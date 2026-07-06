@@ -9,7 +9,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { WebhookIngestSchema } from '../types/schema';
+import { WebhookIngestSchema } from '../models';
 
 export const ingestRouter = Router();
 

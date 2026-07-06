@@ -8,7 +8,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { Tenant, User } from '../types/schema';
+import { Tenant, User } from '../models';
 
 // Extend Express Request type with authenticated session context
 declare global {

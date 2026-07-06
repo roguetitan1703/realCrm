@@ -13,7 +13,7 @@ import {
   WhatsAppActionSchema,
   StageChangeSchema,
   MergeSchema,
-} from '../types/schema';
+} from '../models';
 import {
   requireTenantAuth,
   requireModuleEnabled,
