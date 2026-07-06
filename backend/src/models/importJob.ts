@@ -1,21 +1,22 @@
 /**
  * ============================================================================
- * 📥 IMPORT JOBS & LEAD ROUTING RULE MODEL DEFINITIONS
+ * 📥 IMPORT JOBS & ROUTING RULE MODEL DEFINITIONS
  * ============================================================================
- * Represents async bulk spreadsheet migration trackers and round-robin/location
- * portal lead assignment rules.
+ * Represents bulk async spreadsheet migration trackers and round-robin/location
+ * routing rules applicable across any module.
  * ============================================================================
  */
 
 export type RoutingRuleType = 'ROUND_ROBIN' | 'LOCATION_MATCH' | 'SOURCE_DEDICATED';
 
-export interface LeadRoutingRule {
+export interface RoutingRule {
   id: string;
   tenant_id: string;
+  module_key: string; // Applies to any module ('leads', 'support_tickets')
   rule_name: string;
   rule_type: RoutingRuleType;
-  source_filter?: string; // e.g., '99acres', 'MagicBricks'
-  active_user_ids: string[]; // Rotational list of agent UUIDs
+  source_filter?: string;
+  active_user_ids: string[];
   last_assigned_index: number;
   is_active: boolean;
   created_at?: Date;
@@ -27,6 +28,7 @@ export interface ImportJob {
   id: string;
   tenant_id: string;
   user_id?: string;
+  module_key: string; // Migrates Excel rows into any module!
   file_name: string;
   file_url: string;
   status: ImportJobStatus;

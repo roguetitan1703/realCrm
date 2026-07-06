@@ -1,38 +1,35 @@
 /**
  * ============================================================================
- * 🧩 COMPOSABLE MODULE SCHEMA & DYNAMIC CUSTOM FIELD CONTRACTS
+ * 🧩 PURE COMPOSABLE UNIVERSAL RECORD ENGINE
  * ============================================================================
- * Defines the core metadata engine that allows tenants to declare custom modules
- * (e.g., Loan Applications, Site Visits), custom pipeline columns, and custom
- * form fields without altering database SQL tables.
+ * Defines the core metadata engine where NO MODULE IS HARDCODED as an SQL table.
+ * Leads, Properties, Clients, Deals, and Units are dynamically declared in
+ * `Module` and all records live in `ModuleRecord` with GIN indexed JSONB!
  * ============================================================================
  */
 
 import { z } from 'zod';
 
-/**
- * Explicit Module Registry Entity
- * Allows tenants to register custom modules alongside system defaults ('leads', 'properties').
- */
 export interface Module {
   id: string;
   tenant_id: string;
-  key: string; // e.g., 'leads', 'properties', 'loan_applications', 'legal_docs'
-  name: string; // e.g., 'Loan Applications'
-  icon: string; // e.g., 'Banknote', 'FileText'
-  is_system: boolean; // true for core CRM modules, false for tenant-created modules
+  key: string; // 'leads', 'properties', 'clients', 'deals', 'units'
+  name: string; // 'Leads', 'Properties', 'Clients'
+  icon: string;
+  is_system: boolean; // true for default templates, false for tenant custom modules
   config: {
     supports_pipeline: boolean;
     supports_custom_fields: boolean;
     default_view: 'kanban' | 'table' | 'grid';
+    title_field: string;
   };
-  created_at: Date;
+  created_at?: Date;
 }
 
 export interface PipelineStage {
   id: string;
   tenant_id: string;
-  module_key: string; // Points to Module.key ('leads', 'loan_applications')
+  module_key: string; // Points to Module.key
   name: string;
   key: string;
   color: string;
@@ -45,54 +42,90 @@ export interface CustomFieldDefinition {
   id: string;
   tenant_id: string;
   module_key: string; // Points to Module.key
-  field_key: string; // e.g., 'budget_range', 'vastu', 'bank_name'
+  field_key: string; // e.g., 'budget', 'vastu', 'rera_no', 'company_name'
   field_label: string;
-  field_type: 'text' | 'number' | 'select' | 'date' | 'boolean';
-  options?: string[]; // Dropdown options for 'select' type
+  field_type: 'text' | 'number' | 'select' | 'date' | 'phone' | 'email' | 'boolean';
+  options?: string[];
   is_required: boolean;
   is_filterable: boolean;
 }
 
 /**
- * Generic Module Record Entity
- * Stores arbitrary records for custom tenant modules (like 'Loan Applications')
- * inside a unified PostgreSQL table using JSONB custom_data!
+ * THE UNIVERSAL RECORD ENTITY
+ * All CRM entities (Leads, Properties, Clients, Deals) are stored here!
  */
 export interface ModuleRecord {
   id: string;
   tenant_id: string;
-  module_key: string;
-  title: string; // Primary identifier (e.g., "HDFC Loan #1092 - Aarav Sharma")
+  module_key: string; // Distinguishes 'leads' vs 'properties' vs 'clients'
+  parent_record_id?: string; // Links Units to Properties, or Deals to Clients
+  title: string; // Display title (e.g., "Aarav Sharma" or "Godrej Woods Tower B")
+  primary_phone?: string; // B-Tree indexed for Exotel Click-to-Call & WhatsApp matching!
+  primary_email?: string; // B-Tree indexed for instant deduplication!
   stage_id?: string;
   assigned_user_id?: string;
-  custom_data: Record<string, any>; // Dynamic custom fields stored in GIN indexed JSONB
+  data: Record<string, any>; // Holds ALL dynamic fields: {"budget": 15000000, "vastu": "East"}
   created_at: Date;
   updated_at: Date;
+  last_activity_at: Date;
 }
 
-/**
- * Zod Schema for declaring a new custom module
- * POST /api/v1/modules
- */
-export const CreateModuleSchema = z.object({
-  key: z.string().regex(/^[a-z0-9_]+$/, "Key must be lowercase alphanumeric with underscores"),
-  name: z.string().min(2, "Module name required"),
-  icon: z.string().default("Folder"),
-  supports_pipeline: z.boolean().default(true),
-  default_view: z.enum(["kanban", "table", "grid"]).default("kanban"),
-});
-export type CreateModulePayload = z.infer<typeof CreateModuleSchema>;
+// ============================================================================
+// SHARED ACTION PAYLOAD SCHEMAS (CONTRACT-DRIVEN ZERO BACKLOG TESTING)
+// ============================================================================
 
 /**
- * Zod Schema for declaring a new custom field on any module
- * POST /api/v1/modules/:moduleKey/fields
+ * Payload schema for triggering Click-to-Call on ANY record with primary_phone
+ * POST /api/v1/records/:id/actions/call
  */
-export const CreateCustomFieldSchema = z.object({
-  field_key: z.string().regex(/^[a-z0-9_]+$/, "Field key must be lowercase with underscores"),
-  field_label: z.string().min(2),
-  field_type: z.enum(["text", "number", "select", "date", "boolean"]),
-  options: z.array(z.string()).default([]),
-  is_required: z.boolean().default(false),
-  is_filterable: z.boolean().default(true),
+export const CallActionSchema = z.object({
+  agent_id: z.string().min(1, "Agent ID required"),
+  record_call: z.boolean().default(true),
+  custom_metadata: z.record(z.any()).optional(),
 });
-export type CreateCustomFieldPayload = z.infer<typeof CreateCustomFieldSchema>;
+export type CallActionPayload = z.infer<typeof CallActionSchema>;
+
+/**
+ * Payload schema for sending WhatsApp Business template to ANY record with primary_phone
+ * POST /api/v1/records/:id/actions/whatsapp
+ */
+export const WhatsAppActionSchema = z.object({
+  template_id: z.string().min(1, "Template ID required"),
+  variables: z.array(z.string()).default([]),
+  media_url: z.string().url().optional(),
+});
+export type WhatsAppActionPayload = z.infer<typeof WhatsAppActionSchema>;
+
+/**
+ * Payload schema for updating Kanban stage on ANY record
+ * POST /api/v1/records/:id/actions/stage-change
+ */
+export const StageChangeSchema = z.object({
+  new_stage_id: z.string().min(1, "Stage ID required"),
+  note: z.string().min(3, "Mandatory stage change note must be at least 3 characters"),
+});
+export type StageChangePayload = z.infer<typeof StageChangeSchema>;
+
+/**
+ * Payload schema for merging duplicate records
+ * POST /api/v1/records/:id/actions/merge
+ */
+export const MergeSchema = z.object({
+  duplicate_record_id: z.string().min(1, "Duplicate Record ID required"),
+  merge_strategy: z.enum(["keep_primary", "keep_newest"]).default("keep_primary"),
+});
+export type MergePayload = z.infer<typeof MergeSchema>;
+
+/**
+ * Payload schema for portal webhook lead ingestion
+ * POST /api/v1/ingest/:tenantSlug/:sourceKey
+ */
+export const WebhookIngestSchema = z.object({
+  external_id: z.string().min(1, "External ID required for idempotency"),
+  name: z.string().min(1, "Title / Name required"),
+  phone: z.string().min(10, "Valid Phone Number required"),
+  email: z.string().email().optional().or(z.literal('')),
+  module_target: z.string().default("leads"),
+  custom_attributes: z.record(z.any()).default({}),
+});
+export type WebhookIngestPayload = z.infer<typeof WebhookIngestSchema>;

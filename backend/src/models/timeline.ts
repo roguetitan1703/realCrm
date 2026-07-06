@@ -2,8 +2,8 @@
  * ============================================================================
  * 📜 TIMELINE EVENTS & MESSAGE TEMPLATE MODEL DEFINITIONS
  * ============================================================================
- * Represents immutable audit logs for call recordings, WhatsApp messages,
- * stage transitions, notes, and TRAI/Meta approved messaging templates.
+ * Links audit events, call recordings, and WhatsApp messages to universal
+ * module_records via `record_id`.
  * ============================================================================
  */
 
@@ -19,11 +19,11 @@ export type TimelineEventType =
 export interface TimelineEvent {
   id: string;
   tenant_id: string;
-  lead_id?: string;
+  record_id?: string; // Links to ANY module record (Lead, Property, Client, Deal)
   user_id?: string;
   event_type: TimelineEventType;
-  content: string; // Note text or message body snippet
-  metadata: Record<string, any>; // {"duration": 184, "call_sid": "...", "waba_id": "...", "old_stage": "New"}
+  content: string;
+  metadata: Record<string, any>;
   created_at: Date;
 }
 
@@ -35,9 +35,9 @@ export interface MessageTemplate {
   tenant_id: string;
   channel: MessageChannel;
   template_name: string;
-  external_template_id?: string; // Meta WABA Template ID or Indian TRAI DLT SMS Template ID
+  external_template_id?: string;
   content_script: string;
-  variables: string[]; // e.g., ["buyer_name", "project_name", "agent_phone"]
+  variables: string[];
   status: TemplateStatus;
   created_at?: Date;
 }
