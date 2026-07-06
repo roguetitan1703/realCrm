@@ -153,15 +153,15 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
     <>
       {topBar({ eyebrow: 'Leads', title: l.name, onBack: back,
         actions: <>
-          <Button size="sm" onClick={() => store.openModal({ kind: 'call', leadId: l.id })} icon="phone">Call</Button>
-          <Button variant="secondary" size="sm" onClick={() => store.openModal({ kind: 'pickMatch', leadId: l.id })} icon="wa">WhatsApp</Button>
+          <Button size="sm" onClick={() => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' })} icon="phone">Call</Button>
+          <Button variant="secondary" size="sm" onClick={() => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'wa' })} icon="wa">WhatsApp</Button>
         </> })}
       <div className="app-body">
         <DetailLayout rail={
           <ActionRail>
             <RailSection>
               <NbaBanner label={overdue ? 'Next best action · overdue' : 'Next best action'} title={nbaTitle}
-                cta={{ label: l.followUp ? 'Do it' : 'Call now', onClick: () => store.openModal({ kind: 'call', leadId: l.id }) }} />
+                cta={{ label: l.followUp ? 'Do it' : 'Call now', onClick: () => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' }) }} />
             </RailSection>
             <RailSection title="Actions">
               <ActionGroup groups={actionGroups} />
