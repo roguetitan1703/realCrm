@@ -114,6 +114,21 @@ function reducer(state, action) {
       }
     }
 
+    case 'VISIT_FEEDBACK': {
+      const { leadId, propId, verdict, reason, society } = action
+      const label = verdict === 'liked'
+        ? `Liked ${society} on site visit`
+        : `Rejected ${society} — ${reason}`
+      return {
+        ...state,
+        leads: state.leads.map(l => {
+          if (l.id !== leadId) return l
+          const feedback = { ...(l.feedback || {}), [propId]: { verdict, reason } }
+          return { ...l, feedback, timeline: [{ type: verdict === 'liked' ? 'note' : 'note', label, ago: 'just now' }, ...l.timeline] }
+        }),
+      }
+    }
+
     case 'ADD_LEAD': {
       return { ...state, leads: [action.lead, ...state.leads] }
     }
@@ -214,6 +229,7 @@ export function StoreProvider({ children }) {
     addNote: (leadId, text, kind) => { dispatch({ type: 'NOTE', leadId, text, kind }); toast(kind === 'call' ? 'Call logged' : 'Note added') },
     merge: (leadId) => { dispatch({ type: 'MERGE', leadId }); toast('Merged into one record') },
     attachProp: (leadId, propId, label) => { dispatch({ type: 'ATTACH_PROP', leadId, propId, label }); toast('Property shortlisted for this lead') },
+    visitFeedback: (leadId, propId, verdict, reason, society) => { dispatch({ type: 'VISIT_FEEDBACK', leadId, propId, verdict, reason, society }); toast(verdict === 'liked' ? 'Marked as liked' : 'Rejection logged — refines matches') },
     detachProp: (leadId, propId) => dispatch({ type: 'DETACH_PROP', leadId, propId }),
     addLead: (lead) => { dispatch({ type: 'ADD_LEAD', lead }); toast('Lead saved — routed') },
     addProperty: (property) => { dispatch({ type: 'ADD_PROPERTY', property }); toast('Property added — now matchable') },

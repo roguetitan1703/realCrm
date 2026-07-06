@@ -35,6 +35,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'propStatus' && <StatusModal store={store} propId={m.propId} />}
       {m?.kind === 'integration' && <IntegrationModal store={store} card={m.card} />}
       {m?.kind === 'import' && <ImportModal store={store} />}
+      {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'pickMatch' && <PickMatchModal store={store} leadId={m.leadId} />}
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
@@ -423,6 +424,33 @@ function IntegrationModal({ store, card }) {
         <b>{card.staged ? 'Not live in this demo.' : 'Custom add-on.'}</b> {card.staged ? "You'll authorise with your own account on setup — no data leaves your system until you connect it." : 'Scoped once we see your current site — priced separately from the core platform.'}
       </div>
       <Button variant="primary" block onClick={store.closeModal}>{card.staged ? 'Connect ' + card.key : 'Request scoping'}</Button>
+    </Modal>
+  )
+}
+
+// ---- Structured site-visit outcome (Liked / Rejected + reason) ----
+const REJECT_REASONS = ['Price / budget', 'Vaastu / facing', 'Floor', 'Location', 'Noise', 'Size / layout', 'Furnishing', 'Parking']
+function VisitFeedbackModal({ store, leadId, propId }) {
+  const l = store.state.leads.find(x => x.id === leadId)
+  const p = store.state.properties.find(x => x.id === propId)
+  const [verdict, setVerdict] = useState('liked')
+  const [reason, setReason] = useState(REJECT_REASONS[0])
+  if (!l || !p) return null
+  const save = () => { store.visitFeedback(leadId, propId, verdict, verdict === 'rejected' ? reason : null, p.society); store.closeModal() }
+  return (
+    <Modal title="Log site-visit outcome" onClose={store.closeModal} width={420}>
+      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 14 }}><b style={{ color: 'var(--ink)' }}>{l.name}</b> visited <b style={{ color: 'var(--ink)' }}>{p.society}</b> ({p.type} · {p.locality})</div>
+      <Segmented block value={verdict} onChange={setVerdict}
+        options={[{ value: 'liked', label: '👍 Liked' }, { value: 'rejected', label: '👎 Rejected' }]} />
+      {verdict === 'rejected' && (
+        <>
+          <div style={{ fontSize: 11, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600, margin: '16px 0 8px' }}>Reason — refines future matches</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+            {REJECT_REASONS.map(r => <button key={r} className={'qchip' + (reason === r ? ' on' : '')} onClick={() => setReason(r)}>{r}</button>)}
+          </div>
+        </>
+      )}
+      <Button variant="primary" block style={{ marginTop: 18 }} onClick={save}>Save outcome</Button>
     </Modal>
   )
 }

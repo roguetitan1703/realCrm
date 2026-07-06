@@ -135,25 +135,34 @@ export default function MobileLeadDetail({ store, me, id, back, open, tabs, moda
           </button>
         </div>
         {props.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '4px 2px' }}>No matches yet. Attach one to share.</div>}
-        {props.map(({ p, shortlisted }) => (
-          <button key={p.id} className="m-card-prop" style={{ marginBottom: 8 }} onClick={() => open('prop', p.id)}>
+        {props.map(({ p, shortlisted }) => {
+          const fb = (l.feedback || {})[p.id]
+          const rejected = fb?.verdict === 'rejected'
+          return (
+          <button key={p.id} className="m-card-prop" style={{ marginBottom: 8, opacity: rejected ? 0.6 : 1 }} onClick={() => open('prop', p.id)}>
             <div className="m-cp-top">
-              <div className="m-cp-name">
+              <div className="m-cp-name" style={{ textDecoration: rejected ? 'line-through' : 'none' }}>
                 <span className="av av-sm" style={{ background: thumbTint(p.id), color: 'var(--faint)', borderRadius: 6, width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name="building" size={12} />
                 </span>
                 {p.society}
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
-                {shortlisted && <span className="fit ok" style={{ padding: '1px 6px' }}><Icon name="check" size={10} />Shortlisted</span>}
+                {fb?.verdict === 'liked' && <span className="fit ok" style={{ padding: '1px 6px' }}>👍 Liked</span>}
+                {rejected && <span className="fit no" style={{ padding: '1px 6px' }}>👎 {fb.reason}</span>}
+                {!fb && shortlisted && <span className="fit ok" style={{ padding: '1px 6px' }}><Icon name="check" size={10} />Shortlisted</span>}
                 <StatusTag status={p.status} />
               </div>
             </div>
             <div className="m-cp-sub">{p.type} · {p.locality} · {p.priceLabel}</div>
             <div className="m-cp-bot" style={{ justifyContent: 'space-between' }}>
-              <span className="fit ok" style={{ fontSize: 11, padding: '2px 8px', background: 'var(--accent-wash)', color: 'var(--accent-ink)' }}>
-                <Icon name="check" size={11} />{p.fitLine || 'Matches requirement'}
-              </span>
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ padding: '4px 10px' }}
+                onClick={(e) => { e.stopPropagation(); store.openModal({ kind: 'visitFeedback', leadId: l.id, propId: p.id }) }}
+              >
+                <Icon name="check" size={12} />Log visit
+              </button>
               <button
                 className="btn btn-secondary btn-sm"
                 style={{ padding: '4px 10px' }}
@@ -163,7 +172,7 @@ export default function MobileLeadDetail({ store, me, id, back, open, tabs, moda
               </button>
             </div>
           </button>
-        ))}
+        )})}
       </div>
 
       {/* timeline */}

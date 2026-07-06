@@ -123,10 +123,11 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
   // merged property list: shortlisted (attached) pinned first, then system matches
   const shortlistIds = l.shortlist || []
   const byId = (id) => store.state.properties.find(p => p.id === id)
+  const fbMap = l.feedback || {}
   const propRows = [
     ...shortlistIds.map(byId).filter(Boolean).map(p => ({ p, shortlisted: true, fit: fitReasons(p, l.req).score, line: quotedShort(p) })),
     ...matches.filter(m => !shortlistIds.includes(m.id)).map(m => ({ p: m, shortlisted: false, fit: fitReasons(m, l.req).score, line: quotedShort(m) })),
-  ]
+  ].sort((a, b) => (fbMap[a.p.id]?.verdict === 'rejected' ? 1 : 0) - (fbMap[b.p.id]?.verdict === 'rejected' ? 1 : 0))
 
   // TWO CLEAR OUTREACH PATHS + manage. "Contact" is plain (no property needed);
   // "Share a property" is the matched/generated feature.
@@ -209,24 +210,30 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
             <SectionHead title="Properties for this lead"
               right={<button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'attachProp', leadId: l.id })}><Icon name="plus" size={14} />Attach</button>} />
             {propRows.length === 0 && <div className="u-muted" style={{ fontSize: 13 }}>No shortlisted or matching inventory yet. Attach one to get started.</div>}
-            {propRows.map((row, i) => (
-              <div key={row.p.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0', borderTop: i ? '1px solid var(--line-2)' : 'none' }}>
+            {propRows.map((row, i) => {
+              const fb = (l.feedback || {})[row.p.id]
+              const rejected = fb?.verdict === 'rejected'
+              return (
+              <div key={row.p.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0', borderTop: i ? '1px solid var(--line-2)' : 'none', opacity: rejected ? 0.55 : 1 }}>
                 <div style={{ width: 46, height: 46, borderRadius: 8, background: thumbTint(row.p.id), display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--faint)', flexShrink: 0 }}>
                   <Icon name="building" size={22} strokeWidth={1.4} />
                 </div>
                 <button onClick={() => go('properties', { propId: row.p.id, propOpen: true })}
                   style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
-                  <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 7 }}>
-                    {row.p.society}
-                    {row.shortlisted
+                  <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                    <span style={{ textDecoration: rejected ? 'line-through' : 'none' }}>{row.p.society}</span>
+                    {fb?.verdict === 'liked' && <span className="fit ok" style={{ padding: '1px 7px' }}>👍 Liked</span>}
+                    {rejected && <span className="fit no" style={{ padding: '1px 7px' }}>👎 {fb.reason}</span>}
+                    {!fb && (row.shortlisted
                       ? <span className="fit ok" style={{ padding: '1px 7px' }}><Icon name="check" size={11} />Shortlisted</span>
-                      : <span className="source">{row.fit}% match</span>}
+                      : <span className="source">{row.fit}% match</span>)}
                   </div>
                   <div className="u-muted" style={{ fontSize: 12.5 }}>{row.p.type} · {row.p.locality} · {row.line}</div>
                 </button>
+                <button className="btn btn-ghost btn-sm" title="Log site-visit outcome" onClick={() => store.openModal({ kind: 'visitFeedback', leadId: l.id, propId: row.p.id })}><Icon name="check" size={14} />Visit</button>
                 <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(row.p.id, l.id)}>Share</Button>
               </div>
-            ))}
+            )})}
           </Panel>
 
           {/* timeline */}

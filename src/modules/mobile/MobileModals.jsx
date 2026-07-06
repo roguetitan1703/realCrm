@@ -44,6 +44,7 @@ export default function MobileModals({ store }) {
   if (m.kind === 'pickBuyer') return <MobilePickBuyer store={store} propId={m.propId} onClose={close} />
   if (m.kind === 'attachProp') return <MobileAttachProp store={store} leadId={m.leadId} onClose={close} />
   if (m.kind === 'callOwner') return <MobileCallOwner store={store} owner={m.owner} onClose={close} />
+  if (m.kind === 'visitFeedback') return <MobileVisitFeedback store={store} leadId={m.leadId} propId={m.propId} onClose={close} />
 
   // Fallback for admin/desktop modal kinds triggered in mobile mode
   if (m.kind === 'assign' || m.kind === 'reassign' || m.kind === 'addAgent' || m.kind === 'integration') {
@@ -418,6 +419,33 @@ function MobileAttachProp({ store, leadId, onClose }) {
           </button>
         ))}
       </div>
+    </Sheet>
+  )
+}
+
+const REJECT_REASONS = ['Price / budget', 'Vaastu / facing', 'Floor', 'Location', 'Noise', 'Size / layout', 'Furnishing', 'Parking']
+function MobileVisitFeedback({ store, leadId, propId, onClose }) {
+  const l = store.state.leads.find(x => x.id === leadId)
+  const p = store.state.properties.find(x => x.id === propId)
+  const [verdict, setVerdict] = useState('liked')
+  const [reason, setReason] = useState(REJECT_REASONS[0])
+  if (!l || !p) return null
+  const save = () => { store.visitFeedback(leadId, propId, verdict, verdict === 'rejected' ? reason : null, p.society); onClose() }
+  return (
+    <Sheet title="Site-visit outcome" onClose={onClose}>
+      <div className="u-muted" style={{ fontSize: '12.5px', marginBottom: '14px', marginTop: '-4px' }}>
+        <b style={{ color: 'var(--ink)' }}>{l.name}</b> visited <b style={{ color: 'var(--ink)' }}>{p.society}</b>
+      </div>
+      <Segmented block value={verdict} onChange={setVerdict} options={[{ value: 'liked', label: '👍 Liked' }, { value: 'rejected', label: '👎 Rejected' }]} />
+      {verdict === 'rejected' && (
+        <>
+          <div style={{ fontSize: '11px', letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600, margin: '16px 0 8px' }}>Reason — refines future matches</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
+            {REJECT_REASONS.map(r => <button key={r} className={'qchip' + (reason === r ? ' on' : '')} onClick={() => setReason(r)} style={{ padding: '6px 12px' }}>{r}</button>)}
+          </div>
+        </>
+      )}
+      <Button variant="primary" block style={{ marginTop: '18px', padding: '13px' }} onClick={save}>Save outcome</Button>
     </Sheet>
   )
 }
