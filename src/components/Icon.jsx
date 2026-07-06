@@ -1,5 +1,6 @@
 // One icon component. Add a path here → available everywhere. (Feather-style.)
 const P = {
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
   leads: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
   home: 'M3 9l9-7 9 7v11a2 2 0 0 1-2 2h-4v-7H9v7H5a2 2 0 0 1-2-2z',
   building: 'M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6',
@@ -19,6 +20,7 @@ const P = {
   back: 'M15 18l-6-6 6-6',
   chevRight: 'M9 6l6 6-6 6',
   chevDown: 'M6 9l6 6 6-6',
+  chevUp: 'M18 15l-6-6-6 6',
   phone: 'M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.4 2.5 1.2 3.6.6 4.7L8 9.6a16 16 0 0 0 6 6l1.2-1.2 4.7.6a2 2 0 0 1 1.7 2Z',
   sms: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   wa: 'M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Z',
