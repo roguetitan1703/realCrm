@@ -49,8 +49,8 @@ export default function MobileLeads({ store, me, open }) {
       if (sort === 'name') return a.name.localeCompare(b.name)
       if (sort === 'stage') return a.stage.localeCompare(b.stage)
       if (sort === 'budget') {
-        const bgA = (a.req.budget?.[1] || 0)
-        const bgB = (b.req.budget?.[1] || 0)
+        const bgA = (a.req.budgetMax || 0)
+        const bgB = (b.req.budgetMax || 0)
         return bgB - bgA
       }
       // date default: overdue first, then follow-ups, then created

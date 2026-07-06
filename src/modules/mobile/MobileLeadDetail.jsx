@@ -3,7 +3,6 @@ import { MobileShell, MobileTopBar } from '../../layouts/layouts.jsx'
 import { StageTag, StatusTag, Stepper, Timeline } from '../../components/primitives.jsx'
 import { Scheduler } from '../../components/rail.jsx'
 import Icon from '../../components/Icon.jsx'
-import { theme } from '../../data/theme.js'
 import { budgetRange, thumbTint, unitLabel } from '../../lib/format.js'
 import { matchesForLead } from '../../data/seed.js'
 import MobileSpeedDial from './MobileSpeedDial.jsx'
@@ -183,7 +182,7 @@ export default function MobileLeadDetail({ store, me, id, back, open, tabs, moda
       {sheet === 'stage' && (
         <Sheet title="Move stage" onClose={() => setSheet(null)}>
           <Stepper
-            stages={theme.stages.filter(s => s !== 'Closed Lost')}
+            stages={store.state.settings.stages.filter(s => s !== 'Closed Lost')}
             current={l.stage}
             onPick={(s) => { store.setStage(l.id, s); setSheet(null) }}
           />

@@ -93,30 +93,29 @@ function MobileLeadForm({ store, leadId, onClose }) {
       store.toast('Name and phone are required', 'warn')
       return
     }
+    // budget defaults match the desktop LeadForm so matching + ₹ display work
+    const budget = f.deal === 'rent' ? { budgetMin: 20000, budgetMax: 35000 } : { budgetMin: 7500000, budgetMax: 9000000 }
     const lead = {
-      id: edit ? l.id : 'l' + Date.now(),
+      id: edit ? l.id : 'lnew' + Date.now(),
       name: f.name.trim(),
-      phone: f.phone.trim(),
+      phone: f.phone.trim() || '+91 90000 00000',
       source: f.source,
       stage: edit ? l.stage : 'New',
+      minsAgo: edit ? l.minsAgo : 0,
       agentId: f.agentId,
-      created: edit ? l.created : 'Today',
       overdue: edit ? l.overdue : false,
+      followUp: edit ? l.followUp : null,
       req: {
         deal: f.deal,
         config: f.config,
-        locality: f.locality,
-        budget: f.deal === 'rent' ? [25000, 35000] : [75, 95],
+        locality: f.locality || 'Wakad',
+        ...budget,
         timeline: edit ? l.req.timeline : 'Within 30 days',
-        notes: f.notes
+        notes: f.notes || ''
       },
       shortlist: edit ? l.shortlist : [],
-      timeline: edit ? l.timeline : [{
-        date: 'Today',
-        type: 'created',
-        text: `Lead created from field (${f.source})`,
-        meta: `Assigned to ${me.first}`
-      }]
+      // canonical timeline shape ({type,label,ago}) so the shared Timeline renders it
+      timeline: edit ? l.timeline : [{ type: 'created', label: `Lead created from field (${f.source})`, ago: 'just now' }]
     }
     if (edit) store.toast('Lead updated')
     else store.addLead(lead)
@@ -148,7 +147,7 @@ function MobileLeadForm({ store, leadId, onClose }) {
         <div className="field">
           <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: '6px' }}>Lead Source</label>
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {theme.sources.map(s => chip(f.source === s, () => set('source', s), s))}
+            {store.state.settings.sources.map(s => chip(f.source === s, () => set('source', s), s))}
           </div>
         </div>
         <Field label="Requirement Notes">

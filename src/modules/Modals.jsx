@@ -3,7 +3,7 @@ import Icon from '../components/Icon.jsx'
 import { Button, Field, Input, PhoneInput, Textarea, Segmented, Avatar, Source, StageTag, Money } from '../components/primitives.jsx'
 import { theme } from '../data/theme.js'
 import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/format.js'
-import { matchesForLead, leadsForProperty } from '../data/seed.js'
+import { matchesForLead, leadsForProperty, ownerUpdateMessage } from '../data/seed.js'
 
 // Generic modal frame
 function Modal({ title, onClose, children, width = 440 }) {
@@ -30,7 +30,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'reassign' && <ReassignModal store={store} fromId={m.fromId} />}
       {m?.kind === 'addAgent' && <AddAgentModal store={store} />}
       {m?.kind === 'call' && <CallModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'callOwner' && <CallModal store={store} owner={m.owner} />}
+      {m?.kind === 'callOwner' && <CallModal store={store} owner={m.owner} propId={m.propId} />}
       {m?.kind === 'note' && <NoteModal store={store} leadId={m.leadId} />}
       {m?.kind === 'propStatus' && <StatusModal store={store} propId={m.propId} />}
       {m?.kind === 'integration' && <IntegrationModal store={store} card={m.card} />}
@@ -40,7 +40,82 @@ export default function Modals({ store, go }) {
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
       {m?.kind === 'outreach' && <OutreachModal store={store} leadId={m.leadId} channel={m.channel} />}
+      {m?.kind === 'tenancy' && <TenancyModal store={store} propId={m.propId} />}
+      {m?.kind === 'ownerUpdate' && <OwnerUpdateModal store={store} propId={m.propId} />}
     </>
+  )
+}
+
+// ---- One-tap owner update: activity summary WhatsApp, logged to the listing ----
+function OwnerUpdateModal({ store, propId }) {
+  const p = store.state.properties.find(x => x.id === propId)
+  const [text, setText] = useState(() => p ? ownerUpdateMessage(p, store.state.leads) : '')
+  if (!p) return null
+  const send = () => {
+    store.logEvent(p.id, 'wa', `Owner update sent to ${p.owner}`)
+    store.closeModal()
+  }
+  return (
+    <Modal title="Update the owner" onClose={store.closeModal} width={460}>
+      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
+        To <b style={{ color: 'var(--ink)' }}>{p.owner}</b> · owner of {p.society} ({p.type} · {p.locality})
+      </div>
+      <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+        <Textarea value={text} onChange={e => setText(e.target.value)} style={{ minHeight: 190, fontSize: 13, lineHeight: 1.55 }} />
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} icon="wa" onClick={send}>Send & log to listing</Button>
+        <Button icon="copy" onClick={() => store.toast('Owner update copied')}>Copy</Button>
+      </div>
+      <div style={{ marginTop: 12, background: 'var(--accent-wash)', border: '1px solid var(--accent-line)', borderRadius: 9, padding: '10px 12px', fontSize: 11.5, color: 'var(--accent-ink)', display: 'flex', gap: 9 }}>
+        <Icon name="zap" size={15} style={{ flexShrink: 0, marginTop: 1 }} /><span>Sends from your own WhatsApp on setup. The update is logged to this listing's history either way.</span>
+      </div>
+    </Modal>
+  )
+}
+
+// ---- Rental tenancy: tenant, agreement window, deposit held ----
+function TenancyModal({ store, propId }) {
+  const p = store.state.properties.find(x => x.id === propId)
+  const t = p?.tenancy
+  const [f, setF] = useState({
+    tenant: t?.tenant || '', phone: t?.phone || '',
+    start: t?.start || '', end: t?.end || '',
+    deposit: t?.deposit ? String(t.deposit) : (p ? String(p.deposit || '') : ''),
+  })
+  if (!p) return null
+  const set = (k, v) => setF(s => ({ ...s, [k]: v }))
+  const save = () => {
+    if (!f.tenant.trim()) { store.toast('Add the tenant name', 'warn'); return }
+    const depNum = parseInt(String(f.deposit).replace(/[^0-9]/g, '')) || p.deposit || 0
+    const tenancy = {
+      tenant: f.tenant.trim(), phone: f.phone.trim(),
+      start: f.start || undefined, end: f.end || undefined,
+      deposit: depNum, depositLabel: depNum ? '₹' + depNum.toLocaleString('en-IN') : p.depositLabel,
+      depositReturned: t?.depositReturned || false, agentId: t?.agentId,
+    }
+    store.setTenancy(propId, tenancy); store.closeModal()
+  }
+  const clear = () => { store.setTenancy(propId, null); store.closeModal() }
+  return (
+    <Modal title={t ? 'Update tenancy' : 'Record tenancy'} onClose={store.closeModal} width={440}>
+      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
+        <b style={{ color: 'var(--ink)' }}>{p.society}</b> · {p.type} · {p.priceLabel}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Field label="Tenant name"><Input value={f.tenant} onChange={e => set('tenant', e.target.value)} placeholder="e.g. Rahul Verma" autoFocus /></Field>
+        <Field label="Tenant phone"><PhoneInput value={f.phone} onChange={e => set('phone', e.target.value)} placeholder="98xxx xxxxx" /></Field>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ flex: 1 }}><Field label="Agreement start"><input className="input" type="date" value={f.start} onChange={e => set('start', e.target.value)} /></Field></div>
+          <div style={{ flex: 1 }}><Field label="Agreement end"><input className="input" type="date" value={f.end} onChange={e => set('end', e.target.value)} /></Field></div>
+        </div>
+        <Field label="Deposit held (₹)"><Input value={f.deposit} onChange={e => set('deposit', e.target.value)} placeholder="200000" /></Field>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} onClick={save}>{t ? 'Save tenancy' : 'Record tenancy'}</Button>
+          {t && <Button variant="danger" onClick={clear}>Free flat</Button>}
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -232,7 +307,7 @@ function LeadForm({ store, leadId }) {
         <div className="field"><label>Deal</label><Segmented value={f.deal} onChange={v => set('deal', v)} options={[{ value: 'sale', label: 'Buy' }, { value: 'rent', label: 'Rent' }]} /></div>
         <div className="field"><label>Config</label><div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>{['1BHK', '2BHK', '3BHK', 'Commercial', 'Plot'].map(t => chip(f.config === t, () => set('config', t), t))}</div></div>
         <Field label="Locality"><Input value={f.locality} onChange={e => set('locality', e.target.value)} placeholder="Wakad" /></Field>
-        <div className="field"><label>Source</label><div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>{theme.sources.map(s => chip(f.source === s, () => set('source', s), s))}</div></div>
+        <div className="field"><label>Source</label><div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>{store.state.settings.sources.map(s => chip(f.source === s, () => set('source', s), s))}</div></div>
         <div className="field"><label>Assign to</label><div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>{store.state.agents.map(a => chip(f.agentId === a.id, () => set('agentId', a.id), a.first))}</div></div>
         <Field label="Notes"><Textarea value={f.notes} onChange={e => set('notes', e.target.value)} placeholder="Notes (optional)" /></Field>
         <Button variant="primary" block onClick={save}>{edit ? 'Save changes' : 'Save lead'}</Button>
@@ -357,12 +432,18 @@ function AddAgentModal({ store }) {
 }
 
 // ---- Call & SMS ----
-function CallModal({ store, leadId, owner }) {
+function CallModal({ store, leadId, owner, propId }) {
   const l = leadId ? store.state.leads.find(x => x.id === leadId) : null
   const name = l ? l.name : owner
   const phone = l ? l.phone : store.demoPhone(owner || 'Owner')
   const [tab, setTab] = useState('call')
   const first = (name || '').split(' ')[0]
+  // owner call (no lead) logs to the property's own timeline
+  const logCall = () => {
+    if (l) store.addNote(l.id, 'Call logged with ' + first, 'call')
+    else if (propId) store.logEvent(propId, 'call', `Called owner ${owner}`)
+    store.closeModal()
+  }
   return (
     <Modal title="Call & SMS" onClose={store.closeModal} width={400}>
       <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>{name} · <span className="mono-num">{phone}</span></div>
@@ -370,7 +451,7 @@ function CallModal({ store, leadId, owner }) {
       <div style={{ marginTop: 14 }}>
         {tab === 'call' ? (
           <>
-            <button className="btn btn-primary btn-block" onClick={() => { if (l) store.addNote(l.id, 'Call logged with ' + first, 'call'); store.closeModal() }} style={{ padding: 14 }}><Icon name="phone" />Call {first}</button>
+            <button className="btn btn-primary btn-block" onClick={logCall} style={{ padding: 14 }}><Icon name="phone" />Call {first}</button>
             <div className="u-muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 9 }}>Calls auto-log to the timeline. Connects with your telephony account.</div>
           </>
         ) : (

@@ -68,6 +68,11 @@ input,textarea,select{font-family:inherit}
 .btn-sm{padding:7px 11px;font-size:12.5px}
 .btn-block{width:100%;justify-content:center}
 .btn[disabled]{opacity:.45;cursor:not-allowed}
+/* tiny inline icon buttons (settings stage/source editors) */
+.icon-mini{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--muted);cursor:pointer;padding:0;flex-shrink:0}
+.icon-mini:hover{background:var(--line-2);color:var(--ink)}
+.icon-mini.danger:hover{background:var(--alert-wash);color:var(--alert);border-color:#E4C4C0}
+.icon-mini[disabled]{opacity:.35;cursor:not-allowed;pointer-events:none}
 .ic{width:16px;height:16px;flex-shrink:0;stroke-width:1.9}
 .dots-btn{width:30px;height:30px;border-radius:7px;border:1px solid var(--line);background:var(--card);cursor:pointer;color:var(--muted);display:inline-flex;align-items:center;justify-content:center}
 
@@ -117,6 +122,17 @@ input,textarea,select{font-family:inherit}
 .stage-nego{background:#F6E7DF;color:#94472A}.stage-nego .dot{background:var(--st-nego)}
 .stage-won{background:var(--accent-wash);color:var(--accent-ink)}.stage-won .dot{background:var(--st-won)}
 .stage-lost{background:#EDECE9;color:#6E6A64}.stage-lost .dot{background:var(--st-lost)}
+/* custom (broker-renamed) stages — stable palette assigned by name hash */
+.stage-c1{background:#EBF0EC;color:#2E6A4C}.stage-c1 .dot{background:#2E6A4C}
+.stage-c2{background:#F1ECF6;color:#5A3D82}.stage-c2 .dot{background:#5A3D82}
+.stage-c3{background:#F6EEDD;color:#8A5E1E}.stage-c3 .dot{background:#8A5E1E}
+.stage-c4{background:#E4EEF2;color:#2C5A6E}.stage-c4 .dot{background:#2C5A6E}
+.stage-c5{background:#F6E7DF;color:#94472A}.stage-c5 .dot{background:#94472A}
+/* rental renewal banner (property detail) */
+.renewal-banner{display:flex;align-items:center;gap:9px;border-radius:9px;padding:9px 11px;font-size:12.5px;font-weight:600;margin-bottom:12px}
+.renewal-banner .btn{padding:5px 10px;font-size:12px;background:var(--card);border:1px solid currentColor}
+.renewal-banner.due{background:#F6EEDD;color:#8A5E1E}
+.renewal-banner.overdue{background:var(--alert-wash);color:var(--alert)}
 .status-available{background:var(--accent-wash);color:var(--accent-ink)}.status-available .dot{background:var(--st-won)}
 .status-offer{background:#F6EEDD;color:#8A5E1E}.status-offer .dot{background:var(--st-visit)}
 .status-closed{background:#EDECE9;color:var(--muted)}.status-closed .dot{background:var(--st-lost)}
@@ -438,10 +454,13 @@ input,textarea,select{font-family:inherit}
 .rail{width:300px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden}
 .rail .r-sec{padding:15px 16px;border-top:1px solid var(--line-2)}
 .rail .r-sec:first-child{border-top:none}
-.rail-nba{display:flex;align-items:center;gap:12px;background:var(--chrome);color:#fff;border-radius:var(--radius);padding:13px}
-.rail-nba .n-ic{width:38px;height:38px;border-radius:9px;background:rgba(30,111,82,.28);display:flex;align-items:center;justify-content:center;color:#7FD4B0;flex-shrink:0}
-.rail-nba .n-l{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#8FBBAA;font-weight:700}
-.rail-nba .n-t{font-weight:600;font-size:14px;margin-top:2px}
+.rail-nba{background:var(--chrome);color:#fff;border-radius:var(--radius);padding:14px 15px 15px}
+.rail-nba .nba-top{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.rail-nba .n-ic{width:26px;height:26px;border-radius:7px;background:rgba(30,111,82,.28);display:flex;align-items:center;justify-content:center;color:#7FD4B0;flex-shrink:0}
+.rail-nba .n-l{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#8FBBAA;font-weight:700}
+.rail-nba .n-t{font-family:var(--disp);font-weight:600;font-size:15.5px;line-height:1.3;text-wrap:balance}
+.rail-nba .n-s{font-size:12.5px;color:var(--on-chrome-mut);margin-top:3px}
+.rail-nba .btn{margin-top:12px}
 .qa-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .qa{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);cursor:pointer;font-size:12px;font-weight:500;color:var(--ink)}
 .qa:hover{background:var(--card-2);border-color:var(--muted)}

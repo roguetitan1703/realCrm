@@ -4,6 +4,7 @@ import { AppShell } from './layouts/layouts.jsx'
 import { TopBar, Toasts } from './components/chrome.jsx'
 
 import Login from './modules/Login.jsx'
+import Onboarding from './modules/Onboarding.jsx'
 import Dashboard from './modules/Dashboard.jsx'
 import Leads from './modules/Leads.jsx'
 import Properties from './modules/Properties.jsx'
@@ -60,8 +61,15 @@ export default function App() {
   const boot = bootFromUrl()
   const [screen, setScreen] = useState(boot?.screen || 'dashboard')
   const [sel, setSel] = useState(boot?.sel || {})
+  const [onboarding, setOnboarding] = useState(false)
 
-  if (!state.loggedIn && !boot?.forceLogin) return <Login store={store} />
+  if (onboarding) {
+    return <Onboarding store={store} onCancel={() => setOnboarding(false)} />
+  }
+
+  if (!state.loggedIn && !boot?.forceLogin) {
+    return <Login store={store} onStartOnboard={() => setOnboarding(true)} />
+  }
 
   // Phone view = the CRM rendered for the agent role. Same store/data.
   if (state.role === 'agent' || boot?.role === 'agent') {
@@ -85,8 +93,10 @@ export default function App() {
     agent: store.me(), name: 'Rakesh Sethi', role: 'Owner · Admin',
     items: [
       { icon: 'settings', label: 'Settings', onClick: () => go('settings') },
+      { icon: 'plus', label: 'Provision new workspace (Onboard)', onClick: () => setOnboarding(true) },
       { icon: 'team', label: 'Manage team', onClick: () => go('team') },
       { icon: 'switch', label: 'Switch to agent (phone) view', onClick: () => { store.setRole('agent'); store.toast('Agent phone view') } },
+      { icon: 'refresh', label: 'Reset demo data', onClick: () => store.resetDemo() },
       { icon: 'x', label: 'Sign out', onClick: () => store.toast('Signed out (demo)') },
     ],
   }
@@ -106,7 +116,7 @@ export default function App() {
   const Screen = SCREENS[screen] || Dashboard
   return (
     <>
-      <AppShell nav={nav} active={screen} onNav={go} footer={footer} topbar={null}>
+      <AppShell nav={nav} active={screen} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName}>
         <Screen {...ctx} />
       </AppShell>
       {state.waState && <WaModal store={store} />}

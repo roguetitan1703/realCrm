@@ -5,12 +5,12 @@ import { theme } from '../data/theme.js'
 import { Avatar } from './primitives.jsx'
 
 // ---- desktop sidebar ----
-export function Sidebar({ items, active, onNav, footer }) {
+export function Sidebar({ items, active, onNav, footer, firmName }) {
   return (
     <nav className="nav">
       <div className="n-brand">
         <div className="n-mono">{theme.brand.initials}</div>
-        <div><div className="n-fn">{theme.brand.firmName}</div><div className="n-sub">{theme.brand.officeLine}</div></div>
+        <div><div className="n-fn">{firmName || theme.brand.firmName}</div><div className="n-sub">{theme.brand.officeLine}</div></div>
       </div>
       <div className="n-list">
         {items.map(it => it.section

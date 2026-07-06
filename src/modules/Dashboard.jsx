@@ -1,5 +1,4 @@
 import { Kpi, Panel, SectionHead, Avatar, StageTag } from '../components/primitives.jsx'
-import { theme } from '../data/theme.js'
 import Icon from '../components/Icon.jsx'
 
 // The hero first screen. Every tile, bar and row is clickable — it drills into
@@ -16,15 +15,16 @@ export default function Dashboard({ store, go, topBar }) {
 
   const toLeads = (leadFilter) => go('leads', { leadFilter, leadOpen: false, leadId: undefined })
 
-  const stageCounts = theme.stages.map(s => ({ name: s, list: leads.filter(l => l.stage === s) }))
+  const { stages, sources } = state.settings
+  const stageCounts = stages.map(s => ({ name: s, list: leads.filter(l => l.stage === s) }))
   const maxStage = Math.max(1, ...stageCounts.map(s => s.list.length))
-  const srcMax = Math.max(1, ...theme.sources.map(sn => leads.filter(l => l.source === sn).length))
+  const srcMax = Math.max(1, ...sources.map(sn => leads.filter(l => l.source === sn).length))
 
   const lb = state.agents.map(a => {
     const mine = leads.filter(l => l.agentId === a.id)
     return {
       a, assigned: mine.length,
-      contacted: mine.filter(l => theme.stages.indexOf(l.stage) >= 1).length,
+      contacted: mine.filter(l => stages.indexOf(l.stage) >= 1).length,
       visits: mine.filter(l => l.stage === 'Site Visit' || l.stage === 'Closed Won').length,
       closed: mine.filter(l => l.stage === 'Closed Won').length,
     }
@@ -58,7 +58,7 @@ export default function Dashboard({ store, go, topBar }) {
           {/* sources — click to filter */}
           <Panel>
             <SectionHead title="Leads by source" />
-            {theme.sources.map(sn => {
+            {sources.map(sn => {
               const c = leads.filter(l => l.source === sn).length
               return (
                 <button key={sn} className="drow drow-col" onClick={() => toLeads({ source: [sn] })}>

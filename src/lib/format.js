@@ -108,6 +108,35 @@ export function quotedLine(p) {
   return { label: 'Asking', figure: p.priceLabel, note: p.negotiable ? 'indicative, negotiable' : 'fixed' }
 }
 
+// ---- Rental tenancy helpers ------------------------------------------------
+// tenancy = { tenant, phone?, start, end, deposit, depositReturned, agent? }
+// dates are 'YYYY-MM-DD'. All derived, no library.
+export function fmtDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso + 'T00:00:00')
+  if (isNaN(d)) return iso
+  const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${d.getDate()} ${M[d.getMonth()]} ${d.getFullYear()}`
+}
+
+export function daysUntil(iso, from = new Date()) {
+  if (!iso) return null
+  const d = new Date(iso + 'T00:00:00')
+  if (isNaN(d)) return null
+  const base = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  return Math.round((d - base) / 86400000)
+}
+
+// Renewal signal for an occupied rental: null | {tone,label,days}
+export function renewalSignal(tenancy, from = new Date()) {
+  if (!tenancy || !tenancy.end) return null
+  const days = daysUntil(tenancy.end, from)
+  if (days == null) return null
+  if (days < 0) return { tone: 'overdue', label: `Agreement expired ${Math.abs(days)}d ago`, days }
+  if (days <= 60) return { tone: 'due', label: days === 0 ? 'Expires today' : `Renewal due in ${days}d`, days }
+  return { tone: 'ok', label: `Renews ${fmtDate(tenancy.end)}`, days }
+}
+
 // avatar palette cycling for thumbs
 export function thumbTint(id) {
   const arr = ['#EEF1F6', '#E9EEF5', '#F6EEDD', '#EDECE9', '#E8F1EC']

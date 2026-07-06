@@ -27,15 +27,16 @@ export function RailSection({ title, right, children }) {
   )
 }
 
-export function NbaBanner({ label = 'Next best action', title, cta }) {
+export function NbaBanner({ label = 'Next best action', title, sub, icon = 'phone', cta }) {
   return (
     <div className="rail-nba">
-      <span className="n-ic"><Icon name="phone" size={18} /></span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="n-l">{label}</div>
-        <div className="n-t">{title}</div>
+      <div className="nba-top">
+        <span className="n-ic"><Icon name={icon} size={16} /></span>
+        <span className="n-l">{label}</span>
       </div>
-      {cta && <Button variant="primary" size="sm" onClick={cta.onClick}>{cta.label}</Button>}
+      <div className="n-t">{title}</div>
+      {sub && <div className="n-s">{sub}</div>}
+      {cta && <Button variant="primary" size="sm" block onClick={cta.onClick} icon={cta.icon}>{cta.label}</Button>}
     </div>
   )
 }

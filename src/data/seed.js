@@ -56,9 +56,12 @@ export const properties = [
     furnishing:'Fully furnished', possession:'1 July', tenants:'Family / bachelors',
     features:['Modular kitchen with trolleys','Beds, mattresses & wardrobes','Sofa, TV unit, shoe rack','Fridge, microwave, stove, washing machine, geyser','Gas pipeline + free cable','Big garden attached'], billsByOwner:true },
   { id:'p8', title:'2 BHK · Viman Nagar', type:'2BHK', deal:'rent', locality:'Viman Nagar', society:'Nyati Emporius',
-    carpet:900, floor:6, totalFloors:13, facing:'West', age:6, price:32000, priceLabel:'₹32,000/mo', deposit:200000, depositLabel:'₹2,00,000', negotiable:true, status:'Available', owner:'Deepak Nair',
+    carpet:900, floor:6, totalFloors:13, facing:'West', age:6, price:32000, priceLabel:'₹32,000/mo', deposit:200000, depositLabel:'₹2,00,000', negotiable:true, status:'Under offer', owner:'Deepak Nair',
     furnishing:'Semi-furnished', possession:'Immediate', tenants:'Family preferred',
-    features:['Airport 10 min','Phoenix Marketcity 5 min','Wardrobes + kitchen fitted','Gated, covered parking'] },
+    features:['Airport 10 min','Phoenix Marketcity 5 min','Wardrobes + kitchen fitted','Gated, covered parking'],
+    // occupied — agreement ending soon, deposit held (the renewal + deposit case)
+    tenancy:{ tenant:'Rahul & Anjali Verma', phone:'+91 98903 22140', start:'2025-08-20', end:'2026-08-19', deposit:200000, depositLabel:'₹2,00,000', depositReturned:false, agentId:'a2' },
+    timeline:[ {type:'note', label:'Agreement signed · ₹32,000/mo · deposit ₹2,00,000 held', ago:'11 months ago'} ] },
   { id:'p9', title:'2 BHK · Viman Nagar', type:'2BHK', deal:'sale', locality:'Viman Nagar', society:'Konark Campus',
     carpet:980, floor:8, totalFloors:15, facing:'East', age:7, price:9200000, priceLabel:'₹92L', negotiable:true, status:'Available', owner:'Sanjana Rao',
     furnishing:'Semi-furnished', possession:'Immediate',
@@ -80,9 +83,35 @@ export const properties = [
     furnishing:'Semi-furnished', possession:'Immediate',
     features:['Almost new, 2 yrs old','Rooftop amenities','Wakad-Hinjewadi border','Great rental yield'] },
   { id:'p14', title:'1 BHK · Hinjewadi', type:'1BHK', deal:'rent', locality:'Hinjewadi', society:'Life Republic',
-    carpet:580, floor:5, totalFloors:18, facing:'South', age:4, price:18000, priceLabel:'₹18,000/mo', deposit:90000, depositLabel:'₹90,000', negotiable:true, status:'Available', owner:'Pooja Menon',
+    carpet:580, floor:5, totalFloors:18, facing:'South', age:4, price:18000, priceLabel:'₹18,000/mo', deposit:90000, depositLabel:'₹90,000', negotiable:true, status:'Under offer', owner:'Pooja Menon',
     furnishing:'Semi-furnished', possession:'Immediate', tenants:'Bachelors OK',
-    features:['Township, walk to IT park','Semi-furnished, ready to move','Shuttle + mall inside','Low deposit'] },
+    features:['Township, walk to IT park','Semi-furnished, ready to move','Shuttle + mall inside','Low deposit'],
+    // occupied, agreement healthy — deposit held
+    tenancy:{ tenant:'Nikhil Joshi', phone:'+91 98221 55079', start:'2026-02-01', end:'2027-01-31', deposit:90000, depositLabel:'₹90,000', depositReturned:false, agentId:'a3' },
+    timeline:[ {type:'note', label:'Agreement signed · ₹18,000/mo · deposit ₹90,000 held', ago:'5 months ago'} ] },
+  // second multi-unit project — 3 BHK sale units in Godrej Elements, Baner (the
+  // audit's Tower B/C/A scenario), different floors/prices/owners.
+  { id:'p15', title:'3 BHK · Baner', type:'3BHK', deal:'sale', locality:'Baner', society:'Godrej Elements',
+    project:'Godrej Elements', wing:'B', flat:'402', parking:'2 covered',
+    carpet:1480, floor:4, totalFloors:22, facing:'West', age:2, price:16800000, priceLabel:'₹1.68Cr', negotiable:true, status:'Available', owner:'Sameer Kapoor',
+    furnishing:'Semi-furnished', possession:'Immediate',
+    features:['Low floor, road-facing','2-yr new construction','Rooftop infinity pool','Balewadi High Street 6 min'] },
+  { id:'p15b', title:'3 BHK · Baner', type:'3BHK', deal:'sale', locality:'Baner', society:'Godrej Elements',
+    project:'Godrej Elements', wing:'A', flat:'201', parking:'1 covered',
+    carpet:1510, floor:2, totalFloors:22, facing:'East', age:2, price:16200000, priceLabel:'₹1.62Cr', negotiable:true, status:'Available', owner:'Nikhil Rane',
+    furnishing:'Unfurnished', possession:'After 1 month',
+    features:['East light, quiet wing','Vaastu compliant','Rooftop infinity pool','Corner unit']  },
+  { id:'p15c', title:'3 BHK · Baner', type:'3BHK', deal:'sale', locality:'Baner', society:'Godrej Elements',
+    project:'Godrej Elements', wing:'C', flat:'1105', parking:'2 covered',
+    carpet:1495, floor:11, totalFloors:22, facing:'North', age:1, price:17500000, priceLabel:'₹1.75Cr', negotiable:false, status:'Under offer', owner:'Reena Malhotra',
+    furnishing:'Fully furnished', possession:'Immediate',
+    features:['High floor, hill view','Fully furnished, move-in','Rooftop infinity pool','Premium C-wing'] },
+  // a 2BHK rental multi-unit in Wakad (two tenanted flats, different rents)
+  { id:'p16', title:'2 BHK · Wakad', type:'2BHK', deal:'rent', locality:'Wakad', society:'Rohan Abhilasha',
+    project:'Rohan Abhilasha', wing:'D', flat:'703', parking:'1 covered',
+    carpet:1010, floor:7, totalFloors:14, facing:'North', age:3, price:27000, priceLabel:'₹27,000/mo', deposit:150000, depositLabel:'₹1,50,000', negotiable:true, status:'Available', owner:'Meena Joshi',
+    furnishing:'Semi-furnished', possession:'Immediate', tenants:'Family preferred',
+    features:['5 min to Hinjewadi Phase 1','Wardrobes + modular kitchen','Kids play area + garden','Gated, covered parking'] },
 ]
 
 export const leads = [
@@ -158,6 +187,44 @@ export const leads = [
     req:{ config:'1BHK', deal:'rent', locality:'Hinjewadi', budgetMin:15000, budgetMax:20000, timeline:'This week', notes:'IT professional, immediate move.' },
     overdue:false, followUp:{ action:'Share Life Republic 1BHK', date:'Today', time:'7:00 pm' },
     timeline:[ {type:'created', label:'Website enquiry', ago:'9 hrs ago'}, {type:'stage', label:'Stage → Contacted', ago:'7 hrs ago'} ] },
+
+  // ---- fuller-brokerage influx: a real firm's Tuesday spread ----
+  { id:'l19', name:'Rohit Bansal', phone:'+91 98815 44021', source:'99acres', stage:'New', minsAgo:18, agentId:null,
+    req:{ config:'3BHK', deal:'sale', locality:'Baner', budgetMin:15500000, budgetMax:17500000, timeline:'2 months', notes:'Godrej / Gera preferred, high floor.' },
+    overdue:false, followUp:null,
+    timeline:[ {type:'created', label:'Lead created via 99acres', ago:'18 min ago'} ] },
+  { id:'l20', name:'Ayesha Khan', phone:'+91 90045 77310', source:'MagicBricks', stage:'New', minsAgo:65, agentId:null,
+    req:{ config:'2BHK', deal:'rent', locality:'Wakad', budgetMin:24000, budgetMax:30000, timeline:'Immediate', notes:'Family, semi-furnished, near IT park.' },
+    overdue:false, followUp:null,
+    timeline:[ {type:'created', label:'Lead created via MagicBricks', ago:'1 hr ago'} ] },
+  { id:'l21', name:'Suresh Kulkarni', phone:'+91 98220 90114', source:'Referral', stage:'Site Visit', minsAgo:1600, agentId:'a4',
+    req:{ config:'3BHK', deal:'sale', locality:'Baner', budgetMin:16000000, budgetMax:18000000, timeline:'1–2 months', notes:'Visited Godrej Elements — comparing B-402 vs C-1105.' },
+    overdue:false, followUp:{ action:'Site visit — Godrej Elements', date:'Sat', time:'12:30 pm' },
+    timeline:[ {type:'created', label:'Referred by past client', ago:'2 days ago'}, {type:'stage', label:'Stage → Site Visit', ago:'1 day ago'}, {type:'msg', label:'WhatsApp sent — Godrej Elements', ago:'1 day ago'} ] },
+  { id:'l22', name:'Pooja Jain', phone:'+91 99223 61870', source:'Walk-in', stage:'Contacted', minsAgo:2600, agentId:'a3',
+    req:{ config:'2BHK', deal:'sale', locality:'Wakad', budgetMin:7500000, budgetMax:8200000, timeline:'1 month', notes:'Low floor, wants Kolte Patil A-wing.' },
+    overdue:true, followUp:{ action:'Callback — Kolte Patil A-201 price', date:'Yesterday', time:'4:00 pm' },
+    timeline:[ {type:'created', label:'Walk-in enquiry', ago:'2 days ago'}, {type:'stage', label:'Stage → Contacted', ago:'1 day ago'} ] },
+  { id:'l23', name:'Vivek Menon', phone:'+91 97655 20983', source:'Website', stage:'Negotiation', minsAgo:5200, agentId:'a1',
+    req:{ config:'3BHK', deal:'sale', locality:'Baner', budgetMin:16000000, budgetMax:17800000, timeline:'Ready to close', notes:'Offered ₹1.72Cr on Godrej C-1105.' },
+    overdue:false, followUp:{ action:'Finalise — Godrej Elements C-1105', date:'Thu', time:'11:30 am' },
+    timeline:[ {type:'created', label:'Website enquiry', ago:'4 days ago'}, {type:'stage', label:'Stage → Negotiation', ago:'1 day ago'}, {type:'note', label:'Offered ₹1.72Cr, owner at ₹1.75Cr', ago:'6 hrs ago'} ] },
+  { id:'l24', name:'Sneha Iyer', phone:'+91 90287 45560', source:'99acres', stage:'Contacted', minsAgo:2100, agentId:'a2',
+    req:{ config:'2BHK', deal:'rent', locality:'Viman Nagar', budgetMin:28000, budgetMax:34000, timeline:'Within 2 weeks', notes:'Working couple, near airport.' },
+    overdue:false, followUp:{ action:'Share Nyati Emporius', date:'Tomorrow', time:'1:00 pm' },
+    timeline:[ {type:'created', label:'Lead created via 99acres', ago:'36 hrs ago'}, {type:'stage', label:'Stage → Contacted', ago:'1 day ago'} ] },
+  { id:'l25', name:'Abhishek Rao', phone:'+91 98905 71234', source:'Referral', stage:'Site Visit', minsAgo:3000, agentId:'a4',
+    req:{ config:'2BHK', deal:'sale', locality:'Wakad', budgetMin:8000000, budgetMax:8800000, timeline:'1 month', notes:'Newer build, rooftop amenities.' },
+    overdue:false, followUp:{ action:'Site visit — Pristine Prolife', date:'Sun', time:'11:00 am' },
+    timeline:[ {type:'created', label:'Referral lead', ago:'2 days ago'}, {type:'stage', label:'Stage → Site Visit', ago:'8 hrs ago'} ] },
+  { id:'l26', name:'Meera Nair', phone:'+91 99872 30045', source:'Website', stage:'New', minsAgo:300, agentId:'a1',
+    req:{ config:'1BHK', deal:'sale', locality:'Hinjewadi', budgetMin:5000000, budgetMax:5800000, timeline:'Investment', notes:'Rental-yield play near Phase 1.' },
+    overdue:false, followUp:null,
+    timeline:[ {type:'created', label:'Website enquiry', ago:'5 hrs ago'} ] },
+  { id:'l27', name:'Deepika Shah', phone:'+91 98334 66120', source:'Walk-in', stage:'Closed Won', minsAgo:7200, agentId:'a4',
+    req:{ config:'3BHK', deal:'sale', locality:'Baner', budgetMin:16000000, budgetMax:18000000, timeline:'Done', notes:'Godrej B-402 booked, agreement signed.' },
+    overdue:false, followUp:null,
+    timeline:[ {type:'created', label:'Walk-in enquiry', ago:'5 days ago'}, {type:'stage', label:'Stage → Closed Won', ago:'1 day ago'}, {type:'note', label:'Godrej Elements B-402 booked at ₹1.68Cr', ago:'1 day ago'} ] },
 ]
 
 // --- matching ---------------------------------------------------------------
@@ -194,6 +261,32 @@ export function leadsForProperty(property, allLeads) {
     .filter(x => x._score >= 3)
     .sort((a, b) => b._score - a._score)
     .slice(0, 4)
+}
+
+// --- Owner-update WhatsApp (activity summary for the property's owner) -------
+// Template-filled (no AI). Reports demand + visit activity so the owner sees the
+// broker is working the listing — and nudges a price/terms conversation.
+export function ownerUpdateMessage(property, allLeads) {
+  const p = property
+  const buyers = leadsForProperty(p, allLeads)
+  const partyWord = p.deal === 'rent' ? 'tenants' : 'buyers'
+  const visits = allLeads.filter(l => l.stage === 'Site Visit' &&
+    l.req.deal === p.deal && l.req.config === p.type && l.req.locality === p.locality).length
+  const L = []
+  L.push(`Namaste ${p.owner} ji,`)
+  L.push('')
+  L.push(`Update on your ${p.type} at ${p.society}, ${p.locality}:`)
+  L.push(`• ${buyers.length} matching ${partyWord} in our pipeline`)
+  if (visits) L.push(`• ${visits} site visit${visits > 1 ? 's' : ''} lined up / done`)
+  L.push(`• Currently quoted at ${p.priceLabel}${p.negotiable ? ' (negotiable)' : ''}`)
+  L.push('')
+  if (buyers.length === 0) {
+    L.push('Response is a bit slow at the current ask. If you can consider a small adjustment, I can push harder. Let me know.')
+  } else {
+    L.push('Genuine interest hai. Main follow-up kar raha hoon — koi decision aate hi aapko update karunga.')
+  }
+  L.push('— ' + FIRM)
+  return L.join('\n')
 }
 
 // --- WhatsApp message generation -------------------------------------------

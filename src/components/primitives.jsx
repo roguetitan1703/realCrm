@@ -1,6 +1,6 @@
 // Small pure components — each maps to a class in styles.css. Change look = edit styles.css.
 import Icon from './Icon.jsx'
-import { theme } from '../data/theme.js'
+import { theme, stageClassFor } from '../data/theme.js'
 
 // ---- Button ----
 export function Button({ variant = 'ghost', size, block, icon, children, ...rest }) {
@@ -51,7 +51,7 @@ export function Toggle({ on, ...rest }) { return <button className={'toggle' + (
 
 // ---- Signals (contained) ----
 export function StageTag({ stage }) {
-  const cls = theme.stageClass[stage] || 'stage-new'
+  const cls = stageClassFor(stage)
   const label = stage === 'Closed Won' ? 'Closed won' : stage === 'Closed Lost' ? 'Closed lost' : stage === 'Site Visit' ? 'Site visit' : stage
   return <span className={'stage ' + cls}><span className="dot" />{label}</span>
 }

@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { ListLayout, DetailLayout } from '../layouts/layouts.jsx'
 import { FilterBar, SortControl, Table, PropertyCard } from '../components/collections.jsx'
-import { StatusTag, Source, Quoted, Fit, Button, Panel, SectionHead, GlanceCard, KV } from '../components/primitives.jsx'
+import { StatusTag, Source, Quoted, Fit, Button, Panel, SectionHead, GlanceCard, KV, Timeline } from '../components/primitives.jsx'
 import { ActionRail, RailSection, NbaBanner, ActionGroup } from '../components/rail.jsx'
 import { leadsForProperty } from '../data/seed.js'
-import { thumbTint, propFacts, quotedLine, ratePsf, unitLabel } from '../lib/format.js'
+import { thumbTint, propFacts, quotedLine, ratePsf, unitLabel, fmtDate, renewalSignal } from '../lib/format.js'
 import Icon from '../components/Icon.jsx'
 
 const LOCALITIES = ['Wakad', 'Baner', 'Kothrud', 'Hinjewadi', 'Viman Nagar', 'Kalyani Nagar', 'Wagholi']
@@ -150,14 +150,23 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
   const proj = p.project || p.society
   const siblings = store.state.properties.filter(x => x.id !== p.id && (x.project || x.society) === proj)
 
+  const tenancy = p.deal === 'rent' ? p.tenancy : null
+  const renewal = renewalSignal(tenancy)
+
   const actionGroups = [
     { head: 'Share & match', items: [
       { icon: 'wa', label: 'WhatsApp this listing', tone: 'accent', sub: buyers[0] ? `${buyers.length} matched ${p.deal === 'rent' ? 'tenant' : 'buyer'}${buyers.length > 1 ? 's' : ''}` : 'Pick a recipient', onClick: () => store.openModal({ kind: 'pickBuyer', propId: p.id }) },
       { icon: 'copy', label: 'Copy listing details', onClick: () => { store.toast('Listing copied to clipboard') } },
     ] },
     { head: 'Owner', items: [
-      { icon: 'phone', label: 'Call owner', sub: p.owner, onClick: () => store.openModal({ kind: 'callOwner', owner: p.owner }) },
+      { icon: 'wa', label: 'Send owner update', tone: 'accent', sub: `${buyers.length} matched · activity`, onClick: () => store.openModal({ kind: 'ownerUpdate', propId: p.id }) },
+      { icon: 'phone', label: 'Call owner', sub: p.owner, onClick: () => store.openModal({ kind: 'callOwner', owner: p.owner, propId: p.id }) },
     ] },
+    // rental-only: the second half of a rental deal lives here
+    ...(p.deal === 'rent' ? [{ head: 'Tenancy', items: [
+      { icon: 'people', label: tenancy ? 'Update tenancy' : 'Record tenancy', sub: tenancy ? tenancy.tenant : 'Mark as let / deposit', onClick: () => store.openModal({ kind: 'tenancy', propId: p.id }) },
+      ...(tenancy && !tenancy.depositReturned ? [{ icon: 'check', label: 'Mark deposit returned', sub: tenancy.depositLabel, onClick: () => store.returnDeposit(p.id) }] : []),
+    ] }] : []),
     { head: 'Manage listing', items: [
       { icon: 'tag', label: 'Set status', sub: p.status, onClick: () => store.openModal({ kind: 'propStatus', propId: p.id }) },
       { icon: 'edit', label: 'Edit details', onClick: () => store.openModal({ kind: 'addProperty', propId: p.id }) },
@@ -167,17 +176,22 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
   return (
     <>
       {topBar({ eyebrow: 'Properties', title: p.society, onBack: back,
-        actions: <>
-          <Button size="sm" onClick={() => store.openModal({ kind: 'propStatus', propId: p.id })} icon="tag">Status</Button>
-          <Button variant="secondary" size="sm" onClick={() => store.openModal({ kind: 'pickBuyer', propId: p.id })} icon="wa">WhatsApp</Button>
-        </> })}
+        // One primary action — status & the rest live once, in the rail.
+        actions: <Button variant="secondary" size="sm" onClick={() => store.openModal({ kind: 'pickBuyer', propId: p.id })} icon="wa">WhatsApp</Button> })}
       <div className="app-body">
         <DetailLayout rail={
           <ActionRail>
             <RailSection>
-              <NbaBanner label={buyers[0] ? `Interested ${p.deal === 'rent' ? 'tenant' : 'buyer'}` : 'Share listing'}
-                title={buyers[0] ? `Send to ${buyers[0].lead.name.split(' ')[0]}` : 'Pick a recipient'}
-                cta={{ label: 'WhatsApp', onClick: () => store.openModal({ kind: 'pickBuyer', propId: p.id }) }} />
+              {renewal && renewal.tone !== 'ok' ? (
+                <NbaBanner label={renewal.tone === 'overdue' ? 'Renewal · overdue' : 'Renewal due'} icon="clock"
+                  title={renewal.label} sub={tenancy.tenant}
+                  cta={{ label: 'Handle renewal', icon: 'calendar', onClick: () => store.openModal({ kind: 'tenancy', propId: p.id }) }} />
+              ) : (
+                <NbaBanner label={buyers[0] ? `Interested ${p.deal === 'rent' ? 'tenant' : 'buyer'}` : 'Share listing'} icon="wa"
+                  title={buyers[0] ? `Send to ${buyers[0].lead.name.split(' ')[0]}` : 'Pick a recipient'}
+                  sub={buyers[0] ? `${p.type} · ${p.locality}` : 'No matched contacts yet'}
+                  cta={{ label: 'WhatsApp', icon: 'wa', onClick: () => store.openModal({ kind: 'pickBuyer', propId: p.id }) }} />
+              )}
             </RailSection>
             <RailSection title="Actions">
               <ActionGroup groups={actionGroups} />
@@ -208,6 +222,35 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
               <KV items={commercials(p)} />
             </Panel>
           </div>
+
+          {/* rental tenancy — the second half of a rental deal (deposit + renewal) */}
+          {p.deal === 'rent' && (
+            <Panel>
+              <SectionHead title="Tenancy & deposit"
+                right={tenancy
+                  ? <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'tenancy', propId: p.id })}><Icon name="edit" size={13} />Manage</button>
+                  : <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'tenancy', propId: p.id })}><Icon name="plus" size={13} />Record</button>} />
+              {!tenancy ? (
+                <div className="u-muted" style={{ fontSize: 13 }}>Flat is vacant. Record a tenancy when it's let — track the agreement window and deposit here.</div>
+              ) : (
+                <>
+                  {renewal && renewal.tone !== 'ok' && (
+                    <div className={'renewal-banner ' + renewal.tone}>
+                      <Icon name="clock" size={15} />
+                      <span style={{ flex: 1 }}>{renewal.label}</span>
+                      <button className="btn btn-sm" onClick={() => store.openModal({ kind: 'tenancy', propId: p.id })}>Renew</button>
+                    </div>
+                  )}
+                  <KV items={[
+                    { k: 'Tenant', v: tenancy.tenant + (tenancy.phone ? ` · ${tenancy.phone}` : '') },
+                    { k: 'Agreement', v: `${fmtDate(tenancy.start)} → ${fmtDate(tenancy.end)}` },
+                    { k: renewal ? 'Renewal' : 'Status', v: renewal ? renewal.label : 'Active' },
+                    { k: 'Deposit', v: tenancy.depositReturned ? `${tenancy.depositLabel} · returned` : `${tenancy.depositLabel} · held` },
+                  ]} />
+                </>
+              )}
+            </Panel>
+          )}
 
           {/* other units in the same project — the "3 flats, 3 prices" clarity */}
           {siblings.length > 0 && (
@@ -253,6 +296,15 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
                 <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(p.id, b.lead.id)}>Share</Button>
               </div>
             ))}
+          </Panel>
+
+          {/* listing history — owner updates, calls, status/tenancy changes */}
+          <Panel>
+            <SectionHead title="Listing history"
+              right={<button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'ownerUpdate', propId: p.id })}><Icon name="wa" size={13} />Update owner</button>} />
+            {(p.timeline && p.timeline.length)
+              ? <Timeline events={p.timeline} />
+              : <div className="u-muted" style={{ fontSize: 13 }}>No activity logged yet. Owner updates, calls and status changes appear here.</div>}
           </Panel>
         </DetailLayout>
       </div>

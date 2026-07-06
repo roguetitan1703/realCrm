@@ -3,7 +3,6 @@ import { ListLayout, DetailLayout } from '../layouts/layouts.jsx'
 import { FilterBar, SortControl, Table } from '../components/collections.jsx'
 import { StageTag, Source, Overdue, Unassigned, Avatar, Money, GlanceCard, Button, Panel, SectionHead, KV, Timeline, Stepper } from '../components/primitives.jsx'
 import { ActionRail, RailSection, NbaBanner, ActionGroup, Scheduler } from '../components/rail.jsx'
-import { theme } from '../data/theme.js'
 import { reqShort, budgetRange, fitReasons, thumbTint, initials } from '../lib/format.js'
 import { matchesForLead } from '../data/seed.js'
 import Icon from '../components/Icon.jsx'
@@ -11,11 +10,11 @@ import Icon from '../components/Icon.jsx'
 const SORT_OPTS = { activity: 'Last activity', budget: 'Budget', name: 'Name', stage: 'Stage' }
 
 // filterable fields for leads — config drives the scalable FilterBar (no custom pills)
-const leadFields = (agents) => [
+const leadFields = (agents, settings) => [
   { key: 'flag', label: 'Needs attention', icon: 'clock', options: [{ value: 'overdue', label: 'Overdue' }, { value: 'unassigned', label: 'Unassigned' }, { value: 'new', label: 'New today' }] },
-  { key: 'stage', label: 'Stage', icon: 'layers', options: theme.stages.map(s => ({ value: s, label: s })) },
+  { key: 'stage', label: 'Stage', icon: 'layers', options: settings.stages.map(s => ({ value: s, label: s })) },
   { key: 'deal', label: 'Deal', icon: 'tag', options: [{ value: 'sale', label: 'Sale' }, { value: 'rent', label: 'Rent' }] },
-  { key: 'source', label: 'Source', icon: 'trend', options: theme.sources.map(s => ({ value: s, label: s })) },
+  { key: 'source', label: 'Source', icon: 'trend', options: settings.sources.map(s => ({ value: s, label: s })) },
   { key: 'locality', label: 'Locality', icon: 'building', options: LOCALITIES.map(l => ({ value: l, label: l })) },
   { key: 'agent', label: 'Agent', icon: 'person', options: [{ value: '_none', label: 'Unassigned' }, ...agents.map(a => ({ value: a.id, label: a.first }))] },
 ]
@@ -50,7 +49,7 @@ export default function Leads({ store, go, sel, setSel, topBar }) {
     const s = q.trim().toLowerCase()
     list = list.filter(l => l.name.toLowerCase().includes(s) || l.phone.includes(s) || l.req.locality.toLowerCase().includes(s) || l.req.config.toLowerCase().includes(s))
   }
-  const val = (l) => sortKey === 'name' ? l.name.toLowerCase() : sortKey === 'budget' ? l.req.budgetMax : sortKey === 'stage' ? theme.stages.indexOf(l.stage) : l.minsAgo
+  const val = (l) => sortKey === 'name' ? l.name.toLowerCase() : sortKey === 'budget' ? l.req.budgetMax : sortKey === 'stage' ? state.settings.stages.indexOf(l.stage) : l.minsAgo
   list.sort((a, b) => { const c = val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0; return sortDir === 'asc' ? c : -c })
 
   const counts = {
@@ -61,7 +60,7 @@ export default function Leads({ store, go, sel, setSel, topBar }) {
 
   const toolbar = (
     <FilterBar
-      fields={leadFields(store.activeAgents())}
+      fields={leadFields(store.activeAgents(), state.settings)}
       value={flt} onChange={setFlt}
       search={{ value: q, onChange: setQ, placeholder: 'Search name, phone, locality…' }}
       right={<SortControl value={sortKey} dir={sortDir} onSort={setSortKey}
@@ -116,9 +115,25 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
   const a = store.agentById(l.agentId)
   const matches = matchesForLead(l, store.state.properties)
   const overdue = l.overdue
-  const nbaTitle = l.followUp ? l.followUp.action : (matches[0] ? `Send ${matches[0].society}` : 'Contact this lead')
   const back = () => setSel(s => ({ ...s, leadOpen: false }))
   const top1 = matches[0]
+
+  // Next-best-action, split into a clean headline + quiet sub-line (no em-dash
+  // cramming). Follow-up actions read "Call — Name" / "Site visit — Society";
+  // we break them so the verb is the headline and the target is the sub.
+  const nba = (() => {
+    if (l.followUp) {
+      const [head, ...rest] = String(l.followUp.action).split('—')
+      const t = head.trim()
+      return {
+        title: t,
+        sub: rest.join('—').trim() || l.name,
+        icon: /visit/i.test(t) ? 'calendar' : /meet/i.test(t) ? 'people' : 'phone',
+      }
+    }
+    if (top1) return { title: 'Share a match', sub: top1.society, icon: 'wa' }
+    return { title: 'Contact this lead', sub: l.phone, icon: 'phone' }
+  })()
 
   // merged property list: shortlisted (attached) pinned first, then system matches
   const shortlistIds = l.shortlist || []
@@ -132,13 +147,13 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
   // TWO CLEAR OUTREACH PATHS + manage. "Contact" is plain (no property needed);
   // "Share a property" is the matched/generated feature.
   const actionGroups = [
-    { head: 'Contact', items: [
+    { head: 'Talk to them', items: [
       { icon: 'phone', label: 'Call & log', sub: l.phone, onClick: () => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' }) },
       { icon: 'sms', label: 'Send SMS', onClick: () => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'sms' }) },
-      { icon: 'wa', label: 'WhatsApp (message)', onClick: () => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'wa' }) },
+      { icon: 'wa', label: 'WhatsApp a message', onClick: () => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'wa' }) },
       { icon: 'note', label: 'Add note', onClick: () => store.openModal({ kind: 'note', leadId: l.id }) },
     ] },
-    { head: 'Share a property', items: [
+    { head: 'Send a property', items: [
       { icon: 'wa', label: 'WhatsApp a property', tone: 'accent', sub: top1 ? `best: ${top1.society}` : 'pick from matches', onClick: () => store.openModal({ kind: 'pickMatch', leadId: l.id }) },
       { icon: 'plus', label: 'Attach to shortlist', onClick: () => store.openModal({ kind: 'attachProp', leadId: l.id }) },
     ] },
@@ -152,25 +167,24 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
   return (
     <>
       {topBar({ eyebrow: 'Leads', title: l.name, onBack: back,
-        actions: <>
-          <Button size="sm" onClick={() => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' })} icon="phone">Call</Button>
-          <Button variant="secondary" size="sm" onClick={() => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'wa' })} icon="wa">WhatsApp</Button>
-        </> })}
+        // One primary action here — the full contact toolkit lives once, in the rail.
+        actions: <Button variant="secondary" size="sm" onClick={() => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'wa' })} icon="wa">WhatsApp</Button> })}
       <div className="app-body">
         <DetailLayout rail={
           <ActionRail>
             <RailSection>
-              <NbaBanner label={overdue ? 'Next best action · overdue' : 'Next best action'} title={nbaTitle}
-                cta={{ label: l.followUp ? 'Do it' : 'Call now', onClick: () => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' }) }} />
+              <NbaBanner label={overdue ? 'Overdue · do now' : 'Next best action'}
+                title={nba.title} sub={nba.sub} icon={nba.icon}
+                cta={{ label: l.followUp ? 'Do it' : 'Call now', icon: nba.icon, onClick: () => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' }) }} />
             </RailSection>
-            <RailSection title="Actions">
+            <RailSection>
               <ActionGroup groups={actionGroups} />
             </RailSection>
             <RailSection title="Schedule follow-up">
               <Scheduler onSave={(f) => store.setFollowUp(l.id, followFrom(f, l))} />
             </RailSection>
             <RailSection title="Stage" right="tap to advance">
-              <Stepper stages={theme.stages.filter(s => s !== 'Closed Lost')} current={l.stage} onPick={(s) => store.setStage(l.id, s)} />
+              <Stepper stages={store.state.settings.stages.filter(s => s !== 'Closed Lost')} current={l.stage} onPick={(s) => store.setStage(l.id, s)} />
               <div style={{ marginTop: 9, textAlign: 'right' }}>
                 <button className="btn btn-quiet btn-sm" style={{ color: 'var(--muted)', textDecoration: 'underline' }} onClick={() => store.setStage(l.id, 'Closed Lost')}>Mark as lost</button>
               </div>

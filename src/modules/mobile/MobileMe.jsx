@@ -28,6 +28,10 @@ export default function MobileMe({ store, me }) {
         </div>
         <Icon name="chevRight" size={18} style={{ color: 'var(--faint)' }} />
       </button>
+      <button className="m-card" onClick={() => store.resetDemo()}>
+        <span className="av av-md" style={{ background: 'var(--card-2)', color: 'var(--ink-2)', border: '1px solid var(--line)' }}><Icon name="refresh" size={16} /></span>
+        <div className="m-c-main"><div className="m-c-name">Reset demo data</div><div className="m-c-sub">Wipe to a clean slate</div></div>
+      </button>
       <button className="m-card" onClick={() => store.toast('Signed out (demo)')}>
         <span className="av av-md" style={{ background: 'var(--card-2)', color: 'var(--muted)', border: '1px solid var(--line)' }}><Icon name="x" size={16} /></span>
         <div className="m-c-main"><div className="m-c-name">Sign out</div></div>

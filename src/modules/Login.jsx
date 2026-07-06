@@ -14,7 +14,7 @@ import { Button } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { Toasts } from '../components/chrome.jsx'
 
-export default function Login({ store }) {
+export default function Login({ store, onStartOnboard }) {
   const { state } = store
   const [phase, setPhase] = useState('phone') // 'phone' | 'otp'
   const [phone, setPhone] = useState('')
@@ -426,8 +426,18 @@ export default function Login({ store }) {
           </div>
 
           {/* Minimal Support Help */}
-          <div style={{ textAlign: 'center', marginTop: 28, fontSize: 12, color: 'var(--muted)' }}>
-            Need access? Contact your firm&apos;s administration desk.
+          <div style={{ textAlign: 'center', marginTop: 28, fontSize: 12, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div>Need access? Contact your firm&apos;s administration desk.</div>
+            {onStartOnboard && (
+              <button
+                type="button"
+                onClick={onStartOnboard}
+                className="btn-quiet"
+                style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600, margin: '0 auto' }}
+              >
+                Setting up a new brokerage? Provision workspace →
+              </button>
+            )}
           </div>
         </div>
       </div>

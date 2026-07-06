@@ -27,3 +27,25 @@ export const theme = {
 }
 
 export const FIRM = theme.brand.firmName
+
+// Default editable settings — the store seeds from these, then owns them. Renaming
+// a stage / adding a source in Settings mutates state, never this object.
+export const DEFAULT_SETTINGS = {
+  firmName: theme.brand.firmName,
+  stages: [...theme.stages],
+  sources: [...theme.sources],
+}
+
+// Closed stages are terminal and can't be renamed/removed — the app keys logic off
+// them (`stage.startsWith('Closed')`), so they're protected in the editor.
+export const PROTECTED_STAGES = ['Closed Won', 'Closed Lost']
+
+// A stage's colour class. Built-in stages use the curated map; custom stages get a
+// stable palette class by hashing the name so the colour never flickers.
+const CUSTOM_STAGE_CLASSES = ['stage-c1', 'stage-c2', 'stage-c3', 'stage-c4', 'stage-c5']
+export function stageClassFor(stage) {
+  if (theme.stageClass[stage]) return theme.stageClass[stage]
+  let h = 0
+  for (let i = 0; i < stage.length; i++) h = (h * 31 + stage.charCodeAt(i)) >>> 0
+  return CUSTOM_STAGE_CLASSES[h % CUSTOM_STAGE_CLASSES.length]
+}
