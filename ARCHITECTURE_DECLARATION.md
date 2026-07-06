@@ -1,6 +1,6 @@
 # 🏗️ Bhumi Propcity CRM — Full-Stack Architecture & Core Flow Declaration
 
-> **Purpose:** Establish definitive engineering contracts, system boundaries, and event lifecycles across Frontend, Backend, Integrations, and Super Admin governance. This declaration serves as the immutable source of truth to prevent QA regressions, race conditions, and integration debt.
+> **Purpose:** Establish definitive engineering contracts, system boundaries, and event lifecycles across Frontend, Backend, Integrations, Data Migration, and Super Admin governance. This declaration serves as the immutable, living source of truth to prevent QA regressions, race conditions, and integration debt. As features expand, new specifications must be appended to this document.
 
 ---
 
@@ -23,7 +23,8 @@ graph TD
     subgraph Core Services [Core Backend Micro-Services]
         AuthSvc[Auth & Tenant Service]
         CRMSvc[Core CRM Service<br>Leads, Props, Team, Timeline]
-        RoutingSvc[Lead Routing Engine<br>Round-Robin & Location Rules]
+        RoutingSvc[Lead Routing & Deduplication Engine]
+        SyncSvc[Data Import / Export & Merge Engine]
     end
 
     subgraph Data Layer [Isolated Data & State Layer]
@@ -33,16 +34,17 @@ graph TD
     end
 
     subgraph Integration Gateways [Communication & Webhook Gateways]
-        Ingest[Webhook Ingestion Receiver<br>Idempotent & Schema-Validated]
+        Ingest[Inbound Webhook Receiver (Pull)<br>99acres, MagicBricks, Meta Ads]
+        Outbound[Outbound Webhook Dispatcher (Push)<br>Website Sync, Portal Updates]
         WABA[WhatsApp Cloud API Gateway]
         Telephony[Cloud Telephony Gateway<br>Exotel / Knowlarity / Airtel IQ]
     end
 
     Desktop & Mobile --> CDN --> Gateway
-    Gateway --> AuthSvc & CRMSvc & RoutingSvc
-    CRMSvc --> PG & Redis
-    CRMSvc --> SQS
-    SQS --> WABA & Telephony
+    Gateway --> AuthSvc & CRMSvc & RoutingSvc & SyncSvc
+    CRMSvc & RoutingSvc & SyncSvc --> PG & Redis
+    CRMSvc & SyncSvc --> SQS
+    SQS --> WABA & Telephony & Outbound
     Ingest --> SQS --> RoutingSvc --> CRMSvc
 ```
 
@@ -53,7 +55,7 @@ graph TD
 To prevent QA cycle hell caused by schema mismatches or cross-tenant data leaks, every component must adhere to the **Tenant Schema Declaration**.
 
 ### A. Row-Level Security (RLS) Mandate
-Every database table (`users`, `leads`, `properties`, `timeline_events`, `message_templates`, `webhooks`) MUST contain an indexed `tenant_id` UUID column.
+Every database table (`users`, `leads`, `properties`, `timeline_events`, `message_templates`, `webhooks`, `import_jobs`) MUST contain an indexed `tenant_id` UUID column.
 * **Backend Contract:** No database query is permitted without an explicit `WHERE tenant_id = $1` clause enforced at the database driver / ORM middleware layer.
 * **Super Admin Contract:** Super Admins bypass RLS only via short-lived, audited impersonation tokens with explicit logging (`super_admin_audit_log`).
 
@@ -68,137 +70,119 @@ Upon authentication, the client receives the **Tenant Config Payload**. The fron
     "city": "Pune",
     "theme": { "primary": "#1E6F52", "surface": "#F6F5F2" }
   },
-  "features": { "dialer": true, "whatsapp_api": true, "inventory_matching": true },
+  "features": { "dialer": true, "whatsapp_api": true, "inventory_matching": true, "excel_import": true },
   "pipeline_stages": [
     { "id": "stg_1", "key": "new", "label": "New Inquiry", "color": "#2563EB", "order": 1 },
     { "id": "stg_2", "key": "contacted", "label": "Contacted", "color": "#D97706", "order": 2 },
     { "id": "stg_3", "key": "visit", "label": "Site Visit Done", "color": "#059669", "order": 3 }
   ],
   "lead_sources": ["99acres", "MagicBricks", "Housing.com", "Walk-in", "Meta Ads"],
-  "rules": { "require_note_on_stage_change": true, "mask_phone_after_days": 30 }
+  "rules": { "require_note_on_stage_change": true, "mask_phone_after_days": 30, "dedup_window_days": 30 }
 }
 ```
 
 ---
 
-## ⚡ 3. Declaration of Core Flows (Who, What, Where, When, How)
+## 🧩 3. Module-Specific Frontend & Backend Architecture
 
-### Flow 1: Automated Lead Ingestion & Round-Robin Routing
-* **The Problem It Solves:** 99acres, MagicBricks, and Meta Ads send sudden webhook bursts or retry payloads that cause duplicate leads and system freezes.
-* **When It Triggers:** A prospective buyer submits an inquiry on a property portal or ad form.
+To ensure scalable team development where adding new features never breaks existing code, all modules must follow the **Self-Contained Plugin Contract**:
+
+### A. Frontend Module Contract (`src/modules/<ModuleName>/`)
+* **Isolation:** Each module (e.g., `Leads`, `Properties`, `Calendar`) must export a clean container component and define its own internal sub-components, modal views, and data hooks.
+* **Registration:** Modules register their routing key and navigation icon in a central module registry. When the app boots, the navigation rail filters visible modules against `tenant.enabled_modules`.
+* **State Access:** Modules never mutate global store directly; they emit typed action intents (e.g., `store.dispatch({ type: 'LEAD_STAGE_UPDATE', payload: { id, stage } })`) which handle optimistic UI updates and rollback on error.
+
+### B. Backend Module Contract (`/api/v1/<module_name>/`)
+* **Service Layer Separation:** Route controllers only validate input schemas (Zod/TypeBox) and authenticate JWT tokens. Business logic resides in modular domain services (`LeadService`, `PropertyService`, `MatchingService`).
+* **Cross-Module Communication:** Modules never perform direct SQL joins across unrelated domain tables if it breaks modularity. Instead, domain events are published to local internal event buses or Redis pub/sub (e.g., `PropertyService` publishes `property.price_dropped` $\rightarrow$ `MatchingService` catches it and notifies matching buyers).
+
+---
+
+## 🔌 4. Integration Engine — Push, Pull & Ecosystem Connectors
+
+The CRM acts as an open, bi-directional data hub connecting Indian property portals, ad networks, and client web surfaces.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant Portal as 99acres / Meta Ads
-    participant Ingest as Webhook Receiver (API Gateway)
-    participant Queue as Redis / BullMQ Queue
-    participant Worker as Ingestion Worker & Router
-    participant DB as PostgreSQL (RLS)
-    participant WS as WebSocket Pub/Sub
-    participant Agent as Agent Mobile App
+graph LR
+    subgraph Inbound Pull / Webhook Ingestion
+        Portals[99acres / MagicBricks / Housing] -->|HTTP Webhook| API_In[Ingest Endpoint<br>/v1/ingest]
+        Meta[Meta Lead Ads / Google Ads] -->|Graph API Webhook| API_In
+        API_In --> Queue_In[Redis Ingest Queue] --> Router[Routing & Dedup Engine] --> DB[(CRM Database)]
+    end
 
-    Portal->>Ingest: POST /v1/webhooks/ingest/{tenant_id}/{source}
-    Ingest->>Ingest: Validate HMAC Signature & Idempotency Key
-    Ingest->>Queue: Push Raw Payload (Return 200 Accepted instantly)
-    Queue->>Worker: Dequeue Job
-    Worker->>Worker: Normalize Data against Tenant Schema
-    Worker->>DB: Check Deduplication (phone + project within 30 days)
-    alt Is Duplicate?
-        Worker->>DB: Append note to existing Lead Timeline
-    else Is New Lead?
-        Worker->>DB: Fetch Active Agents & Execute Round-Robin Rule
-        Worker->>DB: INSERT Lead (assigned_to = Agent X)
-        Worker->>WS: Broadcast Lead Created Event (tenant_id, lead_id)
-        WS->>Agent: Push Notification & Live UI Update (No page refresh!)
+    subgraph Outbound Push / Webhook Dispatch
+        DB -->|Event Trigger:<br>Price Change / Sold| Dispatcher[Outbound Webhook Worker]
+        Dispatcher -->|HMAC Signed POST| ClientWeb[Client Public Website<br>Live Inventory Sync]
+        Dispatcher -->|JSON Payload| Partner[Partner Broker / MLS Portals]
     end
 ```
 
+### A. Inbound Lead Ingestion (Pull & Webhooks)
+* **Webhook Receivers:** Each tenant receives a unique ingest URL: `https://api.propcity.io/v1/ingest/{tenant_id}/{source_key}`.
+* **Polling Fallback:** For legacy portals without webhooks, an automated cron scheduler runs every 15 minutes, calling portal XML/JSON APIs, pulling new leads, and pushing them into the ingestion queue.
+
+### B. Outbound Inventory Sync (Custom Webhook Push)
+* **When It Triggers:** When a property unit is marked `Closed Won`, price is updated, or a new listing is published.
+* **The Push Contract:** The backend fires an HMAC-signed `POST` webhook to the tenant’s registered external endpoints (e.g., their Next.js/WordPress company website or channel partner portals), ensuring public listing inventory is instantly synchronized without manual data entry.
+
+### C. Essential Ecosystem Connectors
+* **Calendar Sync (Google / Outlook):** Bi-directional OAuth sync. Scheduling a site visit in the CRM automatically creates a calendar invite for the agent and buyer with Google Maps location coordinates.
+* **Payment Links (Razorpay / Stripe / Easebuzz):** Generating instant 1-click token advance payment links sent via WhatsApp. When paid, the webhook automatically moves the property status to `Under Offer`.
+
 ---
 
-### Flow 2: Outbound & Inbound WhatsApp Business (WABA) Communication
-* **The Problem It Solves:** Agents copying phone numbers into personal WhatsApp, losing message history, and failing to track read receipts.
-* **When It Triggers:** Agent taps **[`WhatsApp`]** or **[`Share Inventory`]** on Mobile or Desktop.
+## 📥 5. Data Import, Export & Deduplication / Merging Engine
+
+Data migration from spreadsheets (Excel/CSV) is the highest-friction step in tenant onboarding. The system implements a bulletproof asynchronous import and conflict resolution engine.
+
+### A. Spreadsheet Import Pipeline (`POST /api/v1/import/jobs`)
+1. **Upload & Map:** User uploads `.xlsx` / `.csv`. The backend parses headers and returns a column-mapping proposal (e.g., Sheet column *"Mobile No"* $\rightarrow$ CRM schema `phone_number`).
+2. **Async Background Processing:** Large imports (e.g., 10,000 rows) are queued as background jobs to prevent HTTP timeouts.
+3. **Validation & Error Reporting:** Invalid rows (missing mandatory phone numbers or invalid budgets) are segregated into an downloadable *"Error Log CSV"* without failing the clean rows.
+
+### B. The Deduplication & Matching Engine
+Before inserting any lead or property from webhooks, imports, or manual entry, the system executes the **3-Tier Deduplication Rule**:
+1. **Exact Key Match:** Check if `phone_number` or `email` already exists under `tenant_id`.
+2. **Project Interest Window:** If exact phone exists, check if the inquiry is within `dedup_window_days` (default 30 days) for the same property project.
+3. **Fuzzy Name Match:** Levenshtein distance matching on buyer names to flag potential family member duplicates.
+
+### C. Automated Merging Decisions
+When a duplicate lead is detected from a new source (e.g., existing lead *Aarav Sharma* inquires again on 99acres):
+* **No Overwrite:** Primary contact details (`phone`, `email`, `original_source`, `first_inquired_date`) are NEVER overwritten.
+* **Activity Aggregation:** The new inquiry is automatically logged as a high-priority `"Repeat Inquiry — 99acres"` event on the existing lead's timeline.
+* **Agent Notification:** If the lead is already assigned to Agent Ramesh, Ramesh receives an instant mobile push notification: *"🔥 Your active lead Aarav Sharma just re-inquired on 99acres!"*
+* **Manual Merge Tool:** For complex conflicts, admins can open the **"Merge Duplicates"** UI modal to manually select which fields to retain while combining all historical notes and call recordings into a unified timeline.
+
+---
+
+## 🚀 6. Automated Tenant Onboarding & Provisioning Pipeline
+
+To scale as a self-serve or rapid-deployment Multi-Tenant SaaS, creating a new brokerage workspace must be 100% automated and zero-touch.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant UI as Client App (Mobile / Desktop)
-    participant API as Backend API Layer
-    participant WABA as Meta Cloud API Gateway
-    participant DB as PostgreSQL Timeline
-    participant Buyer as Buyer Phone (WhatsApp)
+    participant Admin as Super Admin / Signup Web
+    participant API as Provisioning Service
+    participant DB as PostgreSQL & Redis
+    participant Storage as Cloud Storage / S3
+    participant Email as Welcome Dispatcher
 
-    UI->>API: POST /api/v1/messages/dispatch { tenant_id, lead_id, template: "brochure_v1" }
-    API->>DB: Fetch Lead & Tenant Encrypted WABA Token
-    API->>WABA: POST https://graph.facebook.com/v19.0/{phone_id}/messages
-    WABA-->>API: 200 OK (waba_message_id)
-    API->>DB: INSERT timeline_event (type: 'wa_sent', status: 'sent')
-    API-->>UI: Optimistic UI Success Toast
-    
-    Note over WABA,Buyer: Asynchronous Delivery & Read Lifecycle
-    WABA->>API: Webhook: status = 'delivered' / 'read'
-    API->>DB: UPDATE timeline_event SET status = 'read'
-    API->>UI: WebSocket Push -> Update double checkmark icon in UI
-    
-    Buyer->>WABA: Sends Reply ("When can we visit?")
-    WABA->>API: Webhook: Inbound Message
-    API->>DB: INSERT timeline_event (type: 'wa_inbound', content: "...")
-    API->>UI: Push Alert to Assigned Agent -> Badge counter increments
+    Admin->>API: POST /api/super/tenants/provision { firmName: "Bhumi Propcity", adminEmail, plan: "PRO" }
+    API->>DB: Generate UUID tenant_id & Create Workspace Record
+    API->>DB: Seed Default Pipeline Stages (New, Contacted, Visit, Closed)
+    API->>DB: Seed Default Lead Sources (99acres, MagicBricks, Walk-in)
+    API->>DB: Seed Default WABA & SMS Message Scripts
+    API->>DB: Create Tenant Admin User Account & Generate Password Hash
+    API->>Storage: Provision Tenant Asset Bucket (logos, brochure PDFs)
+    API->>Redis: Generate Unique Webhook Ingestion HMAC Keys
+    API->>Email: Send Welcome Kit with Login Credentials & Webhook URLs
+    API-->>Admin: 201 Created { tenant_id, login_url, setup_status: "READY" }
 ```
 
 ---
 
-### Flow 3: Cloud Telephony Click-to-Call & Audio Recording Sync
-* **The Problem It Solves:** Unverified agent call activity and lack of proof regarding buyer negotiations.
-* **When It Triggers:** Agent taps **[`Call`]** button on Lead or Property detail page.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant UI as Client App (Mobile / Desktop)
-    participant API as Backend API Layer
-    participant Telco as Exotel / Knowlarity Cloud
-    participant Agent as Agent Physical Phone
-    participant Buyer as Buyer Physical Phone
-    participant DB as PostgreSQL Timeline
-
-    UI->>API: POST /api/v1/telephony/bridge { tenant_id, lead_id, agent_id }
-    API->>DB: Lookup agent_phone and buyer_phone (Check privacy rules)
-    API->>Telco: POST /v1/calls/connect { from: agent_phone, to: buyer_phone, caller_id: virtual_number }
-    Telco-->>API: 200 OK (call_sid)
-    API-->>UI: Display "Connecting Call..." Bottom Sheet
-    
-    Telco->>Agent: Rings Agent Phone -> Agent Answers
-    Telco->>Buyer: Rings Buyer Phone -> Buyer Answers
-    Note over Agent,Buyer: Live Call in Progress (Audio recorded by Telco)
-    
-    Agent->>Telco: Hangs up call
-    Telco->>API: POST /webhooks/telephony/status { call_sid, duration: 184s, status: 'completed', recording_url }
-    API->>DB: INSERT timeline_event (type: 'call', duration: 184, audio_url: recording_url)
-    API->>UI: WebSocket Push -> Call log & MP3 player appears on Lead Timeline
-```
-
----
-
-### Flow 4: Super Admin Governance & Tenant Onboarding Lifecycle
-* **The Problem It Solves:** Manual database hacking to onboard new clients, leading to broken configurations.
-* **When It Triggers:** Super Admin creates a new brokerage tenant in the Control Plane.
-
-1. **Provisioning (`POST /api/super/tenants`):**
-   * Creates tenant workspace record (`tenant_id`).
-   * Seeds default pipeline stages, sources, and system roles.
-   * Generates unique ingress webhook keys for 99acres and MagicBricks.
-2. **Credential Vaulting:**
-   * Super Admin or Tenant Admin inputs Meta WABA keys and Exotel API credentials.
-   * Keys are encrypted using **AES-256-GCM** with a tenant-specific salt before storage.
-3. **Feature Flagging:**
-   * Super Admin toggles modules (e.g., `enable_ai_matching: true`, `enable_export: false`).
-   * Next time tenant agents log in, their JWT token reflects the updated feature scope, instantly enabling/disabling UI rails without frontend deployment.
-
----
-
-## 🛡️ 4. QA Guardrails & Regression Prevention Contract
+## 🛡️ 7. QA Guardrails & Regression Prevention Contract
 
 To permanently avoid "QA Cycle Hell," all future development must adhere to these 4 absolute engineering guardrails:
 
