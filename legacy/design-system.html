@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bhumi Propcity — Design System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Archivo:wght@500;600;700;800&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ===================================================================
+     Bhumi Propcity CRM — Design System style tile
+     Three subject-grounded directions + full component library.
+     =================================================================== */
+  html, body { margin: 0; background: #eceae3; }
+  * { box-sizing: border-box; }
+  .ds { font-family: 'IBM Plex Sans', system-ui, sans-serif; color: #1a1a1a; line-height: 1.5; max-width: 1180px; margin: 0 auto; padding: 40px 28px 100px; }
+  .ds h2.dir-title { font-size: 13px; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 4px; }
+  .ds .lede { font-size: 15px; color: #555; max-width: 640px; margin: 0 0 28px; }
+  .ds .doc-head { border-bottom: 2px solid #1a1a1a; padding-bottom: 16px; margin-bottom: 8px; }
+  .ds .doc-head h1 { font-family: 'Space Grotesk'; font-size: 30px; margin: 0 0 6px; letter-spacing: -.5px; }
+  .ds .doc-head p { margin: 0; color: #666; font-size: 14px; }
+  .ds .note { background: #f6f5f1; border-left: 3px solid #999; padding: 12px 16px; font-size: 13.5px; color: #444; border-radius: 0 6px 6px 0; margin: 14px 0 34px; }
+
+  /* direction card */
+  .dir { border-radius: 16px; overflow: hidden; margin-bottom: 34px; box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 8px 30px rgba(0,0,0,.06); }
+  .dir-body { padding: 26px 28px 30px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .stack { display: flex; flex-direction: column; gap: 8px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .sub { font-size: 10.5px; letter-spacing: 1.4px; text-transform: uppercase; font-weight: 700; margin: 22px 0 11px; opacity: .55; }
+  .sub:first-child { margin-top: 0; }
+  .swatch { flex: 1; min-width: 90px; border-radius: 10px; overflow: hidden; border: 1px solid rgba(0,0,0,.08); }
+  .swatch .chip { height: 56px; }
+  .swatch .lbl { padding: 7px 9px; font-size: 11px; background: #fff; }
+  .swatch .lbl b { display: block; font-size: 12px; }
+  .swatch .lbl span { color: #888; font-size: 10.5px; }
+  .comp-label { font-size: 11px; color: #999; margin: 3px 0 0; }
+  @media (max-width: 720px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+
+  /* ============ shared component skeletons (themed per .dir via vars) ============ */
+  .dir { --acc: #143E34; --acc2: #B0782B; --bg: #F2EFE8; --card: #fff; --ink: #19211D; --muted: #5C665F; --line: #D7DCD2; --disp: 'Space Grotesk'; --body: 'IBM Plex Sans'; }
+  .dir .panel { background: var(--bg); border-radius: 12px; padding: 20px; }
+  .dir .disp { font-family: var(--disp); }
+
+  /* buttons */
+  .btn { font-family: var(--disp); font-weight: 600; font-size: 13.5px; border-radius: 9px; padding: 10px 16px; border: 1px solid transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+  .btn.primary { background: var(--acc); color: #fff; }
+  .btn.brass { background: var(--acc2); color: #241a08; }
+  .btn.ghost { background: transparent; color: var(--acc); border-color: var(--line); }
+  .btn.danger { background: #fff; color: #8A5350; border-color: #E1C9C7; }
+  .btn.icon { padding: 10px; }
+
+  /* pills */
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 4px 11px; }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .pill.outline { border: 1px solid currentColor; border-radius: 6px; padding: 3px 9px; }
+  .badge { font-size: 10px; font-weight: 700; border-radius: 999px; padding: 2px 7px; background: var(--acc); color: #fff; }
+
+  /* card */
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .card .thumb { height: 96px; display: flex; align-items: center; justify-content: center; position: relative; }
+  .card .cbody { padding: 12px 14px 14px; }
+  .card .society { font-weight: 600; font-size: 14px; }
+  .card .price { font-family: var(--disp); font-weight: 700; font-size: 17px; color: var(--acc2); }
+
+  /* list row */
+  .lrow { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--acc); border-radius: 9px; padding: 11px 13px; display: flex; flex-direction: column; gap: 6px; }
+
+  /* filter/sort bar */
+  .fsbar { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 11px; padding: 8px 10px; flex-wrap: wrap; }
+  .seg { display: flex; gap: 3px; background: var(--bg); border-radius: 8px; padding: 3px; }
+  .seg button { font-family: var(--disp); font-weight: 600; font-size: 12.5px; border: none; background: transparent; color: var(--muted); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .seg button.on { background: var(--acc); color: #fff; }
+  .fchip { font-size: 12px; font-weight: 600; border-radius: 999px; padding: 6px 12px; border: 1px solid var(--line); background: var(--card); color: var(--muted); cursor: pointer; }
+  .fchip.on { background: var(--acc); color: #fff; border-color: var(--acc); }
+  .viewsw { display: flex; gap: 2px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .viewsw button { border: none; background: var(--card); padding: 7px 9px; cursor: pointer; display: flex; color: var(--muted); }
+  .viewsw button.on { background: var(--acc); color: #fff; }
+
+  /* inputs */
+  .field label { display: block; font-size: 11px; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+  .input, .select { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; font-family: var(--body); font-size: 13.5px; background: var(--card); color: var(--ink); }
+  .select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 16px) 17px, calc(100% - 11px) 17px; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+
+  /* toast */
+  .toast { display: inline-flex; align-items: center; gap: 9px; background: var(--acc); color: #fff; border-radius: 10px; padding: 11px 15px; font-size: 13px; font-weight: 500; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+
+  /* nav preview */
+  .nav { width: 210px; background: var(--acc); border-radius: 12px; padding: 14px 10px; }
+  .nav .np { display: flex; align-items: center; gap: 10px; padding: 6px 8px 14px; border-bottom: 1px solid rgba(255,255,255,.1); margin-bottom: 10px; }
+  .nav .np .mono { width: 38px; height: 38px; border: 1.5px solid var(--acc2); border-radius: 5px; display: flex; align-items: center; justify-content: center; font-family: var(--disp); font-weight: 700; color: var(--acc2); font-size: 15px; }
+  .nav .np .nm { color: #fff; font-family: var(--disp); font-weight: 600; font-size: 14px; }
+  .nav .np .sub2 { color: rgba(255,255,255,.5); font-size: 10.5px; }
+  .nav a { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; color: rgba(255,255,255,.62); font-size: 13px; font-weight: 500; text-decoration: none; }
+  .nav a.on { background: var(--bg); color: var(--ink); font-weight: 600; }
+
+  /* scheduler preview */
+  .sched .chips { display: flex; gap: 7px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<div class="ds">
+  <div class="doc-head">
+    <h1>Bhumi Propcity — Design System</h1>
+    <p>Three subject-grounded directions for a Pune brokerage CRM. Pick one (or mix), then it applies across every screen. Every component shown with real product content.</p>
+  </div>
+  <div class="note">
+    <b>How to read this:</b> Each block is a complete visual world — palette, type pairing, then the shared component set (buttons, pills, status system, cards in <i>card</i> and <i>list</i> form, the one filter/sort bar, inputs, the follow-up scheduler, toasts, side-nav, action rail). The components are identical in structure across all three — only the <b>skin</b> changes — which is exactly the coherence goal: one grammar, one identity.
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- DIRECTION A — REGISTRY -->
+  <!-- ============================================================= -->
+  <div class="dir" style="--acc:#123A34; --acc2:#A9762B; --bg:#F4F0E6; --card:#FFFDF8; --ink:#1C201C; --muted:#5E655C; --line:#E1DBC9; --disp:'Fraunces'; --body:'Instrument Sans'; background:#FFFDF8;">
+    <div style="background:#123A34; color:#F4F0E6; padding:22px 28px;">
+      <h2 class="dir-title" style="color:#A9762B;">Direction A</h2>
+      <div style="font-family:'Fraunces'; font-weight:600; font-size:26px;">Registry</div>
+      <div style="font-size:13.5px; color:#B9C4B8; max-width:560px; margin-top:4px;">The gravitas of a sub-registrar's office and stamp-paper. Ink-teal ground, gold-leaf money accent, document-paper surfaces. Fraunces (a warm, high-character serif) for headings and figures reads as institutional and trustworthy — like a firm that's been registering deals for 30 years. Body in Instrument Sans stays clean and modern so it never feels dated.</div>
+    </div>
+    <div class="dir-body" style="background:#FFFDF8;">
+      <div class="sub">Palette</div>
+      <div class="row">
+        <div class="swatch"><div class="chip" style="background:#123A34;"></div><div class="lbl"><b>Registry Teal</b><span>#123A34 · chrome</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#0B241F;"></div><div class="lbl"><b>Deep Pine</b><span>#0B241F · depth</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#A9762B;"></div><div class="lbl"><b>Gold Leaf</b><span>#A9762B · money only</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#F4F0E6;"></div><div class="lbl"><b>Document</b><span>#F4F0E6 · ground</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#7A2E28;"></div><div class="lbl"><b>Oxblood</b><span>#7A2E28 · seal/alert</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#5E655C;"></div><div class="lbl"><b>Sage Ink</b><span>#5E655C · muted</span></div></div>
+      </div>
+      <div class="sub">Type — Fraunces (display) · Instrument Sans (body)</div>
+      <div style="font-family:'Fraunces'; font-weight:600; font-size:34px; line-height:1;">Aarti Deshpande</div>
+      <div class="row" style="align-items:baseline; gap:22px; margin-top:8px;">
+        <span style="font-family:'Fraunces'; font-weight:600; font-size:30px; color:#A9762B; font-variant-numeric:tabular-nums;">₹1.65Cr</span>
+        <span style="font-family:'Fraunces'; font-weight:600; font-size:30px; color:#A9762B;">₹82L</span>
+        <span style="font-family:'Fraunces'; font-weight:600; font-size:30px; color:#A9762B;">₹32k/mo</span>
+      </div>
+      <div style="font-family:'Instrument Sans'; font-size:14px; color:#5E655C; margin-top:6px;">3BHK · Baner · ₹1.5–1.8Cr · high floor, hill view — the body face for dense, scannable rows.</div>
+
+      <div id="A-components"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- DIRECTION B — SALE BOARD -->
+  <!-- ============================================================= -->
+  <div class="dir" style="--acc:#1F2421; --acc2:#E08A1E; --bg:#F5F3EE; --card:#FFFFFF; --ink:#1B1F1C; --muted:#63696300; --line:#E4E2DA; --disp:'Archivo'; --body:'Spline Sans'; --muted:#5F655E; background:#FFFFFF;">
+    <div style="background:#1F2421; color:#F5F3EE; padding:22px 28px;">
+      <h2 class="dir-title" style="color:#E08A1E;">Direction B</h2>
+      <div style="font-family:'Archivo'; font-weight:800; font-size:28px; letter-spacing:-.5px;">SALE BOARD</div>
+      <div style="font-size:13.5px; color:#B7BAB4; max-width:560px; margin-top:4px;">The graphic energy of Indian property signage — bold, high-contrast, unapologetically informational. Graphite ground with a confident signboard amber. Archivo (a chunky grotesque) for prices and headings hits like a printed board; Spline Sans keeps data legible. Near-zero ornament, colour does the work. More energetic and modern than A — reads like a sharp young firm.</div>
+    </div>
+    <div class="dir-body" style="background:#FFFFFF;">
+      <div class="sub">Palette</div>
+      <div class="row">
+        <div class="swatch"><div class="chip" style="background:#1F2421;"></div><div class="lbl"><b>Graphite</b><span>#1F2421 · chrome</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#E08A1E;"></div><div class="lbl"><b>Board Amber</b><span>#E08A1E · accent+money</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#2E7D4E;"></div><div class="lbl"><b>Available</b><span>#2E7D4E · good</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#C6412E;"></div><div class="lbl"><b>Signal Red</b><span>#C6412E · alert</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#F5F3EE;"></div><div class="lbl"><b>Bone</b><span>#F5F3EE · ground</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#5F655E;"></div><div class="lbl"><b>Slate</b><span>#5F655E · muted</span></div></div>
+      </div>
+      <div class="sub">Type — Archivo (display) · Spline Sans (body)</div>
+      <div style="font-family:'Archivo'; font-weight:800; font-size:34px; line-height:1; letter-spacing:-1px;">IMRAN SHAIKH</div>
+      <div class="row" style="align-items:baseline; gap:22px; margin-top:8px;">
+        <span style="font-family:'Archivo'; font-weight:800; font-size:32px; color:#E08A1E; font-variant-numeric:tabular-nums;">₹92L</span>
+        <span style="font-family:'Archivo'; font-weight:800; font-size:32px; color:#E08A1E;">₹1.15Cr</span>
+        <span style="font-family:'Archivo'; font-weight:800; font-size:32px; color:#E08A1E;">₹50k/mo</span>
+      </div>
+      <div style="font-family:'Spline Sans'; font-size:14px; color:#5F655E; margin-top:6px;">2BHK · Viman Nagar · ₹85–95L · east facing, near airport — Spline Sans for the workhorse rows.</div>
+
+      <div id="B-components"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
+  <!-- DIRECTION C — NAMEPLATE (refined current) -->
+  <!-- ============================================================= -->
+  <div class="dir" style="--acc:#143E34; --acc2:#B0782B; --bg:#F2EFE8; --card:#FFFFFF; --ink:#19211D; --muted:#5C665F; --line:#DDD8CB; --disp:'Space Grotesk'; --body:'IBM Plex Sans'; background:#FFFFFF;">
+    <div style="background:#143E34; color:#F2EFE8; padding:22px 28px;">
+      <h2 class="dir-title" style="color:#B0782B;">Direction C</h2>
+      <div style="font-family:'Space Grotesk'; font-weight:600; font-size:26px;">Nameplate (refined)</div>
+      <div style="font-size:13.5px; color:#9FB6AA; max-width:560px; margin-top:4px;">Your current identity, cleaned up — bottle-green + brass + porcelain, but with corrected neutrals, tuned contrast, and the full component system applied consistently. The safe choice: it's already been in front of people and it works. Space Grotesk + IBM Plex Sans. Shown here so you can compare the <i>refined</i> version against a genuine rethink.</div>
+    </div>
+    <div class="dir-body" style="background:#FFFFFF;">
+      <div class="sub">Palette</div>
+      <div class="row">
+        <div class="swatch"><div class="chip" style="background:#143E34;"></div><div class="lbl"><b>Bottle Green</b><span>#143E34 · chrome</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#0C2B24;"></div><div class="lbl"><b>Deep Pine</b><span>#0C2B24 · depth</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#B0782B;"></div><div class="lbl"><b>Brass</b><span>#B0782B · money only</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#F2EFE8;"></div><div class="lbl"><b>Porcelain</b><span>#F2EFE8 · ground</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#B23A2E;"></div><div class="lbl"><b>Signal</b><span>#B23A2E · alert</span></div></div>
+        <div class="swatch"><div class="chip" style="background:#5C665F;"></div><div class="lbl"><b>Muted</b><span>#5C665F · secondary</span></div></div>
+      </div>
+      <div class="sub">Type — Space Grotesk (display) · IBM Plex Sans (body)</div>
+      <div style="font-family:'Space Grotesk'; font-weight:600; font-size:34px; line-height:1;">Karan Mehta</div>
+      <div class="row" style="align-items:baseline; gap:22px; margin-top:8px;">
+        <span style="font-family:'Space Grotesk'; font-weight:700; font-size:30px; color:#B0782B; font-variant-numeric:tabular-nums;">₹82L</span>
+        <span style="font-family:'Space Grotesk'; font-weight:700; font-size:30px; color:#B0782B;">₹1.2Cr</span>
+        <span style="font-family:'Space Grotesk'; font-weight:700; font-size:30px; color:#B0782B;">₹32k/mo</span>
+      </div>
+      <div style="font-family:'IBM Plex Sans'; font-size:14px; color:#5C665F; margin-top:6px;">2BHK · Wakad · ₹75–85L · ready possession — IBM Plex for the dense data rows.</div>
+
+      <div id="C-components"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Render the identical component set into each direction, so only the skin differs.
+  function comp(){ return `
+    <div class="sub">Buttons</div>
+    <div class="row">
+      <button class="btn primary">Save lead</button>
+      <button class="btn brass">Send on WhatsApp</button>
+      <button class="btn ghost">Assign</button>
+      <button class="btn danger">Mark as lost</button>
+      <button class="btn icon" aria-label="more">⋯</button>
+    </div>
+
+    <div class="sub">Status system — stage · source · property status · signals</div>
+    <div class="row" style="gap:8px;">
+      <span class="pill" style="color:#3A7CA5; background:#E7EFF4;"><span class="dot" style="background:#3A7CA5;"></span>New</span>
+      <span class="pill" style="color:#2E9E8F; background:#E4F1EE;"><span class="dot" style="background:#2E9E8F;"></span>Contacted</span>
+      <span class="pill" style="color:#C79028; background:#F7EFDC;"><span class="dot" style="background:#C79028;"></span>Site Visit</span>
+      <span class="pill" style="color:#C2551F; background:#F7E5DA;"><span class="dot" style="background:#C2551F;"></span>Negotiation</span>
+      <span class="pill" style="color:#2E7D4E; background:#E2F0E7;"><span class="dot" style="background:#2E7D4E;"></span>Closed Won</span>
+    </div>
+    <div class="row" style="gap:8px; margin-top:9px;">
+      <span class="pill outline" style="color:#C2551F;">99acres</span>
+      <span class="pill outline" style="color:#B23A2E;">MagicBricks</span>
+      <span class="pill outline" style="color:#2E7D4E;">Walk-in</span>
+      <span class="pill outline" style="color:#3A7CA5;">Referral</span>
+      <span style="display:inline-flex;align-items:center;gap:7px;color:#B23A2E;font-size:12.5px;font-weight:600;"><span style="width:8px;height:8px;border-radius:50%;background:#B23A2E;box-shadow:0 0 0 3px rgba(178,58,46,.18);"></span>Overdue follow-up</span>
+    </div>
+
+    <div class="sub">Cards view ⊞ &nbsp;·&nbsp; List view ☰ — same object, two densities</div>
+    <div class="grid2">
+      <div class="card">
+        <div class="thumb" style="background:#E7EFF4;">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#3A7CA5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg>
+          <span class="pill" style="position:absolute;top:8px;left:8px;background:#2E7D4E;color:#fff;font-size:10px;padding:3px 8px;">Available</span>
+        </div>
+        <div class="cbody">
+          <div class="society">Kolte Patil Life Republic</div>
+          <div style="font-size:11.5px;color:var(--muted);">2 BHK · Wakad</div>
+          <div class="row" style="justify-content:space-between;align-items:baseline;margin-top:7px;"><span class="price">₹82L</span><span style="font-size:11px;color:var(--muted);">950 sqft</span></div>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="lrow" style="border-left-color:#3A7CA5;">
+          <div class="row" style="justify-content:space-between;"><b style="font-size:14px;">Karan Mehta</b><span style="font-size:12px;color:var(--muted);">2 min ago</span></div>
+          <div class="disp" style="font-size:12.5px;color:var(--muted);font-weight:500;">2BHK · Wakad · ₹75–85L</div>
+          <div class="row" style="gap:7px;"><span class="pill outline" style="color:#C2551F;font-size:11px;">99acres</span><span class="pill" style="color:#3A7CA5;font-size:11px;padding:2px 8px;"><span class="dot" style="background:#3A7CA5;"></span>New</span></div>
+        </div>
+        <div class="lrow" style="border-left-color:#C79028;">
+          <div class="row" style="justify-content:space-between;"><b style="font-size:14px;">Imran Shaikh</b><span style="font-size:12px;color:var(--muted);">1d ago</span></div>
+          <div class="disp" style="font-size:12.5px;color:var(--muted);font-weight:500;">2BHK · Viman Nagar · ₹85–95L</div>
+          <div class="row" style="gap:7px;"><span class="pill outline" style="color:#2E7D4E;font-size:11px;">Walk-in</span><span class="pill" style="color:#C79028;font-size:11px;padding:2px 8px;"><span class="dot" style="background:#C79028;"></span>Site Visit</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sub">Filter / sort bar — one component, every module</div>
+    <div class="fsbar">
+      <div class="seg"><button class="on">All</button><button>New</button><button>Overdue</button></div>
+      <span class="fchip on">99acres</span>
+      <span class="fchip">Wakad</span>
+      <span class="fchip">This week</span>
+      <span style="flex:1;"></span>
+      <span style="font-size:12px;color:var(--muted);">Sort</span>
+      <select class="select" style="width:auto;padding:7px 30px 7px 11px;font-size:12.5px;"><option>Newest</option><option>Overdue first</option><option>Budget</option></select>
+      <div class="viewsw">
+        <button class="on" aria-label="list"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></button>
+        <button aria-label="cards"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>
+        <button aria-label="board"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="12" rx="1"/><rect x="17" y="3" width="5" height="15" rx="1"/></svg></button>
+      </div>
+    </div>
+
+    <div class="sub">Inputs</div>
+    <div class="grid3">
+      <div class="field"><label>Name</label><input class="input" value="Rohit Sharma"></div>
+      <div class="field"><label>Config</label><select class="select"><option>2BHK</option><option>3BHK</option></select></div>
+      <div class="field"><label>Locality</label><input class="input" placeholder="Wakad"></div>
+    </div>
+
+    <div class="sub">Follow-up scheduler — action · date · time (fixed: no more preset guesswork)</div>
+    <div class="panel sched">
+      <div class="seg" style="margin-bottom:11px;"><button class="on">Call</button><button>Site visit</button><button>Meeting</button></div>
+      <div class="chips" style="margin-bottom:11px;">
+        <span class="fchip on">Today</span><span class="fchip">Tomorrow</span><span class="fchip">This weekend</span><span class="fchip">Pick date…</span>
+      </div>
+      <div class="row" style="gap:10px;">
+        <div class="field" style="flex:1;"><label>Date</label><input class="input" type="date" value="2026-07-06"></div>
+        <div class="field" style="flex:1;"><label>Time</label><input class="input" type="time" value="11:00"></div>
+      </div>
+      <button class="btn primary" style="margin-top:13px;width:100%;justify-content:center;">Schedule — adds to calendar &amp; Today list</button>
+    </div>
+
+    <div class="sub">Toasts</div>
+    <div class="row">
+      <span class="toast"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--acc2)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Lead saved — routed to Rohan</span>
+      <span class="toast" style="background:#8A5350;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#EFE3E2" stroke-width="2.6" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/></svg>Add a name first</span>
+    </div>
+
+    <div class="sub">Side-nav &nbsp;·&nbsp; Action rail — the two you called generic</div>
+    <div class="row" style="align-items:flex-start; gap:16px;">
+      <div class="nav">
+        <div class="np"><div class="mono">BP</div><div><div class="nm">Bhumi Propcity</div><div class="sub2">Pune · Head office</div></div></div>
+        <a class="on"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>Dashboard</a>
+        <a><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>Leads <span style="flex:1"></span><span class="badge">5</span></a>
+        <a><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>Calendar</a>
+        <a><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 21h18M5 21V7l7-4 7 4v14"/></svg>Properties</a>
+      </div>
+      <div style="flex:1; background:var(--bg); border-radius:14px; padding:16px; min-width:240px;">
+        <div class="row" style="gap:8px; margin-bottom:12px;"><span style="width:7px;height:7px;border-radius:50%;background:var(--acc2);"></span><span style="font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:var(--muted);">Next best action</span><span style="flex:1;"></span><span style="font-size:11px;color:var(--muted);">Aarti Deshpande</span></div>
+        <button class="btn" style="width:100%;text-align:left;background:var(--acc);color:#fff;padding:14px;justify-content:flex-start;gap:12px;">
+          <span style="width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="20" height="20" viewBox="0 0 24 24" fill="var(--acc2)"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Z"/></svg></span>
+          <span><span style="display:block;font-size:14px;">Send Gera Emerald</span><span style="display:block;font-size:11.5px;color:rgba(255,255,255,.6);font-weight:400;">Top match · 92% fit · ₹1.65Cr</span></span>
+        </button>
+        <div style="font-size:10px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;color:var(--muted);margin:14px 0 8px;">Quick</div>
+        <div class="grid2" style="gap:7px;">
+          <button class="btn ghost" style="background:var(--card);justify-content:flex-start;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.4 2.5 1.2 3.6.6 4.7L8 9.6a16 16 0 0 0 6 6l1.2-1.2 4.7.6a2 2 0 0 1 1.7 2Z"/></svg>Call</button>
+          <button class="btn ghost" style="background:var(--card);justify-content:flex-start;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>SMS</button>
+          <button class="btn ghost" style="background:var(--card);justify-content:flex-start;border-color:var(--acc);color:var(--acc);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>Follow-up</button>
+          <button class="btn ghost" style="background:var(--card);justify-content:flex-start;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Assign</button>
+        </div>
+      </div>
+    </div>
+  `; }
+  ['A','B','C'].forEach(function(k){ document.getElementById(k+'-components').innerHTML = comp(); });
+</script>
+</body>
+</html>

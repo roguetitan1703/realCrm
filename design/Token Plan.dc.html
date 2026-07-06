@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; }
+  @keyframes wa-in { from { opacity:0; transform: translateY(8px) scale(.98); } to { opacity:1; transform:none; } }
+</style>
+</helmet>
+
+<div style="min-height:100vh; background:#F2EFE8; font-family:'IBM Plex Sans',system-ui,sans-serif; color:#19211D; padding:40px 32px 64px;">
+  <div style="max-width:1120px; margin:0 auto;">
+
+    <!-- Masthead / nameplate -->
+    <div style="display:flex; align-items:stretch; gap:0; border:1px solid #143E34; border-radius:4px; overflow:hidden; box-shadow:0 1px 0 #D7DCD2;">
+      <div style="background:#143E34; color:#F2EFE8; padding:22px 26px; display:flex; align-items:center; gap:16px;">
+        <div style="width:52px; height:52px; border:1.5px solid #B0782B; border-radius:3px; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk'; font-weight:700; font-size:22px; color:#B0782B; letter-spacing:1px;">DP</div>
+        <div>
+          <div style="font-family:'Space Grotesk'; font-weight:600; font-size:11px; letter-spacing:3px; text-transform:uppercase; color:#B0782B;">Token Plan · Nameplate</div>
+          <div style="font-family:'Space Grotesk'; font-weight:700; font-size:26px; letter-spacing:.3px; margin-top:2px;">Delpat CRM</div>
+        </div>
+      </div>
+      <div style="flex:1; background:#FFFFFF; padding:22px 26px; display:flex; flex-direction:column; justify-content:center;">
+        <div style="font-size:13px; color:#5C665F; line-height:1.5;">Direction committed: the brass-and-ink stationery of an established Pune firm, translated to product UI. Deep bottle-green identity, warm porcelain surfaces, one metallic accent reserved for money &amp; success. Everything else stays disciplined so the WhatsApp moment lands.</div>
+      </div>
+    </div>
+
+    <!-- Section: Brand palette -->
+    <div style="margin-top:34px;">
+      <div style="font-family:'Space Grotesk'; font-weight:600; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#5C665F; margin-bottom:14px;">01 — Brand palette · 6 named tokens</div>
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px;">
+        <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; overflow:hidden;">
+          <div style="height:74px; background:#143E34;"></div>
+          <div style="padding:10px 12px;"><div style="font-weight:600; font-size:13px;">Bottle Green</div><div style="font-size:12px; color:#5C665F;">brandInk · #143E34</div><div style="font-size:11px; color:#8A938C; margin-top:2px;">top bar, brand chrome</div></div>
+        </div>
+        <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; overflow:hidden;">
+          <div style="height:74px; background:#0C2B24;"></div>
+          <div style="padding:10px 12px;"><div style="font-weight:600; font-size:13px;">Deep Pine</div><div style="font-size:12px; color:#5C665F;">brandInkDeep · #0C2B24</div><div style="font-size:11px; color:#8A938C; margin-top:2px;">depth, pressed states</div></div>
+        </div>
+        <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; overflow:hidden;">
+          <div style="height:74px; background:#B0782B;"></div>
+          <div style="padding:10px 12px;"><div style="font-weight:600; font-size:13px;">Brass</div><div style="font-size:12px; color:#5C665F;">brass · #B0782B</div><div style="font-size:11px; color:#8A938C; margin-top:2px;">money + success ONLY</div></div>
+        </div>
+        <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; overflow:hidden;">
+          <div style="height:74px; background:#19211D;"></div>
+          <div style="padding:10px 12px;"><div style="font-weight:600; font-size:13px;">Ink Text</div><div style="font-size:12px; color:#5C665F;">inkText · #19211D</div><div style="font-size:11px; color:#8A938C; margin-top:2px;">primary text</div></div>
+        </div>
+        <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; overflow:hidden;">
+          <div style="height:74px; background:#F2EFE8; border-bottom:1px solid #D7DCD2;"></div>
+          <div style="padding:10px 12px;"><div style="font-weight:600; font-size:13px;">Porcelain</div><div style="font-size:12px; color:#5C665F;">porcelain · #F2EFE8</div><div style="font-size:11px; color:#8A938C; margin-top:2px;">app background</div></div>
+        </div>
+        <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; overflow:hidden;">
+          <div style="height:74px; background:#FFFFFF; border-bottom:1px solid #D7DCD2;"></div>
+          <div style="padding:10px 12px;"><div style="font-weight:600; font-size:13px;">Card</div><div style="font-size:12px; color:#5C665F;">card · #FFFFFF</div><div style="font-size:11px; color:#8A938C; margin-top:2px;">surfaces</div></div>
+        </div>
+        <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; overflow:hidden;">
+          <div style="height:74px; background:#D7DCD2;"></div>
+          <div style="padding:10px 12px;"><div style="font-weight:600; font-size:13px;">Sage Line</div><div style="font-size:12px; color:#5C665F;">sageLine · #D7DCD2</div><div style="font-size:11px; color:#8A938C; margin-top:2px;">borders, dividers</div></div>
+        </div>
+        <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; overflow:hidden;">
+          <div style="height:74px; background:#5C665F;"></div>
+          <div style="padding:10px 12px;"><div style="font-weight:600; font-size:13px;">Muted</div><div style="font-size:12px; color:#5C665F;">mutedText · #5C665F</div><div style="font-size:11px; color:#8A938C; margin-top:2px;">secondary text</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section: Type + signature, two columns -->
+    <div style="margin-top:34px; display:grid; grid-template-columns:1.15fr .85fr; gap:22px; align-items:start;">
+
+      <!-- Type roles -->
+      <div>
+        <div style="font-family:'Space Grotesk'; font-weight:600; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#5C665F; margin-bottom:14px;">02 — Type roles</div>
+        <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; padding:22px 24px;">
+          <div style="border-bottom:1px solid #EEEBE3; padding-bottom:18px; margin-bottom:18px;">
+            <div style="font-size:11px; color:#8A938C; letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Display · brand + big figures</div>
+            <div style="font-family:'Space Grotesk'; font-weight:600; font-size:34px;">Space Grotesk</div>
+            <div style="display:flex; align-items:baseline; gap:20px; margin-top:6px;">
+              <div style="font-family:'Space Grotesk'; font-weight:700; font-size:32px; font-variant-numeric:tabular-nums; color:#B0782B;">₹82L</div>
+              <div style="font-family:'Space Grotesk'; font-weight:700; font-size:32px; font-variant-numeric:tabular-nums; color:#B0782B;">₹1.2Cr</div>
+              <div style="font-family:'Space Grotesk'; font-weight:700; font-size:32px; font-variant-numeric:tabular-nums; color:#B0782B;">₹32k/mo</div>
+            </div>
+          </div>
+          <div style="border-bottom:1px solid #EEEBE3; padding-bottom:18px; margin-bottom:18px;">
+            <div style="font-size:11px; color:#8A938C; letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Body · dense data + chrome</div>
+            <div style="font-family:'IBM Plex Sans'; font-weight:600; font-size:22px;">IBM Plex Sans</div>
+            <div style="font-size:13px; color:#5C665F; margin-top:4px; line-height:1.55;">2BHK · Wakad · ₹75–85L · possession Dec · owner direct. Built for scannable rows of real information at arm's length.</div>
+          </div>
+          <div>
+            <div style="font-size:11px; color:#8A938C; letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">Marathi content · Devanagari companion</div>
+            <div style="font-family:'IBM Plex Sans Devanagari'; font-weight:500; font-size:20px;">वाकड मध्ये २BHK फ्लॅट</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Signature: WhatsApp bubble preview -->
+      <div>
+        <div style="font-family:'Space Grotesk'; font-weight:600; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#5C665F; margin-bottom:14px;">03 — The signature</div>
+        <div style="background:#0C2B24; border:1px solid #143E34; border-radius:4px; padding:20px; min-height:236px; display:flex; flex-direction:column;">
+          <div style="font-size:11px; color:#B0782B; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px;">Screen 3.8 · compose → bubble</div>
+          <div style="font-size:12px; color:#9FB0A6; margin-bottom:16px; line-height:1.5;">The one borrowed-vernacular moment: AI composes into a WhatsApp-style bubble he reads as "ready to send."</div>
+          <div style="align-self:flex-start; max-width:100%; background:#DCF7E3; border-radius:12px 12px 12px 3px; padding:12px 14px; box-shadow:0 1px 2px rgba(0,0,0,.25); animation:wa-in .5s ease both; font-family:'IBM Plex Sans';">
+            <div style="font-size:13px; line-height:1.55; color:#0E2C1E;"><b>Prime 2BHK in Wakad!</b> 🏡<br>Spacious 950 sqft, 4th floor, full east facing. Society mein pool + gym, Hinjewadi sirf 15 min. Owner direct, <b>₹82L</b> (thoda negotiable). Site visit ke liye reply karein!</div>
+            <div style="text-align:right; font-size:10px; color:#5C8A6E; margin-top:4px;">12:04 pm ✓✓</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section: Stage + status + source systems -->
+    <div style="margin-top:34px;">
+      <div style="font-family:'Space Grotesk'; font-weight:600; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#5C665F; margin-bottom:14px;">04 — Status systems · every stage &amp; status a named token</div>
+      <div style="display:grid; grid-template-columns:1.4fr 1fr; gap:22px; align-items:start;">
+        <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; padding:20px 22px;">
+          <div style="font-size:11px; color:#8A938C; letter-spacing:1px; text-transform:uppercase; margin-bottom:12px;">Lead stage · cold → hot temperature ramp</div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px;">
+            <span style="display:inline-flex; align-items:center; gap:7px; background:#E7EFF4; color:#3A7CA5; border-radius:20px; padding:6px 13px; font-size:13px; font-weight:600;"><span style="width:8px;height:8px;border-radius:50%;background:#3A7CA5;"></span>New</span>
+            <span style="display:inline-flex; align-items:center; gap:7px; background:#E4F1EE; color:#2E9E8F; border-radius:20px; padding:6px 13px; font-size:13px; font-weight:600;"><span style="width:8px;height:8px;border-radius:50%;background:#2E9E8F;"></span>Contacted</span>
+            <span style="display:inline-flex; align-items:center; gap:7px; background:#F7EFDC; color:#B07C2C; border-radius:20px; padding:6px 13px; font-size:13px; font-weight:600;"><span style="width:8px;height:8px;border-radius:50%;background:#C79028;"></span>Site Visit</span>
+            <span style="display:inline-flex; align-items:center; gap:7px; background:#F7E5DA; color:#C2551F; border-radius:20px; padding:6px 13px; font-size:13px; font-weight:600;"><span style="width:8px;height:8px;border-radius:50%;background:#C2551F;"></span>Negotiation</span>
+            <span style="display:inline-flex; align-items:center; gap:7px; background:#E2F0E7; color:#2E7D4E; border-radius:20px; padding:6px 13px; font-size:13px; font-weight:600;"><span style="width:8px;height:8px;border-radius:50%;background:#2E7D4E;"></span>Closed Won</span>
+            <span style="display:inline-flex; align-items:center; gap:7px; background:#EFE3E2; color:#8A5350; border-radius:20px; padding:6px 13px; font-size:13px; font-weight:600;"><span style="width:8px;height:8px;border-radius:50%;background:#8A5350;"></span>Closed Lost</span>
+          </div>
+          <div style="font-size:11px; color:#8A938C; letter-spacing:1px; text-transform:uppercase; margin:18px 0 12px;">Lead source chips</div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px;">
+            <span style="border:1px solid #C2551F; color:#C2551F; border-radius:4px; padding:4px 10px; font-size:12px; font-weight:600;">99acres</span>
+            <span style="border:1px solid #B23A2E; color:#B23A2E; border-radius:4px; padding:4px 10px; font-size:12px; font-weight:600;">MagicBricks</span>
+            <span style="border:1px solid #2E7D4E; color:#2E7D4E; border-radius:4px; padding:4px 10px; font-size:12px; font-weight:600;">Walk-in</span>
+            <span style="border:1px solid #3A7CA5; color:#3A7CA5; border-radius:4px; padding:4px 10px; font-size:12px; font-weight:600;">Referral</span>
+            <span style="border:1px solid #6E7A74; color:#6E7A74; border-radius:4px; padding:4px 10px; font-size:12px; font-weight:600;">Website</span>
+          </div>
+        </div>
+        <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; padding:20px 22px;">
+          <div style="font-size:11px; color:#8A938C; letter-spacing:1px; text-transform:uppercase; margin-bottom:12px;">Property status</div>
+          <div style="display:flex; flex-direction:column; gap:9px;">
+            <span style="display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600;"><span style="background:#2E7D4E; color:#fff; border-radius:3px; padding:3px 10px; font-size:12px;">Available</span></span>
+            <span style="display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600;"><span style="background:#C79028; color:#fff; border-radius:3px; padding:3px 10px; font-size:12px;">Under offer</span></span>
+            <span style="display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600;"><span style="background:#6E7A74; color:#fff; border-radius:3px; padding:3px 10px; font-size:12px;">Closed</span></span>
+          </div>
+          <div style="font-size:11px; color:#8A938C; letter-spacing:1px; text-transform:uppercase; margin:18px 0 10px;">System signal</div>
+          <span style="display:inline-flex; align-items:center; gap:7px; color:#B23A2E; font-size:13px; font-weight:600;"><span style="width:8px;height:8px;border-radius:50%;background:#B23A2E; box-shadow:0 0 0 3px rgba(178,58,46,.18);"></span>Overdue follow-up</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section: Layout concept -->
+    <div style="margin-top:34px;">
+      <div style="font-family:'Space Grotesk'; font-weight:600; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#5C665F; margin-bottom:14px;">05 — Layout concept</div>
+      <div style="background:#fff; border:1px solid #D7DCD2; border-radius:4px; padding:22px 24px; font-size:13px; color:#3B443E; line-height:1.65;">
+        <b style="color:#19211D;">Mobile-first "field tool", desktop widens to "back-office".</b> Every screen wears a slim bottle-green identity bar (the nameplate), porcelain body, white cards keylined in sage. Money and success carry a single brass hairline/figure — nothing else gets the metal. Prices are set in Space Grotesk tabular, Indian-formatted (₹82L, ₹1.2Cr), as first-class typographic objects. Dense rows over decoration: a lead row shows name, requirement one-liner, source chip, stage dot and time-ago at a glance. Bottom tab bar on mobile (Home / Leads / Properties / Contacts / More); left rail on desktop admin. One orchestrated motion moment (3.8); everything else is quiet micro-interaction. All values above live in <b style="font-family:'Space Grotesk'; color:#143E34;">theme.js</b> — tenant #2 is a config swap.
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

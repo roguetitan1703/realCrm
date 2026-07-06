@@ -1,0 +1,745 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bhumi Propcity — Component Library</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   BHUMI PROPCITY — "Register" design system
+   2-colour: warm paper neutrals + ONE deep institutional green accent.
+   Signals (stage/overdue) are contained to rows/detail — never in chrome.
+   This is the real class system the app will use. Component library only —
+   NO full pages. Build pages from these.
+   ============================================================================ */
+:root{
+  /* neutrals — do 90% of the work */
+  --bg:#F6F5F2; --card:#FFFFFF; --card-2:#FBFAF7;
+  --line:#E3E1DB; --line-2:#EDEBE6;
+  --ink:#23231F; --ink-2:#4A4843; --muted:#77756E; --faint:#9A988F;
+  --chrome:#22242A; --chrome-2:#2C2E35; --on-chrome:#E9E8E4; --on-chrome-mut:#9A9B9E;
+  /* the ONE accent */
+  --accent:#1E6F52; --accent-ink:#17583F; --accent-wash:#E8F1EC; --accent-line:#C4DDD0;
+  /* contained signals */
+  --alert:#C0392B; --alert-wash:#F6E4E1;
+  /* stage temperature ramp — ONE slate hue, cold(light)→hot(dark). value, not rainbow */
+  --st-new:#6B7A99; --st-contacted:#4E6688; --st-visit:#B07A2E; --st-nego:#C0603A; --st-won:#1E6F52; --st-lost:#8A8580;
+  --radius:8px; --radius-lg:12px;
+  --shadow:0 1px 2px rgba(35,35,31,.05);
+  --shadow-pop:0 12px 34px -12px rgba(35,35,31,.28);
+  --sans:'IBM Plex Sans',system-ui,sans-serif;
+  --disp:'Space Grotesk','IBM Plex Sans',sans-serif;
+  --deva:'IBM Plex Sans Devanagari','IBM Plex Sans',sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.45}
+h1,h2,h3,h4{margin:0}
+.mono-num{font-variant-numeric:tabular-nums}
+
+/* ---------- page scaffold (doc chrome only, not part of the system) ---------- */
+.doc{max-width:1180px;margin:0 auto;padding:40px 28px 120px}
+.doc-head{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:8px}
+.doc-kicker{font-family:var(--disp);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:600}
+.doc-title{font-family:var(--disp);font-size:30px;font-weight:600;letter-spacing:-.01em;margin:8px 0 6px}
+.doc-sub{color:var(--muted);max-width:640px}
+.sec{margin-top:52px}
+.sec-h{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line);padding-bottom:9px;margin-bottom:22px}
+.sec-h .n{font-family:var(--disp);font-size:12px;font-weight:700;color:var(--faint);font-variant-numeric:tabular-nums}
+.sec-h h2{font-family:var(--disp);font-size:19px;font-weight:600}
+.sec-h .note{color:var(--muted);font-size:13px;margin-left:auto}
+.grp{margin-bottom:30px}
+.grp-l{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);font-weight:600;margin-bottom:12px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.stack{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:18px}
+.panel-dark{background:var(--chrome);border-radius:var(--radius-lg);padding:18px}
+.cap{font-size:11px;color:var(--faint);margin-top:7px}
+
+/* ============================================================================
+   1 · FOUNDATIONS
+   ============================================================================ */
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px}
+.sw i{display:block;height:56px;border-radius:8px;border:1px solid rgba(0,0,0,.06)}
+.sw b{display:block;font-size:12px;font-weight:600;margin-top:7px}
+.sw span{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.type-row{display:flex;align-items:baseline;gap:16px;padding:10px 0;border-bottom:1px solid var(--line-2)}
+.type-row .lab{width:150px;flex-shrink:0;font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em}
+.type-row .meta{margin-left:auto;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+
+/* ============================================================================
+   REUSABLE COMPONENT CLASSES  (the actual system)
+   ============================================================================ */
+
+/* ---- buttons ---- */
+.btn{font-family:var(--sans);font-weight:600;font-size:13.5px;line-height:1;border-radius:var(--radius);
+  padding:10px 15px;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;
+  transition:background .12s,border-color .12s,box-shadow .12s;white-space:nowrap}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-ink)}
+.btn-secondary{background:var(--chrome);color:#fff}
+.btn-secondary:hover{background:var(--chrome-2)}
+.btn-ghost{background:var(--card);color:var(--ink);border-color:var(--line)}
+.btn-ghost:hover{background:var(--card-2);border-color:var(--muted)}
+.btn-quiet{background:transparent;color:var(--ink-2);border-color:transparent;padding:8px 10px}
+.btn-quiet:hover{background:var(--line-2)}
+.btn-danger{background:var(--card);color:var(--alert);border-color:#E4C4C0}
+.btn-danger:hover{background:var(--alert-wash)}
+.btn-icon{padding:9px}
+.btn-sm{padding:7px 11px;font-size:12.5px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.ic{width:16px;height:16px;flex-shrink:0;stroke-width:1.9}
+
+/* ---- inputs ---- */
+.field{display:flex;flex-direction:column;gap:6px}
+.field > label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.input,.select,.textarea{width:100%;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);
+  padding:10px 12px;font-family:var(--sans);font-size:14px;color:var(--ink)}
+.input::placeholder{color:var(--faint)}
+.input:focus,.select:focus,.textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-wash)}
+.textarea{resize:vertical;min-height:74px}
+.input-group{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--card)}
+.input-group:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-wash)}
+.input-group .prefix{display:flex;align-items:center;padding:0 12px;background:var(--card-2);border-right:1px solid var(--line);color:var(--muted);font-weight:600;font-size:13px}
+.input-group input{flex:1;border:none;outline:none;padding:10px 12px;font-family:var(--sans);font-size:14px;background:transparent;color:var(--ink)}
+.input.err{border-color:var(--alert)}
+.input.err:focus{box-shadow:0 0 0 3px var(--alert-wash)}
+.err-msg{font-size:12px;color:var(--alert)}
+
+/* segmented control */
+.seg{display:inline-flex;background:var(--line-2);border-radius:var(--radius);padding:3px;gap:2px}
+.seg button{border:none;background:transparent;padding:7px 14px;font-family:var(--sans);font-size:13px;font-weight:600;
+  color:var(--muted);border-radius:6px;cursor:pointer}
+.seg button.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* quick chips (for scheduler etc — NOT the sort mechanism) */
+.qchip{border:1px solid var(--line);background:var(--card);border-radius:16px;padding:6px 13px;font-size:13px;
+  font-weight:500;color:var(--ink-2);cursor:pointer}
+.qchip:hover{border-color:var(--muted)}
+.qchip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* toggle */
+.toggle{width:38px;height:22px;border-radius:12px;background:var(--line);border:none;cursor:pointer;position:relative;transition:background .15s;flex-shrink:0}
+.toggle.on{background:var(--accent)}
+.toggle::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.toggle.on::after{transform:translateX(16px)}
+
+/* checkbox */
+.check{width:20px;height:20px;border-radius:5px;border:1.5px solid var(--line);background:var(--card);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.check.on{background:var(--accent);border-color:var(--accent)}
+
+/* ---- pills & signals (CONTAINED — only in rows/detail) ---- */
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;border-radius:14px;padding:3px 10px}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+/* stage: one slate hue, value ramp cold→hot. tinted bg + ink text */
+.stage{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;border-radius:14px;padding:3px 10px}
+.stage .dot{width:7px;height:7px;border-radius:50%}
+.stage-new{background:#EEF1F6;color:#41506E}.stage-new .dot{background:var(--st-new)}
+.stage-contacted{background:#E9EEF5;color:#334A6C}.stage-contacted .dot{background:var(--st-contacted)}
+.stage-visit{background:#F6EEDD;color:#8A5E1E}.stage-visit .dot{background:var(--st-visit)}
+.stage-nego{background:#F6E7DF;color:#94472A}.stage-nego .dot{background:var(--st-nego)}
+.stage-won{background:var(--accent-wash);color:var(--accent-ink)}.stage-won .dot{background:var(--st-won)}
+.stage-lost{background:#EDECE9;color:#6E6A64}.stage-lost .dot{background:var(--st-lost)}
+/* source = quiet grey small-caps text, not a coloured chip */
+.source{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--muted);text-transform:uppercase}
+/* overdue = the one alert */
+.overdue{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--alert)}
+.overdue .dot{width:7px;height:7px;border-radius:50%;background:var(--alert);box-shadow:0 0 0 3px var(--alert-wash)}
+.count-badge{font-size:11px;font-weight:700;background:var(--line-2);color:var(--ink-2);border-radius:10px;padding:1px 7px;font-variant-numeric:tabular-nums}
+.count-badge.accent{background:var(--accent);color:#fff}
+.count-badge.alert{background:var(--alert);color:#fff}
+.new-tag{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);background:var(--accent-wash);border-radius:4px;padding:2px 6px}
+
+/* ---- avatar ---- */
+.av{border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:600;color:#fff;flex-shrink:0}
+.av-sm{width:24px;height:24px;font-size:10px}.av-md{width:32px;height:32px;font-size:12px}.av-lg{width:44px;height:44px;font-size:15px}
+.av-a1{background:#3F6F55}.av-a2{background:#3A5A7A}.av-a3{background:#9A6234}.av-a4{background:#7A4A55}
+.av-empty{background:var(--card);border:1.5px dashed var(--line);color:var(--faint)}
+
+/* ---- money (inline tabular, NOT a hero) ---- */
+.money{font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)}
+.money-sub{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
+
+/* ---- price stat / KPI tile ---- */
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:15px 16px}
+.kpi .k-top{display:flex;align-items:center;gap:8px;color:var(--muted)}
+.kpi .k-ic{width:26px;height:26px;border-radius:7px;background:var(--line-2);display:flex;align-items:center;justify-content:center;color:var(--ink-2)}
+.kpi .k-l{font-size:12.5px;font-weight:600}
+.kpi .k-v{font-family:var(--disp);font-weight:600;font-size:27px;margin-top:11px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.kpi .k-s{font-size:12px;color:var(--muted);margin-top:2px}
+.kpi.alert{border-color:#E7CDC9;background:#FCF6F5}
+.kpi.alert .k-ic{background:var(--alert-wash);color:var(--alert)}
+.kpi.alert .k-v{color:var(--alert)}
+
+/* ---- section header (in-panel) ---- */
+.sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.sh .t{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.sh .r{font-size:12px;color:var(--muted)}
+
+/* ---- FILTER / SORT BAR (the ONE toolbar — not pill soup) ---- */
+.toolbar{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--radius-lg);padding:9px 12px;flex-wrap:wrap}
+.toolbar .tabs{display:inline-flex;gap:2px}
+.toolbar .tabs button{border:none;background:transparent;padding:7px 12px;font-family:var(--sans);font-size:13.5px;
+  font-weight:600;color:var(--muted);border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+.toolbar .tabs button.on{background:var(--ink);color:#fff}
+.toolbar .divider{width:1px;height:22px;background:var(--line)}
+.toolbar .spring{flex:1}
+/* the "register" control — a labelled field, reads like a ledger column, NOT a pill */
+.ctrl{display:inline-flex;align-items:center;height:34px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--card);overflow:hidden}
+.ctrl .ctrl-l{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);font-weight:600;
+  padding:0 8px 0 11px}
+.ctrl select{border:none;background:transparent;font-family:var(--sans);font-size:13px;font-weight:600;color:var(--ink);
+  padding:0 30px 0 2px;height:100%;cursor:pointer;-webkit-appearance:none;appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 15px,calc(100% - 10px) 15px;background-size:5px 5px;background-repeat:no-repeat}
+.ctrl select:focus{outline:none}
+.ctrl .dir{border:none;border-left:1px solid var(--line);background:var(--card-2);width:32px;height:100%;cursor:pointer;color:var(--ink-2);display:flex;align-items:center;justify-content:center}
+/* view switch */
+.viewsw{display:inline-flex;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.viewsw button{border:none;background:var(--card);padding:8px 9px;cursor:pointer;color:var(--muted);display:flex;border-left:1px solid var(--line)}
+.viewsw button:first-child{border-left:none}
+.viewsw button.on{background:var(--ink);color:#fff}
+/* search field in toolbar/topbar */
+.search{display:inline-flex;align-items:center;gap:8px;height:34px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--card);padding:0 12px;color:var(--faint);cursor:text;min-width:200px}
+.search input{border:none;outline:none;background:transparent;font-family:var(--sans);font-size:13.5px;color:var(--ink);flex:1}
+
+/* ---- TABLE (dense collection) ---- */
+.tbl{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden}
+.tbl thead th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600;
+  padding:11px 16px;background:var(--card-2);border-bottom:1px solid var(--line);white-space:nowrap;cursor:pointer;user-select:none}
+.tbl thead th .caret{color:var(--accent);margin-left:4px}
+.tbl tbody td{padding:13px 16px;border-bottom:1px solid var(--line-2);vertical-align:middle}
+.tbl tbody tr:last-child td{border-bottom:none}
+.tbl tbody tr{cursor:pointer}
+.tbl tbody tr:hover td{background:var(--card-2)}
+.tbl tbody tr.sel td{background:var(--accent-wash)}
+.tbl .name{font-weight:600}
+.tbl .sub{font-size:12px;color:var(--muted)}
+
+/* ---- LIST ROW (comfortable, mobile + desktop lists) ---- */
+.lrow{display:flex;align-items:center;gap:13px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);
+  padding:13px 15px;cursor:pointer;transition:border-color .12s,box-shadow .12s;width:100%;text-align:left}
+.lrow:hover{border-color:var(--muted);box-shadow:var(--shadow)}
+.lrow .l-main{flex:1;min-width:0}
+.lrow .l-name{font-weight:600;font-size:14.5px}
+.lrow .l-meta{font-size:13px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lrow .l-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0}
+
+/* ---- CARD (one frame, slots) ---- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;cursor:pointer;transition:border-color .12s,box-shadow .12s}
+.card:hover{border-color:var(--muted);box-shadow:var(--shadow)}
+.card .c-thumb{height:120px;background:var(--line-2);display:flex;align-items:center;justify-content:center;position:relative;color:var(--faint)}
+.card .c-badge{position:absolute;top:9px;left:9px;font-size:11px;font-weight:600;border-radius:6px;padding:3px 9px;background:#fff;box-shadow:var(--shadow)}
+.card .c-body{padding:12px 14px}
+.card .c-title{font-weight:600;font-size:14px}
+.card .c-sub{font-size:12px;color:var(--muted);margin-top:1px}
+.card .c-foot{display:flex;align-items:baseline;justify-content:space-between;margin-top:9px}
+
+/* ---- KV grid (detail) ---- */
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.kv .k{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:3px}
+.kv .v{font-size:14px;font-weight:500}
+
+/* ---- stage stepper (single-line connected track) ---- */
+.stepper{display:flex;gap:2px}
+.stepper button{flex:1;border:none;cursor:pointer;padding:9px 4px;font-family:var(--sans);font-size:12px;font-weight:600;
+  text-align:center;background:var(--line-2);color:var(--faint);position:relative}
+.stepper button:first-child{border-radius:var(--radius) 0 0 var(--radius)}
+.stepper button:last-child{border-radius:0 var(--radius) var(--radius) 0}
+.stepper button.done{background:var(--accent-wash);color:var(--accent-ink)}
+.stepper button.current{background:var(--accent);color:#fff}
+
+/* ---- SIDENAV (chrome — charcoal) ---- */
+.nav{width:230px;background:var(--chrome);border-radius:var(--radius-lg);padding:0;overflow:hidden;color:var(--on-chrome)}
+.nav .n-brand{padding:16px 16px 14px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:11px}
+.nav .n-mono{width:38px;height:38px;border-radius:8px;background:var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-weight:700;font-size:15px;color:#fff}
+.nav .n-fn{font-family:var(--disp);font-weight:600;font-size:15px;color:#fff}
+.nav .n-sub{font-size:11px;color:var(--on-chrome-mut);margin-top:1px}
+.nav .n-sec{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#6E7075;font-weight:700;padding:14px 16px 5px}
+.nav a{display:flex;align-items:center;gap:11px;padding:9px 16px;color:var(--on-chrome-mut);text-decoration:none;font-size:13.5px;font-weight:500;cursor:pointer;border-left:2px solid transparent}
+.nav a:hover{background:rgba(255,255,255,.04);color:var(--on-chrome)}
+.nav a.on{color:#fff;background:rgba(30,111,82,.16);border-left-color:var(--accent)}
+.nav a .n-badge{margin-left:auto;font-size:10px;font-weight:700;background:rgba(255,255,255,.12);color:#fff;border-radius:9px;padding:1px 7px}
+.nav a.on .n-badge{background:var(--accent);color:#fff}
+.nav .n-foot{margin-top:6px;padding:12px 16px;border-top:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:10px}
+
+/* ---- TOP BAR (desktop chrome) ---- */
+.topbar{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:11px 16px}
+.topbar h1{font-family:var(--disp);font-size:19px;font-weight:600}
+.topbar .tb-count{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:12px;padding:2px 10px}
+.topbar .tb-crumb{font-size:13px;color:var(--muted)}
+.topbar .tb-crumb a{color:var(--accent);cursor:pointer}
+
+/* ---- MOBILE TAB BAR ---- */
+.tabbar{display:flex;background:var(--chrome);border-radius:var(--radius-lg);padding:6px;gap:2px;max-width:420px}
+.tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0;color:var(--on-chrome-mut);text-decoration:none;cursor:pointer;border-radius:8px;font-size:10px;font-weight:600}
+.tabbar a.on{color:#fff;background:rgba(30,111,82,.22)}
+
+/* ---- ACTION RAIL (right dock; collapsed strip + expanded panel) ---- */
+.rail{width:300px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden}
+.rail .r-sec{padding:15px 16px;border-top:1px solid var(--line-2)}
+.rail .r-sec:first-child{border-top:none}
+.rail .r-sec .sh{margin-bottom:11px}
+.rail-nba{display:flex;align-items:center;gap:12px;background:var(--chrome);color:#fff;border-radius:var(--radius);padding:13px}
+.rail-nba .n-ic{width:38px;height:38px;border-radius:9px;background:rgba(30,111,82,.28);display:flex;align-items:center;justify-content:center;color:#7FD4B0;flex-shrink:0}
+.rail-nba .n-l{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#8FBBAA;font-weight:700}
+.rail-nba .n-t{font-weight:600;font-size:14px;margin-top:2px}
+.qa-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.qa{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);cursor:pointer;font-size:12px;font-weight:500;color:var(--ink)}
+.qa:hover{background:var(--card-2);border-color:var(--muted)}
+.qa .ic{color:var(--muted)}
+/* collapsed strip */
+.rail-strip{width:52px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);
+  display:flex;flex-direction:column;align-items:center;gap:14px;padding:14px 0}
+.rail-strip .chev{color:var(--muted)}
+.rail-strip .lbl{writing-mode:vertical-rl;transform:rotate(180deg);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:700}
+
+/* ---- SCHEDULER ---- */
+.sched{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:16px;width:320px}
+.sched .s-when{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.sched .s-dt{display:flex;gap:8px}
+
+/* ---- TOAST ---- */
+.toast{display:inline-flex;align-items:center;gap:10px;background:var(--chrome);color:#fff;border-radius:var(--radius);
+  padding:12px 15px;font-size:13.5px;box-shadow:var(--shadow-pop);max-width:380px}
+.toast .t-ic{color:#7FD4B0;flex-shrink:0}
+.toast.alert{background:#5A2620}.toast.alert .t-ic{color:#E7B8B2}
+
+/* ---- EMPTY STATE ---- */
+.empty{text-align:center;padding:34px 20px;border:1px dashed var(--line);border-radius:var(--radius-lg);color:var(--muted);background:var(--card)}
+.empty .e-t{font-family:var(--disp);font-size:16px;color:var(--ink);font-weight:600;margin-bottom:4px}
+.empty .e-s{font-size:13px;margin-bottom:14px}
+
+/* ---- TIMELINE ---- */
+.tl .ev{display:flex;gap:12px}
+.tl .ev .rail-dot{display:flex;flex-direction:column;align-items:center}
+.tl .ev .rail-dot .d{width:9px;height:9px;border-radius:50%;background:var(--muted);margin-top:4px}
+.tl .ev .rail-dot .d.accent{background:var(--accent)}
+.tl .ev .rail-dot .ln{width:1px;flex:1;min-height:16px;background:var(--line)}
+.tl .ev .ev-b{padding-bottom:15px}
+.tl .ev .ev-l{font-size:13.5px;font-weight:500}
+.tl .ev .ev-a{font-size:12px;color:var(--muted)}
+
+/* ---- WHATSAPP bubble (the signature vernacular) ---- */
+.wa-canvas{background:#0B3D2E;background-image:radial-gradient(rgba(255,255,255,.035) 1px,transparent 1px);background-size:15px 15px;
+  border-radius:var(--radius-lg);padding:18px;display:flex;flex-direction:column;gap:8px}
+.wa-bubble{align-self:flex-start;max-width:82%;background:#E8FBEF;border-radius:12px 12px 12px 4px;padding:11px 12px 7px;
+  font-size:13px;line-height:1.55;color:#0E2C1E;white-space:pre-wrap;box-shadow:0 3px 12px rgba(0,0,0,.25)}
+.wa-bubble .wa-time{display:flex;align-items:center;justify-content:flex-end;gap:4px;font-size:10px;color:#5C8A6E;margin-top:4px}
+.wa-compose{align-self:flex-start;background:#12463421;background:#0F4A38;border:1px solid rgba(255,255,255,.12);border-radius:12px 12px 12px 4px;padding:13px 14px;max-width:82%}
+.wa-compose .c-head{display:flex;align-items:center;gap:9px;margin-bottom:11px;color:#fff;font-size:12.5px;font-weight:600;font-family:var(--disp)}
+.wa-compose .c-dots{display:flex;gap:3px}
+.wa-compose .c-dots i{width:5px;height:5px;border-radius:50%;background:#7FD4B0;animation:dot 1.2s infinite}
+.wa-compose .c-dots i:nth-child(2){animation-delay:.2s}.wa-compose .c-dots i:nth-child(3){animation-delay:.4s}
+.wa-compose .c-skel{display:flex;flex-direction:column;gap:7px}
+.wa-compose .c-skel i{height:8px;border-radius:5px;background:linear-gradient(90deg,#134631 25%,#1c5b41 37%,#134631 63%);background-size:320px 100%;animation:shim 1.3s infinite}
+@keyframes dot{0%,80%,100%{opacity:.25;transform:scale(.7)}40%{opacity:1;transform:scale(1)}}
+@keyframes shim{0%{background-position:-320px 0}100%{background-position:320px 0}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important}}
+
+/* fit reasons */
+.fit{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;border-radius:10px;padding:2px 8px}
+.fit.ok{background:var(--accent-wash);color:var(--accent-ink)}
+.fit.no{background:#EDECE9;color:var(--muted)}
+
+/* progress bar */
+.bar{height:7px;background:var(--line-2);border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:4px}
+
+/* utility */
+.dots-btn{width:30px;height:30px;border-radius:7px;border:1px solid var(--line);background:var(--card);cursor:pointer;color:var(--muted);display:inline-flex;align-items:center;justify-content:center}
+svg{display:block}
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <div class="doc-head">
+    <div class="doc-kicker">Bhumi Propcity · Design System</div>
+    <h1 class="doc-title">Component library — “Register”</h1>
+    <p class="doc-sub">Every component we build the app from, in its states — no pages here, you assemble pages from these. Two colours only: warm paper neutrals + one deep institutional green. Signals (stage, overdue) stay inside rows and detail, never in the chrome. Real seed data throughout.</p>
+  </div>
+
+  <!-- ============ 1 · FOUNDATIONS ============ -->
+  <section class="sec">
+    <div class="sec-h"><span class="n">01</span><h2>Foundations</h2><span class="note">2-colour · charcoal chrome + one green · warm paper base</span></div>
+
+    <div class="grp">
+      <div class="grp-l">Neutrals — carry 90% of the interface</div>
+      <div class="swatches">
+        <div class="sw"><i style="background:#F6F5F2"></i><b>Paper</b><span>#F6F5F2 · bg</span></div>
+        <div class="sw"><i style="background:#FFFFFF"></i><b>Card</b><span>#FFFFFF</span></div>
+        <div class="sw"><i style="background:#E3E1DB"></i><b>Hairline</b><span>#E3E1DB</span></div>
+        <div class="sw"><i style="background:#23231F"></i><b>Ink</b><span>#23231F · text</span></div>
+        <div class="sw"><i style="background:#77756E"></i><b>Muted</b><span>#77756E</span></div>
+        <div class="sw"><i style="background:#22242A"></i><b>Chrome</b><span>#22242A · nav</span></div>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-l">Accent — the ONE colour (primary action · active · link · focus)</div>
+      <div class="swatches">
+        <div class="sw"><i style="background:#1E6F52"></i><b>Green</b><span>#1E6F52</span></div>
+        <div class="sw"><i style="background:#17583F"></i><b>Green ink</b><span>#17583F · hover</span></div>
+        <div class="sw"><i style="background:#E8F1EC"></i><b>Green wash</b><span>#E8F1EC · tint</span></div>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-l">Contained signals — only inside rows &amp; detail, never chrome</div>
+      <div class="swatches">
+        <div class="sw"><i style="background:#C0392B"></i><b>Alert</b><span>#C0392B · overdue</span></div>
+        <div class="sw"><i style="background:#6B7A99"></i><b>Cold</b><span>New lead</span></div>
+        <div class="sw"><i style="background:#B07A2E"></i><b>Warm</b><span>Site visit</span></div>
+        <div class="sw"><i style="background:#C0603A"></i><b>Hot</b><span>Negotiation</span></div>
+      </div>
+      <p class="cap">Stage is ONE slate hue shifting cold→hot (lead temperature is real data). Not six random colours. Source is quiet grey text, not a colour.</p>
+    </div>
+
+    <div class="grp">
+      <div class="grp-l">Type — IBM Plex Sans does the work · Space Grotesk for titles &amp; brand only</div>
+      <div class="panel">
+        <div class="type-row"><span class="lab">Page title</span><span style="font-family:var(--disp);font-size:26px;font-weight:600;letter-spacing:-.01em">Leads</span><span class="meta">Space Grotesk 600 · 26</span></div>
+        <div class="type-row"><span class="lab">Section label</span><span style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700">Requirement</span><span class="meta">Plex 700 · 11 · +tracking</span></div>
+        <div class="type-row"><span class="lab">Row name</span><span style="font-size:14.5px;font-weight:600">Karan Mehta</span><span class="meta">Plex 600 · 14.5</span></div>
+        <div class="type-row"><span class="lab">Row meta</span><span style="color:var(--muted)">2BHK · Wakad · <span class="money">₹75–85L</span></span><span class="meta">Plex 400 · 14</span></div>
+        <div class="type-row"><span class="lab">Data / ₹ (tabular)</span><span class="money" style="font-size:15px">₹1.65Cr · ₹82L · ₹32k/mo</span><span class="meta">Plex 600 · tabular-nums</span></div>
+        <div class="type-row" style="border:none"><span class="lab">Marathi content</span><span style="font-family:var(--deva)">साइट व्हिजिटसाठी रिप्लाय करा</span><span class="meta">Plex Devanagari</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2 · BUTTONS & ACTIONS ============ -->
+  <section class="sec">
+    <div class="sec-h"><span class="n">02</span><h2>Buttons &amp; actions</h2><span class="note">green = primary only · charcoal = secondary · rest neutral</span></div>
+    <div class="grp">
+      <div class="grp-l">Variants</div>
+      <div class="row">
+        <button class="btn btn-primary"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg>Assign to Rohan</button>
+        <button class="btn btn-secondary">Send on WhatsApp</button>
+        <button class="btn btn-ghost">Edit</button>
+        <button class="btn btn-quiet">Cancel</button>
+        <button class="btn btn-danger">Mark as lost</button>
+        <button class="btn btn-icon btn-ghost"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+        <button class="btn btn-primary" disabled>Disabled</button>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="grp-l">Sizes</div>
+      <div class="row">
+        <button class="btn btn-primary">Default</button>
+        <button class="btn btn-primary btn-sm">Small</button>
+        <button class="btn btn-ghost btn-sm">Small ghost</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3 · INPUTS ============ -->
+  <section class="sec">
+    <div class="sec-h"><span class="n">03</span><h2>Inputs</h2><span class="note">the fields that build every form &amp; the new-lead / add-property modals</span></div>
+    <div class="row" style="align-items:flex-start;gap:26px">
+      <div class="stack" style="width:240px">
+        <div class="field" style="width:100%"><label>Client name</label><input class="input" value="Rohit Sharma"></div>
+        <div class="field" style="width:100%"><label>Phone</label><div class="input-group"><span class="prefix">+91</span><input value="98220 41556"></div></div>
+        <div class="field" style="width:100%"><label>Locality</label><input class="input" placeholder="e.g. Wakad"></div>
+      </div>
+      <div class="stack" style="width:240px">
+        <div class="field" style="width:100%"><label>Price (₹ lakh)</label><input class="input err" value="8two"><span class="err-msg">Enter a number, e.g. 82</span></div>
+        <div class="field" style="width:100%"><label>Notes</label><textarea class="textarea">Ready-possession only, first floor+.</textarea></div>
+      </div>
+      <div class="stack">
+        <div class="grp-l" style="margin:0">Segmented</div>
+        <div class="seg"><button class="on">Buy</button><button>Rent</button></div>
+        <div class="seg"><button class="on">Call</button><button>Site visit</button><button>Meeting</button></div>
+        <div class="grp-l" style="margin:10px 0 0">Quick chips</div>
+        <div class="row"><button class="qchip on">Today</button><button class="qchip">Tomorrow</button><button class="qchip">This weekend</button><button class="qchip">Pick date…</button></div>
+        <div class="grp-l" style="margin:10px 0 0">Toggle · checkbox · dropdown</div>
+        <div class="row">
+          <button class="toggle on"></button><span style="font-size:13px">Agent active</span>
+          <span class="check on"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#fff" style="width:12px;height:12px"><path d="M20 6 9 17l-5-5"/></svg></span>
+          <span class="check"></span>
+          <select class="select" style="width:auto">Config<option>2BHK</option><option>3BHK</option></select>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4 · PILLS & SIGNALS ============ -->
+  <section class="sec">
+    <div class="sec-h"><span class="n">04</span><h2>Pills &amp; signals</h2><span class="note">contained — appear only in rows &amp; detail</span></div>
+    <div class="grp">
+      <div class="grp-l">Stage — one slate hue, cold → hot (lead temperature)</div>
+      <div class="row">
+        <span class="stage stage-new"><span class="dot"></span>New</span>
+        <span class="stage stage-contacted"><span class="dot"></span>Contacted</span>
+        <span class="stage stage-visit"><span class="dot"></span>Site visit</span>
+        <span class="stage stage-nego"><span class="dot"></span>Negotiation</span>
+        <span class="stage stage-won"><span class="dot"></span>Closed won</span>
+        <span class="stage stage-lost"><span class="dot"></span>Closed lost</span>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="grp-l">Source (quiet grey text) · overdue (the one alert) · property status · badges</div>
+      <div class="row" style="gap:18px">
+        <span class="source">99acres</span><span class="source">MagicBricks</span><span class="source">Walk-in</span><span class="source">Referral</span>
+        <span class="divider" style="width:1px;height:18px;background:var(--line)"></span>
+        <span class="overdue"><span class="dot"></span>Overdue · yesterday 5:00</span>
+      </div>
+      <div class="row" style="margin-top:12px;gap:12px">
+        <span class="pill" style="background:var(--accent-wash);color:var(--accent-ink)"><span class="dot"></span>Available</span>
+        <span class="pill" style="background:#F6EEDD;color:#8A5E1E"><span class="dot"></span>Under offer</span>
+        <span class="pill" style="background:#EDECE9;color:var(--muted)"><span class="dot"></span>Closed</span>
+        <span class="count-badge">18</span><span class="count-badge accent">5</span><span class="count-badge alert">3</span>
+        <span class="new-tag">New</span>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="grp-l">Avatars (agents) · fit reasons (matching)</div>
+      <div class="row">
+        <span class="av av-md av-a1">RD</span><span class="av av-md av-a2">SK</span><span class="av av-md av-a3">AJ</span><span class="av av-md av-a4">PS</span>
+        <span class="av av-md av-empty">?</span>
+        <span style="font-size:11px;font-weight:600;color:var(--accent);border:1px dashed var(--accent-line);border-radius:12px;padding:3px 9px">Unassigned</span>
+        <span class="divider" style="width:1px;height:22px;background:var(--line)"></span>
+        <span class="fit ok"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:11px;height:11px"><path d="M20 6 9 17l-5-5"/></svg>In budget</span>
+        <span class="fit ok"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:11px;height:11px"><path d="M20 6 9 17l-5-5"/></svg>Wakad</span>
+        <span class="fit no"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:11px;height:11px"><path d="M18 6 6 18M6 6l12 12"/></svg>Above budget</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 5 · FILTER / SORT BAR ============ -->
+  <section class="sec">
+    <div class="sec-h"><span class="n">05</span><h2>Filter &amp; sort bar</h2><span class="note">ONE toolbar for every module — sort is a labelled ledger control, not pills</span></div>
+    <div class="toolbar">
+      <div class="tabs">
+        <button class="on">All <span class="count-badge accent">18</span></button>
+        <button>Unassigned <span class="count-badge">4</span></button>
+        <button>Overdue <span class="count-badge">3</span></button>
+        <button>Mine</button>
+      </div>
+      <div class="divider"></div>
+      <div class="ctrl"><span class="ctrl-l">Sort</span><select><option>Last activity</option><option>Budget</option><option>Name</option><option>Stage</option></select><button class="dir" title="Descending"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:14px;height:14px"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button></div>
+      <div class="spring"></div>
+      <div class="viewsw">
+        <button class="on" title="List"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></button>
+        <button title="Cards"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></button>
+      </div>
+    </div>
+    <p class="cap">Segments (primary slices) · a real <b>Sort</b> field with direction · view switch. Same grammar on Leads, Properties, People. No third-class pill-sorting.</p>
+  </section>
+
+  <!-- ============ 6 · COLLECTIONS ============ -->
+  <section class="sec">
+    <div class="sec-h"><span class="n">06</span><h2>Collections</h2><span class="note">dense table (desktop) · comfortable rows (mobile/lists) · cards</span></div>
+
+    <div class="grp">
+      <div class="grp-l">Table — the owner’s dense scan (who’s handling what, what’s overdue)</div>
+      <table class="tbl">
+        <thead><tr><th>Name <span class="caret">▼</span></th><th>Requirement</th><th>Budget</th><th>Stage</th><th>Source</th><th>Agent</th><th>Next follow-up</th></tr></thead>
+        <tbody>
+          <tr class="sel"><td><div class="name">Aarti Deshpande</div><div class="sub mono-num">+91 99700 33218</div></td><td>3BHK · sale · Baner</td><td class="money">₹1.5–1.8Cr</td><td><span class="stage stage-contacted"><span class="dot"></span>Contacted</span></td><td><span class="source">MagicBricks</span></td><td><span class="av av-sm av-a2">SK</span></td><td><span class="overdue"><span class="dot"></span>Yest 5:00</span></td></tr>
+          <tr><td><div class="name">Imran Shaikh</div><div class="sub mono-num">+91 90280 77190</div></td><td>2BHK · sale · Viman Nagar</td><td class="money">₹85–95L</td><td><span class="stage stage-visit"><span class="dot"></span>Site visit</span></td><td><span class="source">Walk-in</span></td><td><span class="av av-sm av-a1">RD</span></td><td class="mono-num">Sat 11:00</td></tr>
+          <tr><td><div class="name">Neha Kulkarni</div><div class="sub mono-num">+91 98505 61023</div></td><td>3BHK · rent · Kothrud</td><td class="money">₹45–55k/mo</td><td><span class="stage stage-new"><span class="dot"></span>New</span></td><td><span class="source">Referral</span></td><td><span class="av av-sm av-a3">AJ</span></td><td class="sub">—</td></tr>
+          <tr><td><div class="name">Karan Mehta</div><div class="sub mono-num">+91 98220 41556</div></td><td>2BHK · sale · Wakad</td><td class="money">₹75–85L</td><td><span class="stage stage-new"><span class="dot"></span>New</span></td><td><span class="source">99acres</span></td><td><span style="font-size:11px;font-weight:600;color:var(--accent);border:1px dashed var(--accent-line);border-radius:12px;padding:2px 8px">Unassigned</span></td><td class="sub">2 min ago</td></tr>
+          <tr><td><div class="name">Rahul Kolte</div><div class="sub mono-num">+91 98220 63914</div></td><td>2BHK · sale · Wakad</td><td class="money">₹85L</td><td><span class="stage stage-won"><span class="dot"></span>Closed won</span></td><td><span class="source">Referral</span></td><td><span class="av av-sm av-a1">RD</span></td><td class="sub">Booked</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grp">
+      <div class="grp-l">List rows — comfortable (mobile inbox, people)</div>
+      <div class="stack" style="max-width:520px">
+        <button class="lrow"><span class="av av-md av-a1">RD</span><div class="l-main"><div class="l-name">Imran Shaikh</div><div class="l-meta">2BHK · Viman Nagar · <span class="money">₹85–95L</span></div></div><div class="l-right"><span class="stage stage-visit"><span class="dot"></span>Site visit</span><span class="source">Walk-in</span></div></button>
+        <button class="lrow"><span class="av av-md av-empty">?</span><div class="l-main"><div class="l-name">Karan Mehta</div><div class="l-meta">2BHK · Wakad · <span class="money">₹75–85L</span></div></div><div class="l-right"><span class="stage stage-new"><span class="dot"></span>New</span><span class="source">99acres</span></div></button>
+        <button class="lrow"><span class="av av-md av-a2">SK</span><div class="l-main"><div class="l-name">Aarti Deshpande</div><div class="l-meta">3BHK · Baner · <span class="money">₹1.5–1.8Cr</span></div></div><div class="l-right"><span class="overdue"><span class="dot"></span>Overdue</span><span class="source">MagicBricks</span></div></button>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-l">Cards — property inventory (sale &amp; rent both first-class)</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;max-width:760px">
+        <div class="card"><div class="c-thumb"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg><span class="c-badge" style="color:var(--accent-ink)">Available</span></div><div class="c-body"><div class="c-title">Kolte Patil Life Republic</div><div class="c-sub">2BHK · Wakad · 950 sqft</div><div class="c-foot"><span class="money" style="font-size:15px">₹82L</span><span class="source">Owner · Sunil A.</span></div></div></div>
+        <div class="card"><div class="c-thumb"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg><span class="c-badge" style="color:#8A5E1E">Under offer</span><span class="new-tag" style="position:absolute;top:9px;right:9px">New</span></div><div class="c-body"><div class="c-title">Shivtirth Nagar</div><div class="c-sub">3BHK furnished · Kothrud · rent</div><div class="c-foot"><span class="money" style="font-size:15px">₹50k/mo</span><span class="money-sub">+₹1L dep</span></div></div></div>
+        <div class="card"><div class="c-thumb"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 21h18M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg><span class="c-badge" style="color:var(--accent-ink)">Available</span></div><div class="c-body"><div class="c-title">Gera Emerald</div><div class="c-sub">3BHK · Baner · 1450 sqft</div><div class="c-foot"><span class="money" style="font-size:15px">₹1.65Cr</span><span class="source">Owner · Rajesh M.</span></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 7 · NAV & CHROME ============ -->
+  <section class="sec">
+    <div class="sec-h"><span class="n">07</span><h2>Navigation &amp; chrome</h2><span class="note">charcoal — the only place chrome colour lives</span></div>
+    <div class="row" style="align-items:flex-start;gap:22px">
+      <div class="nav">
+        <div class="n-brand"><div class="n-mono">BP</div><div><div class="n-fn">Bhumi Propcity</div><div class="n-sub">Pune · Head office</div></div></div>
+        <div class="n-sec">Workspace</div>
+        <a class="on"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>Leads<span class="n-badge">5</span></a>
+        <a><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 21h18M5 21V7l7-4 7 4v14"/></svg>Properties</a>
+        <a><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>People</a>
+        <a><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>Calendar</a>
+        <div class="n-sec">Manage</div>
+        <a><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg>Team</a>
+        <a><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1l-.4-2.5h-4l-.4 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5a7 7 0 0 0 .1-1z"/></svg>Settings</a>
+        <div class="n-foot"><span class="av av-md av-a1">RS</span><div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;color:#fff">Rakesh Sethi</div><div class="n-sub">Owner · Admin</div></div></div>
+      </div>
+
+      <div class="stack" style="flex:1;min-width:300px">
+        <div class="grp-l" style="margin:0">Top bar — list mode</div>
+        <div class="topbar" style="width:100%"><h1>Leads</h1><span class="tb-count">18 open · 3 overdue</span><div class="spring" style="flex:1"></div><div class="search"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg><input placeholder="Search leads, ₹, locality…"></div><button class="btn btn-primary btn-sm">+ New lead</button></div>
+        <div class="grp-l" style="margin:8px 0 0">Top bar — detail mode (breadcrumb)</div>
+        <div class="topbar" style="width:100%"><div class="tb-crumb"><a>Leads</a> › <b style="color:var(--ink)">Karan Mehta</b></div><div class="spring" style="flex:1"></div><button class="btn btn-ghost btn-sm">Edit</button><button class="btn btn-secondary btn-sm">Send on WhatsApp</button></div>
+        <div class="grp-l" style="margin:8px 0 0">Mobile tab bar</div>
+        <div class="tabbar">
+          <a class="on"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2h-4v-7H9v7H5a2 2 0 0 1-2-2z"/></svg>Home</a>
+          <a><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>Leads</a>
+          <a><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 21h18M5 21V7l7-4 7 4v14"/></svg>Stock</a>
+          <a><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>People</a>
+          <a><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>More</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 8 · ACTION RAIL ============ -->
+  <section class="sec">
+    <div class="sec-h"><span class="n">08</span><h2>Action rail</h2><span class="note">ONE rail · prime CTA differs by module · collapsed strip ↔ expanded</span></div>
+    <div class="row" style="align-items:flex-start;gap:16px">
+      <div class="rail">
+        <div class="r-sec"><div class="rail-nba"><span class="n-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:18px;height:18px"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.4 2.5 1.2 3.6.6 4.7L8 9.6a16 16 0 0 0 6 6l1.2-1.2 4.7.6a2 2 0 0 1 1.7 2Z"/></svg></span><div style="flex:1"><div class="n-l">Next best action</div><div class="n-t">Call back — Baner options</div></div><button class="btn btn-primary btn-sm">Call</button></div></div>
+        <div class="r-sec"><div class="sh"><span class="t">Quick actions</span></div>
+          <div class="qa-grid">
+            <button class="qa"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.4 2.5 1.2 3.6.6 4.7L8 9.6a16 16 0 0 0 6 6l1.2-1.2 4.7.6a2 2 0 0 1 1.7 2Z"/></svg>Log call</button>
+            <button class="qa"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>SMS</button>
+            <button class="qa"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Add note</button>
+            <button class="qa"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Reassign</button>
+          </div>
+        </div>
+        <div class="r-sec"><div class="sh"><span class="t">Stage</span><span class="r">tap to advance</span></div>
+          <div class="stepper"><button class="done">New</button><button class="current">Contacted</button><button>Visit</button><button>Nego</button><button>Won</button></div>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="grp-l" style="margin:0">Collapsed (narrow width)</div>
+        <div class="rail-strip"><svg class="ic chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M15 6l-6 6 6 6"/></svg><span class="lbl">Actions</span></div>
+        <p class="cap" style="max-width:130px">Docks to the edge; hover / tap opens the full rail.</p>
+      </div>
+
+      <div class="sched">
+        <div class="sh"><span class="t">Schedule follow-up</span></div>
+        <div class="seg" style="width:100%"><button class="on" style="flex:1">Call</button><button style="flex:1">Site visit</button><button style="flex:1">Meeting</button></div>
+        <div class="s-when"><button class="qchip on">Today</button><button class="qchip">Tomorrow</button><button class="qchip">Weekend</button><button class="qchip">Pick…</button></div>
+        <div class="s-dt"><input class="input" type="date" value="2026-07-11"><input class="input" type="time" value="11:00"></div>
+        <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:11px">Schedule — adds to calendar</button>
+      </div>
+    </div>
+    <p class="cap">Prime CTA by object: <b>Lead</b> → Call / next-best-action · <b>Property</b> → Send on WhatsApp · <b>Owner</b> → Call owner. Same rail, module-appropriate primary.</p>
+  </section>
+
+  <!-- ============ 9 · DETAIL PARTS ============ -->
+  <section class="sec">
+    <div class="sec-h"><span class="n">09</span><h2>Detail building blocks</h2><span class="note">KPI tiles · KV grid · timeline · match row · progress</span></div>
+    <div class="grp">
+      <div class="grp-l">KPI tiles — grounded in the real job (routing, oversight, throughput)</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;max-width:860px">
+        <div class="kpi alert"><div class="k-top"><span class="k-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="k-l">Overdue follow-ups</span></div><div class="k-v">3</div><div class="k-s">chase these today</div></div>
+        <div class="kpi"><div class="k-top"><span class="k-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span><span class="k-l">Unassigned</span></div><div class="k-v">4</div><div class="k-s">need routing</div></div>
+        <div class="kpi"><div class="k-top"><span class="k-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg></span><span class="k-l">New today</span></div><div class="k-v">5</div><div class="k-s">fresh enquiries</div></div>
+        <div class="kpi"><div class="k-top"><span class="k-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg></span><span class="k-l">Site visits · week</span></div><div class="k-v">6</div><div class="k-s">across 4 agents</div></div>
+      </div>
+    </div>
+    <div class="row" style="align-items:flex-start;gap:16px">
+      <div class="panel" style="width:340px"><div class="sh"><span class="t">Requirement</span></div>
+        <div class="kv"><div><div class="k">Config · Deal</div><div class="v">3BHK · sale</div></div><div><div class="k">Locality</div><div class="v">Baner</div></div><div><div class="k">Budget</div><div class="v money">₹1.5–1.8Cr</div></div><div><div class="k">Timeline</div><div class="v">2–3 months</div></div></div>
+      </div>
+      <div class="panel" style="width:340px"><div class="sh"><span class="t">Timeline</span></div>
+        <div class="tl">
+          <div class="ev"><div class="rail-dot"><span class="d accent"></span><span class="ln"></span></div><div class="ev-b"><div class="ev-l">Spoke on call — wants Gera Emerald</div><div class="ev-a">2 days ago · note</div></div></div>
+          <div class="ev"><div class="rail-dot"><span class="d"></span><span class="ln"></span></div><div class="ev-b"><div class="ev-l">Stage → Contacted</div><div class="ev-a">2 days ago</div></div></div>
+          <div class="ev"><div class="rail-dot"><span class="d"></span></div><div class="ev-b"><div class="ev-l">Lead created via MagicBricks</div><div class="ev-a">2 days ago</div></div></div>
+        </div>
+      </div>
+      <div class="panel" style="width:300px"><div class="sh"><span class="t">Top match · 92% fit</span></div>
+        <div style="display:flex;gap:12px;align-items:center">
+          <div style="width:46px;height:46px;border-radius:8px;background:var(--line-2);display:flex;align-items:center;justify-content:center;color:var(--faint);flex-shrink:0"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 21h18M5 21V7l7-4 7 4v14"/></svg></div>
+          <div style="flex:1;min-width:0"><div style="font-weight:600">Gera Emerald · 3BHK</div><div style="display:flex;gap:5px;margin-top:5px"><span class="fit ok">Baner</span><span class="fit ok">In budget</span></div></div>
+          <span class="money" style="font-size:15px">₹1.65Cr</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" style="width:100%;justify-content:center;margin-top:12px">Send on WhatsApp</button>
+      </div>
+    </div>
+    <div class="grp" style="margin-top:22px">
+      <div class="grp-l">Handover progress (post-won)</div>
+      <div class="panel" style="max-width:340px"><div class="sh"><span class="t">Handover checklist</span><span class="r" style="color:var(--accent);font-weight:600">4 / 7 done</span></div><div class="bar"><i style="width:57%"></i></div></div>
+    </div>
+  </section>
+
+  <!-- ============ 10 · FEEDBACK STATES ============ -->
+  <section class="sec">
+    <div class="sec-h"><span class="n">10</span><h2>Feedback &amp; states</h2><span class="note">toasts · empty · loading · every state drawn, not defaulted</span></div>
+    <div class="grp">
+      <div class="grp-l">Toasts</div>
+      <div class="stack">
+        <div class="toast"><svg class="ic t-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg>Lead saved — routed to Rohan</div>
+        <div class="toast"><svg class="ic t-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg>Follow-up set · Sat 11:00 — added to calendar</div>
+        <div class="toast alert"><svg class="ic t-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/></svg>Add a name first</div>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="grp-l">Empty states — invitations to act</div>
+      <div class="row" style="align-items:stretch;gap:14px">
+        <div class="empty" style="width:280px"><div class="e-t">No overdue follow-ups</div><div class="e-s">You’re all caught up. Nice.</div></div>
+        <div class="empty" style="width:280px"><div class="e-t">No leads match this filter</div><div class="e-s">Try “All”, or add a lead.</div><button class="btn btn-primary btn-sm">+ New lead</button></div>
+        <div class="empty" style="width:280px"><div class="e-t">No matching inventory yet</div><div class="e-s">Add a property and it’s matchable instantly.</div><button class="btn btn-ghost btn-sm">Add property</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 11 · WHATSAPP (signature) ============ -->
+  <section class="sec">
+    <div class="sec-h"><span class="n">11</span><h2>WhatsApp generator</h2><span class="note">the one borrowed-vernacular moment — composing → bubble</span></div>
+    <div class="row" style="align-items:flex-start;gap:16px">
+      <div style="width:340px">
+        <div class="grp-l">Composing (≈2s theatre)</div>
+        <div class="wa-canvas" style="min-height:200px;justify-content:flex-end">
+          <div class="wa-compose"><div class="c-head"><span>Writing in Hinglish…</span><span class="c-dots"><i></i><i></i><i></i></span></div><div class="c-skel"><i style="width:88%"></i><i style="width:72%"></i><i style="width:81%"></i><i style="width:56%"></i></div></div>
+        </div>
+      </div>
+      <div style="width:360px">
+        <div class="grp-l">Ready — message bubble</div>
+        <div class="wa-canvas" style="min-height:200px;justify-content:flex-end">
+          <div class="wa-bubble"><b>2 BHK for Sale — Wakad</b>
+Kolte Patil Life Republic
+
+Shifting-ready flat, seedha owner se:
+• 950 sqft carpet · 4th floor · East facing
+• 6 yrs old · semi-furnished · possession immediate
+
+Price: <b>₹82L</b> (thoda negotiable)
+Site visit ke liye reply karein 🙏
+— Bhumi Propcity<div class="wa-time">12:04 pm ✓✓</div></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn btn-secondary btn-sm">Copy message</button>
+          <button class="btn btn-ghost btn-sm">Regenerate</button>
+          <div class="seg" style="margin-left:auto"><button class="on">Hinglish</button><button>English</button><button>मराठी</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div style="margin-top:64px;padding:20px 22px;border:1px dashed var(--line);border-radius:12px;background:var(--card)">
+    <div class="grp-l" style="margin:0 0 6px">Your call</div>
+    <p style="margin:0;color:var(--ink-2);max-width:820px">This is the whole kit — you build every page by composing these. Two colours, contained signals, one green for action. If the system reads right, I wire it into the real app so the working demo uses exactly these classes. Tell me what to adjust (green shade, density, a specific component) or say go.</p>
+  </div>
+
+</div>
+</body>
+</html>

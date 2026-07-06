@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bhumi Propcity · CRM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing:border-box; }
+  body { margin:0; background:#E7E3D8; font-family:'IBM Plex Sans',system-ui,sans-serif; color:#19211D; -webkit-font-smoothing:antialiased; }
+  button { font-family:inherit; }
+  ::-webkit-scrollbar { width:0; height:0; }
+  @keyframes bubbleIn { from { opacity:0; transform:translateY(10px) scale(.97); } to { opacity:1; transform:none; } }
+  @keyframes shimmer { 0%{ background-position:-320px 0; } 100%{ background-position:320px 0; } }
+  @keyframes dotPulse { 0%,80%,100%{ opacity:.25; transform:scale(.7);} 40%{ opacity:1; transform:scale(1);} }
+  @keyframes penSweep { 0%{ transform:translateX(-6px);} 50%{ transform:translateX(6px);} 100%{ transform:translateX(-6px);} }
+  @keyframes softGlow { 0%,100%{ box-shadow:0 0 0 0 rgba(178,58,46,.28);} 50%{ box-shadow:0 0 0 4px rgba(178,58,46,.10);} }
+  @keyframes riseIn { from{ opacity:0; transform:translateY(6px);} to{ opacity:1; transform:none;} }
+  @keyframes sheetUp { from{ transform:translateY(100%);} to{ transform:none;} }
+  @keyframes railRise { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce){ *{ animation-duration:.001ms !important; } }
+  input, textarea { font-family:inherit; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="./theme.js"></script>
+<script src="./data.js"></script>
+<script src="./app.js"></script>
+<script src="./render.js"></script>
+<script src="./ui.js"></script>
+<script src="./screens.js"></script>
+<script src="./desktop.js"></script>
+<script src="./main.js"></script>
+</body>
+</html>
