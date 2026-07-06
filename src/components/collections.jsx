@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Icon from './Icon.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, NewTag, Quoted } from './primitives.jsx'
-import { quotedLine } from '../lib/format.js'
+import { quotedLine, unitLabel } from '../lib/format.js'
 
 // ---- FilterBar: scalable add-filter → pick field → pick value + native search ----
 // Config-driven, no per-module custom pills. Module owns state and passes:
@@ -199,7 +199,7 @@ export function PropertyCard({ p, onClick, matchCount }) {
         <span className="pc-thumb" style={{ background: p.thumbBg }}><Icon name="building" size={20} strokeWidth={1.4} /></span>
         <div className="pc-id">
           <div className="pc-title">{p.society}</div>
-          <div className="pc-sub">{p.type} · {p.deal === 'rent' ? 'Rent' : 'Sale'} · {p.locality}</div>
+          <div className="pc-sub">{unitLabel(p) && <span className="unit-tag" style={{ marginLeft: 0, marginRight: 6 }}>{unitLabel(p)}</span>}{p.type} · {p.deal === 'rent' ? 'Rent' : 'Sale'} · {p.locality}</div>
         </div>
         <StatusTag status={p.status} />
       </div>

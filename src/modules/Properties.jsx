@@ -4,7 +4,7 @@ import { FilterBar, SortControl, Table, PropertyCard } from '../components/colle
 import { StatusTag, Source, Quoted, Fit, Button, Panel, SectionHead, GlanceCard, KV } from '../components/primitives.jsx'
 import { ActionRail, RailSection, NbaBanner, ActionGroup } from '../components/rail.jsx'
 import { leadsForProperty } from '../data/seed.js'
-import { thumbTint, propFacts, quotedLine, ratePsf } from '../lib/format.js'
+import { thumbTint, propFacts, quotedLine, ratePsf, unitLabel } from '../lib/format.js'
 import Icon from '../components/Icon.jsx'
 
 const LOCALITIES = ['Wakad', 'Baner', 'Kothrud', 'Hinjewadi', 'Viman Nagar', 'Kalyani Nagar', 'Wagholi']
@@ -124,7 +124,7 @@ function PropTable({ list, onOpen, allLeads }) {
       cells: [
         <div className="u-row" style={{ gap: 11 }}>
           <div style={{ width: 38, height: 38, borderRadius: 8, background: p.thumbBg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--faint)', flexShrink: 0 }}><Icon name="building" size={19} strokeWidth={1.4} /></div>
-          <div><div className="name">{p.society}</div><div className="sub">{p.locality}</div></div>
+          <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}</div><div className="sub">{p.locality}</div></div>
         </div>,
         <span style={{ fontSize: 13 }}>{p.type} · {p.deal}</span>,
         <span style={{ fontSize: 13 }}>{p.carpet ? p.carpet + ' sqft' : '—'}</span>,
@@ -146,6 +146,9 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
   if (!p) { return <>{topBar({ title: 'Property', eyebrow: 'Properties', onBack: back })}<div style={{ padding: 22 }}>Not found.</div></> }
   const buyers = leadsForProperty(p, store.state.leads)
   const dealLabel = p.deal === 'rent' ? 'For rent' : 'For sale'
+  // sibling units = same project, different record
+  const proj = p.project || p.society
+  const siblings = store.state.properties.filter(x => x.id !== p.id && (x.project || x.society) === proj)
 
   const actionGroups = [
     { head: 'Share & match', items: [
@@ -184,7 +187,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
           {/* glance card — identity-first, deal-aware. No hero ₹. Slim banner thumb. */}
           <GlanceCard
             thumb={<div style={{ width: 64, height: 64, borderRadius: 10, background: thumbTint(p.id), display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--faint)' }}><Icon name="building" size={30} strokeWidth={1.3} /></div>}
-            eyebrow={`${dealLabel} · ${p.locality}`}
+            eyebrow={`${dealLabel} · ${p.locality}${unitLabel(p) ? ' · Unit ' + unitLabel(p) : ''}`}
             name={p.society}
             meta={[
               <StatusTag status={p.status} />,
@@ -205,6 +208,30 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
               <KV items={commercials(p)} />
             </Panel>
           </div>
+
+          {/* other units in the same project — the "3 flats, 3 prices" clarity */}
+          {siblings.length > 0 && (
+            <Panel>
+              <SectionHead title={`Other units in ${p.project || p.society}`} right={`${siblings.length} more`} />
+              <div style={{ overflowX: 'auto' }}>
+                <table className="tbl" style={{ border: 'none' }}>
+                  <thead><tr><th>Unit</th><th>Config · floor</th><th>Carpet</th><th>Owner</th><th>Status</th><th>Quoted</th></tr></thead>
+                  <tbody>
+                    {siblings.map(s => (
+                      <tr key={s.id} onClick={() => go('properties', { propId: s.id, propOpen: true })}>
+                        <td><span className="unit-tag" style={{ marginLeft: 0 }}>{unitLabel(s) || '—'}</span></td>
+                        <td style={{ fontSize: 13 }}>{s.type} · {s.totalFloors ? `${s.floor}/${s.totalFloors}` : '—'}</td>
+                        <td style={{ fontSize: 13 }}>{s.carpet ? s.carpet + ' sqft' : '—'}</td>
+                        <td style={{ fontSize: 13 }}>{s.owner}</td>
+                        <td><StatusTag status={s.status} /></td>
+                        <td><Quoted q={quotedLine(s)} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          )}
 
           <Panel>
             <SectionHead title="Location & connectivity" />

@@ -15,9 +15,22 @@ export const agents = [
 
 export const properties = [
   { id:'p1', title:'2 BHK · Wakad', type:'2BHK', deal:'sale', locality:'Wakad', society:'Kolte Patil Life Republic',
+    project:'Kolte Patil Life Republic', wing:'B', flat:'1402', parking:'2 covered',
     carpet:950, floor:4, totalFloors:12, facing:'East', age:6, price:8200000, priceLabel:'₹82L', negotiable:true, status:'Available', owner:'Sunil Agarwal',
     furnishing:'Semi-furnished', possession:'Immediate',
     features:['Pool, gym & clubhouse','Covered parking','Hinjewadi IT park 15 min','Schools & market walkable'] },
+  // sibling units in the SAME project — different wing/flat/floor/price/owner (the
+  // "3 owners selling 2BHKs in Kolte Patil at different prices" scenario).
+  { id:'p1b', title:'2 BHK · Wakad', type:'2BHK', deal:'sale', locality:'Wakad', society:'Kolte Patil Life Republic',
+    project:'Kolte Patil Life Republic', wing:'A', flat:'201', parking:'1 covered',
+    carpet:980, floor:2, totalFloors:12, facing:'North', age:6, price:7500000, priceLabel:'₹75L', negotiable:true, status:'Available', owner:'Meena Joshi',
+    furnishing:'Unfurnished', possession:'Immediate',
+    features:['Low floor, easy access','Corner flat, extra light','Pool, gym & clubhouse','Hinjewadi IT park 15 min'] },
+  { id:'p1c', title:'2 BHK · Wakad', type:'2BHK', deal:'sale', locality:'Wakad', society:'Kolte Patil Life Republic',
+    project:'Kolte Patil Life Republic', wing:'C', flat:'1105', parking:'2 covered',
+    carpet:1005, floor:11, totalFloors:12, facing:'East', age:5, price:7800000, priceLabel:'₹78L', negotiable:false, status:'Available', owner:'Ramesh Gupta',
+    furnishing:'Semi-furnished', possession:'Immediate',
+    features:['High floor, hill view','Fully modular kitchen','Pool, gym & clubhouse','Schools & market walkable'] },
   { id:'p2', title:'2 BHK · Wakad', type:'2BHK', deal:'sale', locality:'Wakad', society:'Rohan Abhilasha',
     carpet:1020, floor:7, totalFloors:14, facing:'North', age:3, price:8800000, priceLabel:'₹88L', negotiable:true, status:'Available', owner:'Meena Joshi',
     furnishing:'Unfurnished', possession:'Immediate',

@@ -4,7 +4,7 @@ import { StageTag, StatusTag, Stepper, Timeline } from '../../components/primiti
 import { Scheduler } from '../../components/rail.jsx'
 import Icon from '../../components/Icon.jsx'
 import { theme } from '../../data/theme.js'
-import { budgetRange, thumbTint } from '../../lib/format.js'
+import { budgetRange, thumbTint, unitLabel } from '../../lib/format.js'
 import { matchesForLead } from '../../data/seed.js'
 import MobileSpeedDial from './MobileSpeedDial.jsx'
 
@@ -145,7 +145,7 @@ export default function MobileLeadDetail({ store, me, id, back, open, tabs, moda
                 <span className="av av-sm" style={{ background: thumbTint(p.id), color: 'var(--faint)', borderRadius: 6, width: 22, height: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name="building" size={12} />
                 </span>
-                {p.society}
+                {p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
                 {fb?.verdict === 'liked' && <span className="fit ok" style={{ padding: '1px 6px' }}>👍 Liked</span>}

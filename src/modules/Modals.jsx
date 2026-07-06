@@ -243,7 +243,7 @@ function LeadForm({ store, leadId }) {
 
 // ---- Add property ----
 function PropertyForm({ store, propId }) {
-  const [f, setF] = useState({ deal: 'sale', type: '2BHK', society: '', locality: 'Wakad', price: '', owner: '', status: 'Available' })
+  const [f, setF] = useState({ deal: 'sale', type: '2BHK', society: '', wing: '', flat: '', parking: '', locality: 'Wakad', price: '', owner: '', status: 'Available' })
   const set = (k, v) => setF(s => ({ ...s, [k]: v }))
   const save = () => {
     if (!f.society.trim()) { store.toast('Add a society name first', 'warn'); return }
@@ -252,6 +252,7 @@ function PropertyForm({ store, propId }) {
     const label = f.deal === 'rent' ? '₹' + price.toLocaleString('en-IN') + '/mo' : (price >= 10000000 ? '₹' + (price / 10000000).toFixed(2).replace(/\.?0+$/, '') + 'Cr' : '₹' + Math.round(price / 100000) + 'L')
     store.addProperty({
       id: 'pnew' + Date.now(), title: `${f.type} · ${f.locality}`, type: f.type, deal: f.deal, locality: f.locality, society: f.society,
+      project: f.society, wing: f.wing || undefined, flat: f.flat || undefined, parking: f.parking || undefined,
       carpet: 950, floor: 3, totalFloors: 12, facing: 'East', age: 3, price, priceLabel: label, negotiable: true, status: f.status,
       owner: f.owner || 'New owner', furnishing: 'Semi-furnished', possession: 'Immediate', isNew: true,
       features: ['Fresh listing, just added', 'Owner direct deal', 'Prime ' + f.locality + ' location', 'Ready to move'],
@@ -266,6 +267,12 @@ function PropertyForm({ store, propId }) {
         <div className="field"><label>Deal</label><Segmented value={f.deal} onChange={v => set('deal', v)} options={[{ value: 'sale', label: 'For sale' }, { value: 'rent', label: 'For rent' }]} /></div>
         <div className="field"><label>Type</label><div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>{['1BHK', '2BHK', '3BHK', 'Commercial', 'Plot'].map(t => chip(f.type === t, () => set('type', t), t))}</div></div>
         <Field label="Society / project"><Input value={f.society} onChange={e => set('society', e.target.value)} placeholder="e.g. Kolte Patil Life Republic" autoFocus /></Field>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ flex: 1 }}><Field label="Wing / tower"><Input value={f.wing} onChange={e => set('wing', e.target.value)} placeholder="B" /></Field></div>
+          <div style={{ flex: 1 }}><Field label="Flat / unit no."><Input value={f.flat} onChange={e => set('flat', e.target.value)} placeholder="1402" /></Field></div>
+          <div style={{ flex: 1 }}><Field label="Parking"><Input value={f.parking} onChange={e => set('parking', e.target.value)} placeholder="2 covered" /></Field></div>
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: -4, display: 'flex', gap: 6, alignItems: 'center' }}><Icon name="check" size={13} style={{ color: 'var(--accent)' }} />Unit no. stays internal — hidden from client WhatsApp shares.</div>
         <div style={{ display: 'flex', gap: 12 }}>
           <div style={{ flex: 1 }}><Field label="Locality"><Input value={f.locality} onChange={e => set('locality', e.target.value)} /></Field></div>
           <div style={{ flex: 1 }}><Field label={f.deal === 'rent' ? 'Rent (₹/mo)' : 'Price (₹ lakh)'}><Input value={f.price} onChange={e => set('price', e.target.value)} placeholder={f.deal === 'rent' ? '32000' : '82'} /></Field></div>

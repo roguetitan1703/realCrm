@@ -61,16 +61,27 @@ export function ratePsf(p) {
   return '₹' + Math.round(p.price / p.carpet).toLocaleString('en-IN') + '/sqft'
 }
 
+// Unit identity (agent-facing only — masked in client shares). e.g. "B-1402".
+export function unitLabel(p) {
+  if (!p) return null
+  if (p.wing && p.flat) return `${p.wing}-${p.flat}`
+  if (p.flat) return `Flat ${p.flat}`
+  return null
+}
+
 // Deal-aware fact grid for a property. The record's backbone is its STABLE,
 // identifying facts (config, area, floor, furnishing, possession) — NOT price.
 // Money is a single quiet attribute, shown small and last, never the headline.
 export function propFacts(p) {
+  const unit = unitLabel(p)
   const common = [
+    ...(unit ? [{ k: 'Unit', v: `${p.wing ? 'Wing ' + p.wing + ' · ' : ''}Flat ${p.flat}` }] : []),
     { k: 'Config', v: p.type },
     { k: 'Carpet', v: p.carpet ? p.carpet + ' sqft' : '—' },
     p.type === 'Plot'
       ? { k: 'Facing', v: p.facing }
       : { k: 'Floor', v: p.totalFloors ? `${p.floor} / ${p.totalFloors}` : '—' },
+    ...(p.parking ? [{ k: 'Parking', v: p.parking, mut: true }] : []),
   ]
   if (p.deal === 'rent') {
     return [
