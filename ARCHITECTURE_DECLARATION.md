@@ -98,34 +98,131 @@ To ensure scalable team development where adding new features never breaks exist
 
 ---
 
-## 🔌 4. Integration Engine — Push, Pull & Ecosystem Connectors
+## ⚡ 4. Declaration of Core Integration Flows (Who, What, Where, When, How)
 
-The CRM acts as an open, bi-directional data hub connecting Indian property portals, ad networks, and client web surfaces.
+### Flow 1: Automated Lead Ingestion & Round-Robin Routing (Pull)
+* **The Problem It Solves:** 99acres, MagicBricks, and Meta Ads send sudden webhook bursts or retry payloads that cause duplicate leads and system freezes.
+* **When It Triggers:** A prospective buyer submits an inquiry on a property portal or ad form.
 
 ```mermaid
-graph LR
-    subgraph Inbound Pull / Webhook Ingestion
-        Portals[99acres / MagicBricks / Housing] -->|HTTP Webhook| API_In[Ingest Endpoint<br>/v1/ingest]
-        Meta[Meta Lead Ads / Google Ads] -->|Graph API Webhook| API_In
-        API_In --> Queue_In[Redis Ingest Queue] --> Router[Routing & Dedup Engine] --> DB[(CRM Database)]
-    end
+sequenceDiagram
+    autonumber
+    participant Portal as 99acres / Meta Ads
+    participant Ingest as Webhook Receiver (API Gateway)
+    participant Queue as Redis / BullMQ Queue
+    participant Worker as Ingestion Worker & Router
+    participant DB as PostgreSQL (RLS)
+    participant WS as WebSocket Pub/Sub
+    participant Agent as Agent Mobile App
 
-    subgraph Outbound Push / Webhook Dispatch
-        DB -->|Event Trigger:<br>Price Change / Sold| Dispatcher[Outbound Webhook Worker]
-        Dispatcher -->|HMAC Signed POST| ClientWeb[Client Public Website<br>Live Inventory Sync]
-        Dispatcher -->|JSON Payload| Partner[Partner Broker / MLS Portals]
+    Portal->>Ingest: POST /v1/webhooks/ingest/{tenant_id}/{source}
+    Ingest->>Ingest: Validate HMAC Signature & Idempotency Key
+    Ingest->>Queue: Push Raw Payload (Return 200 Accepted instantly)
+    Queue->>Worker: Dequeue Job
+    Worker->>Worker: Normalize Data against Tenant Schema
+    Worker->>DB: Check Deduplication (phone + project within 30 days)
+    alt Is Duplicate?
+        Worker->>DB: Append note to existing Lead Timeline
+    else Is New Lead?
+        Worker->>DB: Fetch Active Agents & Execute Round-Robin Rule
+        Worker->>DB: INSERT Lead (assigned_to = Agent X)
+        Worker->>WS: Broadcast Lead Created Event (tenant_id, lead_id)
+        WS->>Agent: Push Notification & Live UI Update (No page refresh!)
     end
 ```
 
-### A. Inbound Lead Ingestion (Pull & Webhooks)
-* **Webhook Receivers:** Each tenant receives a unique ingest URL: `https://api.propcity.io/v1/ingest/{tenant_id}/{source_key}`.
-* **Polling Fallback:** For legacy portals without webhooks, an automated cron scheduler runs every 15 minutes, calling portal XML/JSON APIs, pulling new leads, and pushing them into the ingestion queue.
+---
 
-### B. Outbound Inventory Sync (Custom Webhook Push)
-* **When It Triggers:** When a property unit is marked `Closed Won`, price is updated, or a new listing is published.
-* **The Push Contract:** The backend fires an HMAC-signed `POST` webhook to the tenant’s registered external endpoints (e.g., their Next.js/WordPress company website or channel partner portals), ensuring public listing inventory is instantly synchronized without manual data entry.
+### Flow 2: Outbound & Inbound WhatsApp Business (WABA) Communication
+* **The Problem It Solves:** Agents copying phone numbers into personal WhatsApp, losing message history, and failing to track read receipts.
+* **When It Triggers:** Agent taps **[`WhatsApp`]** or **[`Share Inventory`]** on Mobile or Desktop.
 
-### C. Essential Ecosystem Connectors
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as Client App (Mobile / Desktop)
+    participant API as Backend API Layer
+    participant WABA as Meta Cloud API Gateway
+    participant DB as PostgreSQL Timeline
+    participant Buyer as Buyer Phone (WhatsApp)
+
+    UI->>API: POST /api/v1/messages/dispatch { tenant_id, lead_id, template: "brochure_v1" }
+    API->>DB: Fetch Lead & Tenant Encrypted WABA Token
+    API->>WABA: POST https://graph.facebook.com/v19.0/{phone_id}/messages
+    WABA-->>API: 200 OK (waba_message_id)
+    API->>DB: INSERT timeline_event (type: 'wa_sent', status: 'sent')
+    API-->>UI: Optimistic UI Success Toast
+    
+    Note over WABA,Buyer: Asynchronous Delivery & Read Lifecycle
+    WABA->>API: Webhook: status = 'delivered' / 'read'
+    API->>DB: UPDATE timeline_event SET status = 'read'
+    API->>UI: WebSocket Push -> Update double checkmark icon in UI
+    
+    Buyer->>WABA: Sends Reply ("When can we visit?")
+    WABA->>API: Webhook: Inbound Message
+    API->>DB: INSERT timeline_event (type: 'wa_inbound', content: "...")
+    API->>UI: Push Alert to Assigned Agent -> Badge counter increments
+```
+
+---
+
+### Flow 3: Cloud Telephony Click-to-Call & Audio Recording Sync
+* **The Problem It Solves:** Unverified agent call activity and lack of proof regarding buyer negotiations.
+* **When It Triggers:** Agent taps **[`Call`]** button on Lead or Property detail page.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as Client App (Mobile / Desktop)
+    participant API as Backend API Layer
+    participant Telco as Exotel / Knowlarity Cloud
+    participant Agent as Agent Physical Phone
+    participant Buyer as Buyer Physical Phone
+    participant DB as PostgreSQL Timeline
+
+    UI->>API: POST /api/v1/telephony/bridge { tenant_id, lead_id, agent_id }
+    API->>DB: Lookup agent_phone and buyer_phone (Check privacy rules)
+    API->>Telco: POST /v1/calls/connect { from: agent_phone, to: buyer_phone, caller_id: virtual_number }
+    Telco-->>API: 200 OK (call_sid)
+    API-->>UI: Display "Connecting Call..." Bottom Sheet
+    
+    Telco->>Agent: Rings Agent Phone -> Agent Answers
+    Telco->>Buyer: Rings Buyer Phone -> Buyer Answers
+    Note over Agent,Buyer: Live Call in Progress (Audio recorded by Telco)
+    
+    Agent->>Telco: Hangs up call
+    Telco->>API: POST /webhooks/telephony/status { call_sid, duration: 184s, status: 'completed', recording_url }
+    API->>DB: INSERT timeline_event (type: 'call', duration: 184, audio_url: recording_url)
+    API->>UI: WebSocket Push -> Call log & MP3 player appears on Lead Timeline
+```
+
+---
+
+### Flow 4: Outbound Webhook Dispatch (Push — Live Website & Inventory Sync)
+* **The Problem It Solves:** Manual double-data entry when updating property availability, pricing, or status across brokerage websites and partner portals.
+* **When It Triggers:** Property unit status changes (e.g., from `Available` to `Under Offer` or `Sold Won`), or pricing/carpet area is modified.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Agent as CRM UI (Agent/Admin)
+    participant API as CRM Core API
+    participant DB as PostgreSQL
+    participant Worker as Outbound Dispatch Worker
+    participant Web as Tenant Public Website / Portal
+
+    Agent->>API: PATCH /api/v1/properties/{id} { status: 'Under Offer' }
+    API->>DB: UPDATE property SET status = 'Under Offer'
+    API->>Worker: Enqueue Outbound Webhook Job (event: 'property.updated')
+    Worker->>DB: Lookup registered endpoint URL & HMAC Secret for tenant_id
+    Worker->>Web: POST https://tenant-website.com/api/webhook { event, payload, timestamp }
+    Note over Worker,Web: Signed with X-Propcity-Signature HMAC-SHA256
+    Web-->>Worker: 200 OK (Listing updated on public website)
+```
+
+---
+
+### Flow 5: Ecosystem Connectors (Calendar & Payment Links)
 * **Calendar Sync (Google / Outlook):** Bi-directional OAuth sync. Scheduling a site visit in the CRM automatically creates a calendar invite for the agent and buyer with Google Maps location coordinates.
 * **Payment Links (Razorpay / Stripe / Easebuzz):** Generating instant 1-click token advance payment links sent via WhatsApp. When paid, the webhook automatically moves the property status to `Under Offer`.
 
