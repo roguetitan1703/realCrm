@@ -123,7 +123,7 @@ export default function Onboarding({ store, onCancel }) {
           pointerEvents: 'none'
         }} />
 
-        {/* Top Brand Emblem */}
+        {/* Top Brand Emblem (Platform White-Label Identity) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, zIndex: 2 }}>
           <div style={{
             width: 40,
@@ -139,14 +139,14 @@ export default function Onboarding({ store, onCancel }) {
             fontSize: 18,
             color: '#FFFFFF'
           }}>
-            {theme.brand.initials}
+            RC
           </div>
           <div>
             <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
-              {theme.brand.firmName}
+              RealCRM OS
             </div>
             <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.55)', fontWeight: 500 }}>
-              Private Cloud Provisioning
+              White-Label Cloud Provisioning
             </div>
           </div>
         </div>
@@ -210,7 +210,7 @@ export default function Onboarding({ store, onCancel }) {
 
         {/* Footer Minimal Metadata */}
         <div style={{ zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 24, borderTop: '1px solid rgba(255, 255, 255, 0.1)', fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
-          <div>Automated Onboarding Engine</div>
+          <div>RealCRM · Enterprise White-Label Platform</div>
           <div className="mono-num">v2.4.0-PROD</div>
         </div>
       </div>
@@ -311,7 +311,7 @@ export default function Onboarding({ store, onCancel }) {
                   <span className="prefix" style={{ fontFamily: 'var(--mono)', fontSize: 13, borderLeft: '1px solid var(--line)', borderRight: 'none' }}>.com</span>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-                  Your team will access their CRM desk at <strong className="mono-num" style={{ color: 'var(--ink)' }}>app.{slug || 'firm'}.com</strong>
+                  Your white-label brokerage desk will be deployed at <strong className="mono-num" style={{ color: 'var(--ink)' }}>app.{slug || 'firm'}.com</strong> powered by RealCRM.
                 </div>
               </div>
 
