@@ -12,9 +12,31 @@
 import { Router, Request, Response } from 'express';
 import { CallActionSchema, WhatsAppActionSchema, StageChangeSchema, MergeSchema } from '../models';
 import { requireTenantAuth, requireModuleEnabled, requireQuotaAvailable } from '../middleware/auth';
+import { getLeads, createLead } from '../services/store';
 
 export const leadsRouter = Router();
 leadsRouter.use(requireTenantAuth);
+
+/**
+ * GET /api/v1/leads
+ */
+leadsRouter.get('/', async (req: Request, res: Response) => {
+  return res.status(200).json({
+    success: true,
+    data: await getLeads(),
+  });
+});
+
+/**
+ * POST /api/v1/leads
+ */
+leadsRouter.post('/', async (req: Request, res: Response) => {
+  const newLead = await createLead(req.body);
+  return res.status(201).json({
+    success: true,
+    data: newLead,
+  });
+});
 
 /**
  * 1. TELEPHONY BRIDGE ACTION (Coded business logic calling Exotel API)

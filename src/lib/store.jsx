@@ -1,23 +1,18 @@
 // ============================================================================
-// App store (React context). No backend — persisted to localStorage so state
-// survives refresh. Durable data (agents/properties/leads/settings) is saved;
-// transient UI (toasts/modals/WhatsApp compose) is never persisted.
-// Holds all state + actions the demo needs to actually work (F1–F19).
+// App store (React context). Powered by live backend REST API.
+// Durable data (agents/properties/leads/settings) is hydrated from server and
+// mutated via Express backend endpoints. Transient UI is managed in React state.
 // ============================================================================
 import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react'
 import { agents as seedAgents, properties as seedProps, leads as seedLeads, generateMessage } from '../data/seed.js'
 import { DEFAULT_SETTINGS, PROTECTED_STAGES } from '../data/theme.js'
 import { initials, demoPhone } from './format.js'
+import { api as apiClient } from './api.js'
 
 const StoreCtx = createContext(null)
 export const useStore = () => useContext(StoreCtx)
 
 const clone = (x) => JSON.parse(JSON.stringify(x))
-
-// Bump this when the seed shape changes so stale saved state is discarded.
-const STORE_KEY = 'bhumi-crm-state-v4'
-// Only these fields persist. Transient UI is deliberately excluded.
-const DURABLE = ['role', 'activeAgentId', 'loggedIn', 'agents', 'properties', 'leads', 'inactiveAgentIds', 'settings', 'integrations']
 
 function freshState() {
   return {
@@ -37,33 +32,12 @@ function freshState() {
       'Website sync': { status: 'staged', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/website', secret: 'whsec_web_demo_109' },
     },
     toasts: [],
-    // modal/overlay state (never persisted)
-    modal: null,                   // {kind, ...}
-    waState: null,                 // {propId, leadId, lang, tone, variant, composing, message}
+    // modal/overlay state
+    modal: null,
+    waState: null,
     searchOpen: false,
     notifOpen: false,
   }
-}
-
-function loadState() {
-  const base = freshState()
-  try {
-    const raw = localStorage.getItem(STORE_KEY)
-    if (!raw) return base
-    const saved = JSON.parse(raw)
-    // merge only durable fields over a fresh base (transient stays clean)
-    const merged = { ...base }
-    for (const k of DURABLE) if (k in saved) merged[k] = saved[k]
-    return merged
-  } catch { return base }
-}
-
-function persist(state) {
-  try {
-    const out = {}
-    for (const k of DURABLE) out[k] = state[k]
-    localStorage.setItem(STORE_KEY, JSON.stringify(out))
-  } catch { /* storage full / unavailable — demo still works in-memory */ }
 }
 
 const initial = freshState()
@@ -72,6 +46,18 @@ let _toastSeq = 0
 
 function reducer(state, action) {
   switch (action.type) {
+    case 'HYDRATE_SERVER': {
+      const s = action.state || {}
+      return {
+        ...state,
+        agents: s.agents && s.agents.length > 0 ? s.agents : state.agents,
+        properties: s.properties && s.properties.length > 0 ? s.properties : state.properties,
+        leads: s.leads && s.leads.length > 0 ? s.leads : state.leads,
+        settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
+        integrations: s.integrations ? { ...state.integrations, ...s.integrations } : state.integrations,
+      }
+    }
+
     case 'SET': return { ...state, ...action.patch }
 
     case 'LOGIN': return { ...state, loggedIn: true }
@@ -137,7 +123,6 @@ function reducer(state, action) {
     }
 
     case 'LOG_EVENT': {
-      // Unified activity log — works for a lead OR a property (owner-side timeline).
       const { id, kind, text } = action
       const tlType = kind === 'call' ? 'msg' : kind === 'wa' ? 'msg' : kind === 'sms' ? 'msg' : 'note'
       const entry = { type: tlType, label: text, ago: 'just now' }
@@ -152,7 +137,6 @@ function reducer(state, action) {
     }
 
     case 'MERGE': {
-      // drop the duplicate, keep the primary
       const dup = state.leads.find(l => l.id === action.leadId)
       if (!dup || !dup.duplicateOf) return state
       return {
@@ -214,8 +198,6 @@ function reducer(state, action) {
     }
 
     case 'SET_TENANCY': {
-      // Record / update a rental tenancy (tenant, agreement window, deposit).
-      // Setting a tenancy marks the flat 'Under offer' (occupied); clearing frees it.
       const { propId, tenancy } = action
       return {
         ...state,
@@ -274,7 +256,6 @@ function reducer(state, action) {
       return { ...state, agents: [...state.agents, agent] }
     }
 
-    // ---- Settings (white-label config, now live) ----
     case 'SET_FIRM_NAME': {
       const firmName = action.name.trim() || state.settings.firmName
       return { ...state, settings: { ...state.settings, firmName } }
@@ -282,7 +263,6 @@ function reducer(state, action) {
     case 'ADD_STAGE': {
       const name = action.name.trim()
       if (!name || state.settings.stages.includes(name)) return state
-      // insert before the terminal Closed stages so the pipeline stays ordered
       const stages = state.settings.stages.slice()
       const firstClosed = stages.findIndex(s => s.startsWith('Closed'))
       const at = firstClosed === -1 ? stages.length : firstClosed
@@ -295,7 +275,6 @@ function reducer(state, action) {
       if (!name || from === name || PROTECTED_STAGES.includes(from)) return state
       if (state.settings.stages.includes(name)) return state
       const stages = state.settings.stages.map(s => s === from ? name : s)
-      // migrate every lead sitting on the old label
       const leads = state.leads.map(l => l.stage === from ? { ...l, stage: name } : l)
       return { ...state, settings: { ...state.settings, stages }, leads }
     }
@@ -303,17 +282,15 @@ function reducer(state, action) {
       const { name } = action
       if (PROTECTED_STAGES.includes(name)) return state
       const stages = state.settings.stages.filter(s => s !== name)
-      // leads on the removed stage fall back to the first stage ("New")
       const fallback = stages[0] || 'New'
       const leads = state.leads.map(l => l.stage === name ? { ...l, stage: fallback } : l)
       return { ...state, settings: { ...state.settings, stages }, leads }
     }
     case 'MOVE_STAGE': {
-      const { name, dir } = action   // dir: -1 up, +1 down
+      const { name, dir } = action
       const stages = state.settings.stages.slice()
       const i = stages.indexOf(name)
       const j = i + dir
-      // can't move a stage past the terminal Closed block, or off the ends
       if (i < 0 || j < 0 || j >= stages.length) return state
       if (stages[j] && stages[j].startsWith('Closed')) return state
       if (name.startsWith('Closed')) return state
@@ -343,32 +320,36 @@ function reducer(state, action) {
     }
 
     case 'RESET':
-      return { ...freshState(), loggedIn: true }  // wipe to clean seed, stay logged in
+      return { ...freshState(), loggedIn: true }
 
     default: return state
   }
 }
 
 export function StoreProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, initial, loadState)
+  const [state, dispatch] = useReducer(reducer, initial)
   const timers = useRef({})
 
-  // persist durable state on every change (debounced via microtask coalescing)
-  useEffect(() => { persist(state) }, [
-    state.role, state.activeAgentId, state.loggedIn,
-    state.agents, state.properties, state.leads, state.inactiveAgentIds, state.settings,
-  ])
+  // Hydrate state from backend REST API on mount
+  useEffect(() => {
+    apiClient.getState()
+      .then(res => {
+        if (res && res.success && res.state) {
+          dispatch({ type: 'HYDRATE_SERVER', state: res.state })
+        }
+      })
+      .catch(err => console.warn('[Store Hydration] Backend offline, using embedded seed:', err.message))
+  }, [])
 
   const toast = useCallback((text, tone) => {
     dispatch({ type: 'TOAST', text, tone })
   }, [])
-  // auto-dismiss toasts
+
   const lastToast = state.toasts[state.toasts.length - 1]
   if (lastToast && !timers.current[lastToast.id]) {
     timers.current[lastToast.id] = setTimeout(() => dispatch({ type: 'UNTOAST', id: lastToast.id }), 2600)
   }
 
-  // ---- WhatsApp generation flow (the signature) ----
   const runCompose = useCallback((wa) => {
     clearTimeout(timers.current.wa)
     const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -393,45 +374,83 @@ export function StoreProvider({ children }) {
 
   const api = {
     state, dispatch, toast,
-    // helpers to read
     agentById: (id) => state.agents.find(a => a.id === id),
     me: () => state.agents.find(a => a.id === state.activeAgentId) || state.agents[0],
     activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id)),
-    // actions
-    assign: (leadId, agentId) => { dispatch({ type: 'ASSIGN', leadId, agentId }); const a = state.agents.find(x => x.id === agentId); toast('Lead assigned to ' + (a ? a.first : '')) },
+    
+    assign: (leadId, agentId) => {
+      dispatch({ type: 'ASSIGN', leadId, agentId })
+      const a = state.agents.find(x => x.id === agentId)
+      toast('Lead assigned to ' + (a ? a.first : ''))
+      apiClient.updateLead(leadId, { agentId }).catch(err => console.warn('[Assign API] Backend error:', err.message))
+    },
     setStage: (leadId, stage) => {
       dispatch({ type: 'STAGE', leadId, stage })
       toast('Stage → ' + stage)
-      fetch(`http://localhost:5000/api/v1/records/${leadId}/actions/stage-change`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'demo' },
-        body: JSON.stringify({ new_stage_id: stage, note: 'Stage updated via CRM view' })
-      }).catch(err => console.warn('[Stage API Fallback] Backend offline:', err.message))
+      apiClient.changeStage(leadId, stage, 'Stage updated via CRM view').catch(err => console.warn('[Stage API] Backend error:', err.message))
     },
-    setFollowUp: (leadId, followUp) => { dispatch({ type: 'FOLLOWUP', leadId, followUp }); toast('Follow-up set — added to calendar') },
-    addNote: (leadId, text, kind) => { dispatch({ type: 'NOTE', leadId, text, kind }); toast(kind === 'call' ? 'Call logged' : 'Note added') },
-    logEvent: (id, kind, text) => { dispatch({ type: 'LOG_EVENT', id, kind, text }); toast(kind === 'call' ? 'Call logged' : kind === 'wa' ? 'WhatsApp logged' : kind === 'sms' ? 'SMS logged' : 'Note added') },
+    setFollowUp: (leadId, followUp) => {
+      dispatch({ type: 'FOLLOWUP', leadId, followUp })
+      toast('Follow-up set — added to calendar')
+      apiClient.updateLead(leadId, { followUp }).catch(err => console.warn('[FollowUp API] Backend error:', err.message))
+    },
+    addNote: (leadId, text, kind) => {
+      dispatch({ type: 'NOTE', leadId, text, kind })
+      toast(kind === 'call' ? 'Call logged' : 'Note added')
+    },
+    logEvent: (id, kind, text) => {
+      dispatch({ type: 'LOG_EVENT', id, kind, text })
+      toast(kind === 'call' ? 'Call logged' : kind === 'wa' ? 'WhatsApp logged' : kind === 'sms' ? 'SMS logged' : 'Note added')
+    },
     merge: (leadId) => {
       dispatch({ type: 'MERGE', leadId })
       toast('Merged into one record')
-      fetch(`http://localhost:5000/api/v1/records/${leadId}/actions/merge`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'demo' },
-        body: JSON.stringify({ duplicate_record_id: leadId, merge_strategy: 'combine_timeline' })
-      }).catch(err => console.warn('[Merge API Fallback] Backend offline:', err.message))
+      apiClient.mergeRecords(leadId, leadId, 'combine_timeline').catch(err => console.warn('[Merge API] Backend error:', err.message))
     },
-    attachProp: (leadId, propId, label) => { dispatch({ type: 'ATTACH_PROP', leadId, propId, label }); toast('Property shortlisted for this lead') },
-    visitFeedback: (leadId, propId, verdict, reason, society) => { dispatch({ type: 'VISIT_FEEDBACK', leadId, propId, verdict, reason, society }); toast(verdict === 'liked' ? 'Marked as liked' : 'Rejection logged — refines matches') },
+    attachProp: (leadId, propId, label) => {
+      dispatch({ type: 'ATTACH_PROP', leadId, propId, label })
+      toast('Property shortlisted for this lead')
+      apiClient.updateLead(leadId, { shortlist: [propId] }).catch(err => console.warn('[Attach API] Backend error:', err.message))
+    },
+    visitFeedback: (leadId, propId, verdict, reason, society) => {
+      dispatch({ type: 'VISIT_FEEDBACK', leadId, propId, verdict, reason, society })
+      toast(verdict === 'liked' ? 'Marked as liked' : 'Rejection logged — refines matches')
+    },
     detachProp: (leadId, propId) => dispatch({ type: 'DETACH_PROP', leadId, propId }),
-    addLead: (lead) => { dispatch({ type: 'ADD_LEAD', lead }); toast('Lead saved — routed') },
-    addProperty: (property) => { dispatch({ type: 'ADD_PROPERTY', property }); toast('Property added — now matchable') },
-    setPropStatus: (propId, status) => { dispatch({ type: 'PROP_STATUS', propId, status }); toast('Status → ' + status) },
-    setTenancy: (propId, tenancy) => { dispatch({ type: 'SET_TENANCY', propId, tenancy }); toast(tenancy ? 'Tenancy saved' : 'Flat freed') },
-    returnDeposit: (propId) => { dispatch({ type: 'RETURN_DEPOSIT', propId }); toast('Deposit marked returned') },
-    toggleAgent: (agentId) => dispatch({ type: 'TOGGLE_AGENT', agentId }),
-    reassignAll: (fromId, toId) => { dispatch({ type: 'REASSIGN_ALL', fromId, toId }) },
+    addLead: (lead) => {
+      dispatch({ type: 'ADD_LEAD', lead })
+      toast('Lead saved — routed')
+      apiClient.createLead(lead).catch(err => console.warn('[AddLead API] Backend error:', err.message))
+    },
+    addProperty: (property) => {
+      dispatch({ type: 'ADD_PROPERTY', property })
+      toast('Property added — now matchable')
+      apiClient.createProperty(property).catch(err => console.warn('[AddProp API] Backend error:', err.message))
+    },
+    setPropStatus: (propId, status) => {
+      dispatch({ type: 'PROP_STATUS', propId, status })
+      toast('Status → ' + status)
+      apiClient.updateProperty(propId, { status }).catch(err => console.warn('[PropStatus API] Backend error:', err.message))
+    },
+    setTenancy: (propId, tenancy) => {
+      dispatch({ type: 'SET_TENANCY', propId, tenancy })
+      toast(tenancy ? 'Tenancy saved' : 'Flat freed')
+      apiClient.updateProperty(propId, { tenancy, status: tenancy ? 'Under offer' : 'Available' }).catch(err => console.warn('[Tenancy API] Backend error:', err.message))
+    },
+    returnDeposit: (propId) => {
+      dispatch({ type: 'RETURN_DEPOSIT', propId })
+      toast('Deposit marked returned')
+    },
+    toggleAgent: (agentId) => {
+      dispatch({ type: 'TOGGLE_AGENT', agentId })
+      const isOff = !state.inactiveAgentIds.includes(agentId)
+      apiClient.updateAgentStatus(agentId, isOff ? 'OFF_DUTY' : 'ACTIVE').catch(err => console.warn('[DutyStatus API] Backend error:', err.message))
+    },
+    reassignAll: (fromId, toId) => {
+      dispatch({ type: 'REASSIGN_ALL', fromId, toId })
+      apiClient.reassignLeads(fromId, toId).catch(err => console.warn('[Reassign API] Backend error:', err.message))
+    },
     addAgent: (name) => { dispatch({ type: 'ADD_AGENT', name }); toast('Agent added to team') },
-    // settings (white-label config)
     setFirmName: (name) => { dispatch({ type: 'SET_FIRM_NAME', name }); toast('Firm name updated') },
     addStage: (name) => { dispatch({ type: 'ADD_STAGE', name }); toast('Stage added') },
     renameStage: (from, to) => { dispatch({ type: 'RENAME_STAGE', from, to }); toast('Stage renamed — leads moved') },
@@ -450,16 +469,23 @@ export function StoreProvider({ children }) {
     onboardTenant: (config) => {
       dispatch({ type: 'ONBOARD_TENANT', config })
       toast(`Workspace provisioned & initialized for ${config.firmName || 'new tenant'}`)
+      apiClient.onboardTenant(config).catch(err => console.warn('[Onboard API] Backend error:', err.message))
     },
-    resetDemo: () => { dispatch({ type: 'RESET' }); toast('Demo reset to a clean slate') },
+    resetDemo: () => {
+      dispatch({ type: 'RESET' })
+      toast('Demo reset to a clean slate')
+      apiClient.resetDemo()
+        .then(res => {
+          if (res && res.success && res.state) {
+            dispatch({ type: 'HYDRATE_SERVER', state: res.state })
+          }
+        })
+        .catch(err => console.warn('[Reset API] Backend error:', err.message))
+    },
     saveIntegration: (key, config) => {
       dispatch({ type: 'SAVE_INTEGRATION', key, config })
       toast(`Connected ${key} successfully! Channel active.`)
-      fetch(`http://localhost:5000/api/v1/workspace/integrations/${encodeURIComponent(key)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'demo' },
-        body: JSON.stringify(config)
-      }).catch(err => console.warn('[Integrations API Fallback] Backend offline:', err.message))
+      apiClient.saveIntegration(key, config).catch(err => console.warn('[Integrations API] Backend error:', err.message))
     },
     demoPhone,
   }

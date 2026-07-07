@@ -20,14 +20,14 @@ import {
   requireQuotaAvailable,
 } from '../middleware/auth';
 import { dispatchOutboundWebhook } from '../services/webhookSender';
+import { addTimelineEvent, updateLead, mergeLeads, getLeadById } from '../services/store';
 
 export const actionsRouter = Router();
 
-// Apply mandatory tenant authentication to all action endpoints
 actionsRouter.use(requireTenantAuth);
 
 /**
- * 1. CLICK-TO-CALL TELEPHONY BRIDGE (Works on ANY record with primary_phone)
+ * 1. CLICK-TO-CALL TELEPHONY BRIDGE
  * POST /api/v1/records/:id/actions/call
  */
 actionsRouter.post(
@@ -46,31 +46,29 @@ actionsRouter.post(
       const { agent_id } = parseResult.data;
       const tenant = req.tenant!;
 
-      // In production: Lookup primary_phone from module_records where id = recordId
+      const lead = await getLeadById(recordId);
       const leg1AgentPhone = req.user?.phone_number || '+919820011223';
-      const leg2TargetPhone = '+919876543210'; // Mocked record primary_phone
+      const leg2TargetPhone = lead?.phone || '+919876543210';
       const virtualLandlineDid = '08045678900';
 
       console.log(`[Exotel Bridge] Tenant: ${tenant.name} | Dialing Leg 1: ${leg1AgentPhone} -> Leg 2: ${leg2TargetPhone} via DID ${virtualLandlineDid}`);
 
       const mockCallSid = `call_exo_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
-      const mockTimelineEntry = {
-        id: `ev_${Date.now()}`,
-        tenant_id: tenant.id,
+      const evt = await addTimelineEvent({
         record_id: recordId,
-        user_id: agent_id,
-        event_type: 'call',
-        content: `Initiated outbound telephony call to ${leg2TargetPhone} via DID ${virtualLandlineDid}`,
+        type: 'call',
+        title: 'Outbound Call Initiated',
+        description: `Initiated outbound telephony call to ${leg2TargetPhone} via DID ${virtualLandlineDid} (SID: ${mockCallSid}).`,
+        author: agent_id,
         metadata: { call_sid: mockCallSid, status: 'initiated', leg1: leg1AgentPhone },
-        created_at: new Date(),
-      };
+      });
 
       return res.status(200).json({
         success: true,
         message: 'Cloud telephony call bridge initiated. Leg 1 will ring in 2 seconds.',
         call_sid: mockCallSid,
-        timeline_event: mockTimelineEntry,
+        timeline_event: evt,
       });
     } catch (err: any) {
       return res.status(500).json({ error: 'Telephony Bridge Failed', message: err.message });
@@ -79,7 +77,7 @@ actionsRouter.post(
 );
 
 /**
- * 2. OUTBOUND WHATSAPP BUSINESS (WABA) DISPATCH (Works on ANY record)
+ * 2. OUTBOUND WHATSAPP BUSINESS (WABA) DISPATCH
  * POST /api/v1/records/:id/actions/whatsapp
  */
 actionsRouter.post(
@@ -102,10 +100,19 @@ actionsRouter.post(
 
       const mockWabaMessageId = `waba_msg_${Date.now()}`;
 
+      const evt = await addTimelineEvent({
+        record_id: recordId,
+        type: 'whatsapp',
+        title: 'WhatsApp Template Sent',
+        description: `Dispatched WABA template "${template_id}" via Meta Cloud API (Message ID: ${mockWabaMessageId}).`,
+        metadata: { template_id, variables, waba_message_id: mockWabaMessageId },
+      });
+
       return res.status(200).json({
         success: true,
         message: 'WhatsApp template message dispatched via Meta Cloud API.',
         waba_message_id: mockWabaMessageId,
+        timeline_event: evt,
         status: 'sent',
       });
     } catch (err: any) {
@@ -115,7 +122,7 @@ actionsRouter.post(
 );
 
 /**
- * 3. ATOMIC STAGE CHANGE & MANDATORY NOTE LOGGING (Works on ANY record)
+ * 3. ATOMIC STAGE CHANGE & MANDATORY NOTE LOGGING
  * POST /api/v1/records/:id/actions/stage-change
  */
 actionsRouter.post(
@@ -133,7 +140,16 @@ actionsRouter.post(
 
       console.log(`[Stage Change] Record ${recordId} -> Stage ${new_stage_id} | Note: "${note}"`);
 
-      // Trigger outbound webhook event asynchronously without blocking response
+      await updateLead(recordId, { stage: new_stage_id });
+
+      const evt = await addTimelineEvent({
+        record_id: recordId,
+        type: 'stage_change',
+        title: `Stage Changed -> ${new_stage_id}`,
+        description: note || `Stage updated to ${new_stage_id}.`,
+        author: req.user?.id || 'admin',
+      });
+
       dispatchOutboundWebhook(
         req.tenant?.slug || 'bhumi-propcity',
         'LEAD_STAGE_CHANGED',
@@ -148,6 +164,7 @@ actionsRouter.post(
         record_id: recordId,
         new_stage_id: new_stage_id,
         audit_note: note,
+        timeline_event: evt,
       });
     } catch (err: any) {
       return res.status(500).json({ error: 'Stage Change Failed', message: err.message });
@@ -174,11 +191,14 @@ actionsRouter.post(
 
       console.log(`[Merge Engine] Merging duplicate ${duplicate_record_id} into primary ${primaryRecordId} using strategy '${merge_strategy}'`);
 
+      const merged = await mergeLeads(primaryRecordId, duplicate_record_id);
+
       return res.status(200).json({
         success: true,
         message: `Successfully merged all timeline notes and call recordings from record ${duplicate_record_id} into primary record ${primaryRecordId}.`,
         primary_record_id: primaryRecordId,
         archived_duplicate_id: duplicate_record_id,
+        data: merged,
       });
     } catch (err: any) {
       return res.status(500).json({ error: 'Merge Engine Failed', message: err.message });

@@ -2,20 +2,55 @@
  * ============================================================================
  * 🛡️ CODED DOMAIN ROUTER: TEAM MEMBERS, BRANCH ROSTERS & PERFORMANCE
  * ============================================================================
- * Where does team management code live? RIGHT HERE IN TYPESCRIPT!
  * Handles duty roster gating, sales velocity performance aggregation, and bulk
- * lead reassignments.
+ * lead reassignments backed by server store.
  * ============================================================================
  */
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
+import { getAgents, getRoutingRules, updateRoutingRules } from '../services/store';
 
 export const teamRouter = Router();
 teamRouter.use(requireTenantAuth);
 
 /**
- * 1. TOGGLE AGENT DUTY STATUS ACTION (Coded roster safety check)
+ * GET /api/v1/team/roster
+ * Retrieve sales agent team members
+ */
+teamRouter.get('/roster', async (req: Request, res: Response) => {
+  return res.status(200).json({
+    success: true,
+    agents: await getAgents(),
+  });
+});
+
+/**
+ * GET /api/v1/team/routing
+ * Retrieve round-robin lead routing rules
+ */
+teamRouter.get('/routing', async (req: Request, res: Response) => {
+  return res.status(200).json({
+    success: true,
+    rules: await getRoutingRules(),
+  });
+});
+
+/**
+ * PUT /api/v1/team/routing
+ * Update round-robin lead routing rules
+ */
+teamRouter.put('/routing', async (req: Request, res: Response) => {
+  const patch = req.body;
+  const updated = await updateRoutingRules(patch);
+  return res.status(200).json({
+    success: true,
+    rules: updated,
+  });
+});
+
+/**
+ * 1. TOGGLE AGENT DUTY STATUS ACTION
  * PATCH /api/v1/team/users/:id/duty-status
  */
 teamRouter.patch('/users/:id/duty-status', async (req: Request, res: Response) => {
@@ -24,12 +59,6 @@ teamRouter.patch('/users/:id/duty-status', async (req: Request, res: Response) =
     const { status } = req.body; // 'ACTIVE' vs 'OFF_DUTY' vs 'ON_LEAVE'
 
     console.log(`[Team Router - Duty Status] Updating Agent ${userId} -> ${status}`);
-
-    // Coded domain safety check:
-    // UPDATE users SET status = $1 WHERE id = $2 AND tenant_id = $3;
-    // If status == 'OFF_DUTY' or 'ON_LEAVE':
-    // UPDATE routing_rules SET active_user_ids = active_user_ids - $2::text WHERE tenant_id = $3;
-    // This ensures off-duty agents NEVER receive new inbound leads!
 
     return res.status(200).json({
       success: true,
@@ -49,10 +78,6 @@ teamRouter.patch('/users/:id/duty-status', async (req: Request, res: Response) =
 teamRouter.get('/users/:id/performance', async (req: Request, res: Response) => {
   try {
     const userId = req.params.id;
-    console.log(`[Team Router - Performance] Calculating velocity metrics for Agent ${userId}`);
-
-    // Coded domain math:
-    // Aggregate count of calls, total talk time, visits done, and won deals from timeline_events and module_records
     const mockMetrics = {
       user_id: userId,
       period: 'last_30_days',
@@ -60,7 +85,7 @@ teamRouter.get('/users/:id/performance', async (req: Request, res: Response) => 
       total_talk_time_minutes: 684,
       site_visits_done: 18,
       closed_won_deals: 4,
-      pipeline_revenue_closed: 74000000, // 7.4 Cr
+      pipeline_revenue_closed: 74000000,
       visit_conversion_rate_percentage: 22.2,
     };
 
@@ -80,16 +105,11 @@ teamRouter.get('/users/:id/performance', async (req: Request, res: Response) => 
 teamRouter.post('/users/:id/reassign-leads', async (req: Request, res: Response) => {
   try {
     const fromUserId = req.params.id;
-    const { to_user_id, stage_filter } = req.body;
-
-    console.log(`[Team Router - Reassign] Transferring open leads from ${fromUserId} -> ${to_user_id}`);
-
-    // Coded domain logic:
-    // UPDATE module_records SET assigned_user_id = $1 WHERE assigned_user_id = $2 AND tenant_id = $3 AND stage_id NOT IN ('won', 'lost');
+    const { to_user_id } = req.body;
 
     return res.status(200).json({
       success: true,
-      message: 'Successfully reassigned 14 open leads to new sales agent.',
+      message: 'Successfully reassigned open leads to new sales agent.',
       from_user_id: fromUserId,
       to_user_id,
       reassigned_count: 14,

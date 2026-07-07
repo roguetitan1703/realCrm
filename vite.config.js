@@ -3,7 +3,15 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  server: { open: true },
+  server: {
+    open: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
+    },
+  },
   // only scan the real entry — ignore the design reference .html files at root
   optimizeDeps: { entries: ['index.html'] },
 })

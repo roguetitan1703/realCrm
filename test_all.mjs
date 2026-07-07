@@ -233,6 +233,77 @@ async function runTests() {
       }
     });
 
+    // ------------------------------------------------------------------------
+    // Test 9: Workspace State Hydration & Server Demo Seeding
+    // ------------------------------------------------------------------------
+    await test('GET /api/v1/workspace/state & POST /api/v1/workspace/reset', async () => {
+      const stateRes = await fetch(`${BASE_URL}/workspace/state`, {
+        headers: { 'X-Tenant-ID': 'demo' }
+      });
+      if (!stateRes.ok) throw new Error(`State GET status ${stateRes.status}`);
+      const stateData = await stateRes.json();
+      if (!stateData.success || !stateData.state.leads || stateData.state.leads.length === 0) {
+        throw new Error('State hydration returned empty leads');
+      }
+
+      const resetRes = await fetch(`${BASE_URL}/workspace/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'demo' }
+      });
+      if (!resetRes.ok) throw new Error(`Reset status ${resetRes.status}`);
+      const resetData = await resetRes.json();
+      if (!resetData.success || !resetData.state.properties || resetData.state.properties.length === 0) {
+        throw new Error('Workspace reset failed to re-seed properties');
+      }
+    });
+
+    // ------------------------------------------------------------------------
+    // Test 10: Team Roster & Routing Rules
+    // ------------------------------------------------------------------------
+    await test('GET /api/v1/team/roster & GET/PUT /api/v1/team/routing', async () => {
+      const rosterRes = await fetch(`${BASE_URL}/team/roster`, {
+        headers: { 'X-Tenant-ID': 'demo' }
+      });
+      if (!rosterRes.ok) throw new Error(`Roster status ${rosterRes.status}`);
+      const rosterData = await rosterRes.json();
+      if (!rosterData.success || !rosterData.agents || rosterData.agents.length === 0) {
+        throw new Error('Roster fetch failed');
+      }
+
+      const putRoutingRes = await fetch(`${BASE_URL}/team/routing`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'demo' },
+        body: JSON.stringify({ strategy: 'round_robin', enabled: true })
+      });
+      if (!putRoutingRes.ok) throw new Error(`PUT routing status ${putRoutingRes.status}`);
+    });
+
+    // ------------------------------------------------------------------------
+    // Test 11: Leads & Properties Direct CRUD
+    // ------------------------------------------------------------------------
+    await test('GET & POST /api/v1/leads & /api/v1/properties', async () => {
+      const createLeadRes = await fetch(`${BASE_URL}/leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'demo' },
+        body: JSON.stringify({
+          name: 'Ananya Sharma (Test Lead)',
+          phone: '+91 98111 22334',
+          email: 'ananya@sharma.in',
+          stage: 'New',
+          req: { locality: 'Kalyan Nagar', config: '3 BHK' }
+        })
+      });
+      if (!createLeadRes.ok) throw new Error(`Create lead status ${createLeadRes.status}`);
+      const leadData = await createLeadRes.json();
+      if (!leadData.success || !leadData.data.id) throw new Error('Lead creation failed');
+
+      const getLeadsRes = await fetch(`${BASE_URL}/leads`, { headers: { 'X-Tenant-ID': 'demo' } });
+      const getLeadsData = await getLeadsRes.json();
+      if (!getLeadsData.data.some(l => l.id === leadData.data.id)) {
+        throw new Error('New lead not found in GET /leads');
+      }
+    });
+
   } finally {
     if (server) {
       await new Promise((resolve) => server.close(resolve));

@@ -10,9 +10,31 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
+import { getProperties, createProperty } from '../services/store';
 
 export const propertiesRouter = Router();
 propertiesRouter.use(requireTenantAuth);
+
+/**
+ * GET /api/v1/properties
+ */
+propertiesRouter.get('/', async (req: Request, res: Response) => {
+  return res.status(200).json({
+    success: true,
+    data: await getProperties(),
+  });
+});
+
+/**
+ * POST /api/v1/properties
+ */
+propertiesRouter.post('/', async (req: Request, res: Response) => {
+  const newProp = await createProperty(req.body);
+  return res.status(201).json({
+    success: true,
+    data: newProp,
+  });
+});
 
 /**
  * 1. FETCH INVENTORY UNITS FOR A PROJECT (Coded grouping logic)

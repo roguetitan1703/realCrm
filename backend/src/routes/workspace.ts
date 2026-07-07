@@ -12,6 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
+import { getState, seedDatabase, resetDatabase, updateSettings } from '../services/store';
 
 export const workspaceRouter = Router();
 
@@ -271,4 +272,43 @@ workspaceRouter.post('/onboard', async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Tenant Provisioning Failed', message: err.message });
   }
 });
+
+/**
+ * GET /api/v1/workspace/state
+ * Returns full seeded workspace state from server store
+ */
+workspaceRouter.get('/state', async (req: Request, res: Response) => {
+  const state = await getState();
+  res.status(200).json({
+    success: true,
+    state,
+  });
+});
+
+/**
+ * POST /api/v1/workspace/settings
+ * Updates workspace settings (firmName, stages, sources, etc.)
+ */
+workspaceRouter.post('/settings', async (req: Request, res: Response) => {
+  const patch = req.body;
+  const updated = await updateSettings(patch);
+  res.status(200).json({
+    success: true,
+    settings: updated,
+  });
+});
+
+/**
+ * POST /api/v1/workspace/reset
+ * Resets and re-seeds the server database to initial demo state
+ */
+workspaceRouter.post('/reset', async (req: Request, res: Response) => {
+  const state = await resetDatabase();
+  res.status(200).json({
+    success: true,
+    message: 'Demo database re-seeded successfully.',
+    state,
+  });
+});
+
 
