@@ -17,7 +17,7 @@ const clone = (x) => JSON.parse(JSON.stringify(x))
 // Bump this when the seed shape changes so stale saved state is discarded.
 const STORE_KEY = 'bhumi-crm-state-v4'
 // Only these fields persist. Transient UI is deliberately excluded.
-const DURABLE = ['role', 'activeAgentId', 'loggedIn', 'agents', 'properties', 'leads', 'inactiveAgentIds', 'settings']
+const DURABLE = ['role', 'activeAgentId', 'loggedIn', 'agents', 'properties', 'leads', 'inactiveAgentIds', 'settings', 'integrations']
 
 function freshState() {
   return {
@@ -29,6 +29,13 @@ function freshState() {
     leads: clone(seedLeads),
     inactiveAgentIds: [],
     settings: clone(DEFAULT_SETTINGS),   // editable: firmName, stages, sources
+    integrations: {
+      '99acres': { status: 'staged', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/99acres', secret: 'whsec_99acres_demo_882' },
+      'MagicBricks': { status: 'staged', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/magicbricks', secret: 'whsec_mb_demo_391' },
+      'Calling & SMS': { status: 'staged', apiKey: '', sid: '', callerId: '020-71189900' },
+      'WhatsApp Business API': { status: 'staged', phoneId: '', accessToken: '', wabaId: '' },
+      'Website sync': { status: 'staged', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/website', secret: 'whsec_web_demo_109' },
+    },
     toasts: [],
     // modal/overlay state (never persisted)
     modal: null,                   // {kind, ...}
@@ -329,6 +336,12 @@ function reducer(state, action) {
     case 'WA_CLOSE':
       return { ...state, waState: null }
 
+    case 'SAVE_INTEGRATION': {
+      const current = state.integrations || {}
+      const next = { ...current, [action.key]: { ...current[action.key], ...action.config, status: 'active' } }
+      return { ...state, integrations: next }
+    }
+
     case 'RESET':
       return { ...freshState(), loggedIn: true }  // wipe to clean seed, stay logged in
 
@@ -386,11 +399,27 @@ export function StoreProvider({ children }) {
     activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id)),
     // actions
     assign: (leadId, agentId) => { dispatch({ type: 'ASSIGN', leadId, agentId }); const a = state.agents.find(x => x.id === agentId); toast('Lead assigned to ' + (a ? a.first : '')) },
-    setStage: (leadId, stage) => { dispatch({ type: 'STAGE', leadId, stage }); toast('Stage → ' + stage) },
+    setStage: (leadId, stage) => {
+      dispatch({ type: 'STAGE', leadId, stage })
+      toast('Stage → ' + stage)
+      fetch(`http://localhost:5000/api/v1/records/${leadId}/actions/stage-change`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'demo' },
+        body: JSON.stringify({ new_stage_id: stage, note: 'Stage updated via CRM view' })
+      }).catch(err => console.warn('[Stage API Fallback] Backend offline:', err.message))
+    },
     setFollowUp: (leadId, followUp) => { dispatch({ type: 'FOLLOWUP', leadId, followUp }); toast('Follow-up set — added to calendar') },
     addNote: (leadId, text, kind) => { dispatch({ type: 'NOTE', leadId, text, kind }); toast(kind === 'call' ? 'Call logged' : 'Note added') },
     logEvent: (id, kind, text) => { dispatch({ type: 'LOG_EVENT', id, kind, text }); toast(kind === 'call' ? 'Call logged' : kind === 'wa' ? 'WhatsApp logged' : kind === 'sms' ? 'SMS logged' : 'Note added') },
-    merge: (leadId) => { dispatch({ type: 'MERGE', leadId }); toast('Merged into one record') },
+    merge: (leadId) => {
+      dispatch({ type: 'MERGE', leadId })
+      toast('Merged into one record')
+      fetch(`http://localhost:5000/api/v1/records/${leadId}/actions/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'demo' },
+        body: JSON.stringify({ duplicate_record_id: leadId, merge_strategy: 'combine_timeline' })
+      }).catch(err => console.warn('[Merge API Fallback] Backend offline:', err.message))
+    },
     attachProp: (leadId, propId, label) => { dispatch({ type: 'ATTACH_PROP', leadId, propId, label }); toast('Property shortlisted for this lead') },
     visitFeedback: (leadId, propId, verdict, reason, society) => { dispatch({ type: 'VISIT_FEEDBACK', leadId, propId, verdict, reason, society }); toast(verdict === 'liked' ? 'Marked as liked' : 'Rejection logged — refines matches') },
     detachProp: (leadId, propId) => dispatch({ type: 'DETACH_PROP', leadId, propId }),
@@ -423,6 +452,15 @@ export function StoreProvider({ children }) {
       toast(`Workspace provisioned & initialized for ${config.firmName || 'new tenant'}`)
     },
     resetDemo: () => { dispatch({ type: 'RESET' }); toast('Demo reset to a clean slate') },
+    saveIntegration: (key, config) => {
+      dispatch({ type: 'SAVE_INTEGRATION', key, config })
+      toast(`Connected ${key} successfully! Channel active.`)
+      fetch(`http://localhost:5000/api/v1/workspace/integrations/${encodeURIComponent(key)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'demo' },
+        body: JSON.stringify(config)
+      }).catch(err => console.warn('[Integrations API Fallback] Backend offline:', err.message))
+    },
     demoPhone,
   }
 

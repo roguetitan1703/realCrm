@@ -178,8 +178,23 @@ function OutreachModal({ store, leadId, channel = 'call' }) {
     ],
   }
   const logIt = () => {
-    if (ch === 'call') { store.addNote(l.id, 'Call logged with ' + first, 'call') }
-    else { store.addNote(l.id, `${ch === 'wa' ? 'WhatsApp' : 'SMS'} sent to ${first}${text ? ': ' + text.slice(0, 40) + (text.length > 40 ? '…' : '') : ''}`, 'msg') }
+    if (ch === 'call') {
+      store.addNote(l.id, 'Call logged with ' + first, 'call')
+      fetch(`http://localhost:5000/api/v1/records/${l.id}/actions/call`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'demo' },
+        body: JSON.stringify({ agent_id: store.state.activeAgentId })
+      }).catch(err => console.warn('[Telephony API Fallback] Backend offline:', err.message))
+    } else {
+      store.addNote(l.id, `${ch === 'wa' ? 'WhatsApp' : 'SMS'} sent to ${first}${text ? ': ' + text.slice(0, 40) + (text.length > 40 ? '…' : '') : ''}`, 'msg')
+      if (ch === 'wa') {
+        fetch(`http://localhost:5000/api/v1/records/${l.id}/actions/whatsapp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'demo' },
+          body: JSON.stringify({ template_id: 'outreach_msg', variables: { text: text || 'Template message' } })
+        }).catch(err => console.warn('[WABA API Fallback] Backend offline:', err.message))
+      }
+    }
     store.closeModal()
   }
   return (
@@ -502,16 +517,61 @@ function StatusModal({ store, propId }) {
 }
 
 function IntegrationModal({ store, card }) {
+  const current = store.state.integrations?.[card.key] || {}
+  const [apiKey, setApiKey] = useState(current.apiKey || current.phoneId || '')
+  const [sid, setSid] = useState(current.sid || current.accessToken || '')
+  const isWebhook = card.key === '99acres' || card.key === 'MagicBricks' || card.key === 'Website sync'
+  const isActive = current.status === 'active'
+
+  const handleSave = () => {
+    store.saveIntegration(card.key, isWebhook ? { status: 'active' } : { apiKey, sid, status: 'active' })
+    store.closeModal()
+  }
+
   return (
-    <Modal title={card.key} onClose={store.closeModal} width={440}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+    <Modal title={`Configure ${card.key}`} onClose={store.closeModal} width={480}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--card-2)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 16 }}>{card.mark}</div>
-        <div className="u-muted" style={{ fontSize: 13 }}>{card.desc}</div>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 14.5 }}>{card.key} Integration</div>
+          <div className="u-muted" style={{ fontSize: 12.5 }}>{card.desc}</div>
+        </div>
       </div>
-      <div style={{ background: card.staged ? 'var(--accent-wash)' : 'var(--line-2)', border: '1px solid ' + (card.staged ? 'var(--accent-line)' : 'var(--line)'), borderRadius: 9, padding: '11px 13px', fontSize: 12, color: card.staged ? 'var(--accent-ink)' : 'var(--ink-2)', lineHeight: 1.5, marginBottom: 16 }}>
-        <b>{card.staged ? 'Not live in this demo.' : 'Custom add-on.'}</b> {card.staged ? "You'll authorise with your own account on setup — no data leaves your system until you connect it." : 'Scoped once we see your current site — priced separately from the core platform.'}
+
+      {isWebhook ? (
+        <div style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: 14, marginBottom: 18 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', marginBottom: 6 }}>Your Live Webhook URL</div>
+          <div style={{ fontFamily: 'monospace', fontSize: 12, background: 'var(--card)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--line)', wordBreak: 'break-all', marginBottom: 10, color: 'var(--ink)' }}>
+            {current.webhookUrl || `https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/${card.key.toLowerCase().replace(/\s+/g, '')}`}
+          </div>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', marginBottom: 6 }}>HMAC SHA-256 Secret</div>
+          <div style={{ fontFamily: 'monospace', fontSize: 12, background: 'var(--card)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--line)', color: 'var(--accent-ink)' }}>
+            {current.secret || 'whsec_live_default_secret_991'}
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 18 }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', display: 'block', marginBottom: 4 }}>
+              {card.key === 'Calling & SMS' ? 'Exotel API Key / SID' : 'Meta WABA Phone Number ID'}
+            </label>
+            <input className="input" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={card.key === 'Calling & SMS' ? 'exo_live_key_...' : '109283746582910'} style={{ width: '100%' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', display: 'block', marginBottom: 4 }}>
+              {card.key === 'Calling & SMS' ? 'Virtual Landline DID / Caller ID' : 'System User Access Token'}
+            </label>
+            <input className="input" value={sid} onChange={e => setSid(e.target.value)} placeholder={card.key === 'Calling & SMS' ? '080-45678900' : 'EAAGm0PX4ZCpsBA...'} type={card.key === 'Calling & SMS' ? 'text' : 'password'} style={{ width: '100%' }} />
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <Button variant="ghost" onClick={store.closeModal}>Cancel</Button>
+        <Button variant="primary" onClick={handleSave}>
+          {isActive ? 'Update & Save Credentials' : 'Connect & Activate Channel'}
+        </Button>
       </div>
-      <Button variant="primary" block onClick={store.closeModal}>{card.staged ? 'Connect ' + card.key : 'Request scoping'}</Button>
     </Modal>
   )
 }

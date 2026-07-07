@@ -19,6 +19,7 @@ import {
   requireModuleEnabled,
   requireQuotaAvailable,
 } from '../middleware/auth';
+import { dispatchOutboundWebhook } from '../services/webhookSender';
 
 export const actionsRouter = Router();
 
@@ -131,6 +132,15 @@ actionsRouter.post(
       const { new_stage_id, note } = parseResult.data;
 
       console.log(`[Stage Change] Record ${recordId} -> Stage ${new_stage_id} | Note: "${note}"`);
+
+      // Trigger outbound webhook event asynchronously without blocking response
+      dispatchOutboundWebhook(
+        req.tenant?.slug || 'bhumi-propcity',
+        'LEAD_STAGE_CHANGED',
+        { record_id: recordId, new_stage_id, note, updated_by: req.user?.id || 'admin' },
+        'https://api.bhumipropcity.com/webhooks/outbound',
+        'whsec_default'
+      ).catch(err => console.error('[Stage Change Webhook] Dispatch error:', err));
 
       return res.status(200).json({
         success: true,

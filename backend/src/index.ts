@@ -17,6 +17,7 @@ import { propertiesRouter } from './routes/properties';
 import { teamRouter } from './routes/team';
 import { actionsRouter } from './routes/actions';
 import { ingestRouter } from './routes/ingest';
+import { integrationsRouter } from './routes/integrations';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -42,6 +43,7 @@ app.get('/health', (req: Request, res: Response) => {
 // ============================================================================
 
 // 1. Non-Hacky Workspace & Tenant Resolution (Called before & after login!)
+app.use('/api/v1/workspace/integrations', integrationsRouter);
 app.use('/api/v1/workspace', workspaceRouter);
 
 // 2. Composable Module Metadata & Schema Editor
@@ -71,7 +73,8 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-if (require.main === module) {
+const isMain = process.argv[1] && (import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/')) || import.meta.url.includes(process.argv[1].replace(/\\/g, '/')));
+if (isMain || process.env.START_SERVER === 'true') {
   app.listen(PORT, () => {
     console.log(`============================================================================`);
     console.log(`🚀 Bhumi Propcity CRM Backend API Engine running on port ${PORT}`);

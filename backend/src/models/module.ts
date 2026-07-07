@@ -129,3 +129,26 @@ export const WebhookIngestSchema = z.object({
   custom_attributes: z.record(z.any()).default({}),
 });
 export type WebhookIngestPayload = z.infer<typeof WebhookIngestSchema>;
+
+export const CreateModuleSchema = z.object({
+  key: z.string().min(2, "Module key required (e.g., 'loans')"),
+  name: z.string().min(2, "Module display name required (e.g., 'Home Loans')"),
+  icon: z.string().default("folder"),
+  config: z.object({
+    supports_pipeline: z.boolean().default(true),
+    supports_custom_fields: z.boolean().default(true),
+    default_view: z.enum(["kanban", "table", "grid"]).default("kanban"),
+    title_field: z.string().default("title")
+  }).optional()
+});
+export type CreateModulePayload = z.infer<typeof CreateModuleSchema>;
+
+export const CreateCustomFieldSchema = z.object({
+  field_key: z.string().min(2, "Field key required"),
+  field_label: z.string().min(2, "Field label required"),
+  field_type: z.enum(["text", "number", "select", "date", "phone", "email", "boolean"]).default("text"),
+  options: z.array(z.string()).optional(),
+  is_required: z.boolean().default(false),
+  is_filterable: z.boolean().default(true)
+});
+export type CreateCustomFieldPayload = z.infer<typeof CreateCustomFieldSchema>;

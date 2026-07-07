@@ -11,3 +11,4 @@ export * from './user';
 export * from './module';
 export * from './timeline';
 export * from './importJob';
+export * from './integration';

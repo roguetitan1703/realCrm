@@ -30,21 +30,25 @@ export default function Integrations({ store, topBar }) {
           <div style={{ fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700, marginBottom: 10 }}>Connect your channels</div>
           <div className="u-muted" style={{ fontSize: 13.5, marginBottom: 18, maxWidth: 600 }}>These switch on with your own accounts. Leads, calls and messages flow straight into {theme.brand.firmName} — no copy-paste. Nothing here is live in the demo; it's wired to your credentials on setup.</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            {CARDS.map(c => (
-              <button key={c.key} onClick={() => store.openModal({ kind: 'integration', card: c })}
-                style={{ textAlign: 'left', background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 12, padding: '17px 18px', display: 'flex', flexDirection: 'column', gap: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 42, height: 42, borderRadius: 9, background: 'var(--card-2)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 15, color: 'var(--ink)' }}>{c.mark}</div>
-                  <div style={{ flex: 1 }}><div style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 14.5 }}>{c.key}</div><div className="u-muted" style={{ fontSize: 12 }}>{c.desc}</div></div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 600, color: c.staged ? 'var(--accent-ink)' : 'var(--muted)', background: c.staged ? 'var(--accent-wash)' : 'var(--line-2)', borderRadius: 14, padding: '4px 10px' }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />{c.staged ? 'Connects to your account' : 'Custom add-on'}
-                  </span>
-                  <span className="btn btn-ghost btn-sm">View</span>
-                </div>
-              </button>
-            ))}
+            {CARDS.map(c => {
+              const isActive = store.state.integrations?.[c.key]?.status === 'active'
+              return (
+                <button key={c.key} onClick={() => store.openModal({ kind: 'integration', card: c })}
+                  style={{ textAlign: 'left', background: 'var(--card)', border: '1px solid ' + (isActive ? 'var(--accent-line)' : 'var(--line)'), borderRadius: 12, padding: '17px 18px', display: 'flex', flexDirection: 'column', gap: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ width: 42, height: 42, borderRadius: 9, background: isActive ? 'var(--accent-wash)' : 'var(--card-2)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 15, color: isActive ? 'var(--accent-ink)' : 'var(--ink)' }}>{c.mark}</div>
+                    <div style={{ flex: 1 }}><div style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 14.5 }}>{c.key}</div><div className="u-muted" style={{ fontSize: 12 }}>{c.desc}</div></div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 600, color: isActive ? 'var(--accent-ink)' : c.staged ? 'var(--ink-2)' : 'var(--muted)', background: isActive ? 'var(--accent-wash)' : c.staged ? 'var(--line-2)' : 'var(--line)', borderRadius: 14, padding: '4px 10px' }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: isActive ? '#10b981' : 'currentColor' }} />
+                      {isActive ? 'Active · Connected' : c.staged ? 'Connects to your account' : 'Custom add-on'}
+                    </span>
+                    <span className="btn btn-ghost btn-sm">{isActive ? 'Configure' : 'View'}</span>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </div>
       </div>

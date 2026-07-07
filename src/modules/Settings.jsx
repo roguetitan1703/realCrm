@@ -127,6 +127,20 @@ export default function Settings({ store, topBar }) {
               <Button variant="ghost" size="sm" icon="plus" onClick={addSource}>Add source</Button>
             </div>
           </Panel>
+
+          {/* ---- System & Demo Data ---- */}
+          <Panel>
+            <SectionHead title="System & Demo Environment" />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: '14px 18px' }}>
+              <div>
+                <div style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 14.5 }}>Reset Demo Data & Sandbox</div>
+                <div className="u-muted" style={{ fontSize: 12.5 }}>Wipes any custom leads, calls, or stage changes you tested, restoring the clean factory demo state.</div>
+              </div>
+              <Button variant="ghost" style={{ color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }} onClick={store.resetDemo}>
+                Reset Sandbox
+              </Button>
+            </div>
+          </Panel>
         </div>
       </div>
     </>
