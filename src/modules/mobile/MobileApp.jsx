@@ -19,7 +19,7 @@ const TABS = [
   { key: 'me', label: 'Me', icon: 'person' },
 ]
 
-export default function MobileApp({ store }) {
+export default function MobileApp({ store, framed = false }) {
   const [tab, setTab] = useState('today')
   const [view, setView] = useState(null)   // {kind:'lead'|'prop', id}
   const me = store.me()
@@ -47,7 +47,7 @@ export default function MobileApp({ store }) {
   const Screen = { today: MobileToday, leads: MobileLeads, properties: MobileProperties, me: MobileMe }[tab] || MobileToday
 
   const top = tab === 'today'
-    ? <MobileTopBar brand title={theme.brand.firmName} sub={`${me.name} · Field agent`} right={<Avatar agent={me} size="md" />} />
+    ? <MobileTopBar brand title={theme.brand.firmName} sub={`${me.name || 'Rakesh Sethi'} · ${store.state.role === 'admin' ? 'Owner / Admin' : 'Field agent'}`} right={<Avatar agent={me} size="md" />} />
     : <MobileTopBar
         title={{ leads: 'My leads', properties: 'Properties', me: 'My profile' }[tab]}
         sub={tab === 'leads' ? `${myLeads.length} assigned` : undefined}
@@ -58,7 +58,7 @@ export default function MobileApp({ store }) {
 
   return (
     <MobileShell
-      framed
+      framed={framed}
       top={top}
       tabs={tabs}
       fab={fab}

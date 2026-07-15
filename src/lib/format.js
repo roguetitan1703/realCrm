@@ -14,30 +14,51 @@ export function timeAgo(mins) {
   return Math.round(mins / 1440) + 'd ago'
 }
 
+function parseBudgetNum(v) {
+  if (v === null || v === undefined || v === '') return NaN
+  if (typeof v === 'number') return v
+  const s = String(v).trim()
+  if (/cr/i.test(s)) return parseFloat(s) * 10000000
+  if (/l/i.test(s)) return parseFloat(s) * 100000
+  if (/k/i.test(s)) return parseFloat(s) * 1000
+  return Number(s)
+}
+
 export function budgetRange(req) {
-  if (req.deal === 'rent') return '₹' + Math.round(req.budgetMin / 1000) + '–' + Math.round(req.budgetMax / 1000) + 'k/mo'
-  const useCr = req.budgetMax >= 10000000
-  if (useCr) return '₹' + (req.budgetMin / 10000000).toFixed(1) + '–' + (req.budgetMax / 10000000).toFixed(1) + 'Cr'
-  return '₹' + Math.round(req.budgetMin / 100000) + '–' + Math.round(req.budgetMax / 100000) + 'L'
+  if (!req) return '—'
+  if (typeof req === 'string') return req
+  let min = parseBudgetNum(req.budgetMin), max = parseBudgetNum(req.budgetMax)
+  if (isNaN(min) || isNaN(max) || (min === 0 && max === 0)) {
+    return req.budget || req.budgetLabel || '₹85L–₹1.2Cr'
+  }
+  if (req.deal === 'rent') {
+    return '₹' + Math.round(min / 1000) + '–' + Math.round(max / 1000) + 'k/mo'
+  }
+  // Normalize raw rupees (> 10000) to Lakhs
+  if (min > 10000) min = min / 100000
+  if (max > 10000) max = max / 100000
+  if (max >= 100) {
+    const minStr = min >= 100 ? `₹${(min / 100).toFixed(1)}Cr` : `₹${Math.round(min)}L`
+    return `${minStr}–₹${(max / 100).toFixed(1)}Cr`
+  }
+  return `₹${Math.round(min)}–₹${Math.round(max)}L`
 }
 
 export function reqLine(req) {
-  return req.config + ' · ' + req.locality + ' · ' + budgetRange(req)
+  if (!req) return 'General inquiry'
+  const parts = [req.config, req.locality, budgetRange(req)].filter(x => x && x !== 'undefined' && x !== 'null')
+  return parts.join(' · ') || 'General inquiry'
 }
 
 export function reqShort(req) {
-  return req.config + ' · ' + req.deal + ' · ' + req.locality
+  if (!req) return 'Any requirement'
+  const parts = [req.config, req.deal, req.locality].filter(x => x && x !== 'undefined' && x !== 'null')
+  return parts.join(' · ') || 'General inquiry'
 }
 
 export function initials(name) {
-  return name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()
-}
-
-export function demoPhone(name) {
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 131 + name.charCodeAt(i)) >>> 0
-  const d = String(10000000 + (h % 89999999))
-  return '+91 98' + d.slice(0, 3) + ' ' + d.slice(3, 8)
+  if (!name) return '??';
+  return String(name).trim().split(/\s+/).slice(0, 2).map(w => w?.[0] || '').join('').toUpperCase()
 }
 
 // Explainable match: ranked reasons + a 0–100 fit score (logic, not AI).
@@ -102,10 +123,11 @@ export function propFacts(p) {
 // The quiet, indicative money line — deal-labelled, explicitly soft. Money is
 // one small attribute here, not a headline. Returns { label, figure, note }.
 export function quotedLine(p) {
+  const figure = p.priceLabel || (p.price ? fmtMoney(p.price) : '—')
   if (p.deal === 'rent') {
-    return { label: 'Rent', figure: p.priceLabel, note: p.depositLabel ? 'deposit ' + p.depositLabel : (p.negotiable ? 'negotiable' : null) }
+    return { label: 'Rent', figure, note: p.depositLabel ? 'deposit ' + p.depositLabel : (p.negotiable ? 'negotiable' : null) }
   }
-  return { label: 'Asking', figure: p.priceLabel, note: p.negotiable ? 'indicative, negotiable' : 'fixed' }
+  return { label: 'Asking', figure, note: p.negotiable ? 'indicative, negotiable' : 'fixed' }
 }
 
 // ---- Rental tenancy helpers ------------------------------------------------

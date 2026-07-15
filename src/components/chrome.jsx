@@ -43,7 +43,7 @@ export function Sidebar({ items, active, onNav, footer, firmName }) {
 // Left: back?+eyebrow/title. Center: global search. Right: bell + profile menu.
 // Module CTAs live in the toolbar now, NOT here. `actions` still render (detail
 // quick actions like Status/WhatsApp) just left of the bell.
-export function TopBar({ title, count, eyebrow, onBack, onSearch, onBell, unread, actions, profile }) {
+export function TopBar({ title, eyebrow, onBack, onSearch, onBell, unread, actions, profile }) {
   return (
     <div className="topbar">
       {onBack && (
@@ -53,7 +53,6 @@ export function TopBar({ title, count, eyebrow, onBack, onSearch, onBell, unread
         {eyebrow && <div className="tb-eyebrow">{eyebrow}</div>}
         {onBack ? <div className="tb-h">{title}</div> : <h1>{title}</h1>}
       </div>
-      {count && !onBack && <span className="tb-count">{count}</span>}
 
       {/* centered global search */}
       <div className="u-spring" />
@@ -153,15 +152,43 @@ export function MobileTopBar({ title, sub, onBack, right, brand }) {
 
 // ---- toasts ----
 export function Toasts({ toasts }) {
-  if (!toasts.length) return null
+  const [hovered, setHovered] = useState(false)
+  if (!toasts || !toasts.length) return null
+
+  const visibleToasts = toasts.slice(-4)
+  const total = visibleToasts.length
+
   return (
-    <div className="toast-stack">
-      {toasts.map(t => (
-        <div key={t.id} className={'toast' + (t.tone === 'warn' ? ' alert' : '')}>
-          <Icon name={t.tone === 'warn' ? 'x' : 'check'} className="ic t-ic" />
-          {t.text}
-        </div>
-      ))}
+    <div
+      className="toast-stack"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {visibleToasts.map((t, idx) => {
+        const depth = (total - 1) - idx
+        const isAlert = t.tone === 'warn' || t.tone === 'err'
+
+        const translateY = hovered ? depth * -56 : depth * -12
+        const scale = hovered ? 1 : Math.max(0.85, 1 - depth * 0.04)
+        const opacity = depth > 2 && !hovered ? 0 : 1
+
+        return (
+          <div
+            key={t.id}
+            className={`toast-card ${isAlert ? 'toast-alert' : ''}`}
+            style={{
+              transform: `translateY(${translateY}px) scale(${scale})`,
+              opacity,
+              zIndex: 100 - depth,
+            }}
+          >
+            <span className={`toast-badge ${isAlert ? 'badge-alert' : 'badge-ok'}`}>
+              <Icon name={isAlert ? 'x' : 'check'} size={14} />
+            </span>
+            <span className="toast-text">{t.text}</span>
+          </div>
+        )
+      })}
     </div>
   )
 }

@@ -93,7 +93,7 @@ export default function Settings({ store, topBar }) {
                       {!protectedStage && !isEditing && (
                         <>
                           <button className="icon-mini" onClick={() => startRename(s)} title="Rename"><Icon name="edit" size={13} /></button>
-                          <button className="icon-mini danger" disabled={lastClosedFree <= 1} onClick={() => store.removeStage(s)} title="Remove"><Icon name="x" size={13} /></button>
+                          <button className="icon-mini danger" disabled={lastClosedFree <= 1} onClick={() => { if (window.confirm(`Remove stage "${s}"? Leads currently in this stage will be moved to "${state.settings.stages[0] || 'New'}".`)) store.removeStage(s) }} title="Remove"><Icon name="x" size={13} /></button>
                         </>
                       )}
                       {protectedStage && <span className="u-muted" style={{ fontSize: 10.5, paddingRight: 4 }}>locked</span>}
@@ -128,16 +128,16 @@ export default function Settings({ store, topBar }) {
             </div>
           </Panel>
 
-          {/* ---- System & Demo Data ---- */}
+          {/* ---- System & Database Environment ---- */}
           <Panel>
-            <SectionHead title="System & Demo Environment" />
+            <SectionHead title="System & Database Environment" />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: '14px 18px' }}>
               <div>
-                <div style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 14.5 }}>Reset Demo Data & Sandbox</div>
-                <div className="u-muted" style={{ fontSize: 12.5 }}>Wipes any custom leads, calls, or stage changes you tested, restoring the clean factory demo state.</div>
+                <div style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 14.5 }}>Reset Database State</div>
+                <div className="u-muted" style={{ fontSize: 12.5 }}>Wipes test records from the PostgreSQL database, restoring default baseline dataset.</div>
               </div>
-              <Button variant="ghost" style={{ color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }} onClick={store.resetDemo}>
-                Reset Sandbox
+              <Button variant="ghost" style={{ color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }} onClick={store.resetDatabase}>
+                Reset Database
               </Button>
             </div>
           </Panel>

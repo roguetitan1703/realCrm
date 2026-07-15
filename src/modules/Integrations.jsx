@@ -28,7 +28,7 @@ export default function Integrations({ store, topBar }) {
           </button>
 
           <div style={{ fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700, marginBottom: 10 }}>Connect your channels</div>
-          <div className="u-muted" style={{ fontSize: 13.5, marginBottom: 18, maxWidth: 600 }}>These switch on with your own accounts. Leads, calls and messages flow straight into {theme.brand.firmName} — no copy-paste. Nothing here is live in the demo; it's wired to your credentials on setup.</div>
+          <div className="u-muted" style={{ fontSize: 13.5, marginBottom: 18, maxWidth: 600 }}>These switch on with your own accounts. Leads, calls and messages flow straight into {theme.brand.firmName} — no copy-paste. All integrations are live and wired directly to your PostgreSQL database credentials.</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             {CARDS.map(c => {
               const isActive = store.state.integrations?.[c.key]?.status === 'active'

@@ -25,7 +25,7 @@ export default function Team({ store, topBar }) {
                 <div key={a.id} className="panel" style={{ opacity: off ? 0.6 : 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <Avatar agent={a} size="lg" />
-                    <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 16 }}>{a.name}</div><div className="u-muted" style={{ fontSize: 12 }}>Sales agent · Pune</div></div>
+                    <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 16 }}>{a.name}</div><div className="u-muted" style={{ fontSize: 12 }}>{a.role === 'admin' ? 'Owner / Admin' : (a.role || 'Senior Sales Advisor')} · Pune</div></div>
                     <span style={{ fontSize: 11, fontWeight: 600, borderRadius: 12, padding: '3px 10px', color: off ? '#8A5350' : 'var(--accent-ink)', background: off ? '#EFE3E2' : 'var(--accent-wash)' }}>{off ? 'Inactive' : 'Active'}</span>
                   </div>
                   <div style={{ display: 'flex', margin: '15px 0', border: '1px solid var(--line-2)', borderRadius: 9, overflow: 'hidden' }}>

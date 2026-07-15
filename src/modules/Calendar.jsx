@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Empty } from '../components/primitives.jsx'
+import { Empty, PageHeader } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -8,6 +8,11 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 // Map the seed's relative day labels onto real dates around "today" so the grid
 // is realistically populated. (In production, follow-ups carry an ISO date.)
 function resolveDate(label, today) {
+  if (!label) return null
+  if (/^\d{4}-\d{2}-\d{2}/.test(label)) {
+    const parts = label.split('-').map(Number)
+    return new Date(parts[0], parts[1] - 1, parts[2])
+  }
   const d = new Date(today)
   const map = { Today: 0, Yesterday: -1, Tomorrow: 1 }
   if (label in map) { d.setDate(d.getDate() + map[label]); return d }
@@ -19,7 +24,7 @@ function resolveDate(label, today) {
   }
   return null
 }
-const ymd = (d) => d ? `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` : null
+const ymd = (d) => d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : null
 
 export default function Calendar({ store, go, topBar }) {
   const { state } = store
@@ -51,10 +56,17 @@ export default function Calendar({ store, go, topBar }) {
   const prev = () => setCursor(c => new Date(c.getFullYear(), c.getMonth() - 1, 1))
   const next = () => setCursor(c => new Date(c.getFullYear(), c.getMonth() + 1, 1))
 
+  const kpis = [
+    { label: 'Scheduled', value: events.length },
+    { label: 'Site visits', value: events.filter(e => e.isVisit).length, tone: 'accent' },
+    { label: 'Overdue', value: events.filter(e => e.overdue).length, tone: 'alert' },
+  ]
+
   return (
     <>
-      {topBar({ title: 'Calendar', count: `${events.length} scheduled` })}
-      <div className="app-body" style={{ padding: '20px 22px 44px' }}>
+      {topBar({ title: 'Calendar' })}
+      <PageHeader kpis={kpis} />
+      <div className="app-body cal-body">
         <div className="cal-wrap">
           <div className="cal">
             <div className="cal-top">
@@ -97,20 +109,51 @@ export default function Calendar({ store, go, topBar }) {
               <div className="cd-sub">{pickedList.length ? `${pickedList.length} scheduled` : 'Nothing scheduled'}</div>
             </div>
             {pickedList.length === 0
-              ? <div className="cd-empty">No follow-ups this day.</div>
-              : pickedList.map(e => {
-                const a = store.agentById(e.agentId)
-                return (
-                  <button key={e.lead.id} className="cd-row" onClick={() => go('leads', { leadId: e.lead.id, leadOpen: true })}>
-                    <span className={'cd-time' + (e.overdue ? ' overdue' : '')}>{e.time}</span>
-                    <div className="cd-b">
-                      <div className="cd-n">{e.lead.name}</div>
-                      <div className="cd-a">{e.action}</div>
+              ? (
+                <div className="cd-pad">
+                  <div className="cd-empty cd-empty-bordered">No follow-ups scheduled on this specific day.</div>
+                  {events.length > 0 && (
+                    <div className="cd-upcoming">
+                      <div className="cd-upcoming-h">All upcoming appointments ({events.length})</div>
+                      <div className="cd-list">
+                        {events.map(e => {
+                          const a = store.agentById(e.agentId)
+                          return (
+                            <button key={e.lead.id + e.key + e.time} className="cd-row" onClick={() => go('leads', { leadId: e.lead.id, leadOpen: true })}>
+                              <div className="cd-when cd-when-wide">
+                                <div className="cd-date">{e.key}</div>
+                                <div className="cd-time">{e.time}</div>
+                              </div>
+                              <div className="cd-b">
+                                <div className="cd-n">{e.lead.name}</div>
+                                <div className="cd-a">{e.action}</div>
+                                {a && <div className="cd-agent"><span className={`av av-sm ${a.avatar} cd-av`}>{a.initials}</span><span>{a.name}</span></div>}
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
-                    {a && <span className={`av av-sm ${a.avatar}`}>{a.initials}</span>}
-                  </button>
-                )
-              })}
+                  )}
+                </div>
+              )
+              : (
+                <div className="cd-pad cd-list">
+                  {pickedList.map(e => {
+                    const a = store.agentById(e.agentId)
+                    return (
+                      <button key={e.lead.id + e.time} className="cd-row" onClick={() => go('leads', { leadId: e.lead.id, leadOpen: true })}>
+                        <div className="cd-when"><div className="cd-time cd-time-lg">{e.time}</div></div>
+                        <div className="cd-b">
+                          <div className="cd-n cd-n-lg">{e.lead.name}</div>
+                          <div className="cd-a">{e.action}</div>
+                          {a && <div className="cd-agent"><span className={`av av-sm ${a.avatar} cd-av`}>{a.initials}</span><span>Assigned: <strong>{a.name}</strong></span></div>}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
           </div>
         </div>
         {events.length === 0 && <div style={{ maxWidth: 400, marginTop: 16 }}><Empty title="Nothing scheduled" sub="Set a follow-up from any lead." /></div>}
@@ -120,6 +163,7 @@ export default function Calendar({ store, go, topBar }) {
 }
 
 function parseKey(key) {
+  if (!key) return null
   const [y, m, d] = key.split('-').map(Number)
-  return new Date(y, m, d)
+  return new Date(y, m - 1, d)
 }

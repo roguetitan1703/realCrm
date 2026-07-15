@@ -46,6 +46,21 @@ export async function initSchema(): Promise<void> {
   console.log('[Supabase DB] ⚙️ Verifying PostgreSQL schema and DDL tables...');
   try {
     await sql`
+      CREATE TABLE IF NOT EXISTS tenants (
+        id TEXT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        slug VARCHAR(100) UNIQUE NOT NULL,
+        brand_config JSONB DEFAULT '{"primaryColor": "#1E6F52", "surfaceColor": "#F6F5F2", "city": "Pune"}'::jsonb,
+        enabled_modules JSONB DEFAULT '["leads", "properties", "team", "dialer", "import", "whatsapp"]'::jsonb,
+        subscription_plan VARCHAR(50) DEFAULT 'PRO',
+        subscription_status VARCHAR(50) DEFAULT 'ACTIVE',
+        usage_limits JSONB DEFAULT '{"max_agents": 25, "whatsapp_credits_limit": 10000, "whatsapp_credits_used": 0, "call_minutes_limit": 5000, "call_minutes_used": 0}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
+
+    await sql`
       CREATE TABLE IF NOT EXISTS crm_agents (
         id TEXT PRIMARY KEY,
         name TEXT,
@@ -71,6 +86,16 @@ export async function initSchema(): Promise<void> {
         config JSONB DEFAULT '{}'::jsonb,
         tenancy JSONB,
         timeline JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS crm_units (
+        id TEXT PRIMARY KEY,
+        property_id TEXT NOT NULL,
+        title TEXT,
+        data JSONB DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `;

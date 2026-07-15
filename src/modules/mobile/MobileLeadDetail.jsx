@@ -4,7 +4,7 @@ import { StageTag, StatusTag, Stepper, Timeline } from '../../components/primiti
 import { Scheduler } from '../../components/rail.jsx'
 import Icon from '../../components/Icon.jsx'
 import { budgetRange, thumbTint, unitLabel } from '../../lib/format.js'
-import { matchesForLead } from '../../data/seed.js'
+import { matchesForLead } from '../../lib/matching.js'
 import MobileSpeedDial from './MobileSpeedDial.jsx'
 
 function Sheet({ title, onClose, children }) {
@@ -45,6 +45,40 @@ export default function MobileLeadDetail({ store, me, id, back, open, tabs, moda
     ...matches.filter(m => !shortlistIds.includes(m.id)).map(m => ({ p: m, shortlisted: false })),
   ]
 
+  const [isEditing, setIsEditing] = useState(false)
+  const [form, setForm] = useState({ name: '', phone: '', config: '2BHK', deal: 'sale', budget: '', locality: '', source: 'Walk-in', notes: '' })
+
+  const startEditing = () => {
+    setForm({
+      name: l.name || '',
+      phone: l.phone || '',
+      config: l.req?.config || '2BHK',
+      deal: l.req?.deal || 'sale',
+      budget: l.req?.budget || '',
+      locality: l.req?.locality || '',
+      source: l.source || 'Walk-in',
+      notes: l.req?.notes || '',
+    })
+    setIsEditing(true)
+  }
+
+  const saveEditing = () => {
+    store.updateLead(l.id, {
+      name: form.name,
+      phone: form.phone,
+      source: form.source,
+      req: {
+        ...l.req,
+        config: form.config,
+        deal: form.deal,
+        budget: Number(form.budget) || l.req?.budget || 0,
+        locality: form.locality,
+        notes: form.notes,
+      }
+    })
+    setIsEditing(false)
+  }
+
   const top = (
     <MobileTopBar
       title={l.name}
@@ -56,9 +90,9 @@ export default function MobileLeadDetail({ store, me, id, back, open, tabs, moda
           <button
             className="btn btn-secondary btn-sm"
             style={{ padding: '4px 8px', fontSize: 11, background: 'rgba(255,255,255,.14)', color: '#fff', border: 'none' }}
-            onClick={() => store.openModal({ kind: 'editLead', leadId: l.id })}
+            onClick={isEditing ? () => setIsEditing(false) : startEditing}
           >
-            <Icon name="edit" size={13} />
+            <Icon name={isEditing ? 'x' : 'edit'} size={13} />
           </button>
         </div>
       }
@@ -73,6 +107,40 @@ export default function MobileLeadDetail({ store, me, id, back, open, tabs, moda
       modals={modals}
       fab={<MobileSpeedDial store={store} context={{ kind: 'lead', id: l.id, onSchedule: () => setSheet('schedule'), onStage: () => setSheet('stage') }} />}
     >
+      {isEditing ? (
+        <div style={{ background: 'var(--card)', padding: 16, borderRadius: 14, border: '1px solid var(--line)', marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Editing Lead Details</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Lead Name</label>
+              <input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={{ width: '100%' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Phone Number</label>
+              <input className="input" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={{ width: '100%' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Configuration</label>
+              <select className="input" value={form.config} onChange={e => setForm({ ...form, config: e.target.value })} style={{ width: '100%' }}>
+                {['1BHK', '2BHK', '3BHK', '4BHK+', 'Commercial', 'Plot'].map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Locality</label>
+              <input className="input" value={form.locality} onChange={e => setForm({ ...form, locality: e.target.value })} style={{ width: '100%' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Requirement Notes</label>
+              <textarea className="input" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} style={{ width: '100%' }} />
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setIsEditing(false)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={saveEditing}>Save changes</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* Top CTA Action Bar ("on the above side not at the bottom as the bottom nav will be there") */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '4px' }}>
         <button

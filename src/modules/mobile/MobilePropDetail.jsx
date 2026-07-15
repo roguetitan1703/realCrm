@@ -2,7 +2,7 @@ import { MobileShell, MobileTopBar } from '../../layouts/layouts.jsx'
 import { StatusTag, Quoted, KV } from '../../components/primitives.jsx'
 import Icon from '../../components/Icon.jsx'
 import { initials, thumbTint, quotedLine, propFacts, budgetRange } from '../../lib/format.js'
-import { leadsForProperty } from '../../data/seed.js'
+import { leadsForProperty } from '../../lib/matching.js'
 import MobileSpeedDial from './MobileSpeedDial.jsx'
 
 export default function MobilePropDetail({ store, id, back, tabs, modals }) {
@@ -10,6 +10,38 @@ export default function MobilePropDetail({ store, id, back, tabs, modals }) {
   if (!p) return <MobileShell framed top={<MobileTopBar title="Property" onBack={back} />} tabs={tabs} modals={modals}><div style={{ padding: 20 }}>Not found.</div></MobileShell>
 
   const buyers = leadsForProperty(p, store.state.leads)
+
+  const [isEditing, setIsEditing] = useState(false)
+  const [form, setForm] = useState({ society: '', locality: '', type: '2BHK', deal: 'sale', price: '', owner: '', status: 'Available' })
+
+  const startEditing = () => {
+    setForm({
+      society: p.society || '',
+      locality: p.locality || '',
+      type: p.type || '2BHK',
+      deal: p.deal || 'sale',
+      price: p.price || '',
+      owner: p.owner || '',
+      status: p.status || 'Available',
+    })
+    setIsEditing(true)
+  }
+
+  const saveEditing = () => {
+    let priceNum = Number(form.price)
+    if (isNaN(priceNum) || !priceNum) priceNum = p.price
+    store.updateProp(p.id, {
+      society: form.society,
+      locality: form.locality,
+      type: form.type,
+      deal: form.deal,
+      price: priceNum,
+      owner: form.owner,
+      status: form.status,
+    })
+    setIsEditing(false)
+  }
+
   const top = (
     <MobileTopBar
       title={p.society}
@@ -21,9 +53,9 @@ export default function MobilePropDetail({ store, id, back, tabs, modals }) {
           <button
             className="btn btn-secondary btn-sm"
             style={{ padding: '4px 8px', fontSize: 11, background: 'rgba(255,255,255,.14)', color: '#fff', border: 'none' }}
-            onClick={() => store.openModal({ kind: 'propStatus', propId: p.id })}
+            onClick={isEditing ? () => setIsEditing(false) : startEditing}
           >
-            <Icon name="edit" size={13} />
+            <Icon name={isEditing ? 'x' : 'edit'} size={13} />
           </button>
         </div>
       }
@@ -38,6 +70,46 @@ export default function MobilePropDetail({ store, id, back, tabs, modals }) {
       modals={modals}
       fab={<MobileSpeedDial store={store} context={{ kind: 'prop', id: p.id, owner: p.owner }} />}
     >
+      {isEditing ? (
+        <div style={{ background: 'var(--card)', padding: 16, borderRadius: 14, border: '1px solid var(--line)', marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Editing Property Details</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Society / Project</label>
+              <input className="input" value={form.society} onChange={e => setForm({ ...form, society: e.target.value })} style={{ width: '100%' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Locality</label>
+              <input className="input" value={form.locality} onChange={e => setForm({ ...form, locality: e.target.value })} style={{ width: '100%' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Configuration / Type</label>
+              <select className="input" value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={{ width: '100%' }}>
+                {['1BHK', '2BHK', '3BHK', '4BHK+', 'Commercial', 'Plot'].map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Price (₹)</label>
+              <input className="input" type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} style={{ width: '100%' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Listing Status</label>
+              <select className="input" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} style={{ width: '100%' }}>
+                {['Available', 'Under Offer', 'Sold', 'Let'].map(st => <option key={st} value={st}>{st}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Owner Name & Phone</label>
+              <input className="input" value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })} style={{ width: '100%' }} />
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setIsEditing(false)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={saveEditing}>Save changes</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* Top CTA Action Bar ("on the above side not at the bottom as the bottom nav will be there") */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '4px' }}>
         <button
@@ -87,7 +159,7 @@ export default function MobilePropDetail({ store, id, back, tabs, modals }) {
       <div className="m-sec-h">Highlights</div>
       <div className="m-detail-band">
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-          {p.features.map((f, i) => <span key={i} className="fit ok"><Icon name="check" size={11} />{f}</span>)}
+          {(p.features || p.highlights || []).map((f, i) => <span key={i} className="fit ok"><Icon name="check" size={11} />{f}</span>)}
         </div>
       </div>
 

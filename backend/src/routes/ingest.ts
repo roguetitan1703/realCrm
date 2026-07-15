@@ -12,14 +12,9 @@ import { Router, Request, Response } from 'express';
 import { WebhookIngestSchema } from '../models';
 import { queueManager } from '../services/queue';
 import { signWebhookPayload } from '../services/webhookSender';
-import { getLeads, createLead, addTimelineEvent, updateLead } from '../services/store';
+import { getLeads, createLead, addTimelineEvent, updateLead, getIntegrations, getRoutingRules, updateRoutingRules, getAgents } from '../services/store';
 
 export const ingestRouter = Router();
-
-const inMemoryTenants: Record<string, { secret: string; agents: string[]; lastAgentIdx: number }> = {
-  'bhumi-propcity': { secret: 'whsec_bhumi_prod_901', agents: ['a1', 'a2', 'a3'], lastAgentIdx: 0 },
-  'demo': { secret: 'whsec_demo_secret_123', agents: ['a1', 'a2'], lastAgentIdx: 0 }
-};
 
 /**
  * Register background worker for webhook ingestion processing
@@ -47,18 +42,18 @@ ingestRouter.post('/:tenantSlug/:sourceKey', async (req: Request, res: Response)
 
   console.log(`[Webhook Ingest] Received POST for tenant '${tenantSlug}', source '${sourceKey}'`);
 
-  const tenant = inMemoryTenants[tenantSlug];
-  if (!tenant) {
-    return res.status(404).json({ error: 'Tenant Not Found', message: `No active workspace found for slug '${tenantSlug}'` });
-  }
+  // 1. Fetch integration settings from PostgreSQL to verify webhook secret
+  const integrations = await getIntegrations();
+  const portalConfig = integrations[sourceKey] || integrations['99acres'] || {};
+  const tenantSecret = portalConfig.secret || 'whsec_bhumi_prod_901';
 
-  // 1. HMAC SHA-256 Webhook Security Verification
-  if (tenant.secret && tenant.secret !== 'whsec_demo_secret_123') {
+  // 2. HMAC SHA-256 Webhook Security Verification
+  if (tenantSecret) {
     if (!signature) {
       console.warn(`[Webhook Ingest] Rejected: Missing X-RealCRM-Signature header for '${tenantSlug}'`);
       return res.status(401).json({ error: 'Unauthorized', message: 'Missing X-RealCRM-Signature HMAC header' });
     }
-    const expectedSignature = signWebhookPayload(req.body, tenant.secret);
+    const expectedSignature = signWebhookPayload(req.body, tenantSecret);
     if (signature !== expectedSignature) {
       console.warn(`[Webhook Ingest] Rejected: Signature mismatch! Received '${signature}', expected '${expectedSignature}'`);
       return res.status(403).json({ error: 'Forbidden', message: 'HMAC signature verification failed. Payload may be tampered.' });
@@ -115,9 +110,12 @@ ingestRouter.post('/:tenantSlug/:sourceKey', async (req: Request, res: Response)
       });
     }
 
-    // 5. Round-Robin Lead Routing Rule & Create Lead in Server Store
-    tenant.lastAgentIdx = (tenant.lastAgentIdx + 1) % tenant.agents.length;
-    const assignedAgentId = tenant.agents[tenant.lastAgentIdx];
+    // 5. Round-Robin Lead Routing Rule from PostgreSQL Server Store
+    const rules = await getRoutingRules();
+    const activeAgents = (rules.active_agent_ids && rules.active_agent_ids.length > 0) ? rules.active_agent_ids : ['a1', 'a2', 'a3'];
+    const nextIdx = (rules.last_assigned_index + 1) % activeAgents.length;
+    const assignedAgentId = activeAgents[nextIdx];
+    await updateRoutingRules({ last_assigned_index: nextIdx });
 
     const newLead = await createLead({
       name: leadData.name,

@@ -19,20 +19,26 @@ export default function MobileMe({ store, me }) {
         {stat(mine.filter(l => l.stage === 'Site Visit' || l.stage === 'Closed Won').length, 'Visits')}
         {stat(mine.filter(l => l.stage === 'Closed Won').length, 'Closed')}
       </div>
-      <div className="m-sec-h">Account</div>
-      <button className="m-card" onClick={() => store.setRole('admin')}>
+      <div className="m-sec-h">Account & RBAC Access</div>
+      <button className="m-card" onClick={() => {
+        const nextRole = store.state.role === 'admin' ? 'agent' : 'admin'
+        store.setRole(nextRole)
+        store.toast(`Switched RBAC tier to: ${nextRole === 'admin' ? 'Owner / Admin' : 'Sales Agent'}`)
+      }}>
         <span className="av av-md" style={{ background: 'var(--chrome)' }}><Icon name="switch" size={16} /></span>
         <div className="m-c-main">
-          <div className="m-c-name">Switch to desktop</div>
-          <div className="m-c-sub">Full admin workspace</div>
+          <div className="m-c-name">{store.state.role === 'admin' ? 'Switch access: Sales Agent' : 'Switch access: Owner / Admin'}</div>
+          <div className="m-c-sub">{store.state.role === 'admin' ? 'Limited field agent permissions' : 'Full workspace admin permissions'}</div>
         </div>
         <Icon name="chevRight" size={18} style={{ color: 'var(--faint)' }} />
       </button>
-      <button className="m-card" onClick={() => store.resetDemo()}>
-        <span className="av av-md" style={{ background: 'var(--card-2)', color: 'var(--ink-2)', border: '1px solid var(--line)' }}><Icon name="refresh" size={16} /></span>
-        <div className="m-c-main"><div className="m-c-name">Reset demo data</div><div className="m-c-sub">Wipe to a clean slate</div></div>
-      </button>
-      <button className="m-card" onClick={() => store.toast('Signed out (demo)')}>
+      {store.state.role === 'admin' && (
+        <button className="m-card" onClick={() => store.resetDatabase()}>
+          <span className="av av-md" style={{ background: 'var(--card-2)', color: 'var(--ink-2)', border: '1px solid var(--line)' }}><Icon name="refresh" size={16} /></span>
+          <div className="m-c-main"><div className="m-c-name">Reset database state</div><div className="m-c-sub">Wipe to default baseline dataset</div></div>
+        </button>
+      )}
+      <button className="m-card" onClick={() => store.logout()}>
         <span className="av av-md" style={{ background: 'var(--card-2)', color: 'var(--muted)', border: '1px solid var(--line)' }}><Icon name="x" size={16} /></span>
         <div className="m-c-main"><div className="m-c-name">Sign out</div></div>
       </button>

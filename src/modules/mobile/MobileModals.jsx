@@ -4,7 +4,7 @@ import { Button, Field, Input, PhoneInput, Textarea, Segmented, Money } from '..
 import { WaCanvas } from '../../components/chrome.jsx'
 import { theme } from '../../data/theme.js'
 import { thumbTint, fitReasons } from '../../lib/format.js'
-import { matchesForLead, leadsForProperty } from '../../data/seed.js'
+import { matchesForLead, leadsForProperty } from '../../lib/matching.js'
 
 function Sheet({ title, onClose, children }) {
   return (
@@ -395,7 +395,7 @@ function MobileAttachProp({ store, leadId, onClose }) {
   const ql = q.trim().toLowerCase()
   const cands = store.state.properties
     .filter(p => !already.has(p.id) && p.deal === l.req.deal)
-    .filter(p => !ql || p.society.toLowerCase().includes(ql) || p.locality.toLowerCase().includes(ql) || p.type.toLowerCase().includes(ql))
+    .filter(p => !ql || (p.society || p.title || '').toLowerCase().includes(ql) || (p.locality || '').toLowerCase().includes(ql) || (p.type || '').toLowerCase().includes(ql))
   return (
     <Sheet title="Attach Property to Lead" onClose={onClose}>
       <div className="m-msearch" style={{ marginBottom: '12px', height: '40px', background: 'var(--card)', borderRadius: '20px', border: '1px solid var(--line)', padding: '0 14px', display: 'flex', alignItems: 'center', gap: '8px' }}>

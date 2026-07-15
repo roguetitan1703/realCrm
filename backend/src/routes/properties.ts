@@ -10,30 +10,51 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getProperties, createProperty } from '../services/store';
+import { getProperties, createProperty, getUnits, blockUnit, releaseUnit } from '../services/store';
 
 export const propertiesRouter = Router();
 propertiesRouter.use(requireTenantAuth);
 
 /**
+ * 1. GET ALL PROPERTIES FOR WORKSPACE
  * GET /api/v1/properties
  */
 propertiesRouter.get('/', async (req: Request, res: Response) => {
-  return res.status(200).json({
-    success: true,
-    data: await getProperties(),
-  });
+  try {
+    const { tower } = req.query;
+    let properties = await getProperties();
+
+    if (tower && typeof tower === 'string') {
+      properties = properties.filter(p => p.tower?.toUpperCase() === tower.toUpperCase());
+    }
+
+    return res.status(200).json({ success: true, count: properties.length, data: properties });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch properties', message: err.message });
+  }
 });
 
 /**
+ * 2. CREATE NEW PROPERTY INVENTORY ITEM
  * POST /api/v1/properties
  */
 propertiesRouter.post('/', async (req: Request, res: Response) => {
-  const newProp = await createProperty(req.body);
-  return res.status(201).json({
-    success: true,
-    data: newProp,
-  });
+  try {
+    const { title, type, locality, price, tower, unit, config } = req.body;
+    if (!title || !type) {
+      return res.status(400).json({ error: 'Validation Error', message: 'Title and type are required' });
+    }
+
+    const newProperty = await createProperty({
+      title, status: 'Available', type, locality: locality || 'Unknown',
+      price: price || 'Price on Request', tower: tower || 'A', unit: unit || '101',
+      config: config || {}, tenancy: null, timeline: [],
+    });
+
+    return res.status(201).json({ success: true, data: newProperty });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to create property', message: err.message });
+  }
 });
 
 /**
@@ -43,23 +64,15 @@ propertiesRouter.post('/', async (req: Request, res: Response) => {
 propertiesRouter.get('/:id/units', async (req: Request, res: Response) => {
   try {
     const propertyId = req.params.id;
-    const tenant = req.tenant!;
-
     console.log(`[Properties Router] Fetching inventory units for Project ${propertyId}`);
 
-    // Coded domain logic:
-    // SELECT * FROM module_records WHERE tenant_id = $1 AND module_key = 'units' AND parent_record_id = $2
-    const mockUnits = [
-      { id: 'unit_101', title: 'Tower A - 402', data: { type: '3 BHK', carpet_area_sqft: 1450, price: 18500000, floor: 4, status: 'Available' } },
-      { id: 'unit_102', title: 'Tower A - 403', data: { type: '3 BHK', carpet_area_sqft: 1450, price: 18500000, floor: 4, status: 'Blocked' } },
-      { id: 'unit_103', title: 'Tower A - 501', data: { type: '4 BHK Penthouse', carpet_area_sqft: 2400, price: 32000000, floor: 5, status: 'Sold' } },
-    ];
+    const units = await getUnits(propertyId);
 
     return res.status(200).json({
       success: true,
       property_id: propertyId,
-      units_count: mockUnits.length,
-      units: mockUnits,
+      units_count: units.length,
+      units,
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Fetch Units Failed', message: err.message });
@@ -77,25 +90,18 @@ propertiesRouter.post('/:id/units/:unitId/actions/block', async (req: Request, r
 
     console.log(`[Properties Router - Block Unit] Attempting to block Unit ${unitId} for buyer ${buyer_name}`);
 
-    // Coded domain safety check:
-    // BEGIN TRANSACTION;
-    // SELECT data->>'status' FROM module_records WHERE id = unitId FOR UPDATE;
-    // If status != 'Available' -> ROLLBACK and return 409 Conflict!
-    // Else -> UPDATE module_records SET data = jsonb_set(data, '{status}', '"Blocked"') WHERE id = unitId;
-    // COMMIT;
-
-    const mockIsAvailable = true;
-    if (!mockIsAvailable) {
+    const result = await blockUnit(unitId, buyer_name || 'Anonymous Buyer', block_duration_hours);
+    if (!result.success) {
       return res.status(409).json({
-        error: 'Double-Booking Conflict',
-        message: 'This unit was just blocked or sold by another sales agent!',
+        error: result.error || 'Double-Booking Conflict',
+        message: result.message || 'This unit was just blocked or sold by another sales agent!',
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: `Unit ${unitId} successfully blocked for ${block_duration_hours} hours.`,
-      blocked_until: new Date(Date.now() + block_duration_hours * 3600 * 1000),
+      message: result.message,
+      blocked_until: result.blocked_until,
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Block Unit Failed', message: err.message });
@@ -111,9 +117,14 @@ propertiesRouter.post('/:id/units/:unitId/actions/release', async (req: Request,
     const { unitId } = req.params;
     console.log(`[Properties Router - Release Unit] Releasing Unit ${unitId} back to Available`);
 
+    const result = await releaseUnit(unitId);
+    if (!result.success) {
+      return res.status(404).json({ error: 'Release Unit Failed', message: result.error });
+    }
+
     return res.status(200).json({
       success: true,
-      message: `Unit ${unitId} status reverted to Available.`,
+      message: result.message,
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Release Unit Failed', message: err.message });

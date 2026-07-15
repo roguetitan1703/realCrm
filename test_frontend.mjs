@@ -56,6 +56,46 @@ async function runFrontendTests() {
   console.log('🚀 STARTING MASTER FRONTEND TEST SUITE FOR BHUMI PROPCITY CRM');
   console.log('============================================================================');
 
+  // 0. Start Express + PostgreSQL Backend Server on port 5000
+  console.log('[Backend Server] Starting Express backend on port 5000...');
+  const backendProcess = spawn('npx', ['tsx', 'backend/src/index.ts'], {
+    stdio: 'pipe',
+    shell: true,
+    env: { ...process.env, PORT: '5000', FORCE_COLOR: '0' }
+  });
+
+  try {
+    await waitForServer('http://localhost:5000/health', 25000);
+    console.log('[Backend Server] Ready at http://localhost:5000/health');
+
+    const postJson = (url, data) => new Promise((resolve) => {
+      const u = new URL(url);
+      const req = http.request({
+        hostname: u.hostname,
+        port: u.port || 5000,
+        path: u.pathname,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'bhumi-propcity' }
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => resolve(body));
+      });
+      req.on('error', () => resolve(null));
+      if (data) req.write(JSON.stringify(data));
+      req.end();
+    });
+
+    console.log('[Backend Server] Resetting database to clean default state...');
+    await postJson('http://localhost:5000/api/v1/workspace/reset');
+    console.log('[Backend Server] Seeding test lead and property into Supabase...');
+    await postJson('http://localhost:5000/api/v1/leads', { name: 'Rahul Kolte', phone: '+91 98220 63914', agentId: 'a1', stage: 'New', req: { config: '2BHK', locality: 'Wakad', budget: 8500000, deal: 'sale' }, source: 'Referral' });
+    await postJson('http://localhost:5000/api/v1/properties', { title: 'Tower A 2BHK Premium Unit', society: 'Megapolis Sunway Tower A', locality: 'Wakad', price: '85L', type: '2BHK', config: '2BHK', deal: 'sale', status: 'Available', tower: 'A', unit: '101', highlights: ['Corner unit', 'Modular kitchen included'] });
+    console.log('[Backend Server] Seeding complete.');
+  } catch (err) {
+    console.warn('[Backend Server] Notice: Could not connect to backend server within timeout:', err.message);
+  }
+
   // 1. Start Vite dev server on PORT
   console.log(`[Vite Server] Starting dev server on port ${PORT}...`);
   const viteProcess = spawn('npx', ['vite', '--port', PORT.toString(), '--no-open'], {
@@ -64,13 +104,8 @@ async function runFrontendTests() {
     env: { ...process.env, FORCE_COLOR: '0' }
   });
 
-  viteProcess.stdout.on('data', (data) => {
-    // console.log(`[Vite]: ${data.toString().trim()}`);
-  });
-
-  viteProcess.stderr.on('data', (data) => {
-    // console.error(`[Vite Error]: ${data.toString().trim()}`);
-  });
+  viteProcess.stdout.on('data', (data) => {});
+  viteProcess.stderr.on('data', (data) => {});
 
   let browser;
   try {
@@ -142,6 +177,7 @@ async function runFrontendTests() {
 
       await page.goto(`${BASE_URL}/?demo&role=admin&screen=leads`);
       await page.waitForSelector('.fbar', { timeout: 5000 });
+      await page.waitForSelector('table tbody tr', { timeout: 10000 });
 
       // Test Search Input
       const searchInput = page.locator('.fbar .f-search input');
@@ -200,6 +236,7 @@ async function runFrontendTests() {
       // Click 'Leads' tab in mobile bottom tabbar to switch to mobile leads screen
       await page.locator('.tabbar a').nth(1).click();
       await page.waitForSelector('.m-msearch', { timeout: 5000 });
+      await page.waitForSelector('.m-card', { timeout: 10000 });
 
       // Check Mobile Search Box exists and filter by 'Rahul'
       const mobileSearchInput = page.locator('.m-msearch input');
@@ -237,6 +274,10 @@ async function runFrontendTests() {
     if (viteProcess) {
       viteProcess.kill('SIGTERM');
       console.log('[Vite Server] Stopped dev server.');
+    }
+    if (backendProcess) {
+      backendProcess.kill('SIGTERM');
+      console.log('[Backend Server] Stopped backend server.');
     }
   }
 

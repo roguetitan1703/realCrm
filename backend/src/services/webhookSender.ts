@@ -15,9 +15,10 @@ import { queueManager } from './queue';
 /**
  * Compute HMAC SHA-256 hex signature for outgoing payload
  */
-export function signWebhookPayload(payloadStr: string, secret: string): string {
+export function signWebhookPayload(payloadStr: string | Record<string, any>, secret: string): string {
   if (!secret) return '';
-  return crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
+  const str = typeof payloadStr === 'string' ? payloadStr : JSON.stringify(payloadStr);
+  return crypto.createHmac('sha256', secret).update(str).digest('hex');
 }
 
 /**

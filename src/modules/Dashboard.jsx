@@ -10,7 +10,7 @@ export default function Dashboard({ store, go, topBar }) {
   const active = leads.filter(l => !l.stage.startsWith('Closed'))
   const overdue = leads.filter(l => l.overdue)
   const unassigned = leads.filter(l => !l.agentId)
-  const newToday = leads.filter(l => l.minsAgo < 1440)
+  const newToday = leads.filter(l => l.stage === 'New' || l.minsAgo < 180)
   const visits = leads.filter(l => l.stage === 'Site Visit')
 
   const toLeads = (leadFilter) => go('leads', { leadFilter, leadOpen: false, leadId: undefined })
@@ -73,14 +73,14 @@ export default function Dashboard({ store, go, topBar }) {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1.75fr 1fr', gap: 16, alignItems: 'start' }}>
-          {/* leaderboard — click an agent to open their book (Team) */}
+          {/* agent leaderboard */}
           <Panel>
-            <SectionHead title="Agent leaderboard" right="click to view book" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1.7fr repeat(4,1fr)', fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em', paddingBottom: 9, borderBottom: '1px solid var(--line)' }}>
+            <SectionHead title={state.role === 'agent' ? 'My Performance' : 'Agent performance'} />
+            <div className="lb-h">
               <div>Agent</div><div style={{ textAlign: 'center' }}>Assigned</div><div style={{ textAlign: 'center' }}>Contacted</div><div style={{ textAlign: 'center' }}>Visits</div><div style={{ textAlign: 'center' }}>Closed</div>
             </div>
-            {lb.map(r => (
-              <button key={r.a.id} className="lb-row" onClick={() => go('team')}>
+            {(state.role === 'agent' ? lb.filter(r => r.a.id === state.activeAgentId) : lb).map(r => (
+              <button key={r.a.id} className="lb-row" onClick={() => go('leads', { agentFilter: r.a.id })}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}><Avatar agent={r.a} size="sm" /><span style={{ fontWeight: 600 }}>{r.a.first}</span></div>
                 <div style={{ textAlign: 'center', fontWeight: 600 }} className="mono-num">{r.assigned}</div>
                 <div style={{ textAlign: 'center', fontWeight: 600 }} className="mono-num">{r.contacted}</div>

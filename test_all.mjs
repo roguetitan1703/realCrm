@@ -64,7 +64,7 @@ async function runTests() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          firmName: 'Bhumi Propcity Demo',
+          firmName: 'Bhumi Propcity Live',
           city: 'Pune',
           slug: 'bhumi-propcity',
           adminName: 'Tenant Owner',
@@ -118,8 +118,8 @@ async function runTests() {
         custom_attributes: { project_name: 'Megapolis Sunway', config: '3 BHK', budget: '1.2 Cr' }
       });
 
-      // Sign with demo secret 'whsec_demo_secret_123'
-      const signature = crypto.createHmac('sha256', 'whsec_demo_secret_123').update(payload).digest('hex');
+      // Sign with live secret 'whsec_99acres_live_882'
+      const signature = crypto.createHmac('sha256', 'whsec_99acres_live_882').update(payload).digest('hex');
 
       const res = await fetch(`${BASE_URL}/ingest/demo/99acres`, {
         method: 'POST',
@@ -144,7 +144,7 @@ async function runTests() {
         email: 'rahul@example.com',
         custom_attributes: { project_name: 'Megapolis Sunway', config: '3 BHK', budget: '1.2 Cr' }
       });
-      const signature2 = crypto.createHmac('sha256', 'whsec_demo_secret_123').update(payload2).digest('hex');
+      const signature2 = crypto.createHmac('sha256', 'whsec_99acres_live_882').update(payload2).digest('hex');
 
       const res2 = await fetch(`${BASE_URL}/ingest/demo/99acres`, {
         method: 'POST',
@@ -234,7 +234,7 @@ async function runTests() {
     });
 
     // ------------------------------------------------------------------------
-    // Test 9: Workspace State Hydration & Server Demo Seeding
+    // Test 9: Workspace State Hydration & Server Default Seeding
     // ------------------------------------------------------------------------
     await test('GET /api/v1/workspace/state & POST /api/v1/workspace/reset', async () => {
       const stateRes = await fetch(`${BASE_URL}/workspace/state`, {

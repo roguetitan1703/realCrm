@@ -38,16 +38,16 @@ export default function MobileLeads({ store, me, open }) {
     if (q.trim()) {
       const s = q.trim().toLowerCase()
       list = list.filter(l =>
-        l.name.toLowerCase().includes(s) ||
-        l.req.locality.toLowerCase().includes(s) ||
-        l.phone.includes(s) ||
-        l.req.config.toLowerCase().includes(s)
+        (l.name || '').toLowerCase().includes(s) ||
+        (l.req?.locality || '').toLowerCase().includes(s) ||
+        (l.phone || '').includes(s) ||
+        (l.req?.config || '').toLowerCase().includes(s)
       )
     }
 
     list.sort((a, b) => {
-      if (sort === 'name') return a.name.localeCompare(b.name)
-      if (sort === 'stage') return a.stage.localeCompare(b.stage)
+      if (sort === 'name') return (a.name || '').localeCompare(b.name || '')
+      if (sort === 'stage') return (a.stage || '').localeCompare(b.stage || '')
       if (sort === 'budget') {
         const bgA = (a.req.budgetMax || 0)
         const bgB = (b.req.budgetMax || 0)

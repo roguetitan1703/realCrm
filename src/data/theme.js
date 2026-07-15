@@ -21,7 +21,10 @@ export const theme = {
   statusClass: {
     Available: 'status-available',
     'Under offer': 'status-offer',
+    'Under Offer': 'status-offer',
     Closed: 'status-closed',
+    Sold: 'status-closed',
+    Let: 'status-closed',
   },
   sources: ['99acres', 'MagicBricks', 'Walk-in', 'Referral', 'Website'],
 }

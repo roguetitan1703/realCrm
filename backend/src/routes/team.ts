@@ -9,7 +9,8 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getAgents, getRoutingRules, updateRoutingRules } from '../services/store';
+import { getAgents, getRoutingRules, updateRoutingRules, getAgentPerformance } from '../services/store';
+import { sql } from '../services/db';
 
 export const teamRouter = Router();
 teamRouter.use(requireTenantAuth);
@@ -23,6 +24,27 @@ teamRouter.get('/roster', async (req: Request, res: Response) => {
     success: true,
     agents: await getAgents(),
   });
+});
+
+/**
+ * POST /api/v1/team/roster
+ * Add a new sales agent team member
+ */
+teamRouter.post('/roster', async (req: Request, res: Response) => {
+  try {
+    const { name, role } = req.body;
+    const id = `a_${Date.now().toString(36)}`;
+    const initials = (name || 'New Agent').split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
+    const meta = { initials, avatar: '' };
+    await sql`
+      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata)
+      VALUES (${id}, ${name || 'New Agent'}, ${name ? name.split(' ')[0] : 'New'}, ${initials}, '', ${role || 'agent'}, 'ACTIVE', ${sql.json(meta)})
+    `;
+    const agents = await getAgents();
+    return res.status(201).json({ success: true, agents, newAgentId: id });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to add agent', message: err.message });
+  }
 });
 
 /**
@@ -58,7 +80,8 @@ teamRouter.patch('/users/:id/duty-status', async (req: Request, res: Response) =
     const userId = req.params.id;
     const { status } = req.body; // 'ACTIVE' vs 'OFF_DUTY' vs 'ON_LEAVE'
 
-    console.log(`[Team Router - Duty Status] Updating Agent ${userId} -> ${status}`);
+    await sql`UPDATE crm_agents SET duty_status = ${status} WHERE id = ${userId}`;
+    console.log(`[Team Router - Duty Status] Updated Agent ${userId} -> ${status} in PostgreSQL`);
 
     return res.status(200).json({
       success: true,
@@ -78,20 +101,11 @@ teamRouter.patch('/users/:id/duty-status', async (req: Request, res: Response) =
 teamRouter.get('/users/:id/performance', async (req: Request, res: Response) => {
   try {
     const userId = req.params.id;
-    const mockMetrics = {
-      user_id: userId,
-      period: 'last_30_days',
-      total_outbound_calls: 142,
-      total_talk_time_minutes: 684,
-      site_visits_done: 18,
-      closed_won_deals: 4,
-      pipeline_revenue_closed: 74000000,
-      visit_conversion_rate_percentage: 22.2,
-    };
+    const metrics = await getAgentPerformance(userId);
 
     return res.status(200).json({
       success: true,
-      metrics: mockMetrics,
+      metrics,
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Performance Calculation Failed', message: err.message });
@@ -107,12 +121,15 @@ teamRouter.post('/users/:id/reassign-leads', async (req: Request, res: Response)
     const fromUserId = req.params.id;
     const { to_user_id } = req.body;
 
+    const resSql = await sql`UPDATE crm_leads SET assigned_agent_id = ${to_user_id} WHERE assigned_agent_id = ${fromUserId} RETURNING id`;
+    const count = resSql.length;
+
     return res.status(200).json({
       success: true,
       message: 'Successfully reassigned open leads to new sales agent.',
       from_user_id: fromUserId,
       to_user_id,
-      reassigned_count: 14,
+      reassigned_count: count,
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Bulk Reassignment Failed', message: err.message });

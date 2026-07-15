@@ -73,7 +73,11 @@ export function Quoted({ q }) {
 
 export function Avatar({ agent, size = 'md', empty }) {
   if (empty || !agent) return <span className={`av av-${size} av-empty`}>?</span>
-  return <span className={`av av-${size} ${agent.avatar}`}>{agent.initials}</span>
+  const avatarVal = agent.avatar || ''
+  const isColor = avatarVal.startsWith('#') || avatarVal.startsWith('rgb') || avatarVal.startsWith('hsl')
+  const cls = isColor || !avatarVal ? `av av-${size} av-a1` : `av av-${size} ${avatarVal}`
+  const style = isColor ? { background: avatarVal, color: '#fff' } : undefined
+  return <span className={cls} style={style}>{agent.initials || 'A'}</span>
 }
 
 export function Fit({ ok, children }) {
@@ -110,10 +114,11 @@ export function Panel({ children, style }) { return <div className="panel" style
 export function SectionHead({ title, right }) {
   return <div className="sh"><span className="t">{title}</span>{right && <span className="r">{right}</span>}</div>
 }
-export function KV({ items }) {
+export function KV({ items, rows }) {
+  const list = items || rows || []
   return (
     <div className="kv">
-      {items.map((it, i) => (
+      {list.map((it, i) => (
         <div key={i}><div className="k">{it.k}</div><div className="v">{it.v}</div></div>
       ))}
     </div>
@@ -123,15 +128,66 @@ export function Progress({ pct }) { return <div className="bar"><i style={{ widt
 
 // ---- KPI tile (clickable → drills into the underlying list) ----
 export function Kpi({ icon, label, value, sub, alert, onClick }) {
-  const cls = 'kpi' + (alert ? ' alert' : '') + (onClick ? ' clickable' : '')
+  const isClickable = Boolean(onClick && value !== 0 && value !== '0')
+  const cls = 'kpi' + (alert ? ' alert' : '') + (isClickable ? ' clickable' : '')
   const inner = <>
-    <div className="k-top"><span className="k-ic"><Icon name={icon} /></span><span className="k-l">{label}</span>{onClick && <Icon name="arrowRight" size={15} className="ic k-go" />}</div>
+    <div className="k-top"><span className="k-ic"><Icon name={icon} /></span><span className="k-l">{label}</span>{isClickable && <Icon name="arrowRight" size={15} className="ic k-go" />}</div>
     <div className="k-v">{value}</div>
     <div className="k-s">{sub}</div>
   </>
-  return onClick
+  return isClickable
     ? <button className={cls} onClick={onClick}>{inner}</button>
-    : <div className={cls}>{inner}</div>
+    : <div className={cls} style={{ cursor: 'default' }}>{inner}</div>
+}
+
+// ---- PageHeader: lean in-page strip under the breadcrumb ----
+// Left: inline KPI stats the MODULE supplies. Right: optional scope segments.
+// kpis: [{ label, value, tone?: 'alert'|'accent', onClick? }]
+// segments: [{ key, label, count, on, onClick }]  (scope selector, NOT a filter)
+export function PageHeader({ kpis = [], segments, right }) {
+  if (!kpis.length && !segments && !right) return null
+  return (
+    <div className="pagehead">
+      {kpis.length > 0 && (
+        <div className="ph-stats">
+          {kpis.map((k, i) => {
+            const clickable = Boolean(k.onClick)
+            const cls = 'ph-stat' + (k.tone ? ' ' + k.tone : '') + (clickable ? ' clickable' : '')
+            const inner = <><span className="ph-v">{k.value}</span><span className="ph-l">{k.label}</span></>
+            return clickable
+              ? <button key={i} className={cls} onClick={k.onClick}>{inner}</button>
+              : <div key={i} className={cls}>{inner}</div>
+          })}
+        </div>
+      )}
+      <div className="u-spring" />
+      {segments && <SegmentPills segments={segments} />}
+      {right}
+    </div>
+  )
+}
+
+// ---- SegmentPills: scope selector (All / Buyers / Tenants …) ----
+export function SegmentPills({ segments = [] }) {
+  return (
+    <div className="segpills">
+      {segments.map(s => (
+        <button key={s.key} className={'segpill' + (s.on ? ' on' : '')} onClick={s.onClick}>
+          {s.label}{s.count != null && <span className="segpill-c">{s.count}</span>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ---- ViewSwitch: grid ↔ list toggle (shared by every module) ----
+export function ViewSwitch({ value, onChange }) {
+  return (
+    <div className="viewsw">
+      <button className={value === 'grid' ? 'on' : ''} title="Grid" onClick={() => onChange('grid')}><Icon name="grid" /></button>
+      <button className={value === 'list' ? 'on' : ''} title="List" onClick={() => onChange('list')}><Icon name="leads" /></button>
+    </div>
+  )
 }
 
 // ---- Empty state ----
@@ -160,16 +216,19 @@ export function Stepper({ stages, current, onPick }) {
 }
 
 // ---- Timeline ----
-export function Timeline({ events }) {
+export function Timeline({ events = [] }) {
+  const list = events || [];
+  const agentMap = { a1: 'Rakesh Sethi', a2: 'Neha Verma', a3: 'Rohan Mehta', a4: 'Ananya Sharma' };
+  const fmtLabel = (txt) => (txt || '').replace(/\bagent (a\d+)\b/gi, (m, id) => agentMap[id.toLowerCase()] || id);
   return (
     <div className="tl">
-      {events.map((e, i) => (
+      {list.map((e, i) => (
         <div className="ev" key={i}>
           <div className="rail-dot">
             <span className={'d' + (e.type === 'stage' || e.type === 'follow' || e.type === 'msg' ? ' accent' : '')} />
-            {i < events.length - 1 && <span className="ln" />}
+            {i < list.length - 1 && <span className="ln" />}
           </div>
-          <div className="ev-b"><div className="ev-l">{e.label}</div><div className="ev-a">{e.ago}</div></div>
+          <div className="ev-b"><div className="ev-l">{fmtLabel(e.label)}</div><div className="ev-a">{e.ago}</div></div>
         </div>
       ))}
     </div>

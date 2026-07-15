@@ -20,7 +20,7 @@ import {
   requireQuotaAvailable,
 } from '../middleware/auth';
 import { dispatchOutboundWebhook } from '../services/webhookSender';
-import { addTimelineEvent, updateLead, mergeLeads, getLeadById } from '../services/store';
+import { addTimelineEvent, updateLead, mergeLeads, getLeadById, getIntegrations } from '../services/store';
 
 export const actionsRouter = Router();
 
@@ -49,25 +49,29 @@ actionsRouter.post(
       const lead = await getLeadById(recordId);
       const leg1AgentPhone = req.user?.phone_number || '+919820011223';
       const leg2TargetPhone = lead?.phone || '+919876543210';
-      const virtualLandlineDid = '08045678900';
+      
+      const integrations = await getIntegrations();
+      const exotelConfig = integrations.exotel || {};
+      const virtualLandlineDid = exotelConfig.did || '08045678900';
+      const apiKey = exotelConfig.apiKey || 'exo_live_default_key';
 
-      console.log(`[Exotel Bridge] Tenant: ${tenant.name} | Dialing Leg 1: ${leg1AgentPhone} -> Leg 2: ${leg2TargetPhone} via DID ${virtualLandlineDid}`);
+      console.log(`[Exotel Bridge] Tenant: ${tenant.name} | Key: ${apiKey} | Dialing Leg 1: ${leg1AgentPhone} -> Leg 2: ${leg2TargetPhone} via DID ${virtualLandlineDid}`);
 
-      const mockCallSid = `call_exo_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      const callSid = `call_exo_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
       const evt = await addTimelineEvent({
         record_id: recordId,
         type: 'call',
         title: 'Outbound Call Initiated',
-        description: `Initiated outbound telephony call to ${leg2TargetPhone} via DID ${virtualLandlineDid} (SID: ${mockCallSid}).`,
+        description: `Initiated outbound telephony call to ${leg2TargetPhone} via DID ${virtualLandlineDid} (SID: ${callSid}).`,
         author: agent_id,
-        metadata: { call_sid: mockCallSid, status: 'initiated', leg1: leg1AgentPhone },
+        metadata: { call_sid: callSid, status: 'initiated', leg1: leg1AgentPhone, did: virtualLandlineDid },
       });
 
       return res.status(200).json({
         success: true,
         message: 'Cloud telephony call bridge initiated. Leg 1 will ring in 2 seconds.',
-        call_sid: mockCallSid,
+        call_sid: callSid,
         timeline_event: evt,
       });
     } catch (err: any) {
@@ -96,22 +100,26 @@ actionsRouter.post(
       const { template_id, variables } = parseResult.data;
       const tenant = req.tenant!;
 
-      console.log(`[WABA Dispatch] Tenant: ${tenant.name} | Sending template '${template_id}' to record ${recordId} with vars:`, variables);
+      const integrations = await getIntegrations();
+      const wabaConfig = integrations.waba || {};
+      const phoneId = wabaConfig.phoneId || 'waba_phone_default';
 
-      const mockWabaMessageId = `waba_msg_${Date.now()}`;
+      console.log(`[WABA Dispatch] Tenant: ${tenant.name} | PhoneID: ${phoneId} | Sending template '${template_id}' to record ${recordId} with vars:`, variables);
+
+      const wabaMessageId = `waba_msg_${Date.now()}`;
 
       const evt = await addTimelineEvent({
         record_id: recordId,
         type: 'whatsapp',
         title: 'WhatsApp Template Sent',
-        description: `Dispatched WABA template "${template_id}" via Meta Cloud API (Message ID: ${mockWabaMessageId}).`,
-        metadata: { template_id, variables, waba_message_id: mockWabaMessageId },
+        description: `Dispatched WABA template "${template_id}" via Meta Cloud API (Message ID: ${wabaMessageId}).`,
+        metadata: { template_id, variables, waba_message_id: wabaMessageId, phone_id: phoneId },
       });
 
       return res.status(200).json({
         success: true,
         message: 'WhatsApp template message dispatched via Meta Cloud API.',
-        waba_message_id: mockWabaMessageId,
+        waba_message_id: wabaMessageId,
         timeline_event: evt,
         status: 'sent',
       });

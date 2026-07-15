@@ -40,6 +40,7 @@ const P = {
   switch: 'M5 2h14v20H5zM12 18h.01',
   filter: 'M22 3H2l8 9.5V19l4 2v-8.5L22 3z',
   chevLeft: 'M15 18l-6-6 6-6',
+  trash: 'M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6',
 }
 
 export default function Icon({ name, size = 16, className = 'ic', fill = false, ...rest }) {

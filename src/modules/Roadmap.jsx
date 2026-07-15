@@ -2,15 +2,16 @@ import Icon from '../components/Icon.jsx'
 
 const LIVE = [
   ['Lead capture & routing', 'New leads land, auto-tag by source, round-robin to agents — out of Excel, into one system.'],
-  ['Requirement → property matching', 'Every buyer matched to your live inventory with a plain-language fit reason.'],
-  ['WhatsApp message generator', 'Broker-voice messages in Hinglish, English & Marathi — the format your market already trusts.'],
+  ['Requirement → property matching', 'Every buyer matched to your live inventory with weighted scoring across budget, locality, config & amenities.'],
+  ['WhatsApp message generator & WABA', 'Broker-voice messages in Hinglish, English & Marathi with Meta WhatsApp Business API integration.'],
+  ['Portal & telephony integrations', '99acres / MagicBricks webhook import, Exotel 2-leg telephony click-to-call and SMS bridge.'],
   ['Agent management & handover', "Reassign an agent's whole pipeline in one action. No client is ever lost."],
-  ['Site-visit calendar & reminders', 'Every visit and follow-up in one agenda, with native nudges.'],
+  ['Site-visit calendar & reminders', 'Every visit and follow-up in one agenda, with native nudges and ISO date support.'],
 ]
 const NEXT = [
-  ['Deeper matching intelligence', 'Weighted scoring across budget, locality, config, possession & amenities.'],
-  ['Renewal & repeat-business engine', 'Auto-nudge to re-approach past clients at the right time.'],
-  ['Portal & telephony integrations', '99acres / MagicBricks import, click-to-call and SMS from your number.'],
+  ['AI Inbound Voice Qualifier', 'Automated conversational qualification for after-hours buyer inquiries.'],
+  ['RERA Document OCR Auto-Check', 'Automatic verification of title deeds and project RERA registrations.'],
+  ['Renewal & repeat-business engine', 'Auto-nudge to re-approach past clients and lease renewals at the right time.'],
 ]
 const LATER = [
   ['Deal value, commission & finance', 'Booking value, commission splits and payouts — integrate, not bolt-on.'],

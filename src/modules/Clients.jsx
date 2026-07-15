@@ -1,15 +1,11 @@
 import { useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
-import { FilterBar, SortControl, Table } from '../components/collections.jsx'
-import { StageTag, StatusTag, Avatar, CountBadge } from '../components/primitives.jsx'
+import { ModuleListView, ModuleCards, ModuleTable } from '../components/collections.jsx'
+import { ModuleDetail } from '../components/ModuleDetail.jsx'
+import { StageTag, StatusTag, Avatar, Button, KV } from '../components/primitives.jsx'
 import { initials, reqLine, budgetRange } from '../lib/format.js'
+import { CLIENTS_DEF } from './definitions.jsx'
 
-const SORT_OPTS = { name: 'Name', role: 'Role', activity: 'Recent' }
-const LOCALITIES = ['Wakad', 'Baner', 'Kothrud', 'Hinjewadi', 'Viman Nagar', 'Kalyani Nagar', 'Wagholi']
-
-// Clients = one directory of everyone the firm deals with (buyers, tenants,
-// sellers, landlords). Renders through the SAME ListLayout + Table primitive as
-// Leads — role is a segment tab, not a bespoke view.
 export default function Clients({ store, go, topBar }) {
   const { state } = store
   const [seg, setSeg] = useState('all')
@@ -17,36 +13,66 @@ export default function Clients({ store, go, topBar }) {
   const [q, setQ] = useState('')
   const [sortKey, setSortKey] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
+  const [view, setView] = useState('list')
+  const [selClient, setSelClient] = useState(null)
 
   // build a uniform contact list
   const rows = []
   state.leads.forEach(l => rows.push({
-    id: 'lead-' + l.id, kind: 'demand', role: l.req.deal === 'rent' ? 'Tenant' : 'Buyer',
-    name: l.name, phone: l.phone, locality: l.req.locality, minsAgo: l.minsAgo,
-    detail: `${l.req.config} · ${l.req.locality} · ${budgetRange(l.req)}`,
+    id: 'lead-' + l.id,
+    kind: 'demand',
+    role: l.req?.deal === 'rent' ? 'Tenant' : 'Buyer',
+    name: l.name,
+    phone: l.phone,
+    email: l.email || '',
+    locality: l.req?.locality || 'Pune',
+    minsAgo: l.minsAgo,
+    rawLeadId: l.id,
+    rawLead: l,
+    detail: `${l.req?.config || 'Any'} · ${l.req?.locality || 'Pune'} · ${budgetRange(l.req)}`,
     signal: <StageTag stage={l.stage} />,
-    onClick: () => go('leads', { leadId: l.id, leadOpen: true }),
   }))
+
   const owners = {}
   state.properties.forEach(p => {
-    const o = (owners[p.owner] = owners[p.owner] || { name: p.owner, props: [] })
+    const ownerKey = p.owner || 'Unnamed Owner'
+    const o = (owners[ownerKey] = owners[ownerKey] || { name: ownerKey, props: [] })
     o.props.push(p)
   })
+
   Object.values(owners).forEach(o => {
-    const hasRent = o.props.some(p => p.deal === 'rent'), hasSale = o.props.some(p => p.deal === 'sale')
-    const role = hasRent && !hasSale ? 'Landlord' : hasSale && !hasRent ? 'Seller' : 'Owner'
-    const locs = [...new Set(o.props.map(p => p.locality))]
-    const anyAvail = o.props.some(p => p.status === 'Available')
+    const p = o.props[0]
+    const hasSale = o.props.some(x => x.deal === 'sale')
+    const hasRent = o.props.some(x => x.deal === 'rent')
+    const role = hasSale && hasRent ? 'Seller / Landlord' : hasRent ? 'Landlord' : 'Seller'
     rows.push({
-      id: 'owner-' + o.name, kind: 'supply', role,
-      name: o.name, phone: store.demoPhone(o.name), locality: locs[0], minsAgo: 999999,
-      detail: `${o.props.length} listing${o.props.length > 1 ? 's' : ''} · ${locs.join(', ')}`,
-      signal: <StatusTag status={anyAvail ? 'Available' : 'Closed'} />,
-      onClick: () => go('properties', { propId: o.props[0].id, propOpen: true }),
+      id: 'owner-' + o.name.replace(/\s+/g, '-'),
+      kind: 'supply',
+      role,
+      name: o.name,
+      phone: p.ownerPhone || '+91 —',
+      email: p.ownerEmail || '',
+      locality: p.locality || 'Pune',
+      minsAgo: 120,
+      rawProps: o.props,
+      detail: o.props.length === 1
+        ? `1 listing · ${p.society} (${p.type})`
+        : `${o.props.length} listings across ${[...new Set(o.props.map(x => x.locality))].join(', ')}`,
+      signal: <StatusTag status="Active owner" />,
     })
   })
 
-  const roleGroup = (role) => role === 'Owner' ? ['Seller', 'Landlord'] : [role]
+  rows.forEach(r => {
+    r.onClick = () => setSelClient(r)
+  })
+
+  const roleMatch = (rRole, segKey) => {
+    if (segKey === 'all') return true
+    if (segKey === 'Seller') return rRole === 'Seller' || rRole === 'Seller / Landlord'
+    if (segKey === 'Landlord') return rRole === 'Landlord' || rRole === 'Seller / Landlord'
+    return rRole === segKey
+  }
+
   const segs = [
     { key: 'all', label: 'All' },
     { key: 'Buyer', label: 'Buyers' },
@@ -54,63 +80,87 @@ export default function Clients({ store, go, topBar }) {
     { key: 'Seller', label: 'Sellers' },
     { key: 'Landlord', label: 'Landlords' },
   ].map(s => ({
-    ...s, on: seg === s.key,
-    count: s.key === 'all' ? rows.length : rows.filter(r => roleGroup(r.role).includes(s.key)).length,
+    ...s,
+    on: seg === s.key,
+    count: s.key === 'all' ? rows.length : rows.filter(r => roleMatch(r.role, s.key)).length,
     onClick: () => setSeg(s.key),
   }))
 
-  const fields = [
-    { key: 'locality', label: 'Locality', icon: 'building', options: LOCALITIES.map(l => ({ value: l, label: l })) },
+  // Segment pre-filters the derived directory; the shared engine handles the rest.
+  const records = seg === 'all' ? rows : rows.filter(r => roleMatch(r.role, seg))
+
+  const demandCount = rows.filter(r => r.kind === 'demand').length
+  const supplyCount = rows.filter(r => r.kind === 'supply').length
+  const kpis = [
+    { label: 'Contacts', value: rows.length, onClick: () => setSeg('all') },
+    { label: 'Demand', value: demandCount, tone: 'accent', onClick: () => setSeg('Buyer') },
+    { label: 'Supply', value: supplyCount, onClick: () => setSeg('Seller') },
   ]
 
-  let view = rows
-  if (seg !== 'all') view = view.filter(r => roleGroup(r.role).includes(seg))
-  if ((flt.locality || []).length) view = view.filter(r => flt.locality.includes(r.locality))
-  if (q.trim()) {
-    const s = q.trim().toLowerCase()
-    view = view.filter(r => r.name.toLowerCase().includes(s) || (r.detail || '').toLowerCase().includes(s) || (r.phone || '').includes(s))
-  }
-  const val = (r) => sortKey === 'role' ? r.role : sortKey === 'activity' ? r.minsAgo : r.name.toLowerCase()
-  view.sort((a, b) => { const c = val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0; return sortDir === 'asc' ? c : -c })
-
-  const columns = [
-    { key: 'name', label: 'Name', sortable: true },
-    { key: 'role', label: 'Role', sortable: true },
-    { key: 'detail', label: 'Requirement / listings' },
-    { key: 'locality', label: 'Locality' },
-    { key: 'signal', label: 'Status' },
-  ]
-  const tableRows = view.map(r => ({
-    id: r.id, onClick: r.onClick,
-    cells: [
-      <div className="u-row" style={{ gap: 11 }}>
-        <span className="av av-sm" style={{ background: r.kind === 'supply' ? 'var(--accent)' : 'var(--chrome)' }}>{initials(r.name)}</span>
-        <div><div className="name">{r.name}</div><div className="sub mono-num">{r.phone}</div></div>
-      </div>,
-      <span className="source">{r.role}</span>,
-      <span style={{ fontSize: 13 }}>{r.detail}</span>,
-      r.locality,
-      r.signal,
-    ],
-  }))
+  const { header, toolbar, body } = ModuleListView({
+    def: CLIENTS_DEF, records, store,
+    onOpen: (r) => setSelClient(r),
+    filters: flt, onFilters: setFlt,
+    search: q, onSearch: setQ,
+    sortKey, onSortKey: setSortKey, sortDir, onSortDir: setSortDir,
+    kpis, segments: segs, view, onView: setView,
+    cta: { label: 'New client', onClick: () => store.openModal({ kind: 'newLead' }) },
+    emptyTitle: 'No clients match',
+    emptyHint: 'Adjust the segment, filter or search.',
+    renderTable: (list, v) => v === 'grid'
+      ? <ModuleCards def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} />
+      : <ModuleTable def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} sortKey={sortKey} sortDir={sortDir} onSort={setSortKey} />,
+  })
 
   return (
     <>
-      {topBar({ title: 'Clients', count: `${rows.length} contacts` })}
-      <ListLayout toolbar={
-        <FilterBar
-          segments={segs} fields={fields} value={flt} onChange={setFlt}
-          search={{ value: q, onChange: setQ, placeholder: 'Search clients…' }}
-          right={<SortControl value={sortKey} dir={sortDir} onSort={setSortKey}
-            onDir={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
-            options={Object.entries(SORT_OPTS).map(([value, label]) => ({ value, label }))} />}
-          cta={{ label: 'New client', onClick: () => store.openModal({ kind: 'newLead' }) }}
-        />
-      }>
-        {view.length === 0
-          ? <div className="empty"><div className="e-t">No clients match</div><div className="e-s">Adjust the segment, filter or search.</div></div>
-          : <Table columns={columns} rows={tableRows} sortKey={sortKey} sortDir={sortDir} onSort={setSortKey} />}
-      </ListLayout>
+      {topBar({
+        title: 'Clients',
+        actions: <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import / Revert</Button>
+      })}
+      {header}
+      <div className="clients-split">
+        <div className="clients-list">
+          <ListLayout toolbar={toolbar}>{body}</ListLayout>
+        </div>
+
+        {/* Standardized detail drawer — same ModuleDetail as Leads & Properties */}
+        {selClient && (
+          <ModuleDetail
+            def={CLIENTS_DEF} record={selClient} store={store}
+            signals={<span className="md-deal">{selClient.role}</span>}
+            actionCtx={{ onClose: () => setSelClient(null) }}
+            sections={[{
+              id: 'portfolio',
+              title: selClient.kind === 'demand' ? 'Associated requirement & lead' : 'Listed properties portfolio',
+              render: () => selClient.kind === 'demand' && selClient.rawLead ? (
+                <div className="cli-portfolio">
+                  <KV items={[
+                    { k: 'Looking for', v: `${selClient.rawLead.req?.config || 'Any'} · ${selClient.rawLead.req?.deal || 'sale'}` },
+                    { k: 'Preferred locality', v: selClient.rawLead.req?.locality || 'Pune' },
+                    { k: 'Current stage', v: selClient.rawLead.stage || 'New' },
+                  ]} />
+                  <Button variant="secondary" onClick={() => go('leads', { leadId: selClient.rawLeadId, leadOpen: true })}>
+                    Open full lead workflow & timeline →
+                  </Button>
+                </div>
+              ) : selClient.rawProps ? (
+                <div className="cli-portfolio">
+                  {selClient.rawProps.map(p => (
+                    <div key={p.id} className="cli-prop">
+                      <div>
+                        <div className="cli-prop-t">{p.society} <span className="u-muted cli-prop-meta">({p.type} · {p.locality})</span></div>
+                        <div className="relrow-sub">{p.carpet ? p.carpet + ' sqft · ' : ''}{p.deal === 'rent' ? 'For Rent' : 'For Sale'}</div>
+                      </div>
+                      <Button size="sm" variant="secondary" onClick={() => go('properties', { propId: p.id, propOpen: true })}>View property →</Button>
+                    </div>
+                  ))}
+                </div>
+              ) : null,
+            }]}
+          />
+        )}
+      </div>
     </>
   )
 }

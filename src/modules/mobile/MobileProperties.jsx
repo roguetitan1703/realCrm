@@ -40,10 +40,10 @@ export default function MobileProperties({ store, open }) {
     if (q.trim()) {
       const s = q.trim().toLowerCase()
       list = list.filter(p =>
-        p.society.toLowerCase().includes(s) ||
-        p.locality.toLowerCase().includes(s) ||
-        p.type.toLowerCase().includes(s) ||
-        p.features?.some(f => f.toLowerCase().includes(s))
+        (p.society || p.title || '').toLowerCase().includes(s) ||
+        (p.locality || '').toLowerCase().includes(s) ||
+        (p.type || '').toLowerCase().includes(s) ||
+        (p.features || p.highlights)?.some(f => f.toLowerCase().includes(s))
       )
     }
 
@@ -88,7 +88,7 @@ export default function MobileProperties({ store, open }) {
           <div className="m-cp-bot">
             <div className="m-cp-price">{p.priceLabel}</div>
             <div className="m-cp-note" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              {p.features?.[0] ? <span className="fit ok" style={{ padding: '1px 6px', fontSize: 10.5 }}><Icon name="check" size={10} />{p.features[0]}</span> : null}
+              {(p.features || p.highlights)?.[0] ? <span className="fit ok" style={{ padding: '1px 6px', fontSize: 10.5 }}><Icon name="check" size={10} />{(p.features || p.highlights)[0]}</span> : null}
               <span>Indicative</span>
             </div>
           </div>

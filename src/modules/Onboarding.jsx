@@ -16,6 +16,7 @@ import { useState } from 'react'
 import { theme } from '../data/theme.js'
 import { Button } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
+import { api } from '../lib/api.js'
 
 export default function Onboarding({ store, onCancel }) {
   const [step, setStep] = useState(1) // 1: Firm | 2: Admin | 3: Theme
@@ -66,15 +67,8 @@ export default function Onboarding({ store, onCancel }) {
     }
 
     try {
-      const res = await fetch('http://localhost:5000/api/v1/workspace/onboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        console.log('[Onboard Success] Backend provisioned tenant:', data)
-      }
+      const data = await api.onboardTenant(payload)
+      console.log('[Onboard Success] Backend provisioned tenant:', data)
     } catch (err) {
       console.warn('[Onboard API Fallback] Backend offline, completing in-memory store boot:', err.message)
     }
@@ -139,11 +133,11 @@ export default function Onboarding({ store, onCancel }) {
             fontSize: 18,
             color: '#FFFFFF'
           }}>
-            RC
+            NV
           </div>
           <div>
             <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
-              RealCRM OS
+              Nivaas
             </div>
             <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.55)', fontWeight: 500 }}>
               White-Label Cloud Provisioning
@@ -210,7 +204,7 @@ export default function Onboarding({ store, onCancel }) {
 
         {/* Footer Minimal Metadata */}
         <div style={{ zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 24, borderTop: '1px solid rgba(255, 255, 255, 0.1)', fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
-          <div>RealCRM · Enterprise White-Label Platform</div>
+          <div>Nivaas · Enterprise White-Label Platform</div>
           <div className="mono-num">v2.4.0-PROD</div>
         </div>
       </div>
@@ -311,7 +305,7 @@ export default function Onboarding({ store, onCancel }) {
                   <span className="prefix" style={{ fontFamily: 'var(--mono)', fontSize: 13, borderLeft: '1px solid var(--line)', borderRight: 'none' }}>.com</span>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-                  Your white-label brokerage desk will be deployed at <strong className="mono-num" style={{ color: 'var(--ink)' }}>app.{slug || 'firm'}.com</strong> powered by RealCRM.
+                  Your white-label brokerage desk will be deployed at <strong className="mono-num" style={{ color: 'var(--ink)' }}>app.{slug || 'firm'}.com</strong> powered by Nivaas.
                 </div>
               </div>
 

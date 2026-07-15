@@ -4,32 +4,68 @@
 // mutated via Express backend endpoints. Transient UI is managed in React state.
 // ============================================================================
 import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react'
-import { agents as seedAgents, properties as seedProps, leads as seedLeads, generateMessage } from '../data/seed.js'
 import { DEFAULT_SETTINGS, PROTECTED_STAGES } from '../data/theme.js'
-import { initials, demoPhone } from './format.js'
+import { initials } from './format.js'
+import { generateMessage } from './matching.js'
 import { api as apiClient } from './api.js'
+import { defaultAgents, defaultProperties, defaultLeads } from '../data/defaultDataset.js'
 
 const StoreCtx = createContext(null)
 export const useStore = () => useContext(StoreCtx)
 
 const clone = (x) => JSON.parse(JSON.stringify(x))
 
+function loadAuthSession() {
+  if (typeof window === 'undefined' || !window.localStorage) return { loggedIn: false }
+  try {
+    const raw = window.localStorage.getItem('crm_auth_session')
+    if (raw) {
+      const p = JSON.parse(raw)
+      return {
+        loggedIn: Boolean(p.loggedIn),
+        role: p.role || 'admin',
+        activeAgentId: p.activeAgentId || 'a1',
+      }
+    }
+  } catch (e) {}
+  return { loggedIn: false }
+}
+
+function persistAuthSession(patch = {}) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  try {
+    const existingRaw = window.localStorage.getItem('crm_auth_session')
+    const existing = existingRaw ? JSON.parse(existingRaw) : {}
+    const updated = { ...existing, ...patch, timestamp: Date.now() }
+    window.localStorage.setItem('crm_auth_session', JSON.stringify(updated))
+  } catch (e) {}
+}
+
+function clearAuthSession() {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  try {
+    window.localStorage.removeItem('crm_auth_session')
+  } catch (e) {}
+}
+
 function freshState() {
+  const session = loadAuthSession()
   return {
-    role: 'admin',                 // 'admin' (owner desktop) | 'agent' (mobile)
-    activeAgentId: 'a1',           // who "I" am in agent view
-    loggedIn: false,
-    agents: clone(seedAgents),
-    properties: clone(seedProps),
-    leads: clone(seedLeads),
+    role: session.role || 'admin',                 // 'admin' (owner desktop) | 'agent' (mobile)
+    activeAgentId: session.activeAgentId || 'a1',           // who "I" am in agent view
+    loggedIn: session.loggedIn || false,
+    agents: clone(defaultAgents),
+    properties: clone(defaultProperties),
+    leads: clone(defaultLeads),
+    importLogs: [],
     inactiveAgentIds: [],
     settings: clone(DEFAULT_SETTINGS),   // editable: firmName, stages, sources
     integrations: {
-      '99acres': { status: 'staged', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/99acres', secret: 'whsec_99acres_demo_882' },
-      'MagicBricks': { status: 'staged', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/magicbricks', secret: 'whsec_mb_demo_391' },
-      'Calling & SMS': { status: 'staged', apiKey: '', sid: '', callerId: '020-71189900' },
-      'WhatsApp Business API': { status: 'staged', phoneId: '', accessToken: '', wabaId: '' },
-      'Website sync': { status: 'staged', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/website', secret: 'whsec_web_demo_109' },
+      '99acres': { status: 'unconfigured', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/99acres', secret: '' },
+      'MagicBricks': { status: 'unconfigured', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/magicbricks', secret: '' },
+      'Calling & SMS': { status: 'unconfigured', apiKey: '', sid: '', callerId: '' },
+      'WhatsApp Business API': { status: 'unconfigured', phoneId: '', accessToken: '', wabaId: '' },
+      'Website sync': { status: 'unconfigured', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/website', secret: '' },
     },
     toasts: [],
     // modal/overlay state
@@ -60,10 +96,19 @@ function reducer(state, action) {
 
     case 'SET': return { ...state, ...action.patch }
 
-    case 'LOGIN': return { ...state, loggedIn: true }
+    case 'LOGIN': {
+      persistAuthSession({ loggedIn: true, role: state.role, activeAgentId: state.activeAgentId })
+      return { ...state, loggedIn: true }
+    }
+
+    case 'LOGOUT': {
+      clearAuthSession()
+      return { ...state, loggedIn: false }
+    }
 
     case 'ONBOARD_TENANT': {
       const { firmName, city } = action.config || {}
+      persistAuthSession({ loggedIn: true, role: state.role, activeAgentId: state.activeAgentId })
       return {
         ...state,
         loggedIn: true,
@@ -75,7 +120,10 @@ function reducer(state, action) {
       }
     }
 
-    case 'ROLE': return { ...state, role: action.role }
+    case 'ROLE': {
+      persistAuthSession({ role: action.role })
+      return { ...state, role: action.role }
+    }
 
     case 'TOAST': {
       const t = { id: ++_toastSeq, text: action.text, tone: action.tone || 'ok' }
@@ -110,6 +158,20 @@ function reducer(state, action) {
         leads: state.leads.map(l => l.id === action.leadId
           ? { ...l, followUp: fu, overdue: false, timeline: [{ type: 'follow', label: 'Follow-up set · ' + fu.action, ago: 'just now' }, ...l.timeline] }
           : l),
+      }
+    }
+
+    case 'UPDATE_LEAD': {
+      return {
+        ...state,
+        leads: state.leads.map(l => l.id === action.leadId ? { ...l, ...action.patch, timeline: [{ type: 'note', label: 'Updated details inline', ago: 'just now' }, ...l.timeline] } : l),
+      }
+    }
+
+    case 'UPDATE_PROP': {
+      return {
+        ...state,
+        properties: state.properties.map(p => p.id === action.propId ? { ...p, ...action.patch } : p),
       }
     }
 
@@ -188,6 +250,31 @@ function reducer(state, action) {
 
     case 'ADD_PROPERTY': {
       return { ...state, properties: [action.property, ...state.properties] }
+    }
+
+    case 'DELETE_LEADS': {
+      const ids = Array.isArray(action.ids) ? action.ids : [action.ids]
+      return { ...state, leads: state.leads.filter(l => !ids.includes(l.id)) }
+    }
+
+    case 'DELETE_PROPERTIES': {
+      const ids = Array.isArray(action.ids) ? action.ids : [action.ids]
+      return { ...state, properties: state.properties.filter(p => !ids.includes(p.id)) }
+    }
+
+    case 'LOG_IMPORT_BATCH': {
+      const logs = state.importLogs || []
+      return { ...state, importLogs: [action.logEntry, ...logs] }
+    }
+
+    case 'REVERT_IMPORT_BATCH': {
+      const { batchId } = action
+      return {
+        ...state,
+        leads: state.leads.filter(l => l.importBatchId !== batchId),
+        properties: state.properties.filter(p => p.importBatchId !== batchId),
+        importLogs: (state.importLogs || []).map(log => log.batchId === batchId ? { ...log, reverted: true } : log),
+      }
     }
 
     case 'PROP_STATUS': {
@@ -338,7 +425,7 @@ export function StoreProvider({ children }) {
           dispatch({ type: 'HYDRATE_SERVER', state: res.state })
         }
       })
-      .catch(err => console.warn('[Store Hydration] Backend offline, using embedded seed:', err.message))
+      .catch(err => console.error('[Store Hydration] Failed to connect to PostgreSQL backend:', err.message))
   }, [])
 
   const toast = useCallback((text, tone) => {
@@ -374,8 +461,8 @@ export function StoreProvider({ children }) {
 
   const api = {
     state, dispatch, toast,
-    agentById: (id) => state.agents.find(a => a.id === id),
-    me: () => state.agents.find(a => a.id === state.activeAgentId) || state.agents[0],
+    agentById: (id) => state.agents.find(a => a.id === id) || { id: id || 'a1', name: 'Rakesh Sethi', first: 'Rakesh', role: 'admin', phone: '+91 98220 41556', initials: 'RS', avatar: '' },
+    me: () => state.agents.find(a => a.id === state.activeAgentId) || state.agents[0] || { id: 'a1', name: 'Rakesh Sethi', first: 'Rakesh', role: 'admin', phone: '+91 98220 41556', initials: 'RS', avatar: '' },
     activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id)),
     
     assign: (leadId, agentId) => {
@@ -383,6 +470,16 @@ export function StoreProvider({ children }) {
       const a = state.agents.find(x => x.id === agentId)
       toast('Lead assigned to ' + (a ? a.first : ''))
       apiClient.updateLead(leadId, { agentId }).catch(err => console.warn('[Assign API] Backend error:', err.message))
+    },
+    updateLead: (leadId, patch) => {
+      dispatch({ type: 'UPDATE_LEAD', leadId, patch })
+      toast('Lead details updated')
+      apiClient.updateLead(leadId, patch).catch(err => console.warn('[UpdateLead API] Backend error:', err.message))
+    },
+    updateProp: (propId, patch) => {
+      dispatch({ type: 'UPDATE_PROP', propId, patch })
+      toast('Property details updated')
+      apiClient.updateProperty(propId, patch).catch(err => console.warn('[UpdateProp API] Backend error:', err.message))
     },
     setStage: (leadId, stage) => {
       dispatch({ type: 'STAGE', leadId, stage })
@@ -427,6 +524,21 @@ export function StoreProvider({ children }) {
       toast('Property added — now matchable')
       apiClient.createProperty(property).catch(err => console.warn('[AddProp API] Backend error:', err.message))
     },
+    deleteLead: (ids) => {
+      dispatch({ type: 'DELETE_LEADS', ids })
+      toast('Lead/Client record(s) deleted')
+    },
+    deleteProperty: (ids) => {
+      dispatch({ type: 'DELETE_PROPERTIES', ids })
+      toast('Property record(s) deleted')
+    },
+    revertImportBatch: (batchId) => {
+      dispatch({ type: 'REVERT_IMPORT_BATCH', batchId })
+      toast('Import batch reverted — imported records removed', 'ok')
+    },
+    logImportBatch: (logEntry) => {
+      dispatch({ type: 'LOG_IMPORT_BATCH', logEntry })
+    },
     setPropStatus: (propId, status) => {
       dispatch({ type: 'PROP_STATUS', propId, status })
       toast('Status → ' + status)
@@ -440,6 +552,7 @@ export function StoreProvider({ children }) {
     returnDeposit: (propId) => {
       dispatch({ type: 'RETURN_DEPOSIT', propId })
       toast('Deposit marked returned')
+      apiClient.updateProperty(propId, { depositReturned: true }).catch(err => console.warn('[ReturnDeposit API] Backend error:', err.message))
     },
     toggleAgent: (agentId) => {
       dispatch({ type: 'TOGGLE_AGENT', agentId })
@@ -450,14 +563,51 @@ export function StoreProvider({ children }) {
       dispatch({ type: 'REASSIGN_ALL', fromId, toId })
       apiClient.reassignLeads(fromId, toId).catch(err => console.warn('[Reassign API] Backend error:', err.message))
     },
-    addAgent: (name) => { dispatch({ type: 'ADD_AGENT', name }); toast('Agent added to team') },
-    setFirmName: (name) => { dispatch({ type: 'SET_FIRM_NAME', name }); toast('Firm name updated') },
-    addStage: (name) => { dispatch({ type: 'ADD_STAGE', name }); toast('Stage added') },
-    renameStage: (from, to) => { dispatch({ type: 'RENAME_STAGE', from, to }); toast('Stage renamed — leads moved') },
-    removeStage: (name) => { dispatch({ type: 'REMOVE_STAGE', name }); toast('Stage removed') },
-    moveStage: (name, dir) => dispatch({ type: 'MOVE_STAGE', name, dir }),
-    addSource: (name) => { dispatch({ type: 'ADD_SOURCE', name }); toast('Source added') },
-    removeSource: (name) => { dispatch({ type: 'REMOVE_SOURCE', name }); toast('Source removed') },
+    addAgent: (name) => {
+      dispatch({ type: 'ADD_AGENT', name })
+      toast('Agent added to team')
+      apiClient.addAgent({ name, role: 'agent' }).catch(err => console.warn('[Add Agent API] error:', err.message))
+    },
+    setFirmName: (name) => {
+      dispatch({ type: 'SET_FIRM_NAME', name })
+      toast('Firm name updated')
+      apiClient.updateSettings({ firmName: name }).catch(err => console.warn('[Settings API] error:', err.message))
+    },
+    addStage: (name) => {
+      dispatch({ type: 'ADD_STAGE', name })
+      toast('Stage added')
+      apiClient.updateSettings({ stages: [...state.settings.stages, name] }).catch(err => console.warn('[Settings API] error:', err.message))
+    },
+    renameStage: (from, to) => {
+      dispatch({ type: 'RENAME_STAGE', from, to })
+      toast('Stage renamed — leads moved')
+      apiClient.updateSettings({ stages: state.settings.stages.map(s => s === from ? to : s) }).catch(err => console.warn('[Settings API] error:', err.message))
+    },
+    removeStage: (name) => {
+      dispatch({ type: 'REMOVE_STAGE', name })
+      toast('Stage removed')
+      apiClient.updateSettings({ stages: state.settings.stages.filter(s => s !== name) }).catch(err => console.warn('[Settings API] error:', err.message))
+    },
+    moveStage: (name, dir) => {
+      dispatch({ type: 'MOVE_STAGE', name, dir })
+      const arr = [...state.settings.stages]
+      const idx = arr.indexOf(name)
+      if (idx !== -1 && idx + dir >= 0 && idx + dir < arr.length) {
+        const [removed] = arr.splice(idx, 1)
+        arr.splice(idx + dir, 0, removed)
+        apiClient.updateSettings({ stages: arr }).catch(err => console.warn('[Settings API] error:', err.message))
+      }
+    },
+    addSource: (name) => {
+      dispatch({ type: 'ADD_SOURCE', name })
+      toast('Source added')
+      apiClient.updateSettings({ sources: [...state.settings.sources, name] }).catch(err => console.warn('[Settings API] error:', err.message))
+    },
+    removeSource: (name) => {
+      dispatch({ type: 'REMOVE_SOURCE', name })
+      toast('Source removed')
+      apiClient.updateSettings({ sources: state.settings.sources.filter(s => s !== name) }).catch(err => console.warn('[Settings API] error:', err.message))
+    },
     openModal: (modal) => dispatch({ type: 'SET', patch: { modal } }),
     closeModal: () => dispatch({ type: 'SET', patch: { modal: null } }),
     openWhatsApp, recompose,
@@ -466,28 +616,40 @@ export function StoreProvider({ children }) {
     setNotif: (v) => dispatch({ type: 'SET', patch: { notifOpen: v } }),
     setRole: (role) => dispatch({ type: 'ROLE', role }),
     login: () => dispatch({ type: 'LOGIN' }),
+    logout: () => {
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage?.removeItem('crm_auth_session')
+          if (window.location.search) {
+            window.history.replaceState({}, document.title, window.location.pathname)
+          }
+        } catch (e) {}
+      }
+      dispatch({ type: 'LOGOUT' })
+      toast('Signed out successfully')
+    },
     onboardTenant: (config) => {
+      if (config.slug) apiClient.setTenantId(config.slug)
       dispatch({ type: 'ONBOARD_TENANT', config })
       toast(`Workspace provisioned & initialized for ${config.firmName || 'new tenant'}`)
       apiClient.onboardTenant(config).catch(err => console.warn('[Onboard API] Backend error:', err.message))
     },
-    resetDemo: () => {
+    resetDatabase: () => {
       dispatch({ type: 'RESET' })
-      toast('Demo reset to a clean slate')
-      apiClient.resetDemo()
+      toast('Database reset to clean default dataset')
+      apiClient.resetDatabase()
         .then(res => {
           if (res && res.success && res.state) {
             dispatch({ type: 'HYDRATE_SERVER', state: res.state })
           }
         })
-        .catch(err => console.warn('[Reset API] Backend error:', err.message))
+        .catch(err => console.error('[Reset API] Backend error:', err.message))
     },
     saveIntegration: (key, config) => {
       dispatch({ type: 'SAVE_INTEGRATION', key, config })
       toast(`Connected ${key} successfully! Channel active.`)
-      apiClient.saveIntegration(key, config).catch(err => console.warn('[Integrations API] Backend error:', err.message))
+      apiClient.saveIntegration(key, config).catch(err => console.error('[Integrations API] Backend error:', err.message))
     },
-    demoPhone,
   }
 
   return <StoreCtx.Provider value={api}>{children}</StoreCtx.Provider>

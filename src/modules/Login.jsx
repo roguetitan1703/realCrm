@@ -23,6 +23,7 @@ export default function Login({ store, onStartOnboard }) {
   const [verifying, setVerifying] = useState(false)
   const [timer, setTimer] = useState(30)
   const [role, setRole] = useState(state.role || 'admin')
+  const [sessionOtp, setSessionOtp] = useState('8821')
 
   const inputRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
 
@@ -50,7 +51,9 @@ export default function Login({ store, onStartOnboard }) {
       setLoading(false)
       setPhase('otp')
       setTimer(30)
-      store.toast(`Verification code sent to +91 ${targetPhone}`, 'ok')
+      const genCode = Math.floor(1000 + Math.random() * 9000).toString()
+      setSessionOtp(genCode)
+      store.toast(`Verification code sent to +91 ${targetPhone}: [${genCode}]`, 'ok')
       setTimeout(() => inputRefs[0].current?.focus(), 80)
     }, 900)
   }
@@ -89,9 +92,9 @@ export default function Login({ store, onStartOnboard }) {
   }
 
   const handleAutoFill = () => {
-    const demoCode = ['4', '2', '1', '7']
-    setOtp(demoCode)
-    handleVerify('4217')
+    const codeArr = sessionOtp.split('')
+    setOtp(codeArr)
+    handleVerify(sessionOtp)
   }
 
   const handleVerify = (codeToVerify) => {
@@ -397,7 +400,7 @@ export default function Login({ store, onStartOnboard }) {
                   )}
                 </Button>
 
-                {/* Demo Auto-fill & Resend Options */}
+                {/* Session Auto-fill & Resend Options */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)' }}>
                   <button
                     type="button"
@@ -405,7 +408,7 @@ export default function Login({ store, onStartOnboard }) {
                     className="btn-quiet"
                     style={{ fontSize: 12, padding: 0, color: 'var(--ink-2)' }}
                   >
-                    Use demo code <strong className="mono-num" style={{ color: 'var(--ink)' }}>4217</strong>
+                    Auto-fill received code: <strong className="mono-num" style={{ color: 'var(--ink)' }}>{sessionOtp}</strong>
                   </button>
 
                   {timer > 0 ? (
