@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
-import { ModuleListView, ModuleTable, PropertyCard } from '../components/collections.jsx'
+import { ModuleListView, ModuleTable, PropertyCard, ProjectCard } from '../components/collections.jsx'
+import { buildProjects, unitsInProject, unitsByWing } from '../lib/projects.js'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { StatusTag, Quoted, Button, KV, Timeline } from '../components/primitives.jsx'
 import { NbaBanner } from '../components/rail.jsx'
@@ -18,8 +19,10 @@ export default function Properties({ store, go, sel, setSel, topBar }) {
   const [sortDir, setSortDir] = useState('asc')
 
   if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
+  if (sel.projOpen && sel.projKey) return <ProjectDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
 
   const open = (id) => go('properties', { propId: id, propOpen: true })
+  const openProject = (key) => go('properties', { projKey: key, projOpen: true })
 
   const available = state.properties.filter(p => (p.status || 'Available') === 'Available').length
   const rentals = state.properties.filter(p => p.deal === 'rent').length
@@ -38,11 +41,22 @@ export default function Properties({ store, go, sel, setSel, topBar }) {
     search: q, onSearch: setQ,
     sortKey, onSortKey: setSortKey, sortDir, onSortDir: setSortDir,
     kpis, view, onView: setView,
+    // Grid/list toggle only applies to the flat unit views, hide it in project view.
+    showViewSwitch: view !== 'projects',
+    toolbarRight: <>
+      <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
+        onClick={() => setView(view === 'projects' ? 'grid' : 'projects')}>
+        <Icon name="building" size={14} />Group by project
+      </button>
+      <Button variant="secondary" size="sm" icon="building" onClick={() => store.openModal({ kind: 'addUnits' })}>Add units</Button>
+    </>,
     cta: { label: 'Add property', onClick: () => store.openModal({ kind: 'addProperty' }) },
     emptyHint: 'Try clearing a filter or search.',
-    renderTable: (list, v) => v === 'grid'
-      ? <div className="grid-cards">{list.map(p => <PropertyCard key={p.id} p={p} matchCount={leadsForProperty(p, state.leads).length} onClick={() => open(p.id)} />)}</div>
-      : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open} allLeads={state.leads} />,
+    renderTable: (list, v) => v === 'projects'
+      ? <div className="grid-cards">{buildProjects(list).map(pj => <ProjectCard key={pj.key} project={pj} onClick={() => openProject(pj.key)} />)}</div>
+      : v === 'grid'
+        ? <div className="grid-cards">{list.map(p => <PropertyCard key={p.id} p={p} matchCount={leadsForProperty(p, state.leads).length} onClick={() => open(p.id)} />)}</div>
+        : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open} allLeads={state.leads} />,
   })
 
   return (
@@ -174,12 +188,84 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
       <div className="app-body">
         <ModuleDetail
           def={PROPERTIES_DEF} record={p} store={store} onEdit={openEdit}
-          signals={<><StatusTag status={p.status} /><span className="md-deal">{p.deal === 'rent' ? 'For rent' : 'For sale'}</span></>}
+          title={p.society}
           primary={[{ label: 'WhatsApp', icon: 'wa', onClick: () => store.openModal({ kind: 'pickBuyer', propId: p.id }) }]}
           nba={nba}
           sections={sections}
           actionCtx={{ onClose: back }}
         />
+      </div>
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ProjectDetail — a project is a DERIVED aggregate, not a stored record. This is
+// a lightweight page: a header band of project facts + the units grid grouped by
+// wing. Each unit row opens its normal PropertyDetail. "Add units" bulk-adds.
+function ProjectDetail({ store, go, sel, setSel, topBar }) {
+  const key = sel.projKey
+  const back = () => setSel(s => ({ ...s, projOpen: false, projKey: undefined }))
+  const project = buildProjects(store.state.properties).find(pj => pj.key === key)
+  if (!project) { return <>{topBar({ title: 'Project', eyebrow: 'Properties', onBack: back })}<div className="detail-missing">No units in this project.</div></> }
+
+  const { name, locality, developer, counts, priceRange, wings } = project
+  const wingGroups = unitsByWing(unitsInProject(store.state.properties, key))
+  const openUnit = (id) => go('properties', { propId: id, propOpen: true })
+
+  const facts = [
+    `${counts.total} unit${counts.total !== 1 ? 's' : ''}`,
+    `${counts.available} available`,
+    counts.sold ? `${counts.sold} sold` : null,
+    wings.length ? `${wings.length} wing${wings.length > 1 ? 's' : ''}` : null,
+    priceRange.label !== '—' ? priceRange.label : null,
+  ].filter(Boolean)
+
+  return (
+    <>
+      {topBar({ eyebrow: 'Properties', title: name, onBack: back })}
+      <div className="app-body pagewrap">
+        <div className="rechead">
+          <div className="rh-top">
+            <div className="rh-id">
+              <div className="rh-icon"><Icon name="building" size={22} /></div>
+              <div className="rh-idtext">
+                <div className="rh-title">{name}</div>
+                <div className="rh-facts">
+                  {developer ? <span>{developer}</span> : null}
+                  <span>{locality}</span>
+                  {facts.map((f, i) => <span key={i}>{f}</span>)}
+                </div>
+              </div>
+            </div>
+            <div className="rh-actions">
+              <Button variant="primary" icon="plus" onClick={() => store.openModal({ kind: 'addUnits', projKey: key })}>Add units</Button>
+            </div>
+          </div>
+        </div>
+
+        {wingGroups.map(group => (
+          <div key={group.wing} className="panel wing-panel">
+            <div className="sh"><span className="t">{group.wing}</span><span className="r">{group.units.length} unit{group.units.length !== 1 ? 's' : ''}</span></div>
+            <div className="tbl-scroll">
+              <table className="tbl tbl-flush">
+                <thead><tr><th>Unit</th><th>Config · floor</th><th>Carpet</th><th>Owner</th><th>Status</th><th>Quoted</th></tr></thead>
+                <tbody>
+                  {group.units.map(u => (
+                    <tr key={u.id} onClick={() => openUnit(u.id)}>
+                      <td><span className="unit-tag unit-tag-flush">{unitLabel(u) || '—'}</span></td>
+                      <td className="cell-txt">{u.type} · {u.totalFloors ? `${u.floor}/${u.totalFloors}` : (u.floor || '—')}</td>
+                      <td className="cell-txt">{u.carpet ? u.carpet + ' sqft' : '—'}</td>
+                      <td className="cell-txt">{u.owner || '—'}</td>
+                      <td><StatusTag status={u.status || 'Available'} /></td>
+                      <td><Quoted q={quotedLine(u)} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
       </div>
     </>
   )

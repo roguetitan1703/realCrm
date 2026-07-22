@@ -82,11 +82,26 @@ export function ratePsf(p) {
   return '₹' + Math.round(p.price / p.carpet).toLocaleString('en-IN') + '/sqft'
 }
 
+// The inventory data carries three parallel names for the same concepts across
+// the seed (tower/totalFloors), the add-property form (wing/flat) and the card
+// (tower/unit). These tolerant accessors read whichever exists so grouping and
+// labelling stay consistent everywhere. Nothing rewrites the stored data.
+export const wingOf = (p) => (p && (p.wing || p.tower)) || null
+export const flatOf = (p) => (p && (p.flat || p.unit)) || null
+
+// The project (grouping) a unit belongs to. Units with no project fall into the
+// implicit "Independent / Direct" bucket — a scattered flat/shop/plot broker
+// never has to think about projects; township units group automatically.
+export const INDEPENDENT_PROJECT = 'Independent / Direct'
+export const projectOf = (p) => (p && (p.project || p.society)) || INDEPENDENT_PROJECT
+
 // Unit identity (agent-facing only — masked in client shares). e.g. "B-1402".
 export function unitLabel(p) {
   if (!p) return null
-  if (p.wing && p.flat) return `${p.wing}-${p.flat}`
-  if (p.flat) return `Flat ${p.flat}`
+  const wing = wingOf(p), flat = flatOf(p)
+  if (wing && flat) return `${wing}-${flat}`
+  if (flat) return `Flat ${flat}`
+  if (wing) return `Wing ${wing}`
   return null
 }
 
@@ -96,7 +111,7 @@ export function unitLabel(p) {
 export function propFacts(p) {
   const unit = unitLabel(p)
   const common = [
-    ...(unit ? [{ k: 'Unit', v: `${p.wing ? 'Wing ' + p.wing + ' · ' : ''}Flat ${p.flat}` }] : []),
+    ...(unit ? [{ k: 'Unit', v: `${wingOf(p) ? 'Wing ' + wingOf(p) + ' · ' : ''}${flatOf(p) ? 'Flat ' + flatOf(p) : ''}`.replace(/ · $/, '') }] : []),
     { k: 'Config', v: p.type },
     { k: 'Carpet', v: p.carpet ? p.carpet + ' sqft' : '—' },
     p.type === 'Plot'

@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import Icon from './Icon.jsx'
 import { theme } from '../data/theme.js'
 import { Avatar } from './primitives.jsx'
+import { subscribeConnection } from '../lib/api.js'
 
 // ---- desktop sidebar ----
 export function Sidebar({ items, active, onNav, footer, firmName }) {
@@ -62,11 +63,25 @@ export function TopBar({ title, eyebrow, onBack, onSearch, onBell, unread, actio
       <div className="u-spring" />
 
       {actions}
+      <ConnectionBadge />
       {onBell && (
         <button className="bell" onClick={onBell}><Icon name="bell" />{unread ? <span className="bdot">{unread}</span> : null}</button>
       )}
       {profile && <ProfileMenu {...profile} />}
     </div>
+  )
+}
+
+// Silent while the API is healthy; unmissable the moment it isn't — so a backend
+// outage can never quietly pretend to save work (changes would vanish on refresh).
+export function ConnectionBadge() {
+  const [conn, setConn] = useState({ ok: true, checked: false })
+  useEffect(() => subscribeConnection(setConn), [])
+  if (conn.ok) return null
+  return (
+    <span className="conn-badge" title="Changes are not being saved to the server. Reconnect before continuing.">
+      <Icon name="zap" size={13} />Offline — not saving
+    </span>
   )
 }
 
@@ -193,20 +208,16 @@ export function Toasts({ toasts }) {
   )
 }
 
-// ---- WhatsApp canvas (composing → bubble) ----
-export function WaCanvas({ composing, message, statusLabel, deva, style }) {
+// ---- WhatsApp canvas: a PREVIEW of the filled template ----
+// Deliberately no "composing" animation and no delivered-tick: the message is
+// assembled from property fields instantly, and nothing has been sent yet.
+export function WaCanvas({ message, deva, style }) {
   return (
     <div className="wa-canvas" style={style}>
-      {composing && (
-        <div className="wa-compose">
-          <div className="c-head"><span>{statusLabel}</span><span className="c-dots"><i /><i /><i /></span></div>
-          <div className="c-skel"><i style={{ width: '88%' }} /><i style={{ width: '72%' }} /><i style={{ width: '81%' }} /><i style={{ width: '56%' }} /></div>
-        </div>
-      )}
-      {!composing && message && (
+      {message && (
         <div className={'wa-bubble' + (deva ? ' u-deva' : '')}>
           {message}
-          <div className="wa-time">12:04 pm <Icon name="check" size={12} /></div>
+          <div className="wa-time">Preview</div>
         </div>
       )}
     </div>

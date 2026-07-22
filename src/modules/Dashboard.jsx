@@ -32,7 +32,7 @@ export default function Dashboard({ store, go, topBar }) {
 
   return (
     <>
-      {topBar({ title: 'Dashboard', count: `${active.length} active · ${overdue.length} overdue` })}
+      {topBar({ title: 'Dashboard' })}
       <div className="app-body" style={{ padding: '20px 22px 44px', display: 'flex', flexDirection: 'column', gap: 18 }}>
         {/* KPIs — the day's job, each drills into the exact list */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }}>

@@ -40,17 +40,16 @@ propertiesRouter.get('/', async (req: Request, res: Response) => {
  */
 propertiesRouter.post('/', async (req: Request, res: Response) => {
   try {
-    const { title, type, locality, price, tower, unit, config } = req.body;
-    if (!title || !type) {
+    const body = req.body || {};
+    if (!body.title || !body.type) {
       return res.status(400).json({ error: 'Validation Error', message: 'Title and type are required' });
     }
 
-    const newProperty = await createProperty({
-      title, status: 'Available', type, locality: locality || 'Unknown',
-      price: price || 'Price on Request', tower: tower || 'A', unit: unit || '101',
-      config: config || {}, tenancy: null, timeline: [],
-    });
-
+    // Pass the full record through. createProperty folds flat domain fields
+    // (deal, society, project, wing, flat, carpet, owner, priceLabel, …) into the
+    // config JSONB, and rowToProperty spreads them back on read — so bulk unit
+    // creation round-trips every field, not just the 7 first-class columns.
+    const newProperty = await createProperty(body);
     return res.status(201).json({ success: true, data: newProperty });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to create property', message: err.message });

@@ -27,7 +27,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { ModuleRecordSheet } from './ModuleFields.jsx'
-import { Panel, SectionHead, Button } from './primitives.jsx'
+import { Panel, SectionHead, Button, Stepper } from './primitives.jsx'
 import { DetailLayout } from '../layouts/layouts.jsx'
 import { ActionRail, RailSection } from './rail.jsx'
 import Icon from './Icon.jsx'
@@ -78,11 +78,18 @@ function MoreMenu({ items }) {
 }
 
 export function ModuleDetail({
-  def, record, store, onEdit,
+  def, record, store, onEdit, title, avatar,
   signals, primary = [], nba, railTop, beforeSheet, sections = [], actionCtx = {},
 }) {
   const { quick, manage } = buildActionTiers(def, store, record, actionCtx)
   const visibleSections = sections.filter(s => !s.when || s.when(record, store))
+
+  // Module-generic header data, all from the definition.
+  const facts = def.headerFacts ? def.headerFacts(record, store).filter(Boolean) : []
+  const prog = def.progression
+  const progStages = prog ? prog.stages(store) : null
+  const progCurrent = prog ? prog.current(record) : null
+  const progOnPath = progStages ? progStages.includes(progCurrent) : false
 
   return (
     <DetailLayout rail={
@@ -97,22 +104,40 @@ export function ModuleDetail({
         )}
       </ActionRail>
     }>
-      {/* 1. Header band — signals + ONE primary action + Edit */}
-      {(signals || primary.length > 0 || onEdit) && (
-        <div className="md-head">
-          <div className="md-signals">{signals}</div>
-          <div className="md-actions">
+      {/* 1. Record header — identity band: icon + title + facts + actions, with
+          the progression stepper beneath. Same for every module. */}
+      <div className="rechead">
+        <div className="rh-top">
+          <div className="rh-id">
+            {avatar || <span className="rh-icon"><Icon name={def.icon || 'building'} size={20} /></span>}
+            <div className="rh-idtext">
+              <div className="rh-title">{title || record.name || record.society || def.singularName}</div>
+              {facts.length > 0 && <div className="rh-facts">{facts.map((f, i) => <span key={i}>{f}</span>)}</div>}
+            </div>
+          </div>
+          <div className="rh-actions">
+            {signals && <div className="rh-signals">{signals}</div>}
             {primary.map((a, i) => (
-              <Button key={i} variant={i === 0 ? 'primary' : 'secondary'} size="sm" icon={a.icon} onClick={a.onClick}>
-                {a.label}
-              </Button>
+              <Button key={i} variant={i === 0 ? 'primary' : 'secondary'} size="sm" icon={a.icon} onClick={a.onClick}>{a.label}</Button>
             ))}
             {onEdit && <Button variant="secondary" size="sm" icon="edit" onClick={onEdit}>Edit</Button>}
           </div>
         </div>
-      )}
+        {prog && (
+          <div className="rh-prog">
+            <Stepper
+              stages={progStages}
+              current={progOnPath ? progCurrent : progStages[0]}
+              onPick={(s) => prog.set(store, record, s)}
+            />
+            {prog.exit && (!prog.exit.when || prog.exit.when(record, store)) && (
+              <button className="rh-exit" onClick={() => prog.exit.run(store, record)}>{prog.exit.label}</button>
+            )}
+          </div>
+        )}
+      </div>
 
-      {/* module-specific content above the record sheet (e.g. pipeline banner) */}
+      {/* module-specific content above the record sheet */}
       {beforeSheet}
 
       {/* 2. Record sheet — read-only Zoho-style view (edit via header button) */}

@@ -47,7 +47,7 @@ export function runModuleQuery(def, records, { filters = {}, search = '', sortKe
 export function ModuleListView({
   def, records, store, onOpen,
   filters, onFilters, search, onSearch, sortKey, onSortKey, sortDir, onSortDir,
-  kpis, segments, view, onView, cta, toolbarRight, emptyTitle, emptyHint, renderTable,
+  kpis, segments, view, onView, viewExtra, showViewSwitch = true, cta, toolbarRight, emptyTitle, emptyHint, renderTable,
 }) {
   const list = runModuleQuery(def, records, { filters, search, sortKey, sortDir, store })
 
@@ -71,7 +71,7 @@ export function ModuleListView({
           onSort={onSortKey} onDir={() => onSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
         />
         {toolbarRight}
-        {onView && <ViewSwitch value={view} onChange={onView} />}
+        {onView && showViewSwitch && <ViewSwitch value={view} onChange={onView} extra={viewExtra} />}
       </>}
       cta={cta}
     />
@@ -351,6 +351,45 @@ export function ListRow({ avatar, name, meta, right, onClick }) {
         <div className="l-meta">{meta}</div>
       </div>
       {right && <div className="l-right">{right}</div>}
+    </button>
+  )
+}
+
+// ---- Project card: aggregates a township/society's units into one tile. ----
+// Rendered in the Properties "group by project" view; opens the project detail.
+export function ProjectCard({ project, onClick }) {
+  const { name, locality, developer, wings, counts, priceRange, independent } = project
+  return (
+    <button className={'projcard' + (independent ? ' indep' : '')} onClick={onClick}>
+      <div className="pj-head">
+        <div className="pj-id">
+          <div className="pj-name">{name}</div>
+          <div className="pj-sub">
+            <Icon name="pin" size={13} className="ic" />{locality}
+            {developer ? <span className="pj-dev"> · {developer}</span> : null}
+          </div>
+        </div>
+        <span className="pj-count"><b>{counts.total}</b> unit{counts.total !== 1 ? 's' : ''}</span>
+      </div>
+
+      <div className="pj-meter">
+        <div className="pj-bar">
+          <i className="avail" style={{ width: Math.round((counts.available / Math.max(1, counts.total)) * 100) + '%' }} />
+        </div>
+        <div className="pj-legend">
+          <span className="pj-dot avail">{counts.available} available</span>
+          {counts.sold > 0 && <span className="pj-dot sold">{counts.sold} sold</span>}
+          {wings.length > 0 && <span className="pj-wings">{wings.length} wing{wings.length > 1 ? 's' : ''}</span>}
+        </div>
+      </div>
+
+      <div className="pj-foot">
+        <div>
+          <span className="pj-flabel">Price range</span>
+          <span className="pj-price">{priceRange.label}</span>
+        </div>
+        <Icon name="chevRight" size={16} className="ic pj-go" />
+      </div>
     </button>
   )
 }

@@ -3,8 +3,8 @@ import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
 
 // ---- Button ----
-export function Button({ variant = 'ghost', size, block, icon, children, ...rest }) {
-  const cls = ['btn', 'btn-' + variant, size === 'sm' && 'btn-sm', block && 'btn-block'].filter(Boolean).join(' ')
+export function Button({ variant = 'ghost', size, block, icon, children, className, ...rest }) {
+  const cls = ['btn', 'btn-' + variant, size === 'sm' && 'btn-sm', block && 'btn-block', className].filter(Boolean).join(' ')
   return (
     <button className={cls} {...rest}>
       {icon && <Icon name={icon} />}
@@ -181,11 +181,16 @@ export function SegmentPills({ segments = [] }) {
 }
 
 // ---- ViewSwitch: grid ↔ list toggle (shared by every module) ----
-export function ViewSwitch({ value, onChange }) {
+// Default modes are grid + list; a module can pass `extra` options (e.g. a
+// "group by project" view) that render as additional segments.
+export function ViewSwitch({ value, onChange, extra = [] }) {
   return (
     <div className="viewsw">
       <button className={value === 'grid' ? 'on' : ''} title="Grid" onClick={() => onChange('grid')}><Icon name="grid" /></button>
       <button className={value === 'list' ? 'on' : ''} title="List" onClick={() => onChange('list')}><Icon name="leads" /></button>
+      {extra.map(o => (
+        <button key={o.value} className={value === o.value ? 'on' : ''} title={o.title} onClick={() => onChange(o.value)}><Icon name={o.icon} /></button>
+      ))}
     </div>
   )
 }
@@ -202,14 +207,22 @@ export function Empty({ title, sub, action }) {
 }
 
 // ---- Stage stepper ----
+// Journey stepper — shows a record's position along a progression as a track of
+// connected nodes. Past = done, current = filled, ahead = reachable. Click any
+// node to move there. Module-generic (used for lead stage AND property status).
+const STEP_SHORT = { 'Site Visit': 'Visit', 'Negotiation': 'Nego', 'Closed Won': 'Won', 'Closed Lost': 'Lost', 'Token Pending': 'Token', 'Under Offer': 'Offer', 'Available': 'Available' }
 export function Stepper({ stages, current, onPick }) {
   const idx = stages.indexOf(current)
   return (
-    <div className="stepper">
+    <div className="jstep" role="list">
       {stages.map((s, i) => {
-        const state = i < idx ? 'done' : i === idx ? 'current' : ''
-        const short = s === 'Site Visit' ? 'Visit' : s === 'Negotiation' ? 'Nego' : s === 'Closed Won' ? 'Won' : s === 'Closed Lost' ? 'Lost' : s
-        return <button key={s} className={state} onClick={() => onPick(s)}>{short}</button>
+        const state = i < idx ? 'done' : i === idx ? 'current' : 'ahead'
+        return (
+          <button key={s} className={'jstep-node ' + state} onClick={() => onPick(s)} role="listitem" title={s}>
+            <span className="jstep-dot">{i < idx ? <Icon name="check" size={12} /> : i + 1}</span>
+            <span className="jstep-label">{STEP_SHORT[s] || s}</span>
+          </button>
+        )
       })}
     </div>
   )

@@ -2,14 +2,19 @@ import { WaCanvas } from '../components/chrome.jsx'
 import { Segmented, Button, Money } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { thumbTint } from '../lib/format.js'
+import { whatsappLink } from '../lib/matching.js'
 
 export default function WaModal({ store }) {
   const wa = store.state.waState
   const p = store.state.properties.find(x => x.id === wa.propId)
   const l = store.state.leads.find(x => x.id === wa.leadId)
   if (!p) return null
-  const statusLabel = wa.lang === 'Marathi' ? 'Writing in Marathi…' : wa.lang === 'English' ? 'Writing in English…' : 'Writing in Hinglish…'
   const copy = () => { try { navigator.clipboard.writeText(wa.message || '') } catch {} store.toast('Message copied') }
+  const openInWhatsApp = () => {
+    if (l) store.logEvent(l.id, 'wa', `Sent ${p.society} (${p.priceLabel}) details on WhatsApp`)
+    window.open(whatsappLink(wa.message, l?.phone), '_blank', 'noopener')
+    store.closeWhatsApp()
+  }
 
   return (
     <div className="overlay" onClick={store.closeWhatsApp}>
@@ -39,13 +44,20 @@ export default function WaModal({ store }) {
             </div>
           </div>
         </div>
-        <WaCanvas composing={wa.composing} message={wa.message} statusLabel={statusLabel} deva={wa.lang === 'Marathi'}
+        <WaCanvas message={wa.message} deva={wa.lang === 'Marathi'}
           style={{ borderRadius: 0, minHeight: 220, flex: 1, overflowY: 'auto' }} />
-        {!wa.composing && wa.message && (
-          <div style={{ padding: '12px 14px', display: 'flex', gap: 9, borderTop: '1px solid rgba(255,255,255,.08)' }}>
-            <button className="btn btn-primary" style={{ flex: 1.4, justifyContent: 'center' }} onClick={copy}><Icon name="copy" />Copy message</button>
-            <button className="btn" style={{ flex: 1, justifyContent: 'center', background: 'rgba(255,255,255,.06)', color: '#fff', border: '1px solid rgba(255,255,255,.14)' }} onClick={() => store.recompose({ variant: wa.variant + 1 })}><Icon name="refresh" />Regenerate</button>
-          </div>
+        {wa.message && (
+          <>
+            <div className="wa-source">
+              <Icon name="check" size={13} />
+              Filled from this property's details — price, carpet, floor, amenities. Unit number is never included.
+            </div>
+            <div style={{ padding: '12px 14px', display: 'flex', gap: 9, borderTop: '1px solid rgba(255,255,255,.08)' }}>
+              <button className="btn btn-primary" style={{ flex: 1.6, justifyContent: 'center' }} onClick={openInWhatsApp}><Icon name="wa" />Open in WhatsApp</button>
+              <button className="btn" style={{ flex: 1, justifyContent: 'center', background: 'rgba(255,255,255,.06)', color: '#fff', border: '1px solid rgba(255,255,255,.14)' }} onClick={copy}><Icon name="copy" />Copy</button>
+              <button className="btn" style={{ justifyContent: 'center', background: 'rgba(255,255,255,.06)', color: '#fff', border: '1px solid rgba(255,255,255,.14)' }} title="Switch to another wording" onClick={() => store.recompose({ variant: wa.variant + 1 })}><Icon name="refresh" /></button>
+            </div>
+          </>
         )}
       </div>
     </div>

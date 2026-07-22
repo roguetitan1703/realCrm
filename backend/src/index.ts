@@ -22,7 +22,10 @@ import { integrationsRouter } from './routes/integrations';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+// CORS — open to all origins. The frontend (Vercel) and this API (AWS) are on
+// different origins, and an allowlist is one more thing that can silently break
+// a demo. Default cors() reflects the requested headers, so the custom
+// X-Tenant-ID header passes preflight without extra config.
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));

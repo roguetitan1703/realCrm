@@ -4,7 +4,7 @@ import { Button, Field, Input, PhoneInput, Textarea, Segmented, Money } from '..
 import { WaCanvas } from '../../components/chrome.jsx'
 import { theme } from '../../data/theme.js'
 import { thumbTint, fitReasons } from '../../lib/format.js'
-import { matchesForLead, leadsForProperty } from '../../lib/matching.js'
+import { matchesForLead, leadsForProperty, whatsappLink } from '../../lib/matching.js'
 
 function Sheet({ title, onClose, children }) {
   return (
@@ -469,21 +469,19 @@ function MobileWaModal({ store, wa }) {
   const l = store.state.leads.find(x => x.id === wa.leadId)
   if (!p) return null
 
-  const statusLabel = wa.lang === 'Marathi' ? 'Writing in Marathi…' : wa.lang === 'English' ? 'Writing in English…' : 'Writing in Hinglish…'
   const copy = () => { try { navigator.clipboard.writeText(wa.message || '') } catch {} store.toast('Message copied') }
 
+  // Hands off to the real WhatsApp app with the message pre-filled. We log that
+  // the details were shared — we never claim delivery, because sending happens
+  // in WhatsApp, not here.
   const send = () => {
-    if (l) {
-      store.logEvent(l.id, 'wa', `Sent WhatsApp property sheet for ${p.society} (${p.priceLabel})`)
-      store.toast(`WhatsApp signature sent to ${l.name.split(' ')[0]}`)
-    } else {
-      store.toast(`WhatsApp signature sent for ${p.society}`)
-    }
+    if (l) store.logEvent(l.id, 'wa', `Shared ${p.society} (${p.priceLabel}) details on WhatsApp`)
+    window.open(whatsappLink(wa.message, l?.phone), '_blank', 'noopener')
     store.closeWhatsApp()
   }
 
   return (
-    <Sheet title="WhatsApp Signature" onClose={() => store.closeWhatsApp()}>
+    <Sheet title="Share property details" onClose={() => store.closeWhatsApp()}>
       {l && (
         <div className="u-muted" style={{ fontSize: '12.5px', marginBottom: '12px' }}>
           To: <b style={{ color: 'var(--ink)' }}>{l.name}</b> ({l.phone})
@@ -510,23 +508,26 @@ function MobileWaModal({ store, wa }) {
       </div>
 
       <WaCanvas
-        composing={wa.composing}
         message={wa.message}
-        statusLabel={statusLabel}
         deva={wa.lang === 'Marathi'}
-        style={{ borderRadius: '14px', minHeight: '180px', marginBottom: '12px', background: '#0B3D2E', color: '#fff' }}
+        style={{ borderRadius: '14px', minHeight: '180px', marginBottom: '10px', background: '#0B3D2E', color: '#fff' }}
       />
 
-      {!wa.composing && wa.message && (
+      <div className="wa-source-lite">
+        <Icon name="check" size={12} />
+        Filled from this property's details. Unit number is never included.
+      </div>
+
+      {wa.message && (
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
           <Button variant="secondary" style={{ flex: 1, justifyContent: 'center', fontSize: '12.5px' }} onClick={copy} icon="copy">Copy</Button>
-          <Button variant="secondary" style={{ flex: 1, justifyContent: 'center', fontSize: '12.5px' }} onClick={() => store.recompose({ variant: wa.variant + 1 })} icon="refresh">Regenerate</Button>
+          <Button variant="secondary" style={{ flex: 1, justifyContent: 'center', fontSize: '12.5px' }} onClick={() => store.recompose({ variant: wa.variant + 1 })} icon="refresh">Other wording</Button>
         </div>
       )}
 
       <div style={{ display: 'flex', gap: '10px' }}>
         <Button variant="secondary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => store.closeWhatsApp()}>Cancel</Button>
-        <Button variant="primary" style={{ flex: 2, justifyContent: 'center', background: '#25D366', borderColor: '#25D366', color: '#fff' }} icon="wa" onClick={send}>Send via WhatsApp</Button>
+        <Button variant="primary" style={{ flex: 2, justifyContent: 'center', background: '#25D366', borderColor: '#25D366', color: '#fff' }} icon="wa" onClick={send}>Open in WhatsApp</Button>
       </div>
     </Sheet>
   )

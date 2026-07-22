@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { requireTenantAuth } from '../middleware/auth';
 import {
   getLeads, getLeadById, createLead, updateLead, deleteLead,
-  getProperties, createProperty, updateProperty,
+  getProperties, createProperty, updateProperty, deleteProperty,
   getTimelineEvents
 } from '../services/store';
 
@@ -167,6 +167,8 @@ recordsRouter.delete('/:id', async (req: Request, res: Response) => {
     let deleted = false;
     if (moduleKey === 'leads') {
       deleted = await deleteLead(id);
+    } else if (moduleKey === 'properties') {
+      deleted = await deleteProperty(id);
     }
 
     return res.status(200).json({

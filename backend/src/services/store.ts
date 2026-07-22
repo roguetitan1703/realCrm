@@ -110,6 +110,8 @@ function rowToLead(r: any, events: TimelineEvent[] = []): any {
     shortlist: r.shortlist || [],
     feedback: r.feedback || {},
     duplicateOf: r.duplicate_of || undefined,
+    followUp: r.follow_up || null,
+    overdue: Boolean(r.overdue),
     minsAgo,
     timeline: leadEvents.length > 0 ? leadEvents : (r.notes || []).map((n: string) => ({ type: 'note', label: n, ago: 'just now' })),
   };
@@ -148,20 +150,21 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
 
   // 2. Seed Properties
   for (const p of seedProps) {
-    const config = {
-      society: (p as any).society || p.title.split(' - ')[0],
-      project: (p as any).project || (p as any).society || p.title.split(' - ')[0],
-      deal: (p as any).deal || 'sale',
-      carpet: (p as any).carpet || p.area,
-      beds: p.beds, baths: p.baths, area: p.area, sqftLabel: p.sqftLabel,
-      priceLabel: p.priceLabel, floor: p.floor, totalFloors: (p as any).totalFloors,
-      furnishing: (p as any).furnishing || 'Semi-furnished',
-      facing: p.facing, parking: p.parking, completion: p.completion, builder: p.builder,
-      owner: (p as any).owner || 'Property Owner',
-      ownerPhone: (p as any).ownerPhone || '+91 98220 44551',
-      ownerEmail: (p as any).ownerEmail || '',
-      highlights: p.highlights || [],
-    };
+    const src = p as any;
+    // Carry EVERY non-column field into config. This used to be a hand-maintained
+    // whitelist, which silently dropped any field added to the seed later (age and
+    // possession went missing that way, and the WhatsApp message rendered a gap).
+    const config: any = {};
+    for (const [k, v] of Object.entries(src)) {
+      if (!PROPERTY_COLUMNS.has(k) && k !== 'id' && k !== 'config') config[k] = v;
+    }
+    config.society = src.society || p.title.split(' - ')[0];
+    config.project = src.project || src.society || p.title.split(' - ')[0];
+    config.deal = src.deal || 'sale';
+    config.carpet = src.carpet || p.area;
+    config.furnishing = src.furnishing || 'Semi-furnished';
+    config.owner = src.owner || 'Property Owner';
+    config.highlights = p.highlights || [];
     await sql`
       INSERT INTO crm_properties (id, title, status, type, locality, price, tower, unit, config, tenancy, timeline)
       VALUES (${p.id}, ${p.title}, ${p.status || 'Available'}, ${p.type}, ${p.locality}, ${p.price || ''}, ${p.tower || 'A'}, ${p.unit || '101'}, ${sql.json(config)}, ${sql.json(p.tenancy || null)}, ${sql.json(p.timeline || [])})
@@ -185,10 +188,14 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
 
   // 3. Seed Leads & Timeline
   for (const l of seedLeads) {
+    // Backdate created_at from the seed's minsAgo. rowToLead derives "how long ago"
+    // from this column, so without it every seeded lead reads as "just now" and the
+    // whole pipeline looks like it appeared this second.
+    const createdAt = new Date(Date.now() - (l.minsAgo ?? 60) * 60000).toISOString();
     await sql`
-      INSERT INTO crm_leads (id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback, duplicate_of)
-      VALUES (${l.id}, ${l.name}, ${l.phone}, ${l.email || null}, ${l.stage}, ${l.source || 'Website'}, ${l.agentId || 'a1'}, ${sql.json(l.req || {})}, ${sql.json(l.notes || [])}, ${sql.json(l.shortlist || [])}, ${sql.json(l.feedback || {})}, ${l.duplicateOf || null})
-      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, stage = EXCLUDED.stage, agent_id = EXCLUDED.agent_id;
+      INSERT INTO crm_leads (id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback, duplicate_of, follow_up, overdue, created_at)
+      VALUES (${l.id}, ${l.name}, ${l.phone}, ${l.email || null}, ${l.stage}, ${l.source || 'Website'}, ${l.agentId ?? null}, ${sql.json(l.req || {})}, ${sql.json(l.notes || [])}, ${sql.json(l.shortlist || [])}, ${sql.json(l.feedback || {})}, ${l.duplicateOf || null}, ${sql.json((l as any).followUp || null)}, ${Boolean((l as any).overdue)}, ${createdAt})
+      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, stage = EXCLUDED.stage, agent_id = EXCLUDED.agent_id, follow_up = EXCLUDED.follow_up, overdue = EXCLUDED.overdue, created_at = EXCLUDED.created_at;
     `;
 
     // Add creation timeline event
@@ -381,6 +388,8 @@ export async function updateLead(id: string, patch: any): Promise<any | null> {
   const notes = patch.notes !== undefined ? patch.notes : oldLead.notes;
   const shortlist = patch.shortlist !== undefined ? patch.shortlist : oldLead.shortlist;
   const feedback = patch.feedback !== undefined ? patch.feedback : oldLead.feedback;
+  const followUp = patch.followUp !== undefined ? patch.followUp : (oldLead as any).followUp;
+  const overdue = patch.overdue !== undefined ? patch.overdue : (oldLead as any).overdue;
 
   await sql`
     UPDATE crm_leads SET
@@ -393,7 +402,9 @@ export async function updateLead(id: string, patch: any): Promise<any | null> {
       req = ${sql.json(req || {})},
       notes = ${sql.json(notes || [])},
       shortlist = ${sql.json(shortlist || [])},
-      feedback = ${sql.json(feedback || {})}
+      feedback = ${sql.json(feedback || {})},
+      follow_up = ${sql.json(followUp || null)},
+      overdue = ${Boolean(overdue)}
     WHERE id = ${id};
   `;
 
@@ -411,6 +422,11 @@ export async function updateLead(id: string, patch: any): Promise<any | null> {
 
 export async function deleteLead(id: string): Promise<boolean> {
   const res = await sql`DELETE FROM crm_leads WHERE id = ${id}`;
+  return res.count > 0;
+}
+
+export async function deleteProperty(id: string): Promise<boolean> {
+  const res = await sql`DELETE FROM crm_properties WHERE id = ${id}`;
   return res.count > 0;
 }
 
@@ -451,12 +467,20 @@ export async function createProperty(propData: any): Promise<any> {
   const status = propData.status || 'Available';
   const type = propData.type || '2 BHK';
   const locality = propData.locality || 'Pune';
-  const price = propData.price || '';
-  const tower = propData.tower || 'A';
-  const unit = propData.unit || '101';
-  const config = propData.config || { beds: 2, baths: 2, area: 1000, priceLabel: price };
+  const price = propData.price != null ? String(propData.price) : '';
+  // Accept both column names (tower/unit) and the form names (wing/flat).
+  const tower = propData.tower || propData.wing || 'A';
+  const unit = propData.unit || propData.flat || '101';
   const tenancy = propData.tenancy || null;
   const timeline = propData.timeline || [];
+
+  // Everything that isn't a first-class column becomes a config (JSONB) field, so
+  // domain data (deal, society, project, wing, flat, carpet, owner, priceLabel,
+  // importBatchId, features, …) persists and round-trips via rowToProperty.
+  const config: any = { ...(propData.config || {}) };
+  for (const [k, v] of Object.entries(propData)) {
+    if (!PROPERTY_COLUMNS.has(k) && k !== 'id' && k !== 'config') config[k] = v;
+  }
 
   const rows = await sql`
     INSERT INTO crm_properties (id, title, status, type, locality, price, tower, unit, config, tenancy, timeline)

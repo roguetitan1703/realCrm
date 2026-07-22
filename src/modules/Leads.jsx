@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
-import { Button, Panel, Timeline, StageTag, Overdue } from '../components/primitives.jsx'
+import { Button, Timeline, Overdue, Avatar } from '../components/primitives.jsx'
 import { NbaBanner } from '../components/rail.jsx'
-import { fitReasons, thumbTint } from '../lib/format.js'
+import { fitReasons, thumbTint, initials, unitLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import Icon from '../components/Icon.jsx'
 import { LEADS_DEF } from './definitions.jsx'
@@ -96,10 +96,6 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
   ].sort((a, b) => (fbMap[a.p.id]?.verdict === 'rejected' ? 1 : 0) - (fbMap[b.p.id]?.verdict === 'rejected' ? 1 : 0))
 
   const openEdit = () => store.openModal({ kind: 'editRecord', moduleId: 'leads', recordId: l.id })
-  const stages = store.state.settings.stages
-  const activeStages = stages.filter(s => s !== 'Closed Lost')
-  const nextStage = (() => { const i = activeStages.indexOf(l.stage); return i >= 0 && i < activeStages.length - 1 ? activeStages[i + 1] : null })()
-
   // Rail: NBA banner + follow-up card (module-specific).
   const nbaBanner = (
     <NbaBanner
@@ -126,31 +122,6 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
     </div>
   )
 
-  // Pipeline control — shown above the record sheet (module-specific).
-  const pipelineBar = (
-    <Panel>
-      <div className="pipeline-bar">
-        <div className="pl-stage">
-          <div className="pl-label">Pipeline Stage</div>
-          <select className="pl-select" aria-label="Lead Pipeline Stage" value={l.stage} onChange={e => store.setStage(l.id, e.target.value)}>
-            {stages.map(st => <option key={st} value={st}>{st}</option>)}
-          </select>
-        </div>
-        <div className="pl-actions">
-          {nextStage && (
-            <button className="btn btn-secondary btn-sm pl-advance" onClick={() => { store.setStage(l.id, nextStage); store.toast(`Advanced to ${nextStage}`) }}>
-              <span>Move to {nextStage}</span><Icon name="arrowRight" size={14} />
-            </button>
-          )}
-          <button className="btn btn-quiet btn-sm pl-lost" onClick={() => {
-            const reason = window.prompt('Reason for marking lead as lost? (e.g. Budget, Competition, Timeline)', 'Budget mismatch')
-            if (reason !== null) { store.setStage(l.id, 'Closed Lost'); store.toast('Lead marked as Closed Lost') }
-          }}>Mark as Lost</button>
-        </div>
-      </div>
-    </Panel>
-  )
-
   const sections = [
     {
       id: 'inventory',
@@ -167,6 +138,9 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
                 <button className="invrow-main" onClick={() => go('properties', { propId: row.p.id, propOpen: true })}>
                   <div className="invrow-title">
                     <span className={rejected ? 'invrow-strike' : ''}>{row.p.society}</span>
+                    {/* Agent-side only — the unit no. is never in a client message,
+                        but here it's what distinguishes two flats in one society. */}
+                    {unitLabel(row.p) && <span className="unit-tag">{unitLabel(row.p)}</span>}
                     {fb?.verdict === 'liked' && <span className="fit ok fit-tight">👍 Liked</span>}
                     {rejected && <span className="fit no fit-tight">👎 {fb.reason}</span>}
                     {!fb && (row.shortlisted
@@ -193,11 +167,11 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
       <div className="app-body">
         <ModuleDetail
           def={LEADS_DEF} record={l} store={store} onEdit={openEdit}
-          signals={<><StageTag stage={l.stage} />{overdue && <Overdue>Overdue</Overdue>}</>}
+          avatar={<Avatar agent={{ initials: initials(l.name), avatar: '' }} size="lg" />}
+          signals={overdue ? <Overdue>Overdue</Overdue> : null}
           primary={[{ label: 'Contact', icon: 'phone', onClick: () => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' }) }]}
           nba={nbaBanner}
           railTop={followUpCard}
-          beforeSheet={pipelineBar}
           sections={sections}
           actionCtx={{ onClose: back }}
         />

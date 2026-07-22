@@ -29,10 +29,12 @@ export const defaultProperties = [
     facing: 'East-West',
     parking: '2 Covered',
     completion: 'Ready to Move',
+    age: 6,
+    possession: 'Immediate',
     builder: 'Kumar Properties',
-    owner: 'Rajesh Kulkarni',
+    owner: 'Rajesh Bhosale',
     ownerPhone: '+91 98220 44551',
-    ownerEmail: 'rajesh.kulkarni@gmail.com',
+    ownerEmail: 'rajesh.bhosale@gmail.com',
     highlights: ['Corner unit with open garden view', 'Modular kitchen with chimney included', '2 balcony extensions', 'Dedicated EV charging point'],
     tenancy: null,
     timeline: [
@@ -64,10 +66,12 @@ export const defaultProperties = [
     facing: 'North-East',
     parking: '1 Covered',
     completion: 'Under Construction (Dec 2026)',
+    age: 0,
+    possession: 'Dec 2026',
     builder: 'Godrej Properties',
-    owner: 'Meera Kulkarni',
+    owner: 'Meera Chitnis',
     ownerPhone: '+91 98112 33445',
-    ownerEmail: 'meera.k@yahoo.com',
+    ownerEmail: 'meera.chitnis@yahoo.com',
     highlights: ['High floor excellent ventilation', 'Smart home automation pre-wired', 'Metro station 5 mins walk', 'Clubhouse & rooftop deck access'],
     tenancy: null,
     timeline: [
@@ -98,6 +102,8 @@ export const defaultProperties = [
     facing: 'East',
     parking: '3 Private Garage',
     completion: 'Ready to Move',
+    age: 3,
+    possession: 'Immediate',
     builder: 'Lodha Group',
     owner: 'Anand Deshpande',
     ownerPhone: '+91 98230 44551',
@@ -131,6 +137,8 @@ export const defaultProperties = [
     furnishing: 'Semi-furnished',
     facing: 'North',
     parking: '1 Covered',
+    age: 5,
+    possession: 'Immediate',
     completion: 'Ready to Move',
     builder: 'Kolte Patil Developers',
     owner: 'Sanjay Patwardhan',
@@ -164,6 +172,8 @@ export const defaultProperties = [
     facing: 'East',
     parking: '3 Covered',
     completion: 'Ready to Move',
+    age: 2,
+    possession: 'Immediate',
     builder: 'Panchshil Realty',
     owner: 'Vikramaditya Singhania',
     ownerPhone: '+91 98100 99887',
@@ -196,6 +206,8 @@ export const defaultProperties = [
     facing: 'West',
     parking: '4 Covered',
     completion: 'Ready to Move',
+    age: 8,
+    possession: 'Immediate',
     builder: 'Prestige Group',
     owner: 'Poonawalla Estates LLP',
     ownerPhone: '+91 98220 77000',
@@ -203,10 +215,122 @@ export const defaultProperties = [
     highlights: ['Plug & play setup with 45 workstations & 2 cabins', '100% DG power backup', 'Cafeteria & boardroom pre-configured'],
     tenancy: null,
     timeline: []
+  },
+  // --- Same society as p4 (Kolte Patil Life Republic, Tower R10) --------------
+  // Three flats, three floors, three prices, three different owners. This is the
+  // real broker reality: one society, many owners, each a separate negotiation.
+  {
+    id: 'p7',
+    society: 'Kolte Patil Life Republic',
+    project: 'Kolte Patil Life Republic',
+    title: 'Kolte Patil Life Republic - Sector R10 - 1204',
+    status: 'Available',
+    type: '3 BHK Apartment',
+    deal: 'sale',
+    locality: 'Marunji / Hinjewadi, Pune',
+    price: 11200000,
+    priceLabel: '₹1.12 Cr',
+    carpet: 1180,
+    area: 1180,
+    sqftLabel: '1,180 sqft carpet',
+    floor: '12',
+    totalFloors: 18,
+    tower: 'R10',
+    unit: '1204',
+    beds: 3,
+    baths: 3,
+    furnishing: 'Fully furnished',
+    facing: 'East',
+    parking: '2 Covered',
+    age: 4,
+    possession: 'Immediate',
+    completion: 'Ready to Move',
+    builder: 'Kolte Patil Developers',
+    owner: 'Milind Joshi',
+    ownerPhone: '+91 98905 21140',
+    ownerEmail: 'milind.joshi@rediffmail.com',
+    highlights: ['Higher floor, full hills view', 'Fully furnished — owner leaving all fittings', 'Two covered parkings, rare in this tower'],
+    tenancy: null,
+    timeline: [
+      { type: 'note', label: 'Owner shifting to Bengaluru, wants closure before Diwali', ago: '2d ago' },
+      { type: 'price', label: 'Owner agreed to drop from ₹1.18 Cr to ₹1.12 Cr', ago: '6d ago' }
+    ]
+  },
+  {
+    id: 'p8',
+    society: 'Kolte Patil Life Republic',
+    project: 'Kolte Patil Life Republic',
+    title: 'Kolte Patil Life Republic - Sector R10 - 402',
+    status: 'Available',
+    type: '2 BHK Apartment',
+    deal: 'sale',
+    locality: 'Marunji / Hinjewadi, Pune',
+    price: 7600000,
+    priceLabel: '₹76 Lakh',
+    carpet: 845,
+    area: 845,
+    sqftLabel: '845 sqft carpet',
+    floor: '4',
+    totalFloors: 18,
+    tower: 'R10',
+    unit: '402',
+    beds: 2,
+    baths: 2,
+    furnishing: 'Unfurnished',
+    facing: 'North',
+    parking: '1 Covered',
+    age: 5,
+    possession: 'After 30 days',
+    completion: 'Ready to Move',
+    builder: 'Kolte Patil Developers',
+    owner: 'Sneha Rane',
+    ownerPhone: '+91 97640 30028',
+    ownerEmail: 'sneha.rane88@gmail.com',
+    highlights: ['Entry-level budget in the township', 'Tenant vacating this month', 'Closest to the school gate'],
+    tenancy: null,
+    timeline: [
+      { type: 'note', label: 'Owner open to ₹74 L for a quick, clean deal', ago: '1d ago' }
+    ]
   }
 ]
 
 export const defaultLeads = [
+  // ---------------------------------------------------------------------------
+  // DEMO OPENER: just landed, unassigned, from a portal. This is the lead the
+  // walkthrough starts on — its requirement deliberately matches the Kolte Patil
+  // township units so "assign → match" lands on the same inventory the demo
+  // closes with.
+  // ---------------------------------------------------------------------------
+  {
+    id: 'l0',
+    name: 'Amit Deshpande',
+    phone: '+919881204471',
+    email: 'amit.deshpande@wipro.com',
+    stage: 'New',
+    source: '99acres',
+    agentId: null,
+    req: {
+      deal: 'sale',
+      locality: 'Marunji / Hinjewadi, Pune',
+      config: '3 BHK Apartment',
+      budget: '₹95 Lakh - ₹1.15 Cr',
+      minBudget: 9500000,
+      maxBudget: 11500000,
+      purpose: 'Self Use',
+      notes: 'Works in Hinjewadi IT park, wants to cut the commute. Ready to see flats this weekend.',
+      timeline: 'Within 60 days'
+    },
+    notes: [],
+    shortlist: [],
+    feedback: {},
+    followUp: null,
+    overdue: false,
+    duplicateOf: null,
+    minsAgo: 2,
+    timeline: [
+      { type: 'note', label: 'Enquiry received from 99acres — 3 BHK, Marunji / Hinjewadi', ago: 'just now' }
+    ]
+  },
   {
     id: 'l1',
     name: 'Vikramaditya Deshmukh',
@@ -229,7 +353,7 @@ export const defaultLeads = [
     notes: ['Interested in immediate possession', 'Requires 2 covered car parks for luxury sedans'],
     shortlist: ['p1'],
     feedback: { p1: 'Liked the floor plan and garden view. Wants final price negotiation with owner.' },
-    followUp: { action: 'Schedule second site visit with family and verify parking dimensions', due: '2026-07-10T11:00:00Z' },
+    followUp: { action: 'Schedule second site visit with family and verify parking dimensions', date: 'Today', time: '4:30 pm' },
     overdue: false,
     duplicateOf: null,
     minsAgo: 120,
@@ -260,7 +384,7 @@ export const defaultLeads = [
     notes: ['Inquiry submitted via website landing page', 'Looking for high rental yield property near IT park'],
     shortlist: ['p2'],
     feedback: {},
-    followUp: { action: 'Call and share Godrej Elements layout brochure via WhatsApp', due: '2026-07-09T16:00:00Z' },
+    followUp: { action: 'Call and share Godrej Elements layout brochure via WhatsApp', date: 'Today', time: '10:00 am' },
     overdue: true,
     duplicateOf: null,
     minsAgo: 45,
@@ -290,8 +414,8 @@ export const defaultLeads = [
     notes: ['Referred by existing Lodha villa owner', 'Token cheque ready if clubhouse registration charges are waived'],
     shortlist: ['p3'],
     feedback: { p3: 'Loved the golf course orientation. Awaiting final token structure approval.' },
-    followUp: { action: 'Finalize terms with seller Anand Deshpande', due: '2026-07-09T18:00:00Z' },
-    overdue: false,
+    followUp: { action: 'Finalize terms with seller Anand Deshpande', date: 'Today', time: '11:00 am' },
+    overdue: true,
     duplicateOf: null,
     minsAgo: 300,
     timeline: [
@@ -320,7 +444,7 @@ export const defaultLeads = [
     notes: ['Looking for top floor penthouse with private terrace around EON Free Zone'],
     shortlist: ['p5'],
     feedback: {},
-    followUp: { action: 'Send Panchshil Towers video tour and pricing breakdown', due: '2026-07-11T10:30:00Z' },
+    followUp: { action: 'Send Panchshil Towers video tour and pricing breakdown', date: 'Tomorrow', time: '10:30 am' },
     overdue: false,
     duplicateOf: null,
     minsAgo: 480,
@@ -350,7 +474,7 @@ export const defaultLeads = [
     notes: ['Walked into Wakad experience center', 'Wants child-friendly society with schools nearby'],
     shortlist: ['p4'],
     feedback: {},
-    followUp: { action: 'Arrange site visit at Kolte Patil Life Republic Sector R10', due: '2026-07-10T14:00:00Z' },
+    followUp: { action: 'Arrange site visit at Kolte Patil Life Republic Sector R10', date: 'Today', time: '2:00 pm' },
     overdue: false,
     duplicateOf: null,
     minsAgo: 60,
@@ -380,7 +504,7 @@ export const defaultLeads = [
     notes: ['Looking for premium furnished rental apartment near Koregaon Park / Kalyani Nagar IT hubs'],
     shortlist: ['p6'],
     feedback: { p6: 'Visited Trump Towers rental unit, impressed with amenities.' },
-    followUp: { action: 'Share draft lease agreement terms with corporate HR', due: '2026-07-10T15:00:00Z' },
+    followUp: { action: 'Share draft lease agreement terms with corporate HR', date: 'Tomorrow', time: '3:00 pm' },
     overdue: false,
     duplicateOf: null,
     minsAgo: 140,
@@ -390,9 +514,9 @@ export const defaultLeads = [
   },
   {
     id: 'l7',
-    name: 'Neha Kulkarni',
+    name: 'Snehal Pawar',
     phone: '+919833445522',
-    email: 'neha.kulkarni@designstudio.co',
+    email: 'snehal.pawar@designstudio.co',
     stage: 'New',
     source: 'Website',
     agentId: 'a2',
@@ -410,7 +534,7 @@ export const defaultLeads = [
     notes: ['Looking for semi-furnished rental flat near Baner High Street'],
     shortlist: [],
     feedback: {},
-    followUp: { action: 'Send curated list of 2 BHK rental apartments in Baner', due: '2026-07-09T17:30:00Z' },
+    followUp: { action: 'Send curated list of 2 BHK rental apartments in Baner', date: 'Tomorrow', time: '5:30 pm' },
     overdue: false,
     duplicateOf: null,
     minsAgo: 25,
@@ -440,12 +564,108 @@ export const defaultLeads = [
     notes: ['Expanding Pune engineering branch, requires 3,000 sqft plug-and-play commercial office'],
     shortlist: ['p6'],
     feedback: {},
-    followUp: { action: 'Schedule inspection of Viman Nagar commercial park suites', due: '2026-07-11T11:00:00Z' },
+    followUp: { action: 'Schedule inspection of Viman Nagar commercial park suites', date: 'Fri', time: '11:00 am' },
     overdue: false,
     duplicateOf: null,
     minsAgo: 310,
     timeline: [
       { type: 'call', label: 'Introductory call completed with Admin Head', ago: '5h ago' }
+    ]
+  },
+  // ---------------------------------------------------------------------------
+  // DEMO GUT-PUNCH: these three plus l4 and l8 give Rohan Kulkarni (a3) a real
+  // five-client pipeline. Deactivating him has to feel like a near-miss disaster,
+  // which it doesn't if he only holds one or two records.
+  // ---------------------------------------------------------------------------
+  {
+    id: 'l9',
+    name: 'Prasad Kelkar',
+    phone: '+919823776510',
+    email: 'prasad.kelkar@zensar.com',
+    stage: 'Negotiation',
+    source: 'Referral',
+    agentId: 'a3',
+    req: {
+      deal: 'sale',
+      locality: 'Marunji / Hinjewadi, Pune',
+      config: '3 BHK Apartment',
+      budget: '₹1.05 - ₹1.20 Cr',
+      minBudget: 10500000,
+      maxBudget: 12000000,
+      purpose: 'Self Use',
+      notes: 'Selling his Wakad flat, wants to upgrade within the same corridor. Loan pre-approved.',
+      timeline: 'Within 45 days'
+    },
+    notes: ['Loan pre-approved from HDFC', 'Wants a higher floor, east facing'],
+    shortlist: ['p7'],
+    feedback: { p7: 'Loved the hills view and the furnishing. Negotiating on the ₹1.12 Cr ask.' },
+    followUp: { action: 'Close the gap between owner ask and buyer offer on R10-1204', date: 'Today', time: '12:00 pm' },
+    overdue: true,
+    duplicateOf: null,
+    minsAgo: 260,
+    timeline: [
+      { type: 'visit', label: 'Second visit done at Life Republic R10-1204 with wife', ago: '4h ago' },
+      { type: 'note', label: 'Offered ₹1.06 Cr, owner holding at ₹1.12 Cr', ago: '4h ago' }
+    ]
+  },
+  {
+    id: 'l10',
+    name: 'Farhan Shaikh',
+    phone: '+919767112094',
+    email: 'farhan.shaikh@outlook.com',
+    stage: 'Site Visit',
+    source: '99acres',
+    agentId: 'a3',
+    req: {
+      deal: 'sale',
+      locality: 'Marunji / Hinjewadi, Pune',
+      config: '2 BHK Apartment',
+      budget: '₹70 - ₹80 Lakh',
+      minBudget: 7000000,
+      maxBudget: 8000000,
+      purpose: 'Investment',
+      notes: 'First-time investor, comparing entry-level 2 BHKs across Hinjewadi township projects.',
+      timeline: 'Within 90 days'
+    },
+    notes: ['Investor — rental yield is the deciding factor'],
+    shortlist: ['p8'],
+    feedback: {},
+    followUp: { action: 'Share expected rental yield working for R10-402', date: 'Tomorrow', time: '4:00 pm' },
+    overdue: false,
+    duplicateOf: null,
+    minsAgo: 190,
+    timeline: [
+      { type: 'visit', label: 'Visited Life Republic R10-402, asked for rental comparables', ago: '3h ago' }
+    ]
+  },
+  {
+    id: 'l11',
+    name: 'Shweta Bhandari',
+    phone: '+919920448317',
+    email: 'shweta.bhandari@gmail.com',
+    stage: 'Contacted',
+    source: 'Walk-in',
+    agentId: 'a3',
+    req: {
+      deal: 'rent',
+      locality: 'Baner',
+      config: '2 BHK Apartment',
+      budget: '₹32,000 - ₹40,000/mo',
+      minBudget: 32000,
+      maxBudget: 40000,
+      purpose: 'Lease',
+      notes: 'Relocating from Mumbai next month, needs a semi-furnished 2 BHK close to Baner High Street.',
+      timeline: 'Within 30 days'
+    },
+    notes: ['Relocating from Mumbai, joining a Baner startup'],
+    shortlist: [],
+    feedback: {},
+    followUp: { action: 'Share three Baner rental options with photos', date: 'Fri', time: '10:30 am' },
+    overdue: false,
+    duplicateOf: null,
+    minsAgo: 420,
+    timeline: [
+      { type: 'call', label: 'Walked into the Baner office, requirement noted', ago: '7h ago' }
     ]
   }
 ]

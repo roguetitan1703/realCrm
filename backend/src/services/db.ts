@@ -114,9 +114,17 @@ export async function initSchema(): Promise<void> {
         shortlist JSONB DEFAULT '[]'::jsonb,
         feedback JSONB DEFAULT '{}'::jsonb,
         duplicate_of TEXT,
+        follow_up JSONB,
+        overdue BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `;
+
+    // Idempotent upgrade for databases created before follow_up/overdue existed.
+    // Without these, every lead silently loses its follow-up and nothing is ever
+    // overdue — which empties the agent's Today screen and the Overdue KPI.
+    await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS follow_up JSONB;`;
+    await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS overdue BOOLEAN DEFAULT FALSE;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS crm_settings (

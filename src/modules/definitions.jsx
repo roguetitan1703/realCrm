@@ -23,7 +23,7 @@ import React from 'react'
 import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA } from '../components/ModuleFields.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted } from '../components/primitives.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, budgetRange, quotedLine, unitLabel, thumbTint, initials } from '../lib/format.js'
+import { reqShort, budgetRange, quotedLine, unitLabel, thumbTint, initials, projectOf } from '../lib/format.js'
 import Icon from '../components/Icon.jsx'
 
 // Shared option pools (kept here so filters and forms stay consistent).
@@ -45,7 +45,24 @@ export const LEADS_DEF = {
   id: 'leads',
   name: 'Leads',
   singularName: 'Lead',
+  icon: 'leads',
   schema: LEAD_MODULE_SCHEMA,
+
+  // Header facts strip — the identifying line under the record name.
+  headerFacts: (l) => [l.phone, reqShort(l.req), budgetRange(l.req)].filter(Boolean),
+
+  // Progression — a lead moves through pipeline stages. The standard header
+  // renders this as a clickable journey stepper. `exit` = quiet off-path action.
+  progression: {
+    stages: (store) => store.state.settings.stages.filter(s => s !== 'Closed Lost'),
+    current: (l) => l.stage,
+    set: (store, l, stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) },
+    exit: { label: 'Mark as lost', when: (l) => l.stage !== 'Closed Lost',
+      run: (store, l) => {
+        const reason = window.prompt('Reason for marking lead as lost? (e.g. Budget, Competition, Timeline)', 'Budget mismatch')
+        if (reason !== null) { store.setStage(l.id, 'Closed Lost'); store.toast('Lead marked as Closed Lost') }
+      } },
+  },
 
   searchFields: ['name', 'phone', 'req.locality', 'req.config'],
 
@@ -162,19 +179,38 @@ export const PROPERTIES_DEF = {
   id: 'properties',
   name: 'Properties',
   singularName: 'Property',
+  icon: 'building',
   schema: PROPERTY_MODULE_SCHEMA,
 
-  searchFields: ['society', 'title', 'locality', 'owner', 'type'],
+  headerFacts: (p) => [p.type, p.locality, p.priceLabel, p.deal === 'rent' ? 'For rent' : 'For sale'].filter(Boolean),
 
-  filterFields: () => [
-    { key: 'deal', label: 'Deal', icon: 'tag', multi: false, options: [{ value: 'sale', label: 'For sale' }, { value: 'rent', label: 'For rent' }] },
-    { key: 'type', label: 'Config', icon: 'layers', options: opt(['1BHK', '2BHK', '3BHK', 'Commercial', 'Plot']) },
-    { key: 'locality', label: 'Locality', icon: 'building', options: opt(PROP_LOCALITIES) },
-    { key: 'status', label: 'Status', icon: 'check', options: opt(['Available', 'Under Offer', 'Closed']) },
-    { key: 'furnishing', label: 'Furnishing', icon: 'home', options: opt(['Fully furnished', 'Semi-furnished', 'Unfurnished']) },
-  ],
+  // A listing moves through a sale/lease lifecycle. Rendered as the same stepper.
+  progression: {
+    stages: () => ['Available', 'Token Pending', 'Under Offer', 'Sold'],
+    current: (p) => ['Available', 'Token Pending', 'Under Offer'].includes(p.status) ? p.status : (['Sold', 'Leased', 'Closed'].includes(p.status) ? 'Sold' : 'Available'),
+    set: (store, p, status) => store.setPropStatus(p.id, status),
+    exit: { label: 'Take off-market', when: (p) => p.status !== 'Off-Market',
+      run: (store, p) => store.setPropStatus(p.id, 'Off-Market') },
+  },
+
+  searchFields: ['society', 'title', 'locality', 'owner', 'type', 'project'],
+
+  filterFields: (store) => {
+    // Project options are derived from the live inventory, so a broker can narrow
+    // the unit list to one township/society.
+    const projects = [...new Set((store?.state?.properties || []).map(projectOf))].sort()
+    return [
+      { key: 'project', label: 'Project', icon: 'building', options: opt(projects) },
+      { key: 'deal', label: 'Deal', icon: 'tag', multi: false, options: [{ value: 'sale', label: 'For sale' }, { value: 'rent', label: 'For rent' }] },
+      { key: 'type', label: 'Config', icon: 'layers', options: opt(['1BHK', '2BHK', '3BHK', 'Commercial', 'Plot']) },
+      { key: 'locality', label: 'Locality', icon: 'building', options: opt(PROP_LOCALITIES) },
+      { key: 'status', label: 'Status', icon: 'check', options: opt(['Available', 'Under Offer', 'Closed']) },
+      { key: 'furnishing', label: 'Furnishing', icon: 'home', options: opt(['Fully furnished', 'Semi-furnished', 'Unfurnished']) },
+    ]
+  },
 
   rowMatch(p, key, vals) {
+    if (key === 'project') return vals.includes(projectOf(p))
     if (key === 'deal') return vals.includes(p.deal)
     if (key === 'type') return vals.includes(p.type)
     if (key === 'locality') return vals.includes(p.locality)
@@ -233,9 +269,14 @@ export const PROPERTIES_DEF = {
 // ---------------------------------------------------------------------------
 export const CLIENTS_DEF = {
   id: 'clients',
-  name: 'Clients',
-  singularName: 'Client',
+  name: 'Contacts',
+  singularName: 'Contact',
+  icon: 'people',
   schema: CLIENT_MODULE_SCHEMA,
+
+  // Contacts are a directory, not a pipeline — no `progression`. The standard
+  // header simply omits the stepper. Facts strip still applies.
+  headerFacts: (r) => [r.phone, r.role, r.locality].filter(Boolean),
 
   searchFields: ['name', 'detail', 'phone'],
 

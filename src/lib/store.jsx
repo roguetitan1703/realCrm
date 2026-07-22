@@ -59,7 +59,8 @@ function freshState() {
     leads: clone(defaultLeads),
     importLogs: [],
     inactiveAgentIds: [],
-    settings: clone(DEFAULT_SETTINGS),   // editable: firmName, stages, sources
+    settings: clone(DEFAULT_SETTINGS),   // editable: firmName, stages, sources, slaHours, reminderDays
+    routing: { strategy: 'round_robin', active_agent_ids: ['a1', 'a2', 'a3'] },
     integrations: {
       '99acres': { status: 'unconfigured', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/99acres', secret: '' },
       'MagicBricks': { status: 'unconfigured', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/magicbricks', secret: '' },
@@ -90,9 +91,13 @@ function reducer(state, action) {
         properties: s.properties && s.properties.length > 0 ? s.properties : state.properties,
         leads: s.leads && s.leads.length > 0 ? s.leads : state.leads,
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
+        routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         integrations: s.integrations ? { ...state.integrations, ...s.integrations } : state.integrations,
       }
     }
+
+    case 'PATCH_SETTINGS': return { ...state, settings: { ...state.settings, ...action.patch } }
+    case 'SET_ROUTING': return { ...state, routing: { ...state.routing, ...action.patch } }
 
     case 'SET': return { ...state, ...action.patch }
 
@@ -250,6 +255,10 @@ function reducer(state, action) {
 
     case 'ADD_PROPERTY': {
       return { ...state, properties: [action.property, ...state.properties] }
+    }
+
+    case 'ADD_PROPERTIES': {
+      return { ...state, properties: [...action.properties, ...state.properties] }
     }
 
     case 'DELETE_LEADS': {
@@ -437,27 +446,24 @@ export function StoreProvider({ children }) {
     timers.current[lastToast.id] = setTimeout(() => dispatch({ type: 'UNTOAST', id: lastToast.id }), 2600)
   }
 
-  const runCompose = useCallback((wa) => {
-    clearTimeout(timers.current.wa)
-    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    timers.current.wa = setTimeout(() => {
-      const prop = state.properties.find(p => p.id === wa.propId)
-      const message = prop ? generateMessage(prop, { lang: wa.lang, tone: wa.tone, variant: wa.variant }) : ''
-      dispatch({ type: 'WA_SET', patch: { composing: false, message } })
-    }, reduce ? 300 : 1800)
+  // The message is a TEMPLATE FILLED FROM PROPERTY DATA — not generated text.
+  // It resolves synchronously; there is deliberately no artificial delay or
+  // "composing" animation, which would imply AI authorship we don't do.
+  const composeFor = useCallback((wa) => {
+    const prop = state.properties.find(p => p.id === wa.propId)
+    return prop ? generateMessage(prop, { lang: wa.lang, tone: wa.tone, variant: wa.variant }) : ''
   }, [state.properties])
 
   const openWhatsApp = useCallback((propId, leadId) => {
     const wa = { propId, leadId, lang: 'Hinglish', tone: 'Standard', variant: 0 }
     dispatch({ type: 'WA_OPEN', wa })
-    runCompose(wa)
-  }, [runCompose])
+    dispatch({ type: 'WA_SET', patch: { composing: false, message: composeFor(wa) } })
+  }, [composeFor])
 
   const recompose = useCallback((patch) => {
-    dispatch({ type: 'WA_SET', patch: { ...patch, composing: true, message: null } })
     const wa = { ...state.waState, ...patch }
-    runCompose(wa)
-  }, [state.waState, runCompose])
+    dispatch({ type: 'WA_SET', patch: { ...patch, composing: false, message: composeFor(wa) } })
+  }, [state.waState, composeFor])
 
   const api = {
     state, dispatch, toast,
@@ -524,17 +530,42 @@ export function StoreProvider({ children }) {
       toast('Property added — now matchable')
       apiClient.createProperty(property).catch(err => console.warn('[AddProp API] Backend error:', err.message))
     },
+    // Bulk-add many units at once — one revertable batch, logged to Import history.
+    addProperties: (properties) => {
+      if (!properties?.length) return
+      dispatch({ type: 'ADD_PROPERTIES', properties })
+      toast(`${properties.length} unit${properties.length > 1 ? 's' : ''} added`)
+      const batchId = properties[0]?.importBatchId
+      if (batchId) {
+        const project = properties[0].project || properties[0].society || 'Project'
+        dispatch({ type: 'LOG_IMPORT_BATCH', logEntry: {
+          batchId, timestamp: Date.now(), fileName: `Added ${properties.length} unit(s) to ${project}`,
+          module: 'Properties', addedCount: properties.length, mergedCount: 0, mergedDetails: [], reverted: false,
+        } })
+      }
+      properties.forEach(p => apiClient.createProperty(p).catch(err => console.warn('[AddUnits API] Backend error:', err.message)))
+    },
     deleteLead: (ids) => {
+      const list = Array.isArray(ids) ? ids : [ids]
       dispatch({ type: 'DELETE_LEADS', ids })
       toast('Lead/Client record(s) deleted')
+      list.forEach(id => apiClient.deleteLead(id).catch(err => console.warn('[DeleteLead API] error:', err.message)))
     },
     deleteProperty: (ids) => {
+      const list = Array.isArray(ids) ? ids : [ids]
       dispatch({ type: 'DELETE_PROPERTIES', ids })
       toast('Property record(s) deleted')
+      list.forEach(id => apiClient.deleteProperty(id).catch(err => console.warn('[DeleteProp API] error:', err.message)))
     },
     revertImportBatch: (batchId) => {
+      // Collect the batch's record ids BEFORE the local state removes them, so we
+      // can also delete them on the backend — otherwise they reload on refresh.
+      const propIds = state.properties.filter(p => p.importBatchId === batchId).map(p => p.id)
+      const leadIds = state.leads.filter(l => l.importBatchId === batchId).map(l => l.id)
       dispatch({ type: 'REVERT_IMPORT_BATCH', batchId })
       toast('Import batch reverted — imported records removed', 'ok')
+      propIds.forEach(id => apiClient.deleteProperty(id).catch(err => console.warn('[Revert/Prop API] error:', err.message)))
+      leadIds.forEach(id => apiClient.deleteLead(id).catch(err => console.warn('[Revert/Lead API] error:', err.message)))
     },
     logImportBatch: (logEntry) => {
       dispatch({ type: 'LOG_IMPORT_BATCH', logEntry })
@@ -607,6 +638,18 @@ export function StoreProvider({ children }) {
       dispatch({ type: 'REMOVE_SOURCE', name })
       toast('Source removed')
       apiClient.updateSettings({ sources: state.settings.sources.filter(s => s !== name) }).catch(err => console.warn('[Settings API] error:', err.message))
+    },
+    // Generic settings patch — persists any key (slaHours, reminderDays, currency, …).
+    patchSettings: (patch, note) => {
+      dispatch({ type: 'PATCH_SETTINGS', patch })
+      if (note) toast(note)
+      apiClient.updateSettings(patch).catch(err => console.warn('[Settings API] error:', err.message))
+    },
+    // Lead routing — backend round-robins new leads across active_agent_ids.
+    setRouting: (patch, note) => {
+      dispatch({ type: 'SET_ROUTING', patch })
+      if (note) toast(note)
+      apiClient.updateRouting(patch).catch(err => console.warn('[Routing API] error:', err.message))
     },
     openModal: (modal) => dispatch({ type: 'SET', patch: { modal } }),
     closeModal: () => dispatch({ type: 'SET', patch: { modal: null } }),

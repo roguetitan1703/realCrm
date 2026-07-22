@@ -112,23 +112,15 @@ export default function Clients({ store, go, topBar }) {
       : <ModuleTable def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} sortKey={sortKey} sortDir={sortDir} onSort={setSortKey} />,
   })
 
-  return (
-    <>
-      {topBar({
-        title: 'Clients',
-        actions: <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import / Revert</Button>
-      })}
-      {header}
-      <div className="clients-split">
-        <div className="clients-list">
-          <ListLayout toolbar={toolbar}>{body}</ListLayout>
-        </div>
-
-        {/* Standardized detail drawer — same ModuleDetail as Leads & Properties */}
-        {selClient && (
+  // Full-page detail takeover — same pattern as Leads & Properties (not a drawer).
+  if (selClient) {
+    return (
+      <>
+        {topBar({ eyebrow: 'Contacts', title: selClient.name, onBack: () => setSelClient(null) })}
+        <div className="app-body">
           <ModuleDetail
             def={CLIENTS_DEF} record={selClient} store={store}
-            signals={<span className="md-deal">{selClient.role}</span>}
+            avatar={<span className={'av av-lg ' + (selClient.kind === 'supply' ? 'av-supply' : 'av-demand')}>{initials(selClient.name)}</span>}
             actionCtx={{ onClose: () => setSelClient(null) }}
             sections={[{
               id: 'portfolio',
@@ -159,8 +151,19 @@ export default function Clients({ store, go, topBar }) {
               ) : null,
             }]}
           />
-        )}
-      </div>
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <>
+      {topBar({
+        title: 'Contacts',
+        actions: <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import</Button>
+      })}
+      {header}
+      <ListLayout toolbar={toolbar}>{body}</ListLayout>
     </>
   )
 }

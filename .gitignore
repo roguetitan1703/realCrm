@@ -53,6 +53,10 @@ Thumbs.db
 .env.*
 !.env.example
 !.env.template
+# Committed on purpose: Vite VITE_* vars are inlined into the public browser
+# bundle, so they are never secret. Committing this means a plain `git pull` +
+# deploy points the frontend at the right API with no dashboard step.
+!.env.production
 
 # Vercel
 .vercel
