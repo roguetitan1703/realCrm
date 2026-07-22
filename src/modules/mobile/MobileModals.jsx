@@ -232,9 +232,20 @@ function MobileOutreach({ store, leadId, channel = 'call', onClose }) {
     ]
   }
 
+  // Do the thing, then log it — on a phone these open the real dialer,
+  // WhatsApp and SMS app.
   const logIt = () => {
-    store.logEvent(leadId, ch === 'call' ? 'call' : ch === 'wa' ? 'wa' : 'sms', ch === 'call' ? `Outgoing call to ${l.phone}` : text || `Sent ${ch.toUpperCase()} follow-up`)
-    store.toast(`Logged ${ch.toUpperCase()} to ${first}'s timeline`)
+    const digits = String(l.phone || '').replace(/\D/g, '')
+    const intl = digits ? `+${digits.length > 10 ? digits : '91' + digits}` : ''
+    if (ch === 'call') {
+      if (intl) window.location.href = `tel:${intl}`
+    } else {
+      if (!text.trim()) { store.toast('Pick a template or type a message first', 'warn'); return }
+      if (ch === 'wa') window.open(whatsappLink(text, digits), '_blank', 'noopener')
+      else window.location.href = `sms:${intl}?body=${encodeURIComponent(text)}`
+    }
+    store.logEvent(leadId, ch === 'call' ? 'call' : ch === 'wa' ? 'wa' : 'sms', ch === 'call' ? `Outgoing call to ${l.phone}` : text)
+    store.toast(ch === 'call' ? `Calling ${first} · logged to timeline` : `${ch === 'wa' ? 'WhatsApp' : 'SMS'} opened · logged to timeline`)
     onClose()
   }
 

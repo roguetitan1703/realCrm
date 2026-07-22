@@ -3,7 +3,7 @@ import Icon from '../components/Icon.jsx'
 import { Button, Field, Input, PhoneInput, Textarea, Segmented, Avatar, Source, StageTag, Money } from '../components/primitives.jsx'
 import { theme } from '../data/theme.js'
 import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/format.js'
-import { matchesForLead, leadsForProperty, ownerUpdateMessage } from '../lib/matching.js'
+import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
@@ -267,16 +267,27 @@ function OutreachModal({ store, leadId, channel = 'call' }) {
     ],
   }
 
+  // The button must actually do the thing — dial the phone, open WhatsApp,
+  // open the SMS composer — and *then* log it. Logging alone was the old
+  // behaviour and it read as a dead button.
   const logIt = () => {
+    const digits = String(l.phone || '').replace(/\D/g, '')
     if (ch === 'call') {
-      store.addNote(l.id, `Phone call completed with ${first} — Outcome: ${callOutcome}`, 'call')
+      if (digits) window.location.href = `tel:+${digits.length > 10 ? digits : '91' + digits}`
+      store.addNote(l.id, `Phone call with ${first} — Outcome: ${callOutcome}`, 'call')
       api.callBridge(l.id, store.state.activeAgentId).catch(err => console.warn('[Telephony API Fallback] Backend offline:', err.message))
+      store.toast(`Call logged · ${callOutcome}`)
+    } else if (ch === 'wa') {
+      if (!text.trim()) { store.toast('Pick a template or type a message first', 'warn'); return }
+      window.open(whatsappLink(text, digits), '_blank', 'noopener')
+      store.addNote(l.id, `WhatsApp sent to ${first}: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`, 'msg')
+      api.sendWhatsApp(l.id, 'outreach_msg', { text }).catch(err => console.warn('[WABA API Fallback] Backend offline:', err.message))
+      store.toast('WhatsApp opened with the message ready')
     } else {
-      const channelLabel = ch === 'wa' ? 'WhatsApp' : 'SMS'
-      store.addNote(l.id, `${channelLabel} sent to ${first}${text ? ': ' + text.slice(0, 50) + (text.length > 50 ? '…' : '') : ''}`, 'msg')
-      if (ch === 'wa') {
-        api.sendWhatsApp(l.id, 'outreach_msg', { text: text || 'Template message' }).catch(err => console.warn('[WABA API Fallback] Backend offline:', err.message))
-      }
+      if (!text.trim()) { store.toast('Pick a template or type a message first', 'warn'); return }
+      window.location.href = `sms:${digits ? '+' + (digits.length > 10 ? digits : '91' + digits) : ''}?body=${encodeURIComponent(text)}`
+      store.addNote(l.id, `SMS sent to ${first}: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`, 'msg')
+      store.toast('SMS composer opened')
     }
     store.closeModal()
   }
@@ -325,7 +336,7 @@ function OutreachModal({ store, leadId, channel = 'call' }) {
           <button className="btn btn-primary btn-block" style={{ padding: 14, fontSize: 13.5, fontWeight: 600 }} onClick={logIt}>
             <Icon name="phone" /> Start Call
           </button>
-          <div className="u-muted" style={{ fontSize: 11.5, textAlign: 'center' }}>Connects telephony & logs outcome to timeline.</div>
+          <div className="u-muted" style={{ fontSize: 11.5, textAlign: 'center' }}>Dials {l.phone} and logs the outcome you picked.</div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -355,7 +366,9 @@ function OutreachModal({ store, leadId, channel = 'call' }) {
 
       <div style={{ marginTop: 14, background: 'var(--wash)', border: '1px solid var(--line)', borderRadius: 9, padding: '10px 12px', fontSize: 11.5, color: 'var(--ink-2)', display: 'flex', gap: 9 }}>
         <Icon name="zap" size={15} style={{ flexShrink: 0, marginTop: 1, color: 'var(--accent)' }} />
-        <span>Connects with your Exotel / Meta WABA telephony credentials. Logged instantly to lead timeline.</span>
+        <span>{ch === 'call'
+          ? 'Dials from this device and logs the outcome to the lead timeline.'
+          : `Opens ${ch === 'wa' ? 'WhatsApp' : 'your SMS app'} with the message filled in. The send is logged to the lead timeline.`}</span>
       </div>
     </Modal>
   )

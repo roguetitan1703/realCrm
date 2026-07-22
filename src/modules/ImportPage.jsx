@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react'
 import Icon from '../components/Icon.jsx'
 import { Button, Panel, PageHeader } from '../components/primitives.jsx'
 import { ListLayout } from '../layouts/layouts.jsx'
+import {
+  PROPERTY_FIELDS, LEAD_FIELDS, GROUP_LABEL,
+  parseSpreadsheet, guessMapping, readField,
+  normPhone, splitUnit, moneyLabel,
+} from '../lib/importSchema.js'
 
 // Guided import wizard: Choose → Upload → Map → Review → Done. The parsing,
 // dedup and revert logic is unchanged; the flow is a proper stepped experience.
@@ -31,7 +36,8 @@ export default function ImportPage({ store, go, sel, topBar }) {
   const [fileMeta, setFileMeta] = useState(null)
   const [parsedRows, setParsedRows] = useState([])
   const [headers, setHeaders] = useState([])
-  const [mapping, setMapping] = useState({ name: '', phone: '', locality: '', config: '', budget: '', title: '', price: '', type: '' })
+  const [mapping, setMapping] = useState({})
+  const [showAllFields, setShowAllFields] = useState(false)
   const [filterStatus, setFilterStatus] = useState('all')
   const [importProject, setImportProject] = useState('') // properties: land the whole file under one project
   const [error, setError] = useState(null)
@@ -46,82 +52,116 @@ export default function ImportPage({ store, go, sel, topBar }) {
   const chooseKind = (k) => { setKind(k); setStep('upload'); setError(null) }
   const restart = () => { setKind(null); setStep('choose'); setParsedRows([]); setHeaders([]); setFileMeta(null); setError(null); setImportStats(null) }
 
-  const handleFile = (e) => {
+  const FIELDS = kind === 'clients' ? LEAD_FIELDS : PROPERTY_FIELDS
+
+  const handleFile = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
     setFileMeta({ name: file.name, size: Math.round(file.size / 1024) + ' KB' })
-    const reader = new FileReader()
-    reader.onload = (evt) => {
-      try {
-        const text = evt.target.result
-        const lines = text.split(/\r?\n/).filter(line => line.trim())
-        if (lines.length < 2) { setError('This file needs a header row and at least one data row.'); return }
-        const parseCSVLine = (str) => {
-          const res = []; let cur = ''; let q = false
-          for (let i = 0; i < str.length; i++) {
-            const ch = str[i]
-            if (ch === '"') q = !q
-            else if (ch === ',' && !q) { res.push(cur.trim().replace(/^"|"$/g, '')); cur = '' }
-            else cur += ch
-          }
-          res.push(cur.trim().replace(/^"|"$/g, '')); return res
-        }
-        const cols = parseCSVLine(lines[0])
-        const rows = lines.slice(1).map(line => {
-          const vals = parseCSVLine(line); const obj = {}
-          cols.forEach((h, idx) => { obj[h] = vals[idx] || '' }); return obj
-        })
-        setHeaders(cols)
-        const guess = { name: '', phone: '', locality: '', config: '', budget: '', title: '', price: '', type: '' }
-        cols.forEach(c => {
-          const cl = c.toLowerCase()
-          if (/name|client|buyer/i.test(cl) && !guess.name) guess.name = c
-          if (/phone|mobile|contact|tel/i.test(cl) && !guess.phone) guess.phone = c
-          if (/area|locality|city|location/i.test(cl) && !guess.locality) guess.locality = c
-          if (/bhk|config|req|type/i.test(cl) && !guess.config) guess.config = c
-          if (/budget|amount/i.test(cl) && !guess.budget) guess.budget = c
-          if (/project|society|title|building/i.test(cl) && !guess.title) guess.title = c
-          if (/price|cost|rate/i.test(cl) && !guess.price) guess.price = c
-          if (/type|bhk/i.test(cl) && !guess.type) guess.type = c
-        })
-        setMapping(guess); setParsedRows(rows); setError(null); setStep('map')
-      } catch (err) { setError('Could not read this file: ' + err.message) }
+    setError(null)
+    try {
+      const { headers: cols, rows, sheetName, sheetCount } = await parseSpreadsheet(file)
+      if (!rows.length) { setError('That file has headers but no data rows.'); return }
+      setHeaders(cols)
+      setMapping(guessMapping(cols, FIELDS))
+      setParsedRows(rows)
+      setShowAllFields(false)
+      if (sheetName) setFileMeta(f => ({ ...f, sheetName, sheetCount }))
+      setStep('map')
+    } catch (err) {
+      setError('Could not read this file: ' + err.message)
     }
-    reader.readAsText(file)
   }
 
   const intoProject = importProject.trim()
+
+  // Read every mapped field, then shape it into the record the app really
+  // stores — so a rich sheet lands rich, instead of collapsing to four columns.
   const previewRows = parsedRows.map((row) => {
+    const v = {}
+    FIELDS.forEach(f => { const got = readField(row, mapping, f); if (got !== null) v[f.key] = got })
+
     if (kind === 'clients') {
-      const nameRaw = mapping.name ? row[mapping.name] : ''
-      const phoneRaw = mapping.phone ? row[mapping.phone] : ''
-      if (!nameRaw && !phoneRaw) return { status: 'invalid', reason: 'Missing name & phone', row }
-      const name = nameRaw ? nameRaw.replace(/^[*(]+/g, '').trim() : 'Imported lead'
-      const phone = (phoneRaw && /^[+0-9\s-]{7,15}$/.test(phoneRaw.trim())) ? phoneRaw.trim() : '+919800000000'
-      const dup = store.state.leads.find(l => l.phone === phone || (l.name && l.name.toLowerCase() === name.toLowerCase() && name.length > 3))
-      return {
-        status: dup ? 'duplicate' : 'new', dupTarget: dup ? dup.name : null, name, phone,
-        locality: mapping.locality ? (row[mapping.locality] || 'Pune') : 'Pune',
-        config: mapping.config ? (row[mapping.config] || '2 BHK') : '2 BHK',
-        budget: mapping.budget ? (row[mapping.budget] || '1.2 Cr') : '1.2 Cr',
+      if (!v.name && !v.phone) return { status: 'invalid', reason: 'No name and no phone', row }
+      const name = (v.name || 'Imported lead').replace(/^[*(]+/, '').trim()
+      const phone = v.phone
+      if (!phone) return { status: 'invalid', reason: 'Phone is missing or too short', row, name }
+      const key = normPhone(phone)
+      const dup = store.state.leads.find(l => normPhone(l.phone) === key)
+      const record = {
+        name, phone, email: v.email || undefined,
+        source: v.source || 'Spreadsheet import',
+        stage: v.stage || 'New',
+        req: {
+          deal: v.deal || 'sale',
+          locality: v.locality || '',
+          config: v.config || '',
+          minBudget: v.minBudget || undefined,
+          maxBudget: v.maxBudget || undefined,
+          budget: [moneyLabel(v.minBudget), moneyLabel(v.maxBudget)].filter(Boolean).join(' - ') || '',
+          purpose: v.purpose || undefined,
+          timeline: v.timeline || undefined,
+          notes: v.notes || undefined,
+        },
       }
-    } else {
-      // When importing INTO a project, the row is a unit — its label can come from
-      // the mapped title OR simply the first column (a column of unit numbers).
-      let titleRaw = mapping.title ? row[mapping.title] : ''
-      if (!titleRaw && intoProject && headers.length) titleRaw = row[headers[0]] || ''
-      if (!titleRaw) return { status: 'invalid', reason: intoProject ? 'Missing unit label' : 'Missing project title', row }
-      const title = String(titleRaw).replace(/^[*(]+/g, '').trim()
-      const dup = store.state.properties.find(p => (p.society && p.society.toLowerCase() === title.toLowerCase()) || (p.title && p.title.toLowerCase() === title.toLowerCase()))
-      const priceNum = parseFloat(mapping.price ? row[mapping.price] : '')
-      return {
-        status: dup ? 'duplicate' : 'new', dupTarget: dup ? (dup.society || dup.title) : null, title,
-        locality: mapping.locality ? (row[mapping.locality] || 'Pune') : 'Pune',
-        type: mapping.type ? (row[mapping.type] || '2 BHK') : '2 BHK',
-        price: (!isNaN(priceNum) && priceNum > 0) ? priceNum : 95,
-      }
+      return { status: dup ? 'duplicate' : 'new', dupTarget: dup?.name || null, record, label: name, sub: phone, locality: v.locality || '—' }
+    }
+
+    // Properties. A row is a unit; the project can come from a column or from
+    // the "import into project" box applied to the whole file.
+    let unitRaw = v.title
+    if (!unitRaw && headers.length) unitRaw = String(row[headers[0]] || '').trim()
+    if (!unitRaw) return { status: 'invalid', reason: 'No unit / listing name', row }
+
+    const project = intoProject || v.project || unitRaw
+    const parsed = splitUnit(unitRaw)
+    const wing = v.wing || parsed.wing || undefined
+    const flat = parsed.flat || unitRaw
+    const title = [project, wing && `Wing ${wing}`, flat !== project ? flat : null].filter(Boolean).join(' - ')
+
+    // Dedup on the thing that is actually unique: a unit inside a project.
+    const dupKey = `${project}|${wing || ''}|${flat}`.toLowerCase()
+    const dup = store.state.properties.find(p =>
+      `${p.project || p.society || ''}|${p.wing || p.tower || ''}|${p.flat || p.unit || ''}`.toLowerCase() === dupKey)
+
+    const record = {
+      title,
+      society: project, project,
+      wing, tower: wing, flat, unit: flat,
+      type: v.type || '2 BHK Apartment',
+      deal: v.deal || 'sale',
+      locality: v.locality || 'Pune',
+      price: v.price || undefined,
+      priceLabel: moneyLabel(v.price) || undefined,
+      status: v.status || 'Available',
+      carpet: v.carpet || undefined,
+      area: v.carpet || undefined,
+      sqftLabel: v.carpet ? `${Number(v.carpet).toLocaleString('en-IN')} sqft carpet` : undefined,
+      floor: v.floor || undefined,
+      totalFloors: v.totalFloors || undefined,
+      facing: v.facing || undefined,
+      furnishing: v.furnishing || undefined,
+      parking: v.parking || undefined,
+      possession: v.possession || undefined,
+      age: v.age !== undefined ? v.age : undefined,
+      builder: v.builder || undefined,
+      rera: v.rera || undefined,
+      owner: v.owner || undefined,
+      ownerPhone: v.ownerPhone || undefined,
+      ownerEmail: v.ownerEmail || undefined,
+      highlights: v.notes ? [v.notes] : undefined,
+    }
+    return {
+      status: dup ? 'duplicate' : 'new',
+      dupTarget: dup ? (dup.title || dup.society) : null,
+      record, label: title, sub: moneyLabel(v.price) || '—', locality: v.locality || '—',
     }
   })
+
+  // How much of each row actually survived the mapping — the honest answer to
+  // "is my data coming across, or just the name?"
+  const mappedCount = new Set(Object.values(mapping).filter(Boolean)).size
+  const unmappedHeaders = headers.filter(h => !Object.values(mapping).includes(h))
 
   const newCount = previewRows.filter(r => r.status === 'new').length
   const dupCount = previewRows.filter(r => r.status === 'duplicate').length
@@ -136,27 +176,12 @@ export default function ImportPage({ store, go, sel, topBar }) {
     try {
       for (const pr of previewRows) {
         if (pr.status === 'invalid') continue
-        if (kind === 'clients') {
-          await store.addLead({ name: pr.name, phone: pr.phone, source: 'CSV Import', req: { locality: pr.locality, config: pr.config, budget: pr.budget }, budget: pr.budget, stage: 'New', importBatchId: batchId })
-          if (pr.status === 'duplicate') { merged++; mergedDetails.push(`${pr.name} (${pr.phone}) merged into existing lead — ${pr.dupTarget}`) } else added++
-        } else {
-          const proj = importProject.trim()
-          // When importing into a named project, each row is a unit — parse its label
-          // (e.g. "A-1201" → wing A, flat 1201) so it slots under the right wing.
-          const rec = { title: pr.title, locality: pr.locality, type: pr.type, price: pr.price, status: 'Available', importBatchId: batchId }
-          if (proj) {
-            const m = String(pr.title).match(/^([A-Za-z]+)[\s-]?(\d.*)$/)
-            rec.society = proj; rec.project = proj
-            rec.wing = m ? m[1].toUpperCase() : undefined
-            rec.flat = m ? m[2] : pr.title
-          } else {
-            rec.society = pr.title; rec.project = pr.title
-          }
-          await store.addProperty(rec)
-          if (pr.status === 'duplicate') { merged++; mergedDetails.push(`"${pr.title}" updated existing listing — ${pr.dupTarget}`) } else added++
-        }
+        const rec = { ...pr.record, importBatchId: batchId }
+        if (kind === 'clients') await store.addLead(rec)
+        else await store.addProperty(rec)
+        if (pr.status === 'duplicate') { merged++; mergedDetails.push(`${pr.label} merged into existing record — ${pr.dupTarget}`) } else added++
       }
-      store.logImportBatch({ batchId, timestamp: Date.now(), fileName: fileMeta?.name || 'import.csv', module: kind === 'clients' ? 'Leads & Contacts' : 'Properties', addedCount: added, mergedCount: merged, mergedDetails, reverted: false })
+      store.logImportBatch({ batchId, timestamp: Date.now(), fileName: fileMeta?.name || 'import', module: kind === 'clients' ? 'Leads & Contacts' : 'Properties', addedCount: added, mergedCount: merged, mergedDetails, reverted: false })
       setLastBatchId(batchId); setImportStats({ added, merged, invalid: invalidCount, mergedDetails }); setStep('done'); setImporting(false)
     } catch (err) { setError('Import failed while saving: ' + err.message); setImporting(false) }
   }
@@ -176,21 +201,18 @@ export default function ImportPage({ store, go, sel, topBar }) {
     </div>
   )
 
-  const clientFields = [
-    { key: 'name', label: 'Name', hint: '— required' },
-    { key: 'phone', label: 'Phone', hint: '— required' },
-    { key: 'locality', label: 'Locality', hint: '— optional' },
-    { key: 'budget', label: 'Budget', hint: '— optional' },
-  ]
-  const propFields = [
-    intoProject
-      ? { key: 'title', label: 'Unit label / no.', hint: '— defaults to the first column' }
-      : { key: 'title', label: 'Project / society', hint: '— required' },
-    { key: 'price', label: 'Price', hint: '— optional' },
-    { key: 'locality', label: 'Locality', hint: '— optional' },
-    { key: 'type', label: 'Configuration', hint: '— optional' },
-  ]
-  const mapFields = kind === 'clients' ? clientFields : propFields
+  // Core fields always show; the rest collapse so the required mapping isn't
+  // buried under twenty selects — but they're one click away, not absent.
+  const visibleFields = showAllFields ? FIELDS : FIELDS.filter(f => f.group === 'key')
+  const groups = visibleFields.reduce((acc, f) => {
+    (acc[f.group] = acc[f.group] || []).push(f)
+    return acc
+  }, {})
+  const sampleOf = (col) => {
+    if (!col) return null
+    const hit = parsedRows.find(r => String(r[col] ?? '').trim() !== '')
+    return hit ? String(hit[col]).slice(0, 28) : null
+  }
 
   return (
     <>
@@ -210,12 +232,12 @@ export default function ImportPage({ store, go, sel, topBar }) {
                   <button className="imp-choice" onClick={() => chooseKind('clients')}>
                     <span className="imp-choice-ic"><Icon name="leads" size={24} /></span>
                     <span className="imp-choice-t">Leads & contacts</span>
-                    <span className="imp-choice-d">Buyers, tenants and enquiries. Deduplicated by phone.</span>
+                    <span className="imp-choice-d">Buyers, tenants and enquiries — with budget, locality and requirement. Deduplicated by phone.</span>
                   </button>
                   <button className="imp-choice" onClick={() => chooseKind('properties')}>
                     <span className="imp-choice-ic"><Icon name="building" size={24} /></span>
                     <span className="imp-choice-t">Properties</span>
-                    <span className="imp-choice-d">Listings and inventory. Deduplicated by project name.</span>
+                    <span className="imp-choice-d">Units and listings — carpet, floor, facing, owner, price. Deduplicated per unit inside a project.</span>
                   </button>
                 </div>
               </Panel>
@@ -230,10 +252,10 @@ export default function ImportPage({ store, go, sel, topBar }) {
                 </div>
                 {error && <div className="imp-error">{error}</div>}
                 <label className="imp-drop">
-                  <input type="file" accept=".csv,.txt" onChange={handleFile} className="imp-file" />
+                  <input type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls,.ods" onChange={handleFile} className="imp-file" />
                   <span className="imp-drop-ic"><Icon name="layers" size={26} /></span>
-                  <span className="imp-drop-t">Drop your .csv here, or click to browse</span>
-                  <span className="imp-drop-d">Duplicates are detected automatically — you'll review everything before it's saved.</span>
+                  <span className="imp-drop-t">Drop your Excel or CSV here, or click to browse</span>
+                  <span className="imp-drop-d">.xlsx, .xls, .csv or tab-separated. Columns are matched for you, duplicates are flagged, and nothing saves until you confirm.</span>
                 </label>
               </Panel>
             )}
@@ -242,7 +264,10 @@ export default function ImportPage({ store, go, sel, topBar }) {
             {step === 'map' && (
               <Panel>
                 <div className="imp-bar">
-                  <div className="imp-step-title">Match your columns <span className="imp-target">{parsedRows.length} rows · {fileMeta?.name}</span></div>
+                  <div className="imp-step-title">Match your columns <span className="imp-target">
+                    {parsedRows.length} rows · {headers.length} columns · {fileMeta?.name}
+                    {fileMeta?.sheetName ? ` · sheet "${fileMeta.sheetName}"` : ''}
+                  </span></div>
                   <div className="imp-bar-actions">
                     <Button variant="secondary" size="sm" onClick={() => setStep('upload')}>Back</Button>
                     <Button variant="primary" size="sm" disabled={newCount + dupCount === 0} onClick={() => setStep('review')}>Continue to review</Button>
@@ -258,22 +283,49 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     </datalist>
                   </div>
                 )}
-                <div className="imp-map-grid">
-                  {mapFields.map(f => (
-                    <div key={f.key} className="imp-map-field">
-                      <label className="imp-map-label">{f.label} <span className="imp-map-hint">{f.hint}</span></label>
-                      <select className="input" value={mapping[f.key]} onChange={e => setMapping({ ...mapping, [f.key]: e.target.value })}>
-                        <option value="">— Not mapped —</option>
-                        {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                      </select>
+                <div className="imp-map-groups">
+                {Object.keys(groups).map(g => (
+                  <div key={g}>
+                    {showAllFields && <div className="imp-map-group">{GROUP_LABEL[g]}</div>}
+                    <div className="imp-map-grid">
+                      {groups[g].map(f => {
+                        const sample = sampleOf(mapping[f.key])
+                        return (
+                          <div key={f.key} className="imp-map-field">
+                            <label className="imp-map-label">
+                              {f.label} <span className="imp-map-hint">{f.required ? '— required' : '— optional'}</span>
+                            </label>
+                            <select className="input" value={mapping[f.key] || ''} onChange={e => setMapping({ ...mapping, [f.key]: e.target.value })}>
+                              <option value="">— Not mapped —</option>
+                              {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                            </select>
+                            <span className="imp-map-sample">{sample ? `e.g. ${sample}` : 'No column matched'}</span>
+                          </div>
+                        )
+                      })}
                     </div>
-                  ))}
+                  </div>
+                ))}
                 </div>
+
+                <button className="btn btn-quiet btn-sm imp-more-fields" onClick={() => setShowAllFields(v => !v)}>
+                  <Icon name={showAllFields ? 'chevUp' : 'chevDown'} size={13} />
+                  {showAllFields
+                    ? 'Show core fields only'
+                    : `Map ${FIELDS.length - FIELDS.filter(f => f.group === 'key').length} more fields — carpet area, floor, facing, owner…`}
+                </button>
+
                 <div className="imp-counts">
                   <span className="imp-count new">{newCount} new</span>
                   <span className="imp-count dup">{dupCount} duplicate{dupCount === 1 ? '' : 's'} to merge</span>
                   <span className="imp-count skip">{invalidCount} will be skipped</span>
+                  <span className="imp-count" style={{ marginLeft: 'auto' }}>{mappedCount} of {headers.length} columns mapped</span>
                 </div>
+                {unmappedHeaders.length > 0 && (
+                  <div className="imp-unmapped">
+                    Not imported: {unmappedHeaders.join(', ')}. Map them above if they matter.
+                  </div>
+                )}
               </Panel>
             )}
 
@@ -299,7 +351,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     <thead>
                       <tr>
                         <th>Status</th>
-                        <th>{kind === 'clients' ? 'Name' : 'Society / project'}</th>
+                        <th>{kind === 'clients' ? 'Name' : 'Unit'}</th>
                         <th>{kind === 'clients' ? 'Phone' : 'Price'}</th>
                         <th>Locality</th>
                         <th>Action</th>
@@ -313,8 +365,8 @@ export default function ImportPage({ store, go, sel, topBar }) {
                             {pr.status === 'duplicate' && <span className="imp-badge dup">Merge</span>}
                             {pr.status === 'invalid' && <span className="imp-badge skip">Skip</span>}
                           </td>
-                          <td className="name">{pr.name || pr.title || '—'}</td>
-                          <td className="mono-num">{pr.phone || pr.price || '—'}</td>
+                          <td className="name">{pr.label || '—'}</td>
+                          <td className="mono-num">{pr.sub || '—'}</td>
                           <td>{pr.locality || '—'}</td>
                           <td className="cell-quiet">{pr.dupTarget ? `Merges into ${pr.dupTarget}` : pr.status === 'invalid' ? (pr.reason || 'Skipped') : 'Create new'}</td>
                         </tr>

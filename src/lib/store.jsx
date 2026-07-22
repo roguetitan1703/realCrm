@@ -157,11 +157,13 @@ function reducer(state, action) {
     }
 
     case 'FOLLOWUP': {
+      // fu === null means "marked done" — clearing the appointment, not setting one.
       const fu = action.followUp
+      const label = fu ? `Follow-up set · ${fu.action}` : 'Appointment completed'
       return {
         ...state,
         leads: state.leads.map(l => l.id === action.leadId
-          ? { ...l, followUp: fu, overdue: false, timeline: [{ type: 'follow', label: 'Follow-up set · ' + fu.action, ago: 'just now' }, ...l.timeline] }
+          ? { ...l, followUp: fu, overdue: false, timeline: [{ type: 'follow', label, ago: 'just now' }, ...(l.timeline || [])] }
           : l),
       }
     }
