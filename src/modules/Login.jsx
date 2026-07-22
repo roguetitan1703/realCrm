@@ -5,7 +5,7 @@
  * A calm, disciplined, human-designed authentication desk.
  *
  * Identity gate: the first step is choosing a WORKSPACE. Until one is chosen
- * the screen wears the platform's identity (Nivaas by Delpat) — never a
+ * the screen wears the platform's identity (Real Estate by Delpat) — never a
  * customer's. Pick "bhumipropcity" and the whole desk becomes theirs: mark,
  * name, city, URL, browser tab. Branding follows the workspace, not the app.
  * ============================================================================
@@ -251,7 +251,7 @@ export default function Login({ store, onStartOnboard }) {
 
         {/* Footer Minimal Metadata */}
         <div style={{ zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 24, borderTop: '1px solid rgba(255, 255, 255, 0.1)', fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
-          <div>{ws ? 'Private Cloud Workspace' : `${PLATFORM.name} · White-label platform`}</div>
+          <div>{ws ? 'Private Cloud Workspace' : `${PLATFORM.vendor} · White-label platform`}</div>
           <div className="mono-num">
             {ws ? `© ${new Date().getFullYear()} ${ws.firmName}` : `${PLATFORM.vendor} · ${PLATFORM.version}`}
           </div>
@@ -305,7 +305,7 @@ export default function Login({ store, onStartOnboard }) {
               fontFamily: 'var(--mono)'
             }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: ws ? 'var(--accent)' : 'var(--line)' }} />
-              <span>{ws ? `app.${ws.slug}.com` : `${PLATFORM.name.toLowerCase()}.${PLATFORM.vendor.toLowerCase()}.in`}</span>
+              <span>{ws ? `app.${ws.slug}.com` : PLATFORM.host}</span>
             </div>
           </div>
 

@@ -11,13 +11,14 @@
  * Everything after a workspace is chosen uses the tenant brand.
  */
 export const PLATFORM = {
-  name: 'Nivaas',
-  initials: 'NV',
+  name: 'Real Estate',
+  initials: 'RE',
   vendor: 'Delpat',
-  kind: 'Real estate CRM',
+  kind: 'CRM',
   tagline: 'White-label CRM for real estate desks',
+  host: 'realestate.delpat.in',
   // Browser tab title before a workspace is selected.
-  docTitle: 'Nivaas · Real estate CRM by Delpat',
+  docTitle: 'Real Estate by Delpat',
   version: 'v2.4.0',
 }
 

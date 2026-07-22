@@ -17,6 +17,7 @@ import { theme } from '../data/theme.js'
 import { Button } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
+import { PLATFORM } from '../data/platform.js'
 
 export default function Onboarding({ store, onCancel }) {
   const [step, setStep] = useState(1) // 1: Firm | 2: Admin | 3: Theme
@@ -133,11 +134,11 @@ export default function Onboarding({ store, onCancel }) {
             fontSize: 18,
             color: '#FFFFFF'
           }}>
-            NV
+            {PLATFORM.initials}
           </div>
           <div>
             <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
-              Nivaas
+              {PLATFORM.name}
             </div>
             <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.55)', fontWeight: 500 }}>
               White-Label Cloud Provisioning
@@ -204,7 +205,7 @@ export default function Onboarding({ store, onCancel }) {
 
         {/* Footer Minimal Metadata */}
         <div style={{ zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 24, borderTop: '1px solid rgba(255, 255, 255, 0.1)', fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
-          <div>Nivaas · Enterprise White-Label Platform</div>
+          <div>{PLATFORM.vendor} · Enterprise White-Label Platform</div>
           <div className="mono-num">v2.4.0-PROD</div>
         </div>
       </div>
@@ -305,7 +306,7 @@ export default function Onboarding({ store, onCancel }) {
                   <span className="prefix" style={{ fontFamily: 'var(--mono)', fontSize: 13, borderLeft: '1px solid var(--line)', borderRight: 'none' }}>.com</span>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-                  Your white-label brokerage desk will be deployed at <strong className="mono-num" style={{ color: 'var(--ink)' }}>app.{slug || 'firm'}.com</strong> powered by Nivaas.
+                  Your white-label brokerage desk will be deployed at <strong className="mono-num" style={{ color: 'var(--ink)' }}>app.{slug || 'firm'}.com</strong> powered by {PLATFORM.vendor}.
                 </div>
               </div>
 

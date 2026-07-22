@@ -84,7 +84,7 @@ export default function App() {
   // firm's name inside the desk. Login owns the title while signed out.
   const signedIn = state.loggedIn || boot?.forceLogin
   useEffect(() => {
-    if (onboarding) document.title = `Provision workspace · ${PLATFORM.name}`
+    if (onboarding) document.title = `Provision workspace · ${PLATFORM.vendor}`
     else if (signedIn) document.title = tenantDocTitle(state.settings.firmName)
   }, [onboarding, signedIn, state.settings.firmName])
 
