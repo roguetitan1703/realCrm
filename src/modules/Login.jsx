@@ -1,22 +1,29 @@
 /**
  * ============================================================================
- * 🏛️ BHUMI PROPCITY — INSTITUTIONAL WORKSPACE LOGIN
+ * 🏛️ INSTITUTIONAL WORKSPACE LOGIN
  * ============================================================================
  * A calm, disciplined, human-designed authentication desk.
- * Stripped of all artificial stats, technical buzzwords, and AI filler.
- * Relies on timeless typography, generous whitespace, and restrained elegance.
+ *
+ * Identity gate: the first step is choosing a WORKSPACE. Until one is chosen
+ * the screen wears the platform's identity (Nivaas by Delpat) — never a
+ * customer's. Pick "bhumipropcity" and the whole desk becomes theirs: mark,
+ * name, city, URL, browser tab. Branding follows the workspace, not the app.
  * ============================================================================
  */
 
 import { useState, useRef, useEffect } from 'react'
-import { theme } from '../data/theme.js'
+import { PLATFORM, KNOWN_WORKSPACES, resolveWorkspace, tenantDocTitle } from '../data/platform.js'
+import { api } from '../lib/api.js'
 import { Button } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { Toasts } from '../components/chrome.jsx'
 
 export default function Login({ store, onStartOnboard }) {
   const { state } = store
-  const [phase, setPhase] = useState('phone') // 'phone' | 'otp'
+  const [phase, setPhase] = useState('workspace') // 'workspace' | 'phone' | 'otp'
+  const [wsInput, setWsInput] = useState('')
+  const [ws, setWs] = useState(null) // resolved workspace, or null = platform identity
+  const [resolving, setResolving] = useState(false)
   const [phone, setPhone] = useState('')
   const [otp, setOtp] = useState(['', '', '', ''])
   const [loading, setLoading] = useState(false)
@@ -26,6 +33,34 @@ export default function Login({ store, onStartOnboard }) {
   const [sessionOtp, setSessionOtp] = useState('8821')
 
   const inputRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
+
+  // The browser tab is part of the identity gate: platform name until a
+  // workspace is chosen, the firm's name after.
+  useEffect(() => {
+    document.title = ws ? tenantDocTitle(ws.firmName) : PLATFORM.docTitle
+  }, [ws])
+
+  const selectWorkspace = (input) => {
+    const resolved = resolveWorkspace(input)
+    if (!resolved) {
+      store.toast('Enter your brokerage workspace name to continue.', 'warn')
+      return
+    }
+    setResolving(true)
+    setTimeout(() => {
+      setResolving(false)
+      setWs(resolved)
+      api.setTenantId(resolved.tenantId)
+      setPhase('phone')
+      store.toast(`${resolved.firmName} workspace loaded`, 'ok')
+    }, 550)
+  }
+
+  const leaveWorkspace = () => {
+    setWs(null)
+    setPhase('workspace')
+    setOtp(['', '', '', ''])
+  }
 
   useEffect(() => {
     let interval = null
@@ -107,7 +142,7 @@ export default function Login({ store, onStartOnboard }) {
     setVerifying(true)
     setTimeout(() => {
       setVerifying(false)
-      store.toast(`Welcome to ${theme.brand.firmName}`, 'ok')
+      store.toast(`Welcome to ${ws?.firmName || 'your desk'}`, 'ok')
       store.login()
     }, 800)
   }
@@ -172,19 +207,20 @@ export default function Login({ store, onStartOnboard }) {
             fontSize: 18,
             color: '#FFFFFF'
           }}>
-            {theme.brand.initials}
+            {ws ? ws.initials : PLATFORM.initials}
           </div>
           <div>
             <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
-              {theme.brand.firmName}
+              {ws ? ws.firmName : PLATFORM.name}
             </div>
             <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.55)', fontWeight: 500 }}>
-              {theme.brand.city}, India
+              {ws ? [ws.city, 'India'].filter(Boolean).join(', ') : `${PLATFORM.kind} by ${PLATFORM.vendor}`}
             </div>
           </div>
         </div>
 
-        {/* Center Editorial Statement */}
+        {/* Center Editorial Statement — platform pitch before a workspace is
+            chosen, the firm's own desk after. */}
         <div style={{ zIndex: 2, maxWidth: 460, margin: '60px 0' }}>
           <h1 style={{
             fontFamily: 'var(--disp)',
@@ -196,7 +232,9 @@ export default function Login({ store, onStartOnboard }) {
             margin: '0 0 20px',
             fontFeatureSettings: '"ss01" on, "ss02" on'
           }}>
-            The operating system for residential real estate advisory.
+            {ws
+              ? 'The operating system for residential real estate advisory.'
+              : 'One platform. Every brokerage runs it under its own name.'}
           </h1>
           <p style={{
             fontSize: 16,
@@ -205,14 +243,18 @@ export default function Login({ store, onStartOnboard }) {
             margin: 0,
             fontWeight: 400
           }}>
-            Managing sales pipelines, client relationships, and inventory across premium developments in Pune and Maharashtra.
+            {ws
+              ? `Managing sales pipelines, client relationships, and inventory for ${ws.firmName}${ws.city ? ` across ${ws.city}` : ''}.`
+              : 'Pipelines, contacts and inventory for property desks. Open your workspace and the desk carries your firm’s name, not ours.'}
           </p>
         </div>
 
         {/* Footer Minimal Metadata */}
         <div style={{ zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 24, borderTop: '1px solid rgba(255, 255, 255, 0.1)', fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
-          <div>Private Cloud Workspace</div>
-          <div className="mono-num">© {new Date().getFullYear()} {theme.brand.firmName}</div>
+          <div>{ws ? 'Private Cloud Workspace' : `${PLATFORM.name} · White-label platform`}</div>
+          <div className="mono-num">
+            {ws ? `© ${new Date().getFullYear()} ${ws.firmName}` : `${PLATFORM.vendor} · ${PLATFORM.version}`}
+          </div>
         </div>
       </div>
 
@@ -230,7 +272,29 @@ export default function Login({ store, onStartOnboard }) {
         overflowY: 'auto'
       }}>
         <div style={{ width: '100%', maxWidth: 380 }}>
-          {/* Subtle URL Indicator */}
+          {/* Mobile-only brand lockup — the left pane is hidden under 1024px,
+              so without this a phone would show no identity at all. */}
+          <div className="auth-mobile-mark" style={{ display: 'none', alignItems: 'center', gap: 12, marginBottom: 28 }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: 'var(--radius)', flexShrink: 0,
+              background: '#13281E', color: '#FFFFFF',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 15
+            }}>
+              {ws ? ws.initials : PLATFORM.initials}
+            </div>
+            <div>
+              <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 16, color: 'var(--ink)', letterSpacing: '-0.02em' }}>
+                {ws ? ws.firmName : PLATFORM.name}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--muted)', fontWeight: 500 }}>
+                {ws ? [ws.city, 'India'].filter(Boolean).join(', ') : `${PLATFORM.kind} by ${PLATFORM.vendor}`}
+              </div>
+            </div>
+          </div>
+
+          {/* Subtle URL indicator — the workspace address, once there is one.
+              Before that it names the platform, so the origin is never blank. */}
           <div style={{ marginBottom: 36 }}>
             <div style={{
               display: 'inline-flex',
@@ -240,23 +304,26 @@ export default function Login({ store, onStartOnboard }) {
               color: 'var(--muted)',
               fontFamily: 'var(--mono)'
             }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
-              <span>app.bhumipropcity.com</span>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: ws ? 'var(--accent)' : 'var(--line)' }} />
+              <span>{ws ? `app.${ws.slug}.com` : `${PLATFORM.name.toLowerCase()}.${PLATFORM.vendor.toLowerCase()}.in`}</span>
             </div>
           </div>
 
           {/* Form Header */}
           <div style={{ marginBottom: 32 }}>
             <h2 style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 26, color: 'var(--ink)', margin: '0 0 8px', letterSpacing: '-0.02em' }}>
-              Sign in
+              {ws ? 'Sign in' : 'Open your workspace'}
             </h2>
             <p style={{ fontSize: 14, color: 'var(--muted)', margin: 0, lineHeight: 1.5 }}>
-              Enter your mobile number to access your desk.
+              {ws
+                ? <>Enter your mobile number to access the <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>{ws.firmName}</strong> desk.</>
+                : 'Name your brokerage to load its desk. Each firm gets its own workspace, data and branding.'}
             </p>
           </div>
 
-          {/* Role Toggle (Clean Segmented Control) */}
-          <div style={{ marginBottom: 28 }}>
+          {/* Role Toggle — belongs to a tenant desk, so it appears only once a
+              workspace is loaded. */}
+          <div style={{ marginBottom: 28, display: ws ? 'block' : 'none' }}>
             <div className="seg seg-block" style={{ background: 'var(--line-2)', padding: 3, borderRadius: 'var(--radius)' }}>
               <button
                 type="button"
@@ -285,7 +352,85 @@ export default function Login({ store, onStartOnboard }) {
             padding: '28px 24px',
             boxShadow: 'var(--shadow)'
           }}>
-            {phase === 'phone' ? (
+            {phase === 'workspace' ? (
+              /* PHASE 0: WORKSPACE — the identity gate */
+              <form onSubmit={e => { e.preventDefault(); selectWorkspace(wsInput) }}>
+                <div className="field" style={{ marginBottom: 20 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 8, display: 'block', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Brokerage workspace
+                  </label>
+                  <div className="input-group">
+                    <span className="prefix" style={{ fontFamily: 'var(--mono)' }}>app.</span>
+                    <input
+                      type="text"
+                      value={wsInput}
+                      onChange={e => setWsInput(e.target.value)}
+                      placeholder="bhumipropcity"
+                      autoFocus
+                      disabled={resolving}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      style={{ fontWeight: 600, fontSize: 15 }}
+                    />
+                    <span className="prefix" style={{ fontFamily: 'var(--mono)', color: 'var(--muted)' }}>.com</span>
+                  </div>
+                </div>
+
+                {KNOWN_WORKSPACES.length > 0 && (
+                  <div style={{ marginBottom: 22 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      Your workspaces
+                    </div>
+                    {KNOWN_WORKSPACES.map(w => (
+                      <button
+                        key={w.slug}
+                        type="button"
+                        onClick={() => { setWsInput(w.slug); selectWorkspace(w.slug) }}
+                        disabled={resolving}
+                        style={{
+                          width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                          padding: '10px 12px', background: 'var(--bg)', border: '1px solid var(--line)',
+                          borderRadius: 'var(--radius)', cursor: resolving ? 'wait' : 'pointer', textAlign: 'left'
+                        }}
+                      >
+                        <span style={{
+                          width: 32, height: 32, borderRadius: 'var(--radius)', flexShrink: 0,
+                          background: 'var(--accent-wash)', color: 'var(--accent)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 13
+                        }}>{w.initials}</span>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{w.firmName}</span>
+                          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>app.{w.slug}.com</span>
+                        </span>
+                        <Icon name="arrowRight" size={14} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <Button
+                  variant="primary"
+                  block
+                  type="submit"
+                  disabled={resolving}
+                  style={{ height: 44, fontSize: 14.5, cursor: resolving ? 'wait' : 'pointer', fontWeight: 600 }}
+                >
+                  {resolving ? (
+                    <>
+                      <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                      <span>Loading workspace...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Continue</span>
+                      <Icon name="arrowRight" size={16} />
+                    </>
+                  )}
+                </Button>
+              </form>
+            ) : phase === 'phone' ? (
               /* PHASE 1: MOBILE NUMBER INPUT */
               <form onSubmit={handleSendOtp}>
                 <div className="field" style={{ marginBottom: 24 }}>
@@ -430,7 +575,18 @@ export default function Login({ store, onStartOnboard }) {
 
           {/* Minimal Support Help */}
           <div style={{ textAlign: 'center', marginTop: 28, fontSize: 12, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div>Need access? Contact your firm&apos;s administration desk.</div>
+            {ws ? (
+              <button
+                type="button"
+                onClick={leaveWorkspace}
+                className="btn-quiet"
+                style={{ fontSize: 12, padding: 0, color: 'var(--ink-2)', margin: '0 auto' }}
+              >
+                Not {ws.firmName}? Switch workspace
+              </button>
+            ) : (
+              <div>Need access? Contact your firm&apos;s administration desk.</div>
+            )}
             {onStartOnboard && (
               <button
                 type="button"
@@ -458,6 +614,9 @@ export default function Login({ store, onStartOnboard }) {
           }
           .auth-form-pane {
             padding: 24px !important;
+          }
+          .auth-mobile-mark {
+            display: flex !important;
           }
         }
       `}</style>

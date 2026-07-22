@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useStore } from './lib/store.jsx'
 import { AppShell } from './layouts/layouts.jsx'
 import { TopBar, Toasts } from './components/chrome.jsx'
+import { PLATFORM, tenantDocTitle } from './data/platform.js'
 
 import Login from './modules/Login.jsx'
 import Onboarding from './modules/Onboarding.jsx'
@@ -78,6 +79,14 @@ export default function App() {
   const [sel, setSel] = useState(boot?.sel || {})
   const [onboarding, setOnboarding] = useState(false)
   const isResponsiveMobile = useResponsiveLayout() || boot?.role === 'agent'
+
+  // Tab title follows identity: the platform until a workspace is entered, the
+  // firm's name inside the desk. Login owns the title while signed out.
+  const signedIn = state.loggedIn || boot?.forceLogin
+  useEffect(() => {
+    if (onboarding) document.title = `Provision workspace · ${PLATFORM.name}`
+    else if (signedIn) document.title = tenantDocTitle(state.settings.firmName)
+  }, [onboarding, signedIn, state.settings.firmName])
 
   if (onboarding) {
     return <Onboarding store={store} onCancel={() => setOnboarding(false)} />
