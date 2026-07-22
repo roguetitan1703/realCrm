@@ -52,14 +52,18 @@ async function request(endpoint, options = {}) {
       ...options,
       headers: getHeaders(options.headers || {}),
     });
-    if (!res.ok) {
-      throw new Error(`API Error: ${res.status} ${res.statusText}`);
-    }
-    const data = await res.json();
+    // A 4xx/5xx means the server answered — it is reachable. Only a failed
+    // fetch means offline. Conflating the two made one rejected request paint
+    // the whole app "Offline — not saving" while saves were working fine.
     setOnline(true);
-    return data;
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.clone().json())?.message || ''; } catch { /* not json */ }
+      throw new Error(`API Error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
+    }
+    return await res.json();
   } catch (err) {
-    setOnline(false);
+    if (err instanceof TypeError) setOnline(false); // fetch could not reach the host
     console.warn(`[API Client Warning] Request to ${endpoint} failed:`, err.message);
     throw err;
   }

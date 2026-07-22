@@ -91,7 +91,9 @@ export type CallActionPayload = z.infer<typeof CallActionSchema>;
  */
 export const WhatsAppActionSchema = z.object({
   template_id: z.string().min(1, "Template ID required"),
-  variables: z.array(z.string()).default([]),
+  // Positional (["Amit", "3 BHK"]) or named ({ text: "…" }) — the app fills
+  // templates by name, so rejecting objects 400'd every real send.
+  variables: z.union([z.array(z.string()), z.record(z.string(), z.any())]).default([]),
   media_url: z.string().url().optional(),
 });
 export type WhatsAppActionPayload = z.infer<typeof WhatsAppActionSchema>;

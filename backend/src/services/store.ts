@@ -462,7 +462,9 @@ export async function getProperties(): Promise<any[]> {
 }
 
 export async function createProperty(propData: any): Promise<any> {
-  const newId = propData.id || `p_${Date.now()}`;
+  // Random suffix: a bulk import fires these in the same millisecond, and a bare
+  // Date.now() collided on the primary key — every row after the first 500'd.
+  const newId = propData.id || `p_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const title = propData.title || `${propData.type || '2 BHK'} · ${propData.locality || 'Pune'}`;
   const status = propData.status || 'Available';
   const type = propData.type || '2 BHK';

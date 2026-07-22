@@ -174,9 +174,13 @@ export default function ImportPage({ store, go, sel, topBar }) {
     const batchId = 'imp_' + Date.now()
     let added = 0, merged = 0; const mergedDetails = []
     try {
+      let n = 0
       for (const pr of previewRows) {
         if (pr.status === 'invalid') continue
-        const rec = { ...pr.record, importBatchId: batchId }
+        // Explicit id per row: the optimistic record and the stored row must
+        // share one, or Undo can't find what it created. It also keeps rows
+        // created inside the same millisecond from colliding.
+        const rec = { ...pr.record, id: `${kind === 'clients' ? 'l' : 'p'}_${batchId}_${n++}`, importBatchId: batchId }
         if (kind === 'clients') await store.addLead(rec)
         else await store.addProperty(rec)
         if (pr.status === 'duplicate') { merged++; mergedDetails.push(`${pr.label} merged into existing record — ${pr.dupTarget}`) } else added++
