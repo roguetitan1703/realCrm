@@ -21,6 +21,7 @@ import { integrationsRouter } from './routes/integrations';
 import { authRouter } from './routes/auth';
 import { adminRouter } from './routes/admin';
 import { notificationsRouter } from './routes/notifications';
+import { pwaRouter } from './routes/pwa';
 import { withRequestContext } from './middleware/auth';
 
 const app = express();
@@ -44,6 +45,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'OK', service: 'Bhumi Propcity CRM API Engine', timestamp: new Date() });
 });
+
+// Per-tenant PWA manifest + icons, served at the site origin (not under /api).
+app.use('/pwa', pwaRouter);
 
 // Resolve tenant + actor for EVERY API request and carry it in AsyncLocalStorage
 // so the store layer scopes queries by tenant. Must run before all routers.

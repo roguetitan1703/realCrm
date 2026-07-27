@@ -247,6 +247,24 @@ export async function initSchema(): Promise<void> {
     await sql`ALTER TABLE crm_routing_rules DROP CONSTRAINT IF EXISTS crm_routing_rules_pkey;`;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_routing_tenant ON crm_routing_rules (tenant_id);`;
 
+    // Per-tenant PWA identity (installable app manifest + home-screen icons),
+    // generated once at onboarding and stored here (icons as base64 PNG).
+    await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS pwa_config JSONB DEFAULT '{}'::jsonb;`;
+
+    // Push subscriptions — one row per device a user has opted into push on.
+    await sql`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        endpoint TEXT NOT NULL UNIQUE,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions (tenant_id, user_id);`;
+
     await migrateProperColumns();
     await createLedgerTables();
 
