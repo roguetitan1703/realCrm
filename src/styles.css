@@ -1359,3 +1359,12 @@ input,textarea,select{font-family:inherit}
 .m-sort-btn:active{background:var(--card-2)}
 .m-frame .overlay{position:absolute;inset:0;z-index:50}
 .app-mobile .overlay{position:absolute;inset:0;z-index:50}
+
+/* Install prompt — dismissible "add to home screen" card */
+.install-card{display:flex;align-items:center;gap:10px;padding:11px 12px;margin-bottom:12px;background:var(--accent-wash);border:1px solid var(--accent-line);border-radius:var(--radius);position:relative}
+.install-card-icon{width:30px;height:30px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border-radius:8px;background:var(--accent);color:#fff}
+.install-card-body{flex:1;min-width:0}
+.install-card-title{font-size:13px;font-weight:700;color:var(--accent-ink)}
+.install-card-sub{font-size:11.5px;color:var(--ink-2);margin-top:1px;line-height:1.35}
+.install-card-x{flex-shrink:0;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--muted);cursor:pointer;border-radius:6px}
+.install-card-x:active{background:rgba(0,0,0,.06)}

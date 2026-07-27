@@ -1,6 +1,7 @@
 import { initials, reqShort } from '../../lib/format.js'
 import { Overdue, StageTag } from '../../components/primitives.jsx'
 import Icon from '../../components/Icon.jsx'
+import InstallPrompt from '../../components/InstallPrompt.jsx'
 
 export default function MobileToday({ store, me, open, setTab }) {
   const mine = store.state.leads.filter(l => l.agentId === me.id)
@@ -38,6 +39,7 @@ export default function MobileToday({ store, me, open, setTab }) {
 
   return (
     <>
+      <InstallPrompt />
       <div className="m-kpi-row">
         <button className="m-kpi alert" onClick={() => setTab('leads')}>
           <div className="v">{overdue.length}</div>
