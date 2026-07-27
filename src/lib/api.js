@@ -136,6 +136,9 @@ export const api = {
   // Properties CRUD
   getProperties: () => request('/properties'),
   createProperty: (prop) => request('/properties', { method: 'POST', body: JSON.stringify(prop) }),
+
+  // Real 30-day sales metrics for one agent (calls / site visits / win rate)
+  getAgentPerformance: (id) => request(`/team/users/${encodeURIComponent(id)}/performance`),
   updateProperty: (id, patch) => request(`/modules/properties/records/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
   // Team & Routing

@@ -316,7 +316,7 @@ input,textarea,select{font-family:inherit}
 .bmeter i.hot{background:var(--alert)}
 
 /* stat cluster */
-.bstats{display:flex;gap:26px}
+.bstats{display:flex;gap:20px}
 .bstat{text-align:center}
 .bstat .bv{font-family:var(--disp);font-weight:600;font-size:22px;line-height:1;font-variant-numeric:tabular-nums}
 .bstat .bv.accent{color:var(--accent)}

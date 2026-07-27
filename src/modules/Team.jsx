@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { Avatar, Button, Kpi, IconButton } from '../components/primitives.jsx'
+import { api } from '../lib/api.js'
 
 const ROLE_LABEL = { admin: 'Owner / Admin', agent: 'Sales Advisor', manager: 'Sales Manager' }
 const roleLabel = (r) => ROLE_LABEL[r] || (r ? r[0].toUpperCase() + r.slice(1) : 'Sales Advisor')
@@ -8,6 +10,21 @@ export default function Team({ store, go, topBar }) {
   const inactive = (id) => state.inactiveAgentIds.includes(id)
   const toLeads = (leadFilter) => go && go('leads', { leadFilter, leadOpen: false, leadId: undefined })
 
+  // Real 30-day metrics from the backend, keyed by agent id. Fetched once on
+  // mount; the roster degrades to state-derived numbers if the call fails, so
+  // the desk still ranks correctly offline.
+  const [perf, setPerf] = useState({})
+  useEffect(() => {
+    let live = true
+    Promise.all(state.agents.map(a =>
+      api.getAgentPerformance(a.id).then(r => [a.id, r?.metrics]).catch(() => [a.id, null])
+    )).then(pairs => {
+      if (!live) return
+      setPerf(Object.fromEntries(pairs.filter(([, m]) => m)))
+    })
+    return () => { live = false }
+  }, [state.agents.length])
+
   // Per-agent workload + performance from live state.
   const roster = state.agents.map(a => {
     const mine = state.leads.filter(l => l.agentId === a.id)
@@ -16,8 +33,13 @@ export default function Team({ store, go, topBar }) {
     const lost = mine.filter(l => l.stage === 'Closed Lost').length
     const overdue = mine.filter(l => l.overdue).length
     const settled = won + lost
-    const winRate = settled ? Math.round((won / settled) * 100) : null
-    return { a, open, won, overdue, winRate, off: inactive(a.id) }
+    const stateWinRate = settled ? Math.round((won / settled) * 100) : null
+    const m = perf[a.id]
+    // Prefer the backend's real 30-day numbers; fall back to state-derived.
+    const calls = m?.total_outbound_calls ?? null
+    const visits = m?.site_visits_done ?? null
+    const winRate = m?.visit_conversion_rate_percentage != null ? Math.round(m.visit_conversion_rate_percentage) : stateWinRate
+    return { a, open, won, overdue, winRate, calls, visits, off: inactive(a.id) }
   })
 
   const activeCount = roster.filter(r => !r.off).length
@@ -51,7 +73,7 @@ export default function Team({ store, go, topBar }) {
         </div>
 
         <div className="board">
-          {ranked.map(({ a, open, won, overdue, winRate, off }, i) => {
+          {ranked.map(({ a, open, won, overdue, winRate, calls, visits, off }, i) => {
             const overloaded = !off && open > evenShare * 1.5 && open > 3
             const isLeader = a.id === leaderId
             const pct = Math.round((open / maxLoad) * 100)
@@ -83,7 +105,9 @@ export default function Team({ store, go, topBar }) {
 
                 <div className="bstats">
                   <div className="bstat"><div className="bv accent">{won}</div><div className="bl">Won</div></div>
-                  <div className="bstat"><div className="bv">{winRate === null ? '—' : <>{winRate}<span className="bu">%</span></>}</div><div className="bl">Win rate</div></div>
+                  <div className="bstat"><div className="bv">{winRate == null ? '—' : <>{winRate}<span className="bu">%</span></>}</div><div className="bl">Win rate</div></div>
+                  <div className="bstat"><div className="bv">{calls == null ? '—' : calls}</div><div className="bl">Calls · 30d</div></div>
+                  <div className="bstat"><div className="bv">{visits == null ? '—' : visits}</div><div className="bl">Visits</div></div>
                 </div>
 
                 <div className="bactions">
