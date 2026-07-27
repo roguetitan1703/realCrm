@@ -234,9 +234,141 @@ export async function initSchema(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS ${sql('idx_' + t + '_tenant')} ON ${sql(t)} (tenant_id);`;
     }
 
+    await migrateProperColumns();
+    await createLedgerTables();
+
     console.log('[Supabase DB] ✅ PostgreSQL schema initialization completed successfully.');
   } catch (err: any) {
     console.error('[Supabase DB Error] Failed to initialize database schema:', err.message || err);
     throw err;
   }
+}
+
+/**
+ * One designed migration (not a per-stage patch): give crm_properties and
+ * crm_leads real, indexable columns for the signals we query, and flatten the
+ * existing config/req JSONB blobs into them. Idempotent — flatten only fills
+ * columns that are still NULL, so it's safe on every boot. The JSONB stays as
+ * overflow until the persistence layer reads columns first (next slice).
+ */
+async function migrateProperColumns(): Promise<void> {
+  const propCols: [string, string][] = [
+    ['project', 'TEXT'], ['wing', 'TEXT'], ['unit_no', 'TEXT'], ['deal', 'TEXT'],
+    ['facing', 'TEXT'], ['furnishing', 'TEXT'], ['parking', 'TEXT'], ['possession', 'TEXT'],
+    ['builder', 'TEXT'], ['rera_no', 'TEXT'], ['owner_name', 'TEXT'],
+    ['owner_phone', 'TEXT'], ['owner_email', 'TEXT'], ['floor', 'TEXT'],
+    ['carpet_sqft', 'INT'], ['total_floors', 'INT'], ['age_years', 'INT'],
+    ['price_amount', 'BIGINT'], ['extra', "JSONB DEFAULT '{}'::jsonb"], ['updated_at', 'TIMESTAMPTZ DEFAULT NOW()'],
+  ];
+  for (const [c, t] of propCols) {
+    await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS ${c} ${t}`);
+  }
+  // digits(x): strip everything but digits so casts never blow up on "1,450 sqft".
+  await sql.unsafe(`
+    UPDATE crm_properties SET
+      project      = COALESCE(project, NULLIF(config->>'project',''), NULLIF(config->>'society','')),
+      wing         = COALESCE(wing, NULLIF(config->>'wing',''), tower),
+      unit_no      = COALESCE(unit_no, NULLIF(config->>'flat',''), unit),
+      deal         = COALESCE(deal, NULLIF(config->>'deal',''), 'sale'),
+      facing       = COALESCE(facing, NULLIF(config->>'facing','')),
+      furnishing   = COALESCE(furnishing, NULLIF(config->>'furnishing','')),
+      parking      = COALESCE(parking, NULLIF(config->>'parking','')),
+      possession   = COALESCE(possession, NULLIF(config->>'possession','')),
+      builder      = COALESCE(builder, NULLIF(config->>'builder','')),
+      rera_no      = COALESCE(rera_no, NULLIF(config->>'rera','')),
+      owner_name   = COALESCE(owner_name, NULLIF(config->>'owner','')),
+      owner_phone  = COALESCE(owner_phone, NULLIF(config->>'ownerPhone','')),
+      owner_email  = COALESCE(owner_email, NULLIF(config->>'ownerEmail','')),
+      floor        = COALESCE(floor, NULLIF(config->>'floor','')),
+      carpet_sqft  = COALESCE(carpet_sqft, NULLIF(regexp_replace(COALESCE(config->>'carpet', config->>'area', ''), '\\D', '', 'g'), '')::INT),
+      total_floors = COALESCE(total_floors, NULLIF(regexp_replace(COALESCE(config->>'totalFloors', ''), '\\D', '', 'g'), '')::INT),
+      age_years    = COALESCE(age_years, NULLIF(regexp_replace(COALESCE(config->>'age', ''), '\\D', '', 'g'), '')::INT),
+      price_amount = COALESCE(price_amount, NULLIF(regexp_replace(COALESCE(price, ''), '\\D', '', 'g'), '')::BIGINT)
+  `);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_properties_project ON crm_properties (tenant_id, project)`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_properties_status ON crm_properties (tenant_id, status)`);
+
+  const leadCols: [string, string][] = [
+    ['deal', 'TEXT'], ['requirement', 'TEXT'], ['locality', 'TEXT'],
+    ['purpose', 'TEXT'], ['timeline_pref', 'TEXT'],
+    ['budget_min', 'BIGINT'], ['budget_max', 'BIGINT'],
+  ];
+  for (const [c, t] of leadCols) {
+    await sql.unsafe(`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS ${c} ${t}`);
+  }
+  await sql.unsafe(`
+    UPDATE crm_leads SET
+      deal          = COALESCE(deal, NULLIF(req->>'deal',''), 'sale'),
+      requirement   = COALESCE(requirement, NULLIF(req->>'config','')),
+      locality      = COALESCE(locality, NULLIF(req->>'locality','')),
+      purpose       = COALESCE(purpose, NULLIF(req->>'purpose','')),
+      timeline_pref = COALESCE(timeline_pref, NULLIF(req->>'timeline','')),
+      budget_min    = COALESCE(budget_min, NULLIF(regexp_replace(COALESCE(req->>'minBudget', req->>'budgetMin', ''), '\\D', '', 'g'), '')::BIGINT),
+      budget_max    = COALESCE(budget_max, NULLIF(regexp_replace(COALESCE(req->>'maxBudget', req->>'budgetMax', ''), '\\D', '', 'g'), '')::BIGINT)
+  `);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_leads_stage ON crm_leads (tenant_id, stage)`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_leads_agent ON crm_leads (tenant_id, agent_id)`);
+}
+
+/**
+ * The three ledgers, kept separate (see SPRINT.md):
+ *   activities   → crm_timeline_events (business timeline, already exists)
+ *   notifications→ alerts to a user's inbox
+ *   audit_log    → append-only, hash-chained security ledger
+ */
+async function createLedgerTables(): Promise<void> {
+  // Normalize leads.shortlist + leads.feedback JSONB into rows.
+  await sql`
+    CREATE TABLE IF NOT EXISTS lead_shortlist (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      lead_id TEXT NOT NULL,
+      property_id TEXT NOT NULL,
+      verdict TEXT,
+      reason TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (lead_id, property_id)
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_lead_shortlist_lead ON lead_shortlist (tenant_id, lead_id);`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT,
+      link TEXT,
+      read BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (tenant_id, user_id, read);`;
+
+  // Append-only, tamper-evident. seq gives a monotonic order; prev_hash/hash
+  // form a chain so no past row can be altered or removed undetected. Never
+  // truncated (see resetDatabase).
+  await sql`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      seq BIGSERIAL PRIMARY KEY,
+      tenant_id TEXT,
+      actor_type TEXT NOT NULL,
+      actor_id TEXT,
+      actor_label TEXT,
+      action TEXT NOT NULL,
+      target_type TEXT,
+      target_id TEXT,
+      summary TEXT,
+      metadata JSONB DEFAULT '{}'::jsonb,
+      ip TEXT,
+      user_agent TEXT,
+      prev_hash TEXT,
+      hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log (tenant_id, created_at);`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action);`;
 }
