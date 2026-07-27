@@ -20,6 +20,33 @@ import { listAudit, verifyAuditChain } from '../services/audit';
 export const workspaceRouter = Router();
 
 /**
+ * STORE PWA ICONS — the tenant's home-screen app icons (PNG), generated once
+ * client-side (canvas) and stored on the tenant so the manifest serves real
+ * rasters (Chrome/Android needs PNG for the installed icon, not just SVG).
+ * POST /api/v1/workspace/pwa-icons  { icon192, icon512 }  (base64 data URLs)
+ */
+workspaceRouter.post('/pwa-icons', async (req: Request, res: Response) => {
+  try {
+    const tenantId = getContext()?.tenantId;
+    if (!tenantId) return res.status(401).json({ error: 'Authentication required' });
+    const { icon192, icon512 } = req.body || {};
+    if (!icon192 || !icon512) return res.status(400).json({ error: 'icon192 and icon512 are required' });
+    // Guard against oversized payloads (a simple icon is a few KB).
+    if (icon192.length > 400_000 || icon512.length > 800_000) {
+      return res.status(413).json({ error: 'Icon too large' });
+    }
+    const patch = { icon192, icon512, iconUpdatedAt: new Date().toISOString() };
+    await sql`
+      UPDATE tenants SET pwa_config = COALESCE(pwa_config, '{}'::jsonb) || ${sql.json(patch)}
+      WHERE id = ${tenantId} OR slug = ${tenantId}
+    `;
+    return res.status(200).json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to store icons', message: err.message });
+  }
+});
+
+/**
  * TENANT AUDIT LEDGER (owner/manager only)
  * GET /api/v1/workspace/audit — read-only "who did what, when" for this tenant,
  * plus the tamper-evidence status of the chain.

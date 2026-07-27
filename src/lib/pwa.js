@@ -79,3 +79,41 @@ export function isStandalone() {
   if (typeof window === 'undefined') return false;
   return window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
 }
+
+// ── Home-screen icons ──────────────────────────────────────────────────────
+// Chrome/Android uses a PNG for the installed icon (an SVG-only manifest gets a
+// generic fallback). We render the icon on a canvas — initials on the brand
+// color, full-bleed so it masks cleanly — and upload it once per tenant, so the
+// manifest can serve real PNGs. No server-side image library needed.
+function drawIcon(size, initials, bg, fg = '#ffffff') {
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, size, size); // full-bleed → Android applies its own mask
+  ctx.fillStyle = fg;
+  ctx.font = `700 ${Math.round(size * 0.42)}px "Space Grotesk", Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText((initials || 'RE').toUpperCase(), size / 2, size / 2 + size * 0.02);
+  return c.toDataURL('image/png');
+}
+
+/** Generate + upload the tenant's PWA icons once (idempotent per device). */
+export async function ensurePwaIcons({ slug, initials, color } = {}) {
+  if (typeof document === 'undefined' || !slug || !initials) return;
+  const key = `pwa_icons_${slug}`;
+  try { if (localStorage.getItem(key)) return; } catch (e) {}
+  try {
+    const { api } = await import('./api.js');
+    const bg = color || '#1E6F52';
+    const icon192 = drawIcon(192, initials, bg);
+    const icon512 = drawIcon(512, initials, bg);
+    await api.uploadPwaIcons({ icon192, icon512 });
+    try { localStorage.setItem(key, '1'); } catch (e) {}
+    // Repoint the manifest so a subsequent install picks up the real PNGs.
+    applyPwaIdentity(slug);
+  } catch (e) {
+    console.warn('[PWA] icon generation/upload failed:', e?.message || e);
+  }
+}

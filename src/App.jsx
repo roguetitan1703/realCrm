@@ -3,6 +3,7 @@ import { useStore } from './lib/store.jsx'
 import { AppShell } from './layouts/layouts.jsx'
 import { TopBar, Toasts } from './components/chrome.jsx'
 import { PLATFORM, tenantDocTitle } from './data/platform.js'
+import { ensurePwaIcons } from './lib/pwa.js'
 
 import Login from './modules/Login.jsx'
 import Onboarding from './modules/Onboarding.jsx'
@@ -87,6 +88,17 @@ export default function App() {
     if (onboarding) document.title = `Provision workspace · ${PLATFORM.vendor}`
     else if (signedIn) document.title = tenantDocTitle(state.settings.firmName)
   }, [onboarding, signedIn, state.settings.firmName])
+
+  // Once signed in, make sure this tenant has real PNG home-screen icons so an
+  // install shows the firm's mark, not a generic tile. Idempotent per device.
+  useEffect(() => {
+    if (!signedIn) return
+    const slug = (typeof localStorage !== 'undefined' && localStorage.getItem('crm_tenant_id')) || null
+    const firm = (state.settings.firmName || '').trim()
+    const initials = firm.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
+    const color = state.settings.brand?.primaryColor || '#1E6F52'
+    if (slug && initials) ensurePwaIcons({ slug, initials, color })
+  }, [signedIn, state.settings.firmName])
 
   if (onboarding) {
     return <Onboarding store={store} onCancel={() => setOnboarding(false)} />
