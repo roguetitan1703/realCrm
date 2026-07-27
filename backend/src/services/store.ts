@@ -14,6 +14,7 @@ import { agents as seedAgents, properties as seedProps, leads as seedLeads } fro
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { audit } from './audit.js';
 import { getContext } from './context.js';
+import { notify, notifyRoles } from './notifications.js';
 
 /**
  * The tenant to scope the current request's queries to. Comes from the request
@@ -614,6 +615,13 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
     summary: `Lead "${name}" created (source: ${source})`, metadata: { after: created },
     ip: ctx.ip, user_agent: ctx.userAgent,
   });
+  // Alert the assigned agent, and give owners/managers team-wide visibility.
+  const link = `?screen=leads&lead=${newId}`;
+  const where = locality ? ` · ${locality}` : '';
+  notify({ userId: agentId, type: 'lead_assigned', title: 'New lead assigned to you', body: `${name}${where} (${source})`, link })
+    .catch(err => console.warn('[Notify] lead_assigned failed:', err?.message));
+  notifyRoles(['owner', 'manager'], { type: 'lead_new', title: 'New lead captured', body: `${name}${where} → routed to ${agentId}`, link })
+    .catch(err => console.warn('[Notify] lead_new failed:', err?.message));
   return created;
 }
 
@@ -688,6 +696,18 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     summary: `Lead "${updated?.name}" updated`, metadata: { patch, before: { stage: oldLead.stage, agentId: oldLead.agentId }, after: { stage: updated?.stage, agentId: updated?.agentId } },
     ip: ctx.ip, user_agent: ctx.userAgent,
   });
+  const link = `?screen=leads&lead=${id}`;
+  // Reassignment → alert the newly assigned agent.
+  if (patch.agentId !== undefined && agentId && agentId !== oldLead.agentId) {
+    notify({ userId: agentId, type: 'lead_reassigned', title: 'A lead was assigned to you', body: `${name}`, link })
+      .catch(err => console.warn('[Notify] lead_reassigned failed:', err?.message));
+  }
+  // Follow-up set → remind the owning agent.
+  if (patch.followUp) {
+    const when = (patch.followUp.action || patch.followUp.label || 'Follow-up scheduled');
+    notify({ userId: agentId, type: 'followup_set', title: 'Follow-up scheduled', body: `${name} · ${when}`, link })
+      .catch(err => console.warn('[Notify] followup_set failed:', err?.message));
+  }
   return updated;
 }
 

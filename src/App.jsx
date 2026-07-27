@@ -108,7 +108,8 @@ export default function App() {
 
   const leads = state.leads
   const newCount = leads.filter(l => l.stage === 'New').length
-  const unread = leads.filter(l => l.overdue).length + leads.filter(l => !l.agentId).length
+  const unreadNotifs = (state.notifications || []).filter(n => !n.read).length
+  const unread = leads.filter(l => l.overdue).length + leads.filter(l => !l.agentId).length + unreadNotifs
 
   // RBAC Navigation filtering: Agent role hides system management & settings
   const allowedKeys = state.role === 'agent' ? ['dashboard', 'leads', 'properties', 'clients', 'calendar'] : null

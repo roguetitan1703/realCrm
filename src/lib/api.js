@@ -149,6 +149,11 @@ export const api = {
   // Settings & Branding
   updateSettings: (patch) => request('/workspace/settings', { method: 'POST', body: JSON.stringify(patch) }),
 
+  // Notifications (per-user alert feed)
+  getNotifications: () => request('/notifications'),
+  markNotificationRead: (id) => request(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }),
+  markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
+
   // Composable Actions
   callBridge: (recordId, agentId) => request(`/records/${recordId}/actions/call`, { method: 'POST', body: JSON.stringify({ agent_id: agentId }) }),
   sendWhatsApp: (recordId, templateId, vars) => request(`/records/${recordId}/actions/whatsapp`, { method: 'POST', body: JSON.stringify({ template_id: templateId, variables: vars }) }),

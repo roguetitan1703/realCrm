@@ -1470,6 +1470,23 @@ function NotifModal({ store, go }) {
     return true
   })
 
+  // Server-backed alert feed (real notifications persisted per user), distinct
+  // from the derived action queue below.
+  const notifs = store.state.notifications || []
+  const unreadNotifs = notifs.filter(n => !n.read).length
+  const openNotif = (n) => {
+    const m = (n.link || '').match(/lead=([^&]+)/)
+    if (m) { close(); go('leads', { leadId: m[1], leadOpen: true }) }
+  }
+  const notifAgo = (ts) => {
+    if (!ts) return ''
+    const mins = Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 60000))
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    return hrs < 24 ? `${hrs}h ago` : `${Math.floor(hrs / 24)}d ago`
+  }
+
   return (
     <div className="notif-drawer-overlay" onClick={close}>
       <div className="notif-drawer" onClick={e => e.stopPropagation()}>
@@ -1512,6 +1529,29 @@ function NotifModal({ store, go }) {
         </div>
 
         <div className="notif-drawer-body">
+          {notifs.length > 0 && (
+            <div className="notif-alerts">
+              <div className="notif-alerts-head">
+                <span>Notifications{unreadNotifs > 0 ? ` · ${unreadNotifs} new` : ''}</span>
+                {unreadNotifs > 0 && (
+                  <button type="button" className="btn-quiet" style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600 }} onClick={() => store.markAllNotifsRead()}>
+                    Mark all read
+                  </button>
+                )}
+              </div>
+              {notifs.slice(0, 8).map(n => (
+                <button key={n.id} className={`notif-alert-row${n.read ? '' : ' is-unread'}`} onClick={() => openNotif(n)}>
+                  <span className="notif-alert-dot" aria-hidden />
+                  <div className="notif-alert-content">
+                    <div className="notif-alert-title">{n.title}</div>
+                    {n.body && <div className="notif-alert-body">{n.body}</div>}
+                  </div>
+                  <span className="notif-alert-ago">{notifAgo(n.created_at)}</span>
+                </button>
+              ))}
+              <div className="notif-alerts-label">Action queue</div>
+            </div>
+          )}
           {!filteredItems.length ? (
             <div className="empty" style={{ margin: 'auto 0', padding: '48px 20px' }}>
               <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--card-2)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', color: 'var(--muted)' }}>

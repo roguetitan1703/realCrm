@@ -20,6 +20,7 @@ import { ingestRouter } from './routes/ingest';
 import { integrationsRouter } from './routes/integrations';
 import { authRouter } from './routes/auth';
 import { adminRouter } from './routes/admin';
+import { notificationsRouter } from './routes/notifications';
 import { withRequestContext } from './middleware/auth';
 
 const app = express();
@@ -57,6 +58,9 @@ app.use('/api/v1/auth', authRouter);
 
 // 0b. Superadmin console (Delpat-only, above all tenants)
 app.use('/api/v1/admin', adminRouter);
+
+// 0c. Per-user notification feed
+app.use('/api/v1/notifications', notificationsRouter);
 
 // 1. Non-Hacky Workspace & Tenant Resolution (Called before & after login!)
 app.use('/api/v1/workspace/integrations', integrationsRouter);

@@ -73,6 +73,7 @@ function freshState() {
       'Website sync': { status: 'unconfigured', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/website', secret: '' },
     },
     toasts: [],
+    notifications: [],   // server-backed per-user alert feed
     // modal/overlay state
     modal: null,
     waState: null,
@@ -99,6 +100,9 @@ function reducer(state, action) {
         integrations: s.integrations ? { ...state.integrations, ...s.integrations } : state.integrations,
       }
     }
+
+    case 'SET_NOTIFICATIONS': return { ...state, notifications: action.notifications || [] }
+    case 'MARK_NOTIFS_READ': return { ...state, notifications: (state.notifications || []).map(n => ({ ...n, read: true })) }
 
     case 'PATCH_SETTINGS': return { ...state, settings: { ...state.settings, ...action.patch } }
     case 'SET_ROUTING': return { ...state, routing: { ...state.routing, ...action.patch } }
@@ -454,7 +458,17 @@ export function StoreProvider({ children }) {
       apiClient.me()
         .then(res => { if (!res?.success) throw new Error('invalid') })
         .catch(() => { apiClient.clearToken?.(); dispatch({ type: 'LOGOUT' }) })
+      loadNotifications()
     }
+  }, [])
+
+  // Pull the current user's alert feed. No-op without a token (the feed is
+  // per-user, so it needs an authenticated identity).
+  const loadNotifications = useCallback(() => {
+    if (!apiClient.getToken?.()) return
+    apiClient.getNotifications()
+      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: res.notifications }) })
+      .catch(err => console.warn('[Notifications] load failed:', err.message))
   }, [])
 
   const toast = useCallback((text, tone) => {
@@ -676,9 +690,17 @@ export function StoreProvider({ children }) {
     openWhatsApp, recompose,
     closeWhatsApp: () => dispatch({ type: 'WA_CLOSE' }),
     setSearch: (v) => dispatch({ type: 'SET', patch: { searchOpen: v } }),
-    setNotif: (v) => dispatch({ type: 'SET', patch: { notifOpen: v } }),
+    setNotif: (v) => {
+      dispatch({ type: 'SET', patch: { notifOpen: v } })
+      if (v) loadNotifications() // refresh the feed whenever the drawer opens
+    },
+    loadNotifications,
+    markAllNotifsRead: () => {
+      dispatch({ type: 'MARK_NOTIFS_READ' })
+      apiClient.markAllNotificationsRead().catch(err => console.warn('[Notifications] mark-all failed:', err.message))
+    },
     setRole: (role) => dispatch({ type: 'ROLE', role }),
-    login: (payload) => dispatch({ type: 'LOGIN', payload }),
+    login: (payload) => { dispatch({ type: 'LOGIN', payload }); setTimeout(loadNotifications, 0) },
     logout: () => {
       apiClient.clearToken?.()
       if (typeof window !== 'undefined') {
