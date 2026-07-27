@@ -160,6 +160,11 @@ export const api = {
   markNotificationRead: (id) => request(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }),
   markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
 
+  // Web Push (phone alerts even when the app is closed)
+  getVapid: () => request('/notifications/vapid'),
+  subscribePush: (subscription) => request('/notifications/subscribe', { method: 'POST', body: JSON.stringify({ subscription }) }),
+  unsubscribePush: (endpoint) => request('/notifications/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
+
   // Composable Actions
   callBridge: (recordId, agentId) => request(`/records/${recordId}/actions/call`, { method: 'POST', body: JSON.stringify({ agent_id: agentId }) }),
   sendWhatsApp: (recordId, templateId, vars) => request(`/records/${recordId}/actions/whatsapp`, { method: 'POST', body: JSON.stringify({ template_id: templateId, variables: vars }) }),

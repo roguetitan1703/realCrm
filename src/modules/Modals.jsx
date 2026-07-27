@@ -5,6 +5,7 @@ import { theme } from '../data/theme.js'
 import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink } from '../lib/matching.js'
 import { api } from '../lib/api.js'
+import { pushSupported, isPushSubscribed, enablePush, disablePush } from '../lib/push.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 
@@ -1414,6 +1415,33 @@ function NotifModal({ store, go }) {
   const [filter, setFilter] = useState('all')
   const close = () => store.setNotif(false)
 
+  // Phone alerts (Web Push): reflect whether this device is already subscribed.
+  const [pushState, setPushState] = useState('unknown') // unknown | off | on | unsupported | busy
+  useEffect(() => {
+    if (!pushSupported()) { setPushState('unsupported'); return }
+    isPushSubscribed().then(on => setPushState(on ? 'on' : 'off'))
+  }, [])
+  const togglePush = async () => {
+    if (pushState === 'busy' || pushState === 'unsupported') return
+    setPushState('busy')
+    if (pushState === 'on') {
+      await disablePush()
+      setPushState('off')
+      store.toast('Phone alerts turned off for this device')
+      return
+    }
+    const r = await enablePush()
+    if (r.ok) { setPushState('on'); store.toast('Phone alerts on — you\'ll get notified even when the app is closed') }
+    else {
+      setPushState('off')
+      const msg = r.reason === 'denied' ? 'Notifications are blocked in your browser settings'
+        : r.reason === 'disabled' ? 'Push isn\'t configured on the server yet'
+        : r.reason === 'unsupported' ? 'This browser doesn\'t support phone alerts'
+        : 'Could not turn on alerts — try again'
+      store.toast(msg)
+    }
+  }
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') close()
@@ -1587,9 +1615,19 @@ function NotifModal({ store, go }) {
         </div>
 
         <div className="notif-drawer-footer">
-          <div className="u-muted" style={{ fontSize: 12 }}>
-            Click any card to open full inquiry record
-          </div>
+          {pushState !== 'unsupported' && (
+            <button
+              type="button"
+              className="btn btn-quiet"
+              style={{ fontSize: 12, fontWeight: 600, color: pushState === 'on' ? 'var(--muted)' : 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              onClick={togglePush}
+              disabled={pushState === 'busy'}
+              title="Get notified on this device even when the app is closed"
+            >
+              <Icon name="bell" size={14} />
+              {pushState === 'on' ? 'Phone alerts on' : pushState === 'busy' ? 'Working…' : 'Turn on phone alerts'}
+            </button>
+          )}
           <Button variant="secondary" size="sm" onClick={() => { close(); go('leads') }}>
             Open Leads Workspace
           </Button>

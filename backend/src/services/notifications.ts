@@ -12,6 +12,7 @@
 
 import { sql, DEFAULT_TENANT_ID } from './db.js';
 import { getContext } from './context.js';
+import { sendPushToUser } from './push.js';
 
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
@@ -36,6 +37,14 @@ export async function notify(n: NotifyInput): Promise<void> {
     INSERT INTO notifications (id, tenant_id, user_id, type, title, body, link)
     VALUES (${id}, ${t}, ${n.userId}, ${n.type}, ${n.title}, ${n.body ?? null}, ${n.link ?? null});
   `;
+  // Fan the same alert out to the user's devices (best-effort; push being off or
+  // a device being unsubscribed never breaks the in-app feed).
+  sendPushToUser(t, n.userId, {
+    title: n.title,
+    body: n.body || '',
+    url: n.link || '/',
+    icon: `/pwa/${t}/icon-192.png`,
+  }).catch(() => {});
 }
 
 /** Fan out one alert to every ACTIVE user in the tenant holding one of the
