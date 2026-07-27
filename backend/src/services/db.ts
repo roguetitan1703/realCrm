@@ -46,6 +46,11 @@ export const sql = postgres(dbUrl, {
   connect_timeout: 15,
 });
 
+// Canonical id of the first tenant (Bhumi Propcity). It doubles as the slug the
+// frontend already sends in X-Tenant-ID, so tenant_id === slug throughout —
+// one value to reason about, no id/slug split.
+export const DEFAULT_TENANT_ID = 'bhumi-propcity';
+
 /**
  * Initialize idempotent Supabase PostgreSQL database tables.
  */
@@ -168,6 +173,66 @@ export async function initSchema(): Promise<void> {
         metadata JSONB DEFAULT '{}'::jsonb
       );
     `;
+
+    // ------------------------------------------------------------------------
+    // Phase 0 — real auth + tenant identity (foundation for true multi-tenancy)
+    // ------------------------------------------------------------------------
+
+    // Platform operators (Delpat staff). NO tenant_id — they sit above tenants.
+    // Email + password, distinct from the tenant phone-OTP flow.
+    await sql`
+      CREATE TABLE IF NOT EXISTS superadmins (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
+
+    // Tenant users (owner / manager / agent). Supersedes crm_agents as the
+    // identity table; agents become users with role 'agent'. Login is by phone.
+    await sql`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT,
+        phone TEXT,
+        email TEXT,
+        role TEXT NOT NULL DEFAULT 'agent',
+        status TEXT NOT NULL DEFAULT 'ACTIVE',
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_users_tenant ON users (tenant_id);`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_tenant_phone ON users (tenant_id, phone);`;
+
+    // Short-lived OTP challenges for phone login.
+    await sql`
+      CREATE TABLE IF NOT EXISTS auth_otp (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        code TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        consumed BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
+
+    // Tag every tenant-owned table with tenant_id. Additive and idempotent:
+    // existing single-workspace rows are backfilled to the Bhumi tenant below,
+    // so nothing breaks while Phase 1 threads the filter through the queries.
+    const TENANT_TABLES = [
+      'crm_agents', 'crm_properties', 'crm_units', 'crm_leads',
+      'crm_settings', 'crm_integrations', 'crm_routing_rules', 'crm_timeline_events',
+    ];
+    for (const t of TENANT_TABLES) {
+      await sql`ALTER TABLE ${sql(t)} ADD COLUMN IF NOT EXISTS tenant_id TEXT;`;
+      await sql`UPDATE ${sql(t)} SET tenant_id = ${DEFAULT_TENANT_ID} WHERE tenant_id IS NULL;`;
+      await sql`CREATE INDEX IF NOT EXISTS ${sql('idx_' + t + '_tenant')} ON ${sql(t)} (tenant_id);`;
+    }
 
     console.log('[Supabase DB] ✅ PostgreSQL schema initialization completed successfully.');
   } catch (err: any) {

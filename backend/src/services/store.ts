@@ -8,7 +8,8 @@
  * ============================================================================
  */
 
-import { sql, initSchema } from './db.js';
+import bcrypt from 'bcryptjs';
+import { sql, initSchema, DEFAULT_TENANT_ID } from './db.js';
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 
@@ -131,20 +132,15 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
 
   console.log(`[Supabase DB] 🔄 Bootstrapping default Bhumi Propcity CRM dataset into PostgreSQL...`);
 
-  // 0. Seed Default Tenant Workspace (org_bhumi_109)
-  await sql`
-    INSERT INTO tenants (id, name, slug, subscription_plan, subscription_status)
-    VALUES ('org_bhumi_109', 'Bhumi Propcity CRM', 'bhumi-propcity', 'ENTERPRISE', 'ACTIVE')
-    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, subscription_status = EXCLUDED.subscription_status;
-  `;
-
-  // 1. Seed Agents
+  // 1. Seed Agents (crm_agents stays for the existing team/roster reads until
+  //    Phase 1 migrates them onto users; ensureAuthIdentity mirrors them across).
   for (const a of seedAgents) {
-    const meta = { initials: a.initials, avatar: a.avatar };
+    const meta: any = { initials: a.initials, avatar: a.avatar };
+    if ((a as any).phone) meta.phone = (a as any).phone;
     await sql`
-      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata)
-      VALUES (${a.id}, ${a.name}, ${a.first}, ${a.initials}, ${a.avatar}, 'agent', 'ACTIVE', ${sql.json(meta)})
-      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, first = EXCLUDED.first, metadata = EXCLUDED.metadata;
+      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
+      VALUES (${a.id}, ${a.name}, ${a.first}, ${a.initials}, ${a.avatar}, 'agent', 'ACTIVE', ${sql.json(meta)}, ${DEFAULT_TENANT_ID})
+      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, first = EXCLUDED.first, metadata = EXCLUDED.metadata, tenant_id = EXCLUDED.tenant_id;
     `;
   }
 
@@ -166,9 +162,9 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
     config.owner = src.owner || 'Property Owner';
     config.highlights = p.highlights || [];
     await sql`
-      INSERT INTO crm_properties (id, title, status, type, locality, price, tower, unit, config, tenancy, timeline)
-      VALUES (${p.id}, ${p.title}, ${p.status || 'Available'}, ${p.type}, ${p.locality}, ${p.price || ''}, ${p.tower || 'A'}, ${p.unit || '101'}, ${sql.json(config)}, ${sql.json(p.tenancy || null)}, ${sql.json(p.timeline || [])})
-      ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, status = EXCLUDED.status, config = EXCLUDED.config;
+      INSERT INTO crm_properties (id, title, status, type, locality, price, tower, unit, config, tenancy, timeline, tenant_id)
+      VALUES (${p.id}, ${p.title}, ${p.status || 'Available'}, ${p.type}, ${p.locality}, ${p.price || ''}, ${p.tower || 'A'}, ${p.unit || '101'}, ${sql.json(config)}, ${sql.json(p.tenancy || null)}, ${sql.json(p.timeline || [])}, ${DEFAULT_TENANT_ID})
+      ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, status = EXCLUDED.status, config = EXCLUDED.config, tenant_id = EXCLUDED.tenant_id;
     `;
   }
 
@@ -180,9 +176,9 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
   ];
   for (const u of seedUnits) {
     await sql`
-      INSERT INTO crm_units (id, property_id, title, data)
-      VALUES (${u.id}, ${u.property_id}, ${u.title}, ${sql.json(u.data)})
-      ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, data = EXCLUDED.data;
+      INSERT INTO crm_units (id, property_id, title, data, tenant_id)
+      VALUES (${u.id}, ${u.property_id}, ${u.title}, ${sql.json(u.data)}, ${DEFAULT_TENANT_ID})
+      ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, data = EXCLUDED.data, tenant_id = EXCLUDED.tenant_id;
     `;
   }
 
@@ -193,24 +189,24 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
     // whole pipeline looks like it appeared this second.
     const createdAt = new Date(Date.now() - (l.minsAgo ?? 60) * 60000).toISOString();
     await sql`
-      INSERT INTO crm_leads (id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback, duplicate_of, follow_up, overdue, created_at)
-      VALUES (${l.id}, ${l.name}, ${l.phone}, ${l.email || null}, ${l.stage}, ${l.source || 'Website'}, ${l.agentId ?? null}, ${sql.json(l.req || {})}, ${sql.json(l.notes || [])}, ${sql.json(l.shortlist || [])}, ${sql.json(l.feedback || {})}, ${l.duplicateOf || null}, ${sql.json((l as any).followUp || null)}, ${Boolean((l as any).overdue)}, ${createdAt})
-      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, stage = EXCLUDED.stage, agent_id = EXCLUDED.agent_id, follow_up = EXCLUDED.follow_up, overdue = EXCLUDED.overdue, created_at = EXCLUDED.created_at;
+      INSERT INTO crm_leads (id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback, duplicate_of, follow_up, overdue, created_at, tenant_id)
+      VALUES (${l.id}, ${l.name}, ${l.phone}, ${l.email || null}, ${l.stage}, ${l.source || 'Website'}, ${l.agentId ?? null}, ${sql.json(l.req || {})}, ${sql.json(l.notes || [])}, ${sql.json(l.shortlist || [])}, ${sql.json(l.feedback || {})}, ${l.duplicateOf || null}, ${sql.json((l as any).followUp || null)}, ${Boolean((l as any).overdue)}, ${createdAt}, ${DEFAULT_TENANT_ID})
+      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, stage = EXCLUDED.stage, agent_id = EXCLUDED.agent_id, follow_up = EXCLUDED.follow_up, overdue = EXCLUDED.overdue, created_at = EXCLUDED.created_at, tenant_id = EXCLUDED.tenant_id;
     `;
 
     // Add creation timeline event
     const ts = new Date(Date.now() - (l.minsAgo || 60) * 60000).toISOString();
     await sql`
-      INSERT INTO crm_timeline_events (id, record_id, type, title, description, author, timestamp, metadata)
-      VALUES (${`evt_seed_${l.id}`}, ${l.id}, 'creation', 'Inquiry Received', ${`Inquiry captured via ${l.source || 'Direct'} channel for ${l.req?.locality || 'Pune'}.`}, 'System', ${ts}, ${sql.json({})})
+      INSERT INTO crm_timeline_events (id, record_id, type, title, description, author, timestamp, metadata, tenant_id)
+      VALUES (${`evt_seed_${l.id}`}, ${l.id}, 'creation', 'Inquiry Received', ${`Inquiry captured via ${l.source || 'Direct'} channel for ${l.req?.locality || 'Pune'}.`}, 'System', ${ts}, ${sql.json({})}, ${DEFAULT_TENANT_ID})
       ON CONFLICT (id) DO NOTHING;
     `;
   }
 
   // 4. Seed Settings
   await sql`
-    INSERT INTO crm_settings (key, value) VALUES ('default', ${sql.json(DEFAULT_SETTINGS)})
-    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+    INSERT INTO crm_settings (key, value, tenant_id) VALUES ('default', ${sql.json(DEFAULT_SETTINGS)}, ${DEFAULT_TENANT_ID})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, tenant_id = EXCLUDED.tenant_id;
   `;
 
   // 5. Seed Integrations
@@ -223,21 +219,78 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
   };
   for (const [key, val] of Object.entries(initialIntegrations)) {
     await sql`
-      INSERT INTO crm_integrations (key, config) VALUES (${key}, ${sql.json(val)})
-      ON CONFLICT (key) DO UPDATE SET config = EXCLUDED.config;
+      INSERT INTO crm_integrations (key, config, tenant_id) VALUES (${key}, ${sql.json(val)}, ${DEFAULT_TENANT_ID})
+      ON CONFLICT (key) DO UPDATE SET config = EXCLUDED.config, tenant_id = EXCLUDED.tenant_id;
     `;
   }
 
   // 6. Seed Routing Rules
   const activeIds = seedAgents.map(a => a.id);
   await sql`
-    INSERT INTO crm_routing_rules (id, strategy, active_agent_ids, last_assigned_index)
-    VALUES (1, 'round_robin', ${sql.json(activeIds)}, -1)
-    ON CONFLICT (id) DO UPDATE SET active_agent_ids = EXCLUDED.active_agent_ids;
+    INSERT INTO crm_routing_rules (id, strategy, active_agent_ids, last_assigned_index, tenant_id)
+    VALUES (1, 'round_robin', ${sql.json(activeIds)}, -1, ${DEFAULT_TENANT_ID})
+    ON CONFLICT (id) DO UPDATE SET active_agent_ids = EXCLUDED.active_agent_ids, tenant_id = EXCLUDED.tenant_id;
   `;
+
+  // Tenant + superadmin + mirror agents→users. At the end so agents exist to
+  // mirror (covers fresh seed and reset).
+  await ensureAuthIdentity();
 
   console.log(`[Supabase DB] ✅ Seeded initial PostgreSQL data cleanly.`);
   return await getState();
+}
+
+/**
+ * Idempotent tenant + platform identity. Ensures the tenant row, the first
+ * superadmin (email/password from env), the owner user, and a `users` mirror of
+ * every crm_agent. Safe to run repeatedly; called at the end of a seed AND on
+ * every boot, so an already-populated database (where seed is skipped) is still
+ * brought up to the Phase 0 identity model.
+ */
+export async function ensureAuthIdentity(): Promise<void> {
+  // Tenant: id === slug === DEFAULT_TENANT_ID so the tenant_id on every row
+  // matches what the frontend sends. An earlier build seeded this tenant with a
+  // different id ('org_bhumi_109') but the same slug; rename it to the canonical
+  // id first, otherwise the insert collides on the unique slug.
+  await sql`
+    UPDATE tenants SET id = ${DEFAULT_TENANT_ID}, name = 'Bhumi Propcity'
+    WHERE slug = ${DEFAULT_TENANT_ID} AND id <> ${DEFAULT_TENANT_ID};
+  `;
+  await sql`
+    INSERT INTO tenants (id, name, slug, subscription_plan, subscription_status)
+    VALUES (${DEFAULT_TENANT_ID}, 'Bhumi Propcity', ${DEFAULT_TENANT_ID}, 'ENTERPRISE', 'ACTIVE')
+    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, subscription_status = EXCLUDED.subscription_status;
+  `;
+
+  // First superadmin (Delpat staff). Password from env — never committed; the
+  // dev fallback only applies locally so nobody is locked out while building.
+  const saEmail = (process.env.SUPERADMIN_EMAIL || 'delpatllp@gmail.com').toLowerCase();
+  const saPassword = process.env.SUPERADMIN_PASSWORD || 'delpat-dev-only';
+  const saHash = await bcrypt.hash(saPassword, 10);
+  await sql`
+    INSERT INTO superadmins (id, email, password_hash, name)
+    VALUES ('sa_root', ${saEmail}, ${saHash}, 'Delpat Admin')
+    ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash;
+  `;
+
+  // Workspace owner — the admin identity the desk shows.
+  await sql`
+    INSERT INTO users (id, tenant_id, name, phone, role, status, metadata)
+    VALUES ('owner1', ${DEFAULT_TENANT_ID}, 'Rakesh Sethi', '+919820011223', 'owner', 'ACTIVE', ${sql.json({ initials: 'RS', avatar: '#1E6F52' })})
+    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role;
+  `;
+
+  // Mirror agents into users (role 'agent'), phone carried for phone-OTP login.
+  const agentRows = await sql`SELECT id, name, first, initials, avatar, metadata, tenant_id FROM crm_agents`;
+  for (const a of agentRows) {
+    const meta = a.metadata || { initials: a.initials, avatar: a.avatar };
+    const phone = (a.metadata && a.metadata.phone) || null;
+    await sql`
+      INSERT INTO users (id, tenant_id, name, phone, role, status, metadata)
+      VALUES (${a.id}, ${a.tenant_id || DEFAULT_TENANT_ID}, ${a.name}, ${phone}, 'agent', 'ACTIVE', ${sql.json(meta)})
+      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, metadata = EXCLUDED.metadata;
+    `;
+  }
 }
 
 /**
@@ -245,12 +298,18 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
  */
 export async function resetDatabase(): Promise<ServerState> {
   console.log(`[Supabase DB] 🧹 Truncating all CRM tables for workspace reset...`);
-  await sql`TRUNCATE TABLE crm_timeline_events, crm_units, crm_leads, crm_properties, crm_agents, crm_settings, crm_integrations, crm_routing_rules CASCADE;`;
+  // users is re-seeded from agents; superadmins are platform-level and must
+  // survive a workspace reset, so they are deliberately NOT truncated.
+  await sql`TRUNCATE TABLE crm_timeline_events, crm_units, crm_leads, crm_properties, crm_agents, crm_settings, crm_integrations, crm_routing_rules, users, auth_otp CASCADE;`;
   return await seedDatabase(true);
 }
 
-// Ensure seeded on module load
-seedDatabase().catch(err => console.error('[Supabase Boot Error]:', err.message));
+// Ensure seeded on module load. ensureAuthIdentity runs after, so an
+// already-populated database (seed skipped by the lead-count guard) still gets
+// the Phase 0 identity model — tenant, superadmin, and users mirror.
+seedDatabase()
+  .then(() => ensureAuthIdentity())
+  .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
 // 📖 ASYNC READ & MUTATION HELPER API
