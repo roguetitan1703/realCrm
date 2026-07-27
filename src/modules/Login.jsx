@@ -191,24 +191,21 @@ export default function Login({ store, onStartOnboard }) {
           pointerEvents: 'none'
         }} />
 
-        {/* Top Brand Mark */}
+        {/* Top Brand Mark — the platform logo before a workspace is chosen; a
+            tenant's initials tile once one is. (Tenant logo upload comes later.) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, zIndex: 2 }}>
-          <div style={{
-            width: 40,
-            height: 40,
-            borderRadius: 'var(--radius)',
-            background: 'rgba(255, 255, 255, 0.1)',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontFamily: 'var(--disp)',
-            fontWeight: 700,
-            fontSize: 18,
-            color: '#FFFFFF'
-          }}>
-            {ws ? ws.initials : PLATFORM.initials}
-          </div>
+          {ws ? (
+            <div style={{
+              width: 40, height: 40, borderRadius: 'var(--radius)',
+              background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255, 255, 255, 0.15)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 18, color: '#FFFFFF'
+            }}>
+              {ws.initials}
+            </div>
+          ) : (
+            <img src="/brand-mark.svg" width={40} height={40} alt={PLATFORM.name} style={{ display: 'block', borderRadius: 'var(--radius)' }} />
+          )}
           <div>
             <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
               {ws ? ws.firmName : PLATFORM.name}
@@ -275,14 +272,18 @@ export default function Login({ store, onStartOnboard }) {
           {/* Mobile-only brand lockup — the left pane is hidden under 1024px,
               so without this a phone would show no identity at all. */}
           <div className="auth-mobile-mark" style={{ display: 'none', alignItems: 'center', gap: 12, marginBottom: 28 }}>
-            <div style={{
-              width: 38, height: 38, borderRadius: 'var(--radius)', flexShrink: 0,
-              background: '#13281E', color: '#FFFFFF',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 15
-            }}>
-              {ws ? ws.initials : PLATFORM.initials}
-            </div>
+            {ws ? (
+              <div style={{
+                width: 38, height: 38, borderRadius: 'var(--radius)', flexShrink: 0,
+                background: '#13281E', color: '#FFFFFF',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 15
+              }}>
+                {ws.initials}
+              </div>
+            ) : (
+              <img src="/brand-mark.svg" width={38} height={38} alt={PLATFORM.name} style={{ display: 'block', borderRadius: 'var(--radius)', flexShrink: 0 }} />
+            )}
             <div>
               <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 16, color: 'var(--ink)', letterSpacing: '-0.02em' }}>
                 {ws ? ws.firmName : PLATFORM.name}

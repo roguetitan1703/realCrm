@@ -130,16 +130,13 @@ finishes the tenant side so each firm experiences *their own* software.
   `src/data/theme.js`; they become per-tenant, loaded after login from the token's
   tenant.
 - Onboarding writes a real `brand_config`; the workspace resolver returns it.
-- **Backup config as a tenant setting (client request):** onboarding also
-  collects each tenant's backup preferences — schedule/frequency, retention,
-  and a destination they control — editable later in Settings.
-  Model reconciliation: because we share tables (tenant_id), a tenant's "backup"
-  is a **tenant-scoped export** (their rows only, `WHERE tenant_id`), produced by
-  the same tooling as the platform dump in `scripts/`. It is NOT a separate
-  database or connection URL — that would contradict the shared-tables decision.
-  The platform-wide dump (all tenants) stays a Delpat-only superadmin operation.
-- Result: Bhumi sees Bhumi's name and colours end to end; the next tenant sees
-  theirs, with no code change.
+- **Logo as a tenant asset (client request):** onboarding collects the tenant's
+  own logo (upload), stored in `brand_config` and editable later in Settings.
+  Until a tenant uploads one, their initials tile stands in (as now). The
+  **platform** logo (Real Estate by Delpat) is already generated —
+  `public/brand-mark.svg`, wired into the login, onboarding, and favicon.
+- Result: Bhumi sees Bhumi's name, logo and colours end to end; the next tenant
+  sees theirs, with no code change.
 
 ---
 
@@ -208,8 +205,8 @@ No-cost, no paid tier. Built and verified against the live DB:
   round-tripped 12 leads / 8 properties / 1 tenant / 18 timeline events, with
   zero risk to prod.
 
-Once data is tenant-tagged (Phase 0/1), the per-tenant export in Phase 2 reuses
-this exact tooling with a `WHERE tenant_id` filter.
+Once data is tenant-tagged (Phase 0/1), a per-tenant export (a tenant's own rows,
+`WHERE tenant_id`) can reuse this exact tooling if we choose to offer it later.
 
 ---
 
@@ -234,19 +231,20 @@ this exact tooling with a `WHERE tenant_id` filter.
 ## Open decisions
 
 Resolved: provisioning = **superadmin portal**; demo OTP = **env flag, yes**;
-backup = **no-cost scripts, done** (no paid tier).
+backup = **no-cost scripts, done** (no paid tier); brand assets = **tenant
+uploads its logo at onboarding; Delpat platform logo generated now**
+(`public/brand-mark.svg`).
 
 Still open:
 
-1. **Icons/brand assets:** do we have a Bhumi logo + a Delpat logo for the PWA
-   icons and login, or do we generate placeholders?
-2. **Superadmin identity:** who are the superadmins (which phone numbers /
+1. **Superadmin identity:** who are the superadmins (which phone numbers /
    Delpat staff), and is `/admin` a separate route on the same app or its own
    surface?
-3. ⚠️ **Committed DB credential:** `backend/src/services/db.ts:33` has a live
-   Supabase password hardcoded as a fallback, in a repo that pushes to GitHub.
-   Recommend rotating the password and removing the fallback (require
-   `DATABASE_URL`). Needs doing regardless of phase.
+2. ⚠️ **Rotate the DB password:** the hardcoded fallback in `db.ts` is removed
+   (env now required — done), but the old Supabase password is still in git
+   history. Rotate it in the Supabase dashboard. Delpat-side action.
+3. **PWA icon sizes:** the SVG mark covers the tab/login; Phase 3 needs raster
+   192/512 PNGs (+ maskable) derived from it. Fine to generate from the SVG.
 
 ## Sequencing notes / risks
 

@@ -1,0 +1,8 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Real Estate by Delpat">
+  <!-- Platform mark. Deep-green tile, linen house, one warm ochre roofline —
+       the single accent. Reads cleanly at 16px (favicon) and 40px (login). -->
+  <rect width="48" height="48" rx="12" fill="#13281E"/>
+  <path d="M24 13 L37 24 L37 37 L11 37 L11 24 Z" fill="#F4F1EA"/>
+  <rect x="20.5" y="28" width="7" height="9" rx="1.5" fill="#13281E"/>
+  <path d="M9 25 L24 12 L39 25" fill="none" stroke="#D79A4B" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

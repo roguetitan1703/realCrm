@@ -30,7 +30,14 @@ try {
   console.warn('[DB Engine] Could not load local .env file:', e);
 }
 
-const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres:KOq5K1p3fgLxsduZ@db.zxdidrhhqtxepyhkging.supabase.co:5432/postgres';
+// DATABASE_URL is required. It must come from the environment (AWS) or a local
+// .env — never a hardcoded default. A committed connection string is a leaked
+// production credential, so a missing one fails loudly instead of silently
+// connecting somewhere it shouldn't.
+const dbUrl = process.env.DATABASE_URL;
+if (!dbUrl) {
+  throw new Error('[DB Engine] DATABASE_URL is not set. Provide it via the environment or a local .env file.');
+}
 
 export const sql = postgres(dbUrl, {
   ssl: 'require',

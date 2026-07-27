@@ -120,22 +120,7 @@ export default function Onboarding({ store, onCancel }) {
 
         {/* Top Brand Emblem (Platform White-Label Identity) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, zIndex: 2 }}>
-          <div style={{
-            width: 40,
-            height: 40,
-            borderRadius: 'var(--radius)',
-            background: 'rgba(255, 255, 255, 0.1)',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontFamily: 'var(--disp)',
-            fontWeight: 700,
-            fontSize: 18,
-            color: '#FFFFFF'
-          }}>
-            {PLATFORM.initials}
-          </div>
+          <img src="/brand-mark.svg" width={40} height={40} alt={PLATFORM.name} style={{ display: 'block', borderRadius: 'var(--radius)' }} />
           <div>
             <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
               {PLATFORM.name}
