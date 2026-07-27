@@ -37,13 +37,26 @@ export function subscribeConnection(fn) {
 }
 export function getConnection() { return onlineState; }
 
+// Auth tokens live in localStorage. Two separate identities:
+//   • crm_auth_token  — the signed-in tenant user (owner/agent), sent on every
+//     tenant API call as `Authorization: Bearer`.
+//   • crm_admin_token — a Delpat superadmin, used only by the /admin console.
+// They are kept apart so signing into one never leaks into the other.
+const TOKEN_KEY = 'crm_auth_token';
+const ADMIN_TOKEN_KEY = 'crm_admin_token';
+function lsGet(k) { try { return (typeof window !== 'undefined' && window.localStorage?.getItem(k)) || ''; } catch { return ''; } }
+function lsSet(k, v) { try { if (typeof window === 'undefined' || !window.localStorage) return; if (v) window.localStorage.setItem(k, v); else window.localStorage.removeItem(k); } catch { /* storage blocked */ } }
+
 function getHeaders(customHeaders = {}) {
   const tenantId = typeof window !== 'undefined' ? (window.localStorage?.getItem('crm_tenant_id') || 'bhumi-propcity') : 'bhumi-propcity';
-  return {
+  const base = {
     'X-Tenant-ID': tenantId,
     'Content-Type': 'application/json',
-    ...customHeaders,
   };
+  const token = lsGet(TOKEN_KEY);
+  if (token) base.Authorization = `Bearer ${token}`;
+  // customHeaders wins — lets the admin console override with its own token.
+  return { ...base, ...customHeaders };
 }
 
 async function request(endpoint, options = {}) {
@@ -76,6 +89,31 @@ export const api = {
       window.localStorage.setItem('crm_tenant_id', id);
     }
   },
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  // Tenant users sign in by phone OTP; the returned JWT is stored and attached
+  // to every subsequent request by getHeaders().
+  requestOtp: (phone) => request('/auth/otp/request', { method: 'POST', body: JSON.stringify({ phone }) }),
+  verifyOtp: async (phone, code) => {
+    const res = await request('/auth/otp/verify', { method: 'POST', body: JSON.stringify({ phone, code }) });
+    if (res?.token) lsSet(TOKEN_KEY, res.token);
+    return res;
+  },
+  me: () => request('/auth/me'),
+  getToken: () => lsGet(TOKEN_KEY),
+  setToken: (t) => lsSet(TOKEN_KEY, t),
+  clearToken: () => lsSet(TOKEN_KEY, ''),
+
+  // Superadmin (Delpat staff) — email + password, kept on its own token so the
+  // /admin console is fully separate from the tenant session.
+  superadminLogin: async (email, password) => {
+    const res = await request('/auth/superadmin/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    if (res?.token) lsSet(ADMIN_TOKEN_KEY, res.token);
+    return res;
+  },
+  adminOverview: () => request('/admin/overview', { headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  getAdminToken: () => lsGet(ADMIN_TOKEN_KEY),
+  clearAdminToken: () => lsSet(ADMIN_TOKEN_KEY, ''),
   getState: () => request('/workspace/state'),
   resetDatabase: () => request('/workspace/reset', { method: 'POST' }),
   onboardTenant: (config) => request('/workspace/onboard', { method: 'POST', body: JSON.stringify(config) }),

@@ -19,6 +19,7 @@ import { actionsRouter } from './routes/actions';
 import { ingestRouter } from './routes/ingest';
 import { integrationsRouter } from './routes/integrations';
 import { authRouter } from './routes/auth';
+import { adminRouter } from './routes/admin';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -48,6 +49,9 @@ app.get('/health', (req: Request, res: Response) => {
 
 // 0. Authentication — phone OTP (tenant users) + superadmin password
 app.use('/api/v1/auth', authRouter);
+
+// 0b. Superadmin console (Delpat-only, above all tenants)
+app.use('/api/v1/admin', adminRouter);
 
 // 1. Non-Hacky Workspace & Tenant Resolution (Called before & after login!)
 app.use('/api/v1/workspace/integrations', integrationsRouter);

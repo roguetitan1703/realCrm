@@ -30,7 +30,12 @@ export default function Login({ store, onStartOnboard }) {
   const [verifying, setVerifying] = useState(false)
   const [timer, setTimer] = useState(30)
   const [role, setRole] = useState(state.role || 'admin')
-  const [sessionOtp, setSessionOtp] = useState('8821')
+  // The demo desk owner's number — pressing Continue on an empty field signs in
+  // as the owner so a live demo never stalls hunting for a phone number.
+  const DEMO_PHONE = '98200 11223'
+  // In DEMO_OTP mode the backend echoes the code so the "Auto-fill" affordance
+  // can complete the loop without a real SMS. Empty in production.
+  const [sessionOtp, setSessionOtp] = useState('')
 
   const inputRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
 
@@ -77,20 +82,25 @@ export default function Login({ store, onStartOnboard }) {
     store.toast(`Switched access level to: ${roleTitle}`, 'ok')
   }
 
-  const handleSendOtp = (e) => {
+  const handleSendOtp = async (e) => {
     if (e) e.preventDefault()
-    const targetPhone = phone.trim() || '98220 41556'
+    const targetPhone = phone.trim() || DEMO_PHONE
     setLoading(true)
-    
-    setTimeout(() => {
-      setLoading(false)
+    try {
+      const res = await api.requestOtp(targetPhone)
       setPhase('otp')
       setTimer(30)
-      const genCode = Math.floor(1000 + Math.random() * 9000).toString()
-      setSessionOtp(genCode)
-      store.toast(`Verification code sent to +91 ${targetPhone}: [${genCode}]`, 'ok')
+      // demoCode is only returned when the backend runs with DEMO_OTP=true AND
+      // the number belongs to a real user. Absent in production (and for unknown
+      // numbers), so the auto-fill affordance simply doesn't appear.
+      setSessionOtp(res?.demoCode || '')
+      store.toast(`Verification code sent to +91 ${targetPhone}`, 'ok')
       setTimeout(() => inputRefs[0].current?.focus(), 80)
-    }, 900)
+    } catch (err) {
+      store.toast('Could not send the code. Check your connection and try again.', 'warn')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleOtpChange = (index, val) => {
@@ -132,24 +142,40 @@ export default function Login({ store, onStartOnboard }) {
     handleVerify(sessionOtp)
   }
 
-  const handleVerify = (codeToVerify) => {
+  const handleVerify = async (codeToVerify) => {
     const fullCode = typeof codeToVerify === 'string' ? codeToVerify : otp.join('')
     if (fullCode.length < 4) {
       store.toast('Please enter the 4-digit verification code.', 'warn')
       return
     }
-
+    const targetPhone = phone.trim() || DEMO_PHONE
     setVerifying(true)
-    setTimeout(() => {
-      setVerifying(false)
+    try {
+      const res = await api.verifyOtp(targetPhone, fullCode)
+      if (!res?.token) throw new Error('no token')
       store.toast(`Welcome to ${ws?.firmName || 'your desk'}`, 'ok')
-      store.login()
-    }, 800)
+      // Real login: the verified user drives role + identity, replacing the
+      // old localStorage-only session.
+      store.login({ token: res.token, user: res.user })
+    } catch (err) {
+      store.toast('That code didn’t match. Please try again.', 'warn')
+      setOtp(['', '', '', ''])
+      setTimeout(() => inputRefs[0].current?.focus(), 40)
+    } finally {
+      setVerifying(false)
+    }
   }
 
-  const handleResend = () => {
+  const handleResend = async () => {
+    const targetPhone = phone.trim() || DEMO_PHONE
     setTimer(30)
-    store.toast('Fresh verification code sent via voice bridge.', 'ok')
+    try {
+      const res = await api.requestOtp(targetPhone)
+      setSessionOtp(res?.demoCode || '')
+      store.toast('A fresh verification code is on its way.', 'ok')
+    } catch (err) {
+      store.toast('Could not resend the code. Try again in a moment.', 'warn')
+    }
   }
 
   return (
@@ -444,7 +470,7 @@ export default function Login({ store, onStartOnboard }) {
                       type="tel"
                       value={phone}
                       onChange={e => setPhone(e.target.value)}
-                      placeholder="98220 41556"
+                      placeholder={DEMO_PHONE}
                       autoFocus
                       disabled={loading}
                       className="mono-num"
@@ -548,14 +574,18 @@ export default function Login({ store, onStartOnboard }) {
 
                 {/* Session Auto-fill & Resend Options */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)' }}>
-                  <button
-                    type="button"
-                    onClick={handleAutoFill}
-                    className="btn-quiet"
-                    style={{ fontSize: 12, padding: 0, color: 'var(--ink-2)' }}
-                  >
-                    Auto-fill received code: <strong className="mono-num" style={{ color: 'var(--ink)' }}>{sessionOtp}</strong>
-                  </button>
+                  {sessionOtp ? (
+                    <button
+                      type="button"
+                      onClick={handleAutoFill}
+                      className="btn-quiet"
+                      style={{ fontSize: 12, padding: 0, color: 'var(--ink-2)' }}
+                    >
+                      Auto-fill received code: <strong className="mono-num" style={{ color: 'var(--ink)' }}>{sessionOtp}</strong>
+                    </button>
+                  ) : (
+                    <span>Enter the code sent to your phone</span>
+                  )}
 
                   {timer > 0 ? (
                     <span className="mono-num">00:{timer < 10 ? `0${timer}` : timer}</span>

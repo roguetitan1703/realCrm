@@ -19,10 +19,14 @@ function loadAuthSession() {
   if (typeof window === 'undefined' || !window.localStorage) return { loggedIn: false }
   try {
     const raw = window.localStorage.getItem('crm_auth_session')
+    // A session is only "logged in" if a real JWT is present. This kills the
+    // old fake session (loggedIn flag with no token) — those now see the login
+    // screen and must complete a real OTP.
+    const hasToken = Boolean(apiClient.getToken?.())
     if (raw) {
       const p = JSON.parse(raw)
       return {
-        loggedIn: Boolean(p.loggedIn),
+        loggedIn: Boolean(p.loggedIn) && hasToken,
         role: p.role || 'admin',
         activeAgentId: p.activeAgentId || 'a1',
       }
@@ -102,8 +106,14 @@ function reducer(state, action) {
     case 'SET': return { ...state, ...action.patch }
 
     case 'LOGIN': {
-      persistAuthSession({ loggedIn: true, role: state.role, activeAgentId: state.activeAgentId })
-      return { ...state, loggedIn: true }
+      // The verified user drives role + identity. Backend roles are
+      // owner/manager/agent; the desk UI is admin/agent — anything that isn't a
+      // plain agent gets the full (admin) desk.
+      const user = action.payload?.user
+      const role = user ? (user.role === 'agent' ? 'agent' : 'admin') : state.role
+      const activeAgentId = user?.id || state.activeAgentId
+      persistAuthSession({ loggedIn: true, role, activeAgentId })
+      return { ...state, loggedIn: true, role, activeAgentId }
     }
 
     case 'LOGOUT': {
@@ -437,6 +447,14 @@ export function StoreProvider({ children }) {
         }
       })
       .catch(err => console.error('[Store Hydration] Failed to connect to PostgreSQL backend:', err.message))
+
+    // Validate a stored token against the backend. If it's expired or the user
+    // no longer exists, drop the session so a stale token can't linger.
+    if (apiClient.getToken?.()) {
+      apiClient.me()
+        .then(res => { if (!res?.success) throw new Error('invalid') })
+        .catch(() => { apiClient.clearToken?.(); dispatch({ type: 'LOGOUT' }) })
+    }
   }, [])
 
   const toast = useCallback((text, tone) => {
@@ -660,8 +678,9 @@ export function StoreProvider({ children }) {
     setSearch: (v) => dispatch({ type: 'SET', patch: { searchOpen: v } }),
     setNotif: (v) => dispatch({ type: 'SET', patch: { notifOpen: v } }),
     setRole: (role) => dispatch({ type: 'ROLE', role }),
-    login: () => dispatch({ type: 'LOGIN' }),
+    login: (payload) => dispatch({ type: 'LOGIN', payload }),
     logout: () => {
+      apiClient.clearToken?.()
       if (typeof window !== 'undefined') {
         try {
           window.localStorage?.removeItem('crm_auth_session')
