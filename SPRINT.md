@@ -45,11 +45,24 @@ lead_shortlist id (pk) · tenant_id · lead_id (fk) · property_id (fk)
 activities     id (pk) · tenant_id · record_type · record_id · type
                · title · description · author_id · metadata(jsonb) · created_at
                INDEX(tenant_id, record_type, record_id)
-               -- unifies the timeline; replaces the column-vs-table split
+               -- BUSINESS timeline: user-facing, per record (the lead timeline)
 
 notifications  id (pk) · tenant_id · user_id (fk) · type · title · body
                · link · read · created_at          INDEX(tenant_id, user_id, read)
-               -- new: powers the alerts the client asked for
+               -- ALERTS: to a user's inbox / push. Ephemeral, dismissible.
+
+audit_log      seq (bigserial pk, monotonic) · tenant_id (nullable = platform)
+               · actor_type ('user'|'superadmin'|'system') · actor_id
+               · actor_label (name/email captured at write — survives deletion)
+               · action (e.g. 'lead.delete', 'auth.login_failed', 'export.run')
+               · target_type · target_id · summary · metadata(jsonb)
+               · ip · user_agent
+               · prev_hash · hash          -- SHA-256 chain: tamper-evident
+               · created_at
+               INDEX(tenant_id, created_at) · INDEX(action)
+               -- SECURITY ledger: append-only, who/what/when/where. NOT the
+               -- business timeline. Never updated, never deleted, survives a
+               -- workspace reset (a ledger you can wipe isn't a ledger).
 
 integrations   id (pk) · tenant_id · key · config(jsonb) · status
                UNIQUE(tenant_id, key)
@@ -59,6 +72,34 @@ routing_rules  tenant_id (pk) · strategy · active_agent_ids(jsonb) · last_ind
 Why these are columns, not JSONB: project/wing/unit, price, carpet, facing,
 owner, stage, budget are exactly what the client filters and searches on
 (feedback #8). Columns are indexable and queryable; a JSONB blob is neither.
+
+### Three ledgers, kept separate
+
+Easy to conflate; each has a different job and lifecycle:
+
+| Table | Job | Audience | Lifecycle |
+|---|---|---|---|
+| `activities` | business timeline (call logged, stage moved) | tenant users | editable context, wiped on reset |
+| `notifications` | alerts to act on | one user | ephemeral, dismissible |
+| `audit_log` | who did what, when, from where | owner + Delpat | **append-only, immutable, survives reset** |
+
+**The audit ledger** is what makes this platform-grade and directly answers the
+client's fear of an agent leaving with the client list. It records, at minimum:
+- **Auth:** login success/failure, OTP issue, superadmin login.
+- **Access to sensitive data:** lead/contact view and **export** (the walk-out
+  risk), property owner-contact reveals.
+- **Mutations:** create/update/**delete** of leads and properties, with a
+  before→after diff in `metadata`.
+- **Authority:** RBAC denials, role changes, user deactivation.
+- **Platform:** superadmin tenant provisioning and any cross-tenant action
+  (`tenant_id` = the affected tenant; actor = the superadmin).
+
+It's **tamper-evident**: each row stores `prev_hash` and a `hash` over its
+canonical content + the previous row's hash. Altering or deleting any past row
+breaks the chain, which a verify pass detects. Appends are serialized through one
+`audit(...)` helper (low volume; fine at this scale — per-tenant chains later if
+it ever isn't). It is deliberately **excluded from workspace reset**, alongside
+`superadmins`.
 
 Migration is one clean step: create the new tables, copy the current rows in
 (flattening today's `req`/`config` JSONB into the new columns), verify counts,
@@ -79,6 +120,10 @@ swap. Backups exist; the demo data round-trips.
    tenants. How Delpat onboards a client by hand.
 6. **Notifications** — new-lead / overdue / flagged alerts to an in-app inbox
    per user, with the delivery hook that push (next sprint) plugs into.
+7. **Audit ledger** — the `audit(...)` helper wired into auth, RBAC denials, and
+   every lead/property mutation + export from day one, plus a verify-chain
+   check. An owner-visible "Activity & access" view can be minimal this sprint;
+   the point is that the ledger is *capturing* correctly from the start.
 
 ## Next sprint (named so we don't scope-creep this one)
 
