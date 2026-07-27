@@ -518,6 +518,31 @@ export default function Login({ store, onStartOnboard }) {
                   </button>
                 </div>
 
+                {/* Demo mode: no SMS provider, so surface the code on screen. */}
+                {sessionOtp && (
+                  <button
+                    type="button"
+                    onClick={handleAutoFill}
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                      padding: '12px 14px', marginBottom: 18, cursor: 'pointer',
+                      background: 'var(--accent-wash)', border: '1px solid var(--accent)',
+                      borderRadius: 'var(--radius)', color: 'var(--ink)',
+                    }}
+                  >
+                    <Icon name="shield" size={18} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Demo mode · no SMS sent
+                      </span>
+                      <span style={{ display: 'block', fontSize: 13, color: 'var(--ink-2)' }}>
+                        Your code is <strong className="mono-num" style={{ color: 'var(--ink)', fontSize: 16, letterSpacing: '0.08em' }}>{sessionOtp}</strong> — tap to fill
+                      </span>
+                    </span>
+                    <Icon name="arrowRight" size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                  </button>
+                )}
+
                 {/* 4-Box OTP Input */}
                 <div
                   onPaste={handleOtpPaste}
@@ -576,18 +601,7 @@ export default function Login({ store, onStartOnboard }) {
 
                 {/* Session Auto-fill & Resend Options */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)' }}>
-                  {sessionOtp ? (
-                    <button
-                      type="button"
-                      onClick={handleAutoFill}
-                      className="btn-quiet"
-                      style={{ fontSize: 12, padding: 0, color: 'var(--ink-2)' }}
-                    >
-                      Auto-fill received code: <strong className="mono-num" style={{ color: 'var(--ink)' }}>{sessionOtp}</strong>
-                    </button>
-                  ) : (
-                    <span>Enter the code sent to your phone</span>
-                  )}
+                  <span>{sessionOtp ? 'Code shown above' : 'Enter the code sent to your phone'}</span>
 
                   {timer > 0 ? (
                     <span className="mono-num">00:{timer < 10 ? `0${timer}` : timer}</span>

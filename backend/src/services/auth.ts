@@ -71,10 +71,13 @@ export async function issueOtp(tenantId: string, phoneRaw: string): Promise<{ se
   if (!phone) return { sent: false };
 
   const rows = await sql`SELECT id FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status = 'ACTIVE' LIMIT 1`;
-  if (rows.length === 0) {
-    // Don't reveal whether the number exists; pretend to send.
+  if (rows.length === 0 && !DEMO_OTP) {
+    // Production: don't reveal whether the number exists; pretend to send.
     return { sent: true };
   }
+  // Demo mode has no SMS provider, so it issues a code for ANY number and shows
+  // it on screen; verifyOtp maps an unknown number to the workspace owner so the
+  // demo desk is always reachable. (Off in production via DEMO_OTP.)
 
   const code = String(Math.floor(1000 + Math.random() * 9000));
   const id = `otp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -112,7 +115,17 @@ export async function verifyOtp(tenantId: string, phoneRaw: string, code: string
   await sql`UPDATE auth_otp SET consumed = TRUE WHERE id = ${rows[0].id}`;
 
   const users = await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status = 'ACTIVE' LIMIT 1`;
-  if (users.length === 0) {
+  let u = users[0];
+  if (!u && DEMO_OTP) {
+    // Demo: an unknown number logs into the workspace owner's desk so testing
+    // never dead-ends on "that number isn't a user".
+    const owner = await sql`
+      SELECT * FROM users WHERE tenant_id = ${tenantId} AND status = 'ACTIVE'
+      ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END LIMIT 1
+    `;
+    u = owner[0];
+  }
+  if (!u) {
     audit({
       tenant_id: tenantId, actor_type: 'user', actor_id: null, actor_label: phone,
       action: 'auth.login_failed', target_type: 'user', target_id: null,
@@ -120,7 +133,6 @@ export async function verifyOtp(tenantId: string, phoneRaw: string, code: string
     });
     return null;
   }
-  const u = users[0];
 
   const token = signToken({ kind: 'user', tenant_id: tenantId, user_id: u.id, role: u.role });
   audit({
