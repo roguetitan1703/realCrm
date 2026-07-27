@@ -243,16 +243,15 @@ backup = **no-cost scripts, done** (no paid tier); brand assets = **tenant
 uploads its logo at onboarding; Delpat platform logo generated now**
 (`public/brand-mark.svg`).
 
-Resolved (this turn): superadmin auth = **email + password**, separate
-`/admin/login`, seeded from env — NOT phone OTP; `/admin` is a route in the same
-app gated by the superadmin token.
+Resolved: superadmin auth = **email + password**, separate `/admin/login`,
+seeded from env — NOT phone OTP; `/admin` is a route in the same app gated by
+the superadmin token. **First superadmin = `delpatllp@gmail.com`**
+(`SUPERADMIN_EMAIL`); its `SUPERADMIN_PASSWORD` is set at deploy, never
+committed.
 
 Still open:
 
-1. **First superadmin credentials:** which email(s) become Delpat superadmins,
-   set via `SUPERADMIN_EMAIL`/`SUPERADMIN_PASSWORD` at deploy. (Just need the
-   email when we build Phase 0.)
-2. ⚠️ **Rotate the DB password:** the hardcoded fallback in `db.ts` is removed
+1. ⚠️ **Rotate the DB password:** the hardcoded fallback in `db.ts` is removed
    (env now required — done), but the old Supabase password is still in git
    history. Rotate it in the Supabase dashboard. Delpat-side action.
 3. **PWA icon sizes:** the SVG mark covers the tab/login; Phase 3 needs raster
