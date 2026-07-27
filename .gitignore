@@ -68,3 +68,6 @@ Thumbs.db
 *.tmp
 _shot.html
 scratch/
+
+# Local DB dumps — never commit tenant data
+backups/
