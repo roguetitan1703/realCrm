@@ -14,8 +14,32 @@ import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { getState, seedDatabase, resetDatabase, updateSettings, getSettings } from '../services/store';
 import { sql } from '../services/db';
+import { getContext } from '../services/context';
+import { listAudit, verifyAuditChain } from '../services/audit';
 
 export const workspaceRouter = Router();
+
+/**
+ * TENANT AUDIT LEDGER (owner/manager only)
+ * GET /api/v1/workspace/audit — read-only "who did what, when" for this tenant,
+ * plus the tamper-evidence status of the chain.
+ */
+workspaceRouter.get('/audit', async (req: Request, res: Response) => {
+  try {
+    const role = getContext()?.role;
+    if (role !== 'owner' && role !== 'manager') {
+      return res.status(403).json({ error: 'Owner or manager access required' });
+    }
+    const [entries, chain] = await Promise.all([listAudit(60), verifyAuditChain()]);
+    return res.status(200).json({
+      success: true,
+      entries,
+      chain: { ok: chain.ok, brokenAtSeq: chain.brokenAtSeq ?? null },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to load audit ledger', message: err.message });
+  }
+});
 
 /**
  * 1. PUBLIC TENANT RESOLUTION (Called BEFORE login by the frontend!)

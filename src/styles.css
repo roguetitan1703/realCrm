@@ -1194,6 +1194,36 @@ input,textarea,select{font-family:inherit}
   margin-top: 6px;
 }
 
+/* Audit ledger (Settings > Audit ledger) */
+.audit-chain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+}
+.audit-chain.ok { color: #1E6F52; background: rgba(30, 111, 82, 0.10); }
+.audit-chain.bad { color: var(--alert); background: rgba(231, 111, 99, 0.10); }
+.audit-list { display: flex; flex-direction: column; }
+.audit-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 2px;
+  border-top: 1px solid var(--line);
+}
+.audit-row:first-child { border-top: none; }
+.audit-seq { color: var(--muted); font-size: 12px; min-width: 40px; flex-shrink: 0; }
+.audit-main { flex: 1; min-width: 0; }
+.audit-action { font-size: 13px; font-weight: 600; color: var(--ink); }
+.audit-summary { font-size: 12px; color: var(--muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audit-meta { text-align: right; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; }
+.audit-actor { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.audit-time { font-size: 11px; color: var(--muted); }
+
 .notif-item-card {
   width: 100%;
   text-align: left;

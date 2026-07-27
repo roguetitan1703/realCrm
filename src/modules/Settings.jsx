@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Panel, SectionHead, StageTag, Button, Input } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES } from '../data/theme.js'
+import { api } from '../lib/api.js'
 
 // The palette is fixed per tenant theme (set once at onboarding) — shown for
 // reference, not edited here. Everything else on this screen writes to Postgres.
@@ -15,6 +16,7 @@ const NAV = [
   { key: 'sources', label: 'Lead sources', icon: 'tag' },
   { key: 'routing', label: 'Lead routing', icon: 'team' },
   { key: 'followup', label: 'Follow-up SLA', icon: 'clock' },
+  { key: 'audit', label: 'Audit ledger', icon: 'shield' },
   { key: 'system', label: 'System & data', icon: 'settings' },
 ]
 
@@ -41,6 +43,7 @@ export default function Settings({ store, topBar }) {
               {section === 'sources' && <SourcesSection store={store} settings={settings} />}
               {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} leads={leads} inactiveAgentIds={inactiveAgentIds} />}
               {section === 'followup' && <FollowUpSection store={store} settings={settings} />}
+              {section === 'audit' && <AuditSection />}
               {section === 'system' && <SystemSection store={store} />}
             </div>
           </div>
@@ -260,6 +263,72 @@ function NumField({ value, suffix, onChange, step = 1 }) {
 }
 
 // ---- System & data --------------------------------------------------------
+// ---- Audit ledger ---------------------------------------------------------
+const AUDIT_LABELS = {
+  'auth.login': 'Signed in', 'auth.login_failed': 'Failed sign-in',
+  'lead.create': 'Lead created', 'lead.update': 'Lead updated', 'lead.delete': 'Lead deleted',
+  'property.create': 'Property added', 'property.update': 'Property updated', 'property.delete': 'Property deleted',
+}
+function auditAgo(ts) {
+  if (!ts) return ''
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 60000))
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return new Date(ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+}
+
+function AuditSection() {
+  const [st, setSt] = useState({ loading: true, entries: [], chain: null, error: '' })
+  useEffect(() => {
+    let alive = true
+    api.getAuditLog()
+      .then(res => { if (alive) setSt({ loading: false, entries: res.entries || [], chain: res.chain || null, error: '' }) })
+      .catch(() => { if (alive) setSt({ loading: false, entries: [], chain: null, error: 'Could not load the audit ledger.' }) })
+    return () => { alive = false }
+  }, [])
+
+  const chainOk = st.chain?.ok
+
+  return (
+    <>
+      <SecHead title="Audit ledger" sub="Every sign-in and record change, in an append-only, tamper-evident log. Read-only — entries can never be edited or deleted, and a broken chain is detected automatically." />
+      <Panel>
+        {st.chain && (
+          <div className={`audit-chain ${chainOk ? 'ok' : 'bad'}`}>
+            <Icon name={chainOk ? 'check' : 'x'} size={15} />
+            <span>{chainOk ? 'Chain verified — no entry has been altered or removed.' : `Chain broken at entry #${st.chain.brokenAtSeq}.`}</span>
+          </div>
+        )}
+        {st.loading ? (
+          <div className="sys-s" style={{ padding: '12px 0' }}>Loading ledger…</div>
+        ) : st.error ? (
+          <div className="sys-s" style={{ padding: '12px 0', color: 'var(--alert)' }}>{st.error}</div>
+        ) : st.entries.length === 0 ? (
+          <div className="sys-s" style={{ padding: '12px 0' }}>No activity recorded yet.</div>
+        ) : (
+          <div className="audit-list">
+            {st.entries.map(e => (
+              <div key={e.seq} className="audit-row">
+                <span className="mono-num audit-seq">#{e.seq}</span>
+                <div className="audit-main">
+                  <div className="audit-action">{AUDIT_LABELS[e.action] || e.action}</div>
+                  <div className="audit-summary">{e.summary || e.actor_label || ''}</div>
+                </div>
+                <div className="audit-meta">
+                  <span className="audit-actor">{e.actor_label || e.actor_type}</span>
+                  <span className="audit-time">{auditAgo(e.created_at)}{e.ip ? ` · ${e.ip}` : ''}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+    </>
+  )
+}
+
 function SystemSection({ store }) {
   return (
     <>

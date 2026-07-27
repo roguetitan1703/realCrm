@@ -17,6 +17,7 @@
  */
 import crypto from 'crypto';
 import { sql } from './db.js';
+import { getContext } from './context.js';
 
 export type ActorType = 'user' | 'superadmin' | 'system';
 
@@ -43,9 +44,16 @@ export interface AuditEntry {
  * form stable across the write → JSONB → read round trip.
  */
 function stableStringify(value: any): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
-  if (value && typeof value === 'object') {
-    const keys = Object.keys(value).sort();
+  // Match JSONB's normalization so the canonical form is identical before the
+  // write and after the JSONB round-trip:
+  //   • undefined is not a JSON value — JSONB drops it in objects and stores
+  //     null in arrays. Render it the same way here, or a metadata object
+  //     carrying `foo: undefined` would hash one way on write and another on
+  //     read (the key vanishes), falsely breaking the chain.
+  if (value === undefined || value === null) return 'null';
+  if (Array.isArray(value)) return `[${value.map(v => stableStringify(v)).join(',')}]`;
+  if (typeof value === 'object') {
+    const keys = Object.keys(value).filter(k => value[k] !== undefined).sort();
     return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
   }
   return JSON.stringify(value);
@@ -108,6 +116,23 @@ export function audit(entry: AuditEntry): Promise<void> {
  * any — that's the point of tampering (or deletion, which shows up as a
  * prev_hash that doesn't equal the previous surviving row's hash).
  */
+/**
+ * Recent audit entries for the CURRENT tenant (from the request context) — the
+ * read side of the owner-facing ledger view. Sensitive columns (hashes,
+ * user_agent) are intentionally left out; this is a human activity list, not the
+ * verification surface (that's verifyAuditChain).
+ */
+export async function listAudit(limit = 60): Promise<any[]> {
+  const tenantId = getContext()?.tenantId || null;
+  return await sql`
+    SELECT seq, actor_type, actor_id, actor_label, action, target_type, target_id, summary, ip, created_at
+    FROM audit_log
+    WHERE tenant_id = ${tenantId}
+    ORDER BY seq DESC
+    LIMIT ${limit}
+  `;
+}
+
 export async function verifyAuditChain(): Promise<{ ok: boolean; brokenAtSeq?: number }> {
   const rows = await sql`
     SELECT seq, tenant_id, actor_type, actor_id, actor_label, action, target_type, target_id,

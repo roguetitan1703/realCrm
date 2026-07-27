@@ -149,6 +149,9 @@ export const api = {
   // Settings & Branding
   updateSettings: (patch) => request('/workspace/settings', { method: 'POST', body: JSON.stringify(patch) }),
 
+  // Audit ledger (owner/manager only)
+  getAuditLog: () => request('/workspace/audit'),
+
   // Notifications (per-user alert feed)
   getNotifications: () => request('/notifications'),
   markNotificationRead: (id) => request(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }),
