@@ -18,6 +18,7 @@ import { teamRouter } from './routes/team';
 import { actionsRouter } from './routes/actions';
 import { ingestRouter } from './routes/ingest';
 import { integrationsRouter } from './routes/integrations';
+import { authRouter } from './routes/auth';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -44,6 +45,9 @@ app.get('/health', (req: Request, res: Response) => {
 // ============================================================================
 // 🌐 API V1 ROUTER REGISTRATION
 // ============================================================================
+
+// 0. Authentication — phone OTP (tenant users) + superadmin password
+app.use('/api/v1/auth', authRouter);
 
 // 1. Non-Hacky Workspace & Tenant Resolution (Called before & after login!)
 app.use('/api/v1/workspace/integrations', integrationsRouter);
