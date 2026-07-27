@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/pwa/:path*", "destination": "https://api.re.delpat.in/pwa/:path*" }
+  ]
+}

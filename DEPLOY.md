@@ -81,3 +81,41 @@ hard-refresh, confirm it survived. That proves the whole chain.
 If the API is unreachable, a red **"Offline — not saving"** badge appears in the top
 bar. It is invisible when healthy. If it ever shows during a demo, stop — anything
 changed while it's up will be lost on refresh.
+
+---
+
+## PWA + Web Push (this release)
+
+The installable app + phone notifications span both deploys.
+
+### Backend (AWS) — extra steps for this release
+- `npm install` pulls the new `web-push` and `@resvg/resvg-js` deps.
+- **Fonts:** `@resvg/resvg-js` rasterizes the home-screen icons with system
+  fonts. On a bare box install a base font set (`fontconfig` + `fonts-dejavu`)
+  or icon PNGs render blank.
+- **VAPID env** (see `.env.example`): set `VAPID_PUBLIC_KEY`,
+  `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`. Generate once with
+  `npx web-push generate-vapid-keys`. Without them push is silently disabled and
+  the in-app feed still works.
+- On boot the log should read `[Push] Web Push enabled (VAPID configured).`
+- Smoke-test: `curl -H "X-Tenant-ID: bhumi-propcity" https://api.re.delpat.in/api/v1/notifications/vapid`
+  → `{ "enabled": true, "publicKey": "..." }`.
+
+### Frontend (Vercel)
+- `vercel.json` rewrites same-origin `/pwa/*` → the backend, so the manifest and
+  icons load from the app's own origin (required for a real install + the firm's
+  icon, not a generic shortcut). The destination is `https://api.re.delpat.in`
+  — keep it in sync if the API domain ever changes.
+- The service worker registers **only in production builds**, so test install +
+  push on the deploy, never on `vite dev`.
+
+### Verify on a phone (Chrome/Android)
+1. Open the deploy, pick the workspace → the manifest wears that tenant's name.
+2. Chrome menu shows **Install** (not "Add shortcut"); installed icon = the
+   firm's initials on its brand color.
+3. App → notification drawer → **Turn on phone alerts** → allow.
+4. With the app closed, assign a lead to yourself → the push lands on the lock
+   screen; tapping it deep-links to the lead.
+
+One firm per device until per-tenant subdomains exist. Brave adds a bookmark
+shortcut rather than a true install — use Chrome for the icon/install demo.
