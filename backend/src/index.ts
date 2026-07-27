@@ -9,6 +9,7 @@
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import path from 'path';
 import { workspaceRouter } from './routes/workspace';
 import { modulesRouter } from './routes/modules';
 import { recordsRouter } from './routes/records';
@@ -86,6 +87,18 @@ app.use('/api/v1/records', actionsRouter);
 
 // 6. Idempotent Portal Webhook Ingestion (99acres, MagicBricks, Exotel)
 app.use('/api/v1/ingest', ingestRouter);
+
+// ── Serve the built frontend on the SAME origin as the API + /pwa ───────────
+// One HTTPS origin for the whole app is what the service worker and Web Push
+// require, and it matches how this deploys. `npm run build` writes ./dist.
+const distDir = path.resolve(process.cwd(), 'dist');
+app.use(express.static(distDir));
+app.use((req: Request, res: Response, next: NextFunction) => {
+  // SPA fallback: any non-API GET returns index.html so client routing works.
+  if (req.method !== 'GET') return next();
+  if (req.path.startsWith('/api') || req.path.startsWith('/pwa') || req.path === '/health') return next();
+  res.sendFile(path.join(distDir, 'index.html'), (err) => { if (err) next(); });
+});
 
 // Global Error Handler
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
