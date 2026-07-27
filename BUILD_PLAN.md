@@ -78,14 +78,22 @@ this.
   out — decided.
 - Frontend stores the token; `api.js` sends `Authorization: Bearer`. The
   `X-Tenant-ID` header stops being trusted input — tenant comes from the token.
-- New **`superadmin`** platform role, scoped above tenants (Delpat staff only),
-  carried in its own token claim.
+- New **`superadmin`** platform role, scoped above tenants (Delpat staff only).
+
+**Superadmin auth (decided — NOT phone OTP)**
+- Phone OTP is for brokers and agents. Superadmins are Delpat staff, so they use
+  **email + password** (hashed, e.g. argon2/bcrypt) in a separate platform-level
+  `superadmins` table with **no `tenant_id`**. Their token carries a
+  `superadmin` claim, distinct from a tenant user's `{ tenant_id, user_id, role }`.
+- Login is a separate screen at `/admin/login`, unrelated to the tenant phone
+  flow. First superadmin is seeded from env (`SUPERADMIN_EMAIL` /
+  `SUPERADMIN_PASSWORD`) so there's no chicken-and-egg.
 
 **Superadmin portal (decided — how tenants get created)**
-- A platform-level `/admin` area, reachable only by a `superadmin`, that:
-  provisions a tenant (name, slug, brand), invites its first owner, and lists
-  tenants with basic health (users, leads, last backup). This is the "by hand,
-  through a portal" the client asked for — not self-serve signup.
+- A platform-level `/admin` area (a route in the same app, gated by the
+  superadmin token), that: provisions a tenant (name, slug, brand), invites its
+  first owner, and lists tenants with basic health (users, leads, last backup).
+  This is the "by hand, through a portal" the client asked for — not self-serve.
 
 **Deliverable:** a superadmin can create the Bhumi tenant and its owner; that
 owner logs in as a real user of a real tenant, with a token every later phase
@@ -235,11 +243,15 @@ backup = **no-cost scripts, done** (no paid tier); brand assets = **tenant
 uploads its logo at onboarding; Delpat platform logo generated now**
 (`public/brand-mark.svg`).
 
+Resolved (this turn): superadmin auth = **email + password**, separate
+`/admin/login`, seeded from env — NOT phone OTP; `/admin` is a route in the same
+app gated by the superadmin token.
+
 Still open:
 
-1. **Superadmin identity:** who are the superadmins (which phone numbers /
-   Delpat staff), and is `/admin` a separate route on the same app or its own
-   surface?
+1. **First superadmin credentials:** which email(s) become Delpat superadmins,
+   set via `SUPERADMIN_EMAIL`/`SUPERADMIN_PASSWORD` at deploy. (Just need the
+   email when we build Phase 0.)
 2. ⚠️ **Rotate the DB password:** the hardcoded fallback in `db.ts` is removed
    (env now required — done), but the old Supabase password is still in git
    history. Rotate it in the Supabase dashboard. Delpat-side action.
