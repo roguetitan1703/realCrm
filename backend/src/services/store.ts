@@ -337,7 +337,7 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
   // 4. Seed Settings
   await sql`
     INSERT INTO crm_settings (key, value, tenant_id) VALUES ('default', ${sql.json(DEFAULT_SETTINGS)}, ${DEFAULT_TENANT_ID})
-    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, tenant_id = EXCLUDED.tenant_id;
+    ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value;
   `;
 
   // 5. Seed Integrations
@@ -351,7 +351,7 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
   for (const [key, val] of Object.entries(initialIntegrations)) {
     await sql`
       INSERT INTO crm_integrations (key, config, tenant_id) VALUES (${key}, ${sql.json(val)}, ${DEFAULT_TENANT_ID})
-      ON CONFLICT (key) DO UPDATE SET config = EXCLUDED.config, tenant_id = EXCLUDED.tenant_id;
+      ON CONFLICT (tenant_id, key) DO UPDATE SET config = EXCLUDED.config;
     `;
   }
 
@@ -360,7 +360,7 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
   await sql`
     INSERT INTO crm_routing_rules (id, strategy, active_agent_ids, last_assigned_index, tenant_id)
     VALUES (1, 'round_robin', ${sql.json(activeIds)}, -1, ${DEFAULT_TENANT_ID})
-    ON CONFLICT (id) DO UPDATE SET active_agent_ids = EXCLUDED.active_agent_ids, tenant_id = EXCLUDED.tenant_id;
+    ON CONFLICT (tenant_id) DO UPDATE SET active_agent_ids = EXCLUDED.active_agent_ids;
   `;
 
   // Tenant + superadmin + mirror agents→users. At the end so agents exist to
@@ -462,9 +462,9 @@ export async function getState(): Promise<ServerState> {
     agentScope
       ? sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND agent_id = ${agentScope} ORDER BY created_at DESC`
       : sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} ORDER BY created_at DESC`,
-    sql`SELECT value FROM crm_settings WHERE key = 'default'`,
+    sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}`,
     sql`SELECT key, config FROM crm_integrations WHERE tenant_id = ${t}`,
-    sql`SELECT * FROM crm_routing_rules WHERE id = 1`,
+    sql`SELECT * FROM crm_routing_rules WHERE tenant_id = ${t}`,
     sql`SELECT * FROM crm_timeline_events WHERE tenant_id = ${t} ORDER BY timestamp DESC`,
     sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t}`,
   ]);
@@ -558,7 +558,7 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
     if (rules.active_agent_ids && rules.active_agent_ids.length > 0) {
       const nextIdx = (rules.last_assigned_index + 1) % rules.active_agent_ids.length;
       agentId = rules.active_agent_ids[nextIdx];
-      await sql`UPDATE crm_routing_rules SET last_assigned_index = ${nextIdx} WHERE id = 1`;
+      await sql`UPDATE crm_routing_rules SET last_assigned_index = ${nextIdx} WHERE tenant_id = ${tid()}`;
     } else {
       agentId = 'a1';
     }
@@ -901,7 +901,7 @@ export async function getAgents(): Promise<any[]> {
 }
 
 export async function getRoutingRules(): Promise<RoutingRule> {
-  const rows = await sql`SELECT * FROM crm_routing_rules WHERE id = 1`;
+  const rows = await sql`SELECT * FROM crm_routing_rules WHERE tenant_id = ${tid()}`;
   if (rows.length === 0) {
     return { strategy: 'round_robin', active_agent_ids: ['a1', 'a2', 'a3', 'a4'], last_assigned_index: -1 };
   }
@@ -916,9 +916,9 @@ export async function updateRoutingRules(patch: Partial<RoutingRule>): Promise<R
   const current = await getRoutingRules();
   const next = { ...current, ...patch };
   await sql`
-    INSERT INTO crm_routing_rules (id, strategy, active_agent_ids, last_assigned_index)
-    VALUES (1, ${next.strategy}, ${sql.json(next.active_agent_ids)}, ${next.last_assigned_index})
-    ON CONFLICT (id) DO UPDATE SET
+    INSERT INTO crm_routing_rules (strategy, active_agent_ids, last_assigned_index, tenant_id)
+    VALUES (${next.strategy}, ${sql.json(next.active_agent_ids)}, ${next.last_assigned_index}, ${tid()})
+    ON CONFLICT (tenant_id) DO UPDATE SET
       strategy = EXCLUDED.strategy,
       active_agent_ids = EXCLUDED.active_agent_ids,
       last_assigned_index = EXCLUDED.last_assigned_index;
@@ -928,7 +928,7 @@ export async function updateRoutingRules(patch: Partial<RoutingRule>): Promise<R
 
 // --- SETTINGS & INTEGRATIONS ---
 export async function getSettings(): Promise<any> {
-  const rows = await sql`SELECT value FROM crm_settings WHERE key = 'default'`;
+  const rows = await sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${tid()}`;
   return rows[0]?.value || DEFAULT_SETTINGS;
 }
 
@@ -936,14 +936,14 @@ export async function updateSettings(patch: any): Promise<any> {
   const current = await getSettings();
   const next = { ...current, ...patch };
   await sql`
-    INSERT INTO crm_settings (key, value) VALUES ('default', ${sql.json(next)})
-    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+    INSERT INTO crm_settings (key, value, tenant_id) VALUES ('default', ${sql.json(next)}, ${tid()})
+    ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value;
   `;
   return next;
 }
 
 export async function getIntegrations(): Promise<Record<string, any>> {
-  const rows = await sql`SELECT key, config FROM crm_integrations`;
+  const rows = await sql`SELECT key, config FROM crm_integrations WHERE tenant_id = ${tid()}`;
   const result: Record<string, any> = {};
   for (const r of rows) {
     result[r.key] = r.config;
@@ -956,8 +956,8 @@ export async function updateIntegration(key: string, patch: any): Promise<any | 
   const current = all[key] || {};
   const next = { ...current, ...patch };
   await sql`
-    INSERT INTO crm_integrations (key, config) VALUES (${key}, ${sql.json(next)})
-    ON CONFLICT (key) DO UPDATE SET config = EXCLUDED.config;
+    INSERT INTO crm_integrations (key, config, tenant_id) VALUES (${key}, ${sql.json(next)}, ${tid()})
+    ON CONFLICT (tenant_id, key) DO UPDATE SET config = EXCLUDED.config;
   `;
   return next;
 }

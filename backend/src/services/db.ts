@@ -234,6 +234,19 @@ export async function initSchema(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS ${sql('idx_' + t + '_tenant')} ON ${sql(t)} (tenant_id);`;
     }
 
+    // Widen the singleton config tables (settings / integrations / routing) from
+    // ONE global row to one row PER TENANT. They were built single-workspace with
+    // a scalar primary key (key, or id=1) that physically allowed only one row —
+    // so two tenants couldn't each own their settings/routing. Drop that PK and
+    // key on tenant_id instead. Idempotent: DROP CONSTRAINT IF EXISTS + CREATE
+    // UNIQUE INDEX IF NOT EXISTS.
+    await sql`ALTER TABLE crm_settings DROP CONSTRAINT IF EXISTS crm_settings_pkey;`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_settings_tenant_key ON crm_settings (tenant_id, key);`;
+    await sql`ALTER TABLE crm_integrations DROP CONSTRAINT IF EXISTS crm_integrations_pkey;`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_integrations_tenant_key ON crm_integrations (tenant_id, key);`;
+    await sql`ALTER TABLE crm_routing_rules DROP CONSTRAINT IF EXISTS crm_routing_rules_pkey;`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_routing_tenant ON crm_routing_rules (tenant_id);`;
+
     await migrateProperColumns();
     await createLedgerTables();
 
