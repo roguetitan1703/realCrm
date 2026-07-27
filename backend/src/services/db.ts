@@ -251,7 +251,7 @@ export async function initSchema(): Promise<void> {
  * columns that are still NULL, so it's safe on every boot. The JSONB stays as
  * overflow until the persistence layer reads columns first (next slice).
  */
-async function migrateProperColumns(): Promise<void> {
+export async function migrateProperColumns(): Promise<void> {
   const propCols: [string, string][] = [
     ['project', 'TEXT'], ['wing', 'TEXT'], ['unit_no', 'TEXT'], ['deal', 'TEXT'],
     ['facing', 'TEXT'], ['furnishing', 'TEXT'], ['parking', 'TEXT'], ['possession', 'TEXT'],

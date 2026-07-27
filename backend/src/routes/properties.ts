@@ -49,7 +49,10 @@ propertiesRouter.post('/', async (req: Request, res: Response) => {
     // (deal, society, project, wing, flat, carpet, owner, priceLabel, …) into the
     // config JSONB, and rowToProperty spreads them back on read — so bulk unit
     // creation round-trips every field, not just the 7 first-class columns.
-    const newProperty = await createProperty(body);
+    const newProperty = await createProperty(body, {
+      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
+      ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null,
+    });
     return res.status(201).json({ success: true, data: newProperty });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to create property', message: err.message });

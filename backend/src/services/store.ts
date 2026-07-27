@@ -9,9 +9,27 @@
  */
 
 import bcrypt from 'bcryptjs';
-import { sql, initSchema, DEFAULT_TENANT_ID } from './db.js';
+import { sql, initSchema, DEFAULT_TENANT_ID, migrateProperColumns } from './db.js';
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
+import { audit } from './audit.js';
+
+/** Actor context for the audit ledger, threaded from the route down to the mutation. */
+export interface ActorCtx {
+  actorType?: 'user' | 'superadmin' | 'system';
+  actorId?: string | null;
+  actorLabel?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+}
+const SYSTEM_CTX: Required<Pick<ActorCtx, 'actorType'>> = { actorType: 'system' };
+
+/** digits(x): strip everything but digits and parse to an int, or null. */
+function digits(v: any): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const s = String(v).replace(/\D/g, '');
+  return s ? parseInt(s, 10) : null;
+}
 
 export interface TimelineEvent {
   id: string;
@@ -62,9 +80,21 @@ function rowToProperty(r: any): any {
     // Spread config (domain fields) FIRST so real DB columns below always win — config
     // may carry stale copies of status/id/title from earlier writes; columns are truth.
     ...cfg,
-    project: cfg.project || society,
-    deal: cfg.deal || 'sale',
-    carpet: cfg.carpet || cfg.area || 0,
+    project: r.project || cfg.project || society,
+    deal: r.deal || cfg.deal || 'sale',
+    carpet: r.carpet_sqft ?? cfg.carpet ?? cfg.area ?? 0,
+    facing: r.facing || cfg.facing,
+    furnishing: r.furnishing || cfg.furnishing,
+    parking: r.parking || cfg.parking,
+    possession: r.possession || cfg.possession,
+    builder: r.builder || cfg.builder,
+    rera: r.rera_no || cfg.rera,
+    owner: r.owner_name || cfg.owner,
+    ownerPhone: r.owner_phone || cfg.ownerPhone,
+    ownerEmail: r.owner_email || cfg.ownerEmail,
+    floor: r.floor || cfg.floor,
+    totalFloors: r.total_floors ?? cfg.totalFloors,
+    age: r.age_years ?? cfg.age,
     society,
     id: r.id,
     title: r.title,
@@ -72,17 +102,17 @@ function rowToProperty(r: any): any {
     type: r.type,
     locality: r.locality,
     price: r.price,
-    tower: r.tower,
-    unit: r.unit,
+    tower: r.wing || r.tower,
+    unit: r.unit_no || r.unit,
     tenancy: r.tenancy || undefined,
     timeline: r.timeline || [],
   };
 }
 
-function rowToLead(r: any, events: TimelineEvent[] = []): any {
+function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = []): any {
   const createdMs = r.created_at ? new Date(r.created_at).getTime() : Date.now();
   const minsAgo = Math.max(0, Math.floor((Date.now() - createdMs) / 60000));
-  
+
   // Format timeline events for lead object
   const leadEvents = events
     .filter(e => e.record_id === r.id)
@@ -93,9 +123,32 @@ function rowToLead(r: any, events: TimelineEvent[] = []): any {
       timestamp: e.timestamp,
     }));
 
-  const req = r.req || {};
-  if (!req.deal) {
-    req.deal = req.purpose === 'Lease' ? 'rent' : 'sale';
+  // Columns are source of truth; fall back to the req JSONB when a column is null.
+  const jreq = r.req || {};
+  const req: any = { ...jreq };
+  req.deal = r.deal || jreq.deal || (jreq.purpose === 'Lease' ? 'rent' : 'sale');
+  req.config = r.requirement || jreq.config;
+  req.locality = r.locality || jreq.locality;
+  req.minBudget = r.budget_min != null ? Number(r.budget_min) : jreq.minBudget;
+  req.maxBudget = r.budget_max != null ? Number(r.budget_max) : jreq.maxBudget;
+  req.purpose = r.purpose || jreq.purpose;
+  req.timeline = r.timeline_pref || jreq.timeline;
+
+  // lead_shortlist rows are the source of truth once they exist; fall back to
+  // the JSONB columns for leads that haven't been backfilled/touched yet.
+  let shortlist: string[];
+  let feedback: Record<string, any>;
+  if (shortlistRows && shortlistRows.length > 0) {
+    shortlist = shortlistRows.map(sr => sr.property_id);
+    feedback = {};
+    for (const sr of shortlistRows) {
+      if (sr.verdict != null || sr.reason != null) {
+        feedback[sr.property_id] = { verdict: sr.verdict, reason: sr.reason };
+      }
+    }
+  } else {
+    shortlist = r.shortlist || [];
+    feedback = r.feedback || {};
   }
 
   return {
@@ -108,14 +161,71 @@ function rowToLead(r: any, events: TimelineEvent[] = []): any {
     agentId: r.agent_id,
     req,
     notes: r.notes || [],
-    shortlist: r.shortlist || [],
-    feedback: r.feedback || {},
+    shortlist,
+    feedback,
     duplicateOf: r.duplicate_of || undefined,
     followUp: r.follow_up || null,
     overdue: Boolean(r.overdue),
     minsAgo,
     timeline: leadEvents.length > 0 ? leadEvents : (r.notes || []).map((n: string) => ({ type: 'note', label: n, ago: 'just now' })),
   };
+}
+
+/** Group lead_shortlist rows by lead_id for batch attaching to rowToLead. */
+function groupShortlistByLead(rows: any[]): Map<string, any[]> {
+  const map = new Map<string, any[]>();
+  for (const row of rows) {
+    if (!map.has(row.lead_id)) map.set(row.lead_id, []);
+    map.get(row.lead_id)!.push(row);
+  }
+  return map;
+}
+
+/**
+ * Upsert a lead's shortlist + feedback into lead_shortlist rows, deleting rows
+ * for properties no longer shortlisted. Called whenever a create/update touches
+ * shortlist or feedback so the table (source of truth for rowToLead) stays current.
+ */
+async function syncLeadShortlist(leadId: string, shortlist: string[], feedback: Record<string, any>, tenantId = DEFAULT_TENANT_ID): Promise<void> {
+  const propertyIds = Array.from(new Set([...(shortlist || []), ...Object.keys(feedback || {})]));
+  for (const pid of propertyIds) {
+    const fb = (feedback || {})[pid] || {};
+    const id = `shl_${leadId}_${pid}`;
+    await sql`
+      INSERT INTO lead_shortlist (id, tenant_id, lead_id, property_id, verdict, reason)
+      VALUES (${id}, ${tenantId}, ${leadId}, ${pid}, ${fb.verdict ?? null}, ${fb.reason ?? null})
+      ON CONFLICT (lead_id, property_id) DO UPDATE SET verdict = EXCLUDED.verdict, reason = EXCLUDED.reason;
+    `;
+  }
+  if (propertyIds.length > 0) {
+    await sql`DELETE FROM lead_shortlist WHERE lead_id = ${leadId} AND property_id NOT IN ${sql(propertyIds)}`;
+  } else {
+    await sql`DELETE FROM lead_shortlist WHERE lead_id = ${leadId}`;
+  }
+}
+
+/**
+ * Idempotent backfill: for every lead, insert lead_shortlist rows from the
+ * existing crm_leads.shortlist (array) + feedback (map) JSONB — only rows that
+ * don't already exist (ON CONFLICT DO NOTHING keyed on lead_id+property_id).
+ * Safe to run on every boot.
+ */
+export async function backfillShortlist(): Promise<void> {
+  const rows = await sql`SELECT id, tenant_id, shortlist, feedback FROM crm_leads`;
+  for (const r of rows) {
+    const shortlist: string[] = r.shortlist || [];
+    const feedback: Record<string, any> = r.feedback || {};
+    const propertyIds = Array.from(new Set([...shortlist, ...Object.keys(feedback)]));
+    for (const pid of propertyIds) {
+      const fb = feedback[pid] || {};
+      const id = `shl_${r.id}_${pid}`;
+      await sql`
+        INSERT INTO lead_shortlist (id, tenant_id, lead_id, property_id, verdict, reason)
+        VALUES (${id}, ${r.tenant_id || DEFAULT_TENANT_ID}, ${r.id}, ${pid}, ${fb.verdict ?? null}, ${fb.reason ?? null})
+        ON CONFLICT (lead_id, property_id) DO NOTHING;
+      `;
+    }
+  }
 }
 
 /**
@@ -236,6 +346,12 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
   // mirror (covers fresh seed and reset).
   await ensureAuthIdentity();
 
+  // The seed writes the config/req JSONB; flatten it into the real columns and
+  // rebuild lead_shortlist so a workspace RESET (truncate → re-seed, no reboot)
+  // leaves the proper columns populated, not just the JSONB fallback.
+  await migrateProperColumns();
+  await backfillShortlist();
+
   console.log(`[Supabase DB] ✅ Seeded initial PostgreSQL data cleanly.`);
   return await getState();
 }
@@ -309,6 +425,7 @@ export async function resetDatabase(): Promise<ServerState> {
 // the Phase 0 identity model — tenant, superadmin, and users mirror.
 seedDatabase()
   .then(() => ensureAuthIdentity())
+  .then(() => backfillShortlist())
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
@@ -316,7 +433,7 @@ seedDatabase()
 // ============================================================================
 
 export async function getState(): Promise<ServerState> {
-  const [agentsRows, propsRows, leadsRows, settingsRows, intRows, routingRows, timelineRows] = await Promise.all([
+  const [agentsRows, propsRows, leadsRows, settingsRows, intRows, routingRows, timelineRows, shortlistRows] = await Promise.all([
     sql`SELECT * FROM crm_agents`,
     sql`SELECT * FROM crm_properties ORDER BY created_at DESC`,
     sql`SELECT * FROM crm_leads ORDER BY created_at DESC`,
@@ -324,7 +441,9 @@ export async function getState(): Promise<ServerState> {
     sql`SELECT key, config FROM crm_integrations`,
     sql`SELECT * FROM crm_routing_rules WHERE id = 1`,
     sql`SELECT * FROM crm_timeline_events ORDER BY timestamp DESC`,
+    sql`SELECT * FROM lead_shortlist`,
   ]);
+  const shortlistByLead = groupShortlistByLead(shortlistRows);
 
   const timeline_events: TimelineEvent[] = timelineRows.map(r => ({
     id: r.id,
@@ -340,7 +459,7 @@ export async function getState(): Promise<ServerState> {
   const agents = agentsRows.map(rowToAgent);
   const inactiveAgentIds = agentsRows.filter(a => a.duty_status === 'OFF_DUTY').map(a => a.id);
   const properties = propsRows.map(rowToProperty);
-  const leads = leadsRows.map(r => rowToLead(r, timeline_events));
+  const leads = leadsRows.map(r => rowToLead(r, timeline_events, shortlistByLead.get(r.id) || []));
 
   const settings = settingsRows[0]?.value || DEFAULT_SETTINGS;
   const integrations: Record<string, any> = {};
@@ -369,31 +488,36 @@ export async function getState(): Promise<ServerState> {
 
 // --- LEADS ---
 export async function getLeads(): Promise<any[]> {
-  const [leadsRows, timelineRows] = await Promise.all([
+  const [leadsRows, timelineRows, shortlistRows] = await Promise.all([
     sql`SELECT * FROM crm_leads ORDER BY created_at DESC`,
     sql`SELECT * FROM crm_timeline_events ORDER BY timestamp DESC`,
+    sql`SELECT * FROM lead_shortlist`,
   ]);
   const events = timelineRows.map(r => ({
     id: r.id, record_id: r.record_id, type: r.type, title: r.title,
     description: r.description, timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp)
   }));
-  return leadsRows.map(r => rowToLead(r, events));
+  const shortlistByLead = groupShortlistByLead(shortlistRows);
+  return leadsRows.map(r => rowToLead(r, events, shortlistByLead.get(r.id) || []));
 }
 
 export async function getLeadById(id: string): Promise<any | undefined> {
   const rows = await sql`SELECT * FROM crm_leads WHERE id = ${id}`;
   if (rows.length === 0) return undefined;
-  const timelineRows = await sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} ORDER BY timestamp DESC`;
+  const [timelineRows, shortlistRows] = await Promise.all([
+    sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} ORDER BY timestamp DESC`,
+    sql`SELECT * FROM lead_shortlist WHERE lead_id = ${id}`,
+  ]);
   const events = timelineRows.map(r => ({
     id: r.id, record_id: r.record_id, type: r.type, title: r.title,
     description: r.description, timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp)
   }));
-  return rowToLead(rows[0], events);
+  return rowToLead(rows[0], events, shortlistRows);
 }
 
-export async function createLead(leadData: any): Promise<any> {
+export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
   const newId = leadData.id || `l_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-  
+
   // Apply round-robin assignment if agentId not provided
   let agentId = leadData.agentId || leadData.agent_id;
   if (!agentId) {
@@ -417,11 +541,30 @@ export async function createLead(leadData: any): Promise<any> {
   const shortlist = leadData.shortlist || [];
   const feedback = leadData.feedback || {};
 
+  // New first-class columns, source-of-truth going forward; req JSONB stays populated too.
+  const deal = leadData.deal || req.deal || (leadData.purpose === 'Lease' ? 'rent' : 'sale');
+  const requirement = leadData.requirement ?? req.config ?? null;
+  const locality = leadData.locality ?? req.locality ?? null;
+  const budgetMin = digits(leadData.budgetMin ?? leadData.budget_min ?? req.minBudget);
+  const budgetMax = digits(leadData.budgetMax ?? leadData.budget_max ?? req.maxBudget);
+  const purpose = leadData.purpose ?? req.purpose ?? null;
+  const timelinePref = leadData.timeline ?? leadData.timeline_pref ?? req.timeline ?? null;
+
   const rows = await sql`
-    INSERT INTO crm_leads (id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback)
-    VALUES (${newId}, ${name}, ${phone}, ${email}, ${stage}, ${source}, ${agentId}, ${sql.json(req)}, ${sql.json(notes)}, ${sql.json(shortlist)}, ${sql.json(feedback)})
+    INSERT INTO crm_leads (
+      id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback,
+      deal, requirement, locality, budget_min, budget_max, purpose, timeline_pref
+    )
+    VALUES (
+      ${newId}, ${name}, ${phone}, ${email}, ${stage}, ${source}, ${agentId}, ${sql.json(req)}, ${sql.json(notes)}, ${sql.json(shortlist)}, ${sql.json(feedback)},
+      ${deal}, ${requirement}, ${locality}, ${budgetMin}, ${budgetMax}, ${purpose}, ${timelinePref}
+    )
     RETURNING *;
   `;
+
+  if (shortlist.length > 0 || Object.keys(feedback).length > 0) {
+    await syncLeadShortlist(newId, shortlist, feedback);
+  }
 
   await addTimelineEvent({
     record_id: newId,
@@ -430,10 +573,17 @@ export async function createLead(leadData: any): Promise<any> {
     description: `Lead created via API (Source: ${source}). Assigned to agent ${agentId}.`,
   });
 
-  return await getLeadById(newId);
+  const created = await getLeadById(newId);
+  audit({
+    tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'lead.create', target_type: 'lead', target_id: newId,
+    summary: `Lead "${name}" created (source: ${source})`, metadata: { after: created },
+    ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return created;
 }
 
-export async function updateLead(id: string, patch: any): Promise<any | null> {
+export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any | null> {
   const oldLead = await getLeadById(id);
   if (!oldLead) return null;
 
@@ -450,6 +600,16 @@ export async function updateLead(id: string, patch: any): Promise<any | null> {
   const followUp = patch.followUp !== undefined ? patch.followUp : (oldLead as any).followUp;
   const overdue = patch.overdue !== undefined ? patch.overdue : (oldLead as any).overdue;
 
+  const deal = patch.deal !== undefined ? patch.deal : (req?.deal ?? oldLead.req?.deal);
+  const requirement = patch.requirement !== undefined ? patch.requirement : (req?.config ?? oldLead.req?.config);
+  const locality = patch.locality !== undefined ? patch.locality : (req?.locality ?? oldLead.req?.locality);
+  const budgetMin = (patch.budgetMin !== undefined || patch.budget_min !== undefined || req?.minBudget !== undefined)
+    ? digits(patch.budgetMin ?? patch.budget_min ?? req?.minBudget) : digits(oldLead.req?.minBudget);
+  const budgetMax = (patch.budgetMax !== undefined || patch.budget_max !== undefined || req?.maxBudget !== undefined)
+    ? digits(patch.budgetMax ?? patch.budget_max ?? req?.maxBudget) : digits(oldLead.req?.maxBudget);
+  const purpose = patch.purpose !== undefined ? patch.purpose : (req?.purpose ?? oldLead.req?.purpose);
+  const timelinePref = patch.timeline !== undefined ? patch.timeline : (patch.timeline_pref !== undefined ? patch.timeline_pref : (req?.timeline ?? oldLead.req?.timeline));
+
   await sql`
     UPDATE crm_leads SET
       name = ${name},
@@ -463,9 +623,20 @@ export async function updateLead(id: string, patch: any): Promise<any | null> {
       shortlist = ${sql.json(shortlist || [])},
       feedback = ${sql.json(feedback || {})},
       follow_up = ${sql.json(followUp || null)},
-      overdue = ${Boolean(overdue)}
+      overdue = ${Boolean(overdue)},
+      deal = ${deal || null},
+      requirement = ${requirement || null},
+      locality = ${locality || null},
+      budget_min = ${budgetMin},
+      budget_max = ${budgetMax},
+      purpose = ${purpose || null},
+      timeline_pref = ${timelinePref || null}
     WHERE id = ${id};
   `;
+
+  if (patch.shortlist !== undefined || patch.feedback !== undefined) {
+    await syncLeadShortlist(id, shortlist || [], feedback || {});
+  }
 
   if (patch.stage && patch.stage !== oldLead.stage) {
     await addTimelineEvent({
@@ -476,17 +647,45 @@ export async function updateLead(id: string, patch: any): Promise<any | null> {
     });
   }
 
-  return await getLeadById(id);
+  const updated = await getLeadById(id);
+  audit({
+    tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'lead.update', target_type: 'lead', target_id: id,
+    summary: `Lead "${updated?.name}" updated`, metadata: { patch, before: { stage: oldLead.stage, agentId: oldLead.agentId }, after: { stage: updated?.stage, agentId: updated?.agentId } },
+    ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return updated;
 }
 
-export async function deleteLead(id: string): Promise<boolean> {
+export async function deleteLead(id: string, ctx: ActorCtx = SYSTEM_CTX): Promise<boolean> {
+  const existing = await getLeadById(id);
   const res = await sql`DELETE FROM crm_leads WHERE id = ${id}`;
-  return res.count > 0;
+  const ok = res.count > 0;
+  if (ok) {
+    audit({
+      tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+      actor_label: ctx.actorLabel ?? null, action: 'lead.delete', target_type: 'lead', target_id: id,
+      summary: `Lead "${existing?.name || id}" deleted`, metadata: { before: existing },
+      ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+  }
+  return ok;
 }
 
-export async function deleteProperty(id: string): Promise<boolean> {
+export async function deleteProperty(id: string, ctx: ActorCtx = SYSTEM_CTX): Promise<boolean> {
+  const existingRows = await sql`SELECT * FROM crm_properties WHERE id = ${id}`;
+  const existing = existingRows[0] ? rowToProperty(existingRows[0]) : null;
   const res = await sql`DELETE FROM crm_properties WHERE id = ${id}`;
-  return res.count > 0;
+  const ok = res.count > 0;
+  if (ok) {
+    audit({
+      tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+      actor_label: ctx.actorLabel ?? null, action: 'property.delete', target_type: 'property', target_id: id,
+      summary: `Property "${existing?.title || id}" deleted`, metadata: { before: existing },
+      ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+  }
+  return ok;
 }
 
 export async function mergeLeads(primaryId: string, duplicateId: string): Promise<any | null> {
@@ -520,7 +719,7 @@ export async function getProperties(): Promise<any[]> {
   return rows.map(rowToProperty);
 }
 
-export async function createProperty(propData: any): Promise<any> {
+export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
   // Random suffix: a bulk import fires these in the same millisecond, and a bare
   // Date.now() collided on the primary key — every row after the first 500'd.
   const newId = propData.id || `p_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -543,21 +742,56 @@ export async function createProperty(propData: any): Promise<any> {
     if (!PROPERTY_COLUMNS.has(k) && k !== 'id' && k !== 'config') config[k] = v;
   }
 
+  // New first-class columns (source of truth going forward); config stays populated too.
+  const project = propData.project || config.society || title.split(' - ')[0];
+  const wing = propData.wing || tower;
+  const unitNo = propData.unit_no || propData.flat || unit;
+  const deal = propData.deal || 'sale';
+  const facing = propData.facing ?? null;
+  const furnishing = propData.furnishing ?? null;
+  const parking = propData.parking ?? null;
+  const possession = propData.possession ?? null;
+  const builder = propData.builder ?? null;
+  const reraNo = propData.rera ?? propData.rera_no ?? null;
+  const ownerName = propData.owner ?? propData.owner_name ?? null;
+  const ownerPhone = propData.ownerPhone ?? propData.owner_phone ?? null;
+  const ownerEmail = propData.ownerEmail ?? propData.owner_email ?? null;
+  const floor = propData.floor != null ? String(propData.floor) : null;
+  const carpetSqft = digits(propData.carpet ?? propData.area ?? propData.carpet_sqft);
+  const totalFloors = digits(propData.totalFloors ?? propData.total_floors);
+  const ageYears = digits(propData.age ?? propData.age_years);
+  const priceAmount = digits(price);
+
   const rows = await sql`
-    INSERT INTO crm_properties (id, title, status, type, locality, price, tower, unit, config, tenancy, timeline)
-    VALUES (${newId}, ${title}, ${status}, ${type}, ${locality}, ${price}, ${tower}, ${unit}, ${sql.json(config)}, ${sql.json(tenancy)}, ${sql.json(timeline)})
+    INSERT INTO crm_properties (
+      id, title, status, type, locality, price, tower, unit, config, tenancy, timeline,
+      project, wing, unit_no, deal, facing, furnishing, parking, possession, builder, rera_no,
+      owner_name, owner_phone, owner_email, floor, carpet_sqft, total_floors, age_years, price_amount
+    )
+    VALUES (
+      ${newId}, ${title}, ${status}, ${type}, ${locality}, ${price}, ${tower}, ${unit}, ${sql.json(config)}, ${sql.json(tenancy)}, ${sql.json(timeline)},
+      ${project}, ${wing}, ${unitNo}, ${deal}, ${facing}, ${furnishing}, ${parking}, ${possession}, ${builder}, ${reraNo},
+      ${ownerName}, ${ownerPhone}, ${ownerEmail}, ${floor}, ${carpetSqft}, ${totalFloors}, ${ageYears}, ${priceAmount}
+    )
     RETURNING *;
   `;
-  return rowToProperty(rows[0]);
+  const created = rowToProperty(rows[0]);
+  audit({
+    tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'property.create', target_type: 'property', target_id: newId,
+    summary: `Property "${title}" created`, metadata: { after: created }, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return created;
 }
 
 // First-class columns on crm_properties. Anything else in a patch is a config (JSONB) field.
 const PROPERTY_COLUMNS = new Set(['title', 'status', 'type', 'locality', 'price', 'tower', 'unit', 'tenancy', 'timeline']);
 
-export async function updateProperty(id: string, patch: any): Promise<any | null> {
+export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any | null> {
   const old = await sql`SELECT * FROM crm_properties WHERE id = ${id}`;
   if (old.length === 0) return null;
   const row = old[0];
+  const before = rowToProperty(row);
 
   const title = patch.title !== undefined ? patch.title : row.title;
   const status = patch.status !== undefined ? patch.status : row.status;
@@ -579,14 +813,49 @@ export async function updateProperty(id: string, patch: any): Promise<any | null
     if (!PROPERTY_COLUMNS.has(k)) config[k] = v;
   }
 
+  // New first-class columns, patched when present, else keep the existing column value.
+  const project = patch.project !== undefined ? patch.project : row.project;
+  const wing = patch.wing !== undefined ? patch.wing : (patch.tower !== undefined ? patch.tower : row.wing);
+  const unitNo = patch.unit_no !== undefined ? patch.unit_no : (patch.flat !== undefined ? patch.flat : (patch.unit !== undefined ? patch.unit : row.unit_no));
+  const deal = patch.deal !== undefined ? patch.deal : row.deal;
+  const facing = patch.facing !== undefined ? patch.facing : row.facing;
+  const furnishing = patch.furnishing !== undefined ? patch.furnishing : row.furnishing;
+  const parking = patch.parking !== undefined ? patch.parking : row.parking;
+  const possession = patch.possession !== undefined ? patch.possession : row.possession;
+  const builder = patch.builder !== undefined ? patch.builder : row.builder;
+  const reraNo = patch.rera !== undefined ? patch.rera : (patch.rera_no !== undefined ? patch.rera_no : row.rera_no);
+  const ownerName = patch.owner !== undefined ? patch.owner : (patch.owner_name !== undefined ? patch.owner_name : row.owner_name);
+  const ownerPhone = patch.ownerPhone !== undefined ? patch.ownerPhone : (patch.owner_phone !== undefined ? patch.owner_phone : row.owner_phone);
+  const ownerEmail = patch.ownerEmail !== undefined ? patch.ownerEmail : (patch.owner_email !== undefined ? patch.owner_email : row.owner_email);
+  const floor = patch.floor !== undefined ? (patch.floor != null ? String(patch.floor) : null) : row.floor;
+  const carpetSqft = (patch.carpet !== undefined || patch.area !== undefined || patch.carpet_sqft !== undefined)
+    ? digits(patch.carpet ?? patch.area ?? patch.carpet_sqft) : row.carpet_sqft;
+  const totalFloors = (patch.totalFloors !== undefined || patch.total_floors !== undefined)
+    ? digits(patch.totalFloors ?? patch.total_floors) : row.total_floors;
+  const ageYears = (patch.age !== undefined || patch.age_years !== undefined)
+    ? digits(patch.age ?? patch.age_years) : row.age_years;
+  const priceAmount = patch.price !== undefined ? digits(price) : row.price_amount;
+
   const rows = await sql`
     UPDATE crm_properties SET
       title = ${title}, status = ${status}, type = ${type}, locality = ${locality},
       price = ${price}, tower = ${tower}, unit = ${unit}, config = ${sql.json(config)},
-      tenancy = ${sql.json(tenancy)}, timeline = ${sql.json(timeline)}
+      tenancy = ${sql.json(tenancy)}, timeline = ${sql.json(timeline)},
+      project = ${project}, wing = ${wing}, unit_no = ${unitNo}, deal = ${deal},
+      facing = ${facing}, furnishing = ${furnishing}, parking = ${parking}, possession = ${possession},
+      builder = ${builder}, rera_no = ${reraNo}, owner_name = ${ownerName}, owner_phone = ${ownerPhone},
+      owner_email = ${ownerEmail}, floor = ${floor}, carpet_sqft = ${carpetSqft}, total_floors = ${totalFloors},
+      age_years = ${ageYears}, price_amount = ${priceAmount}, updated_at = NOW()
     WHERE id = ${id} RETURNING *;
   `;
-  return rowToProperty(rows[0]);
+  const updated = rowToProperty(rows[0]);
+  audit({
+    tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'property.update', target_type: 'property', target_id: id,
+    summary: `Property "${updated.title}" updated`, metadata: { patch, before: { status: before.status, price: before.price }, after: { status: updated.status, price: updated.price } },
+    ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return updated;
 }
 
 // --- TEAM & ROUTING ---

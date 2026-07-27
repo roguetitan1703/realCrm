@@ -21,6 +21,16 @@ export const recordsRouter = Router({ mergeParams: true });
 
 recordsRouter.use(requireTenantAuth);
 
+function actorCtx(req: Request) {
+  return {
+    actorType: 'user' as const,
+    actorId: req.user?.id ?? null,
+    actorLabel: req.user?.name ?? null,
+    ip: req.ip || req.socket?.remoteAddress || null,
+    userAgent: (req.headers['user-agent'] as string) || null,
+  };
+}
+
 /**
  * 1. QUERY RECORDS FOR A MODULE
  * GET /api/v1/modules/:moduleKey/records
@@ -74,9 +84,9 @@ recordsRouter.post('/', async (req: Request, res: Response) => {
   try {
     let created: any;
     if (moduleKey === 'leads') {
-      created = await createLead(payload);
+      created = await createLead(payload, actorCtx(req));
     } else if (moduleKey === 'properties') {
-      created = await createProperty(payload);
+      created = await createProperty(payload, actorCtx(req));
     } else {
       created = { id: `rec_${Date.now()}`, ...payload };
     }
@@ -134,9 +144,9 @@ const updateHandler = async (req: Request, res: Response) => {
   try {
     let updated: any;
     if (moduleKey === 'leads') {
-      updated = await updateLead(id, updates);
+      updated = await updateLead(id, updates, actorCtx(req));
     } else if (moduleKey === 'properties') {
-      updated = await updateProperty(id, updates);
+      updated = await updateProperty(id, updates, actorCtx(req));
     }
 
     if (!updated) {
@@ -166,9 +176,9 @@ recordsRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
     let deleted = false;
     if (moduleKey === 'leads') {
-      deleted = await deleteLead(id);
+      deleted = await deleteLead(id, actorCtx(req));
     } else if (moduleKey === 'properties') {
-      deleted = await deleteProperty(id);
+      deleted = await deleteProperty(id, actorCtx(req));
     }
 
     return res.status(200).json({

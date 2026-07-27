@@ -32,7 +32,10 @@ leadsRouter.get('/', async (req: Request, res: Response) => {
  * POST /api/v1/leads
  */
 leadsRouter.post('/', async (req: Request, res: Response) => {
-  const newLead = await createLead(req.body);
+  const newLead = await createLead(req.body, {
+    actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
+    ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null,
+  });
   return res.status(201).json({
     success: true,
     data: newLead,

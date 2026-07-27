@@ -13,6 +13,12 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { sql, DEFAULT_TENANT_ID } from './db.js';
+import { audit } from './audit.js';
+
+export interface RequestCtx {
+  ip?: string | null;
+  userAgent?: string | null;
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-me';
 const TOKEN_TTL = '30d';
@@ -84,7 +90,7 @@ export async function issueOtp(tenantId: string, phoneRaw: string): Promise<{ se
 }
 
 /** Verify an OTP and, on success, return a tenant-user token. */
-export async function verifyOtp(tenantId: string, phoneRaw: string, code: string): Promise<{ token: string; user: any } | null> {
+export async function verifyOtp(tenantId: string, phoneRaw: string, code: string, ctx: RequestCtx = {}): Promise<{ token: string; user: any } | null> {
   const phone = normalizePhone(phoneRaw);
   if (!phone || !code) return null;
 
@@ -94,15 +100,34 @@ export async function verifyOtp(tenantId: string, phoneRaw: string, code: string
       AND consumed = FALSE AND expires_at > NOW()
     ORDER BY created_at DESC LIMIT 1
   `;
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    audit({
+      tenant_id: tenantId, actor_type: 'user', actor_id: null, actor_label: phone,
+      action: 'auth.login_failed', target_type: 'user', target_id: null,
+      summary: `OTP verify failed for ${phone}`, metadata: { phone }, ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+    return null;
+  }
 
   await sql`UPDATE auth_otp SET consumed = TRUE WHERE id = ${rows[0].id}`;
 
   const users = await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status = 'ACTIVE' LIMIT 1`;
-  if (users.length === 0) return null;
+  if (users.length === 0) {
+    audit({
+      tenant_id: tenantId, actor_type: 'user', actor_id: null, actor_label: phone,
+      action: 'auth.login_failed', target_type: 'user', target_id: null,
+      summary: `OTP valid but no active user for ${phone}`, metadata: { phone }, ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+    return null;
+  }
   const u = users[0];
 
   const token = signToken({ kind: 'user', tenant_id: tenantId, user_id: u.id, role: u.role });
+  audit({
+    tenant_id: tenantId, actor_type: 'user', actor_id: u.id, actor_label: u.name || phone,
+    action: 'auth.login', target_type: 'user', target_id: u.id,
+    summary: `${u.name || phone} logged in`, metadata: { phone }, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
   return { token, user: publicUser(u) };
 }
 
@@ -110,13 +135,28 @@ export async function verifyOtp(tenantId: string, phoneRaw: string, code: string
 // Superadmin (email + password)
 // ---------------------------------------------------------------------------
 
-export async function superadminLogin(email: string, password: string): Promise<{ token: string; superadmin: any } | null> {
-  const rows = await sql`SELECT * FROM superadmins WHERE email = ${String(email || '').toLowerCase()} LIMIT 1`;
-  if (rows.length === 0) return null;
+export async function superadminLogin(email: string, password: string, ctx: RequestCtx = {}): Promise<{ token: string; superadmin: any } | null> {
+  const normEmail = String(email || '').toLowerCase();
+  const rows = await sql`SELECT * FROM superadmins WHERE email = ${normEmail} LIMIT 1`;
+  const fail = (reason: string) => audit({
+    tenant_id: null, actor_type: 'superadmin', actor_id: null, actor_label: normEmail,
+    action: 'auth.login_failed', target_type: 'superadmin', target_id: null,
+    summary: `Superadmin login failed for ${normEmail}: ${reason}`, metadata: { email: normEmail, reason },
+    ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+
+  if (rows.length === 0) { fail('unknown email'); return null; }
   const sa = rows[0];
   const ok = await bcrypt.compare(String(password || ''), sa.password_hash);
-  if (!ok) return null;
+  if (!ok) { fail('bad password'); return null; }
+
   const token = signToken({ kind: 'superadmin', superadmin_id: sa.id, email: sa.email });
+  audit({
+    tenant_id: null, actor_type: 'superadmin', actor_id: sa.id, actor_label: sa.name || sa.email,
+    action: 'auth.login', target_type: 'superadmin', target_id: sa.id,
+    summary: `${sa.name || sa.email} (superadmin) logged in`, metadata: { email: sa.email },
+    ip: ctx.ip, user_agent: ctx.userAgent,
+  });
   return { token, superadmin: { id: sa.id, email: sa.email, name: sa.name } };
 }
 

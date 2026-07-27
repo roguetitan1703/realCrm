@@ -24,6 +24,10 @@ function tenantFromHeader(req: Request): string {
   return (req.headers['x-tenant-id'] as string) || DEFAULT_TENANT_ID;
 }
 
+function reqCtx(req: Request) {
+  return { ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null };
+}
+
 authRouter.post('/otp/request', async (req: Request, res: Response) => {
   try {
     const { phone } = req.body || {};
@@ -40,7 +44,7 @@ authRouter.post('/otp/verify', async (req: Request, res: Response) => {
   try {
     const { phone, code } = req.body || {};
     if (!phone || !code) return res.status(400).json({ error: 'phone and code are required' });
-    const out = await verifyOtp(tenantFromHeader(req), phone, code);
+    const out = await verifyOtp(tenantFromHeader(req), phone, code, reqCtx(req));
     if (!out) return res.status(401).json({ error: 'Invalid or expired code' });
     return res.status(200).json({ success: true, token: out.token, user: out.user });
   } catch (err: any) {
@@ -52,7 +56,7 @@ authRouter.post('/superadmin/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
-    const out = await superadminLogin(email, password);
+    const out = await superadminLogin(email, password, reqCtx(req));
     if (!out) return res.status(401).json({ error: 'Invalid credentials' });
     return res.status(200).json({ success: true, token: out.token, superadmin: out.superadmin });
   } catch (err: any) {
