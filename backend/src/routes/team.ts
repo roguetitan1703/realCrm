@@ -37,8 +37,8 @@ teamRouter.post('/roster', async (req: Request, res: Response) => {
     const initials = (name || 'New Agent').split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
     const meta = { initials, avatar: '' };
     await sql`
-      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata)
-      VALUES (${id}, ${name || 'New Agent'}, ${name ? name.split(' ')[0] : 'New'}, ${initials}, '', ${role || 'agent'}, 'ACTIVE', ${sql.json(meta)})
+      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
+      VALUES (${id}, ${name || 'New Agent'}, ${name ? name.split(' ')[0] : 'New'}, ${initials}, '', ${role || 'agent'}, 'ACTIVE', ${sql.json(meta)}, ${req.tenantId})
     `;
     const agents = await getAgents();
     return res.status(201).json({ success: true, agents, newAgentId: id });
@@ -80,7 +80,7 @@ teamRouter.patch('/users/:id/duty-status', async (req: Request, res: Response) =
     const userId = req.params.id;
     const { status } = req.body; // 'ACTIVE' vs 'OFF_DUTY' vs 'ON_LEAVE'
 
-    await sql`UPDATE crm_agents SET duty_status = ${status} WHERE id = ${userId}`;
+    await sql`UPDATE crm_agents SET duty_status = ${status} WHERE id = ${userId} AND tenant_id = ${req.tenantId}`;
     console.log(`[Team Router - Duty Status] Updated Agent ${userId} -> ${status} in PostgreSQL`);
 
     return res.status(200).json({
@@ -121,7 +121,7 @@ teamRouter.post('/users/:id/reassign-leads', async (req: Request, res: Response)
     const fromUserId = req.params.id;
     const { to_user_id } = req.body;
 
-    const resSql = await sql`UPDATE crm_leads SET assigned_agent_id = ${to_user_id} WHERE assigned_agent_id = ${fromUserId} RETURNING id`;
+    const resSql = await sql`UPDATE crm_leads SET agent_id = ${to_user_id} WHERE agent_id = ${fromUserId} AND tenant_id = ${req.tenantId} RETURNING id`;
     const count = resSql.length;
 
     return res.status(200).json({

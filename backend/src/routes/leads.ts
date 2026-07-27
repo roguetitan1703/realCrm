@@ -62,7 +62,7 @@ leadsRouter.post(
       const { agent_id } = parseResult.data;
       const tenant = req.tenant!;
 
-      const rows = await sql<any[]>`SELECT phone FROM crm_leads WHERE id = ${recordId}`;
+      const rows = await sql<any[]>`SELECT phone FROM crm_leads WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
       const leg1AgentPhone = req.user?.phone_number || '+919820011223';
       const leg2BuyerPhone = rows[0]?.phone || '+919876543210';
       const did = '08045678900';
@@ -74,8 +74,8 @@ leadsRouter.post(
       const content = `Outbound telephony call to buyer ${leg2BuyerPhone} via DID ${did}`;
 
       await sql`
-        INSERT INTO crm_timeline_events (id, record_id, author, type, title, description, timestamp)
-        VALUES (${evId}, ${recordId}, ${agent_id || 'system'}, 'call', 'Outbound Call', ${content}, NOW())
+        INSERT INTO crm_timeline_events (id, record_id, author, type, title, description, timestamp, tenant_id)
+        VALUES (${evId}, ${recordId}, ${agent_id || 'system'}, 'call', 'Outbound Call', ${content}, NOW(), ${req.tenantId})
       `;
 
       return res.status(200).json({
@@ -113,8 +113,8 @@ leadsRouter.post(
       const evId = `evt_${Date.now()}`;
       const content = `WhatsApp template '${template_id}' dispatched via Meta Cloud API`;
       await sql`
-        INSERT INTO crm_timeline_events (id, record_id, author, type, title, description, timestamp)
-        VALUES (${evId}, ${recordId}, ${req.user?.id || 'system'}, 'whatsapp', 'WhatsApp Sent', ${content}, NOW())
+        INSERT INTO crm_timeline_events (id, record_id, author, type, title, description, timestamp, tenant_id)
+        VALUES (${evId}, ${recordId}, ${req.user?.id || 'system'}, 'whatsapp', 'WhatsApp Sent', ${content}, NOW(), ${req.tenantId})
       `;
 
       return res.status(200).json({
@@ -137,13 +137,13 @@ leadsRouter.post('/:id/actions/schedule-visit', async (req: Request, res: Respon
     const recordId = req.params.id;
     const { visit_date, notes, agent_id } = req.body;
 
-    await sql`UPDATE crm_leads SET stage = 'Visit Scheduled' WHERE id = ${recordId}`;
+    await sql`UPDATE crm_leads SET stage = 'Visit Scheduled' WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
 
     const evId = `evt_${Date.now()}`;
     const content = `Site Visit Scheduled for ${visit_date}. ${notes || ''}`;
     await sql`
-      INSERT INTO crm_timeline_events (id, record_id, author, type, title, description, timestamp)
-      VALUES (${evId}, ${recordId}, ${agent_id || 'system'}, 'visit', 'Site Visit Scheduled', ${content}, NOW())
+      INSERT INTO crm_timeline_events (id, record_id, author, type, title, description, timestamp, tenant_id)
+      VALUES (${evId}, ${recordId}, ${agent_id || 'system'}, 'visit', 'Site Visit Scheduled', ${content}, NOW(), ${req.tenantId})
     `;
 
     return res.status(200).json({
@@ -167,7 +167,7 @@ leadsRouter.post('/:id/actions/assign-round-robin', async (req: Request, res: Re
     const activeAgents = agents.filter(a => a.duty_status !== 'OFF_DUTY');
     const selectedAgentId = activeAgents.length > 0 ? activeAgents[0].id : (agents[0]?.id || 'usr_default');
 
-    await sql`UPDATE crm_leads SET agent_id = ${selectedAgentId} WHERE id = ${recordId}`;
+    await sql`UPDATE crm_leads SET agent_id = ${selectedAgentId} WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
     console.log(`[Leads Router - Round Robin] Assigned Lead ${recordId} to Agent ${selectedAgentId} in DB`);
 
     return res.status(200).json({
@@ -189,10 +189,10 @@ leadsRouter.post('/:id/actions/convert-to-client', async (req: Request, res: Res
     const recordId = req.params.id;
     const { booking_amount, unit_number, property_id } = req.body;
 
-    await sql`UPDATE crm_leads SET stage = 'Closed Won' WHERE id = ${recordId}`;
+    await sql`UPDATE crm_leads SET stage = 'Closed Won' WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
     if (unit_number) {
       // crm_units keeps status inside the `data` JSONB, not a column.
-      await sql`UPDATE crm_units SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{status}', '"Sold"') WHERE id = ${unit_number} OR title = ${unit_number}`;
+      await sql`UPDATE crm_units SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{status}', '"Sold"') WHERE (id = ${unit_number} OR title = ${unit_number}) AND tenant_id = ${req.tenantId}`;
     }
 
     const clientRecordId = `rec_clients_${Date.now()}`;

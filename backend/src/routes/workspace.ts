@@ -261,8 +261,8 @@ workspaceRouter.post('/onboard', async (req: Request, res: Response) => {
     // Persist admin user into crm_agents table
     const meta = { initials: newTenant.brand_config.initials, avatar: '' };
     await sql`
-      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata)
-      VALUES (${newAdminUser.id}, ${newAdminUser.name}, ${newAdminUser.name.split(' ')[0]}, ${newTenant.brand_config.initials}, '', ${newAdminUser.role}, 'ACTIVE', ${sql.json(meta)})
+      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
+      VALUES (${newAdminUser.id}, ${newAdminUser.name}, ${newAdminUser.name.split(' ')[0]}, ${newTenant.brand_config.initials}, '', ${newAdminUser.role}, 'ACTIVE', ${sql.json(meta)}, ${req.tenantId})
       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, metadata = EXCLUDED.metadata;
     `;
 

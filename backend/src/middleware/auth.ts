@@ -10,6 +10,9 @@
 import { Request, Response, NextFunction } from 'express';
 import { Tenant, User } from '../models';
 import { getSettings, getAgents } from '../services/store';
+import { verifyToken } from '../services/auth';
+import { runWithContext, RequestContext } from '../services/context';
+import { DEFAULT_TENANT_ID } from '../services/db';
 
 // Extend Express Request type with authenticated session context
 declare global {
@@ -49,57 +52,85 @@ async function getTenantContext(tenantId: string): Promise<Tenant | null> {
 }
 
 /**
+ * Global Request Context Resolver — runs BEFORE every router.
+ *
+ * Resolves the authoritative tenant + actor for the request and runs the rest
+ * of the request inside an AsyncLocalStorage so the store layer scopes every
+ * query without a threaded argument. Tenant precedence:
+ *   • valid user token      → tenant from the TOKEN (header ignored — no spoofing)
+ *   • valid superadmin token → tenant from X-Tenant-ID (Delpat acting on a tenant)
+ *   • no / invalid token     → tenant from X-Tenant-ID (pre-login workspace scope)
+ * Never rejects here; enforcement (subscription/module gating) stays in
+ * requireTenantAuth. This only establishes "who + which tenant".
+ */
+export function withRequestContext(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const claims = token ? verifyToken(token) : null;
+  const headerTenant = (req.headers['x-tenant-id'] as string) || DEFAULT_TENANT_ID;
+
+  let ctx: RequestContext;
+  if (claims && claims.kind === 'user') {
+    ctx = {
+      tenantId: claims.tenant_id, userId: claims.user_id, role: claims.role, actorType: 'user',
+      actorLabel: null, ip: req.ip || req.socket?.remoteAddress || null,
+      userAgent: (req.headers['user-agent'] as string) || null,
+    };
+    req.user = { id: claims.user_id, tenant_id: claims.tenant_id, role: claims.role as any } as any;
+  } else if (claims && claims.kind === 'superadmin') {
+    ctx = {
+      tenantId: headerTenant, userId: claims.superadmin_id, role: 'superadmin', actorType: 'superadmin',
+      actorLabel: claims.email, ip: req.ip || req.socket?.remoteAddress || null,
+      userAgent: (req.headers['user-agent'] as string) || null,
+    };
+  } else {
+    // Tokenless: the login screen has selected a workspace; scope to it. This is
+    // the pre-authentication hydrate path only.
+    ctx = {
+      tenantId: headerTenant, userId: null, role: null, actorType: 'system',
+      actorLabel: null, ip: req.ip || req.socket?.remoteAddress || null,
+      userAgent: (req.headers['user-agent'] as string) || null,
+    };
+  }
+  req.tenantId = ctx.tenantId;
+  runWithContext(ctx, () => next());
+}
+
+/**
  * Mandatory Tenant Auth Middleware
- * Verifies Bearer token and attaches `req.tenantId`, `req.tenant`, `req.user` from database
+ * Attaches `req.tenant` (subscription/module context). Tenant + user identity
+ * are already resolved by withRequestContext into req.tenantId / req.user; this
+ * only layers the subscription object and a tokenless fallback user (so the
+ * pre-login demo, which hydrates without a token, still has an actor).
  */
 export async function requireTenantAuth(req: Request, res: Response, next: NextFunction) {
   try {
-    const authHeader = req.headers.authorization;
-    const tenantSlugOrId = req.headers['x-tenant-id'] as string || 'org_bhumi_109';
+    const tenantSlugOrId = req.tenantId || (req.headers['x-tenant-id'] as string) || DEFAULT_TENANT_ID;
+    const tenant = await getTenantContext(tenantSlugOrId);
+    if (!tenant) {
+      return res.status(401).json({ error: 'Unauthorized: Invalid Tenant Context' });
+    }
+    if (tenant.subscription_status !== 'ACTIVE') {
+      return res.status(403).json({ error: 'Forbidden: Tenant workspace inactive or expired' });
+    }
+    req.tenant = tenant;
+    req.tenantId = tenantSlugOrId;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      // For local development or tokenless requests, resolve context from active database
-      req.tenantId = tenantSlugOrId;
-      const tenant = await getTenantContext(tenantSlugOrId);
-      if (!tenant) {
-        return res.status(401).json({ error: 'Unauthorized: Invalid Tenant Context' });
-      }
-      req.tenant = tenant;
+    // Tokenless demo path: no user on the request yet — resolve a default actor
+    // from the roster so audit/actions still have an author.
+    if (!req.user) {
       const agents = await getAgents();
       const activeAgent = agents.find(a => a.duty_status !== 'OFF_DUTY') || agents[0];
       req.user = activeAgent ? {
-        id: activeAgent.id,
-        tenant_id: tenant.id,
-        name: activeAgent.name,
-        email: `${activeAgent.id}@workspace.com`,
-        phone_number: '+919820011223',
+        id: activeAgent.id, tenant_id: tenant.id, name: activeAgent.name,
+        email: `${activeAgent.id}@workspace.com`, phone_number: activeAgent.phone || '+919820011223',
         role: (activeAgent.role || 'FIELD_AGENT') as any,
-        branch_location: activeAgent.branch_location || 'Pune HQ',
-        status: activeAgent.duty_status || 'ACTIVE',
+        branch_location: activeAgent.branch_location || 'Pune HQ', status: activeAgent.duty_status || 'ACTIVE',
       } : {
-        id: 'usr_default',
-        tenant_id: tenant.id,
-        name: 'Workspace Admin',
-        email: 'admin@workspace.com',
-        phone_number: '+919820011223',
-        role: 'TENANT_ADMIN' as any,
-        branch_location: 'HQ',
-        status: 'ACTIVE',
+        id: 'usr_default', tenant_id: tenant.id, name: 'Workspace Admin', email: 'admin@workspace.com',
+        phone_number: '+919820011223', role: 'TENANT_ADMIN' as any, branch_location: 'HQ', status: 'ACTIVE',
       };
-      return next();
     }
-
-    // In production: Verify JWT signature, extract user.id and tenant_id
-    const token = authHeader.split(' ')[1];
-    // ... JWT verification logic ...
-    
-    const tenant = await getTenantContext(tenantSlugOrId);
-    if (!tenant || tenant.subscription_status !== 'ACTIVE') {
-      return res.status(403).json({ error: 'Forbidden: Tenant workspace inactive or expired' });
-    }
-
-    req.tenant = tenant;
-    req.tenantId = tenant.id;
     next();
   } catch (err: any) {
     return res.status(500).json({ error: 'Authentication Error', details: err.message });

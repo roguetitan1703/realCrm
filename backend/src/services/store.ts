@@ -13,6 +13,27 @@ import { sql, initSchema, DEFAULT_TENANT_ID, migrateProperColumns } from './db.j
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { audit } from './audit.js';
+import { getContext } from './context.js';
+
+/**
+ * The tenant to scope the current request's queries to. Comes from the request
+ * context (token-authoritative). Outside a request (seed/boot/backfill there is
+ * no context) it falls back to the default tenant — those paths set tenant_id
+ * explicitly anyway.
+ */
+function tid(): string {
+  return getContext()?.tenantId || DEFAULT_TENANT_ID;
+}
+
+/**
+ * RBAC lead scope: an 'agent' may only see leads assigned to them; owners and
+ * managers (and the tokenless demo path) see the whole tenant. Returns the
+ * agent's user id to filter by, or null for "no extra restriction".
+ */
+function agentLeadScope(): string | null {
+  const c = getContext();
+  return c && c.role === 'agent' && c.userId ? c.userId : null;
+}
 
 /** Actor context for the audit ledger, threaded from the route down to the mutation. */
 export interface ActorCtx {
@@ -198,9 +219,9 @@ async function syncLeadShortlist(leadId: string, shortlist: string[], feedback: 
     `;
   }
   if (propertyIds.length > 0) {
-    await sql`DELETE FROM lead_shortlist WHERE lead_id = ${leadId} AND property_id NOT IN ${sql(propertyIds)}`;
+    await sql`DELETE FROM lead_shortlist WHERE lead_id = ${leadId} AND tenant_id = ${tenantId} AND property_id NOT IN ${sql(propertyIds)}`;
   } else {
-    await sql`DELETE FROM lead_shortlist WHERE lead_id = ${leadId}`;
+    await sql`DELETE FROM lead_shortlist WHERE lead_id = ${leadId} AND tenant_id = ${tenantId}`;
   }
 }
 
@@ -433,15 +454,19 @@ seedDatabase()
 // ============================================================================
 
 export async function getState(): Promise<ServerState> {
+  const t = tid();
+  const agentScope = agentLeadScope();
   const [agentsRows, propsRows, leadsRows, settingsRows, intRows, routingRows, timelineRows, shortlistRows] = await Promise.all([
-    sql`SELECT * FROM crm_agents`,
-    sql`SELECT * FROM crm_properties ORDER BY created_at DESC`,
-    sql`SELECT * FROM crm_leads ORDER BY created_at DESC`,
+    sql`SELECT * FROM crm_agents WHERE tenant_id = ${t}`,
+    sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} ORDER BY created_at DESC`,
+    agentScope
+      ? sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND agent_id = ${agentScope} ORDER BY created_at DESC`
+      : sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} ORDER BY created_at DESC`,
     sql`SELECT value FROM crm_settings WHERE key = 'default'`,
-    sql`SELECT key, config FROM crm_integrations`,
+    sql`SELECT key, config FROM crm_integrations WHERE tenant_id = ${t}`,
     sql`SELECT * FROM crm_routing_rules WHERE id = 1`,
-    sql`SELECT * FROM crm_timeline_events ORDER BY timestamp DESC`,
-    sql`SELECT * FROM lead_shortlist`,
+    sql`SELECT * FROM crm_timeline_events WHERE tenant_id = ${t} ORDER BY timestamp DESC`,
+    sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t}`,
   ]);
   const shortlistByLead = groupShortlistByLead(shortlistRows);
 
@@ -488,10 +513,14 @@ export async function getState(): Promise<ServerState> {
 
 // --- LEADS ---
 export async function getLeads(): Promise<any[]> {
+  const t = tid();
+  const agentScope = agentLeadScope();
   const [leadsRows, timelineRows, shortlistRows] = await Promise.all([
-    sql`SELECT * FROM crm_leads ORDER BY created_at DESC`,
-    sql`SELECT * FROM crm_timeline_events ORDER BY timestamp DESC`,
-    sql`SELECT * FROM lead_shortlist`,
+    agentScope
+      ? sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND agent_id = ${agentScope} ORDER BY created_at DESC`
+      : sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} ORDER BY created_at DESC`,
+    sql`SELECT * FROM crm_timeline_events WHERE tenant_id = ${t} ORDER BY timestamp DESC`,
+    sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t}`,
   ]);
   const events = timelineRows.map(r => ({
     id: r.id, record_id: r.record_id, type: r.type, title: r.title,
@@ -502,11 +531,15 @@ export async function getLeads(): Promise<any[]> {
 }
 
 export async function getLeadById(id: string): Promise<any | undefined> {
-  const rows = await sql`SELECT * FROM crm_leads WHERE id = ${id}`;
+  const t = tid();
+  const agentScope = agentLeadScope();
+  const rows = agentScope
+    ? await sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND agent_id = ${agentScope}`
+    : await sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t}`;
   if (rows.length === 0) return undefined;
   const [timelineRows, shortlistRows] = await Promise.all([
-    sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} ORDER BY timestamp DESC`,
-    sql`SELECT * FROM lead_shortlist WHERE lead_id = ${id}`,
+    sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} AND tenant_id = ${t} ORDER BY timestamp DESC`,
+    sql`SELECT * FROM lead_shortlist WHERE lead_id = ${id} AND tenant_id = ${t}`,
   ]);
   const events = timelineRows.map(r => ({
     id: r.id, record_id: r.record_id, type: r.type, title: r.title,
@@ -550,20 +583,21 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const purpose = leadData.purpose ?? req.purpose ?? null;
   const timelinePref = leadData.timeline ?? leadData.timeline_pref ?? req.timeline ?? null;
 
+  const t = tid();
   const rows = await sql`
     INSERT INTO crm_leads (
       id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback,
-      deal, requirement, locality, budget_min, budget_max, purpose, timeline_pref
+      deal, requirement, locality, budget_min, budget_max, purpose, timeline_pref, tenant_id
     )
     VALUES (
       ${newId}, ${name}, ${phone}, ${email}, ${stage}, ${source}, ${agentId}, ${sql.json(req)}, ${sql.json(notes)}, ${sql.json(shortlist)}, ${sql.json(feedback)},
-      ${deal}, ${requirement}, ${locality}, ${budgetMin}, ${budgetMax}, ${purpose}, ${timelinePref}
+      ${deal}, ${requirement}, ${locality}, ${budgetMin}, ${budgetMax}, ${purpose}, ${timelinePref}, ${t}
     )
     RETURNING *;
   `;
 
   if (shortlist.length > 0 || Object.keys(feedback).length > 0) {
-    await syncLeadShortlist(newId, shortlist, feedback);
+    await syncLeadShortlist(newId, shortlist, feedback, t);
   }
 
   await addTimelineEvent({
@@ -575,7 +609,7 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
 
   const created = await getLeadById(newId);
   audit({
-    tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'lead.create', target_type: 'lead', target_id: newId,
     summary: `Lead "${name}" created (source: ${source})`, metadata: { after: created },
     ip: ctx.ip, user_agent: ctx.userAgent,
@@ -631,11 +665,11 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       budget_max = ${budgetMax},
       purpose = ${purpose || null},
       timeline_pref = ${timelinePref || null}
-    WHERE id = ${id};
+    WHERE id = ${id} AND tenant_id = ${tid()};
   `;
 
   if (patch.shortlist !== undefined || patch.feedback !== undefined) {
-    await syncLeadShortlist(id, shortlist || [], feedback || {});
+    await syncLeadShortlist(id, shortlist || [], feedback || {}, tid());
   }
 
   if (patch.stage && patch.stage !== oldLead.stage) {
@@ -649,7 +683,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
 
   const updated = await getLeadById(id);
   audit({
-    tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'lead.update', target_type: 'lead', target_id: id,
     summary: `Lead "${updated?.name}" updated`, metadata: { patch, before: { stage: oldLead.stage, agentId: oldLead.agentId }, after: { stage: updated?.stage, agentId: updated?.agentId } },
     ip: ctx.ip, user_agent: ctx.userAgent,
@@ -659,11 +693,11 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
 
 export async function deleteLead(id: string, ctx: ActorCtx = SYSTEM_CTX): Promise<boolean> {
   const existing = await getLeadById(id);
-  const res = await sql`DELETE FROM crm_leads WHERE id = ${id}`;
+  const res = await sql`DELETE FROM crm_leads WHERE id = ${id} AND tenant_id = ${tid()}`;
   const ok = res.count > 0;
   if (ok) {
     audit({
-      tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+      tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
       actor_label: ctx.actorLabel ?? null, action: 'lead.delete', target_type: 'lead', target_id: id,
       summary: `Lead "${existing?.name || id}" deleted`, metadata: { before: existing },
       ip: ctx.ip, user_agent: ctx.userAgent,
@@ -673,13 +707,14 @@ export async function deleteLead(id: string, ctx: ActorCtx = SYSTEM_CTX): Promis
 }
 
 export async function deleteProperty(id: string, ctx: ActorCtx = SYSTEM_CTX): Promise<boolean> {
-  const existingRows = await sql`SELECT * FROM crm_properties WHERE id = ${id}`;
+  const t = tid();
+  const existingRows = await sql`SELECT * FROM crm_properties WHERE id = ${id} AND tenant_id = ${t}`;
   const existing = existingRows[0] ? rowToProperty(existingRows[0]) : null;
-  const res = await sql`DELETE FROM crm_properties WHERE id = ${id}`;
+  const res = await sql`DELETE FROM crm_properties WHERE id = ${id} AND tenant_id = ${t}`;
   const ok = res.count > 0;
   if (ok) {
     audit({
-      tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+      tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
       actor_label: ctx.actorLabel ?? null, action: 'property.delete', target_type: 'property', target_id: id,
       summary: `Property "${existing?.title || id}" deleted`, metadata: { before: existing },
       ip: ctx.ip, user_agent: ctx.userAgent,
@@ -699,8 +734,9 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
     ...(duplicate.notes || []),
   ];
 
-  await sql`UPDATE crm_leads SET notes = ${sql.json(combinedNotes)} WHERE id = ${primaryId}`;
-  await sql`UPDATE crm_timeline_events SET record_id = ${primaryId} WHERE record_id = ${duplicateId}`;
+  const t = tid();
+  await sql`UPDATE crm_leads SET notes = ${sql.json(combinedNotes)} WHERE id = ${primaryId} AND tenant_id = ${t}`;
+  await sql`UPDATE crm_timeline_events SET record_id = ${primaryId} WHERE record_id = ${duplicateId} AND tenant_id = ${t}`;
 
   await addTimelineEvent({
     record_id: primaryId,
@@ -715,7 +751,7 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
 
 // --- PROPERTIES ---
 export async function getProperties(): Promise<any[]> {
-  const rows = await sql`SELECT * FROM crm_properties ORDER BY created_at DESC`;
+  const rows = await sql`SELECT * FROM crm_properties WHERE tenant_id = ${tid()} ORDER BY created_at DESC`;
   return rows.map(rowToProperty);
 }
 
@@ -766,18 +802,18 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
     INSERT INTO crm_properties (
       id, title, status, type, locality, price, tower, unit, config, tenancy, timeline,
       project, wing, unit_no, deal, facing, furnishing, parking, possession, builder, rera_no,
-      owner_name, owner_phone, owner_email, floor, carpet_sqft, total_floors, age_years, price_amount
+      owner_name, owner_phone, owner_email, floor, carpet_sqft, total_floors, age_years, price_amount, tenant_id
     )
     VALUES (
       ${newId}, ${title}, ${status}, ${type}, ${locality}, ${price}, ${tower}, ${unit}, ${sql.json(config)}, ${sql.json(tenancy)}, ${sql.json(timeline)},
       ${project}, ${wing}, ${unitNo}, ${deal}, ${facing}, ${furnishing}, ${parking}, ${possession}, ${builder}, ${reraNo},
-      ${ownerName}, ${ownerPhone}, ${ownerEmail}, ${floor}, ${carpetSqft}, ${totalFloors}, ${ageYears}, ${priceAmount}
+      ${ownerName}, ${ownerPhone}, ${ownerEmail}, ${floor}, ${carpetSqft}, ${totalFloors}, ${ageYears}, ${priceAmount}, ${tid()}
     )
     RETURNING *;
   `;
   const created = rowToProperty(rows[0]);
   audit({
-    tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'property.create', target_type: 'property', target_id: newId,
     summary: `Property "${title}" created`, metadata: { after: created }, ip: ctx.ip, user_agent: ctx.userAgent,
   });
@@ -788,7 +824,7 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
 const PROPERTY_COLUMNS = new Set(['title', 'status', 'type', 'locality', 'price', 'tower', 'unit', 'tenancy', 'timeline']);
 
 export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any | null> {
-  const old = await sql`SELECT * FROM crm_properties WHERE id = ${id}`;
+  const old = await sql`SELECT * FROM crm_properties WHERE id = ${id} AND tenant_id = ${tid()}`;
   if (old.length === 0) return null;
   const row = old[0];
   const before = rowToProperty(row);
@@ -846,11 +882,11 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
       builder = ${builder}, rera_no = ${reraNo}, owner_name = ${ownerName}, owner_phone = ${ownerPhone},
       owner_email = ${ownerEmail}, floor = ${floor}, carpet_sqft = ${carpetSqft}, total_floors = ${totalFloors},
       age_years = ${ageYears}, price_amount = ${priceAmount}, updated_at = NOW()
-    WHERE id = ${id} RETURNING *;
+    WHERE id = ${id} AND tenant_id = ${tid()} RETURNING *;
   `;
   const updated = rowToProperty(rows[0]);
   audit({
-    tenant_id: DEFAULT_TENANT_ID, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'property.update', target_type: 'property', target_id: id,
     summary: `Property "${updated.title}" updated`, metadata: { patch, before: { status: before.status, price: before.price }, after: { status: updated.status, price: updated.price } },
     ip: ctx.ip, user_agent: ctx.userAgent,
@@ -860,7 +896,7 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
 
 // --- TEAM & ROUTING ---
 export async function getAgents(): Promise<any[]> {
-  const rows = await sql`SELECT * FROM crm_agents`;
+  const rows = await sql`SELECT * FROM crm_agents WHERE tenant_id = ${tid()}`;
   return rows.map(rowToAgent);
 }
 
@@ -928,10 +964,11 @@ export async function updateIntegration(key: string, patch: any): Promise<any | 
 
 // --- TIMELINE ---
 export async function getTimelineEvents(recordId?: string): Promise<TimelineEvent[]> {
+  const t = tid();
   const rows = recordId
-    ? await sql`SELECT * FROM crm_timeline_events WHERE record_id = ${recordId} ORDER BY timestamp DESC`
-    : await sql`SELECT * FROM crm_timeline_events ORDER BY timestamp DESC`;
-  
+    ? await sql`SELECT * FROM crm_timeline_events WHERE record_id = ${recordId} AND tenant_id = ${t} ORDER BY timestamp DESC`
+    : await sql`SELECT * FROM crm_timeline_events WHERE tenant_id = ${t} ORDER BY timestamp DESC`;
+
   return rows.map(r => ({
     id: r.id,
     record_id: r.record_id,
@@ -948,8 +985,8 @@ export async function addTimelineEvent(evt: Omit<TimelineEvent, 'id' | 'timestam
   const id = `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const ts = evt.timestamp || new Date().toISOString();
   await sql`
-    INSERT INTO crm_timeline_events (id, record_id, type, title, description, author, timestamp, metadata)
-    VALUES (${id}, ${evt.record_id}, ${evt.type}, ${evt.title}, ${evt.description}, ${evt.author || 'System'}, ${ts}, ${sql.json(evt.metadata || {})})
+    INSERT INTO crm_timeline_events (id, record_id, type, title, description, author, timestamp, metadata, tenant_id)
+    VALUES (${id}, ${evt.record_id}, ${evt.type}, ${evt.title}, ${evt.description}, ${evt.author || 'System'}, ${ts}, ${sql.json(evt.metadata || {})}, ${tid()})
     ON CONFLICT (id) DO NOTHING;
   `;
   return {
@@ -961,9 +998,10 @@ export async function addTimelineEvent(evt: Omit<TimelineEvent, 'id' | 'timestam
 
 // --- UNITS (INVENTORY MATRIX) ---
 export async function getUnits(propertyId?: string): Promise<any[]> {
+  const t = tid();
   const rows = propertyId
-    ? await sql`SELECT * FROM crm_units WHERE property_id = ${propertyId} ORDER BY id ASC`
-    : await sql`SELECT * FROM crm_units ORDER BY id ASC`;
+    ? await sql`SELECT * FROM crm_units WHERE property_id = ${propertyId} AND tenant_id = ${t} ORDER BY id ASC`
+    : await sql`SELECT * FROM crm_units WHERE tenant_id = ${t} ORDER BY id ASC`;
   return rows.map(r => ({
     id: r.id,
     property_id: r.property_id,
@@ -973,7 +1011,7 @@ export async function getUnits(propertyId?: string): Promise<any[]> {
 }
 
 export async function blockUnit(unitId: string, buyerName: string, durationHours: number = 48) {
-  const rows = await sql`SELECT * FROM crm_units WHERE id = ${unitId}`;
+  const rows = await sql`SELECT * FROM crm_units WHERE id = ${unitId} AND tenant_id = ${tid()}`;
   if (rows.length === 0) return { success: false, error: 'Unit not found' };
   const unit = rows[0];
   const currentStatus = unit.data?.status || 'Available';
@@ -981,28 +1019,29 @@ export async function blockUnit(unitId: string, buyerName: string, durationHours
     return { success: false, error: 'Double-Booking Conflict', message: `This unit was just blocked or sold (${currentStatus})!` };
   }
   const newData = { ...unit.data, status: 'Blocked', blocked_by_buyer: buyerName, blocked_at: new Date().toISOString() };
-  await sql`UPDATE crm_units SET data = ${sql.json(newData)} WHERE id = ${unitId}`;
+  await sql`UPDATE crm_units SET data = ${sql.json(newData)} WHERE id = ${unitId} AND tenant_id = ${tid()}`;
   return { success: true, message: `Unit ${unitId} successfully blocked for ${durationHours} hours.`, blocked_until: new Date(Date.now() + durationHours * 3600 * 1000) };
 }
 
 export async function releaseUnit(unitId: string) {
-  const rows = await sql`SELECT * FROM crm_units WHERE id = ${unitId}`;
+  const rows = await sql`SELECT * FROM crm_units WHERE id = ${unitId} AND tenant_id = ${tid()}`;
   if (rows.length === 0) return { success: false, error: 'Unit not found' };
   const unit = rows[0];
   const newData = { ...unit.data, status: 'Available' };
   delete newData.blocked_by_buyer;
   delete newData.blocked_at;
-  await sql`UPDATE crm_units SET data = ${sql.json(newData)} WHERE id = ${unitId}`;
+  await sql`UPDATE crm_units SET data = ${sql.json(newData)} WHERE id = ${unitId} AND tenant_id = ${tid()}`;
   return { success: true, message: `Unit ${unitId} status reverted to Available.` };
 }
 
 // --- TEAM PERFORMANCE AGGREGATION ---
 export async function getAgentPerformance(userId: string) {
+  const t = tid();
   const [callRows, visitRows, wonRows, totalLeadsRows] = await Promise.all([
-    sql`SELECT count(*)::int as total_calls FROM crm_timeline_events WHERE author = ${userId} AND type = 'call'`,
-    sql`SELECT count(*)::int as site_visits FROM crm_leads WHERE agent_id = ${userId} AND stage = 'Site Visit Done'`,
-    sql`SELECT count(*)::int as closed_won FROM crm_leads WHERE agent_id = ${userId} AND stage ILIKE '%won%'`,
-    sql`SELECT count(*)::int as total_leads FROM crm_leads WHERE agent_id = ${userId}`,
+    sql`SELECT count(*)::int as total_calls FROM crm_timeline_events WHERE author = ${userId} AND type = 'call' AND tenant_id = ${t}`,
+    sql`SELECT count(*)::int as site_visits FROM crm_leads WHERE agent_id = ${userId} AND stage = 'Site Visit Done' AND tenant_id = ${t}`,
+    sql`SELECT count(*)::int as closed_won FROM crm_leads WHERE agent_id = ${userId} AND stage ILIKE '%won%' AND tenant_id = ${t}`,
+    sql`SELECT count(*)::int as total_leads FROM crm_leads WHERE agent_id = ${userId} AND tenant_id = ${t}`,
   ]);
   const calls = callRows[0]?.total_calls || 142;
   const visits = visitRows[0]?.site_visits || 18;

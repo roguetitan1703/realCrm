@@ -20,6 +20,7 @@ import { ingestRouter } from './routes/ingest';
 import { integrationsRouter } from './routes/integrations';
 import { authRouter } from './routes/auth';
 import { adminRouter } from './routes/admin';
+import { withRequestContext } from './middleware/auth';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -42,6 +43,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'OK', service: 'Bhumi Propcity CRM API Engine', timestamp: new Date() });
 });
+
+// Resolve tenant + actor for EVERY API request and carry it in AsyncLocalStorage
+// so the store layer scopes queries by tenant. Must run before all routers.
+app.use('/api/v1', withRequestContext);
 
 // ============================================================================
 // 🌐 API V1 ROUTER REGISTRATION
