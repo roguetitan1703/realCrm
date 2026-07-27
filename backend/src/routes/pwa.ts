@@ -12,6 +12,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { Resvg } from '@resvg/resvg-js';
 import { sql } from '../services/db';
 
 export const pwaRouter = Router();
@@ -28,11 +29,24 @@ function initialsOf(name: string): string {
   return String(name || '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || PLATFORM.initials;
 }
 
-function iconSvg(initials: string, bg: string, fg = '#ffffff'): string {
+function iconSvg(initials: string, bg: string, opts: { rounded?: boolean; fg?: string } = {}): string {
+  const fg = opts.fg || '#ffffff';
+  // Full-bleed (rounded=false) for the raster PNGs so maskable icons have no
+  // transparent corners; rounded for the standalone SVG.
+  const rect = opts.rounded
+    ? `<rect width="512" height="512" rx="104" fill="${bg}"/>`
+    : `<rect width="512" height="512" fill="${bg}"/>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">` +
-    `<rect width="512" height="512" rx="104" fill="${bg}"/>` +
-    `<text x="256" y="256" dy="0.35em" text-anchor="middle" font-family="'Space Grotesk',Arial,sans-serif" font-weight="700" font-size="230" fill="${fg}">${initials}</text>` +
+    rect +
+    `<text x="256" y="256" dy="0.35em" text-anchor="middle" font-family="Arial,'Space Grotesk',sans-serif" font-weight="700" font-size="230" fill="${fg}">${initials}</text>` +
     `</svg>`;
+}
+
+/** Rasterize the icon SVG to a PNG Buffer at the given width. */
+function renderIconPng(initials: string, bg: string, size: number): Buffer {
+  const svg = iconSvg(initials, bg, { rounded: false });
+  const r = new Resvg(svg, { fitTo: { mode: 'width', value: size }, font: { loadSystemFonts: true, defaultFontFamily: 'Arial' } });
+  return r.render().asPng();
 }
 
 pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response) => {
@@ -44,12 +58,15 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
   const primary = brand.primaryColor || PLATFORM.primary;
   const surface = brand.surfaceColor || PLATFORM.surface;
 
-  // Always offer the SVG (works everywhere immediately); prefer stored PNGs when
-  // onboarding has generated them.
-  const icons: any[] = [];
-  if (pwa.icon192) icons.push({ src: `/pwa/${slug}/icon-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' });
-  if (pwa.icon512) icons.push({ src: `/pwa/${slug}/icon-512.png`, sizes: '512x512', type: 'image/png', purpose: 'maskable any' });
-  icons.push({ src: `/pwa/${slug}/icon.svg`, sizes: 'any', type: 'image/svg+xml', purpose: 'any' });
+  // Always advertise PNGs — the icon route renders them on demand (server-side,
+  // so it never depends on the browser) and caches them. A 512 maskable + a 192
+  // "any" is what Chrome/Android need for a proper install (not a shortcut).
+  const icons: any[] = [
+    { src: `/pwa/${slug}/icon-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: `/pwa/${slug}/icon-512.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+    { src: `/pwa/${slug}/icon-512.png`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    { src: `/pwa/${slug}/icon.svg`, sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+  ];
 
   const startUrl = t ? `/?ws=${t.slug}` : '/';
   res.set('Content-Type', 'application/manifest+json');
@@ -76,17 +93,34 @@ pwaRouter.get('/:slug/icon.svg', async (req: Request, res: Response) => {
   const bg = brand.primaryColor || PLATFORM.primary;
   res.set('Content-Type', 'image/svg+xml');
   res.set('Cache-Control', 'public, max-age=300');
-  return res.send(iconSvg(initials, bg));
+  return res.send(iconSvg(initials, bg, { rounded: true }));
 });
 
 pwaRouter.get('/:slug/icon-:size.png', async (req: Request, res: Response) => {
-  const t = await getTenant(req.params.slug);
+  const slug = req.params.slug;
+  const size = req.params.size === '512' ? 512 : 192;
+  const key = size === 512 ? 'icon512' : 'icon192';
+  const t = await getTenant(slug);
   const pwa = t?.pwa_config || {};
-  const b64: string | undefined = req.params.size === '512' ? pwa.icon512 : pwa.icon192;
-  // No stored PNG yet → fall back to the SVG so the tenant is still installable.
-  if (!b64) return res.redirect(302, `/pwa/${req.params.slug}/icon.svg`);
-  const buf = Buffer.from(String(b64).replace(/^data:image\/png;base64,/, ''), 'base64');
+
+  // Serve the cached PNG if present.
+  const stored: string | undefined = pwa[key];
+  if (stored) {
+    const buf = Buffer.from(String(stored).replace(/^data:image\/png;base64,/, ''), 'base64');
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.send(buf);
+  }
+
+  // Otherwise render it server-side, cache it on the tenant, and serve it.
+  const brand = t?.brand_config || {};
+  const initials = brand.initials || (t ? initialsOf(t.name) : PLATFORM.initials);
+  const bg = brand.primaryColor || PLATFORM.primary;
+  const png = renderIconPng(initials, bg, size);
+  if (t) {
+    await sql`UPDATE tenants SET pwa_config = COALESCE(pwa_config, '{}'::jsonb) || ${sql.json({ [key]: png.toString('base64') })} WHERE id = ${t.id}`;
+  }
   res.set('Content-Type', 'image/png');
-  res.set('Cache-Control', 'public, max-age=31536000, immutable');
-  return res.send(buf);
+  res.set('Cache-Control', 'public, max-age=86400');
+  return res.send(png);
 });
