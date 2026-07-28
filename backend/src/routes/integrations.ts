@@ -21,7 +21,7 @@ integrationsRouter.get('/', async (req: Request, res: Response) => {
   const integrations = await getIntegrations();
   return res.status(200).json({
     success: true,
-    tenant_slug: 'bhumi-propcity',
+    tenant_slug: 'skyline-realty',
     integrations,
   });
 });

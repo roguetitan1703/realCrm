@@ -44,7 +44,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'OK', service: 'Bhumi Propcity CRM API Engine', timestamp: new Date() });
+  res.status(200).json({ status: 'OK', service: 'Real Estate CRM API Engine', timestamp: new Date() });
 });
 
 // Per-tenant PWA manifest + icons, served at the site origin (not under /api).
@@ -114,8 +114,8 @@ const isMain = process.argv[1] && (import.meta.url.endsWith(process.argv[1].repl
 if (isMain || process.env.START_SERVER === 'true') {
   app.listen(PORT, () => {
     console.log(`============================================================================`);
-    console.log(`🚀 Bhumi Propcity CRM Backend API Engine running on port ${PORT}`);
-    console.log(`🌐 Workspace Resolver: http://localhost:${PORT}/api/v1/workspace/resolve?slug=bhumi-propcity`);
+    console.log(`🚀 Real Estate CRM Backend API Engine running on port ${PORT}`);
+    console.log(`🌐 Workspace Resolver: http://localhost:${PORT}/api/v1/workspace/resolve?slug=skyline-realty`);
     console.log(`============================================================================`);
   });
 }

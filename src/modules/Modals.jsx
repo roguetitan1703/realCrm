@@ -927,7 +927,7 @@ function IntegrationModal({ store, card }) {
         <div style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: 14, marginBottom: 18 }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', marginBottom: 6 }}>Your Live Webhook URL</div>
           <div style={{ fontFamily: 'monospace', fontSize: 12, background: 'var(--card)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--line)', wordBreak: 'break-all', marginBottom: 10, color: 'var(--ink)' }}>
-            {current.webhookUrl || `https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/${card.key.toLowerCase().replace(/\s+/g, '')}`}
+            {current.webhookUrl || `https://api.skylinerealty.in/v1/ingest/skyline-realty/${card.key.toLowerCase().replace(/\s+/g, '')}`}
           </div>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', marginBottom: 6 }}>HMAC SHA-256 Secret</div>
           <div style={{ fontFamily: 'monospace', fontSize: 12, background: 'var(--card)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--line)', color: 'var(--accent-ink)' }}>

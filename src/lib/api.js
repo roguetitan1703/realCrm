@@ -48,7 +48,7 @@ function lsGet(k) { try { return (typeof window !== 'undefined' && window.localS
 function lsSet(k, v) { try { if (typeof window === 'undefined' || !window.localStorage) return; if (v) window.localStorage.setItem(k, v); else window.localStorage.removeItem(k); } catch { /* storage blocked */ } }
 
 function getHeaders(customHeaders = {}) {
-  const tenantId = typeof window !== 'undefined' ? (window.localStorage?.getItem('crm_tenant_id') || 'bhumi-propcity') : 'bhumi-propcity';
+  const tenantId = typeof window !== 'undefined' ? (window.localStorage?.getItem('crm_tenant_id') || 'skyline-realty') : 'skyline-realty';
   const base = {
     'X-Tenant-ID': tenantId,
     'Content-Type': 'application/json',

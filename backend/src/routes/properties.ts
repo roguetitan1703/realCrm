@@ -143,7 +143,7 @@ propertiesRouter.post('/:id/actions/generate-brochure', async (req: Request, res
     const { lead_id, agent_id } = req.body;
 
     const trackingCode = `brochure_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const trackedUrl = `https://bhumipropcity.com/view-brochure/${trackingCode}`;
+    const trackedUrl = `https://skylinerealty.in/view-brochure/${trackingCode}`;
 
     console.log(`[Properties Router - Brochure] Generated tracked link for Project ${propertyId}: ${trackedUrl}`);
 

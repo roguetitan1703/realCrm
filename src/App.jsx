@@ -128,38 +128,31 @@ export default function App() {
     }))
   }
 
-  const handleRoleSwitch = () => {
-    const nextRole = state.role === 'admin' ? 'agent' : 'admin'
-    store.setRole(nextRole)
-    store.toast(`Switched access tier to: ${nextRole === 'admin' ? 'Owner / Admin (Full RBAC)' : 'Sales Agent (Limited RBAC)'}`)
-  }
-
   const footer = {
     agent: store.me(),
-    name: store.me().name || 'Rakesh Sethi',
-    role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Agent · RBAC',
-    onSwitch: handleRoleSwitch,
+    name: store.me().name,
+    role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Agent',
   }
 
+  // Profile menu carries only real product actions. Role comes from the signed-in
+  // user (real RBAC) — no dev toggle; workspace provisioning + data reset are
+  // Delpat/superadmin operations and live in the /admin console, not here.
   const profileItems = []
   if (state.role === 'admin') {
     profileItems.push(
       { icon: 'settings', label: 'Settings', onClick: () => go('settings') },
-      { icon: 'plus', label: 'Provision new workspace (Onboard)', onClick: () => setOnboarding(true) },
       { icon: 'team', label: 'Manage team', onClick: () => go('team') },
       { icon: 'zap', label: 'API Integrations & Webhooks', onClick: () => go('integrations') },
-      { icon: 'refresh', label: 'Reset database state', onClick: () => { if (window.confirm('Permanent Action: This will wipe and reset all leads, properties, and settings to clean defaults. Continue?')) store.resetDatabase() } },
     )
   }
   profileItems.push(
-    { icon: 'switch', label: state.role === 'admin' ? 'Switch access: Sales Agent (Limited RBAC)' : 'Switch access: Owner / Admin (Full RBAC)', onClick: handleRoleSwitch },
     { icon: 'x', label: 'Sign out', onClick: () => store.logout() }
   )
 
   const profile = {
     agent: store.me(),
-    name: store.me().name || 'Rakesh Sethi',
-    role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Agent · RBAC',
+    name: store.me().name,
+    role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Agent',
     items: profileItems,
   }
 

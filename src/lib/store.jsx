@@ -21,7 +21,7 @@ const clone = (x) => JSON.parse(JSON.stringify(x))
 // firm's real data (the service worker can't cache the cross-origin API in the
 // split-origin deploy). Keyed by tenant so switching firms never crosses data.
 function stateCacheKey() {
-  let t = 'bhumi-propcity'
+  let t = 'skyline-realty'
   try { t = window.localStorage?.getItem('crm_tenant_id') || t } catch (e) {}
   return `crm_state_cache_${t}`
 }
@@ -89,11 +89,11 @@ function freshState() {
     brand: clone(DEFAULT_BRAND),         // tenant identity from tenants.brand_config (accent, logo)
     routing: { strategy: 'round_robin', active_agent_ids: ['a1', 'a2', 'a3'] },
     integrations: {
-      '99acres': { status: 'unconfigured', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/99acres', secret: '' },
-      'MagicBricks': { status: 'unconfigured', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/magicbricks', secret: '' },
+      '99acres': { status: 'unconfigured', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/99acres', secret: '' },
+      'MagicBricks': { status: 'unconfigured', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/magicbricks', secret: '' },
       'Calling & SMS': { status: 'unconfigured', apiKey: '', sid: '', callerId: '' },
       'WhatsApp Business API': { status: 'unconfigured', phoneId: '', accessToken: '', wabaId: '' },
-      'Website sync': { status: 'unconfigured', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/website', secret: '' },
+      'Website sync': { status: 'unconfigured', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/website', secret: '' },
     },
     toasts: [],
     notifications: [],   // server-backed per-user alert feed

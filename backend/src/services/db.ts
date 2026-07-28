@@ -49,10 +49,14 @@ export const sql = postgres(dbUrl, {
   connect_timeout: 15,
 });
 
-// Canonical id of the first tenant (Bhumi Propcity). It doubles as the slug the
-// frontend already sends in X-Tenant-ID, so tenant_id === slug throughout —
-// one value to reason about, no id/slug split.
-export const DEFAULT_TENANT_ID = 'bhumi-propcity';
+// Canonical id of the seeded DEMO tenant. Deliberately a neutral firm — not any
+// real client's name — so demo/fake data never rides under a real brand. Real
+// tenants (incl. actual clients) are created through onboarding. It doubles as
+// the slug the frontend sends in X-Tenant-ID, so tenant_id === slug throughout.
+export const DEFAULT_TENANT_ID = 'skyline-realty';
+export const DEFAULT_TENANT_NAME = 'Skyline Realty';
+// Legacy demo-tenant ids to retire (their data is re-homed onto the new tenant).
+export const LEGACY_TENANT_IDS = ['bhumi-propcity', 'org_bhumi_109'];
 
 /**
  * Initialize idempotent Supabase PostgreSQL database tables.

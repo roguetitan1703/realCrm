@@ -1,11 +1,11 @@
 // White-label config — swapping a tenant = editing THIS object only.
 export const theme = {
   brand: {
-    firmName: 'Bhumi Propcity',
+    firmName: 'Skyline Realty',
     city: 'Pune',
     deskLine: 'Pune · Sales desk',
     officeLine: 'Pune · Head office',
-    initials: 'BP',
+    initials: 'SR',
   },
   // Design tokens live in styles.css (:root). These are the data-signal maps
   // the app reads for stage/status/source — kept here so a tenant can retune them.

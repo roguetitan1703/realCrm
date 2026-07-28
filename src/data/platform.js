@@ -33,10 +33,12 @@ export function tenantDocTitle(firmName) {
  * the field reads as a real workspace picker, not a decorative input.
  */
 export const KNOWN_WORKSPACES = [
-  { slug: 'bhumipropcity', tenantId: 'bhumi-propcity', firmName: 'Bhumi Propcity', city: 'Pune', initials: 'BP' },
+  // slug = the normalized form of what a user types ("Skyline Realty" -> "skylinerealty");
+  // tenantId = the canonical id sent as X-Tenant-ID (matches DEFAULT_TENANT_ID).
+  { slug: 'skylinerealty', tenantId: 'skyline-realty', firmName: 'Skyline Realty', city: 'Pune', initials: 'SR' },
 ]
 
-/** Normalize whatever was typed ("Bhumi Propcity", "app.bhumipropcity.com") to a slug. */
+/** Normalize whatever was typed ("Skyline Realty", "app.skylinerealty.in") to a slug. */
 export function normalizeSlug(input) {
   return String(input || '')
     .toLowerCase()

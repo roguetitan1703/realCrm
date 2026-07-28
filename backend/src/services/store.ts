@@ -9,7 +9,7 @@
  */
 
 import bcrypt from 'bcryptjs';
-import { sql, initSchema, DEFAULT_TENANT_ID, migrateProperColumns } from './db.js';
+import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_IDS, migrateProperColumns } from './db.js';
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { audit } from './audit.js';
@@ -263,7 +263,7 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
     return await getState();
   }
 
-  console.log(`[Supabase DB] 🔄 Bootstrapping default Bhumi Propcity CRM dataset into PostgreSQL...`);
+  console.log(`[Supabase DB] 🔄 Bootstrapping default demo CRM dataset into PostgreSQL...`);
 
   // 1. Seed Agents (crm_agents stays for the existing team/roster reads until
   //    Phase 1 migrates them onto users; ensureAuthIdentity mirrors them across).
@@ -344,11 +344,11 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
 
   // 5. Seed Integrations
   const initialIntegrations = {
-    '99acres': { status: 'active', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/99acres', secret: 'whsec_99acres_live_882' },
-    'MagicBricks': { status: 'active', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/magicbricks', secret: 'whsec_mb_live_391' },
+    '99acres': { status: 'active', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/99acres', secret: 'whsec_99acres_live_882' },
+    'MagicBricks': { status: 'active', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/magicbricks', secret: 'whsec_mb_live_391' },
     'Calling & SMS': { status: 'active', apiKey: 'exo_key_live_902', sid: 'exo_sid_live_112', callerId: '020-71189900' },
     'WhatsApp Business API': { status: 'active', phoneId: 'waba_phone_881920', accessToken: 'EAAGm00192a000live', wabaId: 'waba_id_881920' },
-    'Website sync': { status: 'active', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/website', secret: 'whsec_web_live_109' },
+    'Website sync': { status: 'active', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/website', secret: 'whsec_web_live_109' },
   };
   for (const [key, val] of Object.entries(initialIntegrations)) {
     await sql`
@@ -386,18 +386,51 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
  * every boot, so an already-populated database (where seed is skipped) is still
  * brought up to the Phase 0 identity model.
  */
+// Demo owner email is configurable so login codes land in an inbox the operator
+// controls; agents get plausible addresses on the demo firm's domain.
+const DEMO_OWNER_EMAIL = (process.env.DEMO_OWNER_EMAIL || 'omchandel1703@gmail.com').toLowerCase();
+const DEMO_DOMAIN = 'skylinerealty.in';
+function demoEmail(name: string): string {
+  const slug = String(name || 'agent').trim().toLowerCase().replace(/[^a-z]+/g, '.').replace(/^\.|\.$/g, '');
+  return `${slug || 'agent'}@${DEMO_DOMAIN}`;
+}
+
+// Tables that carry tenant_id and hold re-homeable data. audit_log is excluded
+// on purpose — it's an append-only hash-chained ledger; rewriting tenant_id
+// would break chain verification, so old entries stay under the old id.
+const TENANT_SCOPED_TABLES = [
+  'crm_agents', 'crm_properties', 'crm_units', 'crm_leads', 'crm_settings',
+  'crm_integrations', 'crm_routing_rules', 'crm_timeline_events', 'users',
+  'auth_otp', 'push_subscriptions', 'lead_shortlist', 'notifications',
+];
+
 export async function ensureAuthIdentity(): Promise<void> {
+  // Retire the legacy demo tenants (one was a real client's name). Re-home their
+  // data onto the neutral demo tenant and drop the old rows. Idempotent: only
+  // touches a legacy id that still exists and isn't the current one.
+  for (const legacy of LEGACY_TENANT_IDS) {
+    if (legacy === DEFAULT_TENANT_ID) continue;
+    const exists = await sql`SELECT 1 FROM tenants WHERE id = ${legacy} LIMIT 1`;
+    if (exists.length === 0) continue;
+    for (const tbl of TENANT_SCOPED_TABLES) {
+      await sql`UPDATE ${sql(tbl)} SET tenant_id = ${DEFAULT_TENANT_ID} WHERE tenant_id = ${legacy}`;
+    }
+    // The re-homed settings blob still carries the old firm name; retitle it to
+    // the neutral demo firm so the desk doesn't show the retired brand.
+    await sql`
+      UPDATE crm_settings
+      SET value = jsonb_set(COALESCE(value, '{}'::jsonb), '{firmName}', ${JSON.stringify(DEFAULT_TENANT_NAME)}::jsonb)
+      WHERE tenant_id = ${DEFAULT_TENANT_ID} AND (value->>'firmName') IN ('Bhumi Propcity', 'Bhumi Propcity CRM Workspace')
+    `;
+    await sql`DELETE FROM tenants WHERE id = ${legacy}`;
+    console.log(`[Auth] Retired legacy demo tenant '${legacy}' -> '${DEFAULT_TENANT_ID}'.`);
+  }
+
   // Tenant: id === slug === DEFAULT_TENANT_ID so the tenant_id on every row
-  // matches what the frontend sends. An earlier build seeded this tenant with a
-  // different id ('org_bhumi_109') but the same slug; rename it to the canonical
-  // id first, otherwise the insert collides on the unique slug.
-  await sql`
-    UPDATE tenants SET id = ${DEFAULT_TENANT_ID}, name = 'Bhumi Propcity'
-    WHERE slug = ${DEFAULT_TENANT_ID} AND id <> ${DEFAULT_TENANT_ID};
-  `;
+  // matches what the frontend sends.
   await sql`
     INSERT INTO tenants (id, name, slug, subscription_plan, subscription_status)
-    VALUES (${DEFAULT_TENANT_ID}, 'Bhumi Propcity', ${DEFAULT_TENANT_ID}, 'ENTERPRISE', 'ACTIVE')
+    VALUES (${DEFAULT_TENANT_ID}, ${DEFAULT_TENANT_NAME}, ${DEFAULT_TENANT_ID}, 'ENTERPRISE', 'ACTIVE')
     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, subscription_status = EXCLUDED.subscription_status;
   `;
 
@@ -412,22 +445,25 @@ export async function ensureAuthIdentity(): Promise<void> {
     ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash;
   `;
 
-  // Workspace owner — the admin identity the desk shows.
+  // Workspace owner — the admin identity the desk shows. Email is set so OTP
+  // codes reach a real inbox; ON CONFLICT refreshes it on every boot.
   await sql`
-    INSERT INTO users (id, tenant_id, name, phone, role, status, metadata)
-    VALUES ('owner1', ${DEFAULT_TENANT_ID}, 'Rakesh Sethi', '+919820011223', 'owner', 'ACTIVE', ${sql.json({ initials: 'RS', avatar: '#1E6F52' })})
-    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role;
+    INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata)
+    VALUES ('owner1', ${DEFAULT_TENANT_ID}, 'Aarav Mehta', '+919820011223', ${DEMO_OWNER_EMAIL}, 'owner', 'ACTIVE', ${sql.json({ initials: 'AM', avatar: '#1E6F52' })})
+    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, email = EXCLUDED.email, role = EXCLUDED.role;
   `;
 
-  // Mirror agents into users (role 'agent'), phone carried for phone-OTP login.
+  // Mirror agents into users (role 'agent'); carry phone + a plausible email so
+  // either can receive an OTP.
   const agentRows = await sql`SELECT id, name, first, initials, avatar, metadata, tenant_id FROM crm_agents`;
   for (const a of agentRows) {
     const meta = a.metadata || { initials: a.initials, avatar: a.avatar };
     const phone = (a.metadata && a.metadata.phone) || null;
+    const email = (a.metadata && a.metadata.email) || demoEmail(a.name);
     await sql`
-      INSERT INTO users (id, tenant_id, name, phone, role, status, metadata)
-      VALUES (${a.id}, ${a.tenant_id || DEFAULT_TENANT_ID}, ${a.name}, ${phone}, 'agent', 'ACTIVE', ${sql.json(meta)})
-      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, metadata = EXCLUDED.metadata;
+      INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata)
+      VALUES (${a.id}, ${a.tenant_id || DEFAULT_TENANT_ID}, ${a.name}, ${phone}, ${email}, 'agent', 'ACTIVE', ${sql.json(meta)})
+      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email, metadata = EXCLUDED.metadata;
     `;
   }
 }

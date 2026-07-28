@@ -45,7 +45,7 @@ ingestRouter.post('/:tenantSlug/:sourceKey', async (req: Request, res: Response)
   // 1. Fetch integration settings from PostgreSQL to verify webhook secret
   const integrations = await getIntegrations();
   const portalConfig = integrations[sourceKey] || integrations['99acres'] || {};
-  const tenantSecret = portalConfig.secret || 'whsec_bhumi_prod_901';
+  const tenantSecret = portalConfig.secret || 'whsec_demo_prod_901';
 
   // 2. HMAC SHA-256 Webhook Security Verification
   if (tenantSecret) {

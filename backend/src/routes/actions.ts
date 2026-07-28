@@ -159,10 +159,10 @@ actionsRouter.post(
       });
 
       dispatchOutboundWebhook(
-        req.tenant?.slug || 'bhumi-propcity',
+        req.tenant?.slug || 'skyline-realty',
         'LEAD_STAGE_CHANGED',
         { record_id: recordId, new_stage_id, note, updated_by: req.user?.id || 'admin' },
-        'https://api.bhumipropcity.com/webhooks/outbound',
+        'https://api.skylinerealty.in/webhooks/outbound',
         'whsec_default'
       ).catch(err => console.error('[Stage Change Webhook] Dispatch error:', err));
 

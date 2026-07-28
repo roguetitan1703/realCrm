@@ -59,9 +59,9 @@ export default function Login({ store, onStartOnboard }) {
       setResolving(false)
       setWs(resolved)
       api.setTenantId(resolved.tenantId)
-      applyPwaIdentity(resolved.slug) // install now captures THIS firm's identity
+      applyPwaIdentity(resolved.tenantId) // canonical id — matches the manifest/icon route
       // Theme the login in the firm's real accent (from tenants.brand_config).
-      api.resolveWorkspace(resolved.slug)
+      api.resolveWorkspace(resolved.tenantId)
         .then(r => applyBrandColor(r?.tenant?.brand_config?.primaryColor))
         .catch(() => {})
       setPhase('phone')
@@ -413,7 +413,7 @@ export default function Login({ store, onStartOnboard }) {
                       type="text"
                       value={wsInput}
                       onChange={e => setWsInput(e.target.value)}
-                      placeholder="bhumipropcity"
+                      placeholder="skylinerealty"
                       autoFocus
                       disabled={resolving}
                       autoCapitalize="none"
