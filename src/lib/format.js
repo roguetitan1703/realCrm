@@ -95,6 +95,11 @@ export const flatOf = (p) => (p && (p.flat || p.unit)) || null
 export const INDEPENDENT_PROJECT = 'Independent / Direct'
 export const projectOf = (p) => (p && (p.project || p.society)) || INDEPENDENT_PROJECT
 
+// Developer/builder is a third parallel name — the seed + every form write
+// `builder`, but some records carry `developer`. Read whichever exists so the
+// project header always shows the developer when one is known.
+export const developerOf = (p) => (p && (p.developer || p.builder)) || null
+
 // Unit identity (agent-facing only — masked in client shares). e.g. "B-1402".
 export function unitLabel(p) {
   if (!p) return null

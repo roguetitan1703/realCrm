@@ -6,7 +6,7 @@
 // lists scattered flats/shops/plots never has to create a project, while a
 // township broker gets their towers grouped for free.
 
-import { projectOf, wingOf, fmtMoney, INDEPENDENT_PROJECT } from './format.js'
+import { projectOf, wingOf, developerOf, fmtMoney, INDEPENDENT_PROJECT } from './format.js'
 
 const isAvailable = (p) => (p.status || 'Available') === 'Available'
 const isSold = (p) => ['Sold', 'Closed', 'Let'].includes(p.status)
@@ -24,7 +24,7 @@ export function buildProjects(units = []) {
     proj.units.push(u)
     if (u.locality) proj.localities.add(u.locality)
     if (wingOf(u)) proj.wings.add(wingOf(u))
-    if (!proj.developer && u.developer) proj.developer = u.developer
+    if (!proj.developer && developerOf(u)) proj.developer = developerOf(u)
   }
 
   const projects = [...map.values()].map(proj => {
