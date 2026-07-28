@@ -35,6 +35,8 @@ export const FIRM = theme.brand.firmName
 // a stage / adding a source in Settings mutates state, never this object.
 export const DEFAULT_SETTINGS = {
   firmName: theme.brand.firmName,
+  brandColor: '#1E6F52',   // tenant accent — applied to the live UI at runtime
+  logoUrl: '',             // optional firm logo (data URL or hosted)
   stages: [...theme.stages],
   sources: [...theme.sources],
 }

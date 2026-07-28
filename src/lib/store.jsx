@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS, PROTECTED_STAGES } from '../data/theme.js'
 import { initials } from './format.js'
 import { generateMessage } from './matching.js'
 import { api as apiClient } from './api.js'
+import { applyBrandColor } from './brand.js'
 import { defaultAgents, defaultProperties, defaultLeads } from '../data/defaultDataset.js'
 
 const StoreCtx = createContext(null)
@@ -168,7 +169,7 @@ function reducer(state, action) {
     }
 
     case 'ONBOARD_TENANT': {
-      const { firmName, city } = action.config || {}
+      const { firmName, city, primaryColor, logoUrl } = action.config || {}
       persistAuthSession({ loggedIn: true, role: state.role, activeAgentId: state.activeAgentId })
       return {
         ...state,
@@ -177,6 +178,8 @@ function reducer(state, action) {
           ...state.settings,
           firmName: firmName || state.settings.firmName,
           city: city || 'Pune',
+          brandColor: primaryColor || state.settings.brandColor,
+          logoUrl: logoUrl || state.settings.logoUrl,
         },
       }
     }
@@ -510,6 +513,12 @@ export function StoreProvider({ children }) {
       loadNotifications()
     }
   }, [])
+
+  // Paint the desk in the tenant's accent whenever it changes (hydrate, edit,
+  // onboarding). Falls back to the default accent for an unset color.
+  useEffect(() => {
+    applyBrandColor(state.settings.brandColor)
+  }, [state.settings.brandColor])
 
   // Pull the current user's alert feed. No-op without a token (the feed is
   // per-user, so it needs an authenticated identity).

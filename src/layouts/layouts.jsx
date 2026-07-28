@@ -2,10 +2,10 @@
 import { Sidebar, TopBar, TabBar, MobileTopBar } from '../components/chrome.jsx'
 
 // ---- desktop app shell: sidebar | (topbar / body) ----
-export function AppShell({ nav, active, onNav, footer, topbar, children, firmName }) {
+export function AppShell({ nav, active, onNav, footer, topbar, children, firmName, logoUrl }) {
   return (
     <div className="app-desktop">
-      <Sidebar items={nav} active={active} onNav={onNav} footer={footer} firmName={firmName} />
+      <Sidebar items={nav} active={active} onNav={onNav} footer={footer} firmName={firmName} logoUrl={logoUrl} />
       <div className="app-main">
         {topbar}
         <div className="app-body">{children}</div>
