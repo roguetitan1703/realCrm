@@ -27,6 +27,7 @@ export default function Login({ store, onStartOnboard }) {
   const [ws, setWs] = useState(null) // resolved workspace, or null = platform identity
   const [resolving, setResolving] = useState(false)
   const [phone, setPhone] = useState('')
+  const [sentHint, setSentHint] = useState('')  // masked email hint when the code was mailed
   const [otp, setOtp] = useState(['', '', '', ''])
   const [loading, setLoading] = useState(false)
   const [verifying, setVerifying] = useState(false)
@@ -91,25 +92,30 @@ export default function Login({ store, onStartOnboard }) {
     store.toast(`Switched access level to: ${roleTitle}`, 'ok')
   }
 
+  const looksEmail = (v) => String(v || '').includes('@')
+
   const handleSendOtp = async (e) => {
     if (e) e.preventDefault()
-    const targetPhone = phone.trim() || DEMO_PHONE
+    const identifier = phone.trim() || DEMO_PHONE
     setLoading(true)
     try {
-      const res = await api.requestOtp(targetPhone)
-      // No delivery channel (no SMS provider AND demo mode off): don't strand the
+      const res = await api.requestOtp(identifier)
+      // No delivery channel (no SMS/email AND demo mode off): don't strand the
       // user on a code screen they can never fill — say what's actually wrong.
       if (res?.delivery === 'none') {
-        store.toast('This workspace can’t deliver a login code yet — no SMS provider is set up and demo mode is off. Ask your admin to enable DEMO_OTP.', 'warn')
+        store.toast('This workspace can’t deliver a login code yet — add an email or ask your admin to enable demo mode.', 'warn')
         return
       }
       setPhase('otp')
       setTimer(30)
-      // demoCode is only returned when the backend runs with DEMO_OTP=true AND
-      // the number belongs to a real user. Absent in production (and for unknown
-      // numbers), so the auto-fill affordance simply doesn't appear.
+      // demoCode is only returned in demo mode (on-screen convenience); when the
+      // code was emailed, sentTo is a masked hint like jy••••@gmail.com.
       setSessionOtp(res?.demoCode || '')
-      store.toast(`Verification code sent to +91 ${targetPhone}`, 'ok')
+      setSentHint(res?.delivery === 'email' ? (res?.sentTo || 'your email') : '')
+      const where = res?.delivery === 'email'
+        ? `Code emailed to ${res?.sentTo || 'your inbox'}`
+        : looksEmail(identifier) ? `Verification code sent to ${identifier}` : `Verification code sent to +91 ${identifier}`
+      store.toast(where, 'ok')
       setTimeout(() => inputRefs[0].current?.focus(), 80)
     } catch (err) {
       store.toast('Could not send the code. Check your connection and try again.', 'warn')
@@ -477,18 +483,19 @@ export default function Login({ store, onStartOnboard }) {
               <form onSubmit={handleSendOtp}>
                 <div className="field" style={{ marginBottom: 24 }}>
                   <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 8, display: 'block', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Mobile Number
+                    Mobile number or email
                   </label>
                   <div className="input-group">
-                    <span className="prefix" style={{ fontFamily: 'var(--mono)' }}>+91</span>
+                    {!looksEmail(phone) && <span className="prefix" style={{ fontFamily: 'var(--mono)' }}>+91</span>}
                     <input
-                      type="tel"
+                      type="text"
+                      inputMode={looksEmail(phone) ? 'email' : 'tel'}
                       value={phone}
                       onChange={e => setPhone(e.target.value)}
-                      placeholder={DEMO_PHONE}
+                      placeholder={`${DEMO_PHONE} or you@firm.com`}
                       autoFocus
                       disabled={loading}
-                      className="mono-num"
+                      className={looksEmail(phone) ? '' : 'mono-num'}
                       style={{ fontWeight: 600, fontSize: 15 }}
                     />
                   </div>
@@ -527,9 +534,16 @@ export default function Login({ store, onStartOnboard }) {
                     className="btn-quiet"
                     style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600 }}
                   >
-                    Change number
+                    Change
                   </button>
                 </div>
+
+                {sentHint && (
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Icon name="sms" size={14} style={{ color: 'var(--accent)' }} />
+                    We emailed a code to <strong style={{ color: 'var(--ink-2)' }}>{sentHint}</strong>
+                  </div>
+                )}
 
                 {/* Demo mode: no SMS provider, so surface the code on screen. */}
                 {sessionOtp && (

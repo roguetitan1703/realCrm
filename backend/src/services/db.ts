@@ -22,7 +22,10 @@ try {
         if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
           val = val.slice(1, -1);
         }
-        process.env[match[1]] = val;
+        // Real environment variables win — a .env file is only a fallback. This
+        // matches standard dotenv behaviour and stops a stale .env on the server
+        // from clobbering what the platform (AWS) actually injected.
+        if (process.env[match[1]] === undefined) process.env[match[1]] = val;
       }
     }
   }

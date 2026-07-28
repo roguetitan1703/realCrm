@@ -30,13 +30,16 @@ function reqCtx(req: Request) {
 
 authRouter.post('/otp/request', async (req: Request, res: Response) => {
   try {
-    const { phone } = req.body || {};
-    if (!phone) return res.status(400).json({ error: 'phone is required' });
-    const out = await issueOtp(tenantFromHeader(req), phone);
+    // Accept a phone or an email under any of these keys (phone kept for back-compat).
+    const { phone, email, identifier } = req.body || {};
+    const id = identifier || email || phone;
+    if (!id) return res.status(400).json({ error: 'phone or email is required' });
+    const out = await issueOtp(tenantFromHeader(req), id);
     // demoCode is only present when DEMO_OTP=true. `delivery` tells the client how
-    // (or whether) the code can reach the user: 'demo' (on screen), 'sms', or
-    // 'none' (no channel configured — the client should surface that, not advance).
-    return res.status(200).json({ success: true, sent: out.sent, demoCode: out.demoCode, delivery: out.delivery });
+    // (or whether) the code reached the user: 'email', 'demo' (on screen), 'sms',
+    // or 'none' (no channel — the client should surface that, not advance).
+    // `sentTo` is a masked hint (e.g. jy••••@gmail.com) when delivered by email.
+    return res.status(200).json({ success: true, sent: out.sent, demoCode: out.demoCode, delivery: out.delivery, sentTo: out.sentTo });
   } catch (err: any) {
     return res.status(500).json({ error: 'OTP request failed', message: err.message });
   }
@@ -44,9 +47,10 @@ authRouter.post('/otp/request', async (req: Request, res: Response) => {
 
 authRouter.post('/otp/verify', async (req: Request, res: Response) => {
   try {
-    const { phone, code } = req.body || {};
-    if (!phone || !code) return res.status(400).json({ error: 'phone and code are required' });
-    const out = await verifyOtp(tenantFromHeader(req), phone, code, reqCtx(req));
+    const { phone, email, identifier, code } = req.body || {};
+    const id = identifier || email || phone;
+    if (!id || !code) return res.status(400).json({ error: 'identifier and code are required' });
+    const out = await verifyOtp(tenantFromHeader(req), id, code, reqCtx(req));
     if (!out) return res.status(401).json({ error: 'Invalid or expired code' });
     return res.status(200).json({ success: true, token: out.token, user: out.user });
   } catch (err: any) {

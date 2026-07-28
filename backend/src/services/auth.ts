@@ -14,6 +14,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { sql, DEFAULT_TENANT_ID } from './db.js';
 import { audit } from './audit.js';
+import { emailConfigured, sendOtpEmail } from './email.js';
 
 export interface RequestCtx {
   ip?: string | null;
@@ -61,67 +62,119 @@ function normalizePhone(raw: string): string {
   return digits ? `+91${digits.slice(-10)}` : '';
 }
 
+function isEmail(raw: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(raw || '').trim());
+}
+
+/** One key for the OTP challenge whether the user gave a phone or an email, so
+ *  the same auth_otp row is looked up on verify. Emails are lowercased; phones
+ *  are normalized to +91XXXXXXXXXX. */
+function normalizeIdentifier(raw: string): { key: string; email: string | null; phone: string | null } {
+  const s = String(raw || '').trim();
+  if (isEmail(s)) {
+    const email = s.toLowerCase();
+    return { key: email, email, phone: null };
+  }
+  const phone = normalizePhone(s);
+  return { key: phone, email: null, phone: phone || null };
+}
+
+/** Hide most of an email for a "sent to j••••@gmail.com" hint. */
+function maskEmail(email: string): string {
+  const [name, domain] = email.split('@');
+  if (!domain) return email;
+  const head = name.slice(0, Math.min(2, name.length));
+  return `${head}${'•'.repeat(Math.max(1, name.length - head.length))}@${domain}`;
+}
+
+async function firmNameFor(tenantId: string): Promise<string> {
+  try {
+    const rows = await sql`SELECT name FROM tenants WHERE id = ${tenantId} OR slug = ${tenantId} LIMIT 1`;
+    return rows[0]?.name || 'your workspace';
+  } catch { return 'your workspace'; }
+}
+
 /**
  * Issue an OTP for a phone within a tenant. Returns the code only when DEMO_OTP
  * is on. Silent on unknown numbers (no user enumeration) — the response looks
  * identical whether or not the number belongs to a user.
  */
-export async function issueOtp(tenantId: string, phoneRaw: string): Promise<{ sent: boolean; demoCode?: string; delivery: 'demo' | 'sms' | 'none' }> {
-  // How a code can actually reach the user. There's no SMS provider wired yet
-  // (phase 4), so the only real delivery channel today is demo mode's on-screen
-  // code. Reported to the client so a misconfigured deploy (DEMO_OTP off, no SMS)
-  // fails loudly instead of stranding the user on an un-fillable code screen.
-  const delivery: 'demo' | 'sms' | 'none' = DEMO_OTP ? 'demo' : 'none';
+export async function issueOtp(tenantId: string, identifierRaw: string): Promise<{ sent: boolean; demoCode?: string; delivery: 'email' | 'demo' | 'sms' | 'none'; sentTo?: string }> {
+  const { key, email, phone } = normalizeIdentifier(identifierRaw);
+  if (!key) return { sent: false, delivery: DEMO_OTP ? 'demo' : 'none' };
 
-  const phone = normalizePhone(phoneRaw);
-  if (!phone) return { sent: false, delivery };
-
-  const rows = await sql`SELECT id FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status = 'ACTIVE' LIMIT 1`;
-  if (rows.length === 0 && !DEMO_OTP) {
-    // Production: don't reveal whether the number exists; pretend to send. (Once
-    // an SMS provider exists, delivery becomes 'sms' here.)
-    return { sent: true, delivery };
+  // Find the recipient's email. If they logged in with an email, that's it; if
+  // with a phone, use the email on their user record (may be absent).
+  let recipientEmail: string | null = email;
+  if (!recipientEmail && phone) {
+    const rows = await sql`SELECT email FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status = 'ACTIVE' LIMIT 1`;
+    recipientEmail = rows[0]?.email || null;
   }
-  // Demo mode has no SMS provider, so it issues a code for ANY number and shows
-  // it on screen; verifyOtp maps an unknown number to the workspace owner so the
-  // demo desk is always reachable. (Off in production via DEMO_OTP.)
+
+  // Anti-enumeration: in production (no demo, no email channel) don't reveal
+  // whether an identifier exists — claim sent without issuing anything.
+  if (!DEMO_OTP && !(emailConfigured() && recipientEmail)) {
+    return { sent: true, delivery: 'none' };
+  }
 
   const code = String(Math.floor(1000 + Math.random() * 9000));
   const id = `otp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString();
+  // The auth_otp `phone` column doubles as the challenge key (email or phone).
   await sql`
     INSERT INTO auth_otp (id, tenant_id, phone, code, expires_at)
-    VALUES (${id}, ${tenantId}, ${phone}, ${code}, ${expiresAt});
+    VALUES (${id}, ${tenantId}, ${key}, ${code}, ${expiresAt});
   `;
-  // TODO(phase 4): dispatch via SMS provider. For now the code is issued and,
-  // in demo mode, returned so the flow is walkable end to end.
-  console.log(`[Auth] OTP issued for ${phone} @ ${tenantId}${DEMO_OTP ? ` = ${code}` : ''}`);
-  return { sent: true, demoCode: DEMO_OTP ? code : undefined, delivery };
+
+  // Deliver by email when we can; otherwise fall back to the on-screen demo code.
+  let delivered: 'email' | null = null;
+  let sentTo: string | undefined;
+  if (emailConfigured() && recipientEmail) {
+    try {
+      await sendOtpEmail(recipientEmail, code, await firmNameFor(tenantId));
+      delivered = 'email';
+      sentTo = maskEmail(recipientEmail);
+    } catch (e: any) {
+      console.warn('[Auth] OTP email send failed:', e?.message);
+    }
+  }
+
+  const delivery: 'email' | 'demo' | 'none' = delivered || (DEMO_OTP ? 'demo' : 'none');
+  console.log(`[Auth] OTP issued for ${key} @ ${tenantId} via ${delivery}${DEMO_OTP ? ` = ${code}` : ''}`);
+  return {
+    sent: delivery !== 'none',
+    demoCode: DEMO_OTP ? code : undefined,
+    delivery,
+    sentTo,
+  };
 }
 
 /** Verify an OTP and, on success, return a tenant-user token. */
-export async function verifyOtp(tenantId: string, phoneRaw: string, code: string, ctx: RequestCtx = {}): Promise<{ token: string; user: any } | null> {
-  const phone = normalizePhone(phoneRaw);
-  if (!phone || !code) return null;
+export async function verifyOtp(tenantId: string, identifierRaw: string, code: string, ctx: RequestCtx = {}): Promise<{ token: string; user: any } | null> {
+  const { key, email, phone } = normalizeIdentifier(identifierRaw);
+  if (!key || !code) return null;
 
   const rows = await sql`
     SELECT * FROM auth_otp
-    WHERE tenant_id = ${tenantId} AND phone = ${phone} AND code = ${code}
+    WHERE tenant_id = ${tenantId} AND phone = ${key} AND code = ${code}
       AND consumed = FALSE AND expires_at > NOW()
     ORDER BY created_at DESC LIMIT 1
   `;
   if (rows.length === 0) {
     audit({
-      tenant_id: tenantId, actor_type: 'user', actor_id: null, actor_label: phone,
+      tenant_id: tenantId, actor_type: 'user', actor_id: null, actor_label: key,
       action: 'auth.login_failed', target_type: 'user', target_id: null,
-      summary: `OTP verify failed for ${phone}`, metadata: { phone }, ip: ctx.ip, user_agent: ctx.userAgent,
+      summary: `OTP verify failed for ${key}`, metadata: { identifier: key }, ip: ctx.ip, user_agent: ctx.userAgent,
     });
     return null;
   }
 
   await sql`UPDATE auth_otp SET consumed = TRUE WHERE id = ${rows[0].id}`;
 
-  const users = await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status = 'ACTIVE' LIMIT 1`;
+  // Match the user by whichever identifier they used.
+  const users = email
+    ? await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND lower(email) = ${email} AND status = 'ACTIVE' LIMIT 1`
+    : await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status = 'ACTIVE' LIMIT 1`;
   let u = users[0];
   if (!u && DEMO_OTP) {
     // Demo: an unknown number logs into the workspace owner's desk so testing

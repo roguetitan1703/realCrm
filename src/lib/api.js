@@ -93,9 +93,10 @@ export const api = {
   // ── Auth ──────────────────────────────────────────────────────────────────
   // Tenant users sign in by phone OTP; the returned JWT is stored and attached
   // to every subsequent request by getHeaders().
-  requestOtp: (phone) => request('/auth/otp/request', { method: 'POST', body: JSON.stringify({ phone }) }),
-  verifyOtp: async (phone, code) => {
-    const res = await request('/auth/otp/verify', { method: 'POST', body: JSON.stringify({ phone, code }) });
+  // identifier is a phone or an email; the backend delivers the code accordingly.
+  requestOtp: (identifier) => request('/auth/otp/request', { method: 'POST', body: JSON.stringify({ identifier }) }),
+  verifyOtp: async (identifier, code) => {
+    const res = await request('/auth/otp/verify', { method: 'POST', body: JSON.stringify({ identifier, code }) });
     if (res?.token) lsSet(TOKEN_KEY, res.token);
     return res;
   },
