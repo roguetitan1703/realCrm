@@ -15,6 +15,27 @@ export const useStore = () => useContext(StoreCtx)
 
 const clone = (x) => JSON.parse(JSON.stringify(x))
 
+// ── Offline snapshot ────────────────────────────────────────────────────────
+// The last server state, cached per tenant so an offline reload still shows the
+// firm's real data (the service worker can't cache the cross-origin API in the
+// split-origin deploy). Keyed by tenant so switching firms never crosses data.
+function stateCacheKey() {
+  let t = 'bhumi-propcity'
+  try { t = window.localStorage?.getItem('crm_tenant_id') || t } catch (e) {}
+  return `crm_state_cache_${t}`
+}
+function writeStateCache(serverState) {
+  try { window.localStorage?.setItem(stateCacheKey(), JSON.stringify({ state: serverState, at: Date.now() })) } catch (e) {}
+}
+function readStateCache() {
+  try {
+    const raw = window.localStorage?.getItem(stateCacheKey())
+    if (!raw) return null
+    const c = JSON.parse(raw)
+    return c && c.state ? c : null
+  } catch (e) { return null }
+}
+
 function loadAuthSession() {
   if (typeof window === 'undefined' || !window.localStorage) return { loggedIn: false }
   try {
@@ -74,6 +95,8 @@ function freshState() {
     },
     toasts: [],
     notifications: [],   // server-backed per-user alert feed
+    dataAsOf: null,      // ms timestamp of the currently displayed data snapshot
+    dataStale: false,    // true when we're showing a cached snapshot (offline read)
     // modal/overlay state
     modal: null,
     waState: null,
@@ -98,6 +121,25 @@ function reducer(state, action) {
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         integrations: s.integrations ? { ...state.integrations, ...s.integrations } : state.integrations,
+        dataAsOf: action.at || Date.now(),
+        dataStale: false,   // fresh from the server
+      }
+    }
+
+    // Offline read: rehydrate from the last cached snapshot when the server is
+    // unreachable, and flag the data as stale so the UI can say "as of <time>".
+    case 'HYDRATE_CACHE': {
+      const s = action.state || {}
+      return {
+        ...state,
+        agents: s.agents && s.agents.length > 0 ? s.agents : state.agents,
+        properties: s.properties && s.properties.length > 0 ? s.properties : state.properties,
+        leads: s.leads && s.leads.length > 0 ? s.leads : state.leads,
+        settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
+        routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
+        integrations: s.integrations ? { ...state.integrations, ...s.integrations } : state.integrations,
+        dataAsOf: action.at || null,
+        dataStale: true,
       }
     }
 
@@ -448,9 +490,16 @@ export function StoreProvider({ children }) {
       .then(res => {
         if (res && res.success && res.state) {
           dispatch({ type: 'HYDRATE_SERVER', state: res.state })
+          writeStateCache(res.state)   // keep a snapshot for the next offline load
         }
       })
-      .catch(err => console.error('[Store Hydration] Failed to connect to PostgreSQL backend:', err.message))
+      .catch(err => {
+        console.error('[Store Hydration] Backend unreachable:', err.message)
+        // Offline: fall back to the last cached snapshot so the desk is still
+        // readable, flagged stale so the UI can show "as of <time>".
+        const cached = readStateCache()
+        if (cached) dispatch({ type: 'HYDRATE_CACHE', state: cached.state, at: cached.at })
+      })
 
     // Validate a stored token against the backend. If it's expired or the user
     // no longer exists, drop the session so a stale token can't linger.

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useStore } from './lib/store.jsx'
 import { AppShell } from './layouts/layouts.jsx'
-import { TopBar, Toasts } from './components/chrome.jsx'
+import { TopBar, Toasts, StaleBanner } from './components/chrome.jsx'
 import { PLATFORM, tenantDocTitle } from './data/platform.js'
 
 import Login from './modules/Login.jsx'
@@ -100,6 +100,7 @@ export default function App() {
   if (isResponsiveMobile) {
     return (
       <>
+        {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
         <Mobile store={store} framed={false} />
         <Toasts toasts={state.toasts} />
       </>
@@ -179,6 +180,7 @@ export default function App() {
 
   return (
     <>
+      {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
       <AppShell nav={nav} active={effectiveScreen} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName}>
         <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.propId || ''}`} {...ctx} />
       </AppShell>

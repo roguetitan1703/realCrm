@@ -85,6 +85,21 @@ export function ConnectionBadge() {
   )
 }
 
+// Offline-read banner: shown when the app is serving a cached snapshot because
+// the server was unreachable at load. Tells the user the data is real but frozen
+// as of a point in time, so nothing here masquerades as live.
+export function StaleBanner({ asOf }) {
+  const when = asOf
+    ? new Date(asOf).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : null
+  return (
+    <div className="stale-banner" role="status">
+      <Icon name="zap" size={13} />
+      <span>Offline — showing data{when ? ` as of ${when}` : ' from your last visit'}. Changes won’t save until you reconnect.</span>
+    </div>
+  )
+}
+
 function ProfileMenu({ name, role, agent, items = [] }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
