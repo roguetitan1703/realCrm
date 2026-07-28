@@ -47,7 +47,7 @@ export default function MobileApp({ store, framed = false }) {
   const Screen = { today: MobileToday, leads: MobileLeads, properties: MobileProperties, me: MobileMe }[tab] || MobileToday
 
   const top = tab === 'today'
-    ? <MobileTopBar brand title={theme.brand.firmName} sub={`${me.name || 'Rakesh Sethi'} · ${store.state.role === 'admin' ? 'Owner / Admin' : 'Field agent'}`} right={<Avatar agent={me} size="md" />} />
+    ? <MobileTopBar brand title={store.state.settings.firmName || theme.brand.firmName} sub={`${me.name} · ${store.state.role === 'admin' ? 'Owner / Admin' : 'Field agent'}`} right={<Avatar agent={me} size="md" />} />
     : <MobileTopBar
         title={{ leads: 'My leads', properties: 'Properties', me: 'My profile' }[tab]}
         sub={tab === 'leads' ? `${myLeads.length} assigned` : undefined}

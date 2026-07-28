@@ -87,11 +87,12 @@ function maskEmail(email: string): string {
   return `${head}${'•'.repeat(Math.max(1, name.length - head.length))}@${domain}`;
 }
 
-async function firmNameFor(tenantId: string): Promise<string> {
+async function brandFor(tenantId: string): Promise<{ name: string; color: string }> {
   try {
-    const rows = await sql`SELECT name FROM tenants WHERE id = ${tenantId} OR slug = ${tenantId} LIMIT 1`;
-    return rows[0]?.name || 'your workspace';
-  } catch { return 'your workspace'; }
+    const rows = await sql`SELECT name, brand_config FROM tenants WHERE id = ${tenantId} OR slug = ${tenantId} LIMIT 1`;
+    const r = rows[0];
+    return { name: r?.name || 'your workspace', color: r?.brand_config?.primaryColor || '#1E6F52' };
+  } catch { return { name: 'your workspace', color: '#1E6F52' }; }
 }
 
 /**
@@ -131,7 +132,8 @@ export async function issueOtp(tenantId: string, identifierRaw: string): Promise
   let sentTo: string | undefined;
   if (emailConfigured() && recipientEmail) {
     try {
-      await sendOtpEmail(recipientEmail, code, await firmNameFor(tenantId));
+      const brand = await brandFor(tenantId);
+      await sendOtpEmail(recipientEmail, code, brand.name, brand.color);
       delivered = 'email';
       sentTo = maskEmail(recipientEmail);
     } catch (e: any) {

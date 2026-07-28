@@ -11,7 +11,7 @@ export default function MobileMe({ store, me }) {
         <span className={'av av-lg ' + me.avatar}>{me.initials}</span>
         <div>
           <div style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 17 }}>{me.name}</div>
-          <div className="u-muted" style={{ fontSize: 12.5 }}>Field agent · {theme.brand.firmName}</div>
+          <div className="u-muted" style={{ fontSize: 12.5 }}>Field agent · {store.state.settings.firmName || theme.brand.firmName}</div>
         </div>
       </div>
       <div className="m-kpi-row">

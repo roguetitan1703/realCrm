@@ -50,18 +50,33 @@ export async function sendMail(opts: { to: string; subject: string; html: string
   });
 }
 
-/** Send a login OTP. `firmName` brands the message to the tenant. */
-export async function sendOtpEmail(to: string, code: string, firmName?: string): Promise<void> {
+// Mix a hex toward white by t (0..1) for a soft on-brand fill/border in email
+// clients (which need inline, opacity-free colors).
+function mixWhite(hex: string, t: number): string {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || '').trim());
+  if (!m) return '#E8F1EC';
+  const c = [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+  const out = c.map(v => Math.round(v + (255 - v) * t).toString(16).padStart(2, '0')).join('');
+  return `#${out}`;
+}
+
+/** Send a login OTP, branded to the tenant (name + accent colour). */
+export async function sendOtpEmail(to: string, code: string, firmName?: string, brandColor?: string): Promise<void> {
   const firm = firmName || 'your workspace';
+  const accent = /^#?[a-f\d]{6}$/i.test(String(brandColor || '')) ? brandColor! : '#1E6F52';
+  const wash = mixWhite(accent, 0.9);
+  const line = mixWhite(accent, 0.72);
   const subject = `${code} is your ${firm} login code`;
   const text =
     `Your login code for ${firm} is ${code}.\n\n` +
     `It expires in 5 minutes. If you didn't request this, you can ignore this email.`;
   const html = `
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:440px;margin:0 auto;padding:8px">
-      <p style="color:#23231f;font-size:15px;margin:0 0 16px">Your login code for <strong>${firm}</strong> is:</p>
-      <div style="font-size:34px;font-weight:700;letter-spacing:8px;color:#1E6F52;background:#E8F1EC;border:1px solid #C4DDD0;border-radius:10px;text-align:center;padding:16px 0;margin:0 0 16px">${code}</div>
-      <p style="color:#77756e;font-size:13px;line-height:1.5;margin:0">It expires in 5 minutes. If you didn't request this, you can ignore this email.</p>
+      <p style="color:#23231f;font-size:13px;font-weight:700;letter-spacing:0.4px;margin:0 0 14px">${firm}</p>
+      <p style="color:#23231f;font-size:15px;margin:0 0 16px">Your login code is:</p>
+      <div style="font-size:34px;font-weight:700;letter-spacing:8px;color:${accent};background:${wash};border:1px solid ${line};border-radius:10px;text-align:center;padding:16px 0;margin:0 0 16px">${code}</div>
+      <p style="color:#77756e;font-size:13px;line-height:1.5;margin:0 0 18px">It expires in 5 minutes. If you didn't request this, you can ignore this email.</p>
+      <p style="color:#9a988f;font-size:11px;margin:0;border-top:1px solid #eee;padding-top:12px">Real Estate by Delpat</p>
     </div>`;
   await sendMail({ to, subject, html, text });
 }

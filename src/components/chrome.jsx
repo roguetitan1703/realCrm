@@ -38,6 +38,10 @@ export function Sidebar({ items, active, onNav, footer, firmName, logoUrl }) {
           )}
         </div>
       )}
+      <div className="n-poweredby">
+        <img src="/brand-mark.svg" width={14} height={14} alt="" />
+        <span>Powered by <strong>Delpat</strong></span>
+      </div>
     </nav>
   )
 }

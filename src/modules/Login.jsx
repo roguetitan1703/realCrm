@@ -60,9 +60,14 @@ export default function Login({ store, onStartOnboard }) {
       setWs(resolved)
       api.setTenantId(resolved.tenantId)
       applyPwaIdentity(resolved.tenantId) // canonical id — matches the manifest/icon route
-      // Theme the login in the firm's real accent (from tenants.brand_config).
+      // Dress the login in the firm's real identity — accent + logo from
+      // tenants.brand_config — so from the first screen it's THEIR software.
       api.resolveWorkspace(resolved.tenantId)
-        .then(r => applyBrandColor(r?.tenant?.brand_config?.primaryColor))
+        .then(r => {
+          const bc = r?.tenant?.brand_config || {}
+          applyBrandColor(bc.primaryColor)
+          setWs(w => (w ? { ...w, logoUrl: bc.logoUrl || '', primaryColor: bc.primaryColor || '' } : w))
+        })
         .catch(() => {})
       setPhase('phone')
       store.toast(`${resolved.firmName} workspace loaded`, 'ok')
@@ -242,23 +247,29 @@ export default function Login({ store, onStartOnboard }) {
             tenant's initials tile once one is. (Tenant logo upload comes later.) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, zIndex: 2 }}>
           {ws ? (
-            <div style={{
-              width: 40, height: 40, borderRadius: 'var(--radius)',
-              background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255, 255, 255, 0.15)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 18, color: '#FFFFFF'
-            }}>
-              {ws.initials}
-            </div>
+            ws.logoUrl ? (
+              <img src={ws.logoUrl} width={40} height={40} alt={ws.firmName}
+                style={{ display: 'block', borderRadius: 'var(--radius)', objectFit: 'cover', background: '#fff' }} />
+            ) : (
+              <div style={{
+                width: 40, height: 40, borderRadius: 'var(--radius)',
+                background: ws.primaryColor || 'var(--accent)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 18, color: '#FFFFFF',
+                boxShadow: '0 0 0 1px rgba(255,255,255,0.14)'
+              }}>
+                {ws.initials}
+              </div>
+            )
           ) : (
             <img src="/brand-mark.svg" width={40} height={40} alt={PLATFORM.name} style={{ display: 'block', borderRadius: 'var(--radius)' }} />
           )}
           <div>
             <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: '#FFFFFF' }}>
-              {ws ? ws.firmName : PLATFORM.name}
+              {ws ? ws.firmName : 'Real Estate'}
             </div>
             <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.55)', fontWeight: 500 }}>
-              {ws ? [ws.city, 'India'].filter(Boolean).join(', ') : `${PLATFORM.kind} by ${PLATFORM.vendor}`}
+              {ws ? [ws.city, 'India'].filter(Boolean).join(', ') : `by ${PLATFORM.vendor}`}
             </div>
           </div>
         </div>
