@@ -55,19 +55,21 @@ function SecHead({ title, sub }) {
 const COLOR_PRESETS = ['#1E6F52', '#1D4ED8', '#7C3AED', '#B45309', '#B91C1C', '#0F766E', '#0E7490', '#BE185D']
 
 function BrandSection({ store, settings }) {
+  const brand = store.state.brand || {}
   const [firm, setFirm] = useState(settings.firmName)
   const dirty = firm.trim() && firm.trim() !== settings.firmName
-  const color = settings.brandColor || '#1E6F52'
+  const color = brand.primaryColor || '#1E6F52'
+  const logoUrl = brand.logoUrl || ''
   const initials = String(settings.firmName || '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || theme.brand.initials
 
-  const setColor = (c) => store.patchSettings({ brandColor: c }, 'Brand colour updated')
+  const setColor = (c) => store.updateBrand({ primaryColor: c }, 'Brand colour updated')
 
   const onLogo = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
     if (file.size > 512 * 1024) { store.toast('Logo must be under 512 KB'); return }
     const reader = new FileReader()
-    reader.onload = () => store.patchSettings({ logoUrl: String(reader.result) }, 'Logo updated')
+    reader.onload = () => store.updateBrand({ logoUrl: String(reader.result) }, 'Logo updated')
     reader.readAsDataURL(file)
   }
 
@@ -77,7 +79,7 @@ function BrandSection({ store, settings }) {
       <Panel>
         <div className="brand-row">
           <div className="brand-badge" style={{ background: color, color: '#fff' }}>
-            {settings.logoUrl ? <img src={settings.logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} /> : initials}
+            {logoUrl ? <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} /> : initials}
           </div>
           <div className="brand-field">
             <div className="field-lbl">Firm name</div>
@@ -102,11 +104,11 @@ function BrandSection({ store, settings }) {
         <div className="field-lbl" style={{ marginTop: 16 }}>Logo</div>
         <div className="brand-logo-row">
           <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
-            {settings.logoUrl ? 'Replace logo' : 'Upload logo'}
+            {logoUrl ? 'Replace logo' : 'Upload logo'}
             <input type="file" accept="image/*" onChange={onLogo} style={{ display: 'none' }} />
           </label>
-          {settings.logoUrl && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => store.patchSettings({ logoUrl: '' }, 'Logo removed')}>Remove</button>
+          {logoUrl && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => store.updateBrand({ logoUrl: '' }, 'Logo removed')}>Remove</button>
           )}
           <span className="u-muted" style={{ fontSize: 12 }}>PNG or SVG, under 512&nbsp;KB. Shown on the top bar and login.</span>
         </div>

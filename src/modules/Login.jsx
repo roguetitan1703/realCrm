@@ -15,6 +15,7 @@ import { useState, useRef, useEffect } from 'react'
 import { PLATFORM, KNOWN_WORKSPACES, resolveWorkspace, tenantDocTitle } from '../data/platform.js'
 import { api } from '../lib/api.js'
 import { applyPwaIdentity } from '../lib/pwa.js'
+import { applyBrandColor, DEFAULT_ACCENT } from '../lib/brand.js'
 import { Button } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { Toasts } from '../components/chrome.jsx'
@@ -58,6 +59,10 @@ export default function Login({ store, onStartOnboard }) {
       setWs(resolved)
       api.setTenantId(resolved.tenantId)
       applyPwaIdentity(resolved.slug) // install now captures THIS firm's identity
+      // Theme the login in the firm's real accent (from tenants.brand_config).
+      api.resolveWorkspace(resolved.slug)
+        .then(r => applyBrandColor(r?.tenant?.brand_config?.primaryColor))
+        .catch(() => {})
       setPhase('phone')
       store.toast(`${resolved.firmName} workspace loaded`, 'ok')
     }, 550)
@@ -67,6 +72,8 @@ export default function Login({ store, onStartOnboard }) {
     setWs(null)
     setPhase('workspace')
     setOtp(['', '', '', ''])
+    applyBrandColor(DEFAULT_ACCENT) // back to the platform (Delpat) identity
+    applyPwaIdentity(null)
   }
 
   useEffect(() => {

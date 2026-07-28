@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getState, seedDatabase, resetDatabase, updateSettings, getSettings } from '../services/store';
+import { getState, seedDatabase, resetDatabase, updateSettings, getSettings, getBrand, updateBrand } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { listAudit, verifyAuditChain } from '../services/audit';
@@ -79,37 +79,36 @@ workspaceRouter.get('/resolve', async (req: Request, res: Response) => {
   console.log(`[Tenant Resolver] Resolving workspace for slug: '${slug}' | domain: '${domain}'`);
 
   try {
-    const settings = await getSettings();
-    const brand = settings.brand || {
-      primaryColor: '#1E6F52',
-      surfaceColor: '#F6F5F2',
-      city: 'Pune',
-      logoUrl: 'https://bhumipropcity.com/logo.png',
-      firmName: 'Bhumi Propcity',
-      tagline: 'Pune Premium Real Estate Advisors',
-    };
+    // Read the REAL tenant row so the login screen themes from the firm's actual
+    // brand_config (the same source the desk and PWA icons use), not a hardcoded
+    // default. Fall back to the first tenant when no slug is given (single-tenant
+    // dev), and 404 on an unknown slug.
+    const key = slug || domain || '';
+    const rows = key
+      ? await sql`SELECT id, name, slug, brand_config, enabled_modules FROM tenants WHERE slug = ${key} OR id = ${key} LIMIT 1`
+      : await sql`SELECT id, name, slug, brand_config, enabled_modules FROM tenants ORDER BY created_at ASC LIMIT 1`;
+    const t = rows[0];
 
-    if (slug || domain || !slug) {
-      const publicTenant = {
-        id: 'org_bhumi_109',
-        name: `${brand.firmName || 'Real Estate'} CRM Workspace`,
-        slug: slug || 'bhumi-propcity',
-        brand_config: brand,
-        enabled_modules: settings.enabled_modules || ['leads', 'properties', 'team', 'dialer', 'import', 'whatsapp'],
-      };
-
-      return res.status(200).json({
-        success: true,
-        resolved: true,
-        tenant: publicTenant,
+    if (!t) {
+      return res.status(404).json({
+        success: false,
+        resolved: false,
+        error: 'Workspace Not Found',
+        message: `No active CRM workspace found matching slug '${slug}' or domain '${domain}'.`,
       });
     }
 
-    return res.status(404).json({
-      success: false,
-      resolved: false,
-      error: 'Workspace Not Found',
-      message: `No active CRM workspace found matching slug '${slug}' or domain '${domain}'.`,
+    const brand = { primaryColor: '#1E6F52', surfaceColor: '#F6F5F2', logoUrl: '', firmName: t.name, ...(t.brand_config || {}) };
+    return res.status(200).json({
+      success: true,
+      resolved: true,
+      tenant: {
+        id: t.id,
+        name: t.name,
+        slug: t.slug,
+        brand_config: brand,
+        enabled_modules: t.enabled_modules || ['leads', 'properties', 'team', 'dialer', 'import', 'whatsapp'],
+      },
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Resolution Failed', message: err.message });
@@ -360,6 +359,30 @@ workspaceRouter.post('/settings', async (req: Request, res: Response) => {
     success: true,
     settings: updated,
   });
+});
+
+/**
+ * POST /api/v1/workspace/brand
+ * Update the tenant's brand identity (accent colour, logo). Owner/manager only —
+ * it changes what every user in the firm sees. Writes tenants.brand_config, the
+ * single source the app UI and the PWA icons both read.
+ */
+workspaceRouter.post('/brand', async (req: Request, res: Response) => {
+  try {
+    const role = getContext()?.role;
+    if (role !== 'owner' && role !== 'manager') {
+      return res.status(403).json({ success: false, error: 'Only an owner or manager can change branding.' });
+    }
+    const { primaryColor, logoUrl, surfaceColor } = req.body || {};
+    const patch: any = {};
+    if (typeof primaryColor === 'string') patch.primaryColor = primaryColor;
+    if (typeof surfaceColor === 'string') patch.surfaceColor = surfaceColor;
+    if (typeof logoUrl === 'string') patch.logoUrl = logoUrl;
+    const brand = await updateBrand(patch);
+    return res.status(200).json({ success: true, brand });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: 'Brand update failed', message: err.message });
+  }
 });
 
 /**

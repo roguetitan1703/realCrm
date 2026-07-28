@@ -76,6 +76,7 @@ export interface ServerState {
   leads: any[];
   inactiveAgentIds: string[];
   settings: any;
+  brand: any;
   integrations: Record<string, any>;
   routing_rules: RoutingRule;
   timeline_events: TimelineEvent[];
@@ -457,7 +458,7 @@ seedDatabase()
 export async function getState(): Promise<ServerState> {
   const t = tid();
   const agentScope = agentLeadScope();
-  const [agentsRows, propsRows, leadsRows, settingsRows, intRows, routingRows, timelineRows, shortlistRows] = await Promise.all([
+  const [agentsRows, propsRows, leadsRows, settingsRows, intRows, routingRows, timelineRows, shortlistRows, brandRows] = await Promise.all([
     sql`SELECT * FROM crm_agents WHERE tenant_id = ${t}`,
     sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} ORDER BY created_at DESC`,
     agentScope
@@ -468,6 +469,7 @@ export async function getState(): Promise<ServerState> {
     sql`SELECT * FROM crm_routing_rules WHERE tenant_id = ${t}`,
     sql`SELECT * FROM crm_timeline_events WHERE tenant_id = ${t} ORDER BY timestamp DESC`,
     sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t}`,
+    sql`SELECT brand_config FROM tenants WHERE id = ${t} OR slug = ${t} LIMIT 1`,
   ]);
   const shortlistByLead = groupShortlistByLead(shortlistRows);
 
@@ -500,12 +502,15 @@ export async function getState(): Promise<ServerState> {
     last_assigned_index: rRow.last_assigned_index || -1,
   };
 
+  const brand = { primaryColor: '#1E6F52', surfaceColor: '#F6F5F2', logoUrl: '', ...(brandRows[0]?.brand_config || {}) };
+
   return {
     agents,
     properties,
     leads,
     inactiveAgentIds,
     settings,
+    brand,
     integrations,
     routing_rules,
     timeline_events,
@@ -942,6 +947,40 @@ export async function updateRoutingRules(patch: Partial<RoutingRule>): Promise<R
       strategy = EXCLUDED.strategy,
       active_agent_ids = EXCLUDED.active_agent_ids,
       last_assigned_index = EXCLUDED.last_assigned_index;
+  `;
+  return next;
+}
+
+// --- BRAND (single source of truth: tenants.brand_config) ---
+// The tenant's identity — accent colour, logo, initials — lives on the tenant
+// row, NOT in crm_settings. Onboarding writes it, the PWA icon route reads it,
+// and the app UI reads it here, so the installed icon and the live desk can
+// never drift to different colours.
+const DEFAULT_BRAND = {
+  primaryColor: '#1E6F52',
+  surfaceColor: '#F6F5F2',
+  logoUrl: '',
+};
+
+export async function getBrand(): Promise<any> {
+  const t = tid();
+  const rows = await sql`SELECT brand_config FROM tenants WHERE id = ${t} OR slug = ${t} LIMIT 1`;
+  return { ...DEFAULT_BRAND, ...(rows[0]?.brand_config || {}) };
+}
+
+/** Merge a brand patch into the tenant row. When the accent colour changes we
+ *  drop the cached icon PNGs so the installed-app icon regenerates in the new
+ *  colour on next request (keeping icon + UI in lock-step). */
+export async function updateBrand(patch: any): Promise<any> {
+  const t = tid();
+  const current = await getBrand();
+  const next = { ...current, ...patch };
+  const colorChanged = patch?.primaryColor && patch.primaryColor !== current.primaryColor;
+  await sql`
+    UPDATE tenants
+    SET brand_config = COALESCE(brand_config, '{}'::jsonb) || ${sql.json(next)}
+        ${colorChanged ? sql`, pwa_config = COALESCE(pwa_config, '{}'::jsonb) - 'icon192' - 'icon512'` : sql``}
+    WHERE id = ${t} OR slug = ${t}
   `;
   return next;
 }

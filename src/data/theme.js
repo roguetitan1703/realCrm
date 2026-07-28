@@ -35,10 +35,17 @@ export const FIRM = theme.brand.firmName
 // a stage / adding a source in Settings mutates state, never this object.
 export const DEFAULT_SETTINGS = {
   firmName: theme.brand.firmName,
-  brandColor: '#1E6F52',   // tenant accent — applied to the live UI at runtime
-  logoUrl: '',             // optional firm logo (data URL or hosted)
   stages: [...theme.stages],
   sources: [...theme.sources],
+}
+
+// Tenant brand identity lives on the tenant row (tenants.brand_config), NOT in
+// settings — one source shared by the live UI and the PWA icons. This is the
+// frontend default until the server's brand hydrates.
+export const DEFAULT_BRAND = {
+  primaryColor: '#1E6F52',
+  surfaceColor: '#F6F5F2',
+  logoUrl: '',
 }
 
 // Closed stages are terminal and can't be renamed/removed — the app keys logic off

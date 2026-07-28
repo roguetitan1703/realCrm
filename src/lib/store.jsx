@@ -4,7 +4,7 @@
 // mutated via Express backend endpoints. Transient UI is managed in React state.
 // ============================================================================
 import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react'
-import { DEFAULT_SETTINGS, PROTECTED_STAGES } from '../data/theme.js'
+import { DEFAULT_SETTINGS, DEFAULT_BRAND, PROTECTED_STAGES } from '../data/theme.js'
 import { initials } from './format.js'
 import { generateMessage } from './matching.js'
 import { api as apiClient } from './api.js'
@@ -86,6 +86,7 @@ function freshState() {
     importLogs: [],
     inactiveAgentIds: [],
     settings: clone(DEFAULT_SETTINGS),   // editable: firmName, stages, sources, slaHours, reminderDays
+    brand: clone(DEFAULT_BRAND),         // tenant identity from tenants.brand_config (accent, logo)
     routing: { strategy: 'round_robin', active_agent_ids: ['a1', 'a2', 'a3'] },
     integrations: {
       '99acres': { status: 'unconfigured', webhookUrl: 'https://api.bhumipropcity.com/v1/ingest/bhumi-propcity/99acres', secret: '' },
@@ -122,6 +123,7 @@ function reducer(state, action) {
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         integrations: s.integrations ? { ...state.integrations, ...s.integrations } : state.integrations,
+        brand: s.brand ? { ...state.brand, ...s.brand } : state.brand,
         dataAsOf: action.at || Date.now(),
         dataStale: false,   // fresh from the server
       }
@@ -139,10 +141,13 @@ function reducer(state, action) {
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         integrations: s.integrations ? { ...state.integrations, ...s.integrations } : state.integrations,
+        brand: s.brand ? { ...state.brand, ...s.brand } : state.brand,
         dataAsOf: action.at || null,
         dataStale: true,
       }
     }
+
+    case 'SET_BRAND': return { ...state, brand: { ...state.brand, ...action.patch } }
 
     case 'SET_NOTIFICATIONS': return { ...state, notifications: action.notifications || [] }
     case 'MARK_NOTIFS_READ': return { ...state, notifications: (state.notifications || []).map(n => ({ ...n, read: true })) }
@@ -178,8 +183,12 @@ function reducer(state, action) {
           ...state.settings,
           firmName: firmName || state.settings.firmName,
           city: city || 'Pune',
-          brandColor: primaryColor || state.settings.brandColor,
-          logoUrl: logoUrl || state.settings.logoUrl,
+        },
+        // In-session theming; the server also persisted this to brand_config.
+        brand: {
+          ...state.brand,
+          primaryColor: primaryColor || state.brand.primaryColor,
+          logoUrl: logoUrl || state.brand.logoUrl,
         },
       }
     }
@@ -515,10 +524,10 @@ export function StoreProvider({ children }) {
   }, [])
 
   // Paint the desk in the tenant's accent whenever it changes (hydrate, edit,
-  // onboarding). Falls back to the default accent for an unset color.
+  // onboarding). Sourced from tenants.brand_config; falls back to the default.
   useEffect(() => {
-    applyBrandColor(state.settings.brandColor)
-  }, [state.settings.brandColor])
+    applyBrandColor(state.brand?.primaryColor)
+  }, [state.brand?.primaryColor])
 
   // Pull the current user's alert feed. No-op without a token (the feed is
   // per-user, so it needs an authenticated identity).
@@ -736,6 +745,12 @@ export function StoreProvider({ children }) {
       dispatch({ type: 'PATCH_SETTINGS', patch })
       if (note) toast(note)
       apiClient.updateSettings(patch).catch(err => console.warn('[Settings API] error:', err.message))
+    },
+    // Tenant brand (accent, logo) — the single source shared with the PWA icons.
+    updateBrand: (patch, note) => {
+      dispatch({ type: 'SET_BRAND', patch })
+      if (note) toast(note)
+      apiClient.updateBrand(patch).catch(err => console.warn('[Brand API] error:', err.message))
     },
     // Lead routing — backend round-robins new leads across active_agent_ids.
     setRouting: (patch, note) => {

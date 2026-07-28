@@ -152,6 +152,11 @@ export const api = {
   // Settings & Branding
   updateSettings: (patch) => request('/workspace/settings', { method: 'POST', body: JSON.stringify(patch) }),
 
+  // Tenant brand identity (accent colour, logo) — writes tenants.brand_config,
+  // the single source the desk UI and the installed-app icon both read.
+  updateBrand: (patch) => request('/workspace/brand', { method: 'POST', body: JSON.stringify(patch) }),
+  resolveWorkspace: (slug) => request(`/workspace/resolve?slug=${encodeURIComponent(slug || '')}`),
+
   // Audit ledger (owner/manager only)
   getAuditLog: () => request('/workspace/audit'),
 
