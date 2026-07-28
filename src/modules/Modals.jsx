@@ -822,10 +822,29 @@ function ReassignModal({ store, fromId }) {
 
 function AddAgentModal({ store }) {
   const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState('agent')
+  const [saving, setSaving] = useState(false)
+
+  const submit = () => {
+    if (!name.trim()) { store.toast('Add a name first', 'warn'); return }
+    if (!phone.trim() && !email.trim()) { store.toast('Add a phone or email so they can sign in', 'warn'); return }
+    setSaving(true)
+    Promise.resolve(store.addAgent({ name: name.trim(), phone: phone.trim(), email: email.trim(), role }))
+      .then(ok => { if (ok) store.closeModal(); else setSaving(false) })
+  }
+
   return (
-    <Modal title="Add agent" onClose={store.closeModal} width={380}>
-      <Field label="Agent name"><Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Kiran Patil" autoFocus /></Field>
-      <Button variant="primary" block style={{ marginTop: 16 }} onClick={() => { if (name.trim()) { store.addAgent(name); store.closeModal() } else store.toast('Add a name first', 'warn') }}>Add to team</Button>
+    <Modal title="Add teammate" onClose={store.closeModal} width={400}>
+      <Field label="Full name"><Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Kiran Patil" autoFocus /></Field>
+      <Field label="Mobile number"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
+      <Field label="Email (optional)"><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="kiran@firm.com" type="email" /></Field>
+      <Field label="Access">
+        <Segmented value={role} onChange={setRole} options={[{ value: 'agent', label: 'Sales agent' }, { value: 'manager', label: 'Manager' }]} />
+      </Field>
+      <div className="u-muted" style={{ fontSize: 12, margin: '2px 0 4px' }}>They sign in with this phone or email — no password. A manager sees the whole desk; an agent sees only their own leads.</div>
+      <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Adding…' : 'Add to team'}</Button>
     </Modal>
   )
 }

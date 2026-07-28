@@ -695,10 +695,20 @@ export function StoreProvider({ children }) {
       dispatch({ type: 'REASSIGN_ALL', fromId, toId })
       apiClient.reassignLeads(fromId, toId).catch(err => console.warn('[Reassign API] Backend error:', err.message))
     },
-    addAgent: (name) => {
-      dispatch({ type: 'ADD_AGENT', name })
-      toast('Agent added to team')
-      apiClient.addAgent({ name, role: 'agent' }).catch(err => console.warn('[Add Agent API] error:', err.message))
+    // Real teammate creation — the server makes a login-capable user, so we take
+    // the server's roster as truth rather than an optimistic local guess.
+    addAgent: (details) => {
+      const payload = typeof details === 'string' ? { name: details, role: 'agent' } : details
+      return apiClient.addAgent(payload)
+        .then(res => {
+          if (res?.success && res.agents) {
+            dispatch({ type: 'SET', patch: { agents: res.agents } })
+            toast(`${payload.name?.split(' ')[0] || 'Teammate'} added — they can sign in with their phone or email`)
+            return true
+          }
+          throw new Error('unexpected response')
+        })
+        .catch(err => { console.warn('[Add Agent API] error:', err.message); toast(err.message || 'Could not add teammate', 'warn'); return false })
     },
     setFirmName: (name) => {
       dispatch({ type: 'SET_FIRM_NAME', name })
