@@ -66,14 +66,21 @@ function normalizePhone(raw: string): string {
  * is on. Silent on unknown numbers (no user enumeration) — the response looks
  * identical whether or not the number belongs to a user.
  */
-export async function issueOtp(tenantId: string, phoneRaw: string): Promise<{ sent: boolean; demoCode?: string }> {
+export async function issueOtp(tenantId: string, phoneRaw: string): Promise<{ sent: boolean; demoCode?: string; delivery: 'demo' | 'sms' | 'none' }> {
+  // How a code can actually reach the user. There's no SMS provider wired yet
+  // (phase 4), so the only real delivery channel today is demo mode's on-screen
+  // code. Reported to the client so a misconfigured deploy (DEMO_OTP off, no SMS)
+  // fails loudly instead of stranding the user on an un-fillable code screen.
+  const delivery: 'demo' | 'sms' | 'none' = DEMO_OTP ? 'demo' : 'none';
+
   const phone = normalizePhone(phoneRaw);
-  if (!phone) return { sent: false };
+  if (!phone) return { sent: false, delivery };
 
   const rows = await sql`SELECT id FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status = 'ACTIVE' LIMIT 1`;
   if (rows.length === 0 && !DEMO_OTP) {
-    // Production: don't reveal whether the number exists; pretend to send.
-    return { sent: true };
+    // Production: don't reveal whether the number exists; pretend to send. (Once
+    // an SMS provider exists, delivery becomes 'sms' here.)
+    return { sent: true, delivery };
   }
   // Demo mode has no SMS provider, so it issues a code for ANY number and shows
   // it on screen; verifyOtp maps an unknown number to the workspace owner so the
@@ -89,7 +96,7 @@ export async function issueOtp(tenantId: string, phoneRaw: string): Promise<{ se
   // TODO(phase 4): dispatch via SMS provider. For now the code is issued and,
   // in demo mode, returned so the flow is walkable end to end.
   console.log(`[Auth] OTP issued for ${phone} @ ${tenantId}${DEMO_OTP ? ` = ${code}` : ''}`);
-  return { sent: true, demoCode: DEMO_OTP ? code : undefined };
+  return { sent: true, demoCode: DEMO_OTP ? code : undefined, delivery };
 }
 
 /** Verify an OTP and, on success, return a tenant-user token. */

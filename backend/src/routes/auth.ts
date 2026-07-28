@@ -33,8 +33,10 @@ authRouter.post('/otp/request', async (req: Request, res: Response) => {
     const { phone } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'phone is required' });
     const out = await issueOtp(tenantFromHeader(req), phone);
-    // demoCode is only present when DEMO_OTP=true.
-    return res.status(200).json({ success: true, sent: out.sent, demoCode: out.demoCode });
+    // demoCode is only present when DEMO_OTP=true. `delivery` tells the client how
+    // (or whether) the code can reach the user: 'demo' (on screen), 'sms', or
+    // 'none' (no channel configured — the client should surface that, not advance).
+    return res.status(200).json({ success: true, sent: out.sent, demoCode: out.demoCode, delivery: out.delivery });
   } catch (err: any) {
     return res.status(500).json({ error: 'OTP request failed', message: err.message });
   }

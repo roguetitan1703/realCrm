@@ -97,6 +97,12 @@ export default function Login({ store, onStartOnboard }) {
     setLoading(true)
     try {
       const res = await api.requestOtp(targetPhone)
+      // No delivery channel (no SMS provider AND demo mode off): don't strand the
+      // user on a code screen they can never fill — say what's actually wrong.
+      if (res?.delivery === 'none') {
+        store.toast('This workspace can’t deliver a login code yet — no SMS provider is set up and demo mode is off. Ask your admin to enable DEMO_OTP.', 'warn')
+        return
+      }
       setPhase('otp')
       setTimer(30)
       // demoCode is only returned when the backend runs with DEMO_OTP=true AND
