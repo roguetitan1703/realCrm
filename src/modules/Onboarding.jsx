@@ -21,12 +21,14 @@ import { PLATFORM } from '../data/platform.js'
 
 export default function Onboarding({ store, onCancel }) {
   const [step, setStep] = useState(1) // 1: Firm | 2: Admin | 3: Theme
-  const [firmName, setFirmName] = useState('Apex Realty Pune')
-  const [city, setCity] = useState('Pune')
-  const [slug, setSlug] = useState('apex-realty-pune')
-  const [adminName, setAdminName] = useState('Rakesh Sethi')
-  const [adminPhone, setAdminPhone] = useState('98220 41556')
-  const [adminEmail, setAdminEmail] = useState('rakesh@apexrealty.com')
+  // Real onboarding — fields start empty so the operator enters the client's
+  // actual details (the owner's email/phone become their real login).
+  const [firmName, setFirmName] = useState('')
+  const [city, setCity] = useState('')
+  const [slug, setSlug] = useState('')
+  const [adminName, setAdminName] = useState('')
+  const [adminPhone, setAdminPhone] = useState('')
+  const [adminEmail, setAdminEmail] = useState('')
   const [primaryColor, setPrimaryColor] = useState('#1E6F52')
   const [provisioning, setProvisioning] = useState(false)
   const [statusText, setStatusText] = useState('')
@@ -43,44 +45,45 @@ export default function Onboarding({ store, onCancel }) {
 
   // Provision Workspace End-to-End
   const handleProvision = async () => {
+    // Real onboarding — validate before we touch the backend. The owner's
+    // phone/email becomes their real login, so one is required.
+    if (!firmName.trim()) { store.toast('Enter the firm name', 'warn'); setStep(1); return }
+    if (!city.trim()) { store.toast('Enter the city', 'warn'); setStep(1); return }
+    if (!adminEmail.trim() && !adminPhone.trim()) { store.toast("Add the owner's email or phone — it's their login", 'warn'); setStep(2); return }
+
     setProvisioning(true)
+    setStatusText('Provisioning workspace…')
 
-    // Step 1: Schema creation simulation
-    setStatusText('Creating dedicated PostgreSQL tenant schema...')
-    await new Promise(r => setTimeout(r, 600))
-
-    // Step 2: RLS policies
-    setStatusText('Applying Row-Level Security (RLS) isolation policies...')
-    await new Promise(r => setTimeout(r, 600))
-
-    // Step 3: Seeding 12 CRM modules & RERA stages
-    setStatusText('Seeding 12 real estate modules & RERA Maharashtra sales funnel...')
-    
-    // Attempt real backend call
     const payload = {
-      firmName: firmName.trim() || 'Apex Realty Pune',
-      city: city.trim() || 'Pune',
-      slug: slug || 'apex-realty-pune',
-      adminName: adminName.trim() || 'Tenant Owner',
-      adminEmail: adminEmail.trim() || 'admin@apexrealty.com',
-      adminPhone: adminPhone.trim() || '98220 41556',
+      firmName: firmName.trim(),
+      city: city.trim(),
+      slug: slug.trim() || undefined,
+      adminName: adminName.trim(),
+      adminEmail: adminEmail.trim(),
+      adminPhone: adminPhone.trim(),
       primaryColor,
     }
 
+    let data
     try {
-      const data = await api.onboardTenant(payload)
-      console.log('[Onboard Success] Backend provisioned tenant:', data)
+      data = await api.onboardTenant(payload)
+      if (!data?.success) throw new Error(data?.message || 'Provisioning failed')
     } catch (err) {
-      console.warn('[Onboard API Fallback] Backend offline, completing in-memory store boot:', err.message)
+      setProvisioning(false)
+      store.toast(err.message || 'Could not provision the workspace — try again', 'warn')
+      return
     }
 
-    await new Promise(r => setTimeout(r, 600))
-    setStatusText('Workspace provisioned successfully.')
+    // Real session: store the owner token + point the client at the new tenant,
+    // then enter the desk authenticated.
+    if (data.token) api.setToken(data.token)
+    if (data.tenant?.id) api.setTenantId(data.tenant.id)
 
+    setStatusText(`${payload.firmName} is ready.`)
     setTimeout(() => {
       setProvisioning(false)
-      store.onboardTenant(payload)
-    }, 400)
+      store.onboardTenant({ ...payload, tenantId: data.tenant?.id, brandConfig: data.tenant?.brand_config })
+    }, 500)
   }
 
   return (

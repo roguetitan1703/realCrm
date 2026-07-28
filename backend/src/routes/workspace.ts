@@ -12,10 +12,11 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getState, seedDatabase, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getIngestConfig, regenerateIngestKey } from '../services/store';
+import { getState, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getIngestConfig, regenerateIngestKey, genIngestKey } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { listAudit, verifyAuditChain } from '../services/audit';
+import { signToken } from '../services/auth';
 
 export const workspaceRouter = Router();
 
@@ -205,134 +206,92 @@ workspaceRouter.get('/bootstrap', requireTenantAuth, async (req: Request, res: R
  */
 workspaceRouter.post('/onboard', async (req: Request, res: Response) => {
   const { firmName, city, slug, adminName, adminEmail, adminPhone, primaryColor } = req.body;
-
-  console.log(`[Tenant Onboard] Provisioning new cloud workspace for '${firmName}' (${city})`);
+  console.log(`[Tenant Onboard] Provisioning workspace for '${firmName}' (${city})`);
 
   try {
     if (!firmName || !city) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing Required Fields',
-        message: 'Firm Name and City are required to initialize a real estate CRM workspace.',
-      });
+      return res.status(400).json({ success: false, error: 'Missing Required Fields', message: 'Firm name and city are required.' });
+    }
+    // The owner needs a way to sign in — OTP goes to a phone or an email.
+    const ownerPhoneRaw = adminPhone ? String(adminPhone).replace(/\D/g, '') : '';
+    const ownerPhone = ownerPhoneRaw ? `+91${ownerPhoneRaw.slice(-10)}` : null;
+    const ownerEmail = adminEmail ? String(adminEmail).trim().toLowerCase() : null;
+    if (!ownerPhone && !ownerEmail) {
+      return res.status(400).json({ success: false, error: 'Owner contact required', message: "Provide the owner's phone or email so they can sign in." });
     }
 
-    // Generate clean URL slug if not provided
-    const cleanSlug = (slug || firmName)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-
-    const tenantId = 'b1ffc099-8d1a-4ef8-bb6d-7cc0ce491b22'; // Deterministic UUID for new tenant
-    const adminId = 'c2aab100-9e2b-4fa9-cc7e-8dd1df502c33';
-
-    // Seeded Tenant Record
-    const newTenant = {
-      id: tenantId,
-      name: firmName,
-      slug: cleanSlug,
-      brand_config: {
-        primaryColor: primaryColor || '#1E6F52',
-        surfaceColor: '#F6F5F2',
-        city: city,
-        logoUrl: '',
-        firmName: firmName,
-        tagline: `${city} Private Wealth & Real Estate Advisory Desk`,
-        initials: firmName
-          .split(' ')
-          .slice(0, 2)
-          .map((w: string) => w[0])
-          .join('')
-          .toUpperCase(),
-      },
-      subscription_plan: 'ENTERPRISE_PRIVATE_CLOUD',
-      enabled_modules: [
-        'leads', 'properties', 'team', 'dialer', 'telephony', 'whatsapp',
-        'tasks', 'visits', 'bookings', 'ingest', 'automation', 'reports', 'settings'
-      ],
-      created_at: new Date(),
+    // Unique slug === tenant id (our convention). If taken, suffix -2, -3, …
+    const base = (slug || firmName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
+    let cleanSlug = base;
+    for (let n = 2; (await sql`SELECT 1 FROM tenants WHERE id = ${cleanSlug} OR slug = ${cleanSlug} LIMIT 1`).length; n++) {
+      cleanSlug = `${base}-${n}`;
+    }
+    const tenantId = cleanSlug;
+    const initials = firmName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
+    const brand_config = {
+      primaryColor: primaryColor || '#1E6F52',
+      surfaceColor: '#F6F5F2',
+      city,
+      logoUrl: '',
+      firmName,
+      initials,
     };
+    const ingestSecret = genIngestKey();
 
-    const newAdminUser = {
-      id: adminId,
-      name: adminName || 'Tenant Owner',
-      email: adminEmail || `admin@${cleanSlug}.com`,
-      phone: adminPhone || '+91 98220 00000',
-      role: 'TENANT_ADMIN',
-      branch_location: `${city} HQ`,
-    };
-
-    // Seed 12 Core Real Estate Modules & RERA Funnel
-    const seededModulesConfig = {
-      leads: {
-        stages: [
-          { id: '22222222-1111-1111-1111-111111111101', key: 'new', name: 'New Inquiry', color: '#3B82F6', order_index: 1 },
-          { id: '22222222-1111-1111-1111-111111111102', key: 'contacted', name: 'Contacted', color: '#8B5CF6', order_index: 2 },
-          { id: '22222222-1111-1111-1111-111111111103', key: 'visit_scheduled', name: 'Site Visit Scheduled', color: '#F59E0B', order_index: 3 },
-          { id: '22222222-1111-1111-1111-111111111104', key: 'visit_done', name: 'Site Visit Done', color: '#10B981', order_index: 4 },
-          { id: '22222222-1111-1111-1111-111111111105', key: 'negotiation', name: 'Negotiation / Token', color: '#C0603A', order_index: 5 },
-          { id: '22222222-1111-1111-1111-111111111106', key: 'won', name: 'Closed Won (Booked)', color: '#059669', order_index: 6, is_closed: true },
-        ],
-        customFields: [
-          { field_key: 'budget_range', field_label: 'Budget Range', field_type: 'select', options: ['Under 50 Lakhs', '50 Lakhs - 1 Cr', '1 Cr - 1.5 Cr', '1.5 Cr - 2.5 Cr', '2.5 Cr+'], is_required: false },
-          { field_key: 'vastu_preference', field_label: 'Vastu Preference', field_type: 'select', options: ['East Facing', 'North Facing', 'North-East', 'Any'], is_required: false },
-          { field_key: 'property_type', field_label: 'Property Type Interested', field_type: 'select', options: ['2 BHK', '3 BHK', '4 BHK / Penthouse', 'Commercial Office', 'Plot / Land'], is_required: true },
-        ],
-      },
-      properties: {
-        customFields: [
-          { field_key: 'rera_no', field_label: 'RERA Registration No.', field_type: 'text', is_required: true },
-          { field_key: 'possession_status', field_label: 'Possession Status', field_type: 'select', options: ['Ready to Move', 'Under Construction (2026)', 'New Launch'], is_required: true },
-          { field_key: 'project_tower', field_label: 'Tower / Phase', field_type: 'text', is_required: false },
-        ],
-      },
-    };
-
-    const rbacNavItems = [
-      { key: 'leads', label: 'Leads', icon: 'Users', path: '/leads' },
-      { key: 'properties', label: 'Properties & Projects', icon: 'Building', path: '/properties' },
-      { key: 'team', label: 'Team Members', icon: 'UserCheck', path: '/team' },
-      { key: 'import', label: 'Import Data', icon: 'Upload', path: '/import' },
-      { key: 'integrations', label: 'Integrations', icon: 'Link', path: '/integrations' },
-      { key: 'settings', label: 'Settings & Branding', icon: 'Settings', path: '/settings' },
-    ];
-
-    // Persist new workspace configuration into PostgreSQL store
-    await updateSettings({
-      firmName: firmName,
-      city: city,
-      brand: newTenant.brand_config,
-      enabled_modules: newTenant.enabled_modules,
-      stages: seededModulesConfig.leads.stages.map(s => s.name),
-      custom_fields: seededModulesConfig.leads.customFields,
-      property_custom_fields: seededModulesConfig.properties.customFields,
-    });
-
-    // Persist admin user into crm_agents table
-    const meta = { initials: newTenant.brand_config.initials, avatar: '' };
+    // 1. The tenant row — the real anchor every tenant-scoped row hangs off.
     await sql`
-      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
-      VALUES (${newAdminUser.id}, ${newAdminUser.name}, ${newAdminUser.name.split(' ')[0]}, ${newTenant.brand_config.initials}, '', ${newAdminUser.role}, 'ACTIVE', ${sql.json(meta)}, ${req.tenantId})
-      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, metadata = EXCLUDED.metadata;
+      INSERT INTO tenants (id, name, slug, brand_config, ingest_secret, subscription_plan, subscription_status)
+      VALUES (${tenantId}, ${firmName}, ${cleanSlug}, ${sql.json(brand_config)}, ${ingestSecret}, 'PRO', 'ACTIVE')
     `;
 
-    // Ensure tenant dataset is seeded into PostgreSQL tables
-    await seedDatabase(true);
+    // 2. The owner — a login-capable user (OTP) + a roster mirror so the desk
+    //    and lead-assignment reads see them. Both under the NEW tenant.
+    const ownerId = `owner_${tenantId}`;
+    const ownerName = (adminName || 'Owner').trim();
+    const ownerMeta = { initials, avatar: '', phone: ownerPhone, email: ownerEmail };
+    await sql`
+      INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata)
+      VALUES (${ownerId}, ${tenantId}, ${ownerName}, ${ownerPhone}, ${ownerEmail}, 'owner', 'ACTIVE', ${sql.json(ownerMeta)})
+    `;
+    await sql`
+      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
+      VALUES (${ownerId}, ${ownerName}, ${ownerName.split(' ')[0]}, ${initials}, '', 'owner', 'ACTIVE', ${sql.json(ownerMeta)}, ${tenantId})
+    `;
 
+    // 3. Default settings + routing for the NEW tenant (NOT via tid(), which is
+    //    the requester's context). A new firm starts EMPTY — no demo leads.
+    const settings = {
+      firmName, city,
+      stages: ['New', 'Contacted', 'Site Visit', 'Negotiation', 'Closed Won', 'Closed Lost'],
+      sources: ['99acres', 'MagicBricks', 'Walk-in', 'Referral', 'Website'],
+    };
+    await sql`
+      INSERT INTO crm_settings (key, value, tenant_id) VALUES ('default', ${sql.json(settings)}, ${tenantId})
+      ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value
+    `;
+    await sql`
+      INSERT INTO crm_routing_rules (strategy, active_agent_ids, last_assigned_index, tenant_id)
+      VALUES ('round_robin', ${sql.json([ownerId])}, -1, ${tenantId})
+      ON CONFLICT (tenant_id) DO NOTHING
+    `;
+
+    // Sign the owner straight in — provisioning yields a real session, so the
+    // operator lands in the new desk authenticated (no fake logged-in state).
+    const token = signToken({ kind: 'user', tenant_id: tenantId, user_id: ownerId, role: 'owner' });
+
+    console.log(`[Tenant Onboard] Provisioned '${firmName}' as '${tenantId}' (owner ${ownerId}).`);
     return res.status(201).json({
       success: true,
-      message: `Workspace '${firmName}' successfully provisioned and seeded with Indian RERA defaults.`,
-      tenant: newTenant,
-      user: newAdminUser,
-      bootstrap: {
-        user: newAdminUser,
-        tenant: newTenant,
-        rbac_nav_items: rbacNavItems,
-        modules_config: seededModulesConfig,
-      },
+      message: `Workspace '${firmName}' provisioned.`,
+      tenant: { id: tenantId, name: firmName, slug: cleanSlug, brand_config },
+      owner: { id: ownerId, name: ownerName, phone: ownerPhone, email: ownerEmail, role: 'owner' },
+      ingest: { tenantSlug: cleanSlug, secret: ingestSecret },
+      loginWith: ownerEmail || ownerPhone,
+      token,
     });
   } catch (err: any) {
-    return res.status(500).json({ error: 'Tenant Provisioning Failed', message: err.message });
+    console.error('[Tenant Onboard] Failed:', err.message);
+    return res.status(500).json({ success: false, error: 'Tenant Provisioning Failed', message: err.message });
   }
 });
 

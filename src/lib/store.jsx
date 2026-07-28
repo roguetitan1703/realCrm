@@ -175,10 +175,17 @@ function reducer(state, action) {
 
     case 'ONBOARD_TENANT': {
       const { firmName, city, primaryColor, logoUrl } = action.config || {}
-      persistAuthSession({ loggedIn: true, role: state.role, activeAgentId: state.activeAgentId })
+      persistAuthSession({ loggedIn: true, role: 'admin', activeAgentId: state.activeAgentId })
       return {
         ...state,
         loggedIn: true,
+        role: 'admin',                    // the owner runs the full desk
+        // A brand-new firm starts EMPTY — clear the demo collections so nothing
+        // from the previous tenant bleeds through (hydrate then fills the owner).
+        leads: [],
+        properties: [],
+        importLogs: [],
+        notifications: [],
         settings: {
           ...state.settings,
           firmName: firmName || state.settings.firmName,
@@ -797,11 +804,16 @@ export function StoreProvider({ children }) {
       dispatch({ type: 'LOGOUT' })
       toast('Signed out successfully')
     },
+    // Called AFTER the backend has provisioned the tenant (Onboarding.jsx made
+    // the real call + stored the owner token). Point at the new tenant, enter an
+    // authenticated session, and hydrate its (empty) state — no demo data bleed.
     onboardTenant: (config) => {
-      if (config.slug) apiClient.setTenantId(config.slug)
+      if (config.tenantId) apiClient.setTenantId(config.tenantId)
       dispatch({ type: 'ONBOARD_TENANT', config })
-      toast(`Workspace provisioned & initialized for ${config.firmName || 'new tenant'}`)
-      apiClient.onboardTenant(config).catch(err => console.warn('[Onboard API] Backend error:', err.message))
+      toast(`${config.firmName || 'Workspace'} is ready`)
+      apiClient.getState()
+        .then(res => { if (res?.success && res.state) dispatch({ type: 'HYDRATE_SERVER', state: res.state }) })
+        .catch(err => console.warn('[Onboard hydrate] error:', err.message))
     },
     resetDatabase: () => {
       dispatch({ type: 'RESET' })
