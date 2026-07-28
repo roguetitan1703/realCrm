@@ -9,12 +9,22 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { WebhookIngestSchema } from '../models';
 import { queueManager } from '../services/queue';
-import { signWebhookPayload } from '../services/webhookSender';
-import { getLeads, createLead, addTimelineEvent, updateLead, getIntegrations, getRoutingRules, updateRoutingRules, getAgents } from '../services/store';
+import { getLeads, createLead, addTimelineEvent, updateLead, getRoutingRules, updateRoutingRules, getTenantForIngest } from '../services/store';
+import { runWithContext } from '../services/context';
 
 export const ingestRouter = Router();
+
+// Tolerant field mapping — portals (99acres/MagicBricks/Meta/website) each use
+// different key names. Pull the first present alias; nothing about our lead
+// shape leaks into the URL the client configures.
+function pick(body: any, keys: string[]): string {
+  for (const k of keys) {
+    const v = body?.[k] ?? body?.custom_attributes?.[k];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+  }
+  return '';
+}
 
 /**
  * Register background worker for webhook ingestion processing
@@ -38,118 +48,82 @@ queueManager.registerWorker('webhook-ingest', async (job) => {
  */
 ingestRouter.post('/:tenantSlug/:sourceKey', async (req: Request, res: Response) => {
   const { tenantSlug, sourceKey } = req.params;
-  const signature = req.headers['x-realcrm-signature'] as string;
+  console.log(`[Ingest] POST for tenant '${tenantSlug}', source '${sourceKey}'`);
 
-  console.log(`[Webhook Ingest] Received POST for tenant '${tenantSlug}', source '${sourceKey}'`);
-
-  // 1. Fetch integration settings from PostgreSQL to verify webhook secret
-  const integrations = await getIntegrations();
-  const portalConfig = integrations[sourceKey] || integrations['99acres'] || {};
-  const tenantSecret = portalConfig.secret || 'whsec_demo_prod_901';
-
-  // 2. HMAC SHA-256 Webhook Security Verification
-  if (tenantSecret) {
-    if (!signature) {
-      console.warn(`[Webhook Ingest] Rejected: Missing X-RealCRM-Signature header for '${tenantSlug}'`);
-      return res.status(401).json({ error: 'Unauthorized', message: 'Missing X-RealCRM-Signature HMAC header' });
-    }
-    const expectedSignature = signWebhookPayload(req.body, tenantSecret);
-    if (signature !== expectedSignature) {
-      console.warn(`[Webhook Ingest] Rejected: Signature mismatch! Received '${signature}', expected '${expectedSignature}'`);
-      return res.status(403).json({ error: 'Forbidden', message: 'HMAC signature verification failed. Payload may be tampered.' });
-    }
-    console.log(`[Webhook Ingest] Verified HMAC SHA-256 signature successfully.`);
+  // 1. Resolve the tenant FROM THE URL (not the request context) — this is a
+  //    public endpoint the portal calls with no token/header.
+  const tenant = await getTenantForIngest(tenantSlug);
+  if (!tenant) {
+    return res.status(404).json({ error: 'Unknown workspace', message: `No workspace '${tenantSlug}'.` });
   }
 
-  // 2. Validate payload against Zod schema
-  const parseResult = WebhookIngestSchema.safeParse(req.body);
-  if (!parseResult.success) {
-    return res.status(400).json({ error: 'Invalid Payload Shape', details: parseResult.error.format() });
+  // 2. Authenticate with the per-tenant key. Portals can only add a URL, so the
+  //    key rides in ?key= (a header x-api-key is also accepted).
+  const providedKey = (req.query.key as string) || (req.headers['x-api-key'] as string) || '';
+  if (!tenant.secret || providedKey !== tenant.secret) {
+    console.warn(`[Ingest] Rejected: bad/missing key for '${tenantSlug}'.`);
+    return res.status(401).json({ error: 'Unauthorized', message: 'Missing or invalid ingest key.' });
   }
 
-  const leadData = parseResult.data;
+  // 3. Map the portal's payload tolerantly to a lead.
+  const name = pick(req.body, ['name', 'full_name', 'fullname', 'customer_name', 'lead_name', 'Name']);
+  const phone = pick(req.body, ['phone', 'mobile', 'phone_number', 'contact_number', 'contact', 'Phone', 'mobile_number']);
+  const email = pick(req.body, ['email', 'email_id', 'Email']);
+  if (!name || !phone) {
+    return res.status(400).json({ error: 'Invalid payload', message: 'A name and phone are required.' });
+  }
+  const locality = pick(req.body, ['locality', 'location', 'area', 'city', 'preferred_locality']);
+  const config = pick(req.body, ['config', 'bhk', 'configuration', 'property_type', 'requirement']);
+  const externalId = pick(req.body, ['external_id', 'id', 'lead_id', 'enquiry_id']) || `${sourceKey}-${phone.replace(/\D/g, '')}`;
 
+  // 4. Everything below runs UNDER the resolved tenant so createLead / routing /
+  //    dedup all scope to the right workspace.
   try {
-    // 3. Idempotency Check (prevent duplicate processing of same portal retry)
-    const idempotencyKey = `dedup:${tenantSlug}:${sourceKey}:${leadData.external_id}`;
-    const alreadyProcessed = queueManager.checkIdempotencyLock(idempotencyKey);
-    if (alreadyProcessed) {
-      console.log(`[Webhook Ingest] Idempotency hit! Skipping already processed external_id: ${leadData.external_id}`);
-      return res.status(200).json({ status: 'ignored', reason: 'Idempotent retry already processed' });
-    }
-    queueManager.setIdempotencyLock(idempotencyKey, 604800); // Lock for 7 days
+    const result = await runWithContext(
+      { tenantId: tenant.id, userId: null, role: 'system', actorType: 'system', actorLabel: `ingest:${sourceKey}` } as any,
+      async () => {
+        // Idempotency: ignore a portal retry of the same external_id.
+        const idempotencyKey = `dedup:${tenant.id}:${sourceKey}:${externalId}`;
+        if (queueManager.checkIdempotencyLock(idempotencyKey)) {
+          return { status: 'ignored', reason: 'Idempotent retry already processed' };
+        }
+        queueManager.setIdempotencyLock(idempotencyKey, 604800);
 
-    // 4. Automatic Lead Deduplication Matching (Check exact phone match in existing leads)
-    const cleanPhone = leadData.phone.replace(/[^0-9+]/g, '');
-    const leads = await getLeads();
-    const existingLead = leads.find(l => (l.phone && l.phone.replace(/[^0-9+]/g, '') === cleanPhone));
+        // Dedup on exact phone within this tenant.
+        const cleanPhone = phone.replace(/[^0-9+]/g, '');
+        const leads = await getLeads();
+        const existing = leads.find(l => l.phone && l.phone.replace(/[^0-9+]/g, '') === cleanPhone);
+        if (existing) {
+          const newNotes = [`[Duplicate from ${sourceKey}] Fresh inquiry attached.`, ...(existing.notes || [])];
+          await updateLead(existing.id, { notes: newNotes });
+          return { status: 'deduplicated_merged', merged_into_lead_id: existing.id };
+        }
 
-    if (existingLead) {
-      console.log(`[Webhook Ingest] Deduplication hit! Lead '${leadData.name}' (${cleanPhone}) matches existing lead ${existingLead.id}`);
-      
-      const newNotes = [`[DUPLICATE INQUIRY MERGED] New inquiry from ${sourceKey} automatically attached.`, ...(existingLead.notes || [])];
-      await updateLead(existingLead.id, { notes: newNotes });
+        // Round-robin assignment among active agents.
+        const rules = await getRoutingRules();
+        const activeAgents = (rules.active_agent_ids && rules.active_agent_ids.length > 0) ? rules.active_agent_ids : [];
+        let assignedAgentId: string | null = null;
+        if (activeAgents.length) {
+          const nextIdx = (rules.last_assigned_index + 1) % activeAgents.length;
+          assignedAgentId = activeAgents[nextIdx];
+          await updateRoutingRules({ last_assigned_index: nextIdx });
+        }
 
-      await queueManager.enqueue('webhook-ingest', {
-        action: 'merge_dedup',
-        tenantSlug,
-        sourceKey,
-        existingLeadId: existingLead.id,
-        leadData,
-        note: `[DUPLICATE INQUIRY MERGED] New inquiry from ${sourceKey} automatically attached to existing lead record.`
-      });
+        const newLead = await createLead({
+          name, phone, email,
+          stage: 'New',
+          agentId: assignedAgentId,
+          source: sourceKey,
+          req: { locality: locality || 'Pune', config: config || '' },
+        } as any);
+        return { status: 'ingested', lead_id: newLead?.id || null, assigned_agent_id: assignedAgentId };
+      }
+    );
 
-      return res.status(200).json({
-        success: true,
-        status: 'deduplicated_merged',
-        tenant_slug: tenantSlug,
-        source: sourceKey,
-        external_id: leadData.external_id,
-        merged_into_lead_id: existingLead.id,
-        assigned_agent: existingLead.agentId || existingLead.assigned_agent_id
-      });
-    }
-
-    // 5. Round-Robin Lead Routing Rule from PostgreSQL Server Store
-    const rules = await getRoutingRules();
-    const activeAgents = (rules.active_agent_ids && rules.active_agent_ids.length > 0) ? rules.active_agent_ids : ['a1', 'a2', 'a3'];
-    const nextIdx = (rules.last_assigned_index + 1) % activeAgents.length;
-    const assignedAgentId = activeAgents[nextIdx];
-    await updateRoutingRules({ last_assigned_index: nextIdx });
-
-    const newLead = await createLead({
-      name: leadData.name,
-      phone: leadData.phone,
-      email: leadData.email || '',
-      stage: 'New',
-      agentId: assignedAgentId,
-      source: sourceKey,
-      req: { locality: leadData.custom_attributes?.locality || 'Pune', config: leadData.custom_attributes?.config || '2 BHK' },
-      custom_attributes: leadData.custom_attributes
-    });
-
-    // 6. Enqueue background ingestion processing job
-    const jobId = await queueManager.enqueue('webhook-ingest', {
-      action: 'create_new',
-      tenantSlug,
-      sourceKey,
-      leadData,
-      assignedAgentId
-    });
-
-    console.log(`[Webhook Ingest] Successfully ingested new lead '${leadData.name}' -> assigned to ${assignedAgentId} (Job: ${jobId})`);
-
-    return res.status(200).json({
-      success: true,
-      status: 'ingested',
-      tenant_slug: tenantSlug,
-      source: sourceKey,
-      external_id: leadData.external_id,
-      assigned_agent_id: assignedAgentId,
-      job_id: jobId
-    });
+    console.log(`[Ingest] ${result.status} for '${tenant.id}' (${sourceKey}, ${name})`);
+    return res.status(200).json({ success: true, tenant: tenant.id, source: sourceKey, external_id: externalId, ...result });
   } catch (err: any) {
-    console.error(`[Webhook Ingest] Internal Error:`, err.message);
-    return res.status(500).json({ error: 'Ingestion Pipeline Error', message: err.message });
+    console.error('[Ingest] Error:', err.message);
+    return res.status(500).json({ error: 'Ingestion failed', message: err.message });
   }
 });

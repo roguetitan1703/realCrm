@@ -119,6 +119,11 @@ export const api = {
   resetDatabase: () => request('/workspace/reset', { method: 'POST' }),
   onboardTenant: (config) => request('/workspace/onboard', { method: 'POST', body: JSON.stringify(config) }),
 
+  // Lead ingest (the per-tenant URL the client pastes into 99acres/MagicBricks)
+  baseUrl: () => BASE_URL,
+  getIngestConfig: () => request('/workspace/ingest'),
+  regenerateIngestKey: () => request('/workspace/ingest/regenerate', { method: 'POST' }),
+
   // Integrations
   getIntegrations: () => request('/workspace/integrations'),
   saveIntegration: (key, config) => request(`/workspace/integrations/${encodeURIComponent(key)}`, {

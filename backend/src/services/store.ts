@@ -9,6 +9,7 @@
  */
 
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_IDS, migrateProperColumns } from './db.js';
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
@@ -24,6 +25,39 @@ import { notify, notifyRoles } from './notifications.js';
  */
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
+}
+
+/** URL-safe per-tenant ingest key (portals paste this into their push URL). */
+export function genIngestKey(): string {
+  return `ink_${randomBytes(18).toString('base64url')}`;
+}
+
+/** Fetch the current tenant's ingest key + the info the UI needs to build the
+ *  push URLs it shows the client. */
+export async function getIngestConfig(): Promise<{ tenantSlug: string; secret: string }> {
+  const t = tid();
+  const rows = await sql`SELECT slug, ingest_secret FROM tenants WHERE id = ${t} OR slug = ${t} LIMIT 1`;
+  let secret = rows[0]?.ingest_secret as string | undefined;
+  if (!secret) {
+    secret = genIngestKey();
+    await sql`UPDATE tenants SET ingest_secret = ${secret} WHERE id = ${t} OR slug = ${t}`;
+  }
+  return { tenantSlug: rows[0]?.slug || t, secret };
+}
+
+/** Rotate the ingest key (invalidates any URL already handed out). */
+export async function regenerateIngestKey(): Promise<{ tenantSlug: string; secret: string }> {
+  const t = tid();
+  const secret = genIngestKey();
+  const rows = await sql`UPDATE tenants SET ingest_secret = ${secret} WHERE id = ${t} OR slug = ${t} RETURNING slug`;
+  return { tenantSlug: rows[0]?.slug || t, secret };
+}
+
+/** Resolve a tenant + its ingest key by slug/id — for the PUBLIC ingest endpoint
+ *  (no request context, so it can't use tid()). */
+export async function getTenantForIngest(slugOrId: string): Promise<{ id: string; secret: string | null } | null> {
+  const rows = await sql`SELECT id, ingest_secret FROM tenants WHERE slug = ${slugOrId} OR id = ${slugOrId} LIMIT 1`;
+  return rows[0] ? { id: rows[0].id, secret: rows[0].ingest_secret } : null;
 }
 
 /**
@@ -433,6 +467,8 @@ export async function ensureAuthIdentity(): Promise<void> {
     VALUES (${DEFAULT_TENANT_ID}, ${DEFAULT_TENANT_NAME}, ${DEFAULT_TENANT_ID}, 'ENTERPRISE', 'ACTIVE')
     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, subscription_status = EXCLUDED.subscription_status;
   `;
+  // Give the demo tenant an ingest key if it doesn't have one yet.
+  await sql`UPDATE tenants SET ingest_secret = ${genIngestKey()} WHERE id = ${DEFAULT_TENANT_ID} AND (ingest_secret IS NULL OR ingest_secret = '')`;
 
   // First superadmin (Delpat staff). Password from env — never committed; the
   // dev fallback only applies locally so nobody is locked out while building.

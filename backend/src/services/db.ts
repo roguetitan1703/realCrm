@@ -257,6 +257,10 @@ export async function initSchema(): Promise<void> {
     // Per-tenant PWA identity (installable app manifest + home-screen icons),
     // generated once at onboarding and stored here (icons as base64 PNG).
     await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS pwa_config JSONB DEFAULT '{}'::jsonb;`;
+    // Per-tenant lead-ingest key. Portals (99acres/MagicBricks/website) POST to
+    // /api/v1/ingest/<slug>/<source>?key=<this>, so it's the shared secret we
+    // hand the client to paste into their portal push-URL config.
+    await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS ingest_secret TEXT;`;
 
     // Push subscriptions — one row per device a user has opted into push on.
     await sql`
