@@ -14,8 +14,8 @@ than design-and-build one point at a time.
 | [properties.md](./properties.md) | C. Properties: fields, media, filters, add-flow | 🔒 locked (form UI ref at build-time) |
 | [ingestion.md](./ingestion.md) | D. Ingestion: webhook inbox + parser | 🔒 locked |
 | [data-lifecycle.md](./data-lifecycle.md) | Cross-cutting: retention & storage | 🔒 principle locked |
-| [branding.md](./branding.md) | E5 + platform identity, themes, URL, landing/login | 🧭 planning (questions open) |
-| [pwa.md](./pwa.md) | E3/E4 PWA & app-shell audit | 🧭 planning (questions open) |
+| [branding.md](./branding.md) | E5 + platform identity, themes, URL, landing/login | 🔒 locked (landing parked) |
+| [pwa.md](./pwa.md) | E3/E4 PWA & app-shell audit | 🔒 locked (one big overhaul) |
 
 > Each spec carries: **Decisions** (locked), **Data model**, **Flows/API**,
 > **Migration/rollback**, and a **Build checklist** (executed later, once locked).

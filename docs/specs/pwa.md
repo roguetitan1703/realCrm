@@ -1,7 +1,7 @@
 # Spec: PWA & app-shell audit (Roadmap E3 + E4)
 
-**Status:** 🧭 planning — questions open. The PWA is currently weak and feels like
-"another app". This is the audit + fix plan.
+**Status:** 🔒 **LOCKED.** One-app confirmed; **one big overhaul** (it's really
+behind), not a phased patch. This is the audit + rebuild plan.
 
 ---
 
@@ -36,13 +36,12 @@ isn't meant to be a deliberately different UX).
 
 ---
 
-## OPEN QUESTIONS
-7. **One-app confirm** — the PWA = the installable responsive website, and any
-   separate/under-built mobile layout is folded into it (not a distinct app). Or
-   is the mobile field-tool intentionally a different, simpler UX?
-8. **Scope now vs audit later** — fix the **concrete bugs first** (tenant install
-   identity, sticky bars, notifications device-test), then schedule the **full
-   flow/screen audit** as a pass? Or one big PWA overhaul?
+## ANSWERS (locked)
+6/7. **One app — confirmed** ("that will make us not miss things"): the mobile
+   layout folds into the responsive website; no separate app.
+8. **One big overhaul** — it's really behind, so a single rebuild pass (install
+   identity + sticky shell + push device-test + full flow/screen reconciliation),
+   not incremental patches.
 
 ---
 

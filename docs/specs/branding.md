@@ -1,8 +1,8 @@
 # Spec: Branding & platform identity (Roadmap E5 + platform surfaces)
 
-**Status:** 🧭 planning — questions open. The recurring one. Covers: the
-Delpat-vs-tenant identity split, curated multi-colour themes, the URL model, the
-landing + login surfaces, the "powered by Delpat" watermark, and the
+**Status:** 🔒 **LOCKED** (landing page parked; palette values designed at build).
+Covers: the Delpat-vs-tenant identity split, derived multi-colour themes, the URL
+model, org-select login, the very-quiet "Powered by Delpat" mark, and the
 colour-bleed-on-logout bug.
 
 ---
@@ -24,21 +24,44 @@ Every surface wears exactly one identity:
 | Superadmin console (`/admin`) | **Delpat** |
 | System / error / not-found | **Delpat** |
 | **Everything under `/{tenant}`** (login + whole app) | **TENANT** — name, logo, theme |
-| Inside a tenant, Delpat shows only as | a small **"Powered by Delpat"** mark |
+| Inside a tenant, Delpat shows only as | **one very quiet "Powered by Delpat"** mark, nothing else |
 
 **Rule:** pre-tenant = Delpat; inside a tenant = the tenant, with Delpat reduced
-to a quiet footer mark. Nothing tenant-coloured may leak onto a Delpat surface,
-and vice-versa.
+to **a single very quiet mark and removed everywhere else**. Nothing
+tenant-coloured may leak onto a Delpat surface, and vice-versa.
 
-## Tenant theming = a curated **collection of colours**, never a random hex  🔒
-- A tenant's identity is a **theme = a coordinated palette** (primary, accent,
-  surface, ink, wash, line, on-accent foreground, …), **not one colour**. This is
-  why ad-hoc single-hex picking kept breaking things (nav-active, contrast).
-- Tenants **pick from a set of designed themes** (each a full, contrast-checked
-  palette in light/dark) + upload their **logo**. **No raw colour picker.**
-- Implementation: `applyTheme(tokens)` sets the **whole token set** (extends
-  today's single `--accent` into a full palette); themes are defined once,
-  centrally, and validated. → Q1, Q2.
+## Tenant theming = a derived **collection of colours**  🔒
+A tenant's identity is a **full coordinated palette**, never a single raw hex
+slapped on one variable (that's what kept breaking nav-active/contrast). Two ways
+to set it, both producing a **complete, contrast-checked token set**:
+
+**(a) Pick a starter theme** — I design **~6 coherent palettes** (Delpat-curated,
+light/dark, validated). One tap.
+
+**(b) Pick a custom seed colour → the palette is DERIVED by fixed rules.** The
+picker is allowed, but a seed **never** gets applied blindly — it generates the
+whole accent family under guaranteed-contrast rules:
+
+- Fixed **neutral base stays** (charcoal chrome, linen surfaces) — only the accent
+  family varies, so the app is always coherent.
+- From the seed, derive + **contrast-clamp**:
+  - `--accent` = seed, lightness-clamped so it can carry `--on-accent` text ≥ AA.
+  - `--accent-rgb` = for alpha tints (nav-active etc.).
+  - `--accent-ink` = seed darkened until ≥ 4.5:1 on `--bg` (accent text/links).
+  - `--accent-wash` = seed ~90% → surface (faint fills).
+  - `--accent-line` = seed ~72% → surface (soft borders).
+  - `--on-accent` = white **or** near-black, whichever hits ≥ 4.5:1 on `--accent`
+    (auto-fixes the on-accent foreground).
+  - `--nav-active-bg` = `rgba(accent-rgb, .18)` on the dark chrome, contrast-checked.
+- **Preset rules = contrast constraints + fixed mix ratios.** A seed that can't
+  satisfy them (e.g. pure yellow) gets its **lightness clamped until it can** — so
+  every derived palette is legible by construction. A validator runs at derive-time.
+- Do the actual palette design + the derivation function with the **frontend-design
+  skill** at build (this is a real colour-system task).
+
+Implementation: `applyTheme(seedOrTheme)` computes the full token set and applies
+it; themes are just pre-baked instances of the same derivation. → Q1 (I design the
+starters), Q2 (picker allowed, always derived).
 
 ## Tenant identity = theme + logo + name
 - **Logo** drives: sidebar mark, login, **PWA install icon**, and the **media
@@ -71,30 +94,26 @@ surfaces must always render Delpat, regardless of what was last viewed.
 
 ---
 
-## OPEN QUESTIONS
-1. **Curated themes** — I propose a starter set of **~6 designed palettes** (full
-   multi-colour, light/dark, contrast-checked). Do you want to hand me the
-   palettes/refs, or should I design the starter set and you approve?
-2. Confirm: **no raw colour picker at all** — tenants choose a theme + upload a
-   logo, full stop.
-3. **Delpat presence inside a tenant** — a small "Powered by Delpat" in the login
-   footer + sidebar base only? Or even quieter (legal/settings only)?
-4. **URL** — everything under `realestate.delpat.in/{tenant}` for now; custom
-   domains parked as a future upsell — agree?
-5. **Landing page** — a simple one-pager (value prop + contact-for-onboarding) for
-   v1? Any content/brand refs you'll provide, or I draft it?
-6. **Login** — root = "enter organisation"; `/{tenant}` = tenant-branded login
-   directly. Confirm this split.
+## ANSWERS (locked)
+1. **I design the ~6 starter palettes** (frontend-design pass), you approve.
+2. **Colour picker allowed — but always derives the full palette** by the rules
+   above. Never a raw single value.
+3. **Delpat = one very quiet mark**, and **removed everywhere else** inside a
+   tenant. Minimal, single presence.
+4. **All under `realestate.delpat.in/{tenant}`**; custom domains parked.
+5. **Landing page parked** (later).
+6. Root = "enter organisation"; `/{tenant}` = tenant-branded login. ✔
 
 ---
 
 ## Build checklist (draft)
-- [ ] `applyTheme(tokens)` — full palette token set; retire single-hex accent path.
-- [ ] Curated theme registry (~6), light/dark, contrast-validated; picker = themes not colours.
+- [ ] Palette **derivation function** (seed → full token family, contrast-clamped + validator) — frontend-design pass.
+- [ ] **~6 starter themes** (designed instances) + **custom seed picker** that runs the derivation (never raw).
+- [ ] `applyTheme(seedOrTheme)` sets the full token set; retire the single-`--accent`-only path.
 - [ ] Hard-reset to Delpat theme on logout/leave-tenant (fix colour bleed); reset PWA theme-color.
 - [ ] Two-identity guard: platform surfaces always Delpat; tenant surfaces always tenant.
-- [ ] Landing page (Delpat + contact-for-onboarding).
+- [ ] One very quiet "Powered by Delpat" mark; remove Delpat branding everywhere else in tenant.
 - [ ] Root login "enter organisation" → `/{tenant}`; tenant-branded login at `/{tenant}`.
 - [ ] Replace fake `app.{tenant}.com` with real `realestate.delpat.in/{tenant}` everywhere.
-- [ ] "Powered by Delpat" mark placement per Q3.
 - [ ] Logo → sidebar + login + PWA icon + media watermark (single source brand_config).
+- [ ] **Parked:** landing page (Delpat + contact-for-onboarding) — later.
