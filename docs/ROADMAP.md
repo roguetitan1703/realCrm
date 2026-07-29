@@ -5,9 +5,14 @@
 > client feedback (11 points), the post-audit gaps, and the new production list
 > (17 points) into one themed, sequenced plan.
 >
-> **Working agreement:** we go **point by point** — design first, then build.
-> Items here are not "minimal checkpoints"; each carries open questions to
+> **Working agreement:** we **plan every point into a running spec first**
+> ([docs/specs/](./specs/)), revising as we work through the roadmap, and
+> **develop once** the plans are settled — not design-and-build one point at a
+> time. Items here are not "minimal checkpoints"; each carries open questions to
 > resolve before code.
+>
+> **Detailed plans:** [specs/](./specs/) — e.g. [specs/auth.md](./specs/auth.md)
+> (block A). The roadmap is the map; specs are what we build against.
 
 **Legend:** ✅ shipped · 🔶 partial / needs rework · ⬜ pending · 🅿️ parked
 

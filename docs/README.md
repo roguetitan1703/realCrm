@@ -8,6 +8,8 @@ platform. Now in **production** (first paying tenant onboarding).
 - **[ROADMAP.md](./ROADMAP.md)** — the single working backlog. Clubs the original
   client feedback, the post-audit gaps, and the production list into one themed,
   sequenced plan. **This is the current source of truth for what we build next.**
+- **[specs/](./specs/)** — the detailed, buildable plans behind the roadmap. We
+  plan every point here first, then develop once. Start: [specs/auth.md](./specs/auth.md).
 
 ## Reference
 
