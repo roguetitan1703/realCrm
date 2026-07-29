@@ -1,4 +1,13 @@
-# Bhumi Propcity — CRM demo
+# RealEstate by Delpat — CRM
+
+> **📍 Now a production SaaS.** For the current plan and how the docs are
+> organized, start at **[docs/ROADMAP.md](./docs/ROADMAP.md)** and
+> **[docs/README.md](./docs/README.md)**. The note below is the original demo
+> README, kept for history.
+
+---
+
+# Bhumi Propcity — CRM demo (historical)
 
 A clickable, white-label real-estate CRM demo for a Pune brokerage. Pure static
 front-end (HTML/CSS/JS, no build step, no backend). All data is in-memory and
