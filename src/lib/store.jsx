@@ -717,16 +717,18 @@ export function StoreProvider({ children }) {
     },
     // Real teammate creation — the server makes a login-capable user, so we take
     // the server's roster as truth rather than an optimistic local guess.
+    // Create a login-capable teammate (password auth). Resolves to the API
+    // response (carrying loginId + initialPassword to hand over), or false.
     addAgent: (details) => {
       const payload = typeof details === 'string' ? { name: details, role: 'agent' } : details
-      return apiClient.addAgent(payload)
+      return apiClient.createUser(payload)
         .then(res => {
-          if (res?.success && res.agents) {
-            dispatch({ type: 'SET', patch: { agents: res.agents } })
-            toast(`${payload.name?.split(' ')[0] || 'Teammate'} added — they can sign in with their phone or email`)
-            return true
+          if (res?.success) {
+            if (res.agents) dispatch({ type: 'SET', patch: { agents: res.agents } })
+            toast(`${payload.name?.split(' ')[0] || 'Teammate'} added`)
+            return res
           }
-          throw new Error('unexpected response')
+          throw new Error(res?.error || 'unexpected response')
         })
         .catch(err => { console.warn('[Add Agent API] error:', err.message); toast(err.message || 'Could not add teammate', 'warn'); return false })
     },

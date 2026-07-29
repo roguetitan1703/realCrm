@@ -824,27 +824,68 @@ function AddAgentModal({ store }) {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
+  const [loginId, setLoginId] = useState('')
   const [role, setRole] = useState('agent')
   const [saving, setSaving] = useState(false)
+  const [done, setDone] = useState(null)   // { handle, initialPassword } after creation
+  const [copied, setCopied] = useState(false)
 
   const submit = () => {
     if (!name.trim()) { store.toast('Add a name first', 'warn'); return }
-    // Sign-in codes go out by email, so email is the one required contact.
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { store.toast('A valid email is required — their sign-in code is sent there', 'warn'); return }
+    // Managers log in by email; agents by an assigned ID (email optional).
+    if (role === 'manager' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      store.toast('A manager needs a valid email to sign in.', 'warn'); return
+    }
     setSaving(true)
-    Promise.resolve(store.addAgent({ name: name.trim(), phone: phone.trim(), email: email.trim(), role }))
-      .then(ok => { if (ok) store.closeModal(); else setSaving(false) })
+    Promise.resolve(store.addAgent({ name: name.trim(), phone: phone.trim(), email: email.trim(), loginId: loginId.trim(), role }))
+      .then(res => {
+        if (res && res.success) {
+          setDone({ handle: role === 'manager' ? email.trim() : (res.loginId || loginId.trim()), initialPassword: res.initialPassword })
+        } else { setSaving(false) }
+      })
+  }
+
+  const copyCreds = () => {
+    const text = `${store.state.settings.firmName || 'Workspace'} login\nID/email: ${done.handle}\nPassword: ${done.initialPassword}`
+    navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => {})
+  }
+
+  if (done) {
+    return (
+      <Modal title="Teammate added" onClose={store.closeModal} width={400}>
+        <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Hand these over — they change the password on first login. This password won't be shown again.</div>
+        <div style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13.5, padding: '4px 0' }}><span className="u-muted">ID / email</span><span className="mono-num" style={{ fontWeight: 600, wordBreak: 'break-all' }}>{done.handle}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13.5, padding: '4px 0', borderTop: '1px solid var(--line-2)' }}><span className="u-muted">Password</span><span className="mono-num" style={{ fontWeight: 600 }}>{done.initialPassword}</span></div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button variant="secondary" onClick={copyCreds}><Icon name={copied ? 'check' : 'copy'} size={14} />{copied ? 'Copied' : 'Copy'}</Button>
+          <Button variant="primary" block onClick={store.closeModal}>Done</Button>
+        </div>
+      </Modal>
+    )
   }
 
   return (
     <Modal title="Add teammate" onClose={store.closeModal} width={400}>
       <Field label="Full name"><Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Kiran Patil" autoFocus /></Field>
-      <Field label="Email"><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="kiran@firm.com" type="email" /></Field>
-      <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
       <Field label="Access">
         <Segmented value={role} onChange={setRole} options={[{ value: 'agent', label: 'Sales agent' }, { value: 'manager', label: 'Manager' }]} />
       </Field>
-      <div className="u-muted" style={{ fontSize: 12, margin: '2px 0 4px' }}>They sign in with their email — a one-time code is sent there, no password. A manager sees the whole desk; an agent sees only their own leads.</div>
+      {role === 'agent' ? (
+        <>
+          <Field label="Login ID (optional — auto-created from the name)"><Input value={loginId} onChange={e => setLoginId(e.target.value.replace(/@/g, ''))} placeholder="e.g. kiran" /></Field>
+          <Field label="Email (optional)"><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="kiran@firm.com" type="email" /></Field>
+        </>
+      ) : (
+        <Field label="Email"><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="kiran@firm.com" type="email" /></Field>
+      )}
+      <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
+      <div className="u-muted" style={{ fontSize: 12, margin: '2px 0 4px' }}>
+        {role === 'manager'
+          ? 'A manager signs in with their email + password and can self-reset by email. Managers see the whole desk.'
+          : "An agent signs in with their ID + password. We'll create a starter password to hand over; the admin resets it if forgotten. Agents see only their own leads."}
+      </div>
       <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Adding…' : 'Add to team'}</Button>
     </Modal>
   )
