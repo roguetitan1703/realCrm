@@ -278,12 +278,82 @@ export async function initSchema(): Promise<void> {
 
     await migrateProperColumns();
     await createLedgerTables();
+    await migrateAuthV2();
 
     console.log('[Supabase DB] ✅ PostgreSQL schema initialization completed successfully.');
   } catch (err: any) {
     console.error('[Supabase DB Error] Failed to initialize database schema:', err.message || err);
     throw err;
   }
+}
+
+/**
+ * Auth v2 (spec: docs/specs/auth.md) — password login, sessions, resets.
+ * Moves tenant users off OTP onto ID/email + password. Additive & idempotent, so
+ * safe on every boot; the OTP path stays dormant until fully retired.
+ */
+export async function migrateAuthV2(): Promise<void> {
+  // Seat/credential columns on the existing users table.
+  const userCols: [string, string][] = [
+    ['login_id', 'TEXT'],              // agent handle (email-login users leave null)
+    ['password_hash', 'TEXT'],
+    ['must_change_password', 'BOOLEAN DEFAULT FALSE'],
+    ['email_verified', 'BOOLEAN DEFAULT FALSE'],
+    ['deleted_at', 'TIMESTAMPTZ'],     // soft delete — row kept for attribution
+    ['failed_logins', 'INT DEFAULT 0'],
+    ['locked_until', 'TIMESTAMPTZ'],
+  ];
+  for (const [c, t] of userCols) {
+    await sql.unsafe(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${c} ${t}`);
+  }
+  // login_id unique per tenant (only where present — email-login users are null).
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_tenant_loginid ON users (tenant_id, login_id) WHERE login_id IS NOT NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_users_tenant_email ON users (tenant_id, lower(email));`;
+
+  // Server-tracked sessions — the source of truth for validity/expiry, so a
+  // session can be listed (active-sessions view) and revoked (force-logout). The
+  // JWT carries this row's id as its `jti`.
+  await sql`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT,
+      user_id TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      ip TEXT,
+      user_agent TEXT,
+      revoked BOOLEAN DEFAULT FALSE
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (tenant_id, user_id);`;
+
+  // Password-reset tokens (owner/manager self-serve). Token emailed as a link;
+  // only its hash is stored; single-use; short TTL.
+  await sql`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      consumed BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_pwreset_token ON password_resets (token_hash);`;
+
+  // Unknown-key ingest attempts — minimal, short-lived abuse log (block D uses it
+  // too). Bodies are never stored here.
+  await sql`
+    CREATE TABLE IF NOT EXISTS ingest_rejects (
+      id TEXT PRIMARY KEY,
+      received_at TIMESTAMPTZ DEFAULT NOW(),
+      ip TEXT,
+      key_prefix TEXT,
+      note TEXT
+    );
+  `;
 }
 
 /**

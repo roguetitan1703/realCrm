@@ -12,9 +12,10 @@
 
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { randomBytes, createHash } from 'crypto';
 import { sql, DEFAULT_TENANT_ID } from './db.js';
 import { audit } from './audit.js';
-import { emailConfigured, sendOtpEmail } from './email.js';
+import { emailConfigured, sendOtpEmail, sendPasswordResetEmail } from './email.js';
 
 export interface RequestCtx {
   ip?: string | null;
@@ -33,6 +34,7 @@ export interface TenantTokenClaims {
   tenant_id: string;
   user_id: string;
   role: string;
+  jti?: string;   // session id (auth v2) — the sessions row that backs this token
 }
 export interface SuperadminTokenClaims {
   kind: 'superadmin';
@@ -253,6 +255,208 @@ export function publicUser(u: any): any {
 export async function getUserById(tenantId: string, userId: string): Promise<any | null> {
   const rows = await sql`SELECT * FROM users WHERE id = ${userId} AND tenant_id = ${tenantId} LIMIT 1`;
   return rows.length ? rows[0] : null;
+}
+
+// ---------------------------------------------------------------------------
+// AUTH V2 — password login, sessions, resets (spec: docs/specs/auth.md)
+// One secret per user: a password. Owner/manager log in by email, agents by an
+// assigned login_id. Sessions are server-tracked (30d sliding) so they can be
+// listed + revoked. OTP above is kept dormant for one release, then removed.
+// ---------------------------------------------------------------------------
+
+const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS) || 30;
+const MAX_FAILED = 5;
+const LOCK_MINUTES = 15;
+const BCRYPT_COST = 10;
+const APP_BASE_URL = (process.env.APP_BASE_URL || 'https://realestate.delpat.in').replace(/\/+$/, '');
+
+function isActive(status: any): boolean {
+  return String(status || '').toLowerCase() === 'active';
+}
+function sessionExpiryISO(): string {
+  return new Date(Date.now() + SESSION_TTL_DAYS * 86400000).toISOString();
+}
+
+/** Minimum strength for a user-chosen password. Returns a message or null. */
+export function passwordIssue(pw: string): string | null {
+  if (!pw || String(pw).length < 8) return 'Password must be at least 8 characters.';
+  return null;
+}
+
+/** A memorable suggestion an admin can hand over (word-place-number). */
+const PW_WORDS = ['tiger', 'river', 'maple', 'cedar', 'delta', 'orbit', 'ember', 'coral', 'ivory', 'onyx', 'pine', 'wren'];
+const PW_PLACES = ['pune', 'mumbai', 'thane', 'nashik', 'baner', 'wakad', 'kothrud', 'hadapsar'];
+export function suggestPassword(): string {
+  const pick = (a: string[]) => a[Math.floor(Math.random() * a.length)];
+  return `${pick(PW_WORDS)}-${pick(PW_PLACES)}-${Math.floor(10 + Math.random() * 89)}`;
+}
+
+// ---- Sessions --------------------------------------------------------------
+
+export async function createSession(tenantId: string | null, userId: string, ctx: RequestCtx = {}): Promise<string> {
+  const id = `sess_${Date.now()}_${randomBytes(9).toString('base64url')}`;
+  await sql`
+    INSERT INTO sessions (id, tenant_id, user_id, expires_at, ip, user_agent)
+    VALUES (${id}, ${tenantId}, ${userId}, ${sessionExpiryISO()}, ${ctx.ip || null}, ${ctx.userAgent || null})
+  `;
+  return id;
+}
+
+/** Load a live session and slide its window. Returns the row or null if it's
+ *  missing / revoked / expired. The last_seen bump is throttled to ~5 min. */
+export async function touchSession(jti: string): Promise<any | null> {
+  const rows = await sql`SELECT * FROM sessions WHERE id = ${jti} AND revoked = FALSE AND expires_at > NOW() LIMIT 1`;
+  if (!rows.length) return null;
+  await sql`
+    UPDATE sessions SET last_seen_at = NOW(), expires_at = ${sessionExpiryISO()}
+    WHERE id = ${jti} AND last_seen_at < NOW() - INTERVAL '5 minutes'
+  `;
+  return rows[0];
+}
+
+export async function revokeSession(jti: string): Promise<void> {
+  await sql`UPDATE sessions SET revoked = TRUE WHERE id = ${jti}`;
+}
+export async function revokeUserSessions(userId: string, exceptJti?: string): Promise<void> {
+  if (exceptJti) await sql`UPDATE sessions SET revoked = TRUE WHERE user_id = ${userId} AND id <> ${exceptJti}`;
+  else await sql`UPDATE sessions SET revoked = TRUE WHERE user_id = ${userId}`;
+}
+export async function listSessions(userId: string): Promise<any[]> {
+  return sql`
+    SELECT id, created_at, last_seen_at, expires_at, ip, user_agent
+    FROM sessions WHERE user_id = ${userId} AND revoked = FALSE AND expires_at > NOW()
+    ORDER BY last_seen_at DESC
+  `;
+}
+
+// ---- Password login + lifecycle -------------------------------------------
+
+/** Log in with a handle (email → owner/manager, login_id → agent) + password.
+ *  Returns a token + session, or { error } (generic, anti-enumeration). */
+export async function passwordLogin(
+  tenantId: string, handleRaw: string, password: string, ctx: RequestCtx = {},
+): Promise<{ token: string; user: any; mustChange: boolean } | { error: string }> {
+  const handle = String(handleRaw || '').trim();
+  if (!handle || !password) return { error: 'invalid' };
+
+  const rows = isEmail(handle)
+    ? await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND lower(email) = ${handle.toLowerCase()} AND deleted_at IS NULL LIMIT 1`
+    : await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND login_id = ${handle} AND deleted_at IS NULL LIMIT 1`;
+  const u = rows[0];
+
+  const fail = () => {
+    audit({
+      tenant_id: tenantId, actor_type: 'user', actor_id: null, actor_label: handle,
+      action: 'auth.login_failed', target_type: 'user', target_id: u?.id ?? null,
+      summary: `Password login failed for ${handle}`, metadata: { handle }, ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+    return { error: 'invalid' as const };
+  };
+
+  if (!u) return fail();
+  if (u.locked_until && new Date(u.locked_until) > new Date()) return { error: 'invalid' };
+  if (!isActive(u.status) || !u.password_hash) return fail();
+
+  const ok = await bcrypt.compare(String(password), u.password_hash);
+  if (!ok) {
+    const failed = (u.failed_logins || 0) + 1;
+    const lock = failed >= MAX_FAILED ? new Date(Date.now() + LOCK_MINUTES * 60000).toISOString() : null;
+    await sql`UPDATE users SET failed_logins = ${failed}, locked_until = ${lock} WHERE id = ${u.id}`;
+    return fail();
+  }
+
+  await sql`UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ${u.id}`;
+  const jti = await createSession(tenantId, u.id, ctx);
+  const token = signToken({ kind: 'user', tenant_id: tenantId, user_id: u.id, role: u.role, jti });
+  audit({
+    tenant_id: tenantId, actor_type: 'user', actor_id: u.id, actor_label: u.name || handle,
+    action: 'auth.login', target_type: 'user', target_id: u.id,
+    summary: `${u.name || handle} logged in`, metadata: { handle }, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return { token, user: publicUser(u), mustChange: !!u.must_change_password };
+}
+
+/** Change own password (requires the current one). Revokes other sessions. */
+export async function changePassword(
+  tenantId: string, userId: string, current: string, next: string, currentJti?: string,
+): Promise<{ ok: true } | { error: string }> {
+  const issue = passwordIssue(next);
+  if (issue) return { error: issue };
+  const rows = await sql`SELECT * FROM users WHERE id = ${userId} AND tenant_id = ${tenantId} AND deleted_at IS NULL LIMIT 1`;
+  const u = rows[0];
+  if (!u || !u.password_hash) return { error: 'invalid' };
+  if (!(await bcrypt.compare(String(current), u.password_hash))) return { error: 'Current password is incorrect.' };
+  const hash = await bcrypt.hash(String(next), BCRYPT_COST);
+  await sql`UPDATE users SET password_hash = ${hash}, must_change_password = FALSE WHERE id = ${userId}`;
+  await revokeUserSessions(userId, currentJti);
+  audit({
+    tenant_id: tenantId, actor_type: 'user', actor_id: userId, actor_label: u.name || userId,
+    action: 'auth.password_changed', target_type: 'user', target_id: userId,
+    summary: `${u.name || userId} changed their password`, metadata: {},
+  });
+  return { ok: true };
+}
+
+/** Start a self-serve reset. Silent (no enumeration); only for verified emails. */
+export async function requestPasswordReset(tenantId: string, emailRaw: string): Promise<void> {
+  const email = String(emailRaw || '').trim().toLowerCase();
+  if (!isEmail(email) || !emailConfigured()) return;
+  const rows = await sql`
+    SELECT * FROM users
+    WHERE tenant_id = ${tenantId} AND lower(email) = ${email}
+      AND email_verified = TRUE AND deleted_at IS NULL AND status ILIKE 'active' LIMIT 1
+  `;
+  const u = rows[0];
+  if (!u) return; // silent — don't reveal whether the email exists
+
+  const token = randomBytes(24).toString('base64url');
+  const tokenHash = createHash('sha256').update(token).digest('hex');
+  const id = `pwr_${Date.now()}_${randomBytes(4).toString('hex')}`;
+  const expiresAt = new Date(Date.now() + 30 * 60000).toISOString();
+  await sql`
+    INSERT INTO password_resets (id, tenant_id, user_id, token_hash, expires_at)
+    VALUES (${id}, ${tenantId}, ${u.id}, ${tokenHash}, ${expiresAt})
+  `;
+  const brand = await brandFor(tenantId);
+  const link = `${APP_BASE_URL}/${tenantId}/reset?token=${token}`;
+  try { await sendPasswordResetEmail(u.email, link, brand.name, brand.color); }
+  catch (e: any) { console.warn('[Auth] reset email failed:', e?.message); }
+}
+
+/** Complete a reset with the emailed token. Revokes all the user's sessions. */
+export async function resetPassword(tenantId: string, token: string, next: string): Promise<{ ok: true } | { error: string }> {
+  const issue = passwordIssue(next);
+  if (issue) return { error: issue };
+  const tokenHash = createHash('sha256').update(String(token || '')).digest('hex');
+  const rows = await sql`
+    SELECT * FROM password_resets
+    WHERE tenant_id = ${tenantId} AND token_hash = ${tokenHash} AND consumed = FALSE AND expires_at > NOW()
+    ORDER BY created_at DESC LIMIT 1
+  `;
+  const r = rows[0];
+  if (!r) return { error: 'This reset link is invalid or has expired.' };
+  const hash = await bcrypt.hash(String(next), BCRYPT_COST);
+  await sql`UPDATE users SET password_hash = ${hash}, must_change_password = FALSE, failed_logins = 0, locked_until = NULL WHERE id = ${r.user_id}`;
+  await sql`UPDATE password_resets SET consumed = TRUE WHERE id = ${r.id}`;
+  await revokeUserSessions(r.user_id);
+  audit({
+    tenant_id: tenantId, actor_type: 'user', actor_id: r.user_id, actor_label: r.user_id,
+    action: 'auth.password_reset', target_type: 'user', target_id: r.user_id,
+    summary: `Password reset via email link`, metadata: {},
+  });
+  return { ok: true };
+}
+
+/** Admin sets/resets a user's password (agents have no email self-reset).
+ *  Forces a change on next login and kicks their sessions. */
+export async function adminSetPassword(tenantId: string, userId: string, newPassword: string, mustChange = true): Promise<boolean> {
+  const hash = await bcrypt.hash(String(newPassword), BCRYPT_COST);
+  const res = await sql`
+    UPDATE users SET password_hash = ${hash}, must_change_password = ${mustChange}, failed_logins = 0, locked_until = NULL
+    WHERE id = ${userId} AND tenant_id = ${tenantId} AND deleted_at IS NULL RETURNING id
+  `;
+  if (res.length) await revokeUserSessions(userId);
+  return res.length > 0;
 }
 
 export { DEFAULT_TENANT_ID };
