@@ -10,7 +10,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { Tenant, User } from '../models';
 import { getSettings, getAgents } from '../services/store';
-import { verifyToken } from '../services/auth';
+import { verifyToken, touchSession } from '../services/auth';
 import { runWithContext, RequestContext } from '../services/context';
 import { DEFAULT_TENANT_ID } from '../services/db';
 
@@ -63,7 +63,7 @@ async function getTenantContext(tenantId: string): Promise<Tenant | null> {
  * Never rejects here; enforcement (subscription/module gating) stays in
  * requireTenantAuth. This only establishes "who + which tenant".
  */
-export function withRequestContext(req: Request, res: Response, next: NextFunction) {
+export async function withRequestContext(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
   const claims = token ? verifyToken(token) : null;
@@ -71,6 +71,19 @@ export function withRequestContext(req: Request, res: Response, next: NextFuncti
 
   let ctx: RequestContext;
   if (claims && claims.kind === 'user') {
+    // Auth v2: a token carrying a session id (jti) is only valid while that
+    // session is live — this is what makes revoke / force-logout / expiry real.
+    // Legacy tokens (no jti, from the dormant OTP flow) still pass. A transient DB
+    // hiccup fails OPEN (don't log everyone out); only a definitively gone session
+    // is rejected.
+    if (claims.jti) {
+      try {
+        const session = await touchSession(claims.jti);
+        if (!session) return res.status(401).json({ error: 'Session expired', code: 'SESSION_INVALID' });
+      } catch (e: any) {
+        console.warn('[Auth] session check errored (allowing):', e?.message);
+      }
+    }
     ctx = {
       tenantId: claims.tenant_id, userId: claims.user_id, role: claims.role, actorType: 'user',
       actorLabel: null, ip: req.ip || req.socket?.remoteAddress || null,

@@ -246,7 +246,11 @@ export function publicUser(u: any): any {
     tenant_id: u.tenant_id,
     name: u.name,
     phone: u.phone,
+    email: u.email,
+    login_id: u.login_id,
     role: u.role,
+    status: u.status,
+    must_change_password: !!u.must_change_password,
     initials: u.metadata?.initials,
     avatar: u.metadata?.avatar,
   };

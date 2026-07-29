@@ -16,7 +16,10 @@
 import { Router, Request, Response } from 'express';
 import {
   issueOtp, verifyOtp, superadminLogin, verifyToken, getUserById, publicUser, DEFAULT_TENANT_ID,
+  passwordLogin, changePassword, requestPasswordReset, resetPassword,
+  revokeSession, listSessions,
 } from '../services/auth.js';
+import type { TenantTokenClaims } from '../services/auth.js';
 
 export const authRouter = Router();
 
@@ -26,6 +29,14 @@ function tenantFromHeader(req: Request): string {
 
 function reqCtx(req: Request) {
   return { ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null };
+}
+
+/** Read + verify the bearer token, returning tenant-user claims (or null). */
+function userClaims(req: Request): TenantTokenClaims | null {
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const claims = token ? verifyToken(token) : null;
+  return claims && claims.kind === 'user' ? claims : null;
 }
 
 authRouter.post('/otp/request', async (req: Request, res: Response) => {
@@ -56,6 +67,75 @@ authRouter.post('/otp/verify', async (req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({ error: 'OTP verify failed', message: err.message });
   }
+});
+
+// ── Password auth (auth v2) ─────────────────────────────────────────────────
+// Tenant comes from the selected-workspace header (login is pre-token). The
+// handle is an email (owner/manager) or an assigned login_id (agent).
+authRouter.post('/login', async (req: Request, res: Response) => {
+  try {
+    const { handle, identifier, password } = req.body || {};
+    const h = handle || identifier;
+    if (!h || !password) return res.status(400).json({ error: 'handle and password are required' });
+    const out = await passwordLogin(tenantFromHeader(req), h, password, reqCtx(req));
+    if ('error' in out) return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(200).json({ success: true, token: out.token, user: out.user, mustChange: out.mustChange });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Login failed', message: err.message });
+  }
+});
+
+authRouter.post('/logout', async (req: Request, res: Response) => {
+  const claims = userClaims(req);
+  if (claims?.jti) { try { await revokeSession(claims.jti); } catch { /* best effort */ } }
+  return res.status(200).json({ success: true });
+});
+
+authRouter.post('/password/change', async (req: Request, res: Response) => {
+  const claims = userClaims(req);
+  if (!claims) return res.status(401).json({ error: 'Not authenticated' });
+  const { current, next } = req.body || {};
+  if (!current || !next) return res.status(400).json({ error: 'current and next are required' });
+  const out = await changePassword(claims.tenant_id, claims.user_id, current, next, claims.jti);
+  if ('error' in out) return res.status(400).json({ error: out.error });
+  return res.status(200).json({ success: true });
+});
+
+// Always 200 (no account enumeration) whether or not the email maps to a user.
+authRouter.post('/password/forgot', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body || {};
+    if (email) await requestPasswordReset(tenantFromHeader(req), email);
+  } catch (err: any) {
+    console.warn('[Auth] forgot-password error:', err.message);
+  }
+  return res.status(200).json({ success: true });
+});
+
+authRouter.post('/password/reset', async (req: Request, res: Response) => {
+  const { token, next } = req.body || {};
+  if (!token || !next) return res.status(400).json({ error: 'token and next are required' });
+  const out = await resetPassword(tenantFromHeader(req), token, next);
+  if ('error' in out) return res.status(400).json({ error: out.error });
+  return res.status(200).json({ success: true });
+});
+
+// Active sessions for the caller (the "where am I logged in" view).
+authRouter.get('/sessions', async (req: Request, res: Response) => {
+  const claims = userClaims(req);
+  if (!claims) return res.status(401).json({ error: 'Not authenticated' });
+  const sessions = await listSessions(claims.user_id);
+  return res.status(200).json({ success: true, sessions, current: claims.jti || null });
+});
+
+authRouter.post('/sessions/:id/revoke', async (req: Request, res: Response) => {
+  const claims = userClaims(req);
+  if (!claims) return res.status(401).json({ error: 'Not authenticated' });
+  // Only revoke a session that belongs to the caller.
+  const mine = await listSessions(claims.user_id);
+  if (!mine.some((s: any) => s.id === req.params.id)) return res.status(404).json({ error: 'Session not found' });
+  await revokeSession(req.params.id);
+  return res.status(200).json({ success: true });
 });
 
 authRouter.post('/superadmin/login', async (req: Request, res: Response) => {
