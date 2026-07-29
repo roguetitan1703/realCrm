@@ -270,6 +270,26 @@ function rowToProperty(r: any): any {
   };
 }
 
+// Shared timeline-event -> client shape mapper. Used for leads AND properties
+// (both key off crm_timeline_events.record_id) so a Remark (B1) looks and
+// behaves the same wherever it's attached. Carries `id` + `authorId` +
+// `timestamp` (unlike the old lead-only mapping, which dropped all three and
+// hardcoded ago:'just now') so the client can attribute, edit-own, and render
+// a real relative time.
+function mapEventForClient(e: TimelineEvent) {
+  // Remarks are already visually tagged "Remark" by the Timeline UI, so the
+  // label is just the text — no "Remark: " prefix duplicating that tag.
+  const isRemark = e.type === 'remark';
+  return {
+    id: e.id,
+    type: isRemark ? 'remark' : e.type === 'stage_change' ? 'stage' : e.type === 'creation' ? 'note' : 'msg',
+    label: isRemark ? e.description : (e.title && e.title !== e.description ? `${e.title}: ${e.description}` : e.description),
+    authorId: e.author || null,
+    timestamp: e.timestamp,
+    metadata: e.metadata || {},
+  };
+}
+
 function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = []): any {
   const createdMs = r.created_at ? new Date(r.created_at).getTime() : Date.now();
   const minsAgo = Math.max(0, Math.floor((Date.now() - createdMs) / 60000));
@@ -277,12 +297,7 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
   // Format timeline events for lead object
   const leadEvents = events
     .filter(e => e.record_id === r.id)
-    .map(e => ({
-      type: e.type === 'stage_change' ? 'stage' : e.type === 'creation' ? 'note' : 'msg',
-      label: e.title ? `${e.title}: ${e.description}` : e.description,
-      ago: 'just now',
-      timestamp: e.timestamp,
-    }));
+    .map(mapEventForClient);
 
   // Columns are source of truth; fall back to the req JSONB when a column is null.
   const jreq = r.req || {};
@@ -704,7 +719,15 @@ export async function getState(): Promise<ServerState> {
 
   const agents = agentsRows.map(rowToAgent);
   const inactiveAgentIds = agentsRows.filter(a => a.duty_status === 'OFF_DUTY').map(a => a.id);
-  const properties = propsRows.map(rowToProperty);
+  // Properties get the same crm_timeline_events feed as leads (Remark lives on
+  // both, B1) — merge matching events ahead of any legacy JSONB timeline items
+  // already on the row (real DB events are the source of truth going forward;
+  // legacy items just keep rendering, they're never migrated/rewritten).
+  const properties = propsRows.map(r => {
+    const p = rowToProperty(r);
+    const evs = timeline_events.filter(e => e.record_id === r.id).map(mapEventForClient);
+    return evs.length ? { ...p, timeline: [...evs, ...(p.timeline || [])] } : p;
+  });
   const leads = leadsRows.map(r => rowToLead(r, timeline_events, shortlistByLead.get(r.id) || []));
 
   const settings = settingsRows[0]?.value || DEFAULT_SETTINGS;
@@ -1277,6 +1300,42 @@ export async function addTimelineEvent(evt: Omit<TimelineEvent, 'id' | 'timestam
     id,
     timestamp: ts,
     ...evt,
+  };
+}
+
+/** Fetch one timeline event, tenant-scoped — used by the remark edit route to
+ *  check the caller actually authored it before allowing a change. */
+export async function getTimelineEventById(id: string, tenantId: string): Promise<TimelineEvent | null> {
+  const rows = await sql`SELECT * FROM crm_timeline_events WHERE id = ${id} AND tenant_id = ${tenantId} LIMIT 1`;
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id, record_id: r.record_id, type: r.type, title: r.title, description: r.description,
+    author: r.author || undefined,
+    timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp),
+    metadata: r.metadata || {},
+  };
+}
+
+/** Edit a remark's text (author-only, enforced by the route). Stamps
+ *  metadata.edited so the UI can show "edited". Timestamp/author are NOT
+ *  touched — an edit doesn't reorder the thread or change who wrote it. */
+export async function updateTimelineEvent(id: string, tenantId: string, text: string): Promise<TimelineEvent | null> {
+  const existing = await getTimelineEventById(id, tenantId);
+  if (!existing) return null;
+  const meta = { ...(existing.metadata || {}), edited: true, edited_at: new Date().toISOString() };
+  const rows = await sql`
+    UPDATE crm_timeline_events SET description = ${text}, metadata = ${sql.json(meta)}
+    WHERE id = ${id} AND tenant_id = ${tenantId}
+    RETURNING *
+  `;
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id, record_id: r.record_id, type: r.type, title: r.title, description: r.description,
+    author: r.author || undefined,
+    timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp),
+    metadata: r.metadata || {},
   };
 }
 

@@ -137,8 +137,8 @@ export const LEADS_DEF = {
       run: (store, l) => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' }) },
     { id: 'whatsapp', tier: 'quick', icon: 'wa', label: 'WhatsApp',
       run: (store, l) => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'wa' }) },
-    { id: 'note', tier: 'quick', icon: 'note', label: 'Add note',
-      run: (store, l) => store.openModal({ kind: 'note', leadId: l.id }) },
+    { id: 'remark', tier: 'quick', icon: 'note', label: 'Add remark',
+      run: (store, l) => store.openModal({ kind: 'remark', recordType: 'lead', recordId: l.id }) },
     { id: 'schedule', tier: 'quick', icon: 'calendar', label: 'Schedule',
       run: (store, l) => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id }) },
     // manage (behind "More"):
@@ -251,6 +251,8 @@ export const PROPERTIES_DEF = {
       run: (store, p) => store.openModal({ kind: 'callOwner', owner: p.owner, propId: p.id }) },
     { id: 'status', tier: 'quick', icon: 'tag', label: 'Set status',
       run: (store, p) => store.openModal({ kind: 'propStatus', propId: p.id }) },
+    { id: 'remark', tier: 'quick', icon: 'note', label: 'Add remark',
+      run: (store, p) => store.openModal({ kind: 'remark', recordType: 'property', recordId: p.id }) },
     // manage (behind "More"):
     { id: 'copy', tier: 'manage', icon: 'copy', label: 'Copy listing details',
       run: (store) => store.toast('Listing copied to clipboard') },

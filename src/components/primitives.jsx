@@ -1,6 +1,8 @@
 // Small pure components — each maps to a class in styles.css. Change look = edit styles.css.
+import { useState } from 'react'
 import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
+import { relTime, agentName } from '../lib/format.js'
 
 // ---- Button ----
 export function Button({ variant = 'ghost', size, block, icon, children, className, ...rest }) {
@@ -229,21 +231,59 @@ export function Stepper({ stages, current, onPick }) {
 }
 
 // ---- Timeline ----
-export function Timeline({ events = [] }) {
+// events: [{ id?, type, label, ago? | timestamp?, authorId? }]. `id`+`authorId`
+// are only present on real DB-backed events (remarks, calls, stage changes…) —
+// older client-only entries render fine but can't be edited (no id to target).
+export function Timeline({ events = [], agents = [], currentUserId, onEditRemark }) {
   const list = events || [];
-  const agentMap = { a1: 'Rakesh Sethi', a2: 'Neha Verma', a3: 'Rohan Mehta', a4: 'Ananya Sharma' };
-  const fmtLabel = (txt) => (txt || '').replace(/\bagent (a\d+)\b/gi, (m, id) => agentMap[id.toLowerCase()] || id);
+  const fmtLabel = (txt) => (txt || '').replace(/\bagent (\S+)\b/gi, (m, id) => agentName(agents, id));
   return (
     <div className="tl">
       {list.map((e, i) => (
-        <div className="ev" key={i}>
-          <div className="rail-dot">
-            <span className={'d' + (e.type === 'stage' || e.type === 'follow' || e.type === 'msg' ? ' accent' : '')} />
-            {i < list.length - 1 && <span className="ln" />}
-          </div>
-          <div className="ev-b"><div className="ev-l">{fmtLabel(e.label)}</div><div className="ev-a">{e.ago}</div></div>
-        </div>
+        <TimelineRow key={e.id || i} e={e} isLast={i === list.length - 1}
+          agents={agents} currentUserId={currentUserId} onEditRemark={onEditRemark} fmtLabel={fmtLabel} />
       ))}
+    </div>
+  )
+}
+
+function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(e.label || '')
+  const isRemark = e.type === 'remark'
+  const canEdit = isRemark && e.id && e.authorId && currentUserId && e.authorId === currentUserId && !!onEditRemark
+  const ago = e.timestamp ? relTime(e.timestamp) : (e.ago || '')
+  const author = e.authorId ? agentName(agents, e.authorId) : null
+  const save = () => {
+    if (!text.trim()) return
+    onEditRemark(e.id, text.trim())
+    setEditing(false)
+  }
+  return (
+    <div className="ev">
+      <div className="rail-dot">
+        <span className={'d' + (e.type === 'stage' || e.type === 'follow' || e.type === 'msg' || e.type === 'remark' ? ' accent' : '')} />
+        {!isLast && <span className="ln" />}
+      </div>
+      <div className="ev-b">
+        {editing ? (
+          <div className="ev-edit">
+            <textarea className="textarea" value={text} onChange={ev => setText(ev.target.value)} rows={2} autoFocus />
+            <div className="ev-edit-actions">
+              <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(false); setText(e.label || '') }}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={save}>Save</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="ev-l">{isRemark && <span className="ev-remark-tag">Remark</span>}{fmtLabel(e.label)}</div>
+            <div className="ev-a">
+              {author ? `${author} · ` : ''}{ago}{e.metadata?.edited ? ' · edited' : ''}
+              {canEdit && <button className="ev-edit-btn" onClick={() => setEditing(true)}>Edit</button>}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

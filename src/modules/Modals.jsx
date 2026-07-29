@@ -37,7 +37,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'addAgent' && <AddAgentModal store={store} />}
       {m?.kind === 'call' && <CallModal store={store} leadId={m.leadId} />}
       {m?.kind === 'callOwner' && <CallModal store={store} owner={m.owner} propId={m.propId} />}
-      {m?.kind === 'note' && <NoteModal store={store} leadId={m.leadId} />}
+      {m?.kind === 'remark' && <RemarkModal store={store} recordType={m.recordType} recordId={m.recordId} />}
       {m?.kind === 'propStatus' && <StatusModal store={store} propId={m.propId} />}
       {m?.kind === 'integration' && <IntegrationModal store={store} card={m.card} />}
       {m?.kind === 'import' && <ImportModal store={store} />}
@@ -951,15 +951,18 @@ function CallModal({ store, leadId, owner, propId }) {
   )
 }
 
-function NoteModal({ store, leadId }) {
+// ---- Add remark (B1): a threaded, timestamped note on a lead or property ----
+function RemarkModal({ store, recordType, recordId }) {
   const [text, setText] = useState('')
+  const submit = () => {
+    if (!text.trim()) { store.toast('Type a remark first', 'warn'); return }
+    store.addRemark(recordType, recordId, text.trim())
+    store.closeModal()
+  }
   return (
-    <Modal title="Add note" onClose={store.closeModal} width={400}>
-      <Textarea value={text} onChange={e => setText(e.target.value)} placeholder="Note or call summary…" autoFocus />
-      <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => { if (text.trim()) { store.addNote(leadId, text, 'note'); store.closeModal() } else store.toast('Type a note first', 'warn') }}>Add note</Button>
-        <Button onClick={() => { if (text.trim()) { store.addNote(leadId, text, 'call'); store.closeModal() } else store.toast('Type a note first', 'warn') }}>Log as call</Button>
-      </div>
+    <Modal title="Add remark" onClose={store.closeModal} width={400}>
+      <Textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a remark to this record…" autoFocus />
+      <Button variant="primary" block style={{ marginTop: 14 }} onClick={submit}>Add remark</Button>
     </Modal>
   )
 }

@@ -20,11 +20,74 @@ import {
   requireQuotaAvailable,
 } from '../middleware/auth';
 import { dispatchOutboundWebhook } from '../services/webhookSender';
-import { addTimelineEvent, updateLead, mergeLeads, getLeadById, getIntegrations } from '../services/store';
+import { addTimelineEvent, updateLead, mergeLeads, getLeadById, getIntegrations, getTimelineEventById, updateTimelineEvent } from '../services/store';
+import { audit } from '../services/audit';
 
 export const actionsRouter = Router();
 
 actionsRouter.use(requireTenantAuth);
+
+/**
+ * REMARK — a threaded note on any record (lead or property). B1: many per
+ * record, newest-first, author + time, author can edit their own (no delete).
+ * POST /api/v1/records/:id/actions/remark
+ */
+actionsRouter.post('/:id/actions/remark', async (req: Request, res: Response) => {
+  try {
+    const recordId = req.params.id;
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Remark text is required' });
+    const authorId = req.user?.id || null;
+    const evt = await addTimelineEvent({
+      record_id: recordId, type: 'remark', title: 'Remark', description: text,
+      author: authorId || undefined,
+    });
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,
+      actor_label: authorId || 'system', action: 'remark.added',
+      target_type: 'record', target_id: recordId, summary: 'Remark added', metadata: {},
+    });
+    return res.status(201).json({
+      success: true,
+      timeline_event: { id: evt.id, type: 'remark', label: text, authorId, timestamp: evt.timestamp, metadata: {} },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to add remark', message: err.message });
+  }
+});
+
+/**
+ * Edit a remark — author-only. Not the last-write-wins pattern of stage/status
+ * changes: this literally rejects anyone but the person who wrote it.
+ * PATCH /api/v1/records/:id/actions/remark/:eventId
+ */
+actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Response) => {
+  try {
+    const { eventId } = req.params;
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Remark text is required' });
+    const existing = await getTimelineEventById(eventId, req.tenantId!);
+    if (!existing) return res.status(404).json({ error: 'Remark not found' });
+    if (existing.type !== 'remark') return res.status(400).json({ error: 'Only remarks can be edited' });
+    const authorId = req.user?.id || null;
+    if (!authorId || existing.author !== authorId) {
+      return res.status(403).json({ error: 'You can only edit your own remark' });
+    }
+    const updated = await updateTimelineEvent(eventId, req.tenantId!, text);
+    if (!updated) return res.status(404).json({ error: 'Remark not found' });
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,
+      actor_label: authorId, action: 'remark.updated',
+      target_type: 'record', target_id: existing.record_id, summary: 'Remark edited', metadata: {},
+    });
+    return res.status(200).json({
+      success: true,
+      timeline_event: { id: updated.id, type: 'remark', label: text, authorId, timestamp: updated.timestamp, metadata: updated.metadata },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to edit remark', message: err.message });
+  }
+});
 
 /**
  * 1. CLICK-TO-CALL TELEPHONY BRIDGE

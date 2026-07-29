@@ -168,6 +168,25 @@ function reducer(state, action) {
 
     case 'SET': return { ...state, ...action.patch }
 
+    // Real, server-persisted remark events (B1) — kind picks the array so the
+    // same actions serve leads and properties.
+    case 'ADD_TIMELINE_EVENT': {
+      const arrKey = action.kind === 'property' ? 'properties' : 'leads'
+      return { ...state, [arrKey]: state[arrKey].map(r => r.id === action.id ? { ...r, timeline: [action.event, ...(r.timeline || [])] } : r) }
+    }
+    case 'EDIT_TIMELINE_EVENT': {
+      const arrKey = action.kind === 'property' ? 'properties' : 'leads'
+      return {
+        ...state,
+        [arrKey]: state[arrKey].map(r => r.id !== action.id ? r : {
+          ...r,
+          timeline: (r.timeline || []).map(e => e.id === action.eventId
+            ? { ...e, label: action.text, metadata: { ...(e.metadata || {}), edited: true } }
+            : e),
+        }),
+      }
+    }
+
     case 'LOGIN': {
       // The verified user drives role + identity. Backend roles are
       // owner/manager/agent; the desk UI is admin/agent — anything that isn't a
@@ -643,6 +662,24 @@ export function StoreProvider({ children }) {
       dispatch({ type: 'MERGE', leadId })
       toast('Merged into one record')
       apiClient.mergeRecords(leadId, leadId, 'combine_timeline').catch(err => console.warn('[Merge API] Backend error:', err.message))
+    },
+    // Remark thread (B1) — real persistence, not the old client-only note echo.
+    // kind = 'lead' | 'property'.
+    addRemark: (kind, id, text) => {
+      apiClient.addRemark(id, text)
+        .then(res => {
+          if (res?.success && res.timeline_event) { dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event }); toast('Remark added') }
+          else toast('Could not save the remark', 'warn')
+        })
+        .catch(err => { console.warn('[Remark API] error:', err.message); toast('Could not save the remark — try again', 'warn') })
+    },
+    editRemark: (kind, id, eventId, text) => {
+      apiClient.editRemark(id, eventId, text)
+        .then(res => {
+          if (res?.success) { dispatch({ type: 'EDIT_TIMELINE_EVENT', kind, id, eventId, text }); toast('Remark updated') }
+          else toast('Could not save the edit', 'warn')
+        })
+        .catch(err => { console.warn('[Remark edit API] error:', err.message); toast('Could not save the edit — try again', 'warn') })
     },
     attachProp: (leadId, propId, label) => {
       dispatch({ type: 'ATTACH_PROP', leadId, propId, label })

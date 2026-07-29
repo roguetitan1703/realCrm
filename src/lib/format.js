@@ -14,6 +14,22 @@ export function timeAgo(mins) {
   return Math.round(mins / 1440) + 'd ago'
 }
 
+// Relative time computed at RENDER time from a real ISO timestamp (unlike the
+// old server-baked 'just now' on every timeline event, which never updated).
+export function relTime(iso) {
+  if (!iso) return ''
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  return mins < 1 ? 'just now' : timeAgo(mins)
+}
+
+// Resolve a user/agent id (as stored on a timeline event's author) to a
+// display name, from the live roster — not a hardcoded id->name map.
+export function agentName(agents, id) {
+  if (!id) return 'System'
+  const a = (agents || []).find(x => x.id === id)
+  return a ? (a.first || a.name || id) : id
+}
+
 function parseBudgetNum(v) {
   if (v === null || v === undefined || v === '') return NaN
   if (typeof v === 'number') return v
