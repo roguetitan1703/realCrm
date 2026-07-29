@@ -78,8 +78,8 @@ function BrandSection({ store, settings }) {
       <SecHead title="Brand" sub="Your desk is white-labelled. This name, mark and colour appear on the login, top bar and every message your team sends." />
       <Panel>
         <div className="brand-row">
-          <div className="brand-badge" style={{ background: color, color: '#fff' }}>
-            {logoUrl ? <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} /> : initials}
+          <div className="brand-badge" style={{ background: logoUrl ? '#fff' : color, color: '#fff' }}>
+            {logoUrl ? <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit', display: 'block' }} /> : initials}
           </div>
           <div className="brand-field">
             <div className="field-lbl">Firm name</div>
@@ -95,10 +95,6 @@ function BrandSection({ store, settings }) {
             <button key={c} type="button" className={'swatch-pick' + (c.toLowerCase() === color.toLowerCase() ? ' on' : '')}
               style={{ background: c }} onClick={() => setColor(c)} title={c} aria-label={`Use ${c}`} />
           ))}
-          <label className="swatch-custom" title="Pick a custom colour">
-            <input type="color" value={color} onChange={e => setColor(e.target.value)} />
-            <Icon name="edit" size={13} />
-          </label>
         </div>
 
         <div className="field-lbl" style={{ marginTop: 16 }}>Logo</div>

@@ -37,6 +37,7 @@ export function applyBrandColor(hex) {
   const rgb = hexToRgb(hex) || hexToRgb(DEFAULT_ACCENT)
   const root = document.documentElement.style
   root.setProperty('--accent', rgbToHex(rgb))
+  root.setProperty('--accent-rgb', `${clamp(rgb.r)},${clamp(rgb.g)},${clamp(rgb.b)}`) // for rgba() tints on dark chrome
   root.setProperty('--accent-ink', rgbToHex(mix(rgb, BLACK, 0.18)))   // darker text-on-light
   root.setProperty('--accent-wash', rgbToHex(mix(rgb, WHITE, 0.90)))  // faint fill
   root.setProperty('--accent-line', rgbToHex(mix(rgb, WHITE, 0.72)))  // soft border

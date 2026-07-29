@@ -13,6 +13,11 @@ import { useState, useEffect } from 'react'
 import { api } from '../lib/api.js'
 import { PLATFORM } from '../data/platform.js'
 
+// A curated accent palette — the only colours a workspace can wear. Restricting
+// to these keeps the theming legible everywhere (nav, pills, meters); an
+// arbitrary hue can't produce an unreadable desk.
+const COLOR_PRESETS = ['#1E6F52', '#1D4ED8', '#7C3AED', '#B45309', '#B91C1C', '#0F766E', '#0E7490', '#BE185D']
+
 export default function Admin() {
   const [authed, setAuthed] = useState(() => Boolean(api.getAdminToken?.()))
   const [email, setEmail] = useState('delpatllp@gmail.com')
@@ -195,7 +200,19 @@ export default function Admin() {
                 <div><label style={fLabel}>Owner name</label><input style={fInput} value={form.ownerName} onChange={e => setF('ownerName', e.target.value)} placeholder="Rohan Shah" /></div>
                 <div><label style={fLabel}>Owner email</label><input style={fInput} type="email" value={form.ownerEmail} onChange={e => setF('ownerEmail', e.target.value)} placeholder="rohan@meridian.in" /></div>
                 <div><label style={fLabel}>Owner mobile (optional)</label><input style={fInput} value={form.ownerPhone} onChange={e => setF('ownerPhone', e.target.value)} placeholder="98xxx xxxxx" /></div>
-                <div><label style={fLabel}>Accent colour</label><input style={{ ...fInput, height: 44, padding: 4 }} type="color" value={form.primaryColor} onChange={e => setF('primaryColor', e.target.value)} /></div>
+                <div>
+                  <label style={fLabel}>Accent colour</label>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', height: 44 }}>
+                    {COLOR_PRESETS.map(c => (
+                      <button key={c} type="button" onClick={() => setF('primaryColor', c)} aria-label={`Use ${c}`} title={c}
+                        style={{
+                          width: 26, height: 26, borderRadius: 7, background: c, cursor: 'pointer', padding: 0,
+                          border: form.primaryColor.toLowerCase() === c.toLowerCase() ? '2px solid var(--ink, #1a1a1a)' : '2px solid transparent',
+                          boxShadow: form.primaryColor.toLowerCase() === c.toLowerCase() ? '0 0 0 2px #fff inset' : 'none',
+                        }} />
+                    ))}
+                  </div>
+                </div>
               </div>
               <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 10 }}>The owner signs in with their email — a one-time code is sent there. A new firm starts empty; no demo data.</div>
               {provErr && <div style={{ color: '#B4342A', fontSize: 12.5, marginTop: 10 }}>{provErr}</div>}

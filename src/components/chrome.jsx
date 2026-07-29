@@ -12,7 +12,7 @@ export function Sidebar({ items, active, onNav, footer, firmName, logoUrl }) {
   return (
     <nav className="nav">
       <div className="n-brand">
-        <div className="n-mono">{logoUrl ? <img src={logoUrl} alt="" /> : initials}</div>
+        <div className={'n-mono' + (logoUrl ? ' has-logo' : '')}>{logoUrl ? <img src={logoUrl} alt="" /> : initials}</div>
         <div><div className="n-fn">{name}</div><div className="n-sub">{theme.brand.officeLine}</div></div>
       </div>
       <div className="n-list">
