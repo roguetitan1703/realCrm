@@ -792,6 +792,9 @@ export function StoreProvider({ children }) {
     },
     openModal: (modal) => dispatch({ type: 'SET', patch: { modal } }),
     closeModal: () => dispatch({ type: 'SET', patch: { modal: null } }),
+    // Re-pull the whole desk from the server (used after user-management edits so
+    // the roster reflects a suspend / delete / seat-swap immediately).
+    reloadServer: loadServerState,
     openWhatsApp, recompose,
     closeWhatsApp: () => dispatch({ type: 'WA_CLOSE' }),
     setSearch: (v) => dispatch({ type: 'SET', patch: { searchOpen: v } }),

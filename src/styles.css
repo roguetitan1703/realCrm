@@ -287,6 +287,40 @@ input,textarea,select{font-family:inherit}
 .desk-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
 @media (max-width:900px){.desk-strip{grid-template-columns:repeat(2,1fr)}}
 
+/* team — manage access + your sessions */
+.acc-panel{margin-top:22px}
+.acc-hint{font-size:12px}
+.acc-empty{padding:22px 4px;color:var(--muted);font-size:13px}
+.acc-tbl-wrap{overflow-x:auto;margin-top:6px}
+.acc-tbl{width:100%;min-width:720px}
+.acc-tbl th,.acc-tbl td{padding:11px 14px;text-align:left;vertical-align:middle}
+.acc-tbl tbody tr{border-top:1px solid var(--line)}
+.acc-tbl tr.acc-off{opacity:.6}
+.acc-who{display:flex;align-items:center;gap:10px}
+.acc-name .acc-n{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:7px}
+.acc-role{font-size:11.5px}
+.acc-handle{font-size:12.5px;font-weight:600}
+.acc-mustchg{display:block;font-size:10.5px;color:var(--muted);margin-top:2px}
+.acc-last{font-size:12px;white-space:nowrap}
+.acc-youtag{font-size:9.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--accent-ink);background:var(--accent-wash);border-radius:5px;padding:2px 6px}
+.pill.acc-pill-on{color:#1E6F52;background:rgba(30,111,82,.10)}
+.pill.acc-pill-off{color:var(--alert);background:var(--alert-wash)}
+.acc-actcol{text-align:right}
+.acc-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.acc-act{font-size:12px;font-weight:600;color:var(--ink-2);background:var(--card-2);border:1px solid var(--line);border-radius:7px;padding:5px 9px;cursor:pointer;font-family:inherit;white-space:nowrap;transition:border-color .12s,background .12s,color .12s}
+.acc-act:hover:not(:disabled){border-color:var(--accent);color:var(--accent-ink)}
+.acc-act.danger{color:var(--alert);border-color:#E4C4C0}
+.acc-act.danger:hover:not(:disabled){background:var(--alert-wash)}
+.acc-act:disabled{opacity:.45;cursor:default}
+.acc-noperm{font-size:12px}
+/* your sessions */
+.acc-sess{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.acc-sess-row{display:flex;align-items:center;gap:12px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--card-2)}
+.acc-sess-ic{color:var(--muted);flex-shrink:0}
+.acc-sess-meta{flex:1;min-width:0}
+.acc-sess-ua{font-weight:600;font-size:13px;display:flex;align-items:center;gap:7px}
+.acc-sess-sub{font-size:11.5px;margin-top:1px}
+
 /* team — leaderboard of people (not a spreadsheet) */
 .board{display:flex;flex-direction:column;gap:12px}
 .bcard{display:grid;grid-template-columns:auto auto 1fr auto auto;align-items:center;gap:22px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:18px 22px;transition:border-color .12s,box-shadow .12s}
