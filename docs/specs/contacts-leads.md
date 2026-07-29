@@ -78,12 +78,18 @@ The follow-up is an **activity with hard proof**:
   **+ 1 year**, owner/manager-only, never shared externally, purgeable on request.
 - **Distance-to-property:** if the property has coordinates, show how far the
   selfie's GPS was from it (soft signal of a genuine on-site visit; not a block).
-- **Attach:** a site-visit activity links **both the lead (client) and the
-  property/unit visited**. *(Q11 — assumed "both"; confirm.)*
+- **Attach: the activity belongs to the LEAD only — never written onto the
+  property.** *(Q11 resolved.)* A visit may **reference** the unit it concerned
+  (`property_id`), but that's a pointer, not ownership: the property record must
+  **not** accumulate activity data. This keeps properties clean.
+  - **Property-side views stay derived**, not stored: "interested buyers" and
+    "visits to this unit" are computed by querying the leads/activities that
+    reference the property (same pattern as today's matching-derived buyers), so
+    the relationship can change without ever mutating the property row.
 
 **Activity model:** `activities` — `type` (call · site_visit · meeting ·
 follow_up · note), `at`, `agent`, `remark`, `outcome?`, `photo_url?`,
-`geo{lat,lng,accuracy}?`, `lead_id?`, `property_id?`.
+`geo{lat,lng,accuracy}?`, **`lead_id` (owner)**, `property_id?` (reference only).
 
 ## B5 — Call / message on contact, with a confirm + logged action  🔒  [P8]
 - Tapping **Call** or **Message (WhatsApp)** on a contact opens a **confirm modal**:
@@ -113,7 +119,8 @@ follow_up · note), `at`, `agent`, `remark`, `outcome?`, `photo_url?`,
       section with two subnavs + role pills.
 - [ ] Timeline `remark` type on leads + properties; author + time; **edit-own, no delete**.
 - [ ] Lead pills = pipeline stages (filter view); deal type stays a filter.
-- [ ] `activities` table (type, at, agent, remark, outcome, photo_url, geo, lead_id, property_id).
+- [ ] `activities` table owned by **lead_id**; `property_id` is a reference only (properties never accumulate activities).
+- [ ] Property "interested buyers / visits" = **derived** from referencing leads/activities, not stored on the property.
 - [ ] **Cloudflare R2** upload pipeline (presigned PUT); store key/URL only.
 - [ ] PWA **camera-capture-only** selfie + **mandatory geolocation**; deny → can't log visit.
 - [ ] Watermark on ingest for all media (incl. selfies).
@@ -123,5 +130,4 @@ follow_up · note), `at`, `agent`, `remark`, `outcome?`, `photo_url?`,
 - [ ] Audit: activity added, remark added/edited.
 
 ## Remaining confirmations
-1. **Q11** — site-visit activity attaches to **both** lead + property (assumed).
-2. **Q15** — watermark selfies too (my reading of "no exception").
+1. **Q15** — watermark selfies too (my reading of "no exception").
