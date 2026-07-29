@@ -105,6 +105,30 @@ export const api = {
   setToken: (t) => lsSet(TOKEN_KEY, t),
   clearToken: () => lsSet(TOKEN_KEY, ''),
 
+  // ── Password auth (auth v2) ────────────────────────────────────────────────
+  // Handle is an email (owner/manager) or an assigned login_id (agent).
+  login: async (handle, password) => {
+    const res = await request('/auth/login', { method: 'POST', body: JSON.stringify({ handle, password }) });
+    if (res?.token) lsSet(TOKEN_KEY, res.token);
+    return res;
+  },
+  logout: () => request('/auth/logout', { method: 'POST' }).catch(() => {}),
+  changePassword: (current, next) => request('/auth/password/change', { method: 'POST', body: JSON.stringify({ current, next }) }),
+  forgotPassword: (email) => request('/auth/password/forgot', { method: 'POST', body: JSON.stringify({ email }) }),
+  resetPassword: (token, next) => request('/auth/password/reset', { method: 'POST', body: JSON.stringify({ token, next }) }),
+  getSessions: () => request('/auth/sessions'),
+  revokeSession: (id) => request(`/auth/sessions/${encodeURIComponent(id)}/revoke`, { method: 'POST' }),
+
+  // ── User management ────────────────────────────────────────────────────────
+  getUsers: () => request('/team/users'),
+  createUser: (body) => request('/team/users', { method: 'POST', body: JSON.stringify(body) }),
+  updateUser: (id, patch) => request(`/team/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  setUserStatus: (id, status) => request(`/team/users/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
+  reassignSeat: (id, body) => request(`/team/users/${encodeURIComponent(id)}/reassign-seat`, { method: 'POST', body: JSON.stringify(body) }),
+  adminResetPassword: (id, password) => request(`/team/users/${encodeURIComponent(id)}/reset-password`, { method: 'POST', body: JSON.stringify({ password }) }),
+  forceLogout: (id) => request(`/team/users/${encodeURIComponent(id)}/force-logout`, { method: 'POST' }),
+  deleteUser: (id) => request(`/team/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   // Superadmin (Delpat staff) — email + password, kept on its own token so the
   // /admin console is fully separate from the tenant session.
   superadminLogin: async (email, password) => {

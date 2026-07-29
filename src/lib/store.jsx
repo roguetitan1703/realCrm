@@ -812,6 +812,7 @@ export function StoreProvider({ children }) {
       setTimeout(loadNotifications, 0)
     },
     logout: () => {
+      apiClient.logout?.()          // revoke the server session (best-effort)
       apiClient.clearToken?.()
       if (typeof window !== 'undefined') {
         try {

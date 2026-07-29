@@ -22,25 +22,20 @@ import { Toasts } from '../components/chrome.jsx'
 
 export default function Login({ store }) {
   const { state } = store
-  const [phase, setPhase] = useState('workspace') // 'workspace' | 'phone' | 'otp'
+  const [phase, setPhase] = useState('workspace') // 'workspace' | 'creds' | 'change' | 'forgot' | 'reset'
   const [wsInput, setWsInput] = useState('')
   const [ws, setWs] = useState(null) // resolved workspace, or null = platform identity
   const [resolving, setResolving] = useState(false)
-  const [phone, setPhone] = useState('')
-  const [sentHint, setSentHint] = useState('')  // masked email hint when the code was mailed
-  const [otp, setOtp] = useState(['', '', '', ''])
+  // Credentials: handle = an email (owner/manager) or an assigned login ID (agent).
+  const [handle, setHandle] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [verifying, setVerifying] = useState(false)
-  const [timer, setTimer] = useState(30)
-  const [role, setRole] = useState(state.role || 'admin')
-  // The demo desk owner's number — pressing Continue on an empty field signs in
-  // as the owner so a live demo never stalls hunting for a phone number.
-  const DEMO_PHONE = '98200 11223'
-  // In DEMO_OTP mode the backend echoes the code so the "Auto-fill" affordance
-  // can complete the loop without a real SMS. Empty in production.
-  const [sessionOtp, setSessionOtp] = useState('')
-
-  const inputRefs = [useRef(null), useRef(null), useRef(null), useRef(null)]
+  // First-login change + reset flows.
+  const [newPw, setNewPw] = useState('')
+  const [newPw2, setNewPw2] = useState('')
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotSent, setForgotSent] = useState(false)
+  const [resetToken, setResetToken] = useState('')
 
   // The browser tab is part of the identity gate: platform name until a
   // workspace is chosen, the firm's name after.
@@ -53,7 +48,7 @@ export default function Login({ store }) {
   // stop right here (no phone step, no OTP). This is what stops "type anything
   // and you're in". The firm's name/brand shown next come from the server row,
   // never from what was typed.
-  const selectWorkspace = async (input) => {
+  const selectWorkspace = async (input, nextPhase = 'creds') => {
     const guess = resolveWorkspace(input)
     if (!guess) {
       store.toast('Enter your brokerage workspace name to continue.', 'warn')
@@ -76,7 +71,7 @@ export default function Login({ store }) {
       setWs(resolved)
       // Reflect the workspace in the URL so it's shareable: baseurl/<slug>.
       try { window.history.pushState({}, '', `/${t.slug}`) } catch (e) {}
-      setPhase('phone')
+      setPhase(nextPhase)
       store.toast(`${t.name} workspace loaded`, 'ok')
     } catch (e) {
       store.toast('No workspace found with that name. Check the spelling, or ask your admin for the exact name.', 'warn')
@@ -86,144 +81,94 @@ export default function Login({ store }) {
   }
 
   // Auto-enter the workspace named in the URL path (baseurl/<slug>) on first
-  // load, so a bookmarked or shared firm URL lands straight on their login.
+  // load. A `/<slug>/reset?token=` link jumps straight to the reset form.
   useEffect(() => {
-    if (phase !== 'workspace') return
-    const seg = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '')
-    if (seg && seg !== 'admin') selectWorkspace(seg)
+    const parts = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')
+    const seg = decodeURIComponent(parts[0] || '')
+    const token = new URLSearchParams(window.location.search).get('token')
+    if (seg && seg !== 'admin') {
+      if (parts[1] === 'reset' && token) { setResetToken(token); selectWorkspace(seg, 'reset') }
+      else selectWorkspace(seg)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const leaveWorkspace = () => {
     setWs(null)
     setPhase('workspace')
-    setOtp(['', '', '', ''])
+    setPassword(''); setHandle('')
     applyBrandColor(DEFAULT_ACCENT) // back to the platform (Delpat) identity
     applyPwaIdentity(null)
     try { window.history.pushState({}, '', '/') } catch (e) {}
   }
 
-  useEffect(() => {
-    let interval = null
-    if (phase === 'otp' && timer > 0) {
-      interval = setInterval(() => setTimer(t => t - 1), 1000)
-    }
-    return () => clearInterval(interval)
-  }, [phase, timer])
-
-  const handleRoleChange = (newRole) => {
-    setRole(newRole)
-    store.dispatch({ type: 'ROLE', role: newRole })
-    const roleTitle = newRole === 'admin' ? 'Owner / Admin' : 'Sales Agent'
-    store.toast(`Switched access level to: ${roleTitle}`, 'ok')
-  }
-
-  const looksEmail = (v) => String(v || '').includes('@')
-
-  const handleSendOtp = async (e) => {
+  // ── Password auth handlers ─────────────────────────────────────────────────
+  const doLogin = async (e) => {
     if (e) e.preventDefault()
-    const identifier = phone.trim() || DEMO_PHONE
+    if (!handle.trim() || !password) { store.toast('Enter your ID or email and password.', 'warn'); return }
     setLoading(true)
     try {
-      const res = await api.requestOtp(identifier)
-      // No delivery channel (no SMS/email AND demo mode off): don't strand the
-      // user on a code screen they can never fill — say what's actually wrong.
-      if (res?.delivery === 'none') {
-        store.toast('This workspace can’t deliver a login code yet — add an email or ask your admin to enable demo mode.', 'warn')
-        return
-      }
-      setPhase('otp')
-      setTimer(30)
-      // demoCode is only returned in demo mode (on-screen convenience); when the
-      // code was emailed, sentTo is a masked hint like jy••••@gmail.com.
-      setSessionOtp(res?.demoCode || '')
-      setSentHint(res?.delivery === 'email' ? (res?.sentTo || 'your email') : '')
-      const where = res?.delivery === 'email'
-        ? `Code emailed to ${res?.sentTo || 'your inbox'}`
-        : looksEmail(identifier) ? `Verification code sent to ${identifier}` : `Verification code sent to +91 ${identifier}`
-      store.toast(where, 'ok')
-      setTimeout(() => inputRefs[0].current?.focus(), 80)
+      const res = await api.login(handle.trim(), password)
+      if (!res?.token) throw new Error('no token')
+      if (res.mustChange) { setPhase('change'); setNewPw(''); setNewPw2(''); store.toast('Set a new password to continue.', 'ok'); return }
+      store.toast(`Welcome to ${ws?.firmName || 'your desk'}`, 'ok')
+      store.login({ token: res.token, user: res.user })
     } catch (err) {
-      store.toast('Could not send the code. Check your connection and try again.', 'warn')
+      store.toast('Those credentials didn’t match. Please try again.', 'warn')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleOtpChange = (index, val) => {
-    const char = val.slice(-1)
-    if (!/^\d*$/.test(char)) return
-
-    const newOtp = [...otp]
-    newOtp[index] = char
-    setOtp(newOtp)
-
-    if (char && index < 3) {
-      inputRefs[index + 1].current?.focus()
-    }
-
-    if (char && index === 3 && newOtp.every(d => d !== '')) {
-      handleVerify(newOtp.join(''))
-    }
-  }
-
-  const handleOtpKeyDown = (index, e) => {
-    if (e.key === 'Backspace' && !otp[index] && index > 0) {
-      inputRefs[index - 1].current?.focus()
-    }
-  }
-
-  const handleOtpPaste = (e) => {
-    e.preventDefault()
-    const pasted = e.clipboardData.getData('text').slice(0, 4).split('')
-    if (pasted.length === 4 && pasted.every(c => /^\d$/.test(c))) {
-      setOtp(pasted)
-      inputRefs[3].current?.focus()
-      handleVerify(pasted.join(''))
-    }
-  }
-
-  const handleAutoFill = () => {
-    const codeArr = sessionOtp.split('')
-    setOtp(codeArr)
-    handleVerify(sessionOtp)
-  }
-
-  const handleVerify = async (codeToVerify) => {
-    const fullCode = typeof codeToVerify === 'string' ? codeToVerify : otp.join('')
-    if (fullCode.length < 4) {
-      store.toast('Please enter the 4-digit verification code.', 'warn')
-      return
-    }
-    const targetPhone = phone.trim() || DEMO_PHONE
-    setVerifying(true)
+  const doChangePassword = async (e) => {
+    if (e) e.preventDefault()
+    if (newPw.length < 8) { store.toast('New password must be at least 8 characters.', 'warn'); return }
+    if (newPw !== newPw2) { store.toast('The two passwords don’t match.', 'warn'); return }
+    setLoading(true)
     try {
-      const res = await api.verifyOtp(targetPhone, fullCode)
-      if (!res?.token) throw new Error('no token')
-      store.toast(`Welcome to ${ws?.firmName || 'your desk'}`, 'ok')
-      // Real login: the verified user drives role + identity, replacing the
-      // old localStorage-only session.
+      const r = await api.changePassword(password, newPw)  // current = the temp password just used
+      if (r?.error) throw new Error(r.error)
+      const res = await api.login(handle.trim(), newPw)    // clean re-login with the new password
+      if (!res?.token) throw new Error('login failed')
+      store.toast('Password updated — welcome.', 'ok')
       store.login({ token: res.token, user: res.user })
     } catch (err) {
-      store.toast('That code didn’t match. Please try again.', 'warn')
-      setOtp(['', '', '', ''])
-      setTimeout(() => inputRefs[0].current?.focus(), 40)
+      store.toast(err.message || 'Could not update the password.', 'warn')
     } finally {
-      setVerifying(false)
+      setLoading(false)
     }
   }
 
-  const handleResend = async () => {
-    const targetPhone = phone.trim() || DEMO_PHONE
-    setTimer(30)
+  const doForgot = async (e) => {
+    if (e) e.preventDefault()
+    setLoading(true)
+    try { await api.forgotPassword(forgotEmail.trim()) } catch (e2) { /* silent */ }
+    setForgotSent(true)   // always claim sent (no account enumeration)
+    setLoading(false)
+  }
+
+  const doReset = async (e) => {
+    if (e) e.preventDefault()
+    if (newPw.length < 8) { store.toast('Password must be at least 8 characters.', 'warn'); return }
+    if (newPw !== newPw2) { store.toast('The two passwords don’t match.', 'warn'); return }
+    setLoading(true)
     try {
-      const res = await api.requestOtp(targetPhone)
-      setSessionOtp(res?.demoCode || '')
-      store.toast('A fresh verification code is on its way.', 'ok')
+      const r = await api.resetPassword(resetToken, newPw)
+      if (r?.error) throw new Error(r.error)
+      store.toast('Password reset — sign in with your new password.', 'ok')
+      setPhase('creds'); setPassword(''); setNewPw(''); setNewPw2('')
+      try { window.history.replaceState({}, '', `/${ws?.tenantId || ''}`) } catch (e2) {}
     } catch (err) {
-      store.toast('Could not resend the code. Try again in a moment.', 'warn')
+      store.toast(err.message || 'This reset link is invalid or has expired.', 'warn')
+    } finally {
+      setLoading(false)
     }
   }
+
+
+  const LBL = { fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 8, display: 'block', textTransform: 'uppercase', letterSpacing: '0.06em' }
+  const SPIN = { display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }
+  const BTN = { height: 44, fontSize: 14.5, fontWeight: 600 }
 
   return (
     <div className="auth-root" style={{
@@ -385,7 +330,7 @@ export default function Login({ store }) {
               fontFamily: 'var(--mono)'
             }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: ws ? 'var(--accent)' : 'var(--line)' }} />
-              <span>{ws ? `app.${ws.slug}.com` : PLATFORM.host}</span>
+              <span>{ws ? `${PLATFORM.host}/${ws.slug}` : PLATFORM.host}</span>
             </div>
           </div>
 
@@ -396,32 +341,9 @@ export default function Login({ store }) {
             </h2>
             <p style={{ fontSize: 14, color: 'var(--muted)', margin: 0, lineHeight: 1.5 }}>
               {ws
-                ? <>Enter your mobile number to access the <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>{ws.firmName}</strong> desk.</>
+                ? <>Sign in to the <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>{ws.firmName}</strong> desk with your ID or email and password.</>
                 : 'Name your brokerage to load its desk. Each firm gets its own workspace, data and branding.'}
             </p>
-          </div>
-
-          {/* Role Toggle — belongs to a tenant desk, so it appears only once a
-              workspace is loaded. */}
-          <div style={{ marginBottom: 28, display: ws ? 'block' : 'none' }}>
-            <div className="seg seg-block" style={{ background: 'var(--line-2)', padding: 3, borderRadius: 'var(--radius)' }}>
-              <button
-                type="button"
-                className={role === 'admin' ? 'on' : ''}
-                onClick={() => handleRoleChange('admin')}
-                style={{ flex: 1, padding: '8px 12px', fontSize: 13, cursor: 'pointer', textAlign: 'center' }}
-              >
-                Owner / Admin
-              </button>
-              <button
-                type="button"
-                className={role === 'agent' ? 'on' : ''}
-                onClick={() => handleRoleChange('agent')}
-                style={{ flex: 1, padding: '8px 12px', fontSize: 13, cursor: 'pointer', textAlign: 'center' }}
-              >
-                Sales Agent
-              </button>
-            </div>
           </div>
 
           {/* AUTHENTICATION FORM CARD */}
@@ -510,172 +432,110 @@ export default function Login({ store }) {
                   )}
                 </Button>
               </form>
-            ) : phase === 'phone' ? (
-              /* PHASE 1: MOBILE NUMBER INPUT */
-              <form onSubmit={handleSendOtp}>
-                <div className="field" style={{ marginBottom: 24 }}>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 8, display: 'block', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Mobile number or email
-                  </label>
+            ) : phase === 'creds' ? (
+              /* PHASE 1: PASSWORD SIGN-IN (email or agent ID) */
+              <form onSubmit={doLogin}>
+                <div className="field" style={{ marginBottom: 16 }}>
+                  <label style={LBL}>ID or email</label>
                   <div className="input-group">
-                    {!looksEmail(phone) && <span className="prefix" style={{ fontFamily: 'var(--mono)' }}>+91</span>}
-                    <input
-                      type="text"
-                      inputMode={looksEmail(phone) ? 'email' : 'tel'}
-                      value={phone}
-                      onChange={e => setPhone(e.target.value)}
-                      placeholder={`${DEMO_PHONE} or you@firm.com`}
-                      autoFocus
-                      disabled={loading}
-                      className={looksEmail(phone) ? '' : 'mono-num'}
-                      style={{ fontWeight: 600, fontSize: 15 }}
-                    />
+                    <input type="text" value={handle} onChange={e => setHandle(e.target.value)}
+                      placeholder="you@firm.com or your ID" autoFocus disabled={loading}
+                      autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                      style={{ fontWeight: 600, fontSize: 15 }} />
                   </div>
                 </div>
-
-                <Button
-                  variant="primary"
-                  block
-                  type="submit"
-                  disabled={loading}
-                  style={{ height: 44, fontSize: 14.5, cursor: loading ? 'wait' : 'pointer', fontWeight: 600 }}
-                >
-                  {loading ? (
-                    <>
-                      <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                      <span>Sending code...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Continue</span>
-                      <Icon name="arrowRight" size={16} />
-                    </>
-                  )}
+                <div className="field" style={{ marginBottom: 10 }}>
+                  <label style={LBL}>Password</label>
+                  <div className="input-group">
+                    <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                      placeholder="••••••••" disabled={loading} style={{ fontWeight: 600, fontSize: 15 }} />
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', marginBottom: 18 }}>
+                  <button type="button" className="btn-quiet"
+                    onClick={() => { setForgotEmail(handle.includes('@') ? handle : ''); setForgotSent(false); setPhase('forgot') }}
+                    style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600 }}>Forgot password?</button>
+                </div>
+                <Button variant="primary" block type="submit" disabled={loading} style={{ ...BTN, cursor: loading ? 'wait' : 'pointer' }}>
+                  {loading ? <><span style={SPIN} /><span>Signing in…</span></> : <><span>Sign in</span><Icon name="arrowRight" size={16} /></>}
                 </Button>
               </form>
-            ) : (
-              /* PHASE 2: INTERACTIVE OTP INPUT */
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 20 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
-                    Enter 4-digit code
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setPhase('phone')}
-                    className="btn-quiet"
-                    style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600 }}
-                  >
-                    Change
-                  </button>
+            ) : phase === 'change' ? (
+              /* PHASE 2: FIRST-LOGIN PASSWORD CHANGE */
+              <form onSubmit={doChangePassword}>
+                <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.5 }}>
+                  Set a new password to finish signing in.
                 </div>
-
-                {sentHint && (
-                  <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Icon name="sms" size={14} style={{ color: 'var(--accent)' }} />
-                    We emailed a code to <strong style={{ color: 'var(--ink-2)' }}>{sentHint}</strong>
+                <div className="field" style={{ marginBottom: 14 }}>
+                  <label style={LBL}>New password</label>
+                  <div className="input-group">
+                    <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)}
+                      placeholder="At least 8 characters" autoFocus disabled={loading} style={{ fontWeight: 600, fontSize: 15 }} />
                   </div>
-                )}
-
-                {/* Demo mode: no SMS provider, so surface the code on screen. */}
-                {sessionOtp && (
-                  <button
-                    type="button"
-                    onClick={handleAutoFill}
-                    style={{
-                      width: '100%', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
-                      padding: '12px 14px', marginBottom: 18, cursor: 'pointer',
-                      background: 'var(--accent-wash)', border: '1px solid var(--accent)',
-                      borderRadius: 'var(--radius)', color: 'var(--ink)',
-                    }}
-                  >
-                    <Icon name="shield" size={18} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        Demo mode · no SMS sent
-                      </span>
-                      <span style={{ display: 'block', fontSize: 13, color: 'var(--ink-2)' }}>
-                        Your code is <strong className="mono-num" style={{ color: 'var(--ink)', fontSize: 16, letterSpacing: '0.08em' }}>{sessionOtp}</strong> — tap to fill
-                      </span>
-                    </span>
-                    <Icon name="arrowRight" size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-                  </button>
-                )}
-
-                {/* 4-Box OTP Input */}
-                <div
-                  onPaste={handleOtpPaste}
-                  style={{ display: 'flex', gap: 10, justifyContent: 'space-between', marginBottom: 22 }}
-                >
-                  {otp.map((digit, i) => (
-                    <input
-                      key={i}
-                      ref={inputRefs[i]}
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={1}
-                      value={digit}
-                      onChange={e => handleOtpChange(i, e.target.value)}
-                      onKeyDown={e => handleOtpKeyDown(i, e)}
-                      disabled={verifying}
-                      className="mono-num"
-                      style={{
-                        width: '100%',
-                        height: 56,
-                        border: `1.5px solid ${digit ? 'var(--accent)' : 'var(--line)'}`,
-                        borderRadius: 'var(--radius)',
-                        textAlign: 'center',
-                        fontFamily: 'var(--disp)',
-                        fontWeight: 700,
-                        fontSize: 22,
-                        color: 'var(--ink)',
-                        background: digit ? 'var(--accent-wash)' : 'var(--card)',
-                        outline: 'none',
-                        transition: 'all 0.15s ease'
-                      }}
-                    />
-                  ))}
                 </div>
-
-                {/* Continue Button */}
-                <Button
-                  variant="primary"
-                  block
-                  onClick={() => handleVerify()}
-                  disabled={verifying || otp.some(d => d === '')}
-                  style={{ height: 44, fontSize: 14.5, cursor: verifying ? 'wait' : 'pointer', fontWeight: 600, marginBottom: 16 }}
-                >
-                  {verifying ? (
-                    <>
-                      <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                      <span>Verifying...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Verify & Sign In</span>
-                      <Icon name="check" size={16} />
-                    </>
-                  )}
+                <div className="field" style={{ marginBottom: 18 }}>
+                  <label style={LBL}>Confirm password</label>
+                  <div className="input-group">
+                    <input type="password" value={newPw2} onChange={e => setNewPw2(e.target.value)}
+                      placeholder="Repeat it" disabled={loading} style={{ fontWeight: 600, fontSize: 15 }} />
+                  </div>
+                </div>
+                <Button variant="primary" block type="submit" disabled={loading} style={{ ...BTN, cursor: loading ? 'wait' : 'pointer' }}>
+                  {loading ? <><span style={SPIN} /><span>Updating…</span></> : <><span>Update &amp; continue</span><Icon name="check" size={16} /></>}
                 </Button>
-
-                {/* Session Auto-fill & Resend Options */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: 'var(--muted)' }}>
-                  <span>{sessionOtp ? 'Code shown above' : 'Enter the code sent to your phone'}</span>
-
-                  {timer > 0 ? (
-                    <span className="mono-num">00:{timer < 10 ? `0${timer}` : timer}</span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleResend}
-                      className="btn-quiet"
-                      style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600 }}
-                    >
-                      Resend SMS
-                    </button>
-                  )}
+              </form>
+            ) : phase === 'forgot' ? (
+              /* PHASE 3: FORGOT PASSWORD (owner/manager self-serve) */
+              <div>
+                {forgotSent ? (
+                  <div style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.55 }}>
+                    If an account with that email exists, a reset link is on its way. Check your inbox — the link expires in 30 minutes.
+                  </div>
+                ) : (
+                  <form onSubmit={doForgot}>
+                    <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.5 }}>
+                      Enter your account email and we'll send a reset link. Agents: ask your admin to reset your password.
+                    </div>
+                    <div className="field" style={{ marginBottom: 18 }}>
+                      <label style={LBL}>Email</label>
+                      <div className="input-group">
+                        <input type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
+                          placeholder="you@firm.com" autoFocus disabled={loading}
+                          autoCapitalize="none" autoCorrect="off" spellCheck={false} style={{ fontWeight: 600, fontSize: 15 }} />
+                      </div>
+                    </div>
+                    <Button variant="primary" block type="submit" disabled={loading} style={{ ...BTN, cursor: loading ? 'wait' : 'pointer' }}>
+                      {loading ? <><span style={SPIN} /><span>Sending…</span></> : <span>Send reset link</span>}
+                    </Button>
+                  </form>
+                )}
+                <div style={{ textAlign: 'center', marginTop: 16 }}>
+                  <button type="button" className="btn-quiet" onClick={() => setPhase('creds')}
+                    style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600 }}>Back to sign in</button>
                 </div>
               </div>
+            ) : (
+              /* PHASE 4: RESET PASSWORD (from an emailed link) */
+              <form onSubmit={doReset}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 14 }}>Set a new password</div>
+                <div className="field" style={{ marginBottom: 14 }}>
+                  <label style={LBL}>New password</label>
+                  <div className="input-group">
+                    <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)}
+                      placeholder="At least 8 characters" autoFocus disabled={loading} style={{ fontWeight: 600, fontSize: 15 }} />
+                  </div>
+                </div>
+                <div className="field" style={{ marginBottom: 18 }}>
+                  <label style={LBL}>Confirm password</label>
+                  <div className="input-group">
+                    <input type="password" value={newPw2} onChange={e => setNewPw2(e.target.value)}
+                      placeholder="Repeat it" disabled={loading} style={{ fontWeight: 600, fontSize: 15 }} />
+                  </div>
+                </div>
+                <Button variant="primary" block type="submit" disabled={loading} style={{ ...BTN, cursor: loading ? 'wait' : 'pointer' }}>
+                  {loading ? <><span style={SPIN} /><span>Saving…</span></> : <span>Reset password</span>}
+                </Button>
+              </form>
             )}
           </div>
 
