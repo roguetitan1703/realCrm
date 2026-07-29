@@ -12,7 +12,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react'
-import { PLATFORM, recentWorkspaces, rememberWorkspace, resolveWorkspace, tenantDocTitle } from '../data/platform.js'
+import { PLATFORM, recentWorkspaces, rememberWorkspace, resolveWorkspace, normalizeSlug, tenantDocTitle } from '../data/platform.js'
 import { api } from '../lib/api.js'
 import { applyPwaIdentity } from '../lib/pwa.js'
 import { applyBrandColor, DEFAULT_ACCENT } from '../lib/brand.js'
@@ -385,12 +385,11 @@ export default function Login({ store }) {
                     Workspace
                   </label>
                   <div className="input-group">
-                    <span className="prefix" style={{ fontFamily: 'var(--mono)', color: 'var(--muted)' }}>{PLATFORM.host}/</span>
                     <input
                       type="text"
                       value={wsInput}
                       onChange={e => setWsInput(e.target.value)}
-                      placeholder="your-firm"
+                      placeholder="Your firm's name"
                       autoFocus
                       disabled={resolving}
                       autoCapitalize="none"
@@ -398,6 +397,12 @@ export default function Login({ store }) {
                       spellCheck={false}
                       style={{ fontWeight: 600, fontSize: 15 }}
                     />
+                  </div>
+                  <div style={{ marginTop: 9, fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--mono)', display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: wsInput.trim() ? 'var(--accent)' : 'var(--line)', flexShrink: 0 }} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {PLATFORM.host}/<span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{normalizeSlug(wsInput) || 'your-firm'}</span>
+                    </span>
                   </div>
                 </div>
 
