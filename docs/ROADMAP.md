@@ -163,14 +163,16 @@ a daily-use CRM.
   yet pushed/deployed**. Verify on the live domain after deploy.
 - **E2** ⬜ Rotate the secrets exposed during dev before go-live (DB password,
   SES, VAPID, superadmin) — manual, user-side.
-- **E3 [reopened C2/C4]** ⬜ **Verify PWA + push on a real installed device** —
-  install the tenant-themed app, confirm offline read, and land a real push on a
-  phone. None of this is proven yet.
-- **E4 [reopened C4]** ⬜ **Harden the PWA** — installability, offline
-  robustness, per-tenant icon/manifest actually working on device.
-- **E5 [reopened C9]** ⬜ **Branding richness + audit** — walk every surface
-  (login, desk, mobile, PWA icon, OTP/email, WhatsApp share, watermark) and make
-  the tenant identity consistent and complete; today it's partial and unproven.
+- **E3 [reopened C2/C4]** ⬜ **PWA install identity + push, on a real device** —
+  installed tenant app shows **tenant name + icon** (not "RE"), sticky top/bottom
+  bars (scroll bug), and a real push lands on a phone. Plan: [specs/pwa.md](./specs/pwa.md).
+- **E4 [reopened C4]** ⬜ **PWA = one app (the website installed), not a second
+  app** + flow/screen audit vs the latest web app. [specs/pwa.md](./specs/pwa.md).
+- **E5 [reopened C9]** ⬜ **Branding & platform identity** — the white-label crux:
+  two-identity rule (Delpat vs tenant), **curated multi-colour themes** (no random
+  hex), fix the **colour-bleed-on-logout** bug, real **`/{tenant}` URL model**
+  (kill fake `app.{tenant}.com`), **landing page** (contact-for-onboarding) +
+  org-select login, quiet "Powered by Delpat". Plan: [specs/branding.md](./specs/branding.md).
 - **E7 [global]** ⬜ **Data lifecycle & retention** — no store grows unbounded.
   Every append-only/growing table or bucket ships with a retention policy; one
   nightly purge job; storage monitoring in the superadmin console. Full register
