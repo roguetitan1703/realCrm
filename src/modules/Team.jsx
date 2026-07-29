@@ -124,7 +124,6 @@ export default function Team({ store, go, topBar }) {
 
                 <div className="bstats">
                   <div className="bstat"><div className="bv accent">{won}</div><div className="bl">Won</div></div>
-                  <div className="bstat"><div className="bv">{winRate == null ? '—' : <>{winRate}<span className="bu">%</span></>}</div><div className="bl">Win rate</div></div>
                   <div className="bstat"><div className="bv">{calls == null ? '—' : calls}</div><div className="bl">Calls · 30d</div></div>
                   <div className="bstat"><div className="bv">{visits == null ? '—' : visits}</div><div className="bl">Visits</div></div>
                 </div>
@@ -183,7 +182,7 @@ function AccessPanel({ store }) {
   const resetPw = (u) => {
     setBusy(u.id)
     api.adminResetPassword(u.id)
-      .then(r => setReveal({ title: 'Password reset', name: u.name, handle: u.login_id || u.email, password: r.initialPassword }))
+      .then(r => setReveal({ title: 'Password reset', name: u.name, handle: u.login_id || u.email, byId: !!u.login_id, password: r.initialPassword }))
       .catch(err => store.toast(cleanErr(err), 'warn'))
       .finally(() => setBusy(''))
   }
@@ -197,6 +196,7 @@ function AccessPanel({ store }) {
           {[0, 1, 2].map(i => (
             <tr key={i}>
               <td><div className="acc-who"><span className="skel skel-av" /><div className="acc-name"><span className="skel skel-line" style={{ width: 120 }} /><span className="skel skel-line sm" style={{ width: 70 }} /></div></div></td>
+              <td><span className="skel skel-line" style={{ width: 80 }} /></td>
               <td><span className="skel skel-line" style={{ width: 150 }} /></td>
               <td><span className="skel skel-line" style={{ width: 60 }} /></td>
               <td><span className="skel skel-line" style={{ width: 50 }} /></td>
@@ -208,7 +208,7 @@ function AccessPanel({ store }) {
         <div className="acc-tbl-wrap">
           <table className="tbl acc-tbl">
             <thead>
-              <tr><th>Person</th><th>Signs in with</th><th>Status</th><th>Last active</th><th className="acc-actcol">Actions</th></tr>
+              <tr><th>Person</th><th>User ID</th><th>Email</th><th>Status</th><th>Last active</th><th className="acc-actcol">Actions</th></tr>
             </thead>
             <tbody>
               {users.map(u => {
@@ -222,12 +222,16 @@ function AccessPanel({ store }) {
                         <span className="av av-sm" style={{ background: 'var(--chrome)' }}>{(u.metadata?.initials) || (u.name || '?').split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()}</span>
                         <div className="acc-name">
                           <div className="acc-n">{u.name}{self && <span className="acc-youtag">You</span>}</div>
-                          <div className="u-muted acc-role">{roleLabel(u.role)}</div>
+                          <div className="u-muted acc-role">{roleLabel(u.role)} · signs in with {u.login_id ? 'ID' : 'email'}</div>
                         </div>
                       </div>
                     </td>
-                    <td><span className="mono-num acc-handle">{u.login_id || u.email || '—'}</span>{u.must_change_password && <span className="acc-mustchg" title="Will set their own password on first sign-in">sets password on first login</span>}</td>
-                    <td><span className={'pill ' + (isSuspended(u) ? 'acc-pill-off' : 'acc-pill-on')}><span className="dot" />{isSuspended(u) ? 'Suspended' : 'Active'}</span></td>
+                    <td><span className="mono-num acc-handle">{u.login_id || '—'}</span></td>
+                    <td><span className="mono-num acc-handle">{u.email || '—'}</span></td>
+                    <td>
+                      <span className={'pill ' + (isSuspended(u) ? 'acc-pill-off' : 'acc-pill-on')}><span className="dot" />{isSuspended(u) ? 'Suspended' : 'Active'}</span>
+                      {u.must_change_password && <span className="acc-mustchg" title="They set their own password on first sign-in">first-login password pending</span>}
+                    </td>
                     <td className="u-muted acc-last">{timeAgo(u.last_active)}</td>
                     <td className="acc-actcol">
                       {mine ? (
@@ -255,7 +259,7 @@ function AccessPanel({ store }) {
         onDone={() => { setEdit(null); store.reloadServer?.(); load() }} />}
       {reveal && <RevealCard data={reveal} store={store} onClose={() => setReveal(null)} />}
       {seat && <SeatModal store={store} user={seat} onClose={() => setSeat(null)}
-        onDone={(res) => { setSeat(null); store.reloadServer?.(); load(); setReveal({ title: 'Seat reassigned', name: res.name, handle: res.loginId || res.handle, password: res.initialPassword }) }} />}
+        onDone={(res) => { setSeat(null); store.reloadServer?.(); load(); setReveal({ title: 'Seat reassigned', name: res.name, handle: res.loginId || res.handle, byId: !!res.loginId, password: res.initialPassword }) }} />}
     </div>
   )
 }
@@ -263,23 +267,39 @@ function AccessPanel({ store }) {
 // One-time credential reveal shared by reset-password and seat-reassign.
 function RevealCard({ data, store, onClose }) {
   const [copied, setCopied] = useState(false)
+  const [left, setLeft] = useState(3)   // seconds it stays locked open, so it can't be dismissed by accident
+  useEffect(() => {
+    if (left <= 0) return
+    const t = setTimeout(() => setLeft(n => n - 1), 1000)
+    return () => clearTimeout(t)
+  }, [left])
+  const locked = left > 0
+  const tryClose = () => { if (!locked) onClose() }
+  const idLabel = data.byId ? 'User ID' : 'Email'
   const copy = () => {
-    const text = `${store.state.settings?.firmName || 'Workspace'} login\nID / email: ${data.handle}\nPassword: ${data.password}`
+    const firm = store.state.settings?.firmName || 'Workspace'
+    const text = `${firm} sign-in\n${idLabel}: ${data.handle}\nTemporary password: ${data.password}`
     navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => {})
   }
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay" onClick={tryClose}>
       <div className="modal" style={{ width: 400 }} onClick={e => e.stopPropagation()}>
-        <div className="m-head"><h3>{data.title}</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
+        <div className="m-head"><h3>{data.title}</h3>
+          <button className="btn btn-icon btn-quiet" onClick={tryClose} disabled={locked} style={locked ? { opacity: .4, cursor: 'default' } : undefined}><Icon name="x" /></button>
+        </div>
         <div className="m-content">
-          <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Hand this to {data.name} — they'll change it on first sign-in. It won't be shown again.</div>
+          <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Give these to <b style={{ color: 'var(--ink)' }}>{data.name}</b>. The password <b style={{ color: 'var(--ink)' }}>won't be shown again</b> — copy it now. They set their own on first sign-in.</div>
           <div style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13.5, padding: '4px 0' }}><span className="u-muted">ID / email</span><span className="mono-num" style={{ fontWeight: 600, wordBreak: 'break-all' }}>{data.handle}</span></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13.5, padding: '4px 0', borderTop: '1px solid var(--line-2)' }}><span className="u-muted">Password</span><span className="mono-num" style={{ fontWeight: 600 }}>{data.password}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, padding: '4px 0' }}><span className="u-muted">{idLabel}</span><span className="mono-num" style={{ fontWeight: 600, wordBreak: 'break-all' }}>{data.handle}</span></div>
+          </div>
+          {/* Password is the thing that matters — make it the hero, not a table row. */}
+          <div style={{ marginBottom: 14 }}>
+            <div className="u-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Temporary password</div>
+            <div className="mono-num" style={{ fontSize: 20, fontWeight: 700, letterSpacing: '.02em', background: 'var(--accent-wash)', color: 'var(--accent-ink)', border: '1px solid var(--accent-line)', borderRadius: 10, padding: '12px 14px', textAlign: 'center', wordBreak: 'break-all' }}>{data.password}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Button variant="secondary" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={14} />{copied ? 'Copied' : 'Copy'}</Button>
-            <Button variant="primary" block onClick={onClose}>Done</Button>
+            <Button variant="primary" block onClick={tryClose} disabled={locked}>{locked ? `Keep open (${left})` : 'Done'}</Button>
           </div>
         </div>
       </div>
@@ -344,9 +364,15 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
       <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
         <div className="m-head"><h3>Edit {user.name}</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
         <div className="m-content">
-          <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
-            Signs in with <b style={{ color: 'var(--ink)' }}>{user.login_id || user.email || '—'}</b>{user.login_id ? ' (agent ID)' : ''}. Changing the sign-in seat itself is “Reassign seat”.
-          </div>
+          {user.login_id ? (
+            <Field label="User ID (used to sign in — fixed)">
+              <Input value={user.login_id} disabled readOnly />
+            </Field>
+          ) : (
+            <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
+              Signs in with their <b style={{ color: 'var(--ink)' }}>email</b>. To hand this seat to a different person, use “Reassign seat”.
+            </div>
+          )}
           <Field label="Full name"><Input value={name} onChange={e => setName(e.target.value)} autoFocus /></Field>
           <Field label={needsEmail ? 'Email' : 'Email (optional)'}><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@firm.com" type="email" /></Field>
           <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>

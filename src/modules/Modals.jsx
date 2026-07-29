@@ -827,8 +827,19 @@ function AddAgentModal({ store }) {
   const [loginId, setLoginId] = useState('')
   const [role, setRole] = useState('agent')
   const [saving, setSaving] = useState(false)
-  const [done, setDone] = useState(null)   // { handle, initialPassword } after creation
+  const [done, setDone] = useState(null)   // { handle, byId, initialPassword } after creation
   const [copied, setCopied] = useState(false)
+  const [left, setLeft] = useState(3)      // reveal stays locked open so it can't be dismissed by accident
+
+  useEffect(() => {
+    if (!done || left <= 0) return
+    const t = setTimeout(() => setLeft(n => n - 1), 1000)
+    return () => clearTimeout(t)
+  }, [done, left])
+
+  // What the agent's sign-in ID will actually be — shown live so it's never a
+  // surprise. Mirrors the backend: typed ID wins, else slug of the name.
+  const derivedId = (loginId.trim() || name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16))
 
   const submit = () => {
     if (!name.trim()) { store.toast('Add a name first', 'warn'); return }
@@ -840,27 +851,32 @@ function AddAgentModal({ store }) {
     Promise.resolve(store.addAgent({ name: name.trim(), phone: phone.trim(), email: email.trim(), loginId: loginId.trim(), role }))
       .then(res => {
         if (res && res.success) {
-          setDone({ handle: role === 'manager' ? email.trim() : (res.loginId || loginId.trim()), initialPassword: res.initialPassword })
+          setDone({ handle: role === 'manager' ? email.trim() : (res.loginId || loginId.trim()), byId: role !== 'manager', initialPassword: res.initialPassword })
         } else { setSaving(false) }
       })
   }
 
-  const copyCreds = () => {
-    const text = `${store.state.settings.firmName || 'Workspace'} login\nID/email: ${done.handle}\nPassword: ${done.initialPassword}`
-    navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => {})
-  }
-
   if (done) {
+    const idLabel = done.byId ? 'User ID' : 'Email'
+    const locked = left > 0
+    const guardedClose = () => { if (!locked) store.closeModal() }
+    const copyCreds = () => {
+      const text = `${store.state.settings.firmName || 'Workspace'} sign-in\n${idLabel}: ${done.handle}\nTemporary password: ${done.initialPassword}`
+      navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => {})
+    }
     return (
-      <Modal title="Teammate added" onClose={store.closeModal} width={400}>
-        <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Hand these over — they change the password on first login. This password won't be shown again.</div>
+      <Modal title="Teammate added" onClose={guardedClose} width={400}>
+        <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Give these to {name.trim() || 'them'}. The password <b style={{ color: 'var(--ink)' }}>won't be shown again</b> — copy it now. They set their own on first sign-in.</div>
         <div style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13.5, padding: '4px 0' }}><span className="u-muted">ID / email</span><span className="mono-num" style={{ fontWeight: 600, wordBreak: 'break-all' }}>{done.handle}</span></div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13.5, padding: '4px 0', borderTop: '1px solid var(--line-2)' }}><span className="u-muted">Password</span><span className="mono-num" style={{ fontWeight: 600 }}>{done.initialPassword}</span></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, padding: '4px 0' }}><span className="u-muted">{idLabel}</span><span className="mono-num" style={{ fontWeight: 600, wordBreak: 'break-all' }}>{done.handle}</span></div>
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <div className="u-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Temporary password</div>
+          <div className="mono-num" style={{ fontSize: 20, fontWeight: 700, letterSpacing: '.02em', background: 'var(--accent-wash)', color: 'var(--accent-ink)', border: '1px solid var(--accent-line)', borderRadius: 10, padding: '12px 14px', textAlign: 'center', wordBreak: 'break-all' }}>{done.initialPassword}</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Button variant="secondary" onClick={copyCreds}><Icon name={copied ? 'check' : 'copy'} size={14} />{copied ? 'Copied' : 'Copy'}</Button>
-          <Button variant="primary" block onClick={store.closeModal}>Done</Button>
+          <Button variant="primary" block onClick={guardedClose} disabled={locked}>{locked ? `Keep open (${left})` : 'Done'}</Button>
         </div>
       </Modal>
     )
@@ -875,6 +891,9 @@ function AddAgentModal({ store }) {
       {role === 'agent' ? (
         <>
           <Field label="Login ID (optional — auto-created from the name)"><Input value={loginId} onChange={e => setLoginId(e.target.value.replace(/@/g, ''))} placeholder="e.g. kiran" /></Field>
+          <div className="u-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 4 }}>
+            Signs in as <b className="mono-num" style={{ color: 'var(--ink)' }}>{derivedId || '—'}</b>
+          </div>
           <Field label="Email (optional)"><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="kiran@firm.com" type="email" /></Field>
         </>
       ) : (

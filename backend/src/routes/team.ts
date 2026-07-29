@@ -64,6 +64,17 @@ async function loadUser(tenantId: string, id: string): Promise<any | null> {
   return rows[0] || null;
 }
 
+/** Email must be unique within a tenant — login resolves an account by email, so
+ *  two users sharing one would make sign-in ambiguous (one could never log in). */
+async function emailTaken(tenantId: string, email: string, exceptId?: string): Promise<boolean> {
+  const rows = await sql`
+    SELECT id FROM users
+    WHERE tenant_id = ${tenantId} AND lower(email) = ${email.toLowerCase()} AND deleted_at IS NULL
+      AND id <> ${exceptId || ''}
+    LIMIT 1`;
+  return rows.length > 0;
+}
+
 // ── User management (auth v2) ───────────────────────────────────────────────
 
 /** Roster of live users with role, status, and last-active (from sessions). */
@@ -104,6 +115,9 @@ teamRouter.post('/users', async (req: Request, res: Response) => {
       if (loginIdVal.includes('@')) return res.status(400).json({ error: 'A login ID cannot contain "@".' });
     } else if (!normEmail || !EMAIL_RE.test(normEmail)) {
       return res.status(400).json({ error: 'An owner or manager needs a valid email to sign in.' });
+    }
+    if (normEmail && await emailTaken(req.tenantId!, normEmail)) {
+      return res.status(409).json({ error: 'Someone on this team already uses that email.' });
     }
 
     const initial = String(password || '').trim() || suggestPassword();
@@ -159,6 +173,9 @@ teamRouter.patch('/users/:id', async (req: Request, res: Response) => {
     const normEmail = email != null ? (String(email).trim().toLowerCase() || null) : u.email;
     if (newRole !== 'agent' && (!normEmail || !EMAIL_RE.test(normEmail))) {
       return res.status(400).json({ error: 'An owner or manager needs a valid email.' });
+    }
+    if (normEmail && await emailTaken(req.tenantId!, normEmail, u.id)) {
+      return res.status(409).json({ error: 'Someone on this team already uses that email.' });
     }
     const meta = { ...(u.metadata || {}), phone: normPhone, email: normEmail };
     await sql`
@@ -223,6 +240,9 @@ teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) 
     const normEmail = email ? String(email).trim().toLowerCase() : null;
     if (u.role !== 'agent' && (!normEmail || !EMAIL_RE.test(normEmail))) {
       return res.status(400).json({ error: 'An owner/manager seat needs a valid email.' });
+    }
+    if (normEmail && await emailTaken(req.tenantId!, normEmail, u.id)) {
+      return res.status(409).json({ error: 'Someone on this team already uses that email.' });
     }
     const initials = cleanName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
     const meta = { initials, avatar: '', phone: normPhone, email: normEmail };
