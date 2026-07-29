@@ -38,14 +38,20 @@ export const KNOWN_WORKSPACES = [
   { slug: 'skylinerealty', tenantId: 'skyline-realty', firmName: 'Skyline Realty', city: 'Pune', initials: 'SR' },
 ]
 
-/** Normalize whatever was typed ("Skyline Realty", "app.skylinerealty.in") to a slug. */
+/** Normalize whatever was typed ("Skyline Realty", "app.skylinerealty.in") to a
+ *  slug. MUST match the slug the backend mints at onboarding
+ *  (firmName.replace(/[^a-z0-9]+/g,'-')) so a firm typed by name resolves to its
+ *  real tenant id — e.g. "Meridian Estates" -> "meridian-estates", not
+ *  "meridianestates". The backend resolve is also hyphen-insensitive as a
+ *  belt-and-braces match. */
 export function normalizeSlug(input) {
   return String(input || '')
     .toLowerCase()
     .replace(/^https?:\/\//, '')
     .replace(/^app\./, '')
-    .replace(/\.com.*$/, '')
-    .replace(/[^a-z0-9-]/g, '')
+    .replace(/\.(com|in|co|net|org).*$/, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
 }
 
 /** Resolve a typed workspace to its brand. Unknown slugs still resolve — titled from the slug. */

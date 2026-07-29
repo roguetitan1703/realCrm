@@ -85,8 +85,16 @@ workspaceRouter.get('/resolve', async (req: Request, res: Response) => {
     // default. Fall back to the first tenant when no slug is given (single-tenant
     // dev), and 404 on an unknown slug.
     const key = slug || domain || '';
+    // Hyphen-insensitive match: "meridianestates" resolves to "meridian-estates"
+    // so a firm typed by name lands on its workspace regardless of spacing.
+    const bare = key.toLowerCase().replace(/-/g, '');
     const rows = key
-      ? await sql`SELECT id, name, slug, brand_config, enabled_modules FROM tenants WHERE slug = ${key} OR id = ${key} LIMIT 1`
+      ? await sql`
+          SELECT id, name, slug, brand_config, enabled_modules FROM tenants
+          WHERE slug = ${key} OR id = ${key}
+             OR replace(lower(slug), '-', '') = ${bare}
+             OR replace(lower(id), '-', '') = ${bare}
+          LIMIT 1`
       : await sql`SELECT id, name, slug, brand_config, enabled_modules FROM tenants ORDER BY created_at ASC LIMIT 1`;
     const t = rows[0];
 
