@@ -673,7 +673,11 @@ export async function getState(): Promise<ServerState> {
   const t = tid();
   const agentScope = agentLeadScope();
   const [agentsRows, propsRows, leadsRows, settingsRows, intRows, routingRows, timelineRows, shortlistRows, brandRows] = await Promise.all([
-    sql`SELECT * FROM crm_agents WHERE tenant_id = ${t}`,
+    // Same soft-delete exclusion as getAgents() so the roster/activity view and
+    // Manage access never disagree about who's on the team.
+    sql`SELECT a.* FROM crm_agents a
+        LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
+        WHERE a.tenant_id = ${t} AND u.deleted_at IS NULL`,
     sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} ORDER BY created_at DESC`,
     agentScope
       ? sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND agent_id = ${agentScope} ORDER BY created_at DESC`

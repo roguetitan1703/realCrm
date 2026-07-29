@@ -110,7 +110,7 @@ export default function Team({ store, go, topBar }) {
                         : overloaded ? <span className="btag over">Overloaded</span>
                         : isLeader ? <span className="btag top">Top closer</span> : null}
                     </div>
-                    <div className="brole">{roleLabel(a.role)} · Pune</div>
+                    <div className="brole">{roleLabel(a.role)}</div>
                   </div>
                 </div>
 

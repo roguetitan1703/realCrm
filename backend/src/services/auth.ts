@@ -297,11 +297,30 @@ export function suggestPassword(): string {
 
 // ---- Sessions --------------------------------------------------------------
 
+const MAX_LIVE_SESSIONS = 8;   // devices a single user can be signed in on at once
+
 export async function createSession(tenantId: string | null, userId: string, ctx: RequestCtx = {}): Promise<string> {
+  // Housekeeping first: hard-delete this user's dead sessions (revoked or
+  // expired) so the table doesn't grow unbounded and "Your sessions" stays
+  // honest — abandoned/expired devices don't linger as recorded rows.
+  await sql`DELETE FROM sessions WHERE user_id = ${userId} AND (revoked = TRUE OR expires_at < NOW())`;
+
   const id = `sess_${Date.now()}_${randomBytes(9).toString('base64url')}`;
   await sql`
     INSERT INTO sessions (id, tenant_id, user_id, expires_at, ip, user_agent)
     VALUES (${id}, ${tenantId}, ${userId}, ${sessionExpiryISO()}, ${ctx.ip || null}, ${ctx.userAgent || null})
+  `;
+
+  // Cap concurrent sessions: revoke all but the newest MAX so a user who keeps
+  // signing in without logging out can't accumulate endless live sessions.
+  await sql`
+    UPDATE sessions SET revoked = TRUE
+    WHERE user_id = ${userId} AND revoked = FALSE AND expires_at > NOW()
+      AND id NOT IN (
+        SELECT id FROM sessions
+        WHERE user_id = ${userId} AND revoked = FALSE AND expires_at > NOW()
+        ORDER BY last_seen_at DESC LIMIT ${MAX_LIVE_SESSIONS}
+      )
   `;
   return id;
 }

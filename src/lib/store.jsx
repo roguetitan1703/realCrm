@@ -9,7 +9,6 @@ import { initials } from './format.js'
 import { generateMessage } from './matching.js'
 import { api as apiClient } from './api.js'
 import { applyBrandColor } from './brand.js'
-import { defaultAgents, defaultProperties, defaultLeads } from '../data/defaultDataset.js'
 
 const StoreCtx = createContext(null)
 export const useStore = () => useContext(StoreCtx)
@@ -51,6 +50,8 @@ function loadAuthSession() {
         loggedIn: Boolean(p.loggedIn) && hasToken,
         role: p.role || 'admin',
         activeAgentId: p.activeAgentId || 'a1',
+        tenantName: p.tenantName || '',
+        tenantCity: p.tenantCity || '',
       }
     }
   } catch (e) {}
@@ -76,28 +77,33 @@ function clearAuthSession() {
 
 function freshState() {
   const session = loadAuthSession()
+  // NEVER seed the client with the bundled demo dataset. Showing one firm's
+  // sample agents/leads/name for a frame before the server hydrate lands is the
+  // "demo data flash / wrong tenant" leak. When signed in, start from this
+  // browser's per-tenant offline snapshot (real last-known data) if present,
+  // otherwise empty — and let the server hydrate fill it in. The firm name is
+  // seeded from the auth session so the sidebar never flashes the demo firm.
+  const cached = session.loggedIn ? readStateCache() : null
+  const cs = cached?.state || {}
+  const settings = cs.settings
+    ? { ...clone(DEFAULT_SETTINGS), ...cs.settings }
+    : { ...clone(DEFAULT_SETTINGS), firmName: session.tenantName || '', city: session.tenantCity || '' }
   return {
     role: session.role || 'admin',                 // 'admin' (owner desktop) | 'agent' (mobile)
     activeAgentId: session.activeAgentId || 'a1',           // who "I" am in agent view
     loggedIn: session.loggedIn || false,
-    agents: clone(defaultAgents),
-    properties: clone(defaultProperties),
-    leads: clone(defaultLeads),
+    agents: Array.isArray(cs.agents) ? cs.agents : [],
+    properties: Array.isArray(cs.properties) ? cs.properties : [],
+    leads: Array.isArray(cs.leads) ? cs.leads : [],
     importLogs: [],
-    inactiveAgentIds: [],
-    settings: clone(DEFAULT_SETTINGS),   // editable: firmName, stages, sources, slaHours, reminderDays
-    brand: clone(DEFAULT_BRAND),         // tenant identity from tenants.brand_config (accent, logo)
-    routing: { strategy: 'round_robin', active_agent_ids: ['a1', 'a2', 'a3'] },
-    integrations: {
-      '99acres': { status: 'unconfigured', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/99acres', secret: '' },
-      'MagicBricks': { status: 'unconfigured', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/magicbricks', secret: '' },
-      'Calling & SMS': { status: 'unconfigured', apiKey: '', sid: '', callerId: '' },
-      'WhatsApp Business API': { status: 'unconfigured', phoneId: '', accessToken: '', wabaId: '' },
-      'Website sync': { status: 'unconfigured', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/website', secret: '' },
-    },
+    inactiveAgentIds: Array.isArray(cs.inactiveAgentIds) ? cs.inactiveAgentIds : [],
+    settings,                            // editable: firmName, stages, sources, slaHours, reminderDays
+    brand: cs.brand ? { ...clone(DEFAULT_BRAND), ...cs.brand } : clone(DEFAULT_BRAND),
+    routing: cs.routing_rules ? { strategy: 'round_robin', active_agent_ids: [], ...cs.routing_rules } : { strategy: 'round_robin', active_agent_ids: [] },
+    integrations: cs.integrations || {},
     toasts: [],
     notifications: [],   // server-backed per-user alert feed
-    dataAsOf: null,      // ms timestamp of the currently displayed data snapshot
+    dataAsOf: cached?.at || null,   // ms timestamp of the currently displayed data snapshot
     dataStale: false,    // true when we're showing a cached snapshot (offline read)
     // modal/overlay state
     modal: null,
@@ -169,8 +175,15 @@ function reducer(state, action) {
       const user = action.payload?.user
       const role = user ? (user.role === 'agent' ? 'agent' : 'admin') : state.role
       const activeAgentId = user?.id || state.activeAgentId
-      persistAuthSession({ loggedIn: true, role, activeAgentId })
-      return { ...state, loggedIn: true, role, activeAgentId }
+      // The workspace name/city are known at sign-in — persist them so the next
+      // boot paints the real firm in the sidebar/tab instead of flashing the
+      // demo firm for the moment before the server state hydrates.
+      const tenant = action.payload?.tenant || {}
+      persistAuthSession({ loggedIn: true, role, activeAgentId, tenantName: tenant.firmName || '', tenantCity: tenant.city || '' })
+      const settings = tenant.firmName
+        ? { ...state.settings, firmName: tenant.firmName, city: tenant.city || state.settings.city }
+        : state.settings
+      return { ...state, loggedIn: true, role, activeAgentId, settings }
     }
 
     case 'LOGOUT': {

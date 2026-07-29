@@ -166,7 +166,7 @@ export default function App() {
   return (
     <>
       {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
-      <AppShell nav={nav} active={effectiveScreen} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl}>
+      <AppShell nav={nav} active={effectiveScreen} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
         <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.propId || ''}`} {...ctx} />
       </AppShell>
       {state.waState && <WaModal store={store} />}

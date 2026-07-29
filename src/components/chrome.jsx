@@ -6,14 +6,14 @@ import { Avatar } from './primitives.jsx'
 import { subscribeConnection } from '../lib/api.js'
 
 // ---- desktop sidebar ----
-export function Sidebar({ items, active, onNav, footer, firmName, logoUrl }) {
+export function Sidebar({ items, active, onNav, footer, firmName, logoUrl, sub }) {
   const name = firmName || theme.brand.firmName
   const initials = String(name).trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || theme.brand.initials
   return (
     <nav className="nav">
       <div className="n-brand">
         <div className={'n-mono' + (logoUrl ? ' has-logo' : '')}>{logoUrl ? <img src={logoUrl} alt="" /> : initials}</div>
-        <div><div className="n-fn">{name}</div><div className="n-sub">{theme.brand.officeLine}</div></div>
+        <div><div className="n-fn">{name}</div>{sub ? <div className="n-sub">{sub}</div> : null}</div>
       </div>
       <div className="n-list">
         {items.map(it => it.section

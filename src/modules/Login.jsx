@@ -137,7 +137,7 @@ export default function Login({ store }) {
       if (!res?.token) throw new Error('no token')
       if (res.mustChange) { setPhase('change'); setNewPw(''); setNewPw2(''); store.toast('Set a new password to continue.', 'ok'); return }
       store.toast(`Welcome to ${ws?.firmName || 'your desk'}`, 'ok')
-      store.login({ token: res.token, user: res.user })
+      store.login({ token: res.token, user: res.user, tenant: { firmName: ws?.firmName, city: ws?.city } })
     } catch (err) {
       store.toast('Those credentials didn’t match. Please try again.', 'warn')
     } finally {
@@ -156,7 +156,7 @@ export default function Login({ store }) {
       const res = await api.login(handle.trim(), newPw)    // clean re-login with the new password
       if (!res?.token) throw new Error('login failed')
       store.toast('Password updated — welcome.', 'ok')
-      store.login({ token: res.token, user: res.user })
+      store.login({ token: res.token, user: res.user, tenant: { firmName: ws?.firmName, city: ws?.city } })
     } catch (err) {
       store.toast(err.message || 'Could not update the password.', 'warn')
     } finally {
