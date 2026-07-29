@@ -171,6 +171,11 @@ a daily-use CRM.
 - **E5 [reopened C9]** ⬜ **Branding richness + audit** — walk every surface
   (login, desk, mobile, PWA icon, OTP/email, WhatsApp share, watermark) and make
   the tenant identity consistent and complete; today it's partial and unproven.
+- **E7 [global]** ⬜ **Data lifecycle & retention** — no store grows unbounded.
+  Every append-only/growing table or bucket ships with a retention policy; one
+  nightly purge job; storage monitoring in the superadmin console. Full register
+  in [specs/data-lifecycle.md](./specs/data-lifecycle.md). **Review-gate:** a new
+  growing store can't land without its policy.
 - **E6 [reopened C10]** ⬜ **Backup restore story** — define how a Supabase
   Postgres dump is *restored*, and specifically **per-tenant** restore/export
   (`WHERE tenant_id`). Size the Supabase plan's **storage limit** vs expected
