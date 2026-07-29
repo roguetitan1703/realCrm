@@ -1,7 +1,7 @@
 # Spec: Auth, sessions & user management (Roadmap block A)
 
-**Status:** 🧭 planning — **A1 login LOCKED**; A1a seats locked; A2 sessions and
-A3 user management still to plan.
+**Status:** 🔒 **A-block LOCKED** — A1 login, A1a seats, A2 sessions, A3 user
+management all planned and ready to build (develop-once).
 **Supersedes:** the OTP login shipped earlier. Email *sending* infra is kept
 (repurposed from login codes to password-reset links).
 
@@ -64,6 +64,11 @@ Extend `users` (already tenant-scoped) so the **credential/seat** and the
 - `id, tenant_id, user_id, token_hash, expires_at, consumed BOOLEAN`
 - token emailed as a link (`/reset?token=…`), single-use, short TTL (e.g. 30 min)
 
+**New table: `sessions`** (server-side session records — required for the
+active-sessions view and revoke/force-logout; a stateless JWT alone can't be
+listed or revoked)
+- `id (jti), tenant_id, user_id, created_at, last_seen_at, expires_at, ip, user_agent, revoked BOOLEAN`
+
 **Retire:** `auth_otp` table + OTP code path (drop or leave dormant; see rollback).
 
 ---
@@ -112,23 +117,119 @@ verify steps and the workspace→phone→otp progression's OTP leg.
 
 ---
 
-## Build checklist (execute after the whole A-block is locked)
-- [ ] Schema: `users` columns + `password_resets` table + login uniqueness.
-- [ ] `auth.ts`: password login, change, forgot, reset; retire OTP issue/verify.
-- [ ] Routes: `/auth/login`, `/auth/password/{change,forgot,reset}`, `/team/users/:id/reset-password`.
-- [ ] Suggested-password helper.
-- [ ] Onboarding (`provisionTenant`): generate owner initial password, return it; show in `/admin` hand-off.
-- [ ] Frontend Login: "ID or email" + password; first-login change screen; forgot-password screen.
-- [ ] Seat reassignment action (A1a) in user management (A3).
-- [ ] Audit events: login, password change/reset, admin reset, seat reassignment.
+## Build checklist (execute after the whole A-block is locked — it now is)
+
+**Schema**
+- [ ] `users`: `login_id`, `password_hash`, `must_change_password`, `email_verified`, `status`; `UNIQUE(tenant_id, login_id)`.
+- [ ] New tables: `password_resets`, `sessions`.
+- [ ] Retire/dormant `auth_otp`.
+
+**Backend — auth (A1/A2)**
+- [ ] `auth.ts`: password login (resolve by email|login_id), change, forgot, reset; retire OTP issue/verify.
+- [ ] Session lifecycle: create on login (ip/ua, +30d), `jti` in JWT, middleware load/validate/slide, throttled `last_seen` bump.
+- [ ] Routes: `/auth/login`, `/auth/password/{change,forgot,reset}`, `/auth/sessions`, `/auth/sessions/:id/revoke`, logout revokes session.
+- [ ] Suggested-password helper; `SESSION_TTL_DAYS` (default 30).
+- [ ] `email.ts`: add `sendPasswordResetEmail` (keep transporter).
+- [ ] IP → coarse location for the sessions view (or defer to display-time).
+
+**Backend — user management (A3)**
+- [ ] `/team/users` CRUD; `/status`, `/reassign-seat`, `/reset-password`, `/force-logout`; guarded `DELETE`.
+- [ ] RBAC matrix (owner/manager/agent) enforced server-side.
+
+**Onboarding**
+- [ ] `provisionTenant`: generate owner initial password, return it; show in `/admin` hand-off.
+
+**Frontend**
+- [ ] Login: single "ID or email" + password; first-login change-password screen; forgot-password + reset screens.
+- [ ] Settings/Team: user-management UI (create, edit, status lifecycle, reassign seat, reset pw, force-logout).
+- [ ] "Active sessions" panel (own sessions; owner/manager team view).
+
+**Audit**
+- [ ] Events: login (ip/ua), password change/reset, admin reset, status change, seat reassignment, force-logout, hard delete.
 
 ---
 
-## A2 — Sessions  🧭 TO PLAN
-Long sessions (weeks) so no daily re-login; **active sessions** view (when/where
-each login happened) feeding the audit log. *(Plan next.)*
+## A2 — Sessions  🔒 LOCKED
 
-## A3 — User management  🧭 TO PLAN
-Edit details, change password, **suspend** (reversible) vs **deactivate** vs
-**hard delete**, invite/create users, seat reassignment (A1a), force-logout.
-*(Plan after A2.)*
+### Decisions
+- **Conventional session length: 30 days, sliding.** A "remember-me" month — the
+  standard for a daily-use business app. The session **renews on activity** (each
+  authenticated request pushes `expires_at` to now + 30d); a session unused for 30
+  days expires. One knob (`SESSION_TTL_DAYS`, default 30) if we ever tune it.
+- **Server-tracked sessions.** The JWT stays the transport but carries a **`jti`**
+  (session id); the real session lives in the `sessions` table. This is what makes
+  "active sessions" listable and individually revocable — a bare stateless JWT
+  can be neither.
+- **Active sessions view.** Each user can see their own sessions: **when** (created
+  + last seen), **where** (IP + coarse city/region from an IP lookup) and **which
+  device** (parsed from user-agent), with the current session flagged. Owners/
+  managers can additionally view sessions across the team (A3 force-logout).
+- **Every login is audited** with IP + user-agent (feeds the audit ledger).
+
+### Flow / API
+- **On login:** insert a `sessions` row (ip, user_agent, expires_at = +30d); the
+  JWT embeds its `jti`. Audit `auth.login` with ip/ua.
+- **Auth middleware (per request):** verify JWT signature → load `sessions[jti]`
+  → reject if missing/`revoked`/past `expires_at` → bump `last_seen_at` and slide
+  `expires_at`. (Bump is cheap; throttle the write to ~once/5 min to avoid a
+  write per request.)
+- **List** — `GET /auth/sessions` → the caller's sessions (current flagged).
+- **Revoke one** — `POST /auth/sessions/:id/revoke` (own sessions; "log out that
+  device").
+- **Logout** — revokes the current session (not just a client token drop).
+- **Coarse location:** derive city/region from IP at display time (or store at
+  login). Start with IP + device string if the lookup is deferred; location is
+  additive.
+
+---
+
+## A3 — User management  🔒 LOCKED
+
+### Decisions — the status lifecycle (this is the core the client asked for)
+A single `status` on the user with three states + a separate destructive action:
+
+- **Active** — normal.
+- **Suspended** — *reversible pause.* Blocks login immediately (**revoke all their
+  sessions**), **keeps all data + lead assignments untouched**, stays in reports.
+  For leave, disputes, "not right now." Un-suspend restores everything.
+- **Deactivated** — *retired seat.* Blocks login + revokes sessions, **removes from
+  round-robin and active rosters**, keeps historical attribution on their leads.
+  This is "they've left." Reversible (reactivate) **or** hand the seat to a new
+  hire via **seat reassignment** (A1a).
+- **Hard delete** — *separate, destructive, guarded.* Removes the user row. **Must
+  reassign their open leads first** (block otherwise). Owner-only, explicit
+  confirm, audited. Rare — suspend/deactivate cover almost every real case.
+
+So the plain "deactivate button with no enforcement" is replaced by: **Suspend /
+Reactivate**, **Deactivate**, **Reassign seat**, and a distinct guarded **Delete**.
+
+### Decisions — the rest
+- **Create user = "invite" without links.** Admin fills details (name, role,
+  phone/email, and for agents a `login_id`), the system offers a **suggested
+  password**, admin hands it over. (Per A1: no email invite links.)
+- **Edit details:** name, phone, email, role. Changing role re-scopes RBAC live.
+- **Change password:** self-serve (any user) or **admin reset** for agents (returns
+  the new password once to hand over) — from A1.
+- **Seat reassignment (A1a):** on a deactivated/leaving agent, "Assign seat to a
+  new person" → keep `login_id` + all leads/history, overwrite person fields
+  (name/phone/email/avatar), force `must_change_password`, revoke old sessions.
+  Audited as `user.seat_reassigned`.
+- **Force-logout:** owner/manager can revoke all of a user's sessions (uses A2).
+
+### RBAC for user management
+- **Owner:** full — manage everyone, delete, reassign seats, force-logout.
+- **Manager:** manage **agents** only (create/edit/suspend/deactivate/reset/
+  force-logout agents); cannot touch owners or other managers; cannot hard-delete.
+- **Agent:** no user management; may edit their own profile + change own password.
+
+### API
+- `GET /team/users` — roster with role, status, last-active (from sessions).
+- `POST /team/users` — create (name, role, login_id|email, initial password).
+- `PATCH /team/users/:id` — edit details / role.
+- `POST /team/users/:id/status` — `{ status: active|suspended|deactivated }`
+  (revokes sessions on suspend/deactivate).
+- `POST /team/users/:id/reassign-seat` — A1a (person swap + force reset).
+- `POST /team/users/:id/reset-password` — admin reset (from A1).
+- `POST /team/users/:id/force-logout` — revoke all sessions.
+- `DELETE /team/users/:id` — guarded hard delete (requires leads reassigned).
+- All gated by the RBAC matrix above; all audited.

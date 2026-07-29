@@ -9,7 +9,7 @@ than design-and-build one point at a time.
 
 | Spec | Roadmap block | Status |
 |------|---------------|--------|
-| [auth.md](./auth.md) | A. Auth, sessions & users (A1–A3) | 🧭 planning (A1 locked) |
+| [auth.md](./auth.md) | A. Auth, sessions & users (A1–A3) | 🔒 locked (ready to build) |
 
 > Each spec carries: **Decisions** (locked), **Data model**, **Flows/API**,
 > **Migration/rollback**, and a **Build checklist** (executed later, once locked).
