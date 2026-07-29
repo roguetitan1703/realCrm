@@ -17,19 +17,24 @@
 
 From the original 11 client-feedback points and the sprint work:
 
+> **Honesty note (2026-07-29):** several items previously marked ✅ were code-
+> complete but **not verified in production** — downgraded below. "Code exists"
+> is not "done" for a paying tenant. Nothing here is signed off until it's
+> deployed and checked on a real device/tenant.
+
 | # | Item | Status | Note |
 |---|------|--------|------|
 | C1 | Lead ingestion from portals (per-tenant `/ingest/:slug/:source?key=`) | 🔶 | Works; #15 is the richer inbox+parser evolution. |
-| C2 | Phone notifications (Web Push, VAPID, no Firebase) | ✅ | Needs live phone verification post-deploy. |
-| C3 | Team activity / RBAC | 🔶 | Server RBAC enforced; user-mgmt is thin → #14. |
-| C4 | Mobile PWA + install + push | ✅ | Per-tenant icon/manifest. |
-| C5 | `tel:` click-to-call | ✅ | Now framed as built-in (not an "integration"). |
-| C6 | `wa.me` WhatsApp richness (trilingual, structured) | ✅ | |
+| C2 | Phone notifications (Web Push, VAPID, no Firebase) | ⬜ | **UNVERIFIED.** Code wired end-to-end but no real-device delivery ever confirmed. Treat as unproven until a push lands on a phone. |
+| C3 | Team activity / RBAC | 🔶 | Server RBAC enforced; user-mgmt is thin → #14 (A-block). |
+| C4 | Mobile PWA + install + push | 🔶 | **Weak.** Tenant-themed app not actually installed/verified; PWA is not robust. Needs an install + offline + push pass on a real device. |
+| C5 | `tel:` click-to-call | ✅ | Built-in (not an "integration"). |
+| C6 | `wa.me` WhatsApp richness | 🔶 | Text is trilingual/structured, but **media sharing is missing** — richness incomplete until photos/videos (C2m/#3) are in the share. |
 | C7 | No WhatsApp Business API | ✅ | Deep links only, by design. |
-| C8 | Property visibility / search / export | 🔶 | Search exists; filters buggy → #5; export parked. |
-| C9 | Branding: tenant + Delpat platform split | ✅ | Single source `tenants.brand_config`; presets-only. |
-| C10 | DB backup | ✅ | `scripts/db-backup.sh` + restore, verified. |
-| C11 | True multi-tenant + RBAC (real, not theatre) | ✅ | tenant_id everywhere, token-authoritative, leak-tested. |
+| C8 | Property visibility / search / export | 🔶 | Search exists; **filters buggy → #5**; export parked. |
+| C9 | Branding: tenant + Delpat platform split | 🔶 | **Not complete.** Single-source `brand_config` exists, but branding needs a real richness + consistency **audit** across login/desk/mobile/PWA/email/share — many surfaces unproven. |
+| C10 | DB backup | 🔶 | `db-backup.sh` dumps public schema, but **per-tenant restore/use is undefined**, and Supabase storage limits not sized. Open questions below. |
+| C11 | True multi-tenant + RBAC (real, not theatre) | 🔶 | **Still not trustworthy.** tenant_id + token-auth landed and passed a scripted leak test, but **demo-data leakage is still observed**, multi-tenancy is flaky, and the superadmin is weak. Needs a full isolation audit → new item **A0** below. |
 
 Post-audit gaps:
 
@@ -39,10 +44,11 @@ Post-audit gaps:
 | Site-visit outcome tags | 🔶 | Folded into #11 (richer follow-up/visit proof). |
 | Staged CSV import | ✅ | Map → dedup → revertable batch. |
 
-Foundation made real (2026-07-29): lead ingest, team creation, onboarding — all
-rewritten from theatre to real; onboarding gated to the superadmin console.
-Tenant isolation bleed fixed on the frontend. Per-workspace URLs (`/orgname`)
-with Vercel SPA fallback.
+Foundation work (2026-07-29): lead ingest, team creation, onboarding rewritten
+from theatre toward real; onboarding gated to the superadmin console. A frontend
+isolation bleed was fixed — **but demo-data leakage is still being seen**, so
+isolation is NOT closed (see **A0**). Per-workspace URLs (`/orgname`) with a
+Vercel SPA fallback (fix committed, not yet on `origin`).
 
 ---
 
@@ -50,6 +56,20 @@ with Vercel SPA fallback.
 
 Grouped by theme. Bracketed tags are the source item numbers
 (`P#` = new production list, `C#` = original client list).
+
+### A0. Isolation & superadmin audit — **production blocker, do before onboarding a paying tenant** [reopened C11]
+
+- ⬜ **Demo-data leakage still observed** — hunt every source: bundled default
+  dataset in the frontend store, cached snapshots (`crm_state_cache_*`), any
+  query missing `WHERE tenant_id`, hydrate paths, and stale localStorage across
+  tenant switches. The scripted leak test passed but real usage still leaks —
+  reproduce it, then fix the actual vector, then re-audit.
+- ⬜ **Multi-tenancy is flaky** — audit tenant resolution end-to-end (token vs
+  header vs URL slug), switching tenants, and every raw-SQL route.
+- ⬜ **Superadmin is weak** — harden `/admin`: session/expiry, no tenant-token
+  crossover, audit of superadmin actions, and a real overview (not thin).
+- *This gates go-live: a paying tenant seeing another tenant's / demo data is
+  the one unacceptable failure.*
 
 ### A. Auth, sessions & user management — **the keystone; design as one unit**
 
@@ -134,21 +154,37 @@ a daily-use CRM.
 
 ### E. Cross-cutting / ops
 
-- **E1 [P17]** ✅ Per-workspace URL Vercel 404 — fixed (SPA catch-all rewrite).
+- **E1 [P17]** 🔶 Per-workspace URL Vercel 404 — fix committed (`aab3f79`), **not
+  yet pushed/deployed**. Verify on the live domain after deploy.
 - **E2** ⬜ Rotate the secrets exposed during dev before go-live (DB password,
   SES, VAPID, superadmin) — manual, user-side.
-- **E3** ⬜ Confirm live push on a real installed PWA post-deploy.
+- **E3 [reopened C2/C4]** ⬜ **Verify PWA + push on a real installed device** —
+  install the tenant-themed app, confirm offline read, and land a real push on a
+  phone. None of this is proven yet.
+- **E4 [reopened C4]** ⬜ **Harden the PWA** — installability, offline
+  robustness, per-tenant icon/manifest actually working on device.
+- **E5 [reopened C9]** ⬜ **Branding richness + audit** — walk every surface
+  (login, desk, mobile, PWA icon, OTP/email, WhatsApp share, watermark) and make
+  the tenant identity consistent and complete; today it's partial and unproven.
+- **E6 [reopened C10]** ⬜ **Backup restore story** — define how a Supabase
+  Postgres dump is *restored*, and specifically **per-tenant** restore/export
+  (`WHERE tenant_id`). Size the Supabase plan's **storage limit** vs expected
+  tenant data + media (photos/videos from C2m will dominate — likely object
+  storage, not Postgres). Open question to resolve, see below.
 
 ---
 
 ## Suggested sequence
 
+0. **A0 isolation & superadmin audit** — **blocks go-live.** No paying tenant
+   until demo-data leakage is gone and multi-tenancy is trustworthy.
 1. **A (auth/users)** — keystone; login changes, everything else sits on it.
 2. **C-fix [P5]** filters — quick correctness win, can run in parallel.
 3. **B1 [P1]** Remark + **B2/B3** lead/contact structure.
 4. **C fields [P6]** + **C media/watermark [P2/P3]**.
 5. **D ingestion [P15/P16]**.
 6. **B4 [P11]** visit-proof, **C4 [P7]** super-expansions.
-7. Parked: **C5 [P4]** AI video.
+7. Verification passes: **E3/E4** PWA+push on device, **E5** branding audit.
+8. Parked: **C5 [P4]** AI video.
 
 Sequence is a proposal — we confirm per point as we go.
