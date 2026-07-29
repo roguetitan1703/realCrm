@@ -10,7 +10,8 @@ than design-and-build one point at a time.
 | Spec | Roadmap block | Status |
 |------|---------------|--------|
 | [auth.md](./auth.md) | A. Auth, sessions & users (A1–A3) | 🔒 locked (ready to build) |
-| [contacts-leads.md](./contacts-leads.md) | B. Contacts & leads (B1–B5) | 🔒 locked (2 confirmations) |
+| [contacts-leads.md](./contacts-leads.md) | B. Contacts & leads (B1–B5) | 🔒 locked & sealed |
+| [properties.md](./properties.md) | C. Properties: fields, media, filters | 🧭 planning (questions open; filters bug diagnosed) |
 
 > Each spec carries: **Decisions** (locked), **Data model**, **Flows/API**,
 > **Migration/rollback**, and a **Build checklist** (executed later, once locked).

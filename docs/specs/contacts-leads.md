@@ -1,6 +1,6 @@
 # Spec: Contacts & leads (Roadmap block B)
 
-**Status:** 🔒 **LOCKED** (2 small confirmations noted inline). Items: B1 Remark ·
+**Status:** 🔒 **LOCKED & SEALED** — all questions answered. Items: B1 Remark ·
 B2 lead stage pills · B3 Clients/Owners subnavs · B4 visit-proof follow-up ·
 B5 call/message-on-contact.
 
@@ -108,9 +108,7 @@ follow_up · note), `at`, `agent`, `remark`, `outcome?`, `photo_url?`,
   One pipeline shared by B4 selfies and Block-C property photos/videos. Store the
   object in R2, keep only the URL/key in Postgres.
 - **Watermarking: no exception** — all uploaded/captured media, **including
-  visit-proof selfies**, carry the firm watermark. *(Q15 — I read "no exception"
-  as "don't exempt selfies"; the brand mark is a corner overlay, so it doesn't
-  obscure the proof. Flag if you meant the opposite.)*
+  visit-proof selfies**, carry the firm watermark. **(Q15 confirmed.)**
 
 ---
 
@@ -130,4 +128,4 @@ follow_up · note), `at`, `agent`, `remark`, `outcome?`, `photo_url?`,
 - [ ] Audit: activity added, remark added/edited.
 
 ## Remaining confirmations
-1. **Q15** — watermark selfies too (my reading of "no exception").
+_None — sealed._
