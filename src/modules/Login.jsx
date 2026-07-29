@@ -48,31 +48,51 @@ export default function Login({ store }) {
     document.title = ws ? tenantDocTitle(ws.firmName) : PLATFORM.docTitle
   }, [ws])
 
-  const selectWorkspace = (input) => {
-    const resolved = resolveWorkspace(input)
-    if (!resolved) {
+  // Enter a workspace — but ONLY if it really exists. The backend resolver is
+  // the authority: a typed name that doesn't match a real tenant 404s, and we
+  // stop right here (no phone step, no OTP). This is what stops "type anything
+  // and you're in". The firm's name/brand shown next come from the server row,
+  // never from what was typed.
+  const selectWorkspace = async (input) => {
+    const guess = resolveWorkspace(input)
+    if (!guess) {
       store.toast('Enter your brokerage workspace name to continue.', 'warn')
       return
     }
     setResolving(true)
-    setTimeout(() => {
-      setResolving(false)
+    try {
+      const r = await api.resolveWorkspace(guess.tenantId)
+      if (!r?.resolved || !r?.tenant) throw new Error('not-found')
+      const t = r.tenant
+      const bc = t.brand_config || {}
+      const resolved = {
+        slug: t.slug, tenantId: t.id, firmName: t.name,
+        initials: bc.initials || String(t.name || '').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase(),
+        logoUrl: bc.logoUrl || '', primaryColor: bc.primaryColor || '',
+      }
+      api.setTenantId(t.id)
+      applyPwaIdentity(t.id)                 // canonical id — matches the manifest/icon route
+      applyBrandColor(bc.primaryColor)       // dress the login in the firm's real accent
       setWs(resolved)
-      api.setTenantId(resolved.tenantId)
-      applyPwaIdentity(resolved.tenantId) // canonical id — matches the manifest/icon route
-      // Dress the login in the firm's real identity — accent + logo from
-      // tenants.brand_config — so from the first screen it's THEIR software.
-      api.resolveWorkspace(resolved.tenantId)
-        .then(r => {
-          const bc = r?.tenant?.brand_config || {}
-          applyBrandColor(bc.primaryColor)
-          setWs(w => (w ? { ...w, logoUrl: bc.logoUrl || '', primaryColor: bc.primaryColor || '' } : w))
-        })
-        .catch(() => {})
+      // Reflect the workspace in the URL so it's shareable: baseurl/<slug>.
+      try { window.history.pushState({}, '', `/${t.slug}`) } catch (e) {}
       setPhase('phone')
-      store.toast(`${resolved.firmName} workspace loaded`, 'ok')
-    }, 550)
+      store.toast(`${t.name} workspace loaded`, 'ok')
+    } catch (e) {
+      store.toast('No workspace found with that name. Check the spelling, or ask your admin for the exact name.', 'warn')
+    } finally {
+      setResolving(false)
+    }
   }
+
+  // Auto-enter the workspace named in the URL path (baseurl/<slug>) on first
+  // load, so a bookmarked or shared firm URL lands straight on their login.
+  useEffect(() => {
+    if (phase !== 'workspace') return
+    const seg = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '')
+    if (seg && seg !== 'admin') selectWorkspace(seg)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const leaveWorkspace = () => {
     setWs(null)
@@ -80,6 +100,7 @@ export default function Login({ store }) {
     setOtp(['', '', '', ''])
     applyBrandColor(DEFAULT_ACCENT) // back to the platform (Delpat) identity
     applyPwaIdentity(null)
+    try { window.history.pushState({}, '', '/') } catch (e) {}
   }
 
   useEffect(() => {

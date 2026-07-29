@@ -181,8 +181,8 @@ export default function Admin() {
                 {provisioned.tenant.name} is live — hand these to the client.
               </div>
               <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '10px 18px', margin: 0, fontSize: 13.5 }}>
-                <dt style={dtStyle}>Workspace</dt>
-                <dd style={ddStyle}><span className="mono-num">{provisioned.tenant.slug}</span> — they type “{provisioned.tenant.name}” at the login screen</dd>
+                <dt style={dtStyle}>Workspace URL</dt>
+                <dd style={ddStyle}><span className="mono-num" style={{ wordBreak: 'break-all' }}>{`${window.location.origin}/${provisioned.tenant.slug}`}</span> — or they type “{provisioned.tenant.name}” at the login screen</dd>
                 <dt style={dtStyle}>Owner login</dt>
                 <dd style={ddStyle}><span className="mono-num">{provisioned.loginWith}</span> — a one-time code is emailed here (no password)</dd>
                 <dt style={dtStyle}>Lead ingest key</dt>
