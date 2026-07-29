@@ -16,6 +16,7 @@ import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { audit } from './audit.js';
 import { getContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
+import { suggestPassword } from './auth.js';
 
 /**
  * The tenant to scope the current request's queries to. Comes from the request
@@ -82,6 +83,7 @@ export interface ProvisionResult {
   owner: { id: string; name: string; email: string; phone: string | null; role: 'owner' };
   ingest: { tenantSlug: string; secret: string };
   loginWith: string;
+  initialPassword: string;   // hand this to the owner (they change it on first login)
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -123,9 +125,14 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   const ownerId = `owner_${tenantId}`;
   const ownerName = (input.ownerName || 'Owner').trim();
   const ownerMeta = { initials, avatar: '', phone: ownerPhone, email: ownerEmail };
+  // Owner logs in by email + password (auth v2). Generate an initial password to
+  // hand over; the email is admin-vouched (verified) so self-reset works; they're
+  // forced to change it on first login.
+  const initialPassword = suggestPassword();
+  const ownerPwHash = await bcrypt.hash(initialPassword, 10);
   await sql`
-    INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata)
-    VALUES (${ownerId}, ${tenantId}, ${ownerName}, ${ownerPhone}, ${ownerEmail}, 'owner', 'ACTIVE', ${sql.json(ownerMeta)})
+    INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
+    VALUES (${ownerId}, ${tenantId}, ${ownerName}, ${ownerPhone}, ${ownerEmail}, 'owner', 'active', ${sql.json(ownerMeta)}, ${ownerPwHash}, TRUE, TRUE)
   `;
   await sql`
     INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
@@ -153,6 +160,7 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
     owner: { id: ownerId, name: ownerName, email: ownerEmail, phone: ownerPhone, role: 'owner' },
     ingest: { tenantSlug: cleanSlug, secret: ingestSecret },
     loginWith: ownerEmail,
+    initialPassword,
   };
 }
 

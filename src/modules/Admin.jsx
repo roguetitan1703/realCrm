@@ -184,7 +184,9 @@ export default function Admin() {
                 <dt style={dtStyle}>Workspace URL</dt>
                 <dd style={ddStyle}><span className="mono-num" style={{ wordBreak: 'break-all' }}>{`${window.location.origin}/${provisioned.tenant.slug}`}</span> — or they type “{provisioned.tenant.name}” at the login screen</dd>
                 <dt style={dtStyle}>Owner login</dt>
-                <dd style={ddStyle}><span className="mono-num">{provisioned.loginWith}</span> — a one-time code is emailed here (no password)</dd>
+                <dd style={ddStyle}><span className="mono-num">{provisioned.loginWith}</span> — email + the password below</dd>
+                <dt style={dtStyle}>Owner password</dt>
+                <dd style={ddStyle}><span className="mono-num">{provisioned.initialPassword}</span> — hand this over; they change it on first login</dd>
                 <dt style={dtStyle}>Lead ingest key</dt>
                 <dd style={ddStyle}><span className="mono-num" style={{ wordBreak: 'break-all' }}>{provisioned.ingest.secret}</span></dd>
                 <dt style={dtStyle}>Ingest URL</dt>
