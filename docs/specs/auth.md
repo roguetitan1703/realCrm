@@ -50,15 +50,20 @@ Extend `users` (already tenant-scoped) so the **credential/seat** and the
 - `password_hash TEXT` — bcrypt (dep already present)
 - `must_change_password BOOLEAN DEFAULT false`
 - `role TEXT` — `owner | manager | agent`
-- `status TEXT` — `active | suspended | deactivated` (detail in A3)
+- `status TEXT` — `active | suspended` (detail in A3)
+- `deleted_at TIMESTAMP NULL` — soft delete (record-preserving; see A3). A user is
+  "gone" when this is set; the row stays for historical lead attribution.
+- `failed_logins INT DEFAULT 0`, `locked_until TIMESTAMP NULL` — brute-force guard (A1)
 
 **Person (swappable on seat reassignment)**
 - `name`, `phone`, `email`, `metadata(initials, avatar)` (already present)
 - `email_verified BOOLEAN DEFAULT false` — gates self-serve reset eligibility
 
-**Login resolution within a tenant**
-- typed handle contains `@` → match `lower(email)`
-- else → match `login_id`
+**Login resolution within a tenant** (tenant known from the workspace URL/slug)
+- typed handle contains `@` → match `lower(email)`; else → match `login_id`
+- `login_id` must **not** contain `@` (reserve `@` for email resolution), unique
+  per tenant. The same email/id can exist in *different* tenants as different users.
+- Reject login if `status != 'active'` or `deleted_at IS NOT NULL` or `locked_until > now()`.
 
 **New table: `password_resets`**
 - `id, tenant_id, user_id, token_hash, expires_at, consumed BOOLEAN`
@@ -77,13 +82,22 @@ listed or revoked)
 
 **Login** — `POST /auth/login { handle, password }`
 - Resolve user in the request's tenant by email or `login_id`.
-- `bcrypt.compare`; on success sign the existing JWT (`kind:'user'`, tenant_id,
-  user_id, role). Audit `auth.login`.
-- Response carries `must_change_password` → client routes to a change-password
-  screen before the desk.
-- Anti-enumeration: generic "invalid credentials" on any failure.
+- `bcrypt.compare`; on success sign the JWT (`kind:'user'`, tenant_id, user_id,
+  role, `jti`) + open a session (A2). Reset `failed_logins`. Audit `auth.login`.
+- **Brute-force guard:** on failure, increment `failed_logins`; after **5** fails
+  set `locked_until = now()+15min` (exponential on repeat). Plus a **per-IP rate
+  limit** on the endpoint. This replaces the throttling OTP-expiry gave us for
+  free — password login over the open web *must* have it.
+- **Anti-enumeration:** generic "invalid credentials" for bad handle, bad
+  password, suspended, or locked — never reveal which.
+- `must_change_password` → response flags it; **the session is gated** so a
+  must-change token can call *only* `/auth/password/change` until it's cleared
+  (can't touch the desk with a temp password).
 
 **Change password (authed)** — `POST /auth/password/change { current, new }`
+- On success, **revoke the user's other sessions** (a password change kicks out
+  anyone else holding an old session); keep the current one. Clears
+  `must_change_password`. Same session-revoke on **reset** below.
 
 **Forgot password** — `POST /auth/password/forgot { email }`
 - Only for users with a **verified email** (owner/manager). Create a
@@ -120,21 +134,27 @@ verify steps and the workspace→phone→otp progression's OTP leg.
 ## Build checklist (execute after the whole A-block is locked — it now is)
 
 **Schema**
-- [ ] `users`: `login_id`, `password_hash`, `must_change_password`, `email_verified`, `status`; `UNIQUE(tenant_id, login_id)`.
+- [ ] `users`: `login_id`, `password_hash`, `must_change_password`, `email_verified`, `status`, `deleted_at`, `failed_logins`, `locked_until`; `UNIQUE(tenant_id, login_id)`, `login_id` has no `@`.
 - [ ] New tables: `password_resets`, `sessions`.
 - [ ] Retire/dormant `auth_otp`.
 
 **Backend — auth (A1/A2)**
-- [ ] `auth.ts`: password login (resolve by email|login_id), change, forgot, reset; retire OTP issue/verify.
-- [ ] Session lifecycle: create on login (ip/ua, +30d), `jti` in JWT, middleware load/validate/slide, throttled `last_seen` bump.
+- [ ] `auth.ts`: password login (resolve by email|login_id, reject non-active/deleted/locked), change, forgot, reset; retire OTP issue/verify.
+- [ ] Brute-force: `failed_logins` + `locked_until` (5 fails → 15 min) + per-IP rate limit; anti-enumeration generic errors.
+- [ ] `must_change_password` gate: such a session may hit only `/auth/password/change`.
+- [ ] Password change/reset **revokes other sessions**.
+- [ ] Session lifecycle: create on login (ip/ua, +30d), `jti` in JWT, middleware load/validate/slide, throttled `last_seen` bump; JWT TTL ≥ session window.
 - [ ] Routes: `/auth/login`, `/auth/password/{change,forgot,reset}`, `/auth/sessions`, `/auth/sessions/:id/revoke`, logout revokes session.
-- [ ] Suggested-password helper; `SESSION_TTL_DAYS` (default 30).
+- [ ] Suggested-password helper + min-strength on user-chosen passwords; `SESSION_TTL_DAYS` (default 30).
 - [ ] `email.ts`: add `sendPasswordResetEmail` (keep transporter).
 - [ ] IP → coarse location for the sessions view (or defer to display-time).
+- [ ] Superadmin can reset an owner's password (`/admin`); superadmin sessions tracked.
 
 **Backend — user management (A3)**
-- [ ] `/team/users` CRUD; `/status`, `/reassign-seat`, `/reset-password`, `/force-logout`; guarded `DELETE`.
+- [ ] `/team/users` CRUD; `/status` (active|suspended, pauses round-robin), `/reassign-seat`, `/reset-password`, `/force-logout`; guarded **soft** `DELETE` (reassign open leads first).
+- [ ] **Last-active-owner guard** on suspend/delete/role-change.
 - [ ] RBAC matrix (owner/manager/agent) enforced server-side.
+- [ ] All active-user reads exclude `deleted_at IS NOT NULL`; historical attribution still resolves the name.
 
 **Onboarding**
 - [ ] `provisionTenant`: generate owner initial password, return it; show in `/admin` hand-off.
@@ -185,23 +205,24 @@ verify steps and the workspace→phone→otp progression's OTP leg.
 
 ## A3 — User management  🔒 LOCKED
 
-### Decisions — the status lifecycle (this is the core the client asked for)
-A single `status` on the user with three states + a separate destructive action:
-
+### Decisions — the status lifecycle (just **Suspend** and **Delete**, no Deactivate)
 - **Active** — normal.
-- **Suspended** — *reversible pause.* Blocks login immediately (**revoke all their
-  sessions**), **keeps all data + lead assignments untouched**, stays in reports.
-  For leave, disputes, "not right now." Un-suspend restores everything.
-- **Deactivated** — *retired seat.* Blocks login + revokes sessions, **removes from
-  round-robin and active rosters**, keeps historical attribution on their leads.
-  This is "they've left." Reversible (reactivate) **or** hand the seat to a new
-  hire via **seat reassignment** (A1a).
-- **Hard delete** — *separate, destructive, guarded.* Removes the user row. **Must
-  reassign their open leads first** (block otherwise). Owner-only, explicit
-  confirm, audited. Rare — suspend/deactivate cover almost every real case.
+- **Suspended** — *reversible pause.* Blocks login immediately (**revoke their
+  sessions**), **pauses round-robin** (no new leads routed to someone who can't
+  act) but **keeps existing lead ownership + all data**, stays in reports.
+  Un-suspend restores everything. For leave, disputes, "not right now."
+- **Delete** — *terminal, but record-safe (soft delete).* Sets `deleted_at`:
+  revokes sessions, blocks login, removes from rosters/round-robin and from
+  active user lists — **but keeps the row** so historical lead attribution
+  ("closed by Arjun") survives. **Guard: their open leads must be reassigned
+  first** (block otherwise). Owner-only, explicit confirm, audited.
+  - *Why soft, not a row-drop:* a hard `DELETE` would orphan every past lead that
+    references the agent. A true purge is a rare superadmin-only escape hatch,
+    not a day-to-day button.
 
-So the plain "deactivate button with no enforcement" is replaced by: **Suspend /
-Reactivate**, **Deactivate**, **Reassign seat**, and a distinct guarded **Delete**.
+So the weak "deactivate with no enforcement" is replaced by: **Suspend /
+Un-suspend**, a guarded record-safe **Delete**, and **Reassign seat** (below) for
+the "agent left, new hire takes the desk" case — which needs no resting state.
 
 ### Decisions — the rest
 - **Create user = "invite" without links.** Admin fills details (name, role,
@@ -210,10 +231,10 @@ Reactivate**, **Deactivate**, **Reassign seat**, and a distinct guarded **Delete
 - **Edit details:** name, phone, email, role. Changing role re-scopes RBAC live.
 - **Change password:** self-serve (any user) or **admin reset** for agents (returns
   the new password once to hand over) — from A1.
-- **Seat reassignment (A1a):** on a deactivated/leaving agent, "Assign seat to a
-  new person" → keep `login_id` + all leads/history, overwrite person fields
-  (name/phone/email/avatar), force `must_change_password`, revoke old sessions.
-  Audited as `user.seat_reassigned`.
+- **Seat reassignment (A1a):** on a leaving agent, "Assign seat to a new person"
+  → keep `login_id` + all leads/history, overwrite person fields (name/phone/
+  email/avatar), force `must_change_password`, revoke old sessions, reset
+  lockout. The seat stays `active` with a new human. Audited `user.seat_reassigned`.
 - **Force-logout:** owner/manager can revoke all of a user's sessions (uses A2).
 
 ### RBAC for user management
@@ -226,10 +247,43 @@ Reactivate**, **Deactivate**, **Reassign seat**, and a distinct guarded **Delete
 - `GET /team/users` — roster with role, status, last-active (from sessions).
 - `POST /team/users` — create (name, role, login_id|email, initial password).
 - `PATCH /team/users/:id` — edit details / role.
-- `POST /team/users/:id/status` — `{ status: active|suspended|deactivated }`
-  (revokes sessions on suspend/deactivate).
+- `POST /team/users/:id/status` — `{ status: active|suspended }` (revokes
+  sessions + pauses round-robin on suspend).
 - `POST /team/users/:id/reassign-seat` — A1a (person swap + force reset).
 - `POST /team/users/:id/reset-password` — admin reset (from A1).
 - `POST /team/users/:id/force-logout` — revoke all sessions.
-- `DELETE /team/users/:id` — guarded hard delete (requires leads reassigned).
+- `DELETE /team/users/:id` — guarded **soft** delete (sets `deleted_at`; requires
+  open leads reassigned first). A hard purge is superadmin-only, separate.
 - All gated by the RBAC matrix above; all audited.
+
+### Review — gaps & edge cases (caught in self-critique)
+- **Last-owner guard:** cannot suspend/delete/downgrade the **last active owner** —
+  a firm must always have someone who can administer it. Enforced server-side.
+- **Owner lockout escape hatch:** if the owner forgets their password *and* email
+  reset fails, the **Delpat superadmin can reset the owner's password** from
+  `/admin`. Agents → firm admin resets; owner → superadmin resets. No dead ends.
+- **Suspended/deleted users keep lead *ownership*** but are out of round-robin;
+  their **open** leads are only force-moved on Delete (must reassign) — Suspend
+  leaves them owned so nothing is lost on un-suspend.
+- **Email change re-verifies:** changing a user's email clears `email_verified`
+  (so self-reset can't be hijacked to an unverified address) and, since email is
+  the owner/manager login handle, updates their handle.
+- **Suggested-password tradeoff:** memorable suggestions are weaker; mitigated by
+  `must_change_password`, bcrypt, and the brute-force lockout. Acceptable for a
+  hand-over credential.
+- **JWT vs session authority:** the JWT proves identity (signature); the
+  `sessions` row is the source of truth for validity/expiry. JWT TTL is set ≥ the
+  session window so the session table (not the token) decides when to expire.
+- **Superadmin sessions** are also tracked (same table, `tenant_id` null) so
+  `/admin` logins show in an audit too — folds into the A0 superadmin hardening.
+
+### Migration & cutover (this reverses OTP — plan the switch)
+- **Existing users:** owner/managers keep email as handle; **agents get a
+  `login_id`** assigned (from name/initials, deduped) + a temp password +
+  `must_change`. Owner/managers get a temp password + a "set your password" email
+  (reset link) on cutover.
+- **Demo tenant:** the `DEMO_OTP` path goes away → seed the demo owner with a
+  known demo password (documented, not committed) so the demo still opens fast.
+- **Cutover style:** hard switch for the single live tenant (small), but keep the
+  OTP endpoints dormant one release so a rollback is a client revert, not a
+  migration. Drop `auth_otp` after.
