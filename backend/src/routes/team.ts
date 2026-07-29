@@ -11,9 +11,317 @@ import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { getAgents, getRoutingRules, updateRoutingRules, getAgentPerformance } from '../services/store';
 import { sql } from '../services/db';
+import { getContext } from '../services/context';
+import { audit } from '../services/audit';
+import { adminSetPassword, suggestPassword, revokeUserSessions, passwordIssue } from '../services/auth';
 
 export const teamRouter = Router();
 teamRouter.use(requireTenantAuth);
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ── RBAC for user management ────────────────────────────────────────────────
+// owner: manages everyone. manager: agents only. agent: no user management.
+function canManageRole(targetRole: string): { ok: boolean; msg?: string } {
+  const r = getContext()?.role;
+  if (r === 'owner' || r === 'superadmin') return { ok: true };
+  if (r === 'manager') return targetRole === 'agent'
+    ? { ok: true }
+    : { ok: false, msg: 'Managers can only manage agents.' };
+  return { ok: false, msg: 'You do not have permission to manage users.' };
+}
+
+/** A firm must always keep one active owner — block the action that would remove
+ *  the last one (suspend / delete / role-change away from owner). */
+async function isLastActiveOwner(tenantId: string, userId: string): Promise<boolean> {
+  const owners = await sql`
+    SELECT id FROM users WHERE tenant_id = ${tenantId} AND role = 'owner'
+      AND deleted_at IS NULL AND status ILIKE 'active'
+  `;
+  return owners.length <= 1 && owners.some((o: any) => o.id === userId);
+}
+
+/** Slug an agent's login_id from their name, unique within the tenant. */
+async function deriveLoginId(tenantId: string, name: string): Promise<string> {
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'agent';
+  let candidate = base;
+  for (let n = 2; (await sql`SELECT 1 FROM users WHERE tenant_id = ${tenantId} AND login_id = ${candidate} LIMIT 1`).length; n++) {
+    candidate = `${base}${n}`;
+  }
+  return candidate;
+}
+
+/** Drop a user from the round-robin's active pool (on suspend/delete). */
+async function removeFromRouting(tenantId: string, userId: string): Promise<void> {
+  const rows = await sql`SELECT active_agent_ids FROM crm_routing_rules WHERE tenant_id = ${tenantId} LIMIT 1`;
+  const ids: string[] = rows[0]?.active_agent_ids || [];
+  if (!ids.includes(userId)) return;
+  await sql`UPDATE crm_routing_rules SET active_agent_ids = ${sql.json(ids.filter(x => x !== userId))} WHERE tenant_id = ${tenantId}`;
+}
+
+async function loadUser(tenantId: string, id: string): Promise<any | null> {
+  const rows = await sql`SELECT * FROM users WHERE id = ${id} AND tenant_id = ${tenantId} AND deleted_at IS NULL LIMIT 1`;
+  return rows[0] || null;
+}
+
+// ── User management (auth v2) ───────────────────────────────────────────────
+
+/** Roster of live users with role, status, and last-active (from sessions). */
+teamRouter.get('/users', async (req: Request, res: Response) => {
+  try {
+    const users = await sql`
+      SELECT u.id, u.name, u.login_id, u.email, u.phone, u.role, u.status, u.must_change_password, u.metadata,
+        (SELECT max(last_seen_at) FROM sessions s WHERE s.user_id = u.id AND s.revoked = FALSE) AS last_active
+      FROM users u
+      WHERE u.tenant_id = ${req.tenantId} AND u.deleted_at IS NULL
+      ORDER BY CASE u.role WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END, u.name
+    `;
+    return res.status(200).json({ success: true, users });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to load users', message: err.message });
+  }
+});
+
+/** Create a user. Agents log in by login_id, owner/manager by email. Admin sets
+ *  an initial password (suggested if none given); returned once to hand over. */
+teamRouter.post('/users', async (req: Request, res: Response) => {
+  try {
+    const { name, role, loginId, email, phone, password } = req.body || {};
+    const teamRole = ['owner', 'manager', 'agent'].includes(role) ? role : 'agent';
+    const perm = canManageRole(teamRole);
+    if (!perm.ok) return res.status(403).json({ error: perm.msg });
+
+    const cleanName = String(name || '').trim();
+    if (!cleanName) return res.status(400).json({ error: 'Name is required' });
+
+    const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
+    const normPhone = cleanPhone ? `+91${cleanPhone.slice(-10)}` : null;
+    const normEmail = email ? String(email).trim().toLowerCase() : null;
+
+    let loginIdVal: string | null = null;
+    if (teamRole === 'agent') {
+      loginIdVal = String(loginId || '').trim() || await deriveLoginId(req.tenantId!, cleanName);
+      if (loginIdVal.includes('@')) return res.status(400).json({ error: 'A login ID cannot contain "@".' });
+    } else if (!normEmail || !EMAIL_RE.test(normEmail)) {
+      return res.status(400).json({ error: 'An owner or manager needs a valid email to sign in.' });
+    }
+
+    const initial = String(password || '').trim() || suggestPassword();
+    const issue = passwordIssue(initial);
+    if (issue) return res.status(400).json({ error: issue });
+
+    const id = `u_${Date.now().toString(36)}`;
+    const initials = cleanName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
+    const meta = { initials, avatar: '', phone: normPhone, email: normEmail };
+    // Admin-vouched email is treated as verified so owner/manager self-reset works.
+    const emailVerified = !!normEmail;
+
+    await sql`
+      INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, email_verified, metadata)
+      VALUES (${id}, ${req.tenantId}, ${cleanName}, ${loginIdVal}, ${normPhone}, ${normEmail}, ${teamRole}, 'active', ${emailVerified}, ${sql.json(meta)})
+    `;
+    await sql`
+      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
+      VALUES (${id}, ${cleanName}, ${cleanName.split(' ')[0]}, ${initials}, '', ${teamRole}, 'ACTIVE', ${sql.json(meta)}, ${req.tenantId})
+    `;
+    await adminSetPassword(req.tenantId!, id, initial, true);
+
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
+      actor_label: getContext()?.userId ?? 'admin', action: 'user.created',
+      target_type: 'user', target_id: id, summary: `Created ${teamRole} ${cleanName}`, metadata: { role: teamRole },
+    });
+    return res.status(201).json({ success: true, userId: id, loginId: loginIdVal, initialPassword: initial, agents: await getAgents() });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to create user', message: err.message });
+  }
+});
+
+/** Edit a user's details / role. */
+teamRouter.patch('/users/:id', async (req: Request, res: Response) => {
+  try {
+    const u = await loadUser(req.tenantId!, req.params.id);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    let perm = canManageRole(u.role);
+    if (!perm.ok) return res.status(403).json({ error: perm.msg });
+
+    const { name, phone, email, role } = req.body || {};
+    const newRole = role && ['owner', 'manager', 'agent'].includes(role) ? role : u.role;
+    if (newRole !== u.role) {
+      perm = canManageRole(newRole);
+      if (!perm.ok) return res.status(403).json({ error: perm.msg });
+      if (u.role === 'owner' && await isLastActiveOwner(req.tenantId!, u.id)) {
+        return res.status(400).json({ error: 'This is the last active owner — assign another owner first.' });
+      }
+    }
+    const cleanName = name != null ? String(name).trim() : u.name;
+    const normPhone = phone != null ? (String(phone).replace(/\D/g, '') ? `+91${String(phone).replace(/\D/g, '').slice(-10)}` : null) : u.phone;
+    const normEmail = email != null ? (String(email).trim().toLowerCase() || null) : u.email;
+    if (newRole !== 'agent' && (!normEmail || !EMAIL_RE.test(normEmail))) {
+      return res.status(400).json({ error: 'An owner or manager needs a valid email.' });
+    }
+    const meta = { ...(u.metadata || {}), phone: normPhone, email: normEmail };
+    await sql`
+      UPDATE users SET name = ${cleanName}, phone = ${normPhone}, email = ${normEmail}, role = ${newRole},
+        email_verified = ${!!normEmail}, metadata = ${sql.json(meta)}
+      WHERE id = ${u.id} AND tenant_id = ${req.tenantId}
+    `;
+    await sql`UPDATE crm_agents SET name = ${cleanName}, role = ${newRole}, metadata = ${sql.json(meta)} WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
+      actor_label: getContext()?.userId ?? 'admin', action: 'user.updated',
+      target_type: 'user', target_id: u.id, summary: `Updated ${cleanName}`, metadata: { role: newRole },
+    });
+    return res.status(200).json({ success: true, agents: await getAgents() });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to update user', message: err.message });
+  }
+});
+
+/** Suspend (reversible) / reactivate. Suspend revokes sessions + pauses routing. */
+teamRouter.post('/users/:id/status', async (req: Request, res: Response) => {
+  try {
+    const u = await loadUser(req.tenantId!, req.params.id);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    const perm = canManageRole(u.role);
+    if (!perm.ok) return res.status(403).json({ error: perm.msg });
+
+    const status = req.body?.status === 'suspended' ? 'suspended' : 'active';
+    if (status === 'suspended' && u.role === 'owner' && await isLastActiveOwner(req.tenantId!, u.id)) {
+      return res.status(400).json({ error: 'Cannot suspend the last active owner.' });
+    }
+    await sql`UPDATE users SET status = ${status} WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
+    if (status === 'suspended') {
+      await revokeUserSessions(u.id);
+      await removeFromRouting(req.tenantId!, u.id);
+    }
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
+      actor_label: getContext()?.userId ?? 'admin', action: 'user.status_changed',
+      target_type: 'user', target_id: u.id, summary: `${u.name} → ${status}`, metadata: { status },
+    });
+    return res.status(200).json({ success: true, agents: await getAgents() });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to change status', message: err.message });
+  }
+});
+
+/** Reassign the seat to a new person: keep login_id + all leads, swap identity,
+ *  force a password change, kick old sessions. (A1a) */
+teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) => {
+  try {
+    const u = await loadUser(req.tenantId!, req.params.id);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    const perm = canManageRole(u.role);
+    if (!perm.ok) return res.status(403).json({ error: perm.msg });
+
+    const { name, phone, email, password } = req.body || {};
+    const cleanName = String(name || '').trim();
+    if (!cleanName) return res.status(400).json({ error: 'New person name is required' });
+    const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
+    const normPhone = cleanPhone ? `+91${cleanPhone.slice(-10)}` : null;
+    const normEmail = email ? String(email).trim().toLowerCase() : null;
+    if (u.role !== 'agent' && (!normEmail || !EMAIL_RE.test(normEmail))) {
+      return res.status(400).json({ error: 'An owner/manager seat needs a valid email.' });
+    }
+    const initials = cleanName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
+    const meta = { initials, avatar: '', phone: normPhone, email: normEmail };
+    const initial = String(password || '').trim() || suggestPassword();
+    const issue = passwordIssue(initial);
+    if (issue) return res.status(400).json({ error: issue });
+
+    await sql`
+      UPDATE users SET name = ${cleanName}, phone = ${normPhone}, email = ${normEmail},
+        email_verified = ${!!normEmail}, status = 'active', metadata = ${sql.json(meta)}
+      WHERE id = ${u.id} AND tenant_id = ${req.tenantId}
+    `;
+    await sql`UPDATE crm_agents SET name = ${cleanName}, first = ${cleanName.split(' ')[0]}, initials = ${initials}, metadata = ${sql.json(meta)} WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
+    await adminSetPassword(req.tenantId!, u.id, initial, true);   // forces change + revokes sessions
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
+      actor_label: getContext()?.userId ?? 'admin', action: 'user.seat_reassigned',
+      target_type: 'user', target_id: u.id, summary: `Seat ${u.login_id || u.id} reassigned to ${cleanName}`, metadata: {},
+    });
+    return res.status(200).json({ success: true, loginId: u.login_id, initialPassword: initial, agents: await getAgents() });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to reassign seat', message: err.message });
+  }
+});
+
+/** Admin resets a user's password → returns the new one once to hand over. */
+teamRouter.post('/users/:id/reset-password', async (req: Request, res: Response) => {
+  try {
+    const u = await loadUser(req.tenantId!, req.params.id);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    const perm = canManageRole(u.role);
+    if (!perm.ok) return res.status(403).json({ error: perm.msg });
+    const newPw = String(req.body?.password || '').trim() || suggestPassword();
+    const issue = passwordIssue(newPw);
+    if (issue) return res.status(400).json({ error: issue });
+    await adminSetPassword(req.tenantId!, u.id, newPw, true);
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
+      actor_label: getContext()?.userId ?? 'admin', action: 'user.password_reset_by_admin',
+      target_type: 'user', target_id: u.id, summary: `Reset password for ${u.name}`, metadata: {},
+    });
+    return res.status(200).json({ success: true, initialPassword: newPw });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to reset password', message: err.message });
+  }
+});
+
+/** Force-logout: revoke all of a user's sessions. */
+teamRouter.post('/users/:id/force-logout', async (req: Request, res: Response) => {
+  try {
+    const u = await loadUser(req.tenantId!, req.params.id);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    const perm = canManageRole(u.role);
+    if (!perm.ok) return res.status(403).json({ error: perm.msg });
+    await revokeUserSessions(u.id);
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
+      actor_label: getContext()?.userId ?? 'admin', action: 'user.force_logout',
+      target_type: 'user', target_id: u.id, summary: `Forced logout of ${u.name}`, metadata: {},
+    });
+    return res.status(200).json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to force logout', message: err.message });
+  }
+});
+
+/** Soft delete — record-safe. Requires their OPEN leads reassigned first; keeps
+ *  the row (deleted_at) so historical attribution survives. Owner-only. */
+teamRouter.delete('/users/:id', async (req: Request, res: Response) => {
+  try {
+    const u = await loadUser(req.tenantId!, req.params.id);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    if (getContext()?.role !== 'owner' && getContext()?.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only an owner can delete a user.' });
+    }
+    if (u.role === 'owner' && await isLastActiveOwner(req.tenantId!, u.id)) {
+      return res.status(400).json({ error: 'Cannot delete the last active owner.' });
+    }
+    const openLeads = await sql`
+      SELECT COUNT(*)::int AS n FROM crm_leads
+      WHERE tenant_id = ${req.tenantId} AND agent_id = ${u.id}
+        AND COALESCE(stage, '') NOT IN ('Closed Won', 'Closed Lost', 'won', 'lost')
+    `;
+    if (openLeads[0].n > 0) {
+      return res.status(400).json({ error: `Reassign this user's ${openLeads[0].n} open lead(s) before deleting.`, openLeads: openLeads[0].n });
+    }
+    await sql`UPDATE users SET deleted_at = NOW(), status = 'suspended' WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
+    await revokeUserSessions(u.id);
+    await removeFromRouting(req.tenantId!, u.id);
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
+      actor_label: getContext()?.userId ?? 'admin', action: 'user.deleted',
+      target_type: 'user', target_id: u.id, summary: `Deleted ${u.name}`, metadata: {},
+    });
+    return res.status(200).json({ success: true, agents: await getAgents() });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to delete user', message: err.message });
+  }
+});
 
 /**
  * GET /api/v1/team/roster
