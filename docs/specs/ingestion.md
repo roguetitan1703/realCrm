@@ -35,12 +35,18 @@ Provider POST ──▶ /api/v1/ingest/{tenant}          (X-API-Key: sk_live_…
   - Each connection shows its **live webhook activity** underneath it (recent
     pushes, last received, counts, parsed/pending/failed) — so they can *see* data
     arriving even before it becomes leads.
-- **Parser configuration = Delpat's job, in the admin console.** Once real data is
-  in, **we configure the parser** for them (map the fields), and it's **editable in
-  the `/admin` (superadmin) console**. The tenant manages connections + keys + sees
-  activity; the **field-mapping lives with Delpat** (editable), not the tenant.
-  *(Interpretation of "editable in the admin" = the Delpat superadmin console;
-  flag if you meant the tenant's owner.)*
+- **Parser configuration lives in the TENANT OWNER's area** (owner-only RBAC), **and
+  the Delpat superadmin can also edit any tenant's** (dual access). NOT a
+  superadmin-only console — that would make Delpat a bottleneck for every provider
+  tweak and doesn't scale.
+  - **Default:** Delpat sets it up white-glove at onboarding; the owner can adjust
+    later without waiting on us.
+  - **Not a raw JSON editor:** the auto-suggest-from-sample turns it into "confirm
+    these field matches" — broker-approachable.
+  - **Mandatory test-preview before save (guardrail):** the mapping runs against
+    the **last real payload** and shows exactly which lead fields fill in. A
+    mis-map can't silently ship — the owner sees the parsed result first. This is
+    what makes tenant-editing safe despite lead-intake being high-blast-radius.
 
 ---
 
@@ -95,8 +101,8 @@ Provider POST ──▶ /api/v1/ingest/{tenant}          (X-API-Key: sk_live_…
   **body is purged, metadata + lead link kept**. Governed by the global policy
   below. ✔
 - **RBAC:** owner/manager manage connections/keys + see activity; **parser mapping
-  = superadmin.** Fast **200 ack** on valid key (parse async) so providers don't
-  retry-storm.
+  = tenant OWNER (+ superadmin), with a mandatory test-preview before save.** Fast
+  **200 ack** on valid key (parse async) so providers don't retry-storm.
 
 ## D2 — client-forwardable setup pack (generic)
 Per integration, generate a pack the tenant forwards to their 3rd party: the
@@ -113,7 +119,7 @@ Same for every provider — the endpoint doesn't care who's calling.
 - [ ] Parser engine (map + defaults + valueMaps + transforms) → canonical lead.
 - [ ] Deferred load + "Replay pending"; auto-parse on new push once configured.
 - [ ] Integrations UI (tenant): enable-popular + add-custom (name→key); per-connection activity feed.
-- [ ] Parser mapper UI in **/admin** (superadmin): auto-suggest from sample, editable; save-as-template (learned preset).
+- [ ] Parser mapper UI in the **tenant owner's Integrations area** (owner-only) + superadmin can edit any tenant: auto-suggest from sample, **mandatory test-preview against last payload before save**, save-as-template (learned preset).
 - [ ] Key management: create/rotate (show once), last4, RBAC owner/manager.
 - [ ] D2: generic setup-pack generator (email + page).
 - [ ] Retention purge job (see data-lifecycle.md); audit: integration/key/parser/replay events.
