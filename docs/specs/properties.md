@@ -85,9 +85,52 @@ Description (≤1500) · **Photos & videos**
 > Residential ships first; Commercial/Plot are field-set variants of the same
 > engine.
 
+**Schema refinements over the portals (measurement/legal nuance):**
+- **Area types:** Carpet · Built-up · **Super built-up** (missing before — it's
+  what sale price/sq.ft is usually quoted on) · Plot. Note *which* area the
+  price/sq.ft derives from. Plots often in **sq.yd/gaj** — support the unit.
+- **Ownership type:** Freehold · Leasehold · Power of Attorney · Co-op society —
+  India-critical, absent from both refs.
+- **Floor** can be non-numeric (Ground/Lower-Ground/Basement) — model as a token,
+  not just an int.
+
 ---
 
-## C-add — How you add properties (the flow)  🧭 DISCUSS
+## C4+ — The CRM operational layer (this is the real "good enough")
+
+A listing form ≠ a broker's record. These are the fields a brokerage actually
+runs on, that **no portal form has** — and they never appear in a shared listing:
+
+- **Exclusivity / mandate:** Exclusive · Sole-selling · Open — do we hold the
+  mandate? (Changes how hard we push it.)
+- **Listing source:** Owner-direct · Builder · Another broker · Portal · Reference
+  — how we got it.
+- **Co-broker + commission split:** if sourced via another broker, who + the split.
+- **Occupancy for visits:** Vacant · Owner-occupied · Tenant-occupied (+ tenancy
+  end, ties to renewals) — decides how a site visit is arranged.
+- **Key / access:** who holds keys, best visit window, owner availability.
+- **Verification:** docs/title/RERA verified? (a "verified" badge builds trust).
+- **Documents (internal, not marketing):** title deed, agreement, floor plan,
+  brochure — separate from the photo/video gallery.
+- **Negotiability:** firm vs negotiable, last-quoted, expected.
+- **Internal tags/notes** + the threaded **Remark** (block B).
+- **Owner link** (internal, masked in shares) — already decided.
+
+**Progressive disclosure (so this doesn't drown the add flow):** the stepped page
+shows a **required core** first, with **"Add more details"** expansions for the
+long tail (like the portals' "Add Additional Details"). A **listing-completeness
+score** (the "Score 5%" you saw) nudges enrichment without forcing it.
+
+## Variants that need their own field sets (scope call)
+- **PG / Co-living** (a deal type): sharing (single/double/triple), per-bed price,
+  meals, gender preference, house rules — **none of the refs detailed this.**
+- **Commercial:** cabins, workstations, washrooms, pantry, frontage (shops), power
+  load (KW), fire-NOC, occupancy certificate — a real variant, not a tweak.
+→ Q16, Q17.
+
+---
+
+## C-add — How you add properties (the flow)  🔒 (13–15 agreed)
 
 **Problem:** the schema above is portal-grade — a cramped **modal can't hold it**,
 and losing half-entered data is unacceptable. And the current **"+ bulk add
@@ -121,13 +164,15 @@ and losing half-entered data is unacceptable. And the current **"+ bulk add
 ---
 
 ## OPEN QUESTIONS
-13. Confirm: **single add = stepped page** (draft-saved), **retire the tabular
-    bulk-add modal**, keep **Excel import** for true bulk. Agree?
-14. **"Add another in this project"** (clone shared context, change unit-specifics)
-    as the natural manual multi-unit flow — is that how you'd add a few units, or
-    do you picture it differently?
-15. Step order/grouping above — good, or regroup? Any field that must appear
-    earlier (e.g. price on step 1)?
+13–15. **Agreed** — stepped page, retire bulk-add modal, Excel for bulk;
+   "add another in project"; step order OK.
+16. **CRM operational layer** (exclusivity, source, co-broker split, occupancy/
+    key, verification, documents) — how much in **v1**? All of it, or a core
+    subset (I'd start with exclusivity + source + occupancy + owner link + docs)?
+17. **PG/Co-living and Commercial** — in v1, or **Residential (Sale/Rent) first**
+    and these as a fast-follow variant? (They each need their own field set.)
+18. **Listing-completeness score** + progressive "Add more details" disclosure —
+    want it, or keep the form flat?
 
 ---
 
