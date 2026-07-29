@@ -1,9 +1,9 @@
 # Spec: Properties — fields, media, filters, add-flow (Roadmap block C)
 
-**Status:** 🧭 planning — most decisions locked; **add-flow** open for one round.
-Items: C-fix filters · C1f fields · C2m photos/videos · C3w watermark · C4
-super-expansion (portal-grade schema) · **C-add** (stepped add page) · C5 AI video
-(parked).
+**Status:** 🔒 **LOCKED** — all questions answered. One build-time input pending:
+the **form UI reference** (user provides when we build). Items: C-fix filters ·
+C1f fields · C2m photos/videos · C3w watermark · C4 portal-grade schema · C4+
+key/access · C-add (stepped page, edit reuses it) · C5 AI video (parked).
 
 ---
 
@@ -96,37 +96,28 @@ Description (≤1500) · **Photos & videos**
 
 ---
 
-## C4+ — The CRM operational layer (this is the real "good enough")
+## C4+ — CRM operational layer (trimmed)  🔒
 
-A listing form ≠ a broker's record. These are the fields a brokerage actually
-runs on, that **no portal form has** — and they never appear in a shared listing:
+Decision: keep it minimal for now — **only Key/Access** beyond the owner link.
+The rest (exclusivity, source, co-broker split, occupancy, verification,
+documents, negotiability) is **overkill until asked — do NOT add until the client
+requests it.** **(Q16.)**
 
-- **Exclusivity / mandate:** Exclusive · Sole-selling · Open — do we hold the
-  mandate? (Changes how hard we push it.)
-- **Listing source:** Owner-direct · Builder · Another broker · Portal · Reference
-  — how we got it.
-- **Co-broker + commission split:** if sourced via another broker, who + the split.
-- **Occupancy for visits:** Vacant · Owner-occupied · Tenant-occupied (+ tenancy
-  end, ties to renewals) — decides how a site visit is arranged.
-- **Key / access:** who holds keys, best visit window, owner availability.
-- **Verification:** docs/title/RERA verified? (a "verified" badge builds trust).
-- **Documents (internal, not marketing):** title deed, agreement, floor plan,
-  brochure — separate from the photo/video gallery.
-- **Negotiability:** firm vs negotiable, last-quoted, expected.
-- **Internal tags/notes** + the threaded **Remark** (block B).
-- **Owner link** (internal, masked in shares) — already decided.
+- **Key / access:** who holds the keys, best visit window / owner availability —
+  the one operational field that earns its place (a visit can't happen without it).
+- **Owner link** (internal, masked in shares) — already decided (block B).
 
-**Progressive disclosure (so this doesn't drown the add flow):** the stepped page
-shows a **required core** first, with **"Add more details"** expansions for the
-long tail (like the portals' "Add Additional Details"). A **listing-completeness
-score** (the "Score 5%" you saw) nudges enrichment without forcing it.
+## Variants  🔒
+- **v1 = Residential + Commercial** (Sale/Rent), as field-set variants of one
+  engine.
+- **PG / Co-living — parked**, not in v1. **(Q17.)**
 
-## Variants that need their own field sets (scope call)
-- **PG / Co-living** (a deal type): sharing (single/double/triple), per-bed price,
-  meals, gender preference, house rules — **none of the refs detailed this.**
-- **Commercial:** cabins, workstations, washrooms, pantry, frontage (shops), power
-  load (KW), fire-NOC, occupancy certificate — a real variant, not a tweak.
-→ Q16, Q17.
+## Listing-completeness score + progressive disclosure  🔒
+- Keep a **completeness score**, but **quiet** — it's internal, not a consumer-
+  facing nag to "complete your profile". Just a low-key indicator.
+- **Progressive disclosure:** after the initial core steps the property can be
+  **saved**, and the rest **added later** — you don't have to fill everything in
+  one sitting. **(Q18.)**
 
 ---
 
@@ -155,7 +146,13 @@ and losing half-entered data is unacceptable. And the current **"+ bulk add
    have). For a builder's inventory sheet / large lists.
 
 **Retire** the tabular bulk-add-units modal — its job is split cleanly between
-(2) "add another in project" for manual handfuls and (3) Excel for bulk. → Q13–Q15.
+(2) "add another in project" for manual handfuls and (3) Excel for bulk.
+
+**Edit reuses the same page.** Editing a property opens the **same stepped page**
+as add (pre-filled), not a separate form — one flow to maintain, consistent UX.
+
+**⚠️ Build-time input:** the **form UI/layout reference will be provided by the
+user when we build** this — ask for it before implementing the add/edit page.
 
 ---
 
@@ -163,23 +160,24 @@ and losing half-entered data is unacceptable. And the current **"+ bulk add
 
 ---
 
-## OPEN QUESTIONS
-13–15. **Agreed** — stepped page, retire bulk-add modal, Excel for bulk;
-   "add another in project"; step order OK.
-16. **CRM operational layer** (exclusivity, source, co-broker split, occupancy/
-    key, verification, documents) — how much in **v1**? All of it, or a core
-    subset (I'd start with exclusivity + source + occupancy + owner link + docs)?
-17. **PG/Co-living and Commercial** — in v1, or **Residential (Sale/Rent) first**
-    and these as a fast-follow variant? (They each need their own field set.)
-18. **Listing-completeness score** + progressive "Add more details" disclosure —
-    want it, or keep the form flat?
+## ANSWERS (all resolved)
+- 13–15: stepped page; retire bulk-add modal; Excel for bulk; "add another in
+  project"; step order OK.
+- 16: operational layer = **Key/Access only** (+ owner link); rest **parked until
+  asked**.
+- 17: **Residential + Commercial** in v1; **PG/Co-living parked**.
+- 18: keep a **quiet** completeness score; progressive disclosure = save core
+  early, enrich later.
+- Edit **reuses** the same stepped page.
+- Build-time: **form UI reference from the user** before implementing.
 
 ---
 
 ## Build checklist (draft — firms up after add-flow answer)
 - [ ] Canonical field-definitions (C4 taxonomy) → drives form + filters (fixes C-fix by construction).
 - [ ] Property schema migration (one pass): all C4 fields; deal/category-conditional sets.
-- [ ] **Add-property stepped page** with draft persistence; retire bulk-add modal.
+- [ ] **Add-property stepped page** with draft persistence; **edit reuses the same page**; retire bulk-add modal. *(Get form UI ref from user first.)*
+- [ ] Residential + Commercial variants; PG parked. Key/access field; quiet completeness score; save-core-early.
 - [ ] "Add another in this project" (inherit shared context).
 - [ ] Excel import into project (extend existing importer to the new schema).
 - [ ] Owner link to Owners store; **owner masked/absent in shared listing**.
