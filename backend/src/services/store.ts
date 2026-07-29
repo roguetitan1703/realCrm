@@ -506,6 +506,7 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
   // Tenant + superadmin + mirror agents→users. At the end so agents exist to
   // mirror (covers fresh seed and reset).
   await ensureAuthIdentity();
+  await backfillPasswordAuth();   // seeded users get login_ids + a temp password
 
   // The seed writes the config/req JSONB; flatten it into the real columns and
   // rebuild lead_shortlist so a workspace RESET (truncate → re-seed, no reboot)
@@ -609,6 +610,42 @@ export async function ensureAuthIdentity(): Promise<void> {
 }
 
 /**
+ * Cutover to password auth (spec: docs/specs/auth.md). Idempotent — only fills
+ * what's missing, so it's safe on every boot:
+ *   • agents with no login_id get one derived from their name (unique per tenant)
+ *   • any user with no password gets a temp one (a known demo password) so seeded
+ *     demo users can still sign in after the OTP→password switch.
+ * New users (created via /team/users or onboarding) already carry a password, so
+ * they're untouched here.
+ */
+export async function backfillPasswordAuth(): Promise<void> {
+  const DEMO_PW = process.env.DEMO_USER_PASSWORD || 'delpat-demo-1';
+
+  const agentsNoId = await sql`
+    SELECT id, tenant_id, name FROM users
+    WHERE role = 'agent' AND (login_id IS NULL OR login_id = '') AND deleted_at IS NULL
+  `;
+  for (const u of agentsNoId) {
+    const base = String(u.name || 'agent').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'agent';
+    let candidate = base;
+    for (let n = 2; (await sql`SELECT 1 FROM users WHERE tenant_id = ${u.tenant_id} AND login_id = ${candidate} AND id <> ${u.id} LIMIT 1`).length; n++) {
+      candidate = `${base}${n}`;
+    }
+    await sql`UPDATE users SET login_id = ${candidate} WHERE id = ${u.id}`;
+  }
+
+  const noPw = await sql`SELECT id, email FROM users WHERE (password_hash IS NULL OR password_hash = '') AND deleted_at IS NULL`;
+  if (noPw.length) {
+    const hash = await bcrypt.hash(DEMO_PW, 10);
+    for (const u of noPw) {
+      // Seeded/legacy users: usable immediately (no forced change) for the demo.
+      await sql`UPDATE users SET password_hash = ${hash}, must_change_password = FALSE, email_verified = ${!!u.email} WHERE id = ${u.id}`;
+    }
+    console.log(`[Auth] Cutover: backfilled ${noPw.length} user(s) with a temp password.`);
+  }
+}
+
+/**
  * Reset database to a clean factory seed state.
  */
 export async function resetDatabase(): Promise<ServerState> {
@@ -624,6 +661,7 @@ export async function resetDatabase(): Promise<ServerState> {
 // the Phase 0 identity model — tenant, superadmin, and users mirror.
 seedDatabase()
   .then(() => ensureAuthIdentity())
+  .then(() => backfillPasswordAuth())
   .then(() => backfillShortlist())
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
