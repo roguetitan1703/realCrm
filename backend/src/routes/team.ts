@@ -35,12 +35,14 @@ teamRouter.post('/roster', async (req: Request, res: Response) => {
     const { name, phone, email, role } = req.body;
     const cleanName = (name || '').trim();
     if (!cleanName) return res.status(400).json({ error: 'Name is required' });
-    // A teammate must be reachable to log in (OTP goes to phone or email).
+    // A teammate signs in by OTP, and OTP is delivered ONLY by email today (there
+    // is no SMS channel). So email is required — without it the person could be
+    // created but never actually log in. Phone stays optional (used for tel:/wa).
     const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
     const normPhone = cleanPhone ? `+91${cleanPhone.slice(-10)}` : null;
     const normEmail = email ? String(email).trim().toLowerCase() : null;
-    if (!normPhone && !normEmail) {
-      return res.status(400).json({ error: 'A phone or email is required so the teammate can sign in.' });
+    if (!normEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normEmail)) {
+      return res.status(400).json({ error: 'A valid email is required — sign-in codes are sent by email.' });
     }
     const teamRole = role === 'manager' ? 'manager' : 'agent';
     const id = `u_${Date.now().toString(36)}`;

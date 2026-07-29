@@ -829,7 +829,8 @@ function AddAgentModal({ store }) {
 
   const submit = () => {
     if (!name.trim()) { store.toast('Add a name first', 'warn'); return }
-    if (!phone.trim() && !email.trim()) { store.toast('Add a phone or email so they can sign in', 'warn'); return }
+    // Sign-in codes go out by email, so email is the one required contact.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { store.toast('A valid email is required — their sign-in code is sent there', 'warn'); return }
     setSaving(true)
     Promise.resolve(store.addAgent({ name: name.trim(), phone: phone.trim(), email: email.trim(), role }))
       .then(ok => { if (ok) store.closeModal(); else setSaving(false) })
@@ -838,12 +839,12 @@ function AddAgentModal({ store }) {
   return (
     <Modal title="Add teammate" onClose={store.closeModal} width={400}>
       <Field label="Full name"><Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Kiran Patil" autoFocus /></Field>
-      <Field label="Mobile number"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
-      <Field label="Email (optional)"><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="kiran@firm.com" type="email" /></Field>
+      <Field label="Email"><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="kiran@firm.com" type="email" /></Field>
+      <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
       <Field label="Access">
         <Segmented value={role} onChange={setRole} options={[{ value: 'agent', label: 'Sales agent' }, { value: 'manager', label: 'Manager' }]} />
       </Field>
-      <div className="u-muted" style={{ fontSize: 12, margin: '2px 0 4px' }}>They sign in with this phone or email — no password. A manager sees the whole desk; an agent sees only their own leads.</div>
+      <div className="u-muted" style={{ fontSize: 12, margin: '2px 0 4px' }}>They sign in with their email — a one-time code is sent there, no password. A manager sees the whole desk; an agent sees only their own leads.</div>
       <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Adding…' : 'Add to team'}</Button>
     </Modal>
   )

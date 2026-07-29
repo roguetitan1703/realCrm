@@ -49,7 +49,7 @@ export default function Onboarding({ store, onCancel }) {
     // phone/email becomes their real login, so one is required.
     if (!firmName.trim()) { store.toast('Enter the firm name', 'warn'); setStep(1); return }
     if (!city.trim()) { store.toast('Enter the city', 'warn'); setStep(1); return }
-    if (!adminEmail.trim() && !adminPhone.trim()) { store.toast("Add the owner's email or phone — it's their login", 'warn'); setStep(2); return }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail.trim())) { store.toast("Add the owner's email — the sign-in code is sent there", 'warn'); setStep(2); return }
 
     setProvisioning(true)
     setStatusText('Provisioning workspace…')
@@ -329,7 +329,19 @@ export default function Onboarding({ store, onCancel }) {
               </div>
 
               <div className="field">
-                <label>Admin Mobile Number (with WhatsApp)</label>
+                <label>Admin Desk Email</label>
+                <input
+                  type="email"
+                  className="input"
+                  value={adminEmail}
+                  onChange={e => setAdminEmail(e.target.value)}
+                  placeholder="rakesh@apexrealty.com"
+                />
+                <div className="u-muted" style={{ fontSize: 12, marginTop: 4 }}>The owner signs in with this email — a one-time code is sent here.</div>
+              </div>
+
+              <div className="field">
+                <label>Admin Mobile Number (optional · WhatsApp)</label>
                 <div className="input-group">
                   <span className="prefix" style={{ fontFamily: 'var(--mono)' }}>+91</span>
                   <input
@@ -343,17 +355,6 @@ export default function Onboarding({ store, onCancel }) {
                 </div>
               </div>
 
-              <div className="field">
-                <label>Admin Desk Email</label>
-                <input
-                  type="email"
-                  className="input"
-                  value={adminEmail}
-                  onChange={e => setAdminEmail(e.target.value)}
-                  placeholder="rakesh@apexrealty.com"
-                />
-              </div>
-
               <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
                 <Button
                   variant="ghost"
@@ -365,7 +366,7 @@ export default function Onboarding({ store, onCancel }) {
                 <Button
                   variant="primary"
                   onClick={() => setStep(3)}
-                  disabled={!adminName.trim() || !adminPhone.trim()}
+                  disabled={!adminName.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail.trim())}
                   style={{ height: 44, flex: 2, justifyContent: 'center', fontWeight: 600 }}
                 >
                   <span>Continue to Theme</span>

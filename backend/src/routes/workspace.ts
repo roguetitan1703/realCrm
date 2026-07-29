@@ -212,12 +212,14 @@ workspaceRouter.post('/onboard', async (req: Request, res: Response) => {
     if (!firmName || !city) {
       return res.status(400).json({ success: false, error: 'Missing Required Fields', message: 'Firm name and city are required.' });
     }
-    // The owner needs a way to sign in — OTP goes to a phone or an email.
+    // The owner signs in by OTP, and OTP is delivered ONLY by email today (no SMS
+    // channel). So the owner's email is required — a phone-only owner could be
+    // provisioned but never actually log into the workspace. Phone stays optional.
     const ownerPhoneRaw = adminPhone ? String(adminPhone).replace(/\D/g, '') : '';
     const ownerPhone = ownerPhoneRaw ? `+91${ownerPhoneRaw.slice(-10)}` : null;
     const ownerEmail = adminEmail ? String(adminEmail).trim().toLowerCase() : null;
-    if (!ownerPhone && !ownerEmail) {
-      return res.status(400).json({ success: false, error: 'Owner contact required', message: "Provide the owner's phone or email so they can sign in." });
+    if (!ownerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
+      return res.status(400).json({ success: false, error: 'Owner email required', message: "Provide the owner's email — sign-in codes are sent by email." });
     }
 
     // Unique slug === tenant id (our convention). If taken, suffix -2, -3, …
