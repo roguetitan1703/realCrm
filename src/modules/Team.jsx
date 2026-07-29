@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Avatar, Button, Kpi, IconButton, Field, Input, PhoneInput, SectionHead } from '../components/primitives.jsx'
+import { Avatar, Button, IconButton, Field, Input, PhoneInput, SectionHead, PageHeader, Segmented } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 
@@ -72,24 +72,26 @@ export default function Team({ store, go, topBar }) {
     (x.off - y.off) || (y.won - x.won) || (y.open - x.open))
   const leaderId = ranked.find(r => !r.off && r.won > 0)?.a.id
 
+  // Glance KPIs — same compact ph-stats row as Import and the other modules.
+  const kpis = [
+    { label: 'On the desk', value: `${activeCount}/${state.agents.length}` },
+    { label: 'Open leads', value: openLeads.length, onClick: () => toLeads({}) },
+    { label: 'Unassigned', value: unassigned, tone: unassigned > 0 ? 'alert' : undefined, onClick: () => toLeads({ flag: ['unassigned'] }) },
+    { label: 'Overdue', value: overdueTotal, tone: overdueTotal > 0 ? 'alert' : undefined, onClick: () => toLeads({ flag: ['overdue'] }) },
+  ]
+
   return (
     <>
       {topBar({ title: 'Team' })}
+      <PageHeader kpis={kpis} right={<Button variant="primary" icon="userPlus" onClick={() => store.openModal({ kind: 'addAgent' })}>Add teammate</Button>} />
       <div className="app-body pagewrap">
-        {/* Desk pulse — same KPI tiles as the dashboard, so it feels like one product */}
-        <div className="desk-strip">
-          <Kpi icon="people" label="On the desk" value={`${activeCount}/${state.agents.length}`} sub="agents on duty" />
-          <Kpi icon="switch" label="Open across team" value={openLeads.length} sub="live leads in play" onClick={() => toLeads({})} />
-          <Kpi icon="person" label="Unassigned" value={unassigned} sub="waiting to be picked up" alert={unassigned > 0} onClick={() => toLeads({ flag: ['unassigned'] })} />
-          <Kpi icon="clock" label="Overdue" value={overdueTotal} sub="past the SLA window" alert={overdueTotal > 0} onClick={() => toLeads({ flag: ['overdue'] })} />
-        </div>
+        {/* PRIMARY: who can sign in + admin controls */}
+        <AccessPanel store={store} />
 
-        <div className="row-between row-gap-b">
-          <div className="grow lead-copy">Your desk, ranked. See who's carrying the load and who's winning — move leads off an agent in one action, nothing gets lost.</div>
-          <Button variant="primary" icon="userPlus" onClick={() => store.openModal({ kind: 'addAgent' })}>Add agent</Button>
-        </div>
-
-        <div className="board">
+        {/* SECONDARY: how the desk is performing */}
+        <div className="acc-panel">
+          <SectionHead title="Team activity" right={<span className="u-muted acc-hint">Who's carrying the load and who's closing</span>} />
+          <div className="board">
           {ranked.map(({ a, open, won, overdue, winRate, calls, visits, off }, i) => {
             const overloaded = !off && open > evenShare * 1.5 && open > 3
             const isLeader = a.id === leaderId
@@ -134,9 +136,9 @@ export default function Team({ store, go, topBar }) {
               </div>
             )
           })}
+          </div>
         </div>
 
-        <AccessPanel store={store} />
         <SessionsPanel store={store} />
       </div>
     </>
@@ -153,6 +155,7 @@ function AccessPanel({ store }) {
   const [busy, setBusy] = useState('')       // id of the row currently mutating
   const [reveal, setReveal] = useState(null) // { title, name, handle, password }
   const [seat, setSeat] = useState(null)     // user whose seat is being reassigned
+  const [edit, setEdit] = useState(null)     // user being edited (name/email/phone/role)
 
   const load = () => api.getUsers().then(r => setUsers(r.users || [])).catch(() => setUsers([]))
   useEffect(() => { load() }, [])
@@ -188,9 +191,19 @@ function AccessPanel({ store }) {
   return (
     <div className="panel acc-panel">
       <SectionHead title="Manage access"
-        right={<span className="u-muted acc-hint">Who can sign in, and at what level</span>} />
+        right={<span className="u-muted acc-hint">Add, edit, and control who can sign in</span>} />
       {users == null ? (
-        <div className="acc-empty">Loading team…</div>
+        <div className="acc-tbl-wrap"><table className="tbl acc-tbl"><tbody>
+          {[0, 1, 2].map(i => (
+            <tr key={i}>
+              <td><div className="acc-who"><span className="skel skel-av" /><div className="acc-name"><span className="skel skel-line" style={{ width: 120 }} /><span className="skel skel-line sm" style={{ width: 70 }} /></div></div></td>
+              <td><span className="skel skel-line" style={{ width: 150 }} /></td>
+              <td><span className="skel skel-line" style={{ width: 60 }} /></td>
+              <td><span className="skel skel-line" style={{ width: 50 }} /></td>
+              <td className="acc-actcol"><span className="skel skel-line" style={{ width: 180 }} /></td>
+            </tr>
+          ))}
+        </tbody></table></div>
       ) : (
         <div className="acc-tbl-wrap">
           <table className="tbl acc-tbl">
@@ -219,6 +232,7 @@ function AccessPanel({ store }) {
                     <td className="acc-actcol">
                       {mine ? (
                         <div className="acc-actions">
+                          <button className="acc-act" disabled={rowBusy} onClick={() => setEdit(u)} title="Edit name, email, phone or role">Edit</button>
                           <button className="acc-act" disabled={rowBusy} onClick={() => resetPw(u)} title="Reset password — you hand over the new one">Reset password</button>
                           <button className="acc-act" disabled={rowBusy} onClick={() => setSeat(u)} title="Hand this seat (and its leads) to a new person">Reassign seat</button>
                           <button className="acc-act" disabled={rowBusy} onClick={() => forceLogout(u)} title="Revoke every device this person is signed in on">Force logout</button>
@@ -237,6 +251,8 @@ function AccessPanel({ store }) {
         </div>
       )}
 
+      {edit && <EditUserModal store={store} user={edit} canManage={canManage} onClose={() => setEdit(null)}
+        onDone={() => { setEdit(null); store.reloadServer?.(); load() }} />}
       {reveal && <RevealCard data={reveal} store={store} onClose={() => setReveal(null)} />}
       {seat && <SeatModal store={store} user={seat} onClose={() => setSeat(null)}
         onDone={(res) => { setSeat(null); store.reloadServer?.(); load(); setReveal({ title: 'Seat reassigned', name: res.name, handle: res.loginId || res.handle, password: res.initialPassword }) }} />}
@@ -305,6 +321,47 @@ function SeatModal({ store, user, onClose, onDone }) {
   )
 }
 
+// Edit a person's details / access level. Login handle (login_id / seat) is not
+// changed here — that's the seat-reassign flow; this is name / contact / role.
+function EditUserModal({ store, user, canManage, onClose, onDone }) {
+  const [name, setName] = useState(user.name || '')
+  const [email, setEmail] = useState(user.email || '')
+  const [phone, setPhone] = useState(String(user.phone || '').replace(/^\+91/, ''))
+  const [role, setRole] = useState(user.role === 'owner' ? 'owner' : user.role)
+  const [saving, setSaving] = useState(false)
+  const canSetRole = canManage('owner') && user.role !== 'owner'  // only an owner reassigns roles; owner row is fixed here
+  const needsEmail = role !== 'agent'
+  const submit = () => {
+    if (!name.trim()) { store.toast('Name is required', 'warn'); return }
+    if (needsEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { store.toast('An owner or manager needs a valid email', 'warn'); return }
+    setSaving(true)
+    api.updateUser(user.id, { name: name.trim(), email: email.trim(), phone: phone.trim(), role })
+      .then(() => { store.toast(`${name.trim()} updated`); onDone() })
+      .catch(err => { store.toast(cleanErr(err), 'warn'); setSaving(false) })
+  }
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
+        <div className="m-head"><h3>Edit {user.name}</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
+        <div className="m-content">
+          <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
+            Signs in with <b style={{ color: 'var(--ink)' }}>{user.login_id || user.email || '—'}</b>{user.login_id ? ' (agent ID)' : ''}. Changing the sign-in seat itself is “Reassign seat”.
+          </div>
+          <Field label="Full name"><Input value={name} onChange={e => setName(e.target.value)} autoFocus /></Field>
+          <Field label={needsEmail ? 'Email' : 'Email (optional)'}><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@firm.com" type="email" /></Field>
+          <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
+          {canSetRole && (
+            <Field label="Access level">
+              <Segmented value={role} onChange={setRole} options={[{ value: 'agent', label: 'Sales agent' }, { value: 'manager', label: 'Manager' }]} />
+            </Field>
+          )}
+          <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Saving…' : 'Save changes'}</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Your sessions — the caller's own signed-in devices, with per-device revoke ──
 function SessionsPanel({ store }) {
   const [data, setData] = useState(null)   // { sessions, current }
@@ -321,7 +378,14 @@ function SessionsPanel({ store }) {
     <div className="panel acc-panel">
       <SectionHead title="Your sessions" right={<span className="u-muted acc-hint">Devices signed in as you</span>} />
       {data == null ? (
-        <div className="acc-empty">Loading…</div>
+        <div className="acc-sess">
+          {[0, 1].map(i => (
+            <div key={i} className="acc-sess-row">
+              <span className="skel skel-av sm" />
+              <div className="acc-sess-meta"><span className="skel skel-line" style={{ width: 140 }} /><span className="skel skel-line sm" style={{ width: 90, marginTop: 6 }} /></div>
+            </div>
+          ))}
+        </div>
       ) : sessions.length === 0 ? (
         <div className="acc-empty">No other active sessions.</div>
       ) : (

@@ -10,16 +10,18 @@
  * Rule of thumb: pre-workspace surfaces (login step 1, onboarding) use PLATFORM.
  * Everything after a workspace is chosen uses the tenant brand.
  */
+import pkg from '../../package.json'
+
 export const PLATFORM = {
   name: 'Real Estate',
   initials: 'RE',
   vendor: 'Delpat',
   kind: 'CRM',
-  tagline: 'White-label CRM for real estate desks',
   host: 'realestate.delpat.in',
   // Browser tab title before a workspace is selected.
   docTitle: 'Real Estate by Delpat',
-  version: 'v2.4.0',
+  // Real, single-source version — comes from package.json, never hand-typed.
+  version: `v${pkg.version}`,
 }
 
 /** Browser tab title for a signed-in / selected tenant. */
@@ -28,15 +30,31 @@ export function tenantDocTitle(firmName) {
 }
 
 /**
- * Workspaces this browser can jump straight into. Seeded with the live demo
- * tenant so the owner taps once instead of typing his own firm name — and so
- * the field reads as a real workspace picker, not a decorative input.
+ * Workspaces THIS browser has actually opened before — read from localStorage,
+ * not a hardcoded demo list. A fresh device shows none until the first sign-in.
  */
-export const KNOWN_WORKSPACES = [
-  // slug = the normalized form of what a user types ("Skyline Realty" -> "skylinerealty");
-  // tenantId = the canonical id sent as X-Tenant-ID (matches DEFAULT_TENANT_ID).
-  { slug: 'skylinerealty', tenantId: 'skyline-realty', firmName: 'Skyline Realty', city: 'Pune', initials: 'SR' },
-]
+const RECENTS_KEY = 'crm_recent_workspaces'
+
+export function recentWorkspaces() {
+  try {
+    const v = JSON.parse(window.localStorage?.getItem(RECENTS_KEY) || '[]')
+    return Array.isArray(v) ? v.filter(w => w && w.tenantId && w.firmName) : []
+  } catch { return [] }
+}
+
+/** Record a workspace the user successfully opened, most-recent first (max 4). */
+export function rememberWorkspace(ws) {
+  if (!ws?.tenantId) return
+  try {
+    const next = [{ slug: ws.slug, tenantId: ws.tenantId, firmName: ws.firmName, initials: ws.initials, city: ws.city || '' },
+      ...recentWorkspaces().filter(w => w.tenantId !== ws.tenantId)].slice(0, 4)
+    window.localStorage?.setItem(RECENTS_KEY, JSON.stringify(next))
+  } catch { /* storage blocked */ }
+}
+
+// No hardcoded workspaces — resolution goes through the backend resolver, which
+// is hyphen-insensitive, so a typed name maps to the real tenant regardless.
+export const KNOWN_WORKSPACES = []
 
 /** Normalize whatever was typed ("Skyline Realty", "app.skylinerealty.in") to a
  *  slug. MUST match the slug the backend mints at onboarding

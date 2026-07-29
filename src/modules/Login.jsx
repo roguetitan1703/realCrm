@@ -12,7 +12,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react'
-import { PLATFORM, KNOWN_WORKSPACES, resolveWorkspace, tenantDocTitle } from '../data/platform.js'
+import { PLATFORM, recentWorkspaces, rememberWorkspace, resolveWorkspace, tenantDocTitle } from '../data/platform.js'
 import { api } from '../lib/api.js'
 import { applyPwaIdentity } from '../lib/pwa.js'
 import { applyBrandColor, DEFAULT_ACCENT } from '../lib/brand.js'
@@ -57,6 +57,8 @@ export default function Login({ store }) {
   const [forgotEmail, setForgotEmail] = useState('')
   const [forgotSent, setForgotSent] = useState(false)
   const [resetToken, setResetToken] = useState('')
+  // Workspaces this browser has opened before (from localStorage, not a demo seed).
+  const [recents, setRecents] = useState(() => recentWorkspaces())
 
   // The browser tab is part of the identity gate: platform name until a
   // workspace is chosen, the firm's name after.
@@ -90,6 +92,8 @@ export default function Login({ store }) {
       applyPwaIdentity(t.id)                 // canonical id — matches the manifest/icon route
       applyBrandColor(bc.primaryColor)       // dress the login in the firm's real accent
       setWs(resolved)
+      rememberWorkspace(resolved)   // this browser has now opened it
+      setRecents(recentWorkspaces())
       // Reflect the workspace in the URL so it's shareable: baseurl/<slug>.
       try { window.history.pushState({}, '', `/${t.slug}`) } catch (e) {}
       setPhase(nextPhase)
@@ -275,8 +279,8 @@ export default function Login({ store }) {
             fontFeatureSettings: '"ss01" on, "ss02" on'
           }}>
             {ws
-              ? 'The operating system for residential real estate advisory.'
-              : 'One platform. Every brokerage runs it under its own name.'}
+              ? 'Your desk, ready when you are.'
+              : 'Your property desk, in one place.'}
           </h1>
           <p style={{
             fontSize: 16,
@@ -286,17 +290,15 @@ export default function Login({ store }) {
             fontWeight: 400
           }}>
             {ws
-              ? `Managing sales pipelines, client relationships, and inventory for ${ws.firmName}${ws.city ? ` across ${ws.city}` : ''}.`
-              : 'Pipelines, contacts and inventory for property desks. Open your workspace and the desk carries your firm’s name, not ours.'}
+              ? `Pipelines, contacts and inventory for ${ws.firmName}${ws.city ? `, ${ws.city}` : ''}.`
+              : 'Pipelines, contacts and inventory for your firm. Open your workspace to begin.'}
           </p>
         </div>
 
         {/* Footer Minimal Metadata */}
         <div style={{ zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 24, borderTop: '1px solid rgba(255, 255, 255, 0.1)', fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
-          <div>{ws ? 'Private Cloud Workspace' : `${PLATFORM.vendor} · White-label platform`}</div>
-          <div className="mono-num">
-            {ws ? `© ${new Date().getFullYear()} ${ws.firmName}` : `${PLATFORM.vendor} · ${PLATFORM.version}`}
-          </div>
+          <div>{ws ? `Powered by ${PLATFORM.vendor}` : `${PLATFORM.vendor} · white-label platform`}</div>
+          <div className="mono-num">{PLATFORM.version}</div>
         </div>
       </div>
 
@@ -363,7 +365,7 @@ export default function Login({ store }) {
             <p style={{ fontSize: 14, color: 'var(--muted)', margin: 0, lineHeight: 1.5 }}>
               {ws
                 ? <>Sign in to the <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>{ws.firmName}</strong> desk with your ID or email and password.</>
-                : 'Name your brokerage to load its desk. Each firm gets its own workspace, data and branding.'}
+                : 'Enter your firm’s workspace name to open its desk.'}
             </p>
           </div>
 
@@ -380,15 +382,15 @@ export default function Login({ store }) {
               <form onSubmit={e => { e.preventDefault(); selectWorkspace(wsInput) }}>
                 <div className="field" style={{ marginBottom: 20 }}>
                   <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 8, display: 'block', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Brokerage workspace
+                    Workspace
                   </label>
                   <div className="input-group">
-                    <span className="prefix" style={{ fontFamily: 'var(--mono)' }}>app.</span>
+                    <span className="prefix" style={{ fontFamily: 'var(--mono)', color: 'var(--muted)' }}>{PLATFORM.host}/</span>
                     <input
                       type="text"
                       value={wsInput}
                       onChange={e => setWsInput(e.target.value)}
-                      placeholder="skylinerealty"
+                      placeholder="your-firm"
                       autoFocus
                       disabled={resolving}
                       autoCapitalize="none"
@@ -396,40 +398,41 @@ export default function Login({ store }) {
                       spellCheck={false}
                       style={{ fontWeight: 600, fontSize: 15 }}
                     />
-                    <span className="prefix" style={{ fontFamily: 'var(--mono)', color: 'var(--muted)' }}>.com</span>
                   </div>
                 </div>
 
-                {KNOWN_WORKSPACES.length > 0 && (
+                {recents.length > 0 && (
                   <div style={{ marginBottom: 22 }}>
                     <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      Your workspaces
+                      Recent workspaces
                     </div>
-                    {KNOWN_WORKSPACES.map(w => (
-                      <button
-                        key={w.slug}
-                        type="button"
-                        onClick={() => { setWsInput(w.slug); selectWorkspace(w.slug) }}
-                        disabled={resolving}
-                        style={{
-                          width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-                          padding: '10px 12px', background: 'var(--bg)', border: '1px solid var(--line)',
-                          borderRadius: 'var(--radius)', cursor: resolving ? 'wait' : 'pointer', textAlign: 'left'
-                        }}
-                      >
-                        <span style={{
-                          width: 32, height: 32, borderRadius: 'var(--radius)', flexShrink: 0,
-                          background: 'var(--accent-wash)', color: 'var(--accent)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 13
-                        }}>{w.initials}</span>
-                        <span style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{w.firmName}</span>
-                          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>app.{w.slug}.com</span>
-                        </span>
-                        <Icon name="arrowRight" size={14} />
-                      </button>
-                    ))}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {recents.map(w => (
+                        <button
+                          key={w.tenantId}
+                          type="button"
+                          onClick={() => { setWsInput(w.slug); selectWorkspace(w.slug) }}
+                          disabled={resolving}
+                          style={{
+                            width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                            padding: '10px 12px', background: 'var(--bg)', border: '1px solid var(--line)',
+                            borderRadius: 'var(--radius)', cursor: resolving ? 'wait' : 'pointer', textAlign: 'left'
+                          }}
+                        >
+                          <span style={{
+                            width: 32, height: 32, borderRadius: 'var(--radius)', flexShrink: 0,
+                            background: 'var(--accent-wash)', color: 'var(--accent)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 13
+                          }}>{w.initials}</span>
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{w.firmName}</span>
+                            <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>{PLATFORM.host}/{w.slug}</span>
+                          </span>
+                          <Icon name="arrowRight" size={14} />
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
