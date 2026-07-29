@@ -5,7 +5,6 @@ import { TopBar, Toasts, StaleBanner } from './components/chrome.jsx'
 import { PLATFORM, tenantDocTitle } from './data/platform.js'
 
 import Login from './modules/Login.jsx'
-import Onboarding from './modules/Onboarding.jsx'
 import Dashboard from './modules/Dashboard.jsx'
 import Leads from './modules/Leads.jsx'
 import Properties from './modules/Properties.jsx'
@@ -77,23 +76,19 @@ export default function App() {
   const boot = bootFromUrl()
   const [screen, setScreen] = useState(boot?.screen || 'dashboard')
   const [sel, setSel] = useState(boot?.sel || {})
-  const [onboarding, setOnboarding] = useState(false)
   const isResponsiveMobile = useResponsiveLayout() || boot?.role === 'agent'
 
   // Tab title follows identity: the platform until a workspace is entered, the
   // firm's name inside the desk. Login owns the title while signed out.
   const signedIn = state.loggedIn || boot?.forceLogin
   useEffect(() => {
-    if (onboarding) document.title = `Provision workspace · ${PLATFORM.vendor}`
-    else if (signedIn) document.title = tenantDocTitle(state.settings.firmName)
-  }, [onboarding, signedIn, state.settings.firmName])
+    if (signedIn) document.title = tenantDocTitle(state.settings.firmName)
+  }, [signedIn, state.settings.firmName])
 
-  if (onboarding) {
-    return <Onboarding store={store} onCancel={() => setOnboarding(false)} />
-  }
-
+  // Workspace provisioning lives in the Delpat superadmin console (/admin), not
+  // here — a visitor on the login page can no longer create tenants.
   if (!state.loggedIn && !boot?.forceLogin) {
-    return <Login store={store} onStartOnboard={() => setOnboarding(true)} />
+    return <Login store={store} />
   }
 
   // Responsive layout switching: when viewport < 1024px, render sleek Mobile Layout without phone frame

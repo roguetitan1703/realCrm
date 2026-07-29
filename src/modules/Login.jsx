@@ -20,7 +20,7 @@ import { Button } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { Toasts } from '../components/chrome.jsx'
 
-export default function Login({ store, onStartOnboard }) {
+export default function Login({ store }) {
   const { state } = store
   const [phase, setPhase] = useState('workspace') // 'workspace' | 'phone' | 'otp'
   const [wsInput, setWsInput] = useState('')
@@ -671,16 +671,6 @@ export default function Login({ store, onStartOnboard }) {
               </button>
             ) : (
               <div>Need access? Contact your firm&apos;s administration desk.</div>
-            )}
-            {onStartOnboard && (
-              <button
-                type="button"
-                onClick={onStartOnboard}
-                className="btn-quiet"
-                style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600, margin: '0 auto' }}
-              >
-                Setting up a new brokerage? Provision workspace →
-              </button>
             )}
           </div>
         </div>

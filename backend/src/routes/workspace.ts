@@ -12,11 +12,10 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getState, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getIngestConfig, regenerateIngestKey, genIngestKey } from '../services/store';
+import { getState, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getIngestConfig, regenerateIngestKey } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { listAudit, verifyAuditChain } from '../services/audit';
-import { signToken } from '../services/auth';
 
 export const workspaceRouter = Router();
 
@@ -202,108 +201,10 @@ workspaceRouter.get('/bootstrap', requireTenantAuth, async (req: Request, res: R
   }
 });
 
-/**
- * 3. TENANT ONBOARDING & INITIALIZATION ENGINE
- * POST /api/v1/workspace/onboard
- *
- * Provisions a brand new Indian real estate brokerage workspace:
- * 1. Creates tenant branding & subdomain slug resolution.
- * 2. Initializes the 12 core real estate modules (Leads, Properties, Team, Telephony, etc.).
- * 3. Seeds Maharashtra/India RERA default pipeline stages & custom property attributes.
- * 4. Returns the full bootstrap payload to log the user straight into their new desk!
- */
-workspaceRouter.post('/onboard', async (req: Request, res: Response) => {
-  const { firmName, city, slug, adminName, adminEmail, adminPhone, primaryColor } = req.body;
-  console.log(`[Tenant Onboard] Provisioning workspace for '${firmName}' (${city})`);
-
-  try {
-    if (!firmName || !city) {
-      return res.status(400).json({ success: false, error: 'Missing Required Fields', message: 'Firm name and city are required.' });
-    }
-    // The owner signs in by OTP, and OTP is delivered ONLY by email today (no SMS
-    // channel). So the owner's email is required — a phone-only owner could be
-    // provisioned but never actually log into the workspace. Phone stays optional.
-    const ownerPhoneRaw = adminPhone ? String(adminPhone).replace(/\D/g, '') : '';
-    const ownerPhone = ownerPhoneRaw ? `+91${ownerPhoneRaw.slice(-10)}` : null;
-    const ownerEmail = adminEmail ? String(adminEmail).trim().toLowerCase() : null;
-    if (!ownerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
-      return res.status(400).json({ success: false, error: 'Owner email required', message: "Provide the owner's email — sign-in codes are sent by email." });
-    }
-
-    // Unique slug === tenant id (our convention). If taken, suffix -2, -3, …
-    const base = (slug || firmName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
-    let cleanSlug = base;
-    for (let n = 2; (await sql`SELECT 1 FROM tenants WHERE id = ${cleanSlug} OR slug = ${cleanSlug} LIMIT 1`).length; n++) {
-      cleanSlug = `${base}-${n}`;
-    }
-    const tenantId = cleanSlug;
-    const initials = firmName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
-    const brand_config = {
-      primaryColor: primaryColor || '#1E6F52',
-      surfaceColor: '#F6F5F2',
-      city,
-      logoUrl: '',
-      firmName,
-      initials,
-    };
-    const ingestSecret = genIngestKey();
-
-    // 1. The tenant row — the real anchor every tenant-scoped row hangs off.
-    await sql`
-      INSERT INTO tenants (id, name, slug, brand_config, ingest_secret, subscription_plan, subscription_status)
-      VALUES (${tenantId}, ${firmName}, ${cleanSlug}, ${sql.json(brand_config)}, ${ingestSecret}, 'PRO', 'ACTIVE')
-    `;
-
-    // 2. The owner — a login-capable user (OTP) + a roster mirror so the desk
-    //    and lead-assignment reads see them. Both under the NEW tenant.
-    const ownerId = `owner_${tenantId}`;
-    const ownerName = (adminName || 'Owner').trim();
-    const ownerMeta = { initials, avatar: '', phone: ownerPhone, email: ownerEmail };
-    await sql`
-      INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata)
-      VALUES (${ownerId}, ${tenantId}, ${ownerName}, ${ownerPhone}, ${ownerEmail}, 'owner', 'ACTIVE', ${sql.json(ownerMeta)})
-    `;
-    await sql`
-      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
-      VALUES (${ownerId}, ${ownerName}, ${ownerName.split(' ')[0]}, ${initials}, '', 'owner', 'ACTIVE', ${sql.json(ownerMeta)}, ${tenantId})
-    `;
-
-    // 3. Default settings + routing for the NEW tenant (NOT via tid(), which is
-    //    the requester's context). A new firm starts EMPTY — no demo leads.
-    const settings = {
-      firmName, city,
-      stages: ['New', 'Contacted', 'Site Visit', 'Negotiation', 'Closed Won', 'Closed Lost'],
-      sources: ['99acres', 'MagicBricks', 'Walk-in', 'Referral', 'Website'],
-    };
-    await sql`
-      INSERT INTO crm_settings (key, value, tenant_id) VALUES ('default', ${sql.json(settings)}, ${tenantId})
-      ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value
-    `;
-    await sql`
-      INSERT INTO crm_routing_rules (strategy, active_agent_ids, last_assigned_index, tenant_id)
-      VALUES ('round_robin', ${sql.json([ownerId])}, -1, ${tenantId})
-      ON CONFLICT (tenant_id) DO NOTHING
-    `;
-
-    // Sign the owner straight in — provisioning yields a real session, so the
-    // operator lands in the new desk authenticated (no fake logged-in state).
-    const token = signToken({ kind: 'user', tenant_id: tenantId, user_id: ownerId, role: 'owner' });
-
-    console.log(`[Tenant Onboard] Provisioned '${firmName}' as '${tenantId}' (owner ${ownerId}).`);
-    return res.status(201).json({
-      success: true,
-      message: `Workspace '${firmName}' provisioned.`,
-      tenant: { id: tenantId, name: firmName, slug: cleanSlug, brand_config },
-      owner: { id: ownerId, name: ownerName, phone: ownerPhone, email: ownerEmail, role: 'owner' },
-      ingest: { tenantSlug: cleanSlug, secret: ingestSecret },
-      loginWith: ownerEmail || ownerPhone,
-      token,
-    });
-  } catch (err: any) {
-    console.error('[Tenant Onboard] Failed:', err.message);
-    return res.status(500).json({ success: false, error: 'Tenant Provisioning Failed', message: err.message });
-  }
-});
+// Tenant onboarding moved to the SUPERADMIN console: POST /api/v1/admin/onboard
+// (guarded by requireSuperadmin). The old public /workspace/onboard route was
+// removed so a visitor on the login page can no longer provision workspaces.
+// The provisioning engine now lives in services/store.ts → provisionTenant().
 
 /**
  * GET /api/v1/workspace/state

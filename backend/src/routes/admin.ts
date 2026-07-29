@@ -11,8 +11,9 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../services/auth.js';
-import { verifyAuditChain } from '../services/audit.js';
+import { verifyAuditChain, audit } from '../services/audit.js';
 import { sql } from '../services/db.js';
+import { provisionTenant } from '../services/store.js';
 
 export const adminRouter = Router();
 
@@ -58,5 +59,38 @@ adminRouter.get('/overview', async (_req: Request, res: Response) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Overview failed', message: err.message });
+  }
+});
+
+/**
+ * POST /api/v1/admin/onboard — provision a new brokerage workspace.
+ * Superadmin-only (guarded by adminRouter.use above). This is the ONE place a
+ * workspace is created; the public /workspace/onboard route was removed so a
+ * visitor on the login page can no longer spin up tenants.
+ */
+adminRouter.post('/onboard', async (req: Request, res: Response) => {
+  const sa = (req as any).superadmin;
+  try {
+    const { firmName, city, slug, adminName, ownerName, adminEmail, ownerEmail, adminPhone, ownerPhone, primaryColor } = req.body || {};
+    const result = await provisionTenant({
+      firmName, city, slug,
+      ownerName: ownerName || adminName,
+      ownerEmail: ownerEmail || adminEmail,
+      ownerPhone: ownerPhone || adminPhone,
+      primaryColor,
+    });
+    audit({
+      tenant_id: result.tenant.id, actor_type: 'superadmin', actor_id: sa?.superadmin_id || null,
+      actor_label: sa?.email || 'superadmin', action: 'tenant.provisioned',
+      target_type: 'tenant', target_id: result.tenant.id,
+      summary: `Provisioned workspace '${result.tenant.name}' (owner ${result.owner.email})`,
+      metadata: { slug: result.tenant.slug },
+    });
+    return res.status(201).json({ success: true, message: `Workspace '${result.tenant.name}' provisioned.`, ...result });
+  } catch (err: any) {
+    // Validation errors from provisionTenant read cleanly as 400s.
+    const msg = err?.message || 'Provisioning failed';
+    const isValidation = /required|email/i.test(msg);
+    return res.status(isValidation ? 400 : 500).json({ success: false, error: isValidation ? 'Invalid workspace details' : 'Provisioning failed', message: msg });
   }
 });

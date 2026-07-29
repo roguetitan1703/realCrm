@@ -60,6 +60,102 @@ export async function getTenantForIngest(slugOrId: string): Promise<{ id: string
   return rows[0] ? { id: rows[0].id, secret: rows[0].ingest_secret } : null;
 }
 
+// ---------------------------------------------------------------------------
+// Tenant provisioning — the real "onboard a brokerage" engine. This is a
+// SUPERADMIN action (Delpat staff), not a public one: it creates an isolated,
+// login-ready workspace and NEVER wipes or touches any other tenant's data.
+// Returns everything the operator needs to hand the client: the workspace slug,
+// the owner's login email, and the lead-ingest key. No session token — the
+// superadmin stays a superadmin; the client logs in themselves.
+// ---------------------------------------------------------------------------
+export interface ProvisionInput {
+  firmName: string;
+  city: string;
+  slug?: string;
+  ownerName?: string;
+  ownerEmail: string;
+  ownerPhone?: string;
+  primaryColor?: string;
+}
+export interface ProvisionResult {
+  tenant: { id: string; name: string; slug: string; brand_config: any };
+  owner: { id: string; name: string; email: string; phone: string | null; role: 'owner' };
+  ingest: { tenantSlug: string; secret: string };
+  loginWith: string;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export async function provisionTenant(input: ProvisionInput): Promise<ProvisionResult> {
+  const firmName = String(input.firmName || '').trim();
+  const city = String(input.city || '').trim();
+  if (!firmName || !city) throw new Error('Firm name and city are required.');
+
+  // The owner signs in by OTP, delivered ONLY by email (no SMS channel), so the
+  // owner's email is required — a phone-only owner could never receive a code.
+  const ownerEmail = input.ownerEmail ? String(input.ownerEmail).trim().toLowerCase() : '';
+  if (!EMAIL_RE.test(ownerEmail)) throw new Error("The owner's email is required — sign-in codes are sent by email.");
+  const ownerPhoneRaw = input.ownerPhone ? String(input.ownerPhone).replace(/\D/g, '') : '';
+  const ownerPhone = ownerPhoneRaw ? `+91${ownerPhoneRaw.slice(-10)}` : null;
+
+  // Unique slug === tenant id (our convention). If taken, suffix -2, -3, …
+  const base = (input.slug || firmName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
+  let cleanSlug = base;
+  for (let n = 2; (await sql`SELECT 1 FROM tenants WHERE id = ${cleanSlug} OR slug = ${cleanSlug} LIMIT 1`).length; n++) {
+    cleanSlug = `${base}-${n}`;
+  }
+  const tenantId = cleanSlug;
+  const initials = firmName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
+  const brand_config = {
+    primaryColor: input.primaryColor || '#1E6F52',
+    surfaceColor: '#F6F5F2',
+    city, logoUrl: '', firmName, initials,
+  };
+  const ingestSecret = genIngestKey();
+
+  // 1. The tenant row — the anchor every tenant-scoped row hangs off.
+  await sql`
+    INSERT INTO tenants (id, name, slug, brand_config, ingest_secret, subscription_plan, subscription_status)
+    VALUES (${tenantId}, ${firmName}, ${cleanSlug}, ${sql.json(brand_config)}, ${ingestSecret}, 'PRO', 'ACTIVE')
+  `;
+
+  // 2. The owner — a login-capable user (email OTP) + a roster mirror.
+  const ownerId = `owner_${tenantId}`;
+  const ownerName = (input.ownerName || 'Owner').trim();
+  const ownerMeta = { initials, avatar: '', phone: ownerPhone, email: ownerEmail };
+  await sql`
+    INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata)
+    VALUES (${ownerId}, ${tenantId}, ${ownerName}, ${ownerPhone}, ${ownerEmail}, 'owner', 'ACTIVE', ${sql.json(ownerMeta)})
+  `;
+  await sql`
+    INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
+    VALUES (${ownerId}, ${ownerName}, ${ownerName.split(' ')[0]}, ${initials}, '', 'owner', 'ACTIVE', ${sql.json(ownerMeta)}, ${tenantId})
+  `;
+
+  // 3. Default settings + routing UNDER the new tenant. A new firm starts EMPTY.
+  const settings = {
+    firmName, city,
+    stages: ['New', 'Contacted', 'Site Visit', 'Negotiation', 'Closed Won', 'Closed Lost'],
+    sources: ['99acres', 'MagicBricks', 'Walk-in', 'Referral', 'Website'],
+  };
+  await sql`
+    INSERT INTO crm_settings (key, value, tenant_id) VALUES ('default', ${sql.json(settings)}, ${tenantId})
+    ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value
+  `;
+  await sql`
+    INSERT INTO crm_routing_rules (strategy, active_agent_ids, last_assigned_index, tenant_id)
+    VALUES ('round_robin', ${sql.json([ownerId])}, -1, ${tenantId})
+    ON CONFLICT (tenant_id) DO NOTHING
+  `;
+
+  return {
+    tenant: { id: tenantId, name: firmName, slug: cleanSlug, brand_config },
+    owner: { id: ownerId, name: ownerName, email: ownerEmail, phone: ownerPhone, role: 'owner' },
+    ingest: { tenantSlug: cleanSlug, secret: ingestSecret },
+    loginWith: ownerEmail,
+  };
+}
+
 /**
  * RBAC lead scope: an 'agent' may only see leads assigned to them; owners and
  * managers (and the tokenless demo path) see the whole tenant. Returns the

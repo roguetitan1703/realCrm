@@ -23,6 +23,36 @@ export default function Admin() {
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState('')
 
+  // Workspace provisioning (the ONE place a tenant is created).
+  const emptyForm = { firmName: '', city: '', ownerName: '', ownerEmail: '', ownerPhone: '', primaryColor: '#1E6F52' }
+  const [form, setForm] = useState(emptyForm)
+  const setF = (k, v) => setForm(s => ({ ...s, [k]: v }))
+  const [provisioning, setProvisioning] = useState(false)
+  const [provErr, setProvErr] = useState('')
+  const [provisioned, setProvisioned] = useState(null)
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.ownerEmail.trim())
+  const canProvision = form.firmName.trim() && form.city.trim() && emailOk
+
+  const provision = async (e) => {
+    e.preventDefault()
+    if (!canProvision) { setProvErr('Firm name, city and a valid owner email are required.'); return }
+    setProvisioning(true); setProvErr('')
+    try {
+      const res = await api.adminOnboard({
+        firmName: form.firmName.trim(), city: form.city.trim(),
+        ownerName: form.ownerName.trim(), ownerEmail: form.ownerEmail.trim(),
+        ownerPhone: form.ownerPhone.trim(), primaryColor: form.primaryColor,
+      })
+      setProvisioned(res)
+      setForm(emptyForm)
+      loadOverview()
+    } catch (err) {
+      setProvErr(err?.message?.replace(/^API Error:.*?— /, '') || 'Could not provision the workspace.')
+    } finally {
+      setProvisioning(false)
+    }
+  }
+
   useEffect(() => { document.title = `Superadmin · ${PLATFORM.vendor}` }, [])
 
   const loadOverview = () => {
@@ -131,11 +161,58 @@ export default function Admin() {
       </header>
 
       <main style={{ maxWidth: 980, margin: '0 auto', padding: '28px 24px' }}>
-        {!data && !loadErr && <div style={{ color: 'var(--muted)' }}>Loading overview…</div>}
+        {/* Provision a new workspace — the ONLY place a tenant is created */}
+        <section style={cardStyle}>
+          <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 4 }}>Provision workspace</div>
+          <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 19, marginBottom: 16 }}>Onboard a brokerage</div>
+
+          {provisioned ? (
+            <div>
+              <div style={{
+                display: 'flex', gap: 10, alignItems: 'center', padding: '10px 14px', borderRadius: 10,
+                background: 'rgba(30,111,82,0.1)', color: '#1E6F52', fontWeight: 600, fontSize: 14, marginBottom: 16,
+              }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'currentColor' }} />
+                {provisioned.tenant.name} is live — hand these to the client.
+              </div>
+              <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '10px 18px', margin: 0, fontSize: 13.5 }}>
+                <dt style={dtStyle}>Workspace</dt>
+                <dd style={ddStyle}><span className="mono-num">{provisioned.tenant.slug}</span> — they type “{provisioned.tenant.name}” at the login screen</dd>
+                <dt style={dtStyle}>Owner login</dt>
+                <dd style={ddStyle}><span className="mono-num">{provisioned.loginWith}</span> — a one-time code is emailed here (no password)</dd>
+                <dt style={dtStyle}>Lead ingest key</dt>
+                <dd style={ddStyle}><span className="mono-num" style={{ wordBreak: 'break-all' }}>{provisioned.ingest.secret}</span></dd>
+                <dt style={dtStyle}>Ingest URL</dt>
+                <dd style={ddStyle}><span className="mono-num" style={{ wordBreak: 'break-all' }}>{`${api.baseUrl()}/ingest/${provisioned.ingest.tenantSlug}/99acres?key=${provisioned.ingest.secret}`}</span></dd>
+              </dl>
+              <button onClick={() => setProvisioned(null)} style={{ ...ghostBtn, marginTop: 18 }}>Onboard another</button>
+            </div>
+          ) : (
+            <form onSubmit={provision}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+                <div><label style={fLabel}>Firm name</label><input style={fInput} value={form.firmName} onChange={e => setF('firmName', e.target.value)} placeholder="Meridian Estates" /></div>
+                <div><label style={fLabel}>City</label><input style={fInput} value={form.city} onChange={e => setF('city', e.target.value)} placeholder="Pune" /></div>
+                <div><label style={fLabel}>Owner name</label><input style={fInput} value={form.ownerName} onChange={e => setF('ownerName', e.target.value)} placeholder="Rohan Shah" /></div>
+                <div><label style={fLabel}>Owner email</label><input style={fInput} type="email" value={form.ownerEmail} onChange={e => setF('ownerEmail', e.target.value)} placeholder="rohan@meridian.in" /></div>
+                <div><label style={fLabel}>Owner mobile (optional)</label><input style={fInput} value={form.ownerPhone} onChange={e => setF('ownerPhone', e.target.value)} placeholder="98xxx xxxxx" /></div>
+                <div><label style={fLabel}>Accent colour</label><input style={{ ...fInput, height: 44, padding: 4 }} type="color" value={form.primaryColor} onChange={e => setF('primaryColor', e.target.value)} /></div>
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 10 }}>The owner signs in with their email — a one-time code is sent there. A new firm starts empty; no demo data.</div>
+              {provErr && <div style={{ color: '#B4342A', fontSize: 12.5, marginTop: 10 }}>{provErr}</div>}
+              <button type="submit" disabled={!canProvision || provisioning} style={{
+                marginTop: 16, height: 44, padding: '0 22px', borderRadius: 9, border: 'none',
+                background: canProvision ? '#C6842A' : '#d8cbb4', color: '#1a1205', fontWeight: 700, fontSize: 14,
+                cursor: canProvision && !provisioning ? 'pointer' : 'not-allowed',
+              }}>{provisioning ? 'Provisioning…' : 'Provision workspace'}</button>
+            </form>
+          )}
+        </section>
+
+        {!data && !loadErr && <div style={{ color: 'var(--muted)', marginTop: 20 }}>Loading overview…</div>}
 
         {/* Audit ledger health */}
         {audit && (
-          <section style={cardStyle}>
+          <section style={{ ...cardStyle, marginTop: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
               <div>
                 <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>Audit ledger</div>
@@ -221,3 +298,8 @@ const fieldStyle = { width: '100%', height: 42, borderRadius: 9, border: '1px so
 const cardStyle = { background: 'var(--card, #fff)', border: '1px solid var(--line, #e5e3dd)', borderRadius: 14, padding: '22px 22px' }
 const thStyle = { padding: '4px 10px', fontWeight: 600 }
 const tdStyle = { padding: '11px 10px', verticalAlign: 'top' }
+const fLabel = { fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }
+const fInput = { width: '100%', height: 42, borderRadius: 9, border: '1px solid var(--line, #e5e3dd)', background: 'var(--bg, #fff)', color: 'var(--ink, #1a1a1a)', padding: '0 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' }
+const dtStyle = { fontWeight: 600, color: 'var(--muted)' }
+const ddStyle = { margin: 0 }
+const ghostBtn = { height: 40, padding: '0 18px', borderRadius: 9, border: '1px solid var(--line, #e5e3dd)', background: 'transparent', color: 'var(--ink, #1a1a1a)', fontWeight: 600, fontSize: 13.5, cursor: 'pointer' }

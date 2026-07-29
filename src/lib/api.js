@@ -113,11 +113,12 @@ export const api = {
     return res;
   },
   adminOverview: () => request('/admin/overview', { headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  // Provision a workspace — SUPERADMIN only, sent with the admin token.
+  adminOnboard: (config) => request('/admin/onboard', { method: 'POST', body: JSON.stringify(config), headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   getAdminToken: () => lsGet(ADMIN_TOKEN_KEY),
   clearAdminToken: () => lsSet(ADMIN_TOKEN_KEY, ''),
   getState: () => request('/workspace/state'),
   resetDatabase: () => request('/workspace/reset', { method: 'POST' }),
-  onboardTenant: (config) => request('/workspace/onboard', { method: 'POST', body: JSON.stringify(config) }),
 
   // Lead ingest (the per-tenant URL the client pastes into 99acres/MagicBricks)
   baseUrl: () => BASE_URL,
