@@ -37,12 +37,32 @@ export default function Leads({ store, go, sel, setSel, topBar }) {
     { label: 'Unassigned', value: counts.unassigned, onClick: () => setFlt({ flag: ['unassigned'] }) },
   ]
 
+  // B2: the top pills ARE the pipeline stages — a fast single-tap switch, on
+  // the same `flt.stage` the advanced filter popover already reads/writes (one
+  // source of truth, no second Buy/Rent row — deal stays a normal filter chip).
+  const stages = state.settings.stages || []
+  const activeStage = flt.stage?.length === 1 ? flt.stage[0] : null
+  const setStagePill = (val) => setFlt(prev => {
+    const next = { ...prev }
+    if (val == null) delete next.stage
+    else next.stage = [val]
+    return next
+  })
+  const stageSegs = [
+    { key: 'all', label: 'All', on: !activeStage, count: records.length, onClick: () => setStagePill(null) },
+    ...stages.map(s => ({
+      key: s, label: s, on: activeStage === s,
+      count: records.filter(l => l.stage === s).length,
+      onClick: () => setStagePill(s),
+    })),
+  ]
+
   const { header, toolbar, body } = ModuleListView({
     def: LEADS_DEF, records, store, onOpen,
     filters: flt, onFilters: setFlt,
     search: q, onSearch: setQ,
     sortKey, onSortKey: setSortKey, sortDir, onSortDir: setSortDir,
-    kpis, view, onView: setView,
+    kpis, segments: stageSegs, view, onView: setView,
     cta: { label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) },
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} />
