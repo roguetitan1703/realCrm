@@ -20,6 +20,27 @@ import { Button } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { Toasts } from '../components/chrome.jsx'
 
+// Password field with a show/hide toggle — reused across sign-in, first-login
+// change, and reset so a mistyped password is always checkable.
+function PwField({ value, onChange, placeholder, autoFocus, disabled }) {
+  const [show, setShow] = useState(false)
+  return (
+    <div className="input-group">
+      <input type={show ? 'text' : 'password'} value={value} onChange={onChange}
+        placeholder={placeholder} autoFocus={autoFocus} disabled={disabled}
+        autoCapitalize="none" autoCorrect="off" spellCheck={false}
+        style={{ fontWeight: 600, fontSize: 15 }} />
+      <button type="button" onClick={() => setShow(s => !s)} tabIndex={-1} disabled={disabled}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        title={show ? 'Hide password' : 'Show password'}
+        style={{ display: 'flex', alignItems: 'center', padding: '0 12px', background: 'var(--card-2)',
+          border: 'none', borderLeft: '1px solid var(--line)', color: 'var(--muted)', cursor: 'pointer' }}>
+        <Icon name={show ? 'eyeOff' : 'eye'} size={16} />
+      </button>
+    </div>
+  )
+}
+
 export default function Login({ store }) {
   const { state } = store
   const [phase, setPhase] = useState('workspace') // 'workspace' | 'creds' | 'change' | 'forgot' | 'reset'
@@ -446,10 +467,7 @@ export default function Login({ store }) {
                 </div>
                 <div className="field" style={{ marginBottom: 10 }}>
                   <label style={LBL}>Password</label>
-                  <div className="input-group">
-                    <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                      placeholder="••••••••" disabled={loading} style={{ fontWeight: 600, fontSize: 15 }} />
-                  </div>
+                  <PwField value={password} onChange={e => setPassword(e.target.value)} placeholder="Your password" disabled={loading} />
                 </div>
                 <div style={{ textAlign: 'right', marginBottom: 18 }}>
                   <button type="button" className="btn-quiet"
@@ -468,17 +486,11 @@ export default function Login({ store }) {
                 </div>
                 <div className="field" style={{ marginBottom: 14 }}>
                   <label style={LBL}>New password</label>
-                  <div className="input-group">
-                    <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)}
-                      placeholder="At least 8 characters" autoFocus disabled={loading} style={{ fontWeight: 600, fontSize: 15 }} />
-                  </div>
+                  <PwField value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="At least 8 characters" autoFocus disabled={loading} />
                 </div>
                 <div className="field" style={{ marginBottom: 18 }}>
                   <label style={LBL}>Confirm password</label>
-                  <div className="input-group">
-                    <input type="password" value={newPw2} onChange={e => setNewPw2(e.target.value)}
-                      placeholder="Repeat it" disabled={loading} style={{ fontWeight: 600, fontSize: 15 }} />
-                  </div>
+                  <PwField value={newPw2} onChange={e => setNewPw2(e.target.value)} placeholder="Repeat it" disabled={loading} />
                 </div>
                 <Button variant="primary" block type="submit" disabled={loading} style={{ ...BTN, cursor: loading ? 'wait' : 'pointer' }}>
                   {loading ? <><span style={SPIN} /><span>Updating…</span></> : <><span>Update &amp; continue</span><Icon name="check" size={16} /></>}
@@ -520,17 +532,11 @@ export default function Login({ store }) {
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 14 }}>Set a new password</div>
                 <div className="field" style={{ marginBottom: 14 }}>
                   <label style={LBL}>New password</label>
-                  <div className="input-group">
-                    <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)}
-                      placeholder="At least 8 characters" autoFocus disabled={loading} style={{ fontWeight: 600, fontSize: 15 }} />
-                  </div>
+                  <PwField value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="At least 8 characters" autoFocus disabled={loading} />
                 </div>
                 <div className="field" style={{ marginBottom: 18 }}>
                   <label style={LBL}>Confirm password</label>
-                  <div className="input-group">
-                    <input type="password" value={newPw2} onChange={e => setNewPw2(e.target.value)}
-                      placeholder="Repeat it" disabled={loading} style={{ fontWeight: 600, fontSize: 15 }} />
-                  </div>
+                  <PwField value={newPw2} onChange={e => setNewPw2(e.target.value)} placeholder="Repeat it" disabled={loading} />
                 </div>
                 <Button variant="primary" block type="submit" disabled={loading} style={{ ...BTN, cursor: loading ? 'wait' : 'pointer' }}>
                   {loading ? <><span style={SPIN} /><span>Saving…</span></> : <span>Reset password</span>}

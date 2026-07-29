@@ -402,7 +402,7 @@ export async function changePassword(
 }
 
 /** Start a self-serve reset. Silent (no enumeration); only for verified emails. */
-export async function requestPasswordReset(tenantId: string, emailRaw: string): Promise<void> {
+export async function requestPasswordReset(tenantId: string, emailRaw: string, origin?: string): Promise<void> {
   const email = String(emailRaw || '').trim().toLowerCase();
   if (!isEmail(email) || !emailConfigured()) return;
   const rows = await sql`
@@ -422,7 +422,8 @@ export async function requestPasswordReset(tenantId: string, emailRaw: string): 
     VALUES (${id}, ${tenantId}, ${u.id}, ${tokenHash}, ${expiresAt})
   `;
   const brand = await brandFor(tenantId);
-  const link = `${APP_BASE_URL}/${tenantId}/reset?token=${token}`;
+  const base = (origin || APP_BASE_URL).replace(/\/+$/, '');
+  const link = `${base}/${tenantId}/reset?token=${token}`;
   try { await sendPasswordResetEmail(u.email, link, brand.name, brand.color); }
   catch (e: any) { console.warn('[Auth] reset email failed:', e?.message); }
 }

@@ -105,7 +105,11 @@ authRouter.post('/password/change', async (req: Request, res: Response) => {
 authRouter.post('/password/forgot', async (req: Request, res: Response) => {
   try {
     const { email } = req.body || {};
-    if (email) await requestPasswordReset(tenantFromHeader(req), email);
+    // Build the reset link from where the request actually came from, so the
+    // emailed link points back to THIS app — localhost in dev, the app origin in
+    // the split-origin deploy (the browser's Origin is the app, not the API host).
+    const origin = (req.headers.origin as string) || `${req.protocol}://${req.get('host')}`;
+    if (email) await requestPasswordReset(tenantFromHeader(req), email, origin);
   } catch (err: any) {
     console.warn('[Auth] forgot-password error:', err.message);
   }
