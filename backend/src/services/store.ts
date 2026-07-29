@@ -1135,7 +1135,14 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
 
 // --- TEAM & ROUTING ---
 export async function getAgents(): Promise<any[]> {
-  const rows = await sql`SELECT * FROM crm_agents WHERE tenant_id = ${tid()}`;
+  // Exclude soft-deleted people: their users row carries deleted_at, but the
+  // crm_agents row is kept so historical lead attribution still resolves. A
+  // LEFT JOIN keeps any legacy agent that has no users row at all.
+  const rows = await sql`
+    SELECT a.* FROM crm_agents a
+    LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
+    WHERE a.tenant_id = ${tid()} AND u.deleted_at IS NULL
+  `;
   return rows.map(rowToAgent);
 }
 
