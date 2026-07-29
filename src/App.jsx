@@ -13,7 +13,6 @@ import Calendar from './modules/Calendar.jsx'
 import Team from './modules/Team.jsx'
 import Settings from './modules/Settings.jsx'
 import Integrations from './modules/Integrations.jsx'
-import Roadmap from './modules/Roadmap.jsx'
 import ImportPage from './modules/ImportPage.jsx'
 import WaModal from './modules/WaModal.jsx'
 import Modals from './modules/Modals.jsx'
@@ -31,13 +30,11 @@ const NAV = [
   { key: 'team', label: 'Team', icon: 'team' },
   { key: 'settings', label: 'Settings', icon: 'settings' },
   { key: 'integrations', label: 'Integrations', icon: 'zap' },
-  { section: "What's next" },
-  { key: 'roadmap', label: 'Roadmap', icon: 'roadmap' },
 ]
 
 const SCREENS = {
   dashboard: Dashboard, leads: Leads, properties: Properties, clients: Clients,
-  calendar: Calendar, import: ImportPage, team: Team, settings: Settings, integrations: Integrations, roadmap: Roadmap,
+  calendar: Calendar, import: ImportPage, team: Team, settings: Settings, integrations: Integrations,
 }
 
 // Optional deep-link bootstrap for URL parameters (?screen=leads&lead=l2&prop=p7).
@@ -163,7 +160,7 @@ export default function App() {
   }
 
   // Enforce RBAC on direct screen access
-  const effectiveScreen = (state.role === 'agent' && ['team', 'settings', 'integrations', 'roadmap'].includes(screen)) ? 'dashboard' : screen
+  const effectiveScreen = (state.role === 'agent' && ['team', 'settings', 'integrations'].includes(screen)) ? 'dashboard' : screen
   const Screen = SCREENS[effectiveScreen] || Dashboard
 
   return (

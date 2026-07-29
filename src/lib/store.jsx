@@ -115,11 +115,16 @@ function reducer(state, action) {
   switch (action.type) {
     case 'HYDRATE_SERVER': {
       const s = action.state || {}
+      // Trust the server's arrays verbatim — including EMPTY ones. A freshly
+      // onboarded tenant legitimately has no leads/properties; falling back to
+      // the bundled demo dataset here was leaking Skyline's demo records (and
+      // owner) into every empty workspace. Only keep local state when the server
+      // omitted the key entirely (malformed/partial response).
       return {
         ...state,
-        agents: s.agents && s.agents.length > 0 ? s.agents : state.agents,
-        properties: s.properties && s.properties.length > 0 ? s.properties : state.properties,
-        leads: s.leads && s.leads.length > 0 ? s.leads : state.leads,
+        agents: Array.isArray(s.agents) ? s.agents : state.agents,
+        properties: Array.isArray(s.properties) ? s.properties : state.properties,
+        leads: Array.isArray(s.leads) ? s.leads : state.leads,
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         integrations: s.integrations ? { ...state.integrations, ...s.integrations } : state.integrations,
@@ -135,9 +140,9 @@ function reducer(state, action) {
       const s = action.state || {}
       return {
         ...state,
-        agents: s.agents && s.agents.length > 0 ? s.agents : state.agents,
-        properties: s.properties && s.properties.length > 0 ? s.properties : state.properties,
-        leads: s.leads && s.leads.length > 0 ? s.leads : state.leads,
+        agents: Array.isArray(s.agents) ? s.agents : state.agents,
+        properties: Array.isArray(s.properties) ? s.properties : state.properties,
+        leads: Array.isArray(s.leads) ? s.leads : state.leads,
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         integrations: s.integrations ? { ...state.integrations, ...s.integrations } : state.integrations,
@@ -503,9 +508,12 @@ export function StoreProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initial)
   const timers = useRef({})
 
-  // Hydrate state from backend REST API on mount
-  useEffect(() => {
-    apiClient.getState()
+  // Pull the authoritative, tenant-scoped state from the backend. Called on
+  // mount AND right after login — the token/tenant changes at login, so the
+  // desk must re-fetch under the new identity or it keeps showing whatever
+  // loaded for the default tenant at startup.
+  const loadServerState = useCallback(() => {
+    return apiClient.getState()
       .then(res => {
         if (res && res.success && res.state) {
           dispatch({ type: 'HYDRATE_SERVER', state: res.state })
@@ -519,6 +527,11 @@ export function StoreProvider({ children }) {
         const cached = readStateCache()
         if (cached) dispatch({ type: 'HYDRATE_CACHE', state: cached.state, at: cached.at })
       })
+  }, [])
+
+  // Hydrate state from backend REST API on mount
+  useEffect(() => {
+    loadServerState()
 
     // Validate a stored token against the backend. If it's expired or the user
     // no longer exists, drop the session so a stale token can't linger.
@@ -790,7 +803,14 @@ export function StoreProvider({ children }) {
       apiClient.markAllNotificationsRead().catch(err => console.warn('[Notifications] mark-all failed:', err.message))
     },
     setRole: (role) => dispatch({ type: 'ROLE', role }),
-    login: (payload) => { dispatch({ type: 'LOGIN', payload }); setTimeout(loadNotifications, 0) },
+    login: (payload) => {
+      dispatch({ type: 'LOGIN', payload })
+      // Re-fetch under the just-authenticated tenant so the desk shows THIS
+      // firm's data (empty for a new tenant), not whatever loaded for the
+      // default tenant before login.
+      loadServerState()
+      setTimeout(loadNotifications, 0)
+    },
     logout: () => {
       apiClient.clearToken?.()
       if (typeof window !== 'undefined') {
