@@ -2,12 +2,21 @@ import { useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
-import { StageTag, StatusTag, Avatar, Button, KV } from '../components/primitives.jsx'
+import { StageTag, StatusTag, Avatar, Button, KV, SegmentPills } from '../components/primitives.jsx'
 import { initials, reqLine, budgetRange } from '../lib/format.js'
 import { CLIENTS_DEF } from './definitions.jsx'
 
+// B3: Contacts is ONE section with TWO subnavs — Clients (demand: buyers,
+// tenants) and Owners (supply: sellers, landlords) — backed by separate
+// records (a person who is both gets two distinct rows, never merged). Each
+// subnav gets its own role tab-pills underneath. An owner isn't its own
+// stored record yet (it's derived from grouping properties by owner name),
+// but it already has a stable id + is always reachable contextually from its
+// property — the Contacts→Owners list is the "browse all owners" view, not
+// the only path in.
 export default function Clients({ store, go, topBar }) {
   const { state } = store
+  const [tab, setTab] = useState('clients')   // 'clients' | 'owners'
   const [seg, setSeg] = useState('all')
   const [flt, setFlt] = useState({})
   const [q, setQ] = useState('')
@@ -73,29 +82,44 @@ export default function Clients({ store, go, topBar }) {
     return rRole === segKey
   }
 
-  const segs = [
-    { key: 'all', label: 'All' },
-    { key: 'Buyer', label: 'Buyers' },
-    { key: 'Tenant', label: 'Tenants' },
-    { key: 'Seller', label: 'Sellers' },
-    { key: 'Landlord', label: 'Landlords' },
-  ].map(s => ({
+  // Subnav: which store — demand (Clients) or supply (Owners). Switching
+  // resets the role pill back to "All" so a stale role from the other store
+  // (e.g. "Landlord") can't silently zero out the new list.
+  const demandRows = rows.filter(r => r.kind === 'demand')
+  const supplyRows = rows.filter(r => r.kind === 'supply')
+  const scopeRows = tab === 'clients' ? demandRows : supplyRows
+  const switchTab = (t) => { setTab(t); setSeg('all') }
+  const tabSegs = [
+    { key: 'clients', label: 'Clients', on: tab === 'clients', count: demandRows.length, onClick: () => switchTab('clients') },
+    { key: 'owners', label: 'Owners', on: tab === 'owners', count: supplyRows.length, onClick: () => switchTab('owners') },
+  ]
+
+  // Role pills WITHIN the active subnav — Buyer/Tenant under Clients,
+  // Seller/Landlord under Owners. Not a flat 5-way mix of both stores.
+  const roleOptions = tab === 'clients'
+    ? [{ key: 'all', label: 'All' }, { key: 'Buyer', label: 'Buyers' }, { key: 'Tenant', label: 'Tenants' }]
+    : [{ key: 'all', label: 'All' }, { key: 'Seller', label: 'Sellers' }, { key: 'Landlord', label: 'Landlords' }]
+  const segs = roleOptions.map(s => ({
     ...s,
     on: seg === s.key,
-    count: s.key === 'all' ? rows.length : rows.filter(r => roleMatch(r.role, s.key)).length,
+    count: s.key === 'all' ? scopeRows.length : scopeRows.filter(r => roleMatch(r.role, s.key)).length,
     onClick: () => setSeg(s.key),
   }))
 
   // Segment pre-filters the derived directory; the shared engine handles the rest.
-  const records = seg === 'all' ? rows : rows.filter(r => roleMatch(r.role, seg))
+  const records = seg === 'all' ? scopeRows : scopeRows.filter(r => roleMatch(r.role, seg))
 
-  const demandCount = rows.filter(r => r.kind === 'demand').length
-  const supplyCount = rows.filter(r => r.kind === 'supply').length
-  const kpis = [
-    { label: 'Contacts', value: rows.length, onClick: () => setSeg('all') },
-    { label: 'Demand', value: demandCount, tone: 'accent', onClick: () => setSeg('Buyer') },
-    { label: 'Supply', value: supplyCount, onClick: () => setSeg('Seller') },
-  ]
+  const kpis = tab === 'clients'
+    ? [
+        { label: 'Clients', value: demandRows.length, onClick: () => setSeg('all') },
+        { label: 'Buyers', value: demandRows.filter(r => r.role === 'Buyer').length, onClick: () => setSeg('Buyer') },
+        { label: 'Tenants', value: demandRows.filter(r => r.role === 'Tenant').length, onClick: () => setSeg('Tenant') },
+      ]
+    : [
+        { label: 'Owners', value: supplyRows.length, onClick: () => setSeg('all') },
+        { label: 'Sellers', value: supplyRows.filter(r => roleMatch(r.role, 'Seller')).length, onClick: () => setSeg('Seller') },
+        { label: 'Landlords', value: supplyRows.filter(r => roleMatch(r.role, 'Landlord')).length, onClick: () => setSeg('Landlord') },
+      ]
 
   const { header, toolbar, body } = ModuleListView({
     def: CLIENTS_DEF, records, store,
@@ -104,9 +128,14 @@ export default function Clients({ store, go, topBar }) {
     search: q, onSearch: setQ,
     sortKey, onSortKey: setSortKey, sortDir, onSortDir: setSortDir,
     kpis, segments: segs, view, onView: setView,
-    cta: { label: 'New client', onClick: () => store.openModal({ kind: 'newLead' }) },
-    emptyTitle: 'No clients match',
-    emptyHint: 'Adjust the segment, filter or search.',
+    // Owners aren't created directly (that's B3's stated, deliberate gap —
+    // they're derived from a property's owner field); the CTA that actually
+    // adds a new one is adding the property.
+    cta: tab === 'clients'
+      ? { label: 'New client', onClick: () => store.openModal({ kind: 'newLead' }) }
+      : { label: 'Add property', onClick: () => store.openModal({ kind: 'addProperty' }) },
+    emptyTitle: tab === 'clients' ? 'No clients match' : 'No owners match',
+    emptyHint: 'Adjust the role, filter or search.',
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} />
       : <ModuleTable def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} sortKey={sortKey} sortDir={sortDir} onSort={setSortKey} />,
@@ -162,6 +191,7 @@ export default function Clients({ store, go, topBar }) {
         title: 'Contacts',
         actions: <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import</Button>
       })}
+      <div className="contacts-subnav"><SegmentPills segments={tabSegs} /></div>
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>
     </>

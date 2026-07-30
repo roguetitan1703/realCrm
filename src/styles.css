@@ -869,6 +869,12 @@ input,textarea,select{font-family:inherit}
 .topbar .tb-search{display:inline-flex;align-items:center;gap:9px;height:36px;width:100%;max-width:440px;border:1px solid var(--line);border-radius:20px;background:var(--card-2);padding:0 14px;color:var(--faint);cursor:text}
 .topbar .tb-search span{flex:1;font-size:13.5px}
 .topbar .tb-search kbd{font-family:var(--sans);font-size:11px;font-weight:600;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+/* ---- Contacts subnav (B3): Clients | Owners — the primary tab switcher,
+   sits above the KPI/role-pill header so it reads as a section pick, not
+   just another filter row. ---- */
+.contacts-subnav{padding:16px 22px 0}
+.contacts-subnav .segpill{font-size:13.5px;font-weight:600;padding:7px 16px}
+
 /* ---- PageHeader: lean in-page strip (KPIs + scope segments) ---- */
 .pagehead{display:flex;align-items:center;gap:20px;padding:16px 22px 4px;flex-wrap:wrap}
 .ph-stats{display:inline-flex;align-items:center;gap:28px}
