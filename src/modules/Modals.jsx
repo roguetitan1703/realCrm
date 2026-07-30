@@ -5,6 +5,8 @@ import { theme } from '../data/theme.js'
 import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink } from '../lib/matching.js'
 import { api } from '../lib/api.js'
+import { getPosition, processImage, uploadMedia } from '../lib/media.js'
+import CameraCapture from '../components/CameraCapture.jsx'
 import { pushSupported, isPushSubscribed, enablePush, disablePush } from '../lib/push.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
@@ -41,6 +43,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'integration' && <IntegrationModal store={store} card={m.card} />}
       {m?.kind === 'import' && <ImportModal store={store} />}
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
+      {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'pickMatch' && <PickMatchModal store={store} leadId={m.leadId} />}
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
@@ -1010,6 +1013,181 @@ function RemarkModal({ store, recordType, recordId }) {
     <Modal title="Add remark" onClose={store.closeModal} width={400}>
       <Textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a remark to this record…" autoFocus />
       <Button variant="primary" block style={{ marginTop: 14 }} onClick={submit}>Add remark</Button>
+    </Modal>
+  )
+}
+
+// ============================================================================
+// 📍 VisitProofModal (B4) — a site visit you can't log from the sofa
+// ============================================================================
+// Three gates, in order, none skippable:
+//   1. Location — asked for FIRST, before the camera even opens. If it's
+//      denied there is no visit to log, so there's no point letting someone
+//      shoot a photo and only then telling them it was wasted.
+//   2. A live photo — camera stream only, no gallery (see CameraCapture).
+//   3. An outcome — what actually came of the visit.
+// The remark is the one optional field: sometimes the outcome says it all.
+//
+// Every one of these is re-checked server-side. The UI ordering is a courtesy
+// to the agent, not the enforcement.
+// ============================================================================
+const VISIT_OUTCOMES = [
+  { key: 'interested', label: 'Interested' },
+  { key: 'negotiating', label: 'Negotiating' },
+  { key: 'booked', label: 'Booked' },
+  { key: 'not_interested', label: 'Not interested' },
+  { key: 'no_show', label: 'No show' },
+]
+
+function VisitProofModal({ store, leadId, propId }) {
+  const l = store.state.leads.find(x => x.id === leadId)
+  const [step, setStep] = useState('geo')          // geo → shoot → confirm
+  const [geo, setGeo] = useState(null)
+  const [geoErr, setGeoErr] = useState('')
+  const [shot, setShot] = useState(null)           // { blob, url }
+  const [outcome, setOutcome] = useState('')
+  const [remark, setRemark] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [property, setProperty] = useState(propId || '')
+
+  // Ask for location the moment the modal opens. Failing fast is the whole
+  // point: a denied permission ends the flow here, not after a photo.
+  useEffect(() => {
+    let alive = true
+    getPosition()
+      .then(p => { if (alive) { setGeo(p); setStep('shoot') } })
+      .catch(e => { if (alive) setGeoErr(e.message) })
+    return () => { alive = false }
+  }, [])
+
+  // The captured frame is held as an object URL for preview; release it when
+  // it's replaced or the modal closes, or we leak the whole bitmap.
+  useEffect(() => () => { if (shot?.url) URL.revokeObjectURL(shot.url) }, [shot])
+
+  const retryGeo = () => {
+    setGeoErr('')
+    getPosition().then(p => { setGeo(p); setStep('shoot') }).catch(e => setGeoErr(e.message))
+  }
+
+  const onCapture = (blob) => {
+    if (shot?.url) URL.revokeObjectURL(shot.url)
+    setShot({ blob, url: URL.createObjectURL(blob) })
+    setStep('confirm')
+  }
+
+  const submit = async () => {
+    if (!outcome) { store.toast('Pick what came of the visit', 'warn'); return }
+    if (!geo || !shot) { store.toast('A location and a live photo are both required', 'warn'); return }
+    setBusy(true)
+    try {
+      // Watermark carries its own provenance — firm, time, coordinates — so
+      // the proof still means something if the file is ever viewed outside
+      // the CRM. Stamped before upload; the stored bytes are the marked ones.
+      const stamped = await processImage(shot.blob, [
+        store.state.settings.firmName || 'Site visit',
+        new Date().toLocaleString(),
+        `${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)} · ±${Math.round(geo.accuracy || 0)}m`,
+      ])
+      const photoKey = await uploadMedia(stamped, 'visit-proof')
+      const res = await store.logActivity(leadId, {
+        type: 'site_visit',
+        propertyId: property || undefined,
+        remark: remark.trim() || undefined,
+        outcome,
+        photoKey,
+        geo,
+      })
+      if (res) {
+        // Completing the visit also clears the appointment — that's what the
+        // agent came here to do; making them press Done again would be silly.
+        store.setFollowUp(leadId, null)
+        store.toast('Site visit logged with proof')
+        store.closeModal()
+      }
+    } catch (e) {
+      store.toast(e.message || 'Could not save the visit', 'warn')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!l) return null
+
+  return (
+    <Modal title={`Log site visit — ${l.name}`} onClose={busy ? () => {} : store.closeModal} width={460}>
+      {step === 'geo' && (
+        <div className="vp-gate">
+          {geoErr ? (
+            <>
+              <Icon name="alert" size={26} />
+              <p className="vp-gate-t">Location needed</p>
+              <p className="vp-gate-s">{geoErr}</p>
+              <Button variant="primary" block onClick={retryGeo}>Try again</Button>
+            </>
+          ) : (
+            <>
+              <Icon name="mapPin" size={26} />
+              <p className="vp-gate-t">Getting your location…</p>
+              <p className="vp-gate-s">A site visit is logged with where it happened.</p>
+            </>
+          )}
+        </div>
+      )}
+
+      {step === 'shoot' && (
+        <>
+          <div className="vp-geo-ok">
+            <Icon name="check" size={13} />
+            Location captured · ±{Math.round(geo?.accuracy || 0)}m
+          </div>
+          <CameraCapture onCapture={onCapture} />
+        </>
+      )}
+
+      {step === 'confirm' && (
+        <div className="vp-confirm">
+          <img src={shot.url} alt="Visit photo" className="vp-shot" />
+          <button type="button" className="vp-retake" onClick={() => setStep('shoot')}>
+            <Icon name="refresh" size={13} /> Retake
+          </button>
+
+          <Field label="What came of it?">
+            <div className="vp-outcomes">
+              {VISIT_OUTCOMES.map(o => (
+                <button
+                  key={o.key}
+                  type="button"
+                  className={'qchip' + (outcome === o.key ? ' on' : '')}
+                  onClick={() => setOutcome(o.key)}
+                >{o.label}</button>
+              ))}
+            </div>
+          </Field>
+
+          {/* A visit REFERENCES a unit; it never gets written onto it. The
+              list is the lead's shortlist because that's what they'd be
+              shown — not the whole inventory. */}
+          {(l.shortlist || []).length > 0 && (
+            <Field label="Which unit? (optional)">
+              <select className="input" value={property} onChange={e => setProperty(e.target.value)}>
+                <option value="">Not tied to one unit</option>
+                {(l.shortlist || []).map(pid => {
+                  const p = store.state.properties.find(x => x.id === pid)
+                  return p ? <option key={pid} value={pid}>{p.society} · {p.type}</option> : null
+                })}
+              </select>
+            </Field>
+          )}
+
+          <Field label="Remark (optional)">
+            <Textarea value={remark} onChange={e => setRemark(e.target.value)} placeholder="What happened on the visit?" />
+          </Field>
+
+          <Button variant="primary" block disabled={busy} onClick={submit}>
+            {busy ? 'Saving…' : 'Log visit'}
+          </Button>
+        </div>
+      )}
     </Modal>
   )
 }

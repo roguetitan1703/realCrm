@@ -692,6 +692,24 @@ export function StoreProvider({ children }) {
         })
         .catch(err => { console.warn('[Contact log API] error:', err.message); resolve(null) })
     }),
+    // B4 — log a structured activity (site visit with proof, meeting, …) on a
+    // LEAD. Unlike the optimistic patterns above this reloads from the server
+    // rather than patching local state: the row the client can build is not
+    // the row the server returns (photo visibility is role-gated and
+    // distance-to-property is computed server-side), so echoing a guess would
+    // show the author something no one else can see.
+    logActivity: (leadId, payload) => new Promise((resolve) => {
+      apiClient.logActivity(leadId, payload)
+        .then(res => {
+          if (res?.success) { loadServerState(); resolve(res) }
+          else { toast('Could not log the visit', 'warn'); resolve(null) }
+        })
+        .catch(err => {
+          console.warn('[Activity API] error:', err.message)
+          toast(err.message || 'Could not log the visit — try again', 'warn')
+          resolve(null)
+        })
+    }),
     attachProp: (leadId, propId, label) => {
       dispatch({ type: 'ATTACH_PROP', leadId, propId, label })
       toast('Property shortlisted for this lead')

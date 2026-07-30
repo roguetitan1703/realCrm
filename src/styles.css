@@ -1443,3 +1443,34 @@ input,textarea,select{font-family:inherit}
 /* Offline-read banner — full-width, sits above the desk/mobile shell */
 .stale-banner{display:flex;align-items:center;gap:8px;padding:8px 16px;background:#FBEFC7;color:#7A5B12;border-bottom:1px solid #EBD79A;font-size:12.5px;font-weight:600;line-height:1.3}
 .stale-banner svg{flex-shrink:0}
+
+/* ---- B4 visit proof: camera capture, gates, timeline proof ---------------- */
+.cam{display:flex;flex-direction:column;gap:10px}
+.cam-stage{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:3/4;max-height:52vh}
+.cam-video{width:100%;height:100%;object-fit:cover;display:block}
+.cam-mirror{transform:scaleX(-1)}
+.cam-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:500}
+.cam-bar{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.cam-flip{width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--ink-2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
+.cam-flip:hover{border-color:var(--muted)}
+.cam-shutter{width:58px;height:58px;border-radius:50%;background:var(--accent);border:4px solid var(--card);box-shadow:0 0 0 2px var(--accent);cursor:pointer;flex-shrink:0}
+.cam-shutter:disabled{opacity:.45;cursor:not-allowed}
+.cam-hint{font-size:11.5px;color:var(--muted);font-weight:600;width:38px;text-align:right;line-height:1.2}
+.cam-err{display:flex;flex-direction:column;align-items:center;gap:10px;padding:26px 18px;text-align:center;color:var(--ink-2)}
+.cam-err svg{color:var(--warn,#B4762B)}
+.cam-err p{font-size:13px;line-height:1.45;margin:0}
+
+.vp-gate{display:flex;flex-direction:column;align-items:center;gap:9px;padding:30px 18px;text-align:center}
+.vp-gate svg{color:var(--accent)}
+.vp-gate-t{font-size:14.5px;font-weight:700;color:var(--ink);margin:0}
+.vp-gate-s{font-size:12.5px;color:var(--muted);margin:0 0 6px;line-height:1.45;max-width:34ch}
+.vp-geo-ok{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--accent-ink);background:var(--accent-wash);border-radius:6px;padding:5px 9px;margin-bottom:10px}
+.vp-confirm{display:flex;flex-direction:column;gap:13px}
+.vp-shot{width:100%;border-radius:10px;display:block;max-height:44vh;object-fit:cover}
+.vp-retake{align-self:flex-start;display:inline-flex;align-items:center;gap:5px;background:none;border:none;color:var(--accent-ink);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;padding:0;margin-top:-6px}
+.vp-outcomes{display:flex;flex-wrap:wrap;gap:7px}
+
+.ev-proof{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:7px 0 2px}
+.ev-proof-img{display:block;line-height:0;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+.ev-proof-img img{width:74px;height:74px;object-fit:cover;display:block}
+.ev-proof-locked,.ev-proof-geo{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--muted)}

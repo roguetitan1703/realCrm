@@ -20,7 +20,12 @@ import {
   requireQuotaAvailable,
 } from '../middleware/auth';
 import { dispatchOutboundWebhook } from '../services/webhookSender';
-import { addTimelineEvent, updateLead, mergeLeads, getLeadById, getIntegrations, getTimelineEventById, updateTimelineEvent } from '../services/store';
+import {
+  addTimelineEvent, updateLead, mergeLeads, getLeadById, getIntegrations,
+  getTimelineEventById, updateTimelineEvent,
+  addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES,
+} from '../services/store';
+import { isSafeKey, tenantOfKey } from '../services/media';
 import { audit } from '../services/audit';
 
 export const actionsRouter = Router();
@@ -329,3 +334,93 @@ actionsRouter.post(
     }
   }
 );
+
+/**
+ * B4 — log an ACTIVITY on a lead, with proof.
+ * POST /api/v1/records/:id/actions/activity
+ * body { type, propertyId?, remark?, outcome?, photoKey?, geo{lat,lng,accuracy} }
+ *
+ * :id is the LEAD id — activities are owned by the lead, always. `propertyId`
+ * is a reference to the unit a visit concerned; nothing is ever written onto
+ * the property row (spec B4: "the property record must not accumulate
+ * activity data").
+ *
+ * A site_visit is held to a higher bar than other activity types, because the
+ * whole point of it is that it can't be faked from the sofa:
+ *   • geo is MANDATORY — no location, no logged visit
+ *   • a proof photo is MANDATORY, and must be a key we minted
+ * Other types (call/meeting/follow_up/note) are ordinary log entries.
+ */
+actionsRouter.post('/:id/actions/activity', async (req: Request, res: Response) => {
+  try {
+    const leadId = String(req.params.id);
+    const type = String(req.body?.type || '').trim();
+    if (!ACTIVITY_TYPES.has(type)) {
+      return res.status(400).json({ error: `Unknown activity type '${type}'` });
+    }
+
+    const outcome = req.body?.outcome ? String(req.body.outcome).trim() : null;
+    if (outcome && !ACTIVITY_OUTCOMES.has(outcome)) {
+      return res.status(400).json({ error: `Unknown outcome '${outcome}'` });
+    }
+
+    const remark = req.body?.remark ? String(req.body.remark).trim() : null;
+    const propertyId = req.body?.propertyId ? String(req.body.propertyId) : null;
+    const photoKey = req.body?.photoKey ? String(req.body.photoKey) : null;
+
+    const rawGeo = req.body?.geo;
+    const lat = Number(rawGeo?.lat);
+    const lng = Number(rawGeo?.lng);
+    const hasGeo = Number.isFinite(lat) && Number.isFinite(lng)
+      && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+
+    if (type === 'site_visit') {
+      // Enforced server-side, not just in the UI: a client that skips the
+      // camera or denies location cannot post a visit by calling the API.
+      if (!hasGeo) {
+        return res.status(400).json({ error: 'Location is required to log a site visit.' });
+      }
+      if (!photoKey) {
+        return res.status(400).json({ error: 'A visit selfie is required to log a site visit.' });
+      }
+    }
+
+    // Only keys this server minted, under THIS tenant's prefix, are accepted —
+    // otherwise a caller could attach another workspace's photo to their own
+    // record, or point the key at something we never stored.
+    if (photoKey) {
+      if (!isSafeKey(photoKey) || tenantOfKey(photoKey) !== req.tenantId) {
+        return res.status(400).json({ error: 'That photo does not belong to this workspace.' });
+      }
+    }
+
+    const lead = await getLeadById(leadId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const agentId = req.user?.id || null;
+    const row = await addActivity({
+      lead_id: leadId,
+      property_id: propertyId,
+      type,
+      agent_id: agentId,
+      remark,
+      outcome,
+      photo_key: photoKey,
+      geo: hasGeo
+        ? { lat, lng, accuracy: Number.isFinite(Number(rawGeo?.accuracy)) ? Number(rawGeo.accuracy) : undefined }
+        : null,
+    });
+
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: agentId,
+      actor_label: agentId || 'system', action: 'activity.added',
+      target_type: 'lead', target_id: leadId,
+      summary: `${type} logged`,
+      metadata: { type, outcome, propertyId, hasPhoto: Boolean(photoKey), hasGeo },
+    });
+
+    return res.status(201).json({ success: true, activity_id: row.id });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to log activity', message: err.message });
+  }
+});

@@ -9,6 +9,13 @@ import { matchesForLead } from '../lib/matching.js'
 import Icon from '../components/Icon.jsx'
 import { LEADS_DEF } from './definitions.jsx'
 
+// A scheduled appointment's action reads like "Site Visit — Anita Rao", so the
+// type is a prefix rather than its own field. Matched loosely because the
+// label is user-facing text that has changed spelling before.
+function isSiteVisit(followUp) {
+  return /site\s*visit/i.test(followUp?.action || '')
+}
+
 export default function Leads({ store, go, sel, setSel, topBar }) {
   const { state } = store
   const [flt, setFlt] = useState(sel.leadFilter || {})
@@ -133,7 +140,16 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
             <div className="fu-title">{l.followUp.action}</div>
             <div className="fu-when">{l.followUp.date} · {l.followUp.time}</div>
           </div>
-          <button className="btn btn-ghost btn-sm fu-done" onClick={() => { store.setFollowUp(l.id, null); store.toast('Appointment marked completed') }}>Done</button>
+          {/* B4: a site visit closes with proof (live photo + location), not a
+              bare click. Every other appointment type — calls, meetings, demos
+              — keeps the one-click Done, because there's nothing to verify. */}
+          {isSiteVisit(l.followUp) ? (
+            <button className="btn btn-primary btn-sm fu-done" onClick={() => store.openModal({ kind: 'visitProof', leadId: l.id })}>
+              Log visit
+            </button>
+          ) : (
+            <button className="btn btn-ghost btn-sm fu-done" onClick={() => { store.setFollowUp(l.id, null); store.toast('Appointment marked completed') }}>Done</button>
+          )}
         </div>
       ) : <div className="detail-empty">No active appointment or follow-up scheduled.</div>}
       <Button variant="secondary" size="sm" block icon="calendar" onClick={() => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id })}>

@@ -400,6 +400,12 @@ export async function migrateProperColumns(): Promise<void> {
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_properties_project ON crm_properties (tenant_id, project)`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_properties_status ON crm_properties (tenant_id, status)`);
 
+  // Optional coordinates. Nothing populates these yet, and nothing requires
+  // them: the B4 distance-to-property readout is explicitly conditional on a
+  // property having coords, so a listing without them simply shows no distance.
+  await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS geo_lat DOUBLE PRECISION`);
+  await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS geo_lng DOUBLE PRECISION`);
+
   const leadCols: [string, string][] = [
     ['deal', 'TEXT'], ['requirement', 'TEXT'], ['locality', 'TEXT'],
     ['purpose', 'TEXT'], ['timeline_pref', 'TEXT'],
@@ -483,4 +489,43 @@ async function createLedgerTables(): Promise<void> {
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log (tenant_id, created_at);`;
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action);`;
+
+  // --------------------------------------------------------------------------
+  // ACTIVITIES (docs/specs/contacts-leads.md B4) — a visit/call/meeting with
+  // structure: an outcome, a GPS fix, and proof media.
+  //
+  // Why this is its own table and not another crm_timeline_events row: the
+  // spec's derived property views ("visits to this unit", "interested buyers")
+  // and the site_visits_done metric all query by property_id and outcome. As
+  // real indexed columns those are cheap; buried in a JSONB metadata blob they
+  // are not. Remarks and logged calls stay in crm_timeline_events; the two are
+  // merged into one feed at read time, so the UI still shows a single timeline.
+  //
+  // Ownership rule, load-bearing: lead_id OWNS the activity and is NOT NULL.
+  // property_id is a REFERENCE ONLY — a visit may concern a unit, but the
+  // property record must never accumulate activity of its own. That keeps
+  // properties clean and lets the relationship change without mutating them.
+  await sql`
+    CREATE TABLE IF NOT EXISTS activities (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      lead_id TEXT NOT NULL,
+      property_id TEXT,
+      type TEXT NOT NULL,
+      at TIMESTAMPTZ DEFAULT NOW(),
+      agent_id TEXT,
+      remark TEXT,
+      outcome TEXT,
+      photo_key TEXT,
+      geo_lat DOUBLE PRECISION,
+      geo_lng DOUBLE PRECISION,
+      geo_accuracy DOUBLE PRECISION,
+      metadata JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_activities_lead ON activities (tenant_id, lead_id, at DESC);`;
+  // Drives the derived "visits to this unit" view without scanning JSONB.
+  await sql`CREATE INDEX IF NOT EXISTS idx_activities_property ON activities (tenant_id, property_id) WHERE property_id IS NOT NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_activities_agent ON activities (tenant_id, agent_id, type, at DESC);`;
 }

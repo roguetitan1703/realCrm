@@ -23,6 +23,7 @@ import { authRouter } from './routes/auth';
 import { adminRouter } from './routes/admin';
 import { notificationsRouter } from './routes/notifications';
 import { pwaRouter } from './routes/pwa';
+import { filesRouter, mediaRouter } from './routes/files';
 import { withRequestContext } from './middleware/auth';
 
 const app = express();
@@ -49,6 +50,12 @@ app.get('/health', (req: Request, res: Response) => {
 
 // Per-tenant PWA manifest + icons, served at the site origin (not under /api).
 app.use('/pwa', pwaRouter);
+
+// Media download proxy. Deliberately OUTSIDE /api/v1 and unauthenticated: a
+// browser sends no Authorization header on <img src>, so access control lives
+// in whether the API handed the caller the (128-bit, unguessable) key at all.
+// See routes/files.ts for the full reasoning on that tradeoff.
+app.use('/files', filesRouter);
 
 // Resolve tenant + actor for EVERY API request and carry it in AsyncLocalStorage
 // so the store layer scopes queries by tenant. Must run before all routers.
@@ -87,6 +94,10 @@ app.use('/api/v1/records', actionsRouter);
 
 // 6. Idempotent Portal Webhook Ingestion (99acres, MagicBricks, Exotel)
 app.use('/api/v1/ingest', ingestRouter);
+
+// 7. Media uploads — mints presigned PUTs so bytes go browser→R2 directly.
+//    Authenticated (unlike the /files read proxy above).
+app.use('/api/v1/media', mediaRouter);
 
 // ── Serve the built frontend on the SAME origin as the API + /pwa ───────────
 // One HTTPS origin for the whole app is what the service worker and Web Push

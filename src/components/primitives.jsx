@@ -3,6 +3,7 @@ import { useState } from 'react'
 import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
 import { relTime, agentName } from '../lib/format.js'
+import { fileUrl, formatDistance } from '../lib/media.js'
 
 // ---- Button ----
 export function Button({ variant = 'ghost', size, block, icon, children, className, ...rest }) {
@@ -236,8 +237,43 @@ export function Stepper({ stages, current, onPick }) {
 // older client-only entries render fine but can't be edited (no id to target).
 // Author-editable types (B1 remark, B5 call/wa/sms outcome+remark).
 const EDITABLE_TYPES = new Set(['remark', 'call', 'wa', 'sms'])
-const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS' }
+const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit' }
+// B4 outcomes are stored as stable keys; these are what a person reads.
+const VISIT_OUTCOME_LABEL = {
+  interested: 'Interested', not_interested: 'Not interested',
+  negotiating: 'Negotiating', booked: 'Booked', no_show: 'No show',
+}
 const CALL_OUTCOMES = ['Connected & Discussed Requirements', 'Interested — Scheduling Site Visit', 'Requested Callback Later', 'No Answer / Ringing', 'Number Busy / Switched Off']
+
+/**
+ * The proof attached to a site visit (B4): the selfie, the GPS fix, and — when
+ * the property has coordinates on file — how far the photo was taken from it.
+ *
+ * The photo is only here if the server decided this viewer may have it. Owners
+ * and managers see every one; an agent sees the visits they logged themselves.
+ * When it's withheld the entry still shows that proof exists, because hiding
+ * that too would make an agent's own record look incomplete to their manager.
+ */
+function VisitProof({ meta }) {
+  const { photoKey, photoWithheld, geo, distanceM } = meta
+  if (!photoKey && !photoWithheld && !geo) return null
+  return (
+    <div className="ev-proof">
+      {photoKey && (
+        <a href={fileUrl(photoKey)} target="_blank" rel="noreferrer" className="ev-proof-img">
+          <img src={fileUrl(photoKey)} alt="Visit proof" loading="lazy" />
+        </a>
+      )}
+      {photoWithheld && <span className="ev-proof-locked"><Icon name="shield" size={12} />Proof on file</span>}
+      {geo && (
+        <span className="ev-proof-geo">
+          <Icon name="mapPin" size={12} />
+          {distanceM != null ? `${formatDistance(distanceM)} from the listing` : `±${Math.round(geo.accuracy || 0)}m accuracy`}
+        </span>
+      )}
+    </div>
+  )
+}
 
 export function Timeline({ events = [], agents = [], currentUserId, onEditRemark }) {
   const list = events || [];
@@ -260,6 +296,8 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel 
   const canEdit = tag && EDITABLE_TYPES.has(e.type) && e.id && e.authorId && currentUserId && e.authorId === currentUserId && !!onEditRemark
   const ago = e.timestamp ? relTime(e.timestamp) : (e.ago || '')
   const author = e.authorId ? agentName(agents, e.authorId) : null
+  const rawOutcome = e.metadata?.outcome
+  const outcomeText = rawOutcome ? (VISIT_OUTCOME_LABEL[rawOutcome] || rawOutcome) : ''
   const save = () => {
     if (!text.trim() && !outcome) return
     onEditRemark(e.id, text.trim(), outcome || undefined)
@@ -289,8 +327,9 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel 
         ) : (
           <>
             <div className="ev-l">{tag && <span className="ev-remark-tag">{tag}</span>}{fmtLabel(e.label)}</div>
+            {e.type === 'visit' && <VisitProof meta={e.metadata || {}} />}
             <div className="ev-a">
-              {author ? `${author} · ` : ''}{ago}{e.metadata?.outcome ? ` · ${e.metadata.outcome}` : ''}{e.metadata?.edited ? ' · edited' : ''}
+              {author ? `${author} · ` : ''}{ago}{outcomeText ? ` · ${outcomeText}` : ''}{e.metadata?.edited ? ' · edited' : ''}
               {canEdit && <button className="ev-edit-btn" onClick={() => setEditing(true)}>{e.metadata?.edited ? 'Edit' : 'Add outcome & remark'}</button>}
             </div>
           </>

@@ -681,7 +681,7 @@ export async function resetDatabase(): Promise<ServerState> {
   console.log(`[Supabase DB] 🧹 Truncating all CRM tables for workspace reset...`);
   // users is re-seeded from agents; superadmins are platform-level and must
   // survive a workspace reset, so they are deliberately NOT truncated.
-  await sql`TRUNCATE TABLE crm_timeline_events, crm_units, crm_leads, crm_properties, crm_agents, crm_settings, crm_integrations, crm_routing_rules, users, auth_otp CASCADE;`;
+  await sql`TRUNCATE TABLE activities, crm_timeline_events, crm_units, crm_leads, crm_properties, crm_agents, crm_settings, crm_integrations, crm_routing_rules, users, auth_otp CASCADE;`;
   return await seedDatabase(true);
 }
 
@@ -742,7 +742,19 @@ export async function getState(): Promise<ServerState> {
     const evs = timeline_events.filter(e => e.record_id === r.id).map(mapEventForClient);
     return evs.length ? { ...p, timeline: [...evs, ...(p.timeline || [])] } : p;
   });
-  const leads = leadsRows.map(r => rowToLead(r, timeline_events, shortlistByLead.get(r.id) || []));
+  // B4 activities live in their own table but belong in the same visible feed
+  // as remarks/calls, so they're merged per lead and the whole thing is sorted
+  // newest-first. Photo keys are already gated by role inside the mapper.
+  const activitiesByLead = await getActivitiesByLead();
+  const leads = leadsRows.map(r => {
+    const lead = rowToLead(r, timeline_events, shortlistByLead.get(r.id) || []);
+    const acts = activitiesByLead.get(r.id);
+    if (!acts?.length) return lead;
+    const merged = [...acts, ...(lead.timeline || [])].sort(
+      (a: any, b: any) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
+    );
+    return { ...lead, timeline: merged };
+  });
 
   const settings = settingsRows[0]?.value || DEFAULT_SETTINGS;
   const integrations: Record<string, any> = {};
@@ -1354,6 +1366,161 @@ export async function updateTimelineEvent(id: string, tenantId: string, text: st
     timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp),
     metadata: r.metadata || {},
   };
+}
+
+// ============================================================================
+// 📍 ACTIVITIES (docs/specs/contacts-leads.md B4)
+// ============================================================================
+// A structured event on a lead: a site visit with proof, a meeting, a
+// follow-up. Distinct from crm_timeline_events (free-text remarks and logged
+// call/message actions) because these carry an outcome, a GPS fix and media
+// that we need to query by — see the table comment in db.ts. Both are merged
+// into a single feed at read time so the UI shows one timeline.
+
+export const ACTIVITY_TYPES = new Set(['call', 'site_visit', 'meeting', 'follow_up', 'note']);
+export const ACTIVITY_OUTCOMES = new Set(['interested', 'not_interested', 'negotiating', 'booked', 'no_show']);
+
+export interface ActivityInput {
+  lead_id: string;
+  property_id?: string | null;
+  type: string;
+  agent_id?: string | null;
+  remark?: string | null;
+  outcome?: string | null;
+  photo_key?: string | null;
+  geo?: { lat: number; lng: number; accuracy?: number } | null;
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Proof photos are owner/manager-only (spec B4, Q12): agents log them, they
+ * don't browse each other's. An agent still sees the photo on a visit they
+ * logged themselves — they took it, hiding it from them would be theatre.
+ *
+ * This is the ONLY gate on proof media. Keys are unguessable and /files is
+ * unauthenticated, so "can't see it" means "was never handed the key". Any new
+ * read path for activities must go through mapActivityForClient or it will
+ * leak the key.
+ */
+function canSeeProof(activityAgentId: string | null): boolean {
+  const c = getContext();
+  if (!c) return false;                                   // no context = no photos
+  if (c.role === 'owner' || c.role === 'manager' || c.role === 'superadmin') return true;
+  return Boolean(c.userId && activityAgentId && c.userId === activityAgentId);
+}
+
+/** Metres between two WGS84 points (haversine). Used only for the soft
+ *  "was the agent actually at the property" signal — never to block a log. */
+export function distanceMetres(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(s)));
+}
+
+/**
+ * DB row -> the same client event shape the Timeline already renders, so a
+ * visit slots into the lead's feed next to remarks with no special-casing in
+ * the UI. photoKey is omitted entirely (not nulled) when the viewer isn't
+ * allowed it, so there's nothing to accidentally render.
+ */
+function mapActivityForClient(a: any, propCoords?: { lat: number; lng: number } | null) {
+  const agentId = a.agent_id || null;
+  const meta: Record<string, any> = { ...(a.metadata || {}) };
+  if (a.outcome) meta.outcome = a.outcome;
+  if (a.property_id) meta.propertyId = a.property_id;
+  if (a.geo_lat != null && a.geo_lng != null) {
+    meta.geo = { lat: a.geo_lat, lng: a.geo_lng, accuracy: a.geo_accuracy ?? undefined };
+    if (propCoords) {
+      meta.distanceM = distanceMetres(a.geo_lat, a.geo_lng, propCoords.lat, propCoords.lng);
+    }
+  }
+  if (a.photo_key && canSeeProof(agentId)) meta.photoKey = a.photo_key;
+  else if (a.photo_key) meta.photoWithheld = true;   // UI can say "proof on file"
+
+  return {
+    id: a.id,
+    type: a.type === 'site_visit' ? 'visit' : a.type,
+    label: a.remark || '',
+    authorId: agentId,
+    timestamp: a.at instanceof Date ? a.at.toISOString() : String(a.at),
+    metadata: meta,
+  };
+}
+
+export async function addActivity(input: ActivityInput): Promise<any> {
+  const t = tid();
+  const id = `act_${Date.now()}_${randomBytes(3).toString('hex')}`;
+  const geo = input.geo || null;
+  const rows = await sql`
+    INSERT INTO activities (
+      id, tenant_id, lead_id, property_id, type, agent_id, remark, outcome,
+      photo_key, geo_lat, geo_lng, geo_accuracy, metadata
+    ) VALUES (
+      ${id}, ${t}, ${input.lead_id}, ${input.property_id || null}, ${input.type},
+      ${input.agent_id || null}, ${input.remark || null}, ${input.outcome || null},
+      ${input.photo_key || null}, ${geo?.lat ?? null}, ${geo?.lng ?? null},
+      ${geo?.accuracy ?? null}, ${sql.json(input.metadata || {})}
+    )
+    RETURNING *
+  `;
+  return rows[0];
+}
+
+/** Coordinates for properties referenced by the given activities, so distance
+ *  can be computed without an N+1 query per activity. */
+async function propCoordsFor(propertyIds: string[]): Promise<Map<string, { lat: number; lng: number }>> {
+  const map = new Map<string, { lat: number; lng: number }>();
+  const ids = [...new Set(propertyIds.filter(Boolean))];
+  if (!ids.length) return map;
+  const rows = await sql`
+    SELECT id, geo_lat, geo_lng FROM crm_properties
+    WHERE tenant_id = ${tid()} AND id = ANY(${ids}) AND geo_lat IS NOT NULL AND geo_lng IS NOT NULL
+  `;
+  for (const r of rows) map.set(r.id, { lat: r.geo_lat, lng: r.geo_lng });
+  return map;
+}
+
+/** All activities for the tenant, mapped for the client and grouped by lead.
+ *  Used by getState to fold them into each lead's timeline. */
+export async function getActivitiesByLead(): Promise<Map<string, any[]>> {
+  const rows = await sql`SELECT * FROM activities WHERE tenant_id = ${tid()} ORDER BY at DESC`;
+  const coords = await propCoordsFor(rows.map(r => r.property_id));
+  const byLead = new Map<string, any[]>();
+  for (const r of rows) {
+    const mapped = mapActivityForClient(r, r.property_id ? coords.get(r.property_id) || null : null);
+    const list = byLead.get(r.lead_id) || [];
+    list.push(mapped);
+    byLead.set(r.lead_id, list);
+  }
+  return byLead;
+}
+
+/**
+ * Derived property view: visits that REFERENCED this unit. Nothing is stored
+ * on the property — this is a query over the activities that point at it,
+ * which is exactly why the relationship can change without touching the
+ * property row (spec B4).
+ */
+export async function getVisitsForProperty(propertyId: string): Promise<any[]> {
+  const t = tid();
+  const rows = await sql`
+    SELECT a.*, l.name AS lead_name
+    FROM activities a
+    LEFT JOIN crm_leads l ON l.id = a.lead_id AND l.tenant_id = a.tenant_id
+    WHERE a.tenant_id = ${t} AND a.property_id = ${propertyId}
+    ORDER BY a.at DESC
+  `;
+  const coords = await propCoordsFor([propertyId]);
+  return rows.map(r => ({
+    ...mapActivityForClient(r, coords.get(propertyId) || null),
+    leadId: r.lead_id,
+    leadName: r.lead_name || null,
+  }));
 }
 
 // --- UNITS (INVENTORY MATRIX) ---

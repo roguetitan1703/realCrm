@@ -21,6 +21,16 @@ function resolveBaseUrl() {
 
 const BASE_URL = resolveBaseUrl();
 
+// Media is served from /files on the API ORIGIN, not under /api/v1 — a browser
+// sends no auth header on <img src>, so that route sits outside the API's auth
+// surface. Postgres stores the object KEY, never a URL, so if delivery ever
+// moves to a CDN hostname this one function is the only thing that changes.
+export function fileUrl(key) {
+  if (!key) return '';
+  const origin = BASE_URL.replace(/\/api\/v1$/, '');
+  return `${origin}/files/${String(key).split('/').map(encodeURIComponent).join('/')}`;
+}
+
 // Connection state — surfaced in the UI so a backend outage can never silently
 // masquerade as a working app (writes would be lost on refresh).
 let onlineState = { ok: true, checked: false };
@@ -214,6 +224,12 @@ export const api = {
   // B5 — log a plain call/WhatsApp/SMS action on any record (confirm-then-log).
   logContactAction: (recordId, channel) => request(`/records/${recordId}/actions/contact-log`, { method: 'POST', body: JSON.stringify({ channel }) }),
   sendWhatsApp: (recordId, templateId, vars) => request(`/records/${recordId}/actions/whatsapp`, { method: 'POST', body: JSON.stringify({ template_id: templateId, variables: vars }) }),
+  // B4 — a structured activity on a LEAD (site visit with proof, meeting, …).
+  // `propertyId` is a reference to the unit it concerned, never ownership.
+  logActivity: (leadId, payload) => request(`/records/${leadId}/actions/activity`, { method: 'POST', body: JSON.stringify(payload) }),
+  // B4 media — asks the server to mint a presigned PUT. The bytes then go
+  // browser→R2 directly (see uploadMedia in lib/media.js), never through here.
+  mediaUploadUrl: (contentType, kind) => request('/media/upload-url', { method: 'POST', body: JSON.stringify({ contentType, kind }) }),
   changeStage: (recordId, newStage, note) => request(`/records/${recordId}/actions/stage-change`, { method: 'POST', body: JSON.stringify({ new_stage_id: newStage, note }) }),
   mergeRecords: (primaryId, dupId, strategy = 'combine_timeline') => request(`/records/${primaryId}/actions/merge`, { method: 'POST', body: JSON.stringify({ duplicate_record_id: dupId, merge_strategy: strategy }) }),
 };
