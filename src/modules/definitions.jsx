@@ -139,6 +139,11 @@ export const LEADS_DEF = {
       run: (store, l) => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'wa' }) },
     { id: 'remark', tier: 'quick', icon: 'note', label: 'Add remark',
       run: (store, l) => store.openModal({ kind: 'remark', recordType: 'lead', recordId: l.id }) },
+    // B4. Completing a scheduled Site Visit appointment also opens this, but
+    // that path only exists if someone scheduled one — so a visit that just
+    // happened had nowhere to be logged. This is the always-available entry.
+    { id: 'logVisit', tier: 'quick', icon: 'camera', label: 'Log site visit',
+      run: (store, l) => store.openModal({ kind: 'visitProof', leadId: l.id }) },
     { id: 'schedule', tier: 'quick', icon: 'calendar', label: 'Schedule',
       run: (store, l) => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id }) },
     // manage (behind "More"):

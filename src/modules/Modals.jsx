@@ -302,7 +302,13 @@ function OutreachModal({ store, leadId, channel = 'call' }) {
     } else if (ch === 'wa') {
       if (!text.trim()) { store.toast('Pick a template or type a message first', 'warn'); return }
       window.open(whatsappLink(text, digits), '_blank', 'noopener')
-      attachAndSync(api.sendWhatsApp(l.id, 'outreach_msg', { text }), text)
+      // NOT api.sendWhatsApp — that's the WABA dispatch route, gated by
+      // requireModuleEnabled('whatsapp') + whatsapp_credits quota, so it errors
+      // for every tenant that hasn't bought a WABA module. We deliberately
+      // don't use WABA at all (wa.me deep links only), and that route also
+      // logs a fiction — "Dispatched via Meta Cloud API" — when all that
+      // happened is we opened a link. contact-log records what actually did.
+      attachAndSync(api.logContactAction(l.id, 'wa'), text)
       store.toast('WhatsApp opened with the message ready')
     } else {
       if (!text.trim()) { store.toast('Pick a template or type a message first', 'warn'); return }
