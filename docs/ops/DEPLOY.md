@@ -119,3 +119,66 @@ The installable app + phone notifications span both deploys.
 
 One firm per device until per-tenant subdomains exist. Brave adds a bookmark
 shortcut rather than a true install — use Chrome for the icon/install demo.
+
+---
+
+## Media / visit-proof (B4) — ONE-TIME bucket setup
+
+Photos live in Cloudflare R2 (`re-delpat`). The bucket stays **private**: no
+public access, no custom domain. Node holds the S3 credentials and is the only
+thing that talks to R2.
+
+- **Download** — `GET /files/:key` on the API streams from R2 with
+  `Cache-Control: immutable, max-age=1y` plus ETag/304, backed by a local disk
+  cache (2 days for images, 7 for video). Objects are never overwritten — a
+  replaced photo is a NEW key — so nothing can go stale and there is no cache
+  invalidation anywhere.
+- **Upload** — a presigned PUT from the browser straight to R2, so multi-MB
+  phone photos never pass through Express.
+
+### Required: CORS on the bucket
+
+Uploads are browser→R2 directly, so **without this rule every upload fails with
+a CORS error** while everything else keeps working. This cannot be scripted with
+the object-scoped R2 token (`PutBucketCors` needs bucket-admin), so set it by
+hand once:
+
+Cloudflare dashboard → **R2** → `re-delpat` → **Settings** → **CORS Policy** →
+Edit, and paste:
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "https://realestate.delpat.in",
+      "https://api.re.delpat.in",
+      "http://localhost:5173",
+      "http://localhost:5000"
+    ],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["content-type"],
+    "ExposeHeaders": ["etag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+Only `PUT` is needed: downloads go through our own API, never to R2 from the
+browser. `content-type` must be allowed because the presigned signature pins it.
+Add any new frontend origin here or uploads from it will fail.
+
+### Env
+Set `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+`R2_BUCKET_NAME`, `R2_ENDPOINT` (see `.env.example`). Leave
+`R2_PUBLIC_BASE_URL` unset — it exists only if the bucket is ever made public.
+
+Postgres stores the object **key**, never a URL, so moving delivery to a CDN
+hostname later is a one-line frontend change with no data migration.
+
+### Verify
+1. On a phone, open a lead with a **Site Visit** appointment → **Log visit**.
+2. It asks for location first; deny it and the flow stops there (by design).
+3. Allow, take the photo, pick an outcome, save.
+4. The lead timeline shows a **Site visit** entry with the watermarked photo.
+5. Sign in as another agent → the entry is visible but the photo is not
+   ("Proof on file"). Owners and managers see every photo.
