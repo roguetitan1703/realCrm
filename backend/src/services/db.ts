@@ -426,6 +426,76 @@ export async function migrateProperColumns(): Promise<void> {
   `);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_leads_stage ON crm_leads (tenant_id, stage)`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_leads_agent ON crm_leads (tenant_id, agent_id)`);
+
+  await migratePropertySchemaC4();
+}
+
+/**
+ * Block C — portal-grade property schema (docs/specs/properties.md C4).
+ *
+ * Extends crm_properties rather than paralleling it: `floor` is already TEXT so
+ * it holds the Ground/Basement token as-is, and carpet_sqft / total_floors /
+ * age_years / possession / rera_no / builder / price_amount already exist and
+ * keep their meaning.
+ *
+ * The split that matters: legacy `type` held TWO dimensions in one string
+ * ("4 BHK Villa"), which is why no filter option could ever match it. It
+ * becomes `bhk` + `subtype`. `type` is left in place, unread, until the form
+ * that writes it is replaced.
+ *
+ * Real columns for anything filtered or sorted on; JSONB only for genuine
+ * lists (amenities, fixtures) where a column per value would be absurd.
+ */
+export async function migratePropertySchemaC4(): Promise<void> {
+  const cols: [string, string][] = [
+    // Top level
+    ['category', 'TEXT'], ['subtype', 'TEXT'], ['bhk', 'TEXT'],
+    ['transaction_type', 'TEXT'], ['ownership', 'TEXT'],
+    // Configuration
+    ['bathrooms', 'TEXT'], ['balconies', 'TEXT'],
+    ['builtup_sqft', 'INTEGER'], ['super_builtup_sqft', 'INTEGER'],
+    ['plot_area', 'NUMERIC'], ['area_unit', 'TEXT'],
+    // Which area the quoted price/sq.ft is derived from — without this a
+    // price/sq.ft figure is not comparable between two listings.
+    ['price_area_basis', 'TEXT'],
+    ['covered_parking', 'TEXT'], ['open_parking', 'TEXT'],
+    ['servant_room', 'BOOLEAN'],
+    // Furnishing — lists, so JSONB is the honest shape
+    ['furnish_type', 'TEXT'], ['fixtures', "JSONB DEFAULT '[]'::jsonb"],
+    ['counted_items', "JSONB DEFAULT '{}'::jsonb"],
+    ['society_amenities', "JSONB DEFAULT '[]'::jsonb"],
+    // Rent-only terms
+    ['preferred_tenants', "JSONB DEFAULT '[]'::jsonb"], ['pet_friendly', 'BOOLEAN'],
+    ['available_from', 'DATE'],
+    ['maintenance_mode', 'TEXT'], ['maintenance_amount', 'BIGINT'],
+    ['deposit_option', 'TEXT'], ['deposit_amount', 'BIGINT'],
+    ['lockin_option', 'TEXT'], ['lockin_months', 'INTEGER'],
+    ['parking_charges_mode', 'TEXT'], ['painting_charges', 'TEXT'],
+    // Sale-only terms
+    ['price_includes', "JSONB DEFAULT '[]'::jsonb"], ['other_charges', 'BIGINT'],
+    ['booking_amount', 'BIGINT'],
+    // A LABEL, not arithmetic — we never compute tax (spec Q3).
+    ['tax_included', 'BOOLEAN'],
+    // Plot-only
+    ['floors_allowed', 'INTEGER'], ['open_sides', 'TEXT'],
+    ['road_width_ft', 'NUMERIC'], ['corner_plot', 'BOOLEAN'],
+    // Both. "Consulting", never "brokerage" (spec Q4).
+    ['consulting_option', 'TEXT'], ['consulting_percent', 'NUMERIC'],
+    ['description', 'TEXT'],
+    // Operational layer, deliberately trimmed to just these two (spec Q16).
+    ['key_access', 'TEXT'], ['owner_contact_id', 'TEXT'],
+    // Quiet, internal — never a "complete your profile" nag (spec Q18).
+    ['completeness', 'INTEGER'],
+  ];
+  for (const [c, t] of cols) {
+    await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS ${c} ${t}`);
+  }
+
+  // Filters and the matching engine hit these; without indexes every filter is
+  // a full scan once a tenant has real inventory.
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_props_subtype ON crm_properties (tenant_id, category, subtype)`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_props_bhk ON crm_properties (tenant_id, bhk)`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_props_deal_status ON crm_properties (tenant_id, deal, status)`);
 }
 
 /**

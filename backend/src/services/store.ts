@@ -17,6 +17,13 @@ import { audit } from './audit.js';
 import { getContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
+// Block C canonical vocabulary. Shared with the frontend deliberately: the
+// form, the filters and this backfill must agree on what "4 BHK Villa" means,
+// and three copies of that rule would drift.
+import {
+  FACING, FURNISH, STATUS,
+  normaliseBhk, normaliseFloor, normaliseSubtype, normaliseTo,
+} from '../../../src/data/propertyFields.js';
 
 /**
  * The tenant to scope the current request's queries to. Comes from the request
@@ -542,6 +549,7 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
   // leaves the proper columns populated, not just the JSONB fallback.
   await migrateProperColumns();
   await backfillShortlist();
+  await backfillPropertyCanonicalFields();
 
   console.log(`[Supabase DB] ✅ Seeded initial PostgreSQL data cleanly.`);
   return await getState();
@@ -647,6 +655,69 @@ export async function ensureAuthIdentity(): Promise<void> {
  * New users (created via /team/users or onboarding) already carry a password, so
  * they're untouched here.
  */
+/**
+ * Block C — fill the canonical property columns from whatever the legacy
+ * free-text ones hold. Idempotent (only writes where the target is still
+ * NULL), so it is safe on every boot and safe to re-run.
+ *
+ * It imports the SAME normalisers the frontend uses rather than reimplementing
+ * the parsing here — two copies of "is '4 BHK Villa' a villa?" would drift the
+ * first time either side gained a case.
+ *
+ * The important one is `type`, which conflated configuration and sub-type in a
+ * single string and so could never be matched by a filter option:
+ *   "4 BHK Villa"      -> bhk=4,    subtype=villa
+ *   "Commercial Office" -> bhk=NULL, subtype=office, category=commercial
+ * A value that can't be parsed is left NULL rather than guessed at — the live
+ * data contains facing="East-West", which is not a direction, and inventing
+ * one would be worse than admitting we don't know.
+ */
+export async function backfillPropertyCanonicalFields(): Promise<void> {
+  const rows = await sql`
+    SELECT id, tenant_id, type, furnishing, status, facing, parking, deal, floor
+    FROM crm_properties
+    WHERE subtype IS NULL OR bhk IS NULL OR category IS NULL OR furnish_type IS NULL
+  `;
+  if (!rows.length) return;
+
+  let n = 0;
+  for (const r of rows) {
+    const rawType = r.type || '';
+    const category = /commercial|office|shop|showroom|warehouse|industrial/i.test(rawType)
+      ? 'commercial' : 'residential';
+
+    const patch: Record<string, any> = {
+      category,
+      subtype: normaliseSubtype(rawType, category),
+      bhk: normaliseBhk(rawType),
+      furnish_type: normaliseTo(FURNISH, r.furnishing),
+      // Status/facing get normalised in place — same column, canonical token.
+      status: normaliseTo(STATUS, r.status) || r.status,
+      facing: normaliseTo(FACING, r.facing),
+      floor: normaliseFloor(r.floor),
+      // Legacy `parking` was one field; the schema separates covered from open.
+      // With no way to tell which the old number meant, it becomes covered —
+      // the common case — rather than being split by guesswork.
+      covered_parking: r.parking != null && r.parking !== '' ? String(r.parking) : null,
+    };
+
+    await sql`
+      UPDATE crm_properties SET
+        category = COALESCE(category, ${patch.category}),
+        subtype = COALESCE(subtype, ${patch.subtype}),
+        bhk = COALESCE(bhk, ${patch.bhk}),
+        furnish_type = COALESCE(furnish_type, ${patch.furnish_type}),
+        status = ${patch.status},
+        facing = ${patch.facing},
+        floor = ${patch.floor},
+        covered_parking = COALESCE(covered_parking, ${patch.covered_parking})
+      WHERE id = ${r.id}
+    `;
+    n++;
+  }
+  console.log(`[Schema C] Backfilled canonical fields on ${n} propert${n === 1 ? 'y' : 'ies'}.`);
+}
+
 export async function backfillPasswordAuth(): Promise<void> {
   const DEMO_PW = process.env.DEMO_USER_PASSWORD || 'delpat-demo-1';
 
@@ -692,6 +763,7 @@ seedDatabase()
   .then(() => ensureAuthIdentity())
   .then(() => backfillPasswordAuth())
   .then(() => backfillShortlist())
+  .then(() => backfillPropertyCanonicalFields())
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
