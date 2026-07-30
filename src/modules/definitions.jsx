@@ -248,7 +248,7 @@ export const PROPERTIES_DEF = {
     { id: 'ownerUpdate', tier: 'quick', icon: 'wa', label: 'Owner update',
       run: (store, p) => store.openModal({ kind: 'ownerUpdate', propId: p.id }) },
     { id: 'callOwner', tier: 'quick', icon: 'phone', label: 'Call owner',
-      run: (store, p) => store.openModal({ kind: 'callOwner', owner: p.owner, propId: p.id }) },
+      run: (store, p) => store.openModal({ kind: 'contact', channel: 'call', name: p.owner, phone: p.ownerPhone, recordType: 'property', recordId: p.id }) },
     { id: 'status', tier: 'quick', icon: 'tag', label: 'Set status',
       run: (store, p) => store.openModal({ kind: 'propStatus', propId: p.id }) },
     { id: 'remark', tier: 'quick', icon: 'note', label: 'Add remark',
@@ -317,10 +317,23 @@ export const CLIENTS_DEF = {
   ],
 
   actions: [
+    // Was fake — just a toast, no dial, no WhatsApp, no logging (B5 closes
+    // this). Demand contacts are a real lead (rawLeadId); supply/owner
+    // contacts aren't their own record yet (that's B3) but ARE tied to a
+    // real property, so the action logs there — same as a property's own
+    // "Call owner" quick action.
     { id: 'call', tier: 'quick', icon: 'phone', label: 'Call',
-      run: (store, r) => store.toast(`Calling ${r.name} (${r.phone})`) },
+      run: (store, r) => store.openModal({
+        kind: 'contact', channel: 'call', name: r.name, phone: r.phone,
+        recordType: r.kind === 'demand' ? 'lead' : 'property',
+        recordId: r.kind === 'demand' ? r.rawLeadId : r.rawProps?.[0]?.id,
+      }) },
     { id: 'wa', tier: 'quick', icon: 'wa', label: 'WhatsApp',
-      run: (store, r) => store.toast(`Opening WhatsApp for ${r.name}`) },
+      run: (store, r) => store.openModal({
+        kind: 'contact', channel: 'wa', name: r.name, phone: r.phone,
+        recordType: r.kind === 'demand' ? 'lead' : 'property',
+        recordId: r.kind === 'demand' ? r.rawLeadId : r.rawProps?.[0]?.id,
+      }) },
   ],
 
   // Grid-view card for a client (derived contact).

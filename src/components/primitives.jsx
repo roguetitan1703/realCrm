@@ -234,6 +234,11 @@ export function Stepper({ stages, current, onPick }) {
 // events: [{ id?, type, label, ago? | timestamp?, authorId? }]. `id`+`authorId`
 // are only present on real DB-backed events (remarks, calls, stage changes…) —
 // older client-only entries render fine but can't be edited (no id to target).
+// Author-editable types (B1 remark, B5 call/wa/sms outcome+remark).
+const EDITABLE_TYPES = new Set(['remark', 'call', 'wa', 'sms'])
+const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS' }
+const CALL_OUTCOMES = ['Connected & Discussed Requirements', 'Interested — Scheduling Site Visit', 'Requested Callback Later', 'No Answer / Ringing', 'Number Busy / Switched Off']
+
 export function Timeline({ events = [], agents = [], currentUserId, onEditRemark }) {
   const list = events || [];
   const fmtLabel = (txt) => (txt || '').replace(/\bagent (\S+)\b/gi, (m, id) => agentName(agents, id));
@@ -250,36 +255,43 @@ export function Timeline({ events = [], agents = [], currentUserId, onEditRemark
 function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel }) {
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(e.label || '')
-  const isRemark = e.type === 'remark'
-  const canEdit = isRemark && e.id && e.authorId && currentUserId && e.authorId === currentUserId && !!onEditRemark
+  const [outcome, setOutcome] = useState(e.metadata?.outcome || '')
+  const tag = TYPE_TAG[e.type]
+  const canEdit = tag && EDITABLE_TYPES.has(e.type) && e.id && e.authorId && currentUserId && e.authorId === currentUserId && !!onEditRemark
   const ago = e.timestamp ? relTime(e.timestamp) : (e.ago || '')
   const author = e.authorId ? agentName(agents, e.authorId) : null
   const save = () => {
-    if (!text.trim()) return
-    onEditRemark(e.id, text.trim())
+    if (!text.trim() && !outcome) return
+    onEditRemark(e.id, text.trim(), outcome || undefined)
     setEditing(false)
   }
   return (
     <div className="ev">
       <div className="rail-dot">
-        <span className={'d' + (e.type === 'stage' || e.type === 'follow' || e.type === 'msg' || e.type === 'remark' ? ' accent' : '')} />
+        <span className={'d' + (e.type === 'stage' || e.type === 'follow' || e.type === 'msg' || tag ? ' accent' : '')} />
         {!isLast && <span className="ln" />}
       </div>
       <div className="ev-b">
         {editing ? (
           <div className="ev-edit">
-            <textarea className="textarea" value={text} onChange={ev => setText(ev.target.value)} rows={2} autoFocus />
+            {e.type === 'call' && (
+              <select className="input" value={outcome} onChange={ev => setOutcome(ev.target.value)}>
+                <option value="">No outcome yet</option>
+                {CALL_OUTCOMES.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            )}
+            <textarea className="textarea" value={text} onChange={ev => setText(ev.target.value)} rows={2} placeholder="Add a remark…" autoFocus />
             <div className="ev-edit-actions">
-              <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(false); setText(e.label || '') }}>Cancel</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(false); setText(e.label || ''); setOutcome(e.metadata?.outcome || '') }}>Cancel</button>
               <button className="btn btn-primary btn-sm" onClick={save}>Save</button>
             </div>
           </div>
         ) : (
           <>
-            <div className="ev-l">{isRemark && <span className="ev-remark-tag">Remark</span>}{fmtLabel(e.label)}</div>
+            <div className="ev-l">{tag && <span className="ev-remark-tag">{tag}</span>}{fmtLabel(e.label)}</div>
             <div className="ev-a">
-              {author ? `${author} · ` : ''}{ago}{e.metadata?.edited ? ' · edited' : ''}
-              {canEdit && <button className="ev-edit-btn" onClick={() => setEditing(true)}>Edit</button>}
+              {author ? `${author} · ` : ''}{ago}{e.metadata?.outcome ? ` · ${e.metadata.outcome}` : ''}{e.metadata?.edited ? ' · edited' : ''}
+              {canEdit && <button className="ev-edit-btn" onClick={() => setEditing(true)}>{e.metadata?.edited ? 'Edit' : 'Add outcome & remark'}</button>}
             </div>
           </>
         )}

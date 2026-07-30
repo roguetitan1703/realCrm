@@ -181,7 +181,7 @@ function reducer(state, action) {
         [arrKey]: state[arrKey].map(r => r.id !== action.id ? r : {
           ...r,
           timeline: (r.timeline || []).map(e => e.id === action.eventId
-            ? { ...e, label: action.text, metadata: { ...(e.metadata || {}), edited: true } }
+            ? { ...e, label: action.text, metadata: { ...(e.metadata || {}), edited: true, ...(action.outcome ? { outcome: action.outcome } : {}) } }
             : e),
         }),
       }
@@ -673,14 +673,25 @@ export function StoreProvider({ children }) {
         })
         .catch(err => { console.warn('[Remark API] error:', err.message); toast('Could not save the remark — try again', 'warn') })
     },
-    editRemark: (kind, id, eventId, text) => {
-      apiClient.editRemark(id, eventId, text)
+    editRemark: (kind, id, eventId, text, outcome) => {
+      apiClient.editRemark(id, eventId, text, outcome)
         .then(res => {
-          if (res?.success) { dispatch({ type: 'EDIT_TIMELINE_EVENT', kind, id, eventId, text }); toast('Remark updated') }
+          if (res?.success) { dispatch({ type: 'EDIT_TIMELINE_EVENT', kind, id, eventId, text: res.timeline_event.label, outcome }); toast('Saved') }
           else toast('Could not save the edit', 'warn')
         })
         .catch(err => { console.warn('[Remark edit API] error:', err.message); toast('Could not save the edit — try again', 'warn') })
     },
+    // B5 — confirm-then-log a call/message on any record. Returns the created
+    // event so the caller can immediately offer "add outcome & remark" (via
+    // editRemark above) without a second round trip to find its id.
+    logContactAction: (kind, id, channel) => new Promise((resolve) => {
+      apiClient.logContactAction(id, channel)
+        .then(res => {
+          if (res?.success && res.timeline_event) dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event })
+          resolve(res)
+        })
+        .catch(err => { console.warn('[Contact log API] error:', err.message); resolve(null) })
+    }),
     attachProp: (leadId, propId, label) => {
       dispatch({ type: 'ATTACH_PROP', leadId, propId, label })
       toast('Property shortlisted for this lead')

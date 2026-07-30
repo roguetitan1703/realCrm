@@ -68,7 +68,7 @@ export default function MobilePropDetail({ store, id, back, tabs, modals }) {
       top={top}
       tabs={tabs}
       modals={modals}
-      fab={<MobileSpeedDial store={store} context={{ kind: 'prop', id: p.id, owner: p.owner }} />}
+      fab={<MobileSpeedDial store={store} context={{ kind: 'prop', id: p.id, owner: p.owner, ownerPhone: p.ownerPhone }} />}
     >
       {isEditing ? (
         <div style={{ background: 'var(--card)', padding: 16, borderRadius: 14, border: '1px solid var(--line)', marginBottom: 12 }}>
@@ -113,7 +113,7 @@ export default function MobilePropDetail({ store, id, back, tabs, modals }) {
       {/* Top CTA Action Bar ("on the above side not at the bottom as the bottom nav will be there") */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '4px' }}>
         <button
-          onClick={() => store.openModal({ kind: 'callOwner', owner: p.owner })}
+          onClick={() => store.openModal({ kind: 'contact', channel: 'call', name: p.owner, phone: p.ownerPhone, recordType: 'property', recordId: p.id })}
           style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '5px', padding: '10px 4px', background: 'var(--card)', border: '1px solid var(--line)', borderRadius: '14px', color: 'var(--ink)', fontWeight: 700, fontSize: '11.5px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
         >
           <span style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#E8FBEF', color: '#1E6F52', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -131,7 +131,7 @@ export default function MobilePropDetail({ store, id, back, tabs, modals }) {
           Share Buyers
         </button>
         <button
-          onClick={() => store.openModal({ kind: 'note', propId: p.id })}
+          onClick={() => store.openModal({ kind: 'remark', recordType: 'property', recordId: p.id })}
           style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '5px', padding: '10px 4px', background: 'var(--card)', border: '1px solid var(--line)', borderRadius: '14px', color: 'var(--ink)', fontWeight: 700, fontSize: '11.5px', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
         >
           <span style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#FDF7EC', color: '#B07A2E', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

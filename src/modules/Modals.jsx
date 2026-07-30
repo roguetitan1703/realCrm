@@ -35,8 +35,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'assign' && <AssignModal store={store} leadId={m.leadId} />}
       {m?.kind === 'reassign' && <ReassignModal store={store} fromId={m.fromId} />}
       {m?.kind === 'addAgent' && <AddAgentModal store={store} />}
-      {m?.kind === 'call' && <CallModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'callOwner' && <CallModal store={store} owner={m.owner} propId={m.propId} />}
+      {m?.kind === 'contact' && <ContactConfirmModal store={store} channel={m.channel} name={m.name} phone={m.phone} waText={m.waText} recordType={m.recordType} recordId={m.recordId} />}
       {m?.kind === 'remark' && <RemarkModal store={store} recordType={m.recordType} recordId={m.recordId} />}
       {m?.kind === 'propStatus' && <StatusModal store={store} propId={m.propId} />}
       {m?.kind === 'integration' && <IntegrationModal store={store} card={m.card} />}
@@ -138,8 +137,16 @@ function OwnerUpdateModal({ store, propId }) {
   const p = store.state.properties.find(x => x.id === propId)
   const [text, setText] = useState(() => p ? ownerUpdateMessage(p, store.state.leads) : '')
   if (!p) return null
+  const digits = String(p.ownerPhone || '').replace(/\D/g, '')
+  // Used to only call store.logEvent (client-only — the "logged" claim in the
+  // helper text below was false; it vanished on refresh) and never actually
+  // opened WhatsApp. Now it really sends and really persists (B5 pattern):
+  // log a 'wa' event, then attach the composed text as its remark.
   const send = () => {
-    store.logEvent(p.id, 'wa', `Owner update sent to ${p.owner}`)
+    if (digits) window.open(whatsappLink(text, digits), '_blank', 'noopener')
+    store.logContactAction('property', p.id, 'wa').then(res => {
+      if (res?.timeline_event?.id) store.editRemark('property', p.id, res.timeline_event.id, text)
+    })
     store.closeModal()
   }
   return (
@@ -269,25 +276,35 @@ function OutreachModal({ store, leadId, channel = 'call' }) {
   }
 
   // The button must actually do the thing — dial the phone, open WhatsApp,
-  // open the SMS composer — and *then* log it. Logging alone was the old
-  // behaviour and it read as a dead button.
+  // open the SMS composer — and *then* log it for real (B5). Used to also
+  // fire a client-only store.addNote() "echo" with the rich outcome/message
+  // text; that copy never persisted (lost on refresh) while the server wrote
+  // its OWN, blander, generic-worded entry — two divergent records of one
+  // action, the better one gone after a reload. Now there's one persisted
+  // entry, and the rich text is attached to THAT entry via the same
+  // author-owns-it edit path B1/B5 use everywhere else.
   const logIt = () => {
     const digits = String(l.phone || '').replace(/\D/g, '')
+    const attachAndSync = (apiCall, remarkText, outcome) => {
+      apiCall.then(res => {
+        const evtId = res?.timeline_event?.id
+        return evtId ? api.editRemark(l.id, evtId, remarkText || '', outcome) : null
+      }).catch(err => console.warn('[Outreach log] error:', err.message))
+        .finally(() => store.reloadServer?.())
+    }
     if (ch === 'call') {
       if (digits) window.location.href = `tel:+${digits.length > 10 ? digits : '91' + digits}`
-      store.addNote(l.id, `Phone call with ${first} — Outcome: ${callOutcome}`, 'call')
-      api.callBridge(l.id, store.state.activeAgentId).catch(err => console.warn('[Telephony API Fallback] Backend offline:', err.message))
+      attachAndSync(api.callBridge(l.id, store.state.activeAgentId), '', callOutcome)
       store.toast(`Call logged · ${callOutcome}`)
     } else if (ch === 'wa') {
       if (!text.trim()) { store.toast('Pick a template or type a message first', 'warn'); return }
       window.open(whatsappLink(text, digits), '_blank', 'noopener')
-      store.addNote(l.id, `WhatsApp sent to ${first}: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`, 'msg')
-      api.sendWhatsApp(l.id, 'outreach_msg', { text }).catch(err => console.warn('[WABA API Fallback] Backend offline:', err.message))
+      attachAndSync(api.sendWhatsApp(l.id, 'outreach_msg', { text }), text)
       store.toast('WhatsApp opened with the message ready')
     } else {
       if (!text.trim()) { store.toast('Pick a template or type a message first', 'warn'); return }
       window.location.href = `sms:${digits ? '+' + (digits.length > 10 ? digits : '91' + digits) : ''}?body=${encodeURIComponent(text)}`
-      store.addNote(l.id, `SMS sent to ${first}: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`, 'msg')
+      attachAndSync(api.logContactAction(l.id, 'sms'), text)
       store.toast('SMS composer opened')
     }
     store.closeModal()
@@ -911,41 +928,71 @@ function AddAgentModal({ store }) {
 }
 
 // ---- Call & SMS ----
-function CallModal({ store, leadId, owner, propId }) {
-  const l = leadId ? store.state.leads.find(x => x.id === leadId) : null
-  const p = propId ? store.state.properties.find(x => x.id === propId) : null
-  const name = l ? l.name : owner
-  const phone = l ? l.phone : (p?.phone || p?.ownerPhone || '+91 98220 00000')
-  const [tab, setTab] = useState('call')
-  const first = (name || '').split(' ')[0]
-  // owner call (no lead) logs to the property's own timeline
-  const logCall = () => {
-    if (l) store.addNote(l.id, 'Call logged with ' + first, 'call')
-    else if (propId) store.logEvent(propId, 'call', `Called owner ${owner}`)
+// ---- Call / WhatsApp on a contact (B5): confirm, then redirect + log ----
+// The universal "tap a phone icon anywhere" flow. Yes -> opens tel:/wa.me AND
+// logs an author-attributed activity; No -> nothing recorded. If the caller
+// can resolve a real backing record (recordType/recordId), the initiator can
+// immediately attach an outcome + remark to what was just logged — otherwise
+// (no resolvable record yet, e.g. a not-yet-split Owner contact) it still
+// redirects, it just can't log anywhere real yet.
+function ContactConfirmModal({ store, channel, name, phone, waText, recordType, recordId }) {
+  const [step, setStep] = useState('confirm')   // 'confirm' | 'outcome'
+  const [loggedId, setLoggedId] = useState(null)
+  const [text, setText] = useState('')
+  const [outcome, setOutcome] = useState('')
+  const first = (name || 'them').split(' ')[0]
+  const digits = String(phone || '').replace(/\D/g, '')
+  const label = channel === 'wa' ? 'WhatsApp' : 'call'
+
+  const proceed = () => {
+    if (digits) {
+      if (channel === 'wa') window.open(whatsappLink(waText || '', digits), '_blank', 'noopener')
+      else window.location.href = `tel:+${digits.length > 10 ? digits : '91' + digits}`
+    }
+    if (recordType && recordId) {
+      store.logContactAction(recordType, recordId, channel).then(res => {
+        if (res?.timeline_event?.id) { setLoggedId(res.timeline_event.id); setStep('outcome') }
+        else store.closeModal()
+      })
+    } else {
+      store.closeModal()
+    }
+  }
+
+  const saveOutcome = () => {
+    if (!text.trim() && !outcome) { store.closeModal(); return }
+    store.editRemark(recordType, recordId, loggedId, text.trim(), outcome || undefined)
     store.closeModal()
   }
-  return (
-    <Modal title="Call & SMS" onClose={store.closeModal} width={400}>
-      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>{name} · <span className="mono-num">{phone}</span></div>
-      <Segmented block value={tab} onChange={setTab} options={['call', 'sms'].map(v => ({ value: v, label: v === 'call' ? 'Call' : 'SMS' }))} />
-      <div style={{ marginTop: 14 }}>
-        {tab === 'call' ? (
-          <>
-            <button className="btn btn-primary btn-block" onClick={logCall} style={{ padding: 14 }}><Icon name="phone" />Call {first}</button>
-            <div className="u-muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 9 }}>Calls auto-log to the timeline. Connects with your telephony account.</div>
-          </>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[`Namaste ${first}, site visit confirmed. Address & time on WhatsApp. — ${theme.brand.firmName}`, `Hi ${first}, following up on the properties we discussed. Book a visit this weekend?`, `Thank you for visiting today! Sharing 2 more matching options shortly.`].map((t, i) => (
-              <div key={i} style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 9, padding: '11px 12px', fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5, display: 'flex', gap: 10 }}>
-                <Icon name="sms" size={16} style={{ color: 'var(--muted)', flexShrink: 0, marginTop: 1 }} /><span>{t}</span>
-              </div>
-            ))}
-          </div>
+
+  if (step === 'outcome') {
+    return (
+      <Modal title={`${label === 'call' ? 'Call' : 'WhatsApp'} logged`} onClose={store.closeModal} width={400}>
+        <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>Optional — how did it go with {first}?</div>
+        {channel === 'call' && (
+          <select className="input" value={outcome} onChange={e => setOutcome(e.target.value)} style={{ width: '100%', marginBottom: 10 }}>
+            <option value="">No outcome yet</option>
+            {['Connected & Discussed Requirements', 'Interested — Scheduling Site Visit', 'Requested Callback Later', 'No Answer / Ringing', 'Number Busy / Switched Off'].map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
         )}
-        <div style={{ marginTop: 14, background: 'var(--accent-wash)', border: '1px solid var(--accent-line)', borderRadius: 9, padding: '11px 13px', fontSize: 12, color: 'var(--accent-ink)', display: 'flex', gap: 10 }}>
-          <Icon name="zap" size={16} style={{ flexShrink: 0, marginTop: 1 }} /><span><b>Connects to your telephony account.</b> Click-to-call & SMS switch on when you add your number.</span>
+        <Textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a remark…" />
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+          <Button onClick={store.closeModal}>Skip</Button>
+          <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} onClick={saveOutcome}>Save</Button>
         </div>
+      </Modal>
+    )
+  }
+
+  return (
+    <Modal title={channel === 'wa' ? 'Message on WhatsApp' : 'Call'} onClose={store.closeModal} width={400}>
+      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 14 }}>{name} · <span className="mono-num">{phone || '—'}</span></div>
+      <div style={{ fontSize: 13.5, lineHeight: 1.5, marginBottom: 16 }}>
+        This records an action and will redirect you to your {label === 'call' ? 'dialer' : 'WhatsApp'}. Continue?
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Button onClick={store.closeModal}>No</Button>
+        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} icon={channel === 'wa' ? 'wa' : 'phone'} onClick={proceed}>Yes, continue</Button>
       </div>
     </Modal>
   )

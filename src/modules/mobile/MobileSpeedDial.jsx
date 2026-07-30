@@ -12,21 +12,22 @@ export default function MobileSpeedDial({ store, context = {} }) {
     actions = [
       { label: 'Schedule Follow-up', icon: 'calendar', action: () => { setOpen(false); context.onSchedule?.() }, color: '#1E6F52', wash: '#E8FBEF' },
       { label: 'Advance Pipeline Stage', icon: 'trend', action: () => { setOpen(false); context.onStage?.() }, color: '#4E6688', wash: '#EEF2F7' },
-      { label: 'Log Note for Lead', icon: 'note', action: () => { setOpen(false); store.openModal({ kind: 'note', leadId: context.id }) }, color: '#B07A2E', wash: '#FDF7EC' },
+      { label: 'Add Remark for Lead', icon: 'note', action: () => { setOpen(false); store.openModal({ kind: 'remark', recordType: 'lead', recordId: context.id }) }, color: '#B07A2E', wash: '#FDF7EC' },
       { label: 'Attach / Share Property', icon: 'wa', action: () => { setOpen(false); store.openModal({ kind: 'pickMatch', leadId: context.id }) }, color: '#25D366', wash: '#E8FBEF' }
     ]
   } else if (kind === 'prop') {
     actions = [
       { label: 'Share to Matching Buyers', icon: 'wa', action: () => { setOpen(false); store.openModal({ kind: 'pickBuyer', propId: context.id }) }, color: '#25D366', wash: '#E8FBEF' },
-      { label: 'Call Owner Direct', icon: 'phone', action: () => { setOpen(false); store.openModal({ kind: 'callOwner', owner: context.owner }) }, color: '#1E6F52', wash: '#E8FBEF' },
-      { label: 'Log Property Note', icon: 'note', action: () => { setOpen(false); store.openModal({ kind: 'note', propId: context.id }) }, color: '#B07A2E', wash: '#FDF7EC' }
+      { label: 'Call Owner Direct', icon: 'phone', action: () => { setOpen(false); store.openModal({ kind: 'contact', channel: 'call', name: context.owner, phone: context.ownerPhone, recordType: 'property', recordId: context.id }) }, color: '#1E6F52', wash: '#E8FBEF' },
+      { label: 'Add Property Remark', icon: 'note', action: () => { setOpen(false); store.openModal({ kind: 'remark', recordType: 'property', recordId: context.id }) }, color: '#B07A2E', wash: '#FDF7EC' }
     ]
   } else {
-    // General tabs: today, leads, properties
+    // General tabs: today, leads, properties — no record in context, so no
+    // "instant note" option here anymore (a remark needs a real record to
+    // attach to; open a lead/property first).
     actions = [
       { label: 'New Walk-in Lead', icon: 'plus', action: () => { setOpen(false); store.openModal({ kind: 'newLead' }) }, color: '#1E6F52', wash: '#E8FBEF' },
       { label: 'Add Listing Property', icon: 'building', action: () => { setOpen(false); store.openModal({ kind: 'addProperty' }) }, color: '#4E6688', wash: '#EEF2F7' },
-      { label: 'Log Instant Note', icon: 'note', action: () => { setOpen(false); store.openModal({ kind: 'note' }) }, color: '#B07A2E', wash: '#FDF7EC' }
     ]
   }
 

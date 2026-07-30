@@ -276,14 +276,28 @@ function rowToProperty(r: any): any {
 // `timestamp` (unlike the old lead-only mapping, which dropped all three and
 // hardcoded ago:'just now') so the client can attribute, edit-own, and render
 // a real relative time.
+// DB type -> client channel vocabulary. call/whatsapp/sms/remark pass through
+// distinctly (B5 needs to tell them apart to offer edit-own + an outcome);
+// everything else collapses to the old generic 'msg' bucket, unchanged.
+function clientEventType(dbType: string): string {
+  if (dbType === 'remark' || dbType === 'call' || dbType === 'sms') return dbType;
+  if (dbType === 'whatsapp') return 'wa';
+  if (dbType === 'stage_change') return 'stage';
+  if (dbType === 'creation') return 'note';
+  return 'msg';
+}
+
+// Types the Timeline UI shows a tag pill for (Remark / Call / WhatsApp / SMS)
+// — the label must NOT also repeat the title there, or the tag duplicates it.
+const TAGGED_TYPES = new Set(['remark', 'call', 'wa', 'sms']);
+
 function mapEventForClient(e: TimelineEvent) {
-  // Remarks are already visually tagged "Remark" by the Timeline UI, so the
-  // label is just the text — no "Remark: " prefix duplicating that tag.
-  const isRemark = e.type === 'remark';
+  const ct = clientEventType(e.type);
+  const tagged = TAGGED_TYPES.has(ct);
   return {
     id: e.id,
-    type: isRemark ? 'remark' : e.type === 'stage_change' ? 'stage' : e.type === 'creation' ? 'note' : 'msg',
-    label: isRemark ? e.description : (e.title && e.title !== e.description ? `${e.title}: ${e.description}` : e.description),
+    type: ct,
+    label: tagged ? e.description : (e.title && e.title !== e.description ? `${e.title}: ${e.description}` : e.description),
     authorId: e.author || null,
     timestamp: e.timestamp,
     metadata: e.metadata || {},
@@ -1319,11 +1333,14 @@ export async function getTimelineEventById(id: string, tenantId: string): Promis
 
 /** Edit a remark's text (author-only, enforced by the route). Stamps
  *  metadata.edited so the UI can show "edited". Timestamp/author are NOT
- *  touched — an edit doesn't reorder the thread or change who wrote it. */
-export async function updateTimelineEvent(id: string, tenantId: string, text: string): Promise<TimelineEvent | null> {
+ *  touched — an edit doesn't reorder the thread or change who wrote it.
+ *  `outcome` (B5) is optional — set when attaching an outcome to a logged
+ *  call/message, e.g. "Connected", "No answer". */
+export async function updateTimelineEvent(id: string, tenantId: string, text: string, outcome?: string): Promise<TimelineEvent | null> {
   const existing = await getTimelineEventById(id, tenantId);
   if (!existing) return null;
-  const meta = { ...(existing.metadata || {}), edited: true, edited_at: new Date().toISOString() };
+  const meta: any = { ...(existing.metadata || {}), edited: true, edited_at: new Date().toISOString() };
+  if (outcome) meta.outcome = outcome;
   const rows = await sql`
     UPDATE crm_timeline_events SET description = ${text}, metadata = ${sql.json(meta)}
     WHERE id = ${id} AND tenant_id = ${tenantId}

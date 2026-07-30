@@ -207,9 +207,12 @@ export const api = {
   // Composable Actions
   callBridge: (recordId, agentId) => request(`/records/${recordId}/actions/call`, { method: 'POST', body: JSON.stringify({ agent_id: agentId }) }),
   // Remark thread on a lead OR property (B1) — a real persisted timeline entry,
-  // author-attributed, edit-own.
+  // author-attributed, edit-own. `outcome` (B5) is optional — set when
+  // attaching an outcome to a logged call/message.
   addRemark: (recordId, text) => request(`/records/${recordId}/actions/remark`, { method: 'POST', body: JSON.stringify({ text }) }),
-  editRemark: (recordId, eventId, text) => request(`/records/${recordId}/actions/remark/${encodeURIComponent(eventId)}`, { method: 'PATCH', body: JSON.stringify({ text }) }),
+  editRemark: (recordId, eventId, text, outcome) => request(`/records/${recordId}/actions/remark/${encodeURIComponent(eventId)}`, { method: 'PATCH', body: JSON.stringify({ text, outcome }) }),
+  // B5 — log a plain call/WhatsApp/SMS action on any record (confirm-then-log).
+  logContactAction: (recordId, channel) => request(`/records/${recordId}/actions/contact-log`, { method: 'POST', body: JSON.stringify({ channel }) }),
   sendWhatsApp: (recordId, templateId, vars) => request(`/records/${recordId}/actions/whatsapp`, { method: 'POST', body: JSON.stringify({ template_id: templateId, variables: vars }) }),
   changeStage: (recordId, newStage, note) => request(`/records/${recordId}/actions/stage-change`, { method: 'POST', body: JSON.stringify({ new_stage_id: newStage, note }) }),
   mergeRecords: (primaryId, dupId, strategy = 'combine_timeline') => request(`/records/${primaryId}/actions/merge`, { method: 'POST', body: JSON.stringify({ duplicate_record_id: dupId, merge_strategy: strategy }) }),

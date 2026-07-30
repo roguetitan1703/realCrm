@@ -56,36 +56,85 @@ actionsRouter.post('/:id/actions/remark', async (req: Request, res: Response) =>
   }
 });
 
+// Event types a person can edit-own. Remark is the pure notes case (B1); call/
+// wa/sms are B5's "add an outcome + remark to that action afterward" — same
+// author-only rule, same endpoint, just also accepts an `outcome`. System/
+// stage-change events are never author-editable — they're records, not notes.
+const AUTHOR_EDITABLE_TYPES = new Set(['remark', 'call', 'whatsapp', 'sms']);
+
 /**
- * Edit a remark — author-only. Not the last-write-wins pattern of stage/status
- * changes: this literally rejects anyone but the person who wrote it.
- * PATCH /api/v1/records/:id/actions/remark/:eventId
+ * Edit a remark (or attach outcome+remark to a logged call/message) —
+ * author-only. Not the last-write-wins pattern of stage/status changes: this
+ * literally rejects anyone but the person who wrote it.
+ * PATCH /api/v1/records/:id/actions/remark/:eventId  body { text, outcome? }
  */
 actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Response) => {
   try {
     const { eventId } = req.params;
     const text = String(req.body?.text || '').trim();
-    if (!text) return res.status(400).json({ error: 'Remark text is required' });
+    const outcome = req.body?.outcome ? String(req.body.outcome).trim() : undefined;
+    if (!text && !outcome) return res.status(400).json({ error: 'Add a remark or an outcome' });
     const existing = await getTimelineEventById(eventId, req.tenantId!);
-    if (!existing) return res.status(404).json({ error: 'Remark not found' });
-    if (existing.type !== 'remark') return res.status(400).json({ error: 'Only remarks can be edited' });
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    if (!AUTHOR_EDITABLE_TYPES.has(existing.type)) return res.status(400).json({ error: 'This entry cannot be edited' });
     const authorId = req.user?.id || null;
     if (!authorId || existing.author !== authorId) {
-      return res.status(403).json({ error: 'You can only edit your own remark' });
+      return res.status(403).json({ error: 'You can only edit your own entry' });
     }
-    const updated = await updateTimelineEvent(eventId, req.tenantId!, text);
-    if (!updated) return res.status(404).json({ error: 'Remark not found' });
+    const finalText = text || existing.description;
+    const updated = await updateTimelineEvent(eventId, req.tenantId!, finalText, outcome);
+    if (!updated) return res.status(404).json({ error: 'Not found' });
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,
-      actor_label: authorId, action: 'remark.updated',
-      target_type: 'record', target_id: existing.record_id, summary: 'Remark edited', metadata: {},
+      actor_label: authorId, action: existing.type === 'remark' ? 'remark.updated' : 'contact_action.updated',
+      target_type: 'record', target_id: existing.record_id, summary: 'Entry edited', metadata: { outcome },
     });
+    // DB type -> client-facing channel vocabulary (whatsapp -> wa), same
+    // translation the contact-log route and mapEventForClient use.
+    const clientType = existing.type === 'whatsapp' ? 'wa' : existing.type;
     return res.status(200).json({
       success: true,
-      timeline_event: { id: updated.id, type: 'remark', label: text, authorId, timestamp: updated.timestamp, metadata: updated.metadata },
+      timeline_event: { id: updated.id, type: clientType, label: finalText, authorId, timestamp: updated.timestamp, metadata: updated.metadata },
     });
   } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to edit remark', message: err.message });
+    return res.status(500).json({ error: 'Failed to save', message: err.message });
+  }
+});
+
+/**
+ * B5 — log a plain contact action (call / WhatsApp / SMS) on ANY record: lead,
+ * property, or a contact resolved to one. This is deliberately lightweight —
+ * no module gating, no quota, no telephony-bridge simulation (that's the
+ * Leads-specific /actions/call above) — it exists purely to record "the user
+ * confirmed and was redirected to their dialer/WhatsApp", author-attributed,
+ * so it can be edited afterward with an outcome + remark via the route above.
+ * POST /api/v1/records/:id/actions/contact-log   body { channel: 'call'|'wa'|'sms' }
+ */
+actionsRouter.post('/:id/actions/contact-log', async (req: Request, res: Response) => {
+  try {
+    const recordId = req.params.id;
+    // Frontend-facing channel name stays 'wa' (matches the rest of the app);
+    // the DB type is 'whatsapp' to match the existing WABA dispatch route's
+    // convention — one spelling for "this was a WhatsApp event", not two.
+    const channel = ['call', 'wa', 'sms'].includes(req.body?.channel) ? req.body.channel : 'call';
+    const dbType = channel === 'wa' ? 'whatsapp' : channel;
+    const authorId = req.user?.id || null;
+    const title = channel === 'call' ? 'Call' : channel === 'wa' ? 'WhatsApp' : 'SMS';
+    const evt = await addTimelineEvent({
+      record_id: recordId, type: dbType, title, description: `${title} initiated`,
+      author: authorId || undefined,
+    });
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,
+      actor_label: authorId || 'system', action: 'contact_action.logged',
+      target_type: 'record', target_id: recordId, summary: `${title} logged`, metadata: { channel },
+    });
+    return res.status(201).json({
+      success: true,
+      timeline_event: { id: evt.id, type: channel, label: evt.description, authorId, timestamp: evt.timestamp, metadata: {} },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to log the action', message: err.message });
   }
 });
 
@@ -176,6 +225,10 @@ actionsRouter.post(
         type: 'whatsapp',
         title: 'WhatsApp Template Sent',
         description: `Dispatched WABA template "${template_id}" via Meta Cloud API (Message ID: ${wabaMessageId}).`,
+        // B5: the initiator is the author, so they can attach outcome+remark
+        // afterward (PATCH .../remark/:eventId, author-only). This route never
+        // set author before, so that edit would 403 for everyone — silently.
+        author: req.user?.id,
         metadata: { template_id, variables, waba_message_id: wabaMessageId, phone_id: phoneId },
       });
 
