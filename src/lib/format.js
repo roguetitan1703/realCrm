@@ -201,3 +201,10 @@ export function thumbTint(id) {
   const i = (id ? id.charCodeAt(1) : 0) % arr.length
   return arr[i]
 }
+
+// An owner isn't a stored record — it's derived by grouping properties on the
+// owner name (B3). This is that grouping key, shared by the Contacts→Owners
+// list and the sidebar's Owners count so the two can never disagree about how
+// many owners exist.
+export const ownerKeyOf = (p) => (p && p.owner) || 'Unnamed Owner'
+export const ownerCount = (properties = []) => new Set(properties.map(ownerKeyOf)).size

@@ -6,7 +6,7 @@ import { Avatar } from './primitives.jsx'
 import { subscribeConnection } from '../lib/api.js'
 
 // ---- desktop sidebar ----
-export function Sidebar({ items, active, onNav, footer, firmName, logoUrl, sub }) {
+export function Sidebar({ items, active, activeSub, onNav, footer, firmName, logoUrl, sub }) {
   const name = firmName || theme.brand.firmName
   const initials = String(name).trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || theme.brand.initials
   return (
@@ -19,10 +19,27 @@ export function Sidebar({ items, active, onNav, footer, firmName, logoUrl, sub }
         {items.map(it => it.section
           ? <div key={it.section} className="n-sec">{it.section}</div>
           : (
-            <a key={it.key} className={active === it.key ? 'on' : ''} onClick={() => onNav(it.key)}>
-              <Icon name={it.icon} />{it.label}
-              {it.badge != null && <span className="n-badge">{it.badge}</span>}
-            </a>
+            <div key={it.key}>
+              <a className={active === it.key ? 'on' : ''} onClick={() => onNav(it.key)}>
+                <Icon name={it.icon} />{it.label}
+                {it.badge != null && <span className="n-badge">{it.badge}</span>}
+              </a>
+              {/* A section that holds two stores (Contacts → Clients | Owners)
+                  discloses them here rather than stacking a second pill row on
+                  top of the page's own role pills. Only shown while the section
+                  is open, so the nav stays short for everyone else. */}
+              {it.children && active === it.key && (
+                <div className="n-sub-list">
+                  {it.children.map(c => (
+                    <a key={c.sub} className={'n-sub-item' + (activeSub === c.sub ? ' on' : '')}
+                      onClick={() => onNav(it.key, { [it.subKey]: c.sub })}>
+                      {c.label}
+                      {c.count != null && <span className="n-sub-count">{c.count}</span>}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
       </div>
       {footer && (

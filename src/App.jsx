@@ -3,6 +3,7 @@ import { useStore } from './lib/store.jsx'
 import { AppShell } from './layouts/layouts.jsx'
 import { TopBar, Toasts, StaleBanner } from './components/chrome.jsx'
 import { PLATFORM, tenantDocTitle } from './data/platform.js'
+import { ownerCount } from './lib/format.js'
 
 import Login from './modules/Login.jsx'
 import Dashboard from './modules/Dashboard.jsx'
@@ -23,7 +24,10 @@ const NAV = [
   { key: 'dashboard', label: 'Dashboard', icon: 'grid' },
   { key: 'leads', label: 'Leads', icon: 'leads' },
   { key: 'properties', label: 'Properties', icon: 'building' },
-  { key: 'clients', label: 'Contacts', icon: 'people' },
+  // Contacts holds TWO separate stores (B3) — demand and supply. They're nav
+  // children, not in-page tabs, because switching store is navigation; the
+  // pills inside the page are for filtering a role WITHIN the active store.
+  { key: 'clients', label: 'Contacts', icon: 'people', subKey: 'contactsTab' },
   { key: 'calendar', label: 'Calendar', icon: 'calendar' },
   { section: 'Manage' },
   { key: 'import', label: 'Import', icon: 'layers' },
@@ -106,9 +110,20 @@ export default function App() {
 
   // RBAC Navigation filtering: Agent role hides system management & settings
   const allowedKeys = state.role === 'agent' ? ['dashboard', 'leads', 'properties', 'clients', 'calendar'] : null
+  const contactsTab = sel.contactsTab || 'clients'
   const nav = NAV
     .filter(n => !allowedKeys || (n.key && allowedKeys.includes(n.key)) || (n.section && ['Workspace'].includes(n.section)))
-    .map(n => (n.key === 'leads' ? { ...n, badge: newCount } : n))
+    .map(n => {
+      if (n.key === 'leads') return { ...n, badge: newCount }
+      if (n.key === 'clients') return {
+        ...n,
+        children: [
+          { sub: 'clients', label: 'Clients', count: leads.length },
+          { sub: 'owners', label: 'Owners', count: ownerCount(state.properties) },
+        ],
+      }
+      return n
+    })
 
   const go = (key, patch = {}) => {
     setScreen(key)
@@ -166,7 +181,7 @@ export default function App() {
   return (
     <>
       {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
-      <AppShell nav={nav} active={effectiveScreen} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
+      <AppShell nav={nav} active={effectiveScreen} activeSub={contactsTab} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
         <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.propId || ''}`} {...ctx} />
       </AppShell>
       {state.waState && <WaModal store={store} />}

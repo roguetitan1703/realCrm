@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
-import { StageTag, StatusTag, Avatar, Button, KV, SegmentPills } from '../components/primitives.jsx'
-import { initials, reqLine, budgetRange } from '../lib/format.js'
+import { StageTag, StatusTag, Avatar, Button, KV } from '../components/primitives.jsx'
+import { initials, reqLine, budgetRange, ownerKeyOf } from '../lib/format.js'
 import { CLIENTS_DEF } from './definitions.jsx'
 
 // B3: Contacts is ONE section with TWO subnavs — Clients (demand: buyers,
@@ -14,9 +14,12 @@ import { CLIENTS_DEF } from './definitions.jsx'
 // but it already has a stable id + is always reachable contextually from its
 // property — the Contacts→Owners list is the "browse all owners" view, not
 // the only path in.
-export default function Clients({ store, go, topBar }) {
+export default function Clients({ store, go, sel, topBar }) {
   const { state } = store
-  const [tab, setTab] = useState('clients')   // 'clients' | 'owners'
+  // Which store we're in is NAVIGATION, so it lives in the sidebar sub-nav and
+  // is carried in `sel` — not in local component state. That way the nav and
+  // the list can't disagree about which one is open, and a deep link works.
+  const tab = sel?.contactsTab === 'owners' ? 'owners' : 'clients'
   const [seg, setSeg] = useState('all')
   const [flt, setFlt] = useState({})
   const [q, setQ] = useState('')
@@ -44,7 +47,7 @@ export default function Clients({ store, go, topBar }) {
 
   const owners = {}
   state.properties.forEach(p => {
-    const ownerKey = p.owner || 'Unnamed Owner'
+    const ownerKey = ownerKeyOf(p)
     const o = (owners[ownerKey] = owners[ownerKey] || { name: ownerKey, props: [] })
     o.props.push(p)
   })
@@ -82,19 +85,15 @@ export default function Clients({ store, go, topBar }) {
     return rRole === segKey
   }
 
-  // Subnav: which store — demand (Clients) or supply (Owners). Switching
-  // resets the role pill back to "All" so a stale role from the other store
-  // (e.g. "Landlord") can't silently zero out the new list.
   const demandRows = rows.filter(r => r.kind === 'demand')
   const supplyRows = rows.filter(r => r.kind === 'supply')
   const scopeRows = tab === 'clients' ? demandRows : supplyRows
-  const switchTab = (t) => { setTab(t); setSeg('all') }
-  const tabSegs = [
-    { key: 'clients', label: 'Clients', on: tab === 'clients', count: demandRows.length, onClick: () => switchTab('clients') },
-    { key: 'owners', label: 'Owners', on: tab === 'owners', count: supplyRows.length, onClick: () => switchTab('owners') },
-  ]
 
-  // Role pills WITHIN the active subnav — Buyer/Tenant under Clients,
+  // A role pill from the other store (e.g. "Landlord") would silently zero out
+  // this list, so reset to All whenever the sub-nav switches stores.
+  useEffect(() => { setSeg('all') }, [tab])
+
+  // Role pills WITHIN the active store — Buyer/Tenant under Clients,
   // Seller/Landlord under Owners. Not a flat 5-way mix of both stores.
   const roleOptions = tab === 'clients'
     ? [{ key: 'all', label: 'All' }, { key: 'Buyer', label: 'Buyers' }, { key: 'Tenant', label: 'Tenants' }]
@@ -191,7 +190,6 @@ export default function Clients({ store, go, topBar }) {
         title: 'Contacts',
         actions: <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import</Button>
       })}
-      <div className="contacts-subnav"><SegmentPills segments={tabSegs} /></div>
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>
     </>

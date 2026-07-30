@@ -872,8 +872,11 @@ input,textarea,select{font-family:inherit}
 /* ---- Contacts subnav (B3): Clients | Owners — the primary tab switcher,
    sits above the KPI/role-pill header so it reads as a section pick, not
    just another filter row. ---- */
-.contacts-subnav{padding:16px 22px 0}
-.contacts-subnav .segpill{font-size:13.5px;font-weight:600;padding:7px 16px}
+.n-sub-list{padding:2px 0 4px}
+.nav .n-sub-item{padding:6px 16px 6px 43px;font-size:12.5px;font-weight:500;border-left:2px solid transparent}
+.nav .n-sub-item.on{color:#fff;background:transparent;border-left-color:var(--accent);font-weight:600}
+.n-sub-count{margin-left:auto;font-size:10px;font-weight:700;color:var(--on-chrome-mut);background:rgba(255,255,255,.09);border-radius:9px;padding:1px 7px}
+.nav .n-sub-item.on .n-sub-count{background:var(--accent);color:#fff}
 
 /* ---- PageHeader: lean in-page strip (KPIs + scope segments) ---- */
 .pagehead{display:flex;align-items:center;gap:20px;padding:16px 22px 4px;flex-wrap:wrap}
