@@ -21,8 +21,8 @@ import { suggestPassword } from './auth.js';
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
 // and three copies of that rule would drift.
 import {
-  FACING, FURNISH, STATUS,
-  normaliseBhk, normaliseFloor, normaliseSubtype, normaliseTo,
+  FURNISH, STATUS, labelOf,
+  normaliseBhk, normaliseSubtype, normaliseTo,
 } from '../../../src/data/propertyFields.js';
 
 /**
@@ -274,6 +274,60 @@ function rowToProperty(r: any): any {
     unit: r.unit_no || r.unit,
     tenancy: r.tenancy || undefined,
     timeline: r.timeline || [],
+
+    // --- Block C canonical fields -------------------------------------------
+    // `type` above is the legacy conflated string kept for existing views;
+    // these are what the filters and the new form actually read.
+    category: r.category || 'residential',
+    subtype: r.subtype || null,
+    bhk: r.bhk || null,
+    transactionType: r.transaction_type || null,
+    ownership: r.ownership || null,
+    bathrooms: r.bathrooms || null,
+    balconies: r.balconies || null,
+    builtup: r.builtup_sqft ?? null,
+    superBuiltup: r.super_builtup_sqft ?? null,
+    plotArea: r.plot_area != null ? Number(r.plot_area) : null,
+    areaUnit: r.area_unit || 'sqft',
+    priceAreaBasis: r.price_area_basis || null,
+    coveredParking: r.covered_parking || null,
+    openParking: r.open_parking || null,
+    servantRoom: r.servant_room ?? null,
+    furnishType: r.furnish_type || null,
+    fixtures: r.fixtures || [],
+    countedItems: r.counted_items || {},
+    societyAmenities: r.society_amenities || [],
+    // Rent terms
+    preferredTenants: r.preferred_tenants || [],
+    petFriendly: r.pet_friendly ?? null,
+    availableFrom: r.available_from || null,
+    maintenanceMode: r.maintenance_mode || null,
+    maintenanceAmount: r.maintenance_amount != null ? Number(r.maintenance_amount) : null,
+    depositOption: r.deposit_option || null,
+    depositAmount: r.deposit_amount != null ? Number(r.deposit_amount) : null,
+    lockinOption: r.lockin_option || null,
+    lockinMonths: r.lockin_months ?? null,
+    parkingChargesMode: r.parking_charges_mode || null,
+    paintingCharges: r.painting_charges || null,
+    // Sale terms
+    priceIncludes: r.price_includes || [],
+    otherCharges: r.other_charges != null ? Number(r.other_charges) : null,
+    bookingAmount: r.booking_amount != null ? Number(r.booking_amount) : null,
+    taxIncluded: r.tax_included ?? null,
+    // Plot
+    floorsAllowed: r.floors_allowed ?? null,
+    openSides: r.open_sides || null,
+    roadWidthFt: r.road_width_ft != null ? Number(r.road_width_ft) : null,
+    cornerPlot: r.corner_plot ?? null,
+    // Both
+    consultingOption: r.consulting_option || null,
+    consultingPercent: r.consulting_percent != null ? Number(r.consulting_percent) : null,
+    description: r.description || cfg.description || '',
+    // Operational (trimmed to these two by spec Q16)
+    keyAccess: r.key_access || null,
+    ownerContactId: r.owner_contact_id || null,
+    completeness: r.completeness ?? null,
+    geo: r.geo_lat != null && r.geo_lng != null ? { lat: r.geo_lat, lng: r.geo_lng } : null,
   };
 }
 
@@ -550,6 +604,7 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
   await migrateProperColumns();
   await backfillShortlist();
   await backfillPropertyCanonicalFields();
+  await repairPropertyDisplayCasing();
 
   console.log(`[Supabase DB] ✅ Seeded initial PostgreSQL data cleanly.`);
   return await getState();
@@ -686,15 +741,17 @@ export async function backfillPropertyCanonicalFields(): Promise<void> {
     const category = /commercial|office|shop|showroom|warehouse|industrial/i.test(rawType)
       ? 'commercial' : 'residential';
 
+    // ONLY the new canonical columns are written. status/facing/floor are
+    // legacy DISPLAY columns that the stepper, StatusTag's colour map and the
+    // record sheet all read verbatim — rewriting them to lowercase tokens
+    // broke those readers (an "Available" listing rendered as closed), so the
+    // filters normalise those at compare time instead and the stored strings
+    // are left exactly as the user typed them.
     const patch: Record<string, any> = {
       category,
       subtype: normaliseSubtype(rawType, category),
       bhk: normaliseBhk(rawType),
       furnish_type: normaliseTo(FURNISH, r.furnishing),
-      // Status/facing get normalised in place — same column, canonical token.
-      status: normaliseTo(STATUS, r.status) || r.status,
-      facing: normaliseTo(FACING, r.facing),
-      floor: normaliseFloor(r.floor),
       // Legacy `parking` was one field; the schema separates covered from open.
       // With no way to tell which the old number meant, it becomes covered —
       // the common case — rather than being split by guesswork.
@@ -707,15 +764,44 @@ export async function backfillPropertyCanonicalFields(): Promise<void> {
         subtype = COALESCE(subtype, ${patch.subtype}),
         bhk = COALESCE(bhk, ${patch.bhk}),
         furnish_type = COALESCE(furnish_type, ${patch.furnish_type}),
-        status = ${patch.status},
-        facing = ${patch.facing},
-        floor = ${patch.floor},
         covered_parking = COALESCE(covered_parking, ${patch.covered_parking})
       WHERE id = ${r.id}
     `;
     n++;
   }
   console.log(`[Schema C] Backfilled canonical fields on ${n} propert${n === 1 ? 'y' : 'ies'}.`);
+}
+
+/**
+ * One-time repair. An earlier revision of the backfill above rewrote the legacy
+ * DISPLAY columns (status, facing, floor) into lowercase tokens, which broke
+ * every reader that renders them verbatim — StatusTag's colour lookup fell
+ * through to "closed" for available listings, and the lifecycle stepper matched
+ * nothing. This puts the display casing back.
+ *
+ * Idempotent and self-limiting: it only touches values that still look like
+ * tokens (lowercase, or containing an underscore), so a genuine user-entered
+ * string is never rewritten, and it becomes a no-op once healed.
+ */
+export async function repairPropertyDisplayCasing(): Promise<void> {
+  const rows = await sql`
+    SELECT id, status, facing, floor FROM crm_properties
+    WHERE status = lower(status) OR facing = lower(facing) OR floor = lower(floor)
+  `;
+  if (!rows.length) return;
+
+  const title = (s: string) => s.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('-');
+  let n = 0;
+  for (const r of rows) {
+    const status = r.status ? labelOf(STATUS, r.status) : r.status;
+    // 'north_east' -> 'North-East'; a plain number is left alone.
+    const facing = r.facing && /^[a-z_]+$/.test(r.facing) ? title(r.facing) : r.facing;
+    const floor = r.floor && /^[a-z_]+$/.test(r.floor) ? title(r.floor).replace(/-/g, ' ') : r.floor;
+    if (status === r.status && facing === r.facing && floor === r.floor) continue;
+    await sql`UPDATE crm_properties SET status = ${status}, facing = ${facing}, floor = ${floor} WHERE id = ${r.id}`;
+    n++;
+  }
+  if (n) console.log(`[Schema C] Repaired display casing on ${n} propert${n === 1 ? 'y' : 'ies'}.`);
 }
 
 export async function backfillPasswordAuth(): Promise<void> {
@@ -764,6 +850,7 @@ seedDatabase()
   .then(() => backfillPasswordAuth())
   .then(() => backfillShortlist())
   .then(() => backfillPropertyCanonicalFields())
+  .then(() => repairPropertyDisplayCasing())
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================

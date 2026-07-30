@@ -88,10 +88,15 @@ export const FACING = [
   o('south_east', 'South-East'), o('south_west', 'South-West'),
 ]
 
+// Status is the ONE vocabulary whose values are the display strings themselves.
+// It's a user-facing lifecycle that the stepper, StatusTag's colour map and the
+// record sheet already agree on, so inventing lowercase tokens for it would buy
+// nothing and force a rewrite of live values (which is precisely how an
+// "Available" listing briefly ended up rendering with the closed styling).
+// Filter options equal stored values here by construction — no translation.
 export const STATUS = [
-  o('available', 'Available'), o('under_offer', 'Under offer'),
-  o('blocked', 'Blocked'), o('closed', 'Closed'),
-]
+  'Available', 'Token Pending', 'Under Offer', 'Sold', 'Leased', 'Blocked', 'Off-Market',
+].map(v => o(v, v))
 
 // ---- Furnishing -------------------------------------------------------------
 export const FURNISH = [
@@ -224,13 +229,20 @@ export function normaliseSubtype(raw, category = 'residential') {
   return null
 }
 
-/** Floor may be a number or a token — "Ground", "0", "B", "12". */
+/**
+ * Floor may be a number, a known token, or something a broker just typed —
+ * the live data contains "G+2", which is neither. Anything unrecognised is
+ * PASSED THROUGH rather than nulled: floor is a free token by design, and
+ * silently discarding a value the user entered is worse than storing one we
+ * can't categorise.
+ */
 export function normaliseFloor(raw) {
   if (raw == null || raw === '') return null
   const tok = normaliseTo(FLOOR_TOKENS, raw)
   if (tok) return tok
   const n = Number(raw)
-  return Number.isFinite(n) ? String(n) : null
+  if (Number.isFinite(n)) return String(n)
+  return String(raw).trim() || null
 }
 
 /** Display text for a stored token, tolerant of legacy free text. */

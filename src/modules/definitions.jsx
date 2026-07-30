@@ -25,6 +25,12 @@ import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted
 import { getNestedValue } from '../components/ModuleFields.jsx'
 import { reqShort, budgetRange, quotedLine, unitLabel, thumbTint, initials, projectOf } from '../lib/format.js'
 import Icon from '../components/Icon.jsx'
+// Filter options are GENERATED from the canonical vocabulary rather than typed
+// out again here — that duplication is exactly what broke property filtering.
+import {
+  BHK, CATEGORIES, DEALS, FACING, FURNISH, OWNERSHIP, STATUS, SUBTYPES,
+  normaliseBhk, normaliseSubtype, normaliseTo, optionsOf,
+} from '../data/propertyFields.js'
 
 // Shared option pools (kept here so filters and forms stay consistent).
 export const LEAD_LOCALITIES = [
@@ -206,21 +212,42 @@ export const PROPERTIES_DEF = {
     const projects = [...new Set((store?.state?.properties || []).map(projectOf))].sort()
     return [
       { key: 'project', label: 'Project', icon: 'building', options: opt(projects) },
-      { key: 'deal', label: 'Deal', icon: 'tag', multi: false, options: [{ value: 'sale', label: 'For sale' }, { value: 'rent', label: 'For rent' }] },
-      { key: 'type', label: 'Config', icon: 'layers', options: opt(['1BHK', '2BHK', '3BHK', 'Commercial', 'Plot']) },
+      { key: 'deal', label: 'Deal', icon: 'tag', multi: false, options: optionsOf(DEALS) },
+      // Every option below is generated FROM the canonical vocabulary, so a
+      // filter choice can no longer name a value the database doesn't store.
+      // That was the whole C-fix bug: this list used to read
+      // ['1BHK','2BHK','3BHK','Commercial','Plot'] while rows held
+      // "3 BHK Apartment" and "Commercial Office", so almost nothing matched.
+      { key: 'category', label: 'Category', icon: 'building', options: optionsOf(CATEGORIES) },
+      { key: 'bhk', label: 'Configuration', icon: 'layers', options: optionsOf(BHK) },
+      { key: 'subtype', label: 'Property type', icon: 'home',
+        options: optionsOf([...SUBTYPES.residential, ...SUBTYPES.commercial]
+          .filter((x, i, a) => a.findIndex(y => y.value === x.value) === i)) },
       { key: 'locality', label: 'Locality', icon: 'building', options: opt(PROP_LOCALITIES) },
-      { key: 'status', label: 'Status', icon: 'check', options: opt(['Available', 'Under Offer', 'Closed']) },
-      { key: 'furnishing', label: 'Furnishing', icon: 'home', options: opt(['Fully furnished', 'Semi-furnished', 'Unfurnished']) },
+      { key: 'status', label: 'Status', icon: 'check', options: optionsOf(STATUS) },
+      { key: 'furnishing', label: 'Furnishing', icon: 'home', options: optionsOf(FURNISH) },
+      { key: 'facing', label: 'Facing', icon: 'tag', options: optionsOf(FACING) },
+      { key: 'ownership', label: 'Ownership', icon: 'shield', options: optionsOf(OWNERSHIP) },
     ]
   },
 
   rowMatch(p, key, vals) {
+    // Rows written before the canonical columns existed still hold free text,
+    // and imports will keep bringing more of it, so each comparison normalises
+    // the stored value rather than trusting it to already be a token.
     if (key === 'project') return vals.includes(projectOf(p))
     if (key === 'deal') return vals.includes(p.deal)
-    if (key === 'type') return vals.includes(p.type)
     if (key === 'locality') return vals.includes(p.locality)
-    if (key === 'furnishing') return vals.includes(p.furnishing)
-    if (key === 'status') return vals.some(s => eqi(s, p.status) || (s === 'Closed' && ['Sold', 'Let', 'Closed'].includes(p.status)))
+    if (key === 'category') return vals.includes(p.category || 'residential')
+    if (key === 'bhk') return vals.includes(p.bhk ?? normaliseBhk(p.type))
+    if (key === 'subtype') return vals.includes(p.subtype ?? normaliseSubtype(p.type, p.category))
+    if (key === 'furnishing') return vals.includes(p.furnishType ?? normaliseTo(FURNISH, p.furnishing))
+    if (key === 'facing') return vals.includes(normaliseTo(FACING, p.facing))
+    if (key === 'ownership') return vals.includes(p.ownership)
+    // Status values ARE the display strings (see STATUS in propertyFields),
+    // so this compares directly — case-insensitively, because legacy rows and
+    // imports vary. No token translation, and nothing stored gets rewritten.
+    if (key === 'status') return vals.some(v => eqi(v, p.status))
     return true
   },
 
