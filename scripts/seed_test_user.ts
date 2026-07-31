@@ -18,8 +18,8 @@ async function seed() {
   `;
 
   await sql`
-    INSERT INTO crm_leads (id, tenant_id, name, phone, stage, source, requirement_config, requirement_locality, budget)
-    VALUES ('l_delpat_1', 'delpat', 'Rajesh Sharma', '+91 98765 43210', 'New', 'Website', '3BHK', 'Baner', 12000000)
+    INSERT INTO crm_leads (id, tenant_id, name, phone, stage, source, req, agent_id)
+    VALUES ('l_delpat_1', 'delpat', 'Rajesh Sharma', '+91 98765 43210', 'New', 'Website', ${sql.json({ config: '3BHK', locality: 'Baner', budget: 12000000 })}, 'u_akash')
     ON CONFLICT (id) DO NOTHING;
   `;
 

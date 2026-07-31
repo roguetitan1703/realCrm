@@ -72,48 +72,11 @@ async function runTestUserFlow() {
     await waitForServer('http://localhost:5000/health', 25000);
     console.log('[TestUser] Backend ready at http://localhost:5000/health');
 
-    // Create / ensure tenant 'delpat' and user 'akashpatelyo2@gmail.com' via script in backend context
-    console.log('[TestUser] Seeding user akashpatelyo2@gmail.com on delpat tenant...');
-    const seedScript = `
-      import { sql } from './backend/src/services/db.js';
-      import bcrypt from 'bcryptjs';
-      
-      async function run() {
-        await sql\`
-          INSERT INTO tenants (id, name, slug, subscription_plan, subscription_status, brand_config)
-          VALUES ('delpat', 'Delpat Real Estate', 'delpat', 'ENTERPRISE', 'ACTIVE', '\${JSON.stringify({ primaryColor: '#1E6F52', firmName: 'Delpat Real Estate' })}'::jsonb)
-          ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, brand_config = EXCLUDED.brand_config;
-        \`;
-        
-        const hash = await bcrypt.hash('delpat-demo-1', 10);
-        await sql\`
-          INSERT INTO users (id, tenant_id, name, email, password_hash, role, status, metadata)
-          VALUES ('u_akash', 'delpat', 'Akash Patel', 'akashpatelyo2@gmail.com', \${hash}, 'owner', 'ACTIVE', '\${JSON.stringify({ initials: 'AP' })}'::jsonb)
-          ON CONFLICT (id) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = 'owner', status = 'ACTIVE';
-        \`;
-
-        await sql\`
-          INSERT INTO crm_leads (id, tenant_id, name, phone, stage, source, requirement_config, requirement_locality, budget)
-          VALUES ('l_delpat_1', 'delpat', 'Rajesh Sharma', '+91 98765 43210', 'New', 'Website', '3BHK', 'Baner', 12000000)
-          ON CONFLICT (id) DO NOTHING;
-        \`;
-
-        await sql\`
-          INSERT INTO crm_properties (id, tenant_id, title, society, locality, price, type, config, deal, status, tower, unit)
-          VALUES ('p_delpat_1', 'delpat', 'Villa 402 Luxury Residency', 'Grand Riviera', 'Baner', '1.2 Cr', '3BHK', '3BHK', 'sale', 'Available', 'B', '402')
-          ON CONFLICT (id) DO NOTHING;
-        \`;
-        console.log('SEED_SUCCESS');
-        await sql.end();
-        process.exit(0);
-      }
-      run().catch(e => { console.error(e); process.exit(1); });
-    `;
-    
-    // Execute seed inline via tsx
-    const seedProc = spawn('npx', ['tsx', '-e', seedScript], { stdio: 'pipe', shell: true });
+    // Create / ensure tenant 'delpat' and user 'akashpatelyo2@gmail.com'
+    console.log('[TestUser] Running seed_test_user.ts...');
+    const seedProc = spawn('npx', ['tsx', 'scripts/seed_test_user.ts'], { stdio: 'inherit', shell: true });
     await new Promise((res) => seedProc.on('close', res));
-    console.log('[TestUser] Seeding complete.');
+    console.log('[TestUser] Seeding step complete.');
 
     await waitForServer(BASE_URL, 25000);
     console.log(`[TestUser] Vite ready at ${BASE_URL}`);

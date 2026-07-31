@@ -59,7 +59,9 @@ export function ModuleListView({
   // KPIs are dropped on a phone: a row of numbers costs a third of the screen
   // and the segment pills below already carry the same counts, tappable.
   const header = ((!phone && kpis?.length) || segments)
-    ? <PageHeader kpis={phone ? null : kpis} segments={segments} />
+    // [] not null — a default parameter only fills in for undefined, so null
+    // sailed past `kpis = []` and PageHeader read .length off it.
+    ? <PageHeader kpis={phone ? [] : kpis} segments={segments} />
     : null
 
   // On a phone the desktop bar does not shrink — it wraps into three rows of
