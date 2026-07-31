@@ -144,58 +144,17 @@ actionsRouter.post('/:id/actions/contact-log', async (req: Request, res: Respons
 });
 
 /**
- * 1. CLICK-TO-CALL TELEPHONY BRIDGE
- * POST /api/v1/records/:id/actions/call
+ * There was a CLICK-TO-CALL TELEPHONY BRIDGE here. It invented a DID, an API
+ * key and a call SID, logged "Initiated outbound telephony call to <number>
+ * via DID 08045678900 (SID: call_exo_…)" to the record, and answered
+ * "Leg 1 will ring in 2 seconds" — while never contacting Exotel or anyone
+ * else. Nothing rang. The timeline entry was a fabricated record of a call
+ * that did not happen, which is worse than having no calling at all.
+ *
+ * Calls are placed on the agent's own handset and recorded through
+ * /actions/contact-log below, which claims only what actually occurred.
+ * When real telephony is wired up it goes back here, and only then.
  */
-actionsRouter.post(
-  '/:id/actions/call',
-  requireModuleEnabled('dialer'),
-  requireQuotaAvailable('call_minutes'),
-  async (req: Request, res: Response) => {
-    try {
-      const recordId = req.params.id;
-      const parseResult = CallActionSchema.safeParse(req.body);
-
-      if (!parseResult.success) {
-        return res.status(400).json({ error: 'Validation Error', details: parseResult.error.format() });
-      }
-
-      const { agent_id } = parseResult.data;
-      const tenant = req.tenant!;
-
-      const lead = await getLeadById(recordId);
-      const leg1AgentPhone = req.user?.phone_number || '+919820011223';
-      const leg2TargetPhone = lead?.phone || '+919876543210';
-      
-      const integrations = await getIntegrations();
-      const exotelConfig = integrations.exotel || {};
-      const virtualLandlineDid = exotelConfig.did || '08045678900';
-      const apiKey = exotelConfig.apiKey || 'exo_live_default_key';
-
-      console.log(`[Exotel Bridge] Tenant: ${tenant.name} | Key: ${apiKey} | Dialing Leg 1: ${leg1AgentPhone} -> Leg 2: ${leg2TargetPhone} via DID ${virtualLandlineDid}`);
-
-      const callSid = `call_exo_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-
-      const evt = await addTimelineEvent({
-        record_id: recordId,
-        type: 'call',
-        title: 'Outbound Call Initiated',
-        description: `Initiated outbound telephony call to ${leg2TargetPhone} via DID ${virtualLandlineDid} (SID: ${callSid}).`,
-        author: agent_id,
-        metadata: { call_sid: callSid, status: 'initiated', leg1: leg1AgentPhone, did: virtualLandlineDid },
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: 'Cloud telephony call bridge initiated. Leg 1 will ring in 2 seconds.',
-        call_sid: callSid,
-        timeline_event: evt,
-      });
-    } catch (err: any) {
-      return res.status(500).json({ error: 'Telephony Bridge Failed', message: err.message });
-    }
-  }
-);
 
 /**
  * 2. OUTBOUND WHATSAPP BUSINESS (WABA) DISPATCH

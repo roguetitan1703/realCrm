@@ -25,6 +25,7 @@ import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted
 import { getNestedValue } from '../components/ModuleFields.jsx'
 import { reqShort, budgetRange, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
+import { localities, asOptions } from '../lib/suggest.js'
 import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
 // out again here — that duplication is exactly what broke property filtering.
@@ -35,12 +36,9 @@ import {
 } from '../data/propertyFields.js'
 
 
-// Shared option pools (kept here so filters and forms stay consistent).
-export const LEAD_LOCALITIES = [
-  'Hinjewadi Phase 1', 'Hinjewadi Phase 3', 'Marunji / Hinjewadi',
-  'Gahunje / Expressway', 'Kharadi', 'Kalyani Nagar', 'Baner', 'Wakad', 'Viman Nagar',
-]
-const PROP_LOCALITIES = ['Wakad', 'Baner', 'Kothrud', 'Hinjewadi', 'Viman Nagar', 'Kalyani Nagar', 'Wagholi']
+// Localities are DERIVED from the firm's own records, never listed here. There
+// used to be two hardcoded pools — one for leads, one for properties — that
+// disagreed with each other and were both Pune. See src/lib/suggest.js.
 
 const opt = (arr) => arr.map(v => ({ value: v, label: v }))
 
@@ -86,7 +84,7 @@ export const LEADS_DEF = {
     { key: 'stage', label: 'Stage', icon: 'layers', options: opt(store.state.settings.stages) },
     { key: 'deal', label: 'Deal', icon: 'tag', options: [{ value: 'sale', label: 'Sale' }, { value: 'rent', label: 'Rent' }] },
     { key: 'source', label: 'Source', icon: 'trend', options: opt(store.state.settings.sources) },
-    { key: 'locality', label: 'Locality', icon: 'building', options: opt(LEAD_LOCALITIES) },
+    { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
     { key: 'agent', label: 'Agent', icon: 'person', options: [
       { value: '_none', label: 'Unassigned' }, ...store.activeAgents().map(a => ({ value: a.id, label: a.first })),
     ] },
@@ -249,7 +247,7 @@ export const PROPERTIES_DEF = {
       { key: 'subtype', label: 'Property type', icon: 'home', group: 'What',
         options: optionsOf([...SUBTYPES.residential, ...SUBTYPES.commercial]
           .filter((x, i, a) => a.findIndex(y => y.value === x.value) === i)) },
-      { key: 'locality', label: 'Locality', icon: 'building', group: 'Where', options: opt(PROP_LOCALITIES) },
+      { key: 'locality', label: 'Locality', icon: 'building', group: 'Where', options: asOptions(localities(store)) },
       { key: 'status', label: 'Status', icon: 'check', group: 'State', options: optionsOf(STATUS) },
       { key: 'furnishing', label: 'Furnishing', icon: 'home', group: 'Condition', options: optionsOf(FURNISH) },
       { key: 'facing', label: 'Facing', icon: 'tag', group: 'Condition', options: optionsOf(FACING) },

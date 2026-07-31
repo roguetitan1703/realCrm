@@ -231,7 +231,8 @@ export const api = {
   unsubscribePush: (endpoint) => request('/notifications/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
 
   // Composable Actions
-  callBridge: (recordId, agentId) => request(`/records/${recordId}/actions/call`, { method: 'POST', body: JSON.stringify({ agent_id: agentId }) }),
+  // callBridge() is gone with the route it called. It reported success for a
+  // call nobody placed. Use logContactAction(id, 'call').
   // Remark thread on a lead OR property (B1) — a real persisted timeline entry,
   // author-attributed, edit-own. `outcome` (B5) is optional — set when
   // attaching an outcome to a logged call/message.

@@ -42,11 +42,18 @@ export default function WaModal({ store }) {
       .then(() => store.toast('Message copied'))
       .catch(() => store.toast('Could not copy — select the text and copy it', 'warn'))
   }
+  // PERSIST it. store.logEvent() only dispatches into local React state, so the
+  // entry looked right until the next server read — and any other action that
+  // reloads (logging a call does) replaced the timeline with the server's copy,
+  // silently erasing the WhatsApp send that was never written anywhere.
   const send = () => {
     if (l) {
-      store.logEvent(l.id, 'wa', p
-        ? `Sent ${p.society} (${p.priceLabel}) details on WhatsApp`
-        : 'Sent a WhatsApp message')
+      const note = p ? `Sent ${p.society} (${p.priceLabel}) details on WhatsApp` : 'Sent a WhatsApp message'
+      store.logContactAction('lead', l.id, 'wa')
+        .then(res => {
+          const evtId = res?.timeline_event?.id
+          if (evtId) store.editRemark('lead', l.id, evtId, note)
+        })
     }
     window.open(whatsappLink(wa.message, l?.phone), '_blank', 'noopener')
     store.closeWhatsApp()

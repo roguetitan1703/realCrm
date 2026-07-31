@@ -43,52 +43,14 @@ leadsRouter.post('/', async (req: Request, res: Response) => {
 });
 
 /**
- * 1. TELEPHONY BRIDGE ACTION (Live database phone lookup & timeline event insert)
- * POST /api/v1/leads/:id/actions/call
+ * A second copy of the fabricated telephony bridge lived here — same invented
+ * DID, same "Cloud telephony call bridge initiated" response, writing
+ * "Outbound telephony call to buyer <number> via DID 08045678900" straight
+ * into crm_timeline_events. Two routes inventing the same call.
+ *
+ * Removed. A call is recorded through /records/:id/actions/contact-log, which
+ * says only that a call was logged, by whom, and with what outcome.
  */
-leadsRouter.post(
-  '/:id/actions/call',
-  requireModuleEnabled('dialer'),
-  requireQuotaAvailable('call_minutes'),
-  async (req: Request, res: Response) => {
-    try {
-      const recordId = req.params.id;
-      const parseResult = CallActionSchema.safeParse(req.body);
-
-      if (!parseResult.success) {
-        return res.status(400).json({ error: 'Validation Error', details: parseResult.error.format() });
-      }
-
-      const { agent_id } = parseResult.data;
-      const tenant = req.tenant!;
-
-      const rows = await sql<any[]>`SELECT phone FROM crm_leads WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
-      const leg1AgentPhone = req.user?.phone_number || '+919820011223';
-      const leg2BuyerPhone = rows[0]?.phone || '+919876543210';
-      const did = '08045678900';
-
-      console.log(`[Leads Router - Exotel Bridge] Dialing Leg 1: ${leg1AgentPhone} -> Leg 2: ${leg2BuyerPhone}`);
-
-      const callSid = `exo_call_${Date.now()}`;
-      const evId = `evt_${Date.now()}`;
-      const content = `Outbound telephony call to buyer ${leg2BuyerPhone} via DID ${did}`;
-
-      await sql`
-        INSERT INTO crm_timeline_events (id, record_id, author, type, title, description, timestamp, tenant_id)
-        VALUES (${evId}, ${recordId}, ${agent_id || 'system'}, 'call', 'Outbound Call', ${content}, NOW(), ${req.tenantId})
-      `;
-
-      return res.status(200).json({
-        success: true,
-        message: 'Cloud telephony call bridge initiated.',
-        call_sid: callSid,
-        timeline_event: { id: evId, record_id: recordId, type: 'call', content },
-      });
-    } catch (err: any) {
-      return res.status(500).json({ error: 'Telephony Action Failed', message: err.message });
-    }
-  }
-);
 
 /**
  * 2. SEND WHATSAPP BUSINESS TEMPLATE ACTION (Live DB timeline logging)

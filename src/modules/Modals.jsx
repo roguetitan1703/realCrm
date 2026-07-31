@@ -11,6 +11,7 @@ import CameraCapture from '../components/CameraCapture.jsx'
 import { pushSupported, isPushSubscribed, enablePush, disablePush } from '../lib/push.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
+import { localities } from '../lib/suggest.js'
 import { CALL_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 
 // Generic modal frame
@@ -320,7 +321,11 @@ function LogCallModal({ store, leadId }) {
   const save = () => {
     setBusy(true)
     const label = labelForOutcome(outcome)
-    api.callBridge(l.id, store.state.activeAgentId)
+    // contact-log, NOT the "telephony bridge". That route fabricated a DID, an
+    // API key and a call SID and wrote "Initiated outbound telephony call …
+    // via DID 08045678900" to the timeline. No call was placed and no telephony
+    // is connected — it was a sentence describing something that did not happen.
+    api.logContactAction(l.id, 'call')
       .then(res => {
         const evtId = res?.timeline_event?.id
         return evtId ? api.editRemark(l.id, evtId, text.trim(), label) : null
@@ -384,11 +389,24 @@ function PickBuyerModal({ store, propId }) {
 }
 
 // ---- New / edit lead ----
-const PUNE_LOCALITIES = [
-  'Hinjewadi Phase 1', 'Hinjewadi Phase 3', 'Marunji / Hinjewadi',
-  'Gahunje / Expressway', 'Kharadi', 'Kalyani Nagar',
-  'Baner', 'Wakad', 'Viman Nagar', 'Kothrud'
-];
+// A THIRD hardcoded list of Pune localities used to live here, disagreeing with
+// the two in definitions.jsx. Locality is free text with suggestions drawn from
+// this firm's own records — see src/lib/suggest.js.
+
+// Free text, with the firm's existing values offered as you type. A native
+// datalist deliberately: it suggests without restricting, which is the whole
+// requirement — the next locality is always one nobody has typed yet.
+function SuggestInput({ id, value, onChange, options, placeholder }) {
+  return (
+    <>
+      <input className="input" list={id} value={value} placeholder={placeholder}
+        onChange={e => onChange(e.target.value)} autoComplete="off" style={{ width: '100%' }} />
+      <datalist id={id}>
+        {options.map(o => <option key={o} value={o} />)}
+      </datalist>
+    </>
+  )
+}
 
 const CONFIG_OPTIONS = [
   '1 BHK Apartment', '2 BHK Apartment', '3 BHK Apartment',
@@ -402,8 +420,8 @@ function LeadForm({ store, leadId }) {
     phone: edit.phone || '',
     email: edit.email || '',
     deal: edit.req?.deal || (edit.req?.purpose === 'Lease' ? 'rent' : 'sale'),
-    config: edit.req?.config || '2 BHK Apartment',
-    locality: edit.req?.locality || 'Hinjewadi Phase 1',
+    config: edit.req?.config || '',
+    locality: edit.req?.locality || '',
     timeline: edit.req?.timeline || 'Immediate',
     source: edit.source || 'Website',
     agentId: edit.agentId || null,
@@ -413,8 +431,8 @@ function LeadForm({ store, leadId }) {
     phone: '',
     email: '',
     deal: 'sale',
-    config: '2 BHK Apartment',
-    locality: 'Hinjewadi Phase 1',
+    config: '',
+    locality: '',
     timeline: 'Within 60 days',
     source: 'Website',
     agentId: store.state.agents[0]?.id || null,
@@ -505,9 +523,8 @@ function LeadForm({ store, leadId }) {
 
         <div className="field">
           <label>Preferred locality</label>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {PUNE_LOCALITIES.map(l => chip(f.locality === l, () => set('locality', l), l))}
-          </div>
+          <SuggestInput id="lead-locality" value={f.locality} onChange={v => set('locality', v)}
+            options={localities(store)} placeholder="Where are they looking?" />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
