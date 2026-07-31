@@ -279,6 +279,7 @@ export async function initSchema(): Promise<void> {
     await migrateProperColumns();
     await createLedgerTables();
     await migrateAuthV2();
+    await migrateIngestionD1();
 
     console.log('[Supabase DB] ✅ PostgreSQL schema initialization completed successfully.');
   } catch (err: any) {
@@ -600,4 +601,86 @@ async function createLedgerTables(): Promise<void> {
   // Drives the derived "visits to this unit" view without scanning JSONB.
   await sql`CREATE INDEX IF NOT EXISTS idx_activities_property ON activities (tenant_id, property_id) WHERE property_id IS NOT NULL;`;
   await sql`CREATE INDEX IF NOT EXISTS idx_activities_agent ON activities (tenant_id, agent_id, type, at DESC);`;
+}
+
+
+/**
+ * ============================================================================
+ * D1 — Ingestion platform (spec: docs/specs/ingestion.md)
+ * ============================================================================
+ * Turns "POST arrives → lead appears" into "POST arrives → RAW LANDS → parser
+ * (once configured) → lead". The inbox is the point: a provider's first push
+ * is exactly what you need in order to write the mapping, and today it is
+ * thrown away — the payload is read by a hardcoded alias list and whatever
+ * doesn't match is lost, with no record it was ever sent.
+ *
+ * Two tables, both idempotent and additive.
+ *
+ * `integrations` is NEW and deliberately not the existing `crm_integrations`,
+ * which is a key/config KV store with **no tenant_id at all** — one row per
+ * provider for the whole installation. That is fine for "the Exotel API key"
+ * in a single-tenant demo and unusable here: per-integration keys are the
+ * mechanism that resolves WHICH TENANT a push belongs to, so the table that
+ * holds them must be tenant-scoped or the whole model collapses.
+ */
+export async function migrateIngestionD1(): Promise<void> {
+  await sql`
+    CREATE TABLE IF NOT EXISTS integrations (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      -- The key is stored HASHED, like a password: a leaked database read must
+      -- not hand someone the ability to inject leads. The last4 is what the
+      -- UI shows so a tenant can tell two keys apart; the key itself is
+      -- displayed exactly once, at creation.
+      api_key_hash TEXT,
+      api_key_last4 TEXT,
+      -- NULL until someone configures the mapping. Null is the signal that
+      -- pushes must stay pending rather than guess at a lead.
+      parser_config JSONB,
+      active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      created_by TEXT,
+      last_received_at TIMESTAMPTZ
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_integrations_tenant ON integrations (tenant_id, active);`;
+  // The lookup on every inbound push: hash the presented key, find the row.
+  // Unique so one key can never resolve to two tenants.
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_integrations_key ON integrations (api_key_hash) WHERE api_key_hash IS NOT NULL;`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS webhook_inbox (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      integration_id TEXT NOT NULL,
+      received_at TIMESTAMPTZ DEFAULT NOW(),
+      source_ip TEXT,
+      headers JSONB,
+      -- The raw body, exactly as sent. Purged at 30 days by the retention job
+      -- (data-lifecycle.md) while the row and its lead link are kept, so an
+      -- old push still shows in the activity feed without storing the payload
+      -- of every lead the firm has ever received.
+      raw_body JSONB,
+      body_purged_at TIMESTAMPTZ,
+      status TEXT NOT NULL DEFAULT 'pending',   -- pending·parsed·failed·ignored
+      lead_id TEXT,
+      error TEXT,
+      parsed_at TIMESTAMPTZ
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_inbox_tenant ON webhook_inbox (tenant_id, received_at DESC);`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_inbox_integration ON webhook_inbox (integration_id, received_at DESC);`;
+  // "Replay pending" reads exactly this.
+  await sql`CREATE INDEX IF NOT EXISTS idx_inbox_pending ON webhook_inbox (tenant_id, status) WHERE status = 'pending';`;
+
+  // The unknown-key log already exists but was installation-wide and unbounded.
+  // Keep it minimal by design: no body is ever stored for an unauthenticated
+  // caller (spec behaviour 2), so this can only ever hold metadata.
+  for (const [col, type] of [['tenant_hint', 'TEXT'], ['path', 'TEXT'], ['count', 'INT DEFAULT 1']] as [string, string][]) {
+    await sql.unsafe(`ALTER TABLE ingest_rejects ADD COLUMN IF NOT EXISTS ${col} ${type};`);
+  }
+  await sql`CREATE INDEX IF NOT EXISTS idx_rejects_at ON ingest_rejects (received_at DESC);`;
+
+  console.log('[Supabase DB] D1 ingestion tables ready (integrations, webhook_inbox).');
 }

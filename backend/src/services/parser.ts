@@ -1,0 +1,254 @@
+/**
+ * ============================================================================
+ * 🔀 PARSER ENGINE — provider payload → canonical lead (spec: ingestion.md)
+ * ============================================================================
+ * A parser config is DATA, not code. Adding a provider is a row in a table, not
+ * a deploy — which is the entire point of D1: "new sources = configure
+ * integration + parser mapping, no core changes."
+ *
+ *   {
+ *     "map":        { "name": "full_name", "req.locality": "locality" },
+ *     "defaults":   { "deal": "sale", "source": "99acres" },
+ *     "valueMaps":  { "req.config": { "2 BHK": "2BHK" } },
+ *     "transforms": { "phone": "phone_in", "name": "trim" }
+ *   }
+ *
+ * `map` reads SOURCE dot-path → writes TARGET dot-path. Order of operations is
+ * map → transform → valueMap → default-if-still-empty, so a default can never
+ * overwrite something the provider actually sent, and a valueMap always sees a
+ * cleaned value rather than raw whitespace.
+ *
+ * Everything here is pure: same payload plus same config gives the same lead,
+ * with no database and no clock. That is what makes the mandatory test-preview
+ * honest — the preview runs the identical function the live push will.
+ * ============================================================================
+ */
+
+export type ParserConfig = {
+  map?: Record<string, string>;
+  defaults?: Record<string, any>;
+  valueMaps?: Record<string, Record<string, string>>;
+  transforms?: Record<string, string>;
+};
+
+export type ParseResult = {
+  ok: boolean;
+  lead: any;
+  /** Field-by-field trace, so the preview can show WHERE each value came from
+   *  rather than just the result. A mapping that silently produced nothing is
+   *  the failure mode this exists to expose. */
+  trace: Array<{ target: string; from: string | null; raw: any; value: any; via: string }>;
+  missing: string[];
+  errors: string[];
+};
+
+/** Read `a.b.c` out of a payload, tolerating arrays (`items.0.name`). */
+export function getPath(obj: any, path: string): any {
+  if (!obj || !path) return undefined;
+  return String(path).split('.').reduce((acc: any, part) => {
+    if (acc === null || acc === undefined) return undefined;
+    return acc[part];
+  }, obj);
+}
+
+function setPath(obj: any, path: string, value: any): void {
+  const parts = String(path).split('.');
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (typeof cur[parts[i]] !== 'object' || cur[parts[i]] === null) cur[parts[i]] = {};
+    cur = cur[parts[i]];
+  }
+  cur[parts[parts.length - 1]] = value;
+}
+
+const isEmpty = (v: any) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+
+// ---------------------------------------------------------------------------
+// Transforms — a fixed, named set, never arbitrary code
+// ---------------------------------------------------------------------------
+// A config is authored by a tenant owner and stored in the database. If a
+// transform were an expression, a parser config would be remote code execution
+// with extra steps. So it's a closed vocabulary of named operations, and an
+// unknown name is an error rather than a silent no-op.
+export const TRANSFORMS: Record<string, (v: any) => any> = {
+  trim: (v) => (typeof v === 'string' ? v.trim() : v),
+  lower: (v) => String(v ?? '').toLowerCase(),
+  upper: (v) => String(v ?? '').toUpperCase(),
+  digits: (v) => String(v ?? '').replace(/\D/g, ''),
+  number: (v) => {
+    const n = Number(String(v ?? '').replace(/[^0-9.]/g, ''));
+    return Number.isFinite(n) ? n : null;
+  },
+  /**
+   * Indian mobile normalisation. Portals send "+91 98765 43210",
+   * "098765 43210", "9876543210" and "91-9876543210" for the same person, and
+   * dedup compares phone numbers — so unnormalised input silently creates
+   * duplicate leads for one caller.
+   */
+  phone_in: (v) => {
+    const d = String(v ?? '').replace(/\D/g, '');
+    const ten = d.length > 10 ? d.slice(-10) : d;
+    return ten.length === 10 ? `+91${ten}` : String(v ?? '').trim();
+  },
+  /** "2 BHK Apartment in Wakad" → "2 BHK". Portals bury the config in prose. */
+  bhk: (v) => {
+    const m = String(v ?? '').match(/(\d+(?:\.5)?)\s*(?:bhk|bedroom)/i);
+    if (m) return `${m[1]} BHK`;
+    return /\b1\s*rk\b/i.test(String(v ?? '')) ? '1 RK' : String(v ?? '').trim();
+  },
+  /** "₹95 Lakh" / "1.2 Cr" / "9500000" → rupees. */
+  money_in: (v) => {
+    const s = String(v ?? '').toLowerCase();
+    const n = Number(s.replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(n) || n === 0) return null;
+    if (/cr|crore/.test(s)) return Math.round(n * 10000000);
+    if (/l|lakh|lac/.test(s)) return Math.round(n * 100000);
+    return Math.round(n);
+  },
+};
+
+// The lead fields a config is allowed to write. An allow-list, because the
+// parsed object goes straight into createLead: without it, a mapping could set
+// `id`, `tenant_id` or `stage` from a value a stranger POSTed.
+const WRITABLE = new Set([
+  'name', 'phone', 'email', 'source', 'notes',
+  'req.deal', 'req.locality', 'req.config', 'req.purpose', 'req.notes',
+  'req.timeline', 'req.budgetMin', 'req.budgetMax', 'req.budget',
+  'external_id',
+]);
+
+/** A lead is worth creating only if it can be contacted. */
+const REQUIRED = ['name', 'phone'];
+
+export function parsePayload(payload: any, config: ParserConfig | null): ParseResult {
+  const trace: ParseResult['trace'] = [];
+  const errors: string[] = [];
+  const lead: any = {};
+
+  if (!config || typeof config !== 'object') {
+    return { ok: false, lead, trace, missing: [...REQUIRED], errors: ['No parser configured for this connection.'] };
+  }
+
+  const map = config.map || {};
+  for (const [target, source] of Object.entries(map)) {
+    if (!WRITABLE.has(target)) {
+      errors.push(`"${target}" is not a lead field a mapping can write.`);
+      continue;
+    }
+    const raw = getPath(payload, source);
+    let value: any = raw;
+    let via = 'map';
+
+    const tName = config.transforms?.[target];
+    if (tName) {
+      const fn = TRANSFORMS[tName];
+      if (!fn) { errors.push(`Unknown transform "${tName}" for "${target}".`); }
+      else if (!isEmpty(value)) { value = fn(value); via = `map+${tName}`; }
+    }
+
+    const vmap = config.valueMaps?.[target];
+    if (vmap && !isEmpty(value)) {
+      const hit = vmap[String(value)] ?? vmap[String(value).trim()];
+      if (hit !== undefined) { value = hit; via += '+valueMap'; }
+    }
+
+    if (!isEmpty(value)) setPath(lead, target, value);
+    trace.push({ target, from: source, raw, value: isEmpty(value) ? null : value, via });
+  }
+
+  // Defaults fill gaps; they never overwrite. A provider that sends a deal type
+  // must win over the default someone set months ago.
+  for (const [target, value] of Object.entries(config.defaults || {})) {
+    if (!WRITABLE.has(target)) { errors.push(`"${target}" is not a lead field a default can write.`); continue; }
+    if (isEmpty(getPath(lead, target))) {
+      setPath(lead, target, value);
+      trace.push({ target, from: null, raw: null, value, via: 'default' });
+    }
+  }
+
+  const missing = REQUIRED.filter(f => isEmpty(getPath(lead, f)));
+  return { ok: missing.length === 0 && errors.length === 0, lead, trace, missing, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Auto-suggest
+// ---------------------------------------------------------------------------
+
+/** Every leaf path in a payload, so the mapper can offer real choices instead
+ *  of asking someone to type dot-paths from memory. */
+export function flattenPaths(obj: any, prefix = '', out: Record<string, any> = {}): Record<string, any> {
+  if (obj === null || obj === undefined) return out;
+  if (Array.isArray(obj)) {
+    // Only the first element: portals send N identical-shaped items, and
+    // offering `items.0…items.49` would bury the useful paths.
+    if (obj.length) flattenPaths(obj[0], `${prefix}0.`, out);
+    return out;
+  }
+  if (typeof obj !== 'object') { out[prefix.replace(/\.$/, '')] = obj; return out; }
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== null && typeof v === 'object') flattenPaths(v, `${prefix}${k}.`, out);
+    else out[`${prefix}${k}`] = v;
+  }
+  return out;
+}
+
+// What each canonical field tends to be called in the wild. Ordered: the
+// earlier an alias, the stronger the claim.
+const HINTS: Record<string, string[]> = {
+  name: ['name', 'full_name', 'fullname', 'customer_name', 'lead_name', 'client_name', 'contact_name'],
+  phone: ['phone', 'mobile', 'phone_number', 'mobile_number', 'contact_number', 'contact', 'msisdn'],
+  email: ['email', 'email_id', 'email_address', 'mail'],
+  'req.locality': ['locality', 'location', 'area', 'preferred_locality', 'city', 'project_location'],
+  'req.config': ['config', 'bhk', 'configuration', 'property_type', 'requirement', 'unit_type'],
+  'req.budgetMin': ['budget_min', 'min_budget', 'budget_from', 'price_min'],
+  'req.budgetMax': ['budget_max', 'max_budget', 'budget_to', 'price_max', 'budget'],
+  'req.notes': ['message', 'comments', 'notes', 'query', 'remarks', 'description'],
+  external_id: ['external_id', 'lead_id', 'enquiry_id', 'id', 'reference_id'],
+};
+
+const DEFAULT_TRANSFORM: Record<string, string> = {
+  phone: 'phone_in', name: 'trim', email: 'trim',
+  'req.config': 'bhk', 'req.budgetMin': 'money_in', 'req.budgetMax': 'money_in',
+};
+
+/**
+ * Propose a mapping from a real payload. This is a SUGGESTION and the spec is
+ * explicit that it must be confirmed — it turns the job from "write a config"
+ * into "check these matches", which is the difference between something a
+ * broker can do and something they have to call us about.
+ *
+ * It deliberately proposes nothing it isn't reasonably sure of: a field with no
+ * confident match is left for a human rather than guessed at, because a wrong
+ * mapping that looks configured is worse than an obvious gap.
+ */
+export function suggestConfig(payload: any, providerLabel?: string): ParserConfig {
+  const paths = Object.keys(flattenPaths(payload || {}));
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const map: Record<string, string> = {};
+  const transforms: Record<string, string> = {};
+
+  for (const [target, aliases] of Object.entries(HINTS)) {
+    let best: { path: string; rank: number } | null = null;
+    for (const path of paths) {
+      const leaf = norm(path.split('.').pop() || '');
+      const whole = norm(path);
+      for (let i = 0; i < aliases.length; i++) {
+        const a = norm(aliases[i]);
+        // Exact leaf beats a match anywhere in the path, and an earlier alias
+        // beats a later one.
+        const rank = leaf === a ? i : (whole.includes(a) ? i + 100 : -1);
+        if (rank >= 0 && (!best || rank < best.rank)) best = { path, rank };
+      }
+    }
+    if (best) {
+      map[target] = best.path;
+      if (DEFAULT_TRANSFORM[target]) transforms[target] = DEFAULT_TRANSFORM[target];
+    }
+  }
+
+  const defaults: Record<string, any> = {};
+  if (providerLabel) defaults.source = providerLabel;
+  if (!map['req.deal']) defaults['req.deal'] = 'sale';
+
+  return { map, defaults, transforms, valueMaps: {} };
+}
