@@ -1226,7 +1226,9 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
   // importBatchId, features, …) persists and round-trips via rowToProperty.
   const config: any = { ...(propData.config || {}) };
   for (const [k, v] of Object.entries(propData)) {
-    if (!PROPERTY_COLUMNS.has(k) && k !== 'id' && k !== 'config') config[k] = v;
+    // C4_CLIENT_KEYS have real columns now — letting them also land in config
+    // would leave two copies that disagree the first time one is edited.
+    if (!PROPERTY_COLUMNS.has(k) && !C4_CLIENT_KEYS.has(k) && k !== 'id' && k !== 'config') config[k] = v;
   }
 
   // New first-class columns (source of truth going forward); config stays populated too.
@@ -1262,7 +1264,9 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
     )
     RETURNING *;
   `;
-  const created = rowToProperty(rows[0]);
+  await applyC4Fields(newId, propData);
+  const refreshed = await sql`SELECT * FROM crm_properties WHERE id = ${newId} AND tenant_id = ${tid()}`;
+  const created = rowToProperty(refreshed[0] || rows[0]);
   audit({
     tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'property.create', target_type: 'property', target_id: newId,
@@ -1273,6 +1277,72 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
 
 // First-class columns on crm_properties. Anything else in a patch is a config (JSONB) field.
 const PROPERTY_COLUMNS = new Set(['title', 'status', 'type', 'locality', 'price', 'tower', 'unit', 'tenancy', 'timeline']);
+
+// ---------------------------------------------------------------------------
+// Block C canonical fields: client name -> column.
+//
+// ONE map, used by both createProperty and updateProperty. Without it these
+// fields would fall through to the `config` JSONB blob like every other
+// non-column key, which would quietly defeat the entire schema pass — the
+// columns would exist and always be NULL, and the filters reading them would
+// find nothing.
+// ---------------------------------------------------------------------------
+const C4_SCALARS: Record<string, string> = {
+  category: 'category', subtype: 'subtype', bhk: 'bhk',
+  transactionType: 'transaction_type', ownership: 'ownership',
+  bathrooms: 'bathrooms', balconies: 'balconies',
+  builtup: 'builtup_sqft', superBuiltup: 'super_builtup_sqft',
+  plotArea: 'plot_area', areaUnit: 'area_unit', priceAreaBasis: 'price_area_basis',
+  coveredParking: 'covered_parking', openParking: 'open_parking',
+  servantRoom: 'servant_room', furnishType: 'furnish_type',
+  petFriendly: 'pet_friendly', availableFrom: 'available_from',
+  maintenanceMode: 'maintenance_mode', maintenanceAmount: 'maintenance_amount',
+  depositOption: 'deposit_option', depositAmount: 'deposit_amount',
+  lockinOption: 'lockin_option', lockinMonths: 'lockin_months',
+  parkingChargesMode: 'parking_charges_mode', paintingCharges: 'painting_charges',
+  otherCharges: 'other_charges', bookingAmount: 'booking_amount',
+  taxIncluded: 'tax_included',
+  floorsAllowed: 'floors_allowed', openSides: 'open_sides',
+  roadWidthFt: 'road_width_ft', cornerPlot: 'corner_plot',
+  consultingOption: 'consulting_option', consultingPercent: 'consulting_percent',
+  description: 'description', keyAccess: 'key_access',
+  ownerContactId: 'owner_contact_id', completeness: 'completeness',
+  geoLat: 'geo_lat', geoLng: 'geo_lng',
+};
+
+// Genuine lists — jsonb, not Postgres arrays, so they're written separately.
+const C4_JSON: Record<string, string> = {
+  fixtures: 'fixtures', countedItems: 'counted_items',
+  societyAmenities: 'society_amenities', preferredTenants: 'preferred_tenants',
+  priceIncludes: 'price_includes',
+};
+
+/** Client keys the config blob must NOT swallow, since they have real columns. */
+export const C4_CLIENT_KEYS = new Set([...Object.keys(C4_SCALARS), ...Object.keys(C4_JSON)]);
+
+/** Write whichever canonical fields are present. Absent keys are left alone, so
+ *  this works for both a fresh insert and a partial edit. */
+async function applyC4Fields(id: string, src: any): Promise<void> {
+  const scalars: Record<string, any> = {};
+  for (const [k, col] of Object.entries(C4_SCALARS)) {
+    if (src[k] !== undefined) scalars[col] = src[k] === '' ? null : src[k];
+  }
+  if (Object.keys(scalars).length) {
+    await sql`UPDATE crm_properties SET ${sql(scalars)} WHERE id = ${id} AND tenant_id = ${tid()}`;
+  }
+  for (const [k, col] of Object.entries(C4_JSON)) {
+    if (src[k] === undefined) continue;
+    // sql(col) is the identifier helper and sql.json() the jsonb value helper.
+    // Do NOT hand-roll this as sql.unsafe(`... = $1::jsonb`, [JSON.stringify(v)]) —
+    // that double-encodes, storing the jsonb STRING '["sofa"]' instead of the
+    // array ["sofa"], which reads back as a string and silently breaks
+    // .length/.map on every consumer.
+    await sql`
+      UPDATE crm_properties SET ${sql(col)} = ${sql.json(src[k])}
+      WHERE id = ${id} AND tenant_id = ${tid()}
+    `;
+  }
+}
 
 export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any | null> {
   const old = await sql`SELECT * FROM crm_properties WHERE id = ${id} AND tenant_id = ${tid()}`;
@@ -1297,7 +1367,7 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   if (patch.config && typeof patch.config === 'object') Object.assign(config, patch.config);
   for (const [k, v] of Object.entries(patch)) {
     if (k === 'config' || k === 'id') continue;
-    if (!PROPERTY_COLUMNS.has(k)) config[k] = v;
+    if (!PROPERTY_COLUMNS.has(k) && !C4_CLIENT_KEYS.has(k)) config[k] = v;
   }
 
   // New first-class columns, patched when present, else keep the existing column value.
@@ -1335,7 +1405,9 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
       age_years = ${ageYears}, price_amount = ${priceAmount}, updated_at = NOW()
     WHERE id = ${id} AND tenant_id = ${tid()} RETURNING *;
   `;
-  const updated = rowToProperty(rows[0]);
+  await applyC4Fields(id, patch);
+  const refreshed = await sql`SELECT * FROM crm_properties WHERE id = ${id} AND tenant_id = ${tid()}`;
+  const updated = rowToProperty(refreshed[0] || rows[0]);
   audit({
     tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'property.update', target_type: 'property', target_id: id,
