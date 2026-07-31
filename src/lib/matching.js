@@ -161,7 +161,29 @@ export function whatsappLink(message, phone) {
   return digits ? `https://wa.me/${digits}?text=${text}` : `https://wa.me/?text=${text}`
 }
 
-export function generateMessage(property, opts = {}) {
+// Fields that identify the owner. The shared listing must never carry them
+// (spec C: "owner is internal, never in the listing") — the property links to
+// an internal Owner contact, and that link is how the firm gets back to them.
+const OWNER_IDENTITY_FIELDS = [
+  'owner', 'ownerPhone', 'ownerEmail',
+  'owner_name', 'owner_phone', 'owner_email', 'ownerContactId',
+]
+
+/**
+ * Strip owner identity before a property is turned into anything a client
+ * sees. Enforced by REMOVING the fields rather than by trusting every message
+ * template not to interpolate them — a template edited a year from now cannot
+ * leak what isn't in the object it was handed.
+ */
+export function shareSafeProperty(property) {
+  if (!property) return property
+  const clean = { ...property }
+  for (const f of OWNER_IDENTITY_FIELDS) delete clean[f]
+  return clean
+}
+
+export function generateMessage(rawProperty, opts = {}) {
+  const property = shareSafeProperty(rawProperty)
   if (!property) return ''
   const firmName = opts.firmName || FIRM
   const lang = opts.lang || 'Hinglish', tone = opts.tone || 'Standard', variant = opts.variant || 0

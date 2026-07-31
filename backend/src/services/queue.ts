@@ -3,7 +3,7 @@
  * 🐂 NATIVE ZERO-DEPENDENCY ASYNC TASK QUEUE & IDEMPOTENCY ENGINE
  * ============================================================================
  * Designed per strict user directive: no overengineered Redis/BullMQ clusters
- * or bloat dependencies needed for 10-50 agent real estate brokerages.
+ * or bloat dependencies needed for 10-50 agent real estate consultancies.
  * Uses native Node.js asynchronous loops, concurrency control, exponential
  * backoff retry scheduling, and TTL idempotency locking.
  * ============================================================================

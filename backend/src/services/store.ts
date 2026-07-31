@@ -69,7 +69,7 @@ export async function getTenantForIngest(slugOrId: string): Promise<{ id: string
 }
 
 // ---------------------------------------------------------------------------
-// Tenant provisioning — the real "onboard a brokerage" engine. This is a
+// Tenant provisioning — the real "onboard a consultancy" engine. This is a
 // SUPERADMIN action (Delpat staff), not a public one: it creates an isolated,
 // login-ready workspace and NEVER wipes or touches any other tenant's data.
 // Returns everything the operator needs to hand the client: the workspace slug,

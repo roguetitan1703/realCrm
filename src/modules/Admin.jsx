@@ -169,7 +169,7 @@ export default function Admin() {
         {/* Provision a new workspace — the ONLY place a tenant is created */}
         <section style={cardStyle}>
           <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 4 }}>Provision workspace</div>
-          <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 19, marginBottom: 16 }}>Onboard a brokerage</div>
+          <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 19, marginBottom: 16 }}>Onboard a consultancy</div>
 
           {provisioned ? (
             <div>

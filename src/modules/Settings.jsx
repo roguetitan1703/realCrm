@@ -83,7 +83,7 @@ function BrandSection({ store, settings }) {
           </div>
           <div className="brand-field">
             <div className="field-lbl">Firm name</div>
-            <Input value={firm} onChange={e => setFirm(e.target.value)} placeholder="Your brokerage name"
+            <Input value={firm} onChange={e => setFirm(e.target.value)} placeholder="Your consultancy name"
               onKeyDown={e => { if (e.key === 'Enter' && dirty) store.setFirmName(firm) }} />
           </div>
           <Button variant={dirty ? 'primary' : 'ghost'} disabled={!dirty} onClick={() => store.setFirmName(firm)}>Save</Button>

@@ -163,6 +163,48 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
       ),
     },
     {
+      // C7. The owner lives on the property record, NOT in the add flow —
+      // nobody has these details to hand while typing a listing in — and never
+      // in anything a client receives. This section is that link: it's how the
+      // firm gets back to the owner about re-availability, price changes and
+      // access, which is the whole reason the link exists.
+      id: 'owner',
+      title: 'Owner · internal',
+      right: <span className="own-never">Never shared with clients</span>,
+      render: () => !p.owner && !p.ownerPhone
+        ? <div className="detail-empty">
+            No owner recorded. Add one so this listing can be chased when it goes
+            quiet — <button className="lnk" onClick={openEdit}>edit the property</button>.
+          </div>
+        : (
+          <div className="own">
+            <KV items={[
+              { k: 'Name', v: p.owner || '—' },
+              { k: 'Phone', v: p.ownerPhone || '—' },
+              { k: 'Email', v: p.ownerEmail || '—' },
+              { k: 'Key / access', v: p.keyAccess || '—' },
+            ]} />
+            <div className="own-acts">
+              {p.ownerPhone && (
+                <>
+                  <Button size="sm" variant="secondary" icon="phone"
+                    onClick={() => store.openModal({ kind: 'contact', channel: 'call', name: p.owner, phone: p.ownerPhone, recordType: 'property', recordId: p.id })}>
+                    Call owner
+                  </Button>
+                  <Button size="sm" variant="secondary" icon="wa"
+                    onClick={() => store.openModal({ kind: 'contact', channel: 'wa', name: p.owner, phone: p.ownerPhone, recordType: 'property', recordId: p.id })}>
+                    WhatsApp
+                  </Button>
+                </>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => go('clients', { contactsTab: 'owners' })}>
+                All owners →
+              </Button>
+            </div>
+          </div>
+        ),
+    },
+    {
       id: 'buyers',
       title: `Interested ${p.deal === 'rent' ? 'tenants' : 'buyers'}`, right: `${buyers.length} matched`,
       render: () => buyers.length === 0

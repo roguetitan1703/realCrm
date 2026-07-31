@@ -63,7 +63,7 @@ adminRouter.get('/overview', async (_req: Request, res: Response) => {
 });
 
 /**
- * POST /api/v1/admin/onboard — provision a new brokerage workspace.
+ * POST /api/v1/admin/onboard — provision a new consultancy workspace.
  * Superadmin-only (guarded by adminRouter.use above). This is the ONE place a
  * workspace is created; the public /workspace/onboard route was removed so a
  * visitor on the login page can no longer spin up tenants.
