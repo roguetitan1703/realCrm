@@ -3,6 +3,7 @@ import { Segmented } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { thumbTint, fitReasons } from '../lib/format.js'
 import { whatsappLink, matchesForLead } from '../lib/matching.js'
+import { MESSAGE_LANGUAGES } from '../data/vocabLocale.js'
 
 // ============================================================================
 // 💬 THE WHATSAPP COMPOSER — one component, every entry point
@@ -70,37 +71,53 @@ export default function WaModal({ store }) {
         </div>
 
         {l && (
-          <div className="wa-pick">
-            <button className={'wa-opt' + (!p ? ' on' : '')} onClick={() => store.recompose({ propId: null })}>
-              <span className="wa-opt-b">
-                <span className="wa-opt-n">No property</span>
-                <span className="wa-opt-s">Message only</span>
+          <div className="wa-attach">
+            <label className="wa-attach-l">Attach</label>
+            <div className="wa-sel-w">
+              <select className="wa-sel" value={p?.id || ''}
+                onChange={e => store.recompose({ propId: e.target.value || null })}>
+                <option value="">No property — message only</option>
+                {options.length > 0 && (
+                  <optgroup label="Shortlisted">
+                    {options.filter(o => o.tag === 'Shortlisted').map(({ p: op }) => (
+                      <option key={op.id} value={op.id}>{op.society} · {op.priceLabel}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {options.some(o => o.tag !== 'Shortlisted') && (
+                  <optgroup label="Matches">
+                    {options.filter(o => o.tag !== 'Shortlisted').map(({ p: op, tag }) => (
+                      <option key={op.id} value={op.id}>{op.society} · {op.priceLabel} · {tag}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              <Icon name="chevDown" size={15} />
+            </div>
+            {p && (
+              <span className="wa-chip">
+                <span className="wa-chip-th" style={{ background: thumbTint(p.id) }}>
+                  <Icon name="building" size={13} strokeWidth={1.4} />
+                </span>
+                {p.society}
+                <button type="button" onClick={() => store.recompose({ propId: null })} aria-label="Detach">
+                  <Icon name="x" size={12} />
+                </button>
               </span>
-            </button>
-            {options.map(({ p: op, tag }) => (
-              <button key={op.id} className={'wa-opt' + (p?.id === op.id ? ' on' : '')}
-                onClick={() => store.recompose({ propId: op.id })}>
-                <span className="wa-opt-th" style={{ background: thumbTint(op.id) }}>
-                  <Icon name="building" size={15} strokeWidth={1.4} />
-                </span>
-                <span className="wa-opt-b">
-                  <span className="wa-opt-n">{op.society}</span>
-                  <span className="wa-opt-s">{op.priceLabel} · {tag}</span>
-                </span>
-              </button>
-            ))}
+            )}
           </div>
         )}
 
-        {p && (
-          <div className="wa-ctl">
-            <Segmented value={wa.lang} onChange={v => store.recompose({ lang: v })} options={['Hinglish', 'English', 'Marathi']} />
-            <Segmented value={wa.tone} onChange={v => store.recompose({ tone: v })} options={['Standard', 'Short']} />
-            <button className="wa-var" title="Another wording" onClick={() => store.recompose({ variant: wa.variant + 1 })}>
-              <Icon name="refresh" size={15} />
-            </button>
-          </div>
-        )}
+        {/* Always shown. These are properties of the MESSAGE, not of the
+            listing — a follow-up with nothing attached is still being written
+            in Marathi if that is what was picked. */}
+        <div className="wa-ctl">
+          <Segmented value={wa.lang} onChange={v => store.recompose({ lang: v })} options={MESSAGE_LANGUAGES} />
+          {p && <Segmented value={wa.tone} onChange={v => store.recompose({ tone: v })} options={['Standard', 'Short']} />}
+          <button className="wa-var" title="Another wording" onClick={() => store.recompose({ variant: wa.variant + 1 })}>
+            <Icon name="refresh" size={15} />
+          </button>
+        </div>
 
         <WaCanvas message={wa.message} deva={wa.lang === 'Marathi'}
           style={{ borderRadius: 0, minHeight: 190, flex: 1, overflowY: 'auto' }} />

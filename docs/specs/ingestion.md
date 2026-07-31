@@ -198,11 +198,12 @@ mocks away.
   without a token. `/ingest` itself is NOT affected: it authenticates on the API
   key alone and rejects cross-tenant keys. Parked deliberately (nothing is live
   yet); it is the auth/RBAC phase of BUILD_PLAN, not a D item.
-- **P2 · Fabricated telephony, now deleted.** Two routes invented a DID, an API
-  key and a call SID and wrote "Initiated outbound telephony call … via DID
-  08045678900" to the timeline while contacting nobody. Removed; a call is
-  recorded through `contact-log`, which claims only what happened. Real
-  click-to-call remains unbuilt and should be scoped on its own.
+- **P2 · CLOSED.** Two routes fabricated a DID, an API key and a call SID and
+  wrote "Initiated outbound telephony call … via DID 08045678900" to the
+  timeline while contacting nobody. Removed. **Confirmed with the client: there
+  is no telephony and none is planned** — on a phone the call button opens the
+  device dialer, and everywhere else the agent logs the call afterwards. That is
+  the design, not a gap, so nothing further is owed here.
 - **P3 · The lead form is not schema-driven.** Properties went through the
   vocabulary + wizard rework; leads did not. Locality was three disagreeing
   hardcoded Pune lists (now free text with suggestions derived from the firm's

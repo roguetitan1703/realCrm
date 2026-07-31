@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Field, Input, Textarea } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
+import Lightbox from '../components/Lightbox.jsx'
 import { fileUrl, processListingImage, uploadMedia } from '../lib/media.js'
 import {
   AREA_UNITS, BACHELOR_PREF, BHK_COMMON, BHK_LARGE, BHK_MORE, CATEGORIES,
@@ -220,6 +221,12 @@ function MediaPicker({ media = [], firmName, onChange, onError }) {
   // reason an uploaded photo used to look like an empty box.
   const previews = useRef(new Map())
   const seq = useRef(0)
+  // The list as it is RIGHT NOW. `upload` is created in one render and awaited
+  // across several, so the `media` it closed over is stale by the time the
+  // second file finishes — and `onChange([...media, second])` then wrote a list
+  // that had never heard of the first. Uploading two photos kept exactly one.
+  const latest = useRef(media)
+  latest.current = media
 
   useEffect(() => () => { for (const url of previews.current.values()) URL.revokeObjectURL(url) }, [])
 
@@ -237,7 +244,7 @@ function MediaPicker({ media = [], firmName, onChange, onError }) {
       const key = await uploadMedia(blob, 'property')
       previews.current.set(key, URL.createObjectURL(blob))
       setQueue(q => q.filter(x => x.id !== item.id))
-      onChange([...media, {
+      const next = [...latest.current, {
         key, kind: item.kind, w, h, at: new Date().toISOString(),
         // Video leaves the device untouched: a browser cannot watermark one.
         // Recording that fact on the object is what lets a later server-side
@@ -245,7 +252,9 @@ function MediaPicker({ media = [], firmName, onChange, onError }) {
         // has. Storing it as "watermarked: false" rather than not storing it
         // means an unmarked file can never be mistaken for a marked one.
         ...(item.kind === 'video' ? { watermarked: false } : {}),
-      }])
+      }]
+      latest.current = next
+      onChange(next)
     } catch (e) {
       const msg = e.message || 'Upload failed'
       setQueue(q => q.map(x => (x.id === item.id ? { ...x, status: 'error', error: msg } : x)))
@@ -307,7 +316,7 @@ function MediaPicker({ media = [], firmName, onChange, onError }) {
             <div className="mp-grid">
               {media.map((m, i) => (
                 <div key={m.key} className="mp-item">
-                  <button type="button" className="mp-open" onClick={() => setViewing(m)}
+                  <button type="button" className="mp-open" onClick={() => setViewing(i)}
                     aria-label={m.kind === 'video' ? 'Play video' : 'View photo'}>
                     {m.kind === 'video'
                       ? <span className="mp-vid"><Icon name="play" size={20} fill /></span>
@@ -353,18 +362,9 @@ function MediaPicker({ media = [], firmName, onChange, onError }) {
           </>
         )}
       </div>
-      <div className="pw-hint mp-hint">
-        The first photo is the cover. Photos get the firm's watermark on this
-        device before they upload. Video uploads as shot — it can't be marked here.
-      </div>
 
-      {viewing && (
-        <div className="mp-lightbox" onClick={() => setViewing(null)} role="dialog" aria-label="Media preview">
-          <button type="button" className="mp-lb-x" aria-label="Close"><Icon name="x" size={18} /></button>
-          {viewing.kind === 'video'
-            ? <video src={fileUrl(viewing.key)} controls autoPlay onClick={e => e.stopPropagation()} />
-            : <img src={srcFor(viewing.key)} alt="" onClick={e => e.stopPropagation()} />}
-        </div>
+      {viewing !== null && (
+        <Lightbox items={media} index={viewing} srcFor={srcFor} onClose={() => setViewing(null)} />
       )}
     </div>
   )

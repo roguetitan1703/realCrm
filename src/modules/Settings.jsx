@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
-import { Panel, SectionHead, StageTag, Button, Input } from '../components/primitives.jsx'
+import { Panel, SectionHead, StageTag, Button, Input, Segmented } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES } from '../data/theme.js'
 import { api } from '../lib/api.js'
+import { MESSAGE_LANGUAGES } from '../data/vocabLocale.js'
+import { DEFAULT_FOLLOWUPS, PLACEHOLDERS } from '../data/followUpTemplates.js'
 
 const NAV = [
   { key: 'brand', label: 'Brand', icon: 'layers' },
@@ -10,6 +12,7 @@ const NAV = [
   { key: 'sources', label: 'Lead sources', icon: 'tag' },
   { key: 'routing', label: 'Lead routing', icon: 'team' },
   { key: 'followup', label: 'Follow-up SLA', icon: 'clock' },
+  { key: 'messages', label: 'Message templates', icon: 'wa' },
   { key: 'audit', label: 'Audit ledger', icon: 'shield' },
   { key: 'system', label: 'System & data', icon: 'settings' },
 ]
@@ -37,6 +40,7 @@ export default function Settings({ store, topBar }) {
               {section === 'sources' && <SourcesSection store={store} settings={settings} />}
               {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} leads={leads} inactiveAgentIds={inactiveAgentIds} />}
               {section === 'followup' && <FollowUpSection store={store} settings={settings} />}
+              {section === 'messages' && <MessagesSection store={store} settings={settings} />}
               {section === 'audit' && <AuditSection />}
               {section === 'system' && <SystemSection store={store} />}
             </div>
@@ -273,6 +277,51 @@ function FollowUpSection({ store, settings }) {
         <div className="set-sec-sub">An active lead with no touch for this many days is nudged back to the top.</div>
         <NumField value={remind} suffix="days" onChange={setRemind} step={1} />
       </Panel>
+    </>
+  )
+}
+
+// ---- Message templates ----------------------------------------------------
+// The wording sent when NO property is attached. Three per language so the same
+// buyer chased three times does not get the identical paragraph, and editable
+// because a broker's own phrasing beats ours — this is the text their client
+// actually reads.
+function MessagesSection({ store, settings }) {
+  const [lang, setLang] = useState(MESSAGE_LANGUAGES[0])
+  const saved = settings.followUpTemplates || {}
+  const current = (saved[lang]?.length ? saved[lang] : DEFAULT_FOLLOWUPS[lang]) || []
+  const [draft, setDraft] = useState(current)
+  const [editingLang, setEditingLang] = useState(lang)
+
+  // Switching language loads that language's set rather than carrying edits across.
+  if (editingLang !== lang) { setEditingLang(lang); setDraft(current) }
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(current)
+  const save = () => store.patchSettings(
+    { followUpTemplates: { ...saved, [lang]: draft.map(t => t.trim()).filter(Boolean) } },
+    'Templates saved')
+  const reset = () => {
+    const next = { ...saved }; delete next[lang]
+    setDraft(DEFAULT_FOLLOWUPS[lang]); store.patchSettings({ followUpTemplates: next }, 'Templates reset')
+  }
+
+  return (
+    <>
+      <SecHead title="Message templates" sub="Sent on WhatsApp when no property is attached." />
+      <div className="set-card">
+        <Segmented value={lang} onChange={setLang} options={MESSAGE_LANGUAGES} />
+        <div className="msgt-ph">
+          {PLACEHOLDERS.map(ph => <code key={ph.token}>{ph.token}</code>)}
+        </div>
+        {draft.map((t, i) => (
+          <textarea key={i} className="textarea msgt-t" rows={2} value={t}
+            onChange={e => setDraft(d => d.map((x, j) => (j === i ? e.target.value : x)))} />
+        ))}
+        <div className="msgt-foot">
+          <Button variant="primary" disabled={!dirty} onClick={save}>Save</Button>
+          <Button variant="ghost" onClick={reset}>Reset to default</Button>
+        </div>
+      </div>
     </>
   )
 }

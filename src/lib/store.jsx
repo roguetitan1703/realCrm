@@ -636,8 +636,14 @@ export function StoreProvider({ children }) {
     }
     // No property attached is a normal case — a plain follow-up. Returning ''
     // here left the composer blank with a dead Send button.
-    return lead ? followUpMessage(lead, state.settings.firmName) : ''
-  }, [state.properties, state.leads, state.settings.firmName])
+    // Language, tone and wording-variant belong to the WhatsApp feature, not to
+    // the property branch of it — a follow-up with no listing attached is still
+    // being sent in Marathi if that is what the agent chose.
+    return lead ? followUpMessage(lead, state.settings.firmName, {
+      lang: wa.lang, variant: wa.variant,
+      templates: state.settings.followUpTemplates,
+    }) : ''
+  }, [state.properties, state.leads, state.settings.firmName, state.settings.followUpTemplates])
 
   const openWhatsApp = useCallback((propId, leadId) => {
     const wa = { propId, leadId, lang: 'Hinglish', tone: 'Standard', variant: 0 }

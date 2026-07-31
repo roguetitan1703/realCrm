@@ -77,61 +77,52 @@ function drawWatermark(ctx, w, h, lines) {
 /**
  * The anti-crop mark for LISTING media (spec C3w).
  *
- * A corner logo alone is useless here: anyone can crop the corner off and
- * repost the photo as their own, which is the actual thing being defended
- * against. So the firm's name is also tiled diagonally across the whole frame
- * at low opacity — faint enough not to spoil the photo, present enough that
- * removing it means destroying the image.
+ * A corner logo alone is useless: anyone can crop the corner off and repost the
+ * photo as their own, which is the actual thing being defended against. The
+ * mark therefore sits inside the frame — but sparingly, because a listing photo
+ * a client will not look twice at is worth less than one that could
+ * theoretically be stolen.
  *
  * Deliberately different from the visit-proof stamp, which is a legible
  * provenance caption for an internal record nobody is trying to steal.
  */
 function drawAntiCropMark(ctx, w, h, firmName) {
-  const text = (firmName || 'Listing').toUpperCase()
-  const size = Math.max(12, Math.round(w * 0.021))
+  const text = (firmName || '').trim()
+  if (!text) return
+
+  // TWO marks, not a tiled field.
+  //
+  // The first version tiled the name across the entire frame and added a solid
+  // corner bar on a black scrim. It defended the photo and ruined it — a
+  // listing shot a client will not look twice at is worth less than one that
+  // could theoretically be stolen. Two placements on the diagonal still mean a
+  // crop cannot take the mark off without taking most of the picture with it,
+  // which is the point; the corner bar added nothing that these do not.
+  const size = Math.max(14, Math.round(w * 0.030))
+  const spots = [
+    { x: w * 0.30, y: h * 0.34 },
+    { x: w * 0.70, y: h * 0.70 },
+  ]
 
   ctx.save()
   ctx.font = `700 ${size}px system-ui, -apple-system, sans-serif`
   ctx.textBaseline = 'middle'
-  // Rotate about the centre and cover the diagonal, so the tiling reaches
-  // every corner no matter the aspect ratio.
-  ctx.translate(w / 2, h / 2)
-  ctx.rotate(-Math.PI / 6)
-  const span = Math.hypot(w, h)
-  const stepX = ctx.measureText(text).width + size * 2.4
-  const stepY = size * 3.6
-  ctx.lineWidth = Math.max(1, size / 9)
+  ctx.textAlign = 'center'
+  ctx.lineWidth = Math.max(1, size / 10)
   ctx.lineJoin = 'round'
-  for (let y = -span; y < span; y += stepY) {
-    // Offset alternate rows so the marks don't form removable straight columns.
-    const off = (Math.round(y / stepY) % 2) * (stepX / 2)
-    for (let x = -span + off; x < span; x += stepX) {
-      // Dark outline UNDER a light fill. White alone disappears over a bright
-      // wall or an overexposed sky — extremely common in listing photos — and
-      // an invisible watermark defends nothing. The pair stays legible on any
-      // background while each half remains faint enough not to spoil the shot.
-      ctx.strokeStyle = 'rgba(0,0,0,0.085)'
-      ctx.strokeText(text, x, y)
-      ctx.fillStyle = 'rgba(255,255,255,0.13)'
-      ctx.fillText(text, x, y)
-    }
+  for (const s of spots) {
+    ctx.save()
+    ctx.translate(s.x, s.y)
+    ctx.rotate(-Math.PI / 9)
+    // Dark outline under a light fill: white alone vanishes over a bright wall
+    // or a blown-out sky, and an invisible watermark defends nothing. Both
+    // halves stay faint.
+    ctx.strokeStyle = 'rgba(0,0,0,0.10)'
+    ctx.strokeText(text, 0, 0)
+    ctx.fillStyle = 'rgba(255,255,255,0.16)'
+    ctx.fillText(text, 0, 0)
+    ctx.restore()
   }
-  ctx.restore()
-
-  // Corner mark — the readable attribution, on its own scrim so it stays
-  // legible over a bright sky or a white wall.
-  const pad = Math.round(w * 0.022)
-  const cs = Math.max(13, Math.round(w * 0.028))
-  ctx.save()
-  ctx.font = `700 ${cs}px system-ui, -apple-system, sans-serif`
-  ctx.textBaseline = 'bottom'
-  const tw = ctx.measureText(firmName || 'Listing').width
-  ctx.globalAlpha = 0.45
-  ctx.fillStyle = '#000000'
-  ctx.fillRect(pad - cs * 0.4, h - pad - cs * 1.5, tw + cs * 0.8, cs * 1.7)
-  ctx.globalAlpha = 0.95
-  ctx.fillStyle = '#ffffff'
-  ctx.fillText(firmName || 'Listing', pad, h - pad)
   ctx.restore()
 }
 

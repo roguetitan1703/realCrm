@@ -1,4 +1,6 @@
 import { firmName as tenantFirm } from './tenant.js'
+import { localLabel } from '../data/vocabLocale.js'
+import { DEFAULT_FOLLOWUPS, fillTemplate, PLACEHOLDERS } from '../data/followUpTemplates.js'
 import {
   AREA_UNITS, BHK, FACING, FURNISH, POSSESSION, SOCIETY_AMENITIES, SUBTYPES,
   labelOf, normaliseBhk, normaliseSubtype, normaliseTo,
@@ -92,11 +94,12 @@ const money = (n) => {
   return `₹${v.toLocaleString('en-IN')}`
 }
 
-export function describeProperty(p = {}) {
+export function describeProperty(p = {}, lang = 'English') {
   const category = p.category || 'residential'
   const bhk = p.bhk || normaliseBhk(p.type)
   const subtype = p.subtype || normaliseSubtype(p.type, category)
-  const subtypeLabel = labelOf(SUBTYPES[category] || SUBTYPES.residential, subtype)
+  const subtypeLabel = localLabel(lang, 'subtype', subtype,
+    labelOf(SUBTYPES[category] || SUBTYPES.residential, subtype))
   const bhkLabel = labelOf(BHK, bhk)
 
   // "3 BHK Apartment" — rebuilt from the two fields that replaced it, falling
@@ -107,14 +110,16 @@ export function describeProperty(p = {}) {
   const areaVal = p.carpet || p.builtup || p.superBuiltup || p.plotArea
   const area = areaVal ? `${areaVal} ${unit}` : ''
 
-  const furnish = labelOf(FURNISH, p.furnishType) || p.furnishing || ''
-  const facing = labelOf(FACING, normaliseTo(FACING, p.facing)) || p.facing || ''
-  const possession = labelOf(POSSESSION, normaliseTo(POSSESSION, p.possession)) || p.possession || ''
+  const furnish = localLabel(lang, 'furnish', p.furnishType, labelOf(FURNISH, p.furnishType)) || p.furnishing || ''
+  const facingTok = normaliseTo(FACING, p.facing)
+  const facing = localLabel(lang, 'facing', facingTok, labelOf(FACING, facingTok)) || p.facing || ''
+  const possTok = normaliseTo(POSSESSION, p.possession)
+  const possession = localLabel(lang, 'possession', possTok, labelOf(POSSESSION, possTok)) || p.possession || ''
 
   // Amenities are stored as tokens; a client should read "Gym, Lift, Power
   // Backup", not "gym, lift, power_backup".
   const amenities = (p.societyAmenities || [])
-    .map(a => labelOf(SOCIETY_AMENITIES, a)).filter(Boolean)
+    .map(a => localLabel(lang, 'amenity', a, labelOf(SOCIETY_AMENITIES, a))).filter(Boolean)
 
   // priceLabel is what a broker typed; price is the number. Prefer the typed
   // one, format the number when there isn't one, and never print an empty
@@ -144,8 +149,8 @@ function bullet(parts) {
 }
 const push = (L, line) => { if (line) L.push(line) }
 
-function buildSale(p, t, opener, closer, firmName) {
-  const d = describeProperty(p)
+function buildSale(p, t, opener, closer, firmName, lang) {
+  const d = describeProperty(p, lang)
   const L = []
   L.push(`*${d.headline} ${t.forSale}${d.locality ? ' — ' + d.locality : ''}*`)
   push(L, d.society); L.push('')
@@ -156,8 +161,8 @@ function buildSale(p, t, opener, closer, firmName) {
     d.facing ? `${d.facing} ${t.facing}` : null,
   ]))
   push(L, bullet([
-    d.bathrooms ? `${d.bathrooms} bath` : null,
-    d.balconies ? `${d.balconies} balcony` : null,
+    d.bathrooms ? `${d.bathrooms} ${t.bath}` : null,
+    d.balconies ? `${d.balconies} ${t.balcony}` : null,
     d.parking || null,
   ]))
   push(L, bullet([
@@ -178,8 +183,8 @@ function buildSale(p, t, opener, closer, firmName) {
   return L.join('\n')
 }
 
-function buildRent(p, t, opener, closer, firmName) {
-  const d = describeProperty(p)
+function buildRent(p, t, opener, closer, firmName, lang) {
+  const d = describeProperty(p, lang)
   const L = []
   L.push(`*${d.headline}${d.furnish ? ' ' + d.furnish : ''} — ${t.onRent}*`)
   push(L, [d.society, d.locality].filter(Boolean).join(', '))
@@ -191,7 +196,7 @@ function buildRent(p, t, opener, closer, firmName) {
     d.facing ? `${d.facing} ${t.facing}` : null,
   ]))
   push(L, bullet([
-    d.bathrooms ? `${d.bathrooms} bath` : null,
+    d.bathrooms ? `${d.bathrooms} ${t.bath}` : null,
     d.parking || null,
   ]))
   push(L, bullet([
@@ -215,6 +220,7 @@ const PACKS = {
     closers: ['Site visit ke liye reply karein — weekend slots open hain.', 'Interested ho toh reply karein, aaj hi visit fix kar dete hain.', 'Details ya visit ke liye message karein, turant arrange ho jayega.'],
     forSale: 'for Sale', onRent: 'On Rent', carpet: 'carpet', floor: 'floor', floorSuffix: ord,
     facing: 'facing', yrsOld: 'yrs old', possession: 'possession', highlights: 'Highlights:',
+    bath: 'bath', balcony: 'balcony',
     price: 'Price', rent: 'Rent', deposit: 'Deposit', negotiable: '(thoda negotiable)', fixed: 'fixed',
     ownerDirect: 'Owner direct deal, no chain.', family: 'Family', billsByOwner: 'Owner electricity & gas bill pay karega.',
   },
@@ -223,6 +229,7 @@ const PACKS = {
     closers: ['Reply to book a site visit — weekend slots open.', "Interested? Reply and we'll fix a visit today.", 'Message for details or a visit, arranged right away.'],
     forSale: 'for Sale', onRent: 'On Rent', carpet: 'carpet', floor: 'floor', floorSuffix: ord,
     facing: 'facing', yrsOld: 'years old', possession: 'possession', highlights: 'Highlights:',
+    bath: 'bath', balcony: 'balcony',
     price: 'Price', rent: 'Rent', deposit: 'Deposit', negotiable: '(negotiable)', fixed: 'fixed',
     ownerDirect: 'Direct from owner, no chain.', family: 'Family', billsByOwner: 'Electricity & gas bills paid by owner.',
   },
@@ -231,6 +238,7 @@ const PACKS = {
     closers: ['साइट व्हिजिटसाठी रिप्लाय करा — वीकेंड स्लॉट उपलब्ध.', 'इच्छुक असाल तर रिप्लाय करा, आजच व्हिजिट ठरवू.', 'अधिक माहिती किंवा व्हिजिटसाठी मेसेज करा.'],
     forSale: 'विक्रीसाठी', onRent: 'भाड्याने', carpet: 'कार्पेट', floor: 'मजला', floorSuffix: () => 'वा',
     facing: 'दिशा', yrsOld: 'वर्षे जुने', possession: 'ताबा', highlights: 'ठळक वैशिष्ट्ये:',
+    bath: 'बाथरूम', balcony: 'बाल्कनी',
     price: 'किंमत', rent: 'भाडे', deposit: 'डिपॉझिट', negotiable: '(वाटाघाटीस वाव)', fixed: 'निश्चित',
     ownerDirect: 'थेट मालकाकडून, मध्यस्थ नाही.', family: 'कुटुंब', billsByOwner: 'वीज व गॅस बिल मालक भरेल.',
   },
@@ -280,8 +288,8 @@ export function generateMessage(rawProperty, opts = {}) {
   const i = ((variant % 3) + 3) % 3
   const opener = pack.openers[i], closer = pack.closers[i]
   let msg = property.deal === 'rent'
-    ? buildRent(property, pack, opener, closer, firmName)
-    : buildSale(property, pack, opener, closer, firmName)
+    ? buildRent(property, pack, opener, closer, firmName, lang)
+    : buildSale(property, pack, opener, closer, firmName, lang)
   if (tone === 'Short') {
     const rows = msg.split('\n')
     const head = rows.slice(0, 3)
@@ -294,22 +302,38 @@ export function generateMessage(rawProperty, opts = {}) {
 
 // --- Plain follow-up (no property attached) ---------------------------------
 // Sending a message without a listing is a normal thing to do, and it used to
-// have no template at all — the composer opened blank. Every line here is built
-// from a fact we actually hold; a lead with no locality on file simply gets a
-// shorter message rather than an invented city.
-export function followUpMessage(lead, firmName = tenantFirm()) {
+// have no template at all — the composer opened blank, then had exactly one
+// English sentence regardless of the language chosen. It now uses the same
+// language the rest of the composer does, cycles three wordings, and honours
+// whatever the firm wrote in Settings.
+export function followUpMessage(lead, firmName = tenantFirm(), opts = {}) {
   if (!lead) return ''
-  const first = String(lead.name || '').split(' ')[0]
-  const wants = [labelOf(BHK, lead.req?.config) || lead.req?.config, lead.req?.locality]
-    .filter(Boolean).join(' in ')
-  const L = []
-  L.push(`Namaste ${first},`)
-  L.push('')
-  L.push(wants
-    ? `Following up on your requirement — ${wants}.`
-    : 'Following up on your property requirement.')
-  L.push('Shall I share a few options that fit?')
-  L.push('')
-  if (firmName) L.push('— ' + firmName)
+  const lang = opts.lang || 'Hinglish'
+  const set = (opts.templates && opts.templates[lang]?.length)
+    ? opts.templates[lang]
+    : (DEFAULT_FOLLOWUPS[lang] || DEFAULT_FOLLOWUPS.English)
+  const values = {
+    name: String(lead.name || '').split(' ')[0],
+    config: labelOf(BHK, lead.req?.config) || lead.req?.config || '',
+    locality: lead.req?.locality || '',
+    firm: firmName || '',
+  }
+
+  // Pick a template this lead can actually fill, starting from the requested
+  // variant. Gutting a sentence that referenced a missing locality produced
+  // "Hello Amit Shall I send them across?" — the third wording in every set
+  // needs only a name, so there is always something that fits.
+  const start = ((Number(opts.variant) || 0) % set.length + set.length) % set.length
+  const fits = (t) => !PLACEHOLDERS.some(ph =>
+    t.includes(ph.token) && !String(values[ph.token.slice(1, -1)] ?? '').trim())
+  let chosen = set[start]
+  for (let k = 0; k < set.length; k++) {
+    const cand = set[(start + k) % set.length]
+    if (fits(cand)) { chosen = cand; break }
+  }
+
+  const body = fillTemplate(chosen, values)
+  const L = [body]
+  if (firmName && !body.includes(firmName)) { L.push(''); L.push('— ' + firmName) }
   return L.join('\n')
 }

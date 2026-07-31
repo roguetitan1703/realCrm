@@ -7,6 +7,7 @@ import { StatusTag, Quoted, Button, KV, Timeline } from '../components/primitive
 import { NbaBanner } from '../components/rail.jsx'
 import { leadsForProperty } from '../lib/matching.js'
 import { fileUrl } from '../lib/media.js'
+import Lightbox from '../components/Lightbox.jsx'
 import { quotedLine, unitLabel, fmtDate, renewalSignal, configLabel } from '../lib/format.js'
 import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import Icon from '../components/Icon.jsx'
@@ -96,6 +97,7 @@ function PropTable({ def, list, store, onOpen, allLeads }) {
 // PropertyDetail — thin wrapper: supplies the property's UNIQUE sections to the
 // standard ModuleDetail. Field viewing/editing + action rail are standardized.
 function PropertyDetail({ store, go, sel, setSel, topBar }) {
+  const [gallery, setGallery] = useState(null)
   const p = store.state.properties.find(x => x.id === sel.propId)
   const back = () => setSel(s => ({ ...s, propOpen: false }))
   if (!p) { return <>{topBar({ title: 'Property', eyebrow: 'Properties', onBack: back })}<div className="detail-missing">Not found.</div></> }
@@ -178,11 +180,15 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
             // double-width first tile made a two-photo listing look broken,
             // and it disagreed with the picker in the add form, where the
             // cover is a badge.
-            <a key={m.key} href={fileUrl(m.key)} target="_blank" rel="noreferrer" className="pgal-i">
-              <img src={fileUrl(m.key)} alt="" loading="lazy" />
+            // Opens in place. A target="_blank" threw the raw file at a new
+            // tab and lost the record the agent was reading.
+            <button type="button" key={m.key} className="pgal-i" onClick={() => setGallery(i)}>
+              {m.kind === 'video'
+                ? <span className="pgal-vidbox"><Icon name="play" size={22} fill /></span>
+                : <img src={fileUrl(m.key)} alt="" loading="lazy" />}
               {i === 0 && <span className="pgal-cover">Cover</span>}
               {m.kind === 'video' && <span className="pgal-cover pgal-vid">Video</span>}
-            </a>
+            </button>
           ))}
         </div>
       ),
@@ -271,6 +277,9 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
           actionCtx={{ onClose: back }}
         />
       </div>
+      {gallery !== null && (
+        <Lightbox items={p.media || []} index={gallery} onClose={() => setGallery(null)} />
+      )}
     </>
   )
 }
