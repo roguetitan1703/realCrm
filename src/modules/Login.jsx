@@ -74,7 +74,7 @@ export default function Login({ store }) {
   const selectWorkspace = async (input, nextPhase = 'creds') => {
     const guess = resolveWorkspace(input)
     if (!guess) {
-      store.toast('Enter your firm's workspace name to continue.', 'warn')
+      store.toast('Enter your workspace name to continue.', 'warn')
       return
     }
     setResolving(true)
