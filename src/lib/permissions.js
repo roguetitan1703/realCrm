@@ -16,6 +16,12 @@ export function canEditListing(role) {
   return DESK_ROLES.includes(role)
 }
 
+// Deleting or merging a record destroys history, so it is the owner's call —
+// mirrors canDeleteRecord() in backend/src/lib/permissions.ts.
+export function canDeleteRecord(role) {
+  return role === 'admin' || role === 'owner'
+}
+
 // Appending to a record's history. Always true for a signed-in user — it exists
 // as a named function so a future caller asks the question rather than assuming
 // the answer, and so the rule has one home.

@@ -25,7 +25,7 @@ export default function Leads({ store, go, sel, setSel, topBar, phone }) {
   const [seg, setSeg] = useState('all')
 
   const open = sel.leadOpen && sel.leadId
-  if (open) return <LeadRecord store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
+  if (open) return <LeadRecord store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} />
 
   // Agent role sees only their own pipeline; the shared engine handles filter/search/sort.
   const records = state.role === 'agent'
@@ -56,7 +56,7 @@ export default function Leads({ store, go, sel, setSel, topBar, phone }) {
     filters: flt, onFilters: setFlt,
     search: q, onSearch: setQ,
     sortKey, onSortKey: setSortKey, sortDir, onSortDir: setSortDir,
-    segments: segs, view, onView: setView,
+    segments: segs, view, onView: setView, phone,
     cta: { label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) },
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} />
@@ -78,7 +78,7 @@ export default function Leads({ store, go, sel, setSel, topBar, phone }) {
 }
 
 // ---------------------------------------------------------------------------
-function LeadRecord({ store, go, sel, setSel, topBar }) {
+function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   const l = store.state.leads.find(x => x.id === sel.leadId)
   if (!l) { return <>{topBar({ title: 'Lead', eyebrow: 'Leads', onBack: () => setSel(s => ({ ...s, leadOpen: false })) })}<div style={{ padding: 22 }}>Lead not found.</div></> }
   const a = store.agentById(l.agentId)
@@ -175,7 +175,7 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
       {topBar({ eyebrow: 'Leads', title: l.name, onBack: back })}
       <div className="app-body">
         <ModuleDetail
-          def={LEADS_DEF} record={l} store={store} onEdit={openEdit}
+          def={LEADS_DEF} record={l} store={store} onEdit={openEdit} phone={phone}
           avatar={<Avatar agent={{ initials: initials(l.name), avatar: '' }} size="lg" />}
           signals={overdue ? <Overdue>Overdue</Overdue> : null}
           railTop={followUpCard}

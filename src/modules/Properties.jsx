@@ -29,7 +29,7 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
   // A listing's facts are desk-owned. An agent reaching the wizard by any route
   // — deep link, stale sel, a button we missed — lands back on the list.
   if (sel.propAdd && mayEdit) return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} />
-  if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} mayEdit={mayEdit} />
+  if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} mayEdit={mayEdit} phone={phone} />
   if (sel.projOpen && sel.projKey) return <ProjectDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
 
   const open = (id) => go('properties', { propId: id, propOpen: true })
@@ -51,7 +51,7 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
     filters: flt, onFilters: setFlt,
     search: q, onSearch: setQ,
     sortKey, onSortKey: setSortKey, sortDir, onSortDir: setSortDir,
-    kpis, view, onView: setView,
+    kpis, view, onView: setView, phone,
     // Grid/list toggle only applies to the flat unit views, hide it in project view.
     showViewSwitch: view !== 'projects',
     // No import button here: the top bar already carries Import / Revert on
@@ -100,7 +100,7 @@ function PropTable({ def, list, store, onOpen, allLeads }) {
 // ---------------------------------------------------------------------------
 // PropertyDetail — thin wrapper: supplies the property's UNIQUE sections to the
 // standard ModuleDetail. Field viewing/editing + action rail are standardized.
-function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit }) {
+function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
   const [gallery, setGallery] = useState(null)
   const p = store.state.properties.find(x => x.id === sel.propId)
   const back = () => setSel(s => ({ ...s, propOpen: false }))
@@ -272,7 +272,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit }) {
       {topBar({ eyebrow: 'Properties', title: p.society, onBack: back })}
       <div className="app-body">
         <ModuleDetail
-          def={PROPERTIES_DEF} record={p} store={store} onEdit={mayEdit ? openEdit : null}
+          def={PROPERTIES_DEF} record={p} store={store} onEdit={mayEdit ? openEdit : null} phone={phone}
           title={p.society}
           primary={[{ label: 'WhatsApp', icon: 'wa', onClick: () => store.openModal({ kind: 'pickBuyer', propId: p.id }) }]}
           nba={nba}

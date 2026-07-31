@@ -1891,3 +1891,71 @@ body{overscroll-behavior-y:none}
 /* ---- held work ---- */
 .conn-badge.queued{background:var(--warn-wash,rgba(176,122,46,.12));color:var(--warn,#B07A2E);border-color:transparent}
 .notif-blocked{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--alert)}
+
+/* ---------------------------------------------------------------------------
+   PHONE: list + detail
+   The desk toolbar and the desk rail do not shrink — they wrap into rows of
+   popovers that open off the edge of a 390px screen. These rules replace the
+   surface, not the behaviour: same definition, same query, same actions.
+   --------------------------------------------------------------------------- */
+
+/* Segment pills scroll sideways instead of wrapping into four stacked rows. */
+.app-mobile .pagehead{padding:10px 12px 0;gap:10px}
+/* The spacer that pushes pills to the right of the KPIs on the desk has no
+   KPIs to sit beside here — left in, it eats the width the pills need. */
+.app-mobile .pagehead .u-spring{display:none}
+.app-mobile .segpills{flex:1;min-width:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+.app-mobile .segpills::-webkit-scrollbar{display:none}
+.app-mobile .segpill{flex-shrink:0}
+
+/* Search always visible; filter + sort behind one button. */
+.ptool{display:flex;align-items:center;gap:8px}
+.ptool-search{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:42px;padding:0 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);color:var(--muted)}
+.ptool-search input{flex:1;min-width:0;border:none;background:transparent;outline:none;font-family:var(--sans);font-size:15px;color:var(--ink)}
+.ptool-search input::-webkit-search-cancel-button{display:none}
+.ptool-search .cx{border:none;background:transparent;color:var(--muted);cursor:pointer;padding:4px;display:flex}
+.ptool-btn{position:relative;width:42px;height:42px;flex-shrink:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);color:var(--ink-2);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.ptool-btn.on{background:var(--accent-wash);border-color:var(--accent);color:var(--accent)}
+.ptool-n{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--accent);color:#fff;font-size:10.5px;font-weight:700;display:flex;align-items:center;justify-content:center}
+
+/* Bottom sheet — filter and sort together, because on a phone they are one
+   question ("show me a different set") answered in one pass. */
+.sheet-back{position:absolute;inset:0;z-index:60;background:rgba(12,14,13,.45)}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:61;display:flex;flex-direction:column;max-height:82dvh;background:var(--card);border-radius:18px 18px 0 0;box-shadow:0 -12px 40px rgba(0,0,0,.28);animation:sheetUp .22s cubic-bezier(.2,.8,.2,1) both}
+@keyframes sheetUp{from{transform:translateY(14%);opacity:.6}to{transform:translateY(0);opacity:1}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+.sheet-grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:9px auto 3px;flex-shrink:0}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;padding:8px 16px 12px;font-family:var(--disp);font-weight:600;font-size:16px;color:var(--ink);border-bottom:1px solid var(--line);flex-shrink:0}
+.sheet-clear{border:none;background:transparent;color:var(--accent);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;padding:4px}
+.sheet-body{flex:1;overflow-y:auto;min-height:0;padding:14px 16px;display:flex;flex-direction:column;gap:18px}
+.sheet-group{display:flex;flex-direction:column;gap:9px}
+.sheet-label{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.chiprow{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.chiprow::-webkit-scrollbar{display:none}
+.chiprow.wrap{flex-wrap:wrap;overflow:visible}
+.chipo{flex-shrink:0;display:inline-flex;align-items:center;gap:6px;min-height:38px;padding:0 14px;border-radius:19px;border:1px solid var(--line);background:var(--card-2);color:var(--ink-2);font-family:var(--sans);font-size:13.5px;font-weight:600;cursor:pointer}
+.chipo.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.sheet-foot{flex-shrink:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
+.sheet-go{width:100%;min-height:46px;border:none;border-radius:var(--radius);background:var(--accent);color:#fff;font-family:var(--sans);font-size:15px;font-weight:600;cursor:pointer}
+
+/* Detail: the header band stops being a two-column desk layout. */
+.app-mobile .rechead{padding:14px;margin-bottom:12px}
+.app-mobile .rh-top{flex-direction:column;align-items:stretch;gap:12px}
+.app-mobile .rh-actions{margin-left:0;flex-wrap:wrap}
+/* Under 1120px the desk collapses the action rail to a 52px strip that expands
+   on HOVER. A phone has no hover, so on a touch screen that rail was a sliver
+   nothing could open — taking the follow-up card and the next-best-action
+   banner with it. Here it is simply a block, in full, above the record sheet:
+   the follow-up is the thing an agent opens a lead to see. */
+.app-mobile .detail-layout{padding-right:12px}
+.app-mobile .dl-rail{position:static;order:-1;width:auto;box-shadow:none;background:transparent;max-height:none;overflow:visible}
+.app-mobile .dl-rail .rail-strip{display:none}
+.app-mobile .dl-rail .rail-full{display:block}
+.app-mobile .rh-prog{overflow-x:auto;scrollbar-width:none}
+.app-mobile .rh-prog::-webkit-scrollbar{display:none}
+/* The record sheet is a two-column grid of 150px labels — at 390px that leaves
+   a value column too narrow to hold a price. Label over value, one column. */
+.app-mobile .rs-grid{grid-template-columns:1fr;gap:0}
+.app-mobile .rs-row,.app-mobile .rs-row-wide{grid-template-columns:1fr;gap:2px;padding:10px 0;min-height:0}
+.app-mobile .rs-label{font-size:11.5px}
+.app-mobile .panel{padding:14px}

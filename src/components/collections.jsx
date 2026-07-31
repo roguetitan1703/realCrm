@@ -48,6 +48,7 @@ export function ModuleListView({
   def, records, store, onOpen,
   filters, onFilters, search, onSearch, sortKey, onSortKey, sortDir, onSortDir,
   kpis, segments, view, onView, viewExtra, showViewSwitch = true, cta, toolbarRight, emptyTitle, emptyHint, renderTable,
+  phone,
 }) {
   const list = runModuleQuery(def, records, { filters, search, sortKey, sortDir, store })
 
@@ -55,9 +56,34 @@ export function ModuleListView({
   const sortOptions = def.sortOptions.map(s => ({ value: s.key, label: s.label }))
 
   // Lean in-page header: module KPIs (left) + scope segments (right). NOT the breadcrumb.
-  const header = (kpis?.length || segments)
-    ? <PageHeader kpis={kpis} segments={segments} />
+  // KPIs are dropped on a phone: a row of numbers costs a third of the screen
+  // and the segment pills below already carry the same counts, tappable.
+  const header = ((!phone && kpis?.length) || segments)
+    ? <PageHeader kpis={phone ? null : kpis} segments={segments} />
     : null
+
+  // On a phone the desktop bar does not shrink — it wraps into three rows of
+  // popovers that open off the edge of the screen. Filter and sort move into
+  // one bottom sheet, which is where a thumb expects them.
+  if (phone) {
+    return {
+      header,
+      toolbar: (
+        <PhoneToolbar
+          def={def} fields={fields} filters={filters} onFilters={onFilters}
+          search={search} onSearch={onSearch}
+          sortKey={sortKey} onSortKey={onSortKey} sortDir={sortDir} onSortDir={onSortDir}
+          sortOptions={sortOptions} resultCount={list.length}
+        />
+      ),
+      // One layout, no switch. A table needs a horizontal scroll to be read on
+      // a 390px screen, and choosing between two bad options is not a feature.
+      body: list.length === 0
+        ? <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>
+        : renderTable ? renderTable(list, 'grid') : <ModuleCards def={def} rows={list} store={store} onOpen={onOpen} />,
+      list,
+    }
+  }
 
   const toolbar = (
     <FilterBar
@@ -84,6 +110,100 @@ export function ModuleListView({
       : <ModuleTable def={def} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={onSortKey} />
 
   return { header, toolbar, body, list }
+}
+
+// ---- PhoneToolbar: search always visible, filter + sort in one bottom sheet ----
+// Same definition, same query brain, same state as the desk — only the surface
+// differs. A chip is a 40px tap target; the desk's nested popovers are not.
+function PhoneToolbar({
+  def, fields, filters, onFilters, search, onSearch,
+  sortKey, onSortKey, sortDir, onSortDir, sortOptions, resultCount,
+}) {
+  const [sheet, setSheet] = useState(false)
+  const activeCount = fields.reduce((n, f) => n + ((filters[f.key] || []).length ? 1 : 0), 0)
+
+  const toggle = (f, v) => {
+    const cur = filters[f.key] || []
+    const has = cur.includes(v)
+    const next = f.multi === false ? (has ? [] : [v]) : (has ? cur.filter(x => x !== v) : [...cur, v])
+    onFilters({ ...filters, [f.key]: next })
+  }
+
+  return (
+    <>
+      <div className="ptool">
+        <div className="ptool-search">
+          <Icon name="search" size={16} />
+          <input
+            value={search} onChange={e => onSearch(e.target.value)}
+            placeholder={`Search ${def.name.toLowerCase()}`}
+            type="search" enterKeyHint="search" autoCorrect="off" autoCapitalize="none"
+          />
+          {search && <button className="cx" onClick={() => onSearch('')} aria-label="Clear search"><Icon name="x" size={14} /></button>}
+        </div>
+        <button className={'ptool-btn' + (activeCount ? ' on' : '')} onClick={() => setSheet(true)}>
+          <Icon name="filter" size={16} />
+          {activeCount ? <span className="ptool-n">{activeCount}</span> : null}
+        </button>
+      </div>
+
+      {sheet && (
+        <>
+          <div className="sheet-back" onClick={() => setSheet(false)} />
+          <div className="sheet" role="dialog" aria-label="Filter and sort">
+            <div className="sheet-grab" />
+            <div className="sheet-head">
+              <span>Filter &amp; sort</span>
+              {activeCount > 0 && <button className="sheet-clear" onClick={() => onFilters({})}>Clear all</button>}
+            </div>
+
+            <div className="sheet-body">
+              <div className="sheet-group">
+                <div className="sheet-label">Sort by</div>
+                <div className="chiprow">
+                  {sortOptions.map(o => (
+                    <button key={o.value} className={'chipo' + (o.value === sortKey ? ' on' : '')} onClick={() => onSortKey(o.value)}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="chiprow">
+                  <button className={'chipo' + (sortDir === 'asc' ? ' on' : '')} onClick={() => sortDir !== 'asc' && onSortDir('asc')}>
+                    <Icon name="sortAsc" size={13} />Ascending
+                  </button>
+                  <button className={'chipo' + (sortDir === 'desc' ? ' on' : '')} onClick={() => sortDir !== 'desc' && onSortDir('desc')}>
+                    <Icon name="sortDesc" size={13} />Descending
+                  </button>
+                </div>
+              </div>
+
+              {fields.map(f => (
+                <div className="sheet-group" key={f.key}>
+                  <div className="sheet-label">{f.label}</div>
+                  <div className="chiprow wrap">
+                    {(f.options || []).map(o => {
+                      const on = (filters[f.key] || []).includes(o.value)
+                      return (
+                        <button key={o.value} className={'chipo' + (on ? ' on' : '')} onClick={() => toggle(f, o.value)}>
+                          {o.label ?? o.value}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="sheet-foot">
+              <button className="sheet-go" onClick={() => setSheet(false)}>
+                Show {resultCount} {resultCount === 1 ? def.singularName?.toLowerCase() || 'result' : def.name.toLowerCase()}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  )
 }
 
 // ---- ModuleCards: grid of cards from a definition's `card(record,store)` fn. ----

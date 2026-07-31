@@ -80,6 +80,7 @@ function MoreMenu({ items }) {
 export function ModuleDetail({
   def, record, store, onEdit, title, avatar,
   signals, primary = [], nba, railTop, beforeSheet, sections = [], actionCtx = {},
+  phone,
 }) {
   const { quick, manage } = buildActionTiers(def, store, record, actionCtx)
   const visibleSections = sections.filter(s => !s.when || s.when(record, store))
@@ -96,7 +97,11 @@ export function ModuleDetail({
       <ActionRail>
         {nba && <RailSection>{nba}</RailSection>}
         {railTop && <RailSection>{railTop}</RailSection>}
-        {(quick.length > 0 || manage.length > 0) && (
+        {/* On a phone this block is deleted, not restyled. The action button
+            already carries these exact actions for the open record — rendering
+            them again as a grid at the bottom of the page is the same button
+            twice, and the one at the bottom is the one nobody reaches. */}
+        {!phone && (quick.length > 0 || manage.length > 0) && (
           <RailSection title="Quick actions">
             <QuickActions items={quick} />
             <MoreMenu items={manage} />
