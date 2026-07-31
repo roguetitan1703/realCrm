@@ -18,6 +18,7 @@ import { propertiesRouter } from './routes/properties';
 import { teamRouter } from './routes/team';
 import { actionsRouter } from './routes/actions';
 import { ingestRouter } from './routes/ingest';
+import { connectionsRouter } from './routes/connections';
 import { integrationsRouter } from './routes/integrations';
 import { authRouter } from './routes/auth';
 import { adminRouter } from './routes/admin';
@@ -94,6 +95,8 @@ app.use('/api/v1/records', actionsRouter);
 
 // 6. Idempotent Portal Webhook Ingestion (99acres, MagicBricks, Exotel)
 app.use('/api/v1/ingest', ingestRouter);
+// Tenant-facing management for those connections (authenticated; /ingest is not).
+app.use('/api/v1/connections', connectionsRouter);
 
 // 7. Media uploads — mints presigned PUTs so bytes go browser→R2 directly.
 //    Authenticated (unlike the /files read proxy above).

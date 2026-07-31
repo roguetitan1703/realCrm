@@ -95,6 +95,16 @@ export async function listIntegrations(tenantId: string): Promise<Integration[]>
   ` as unknown as Integration[];
 }
 
+/** One connection, scoped to the tenant so an id from another workspace
+ *  resolves to nothing rather than to someone else's row. */
+export async function getIntegration(tenantId: string, id: string): Promise<Integration | null> {
+  const rows = await sql`
+    SELECT id, tenant_id, provider, api_key_last4, parser_config, active, created_at, created_by, last_received_at
+    FROM integrations WHERE id = ${id} AND tenant_id = ${tenantId} LIMIT 1
+  `;
+  return (rows[0] as Integration) || null;
+}
+
 export async function setParserConfig(tenantId: string, id: string, config: any): Promise<boolean> {
   const rows = await sql`
     UPDATE integrations SET parser_config = ${config === null ? null : sql.json(config)}

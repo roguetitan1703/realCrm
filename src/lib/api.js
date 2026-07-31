@@ -159,6 +159,21 @@ export const api = {
   getIngestConfig: () => request('/workspace/ingest'),
   regenerateIngestKey: () => request('/workspace/ingest/regenerate', { method: 'POST' }),
 
+  // D1 — provider connections: the inbox, the keys, and the field mapping.
+  // Distinct from `/workspace/integrations` below, which is the older
+  // per-provider credential store (Exotel, WABA) and is NOT tenant-scoped.
+  getConnections: () => request('/connections'),
+  createConnection: (provider) => request('/connections', { method: 'POST', body: JSON.stringify({ provider }) }),
+  rotateConnectionKey: (id) => request(`/connections/${id}/rotate`, { method: 'POST' }),
+  setConnectionActive: (id, active) => request(`/connections/${id}`, { method: 'PATCH', body: JSON.stringify({ active }) }),
+  deleteConnection: (id) => request(`/connections/${id}`, { method: 'DELETE' }),
+  getConnectionInbox: (id, limit = 25) => request(`/connections/inbox?connection=${encodeURIComponent(id)}&limit=${limit}`),
+  getConnectionSample: (id) => request(`/connections/${id}/sample`),
+  previewParser: (id, config, payload) => request(`/connections/${id}/preview`, { method: 'POST', body: JSON.stringify({ config, payload }) }),
+  saveParser: (id, config) => request(`/connections/${id}/parser`, { method: 'PUT', body: JSON.stringify({ config }) }),
+  replayConnection: (id) => request(`/connections/${id}/replay`, { method: 'POST' }),
+  getSetupPack: (id, key) => request(`/connections/${id}/setup-pack${key ? `?key=${encodeURIComponent(key)}` : ''}`),
+
   // Integrations
   getIntegrations: () => request('/workspace/integrations'),
   saveIntegration: (key, config) => request(`/workspace/integrations/${encodeURIComponent(key)}`, {
