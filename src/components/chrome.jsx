@@ -4,6 +4,7 @@ import Icon from './Icon.jsx'
 import { theme } from '../data/theme.js'
 import { Avatar } from './primitives.jsx'
 import { subscribeConnection } from '../lib/api.js'
+import { subscribeOutbox } from '../lib/outbox.js'
 
 // Initials from whatever firm name we actually have. Never a bundled default:
 // two wrong letters in the corner of every screen is still the wrong firm.
@@ -103,7 +104,18 @@ export function TopBar({ title, eyebrow, onBack, onSearch, onBell, unread, actio
 // outage can never quietly pretend to save work (changes would vanish on refresh).
 export function ConnectionBadge() {
   const [conn, setConn] = useState({ ok: true, checked: false })
+  const [queued, setQueued] = useState(0)
   useEffect(() => subscribeConnection(setConn), [])
+  useEffect(() => subscribeOutbox(setQueued), [])
+  // A queued write is held work, not saved work. It stays visible until it
+  // lands, so "I logged that visit" is never a thing the app quietly lied about.
+  if (queued) {
+    return (
+      <span className="conn-badge queued" title="Logged on this device, waiting for a connection to save.">
+        <Icon name="clock" size={13} />{queued} waiting to save
+      </span>
+    )
+  }
   if (conn.ok) return null
   return (
     <span className="conn-badge" title="Changes are not being saved to the server. Reconnect before continuing.">
@@ -202,6 +214,7 @@ export function MobileTopBar({ title, sub, onBack, right, brand }) {
             {onBack && <button className="m-back" onClick={onBack}><Icon name="chevLeft" size={20} /></button>}
             <div style={{ flex: 1, minWidth: 0 }}><div className="m-fn" style={{ fontSize: onBack ? 16 : 17, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>{sub && <div className="m-sub">{sub}</div>}</div>
           </>}
+      <ConnectionBadge />
       {right}
     </div>
   )

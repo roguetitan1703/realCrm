@@ -10,6 +10,7 @@ import { generateMessage, followUpMessage } from './matching.js'
 import { api as apiClient } from './api.js'
 import { applyBrandColor } from './brand.js'
 import { setTenantIdentity } from './tenant.js'
+import { getPref } from './prefs.js'
 
 const StoreCtx = createContext(null)
 export const useStore = () => useContext(StoreCtx)
@@ -640,7 +641,13 @@ export function StoreProvider({ children }) {
   }, [state.properties, state.leads, state.settings.firmName, state.settings.followUpTemplates])
 
   const openWhatsApp = useCallback((propId, leadId) => {
-    const wa = { propId, leadId, lang: 'Hinglish', tone: 'Standard', variant: 0 }
+    // The composer opens in the language this person writes in, not a fixed one.
+    // An agent who works in Marathi shouldn't re-pick it on every message.
+    const wa = {
+      propId, leadId, variant: 0,
+      lang: getPref('msgLang', 'Hinglish'),
+      tone: getPref('msgTone', 'Standard'),
+    }
     dispatch({ type: 'WA_OPEN', wa })
     dispatch({ type: 'WA_SET', patch: { composing: false, message: composeFor(wa) } })
   }, [composeFor])

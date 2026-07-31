@@ -946,8 +946,13 @@ input,textarea,select{font-family:inherit}
 .m-top .m-sub{font-size:11.5px;color:var(--on-chrome-mut);margin-top:1px}
 .m-top .m-back{width:32px;height:32px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .m-top .m-av{flex-shrink:0}
-.m-body{flex:1;padding:14px;display:flex;flex-direction:column;gap:12px;padding-bottom:76px;overflow-y:auto;min-height:0}
+/* The scroll container for whichever module is mounted. It carries no padding
+   of its own — the module owns its layout, exactly as it does on the desk. */
+.m-body{flex:1;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;min-height:0;padding-bottom:calc(78px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
 .m-body.has-actionbar{padding-bottom:14px}
+/* The module's own top bar scrolls with nothing — it sticks to the top of the
+   scroller, so a long list runs under its header instead of pushing it away. */
+.m-body>.m-top{position:sticky;top:0}
 
 .tabbar{display:flex;background:rgba(18,22,20,.95);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:8px 8px calc(8px + env(safe-area-inset-bottom));gap:4px;flex-shrink:0;border-top:1px solid rgba(255,255,255,.08);box-shadow:0 -4px 24px rgba(0,0,0,.25);z-index:30;position:relative}
 .tab-slider{position:absolute;top:8px;bottom:calc(8px + env(safe-area-inset-bottom));left:8px;z-index:1;border-radius:14px;background:rgba(30,111,82,.45);border:1px solid rgba(255,255,255,.18);box-shadow:0 4px 16px rgba(30,111,82,.45);transition:transform .28s cubic-bezier(.2,.8,.2,1),width .28s ease;pointer-events:none}
@@ -964,31 +969,6 @@ input,textarea,select{font-family:inherit}
 .m-actionbar .more{width:52px;background:var(--card-2);border:1px solid var(--line);border-radius:var(--radius);color:var(--ink-2);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:10px}
 
 /* mobile building blocks (compose through these) */
-.m-sec-h{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:6px 2px 2px}
-.m-card-prop{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:13px 14px;text-align:left;width:100%;font-family:var(--sans);cursor:pointer;display:flex;flex-direction:column;gap:9px}
-.m-card-prop:active{background:var(--card-2)}
-.m-card-prop .m-cp-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
-.m-card-prop .m-cp-name{font-weight:600;font-size:14.5px;color:var(--ink);display:flex;align-items:center;gap:6px}
-.m-card-prop .m-cp-sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.m-card-prop .m-cp-bot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:6px;border-top:1px dashed var(--line)}
-.m-card-prop .m-cp-price{font-family:var(--disp);font-weight:700;font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums}
-.m-card-prop .m-cp-note{font-size:11.5px;color:var(--faint)}
-.m-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:13px 14px;text-align:left;width:100%;font-family:var(--sans);cursor:pointer;display:flex;align-items:center;gap:12px}
-.m-card:active{background:var(--card-2)}
-.m-card .m-c-main{flex:1;min-width:0}
-.m-card .m-c-name{font-weight:600;font-size:14.5px}
-.m-card .m-c-sub{font-size:12.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.m-card .m-c-right{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0}
-.m-kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
-.m-kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:12px;text-align:center;cursor:pointer;font-family:var(--sans)}
-.m-kpi.alert{border-color:#E7CDC9;background:#FCF6F5}
-.m-kpi .v{font-family:var(--disp);font-weight:600;font-size:24px;font-variant-numeric:tabular-nums}
-.m-kpi.alert .v{color:var(--alert)}
-.m-kpi .l{font-size:11px;color:var(--muted);font-weight:600;margin-top:2px}
-.m-detail-band{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:14px}
-.m-quick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.m-quick button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 4px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);cursor:pointer;font-size:11px;font-weight:600;color:var(--ink);font-family:var(--sans)}
-.m-quick button .qic{width:34px;height:34px;border-radius:9px;background:var(--accent-wash);color:var(--accent-ink);display:flex;align-items:center;justify-content:center}
 .m-seg-scroll{display:flex;gap:7px;overflow-x:auto;padding-bottom:2px;-ms-overflow-style:none;scrollbar-width:none}
 .m-seg-scroll::-webkit-scrollbar{display:none}
 .m-msearch{display:flex;align-items:center;gap:8px;height:40px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);padding:0 12px;color:var(--faint)}
@@ -1439,11 +1419,6 @@ input,textarea,select{font-family:inherit}
 .watermark span{position:absolute;transform:rotate(-24deg);font-size:12px;font-weight:600;color:var(--ink);white-space:nowrap}
 
 /* Mobile Speed Dial & Sort Bar */
-.m-speeddial-menu{position:absolute;right:16px;bottom:calc(130px + env(safe-area-inset-bottom));z-index:40;display:flex;flex-direction:column;gap:8px;align-items:flex-end;animation:riseIn .18s ease both}
-.m-sd-item{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:8px 14px 8px 10px;box-shadow:var(--shadow-pop);font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;transition:transform .12s,background .12s;font-family:var(--sans);white-space:nowrap}
-.m-sd-item:active{transform:scale(.97);background:var(--card-2)}
-.m-sd-ic{width:30px;height:30px;border-radius:50%;background:var(--accent-wash);color:var(--accent-ink);display:flex;align-items:center;justify-content:center}
-.m-sd-backdrop{position:absolute;inset:0;background:rgba(35,35,31,.45);z-index:39;animation:fadeIn .18s ease both}
 .m-sort-btn{display:inline-flex;align-items:center;gap:5px;height:38px;padding:0 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);color:var(--ink-2);font-size:12.5px;font-weight:600;cursor:pointer;flex-shrink:0;font-family:var(--sans);white-space:nowrap}
 .m-sort-btn:active{background:var(--card-2)}
 .m-frame .overlay{position:absolute;inset:0;z-index:50}
@@ -1836,3 +1811,70 @@ input,textarea,select{font-family:inherit}
 .segpill.alert .segpill-c{background:rgba(180,69,60,.14);color:var(--danger,#B4453C)}
 .segpill.alert.on{background:var(--card);color:var(--danger,#B4453C)}
 .segpill.alert.on .segpill-c{background:var(--danger,#B4453C);color:#fff}
+
+/* ===========================================================================
+   PHONE CHROME
+   The same modules the desk renders, reflowed for a thumb. Everything here is
+   scoped to .app-mobile so a rule written for a 390px screen can never reach
+   the desk — the two used to be different apps, and that is precisely the
+   thing this stylesheet must not let back in.
+   =========================================================================== */
+
+/* Desk layouts assume a fixed viewport with their own scrollers. Inside the
+   phone shell there is ONE scroller (.m-body), so the nested ones flatten. */
+.app-mobile .app-body{flex:none;overflow:visible;min-height:0}
+.app-mobile .list-layout{flex:none;min-height:0}
+.app-mobile .ll-toolbar{padding:12px 12px 0}
+.app-mobile .ll-content{flex:none;overflow:visible;padding:12px 12px 8px}
+.app-mobile .detail-layout{grid-template-columns:minmax(0,1fr);padding:12px 12px 8px;gap:14px}
+.app-mobile .dl-rail{position:static}
+.app-mobile .grid-cards{grid-template-columns:1fr}
+.app-mobile .kpi-strip,.app-mobile .desk-strip{grid-template-columns:repeat(2,1fr)}
+/* Tables don't shrink; they scroll inside their own box rather than forcing
+   the page sideways. */
+.app-mobile .table-wrap,.app-mobile .tbl-wrap{overflow-x:auto}
+.app-mobile .modal{max-height:88dvh}
+
+.m-top .conn-badge{margin-left:auto}
+.m-bell{position:relative;width:34px;height:34px;border-radius:9px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
+.m-bell .bdot{position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--alert);color:#fff;font-size:9.5px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid var(--chrome)}
+
+/* ---- the work queue (Today) ---- */
+.q-wrap{padding:12px 12px 8px;display:flex;flex-direction:column;gap:16px}
+.q-group{display:flex;flex-direction:column;gap:7px}
+.q-head{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.q-head-alert{color:var(--alert)}
+.q-count{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--card-2);border:1px solid var(--line);color:var(--ink-2);font-size:10.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;letter-spacing:0}
+.q-head-alert .q-count{background:var(--alert);border-color:var(--alert);color:#fff}
+.q-row{display:flex;align-items:center;gap:11px;padding:11px 12px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);cursor:pointer}
+.q-row:active{background:var(--card-2)}
+.q-main{flex:1;min-width:0}
+.q-name{font-weight:600;font-size:14px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.q-sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.q-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.q-call{padding:5px 9px}
+
+/* ---- Me ---- */
+.me-band{display:flex;align-items:center;gap:13px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}
+.me-name{font-family:var(--disp);font-weight:600;font-size:17px;color:var(--ink)}
+.me-role{font-size:12.5px;color:var(--muted);margin-top:2px}
+.me-row{display:flex;flex-direction:column;gap:7px;padding:11px 12px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}
+.me-label{font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.me-row-alert{flex-direction:row;align-items:center;gap:8px;color:var(--alert);font-size:12.5px}
+.me-signout{display:flex;align-items:center;justify-content:center;gap:8px;padding:13px;border-radius:var(--radius);border:1px solid var(--line);background:var(--card);color:var(--ink-2);font-family:var(--sans);font-size:14px;font-weight:600;cursor:pointer}
+.me-signout:active{background:var(--card-2)}
+
+/* ---- the action button ---- */
+.pa-backdrop{position:absolute;inset:0;z-index:40;background:rgba(12,14,13,.42);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
+.pa-fab{position:absolute;right:16px;bottom:calc(72px + env(safe-area-inset-bottom));z-index:50;width:54px;height:54px;padding:0;border-radius:50%;background:var(--accent);color:#fff;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.28)}
+.pa-fab>*{transition:transform .2s cubic-bezier(.34,1.56,.64,1)}
+.pa-fab.on>*{transform:rotate(45deg)}
+.pa-fab:active{transform:scale(.96)}
+.pa-menu{position:absolute;right:16px;bottom:calc(136px + env(safe-area-inset-bottom));z-index:50;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.pa-item{display:flex;align-items:center;gap:11px;padding:9px 15px 9px 10px;border-radius:24px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-family:var(--sans);font-size:13.5px;font-weight:600;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+.pa-item:active{background:var(--card-2)}
+.pa-ic{width:30px;height:30px;border-radius:50%;background:var(--accent-wash);color:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+
+/* ---- held work ---- */
+.conn-badge.queued{background:var(--warn-wash,rgba(176,122,46,.12));color:var(--warn,#B07A2E);border-color:transparent}
+.notif-blocked{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--alert)}

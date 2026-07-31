@@ -57,17 +57,13 @@ const ALLOWED = [
   join('src', 'lib', 'importSchema.js'),      // maps FOREIGN spreadsheet text onto ours
 ]
 
-// NOT a clean bill of health — a KNOWN, dated exclusion.
+// Empty, and it should stay that way.
 //
-// The mobile module never went through Block C: its filter chips, forms and
-// detail screens are still written against the old vocabulary ('2BHK',
-// 'Semi-furnished'), which is why its filters miss and its screens show gaps.
-// Rebuilding it is E3/E4 (PWA parity) in the roadmap.
-//
-// It is excluded so the guard can protect the desk today instead of being
-// switched off wholesale — but the exclusion is printed on every run, so it
-// can't quietly become permanent, and it lapses the moment E3/E4 lands.
-const DEFERRED = [join('src', 'modules', 'mobile')]
+// This held src/modules/mobile — a parallel set of phone screens written
+// against the pre-Block-C vocabulary ('2BHK', 'Semi-furnished'), which is why
+// its filters missed. It was deleted rather than ported: the phone now renders
+// the same modules the desk does, so there is no second vocabulary to drift.
+const DEFERRED = []
 
 const norm = (s) => String(s).toLowerCase().replace(/[\s\-_/.]+/g, '')
 

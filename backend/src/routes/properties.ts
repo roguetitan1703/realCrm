@@ -11,6 +11,7 @@
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { getProperties, createProperty, getUnits, blockUnit, releaseUnit } from '../services/store';
+import { canEditListing } from '../lib/permissions';
 
 export const propertiesRouter = Router();
 propertiesRouter.use(requireTenantAuth);
@@ -39,6 +40,9 @@ propertiesRouter.get('/', async (req: Request, res: Response) => {
  * POST /api/v1/properties
  */
 propertiesRouter.post('/', async (req: Request, res: Response) => {
+  if (!canEditListing(req.user?.role)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Only an owner or manager can add a listing.', code: 'ROLE_REQUIRED' });
+  }
   try {
     const body = req.body || {};
 

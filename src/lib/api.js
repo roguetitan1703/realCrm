@@ -10,6 +10,8 @@
 //   • deployed       → VITE_API_URL (set in Vercel), e.g. https://api.yourdomain.com
 //   • same-origin    → falls back to /api/v1 if no VITE_API_URL is configured
 // Accepts VITE_API_URL with or without a trailing /api/v1 so it can't be mis-set.
+import { enqueue, flushOutbox } from './outbox.js';
+
 function resolveBaseUrl() {
   const env = import.meta.env || {};
   const configured = (env.VITE_API_URL || '').trim().replace(/\/+$/, '');
@@ -39,6 +41,9 @@ function setOnline(ok) {
   if (onlineState.ok === ok && onlineState.checked) return;
   onlineState = { ok, checked: true };
   listeners.forEach(fn => { try { fn(onlineState) } catch (e) {} });
+  // The first successful call after an outage is the signal to replay whatever
+  // was logged while there was no signal.
+  if (ok) setTimeout(() => flushOutbox(request), 0);
 }
 export function subscribeConnection(fn) {
   listeners.add(fn);
@@ -70,10 +75,11 @@ function getHeaders(customHeaders = {}) {
 }
 
 async function request(endpoint, options = {}) {
+  const { queueable, ...fetchOptions } = options;
   try {
     const res = await fetch(`${BASE_URL}${endpoint}`, {
-      ...options,
-      headers: getHeaders(options.headers || {}),
+      ...fetchOptions,
+      headers: getHeaders(fetchOptions.headers || {}),
     });
     // A 4xx/5xx means the server answered — it is reachable. Only a failed
     // fetch means offline. Conflating the two made one rejected request paint
@@ -86,10 +92,25 @@ async function request(endpoint, options = {}) {
     }
     return await res.json();
   } catch (err) {
-    if (err instanceof TypeError) setOnline(false); // fetch could not reach the host
+    if (err instanceof TypeError) {
+      setOnline(false); // fetch could not reach the host
+      // Work done in the field is held and replayed. Only the writes that opt
+      // in — see outbox.js for why edits deliberately do not.
+      if (queueable) {
+        enqueue({ endpoint, options: fetchOptions });
+        return { queued: true };
+      }
+    }
     console.warn(`[API Client Warning] Request to ${endpoint} failed:`, err.message);
     throw err;
   }
+}
+
+// Drain the queue whenever the device comes back. `request` is passed in so the
+// outbox never has to know how a call is authenticated.
+export function flushPending() { return flushOutbox(request); }
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => { flushPending(); });
 }
 
 export const api = {
@@ -231,14 +252,17 @@ export const api = {
   // Remark thread on a lead OR property (B1) — a real persisted timeline entry,
   // author-attributed, edit-own. `outcome` (B5) is optional — set when
   // attaching an outcome to a logged call/message.
-  addRemark: (recordId, text) => request(`/records/${recordId}/actions/remark`, { method: 'POST', body: JSON.stringify({ text }) }),
+  // `queueable` on the three field writes: an agent logs these standing in a
+  // basement or a lift, and the work is already done — losing it because the
+  // signal dropped loses the firm the record of a real visit.
+  addRemark: (recordId, text) => request(`/records/${recordId}/actions/remark`, { method: 'POST', queueable: true, body: JSON.stringify({ text }) }),
   editRemark: (recordId, eventId, text, outcome) => request(`/records/${recordId}/actions/remark/${encodeURIComponent(eventId)}`, { method: 'PATCH', body: JSON.stringify({ text, outcome }) }),
   // B5 — log a plain call/WhatsApp/SMS action on any record (confirm-then-log).
-  logContactAction: (recordId, channel) => request(`/records/${recordId}/actions/contact-log`, { method: 'POST', body: JSON.stringify({ channel }) }),
+  logContactAction: (recordId, channel) => request(`/records/${recordId}/actions/contact-log`, { method: 'POST', queueable: true, body: JSON.stringify({ channel }) }),
   // sendWhatsApp() is gone with the fabricated WABA route it called.
   // B4 — a structured activity on a LEAD (site visit with proof, meeting, …).
   // `propertyId` is a reference to the unit it concerned, never ownership.
-  logActivity: (leadId, payload) => request(`/records/${leadId}/actions/activity`, { method: 'POST', body: JSON.stringify(payload) }),
+  logActivity: (leadId, payload) => request(`/records/${leadId}/actions/activity`, { method: 'POST', queueable: true, body: JSON.stringify(payload) }),
   // B4 media — asks the server to mint a presigned PUT. The bytes then go
   // browser→R2 directly (see uploadMedia in lib/media.js), never through here.
   mediaUploadUrl: (contentType, kind) => request('/media/upload-url', { method: 'POST', body: JSON.stringify({ contentType, kind }) }),

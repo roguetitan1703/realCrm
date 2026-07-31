@@ -4,6 +4,7 @@ import { AppShell } from './layouts/layouts.jsx'
 import { TopBar, Toasts, StaleBanner } from './components/chrome.jsx'
 import { PLATFORM, tenantDocTitle } from './data/platform.js'
 import { ownerCount } from './lib/format.js'
+import { autoEnablePush } from './lib/push.js'
 
 import Login from './modules/Login.jsx'
 import Dashboard from './modules/Dashboard.jsx'
@@ -17,7 +18,7 @@ import Integrations from './modules/Integrations.jsx'
 import ImportPage from './modules/ImportPage.jsx'
 import WaModal from './modules/WaModal.jsx'
 import Modals from './modules/Modals.jsx'
-import Mobile from './modules/Mobile.jsx'
+import Phone from './modules/Phone.jsx'
 
 const NAV = [
   { section: 'Workspace' },
@@ -77,7 +78,16 @@ export default function App() {
   const boot = bootFromUrl()
   const [screen, setScreen] = useState(boot?.screen || 'dashboard')
   const [sel, setSel] = useState(boot?.sel || {})
-  const isResponsiveMobile = useResponsiveLayout() || boot?.role === 'agent'
+  // Screen size only. Role used to force the phone chrome, so an agent at a
+  // desk got a phone app on a 27" monitor while a manager on a 13" laptop got
+  // the desk. What an agent may see is RBAC's job, not the layout's.
+  const isPhone = useResponsiveLayout()
+
+  // Alerts are on by default — no toggle exists, so subscribing is the app's
+  // job, once, as soon as there's a signed-in person to attach the device to.
+  useEffect(() => {
+    if (state.loggedIn) autoEnablePush()
+  }, [state.loggedIn])
 
   // Tab title follows identity: the platform until a workspace is entered, the
   // firm's name inside the desk. Login owns the title while signed out.
@@ -92,12 +102,13 @@ export default function App() {
     return <Login store={store} />
   }
 
-  // Responsive layout switching: when viewport < 1024px, render sleek Mobile Layout without phone frame
-  if (isResponsiveMobile) {
+  // Below 1024px the SAME modules render inside the phone chrome — bottom tabs
+  // and an action button instead of a sidebar. Not a different app.
+  if (isPhone) {
     return (
       <>
         {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
-        <Mobile store={store} framed={false} />
+        <Phone store={store} framed={false} />
         <Toasts toasts={state.toasts} />
       </>
     )
@@ -145,9 +156,12 @@ export default function App() {
     })
   }
 
+  // me() returns null when the signed-in user isn't in the agent roster (the
+  // invented fallback agent was removed). Reading .name off it crashed the shell.
+  const me = store.me()
   const footer = {
-    agent: store.me(),
-    name: store.me().name,
+    agent: me,
+    name: me?.name || state.settings.firmName,
     role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Agent',
   }
 
@@ -167,8 +181,8 @@ export default function App() {
   )
 
   const profile = {
-    agent: store.me(),
-    name: store.me().name,
+    agent: me,
+    name: me?.name || state.settings.firmName,
     role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Agent',
     items: profileItems,
   }

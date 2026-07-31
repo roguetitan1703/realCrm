@@ -70,6 +70,34 @@ export async function enablePush() {
   }
 }
 
+/**
+ * Alerts are on by default: there is no switch anywhere in the product, so this
+ * runs once per signed-in device and subscribes.
+ *
+ * It waits for the first real interaction because Safari (and iOS PWAs) only
+ * grant Notification.requestPermission() from a user gesture — asking on mount
+ * there is an instant, permanent denial, and a denial cannot be re-asked. One
+ * attempt per device: if the person says no, we do not nag on every load.
+ */
+export function autoEnablePush() {
+  if (!pushSupported()) return;
+  if (pushPermission() === 'denied') return;
+
+  const run = async () => {
+    off();
+    if (await isPushSubscribed()) return;
+    await enablePush();
+  };
+  const off = () => {
+    window.removeEventListener('pointerdown', run);
+    window.removeEventListener('keydown', run);
+  };
+
+  if (pushPermission() === 'granted') { run(); return; }
+  window.addEventListener('pointerdown', run, { once: true });
+  window.addEventListener('keydown', run, { once: true });
+}
+
 export async function disablePush() {
   const reg = await readyRegistration();
   if (!reg) return { ok: true };

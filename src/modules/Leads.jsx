@@ -15,7 +15,7 @@ function isSiteVisit(followUp) {
   return /site\s*visit/i.test(followUp?.action || '')
 }
 
-export default function Leads({ store, go, sel, setSel, topBar }) {
+export default function Leads({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
   const [flt, setFlt] = useState(sel.leadFilter || {})
   const [q, setQ] = useState('')
@@ -67,7 +67,9 @@ export default function Leads({ store, go, sel, setSel, topBar }) {
     <>
       {topBar({
         title: 'Leads',
-        actions: <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import / Revert</Button>
+        // Bulk import is desk work and has no phone screen, so the phone chrome
+        // must not offer a route to one.
+        actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import / Revert</Button>
       })}
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>

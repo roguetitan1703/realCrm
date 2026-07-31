@@ -16,6 +16,7 @@ import {
   getProperties, createProperty, updateProperty, deleteProperty,
   getTimelineEvents
 } from '../services/store';
+import { canEditListing, canDeleteRecord } from '../lib/permissions';
 
 export const recordsRouter = Router({ mergeParams: true });
 
@@ -81,6 +82,10 @@ recordsRouter.post('/', async (req: Request, res: Response) => {
   const { moduleKey } = req.params;
   const payload = req.body;
 
+  if (moduleKey === 'properties' && !canEditListing(req.user?.role)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Only an owner or manager can add a listing.', code: 'ROLE_REQUIRED' });
+  }
+
   try {
     let created: any;
     if (moduleKey === 'leads') {
@@ -141,6 +146,13 @@ const updateHandler = async (req: Request, res: Response) => {
   const { moduleKey, id } = req.params;
   const updates = req.body;
 
+  // A listing's facts are desk-owned. Note this guards the RECORD, not the
+  // record's history — remarks, call logs and visit logs go through
+  // /records/:id/actions/* and stay open to every signed-in user.
+  if (moduleKey === 'properties' && !canEditListing(req.user?.role)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Only an owner or manager can change a listing.', code: 'ROLE_REQUIRED' });
+  }
+
   try {
     let updated: any;
     if (moduleKey === 'leads') {
@@ -172,6 +184,10 @@ recordsRouter.put('/:id', updateHandler);
  */
 recordsRouter.delete('/:id', async (req: Request, res: Response) => {
   const { moduleKey, id } = req.params;
+
+  if (!canDeleteRecord(req.user?.role)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Only an owner can delete a record.', code: 'ROLE_REQUIRED' });
+  }
 
   try {
     let deleted = false;

@@ -13,9 +13,11 @@ import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
 import PropertyWizard from './PropertyWizard.jsx'
+import { canEditListing } from '../lib/permissions.js'
 
-export default function Properties({ store, go, sel, setSel, topBar }) {
+export default function Properties({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
+  const mayEdit = canEditListing(state.role)
   const [flt, setFlt] = useState({})
   const [q, setQ] = useState('')
   const [view, setView] = useState('grid')
@@ -24,8 +26,10 @@ export default function Properties({ store, go, sel, setSel, topBar }) {
 
   // Add/edit is a stepped PAGE, not a modal (spec C-add) — rendered inside this
   // screen the same way the detail takeover is, so no new route is needed.
-  if (sel.propAdd) return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} />
-  if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
+  // A listing's facts are desk-owned. An agent reaching the wizard by any route
+  // — deep link, stale sel, a button we missed — lands back on the list.
+  if (sel.propAdd && mayEdit) return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} />
+  if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} mayEdit={mayEdit} />
   if (sel.projOpen && sel.projKey) return <ProjectDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
 
   const open = (id) => go('properties', { propId: id, propOpen: true })
@@ -59,7 +63,7 @@ export default function Properties({ store, go, sel, setSel, topBar }) {
         <Icon name="building" size={14} />Group by project
       </button>
     </>,
-    cta: { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) },
+    cta: mayEdit ? { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) } : null,
     emptyHint: 'Try clearing a filter or search.',
     renderTable: (list, v) => v === 'projects'
       ? <div className="grid-cards">{buildProjects(list).map(pj => <ProjectCard key={pj.key} project={pj} onClick={() => openProject(pj.key)} />)}</div>
@@ -72,7 +76,7 @@ export default function Properties({ store, go, sel, setSel, topBar }) {
     <>
       {topBar({
         title: 'Properties',
-        actions: <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'properties' })}>Import / Revert</Button>
+        actions: (phone || !mayEdit) ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'properties' })}>Import / Revert</Button>
       })}
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>
@@ -96,7 +100,7 @@ function PropTable({ def, list, store, onOpen, allLeads }) {
 // ---------------------------------------------------------------------------
 // PropertyDetail — thin wrapper: supplies the property's UNIQUE sections to the
 // standard ModuleDetail. Field viewing/editing + action rail are standardized.
-function PropertyDetail({ store, go, sel, setSel, topBar }) {
+function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit }) {
   const [gallery, setGallery] = useState(null)
   const p = store.state.properties.find(x => x.id === sel.propId)
   const back = () => setSel(s => ({ ...s, propOpen: false }))
@@ -125,7 +129,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
     {
       id: 'tenancy', when: () => p.deal === 'rent',
       title: 'Tenancy & deposit',
-      right: tenancy
+      right: !mayEdit ? null : tenancy
         ? <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'tenancy', propId: p.id })}><Icon name="edit" size={13} />Manage</button>
         : <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'tenancy', propId: p.id })}><Icon name="plus" size={13} />Record</button>,
       render: () => !tenancy
@@ -201,13 +205,12 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
       // trip through three steps.
       id: 'owner',
       title: 'Owner · internal',
-      right: <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'ownerEdit', propId: p.id })}>
+      right: mayEdit ? <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'ownerEdit', propId: p.id })}>
         <Icon name="edit" size={13} />{p.owner || p.ownerPhone ? 'Edit owner' : 'Add owner'}
-      </button>,
+      </button> : null,
       render: () => !p.owner && !p.ownerPhone
         ? <div className="detail-empty">
-            No owner recorded. Add one so this listing can be chased when it goes
-            quiet — <button className="lnk" onClick={() => store.openModal({ kind: 'ownerEdit', propId: p.id })}>add the owner</button>.
+            No owner recorded.{mayEdit && <> <button className="lnk" onClick={() => store.openModal({ kind: 'ownerEdit', propId: p.id })}>Add the owner</button>.</>}
           </div>
         : (
           <div className="own">
@@ -269,7 +272,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
       {topBar({ eyebrow: 'Properties', title: p.society, onBack: back })}
       <div className="app-body">
         <ModuleDetail
-          def={PROPERTIES_DEF} record={p} store={store} onEdit={openEdit}
+          def={PROPERTIES_DEF} record={p} store={store} onEdit={mayEdit ? openEdit : null}
           title={p.society}
           primary={[{ label: 'WhatsApp', icon: 'wa', onClick: () => store.openModal({ kind: 'pickBuyer', propId: p.id }) }]}
           nba={nba}
