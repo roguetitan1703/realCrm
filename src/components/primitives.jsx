@@ -20,8 +20,17 @@ export function IconButton({ icon, variant = 'ghost', ...rest }) {
 }
 
 // ---- Field / Input ----
-export function Field({ label, children }) {
-  return <label className="field"><span>{label}</span>{children}</label>
+// `required` marks the fields a record cannot be useful without — the asterisk
+// is the cheapest way to tell someone which of thirty boxes actually gate the
+// save, so they stop reading the other twenty-odd as obligations.
+export function Field({ label, children, required, hint }) {
+  return (
+    <label className="field">
+      <span>{label}{required && <i className="req" aria-hidden="true">*</i>}</span>
+      {children}
+      {hint && <em className="field-hint">{hint}</em>}
+    </label>
+  )
 }
 export function Input({ error, ...rest }) {
   return <input className={'input' + (error ? ' err' : '')} {...rest} />

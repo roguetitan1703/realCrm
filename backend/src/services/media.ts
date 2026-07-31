@@ -36,10 +36,19 @@ const UPLOAD_URL_TTL_SECONDS = 300;
 // What a client is allowed to upload. Enforced twice — here when minting the
 // presigned URL (the signature pins Content-Type, so the browser cannot PUT a
 // different type than it declared) and again by the caller's own validation.
+// Images arrive already resized and watermarked by the browser. Video cannot
+// be — no browser API can re-encode one — so it is stored as sent and flagged
+// `watermarked: false` on the property record, which is what a later
+// server-side ffmpeg pass will look for. Accepting it now means the file is
+// captured at the site visit, when the agent is standing in the flat; a slot
+// that rejects the upload just loses the footage.
 export const ALLOWED_UPLOAD_TYPES: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
 };
 
 let client: S3Client | null = null;

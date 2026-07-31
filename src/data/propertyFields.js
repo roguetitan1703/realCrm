@@ -55,15 +55,67 @@ export const OWNERSHIP = [
 ]
 
 // ---- Configuration ----------------------------------------------------------
-export const BHK = [
-  o('1rk', '1 RK'), o('1', '1 BHK'), o('1.5', '1.5 BHK'), o('2', '2 BHK'),
-  o('2.5', '2.5 BHK'), o('3', '3 BHK'), o('3.5', '3.5 BHK'), o('4', '4 BHK'),
-  o('4.5', '4.5 BHK'), o('5', '5 BHK'), o('5plus', '5+ BHK'),
+// Three TIERS, not one flat list. ~85% of Indian residential inventory is
+// 1/2/3 BHK, so those are the only ones shown at rest; everything else is one
+// tap away. A flat list of sixteen chips makes the common case pay the cost of
+// the rare one, which is the single biggest reason this form felt long.
+export const BHK_COMMON = [o('1', '1 BHK'), o('2', '2 BHK'), o('3', '3 BHK')]
+export const BHK_MORE = [
+  o('1rk', '1 RK'), o('1.5', '1.5 BHK'), o('2.5', '2.5 BHK'),
+  o('3.5', '3.5 BHK'), o('4', '4 BHK'), o('4.5', '4.5 BHK'), o('5', '5 BHK'),
+]
+// Only revealed from "5 BHK" onward. A 9 BHK is a real thing (a rented
+// bungalow, a hostel-style let) but offering it up front is noise.
+export const BHK_LARGE = ['6', '7', '8', '9', '10', '11', '12'].map(v => o(v, `${v} BHK`))
+
+// `5plus` is legacy-only: rows written before the tiers existed collapsed
+// anything ≥5 into it. Kept so those rows still render and filter, never
+// offered as a new choice.
+// The union — a LOOKUP table for labelOf()/normalise(), not something any
+// picker renders whole. Order is irrelevant here; the tiers above decide it.
+export const BHK = [...BHK_COMMON, ...BHK_MORE, ...BHK_LARGE, o('5plus', '5+ BHK')]
+
+/** The short list a FILTER offers — the long tail would swamp the filter bar. */
+export const BHK_FILTER = [
+  o('1rk', '1 RK'), o('1', '1 BHK'), o('2', '2 BHK'), o('3', '3 BHK'),
+  o('4', '4 BHK'), o('5', '5 BHK'), o('5plus', '5+ BHK'),
 ]
 
-export const COUNT_0_4 = ['0', '1', '2', '3', '4+'].map(v => o(v, v))
-export const COUNT_1_4 = ['1', '2', '3', '4+'].map(v => o(v, v))
-export const COUNT_0_3 = ['0', '1', '2', '3', '3+'].map(v => o(v, v))
+const countList = (from, to) => {
+  const out = []
+  for (let i = from; i < to; i++) out.push(o(String(i), String(i)))
+  out.push(o(`${to}+`, `${to}+`))
+  return out
+}
+
+export const COUNT_0_4 = countList(0, 4)
+export const COUNT_1_4 = countList(1, 4)
+export const COUNT_0_3 = countList(0, 3)
+
+/** How many bedrooms a config implies — the basis for scaling the counts. */
+export function bedroomsOf(bhk) {
+  if (!bhk || bhk === '1rk') return 1
+  if (bhk === '5plus') return 5
+  const n = Number(bhk)
+  return Number.isFinite(n) ? Math.ceil(n) : 1
+}
+
+/**
+ * Bathroom and balcony choices SCALE with the configuration. Offering "4+"
+ * bathrooms on a 1 RK is clutter; capping a 9 BHK at "4+" loses real
+ * information. The default is the honest Indian norm — one bathroom per
+ * bedroom up to 3, then one fewer than the bedroom count.
+ */
+export function countsFor(bhk) {
+  const beds = bedroomsOf(bhk)
+  const bathTop = Math.min(9, Math.max(4, beds + 1))
+  const balcTop = Math.min(9, Math.max(3, beds))
+  return {
+    bathrooms: countList(1, bathTop),
+    balconies: countList(0, balcTop),
+    defaultBathrooms: String(Math.min(bathTop, beds <= 3 ? beds : beds - 1)),
+  }
+}
 
 // A floor is not always a number — Ground/Basement/Stilt are real answers that
 // an integer column cannot hold, which is why this is a token.
@@ -78,9 +130,12 @@ export const AREA_TYPES = [
   // portal refs do) makes a derived price/sq.ft meaningless.
   o('super_builtup', 'Super built-up'), o('plot', 'Plot'),
 ]
-export const AREA_UNITS = [
-  o('sqft', 'sq.ft'), o('sqyd', 'sq.yd / gaj'), o('sqm', 'sq.m'), o('acre', 'acre'),
-]
+// Two units, not five. Every brokerage in this market quotes sq.ft; sq.m
+// exists because RERA filings and builder agreements are written in it. Gaj
+// and acre were offered "for completeness" and bought nothing but a wider
+// row and a chance to store an area nobody downstream can compare — a plot in
+// acres and a flat in sq.ft cannot sort into one list.
+export const AREA_UNITS = [o('sqft', 'sq.ft'), o('sqm', 'sq.m')]
 
 export const FACING = [
   o('north', 'North'), o('east', 'East'), o('west', 'West'), o('south', 'South'),
@@ -132,6 +187,12 @@ export const SOCIETY_AMENITIES = [
 export const TENANT_TYPES = [
   o('family', 'Family'), o('bachelors', 'Bachelors'), o('company', 'Company'),
 ]
+// Only asked once "Bachelors" is actually chosen — a follow-up question, not a
+// field. Owners in this market are specific about it and a broker who sends a
+// men-only flat to a women's group has burned the lead and the owner at once.
+export const BACHELOR_PREF = [
+  o('both', 'Open for both'), o('men', 'Men only'), o('women', 'Women only'),
+]
 export const MAINTENANCE_MODE = [o('included', 'Include in rent'), o('separate', 'Separate')]
 export const DEPOSIT_OPTIONS = [
   o('none', 'None'), o('1mo', '1 month'), o('2mo', '2 months'), o('custom', 'Custom'),
@@ -151,10 +212,18 @@ export const PRICE_INCLUDES = [
 // ---- Plot-only --------------------------------------------------------------
 export const OPEN_SIDES = ['1', '2', '3', '4'].map(v => o(v, v))
 
-// ---- Both -------------------------------------------------------------------
+// ---- Consulting fee ---------------------------------------------------------
 // "Brokerage" is called Consulting throughout the product (spec Q4).
-export const CONSULTING_OPTIONS = [
+//
+// The fee is charged in two structurally different ways, and asking for both
+// at once was the bug: on a LET it is a number of days' rent, on a SALE it is
+// a percentage of the consideration. A percent box on a rental listing is not
+// just noise — filled in by mistake it produces a fee nobody agreed to.
+export const CONSULTING_DAYS = [
   o('none', 'None'), o('15d', '15 days'), o('30d', '30 days'), o('custom', 'Custom'),
+]
+export const CONSULTING_PERCENT = [
+  o('none', 'None'), o('1', '1%'), o('2', '2%'), o('custom', 'Custom'),
 ]
 
 // ============================================================================
@@ -168,21 +237,69 @@ export function isPlot(subtype) {
   return subtype === 'plot'
 }
 
-export function appliesTo({ category = 'residential', deal = 'sale', subtype = 'apartment' } = {}) {
+// A whole building has no super built-up area and a warehouse has no
+// furnishing. Sets, not booleans, where the answer is "which of these".
+const LANDED = new Set(['independent_house', 'villa', 'farm_house'])
+const NO_FURNISHING = new Set(['warehouse', 'industrial'])
+const BIG_HOMES = new Set(['villa', 'penthouse', 'farm_house', 'independent_house', 'duplex'])
+
+export function appliesTo(form = {}) {
+  const {
+    category = 'residential', deal = 'sale', subtype = 'apartment',
+    possession, transactionType, bhk, preferredTenants = [],
+  } = form
   const plot = isPlot(subtype)
   const residential = category === 'residential'
+  const sale = deal === 'sale'
+  const landed = LANDED.has(subtype)
+  // Under construction has no age, no keys and nothing to photograph inside.
+  const underConstruction = possession === 'under_construction'
+
   return {
     bhk: residential && !plot,
     bathrooms: !plot,
     balconies: residential && !plot,
-    furnishing: !plot,
+    furnishing: !plot && !NO_FURNISHING.has(subtype),
     floors: !plot,
-    servantRoom: residential && !plot,
+    // Only asked where a servant room is plausibly present. On a 1 BHK it is
+    // a question with one possible answer, which is not a question.
+    servantRoom: residential && !plot && (bedroomsOf(bhk) >= 3 || BIG_HOMES.has(subtype)),
     plotFields: plot,
+
+    // Super built-up is a loading applied to apartment carpet area. A villa or
+    // an independent house is sold on plot + built-up, and quoting one a
+    // super built-up figure is meaningless.
+    superBuiltup: !plot && !landed,
+    // A landed property has a plot under it even though it isn't "a plot".
+    landPlotArea: landed,
+
+    // TITLE is a sale concern. A tenant never takes title, so freehold vs
+    // leasehold vs power-of-attorney has no bearing on a let.
+    ownership: sale && !underConstruction,
+    transaction: sale,
+    // "Ready / under construction" is a sale question; a let advertises a date
+    // it's free, which is the "Available from" field on the terms step.
+    possession: sale,
+    // Only a new or under-construction project HAS a RERA number.
+    rera: transactionType === 'new' || underConstruction,
+    // Nothing under construction has an age yet.
+    age: !underConstruction,
+
     rentTerms: deal === 'rent',
-    saleTerms: deal === 'sale',
+    saleTerms: sale,
     tenantPreference: deal === 'rent' && residential,
+    bachelorPreference: deal === 'rent' && residential && preferredTenants.includes('bachelors'),
   }
+}
+
+/** The area boxes that make sense for this property — never all four. */
+export function areaFieldsFor(form = {}) {
+  const a = appliesTo(form)
+  if (a.plotFields) return ['plotArea']
+  const out = ['carpet', 'builtup']
+  if (a.superBuiltup) out.push('superBuiltup')
+  if (a.landPlotArea) out.push('plotArea')
+  return out
 }
 
 // ============================================================================
@@ -213,8 +330,10 @@ export function normaliseBhk(raw) {
   const m = s.match(/(\d+(?:\.5)?)\s*bhk/)
   if (!m) return null
   const n = m[1]
-  if (Number(n) >= 5) return '5plus'
-  return BHK.some(b => b.value === n) ? n : null
+  if (BHK.some(b => b.value === n)) return n
+  // Beyond the tiers there is nothing precise to store, so it collapses into
+  // the legacy bucket rather than being dropped.
+  return Number(n) >= 5 ? '5plus' : null
 }
 
 /** "4 BHK Villa" → villa. The sub-type hiding inside the same legacy string. */

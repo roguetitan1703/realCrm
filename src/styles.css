@@ -727,6 +727,16 @@ input,textarea,select{font-family:inherit}
 .rs-label{font-size:12px;font-weight:500;color:var(--muted)}
 .rs-value{font-size:13.5px;font-weight:500;color:var(--ink);word-break:break-word;line-height:1.45}
 .rs-empty{color:var(--faint)}
+/* A collapsible section header is a button, but must not look like one — it
+   reads as the same label it replaced, with an affordance. */
+.rs-toggle{display:flex;align-items:center;gap:7px;width:100%;background:none;border:none;border-bottom:1px solid var(--line-2);font-family:inherit;cursor:pointer;text-align:left}
+.rs-toggle:hover{color:var(--accent)}
+.rs-toggle .ic{flex-shrink:0}
+.rs-count{margin-left:auto;font-size:10.5px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--muted)}
+.rs-section.closed .rs-toggle{border-bottom-color:transparent;margin-bottom:0;padding-bottom:4px}
+/* Tags, not a comma run — six amenities you take in at a glance. */
+.rs-chips{display:flex;flex-wrap:wrap;gap:5px}
+.rs-chip{font-size:11.5px;font-weight:600;color:var(--ink-2);background:var(--wash);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
 @media (max-width:900px){.rs-grid{grid-template-columns:1fr}.rs-row-wide{grid-column:auto}}
 .lrow{display:flex;align-items:center;gap:13px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);
   padding:13px 15px;cursor:pointer;transition:border-color .12s,box-shadow .12s;width:100%;text-align:left}
@@ -913,6 +923,11 @@ input,textarea,select{font-family:inherit}
 .app-desktop{display:flex;height:100vh;overflow:hidden}
 .app-main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
 .app-body{flex:1;overflow:auto;min-height:0}
+/* A screen that manages its own scrolling opts the PAGE out of scrolling. The
+   shell owns .app-body, so a screen can't set this on itself — it declares the
+   intent with a marker child and this reaches up to honour it. */
+.app-body:has(> .pw-page){display:flex;flex-direction:column;overflow:hidden}
+.pw-page{flex:1;min-height:0;display:flex}
 
 /* ============================================================================
    MOBILE  (the CRM rendered for phone — agent role)
@@ -1479,45 +1494,87 @@ input,textarea,select{font-family:inherit}
 .ev-proof-locked,.ev-proof-geo{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--muted)}
 
 /* ---- C: stepped property wizard (page, not modal) ------------------------- */
-.pw{display:grid;grid-template-columns:250px 1fr;gap:26px;padding:20px 22px 40px;align-items:start}
-.pw-rail{position:sticky;top:16px;border:1px solid var(--line);border-radius:12px;background:var(--card);padding:16px 0 10px}
-.pw-rail-head{padding:0 16px 12px}
-.pw-rail-t{font-size:14px;font-weight:700;color:var(--ink)}
+/* The form column is deliberately capped. A field row stretched across a 27"
+   monitor puts the label and its input a hand-span apart and makes three steps
+   feel like thirty — the rail gets the width instead, because that's the part
+   that has to say where you are. */
+.pw{flex:1;min-height:0;padding:18px 22px;display:flex;justify-content:center;overflow:hidden}
+/* ONE card, screen height. The rail and the save line are fixed furniture; the
+   form is the only thing that moves, and it moves inside the card — so the page
+   itself never scrolls and nothing you need can leave the viewport. */
+.pw-shell{display:grid;grid-template-columns:288px minmax(0,660px);width:100%;max-width:1000px;height:100%;min-height:0;border:1px solid var(--line);border-radius:14px;background:var(--card);overflow:hidden}
+.pw-rail{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line);background:var(--card);padding:18px 0 12px;overflow-y:auto}
+.pw-rail-head{padding:0 18px 13px}
+.pw-rail-t{font-size:15px;font-weight:700;color:var(--ink)}
 .pw-rail-s{font-size:11.5px;color:var(--muted);margin-top:2px}
-.pw-score{padding:0 16px 14px;display:flex;flex-direction:column;gap:6px}
-.pw-score-bar{height:4px;border-radius:3px;background:var(--wash);overflow:hidden}
-.pw-score-bar span{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .25s ease}
+.pw-score{padding:0 18px 15px;display:flex;flex-direction:column;gap:6px}
+.pw-score-bar{height:3px;border-radius:2px;background:var(--wash);overflow:hidden}
+.pw-score-bar span{display:block;height:100%;background:var(--muted);border-radius:2px;transition:width .25s ease}
 .pw-score-n{font-size:11px;font-weight:600;color:var(--muted)}
-.pw-steps{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
-.pw-steps li button{width:100%;display:flex;align-items:center;gap:11px;padding:11px 16px;background:none;border:none;border-left:2px solid transparent;cursor:pointer;font-family:inherit;text-align:left}
-.pw-steps li button:hover{background:var(--wash)}
-.pw-steps li.on button{border-left-color:var(--accent);background:var(--accent-wash)}
-.pw-dot{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--muted);flex-shrink:0}
-.pw-steps li.on .pw-dot{border-color:var(--accent);background:var(--accent);color:#fff}
+.pw-steps{list-style:none;margin:0;padding:6px 0;border-top:1px solid var(--line)}
+.pw-steps li button{width:100%;display:flex;align-items:center;gap:13px;padding:9px 18px;background:none;border:none;cursor:pointer;font-family:inherit;text-align:left}
+.pw-steps li button:hover .pw-step-l{color:var(--accent-ink)}
+/* The connector: a line THROUGH the markers, so three steps read as one route
+   you move along rather than three tabs you can be parked on. */
+.pw-mark{position:relative;display:flex;flex-direction:column;align-items:center;align-self:stretch;flex-shrink:0}
+.pw-mark::before,.pw-mark::after{content:'';position:absolute;left:50%;width:2px;margin-left:-1px;background:var(--line)}
+.pw-mark::before{top:-9px;height:calc(50% - 13px)}
+.pw-mark::after{bottom:-9px;height:calc(50% - 13px)}
+.pw-steps li:first-child .pw-mark::before,.pw-steps li:last-child .pw-mark::after{display:none}
+.pw-steps li.on .pw-mark::before,.pw-steps li.done .pw-mark::before,.pw-steps li.done .pw-mark::after{background:var(--accent)}
+.pw-dot{width:28px;height:28px;border-radius:50%;border:2px solid var(--line);background:var(--card);display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:var(--muted);position:relative;z-index:1;margin:auto 0}
+.pw-steps li.on .pw-dot{border-color:var(--accent);background:var(--accent);color:#fff;box-shadow:0 0 0 4px var(--accent-wash)}
 .pw-steps li.done .pw-dot{border-color:var(--accent);color:var(--accent-ink)}
-.pw-step-b{flex:1;min-width:0}
-.pw-step-l{display:block;font-size:13px;font-weight:600;color:var(--ink)}
-.pw-step-h{display:block;font-size:11px;color:var(--muted);margin-top:1px}
-.pw-step-score{font-size:10.5px;font-weight:700;color:var(--accent-ink);background:var(--accent-wash);border-radius:5px;padding:2px 6px;flex-shrink:0}
-.pw-rail-foot{padding:10px 16px 0;border-top:1px solid var(--line);margin-top:8px}
+.pw-step-b{flex:1;min-width:0;padding:3px 0}
+.pw-step-l{display:block;font-size:14px;font-weight:600;color:var(--ink)}
+.pw-steps li.on .pw-step-l{color:var(--accent-ink);font-weight:700}
+.pw-step-h{display:block;font-size:11.5px;color:var(--muted);margin-top:1px}
+.pw-rail-foot{padding:12px 18px 0;margin-top:4px}
 .pw-discard{background:none;border:none;color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;padding:0}
 .pw-discard:hover{color:var(--danger,#B4453C)}
 
-.pw-main{border:1px solid var(--line);border-radius:12px;background:var(--card);min-width:0}
-.pw-panel{padding:22px 24px}
-.pw-h{font-size:16px;font-weight:700;color:var(--ink);margin:0 0 18px}
-.pw-panel .field{margin-bottom:16px}
+.pw-main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.pw-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.pw-panel{padding:6px 24px 20px}
+/* Grouping instead of headings: a rule and a small caption cost 26px, a <h3>
+   costs 44px, and the caption is doing the same work. */
+.pw-grp{padding:16px 0;border-bottom:1px solid var(--line)}
+.pw-grp:last-child{border-bottom:none;padding-bottom:4px}
+.pw-grp-t{display:flex;align-items:center;gap:9px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+.pw-internal{background:var(--wash);border-radius:10px;padding:14px 15px;margin-top:12px}
+.pw-panel .field{margin-bottom:14px}
+.pw-panel .field:last-child{margin-bottom:0}
 .pw-chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:5px}
-.pw-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+/* Squared-off, not pills. A pill reads as a tag you've been given; a soft
+   rectangle reads as a card you're picking — which is what this is. */
+.pwc{border:1px solid var(--line);background:var(--card);border-radius:9px;padding:8px 14px;font-size:13px;font-weight:500;color:var(--ink-2);cursor:pointer;white-space:nowrap;font-family:inherit;transition:border-color .12s,background .12s}
+.pwc:hover{border-color:var(--muted);background:var(--wash)}
+.pwc.on{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.pwc-more{border-style:dashed;color:var(--accent-ink);font-weight:600}
+.pw-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
 .pw-row-3{grid-template-columns:1fr 1fr 1fr}
+/* Area: one heading, one unit, N boxes. The unit belongs to the row, not to
+   each box — carpet in sq.ft and built-up in sq.m is not a thing. */
+.pw-areas{margin-bottom:14px}
+.pw-areas-h{display:flex;align-items:center;gap:11px;margin-bottom:7px}
+.pw-areas-h>span{font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.pw-area{display:block}
+.pw-area>span{display:block;font-size:11px;color:var(--muted);margin-top:4px}
+.pw-unit-sw{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;flex-shrink:0}
+.pw-unit-sw button{border:none;background:var(--card);padding:5px 11px;font-size:11.5px;font-weight:600;color:var(--muted);cursor:pointer;font-family:inherit}
+.pw-unit-sw button.on{background:var(--accent);color:#fff}
 .pw-hint{font-size:11px;color:var(--muted);text-align:right;margin-top:4px}
 .pw-count{font-weight:600;color:var(--accent-ink)}
 .pw-later{display:flex;gap:11px;align-items:flex-start;padding:13px 14px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);margin-top:6px}
 .pw-later strong{display:block;font-size:12.5px;color:var(--ink)}
 .pw-later p{margin:2px 0 0;font-size:11.5px;line-height:1.4}
-.pw-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 24px;border-top:1px solid var(--line);position:sticky;bottom:0;background:var(--card);border-radius:0 0 12px 12px}
-.pw-foot-r{display:flex;align-items:center;gap:10px}
+/* Save sits at the end of the form, pinned, because that's where a person's
+   eye already is when they finish typing — not floating beside step three. */
+.pw-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 24px;border-top:1px solid var(--line);background:var(--card);flex-shrink:0;z-index:2}
+.pw-foot-l,.pw-foot-r{display:flex;align-items:center;gap:10px}
 .pw-missing{font-size:11.5px;color:var(--muted);font-weight:600}
+.field .req{color:var(--danger,#B4453C);font-style:normal;margin-left:2px;font-weight:700}
+.field-hint{display:block;font-size:11px;color:var(--muted);font-style:normal;margin-top:4px}
 
 .pw-counter{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:9px;padding:8px 11px}
 .pw-counter-l{font-size:12.5px;font-weight:500;color:var(--ink)}
@@ -1538,8 +1595,10 @@ input,textarea,select{font-family:inherit}
 .am-counts{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:8px}
 
 @media (max-width:900px){
-  .pw{grid-template-columns:1fr;gap:16px;padding:14px}
-  .pw-rail{position:static}
+  .pw{padding:0}
+  .pw-shell{grid-template-columns:1fr;grid-template-rows:auto 1fr;border:none;border-radius:0}
+  .pw-rail{border-right:none;border-bottom:1px solid var(--line);overflow:visible;padding-bottom:6px}
+  .pw-rail-foot{display:none}
   .pw-row,.pw-row-3{grid-template-columns:1fr}
 }
 
@@ -1549,17 +1608,43 @@ input,textarea,select{font-family:inherit}
 .own-never{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--accent-ink);background:var(--accent-wash);border-radius:5px;padding:3px 7px}
 .lnk{background:none;border:none;padding:0;font:inherit;color:var(--accent-ink);font-weight:600;cursor:pointer;text-decoration:underline}
 
-/* ---- C8: property photos -------------------------------------------------- */
-.mp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:9px;margin-top:5px}
-.mp-item{position:relative;border-radius:9px;overflow:hidden;border:1px solid var(--line);aspect-ratio:4/3}
+/* ---- C8: property media --------------------------------------------------- */
+.mp-zone{border-radius:11px;transition:border-color .15s,background .15s}
+.mp-zone.empty{border:1.5px dashed var(--line);background:var(--wash)}
+.mp-zone.drag{border-color:var(--accent);background:var(--accent-wash)}
+.mp-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:34px 18px;cursor:pointer;color:var(--muted);text-align:center}
+.mp-drop strong{font-size:13.5px;font-weight:600;color:var(--ink);margin-top:6px}
+.mp-drop span{font-size:11.5px}
+.mp-browse{margin-top:7px;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:7px 15px;font-size:12.5px;font-weight:600;color:var(--accent-ink)}
+.mp-drop:hover .mp-browse{border-color:var(--accent);background:var(--accent-wash)}
+.mp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:9px;margin-top:5px}
+.mp-item{position:relative;border-radius:9px;overflow:hidden;border:1px solid var(--line);aspect-ratio:4/3;background:var(--wash)}
 .mp-item img{width:100%;height:100%;object-fit:cover;display:block}
-.mp-cover{position:absolute;left:5px;bottom:5px;font-size:9.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;background:rgba(0,0,0,.62);color:#fff;border-radius:4px;padding:2px 6px}
-.mp-x{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,.58);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer}
-.mp-x:hover{background:rgba(0,0,0,.8)}
+/* The whole tile opens the file; only the X removes it. They used to be the
+   same target, so looking at a photo deleted it. */
+.mp-open{display:block;width:100%;height:100%;padding:0;border:none;background:none;cursor:zoom-in}
+.mp-vid{display:flex;width:100%;height:100%;align-items:center;justify-content:center;background:#1b1b1b;color:#fff}
+.mp-badge{position:absolute;left:5px;bottom:5px;font-size:9.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;border-radius:4px;padding:2px 6px;pointer-events:none}
+.mp-cover{background:rgba(0,0,0,.62);color:#fff}
+.mp-vid-b{background:rgba(0,0,0,.62);color:#fff;left:auto;right:5px}
+.mp-x{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,.58);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2}
+.mp-x:hover{background:rgba(0,0,0,.85)}
+.mp-uploading img{opacity:.45}
+.mp-error{border-color:var(--danger,#B4453C)}
+.mp-error img{opacity:.35}
+.mp-state{position:absolute;inset:auto 0 0 0;display:flex;align-items:center;justify-content:center;gap:6px;padding:5px;background:rgba(0,0,0,.66);color:#fff;font-size:10.5px;font-weight:600}
+.mp-failed{background:var(--danger,#B4453C)}
+.mp-failed button{background:#fff;border:none;border-radius:5px;padding:2px 8px;font-size:10.5px;font-weight:700;color:var(--danger,#B4453C);cursor:pointer;font-family:inherit}
+.mp-spin{width:11px;height:11px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;animation:mp-spin .7s linear infinite}
+@keyframes mp-spin{to{transform:rotate(360deg)}}
 .mp-add{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;aspect-ratio:4/3;border:1px dashed var(--line);border-radius:9px;color:var(--muted);cursor:pointer;font-size:11.5px;font-weight:600;text-align:center;padding:6px}
 .mp-add:hover{border-color:var(--accent);color:var(--accent-ink)}
-.mp-hint{text-align:left}
+.mp-hint{text-align:left;line-height:1.5}
+.mp-lightbox{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.86);display:flex;align-items:center;justify-content:center;padding:36px}
+.mp-lightbox img,.mp-lightbox video{max-width:100%;max-height:100%;border-radius:8px;display:block}
+.mp-lb-x{position:absolute;top:16px;right:18px;width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.14);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .pgal{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:9px}
-.pgal-i{display:block;line-height:0;border-radius:9px;overflow:hidden;border:1px solid var(--line);aspect-ratio:4/3}
+.pgal-i{position:relative;display:block;line-height:0;border-radius:9px;overflow:hidden;border:1px solid var(--line);aspect-ratio:4/3}
 .pgal-i img{width:100%;height:100%;object-fit:cover;display:block}
-.pgal-cover{grid-column:span 2;grid-row:span 2}
+.pgal-cover{position:absolute;left:5px;bottom:5px;font-size:9.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;background:rgba(0,0,0,.62);color:#fff;border-radius:4px;padding:2px 6px;line-height:1.5}
+.pgal-vid{left:auto;right:5px}

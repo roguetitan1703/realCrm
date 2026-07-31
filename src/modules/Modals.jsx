@@ -6,7 +6,7 @@ import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/fo
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { getPosition, processImage, uploadMedia } from '../lib/media.js'
-import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES } from '../data/propertyFields.js'
+import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES, STATUS } from '../data/propertyFields.js'
 import CameraCapture from '../components/CameraCapture.jsx'
 import { pushSupported, isPushSubscribed, enablePush, disablePush } from '../lib/push.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
@@ -32,7 +32,6 @@ export default function Modals({ store, go }) {
       {store.state.notifOpen && <NotifModal store={store} go={go} />}
       {m?.kind === 'newLead' && <LeadForm store={store} />}
       {m?.kind === 'editLead' && <LeadForm store={store} leadId={m.leadId} />}
-      {m?.kind === 'addProperty' && <PropertyForm store={store} propId={m.propId} />}
       {m?.kind === 'editRecord' && <ModuleFormModal store={store} moduleId={m.moduleId} recordId={m.recordId} />}
       {m?.kind === 'assign' && <AssignModal store={store} leadId={m.leadId} />}
       {m?.kind === 'reassign' && <ReassignModal store={store} fromId={m.fromId} />}
@@ -44,13 +43,14 @@ export default function Modals({ store, go }) {
       {m?.kind === 'import' && <ImportModal store={store} />}
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
-      {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} />}
+      {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} only={m.only} />}
       {m?.kind === 'pickMatch' && <PickMatchModal store={store} leadId={m.leadId} />}
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
       {m?.kind === 'scheduleFollowUp' && <ScheduleFollowUpModal store={store} leadId={m.leadId} />}
       {m?.kind === 'outreach' && <OutreachModal store={store} leadId={m.leadId} channel={m.channel} />}
       {m?.kind === 'tenancy' && <TenancyModal store={store} propId={m.propId} />}
+      {m?.kind === 'ownerEdit' && <OwnerEditModal store={store} propId={m.propId} />}
       {m?.kind === 'ownerUpdate' && <OwnerUpdateModal store={store} propId={m.propId} />}
     </>
   )
@@ -67,7 +67,12 @@ function ModuleFormModal({ store, moduleId, recordId }) {
   const [form, setForm] = useState(() => record ? JSON.parse(JSON.stringify(record)) : {})
   if (!def || !record) return null
 
-  const fields = def.schema.fields
+  // Honour the same applicability predicate the record sheet and the add form
+  // use — and read it off the WORKING COPY, so flipping Sale→Rent here swaps
+  // the fields live. Without this the modal offered a booking amount on a
+  // rental and, worse, `save()` wrote every field in the schema, stamping
+  // empty sale terms onto a let.
+  const fields = def.schema.fields.filter(f => !f.when || f.when(form))
   const coreFields = fields.filter(f => f.section === 'core')
   const domainFields = fields.filter(f => f.section !== 'core')
   const setField = (key, val) => setForm(prev => setNestedValue(prev, key, val))
@@ -136,10 +141,53 @@ function ModuleFormModal({ store, moduleId, recordId }) {
   )
 }
 
+// ---- Owner on a property: add or correct, without the stepped form ---------
+// The owner is optional and internal. It used to be capturable NOWHERE — the
+// add page didn't ask and the record's empty state pointed back at the add
+// page, so "add an owner" was a loop with no door. This is the door.
+//
+// Note this edits the owner ON THE PROPERTY. The Contacts → Owners list is
+// derived by grouping properties on this name, so saving here is what makes an
+// owner appear there; there is no separate owner record to keep in step (and
+// no blank one created for a listing that has no owner yet).
+function OwnerEditModal({ store, propId }) {
+  const p = store.state.properties.find(x => x.id === propId)
+  const [owner, setOwner] = useState(p?.owner || '')
+  const [phone, setPhone] = useState(p?.ownerPhone || '')
+  const [email, setEmail] = useState(p?.ownerEmail || '')
+  if (!p) return null
+
+  const save = () => {
+    // Empty stays empty. Writing '' rather than a placeholder is what keeps a
+    // nameless owner out of the Contacts list.
+    store.updateProp(p.id, {
+      owner: owner.trim(), ownerPhone: phone.trim(), ownerEmail: email.trim(),
+    })
+    store.toast(owner.trim() ? `Owner saved · ${owner.trim()}` : 'Owner cleared')
+    store.closeModal()
+  }
+
+  return (
+    <Modal title={p.owner || p.ownerPhone ? 'Edit owner' : 'Add owner'} onClose={store.closeModal} width={440}>
+      <div className="own-never" style={{ marginBottom: 12 }}>Never shared with clients</div>
+      <Field label="Owner name">
+        <Input value={owner} onChange={e => setOwner(e.target.value)} placeholder="Sneha Rane" autoFocus />
+      </Field>
+      <Field label="Phone">
+        <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98765 43210" />
+      </Field>
+      <Field label="Email">
+        <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="Optional" />
+      </Field>
+      <Button variant="primary" block style={{ marginTop: 14 }} onClick={save}>Save owner</Button>
+    </Modal>
+  )
+}
+
 // ---- One-tap owner update: activity summary WhatsApp, logged to the listing ----
 function OwnerUpdateModal({ store, propId }) {
   const p = store.state.properties.find(x => x.id === propId)
-  const [text, setText] = useState(() => p ? ownerUpdateMessage(p, store.state.leads) : '')
+  const [text, setText] = useState(() => p ? ownerUpdateMessage(p, store.state.leads, store.state.settings.firmName) : '')
   if (!p) return null
   const digits = String(p.ownerPhone || '').replace(/\D/g, '')
   // Used to only call store.logEvent (client-only — the "logged" claim in the
@@ -615,65 +663,22 @@ function LeadForm({ store, leadId }) {
   )
 }
 
-// ---- Add property ----
-function PropertyForm({ store, propId }) {
-  const [f, setF] = useState({ deal: 'sale', type: '2BHK', society: '', wing: '', flat: '', parking: '', locality: 'Wakad', price: '', owner: '', status: 'Available' })
-  const set = (k, v) => setF(s => ({ ...s, [k]: v }))
-  const save = () => {
-    if (!f.society.trim()) { store.toast('Add a society name first', 'warn'); return }
-    let rawNum = parseFloat(String(f.price).replace(/[^0-9.]/g, ''))
-    let price = rawNum || (f.deal === 'rent' ? 30000 : 8000000)
-    if (f.deal === 'sale') {
-      if (price <= 25) price = Math.round(price * 10000000) // e.g. 1.5 -> 1.5 Cr (1,50,00,000)
-      else if (price < 100000) price = Math.round(price * 100000) // e.g. 85 -> 85 L (85,00,000)
-    }
-    const label = f.deal === 'rent' ? '₹' + price.toLocaleString('en-IN') + '/mo' : (price >= 10000000 ? '₹' + (price / 10000000).toFixed(2).replace(/\.?0+$/, '') + 'Cr' : '₹' + Math.round(price / 100000) + 'L')
-    store.addProperty({
-      id: 'pnew' + Date.now(), title: `${f.type} · ${f.locality}`, type: f.type, deal: f.deal, locality: f.locality, society: f.society,
-      project: f.society, wing: f.wing || undefined, flat: f.flat || undefined, parking: f.parking || undefined,
-      carpet: 950, floor: 3, totalFloors: 12, facing: 'East', age: 3, price, priceLabel: label, negotiable: true, status: f.status,
-      owner: f.owner || 'New owner', furnishing: 'Semi-furnished', possession: 'Immediate', isNew: true,
-      features: ['Fresh listing, just added', 'Owner direct deal', 'Prime ' + f.locality + ' location', 'Ready to move'],
-      depositLabel: f.deal === 'rent' ? '₹' + (price * 3).toLocaleString('en-IN') : undefined,
-    })
-    store.closeModal()
-  }
-  const chip = (on, onClick, label) => <button className={'qchip' + (on ? ' on' : '')} onClick={onClick}>{label}</button>
-  return (
-    <Modal title="Add property" onClose={store.closeModal} width={460}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div className="field"><label>Deal</label><Segmented value={f.deal} onChange={v => set('deal', v)} options={[{ value: 'sale', label: 'For sale' }, { value: 'rent', label: 'For rent' }]} /></div>
-        <div className="field"><label>Type</label><div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>{['1BHK', '2BHK', '3BHK', 'Commercial', 'Plot'].map(t => chip(f.type === t, () => set('type', t), t))}</div></div>
-        <Field label="Society / project"><Input value={f.society} onChange={e => set('society', e.target.value)} placeholder="e.g. Kolte Patil Life Republic" autoFocus /></Field>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <div style={{ flex: 1 }}><Field label="Wing / tower"><Input value={f.wing} onChange={e => set('wing', e.target.value)} placeholder="B" /></Field></div>
-          <div style={{ flex: 1 }}><Field label="Flat / unit no."><Input value={f.flat} onChange={e => set('flat', e.target.value)} placeholder="1402" /></Field></div>
-          <div style={{ flex: 1 }}><Field label="Parking"><Input value={f.parking} onChange={e => set('parking', e.target.value)} placeholder="2 covered" /></Field></div>
-        </div>
-        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: -4, display: 'flex', gap: 6, alignItems: 'center' }}><Icon name="check" size={13} style={{ color: 'var(--accent)' }} />Unit no. stays internal — hidden from client WhatsApp shares.</div>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <div style={{ flex: 1 }}><Field label="Locality"><Input value={f.locality} onChange={e => set('locality', e.target.value)} /></Field></div>
-          <div style={{ flex: 1 }}><Field label={f.deal === 'rent' ? 'Rent (₹/mo)' : 'Price (₹ lakh)'}><Input value={f.price} onChange={e => set('price', e.target.value)} placeholder={f.deal === 'rent' ? '32000' : '82'} /></Field></div>
-        </div>
-        <Field label="Owner"><Input value={f.owner} onChange={e => set('owner', e.target.value)} placeholder="Owner name" /></Field>
-        <div className="field"><label>Status</label><Segmented value={f.status} onChange={v => set('status', v)} options={['Available', 'Under offer']} /></div>
-        <Button variant="primary" block onClick={save}>Save property</Button>
-      </div>
-    </Modal>
-  )
-}
+// The pre-Block-C add-property modal lived here and has been DELETED.
+//
+// It was superseded by the stepped page (PropertyWizard) but stayed reachable
+// from the mobile speed dial, still writing the old shape: type: '2BHK',
+// furnishing: 'Semi-furnished', possession: 'Immediate', status: 'Under offer'.
+// Not one of those is a valid value any more, so every property added from a
+// phone landed unfilterable, untagged and unmatchable. Dead-looking code that
+// is still wired to a button is the worst kind.
+//
+// Adding a property from the phone now needs the wizard on the mobile shell —
+// that's E3/E4 (PWA parity), and until then the phone doesn't offer it rather
+// than offering something that corrupts the row.
+//
+// `UNIT_CONFIGS` went with it: the last remnant of the bulk-add modal retired
+// in C9.
 
-// ---- Add units to a project (row-by-row list) ----
-// A unit IS a full standalone property. This adds several at once under ONE
-// project: a shared header for the common facts, then one editable row per unit
-// (each a complete property — flat no. optional). No forced floor range.
-const UNIT_CONFIGS = ['1BHK', '2BHK', '3BHK', '4BHK', 'Shop', 'Office', 'Plot']
-
-function priceLabelFor(deal, price) {
-  return deal === 'rent'
-    ? '₹' + price.toLocaleString('en-IN') + '/mo'
-    : (price >= 10000000 ? '₹' + (price / 10000000).toFixed(2).replace(/\.?0+$/, '') + 'Cr' : '₹' + Math.round(price / 100000) + 'L')
-}
 // "95" (lakh) or "1.85" (cr) → absolute rupees; rent left as entered.
 function parsePrice(raw, deal) {
   let n = parseFloat(String(raw).replace(/[^0-9.]/g, ''))
@@ -1113,7 +1118,12 @@ function VisitProofModal({ store, leadId, propId }) {
 // differently: a Sofa either exists or it doesn't, but "2 ACs" and "5 ACs" are
 // materially different to whoever is renting the place — so those get a
 // counter, not a checkbox.
-function AmenitiesModal({ store, value = {}, onDone }) {
+// `only:'society'` drops the furnishing halves. An unfurnished flat still sits
+// in a society with a lift and a gym — those are the building's, not the
+// flat's — but offering "Sofa / Fridge / How many ACs?" on a place with no
+// furniture is asking a question whose answer is already on the screen.
+function AmenitiesModal({ store, value = {}, onDone, only = 'all' }) {
+  const showFurnishing = only !== 'society'
   const [fixtures, setFixtures] = useState(value.fixtures || [])
   const [counted, setCounted] = useState(value.countedItems || {})
   const [amenities, setAmenities] = useState(value.societyAmenities || [])
@@ -1139,34 +1149,38 @@ function AmenitiesModal({ store, value = {}, onDone }) {
   }
 
   return (
-    <Modal title="Furnishings & amenities" onClose={store.closeModal} width={620}>
+    <Modal title={showFurnishing ? 'Furnishings & amenities' : 'Society amenities'} onClose={store.closeModal} width={620}>
       <div className="am">
-        <div className="am-sec">
-          <div className="am-head"><h4>Flat furnishings</h4><span>{fixtures.length} selected</span></div>
-          <div className="am-grid">
-            {FIXTURES.map(f => (
-              <button key={f.value} type="button"
-                className={'am-cell' + (fixtures.includes(f.value) ? ' on' : '')}
-                onClick={() => toggle(fixtures, setFixtures, f.value)}>{f.label}</button>
-            ))}
+        {showFurnishing && (
+          <div className="am-sec">
+            <div className="am-head"><h4>Flat furnishings</h4><span>{fixtures.length} selected</span></div>
+            <div className="am-grid">
+              {FIXTURES.map(f => (
+                <button key={f.value} type="button"
+                  className={'am-cell' + (fixtures.includes(f.value) ? ' on' : '')}
+                  onClick={() => toggle(fixtures, setFixtures, f.value)}>{f.label}</button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="am-sec">
-          <div className="am-head"><h4>How many?</h4><span>{Object.keys(counted).length} set</span></div>
-          <div className="am-counts">
-            {COUNTED_ITEMS.map(c => (
-              <div key={c.value} className="pw-counter">
-                <span className="pw-counter-l">{c.label}</span>
-                <div className="pw-counter-c">
-                  <button type="button" onClick={() => bump(c.value, (counted[c.value] || 0) - 1)} aria-label={`Fewer ${c.label}`}>-</button>
-                  <span>{counted[c.value] || 0}</span>
-                  <button type="button" onClick={() => bump(c.value, (counted[c.value] || 0) + 1)} aria-label={`More ${c.label}`}>+</button>
+        {showFurnishing && (
+          <div className="am-sec">
+            <div className="am-head"><h4>How many?</h4><span>{Object.keys(counted).length} set</span></div>
+            <div className="am-counts">
+              {COUNTED_ITEMS.map(c => (
+                <div key={c.value} className="pw-counter">
+                  <span className="pw-counter-l">{c.label}</span>
+                  <div className="pw-counter-c">
+                    <button type="button" onClick={() => bump(c.value, (counted[c.value] || 0) - 1)} aria-label={`Fewer ${c.label}`}>-</button>
+                    <span>{counted[c.value] || 0}</span>
+                    <button type="button" onClick={() => bump(c.value, (counted[c.value] || 0) + 1)} aria-label={`More ${c.label}`}>+</button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="am-sec">
           <div className="am-head"><h4>Society amenities</h4><span>{amenities.length} selected</span></div>
@@ -1186,12 +1200,24 @@ function AmenitiesModal({ store, value = {}, onDone }) {
   )
 }
 
+// Statuses come from the canonical vocabulary, not a list typed here.
+//
+// This modal WROTE 'Under offer' and 'Closed' — neither of which exists in
+// STATUS ('Under Offer', and there is no 'Closed'). So setting a status here
+// put a value in the database that the filter couldn't match, the status tag
+// had no colour for, and the lifecycle stepper didn't recognise. A read-side
+// drift shows the wrong thing; a write-side one corrupts the row.
 function StatusModal({ store, propId }) {
   const p = store.state.properties.find(x => x.id === propId)
+  // A sale doesn't get Leased and a let doesn't get Sold — offering both is
+  // how a listing ends up marked with the other deal's ending.
+  const options = STATUS
+    .map(s => s.value)
+    .filter(s => (s === 'Sold' ? p?.deal !== 'rent' : s === 'Leased' ? p?.deal === 'rent' : true))
   return (
-    <Modal title="Listing status" onClose={store.closeModal} width={360}>
+    <Modal title="Status" onClose={store.closeModal} width={360}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {['Available', 'Under offer', 'Closed'].map(s => (
+        {options.map(s => (
           <button key={s} onClick={() => { store.setPropStatus(propId, s); store.closeModal() }}
             style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 12px', border: '1px solid ' + (p?.status === s ? 'var(--accent)' : 'var(--line)'), background: p?.status === s ? 'var(--accent-wash)' : '#fff', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>
             <span style={{ flex: 1, textAlign: 'left' }}>{s}</span>
