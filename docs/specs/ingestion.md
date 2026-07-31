@@ -113,13 +113,99 @@ Same for every provider — the endpoint doesn't care who's calling.
 ---
 
 ## Build checklist
-- [ ] `integrations` + `webhook_inbox` tables; migrate `ingest_secret` → an integration.
-- [ ] `/api/v1/ingest/{tenant}` (X-API-Key + ?key=): resolve integration, store raw, fast 200, parse-if-configured.
-- [ ] Unknown-key: 401, no body stored, rate-limited counter + 7-day minimal log.
-- [ ] Parser engine (map + defaults + valueMaps + transforms) → canonical lead.
-- [ ] Deferred load + "Replay pending"; auto-parse on new push once configured.
-- [ ] Integrations UI (tenant): enable-popular + add-custom (name→key); per-connection activity feed.
-- [ ] Parser mapper UI in the **tenant owner's Integrations area** (owner-only) + superadmin can edit any tenant: auto-suggest from sample, **mandatory test-preview against last payload before save**, save-as-template (learned preset).
-- [ ] Key management: create/rotate (show once), last4, RBAC owner/manager.
-- [ ] D2: generic setup-pack generator (email + page).
-- [ ] Retention purge job (see data-lifecycle.md); audit: integration/key/parser/replay events.
+- [x] `integrations` + `webhook_inbox` tables. **`ingest_secret` NOT migrated** — see gap G1.
+- [x] `/api/v1/ingest/{tenant}`: resolve integration, store raw, fast 200, parse-if-configured.
+- [x] Unknown-key: 401, no body stored, counter collapsed per (ip, key-prefix, day). **7-day purge NOT built** — see gap G2.
+- [x] Parser engine (map + defaults + valueMaps + transforms) → canonical lead.
+- [x] Deferred load + "Replay pending"; auto-parse on new push once configured.
+- [x] Integrations UI (tenant): add-connection (name→key); per-connection activity feed with the raw payload readable per push.
+- [x] Parser mapper UI, owner-only, auto-suggest from sample, **mandatory test-preview before save — enforced on the SERVER, not only in the UI**. **save-as-template NOT built** — see gap G3.
+- [x] Key management: create/rotate, last4, RBAC owner/manager. **Changed from spec:** the key is readable, not show-once — see decision D-1.
+- [x] D2: generic setup-pack generator (copyable email, key filled in). **Hosted page NOT built** — see gap G4.
+- [x] Audit: integration create/rotate/reveal/pause/delete/parser_set/replay events.
+- [ ] Retention purge job (30-day body purge) — see gap G2.
+
+---
+
+## Status as built (2026-08-01)
+
+**D1 and D2 are functionally complete and tested against a live server + live
+database.** What is *not* done is listed as gaps below; none of them block a
+provider from sending real leads today.
+
+### Verified, not assumed
+Two suites, both run against a running server and the real Postgres — the
+failures that matter here (a body that never reaches the handler, a retry that
+doubles a lead, a payload stored as `{}`) all live in the layers a unit test
+mocks away.
+
+- `scripts/ingest-conformance.mjs` — **30/30.** Transport: X-API-Key,
+  `?key=`, `Authorization: Bearer`, `X-Auth-Token`; POST/GET/PUT; form-encoded;
+  JSON under `text/plain`; XML and truncated JSON kept verbatim; UTF-8
+  (Devanagari) round trip; deep nesting; root-level array; empty body; 200-field
+  payload; legacy `/:tenant/:source` URL; 401 on no key / wrong key / **valid key
+  on another tenant's URL**; 405 with an `Allow` header instead of the SPA page;
+  ack under 1500ms; 10 concurrent pushes → 10 distinct inbox rows.
+- `scripts/ingest-lead-flows.mjs` — **22/22.** Three genuinely different
+  provider schemas each with their own mapping; name trimmed; `+91 98220 61111`
+  normalised; nested locality read; `75,00,000` → `7500000`; valueMap rewrite;
+  default source; **retry with the same `enquiry_id` → ignored, one lead**;
+  **same buyer via a second provider → merged, one lead**; missing phone / `{}` /
+  nulls / unparseable body → `failed` with a reason and **no lead created**;
+  unmapped connection → stays `pending`, no lead.
+
+### Decisions that differ from the locked spec
+- **D-1 · The API key is readable, not show-once.** Spec said hashed and shown
+  once. Hash-only is right for a password and wrong here: the key lives in a
+  portal's webhook config, so "we can't tell you what we gave you" makes a
+  rotation the only recovery — a real outage, re-briefing the portal, for a
+  property that bought nothing. The key is now stored **twice**: SHA-256 for the
+  inbound lookup (unchanged, one indexed hop) and **AES-256-GCM encrypted** for
+  reading back through an authenticated, audited endpoint. A stolen dump is
+  still useless without the server secret.
+- **D-2 · The endpoint accepts GET/PUT/PATCH, not only POST.** A real share of
+  small portal panels only let you paste a URL and fire a GET with the enquiry
+  in the query string. Refusing them means telling a broker their aggregator
+  "isn't supported". The key is stripped from the payload before storage.
+- **D-3 · A malformed body is landed, not rejected.** Broken JSON (XML under a
+  JSON content-type, a truncated body) used to 500 with nothing recorded — the
+  one push you most need to read. It now lands as `{_unparsed, _error}` and the
+  parser refuses it on its own terms.
+
+### Gaps — carried, not lost
+- **G1 · `ingest_secret` was never migrated.** The old per-tenant secret still
+  exists beside the new per-integration keys. Any portal still configured with
+  the old key gets a 401. Needs a one-time migration that mints an integration
+  per tenant from the existing secret.
+- **G2 · No retention job at all.** `body_purged_at` exists as a column and
+  nothing ever sets it: raw bodies are kept forever, and the reject log has no
+  7-day purge. This is the whole of [data-lifecycle.md](./data-lifecycle.md) for
+  this table and it grows unbounded with every push.
+- **G3 · No save-as-template (learned preset).** Every tenant maps 99acres from
+  scratch. The spec's answer to "no blind presets" was a mapping learned from
+  the first tenant and offered to the next; only the from-scratch half exists.
+- **G4 · No hosted setup page.** D2 produces the copyable email only.
+- **G5 · `crm_integrations` (the old KV table, no `tenant_id`) still sits beside
+  the new `integrations`.** Two near-identically-named tables; the old one holds
+  Exotel/WABA settings and its route hardcodes a tenant slug. Needs a deliberate
+  fold-in.
+
+### Bigger problems found while building D — separate focus, not D's job
+- **P1 · Auth is open.** `requireTenantAuth` has a "tokenless demo path": with no
+  token it falls back to `DEFAULT_TENANT_ID` and **invents a user**. Verified —
+  an unauthenticated `POST /api/v1/records/x/actions/contact-log` returns 201 and
+  writes a timeline event. Every "authenticated" route is currently reachable
+  without a token. `/ingest` itself is NOT affected: it authenticates on the API
+  key alone and rejects cross-tenant keys. Parked deliberately (nothing is live
+  yet); it is the auth/RBAC phase of BUILD_PLAN, not a D item.
+- **P2 · Fabricated telephony, now deleted.** Two routes invented a DID, an API
+  key and a call SID and wrote "Initiated outbound telephony call … via DID
+  08045678900" to the timeline while contacting nobody. Removed; a call is
+  recorded through `contact-log`, which claims only what happened. Real
+  click-to-call remains unbuilt and should be scoped on its own.
+- **P3 · The lead form is not schema-driven.** Properties went through the
+  vocabulary + wizard rework; leads did not. Locality was three disagreeing
+  hardcoded Pune lists (now free text with suggestions derived from the firm's
+  own records, `src/lib/suggest.js`), but the form still drifts from the record
+  sheet the way property fields used to. Needs the same treatment as block C.
+- **P4 · Mobile is pre-Block-C.** 10 files deferred by the vocabulary guard.

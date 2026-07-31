@@ -43,6 +43,10 @@ app.use(express.json({
   verify: (req: any, _res, buf) => { req.rawBody = buf.toString('utf8'); },
 }));
 app.use(express.urlencoded({ extended: true }));
+// text/plain and XML arrive from senders that never set a content-type properly.
+// Parsed as text so /ingest can still read them (payloadOf) instead of landing
+// an empty object and losing a real enquiry.
+app.use(express.text({ type: ['text/*', 'application/xml', 'application/soap+xml'], limit: '10mb' }));
 
 /**
  * A provider sending broken JSON — XML with a JSON content-type, a trailing
