@@ -41,7 +41,6 @@ export default function Modals({ store, go }) {
       {m?.kind === 'contact' && <ContactConfirmModal store={store} channel={m.channel} name={m.name} phone={m.phone} waText={m.waText} recordType={m.recordType} recordId={m.recordId} />}
       {m?.kind === 'remark' && <RemarkModal store={store} recordType={m.recordType} recordId={m.recordId} />}
       {m?.kind === 'propStatus' && <StatusModal store={store} propId={m.propId} />}
-      {m?.kind === 'integration' && <IntegrationModal store={store} card={m.card} />}
       {m?.kind === 'import' && <ImportModal store={store} />}
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
@@ -1116,65 +1115,6 @@ function StatusModal({ store, propId }) {
   )
 }
 
-function IntegrationModal({ store, card }) {
-  const current = store.state.integrations?.[card.key] || {}
-  const [apiKey, setApiKey] = useState(current.apiKey || current.phoneId || '')
-  const [sid, setSid] = useState(current.sid || current.accessToken || '')
-  const isWebhook = card.key === '99acres' || card.key === 'MagicBricks' || card.key === 'Website sync'
-  const isActive = current.status === 'active'
-
-  const handleSave = () => {
-    store.saveIntegration(card.key, isWebhook ? { status: 'active' } : { apiKey, sid, status: 'active' })
-    store.closeModal()
-  }
-
-  return (
-    <Modal title={`Configure ${card.key}`} onClose={store.closeModal} width={480}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--card-2)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 16 }}>{card.mark}</div>
-        <div>
-          <div style={{ fontWeight: 600, fontSize: 14.5 }}>{card.key} Integration</div>
-          <div className="u-muted" style={{ fontSize: 12.5 }}>{card.desc}</div>
-        </div>
-      </div>
-
-      {isWebhook ? (
-        <div style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: 14, marginBottom: 18 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', marginBottom: 6 }}>Your Live Webhook URL</div>
-          <div style={{ fontFamily: 'monospace', fontSize: 12, background: 'var(--card)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--line)', wordBreak: 'break-all', marginBottom: 10, color: 'var(--ink)' }}>
-            {current.webhookUrl || `https://api.skylinerealty.in/v1/ingest/skyline-realty/${card.key.toLowerCase().replace(/\s+/g, '')}`}
-          </div>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--muted)', marginBottom: 6 }}>HMAC SHA-256 Secret</div>
-          <div style={{ fontFamily: 'monospace', fontSize: 12, background: 'var(--card)', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--line)', color: 'var(--accent-ink)' }}>
-            {current.secret || 'whsec_live_default_secret_991'}
-          </div>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 18 }}>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', display: 'block', marginBottom: 4 }}>
-              {card.key === 'Calling & SMS' ? 'Exotel API Key / SID' : 'Meta WABA Phone Number ID'}
-            </label>
-            <input className="input" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={card.key === 'Calling & SMS' ? 'exo_live_key_...' : '109283746582910'} style={{ width: '100%' }} />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', display: 'block', marginBottom: 4 }}>
-              {card.key === 'Calling & SMS' ? 'Virtual Landline DID / Caller ID' : 'System User Access Token'}
-            </label>
-            <input className="input" value={sid} onChange={e => setSid(e.target.value)} placeholder={card.key === 'Calling & SMS' ? '080-45678900' : 'EAAGm0PX4ZCpsBA...'} type={card.key === 'Calling & SMS' ? 'text' : 'password'} style={{ width: '100%' }} />
-          </div>
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-        <Button variant="ghost" onClick={store.closeModal}>Cancel</Button>
-        <Button variant="primary" onClick={handleSave}>
-          {isActive ? 'Update & Save Credentials' : 'Connect & Activate Channel'}
-        </Button>
-      </div>
-    </Modal>
-  )
-}
 
 // ---- Structured site-visit outcome (Liked / Rejected + reason) ----
 const REJECT_REASONS = ['Price / budget', 'Vaastu / facing', 'Floor', 'Location', 'Noise', 'Size / layout', 'Furnishing', 'Parking']

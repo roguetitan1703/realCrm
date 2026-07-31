@@ -96,6 +96,9 @@ export async function withRequestContext(req: Request, res: Response, next: Next
       actorLabel: claims.email, ip: req.ip || req.socket?.remoteAddress || null,
       userAgent: (req.headers['user-agent'] as string) || null,
     };
+    // Superadmin is an authenticated actor too — requireTenantAuth gates on
+    // req.user, and Delpat acting on a tenant must not be treated as anonymous.
+    req.user = { id: claims.superadmin_id, tenant_id: headerTenant, role: 'superadmin' } as any;
   } else {
     // Tokenless: the login screen has selected a workspace; scope to it. This is
     // the pre-authentication hydrate path only.
@@ -110,14 +113,33 @@ export async function withRequestContext(req: Request, res: Response, next: Next
 }
 
 /**
- * Mandatory Tenant Auth Middleware
- * Attaches `req.tenant` (subscription/module context). Tenant + user identity
- * are already resolved by withRequestContext into req.tenantId / req.user; this
- * only layers the subscription object and a tokenless fallback user (so the
- * pre-login demo, which hydrates without a token, still has an actor).
+ * Mandatory Tenant Auth Middleware — a real gate.
+ *
+ * This used to have a "tokenless demo path": with no token it fell back to a
+ * default tenant and INVENTED a user from the roster (or a hardcoded
+ * 'Workspace Admin' with a made-up phone number) so the pre-login demo could
+ * still write. The effect was that every route behind this middleware was
+ * reachable without authenticating, and every action taken that way was
+ * attributed to a real agent who did not perform it.
+ *
+ * The demo it existed for is gone. A request without a valid user or superadmin
+ * token is now rejected, and nothing writes under a fabricated actor.
+ *
+ * `/ingest` is deliberately NOT behind this: it authenticates on its own API
+ * key, which resolves the tenant by itself (see routes/ingest.ts).
  */
 export async function requireTenantAuth(req: Request, res: Response, next: NextFunction) {
   try {
+    // withRequestContext has already established identity from the token. No
+    // user here means no valid token was presented.
+    if (!req.user) {
+      return res.status(401).json({
+        error: 'Not authenticated',
+        message: 'Sign in to continue.',
+        code: 'AUTH_REQUIRED',
+      });
+    }
+
     const tenantSlugOrId = req.tenantId || (req.headers['x-tenant-id'] as string) || DEFAULT_TENANT_ID;
     const tenant = await getTenantContext(tenantSlugOrId);
     if (!tenant) {
@@ -128,22 +150,6 @@ export async function requireTenantAuth(req: Request, res: Response, next: NextF
     }
     req.tenant = tenant;
     req.tenantId = tenantSlugOrId;
-
-    // Tokenless demo path: no user on the request yet — resolve a default actor
-    // from the roster so audit/actions still have an author.
-    if (!req.user) {
-      const agents = await getAgents();
-      const activeAgent = agents.find(a => a.duty_status !== 'OFF_DUTY') || agents[0];
-      req.user = activeAgent ? {
-        id: activeAgent.id, tenant_id: tenant.id, name: activeAgent.name,
-        email: `${activeAgent.id}@workspace.com`, phone_number: activeAgent.phone || '+919820011223',
-        role: (activeAgent.role || 'FIELD_AGENT') as any,
-        branch_location: activeAgent.branch_location || 'Pune HQ', status: activeAgent.duty_status || 'ACTIVE',
-      } : {
-        id: 'usr_default', tenant_id: tenant.id, name: 'Workspace Admin', email: 'admin@workspace.com',
-        phone_number: '+919820011223', role: 'TENANT_ADMIN' as any, branch_location: 'HQ', status: 'ACTIVE',
-      };
-    }
     next();
   } catch (err: any) {
     return res.status(500).json({ error: 'Authentication Error', details: err.message });

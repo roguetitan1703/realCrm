@@ -1830,3 +1830,9 @@ input,textarea,select{font-family:inherit}
 .msgt-ph code{font-family:var(--mono);font-size:11px;background:var(--card-2,var(--wash));border:1px solid var(--line);border-radius:5px;padding:3px 7px;color:var(--ink-2)}
 .msgt-t{width:100%;margin-bottom:8px;font-size:13px;line-height:1.5}
 .msgt-foot{display:flex;gap:9px;margin-top:6px}
+
+/* A segment that is a problem, not a stage — only while it has a count. */
+.segpill.alert{color:var(--danger,#B4453C)}
+.segpill.alert .segpill-c{background:rgba(180,69,60,.14);color:var(--danger,#B4453C)}
+.segpill.alert.on{background:var(--card);color:var(--danger,#B4453C)}
+.segpill.alert.on .segpill-c{background:var(--danger,#B4453C);color:#fff}

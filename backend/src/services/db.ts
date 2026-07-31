@@ -152,13 +152,9 @@ export async function initSchema(): Promise<void> {
       );
     `;
 
-    await sql`
-      CREATE TABLE IF NOT EXISTS crm_integrations (
-        key TEXT PRIMARY KEY,
-        config JSONB NOT NULL
-      );
-    `;
-
+    // crm_integrations (a tenant-scoped KV of provider credentials) is gone.
+    // `integrations` below is the real one: a row per connection, its own key.
+    
     await sql`
       CREATE TABLE IF NOT EXISTS crm_routing_rules (
         id INT PRIMARY KEY DEFAULT 1,
@@ -233,7 +229,7 @@ export async function initSchema(): Promise<void> {
     // so nothing breaks while Phase 1 threads the filter through the queries.
     const TENANT_TABLES = [
       'crm_agents', 'crm_properties', 'crm_units', 'crm_leads',
-      'crm_settings', 'crm_integrations', 'crm_routing_rules', 'crm_timeline_events',
+      'crm_settings', 'crm_routing_rules', 'crm_timeline_events',
     ];
     for (const t of TENANT_TABLES) {
       await sql`ALTER TABLE ${sql(t)} ADD COLUMN IF NOT EXISTS tenant_id TEXT;`;
@@ -249,8 +245,6 @@ export async function initSchema(): Promise<void> {
     // UNIQUE INDEX IF NOT EXISTS.
     await sql`ALTER TABLE crm_settings DROP CONSTRAINT IF EXISTS crm_settings_pkey;`;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_settings_tenant_key ON crm_settings (tenant_id, key);`;
-    await sql`ALTER TABLE crm_integrations DROP CONSTRAINT IF EXISTS crm_integrations_pkey;`;
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_integrations_tenant_key ON crm_integrations (tenant_id, key);`;
     await sql`ALTER TABLE crm_routing_rules DROP CONSTRAINT IF EXISTS crm_routing_rules_pkey;`;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_routing_tenant ON crm_routing_rules (tenant_id);`;
 
@@ -260,7 +254,6 @@ export async function initSchema(): Promise<void> {
     // Per-tenant lead-ingest key. Portals (99acres/MagicBricks/website) POST to
     // /api/v1/ingest/<slug>/<source>?key=<this>, so it's the shared secret we
     // hand the client to paste into their portal push-URL config.
-    await sql`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS ingest_secret TEXT;`;
 
     // Push subscriptions — one row per device a user has opted into push on.
     await sql`

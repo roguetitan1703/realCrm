@@ -184,7 +184,12 @@ export function SegmentPills({ segments = [] }) {
   return (
     <div className="segpills">
       {segments.map(s => (
-        <button key={s.key} className={'segpill' + (s.on ? ' on' : '')} onClick={s.onClick}>
+        // `tone` marks a bucket that is a problem rather than a stage — an
+        // overdue count reading the same as every other number is the one that
+        // gets ignored. A zero count drops the tone: nothing overdue is not an
+        // alert.
+        <button key={s.key} onClick={s.onClick}
+          className={'segpill' + (s.on ? ' on' : '') + (s.tone && s.count ? ' ' + s.tone : '')}>
           {s.label}{s.count != null && <span className="segpill-c">{s.count}</span>}
         </button>
       ))}

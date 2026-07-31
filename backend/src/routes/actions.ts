@@ -21,7 +21,7 @@ import {
 } from '../middleware/auth';
 import { dispatchOutboundWebhook } from '../services/webhookSender';
 import {
-  addTimelineEvent, updateLead, mergeLeads, getLeadById, getIntegrations,
+  addTimelineEvent, updateLead, mergeLeads, getLeadById,
   getTimelineEventById, updateTimelineEvent,
   addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES,
 } from '../services/store';
@@ -157,57 +157,15 @@ actionsRouter.post('/:id/actions/contact-log', async (req: Request, res: Respons
  */
 
 /**
- * 2. OUTBOUND WHATSAPP BUSINESS (WABA) DISPATCH
- * POST /api/v1/records/:id/actions/whatsapp
+ * The OUTBOUND WABA DISPATCH route was here. Same fiction as the telephony
+ * bridge: it read a phone id out of the old integrations table, defaulted it to
+ * 'waba_phone_default', logged "Dispatched WABA template … via Meta Cloud API
+ * (Message ID: waba_msg_…)" and contacted Meta at no point.
+ *
+ * We send WhatsApp by wa.me deep link from the composer — the agent's own
+ * WhatsApp, no Business API — and that send is recorded through
+ * /actions/contact-log. Nothing here was ever called by the app.
  */
-actionsRouter.post(
-  '/:id/actions/whatsapp',
-  requireModuleEnabled('whatsapp'),
-  requireQuotaAvailable('whatsapp_credits'),
-  async (req: Request, res: Response) => {
-    try {
-      const recordId = req.params.id;
-      const parseResult = WhatsAppActionSchema.safeParse(req.body);
-
-      if (!parseResult.success) {
-        return res.status(400).json({ error: 'Validation Error', details: parseResult.error.format() });
-      }
-
-      const { template_id, variables } = parseResult.data;
-      const tenant = req.tenant!;
-
-      const integrations = await getIntegrations();
-      const wabaConfig = integrations.waba || {};
-      const phoneId = wabaConfig.phoneId || 'waba_phone_default';
-
-      console.log(`[WABA Dispatch] Tenant: ${tenant.name} | PhoneID: ${phoneId} | Sending template '${template_id}' to record ${recordId} with vars:`, variables);
-
-      const wabaMessageId = `waba_msg_${Date.now()}`;
-
-      const evt = await addTimelineEvent({
-        record_id: recordId,
-        type: 'whatsapp',
-        title: 'WhatsApp Template Sent',
-        description: `Dispatched WABA template "${template_id}" via Meta Cloud API (Message ID: ${wabaMessageId}).`,
-        // B5: the initiator is the author, so they can attach outcome+remark
-        // afterward (PATCH .../remark/:eventId, author-only). This route never
-        // set author before, so that edit would 403 for everyone — silently.
-        author: req.user?.id,
-        metadata: { template_id, variables, waba_message_id: wabaMessageId, phone_id: phoneId },
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: 'WhatsApp template message dispatched via Meta Cloud API.',
-        waba_message_id: wabaMessageId,
-        timeline_event: evt,
-        status: 'sent',
-      });
-    } catch (err: any) {
-      return res.status(500).json({ error: 'WABA Dispatch Failed', message: err.message });
-    }
-  }
-);
 
 /**
  * 3. ATOMIC STAGE CHANGE & MANDATORY NOTE LOGGING

@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getState, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getIngestConfig, regenerateIngestKey } from '../services/store';
+import { getState, resetDatabase, updateSettings, getSettings, getBrand, updateBrand } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { listAudit, verifyAuditChain } from '../services/audit';
@@ -232,31 +232,10 @@ workspaceRouter.post('/settings', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/v1/workspace/ingest — the tenant's lead-ingest key + slug, so the UI
- * can show the real push URL to paste into 99acres/MagicBricks/website.
+ * The /workspace/ingest and /workspace/ingest/regenerate routes are gone with
+ * the per-tenant ingest_secret they served. Connections own their own keys now
+ * (routes/connections.ts) — one key per provider, rotatable per provider.
  */
-workspaceRouter.get('/ingest', async (_req: Request, res: Response) => {
-  try {
-    const cfg = await getIngestConfig();
-    return res.status(200).json({ success: true, ...cfg });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: 'Failed to load ingest config', message: err.message });
-  }
-});
-
-/** POST /api/v1/workspace/ingest/regenerate — rotate the key (owner/manager). */
-workspaceRouter.post('/ingest/regenerate', async (_req: Request, res: Response) => {
-  try {
-    const role = getContext()?.role;
-    if (role !== 'owner' && role !== 'manager') {
-      return res.status(403).json({ success: false, error: 'Only an owner or manager can rotate the ingest key.' });
-    }
-    const cfg = await regenerateIngestKey();
-    return res.status(200).json({ success: true, ...cfg });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: 'Failed to rotate ingest key', message: err.message });
-  }
-});
 
 /**
  * POST /api/v1/workspace/brand

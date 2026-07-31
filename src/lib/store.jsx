@@ -101,7 +101,6 @@ function freshState() {
     settings,                            // editable: firmName, stages, sources, slaHours, reminderDays
     brand: cs.brand ? { ...clone(DEFAULT_BRAND), ...cs.brand } : clone(DEFAULT_BRAND),
     routing: cs.routing_rules ? { strategy: 'round_robin', active_agent_ids: [], ...cs.routing_rules } : { strategy: 'round_robin', active_agent_ids: [] },
-    integrations: cs.integrations || {},
     toasts: [],
     notifications: [],   // server-backed per-user alert feed
     dataAsOf: cached?.at || null,   // ms timestamp of the currently displayed data snapshot
@@ -134,7 +133,6 @@ function reducer(state, action) {
         leads: Array.isArray(s.leads) ? s.leads : state.leads,
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
-        integrations: s.integrations ? { ...state.integrations, ...s.integrations } : state.integrations,
         brand: s.brand ? { ...state.brand, ...s.brand } : state.brand,
         dataAsOf: action.at || Date.now(),
         dataStale: false,   // fresh from the server
@@ -152,7 +150,6 @@ function reducer(state, action) {
         leads: Array.isArray(s.leads) ? s.leads : state.leads,
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
-        integrations: s.integrations ? { ...state.integrations, ...s.integrations } : state.integrations,
         brand: s.brand ? { ...state.brand, ...s.brand } : state.brand,
         dataAsOf: action.at || null,
         dataStale: true,
@@ -528,12 +525,6 @@ function reducer(state, action) {
     case 'WA_CLOSE':
       return { ...state, waState: null }
 
-    case 'SAVE_INTEGRATION': {
-      const current = state.integrations || {}
-      const next = { ...current, [action.key]: { ...current[action.key], ...action.config, status: 'active' } }
-      return { ...state, integrations: next }
-    }
-
     case 'RESET':
       return { ...freshState(), loggedIn: true }
 
@@ -566,9 +557,12 @@ export function StoreProvider({ children }) {
       })
   }, [])
 
-  // Hydrate state from backend REST API on mount
+  // Hydrate state from backend REST API on mount.
+  // Only with a token: the API now rejects unauthenticated reads outright (the
+  // tokenless fallback actor is gone), so firing this on the login screen would
+  // 401 and make a signed-out app look like a backend outage.
   useEffect(() => {
-    loadServerState()
+    if (apiClient.getToken?.()) loadServerState()
 
     // Validate a stored token against the backend. If it's expired or the user
     // no longer exists, drop the session so a stale token can't linger.
@@ -989,11 +983,6 @@ export function StoreProvider({ children }) {
           }
         })
         .catch(err => console.error('[Reset API] Backend error:', err.message))
-    },
-    saveIntegration: (key, config) => {
-      dispatch({ type: 'SAVE_INTEGRATION', key, config })
-      toast(`Connected ${key} successfully! Channel active.`)
-      apiClient.saveIntegration(key, config).catch(err => console.error('[Integrations API] Backend error:', err.message))
     },
   }
 

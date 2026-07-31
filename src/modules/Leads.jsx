@@ -22,6 +22,7 @@ export default function Leads({ store, go, sel, setSel, topBar }) {
   const [sortKey, setSortKey] = useState('activity')
   const [sortDir, setSortDir] = useState('asc')
   const [view, setView] = useState('list')
+  const [seg, setSeg] = useState('all')
 
   const open = sel.leadOpen && sel.leadId
   if (open) return <LeadRecord store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
@@ -32,43 +33,30 @@ export default function Leads({ store, go, sel, setSel, topBar }) {
     : state.leads
 
   const onOpen = (l) => go('leads', { leadId: l.id, leadOpen: true })
-  const counts = {
-    all: state.leads.length,
-    overdue: state.leads.filter(l => l.overdue).length,
-    unassigned: state.leads.filter(l => !l.agentId).length,
-  }
-  const kpis = [
-    { label: 'Total', value: counts.all, onClick: () => setFlt({}) },
-    { label: 'Overdue', value: counts.overdue, tone: 'alert', onClick: () => setFlt({ flag: ['overdue'] }) },
-    { label: 'Unassigned', value: counts.unassigned, onClick: () => setFlt({ flag: ['unassigned'] }) },
-  ]
+  // The KPI strip used to sit above these pills reading Total / Overdue /
+  // Unassigned — the same three numbers the pills now carry, one row apart,
+  // each filtering a different way. Two controls for one question.
 
-  // B2: the top pills ARE the pipeline stages — a fast single-tap switch, on
-  // the same `flt.stage` the advanced filter popover already reads/writes (one
-  // source of truth, no second Buy/Rent row — deal stays a normal filter chip).
-  const stages = state.settings.stages || []
-  const activeStage = flt.stage?.length === 1 ? flt.stage[0] : null
-  const setStagePill = (val) => setFlt(prev => {
-    const next = { ...prev }
-    if (val == null) delete next.stage
-    else next.stage = [val]
-    return next
-  })
-  const stageSegs = [
-    { key: 'all', label: 'All', on: !activeStage, count: records.length, onClick: () => setStagePill(null) },
-    ...stages.map(s => ({
-      key: s, label: s, on: activeStage === s,
-      count: records.filter(l => l.stage === s).length,
-      onClick: () => setStagePill(s),
-    })),
-  ]
+  // B2 — sub-segments. The buckets live on LEADS_DEF (definitions.jsx) so the
+  // pattern belongs to the module standard, not to this screen. Counts are of
+  // what the agent can actually see, so an agent's "Overdue 3" is their three.
+  const segs = (LEADS_DEF.segments || []).map(sg => ({
+    key: sg.key,
+    label: sg.label,
+    tone: sg.tone,
+    on: seg === sg.key,
+    count: records.filter(sg.match).length,
+    onClick: () => setSeg(sg.key),
+  }))
+  const activeSeg = (LEADS_DEF.segments || []).find(sg => sg.key === seg)
+  const scoped = activeSeg && seg !== 'all' ? records.filter(activeSeg.match) : records
 
   const { header, toolbar, body } = ModuleListView({
-    def: LEADS_DEF, records, store, onOpen,
+    def: LEADS_DEF, records: scoped, store, onOpen,
     filters: flt, onFilters: setFlt,
     search: q, onSearch: setQ,
     sortKey, onSortKey: setSortKey, sortDir, onSortDir: setSortDir,
-    kpis, segments: stageSegs, view, onView: setView,
+    segments: segs, view, onView: setView,
     cta: { label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) },
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} />

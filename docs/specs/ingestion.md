@@ -173,10 +173,10 @@ mocks away.
   parser refuses it on its own terms.
 
 ### Gaps — carried, not lost
-- **G1 · `ingest_secret` was never migrated.** The old per-tenant secret still
-  exists beside the new per-integration keys. Any portal still configured with
-  the old key gets a 401. Needs a one-time migration that mints an integration
-  per tenant from the existing secret.
+- **G1 · CLOSED — deleted, not migrated.** The per-tenant `ingest_secret` and
+  its `getIngestConfig` / `regenerateIngestKey` / `/workspace/ingest` routes are
+  gone. Nothing is live, so there was no old key in a portal's config to
+  preserve and no migration to write.
 - **G2 · No retention job at all.** `body_purged_at` exists as a column and
   nothing ever sets it: raw bodies are kept forever, and the reject log has no
   7-day purge. This is the whole of [data-lifecycle.md](./data-lifecycle.md) for
@@ -185,19 +185,21 @@ mocks away.
   scratch. The spec's answer to "no blind presets" was a mapping learned from
   the first tenant and offered to the next; only the from-scratch half exists.
 - **G4 · No hosted setup page.** D2 produces the copyable email only.
-- **G5 · `crm_integrations` (the old KV table, no `tenant_id`) still sits beside
-  the new `integrations`.** Two near-identically-named tables; the old one holds
-  Exotel/WABA settings and its route hardcodes a tenant slug. Needs a deliberate
-  fold-in.
+- **G5 · CLOSED — deleted.** `crm_integrations`, its helpers, its router and
+  the five fabricated credentials the seed planted in it (Exotel keys, a WABA
+  access token, webhook secrets on a demo domain) are gone. Its only readers
+  were the two fake routes. `integrations` is the only one now.
 
 ### Bigger problems found while building D — separate focus, not D's job
-- **P1 · Auth is open.** `requireTenantAuth` has a "tokenless demo path": with no
-  token it falls back to `DEFAULT_TENANT_ID` and **invents a user**. Verified —
-  an unauthenticated `POST /api/v1/records/x/actions/contact-log` returns 201 and
-  writes a timeline event. Every "authenticated" route is currently reachable
-  without a token. `/ingest` itself is NOT affected: it authenticates on the API
-  key alone and rejects cross-tenant keys. Parked deliberately (nothing is live
-  yet); it is the auth/RBAC phase of BUILD_PLAN, not a D item.
+- **P1 · CLOSED.** `requireTenantAuth` had a "tokenless demo path": with no
+  token it fell back to a default tenant and INVENTED a user from the roster (or
+  a hardcoded 'Workspace Admin' with a made-up phone number), so every route
+  behind it was reachable unauthenticated and every action taken that way was
+  attributed to a real agent who did not perform it. Deleted. Verified: an
+  unauthenticated `POST /records/x/actions/contact-log` and `GET /team/users`
+  both return **401**. `/ingest` is unaffected — it authenticates on its own API
+  key and both suites still pass (30/30, 22/22).
+
 - **P2 · CLOSED.** Two routes fabricated a DID, an API key and a call SID and
   wrote "Initiated outbound telephony call … via DID 08045678900" to the
   timeline while contacting nobody. Removed. **Confirmed with the client: there

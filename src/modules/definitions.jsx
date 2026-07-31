@@ -141,6 +141,34 @@ export const LEADS_DEF = {
     } },
   ],
 
+  /**
+   * B2 — SUB-SEGMENTS as tab pills. Defined here, not in the screen, so the
+   * pattern is reusable by any module rather than hand-rolled per page.
+   *
+   * These are WORKING BUCKETS, not pipeline position. The pills used to be the
+   * stages themselves, which is a different question: "where is this lead in
+   * the funnel" is what the stage filter answers, and it is still in the filter
+   * bar. What an agent triages by each morning is "who is new, who is warm, who
+   * have I let slip" — that is this row.
+   *
+   * Deal (buy vs rent) deliberately stays a filter chip, not a second pill row:
+   * two axes of pills is how a toolbar becomes a wall.
+   *
+   * Not represented yet: Sellers / Landlords. A lead records what someone is
+   * LOOKING FOR (`req.deal`), so there is no field that says they are supplying
+   * a property instead of seeking one. Faking it off the owner name on a
+   * property would be a guess. It needs the contact-store split (B3).
+   */
+  segments: [
+    { key: 'all', label: 'All', match: () => true },
+    { key: 'fresh', label: 'Fresh', match: (l) => l.stage === 'New' },
+    { key: 'working', label: 'Working', match: (l) => ['Contacted', 'Negotiation'].includes(l.stage) },
+    { key: 'visiting', label: 'Visiting', match: (l) => l.stage === 'Site Visit' },
+    { key: 'overdue', label: 'Overdue', tone: 'alert', match: (l) => !!l.overdue && !String(l.stage || '').startsWith('Closed') },
+    { key: 'unassigned', label: 'Unassigned', match: (l) => !l.agentId && !String(l.stage || '').startsWith('Closed') },
+    { key: 'closed', label: 'Closed', match: (l) => String(l.stage || '').startsWith('Closed') },
+  ],
+
   // Standardized action set for the detail rail. `group` buckets them; `when`
   // gates by record state; `run(store, record)` calls existing store api.
   actions: [

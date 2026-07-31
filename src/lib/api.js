@@ -58,7 +58,7 @@ function lsGet(k) { try { return (typeof window !== 'undefined' && window.localS
 function lsSet(k, v) { try { if (typeof window === 'undefined' || !window.localStorage) return; if (v) window.localStorage.setItem(k, v); else window.localStorage.removeItem(k); } catch { /* storage blocked */ } }
 
 function getHeaders(customHeaders = {}) {
-  const tenantId = typeof window !== 'undefined' ? (window.localStorage?.getItem('crm_tenant_id') || 'skyline-realty') : 'skyline-realty';
+  const tenantId = typeof window !== 'undefined' ? (window.localStorage?.getItem('crm_tenant_id') || '') : '';
   const base = {
     'X-Tenant-ID': tenantId,
     'Content-Type': 'application/json',
@@ -156,8 +156,7 @@ export const api = {
 
   // Lead ingest (the per-tenant URL the client pastes into 99acres/MagicBricks)
   baseUrl: () => BASE_URL,
-  getIngestConfig: () => request('/workspace/ingest'),
-  regenerateIngestKey: () => request('/workspace/ingest/regenerate', { method: 'POST' }),
+  // The per-tenant ingest key is gone; each connection carries its own.
 
   // D1 — provider connections: the inbox, the keys, and the field mapping.
   // Distinct from `/workspace/integrations` below, which is the older
@@ -176,11 +175,7 @@ export const api = {
   getSetupPack: (id, key) => request(`/connections/${id}/setup-pack${key ? `?key=${encodeURIComponent(key)}` : ''}`),
 
   // Integrations
-  getIntegrations: () => request('/workspace/integrations'),
-  saveIntegration: (key, config) => request(`/workspace/integrations/${encodeURIComponent(key)}`, {
-    method: 'PUT',
-    body: JSON.stringify(config),
-  }),
+  // /workspace/integrations is gone with the KV table behind it.
 
   // Leads CRUD — CRUD routes live under /modules/:moduleKey/records (recordsRouter);
   // /records/:id/actions/* below are the separate actionsRouter endpoints.
@@ -240,7 +235,7 @@ export const api = {
   editRemark: (recordId, eventId, text, outcome) => request(`/records/${recordId}/actions/remark/${encodeURIComponent(eventId)}`, { method: 'PATCH', body: JSON.stringify({ text, outcome }) }),
   // B5 — log a plain call/WhatsApp/SMS action on any record (confirm-then-log).
   logContactAction: (recordId, channel) => request(`/records/${recordId}/actions/contact-log`, { method: 'POST', body: JSON.stringify({ channel }) }),
-  sendWhatsApp: (recordId, templateId, vars) => request(`/records/${recordId}/actions/whatsapp`, { method: 'POST', body: JSON.stringify({ template_id: templateId, variables: vars }) }),
+  // sendWhatsApp() is gone with the fabricated WABA route it called.
   // B4 — a structured activity on a LEAD (site visit with proof, meeting, …).
   // `propertyId` is a reference to the unit it concerned, never ownership.
   logActivity: (leadId, payload) => request(`/records/${leadId}/actions/activity`, { method: 'POST', body: JSON.stringify(payload) }),

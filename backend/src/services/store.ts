@@ -35,37 +35,19 @@ function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
 }
 
-/** URL-safe per-tenant ingest key (portals paste this into their push URL). */
-export function genIngestKey(): string {
-  return `ink_${randomBytes(18).toString('base64url')}`;
-}
-
-/** Fetch the current tenant's ingest key + the info the UI needs to build the
- *  push URLs it shows the client. */
-export async function getIngestConfig(): Promise<{ tenantSlug: string; secret: string }> {
-  const t = tid();
-  const rows = await sql`SELECT slug, ingest_secret FROM tenants WHERE id = ${t} OR slug = ${t} LIMIT 1`;
-  let secret = rows[0]?.ingest_secret as string | undefined;
-  if (!secret) {
-    secret = genIngestKey();
-    await sql`UPDATE tenants SET ingest_secret = ${secret} WHERE id = ${t} OR slug = ${t}`;
-  }
-  return { tenantSlug: rows[0]?.slug || t, secret };
-}
-
-/** Rotate the ingest key (invalidates any URL already handed out). */
-export async function regenerateIngestKey(): Promise<{ tenantSlug: string; secret: string }> {
-  const t = tid();
-  const secret = genIngestKey();
-  const rows = await sql`UPDATE tenants SET ingest_secret = ${secret} WHERE id = ${t} OR slug = ${t} RETURNING slug`;
-  return { tenantSlug: rows[0]?.slug || t, secret };
-}
-
-/** Resolve a tenant + its ingest key by slug/id — for the PUBLIC ingest endpoint
- *  (no request context, so it can't use tid()). */
-export async function getTenantForIngest(slugOrId: string): Promise<{ id: string; secret: string | null } | null> {
-  const rows = await sql`SELECT id, ingest_secret FROM tenants WHERE slug = ${slugOrId} OR id = ${slugOrId} LIMIT 1`;
-  return rows[0] ? { id: rows[0].id, secret: rows[0].ingest_secret } : null;
+/**
+ * Resolve a tenant id by slug/id — for the PUBLIC ingest endpoint, which has no
+ * request context and only needs to check that the key's tenant matches the URL.
+ *
+ * There was a `genIngestKey` / `getIngestConfig` / `regenerateIngestKey` trio
+ * here backing ONE shared `tenants.ingest_secret` per tenant. The per-connection
+ * keys in `integrations` replaced it; both existed side by side and only the new
+ * one was ever checked. Deleted outright rather than migrated — nothing is live,
+ * so there is no old key sitting in a portal's config to preserve.
+ */
+export async function getTenantForIngest(slugOrId: string): Promise<{ id: string } | null> {
+  const rows = await sql`SELECT id FROM tenants WHERE slug = ${slugOrId} OR id = ${slugOrId} LIMIT 1`;
+  return rows[0] ? { id: rows[0].id } : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,12 +102,11 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
     surfaceColor: '#F6F5F2',
     city, logoUrl: '', firmName, initials,
   };
-  const ingestSecret = genIngestKey();
 
   // 1. The tenant row — the anchor every tenant-scoped row hangs off.
   await sql`
-    INSERT INTO tenants (id, name, slug, brand_config, ingest_secret, subscription_plan, subscription_status)
-    VALUES (${tenantId}, ${firmName}, ${cleanSlug}, ${sql.json(brand_config)}, ${ingestSecret}, 'PRO', 'ACTIVE')
+    INSERT INTO tenants (id, name, slug, brand_config, subscription_plan, subscription_status)
+    VALUES (${tenantId}, ${firmName}, ${cleanSlug}, ${sql.json(brand_config)}, 'PRO', 'ACTIVE')
   `;
 
   // 2. The owner — a login-capable user (email OTP) + a roster mirror.
@@ -222,7 +203,6 @@ export interface ServerState {
   inactiveAgentIds: string[];
   settings: any;
   brand: any;
-  integrations: Record<string, any>;
   routing_rules: RoutingRule;
   timeline_events: TimelineEvent[];
 }
@@ -574,20 +554,10 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
     ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value;
   `;
 
-  // 5. Seed Integrations
-  const initialIntegrations = {
-    '99acres': { status: 'active', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/99acres', secret: 'whsec_99acres_live_882' },
-    'MagicBricks': { status: 'active', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/magicbricks', secret: 'whsec_mb_live_391' },
-    'Calling & SMS': { status: 'active', apiKey: 'exo_key_live_902', sid: 'exo_sid_live_112', callerId: '020-71189900' },
-    'WhatsApp Business API': { status: 'active', phoneId: 'waba_phone_881920', accessToken: 'EAAGm00192a000live', wabaId: 'waba_id_881920' },
-    'Website sync': { status: 'active', webhookUrl: 'https://api.skylinerealty.in/v1/ingest/skyline-realty/website', secret: 'whsec_web_live_109' },
-  };
-  for (const [key, val] of Object.entries(initialIntegrations)) {
-    await sql`
-      INSERT INTO crm_integrations (key, config, tenant_id) VALUES (${key}, ${sql.json(val)}, ${DEFAULT_TENANT_ID})
-      ON CONFLICT (tenant_id, key) DO UPDATE SET config = EXCLUDED.config;
-    `;
-  }
+  // The seed used to plant five fabricated integrations here — live-looking
+  // Exotel keys, a WABA access token, webhook secrets and an api.<demo>.in
+  // domain — none of which authenticated anything. Connections are created by
+  // the firm now, with real keys.
 
   // 6. Seed Routing Rules
   const activeIds = seedAgents.map(a => a.id);
@@ -635,7 +605,7 @@ function demoEmail(name: string): string {
 // would break chain verification, so old entries stay under the old id.
 const TENANT_SCOPED_TABLES = [
   'crm_agents', 'crm_properties', 'crm_units', 'crm_leads', 'crm_settings',
-  'crm_integrations', 'crm_routing_rules', 'crm_timeline_events', 'users',
+  'crm_routing_rules', 'crm_timeline_events', 'users',
   'auth_otp', 'push_subscriptions', 'lead_shortlist', 'notifications',
 ];
 
@@ -669,7 +639,6 @@ export async function ensureAuthIdentity(): Promise<void> {
     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, subscription_status = EXCLUDED.subscription_status;
   `;
   // Give the demo tenant an ingest key if it doesn't have one yet.
-  await sql`UPDATE tenants SET ingest_secret = ${genIngestKey()} WHERE id = ${DEFAULT_TENANT_ID} AND (ingest_secret IS NULL OR ingest_secret = '')`;
 
   // First superadmin (Delpat staff). Password from env — never committed; the
   // dev fallback only applies locally so nobody is locked out while building.
@@ -842,7 +811,7 @@ export async function resetDatabase(): Promise<ServerState> {
   console.log(`[Supabase DB] 🧹 Truncating all CRM tables for workspace reset...`);
   // users is re-seeded from agents; superadmins are platform-level and must
   // survive a workspace reset, so they are deliberately NOT truncated.
-  await sql`TRUNCATE TABLE activities, crm_timeline_events, crm_units, crm_leads, crm_properties, crm_agents, crm_settings, crm_integrations, crm_routing_rules, users, auth_otp CASCADE;`;
+  await sql`TRUNCATE TABLE activities, crm_timeline_events, crm_units, crm_leads, crm_properties, crm_agents, crm_settings, crm_routing_rules, users, auth_otp CASCADE;`;
   return await seedDatabase(true);
 }
 
@@ -864,7 +833,7 @@ seedDatabase()
 export async function getState(): Promise<ServerState> {
   const t = tid();
   const agentScope = agentLeadScope();
-  const [agentsRows, propsRows, leadsRows, settingsRows, intRows, routingRows, timelineRows, shortlistRows, brandRows] = await Promise.all([
+  const [agentsRows, propsRows, leadsRows, settingsRows, routingRows, timelineRows, shortlistRows, brandRows] = await Promise.all([
     // Same soft-delete exclusion as getAgents() so the roster/activity view and
     // Manage access never disagree about who's on the team.
     sql`SELECT a.* FROM crm_agents a
@@ -875,7 +844,6 @@ export async function getState(): Promise<ServerState> {
       ? sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND agent_id = ${agentScope} ORDER BY created_at DESC`
       : sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} ORDER BY created_at DESC`,
     sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}`,
-    sql`SELECT key, config FROM crm_integrations WHERE tenant_id = ${t}`,
     sql`SELECT * FROM crm_routing_rules WHERE tenant_id = ${t}`,
     sql`SELECT * FROM crm_timeline_events WHERE tenant_id = ${t} ORDER BY timestamp DESC`,
     sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t}`,
@@ -920,11 +888,6 @@ export async function getState(): Promise<ServerState> {
   });
 
   const settings = settingsRows[0]?.value || DEFAULT_SETTINGS;
-  const integrations: Record<string, any> = {};
-  for (const row of intRows) {
-    integrations[row.key] = row.config;
-  }
-
   const rRow = routingRows[0] || { strategy: 'round_robin', active_agent_ids: agents.map(a => a.id), last_assigned_index: -1 };
   const routing_rules: RoutingRule = {
     strategy: rRow.strategy as any,
@@ -941,7 +904,6 @@ export async function getState(): Promise<ServerState> {
     inactiveAgentIds,
     settings,
     brand,
-    integrations,
     routing_rules,
     timeline_events,
   };
@@ -1527,25 +1489,10 @@ export async function updateSettings(patch: any): Promise<any> {
   return next;
 }
 
-export async function getIntegrations(): Promise<Record<string, any>> {
-  const rows = await sql`SELECT key, config FROM crm_integrations WHERE tenant_id = ${tid()}`;
-  const result: Record<string, any> = {};
-  for (const r of rows) {
-    result[r.key] = r.config;
-  }
-  return result;
-}
-
-export async function updateIntegration(key: string, patch: any): Promise<any | null> {
-  const all = await getIntegrations();
-  const current = all[key] || {};
-  const next = { ...current, ...patch };
-  await sql`
-    INSERT INTO crm_integrations (key, config, tenant_id) VALUES (${key}, ${sql.json(next)}, ${tid()})
-    ON CONFLICT (tenant_id, key) DO UPDATE SET config = EXCLUDED.config;
-  `;
-  return next;
-}
+// getIntegrations/updateIntegration read `crm_integrations`, a tenant-scoped KV
+// of provider credentials that nothing authenticated against. Its only readers
+// were the fabricated telephony and WABA routes. Table and helpers deleted; the
+// real one is `integrations` (services/ingestion.ts) — a row per connection.
 
 // --- TIMELINE ---
 export async function getTimelineEvents(recordId?: string): Promise<TimelineEvent[]> {

@@ -19,7 +19,6 @@ import { teamRouter } from './routes/team';
 import { actionsRouter } from './routes/actions';
 import { ingestRouter } from './routes/ingest';
 import { connectionsRouter } from './routes/connections';
-import { integrationsRouter } from './routes/integrations';
 import { authRouter } from './routes/auth';
 import { adminRouter } from './routes/admin';
 import { notificationsRouter } from './routes/notifications';
@@ -105,7 +104,7 @@ app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/notifications', notificationsRouter);
 
 // 1. Non-Hacky Workspace & Tenant Resolution (Called before & after login!)
-app.use('/api/v1/workspace/integrations', integrationsRouter);
+// /workspace/integrations is gone with the crm_integrations KV table it read.
 app.use('/api/v1/workspace', workspaceRouter);
 
 // 2. Composable Module Metadata & Schema Editor
