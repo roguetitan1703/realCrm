@@ -37,7 +37,6 @@ export default function MobileModals({ store }) {
   if (m.kind === 'newLead') return <MobileLeadForm store={store} onClose={close} />
   if (m.kind === 'editLead') return <MobileLeadForm store={store} leadId={m.leadId} onClose={close} />
   if (m.kind === 'addProperty') return <MobilePropForm store={store} propId={m.propId} onClose={close} />
-  if (m.kind === 'outreach' || m.kind === 'call') return <MobileOutreach store={store} leadId={m.leadId} channel={m.channel || 'call'} onClose={close} />
   if (m.kind === 'note') return <MobileNote store={store} leadId={m.leadId} propId={m.propId} onClose={close} />
   if (m.kind === 'propStatus') return <MobileStatus store={store} propId={m.propId} onClose={close} />
   if (m.kind === 'pickMatch') return <MobilePickMatch store={store} leadId={m.leadId} onClose={close} />
@@ -214,78 +213,6 @@ function MobilePropForm({ store, propId, onClose }) {
   )
 }
 
-function MobileOutreach({ store, leadId, channel = 'call', onClose }) {
-  const l = store.state.leads.find(x => x.id === leadId)
-  const [ch, setCh] = useState(channel)
-  const [text, setText] = useState('')
-  if (!l) return null
-  const first = l.name.split(' ')[0]
-  const templates = {
-    sms: [
-      `Namaste ${first}, this is ${theme.brand.firmName}. Following up on your property search — shall we talk today?`,
-      `Hi ${first}, a couple of good options just came up in ${l.req.locality}. Free for a quick call?`,
-      `Thanks for your time, ${first}! I'll share matching ${l.req.config} options shortly.`
-    ],
-    wa: [
-      `Namaste ${first} 🙏 ${theme.brand.firmName} here. Aapki ${l.req.config} requirement ke liye kuch achhe options hain — baat karein?`,
-      `Hi ${first}, following up on your ${l.req.locality} search. Weekend mein site visit fix karein?`
-    ]
-  }
-
-  // Do the thing, then log it — on a phone these open the real dialer,
-  // WhatsApp and SMS app.
-  const logIt = () => {
-    const digits = String(l.phone || '').replace(/\D/g, '')
-    const intl = digits ? `+${digits.length > 10 ? digits : '91' + digits}` : ''
-    if (ch === 'call') {
-      if (intl) window.location.href = `tel:${intl}`
-    } else {
-      if (!text.trim()) { store.toast('Pick a template or type a message first', 'warn'); return }
-      if (ch === 'wa') window.open(whatsappLink(text, digits), '_blank', 'noopener')
-      else window.location.href = `sms:${intl}?body=${encodeURIComponent(text)}`
-    }
-    store.logEvent(leadId, ch === 'call' ? 'call' : ch === 'wa' ? 'wa' : 'sms', ch === 'call' ? `Outgoing call to ${l.phone}` : text)
-    store.toast(ch === 'call' ? `Calling ${first} · logged to timeline` : `${ch === 'wa' ? 'WhatsApp' : 'SMS'} opened · logged to timeline`)
-    onClose()
-  }
-
-  const title = ch === 'call' ? `Call — ${l.name}` : ch === 'wa' ? `WhatsApp — ${l.name}` : `SMS — ${l.name}`
-
-  return (
-    <Sheet title={title} onClose={onClose}>
-      <div className="u-muted" style={{ fontSize: '12.5px', marginBottom: '14px', marginTop: '-4px' }}>
-        <span className="mono-num" style={{ fontWeight: 600, color: 'var(--ink)' }}>{l.phone}</span> · {l.req.config} · {l.req.locality}
-      </div>
-      <div>
-        {ch === 'call' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <Button variant="primary" block style={{ padding: '14px', fontSize: '14.5px' }} icon="phone" onClick={logIt}>Call {first} & Log to Timeline</Button>
-            <div className="u-muted" style={{ fontSize: '12px', textAlign: 'center' }}>Connecting via your phone's dialer. Timeline is auto-updated.</div>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {(templates[ch] || []).map((t, i) => (
-                <button
-                  key={i}
-                  onClick={() => setText(t)}
-                  style={{ textAlign: 'left', background: text === t ? 'var(--accent-wash)' : 'var(--card)', border: '1px solid ' + (text === t ? 'var(--accent)' : 'var(--line)'), borderRadius: '10px', padding: '10px', fontSize: '12.5px', color: 'var(--ink)', cursor: 'pointer', fontFamily: 'var(--sans)' }}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-            <Textarea value={text} onChange={e => setText(e.target.value)} placeholder={`Type custom ${ch.toUpperCase()} message...`} />
-            <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-              <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} icon={ch === 'wa' ? 'wa' : 'sms'} onClick={logIt}>Send & Log</Button>
-              <Button icon="tag" onClick={() => store.openModal({ kind: 'pickMatch', leadId: l.id })}>Share Property</Button>
-            </div>
-          </div>
-        )}
-      </div>
-    </Sheet>
-  )
-}
 
 function MobileNote({ store, leadId, propId, onClose }) {
   const [t, setT] = useState('')

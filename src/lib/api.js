@@ -164,6 +164,7 @@ export const api = {
   // per-provider credential store (Exotel, WABA) and is NOT tenant-scoped.
   getConnections: () => request('/connections'),
   createConnection: (provider) => request('/connections', { method: 'POST', body: JSON.stringify({ provider }) }),
+  revealConnectionKey: (id) => request(`/connections/${id}/key`),
   rotateConnectionKey: (id) => request(`/connections/${id}/rotate`, { method: 'POST' }),
   setConnectionActive: (id, active) => request(`/connections/${id}`, { method: 'PATCH', body: JSON.stringify({ active }) }),
   deleteConnection: (id) => request(`/connections/${id}`, { method: 'DELETE' }),

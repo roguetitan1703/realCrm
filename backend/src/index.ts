@@ -35,8 +35,33 @@ const PORT = process.env.PORT || 5000;
 // a demo. Default cors() reflects the requested headers, so the custom
 // X-Tenant-ID header passes preflight without extra config.
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+// `verify` keeps the raw bytes so a body that fails to parse is still readable
+// (see the ingest recovery below). It costs one string per request and is the
+// only way to see what a misconfigured provider actually sent.
+app.use(express.json({
+  limit: '10mb',
+  verify: (req: any, _res, buf) => { req.rawBody = buf.toString('utf8'); },
+}));
 app.use(express.urlencoded({ extended: true }));
+
+/**
+ * A provider sending broken JSON — XML with a JSON content-type, a trailing
+ * comma, a truncated body — must not get a 500 with nothing recorded. That is
+ * precisely the push the firm needs to look at, and discarding it leaves them
+ * debugging against an empty inbox.
+ *
+ * So for /ingest only: swallow the parse error and let the body through as the
+ * raw text it was. It lands in the inbox as unparseable, visibly, and the
+ * parser will refuse it later on its own terms.
+ */
+app.use((err: any, req: Request, _res: Response, next: NextFunction) => {
+  const isParseError = err instanceof SyntaxError && 'body' in err;
+  if (isParseError && req.path.startsWith('/api/v1/ingest')) {
+    req.body = { _unparsed: (req as any).rawBody ?? null, _error: err.message };
+    return next();
+  }
+  return next(err);
+});
 
 // Request logger
 app.use((req: Request, res: Response, next: NextFunction) => {

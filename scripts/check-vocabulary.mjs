@@ -155,6 +155,47 @@ for (const file of files) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Tenant identity must never be a literal
+// ---------------------------------------------------------------------------
+// A firm name, a city or a person's contact details typed into the source is
+// not a default — it is another tenant's data rendered on this tenant's screen,
+// and it has shipped that way more than once ("Skyline Realty" in a WhatsApp
+// message, a fallback agent with a real phone number, 'Pune' as the locality of
+// every property whose locality was blank).
+//
+// These come from the signed-in tenant at runtime: src/lib/tenant.js for text,
+// state.settings for the UI. Anything genuinely fixed can say `vocab-ok`.
+const BANNED = [
+  [/\bSkyline Realty\b/, 'a demo firm name — read it from the tenant (src/lib/tenant.js)'],
+  [/\bBhumi Propcity\b/, 'a firm name — read it from the tenant (src/lib/tenant.js)'],
+  [/\|\|\s*'Pune( HQ)?'/, 'a hardcoded city fallback — leave it empty and drop the segment'],
+  [/\bRakesh Sethi\b/, 'a seeded demo person — resolve the agent or render nothing'],
+  [/\+91 98220 41556/, 'a hardcoded phone number'],
+]
+
+for (const file of files) {
+  if (DEFERRED.some(d => file.includes(d))) continue
+  if (file.includes('defaultDataset') || file.includes('data/theme.js')) continue
+  const src = readFileSync(file, 'utf8')
+  let inBlock = false
+  src.split('\n').forEach((line, i) => {
+    // Same rule as above: comments are prose ABOUT the problem. Every warning
+    // written here explaining why a demo firm name is dangerous would otherwise
+    // report itself as a demo firm name.
+    const t = line.trim()
+    if (inBlock) { if (t.includes('*/')) inBlock = false; return }
+    if (t.startsWith('/*')) { if (!t.includes('*/')) inBlock = true; return }
+    if (t.startsWith('//') || t.startsWith('*')) return
+    if (line.includes('vocab-ok')) return
+    for (const [re, why] of BANNED) {
+      if (re.test(line)) {
+        problems.push(`${relative(ROOT, file)}:${i + 1}\n    ${line.trim().slice(0, 110)}\n    ${why}.`)
+      }
+    }
+  })
+}
+
 if (problems.length) {
   console.error(`\n✗ vocabulary guard: ${problems.length} problem${problems.length > 1 ? 's' : ''}\n`)
   problems.forEach(p => console.error('  ' + p + '\n'))

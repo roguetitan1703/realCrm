@@ -94,7 +94,7 @@ export default function MobileLeads({ store, me, open }) {
                 style={{ padding: '4px 8px', fontSize: 11 }}
                 onClick={(e) => {
                   e.stopPropagation()
-                  store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' })
+                  store.openModal({ kind: 'logCall', leadId: l.id })
                 }}
               >
                 <Icon name="phone" size={12} />
@@ -104,7 +104,7 @@ export default function MobileLeads({ store, me, open }) {
                 style={{ padding: '4px 8px', fontSize: 11, color: '#25D366' }}
                 onClick={(e) => {
                   e.stopPropagation()
-                  store.openModal({ kind: 'outreach', leadId: l.id, channel: 'wa' })
+                  store.openWhatsApp(null, l.id)
                 }}
               >
                 <Icon name="wa" size={12} />

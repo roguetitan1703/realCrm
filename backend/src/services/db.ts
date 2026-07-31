@@ -629,10 +629,8 @@ export async function migrateIngestionD1(): Promise<void> {
       id TEXT PRIMARY KEY,
       tenant_id TEXT NOT NULL,
       provider TEXT NOT NULL,
-      -- The key is stored HASHED, like a password: a leaked database read must
-      -- not hand someone the ability to inject leads. The last4 is what the
-      -- UI shows so a tenant can tell two keys apart; the key itself is
-      -- displayed exactly once, at creation.
+      -- Hashed for the inbound lookup (see api_key_enc below for the readable
+      -- copy). The last4 is what the UI shows at rest.
       api_key_hash TEXT,
       api_key_last4 TEXT,
       -- NULL until someone configures the mapping. Null is the signal that
@@ -645,6 +643,12 @@ export async function migrateIngestionD1(): Promise<void> {
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_integrations_tenant ON integrations (tenant_id, active);`;
+  // The key, encrypted (AES-256-GCM), so the firm can read it back later.
+  // The hash above is still what the inbound lookup uses; this exists only so
+  // "what key did we give 99acres?" is answerable without rotating and having
+  // to re-brief the portal. Encrypted rather than plaintext: a stolen dump is
+  // then useless without the server secret.
+  await sql.unsafe(`ALTER TABLE integrations ADD COLUMN IF NOT EXISTS api_key_enc TEXT`);
   // The lookup on every inbound push: hash the presented key, find the row.
   // Unique so one key can never resolve to two tenants.
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_integrations_key ON integrations (api_key_hash) WHERE api_key_hash IS NOT NULL;`;

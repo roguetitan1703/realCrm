@@ -5,10 +5,14 @@ import { theme } from '../data/theme.js'
 import { Avatar } from './primitives.jsx'
 import { subscribeConnection } from '../lib/api.js'
 
+// Initials from whatever firm name we actually have. Never a bundled default:
+// two wrong letters in the corner of every screen is still the wrong firm.
+const brandInitials = (n) => String(n || '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
+
 // ---- desktop sidebar ----
 export function Sidebar({ items, active, activeSub, onNav, footer, firmName, logoUrl, sub }) {
-  const name = firmName || theme.brand.firmName
-  const initials = String(name).trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || theme.brand.initials
+  const name = firmName || ''
+  const initials = String(name).trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
   return (
     <nav className="nav">
       <div className="n-brand">
@@ -192,7 +196,7 @@ export function MobileTopBar({ title, sub, onBack, right, brand }) {
   return (
     <div className="m-top">
       {brand
-        ? <><div className="n-mono">{theme.brand.initials}</div>
+        ? <><div className="n-mono">{brandInitials(title)}</div>
             <div style={{ flex: 1, minWidth: 0 }}><div className="m-fn">{title}</div>{sub && <div className="m-sub">{sub}</div>}</div></>
         : <>
             {onBack && <button className="m-back" onClick={onBack}><Icon name="chevLeft" size={20} /></button>}

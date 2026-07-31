@@ -3,7 +3,6 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Overdue, Avatar } from '../components/primitives.jsx'
-import { NbaBanner } from '../components/rail.jsx'
 import { fitReasons, thumbTint, initials, unitLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import Icon from '../components/Icon.jsx'
@@ -96,22 +95,12 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
   const matches = matchesForLead(l, store.state.properties)
   const overdue = l.overdue
   const back = () => setSel(s => ({ ...s, leadOpen: false }))
-  const top1 = matches[0]
 
-  // Next-best-action
-  const nba = (() => {
-    if (l.followUp) {
-      const [head, ...rest] = String(l.followUp.action).split('—')
-      const t = head.trim()
-      return {
-        title: t,
-        sub: rest.join('—').trim() || l.name,
-        icon: /visit/i.test(t) ? 'calendar' : /meet/i.test(t) ? 'people' : 'phone',
-      }
-    }
-    if (top1) return { title: 'Share a match', sub: top1.society, icon: 'wa' }
-    return { title: 'Contact this lead', sub: l.phone, icon: 'phone' }
-  })()
+  // The next-best-action banner is gone. With a follow-up scheduled it
+  // restated the follow-up card sitting directly beneath it; without one it
+  // said "Contact this lead", which is a label, not a recommendation. A banner
+  // that is either a duplicate or a truism is noise on the one screen an agent
+  // reads all day.
 
   // merged property list: shortlisted pinned first, then system matches
   const shortlistIds = l.shortlist || []
@@ -123,14 +112,7 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
   ].sort((a, b) => (fbMap[a.p.id]?.verdict === 'rejected' ? 1 : 0) - (fbMap[b.p.id]?.verdict === 'rejected' ? 1 : 0))
 
   const openEdit = () => store.openModal({ kind: 'editRecord', moduleId: 'leads', recordId: l.id })
-  // Rail: NBA banner + follow-up card (module-specific).
-  const nbaBanner = (
-    <NbaBanner
-      label={overdue ? 'Overdue Action · Do Now' : 'Next Best Action'}
-      title={nba.title} sub={nba.sub} icon={nba.icon}
-      cta={{ label: l.followUp ? 'Complete' : 'Call Now', icon: nba.icon, onClick: () => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' }) }}
-    />
-  )
+  // Rail: the follow-up card, which is the only thing that changes per lead.
   const followUpCard = (
     <div className="fu-card">
       <div className="fu-head">Appointment & Follow-up</div>
@@ -206,8 +188,6 @@ function LeadRecord({ store, go, sel, setSel, topBar }) {
           def={LEADS_DEF} record={l} store={store} onEdit={openEdit}
           avatar={<Avatar agent={{ initials: initials(l.name), avatar: '' }} size="lg" />}
           signals={overdue ? <Overdue>Overdue</Overdue> : null}
-          primary={[{ label: 'Contact', icon: 'phone', onClick: () => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' }) }]}
-          nba={nbaBanner}
           railTop={followUpCard}
           sections={sections}
           actionCtx={{ onClose: back }}

@@ -442,7 +442,7 @@ export function PropertyCard({ p, onClick, matchCount }) {
           <div className="pc-title" style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink)' }}>{societyName}</div>
           <div className="pc-sub" style={{ marginTop: 3, fontSize: 13, color: 'var(--muted)' }}>
             <Icon name="pin" size={13} style={{ marginRight: 4, verticalAlign: -1 }} />
-            {p.locality || 'Pune'}
+            {p.locality || '—'}
           </div>
         </div>
       </div>

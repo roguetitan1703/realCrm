@@ -28,7 +28,7 @@ export default function MobileToday({ store, me, open, setTab }) {
           style={{ padding: '3px 8px', fontSize: 11 }}
           onClick={(e) => {
             e.stopPropagation()
-            store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' })
+            store.openModal({ kind: 'logCall', leadId: l.id })
           }}
         >
           <Icon name="phone" size={12} />

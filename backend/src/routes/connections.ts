@@ -23,7 +23,7 @@ import { Router, Request, Response } from 'express';
 import {
   createIntegration, listIntegrations, rotateIntegrationKey, setParserConfig,
   setIntegrationActive, deleteIntegration, listInbox, inboxCounts, lastPayload,
-  replayPending, getIntegration,
+  replayPending, getIntegration, revealKey,
 } from '../services/ingestion';
 import { parsePayload, suggestConfig, flattenPaths, TRANSFORMS } from '../services/parser';
 import { audit } from '../services/audit';
@@ -31,6 +31,12 @@ import { audit } from '../services/audit';
 export const connectionsRouter = Router();
 
 const tenantOf = (req: Request): string | null => (req as any).user?.tenant_id ?? null;
+
+/** One endpoint for every provider — the key is what tells them apart. Built
+ *  from the request so it is correct on localhost and in production alike. */
+const endpointFor = (req: Request, tenant: string) =>
+  `${process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`}/api/v1/ingest/${tenant}`;
+
 const roleOf = (req: Request): string => String((req as any).user?.role || '');
 const userOf = (req: Request): string | null => (req as any).user?.id ?? null;
 
@@ -66,9 +72,11 @@ connectionsRouter.get('/', async (req: Request, res: Response) => {
   const [rows, counts] = await Promise.all([listIntegrations(tenant), inboxCounts(tenant)]);
   return res.status(200).json({
     success: true,
+    endpoint: endpointFor(req, tenant),
+    headerName: 'X-API-Key',
     connections: rows.map(r => ({
       ...r,
-      // Never the key, never the hash — only whether one exists and its last4.
+      // The key itself is a separate, audited request (`GET /:id/key`).
       hasKey: !!r.api_key_last4,
       configured: !!r.parser_config,
       counts: counts[r.id] || {},
@@ -93,6 +101,30 @@ connectionsRouter.post('/', async (req: Request, res: Response) => {
   // The key is returned exactly once. It is not stored in a form we can read
   // back, so the UI must say so at the moment it shows it.
   return res.status(201).json({ success: true, connection: { ...integration, configured: false }, apiKey, showOnce: true });
+});
+
+/**
+ * Read the key back. Audited: looking at a credential is an event, and this is
+ * the only trace that it happened.
+ *
+ * A connection created before keys were stored encrypted has nothing to
+ * decrypt, and the honest answer is to rotate rather than to pretend.
+ */
+connectionsRouter.get('/:id/key', async (req: Request, res: Response) => {
+  const tenant = requireTenant(req, res); if (!tenant) return;
+  if (!requireManager(req, res)) return;
+  const integration = await getIntegration(tenant, req.params.id);
+  if (!integration) return res.status(404).json({ error: 'No such connection' });
+
+  const apiKey = await revealKey(tenant, req.params.id);
+  if (!apiKey) return res.status(410).json({ error: 'unrecoverable', message: 'This key predates key storage. Rotate it to get a readable one.' });
+
+  audit({
+    tenant_id: tenant, actor_type: 'user', actor_id: userOf(req), actor_label: (req as any).user?.name ?? null,
+    action: 'integration.reveal_key', target_type: 'integration', target_id: req.params.id,
+    summary: `Key for "${integration.provider}" viewed`, metadata: {},
+  });
+  return res.status(200).json({ success: true, apiKey, endpoint: endpointFor(req, tenant), headerName: 'X-API-Key' });
 });
 
 connectionsRouter.post('/:id/rotate', async (req: Request, res: Response) => {
@@ -255,9 +287,8 @@ connectionsRouter.post('/:id/replay', async (req: Request, res: Response) => {
  * does not care who is calling, so there is one pack rather than a page per
  * portal — and a page per portal would rot the moment a portal changed its UI.
  *
- * The key is NOT included. It cannot be: we only stored a hash. The pack is
- * generated with a freshly rotated key at the moment of sending, or the firm
- * pastes in the key they saved.
+ * The connection's real key is filled in, so the pack is send-ready. Falls back
+ * to a placeholder for keys minted before they were stored readably.
  */
 connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => {
   const tenant = requireTenant(req, res); if (!tenant) return;
@@ -265,9 +296,8 @@ connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => 
   const integration = await getIntegration(tenant, req.params.id);
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 
-  const base = process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`;
-  const endpoint = `${base}/api/v1/ingest/${tenant}`;
-  const keyToken = String(req.query.key || 'YOUR_API_KEY');
+  const endpoint = endpointFor(req, tenant);
+  const keyToken = String(req.query.key || '') || (await revealKey(tenant, req.params.id)) || 'YOUR_API_KEY';
 
   const email = [
     `Subject: Sending enquiries to ${integration.provider} — technical setup`,

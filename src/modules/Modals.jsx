@@ -11,6 +11,7 @@ import CameraCapture from '../components/CameraCapture.jsx'
 import { pushSupported, isPushSubscribed, enablePush, disablePush } from '../lib/push.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
+import { CALL_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 
 // Generic modal frame
 function Modal({ title, onClose, children, width = 440 }) {
@@ -44,11 +45,10 @@ export default function Modals({ store, go }) {
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} only={m.only} />}
-      {m?.kind === 'pickMatch' && <PickMatchModal store={store} leadId={m.leadId} />}
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
       {m?.kind === 'scheduleFollowUp' && <ScheduleFollowUpModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'outreach' && <OutreachModal store={store} leadId={m.leadId} channel={m.channel} />}
+      {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} />}
       {m?.kind === 'tenancy' && <TenancyModal store={store} propId={m.propId} />}
       {m?.kind === 'ownerEdit' && <OwnerEditModal store={store} propId={m.propId} />}
       {m?.kind === 'ownerUpdate' && <OwnerUpdateModal store={store} propId={m.propId} />}
@@ -304,180 +304,50 @@ function AttachPropModal({ store, leadId }) {
   )
 }
 
-// ---- Outreach: plain Call / SMS / WhatsApp, no property required ----
-// Channel-first. Property attach is optional enrichment, not the whole point.
-function OutreachModal({ store, leadId, channel = 'call' }) {
+// ---- Log a call -----------------------------------------------------------
+// Deliberately NOT a dialer. On a desk there is no phone to dial: the agent
+// calls from the handset in their hand and comes here to record what happened.
+// The old modal put Call / WhatsApp / SMS behind one button, so every outreach
+// started with a choice nobody needed to make. WhatsApp is its own composer;
+// SMS is gone.
+function LogCallModal({ store, leadId }) {
   const l = store.state.leads.find(x => x.id === leadId)
-  const [ch, setCh] = useState(channel || 'call')
+  const [outcome, setOutcome] = useState(CALL_OUTCOMES[0].value)
   const [text, setText] = useState('')
-  const [callOutcome, setCallOutcome] = useState('Connected & Discussed Requirements')
+  const [busy, setBusy] = useState(false)
   if (!l) return null
-  const first = l.name.split(' ')[0]
 
-  const templates = {
-    wa: [
-      `Namaste ${first}, ${theme.brand.firmName} here. We have shortlisted verified options for your ${l.req?.config || 'property'} requirement in ${l.req?.locality || 'Pune'}. Would you like to review the layout plans?`,
-      `Hi ${first}, sharing RERA verified brochure & pricing details for matching properties in ${l.req?.locality || 'Pune'}. Let us know if you are available for a site visit this weekend.`,
-      `Hi ${first}, following up on your property inquiry with ${theme.brand.firmName}. Please let me know a convenient time to connect.`,
-    ],
-    sms: [
-      `Namaste ${first}, this is ${theme.brand.firmName}. Following up on your property search in ${l.req?.locality || 'Pune'}. Please let us know when you are free to talk.`,
-      `Hi ${first}, new inventory matching your ${l.req?.config || 'search'} is now available. Call us back for pricing details.`,
-      `Thanks for your time, ${first}! We will share the complete pricing breakdown shortly.`,
-    ],
-  }
-
-  // The button must actually do the thing — dial the phone, open WhatsApp,
-  // open the SMS composer — and *then* log it for real (B5). Used to also
-  // fire a client-only store.addNote() "echo" with the rich outcome/message
-  // text; that copy never persisted (lost on refresh) while the server wrote
-  // its OWN, blander, generic-worded entry — two divergent records of one
-  // action, the better one gone after a reload. Now there's one persisted
-  // entry, and the rich text is attached to THAT entry via the same
-  // author-owns-it edit path B1/B5 use everywhere else.
-  const logIt = () => {
-    const digits = String(l.phone || '').replace(/\D/g, '')
-    const attachAndSync = (apiCall, remarkText, outcome) => {
-      apiCall.then(res => {
+  const save = () => {
+    setBusy(true)
+    const label = labelForOutcome(outcome)
+    api.callBridge(l.id, store.state.activeAgentId)
+      .then(res => {
         const evtId = res?.timeline_event?.id
-        return evtId ? api.editRemark(l.id, evtId, remarkText || '', outcome) : null
-      }).catch(err => console.warn('[Outreach log] error:', err.message))
-        .finally(() => store.reloadServer?.())
-    }
-    if (ch === 'call') {
-      if (digits) window.location.href = `tel:+${digits.length > 10 ? digits : '91' + digits}`
-      attachAndSync(api.callBridge(l.id, store.state.activeAgentId), '', callOutcome)
-      store.toast(`Call logged · ${callOutcome}`)
-    } else if (ch === 'wa') {
-      if (!text.trim()) { store.toast('Pick a template or type a message first', 'warn'); return }
-      window.open(whatsappLink(text, digits), '_blank', 'noopener')
-      // NOT api.sendWhatsApp — that's the WABA dispatch route, gated by
-      // requireModuleEnabled('whatsapp') + whatsapp_credits quota, so it errors
-      // for every tenant that hasn't bought a WABA module. We deliberately
-      // don't use WABA at all (wa.me deep links only), and that route also
-      // logs a fiction — "Dispatched via Meta Cloud API" — when all that
-      // happened is we opened a link. contact-log records what actually did.
-      attachAndSync(api.logContactAction(l.id, 'wa'), text)
-      store.toast('WhatsApp opened with the message ready')
-    } else {
-      if (!text.trim()) { store.toast('Pick a template or type a message first', 'warn'); return }
-      window.location.href = `sms:${digits ? '+' + (digits.length > 10 ? digits : '91' + digits) : ''}?body=${encodeURIComponent(text)}`
-      attachAndSync(api.logContactAction(l.id, 'sms'), text)
-      store.toast('SMS composer opened')
-    }
-    store.closeModal()
+        return evtId ? api.editRemark(l.id, evtId, text.trim(), label) : null
+      })
+      .catch(err => console.warn('[Call log] error:', err.message))
+      .finally(() => { store.reloadServer?.(); store.toast(`Call logged · ${label}`); store.closeModal() })
   }
 
   return (
-    <Modal title={`Reach Out to ${l.name}`} onClose={store.closeModal} width={480}>
-      <div style={{ background: 'var(--wash)', border: '1px solid var(--line)', borderRadius: 10, padding: '10px 14px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{l.phone}</div>
-          <div className="u-muted" style={{ fontSize: 11.5 }}>{l.req?.config} · {l.req?.locality}</div>
-        </div>
-        <span style={{ fontSize: 11, fontWeight: 600, padding: '4px 9px', borderRadius: 6, background: 'var(--accent-wash)', color: 'var(--accent-ink)' }}>{l.stage}</span>
+    <Modal title={`Log a call with ${l.name.split(' ')[0]}`} onClose={store.closeModal} width={430}>
+      <div className="lc-who">
+        <span className="mono-num">{l.phone || '—'}</span>
+        <StageTag stage={l.stage} />
       </div>
-
-      {/* Accessible Channel Selector */}
-      <div role="tablist" aria-label="Outreach Channel" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 16 }}>
-        {[
-          { id: 'call', label: 'Call', icon: 'phone' },
-          { id: 'wa', label: 'WhatsApp', icon: 'wa' },
-          { id: 'sms', label: 'SMS', icon: 'sms' },
-        ].map(item => {
-          const isOn = ch === item.id
-          return (
-            <button key={item.id} role="tab" aria-selected={isOn} onClick={() => setCh(item.id)}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '10px 12px', borderRadius: 9, border: `1.5px solid ${isOn ? 'var(--accent)' : 'var(--line)'}`, background: isOn ? 'var(--accent-wash)' : '#fff', color: isOn ? 'var(--accent-ink)' : 'var(--ink-2)', fontWeight: isOn ? 600 : 500, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
-              <Icon name={item.icon} size={15} />
-              {item.label}
-            </button>
-          )
-        })}
-      </div>
-
-      {ch === 'call' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>Select Call Outcome to Log</label>
-            <select aria-label="Call Outcome" value={callOutcome} onChange={e => setCallOutcome(e.target.value)}
-              style={{ width: '100%', padding: '10px 12px', borderRadius: 9, border: '1px solid var(--line)', background: '#fff', fontSize: 13, color: 'var(--ink)', fontFamily: 'inherit' }}>
-              <option value="Connected & Discussed Requirements">Connected & Discussed Requirements</option>
-              <option value="Interested — Scheduling Site Visit">Interested — Scheduling Site Visit</option>
-              <option value="Requested Callback Later">Requested Callback Later</option>
-              <option value="No Answer / Ringing">No Answer / Ringing</option>
-              <option value="Number Busy / Switched Off">Number Busy / Switched Off</option>
-            </select>
-          </div>
-          <button className="btn btn-primary btn-block" style={{ padding: 14, fontSize: 13.5, fontWeight: 600 }} onClick={logIt}>
-            <Icon name="phone" /> Start Call
-          </button>
-          <div className="u-muted" style={{ fontSize: 11.5, textAlign: 'center' }}>Dials {l.phone} and logs the outcome you picked.</div>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>Pick a Quick Template</label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-              {(templates[ch] || []).map((t, i) => (
-                <button key={i} onClick={() => setText(t)}
-                  style={{ textAlign: 'left', background: text === t ? 'var(--accent-wash)' : '#fff', border: `1px solid ${text === t ? 'var(--accent-line)' : 'var(--line)'}`, borderRadius: 8, padding: '9px 11px', fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.45, cursor: 'pointer', fontFamily: 'inherit' }}>
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>Message Content</label>
-            <Textarea aria-label="Message Content" value={text} onChange={e => setText(e.target.value)} placeholder={`Type your ${ch === 'wa' ? 'WhatsApp' : 'SMS'} message…`} />
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} icon={ch === 'wa' ? 'wa' : 'sms'} onClick={logIt}>
-              Send {ch === 'wa' ? 'WhatsApp' : 'SMS'}
-            </Button>
-            <Button icon="tag" onClick={() => store.openModal({ kind: 'pickMatch', leadId: l.id })}>Attach Property</Button>
-          </div>
-        </div>
-      )}
-
-      <div style={{ marginTop: 14, background: 'var(--wash)', border: '1px solid var(--line)', borderRadius: 9, padding: '10px 12px', fontSize: 11.5, color: 'var(--ink-2)', display: 'flex', gap: 9 }}>
-        <Icon name="zap" size={15} style={{ flexShrink: 0, marginTop: 1, color: 'var(--accent)' }} />
-        <span>{ch === 'call'
-          ? 'Dials from this device and logs the outcome to the lead timeline.'
-          : `Opens ${ch === 'wa' ? 'WhatsApp' : 'your SMS app'} with the message filled in. The send is logged to the lead timeline.`}</span>
-      </div>
-    </Modal>
-  )
-}
-
-// ---- Pick which matched PROPERTY to WhatsApp for a lead (from the system) ----
-function PickMatchModal({ store, leadId }) {
-  const l = store.state.leads.find(x => x.id === leadId)
-  if (!l) return null
-  const matches = matchesForLead(l, store.state.properties)
-  const send = (propId) => { store.closeModal(); store.openWhatsApp(propId, leadId) }
-  return (
-    <Modal title="Share a property on WhatsApp" onClose={store.closeModal} width={460}>
-      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
-        Best fits for <b style={{ color: 'var(--ink)' }}>{l.name}</b> — {l.req.config} · {l.req.deal} · {l.req.locality}. Ranked by the system.
-      </div>
-      {matches.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '10px 0' }}>No inventory matches this requirement yet.</div>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {matches.map((m, i) => {
-          const fit = fitReasons(m, l.req)
-          return (
-            <button key={m.id} onClick={() => send(m.id)}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-              <div style={{ width: 44, height: 44, borderRadius: 8, background: thumbTint(m.id), display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--faint)', flexShrink: 0 }}><Icon name="building" size={21} strokeWidth={1.4} /></div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{m.society}{i === 0 && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-wash)', borderRadius: 4, padding: '2px 6px', marginLeft: 7 }}>BEST FIT</span>}</div>
-                <div className="u-muted" style={{ fontSize: 12 }}>{m.fitLine} · {fit.score}% fit</div>
-              </div>
-              <Money>{m.priceLabel}</Money>
-              <Icon name="wa" size={18} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-            </button>
-          )
-        })}
+      <Field label="Outcome">
+        <select className="input" value={outcome} onChange={e => setOutcome(e.target.value)}>
+          {CALL_OUTCOMES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </Field>
+      <Field label="Remark">
+        <Textarea value={text} onChange={e => setText(e.target.value)} placeholder="What was said" />
+      </Field>
+      <div className="lc-foot">
+        <Button onClick={store.closeModal}>Cancel</Button>
+        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} disabled={busy} onClick={save}>
+          {busy ? 'Saving…' : 'Log call'}
+        </Button>
       </div>
     </Modal>
   )
@@ -634,7 +504,7 @@ function LeadForm({ store, leadId }) {
         </div>
 
         <div className="field">
-          <label>Preferred Pune Locality</label>
+          <label>Preferred locality</label>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {PUNE_LOCALITIES.map(l => chip(f.locality === l, () => set('locality', l), l))}
           </div>
@@ -890,7 +760,7 @@ function ContactConfirmModal({ store, channel, name, phone, waText, recordType, 
         {channel === 'call' && (
           <select className="input" value={outcome} onChange={e => setOutcome(e.target.value)} style={{ width: '100%', marginBottom: 10 }}>
             <option value="">No outcome yet</option>
-            {['Connected & Discussed Requirements', 'Interested — Scheduling Site Visit', 'Requested Callback Later', 'No Answer / Ringing', 'Number Busy / Switched Off'].map(o => <option key={o} value={o}>{o}</option>)}
+            {CALL_OUTCOMES.map(o => <option key={o.value} value={o.label}>{o.label}</option>)}
           </select>
         )}
         <Textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a remark…" />
@@ -1404,7 +1274,7 @@ function ImportModal({ store }) {
         status: dup ? 'duplicate' : 'new',
         dupTarget: dup ? dup.name : null,
         name, phone,
-        locality: mapping.locality ? (row[mapping.locality] || 'Pune HQ') : 'Pune HQ',
+        locality: mapping.locality ? (row[mapping.locality] || '') : '',
         config: mapping.config ? (row[mapping.config] || '2 BHK') : '2 BHK',
         budget: mapping.budget ? (row[mapping.budget] || '1.2 Cr') : '1.2 Cr',
       }
@@ -1419,7 +1289,7 @@ function ImportModal({ store }) {
         status: dup ? 'duplicate' : 'new',
         dupTarget: dup ? dup.society : null,
         title,
-        locality: mapping.locality ? (row[mapping.locality] || 'Pune HQ') : 'Pune HQ',
+        locality: mapping.locality ? (row[mapping.locality] || '') : '',
         type: mapping.type ? (row[mapping.type] || '2 BHK') : '2 BHK',
         price: (!isNaN(priceNum) && priceNum > 0) ? priceNum : 95,
       }
@@ -1599,7 +1469,7 @@ function ImportModal({ store }) {
                 <div>
                   <label style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 3 }}>Locality Column</label>
                   <select className="input" value={mapping.locality} onChange={e => setMapping({ ...mapping, locality: e.target.value })} style={{ width: '100%' }}>
-                    <option value="">-- Default Pune HQ --</option>
+                    <option value="">Not mapped</option>
                     {headers.map(h => <option key={h} value={h}>{h}</option>)}
                   </select>
                 </div>

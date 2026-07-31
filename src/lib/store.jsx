@@ -6,9 +6,10 @@
 import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react'
 import { DEFAULT_SETTINGS, DEFAULT_BRAND, PROTECTED_STAGES } from '../data/theme.js'
 import { initials } from './format.js'
-import { generateMessage } from './matching.js'
+import { generateMessage, followUpMessage } from './matching.js'
 import { api as apiClient } from './api.js'
 import { applyBrandColor } from './brand.js'
+import { setTenantIdentity } from './tenant.js'
 
 const StoreCtx = createContext(null)
 export const useStore = () => useContext(StoreCtx)
@@ -20,7 +21,7 @@ const clone = (x) => JSON.parse(JSON.stringify(x))
 // firm's real data (the service worker can't cache the cross-origin API in the
 // split-origin deploy). Keyed by tenant so switching firms never crosses data.
 function stateCacheKey() {
-  let t = 'skyline-realty'
+  let t = 'unresolved'
   try { t = window.localStorage?.getItem('crm_tenant_id') || t } catch (e) {}
   return `crm_state_cache_${t}`
 }
@@ -226,7 +227,7 @@ function reducer(state, action) {
         settings: {
           ...state.settings,
           firmName: firmName || state.settings.firmName,
-          city: city || 'Pune',
+          city: city || '',
         },
         // In-session theming; the server also persisted this to brand_config.
         brand: {
@@ -585,6 +586,13 @@ export function StoreProvider({ children }) {
     applyBrandColor(state.brand?.primaryColor)
   }, [state.brand?.primaryColor])
 
+  // Publish the firm's identity to the plain modules that compose outbound
+  // text. Without this they fall back to a bundled brand and sign a client's
+  // message with the wrong firm's name.
+  useEffect(() => {
+    setTenantIdentity({ firmName: state.settings.firmName, city: state.settings.city })
+  }, [state.settings.firmName, state.settings.city])
+
   // Pull the current user's alert feed. No-op without a token (the feed is
   // per-user, so it needs an authenticated identity).
   const loadNotifications = useCallback(() => {
@@ -598,26 +606,38 @@ export function StoreProvider({ children }) {
     dispatch({ type: 'TOAST', text, tone })
   }, [])
 
-  const lastToast = state.toasts[state.toasts.length - 1]
-  if (lastToast && !timers.current[lastToast.id]) {
-    timers.current[lastToast.id] = setTimeout(() => dispatch({ type: 'UNTOAST', id: lastToast.id }), 2600)
-  }
+  // Every toast gets its own timer, in an effect rather than during render.
+  // Stacked toasts are staggered: three arriving together at a flat 2.6s meant
+  // the last one was on screen for the time it took to read the first.
+  useEffect(() => {
+    state.toasts.forEach((t, i) => {
+      if (timers.current[t.id]) return
+      timers.current[t.id] = setTimeout(
+        () => dispatch({ type: 'UNTOAST', id: t.id }),
+        5000 + i * 900,
+      )
+    })
+  }, [state.toasts])
 
   // The message is a TEMPLATE FILLED FROM PROPERTY DATA — not generated text.
   // It resolves synchronously; there is deliberately no artificial delay or
   // "composing" animation, which would imply AI authorship we don't do.
   const composeFor = useCallback((wa) => {
     const prop = state.properties.find(p => p.id === wa.propId)
+    const lead = state.leads.find(l => l.id === wa.leadId)
     // The firm name MUST come from the signed-in tenant. Leaving it out fell
     // back to the bundled demo brand, so a client received another firm's
     // name at the bottom of the message.
-    return prop
-      ? generateMessage(prop, {
-          lang: wa.lang, tone: wa.tone, variant: wa.variant,
-          firmName: state.settings.firmName,
-        })
-      : ''
-  }, [state.properties, state.settings.firmName])
+    if (prop) {
+      return generateMessage(prop, {
+        lang: wa.lang, tone: wa.tone, variant: wa.variant,
+        firmName: state.settings.firmName,
+      })
+    }
+    // No property attached is a normal case — a plain follow-up. Returning ''
+    // here left the composer blank with a dead Send button.
+    return lead ? followUpMessage(lead, state.settings.firmName) : ''
+  }, [state.properties, state.leads, state.settings.firmName])
 
   const openWhatsApp = useCallback((propId, leadId) => {
     const wa = { propId, leadId, lang: 'Hinglish', tone: 'Standard', variant: 0 }
@@ -632,8 +652,10 @@ export function StoreProvider({ children }) {
 
   const api = {
     state, dispatch, toast,
-    agentById: (id) => state.agents.find(a => a.id === id) || { id: id || 'a1', name: 'Rakesh Sethi', first: 'Rakesh', role: 'admin', phone: '+91 98220 41556', initials: 'RS', avatar: '' },
-    me: () => state.agents.find(a => a.id === state.activeAgentId) || state.agents[0] || { id: 'a1', name: 'Rakesh Sethi', first: 'Rakesh', role: 'admin', phone: '+91 98220 41556', initials: 'RS', avatar: '' },
+    // No invented fallback agent. A hardcoded name and phone number here is a
+    // real person's contact details shown for an id we could not resolve.
+    agentById: (id) => state.agents.find(a => a.id === id) || null,
+    me: () => state.agents.find(a => a.id === state.activeAgentId) || state.agents[0] || null,
     activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id)),
     
     assign: (leadId, agentId) => {

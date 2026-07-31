@@ -1,4 +1,4 @@
-import { FIRM } from '../data/theme.js'
+import { firmName as tenantFirm } from './tenant.js'
 import {
   AREA_UNITS, BHK, FACING, FURNISH, POSSESSION, SOCIETY_AMENITIES, SUBTYPES,
   labelOf, normaliseBhk, normaliseSubtype, normaliseTo,
@@ -45,7 +45,7 @@ export function leadsForProperty(property, allLeads = []) {
 }
 
 // --- Owner-update WhatsApp (activity summary for the property's owner) -------
-export function ownerUpdateMessage(property, allLeads = [], firmName = FIRM) {
+export function ownerUpdateMessage(property, allLeads = [], firmName = tenantFirm()) {
   const p = property
   const buyers = leadsForProperty(p, allLeads)
   const partyWord = p.deal === 'rent' ? 'tenants' : 'buyers'
@@ -65,7 +65,7 @@ export function ownerUpdateMessage(property, allLeads = [], firmName = FIRM) {
   } else {
     L.push('Genuine interest hai. Main follow-up kar raha hoon — koi decision aate hi aapko update karunga.')
   }
-  L.push('— ' + firmName)
+  if (firmName) L.push('— ' + firmName)
   return L.join('\n')
 }
 
@@ -174,7 +174,7 @@ function buildSale(p, t, opener, closer, firmName) {
   // mistake to whoever receives it.
   if (d.price) L.push(`${t.price}: *${d.price}*${p.negotiable ? ` ${t.negotiable}` : ` — ${t.fixed}`}`)
   L.push(t.ownerDirect)
-  L.push(closer); L.push('— ' + firmName)
+  L.push(closer); if (firmName) L.push('— ' + firmName)
   return L.join('\n')
 }
 
@@ -203,7 +203,7 @@ function buildRent(p, t, opener, closer, firmName) {
   if (p.billsByOwner) { L.push(''); L.push(t.billsByOwner) }
   L.push('')
   if (d.price) L.push(`${t.rent}: *${d.price}*` + (d.deposit ? ` · ${t.deposit}: *${d.deposit}*` : ''))
-  L.push(closer); L.push('— ' + firmName)
+  L.push(closer); if (firmName) L.push('— ' + firmName)
   return L.join('\n')
 }
 
@@ -274,7 +274,7 @@ export function shareSafeProperty(property) {
 export function generateMessage(rawProperty, opts = {}) {
   const property = shareSafeProperty(rawProperty)
   if (!property) return ''
-  const firmName = opts.firmName || FIRM
+  const firmName = opts.firmName || tenantFirm()
   const lang = opts.lang || 'Hinglish', tone = opts.tone || 'Standard', variant = opts.variant || 0
   const pack = PACKS[lang] || PACKS.Hinglish
   const i = ((variant % 3) + 3) % 3
@@ -286,7 +286,30 @@ export function generateMessage(rawProperty, opts = {}) {
     const rows = msg.split('\n')
     const head = rows.slice(0, 3)
     const priceLine = rows.find(x => x.startsWith('Rent:') || x.startsWith('Price:'))
-    msg = [...head, '', opener, priceLine, closer, '— ' + firmName].join('\n')
+    msg = [...head, '', opener, priceLine, closer, firmName && '— ' + firmName]
+      .filter(x => x !== undefined && x !== false).join('\n')
   }
   return msg
+}
+
+// --- Plain follow-up (no property attached) ---------------------------------
+// Sending a message without a listing is a normal thing to do, and it used to
+// have no template at all — the composer opened blank. Every line here is built
+// from a fact we actually hold; a lead with no locality on file simply gets a
+// shorter message rather than an invented city.
+export function followUpMessage(lead, firmName = tenantFirm()) {
+  if (!lead) return ''
+  const first = String(lead.name || '').split(' ')[0]
+  const wants = [labelOf(BHK, lead.req?.config) || lead.req?.config, lead.req?.locality]
+    .filter(Boolean).join(' in ')
+  const L = []
+  L.push(`Namaste ${first},`)
+  L.push('')
+  L.push(wants
+    ? `Following up on your requirement — ${wants}.`
+    : 'Following up on your property requirement.')
+  L.push('Shall I share a few options that fit?')
+  L.push('')
+  if (firmName) L.push('— ' + firmName)
+  return L.join('\n')
 }

@@ -130,7 +130,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
       wing, tower: wing, flat, unit: flat,
       type: v.type || '2 BHK Apartment',
       deal: v.deal || 'sale',
-      locality: v.locality || 'Pune',
+      locality: v.locality || '',
       price: v.price || undefined,
       priceLabel: moneyLabel(v.price) || undefined,
       status: v.status || 'Available',

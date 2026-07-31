@@ -146,19 +146,22 @@ export const LEADS_DEF = {
   // Standardized action set for the detail rail. `group` buckets them; `when`
   // gates by record state; `run(store, record)` calls existing store api.
   actions: [
-    { id: 'contact', tier: 'quick', icon: 'phone', label: 'Contact',
-      run: (store, l) => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'call' }) },
+    // ONE action per intent. There used to be a 'Contact' that opened a
+    // channel chooser, a WhatsApp entry that opened the same chooser on a
+    // different tab, a 'Schedule' that duplicated the follow-up card's own
+    // button, and a next-best-action banner whose CTA was a third route to the
+    // first one. Four ways to do two things.
     { id: 'whatsapp', tier: 'quick', icon: 'wa', label: 'WhatsApp',
-      run: (store, l) => store.openModal({ kind: 'outreach', leadId: l.id, channel: 'wa' }) },
-    { id: 'remark', tier: 'quick', icon: 'note', label: 'Add remark',
-      run: (store, l) => store.openModal({ kind: 'remark', recordType: 'lead', recordId: l.id }) },
+      run: (store, l) => store.openWhatsApp(null, l.id) },
+    { id: 'logCall', tier: 'quick', icon: 'phone', label: 'Log call',
+      run: (store, l) => store.openModal({ kind: 'logCall', leadId: l.id }) },
     // B4. Completing a scheduled Site Visit appointment also opens this, but
     // that path only exists if someone scheduled one — so a visit that just
     // happened had nowhere to be logged. This is the always-available entry.
     { id: 'logVisit', tier: 'quick', icon: 'camera', label: 'Log site visit',
       run: (store, l) => store.openModal({ kind: 'visitProof', leadId: l.id }) },
-    { id: 'schedule', tier: 'quick', icon: 'calendar', label: 'Schedule',
-      run: (store, l) => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id }) },
+    { id: 'remark', tier: 'quick', icon: 'note', label: 'Add remark',
+      run: (store, l) => store.openModal({ kind: 'remark', recordType: 'lead', recordId: l.id }) },
     // manage (behind "More"):
     { id: 'assign', tier: 'manage', icon: 'userPlus',
       label: (l) => l.agentId ? 'Reassign owner' : 'Assign owner',

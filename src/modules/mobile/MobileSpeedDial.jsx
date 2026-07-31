@@ -16,7 +16,7 @@ export default function MobileSpeedDial({ store, context = {} }) {
       // B4 — the phone IS where a site visit gets logged, so this belongs here
       // even more than on the desk.
       { label: 'Log Site Visit', icon: 'camera', action: () => { setOpen(false); store.openModal({ kind: 'visitProof', leadId: context.id }) }, color: '#1E6F52', wash: '#E8FBEF' },
-      { label: 'Attach / Share Property', icon: 'wa', action: () => { setOpen(false); store.openModal({ kind: 'pickMatch', leadId: context.id }) }, color: '#25D366', wash: '#E8FBEF' }
+      { label: 'Attach / Share Property', icon: 'wa', action: () => { setOpen(false); store.openWhatsApp(null, context.id) }, color: '#25D366', wash: '#E8FBEF' }
     ]
   } else if (kind === 'prop') {
     actions = [

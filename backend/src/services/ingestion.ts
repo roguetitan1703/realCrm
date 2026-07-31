@@ -54,15 +54,61 @@ function mintKey(): string {
   return 'sk_live_' + crypto.randomBytes(32).toString('hex');
 }
 
+/**
+ * The key is ALSO kept encrypted, alongside the hash.
+ *
+ * Hash-only is the stricter posture, and it is the right one for a password.
+ * It is the wrong one here: this key lives in someone else's system — a portal's
+ * webhook config — and "we can't tell you what we gave you" means the only
+ * recovery is a rotation, which breaks the live feed until the portal is
+ * re-briefed. That is a real outage caused by a property we gained nothing from.
+ *
+ * So: encrypted at rest with a server-held secret, readable only through an
+ * authenticated, audited endpoint. A stolen database dump is still useless
+ * without the secret, and the inbound lookup keeps using the hash.
+ */
+const encSecret = crypto.createHash('sha256')
+  .update(process.env.INGEST_KEY_SECRET || process.env.JWT_SECRET || 'dev-only-change-me')
+  .digest();
+
+function encryptKey(key: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', encSecret, iv);
+  const enc = Buffer.concat([cipher.update(key, 'utf8'), cipher.final()]);
+  return `v1.${iv.toString('base64')}.${cipher.getAuthTag().toString('base64')}.${enc.toString('base64')}`;
+}
+
+function decryptKey(blob: string | null): string | null {
+  if (!blob) return null;
+  const [v, iv, tag, data] = String(blob).split('.');
+  if (v !== 'v1' || !iv || !tag || !data) return null;
+  try {
+    const d = crypto.createDecipheriv('aes-256-gcm', encSecret, Buffer.from(iv, 'base64'));
+    d.setAuthTag(Buffer.from(tag, 'base64'));
+    return Buffer.concat([d.update(Buffer.from(data, 'base64')), d.final()]).toString('utf8');
+  } catch {
+    // Wrong secret, or a tampered row. Either way there is no key to show, and
+    // guessing is not an option — the caller offers a rotation instead.
+    return null;
+  }
+}
+
+/** The plaintext key for a connection. Callers must have checked the role and
+ *  must write an audit entry — reading a credential is an event. */
+export async function revealKey(tenantId: string, id: string): Promise<string | null> {
+  const rows = await sql`
+    SELECT api_key_enc FROM integrations WHERE id = ${id} AND tenant_id = ${tenantId} LIMIT 1
+  `;
+  return rows.length ? decryptKey(rows[0].api_key_enc) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Connections
 // ---------------------------------------------------------------------------
 
 /**
- * Create a connection and return its key ONCE. The plaintext is never stored
- * and cannot be recovered — a lost key is rotated, not looked up. That is the
- * whole point of hashing it, and the UI has to say so at the moment it shows
- * the key, because there is no second chance to read it.
+ * Create a connection and return its key. Stored twice: hashed for the inbound
+ * lookup, encrypted so it can be read back (see `revealKey`).
  */
 export async function createIntegration(
   tenantId: string, provider: string, createdBy: string | null,
@@ -70,8 +116,8 @@ export async function createIntegration(
   const id = rid('int');
   const apiKey = mintKey();
   const rows = await sql`
-    INSERT INTO integrations (id, tenant_id, provider, api_key_hash, api_key_last4, active, created_by)
-    VALUES (${id}, ${tenantId}, ${provider}, ${hashKey(apiKey)}, ${apiKey.slice(-4)}, TRUE, ${createdBy})
+    INSERT INTO integrations (id, tenant_id, provider, api_key_hash, api_key_enc, api_key_last4, active, created_by)
+    VALUES (${id}, ${tenantId}, ${provider}, ${hashKey(apiKey)}, ${encryptKey(apiKey)}, ${apiKey.slice(-4)}, TRUE, ${createdBy})
     RETURNING id, tenant_id, provider, api_key_last4, parser_config, active, created_at, created_by, last_received_at
   `;
   return { integration: rows[0] as Integration, apiKey };
@@ -81,7 +127,8 @@ export async function createIntegration(
 export async function rotateIntegrationKey(tenantId: string, id: string): Promise<string | null> {
   const apiKey = mintKey();
   const rows = await sql`
-    UPDATE integrations SET api_key_hash = ${hashKey(apiKey)}, api_key_last4 = ${apiKey.slice(-4)}
+    UPDATE integrations SET api_key_hash = ${hashKey(apiKey)}, api_key_enc = ${encryptKey(apiKey)},
+           api_key_last4 = ${apiKey.slice(-4)}
     WHERE id = ${id} AND tenant_id = ${tenantId}
     RETURNING id
   `;
@@ -187,7 +234,7 @@ export async function listInbox(
   const limit = Math.min(opts.limit ?? 50, 200);
   return await sql`
     SELECT id, integration_id, received_at, source_ip, status, lead_id, error, parsed_at,
-           raw_body, body_purged_at
+           raw_body, body_purged_at, headers
     FROM webhook_inbox
     WHERE tenant_id = ${tenantId}
       ${opts.integrationId ? sql`AND integration_id = ${opts.integrationId}` : sql``}

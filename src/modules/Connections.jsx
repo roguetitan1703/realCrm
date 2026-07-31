@@ -1,27 +1,25 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
-import { Button, Field, Input } from '../components/primitives.jsx'
+import { Button } from '../components/primitives.jsx'
 import { api } from '../lib/api.js'
 
 // ============================================================================
 // 🔌 CONNECTIONS — where leads come from (spec: docs/specs/ingestion.md, D1)
 // ============================================================================
-// One card per provider, each showing its live activity underneath it. That
-// pairing is the point: a firm can SEE data arriving before it becomes leads,
-// which is the difference between "the integration is broken" and "it's
-// arriving, we just haven't told it how to read it yet".
+// One URL for every provider, one key per provider. That asymmetry is the whole
+// shape of this screen: the endpoint is shown once at the top, and each card
+// carries only the thing that differs.
 //
-// Three states a connection can be in, and the UI names all three rather than
-// showing a generic "connected" tick:
-//   • no key used yet      — nothing has ever arrived
-//   • receiving, unmapped  — data is landing and waiting (NOT an error)
-//   • live                 — mapped, leads are being created
+// Copy rule for this whole file: labels, values and states only. No sentence
+// explains why something works the way it does — that belongs here in the
+// source, not on the client's screen.
 // ============================================================================
 
-// Offered as one-click names only. They create an ordinary connection — there
-// is no per-portal code anywhere, and the endpoint is identical for all of
-// them, so this list is a convenience and never a capability.
-const POPULAR = ['99acres', 'MagicBricks', 'Housing.com', 'Meta Lead Ads', 'Website form']
+const SUGGESTED = ['99acres', 'MagicBricks', 'Housing.com', 'Meta Lead Ads', 'Website form']
+
+const mark = (name) => String(name || '?')
+  .replace(/[^a-zA-Z0-9 ]/g, ' ').trim().split(/\s+/)
+  .map(w => w[0]).join('').slice(0, 2).toUpperCase()
 
 function relativeTime(iso) {
   if (!iso) return 'never'
@@ -32,30 +30,142 @@ function relativeTime(iso) {
   return `${Math.round(mins / 1440)}d ago`
 }
 
-/** The key, shown once and never again. */
-function KeyReveal({ apiKey, onDone, store }) {
-  const [copied, setCopied] = useState(false)
-  const copy = () => {
-    navigator.clipboard?.writeText(apiKey)
-      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600) })
-      .catch(() => store.toast('Could not copy — select the key and copy it manually', 'warn'))
+// Four states, each named. "Unmapped" is not a fault, and a firm that can't
+// tell it from a fault will report a working feed as broken.
+function stateOf(c) {
+  if (!c.active) return { key: 'paused', label: 'Paused' }
+  if (!c.last_received_at) return { key: 'waiting', label: 'Awaiting first push' }
+  if (!c.configured) return { key: 'unmapped', label: 'Unmapped' }
+  return { key: 'live', label: 'Live' }
+}
+
+function useCopy(store) {
+  const [copied, setCopied] = useState('')
+  const copy = (text, tag) => {
+    navigator.clipboard?.writeText(text)
+      .then(() => { setCopied(tag); setTimeout(() => setCopied(''), 1600) })
+      .catch(() => store.toast('Could not copy — select it and copy manually', 'warn'))
   }
+  return [copied, copy]
+}
+
+function Skel({ w, h = 11 }) {
+  return <span className="skel skel-line" style={{ width: w, height: h }} />
+}
+
+// ---------------------------------------------------------------------------
+// The endpoint, once
+// ---------------------------------------------------------------------------
+
+function Endpoint({ endpoint, headerName, store }) {
+  const [copied, copy] = useCopy(store)
+  const [help, setHelp] = useState(false)
+  if (!endpoint) return <div className="cx-url"><Skel w="60%" h={13} /></div>
   return (
-    <div className="cx-reveal">
-      <div className="cx-reveal-h"><Icon name="shield" size={15} />This key is shown once</div>
-      <p>We store only a fingerprint of it, so we cannot show it again. Copy it now — if it's lost, rotate the key and send the new one.</p>
-      <code className="cx-key">{apiKey}</code>
-      <div className="cx-reveal-a">
-        <Button variant="secondary" size="sm" icon={copied ? 'check' : 'copy'} onClick={copy}>{copied ? 'Copied' : 'Copy key'}</Button>
-        <Button variant="primary" size="sm" onClick={onDone}>I've saved it</Button>
+    <div className="cx-url">
+      <div className="cx-url-row">
+        <span className="cx-url-tag">POST</span>
+        <code className="cx-url-v">{endpoint}</code>
+        <button className="btn btn-ghost btn-sm" onClick={() => copy(endpoint, 'url')}>
+          <Icon name={copied === 'url' ? 'check' : 'copy'} size={14} />{copied === 'url' ? 'Copied' : 'Copy'}
+        </button>
+        <button className={'cx-q' + (help ? ' on' : '')} onClick={() => setHelp(h => !h)} aria-label="Endpoint details">?</button>
       </div>
+      {help && (
+        <dl className="cx-url-help">
+          <dt>Method</dt><dd>POST · application/json</dd>
+          <dt>Auth</dt><dd><code>{headerName}: &lt;the source's key&gt;</code></dd>
+          <dt>Body</dt><dd>Any JSON. Fields are mapped per source.</dd>
+          <dt>Success</dt><dd>200</dd>
+        </dl>
+      )}
     </div>
   )
 }
 
-/** Recent pushes for one connection — the "you can see it arriving" view. */
-function Activity({ connectionId, refreshKey }) {
+// ---------------------------------------------------------------------------
+// The key, on the card
+// ---------------------------------------------------------------------------
+
+function KeyRow({ connection, store, fresh, onRotate }) {
+  const [key, setKey] = useState(fresh || null)
+  const [shown, setShown] = useState(!!fresh)
+  const [busy, setBusy] = useState(false)
+  const [copied, copy] = useCopy(store)
+
+  useEffect(() => { if (fresh) { setKey(fresh); setShown(true) } }, [fresh])
+
+  const need = (then) => {
+    if (key) { then(key); return }
+    setBusy(true)
+    api.revealConnectionKey(connection.id)
+      .then(r => {
+        if (r?.success) { setKey(r.apiKey); then(r.apiKey) }
+        else store.toast(r?.message || 'Could not read the key', 'warn')
+      })
+      .catch(e => store.toast(e.message || 'Could not read the key', 'warn'))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className={'cx-keyrow' + (shown ? ' open' : '')}>
+      <span className="cx-keyrow-l">Key</span>
+      <code className="cx-keyrow-v">
+        {busy ? <Skel w={260} h={12} />
+          : shown && key ? key
+            : `sk_live_${'•'.repeat(24)}${connection.api_key_last4 || ''}`}
+      </code>
+      <button className="cx-icb" title={shown ? 'Hide' : 'Show'}
+        onClick={() => (shown ? setShown(false) : need(() => setShown(true)))}>
+        <Icon name={shown ? 'eyeOff' : 'eye'} size={15} />
+      </button>
+      <button className="cx-icb" title="Copy" onClick={() => need(k => copy(k, 'key'))}>
+        <Icon name={copied === 'key' ? 'check' : 'copy'} size={15} />
+      </button>
+      {fresh && <button className="lnk cx-fresh" onClick={onRotate}>New key</button>}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Activity
+// ---------------------------------------------------------------------------
+
+const STATUS_TEXT = {
+  parsed: 'Lead created',
+  pending: 'Waiting for mapping',
+  ignored: 'Duplicate',
+}
+
+// One received push, opened. This is the whole reason the inbox exists: when a
+// provider changes their schema, the only way to find out is to read what they
+// actually sent — not what we hoped they sent.
+function Push({ push, store }) {
+  const [copied, copy] = useCopy(store)
+  const body = push.raw_body
+  const text = body === null || body === undefined ? '' : JSON.stringify(body, null, 2)
+  return (
+    <div className="cx-push">
+      <div className="cx-push-m">
+        <span>{new Date(push.received_at).toLocaleString('en-IN')}</span>
+        {push.source_ip && <span>{push.source_ip}</span>}
+        {push.headers?.['content-type'] && <span>{push.headers['content-type']}</span>}
+        {push.lead_id && <span>{push.lead_id}</span>}
+        <button className="cx-icb" title="Copy payload" onClick={() => copy(text, push.id)}>
+          <Icon name={copied === push.id ? 'check' : 'copy'} size={14} />
+        </button>
+      </div>
+      {push.error && <div className="cx-push-e">{push.error}</div>}
+      {push.body_purged_at
+        ? <div className="cx-act-empty">Payload purged {relativeTime(push.body_purged_at)}</div>
+        : <pre className="cx-push-b">{text || '(empty body)'}</pre>}
+    </div>
+  )
+}
+
+function Activity({ connectionId, refreshKey, store }) {
   const [rows, setRows] = useState(null)
+  const [openId, setOpenId] = useState(null)
   useEffect(() => {
     let alive = true
     api.getConnectionInbox(connectionId, 8)
@@ -64,43 +174,44 @@ function Activity({ connectionId, refreshKey }) {
     return () => { alive = false }
   }, [connectionId, refreshKey])
 
-  if (rows === null) return <div className="cx-act-empty">Loading activity…</div>
-  if (!rows.length) {
+  if (rows === null) {
     return (
-      <div className="cx-act-empty">
-        Nothing received yet. Send one test enquiry from the provider and it will appear here within seconds.
-      </div>
+      <ul className="cx-act">
+        {[0, 1, 2].map(i => (
+          <li key={i}><span className="skel skel-av sm" style={{ width: 9, height: 9, borderRadius: '50%' }} />
+            <Skel w={58} h={9} /><Skel w={120} h={9} /></li>
+        ))}
+      </ul>
     )
   }
+  if (!rows.length) return <div className="cx-act-empty">Nothing received yet</div>
   return (
     <ul className="cx-act">
-      {rows.map(p => (
-        <li key={p.id}>
-          <span className={'cx-dot cx-' + p.status} />
-          <span className="cx-act-t">{relativeTime(p.received_at)}</span>
-          <span className="cx-act-s">
-            {p.status === 'parsed' ? (p.lead_id ? 'became a lead' : 'processed')
-              : p.status === 'pending' ? 'waiting for a field mapping'
-                : p.status === 'ignored' ? 'duplicate, ignored'
-                  : (p.error || 'failed')}
-          </span>
-        </li>
-      ))}
+      {rows.map(p => {
+        const on = openId === p.id
+        return (
+          <li key={p.id} className={on ? 'on' : ''}>
+            <button className="cx-act-r" onClick={() => setOpenId(on ? null : p.id)}>
+              <span className={'cx-dot cx-' + p.status} />
+              <span className="cx-act-t">{relativeTime(p.received_at)}</span>
+              <span className="cx-act-s">
+                {p.status === 'parsed' ? (p.lead_id ? STATUS_TEXT.parsed : 'Processed')
+                  : STATUS_TEXT[p.status] || p.error || 'Failed'}
+              </span>
+              <Icon name={on ? 'chevUp' : 'chevDown'} size={13} />
+            </button>
+            {on && <Push push={p} store={store} />}
+          </li>
+        )
+      })}
     </ul>
   )
 }
 
-/**
- * The field mapper. Deliberately not a JSON editor: it lists the lead fields we
- * want and, for each, a dropdown of the paths that actually exist in a real
- * payload. That turns the job from "write a config" into "confirm these
- * matches" — the difference between something a broker can do and something
- * they have to phone us about.
- *
- * Save is blocked until a preview has been run, and the server refuses an
- * unusable mapping regardless, so the guardrail survives anyone calling the
- * API directly.
- */
+// ---------------------------------------------------------------------------
+// Field mapping
+// ---------------------------------------------------------------------------
+
 const TARGETS = [
   { key: 'name', label: 'Name', required: true },
   { key: 'phone', label: 'Phone', required: true },
@@ -109,8 +220,8 @@ const TARGETS = [
   { key: 'req.config', label: 'Configuration' },
   { key: 'req.budgetMin', label: 'Budget from' },
   { key: 'req.budgetMax', label: 'Budget to' },
-  { key: 'req.notes', label: 'Their message' },
-  { key: 'external_id', label: "Provider's own id" },
+  { key: 'req.notes', label: 'Message' },
+  { key: 'external_id', label: 'Their reference' },
 ]
 
 function Mapper({ connection, store, onClose, onSaved }) {
@@ -126,11 +237,11 @@ function Mapper({ connection, store, onClose, onSaved }) {
         setData(r)
         setConfig(r.config || r.suggestion || { map: {}, defaults: {}, transforms: {}, valueMaps: {} })
       })
-      .catch(() => store.toast('Could not load the sample payload', 'warn'))
+      .catch(() => store.toast('Could not load the sample', 'warn'))
   }, [connection.id, store])
 
-  // Any edit invalidates the preview — otherwise you could preview one mapping
-  // and save a different one.
+  // Any edit clears the preview, or you could preview one mapping and save
+  // another.
   const edit = (target, source) => {
     setPreview(null)
     setConfig(c => {
@@ -151,8 +262,8 @@ function Mapper({ connection, store, onClose, onSaved }) {
   const runPreview = () => {
     setBusy(true)
     api.previewParser(connection.id, config)
-      .then(r => { if (r?.success) setPreview(r); else store.toast(r?.message || 'Could not run the test', 'warn') })
-      .catch(e => store.toast(e.message || 'Could not run the test', 'warn'))
+      .then(r => { if (r?.success) setPreview(r); else store.toast(r?.message || 'Could not test', 'warn') })
+      .catch(e => store.toast(e.message || 'Could not test', 'warn'))
       .finally(() => setBusy(false))
   }
 
@@ -160,26 +271,35 @@ function Mapper({ connection, store, onClose, onSaved }) {
     setBusy(true)
     api.saveParser(connection.id, config)
       .then(r => {
-        if (r?.success) { store.toast('Mapping saved — new enquiries will become leads'); onSaved?.() }
-        else store.toast(r?.message || 'That mapping was rejected', 'warn')
+        if (r?.success) { store.toast('Mapping saved'); onSaved?.() }
+        else store.toast(r?.message || 'Mapping rejected', 'warn')
       })
-      .catch(e => store.toast(e.message || 'That mapping was rejected', 'warn'))
+      .catch(e => store.toast(e.message || 'Mapping rejected', 'warn'))
       .finally(() => setBusy(false))
   }
 
-  if (!data) return <div className="cx-map"><div className="cx-act-empty">Loading…</div></div>
+  if (!data) {
+    return (
+      <div className="cx-map">
+        <div className="cx-map-grid">
+          {[0, 1, 2, 3, 4].map(i => (
+            <div className="cx-map-row" key={i}>
+              <Skel w={80} /><Skel w="100%" h={30} /><Skel w="100%" h={30} /><Skel w="70%" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   if (!data.payload) {
     return (
       <div className="cx-map">
         <div className="cx-nosample">
-          <Icon name="alert" size={17} />
+          <Icon name="alert" size={16} />
           <div>
-            <strong>Nothing to map yet</strong>
-            <p>
-              A mapping is built from what this provider actually sends, not from a guess —
-              so we need one real enquiry first. Send them the setup pack and ask for a single test push.
-            </p>
+            <strong>No enquiry received yet</strong>
+            <p>Send {connection.provider} the setup pack and ask for one test push.</p>
           </div>
         </div>
         <Button variant="secondary" onClick={onClose}>Close</Button>
@@ -188,14 +308,13 @@ function Mapper({ connection, store, onClose, onSaved }) {
   }
 
   const paths = Object.keys(data.paths || {})
-  const okToSave = preview?.ok
 
   return (
     <div className="cx-map">
-      <p className="cx-map-lead">
-        Match each of our fields to whatever <strong>{connection.provider}</strong> calls it.
-        The values shown come from the last enquiry they actually sent.
-      </p>
+      {/* Column headers do the explaining a paragraph would otherwise do. */}
+      <div className="cx-map-row cx-map-head">
+        <div>Field</div><div>{connection.provider} sends</div><div>Format</div><div>Last value</div>
+      </div>
 
       <div className="cx-map-grid">
         {TARGETS.map(t => {
@@ -203,14 +322,12 @@ function Mapper({ connection, store, onClose, onSaved }) {
           const sample = source ? data.paths[source] : undefined
           return (
             <div className="cx-map-row" key={t.key}>
-              <div className="cx-map-l">
-                {t.label}{t.required && <i className="req">*</i>}
-              </div>
+              <div className="cx-map-l">{t.label}{t.required && <i className="req">*</i>}</div>
               <select className="input" value={source} onChange={e => edit(t.key, e.target.value)}>
-                <option value="">— not sent —</option>
+                <option value="">—</option>
                 {paths.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
-              <select className="input cx-map-tr" value={config?.transforms?.[t.key] || ''}
+              <select className="input" value={config?.transforms?.[t.key] || ''}
                 onChange={e => editTransform(t.key, e.target.value)}>
                 <option value="">as-is</option>
                 {(data.transforms || []).map(tr => <option key={tr} value={tr}>{tr}</option>)}
@@ -222,207 +339,245 @@ function Mapper({ connection, store, onClose, onSaved }) {
       </div>
 
       <div className="cx-map-foot">
-        <Button variant="secondary" onClick={runPreview} disabled={busy}>
-          {busy ? 'Testing…' : 'Test against the last enquiry'}
-        </Button>
-        <Button variant="primary" onClick={save} disabled={!okToSave || busy}>Save mapping</Button>
+        <Button variant="secondary" onClick={runPreview} disabled={busy}>{busy ? 'Testing…' : 'Test'}</Button>
+        <Button variant="primary" onClick={save} disabled={!preview?.ok || busy}>Save mapping</Button>
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
       </div>
 
-      {/* The mandatory preview. Showing the RESULT rather than a tick is what
-          makes a mis-map visible before it can affect a single lead. */}
       {preview && (
         <div className={'cx-preview' + (preview.ok ? ' ok' : ' bad')}>
           <div className="cx-preview-h">
-            <Icon name={preview.ok ? 'check' : 'alert'} size={15} />
-            {preview.ok ? 'This is the lead we would create' : 'This mapping would not produce a usable lead'}
+            <Icon name={preview.ok ? 'check' : 'alert'} size={14} />
+            {preview.ok ? 'Resulting lead' : (preview.errors?.length ? preview.errors.join(' ') : `Missing ${preview.missing.join(' and ')}`)}
           </div>
-          {!preview.ok && (
-            <p className="cx-preview-err">
-              {preview.errors?.length ? preview.errors.join(' ') : `Missing ${preview.missing.join(' and ')}.`}
-            </p>
+          {preview.ok && (
+            <div className="cx-preview-grid">
+              {preview.trace.filter(t => t.value !== null).map(t => (
+                <div key={t.target} className="cx-preview-row">
+                  <span className="cx-pv-k">{TARGETS.find(x => x.key === t.target)?.label || t.target}</span>
+                  <span className="cx-pv-v">{String(t.value)}</span>
+                  <span className="cx-pv-from">{t.from || 'default'}</span>
+                </div>
+              ))}
+            </div>
           )}
-          <div className="cx-preview-grid">
-            {preview.trace.filter(t => t.value !== null).map(t => (
-              <div key={t.target} className="cx-preview-row">
-                <span className="cx-pv-k">{TARGETS.find(x => x.key === t.target)?.label || t.target}</span>
-                <span className="cx-pv-v">{String(t.value)}</span>
-                <span className="cx-pv-from">{t.from ? `from ${t.from}` : 'default'}</span>
-              </div>
-            ))}
-          </div>
         </div>
       )}
     </div>
   )
 }
 
+// ---------------------------------------------------------------------------
+// Add a source
+// ---------------------------------------------------------------------------
+
+function AddSource({ onCreate, onCancel, busy }) {
+  const [name, setName] = useState('')
+  const ref = useRef(null)
+  useEffect(() => { ref.current?.focus() }, [])
+  const submit = (e) => { e.preventDefault(); if (name.trim()) onCreate(name.trim()) }
+
+  return (
+    <form className="cx-add" onSubmit={submit}>
+      <div className="cx-add-r">
+        <input ref={ref} className="input cx-add-i" value={name} maxLength={60}
+          onChange={e => setName(e.target.value)} placeholder="Name the source" />
+        <Button type="submit" variant="primary" disabled={!name.trim() || busy}>
+          {busy ? 'Creating…' : 'Create'}
+        </Button>
+        <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
+      </div>
+      <div className="cx-add-pop">
+        {SUGGESTED.map(p => (
+          <button key={p} type="button" className={'cx-chip' + (name === p ? ' on' : '')}
+            onClick={() => setName(p)}>{p}</button>
+        ))}
+      </div>
+    </form>
+  )
+}
+
+// ---------------------------------------------------------------------------
+
+function CardSkeleton() {
+  return (
+    <div className="cx-card">
+      <div className="cx-card-h">
+        <span className="skel cx-mark" />
+        <div className="cx-card-id"><Skel w={130} h={13} /><div style={{ marginTop: 6 }}><Skel w={90} h={9} /></div></div>
+        <Skel w={150} h={28} />
+      </div>
+      <div className="cx-keyrow"><Skel w={30} h={9} /><Skel w="55%" h={12} /></div>
+      <div className="cx-card-f"><Skel w={110} h={20} /></div>
+    </div>
+  )
+}
+
 export default function Connections({ store }) {
   const [rows, setRows] = useState(null)
+  const [meta, setMeta] = useState({ endpoint: '', headerName: 'X-API-Key' })
   const [adding, setAdding] = useState(false)
-  const [name, setName] = useState('')
-  const [revealed, setRevealed] = useState(null)   // { id, apiKey }
+  const [creating, setCreating] = useState(false)
+  const [fresh, setFresh] = useState({})       // id → key just minted, shown expanded
   const [mapping, setMapping] = useState(null)
   const [pack, setPack] = useState(null)
   const [open, setOpen] = useState(null)
+  const [menu, setMenu] = useState(null)
   const [tick, setTick] = useState(0)
+  const [copiedPack, copyPack] = useCopy(store)
 
-  // Owner/manager only — the whole screen is a credential surface.
   const role = store.state.role
   const canManage = role === 'admin' || role === 'owner' || role === 'manager'
 
   const load = useCallback(() => {
     api.getConnections()
-      .then(r => setRows(r?.success ? r.connections : []))
+      .then(r => {
+        if (!r?.success) { setRows([]); return }
+        setRows(r.connections)
+        setMeta({ endpoint: r.endpoint, headerName: r.headerName || 'X-API-Key' })
+      })
       .catch(() => setRows([]))
   }, [])
   useEffect(() => { load() }, [load, tick])
 
+  // A click anywhere else closes the row menu. Registered on the NEXT frame:
+  // React's synthetic handler runs at the root, so `stopPropagation` there does
+  // not stop the native event reaching window — the click that opened the menu
+  // would otherwise close it again before it painted.
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    const id = requestAnimationFrame(() => window.addEventListener('click', close))
+    return () => { cancelAnimationFrame(id); window.removeEventListener('click', close) }
+  }, [menu])
+
   const create = (provider) => {
-    const label = String(provider || '').trim()
-    if (!label) { store.toast('Give the connection a name first', 'warn'); return }
-    api.createConnection(label)
+    setCreating(true)
+    api.createConnection(provider)
       .then(r => {
-        if (!r?.success) { store.toast(r?.message || 'Could not create the connection', 'warn'); return }
-        setRevealed({ id: r.connection.id, apiKey: r.apiKey })
-        setAdding(false); setName(''); setTick(t => t + 1)
+        if (!r?.success) { store.toast(r?.message || r?.error || 'Could not create', 'warn'); return }
+        setFresh(f => ({ ...f, [r.connection.id]: r.apiKey }))
+        setAdding(false); setTick(t => t + 1)
       })
-      .catch(e => store.toast(e.message || 'Could not create the connection', 'warn'))
+      .catch(e => store.toast(e.message || 'Could not create', 'warn'))
+      .finally(() => setCreating(false))
   }
 
   const rotate = (c) => {
-    if (!window.confirm(`Rotate the key for ${c.provider}?\n\nIts current key stops working immediately, and ${c.provider} will not be able to send anything until you give them the new one.`)) return
+    if (!window.confirm(`Rotate the key for ${c.provider}?\n\nTheir current key stops working immediately.`)) return
     api.rotateConnectionKey(c.id)
-      .then(r => { if (r?.success) { setRevealed({ id: c.id, apiKey: r.apiKey }); setTick(t => t + 1) } })
-      .catch(e => store.toast(e.message || 'Could not rotate the key', 'warn'))
+      .then(r => { if (r?.success) { setFresh(f => ({ ...f, [c.id]: r.apiKey })); setTick(t => t + 1) } })
+      .catch(e => store.toast(e.message || 'Could not rotate', 'warn'))
   }
 
   const togglePause = (c) => {
     api.setConnectionActive(c.id, !c.active)
-      .then(() => { store.toast(c.active ? `${c.provider} paused — pushes will be rejected` : `${c.provider} resumed`); setTick(t => t + 1) })
-      .catch(e => store.toast(e.message || 'Could not change that', 'warn'))
+      .then(() => { store.toast(c.active ? `${c.provider} paused` : `${c.provider} resumed`); setTick(t => t + 1) })
+      .catch(e => store.toast(e.message || 'Could not change', 'warn'))
+  }
+
+  const remove = (c) => {
+    if (!window.confirm(`Delete ${c.provider}?\n\nIts key stops working. Received history is kept.`)) return
+    api.deleteConnection(c.id)
+      .then(() => { store.toast(`${c.provider} deleted`); setTick(t => t + 1) })
+      .catch(e => store.toast(e.message || 'Could not delete', 'warn'))
   }
 
   const replay = (c) => {
     api.replayConnection(c.id)
       .then(r => {
-        if (!r?.success) { store.toast('Could not replay', 'warn'); return }
-        store.toast(r.processed
-          ? `Replayed ${r.processed}: ${r.ingested} new, ${r.merged} merged, ${r.failed} failed`
-          : 'Nothing was waiting')
+        if (!r?.success) { store.toast('Could not process', 'warn'); return }
+        store.toast(r.processed ? `${r.ingested} new · ${r.merged} merged · ${r.failed} failed` : 'Nothing waiting')
         setTick(t => t + 1)
         store.hydrate?.()
       })
-      .catch(e => store.toast(e.message || 'Could not replay', 'warn'))
+      .catch(e => store.toast(e.message || 'Could not process', 'warn'))
   }
 
   const showPack = (c) => {
     api.getSetupPack(c.id)
       .then(r => { if (r?.success) setPack({ ...r, connection: c }) })
-      .catch(() => store.toast('Could not build the setup pack', 'warn'))
+      .catch(() => store.toast('Could not build the pack', 'warn'))
   }
 
-  if (!canManage) {
-    return <div className="cx-locked">Only an owner or manager can manage where leads come from.</div>
-  }
+  if (!canManage) return <div className="cx-locked">Owner or manager only.</div>
 
   return (
     <div className="cx">
-      <div className="cx-head">
-        <div>
-          <div className="cx-title">Where leads come from</div>
-          <div className="cx-sub">
-            Each connection gets its own endpoint key. Data lands here the moment a provider
-            sends it — then you tell us how to read their fields.
-          </div>
-        </div>
-        {!adding && <Button variant="primary" icon="plus" onClick={() => setAdding(true)}>Add a connection</Button>}
+      <div className="itg-sec cx-sec">
+        Lead sources
+        {!adding && (
+          <button className="btn btn-secondary btn-sm" onClick={() => setAdding(true)}>
+            <Icon name="plus" size={14} />Add source
+          </button>
+        )}
       </div>
 
-      {adding && (
-        <div className="cx-add">
-          <div className="cx-add-h">Add a connection</div>
-          <div className="cx-add-pop">
-            {POPULAR.map(p => (
-              <button key={p} type="button" className="pwc" onClick={() => create(p)}>{p}</button>
-            ))}
-          </div>
-          <div className="cx-add-any">
-            <Field label="Or anything else — just name it">
-              <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Sunrise Builders referral feed"
-                onKeyDown={e => e.key === 'Enter' && create(name)} autoFocus />
-            </Field>
-            <Button variant="secondary" onClick={() => create(name)}>Create</Button>
-            <Button variant="ghost" onClick={() => { setAdding(false); setName('') }}>Cancel</Button>
-          </div>
-          <p className="cx-add-note">
-            The endpoint is the same whoever is calling it, so there's nothing provider-specific to pick.
-          </p>
-        </div>
-      )}
+      <Endpoint endpoint={meta.endpoint} headerName={meta.headerName} store={store} />
 
-      {revealed && (
-        <KeyReveal apiKey={revealed.apiKey} store={store} onDone={() => setRevealed(null)} />
-      )}
+      {adding && <AddSource onCreate={create} onCancel={() => setAdding(false)} busy={creating} />}
 
-      {rows === null && <div className="cx-act-empty">Loading connections…</div>}
+      {rows === null && <><CardSkeleton /><CardSkeleton /></>}
       {rows?.length === 0 && !adding && (
-        <div className="cx-empty">
-          <strong>No connections yet</strong>
-          <p>Add one for each portal, website form or partner that sends you enquiries.</p>
-        </div>
+        <div className="cx-empty"><strong>No lead sources yet</strong></div>
       )}
 
       {rows?.map(c => {
-        const counts = c.counts || {}
-        const pending = counts.pending || 0
-        const state = !c.last_received_at ? 'waiting'
-          : c.configured ? 'live' : 'unmapped'
+        const pending = (c.counts || {}).pending || 0
+        const st = stateOf(c)
+        const total = Object.values(c.counts || {}).reduce((a, b) => a + b, 0)
         return (
           <div key={c.id} className={'cx-card' + (c.active ? '' : ' paused')}>
             <div className="cx-card-h">
+              <span className="cx-mark">{mark(c.provider)}</span>
               <div className="cx-card-id">
-                <span className={'cx-dot cx-' + state} />
-                <div>
-                  <div className="cx-card-n">{c.provider}</div>
-                  <div className="cx-card-s">
-                    {!c.active ? 'Paused — pushes are rejected'
-                      : state === 'waiting' ? 'Key issued · nothing received yet'
-                        : state === 'unmapped' ? `Receiving · ${pending} waiting for a field mapping`
-                          : `Live · last received ${relativeTime(c.last_received_at)}`}
-                  </div>
+                <div className="cx-card-n">{c.provider}</div>
+                <div className="cx-card-s">
+                  {c.last_received_at ? `Last push ${relativeTime(c.last_received_at)}` : 'No pushes yet'}
                 </div>
               </div>
               <div className="cx-card-a">
-                <button className="btn btn-ghost btn-sm" onClick={() => setOpen(open === c.id ? null : c.id)}>
-                  <Icon name={open === c.id ? 'chevUp' : 'chevDown'} size={13} />Activity
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => showPack(c)}>Setup pack</button>
                 <button className="btn btn-secondary btn-sm" onClick={() => setMapping(c)}>
-                  {c.configured ? 'Edit fields' : 'Map fields'}
+                  {c.configured ? 'Fields' : 'Map fields'}
                 </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => showPack(c)}>Setup</button>
               </div>
             </div>
 
-            {/* The one action that turns a backlog into leads. Only offered
-                when there IS a backlog and a mapping to run it through. */}
+            <KeyRow connection={c} store={store} fresh={fresh[c.id]} onRotate={() => rotate(c)} />
+
             {pending > 0 && c.configured && (
               <div className="cx-replay">
-                <span>{pending} enquir{pending === 1 ? 'y' : 'ies'} arrived before the mapping existed.</span>
-                <Button size="sm" variant="secondary" onClick={() => replay(c)}>Process them now</Button>
+                <span>{pending} waiting</span>
+                <Button size="sm" variant="secondary" onClick={() => replay(c)}>Process</Button>
               </div>
             )}
 
             {open === c.id && (
-              <div className="cx-card-b">
-                <Activity connectionId={c.id} refreshKey={tick} />
-                <div className="cx-card-foot">
-                  <span className="cx-key-h">Key ends ····{c.api_key_last4 || '????'}</span>
-                  <button className="lnk" onClick={() => rotate(c)}>Rotate key</button>
-                  <button className="lnk" onClick={() => togglePause(c)}>{c.active ? 'Pause' : 'Resume'}</button>
-                </div>
-              </div>
+              <div className="cx-card-b"><Activity connectionId={c.id} refreshKey={tick} store={store} /></div>
             )}
+
+            <div className="cx-card-f">
+              <span className={'cx-pill cx-' + st.key}><span className="cx-dot" />{st.label}</span>
+              {total > 0 && <span className="cx-count">{total} received</span>}
+              <button className="lnk cx-toggle" onClick={() => setOpen(open === c.id ? null : c.id)}>
+                Activity<Icon name={open === c.id ? 'chevUp' : 'chevDown'} size={13} />
+              </button>
+              <div className="cx-menu-w" onClick={e => e.stopPropagation()}>
+                <button className="cx-icb" aria-label="More" onClick={() => setMenu(menu === c.id ? null : c.id)}>
+                  <Icon name="dots" size={16} />
+                </button>
+                {menu === c.id && (
+                  <div className="cx-menu" role="menu">
+                    <button onClick={() => { setMenu(null); rotate(c) }}><Icon name="refresh" size={14} />Rotate key</button>
+                    <button onClick={() => { setMenu(null); togglePause(c) }}>
+                      <Icon name={c.active ? 'clock' : 'play'} size={14} />{c.active ? 'Pause' : 'Resume'}
+                    </button>
+                    <button className="danger" onClick={() => { setMenu(null); remove(c) }}><Icon name="trash" size={14} />Delete</button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )
       })}
@@ -431,7 +586,7 @@ export default function Connections({ store }) {
         <div className="cx-sheet" role="dialog" aria-label="Field mapping">
           <div className="cx-sheet-in">
             <div className="cx-sheet-h">
-              <span>How we read {mapping.provider}</span>
+              <span>{mapping.provider} · field mapping</span>
               <button className="cx-x" onClick={() => setMapping(null)} aria-label="Close"><Icon name="x" size={16} /></button>
             </div>
             <Mapper connection={mapping} store={store}
@@ -445,21 +600,16 @@ export default function Connections({ store }) {
         <div className="cx-sheet" role="dialog" aria-label="Setup pack">
           <div className="cx-sheet-in">
             <div className="cx-sheet-h">
-              <span>Send this to {pack.connection.provider}</span>
+              <span>{pack.connection.provider} · setup pack</span>
               <button className="cx-x" onClick={() => setPack(null)} aria-label="Close"><Icon name="x" size={16} /></button>
             </div>
             <div className="cx-pack">
-              <p className="cx-map-lead">
-                Forward this to whoever handles their technical setup. Replace <code>YOUR_API_KEY</code> with
-                the key you saved — we can't fill it in, because we only keep a fingerprint of it.
-              </p>
               <textarea className="textarea cx-pack-t" readOnly rows={16} value={pack.email} />
               <div className="cx-map-foot">
-                <Button variant="secondary" icon="copy" onClick={() => {
-                  navigator.clipboard?.writeText(pack.email)
-                    .then(() => store.toast('Setup pack copied'))
-                    .catch(() => store.toast('Could not copy', 'warn'))
-                }}>Copy</Button>
+                <Button variant="secondary" icon={copiedPack === 'pack' ? 'check' : 'copy'}
+                  onClick={() => copyPack(pack.email, 'pack')}>
+                  {copiedPack === 'pack' ? 'Copied' : 'Copy'}
+                </Button>
                 <Button variant="ghost" onClick={() => setPack(null)}>Close</Button>
               </div>
             </div>

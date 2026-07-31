@@ -1,11 +1,12 @@
-// White-label config — swapping a tenant = editing THIS object only.
+// White-label config. `brand` is DELIBERATELY EMPTY: the firm's name and city
+// come from the signed-in tenant at runtime (src/lib/tenant.js). A default here
+// is not a convenience — it is a wrong firm name printed on a real client's
+// message, which is exactly what happened when 'Skyline Realty' lived here.
 export const theme = {
   brand: {
-    firmName: 'Skyline Realty',
-    city: 'Pune',
-    deskLine: 'Pune · Sales desk',
-    officeLine: 'Pune · Head office',
-    initials: 'SR',
+    firmName: '',
+    city: '',
+    initials: '',
   },
   // Design tokens live in styles.css (:root). These are the data-signal maps
   // the app reads for stage/status/source — kept here so a tenant can retune them.

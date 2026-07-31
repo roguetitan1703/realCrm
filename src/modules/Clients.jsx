@@ -43,11 +43,11 @@ export default function Clients({ store, go, sel, topBar }) {
     name: l.name,
     phone: l.phone,
     email: l.email || '',
-    locality: l.req?.locality || 'Pune',
+    locality: l.req?.locality || '',
     minsAgo: l.minsAgo,
     rawLeadId: l.id,
     rawLead: l,
-    detail: `${l.req?.config || 'Any'} · ${l.req?.locality || 'Pune'} · ${budgetRange(l.req)}`,
+    detail: [l.req?.config, l.req?.locality, budgetRange(l.req)].filter(Boolean).join(' · '),
     signal: <StageTag stage={l.stage} />,
   }))
 
@@ -74,7 +74,7 @@ export default function Clients({ store, go, sel, topBar }) {
       name: o.name,
       phone: p.ownerPhone || '+91 —',
       email: p.ownerEmail || '',
-      locality: p.locality || 'Pune',
+      locality: p.locality || '',
       minsAgo: 120,
       rawProps: o.props,
       detail: o.props.length === 1
@@ -167,7 +167,7 @@ export default function Clients({ store, go, sel, topBar }) {
                 <div className="cli-portfolio">
                   <KV items={[
                     { k: 'Looking for', v: `${selClient.rawLead.req?.config || 'Any'} · ${selClient.rawLead.req?.deal || 'sale'}` },
-                    { k: 'Preferred locality', v: selClient.rawLead.req?.locality || 'Pune' },
+                    { k: 'Preferred locality', v: selClient.rawLead.req?.locality || '—' },
                     { k: 'Current stage', v: selClient.rawLead.stage || 'New' },
                   ]} />
                   <Button variant="secondary" onClick={() => go('leads', { leadId: selClient.rawLeadId, leadOpen: true })}>

@@ -60,7 +60,7 @@ function BrandSection({ store, settings }) {
   const dirty = firm.trim() && firm.trim() !== settings.firmName
   const color = brand.primaryColor || '#1E6F52'
   const logoUrl = brand.logoUrl || ''
-  const initials = String(settings.firmName || '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || theme.brand.initials
+  const initials = String(settings.firmName || '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
 
   const setColor = (c) => store.updateBrand({ primaryColor: c }, 'Brand colour updated')
 
