@@ -9,6 +9,7 @@ import { leadsForProperty } from '../lib/matching.js'
 import { quotedLine, unitLabel, fmtDate, renewalSignal } from '../lib/format.js'
 import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
+import PropertyWizard from './PropertyWizard.jsx'
 
 export default function Properties({ store, go, sel, setSel, topBar }) {
   const { state } = store
@@ -18,6 +19,9 @@ export default function Properties({ store, go, sel, setSel, topBar }) {
   const [sortKey, setSortKey] = useState('recent')
   const [sortDir, setSortDir] = useState('asc')
 
+  // Add/edit is a stepped PAGE, not a modal (spec C-add) — rendered inside this
+  // screen the same way the detail takeover is, so no new route is needed.
+  if (sel.propAdd) return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} />
   if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
   if (sel.projOpen && sel.projKey) return <ProjectDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
 
@@ -50,7 +54,7 @@ export default function Properties({ store, go, sel, setSel, topBar }) {
       </button>
       <Button variant="secondary" size="sm" icon="building" onClick={() => store.openModal({ kind: 'addUnits' })}>Add units</Button>
     </>,
-    cta: { label: 'Add property', onClick: () => store.openModal({ kind: 'addProperty' }) },
+    cta: { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) },
     emptyHint: 'Try clearing a filter or search.',
     renderTable: (list, v) => v === 'projects'
       ? <div className="grid-cards">{buildProjects(list).map(pj => <ProjectCard key={pj.key} project={pj} onClick={() => openProject(pj.key)} />)}</div>
@@ -97,7 +101,8 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
   const siblings = store.state.properties.filter(x => x.id !== p.id && (x.project || x.society) === proj)
   const tenancy = p.deal === 'rent' ? p.tenancy : null
   const renewal = renewalSignal(tenancy)
-  const openEdit = () => store.openModal({ kind: 'editRecord', moduleId: 'properties', recordId: p.id })
+  // Edit reuses the add page (spec) — one form to maintain, not two.
+  const openEdit = () => go('properties', { propAdd: true, propId: p.id, propOpen: false })
 
   // Rail: Next-Best-Action banner (renewal or share).
   const nba = renewal && renewal.tone !== 'ok'

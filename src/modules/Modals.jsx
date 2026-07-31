@@ -6,6 +6,7 @@ import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/fo
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { getPosition, processImage, uploadMedia } from '../lib/media.js'
+import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES } from '../data/propertyFields.js'
 import CameraCapture from '../components/CameraCapture.jsx'
 import { pushSupported, isPushSubscribed, enablePush, disablePush } from '../lib/push.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
@@ -44,6 +45,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'import' && <ImportModal store={store} />}
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
+      {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} />}
       {m?.kind === 'pickMatch' && <PickMatchModal store={store} leadId={m.leadId} />}
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
@@ -1194,6 +1196,90 @@ function VisitProofModal({ store, leadId, propId }) {
           </Button>
         </div>
       )}
+    </Modal>
+  )
+}
+
+
+// ============================================================================
+// 🛋️ AmenitiesModal (spec C4 furnishing block)
+// ============================================================================
+// Behind a button rather than inline, because ~30 checkboxes in the middle of
+// the add flow buries the fields that actually make a listing matchable.
+//
+// Two genuinely different kinds of thing here, which is why they render
+// differently: a Sofa either exists or it doesn't, but "2 ACs" and "5 ACs" are
+// materially different to whoever is renting the place — so those get a
+// counter, not a checkbox.
+function AmenitiesModal({ store, value = {}, onDone }) {
+  const [fixtures, setFixtures] = useState(value.fixtures || [])
+  const [counted, setCounted] = useState(value.countedItems || {})
+  const [amenities, setAmenities] = useState(value.societyAmenities || [])
+
+  const toggle = (list, setList, v) => {
+    const s = new Set(list)
+    s.has(v) ? s.delete(v) : s.add(v)
+    setList([...s])
+  }
+  const bump = (k, n) => setCounted(c => {
+    const next = { ...c }
+    // Drop zeroes rather than storing them — "0 fans" is not a fact worth
+    // keeping, and it would otherwise count toward "selected".
+    if (n <= 0) delete next[k]; else next[k] = n
+    return next
+  })
+
+  const total = fixtures.length + amenities.length + Object.keys(counted).length
+
+  const done = () => {
+    onDone?.({ fixtures, countedItems: counted, societyAmenities: amenities })
+    store.closeModal()
+  }
+
+  return (
+    <Modal title="Furnishings & amenities" onClose={store.closeModal} width={620}>
+      <div className="am">
+        <div className="am-sec">
+          <div className="am-head"><h4>Flat furnishings</h4><span>{fixtures.length} selected</span></div>
+          <div className="am-grid">
+            {FIXTURES.map(f => (
+              <button key={f.value} type="button"
+                className={'am-cell' + (fixtures.includes(f.value) ? ' on' : '')}
+                onClick={() => toggle(fixtures, setFixtures, f.value)}>{f.label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="am-sec">
+          <div className="am-head"><h4>How many?</h4><span>{Object.keys(counted).length} set</span></div>
+          <div className="am-counts">
+            {COUNTED_ITEMS.map(c => (
+              <div key={c.value} className="pw-counter">
+                <span className="pw-counter-l">{c.label}</span>
+                <div className="pw-counter-c">
+                  <button type="button" onClick={() => bump(c.value, (counted[c.value] || 0) - 1)} aria-label={`Fewer ${c.label}`}>-</button>
+                  <span>{counted[c.value] || 0}</span>
+                  <button type="button" onClick={() => bump(c.value, (counted[c.value] || 0) + 1)} aria-label={`More ${c.label}`}>+</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="am-sec">
+          <div className="am-head"><h4>Society amenities</h4><span>{amenities.length} selected</span></div>
+          <div className="am-grid">
+            {SOCIETY_AMENITIES.map(a => (
+              <button key={a.value} type="button"
+                className={'am-cell' + (amenities.includes(a.value) ? ' on' : '')}
+                onClick={() => toggle(amenities, setAmenities, a.value)}>{a.label}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <Button variant="primary" block style={{ marginTop: 14 }} onClick={done}>
+        {total ? `Done · ${total} selected` : 'Done'}
+      </Button>
     </Modal>
   )
 }

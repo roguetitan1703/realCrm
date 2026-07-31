@@ -132,7 +132,7 @@ export default function Clients({ store, go, sel, topBar }) {
     // adds a new one is adding the property.
     cta: tab === 'clients'
       ? { label: 'New client', onClick: () => store.openModal({ kind: 'newLead' }) }
-      : { label: 'Add property', onClick: () => store.openModal({ kind: 'addProperty' }) },
+      : { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) },
     emptyTitle: tab === 'clients' ? 'No clients match' : 'No owners match',
     emptyHint: 'Adjust the role, filter or search.',
     renderTable: (list, v) => v === 'grid'

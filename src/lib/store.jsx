@@ -725,11 +725,30 @@ export function StoreProvider({ children }) {
       toast('Lead saved — routed')
       apiClient.createLead(lead).catch(err => console.warn('[AddLead API] Backend error:', err.message))
     },
-    addProperty: (property) => {
-      dispatch({ type: 'ADD_PROPERTY', property })
-      toast('Property added — now matchable')
-      apiClient.createProperty(property).catch(err => console.warn('[AddProp API] Backend error:', err.message))
-    },
+    // Resolves the SERVER's record, not the payload we sent. The old version
+    // optimistically prepended the raw form data, which carries no id — the
+    // server mints it — so the card was unclickable (open(undefined)) and
+    // duplicated against the real row on the next hydrate. It also toasted
+    // success and let the caller close on a failed request, losing the entry.
+    addProperty: (property) => new Promise((resolve) => {
+      apiClient.createProperty(property)
+        .then(res => {
+          const created = res?.data || res?.property || null
+          if (created?.id) {
+            dispatch({ type: 'ADD_PROPERTY', property: created })
+            toast('Property added — now matching against your leads')
+            resolve(created)
+          } else {
+            toast('Could not save the property', 'warn')
+            resolve(null)
+          }
+        })
+        .catch(err => {
+          console.warn('[AddProp API] Backend error:', err.message)
+          toast(err.message || 'Could not save the property — try again', 'warn')
+          resolve(null)
+        })
+    }),
     // Bulk-add many units at once — one revertable batch, logged to Import history.
     addProperties: (properties) => {
       if (!properties?.length) return
