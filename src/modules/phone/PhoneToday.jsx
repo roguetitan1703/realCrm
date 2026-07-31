@@ -22,7 +22,10 @@ function Row({ l, onOpen, store, tone }) {
         <button
           className="btn btn-secondary btn-sm q-call"
           aria-label={`Call ${l.name}`}
-          onClick={(e) => { e.stopPropagation(); store.openModal({ kind: 'logCall', leadId: l.id }) }}
+          onClick={(e) => {
+            e.stopPropagation()
+            store.openModal({ kind: 'contact', channel: 'call', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id })
+          }}
         ><Icon name="phone" size={13} /></button>
       </div>
     </div>

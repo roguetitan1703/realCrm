@@ -106,11 +106,11 @@ export default function App() {
   // and an action button instead of a sidebar. Not a different app.
   if (isPhone) {
     return (
-      <>
+      <div className="viewport">
         {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
         <Phone store={store} framed={false} />
         <Toasts toasts={state.toasts} />
-      </>
+      </div>
     )
   }
 
@@ -203,7 +203,7 @@ export default function App() {
   const Screen = SCREENS[effectiveScreen] || Dashboard
 
   return (
-    <>
+    <div className="viewport">
       {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
       <AppShell nav={nav} active={effectiveScreen} activeSub={contactsTab} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
         <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.propId || ''}`} {...ctx} />
@@ -211,6 +211,6 @@ export default function App() {
       {state.waState && <WaModal store={store} />}
       <Modals store={store} go={go} />
       <Toasts toasts={state.toasts} />
-    </>
+    </div>
   )
 }

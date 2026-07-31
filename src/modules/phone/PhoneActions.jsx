@@ -22,8 +22,13 @@ export default function PhoneActions({ store, go, context = {} }) {
   let actions = []
   if (kind === 'lead') {
     const id = context.id
+    const l = store.state.leads.find(x => x.id === id)
     actions = [
-      { label: 'Log call', icon: 'phone', run: () => store.openModal({ kind: 'logCall', leadId: id }) },
+      // On a phone, calling means the device dialer — there is no telephony and
+      // none is planned. The confirm modal opens tel:, logs the call, and asks
+      // for the outcome when the agent comes back, which is the only moment
+      // they actually know how it went.
+      { label: 'Call', icon: 'phone', run: () => store.openModal({ kind: 'contact', channel: 'call', name: l?.name, phone: l?.phone, recordType: 'lead', recordId: id }) },
       { label: 'Log site visit', icon: 'camera', run: () => store.openModal({ kind: 'visitProof', leadId: id }) },
       { label: 'WhatsApp', icon: 'wa', run: () => store.openWhatsApp(null, id) },
       { label: 'Add remark', icon: 'note', run: () => store.openModal({ kind: 'remark', recordType: 'lead', recordId: id }) },

@@ -920,7 +920,20 @@ input,textarea,select{font-family:inherit}
 .bell .bdot{position:absolute;top:-2px;right:-2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--alert);color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid var(--card)}
 
 /* app frame */
-.app-desktop{display:flex;height:100vh;overflow:hidden}
+/* The app owns the viewport, and nothing above the shell may push it past the
+   bottom of the screen. The shells used to be a flat 100vh with siblings (the
+   stale-data banner, and on iOS the URL bar's own inset) stacked above them, so
+   the whole page scrolled — taking the top bar and the tab bar off screen, the
+   two things that must never move. One element measures the viewport; the
+   shell takes what's left. dvh, not vh, so a collapsing URL bar doesn't
+   overshoot. */
+html,body,#root{height:100%}
+/* No overflow:hidden on body — the signed-out login screen is NOT inside
+   .viewport and on a short phone it has to be able to scroll. */
+body{overscroll-behavior-y:none}
+.viewport{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+.viewport>.app-desktop,.viewport>.app-mobile{flex:1;min-height:0;height:auto}
+.app-desktop{display:flex;height:100dvh;overflow:hidden}
 .app-main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
 .app-body{flex:1;overflow:auto;min-height:0}
 /* A screen that manages its own scrolling opts the PAGE out of scrolling. The
