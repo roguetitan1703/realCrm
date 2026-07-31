@@ -53,7 +53,7 @@ export default function Properties({ store, go, sel, setSel, topBar }) {
         onClick={() => setView(view === 'projects' ? 'grid' : 'projects')}>
         <Icon name="building" size={14} />Group by project
       </button>
-      <Button variant="secondary" size="sm" icon="building" onClick={() => store.openModal({ kind: 'addUnits' })}>Add units</Button>
+      <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'properties' })}>Import units</Button>
     </>,
     cta: { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) },
     emptyHint: 'Try clearing a filter or search.',
@@ -304,7 +304,11 @@ function ProjectDetail({ store, go, sel, setSel, topBar }) {
               </div>
             </div>
             <div className="rh-actions">
-              <Button variant="primary" icon="plus" onClick={() => store.openModal({ kind: 'addUnits', projKey: key })}>Add units</Button>
+              {/* C9: a handful of units is "add another in this project" (the
+                  wizard keeps the building context and you only change what
+                  differs); a builder's whole sheet is the Excel importer. The
+                  tabular bulk-add modal that sat between them is retired. */}
+              <Button variant="primary" icon="plus" onClick={() => go('properties', { propAdd: true, propId: null, propProject: key })}>Add unit</Button>
             </div>
           </div>
         </div>

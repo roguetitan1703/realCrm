@@ -33,7 +33,6 @@ export default function Modals({ store, go }) {
       {m?.kind === 'newLead' && <LeadForm store={store} />}
       {m?.kind === 'editLead' && <LeadForm store={store} leadId={m.leadId} />}
       {m?.kind === 'addProperty' && <PropertyForm store={store} propId={m.propId} />}
-      {m?.kind === 'addUnits' && <AddUnitsModal store={store} projKey={m.projKey} />}
       {m?.kind === 'editRecord' && <ModuleFormModal store={store} moduleId={m.moduleId} recordId={m.recordId} />}
       {m?.kind === 'assign' && <AssignModal store={store} leadId={m.leadId} />}
       {m?.kind === 'reassign' && <ReassignModal store={store} fromId={m.fromId} />}
@@ -689,103 +688,6 @@ function parsePrice(raw, deal) {
 let _unitRowSeq = 0
 const emptyRow = (over = {}) => ({ _id: 'r' + (++_unitRowSeq), flat: '', config: '2BHK', floor: '', owner: '', price: '', status: 'Available', ...over })
 
-function AddUnitsModal({ store, projKey }) {
-  const sample = store.state.properties.find(p => (p.project || p.society) === projKey)
-  // Shared header — the facts every unit shares. The BUILDER is common; each
-  // unit's OWNER is a separate person, so owner lives on the per-unit row.
-  const [hdr, setHdr] = useState({
-    project: projKey && projKey !== 'Independent / Direct' ? projKey : '',
-    wing: '', locality: sample?.locality || 'Pune', deal: sample?.deal || 'sale',
-    builder: sample?.builder || '', totalFloors: sample?.totalFloors || '',
-  })
-  const setH = (k, v) => setHdr(s => ({ ...s, [k]: v }))
-  // One row per unit; each can override config/floor/carpet/price/status.
-  const [rows, setRows] = useState([emptyRow(), emptyRow(), emptyRow()])
-  const setRow = (id, k, v) => setRows(rs => rs.map(r => r._id === id ? { ...r, [k]: v } : r))
-  const addRow = () => setRows(rs => { const last = rs[rs.length - 1]; return [...rs, emptyRow({ config: last?.config || '2BHK', price: last?.price || '' })] })
-  const dupRow = (id) => setRows(rs => { const r = rs.find(x => x._id === id); const i = rs.findIndex(x => x._id === id); const copy = emptyRow({ ...r, _id: undefined, flat: '' }); return [...rs.slice(0, i + 1), copy, ...rs.slice(i + 1)] })
-  const rmRow = (id) => setRows(rs => rs.length > 1 ? rs.filter(r => r._id !== id) : rs)
-
-  // Every real unit has an identifier (flat / shop / plot no.), so it's required.
-  // A row with a flat no. is a unit; a row with other content but no id is invalid.
-  const hasContent = (r) => r.flat.trim() || r.floor !== '' || r.owner.trim() || r.price !== ''
-  const count = rows.filter(r => r.flat.trim()).length
-  const missingId = rows.some(r => !r.flat.trim() && hasContent(r))
-
-  const save = () => {
-    if (!hdr.project.trim()) { store.toast('Name the project first', 'warn'); return }
-    if (missingId) { store.toast('Every unit needs a unit / plot no.', 'warn'); return }
-    const toCreate = rows.filter(r => r.flat.trim())
-    if (!toCreate.length) { store.toast('Add at least one unit', 'warn'); return }
-    const batchId = 'batch-units-' + Date.now()
-    const units = toCreate.map((r, i) => {
-      const price = parsePrice(r.price, hdr.deal)
-      return {
-        id: `pnew${Date.now()}-${i}`,
-        title: `${r.config} · ${hdr.project}`, type: r.config, deal: hdr.deal,
-        locality: hdr.locality, society: hdr.project, project: hdr.project,
-        wing: hdr.wing || undefined, flat: r.flat.trim(),
-        floor: r.floor !== '' ? Number(r.floor) : undefined,
-        totalFloors: hdr.totalFloors ? Number(hdr.totalFloors) : undefined,
-        price, priceLabel: price ? priceLabelFor(hdr.deal, price) : undefined, negotiable: true,
-        status: r.status,
-        owner: r.owner.trim() || 'Owner — to confirm',   // per-unit owner
-        builder: hdr.builder || undefined,
-        isNew: true, importBatchId: batchId,
-      }
-    })
-    store.addProperties(units)
-    store.closeModal()
-  }
-
-  return (
-    <Modal title="Add units to a project" onClose={store.closeModal} width={860}>
-      <div className="au-wrap">
-        {/* Shared facts */}
-        <div className="au-hdr">
-          <div className="au-hdr-grid">
-            <Field label="Project / township"><Input value={hdr.project} onChange={e => setH('project', e.target.value)} placeholder="e.g. Godrej Riverside" autoFocus={!hdr.project} /></Field>
-            <Field label="Wing / tower"><Input value={hdr.wing} onChange={e => setH('wing', e.target.value)} placeholder="optional — e.g. B" /></Field>
-            <Field label="Locality"><Input value={hdr.locality} onChange={e => setH('locality', e.target.value)} /></Field>
-            <Field label="Builder / developer"><Input value={hdr.builder} onChange={e => setH('builder', e.target.value)} placeholder="optional — shared by the project" /></Field>
-          </div>
-          <div className="field au-deal"><label>Deal</label><Segmented value={hdr.deal} onChange={v => setH('deal', v)} options={[{ value: 'sale', label: 'For sale' }, { value: 'rent', label: 'For rent' }]} /></div>
-        </div>
-
-        {/* Per-unit rows — each unit is a full property with its OWN owner. */}
-        <div className="au-list">
-          <div className="au-scroll">
-            <div className="au-row au-row-head">
-              <span>Unit / plot no. *</span><span>Config</span><span>Floor</span><span>Owner (per unit)</span><span>{hdr.deal === 'rent' ? 'Rent ₹/mo' : 'Price'}</span><span>Status</span><span></span>
-            </div>
-            {rows.map(r => (
-              <div key={r._id} className="au-row">
-                <input className={'input' + (!r.flat.trim() && hasContent(r) ? ' err' : '')} value={r.flat} onChange={e => setRow(r._id, 'flat', e.target.value)} placeholder="e.g. B-1204" />
-                <select className="input" value={r.config} onChange={e => setRow(r._id, 'config', e.target.value)}>{UNIT_CONFIGS.map(c => <option key={c} value={c}>{c}</option>)}</select>
-                <input className="input" value={r.floor} onChange={e => setRow(r._id, 'floor', e.target.value)} placeholder="—" />
-                <input className="input" value={r.owner} onChange={e => setRow(r._id, 'owner', e.target.value)} placeholder="Owner name" />
-                <input className="input" value={r.price} onChange={e => setRow(r._id, 'price', e.target.value)} placeholder={hdr.deal === 'rent' ? '32000' : '95 L'} />
-                <select className="input" value={r.status} onChange={e => setRow(r._id, 'status', e.target.value)}><option>Available</option><option>Under Offer</option><option>Sold</option></select>
-                <div className="au-rowbtns">
-                  <button className="icon-mini" title="Duplicate row" onClick={() => dupRow(r._id)}><Icon name="copy" size={13} /></button>
-                  <button className="icon-mini danger" title="Remove" onClick={() => rmRow(r._id)}><Icon name="x" size={13} /></button>
-                </div>
-              </div>
-            ))}
-          </div>
-          <button className="au-addrow" onClick={addRow}><Icon name="plus" size={14} />Add another unit</button>
-        </div>
-
-        <div className="au-foot">
-          <span className={'au-count' + (missingId ? ' warn' : '')}>
-            {missingId ? 'Give every unit a unit / plot no.' : `${count} unit${count !== 1 ? 's' : ''} ready · revertable from Import history`}
-          </span>
-          <Button variant="primary" onClick={save} icon="plus" disabled={count === 0 || missingId}>Add {count} unit{count !== 1 ? 's' : ''}</Button>
-        </div>
-      </div>
-    </Modal>
-  )
-}
 
 // ---- Assign lead ----
 function AssignModal({ store, leadId }) {

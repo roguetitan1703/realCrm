@@ -120,6 +120,19 @@ function stepRemaining(stepKey, f) {
     .reduce((n, w) => n + w.weight, 0)
 }
 
+// What a second unit in the same building INHERITS. This is the whole point of
+// "add another": a broker entering "6 flats in Tower B" describes the building
+// once and then only says what differs per unit. Everything not listed here is
+// unit-specific and gets cleared — carrying a previous unit's price or flat
+// number into the next one would be worse than retyping it.
+const SHARED_CONTEXT_KEYS = [
+  'deal', 'category', 'subtype', 'society', 'project', 'locality', 'tower',
+  'builder', 'possession', 'transactionType', 'ownership', 'areaUnit',
+  'furnishType', 'fixtures', 'countedItems', 'societyAmenities',
+  'consultingOption', 'consultingPercent', 'taxIncluded', 'maintenanceMode',
+  'preferredTenants', 'petFriendly', 'totalFloors', 'rera', 'keyAccess',
+]
+
 const blank = () => ({
   deal: 'sale', category: 'residential', subtype: 'apartment',
   status: 'Available', areaUnit: 'sqft',
@@ -191,6 +204,8 @@ export default function PropertyWizard({ store, go, sel, topBar }) {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(() => {
     if (editing) return { ...blank(), ...editing }
+    // Arriving from a project's page: start inside that project.
+    if (sel?.propProject) return { ...blank(), society: sel.propProject, project: sel.propProject }
     // A half-typed listing survives a refresh or an accidental navigation —
     // losing it is the exact failure the modal was retired for.
     try {
@@ -225,7 +240,7 @@ export default function PropertyWizard({ store, go, sel, topBar }) {
 
   const close = () => go('properties', { propAdd: false, propId: null })
 
-  const save = async () => {
+  const save = async (again = false) => {
     if (missing.length) { store.toast(`Add the ${missing[0]} first`, 'warn'); return }
     setSaving(true)
     const payload = { ...form, completeness: score }
@@ -234,14 +249,23 @@ export default function PropertyWizard({ store, go, sel, topBar }) {
         store.updateProp(editing.id, payload)
         store.toast('Property updated')
         close()
-      } else {
-        // Only clear the draft and leave the page once the server has actually
-        // taken it. Closing on a failed request threw the entry away.
-        const created = await store.addProperty(payload)
-        if (!created) return
-        try { localStorage.removeItem(DRAFT_KEY) } catch { /* nothing to clear */ }
-        close()
+        return
       }
+      // Only clear the draft and leave the page once the server has actually
+      // taken it. Closing on a failed request threw the entry away.
+      const created = await store.addProperty(payload)
+      if (!created) return
+      try { localStorage.removeItem(DRAFT_KEY) } catch { /* nothing to clear */ }
+
+      if (again) {
+        const next = blank()
+        for (const k of SHARED_CONTEXT_KEYS) if (form[k] !== undefined) next[k] = form[k]
+        setForm(next)
+        setStep(0)
+        store.toast(`Saved. Next unit in ${form.society || form.project || 'this project'}.`)
+        return
+      }
+      close()
     } finally {
       setSaving(false)
     }
@@ -505,8 +529,13 @@ export default function PropertyWizard({ store, go, sel, topBar }) {
                 {/* Savable from step ② onward — ①+② are what matching reads,
                     so there is no reason to hold the listing hostage to
                     furnishing details the broker doesn't have yet. */}
+                {step >= 1 && !editing && (
+                  <Button variant="secondary" disabled={saving || missing.length > 0} onClick={() => save(true)}>
+                    Save &amp; add another
+                  </Button>
+                )}
                 {step >= 1 && (
-                  <Button variant="primary" disabled={saving || missing.length > 0} onClick={save}>
+                  <Button variant="primary" disabled={saving || missing.length > 0} onClick={() => save(false)}>
                     {saving ? 'Saving…' : editing ? 'Save changes' : 'Save property'}
                   </Button>
                 )}
