@@ -287,8 +287,11 @@ connectionsRouter.post('/:id/replay', async (req: Request, res: Response) => {
  * does not care who is calling, so there is one pack rather than a page per
  * portal — and a page per portal would rot the moment a portal changed its UI.
  *
- * The connection's real key is filled in, so the pack is send-ready. Falls back
- * to a placeholder for keys minted before they were stored readably.
+ * The key itself is NEVER put in this pack. It goes to the provider's tech
+ * contact through whatever channel the firm already trusts them on — the same
+ * reason a bank tells you your card number over the phone but never emails it.
+ * The pack shows a placeholder token so the email reads correctly end to end;
+ * the firm fills in the real key from the connection card when they send it.
  */
 connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => {
   const tenant = requireTenant(req, res); if (!tenant) return;
@@ -297,33 +300,37 @@ connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => 
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 
   const endpoint = endpointFor(req, tenant);
-  const keyToken = String(req.query.key || '') || (await revealKey(tenant, req.params.id)) || 'YOUR_API_KEY';
+  const keyToken = '<YOUR_API_KEY>';
 
   const email = [
-    `Subject: Sending enquiries to ${integration.provider} — technical setup`,
+    `Subject: Enquiry integration — ${integration.provider}`,
     '',
-    'Hello,',
+    'Hi,',
     '',
-    'Please send our enquiries to the endpoint below. Any JSON body is fine —',
-    'we map your field names on our side, so nothing needs to change at your end',
-    'to match a format.',
+    'Please post enquiries to the endpoint below as they come in. Any JSON body',
+    'works — field names are mapped on our end, so no reformatting is needed.',
     '',
-    `  Endpoint:  POST ${endpoint}`,
-    `  Auth:      header  X-API-Key: ${keyToken}`,
-    `             (or add ?key=${keyToken} to the URL if you cannot set headers)`,
-    '  Body:      application/json',
+    `  Endpoint   POST ${endpoint}`,
+    `  Header     X-API-Key: ${keyToken}`,
+    '  Content    application/json',
     '',
-    'Example:',
+    "(If your system can't set a custom header, the key may be passed as a",
+    `?key= query parameter instead.)`,
+    '',
+    'Example request:',
     '',
     `  curl -X POST "${endpoint}" \\`,
     `    -H "X-API-Key: ${keyToken}" \\`,
     '    -H "Content-Type: application/json" \\',
     `    -d '{"name":"Test Enquiry","phone":"9876543210","locality":"Wakad"}'`,
     '',
-    'A 200 response means we received it. Please send one test enquiry first —',
-    'we confirm it arrived before you switch the live feed on.',
+    "Send one test enquiry first — we'll confirm receipt before you switch on",
+    'the live feed.',
     '',
-    'Thank you.',
+    "The API key will follow separately. Let us know if you'd rather receive",
+    'it another way.',
+    '',
+    'Thanks,',
   ].join('\n');
 
   return res.status(200).json({

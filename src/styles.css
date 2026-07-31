@@ -1959,3 +1959,54 @@ body{overscroll-behavior-y:none}
 .app-mobile .rs-row,.app-mobile .rs-row-wide{grid-template-columns:1fr;gap:2px;padding:10px 0;min-height:0}
 .app-mobile .rs-label{font-size:11.5px}
 .app-mobile .panel{padding:14px}
+
+/* ===========================================================================
+   JsonView — a real payload tree. Monospace, typed colors, click-to-pick.
+   =========================================================================== */
+.jv{font-family:var(--mono);font-size:12px;line-height:1.65}
+.jv-surface{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;max-height:340px;overflow:auto}
+.jv-row{margin-left:calc(var(--d,0) * 14px)}
+.jv-key{color:var(--muted)}
+.jv-key::after{content:':';margin-right:6px;color:var(--faint)}
+.jv-val{word-break:break-word}
+.jv-string{color:#2E7D5B}
+.jv-number{color:#2B6CB0}
+.jv-boolean,.jv-null{color:#946A2B}
+.jv-leaf{display:inline-flex;align-items:center;gap:5px;border:1px solid transparent;background:transparent;border-radius:5px;padding:1px 5px;margin:-1px -5px;font:inherit;cursor:pointer;color:inherit}
+.jv-leaf:hover{border-color:var(--line);background:var(--wash)}
+.jv-leaf.picked{border-color:var(--accent);background:var(--accent-wash)}
+.jv-check{color:var(--accent)}
+.jv-toggle{display:inline-flex;align-items:center;gap:5px;border:none;background:transparent;font:inherit;cursor:pointer;color:var(--ink-2);padding:0}
+.jv-toggle svg{flex-shrink:0;color:var(--faint)}
+.jv-brace{color:var(--faint)}
+.jv-children{margin-left:14px}
+.jv-branch>.jv-children{border-left:1px solid var(--line-2);padding-left:0}
+.jv-more{margin-left:14px;color:var(--faint);font-style:italic;font-size:11.5px}
+.jv-empty{color:var(--muted);font-size:12.5px;padding:8px 0}
+
+/* ===========================================================================
+   Field mapping — click a row, click a field. Not a dropdown of remembered
+   dot-paths: the payload IS the picker.
+   =========================================================================== */
+.cx-map-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,340px);gap:20px;align-items:start}
+.cx-map-foot{grid-column:1 / -1}
+.cx-map-fields{min-width:0;display:flex;flex-direction:column;gap:10px}
+.cx-map-hint{font-size:12.5px;color:var(--ink-2);background:var(--wash);border:1px solid var(--line-2);border-radius:8px;padding:9px 12px}
+.cx-map-hint b{color:var(--ink);font-weight:600}
+.cx-map-grid{display:flex;flex-direction:column;gap:6px}
+.cx-mrow{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:8px;padding:2px 6px 2px 2px;background:var(--card);transition:border-color .12s,background .12s}
+.cx-mrow.armed{border-color:var(--accent);background:var(--accent-wash)}
+.cx-mrow-main{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:10px;border:none;background:transparent;font:inherit;cursor:pointer;padding:9px 8px;text-align:left}
+.cx-mrow-l{font-size:12.5px;font-weight:600;color:var(--ink-2);flex-shrink:0}
+.cx-mrow-empty{font-size:11.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cx-mrow.armed .cx-mrow-empty{color:var(--accent-ink,var(--accent))}
+.cx-mrow-path{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--accent-ink,#1E6F52);min-width:0;overflow:hidden}
+.cx-mrow-path svg{flex-shrink:0}
+.cx-mrow-sample{color:var(--muted);font-family:var(--sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px}
+.cx-mrow-tf{flex-shrink:0;font-size:11px;padding:4px 6px;border-radius:6px;border:1px solid var(--line);background:var(--card-2);color:var(--ink-2);max-width:88px}
+
+.cx-map-payload{min-width:0;position:sticky;top:0;display:flex;flex-direction:column;gap:8px}
+.cx-map-payload-h{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.cx-map-payload-f{font-size:11.5px;color:var(--muted);text-align:right}
+
+@media (max-width:760px){.cx-map-split{grid-template-columns:1fr}.cx-map-payload{position:static}}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { Button } from '../components/primitives.jsx'
 import { api } from '../lib/api.js'
+import JsonView from '../components/JsonView.jsx'
 
 // ============================================================================
 // 🔌 CONNECTIONS — where leads come from (spec: docs/specs/ingestion.md, D1)
@@ -158,7 +159,9 @@ function Push({ push, store }) {
       {push.error && <div className="cx-push-e">{push.error}</div>}
       {push.body_purged_at
         ? <div className="cx-act-empty">Payload purged {relativeTime(push.body_purged_at)}</div>
-        : <pre className="cx-push-b">{text || '(empty body)'}</pre>}
+        : body && typeof body === 'object'
+          ? <div className="cx-push-b jv-surface"><JsonView data={body} /></div>
+          : <pre className="cx-push-b">{text || '(empty body)'}</pre>}
     </div>
   )
 }
@@ -229,13 +232,20 @@ function Mapper({ connection, store, onClose, onSaved }) {
   const [config, setConfig] = useState(null)
   const [preview, setPreview] = useState(null)
   const [busy, setBusy] = useState(false)
+  // The field currently "listening" for a click in the payload tree. Arms on
+  // the first unmapped required field once the sample loads, and advances to
+  // the next unmapped target after each pick — so mapping a normal 9-field
+  // provider is nine clicks in the payload, not nine trips through a dropdown.
+  const [armed, setArmed] = useState(null)
 
   useEffect(() => {
     api.getConnectionSample(connection.id)
       .then(r => {
         if (!r?.success) return
         setData(r)
-        setConfig(r.config || r.suggestion || { map: {}, defaults: {}, transforms: {}, valueMaps: {} })
+        const cfg = r.config || r.suggestion || { map: {}, defaults: {}, transforms: {}, valueMaps: {} }
+        setConfig(cfg)
+        setArmed(TARGETS.find(t => !cfg.map?.[t.key])?.key || TARGETS[0].key)
       })
       .catch(() => store.toast('Could not load the sample', 'warn'))
   }, [connection.id, store])
@@ -249,6 +259,15 @@ function Mapper({ connection, store, onClose, onSaved }) {
       if (source) map[target] = source; else delete map[target]
       return { ...c, map }
     })
+  }
+  // A click in the payload tree assigns to whichever row is armed, then arms
+  // the next unmapped target — the whole reason this is faster than a dropdown
+  // is that mapping nine fields never leaves the payload.
+  const pick = (path) => {
+    if (!armed) return
+    const justMapped = armed
+    edit(armed, path)
+    setArmed(TARGETS.find(t => t.key !== justMapped && !config?.map?.[t.key])?.key || null)
   }
   const editTransform = (target, name) => {
     setPreview(null)
@@ -307,35 +326,55 @@ function Mapper({ connection, store, onClose, onSaved }) {
     )
   }
 
-  const paths = Object.keys(data.paths || {})
+  const armedField = TARGETS.find(t => t.key === armed)
+  const mappedPaths = new Set(Object.values(config?.map || {}))
 
   return (
-    <div className="cx-map">
-      {/* Column headers do the explaining a paragraph would otherwise do. */}
-      <div className="cx-map-row cx-map-head">
-        <div>Field</div><div>{connection.provider} sends</div><div>Format</div><div>Last value</div>
+    <div className="cx-map cx-map-split">
+      <div className="cx-map-fields">
+        <div className="cx-map-hint">
+          {armedField
+            ? <>Click the field in <b>{connection.provider}'s payload</b> that holds <b>{armedField.label}</b>{armedField.required ? <i className="req">*</i> : null}.</>
+            : 'All fields mapped — pick a row to remap it.'}
+        </div>
+        <div className="cx-map-grid">
+          {TARGETS.map(t => {
+            const source = config?.map?.[t.key] || ''
+            const sample = source ? data.paths[source] : undefined
+            return (
+              <div key={t.key} className={'cx-mrow' + (armed === t.key ? ' armed' : '') + (source ? ' filled' : '')}>
+                <button type="button" className="cx-mrow-main" onClick={() => setArmed(t.key)}>
+                  <span className="cx-mrow-l">{t.label}{t.required && <i className="req">*</i>}</span>
+                  {source
+                    ? <span className="cx-mrow-path"><Icon name="check" size={12} />{source}<span className="cx-mrow-sample">{sample === undefined ? '' : String(sample).slice(0, 30)}</span></span>
+                    : <span className="cx-mrow-empty">{armed === t.key ? 'Waiting for a click…' : 'Not mapped'}</span>}
+                </button>
+                {source && (
+                  <>
+                    <select className="cx-mrow-tf" value={config?.transforms?.[t.key] || ''}
+                      onChange={e => editTransform(t.key, e.target.value)} title="Transform">
+                      <option value="">as-is</option>
+                      {(data.transforms || []).map(tr => <option key={tr} value={tr}>{tr}</option>)}
+                    </select>
+                    <button type="button" className="cx-icb" title="Unmap" onClick={() => edit(t.key, null)}>
+                      <Icon name="x" size={13} />
+                    </button>
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </div>
 
-      <div className="cx-map-grid">
-        {TARGETS.map(t => {
-          const source = config?.map?.[t.key] || ''
-          const sample = source ? data.paths[source] : undefined
-          return (
-            <div className="cx-map-row" key={t.key}>
-              <div className="cx-map-l">{t.label}{t.required && <i className="req">*</i>}</div>
-              <select className="input" value={source} onChange={e => edit(t.key, e.target.value)}>
-                <option value="">—</option>
-                {paths.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-              <select className="input" value={config?.transforms?.[t.key] || ''}
-                onChange={e => editTransform(t.key, e.target.value)}>
-                <option value="">as-is</option>
-                {(data.transforms || []).map(tr => <option key={tr} value={tr}>{tr}</option>)}
-              </select>
-              <div className="cx-map-sample">{sample === undefined ? '' : String(sample).slice(0, 40)}</div>
-            </div>
-          )
-        })}
+      <div className="cx-map-payload">
+        <div className="cx-map-payload-h">{connection.provider} sent this</div>
+        <div className="cx-map-payload-b jv-surface">
+          <JsonView data={data.payload} onPick={pick} picked={armed ? config?.map?.[armed] : null} />
+        </div>
+        {mappedPaths.size > 0 && (
+          <div className="cx-map-payload-f">{mappedPaths.size} field{mappedPaths.size > 1 ? 's' : ''} mapped</div>
+        )}
       </div>
 
       <div className="cx-map-foot">
