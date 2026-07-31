@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button, Field, Input, Textarea } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
+import { fileUrl, processListingImage, uploadMedia } from '../lib/media.js'
 import {
   AREA_UNITS, BHK, CATEGORIES, CONSULTING_OPTIONS, COUNT_0_3, COUNT_0_4, COUNT_1_4,
   DEALS, DEPOSIT_OPTIONS, FACING, LOCKIN_OPTIONS, MAINTENANCE_MODE, OPEN_SIDES,
@@ -92,10 +93,13 @@ const SCORE_WEIGHTS = [
   { key: 'config', weight: 15, has: f => !!f.bhk || isPlot(f.subtype) },
   { key: 'area', weight: 10, has: f => !!(f.carpet || f.builtup || f.superBuiltup || f.plotArea) },
   { key: 'price', weight: 20, has: f => !!f.price },
-  { key: 'furnishing', weight: 5, has: f => !!f.furnishType },
-  { key: 'amenities', weight: 5, has: f => (f.societyAmenities || []).length > 0 },
-  { key: 'description', weight: 5, has: f => !!(f.description || '').trim() },
-  { key: 'access', weight: 5, has: f => !!(f.keyAccess || '').trim() },
+  // Enrichment, weighted light on purpose — you can match and call a lead
+  // without any of it, which is the test that matters for a CRM.
+  { key: 'furnishing', weight: 4, has: f => !!f.furnishType },
+  { key: 'amenities', weight: 4, has: f => (f.societyAmenities || []).length > 0 },
+  { key: 'description', weight: 4, has: f => !!(f.description || '').trim() },
+  { key: 'access', weight: 4, has: f => !!(f.keyAccess || '').trim() },
+  { key: 'photos', weight: 4, has: f => (f.media || []).length > 0 },
 ]
 
 function scoreOf(f) {
@@ -107,7 +111,7 @@ function scoreOf(f) {
 const STEP_SCORE = {
   property: ['deal', 'subtype', 'locality', 'config', 'area'],
   price: ['price'],
-  details: ['furnishing', 'amenities', 'description', 'access'],
+  details: ['furnishing', 'amenities', 'description', 'access', 'photos'],
 }
 
 function stepRemaining(stepKey, f) {
@@ -122,6 +126,64 @@ const blank = () => ({
   fixtures: [], countedItems: {}, societyAmenities: [],
   preferredTenants: [], priceIncludes: [],
 })
+
+
+// ---- photos ----------------------------------------------------------------
+// Unlike the visit-proof camera (B4), the gallery IS allowed here: listing
+// photos are normally shot earlier, or supplied by the owner, and there is
+// nothing to prove — the constraint there was about authenticity, which
+// doesn't apply to marketing images.
+//
+// Every image is resized and watermarked ON THE DEVICE before upload, then
+// PUT straight to R2. Only the object key is stored.
+function MediaPicker({ media = [], firmName, onChange, onError }) {
+  const [busy, setBusy] = useState(0)
+
+  const add = async (files) => {
+    const list = [...files].filter(f => f.type.startsWith('image/'))
+    if (!list.length) return
+    setBusy(list.length)
+    const added = []
+    for (const file of list) {
+      try {
+        const { blob, width, height } = await processListingImage(file, firmName)
+        const key = await uploadMedia(blob, 'property')
+        added.push({ key, kind: 'photo', w: width, h: height, at: new Date().toISOString() })
+      } catch (e) {
+        onError?.(e.message || 'That photo could not be uploaded')
+      } finally {
+        setBusy(n => n - 1)
+      }
+    }
+    if (added.length) onChange([...media, ...added])
+  }
+
+  return (
+    <div className="mp">
+      <div className="mp-grid">
+        {media.map((m, i) => (
+          <div key={m.key} className="mp-item">
+            <img src={fileUrl(m.key)} alt="" loading="lazy" />
+            {i === 0 && <span className="mp-cover">Cover</span>}
+            <button type="button" className="mp-x" aria-label="Remove photo"
+              onClick={() => onChange(media.filter(x => x.key !== m.key))}>
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+        ))}
+        <label className="mp-add">
+          <input type="file" accept="image/*" multiple hidden
+            onChange={e => { add(e.target.files); e.target.value = '' }} />
+          <Icon name="plus" size={17} />
+          <span>{busy > 0 ? `Uploading ${busy}…` : 'Add photos'}</span>
+        </label>
+      </div>
+      <div className="pw-hint mp-hint">
+        The first photo is the cover. Each one is watermarked before it uploads.
+      </div>
+    </div>
+  )
+}
 
 export default function PropertyWizard({ store, go, sel, topBar }) {
   const editing = sel?.propId ? store.state.properties.find(p => p.id === sel.propId) : null
@@ -419,13 +481,14 @@ export default function PropertyWizard({ store, go, sel, topBar }) {
                   <div className="pw-hint">{(form.description || '').length} / 1500</div>
                 </Field>
 
-                <div className="pw-later">
-                  <Icon name="camera" size={15} />
-                  <div>
-                    <strong>Photos &amp; video</strong>
-                    <p>Coming in the next step of this block — they upload, watermark and attach here.</p>
-                  </div>
-                </div>
+                <Field label="Photos">
+                  <MediaPicker
+                    media={form.media || []}
+                    firmName={store.state.settings.firmName}
+                    onChange={v => set('media', v)}
+                    onError={m => store.toast(m, 'warn')}
+                  />
+                </Field>
               </div>
             )}
 

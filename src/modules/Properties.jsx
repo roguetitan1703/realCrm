@@ -6,6 +6,7 @@ import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { StatusTag, Quoted, Button, KV, Timeline } from '../components/primitives.jsx'
 import { NbaBanner } from '../components/rail.jsx'
 import { leadsForProperty } from '../lib/matching.js'
+import { fileUrl } from '../lib/media.js'
 import { quotedLine, unitLabel, fmtDate, renewalSignal } from '../lib/format.js'
 import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
@@ -159,6 +160,22 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
               ))}
             </tbody>
           </table>
+        </div>
+      ),
+    },
+    {
+      // C8. Photos are watermarked on the device before upload, so what's shown
+      // here is exactly what a client receives if it's forwarded on.
+      id: 'media', when: () => (p.media || []).length > 0,
+      title: 'Photos', right: `${(p.media || []).length}`,
+      render: () => (
+        <div className="pgal">
+          {(p.media || []).map((m, i) => (
+            <a key={m.key} href={fileUrl(m.key)} target="_blank" rel="noreferrer"
+               className={'pgal-i' + (i === 0 ? ' pgal-cover' : '')}>
+              <img src={fileUrl(m.key)} alt="" loading="lazy" />
+            </a>
+          ))}
         </div>
       ),
     },

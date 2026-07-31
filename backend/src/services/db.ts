@@ -484,6 +484,8 @@ export async function migratePropertySchemaC4(): Promise<void> {
     ['description', 'TEXT'],
     // Operational layer, deliberately trimmed to just these two (spec Q16).
     ['key_access', 'TEXT'], ['owner_contact_id', 'TEXT'],
+    // [{ key, kind, w, h, at }] — R2 object keys only, never bytes (C2m).
+    ['media', "JSONB DEFAULT '[]'::jsonb"],
     // Quiet, internal — never a "complete your profile" nag (spec Q18).
     ['completeness', 'INTEGER'],
   ];

@@ -327,6 +327,7 @@ function rowToProperty(r: any): any {
     keyAccess: r.key_access || null,
     ownerContactId: r.owner_contact_id || null,
     completeness: r.completeness ?? null,
+    media: r.media || [],
     geo: r.geo_lat != null && r.geo_lng != null ? { lat: r.geo_lat, lng: r.geo_lng } : null,
   };
 }
@@ -1314,7 +1315,7 @@ const C4_SCALARS: Record<string, string> = {
 const C4_JSON: Record<string, string> = {
   fixtures: 'fixtures', countedItems: 'counted_items',
   societyAmenities: 'society_amenities', preferredTenants: 'preferred_tenants',
-  priceIncludes: 'price_includes',
+  priceIncludes: 'price_includes', media: 'media',
 };
 
 /** Client keys the config blob must NOT swallow, since they have real columns. */

@@ -75,6 +75,89 @@ function drawWatermark(ctx, w, h, lines) {
 }
 
 /**
+ * The anti-crop mark for LISTING media (spec C3w).
+ *
+ * A corner logo alone is useless here: anyone can crop the corner off and
+ * repost the photo as their own, which is the actual thing being defended
+ * against. So the firm's name is also tiled diagonally across the whole frame
+ * at low opacity — faint enough not to spoil the photo, present enough that
+ * removing it means destroying the image.
+ *
+ * Deliberately different from the visit-proof stamp, which is a legible
+ * provenance caption for an internal record nobody is trying to steal.
+ */
+function drawAntiCropMark(ctx, w, h, firmName) {
+  const text = (firmName || 'Listing').toUpperCase()
+  const size = Math.max(12, Math.round(w * 0.021))
+
+  ctx.save()
+  ctx.font = `700 ${size}px system-ui, -apple-system, sans-serif`
+  ctx.textBaseline = 'middle'
+  // Rotate about the centre and cover the diagonal, so the tiling reaches
+  // every corner no matter the aspect ratio.
+  ctx.translate(w / 2, h / 2)
+  ctx.rotate(-Math.PI / 6)
+  const span = Math.hypot(w, h)
+  const stepX = ctx.measureText(text).width + size * 2.4
+  const stepY = size * 3.6
+  ctx.lineWidth = Math.max(1, size / 9)
+  ctx.lineJoin = 'round'
+  for (let y = -span; y < span; y += stepY) {
+    // Offset alternate rows so the marks don't form removable straight columns.
+    const off = (Math.round(y / stepY) % 2) * (stepX / 2)
+    for (let x = -span + off; x < span; x += stepX) {
+      // Dark outline UNDER a light fill. White alone disappears over a bright
+      // wall or an overexposed sky — extremely common in listing photos — and
+      // an invisible watermark defends nothing. The pair stays legible on any
+      // background while each half remains faint enough not to spoil the shot.
+      ctx.strokeStyle = 'rgba(0,0,0,0.085)'
+      ctx.strokeText(text, x, y)
+      ctx.fillStyle = 'rgba(255,255,255,0.13)'
+      ctx.fillText(text, x, y)
+    }
+  }
+  ctx.restore()
+
+  // Corner mark — the readable attribution, on its own scrim so it stays
+  // legible over a bright sky or a white wall.
+  const pad = Math.round(w * 0.022)
+  const cs = Math.max(13, Math.round(w * 0.028))
+  ctx.save()
+  ctx.font = `700 ${cs}px system-ui, -apple-system, sans-serif`
+  ctx.textBaseline = 'bottom'
+  const tw = ctx.measureText(firmName || 'Listing').width
+  ctx.globalAlpha = 0.45
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(pad - cs * 0.4, h - pad - cs * 1.5, tw + cs * 0.8, cs * 1.7)
+  ctx.globalAlpha = 0.95
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText(firmName || 'Listing', pad, h - pad)
+  ctx.restore()
+}
+
+/**
+ * Resize + watermark a LISTING photo. Every uploaded image carries the mark —
+ * the spec allows no exception, because these files leave the CRM as WhatsApp
+ * attachments and the burned-in mark is the only thing that travels with them.
+ */
+export async function processListingImage(blob, firmName) {
+  const img = await loadImage(blob)
+  const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height))
+  const w = Math.round(img.width * scale)
+  const h = Math.round(img.height * scale)
+
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(img, 0, 0, w, h)
+  drawAntiCropMark(ctx, w, h, firmName)
+
+  const out = await canvasToBlob(canvas, 'image/jpeg', JPEG_QUALITY)
+  return { blob: out, width: w, height: h }
+}
+
+/**
  * Resize + watermark, returning a JPEG blob ready to upload.
  * `stampLines` is the watermark content — for a visit selfie that's the firm,
  * the capture time and the GPS fix, so the proof carries its own provenance
