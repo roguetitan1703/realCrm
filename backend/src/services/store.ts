@@ -274,6 +274,9 @@ function rowToProperty(r: any): any {
     unit: r.unit_no || r.unit,
     tenancy: r.tenancy || undefined,
     timeline: r.timeline || [],
+    // The list's "Recently added" sort had nothing to sort ON, so it silently
+    // fell back to whatever order the rows arrived in.
+    createdAt: r.created_at || null,
 
     // --- Block C canonical fields -------------------------------------------
     // `type` above is the legacy conflated string kept for existing views;
@@ -1014,7 +1017,14 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const budgetMin = digits(leadData.budgetMin ?? leadData.budget_min ?? req.minBudget);
   const budgetMax = digits(leadData.budgetMax ?? leadData.budget_max ?? req.maxBudget);
   const purpose = leadData.purpose ?? req.purpose ?? null;
-  const timelinePref = leadData.timeline ?? leadData.timeline_pref ?? req.timeline ?? null;
+  // A lead carries TWO unrelated things called "timeline":
+  //   • `lead.timeline`      — the event history, an ARRAY of {type,label,ago}
+  //   • `lead.req.timeline`  — the possession target, a STRING ("Within 30 days")
+  // This read `leadData.timeline` first, so a client sending its event history
+  // (every mobile lead form does) had that array coerced into a text column:
+  // String([{...}]) === "[object Object]", which is exactly what the record
+  // sheet then displayed. The event history is NEVER the possession target.
+  const timelinePref = leadData.timeline_pref ?? req.timeline ?? null;
 
   const t = tid();
   const rows = await sql`
@@ -1052,7 +1062,14 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const where = locality ? ` · ${locality}` : '';
   notify({ userId: agentId, type: 'lead_assigned', title: 'New lead assigned to you', body: `${name}${where} (${source})`, link })
     .catch(err => console.warn('[Notify] lead_assigned failed:', err?.message));
-  notifyRoles(['owner', 'manager'], { type: 'lead_new', title: 'New lead captured', body: `${name}${where} → routed to ${agentId}`, link })
+  // Name the agent, not their primary key. This read "routed to u_ms6oqbda",
+  // which tells the person reading it nothing and looks broken besides.
+  const agentName = agentId
+    ? (await sql`SELECT name FROM crm_agents WHERE id = ${agentId} AND tenant_id = ${tid()} LIMIT 1`)[0]?.name
+      ?? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name
+      ?? 'an agent'
+    : 'the queue';
+  notifyRoles(['owner', 'manager'], { type: 'lead_new', title: 'New lead captured', body: `${name}${where} → routed to ${agentName}`, link })
     .catch(err => console.warn('[Notify] lead_new failed:', err?.message));
   return created;
 }
@@ -1082,7 +1099,10 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   const budgetMax = (patch.budgetMax !== undefined || patch.budget_max !== undefined || req?.maxBudget !== undefined)
     ? digits(patch.budgetMax ?? patch.budget_max ?? req?.maxBudget) : digits(oldLead.req?.maxBudget);
   const purpose = patch.purpose !== undefined ? patch.purpose : (req?.purpose ?? oldLead.req?.purpose);
-  const timelinePref = patch.timeline !== undefined ? patch.timeline : (patch.timeline_pref !== undefined ? patch.timeline_pref : (req?.timeline ?? oldLead.req?.timeline));
+  // Same collision on update — see createLead. `patch.timeline` is history.
+  const timelinePref = patch.timeline_pref !== undefined
+    ? patch.timeline_pref
+    : (req?.timeline ?? oldLead.req?.timeline);
 
   await sql`
     UPDATE crm_leads SET

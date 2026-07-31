@@ -186,3 +186,77 @@ user when we build** this — ask for it before implementing the add/edit page.
       (corner logo + translucent anti-crop overlay) on ingest.
 - [ ] Media-rich WhatsApp share (closes C6); owner never included.
 - [ ] Terminology sweep Brokerage → Consulting.
+
+---
+
+## C-vocab — One vocabulary, enforced 🔒 (added after Block C build)
+
+**The rule.** Every enumerable property value is declared once, in
+`src/data/propertyFields.js`, as `{ value, label }`. `value` is the stored
+token; `label` is the only string a person ever sees. Code compares tokens.
+Nothing outside that file types a label.
+
+**Why it needed enforcing.** The rule was agreed at C1 and then broken five
+times while the block was being built, each time in a different file, and each
+one looked like ordinary code in review:
+
+| # | Where | What it did |
+|---|---|---|
+| 1 | Properties filter | offered `['1BHK','2BHK','3BHK']` while rows held `"3 BHK Apartment"` — almost nothing matched |
+| 2 | Record sheet schema | offered `'2 BHK Apartment'`, `'Semi-furnished'` — its editor **wrote** values the filters can't match |
+| 3 | Table columns | read `p.type`, `p.furnishing`, hardcoded `' sqft'` — three columns showed `—` on new listings |
+| 4 | Status modal | wrote `'Under offer'` and `'Closed'` — neither exists; **corrupted the row** |
+| 5 | `headerFacts`, `propFacts` | read `p.type`/`p.priceLabel` raw — identity line half empty |
+
+Two more of the same shape were found by the guard once it existed: the status
+colour map keyed on `'Under offer'` (so the tag fell through to default
+styling), and recording a tenancy setting `status: 'Under offer'` — which is
+both invalid *and* the wrong idea, since a let flat is `Leased`.
+
+The pattern is that a **read-side** drift shows the wrong thing, and a
+**write-side** drift puts values in the database that nothing can match. The
+second kind survives the deploy.
+
+**The enforcement.** `scripts/check-vocabulary.mjs`, wired into `npm run build`
+(`check:vocab && vite build`), so a drifted literal fails the build rather than
+reaching a screenshot. It **imports** the vocabulary rather than parsing it, so
+the check can't drift from the thing it checks, and it flags two things:
+
+- **near-misses** — a string differing from a real label only by case, spacing
+  or punctuation (`'Under offer'` → `'Under Offer'`). These are the dangerous
+  ones: they read as correct and fail every comparison silently.
+- **re-declared lists** — an array literal holding two or more vocabulary
+  labels. That is a second copy of a list by definition.
+
+It deliberately does **not** flag a lone exact label (prose and empty states
+use them legitimately), stored tokens, camelCase field keys, or comments. A
+guard that cries wolf gets switched off, which would cost more than it saves.
+Escape hatch: `vocab-ok` on the line.
+
+**Known exclusion:** `src/modules/mobile/**` is still entirely pre-Block-C and
+is skipped — but the count is printed on every run so it can't quietly become
+permanent. It lapses when E3/E4 (PWA parity) rebuilds those screens.
+
+**Applies to any future enumerable set.** A new module with statuses, stages or
+types declares them the same way and inherits the same guard.
+
+## C-detail — Information hierarchy on a record 🔒
+
+Once the schema is portal-grade, a flat wall of forty `label: value` rows makes
+the four facts you came for as hard to find as the thirty-six you didn't. So a
+record sheet section carries a default state:
+
+- **Overview** — always open, never collapsible. The record's identity; a page
+  whose first section can be hidden has no anchor.
+- **Details** — open. What the property physically is, including furnishing and
+  amenities as tags. The scanning layer.
+- **Terms & charges** — **collapsed**. Deposit, lock-in, booking amount, fee.
+  Needed when negotiating, not when deciding if this is the right unit.
+- **Internal · never shared** — **collapsed**. Flat no., keys, description.
+
+Two rules that make collapsing safe: a closed section still reports how much it
+holds ("4 recorded" / "nothing recorded"), so it never hides the *existence* of
+data; and a field declares `when(record)` from the same `appliesTo()` predicate
+the form uses, so a rental never renders a column of `—` for sale-only fields.
+List values render as **tags, not a comma run** — five amenities as tags is one
+glance, as a sentence it is something you have to read.

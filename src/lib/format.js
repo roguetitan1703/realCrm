@@ -1,4 +1,22 @@
 // Formatting + derived-data helpers (ported from legacy app.js).
+import {
+  AREA_UNITS, BHK, SUBTYPES, isPlot, labelOf, normaliseBhk, normaliseSubtype,
+} from '../data/propertyFields.js'
+
+/**
+ * "3 BHK Apartment" — the display config, rebuilt from the two canonical
+ * fields that replaced the single conflated `type`, falling back to that
+ * legacy string for rows that were never migrated.
+ *
+ * Lives here, once, because five different screens want this sentence and
+ * every one of them used to build it by hand off `p.type`.
+ */
+export function configLabel(p = {}) {
+  const cat = p.category || 'residential'
+  const bhk = labelOf(BHK, p.bhk ?? normaliseBhk(p.type))
+  const sub = labelOf(SUBTYPES[cat] || SUBTYPES.residential, p.subtype ?? normaliseSubtype(p.type, cat))
+  return [bhk, sub].filter(Boolean).join(' ') || p.type || 'Property'
+}
 
 export function fmtMoney(n) {
   if (!n) return '—'
@@ -133,9 +151,9 @@ export function propFacts(p) {
   const unit = unitLabel(p)
   const common = [
     ...(unit ? [{ k: 'Unit', v: `${wingOf(p) ? 'Wing ' + wingOf(p) + ' · ' : ''}${flatOf(p) ? 'Flat ' + flatOf(p) : ''}`.replace(/ · $/, '') }] : []),
-    { k: 'Config', v: p.type },
-    { k: 'Carpet', v: p.carpet ? p.carpet + ' sqft' : '—' },
-    p.type === 'Plot'
+    { k: 'Config', v: configLabel(p) },
+    { k: 'Carpet', v: p.carpet ? `${p.carpet} ${labelOf(AREA_UNITS, p.areaUnit || 'sqft')}` : '—' },
+    isPlot(p.subtype ?? normaliseSubtype(p.type, p.category))
       ? { k: 'Facing', v: p.facing }
       : { k: 'Floor', v: p.totalFloors ? `${p.floor} / ${p.totalFloors}` : '—' },
     ...(p.parking ? [{ k: 'Parking', v: p.parking, mut: true }] : []),
@@ -206,5 +224,9 @@ export function thumbTint(id) {
 // owner name (B3). This is that grouping key, shared by the Contacts→Owners
 // list and the sidebar's Owners count so the two can never disagree about how
 // many owners exist.
-export const ownerKeyOf = (p) => (p && p.owner) || 'Unnamed Owner'
-export const ownerCount = (properties = []) => new Set(properties.map(ownerKeyOf)).size
+// No owner recorded means NO owner — not an owner called "Unnamed Owner".
+// Every ownerless listing used to collapse into one phantom contact that
+// couldn't be opened, edited or called, because there was nobody behind it.
+export const ownerKeyOf = (p) => (p && p.owner) || null
+export const ownerCount = (properties = []) =>
+  new Set(properties.map(ownerKeyOf).filter(Boolean)).size

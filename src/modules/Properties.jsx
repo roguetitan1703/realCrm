@@ -7,7 +7,8 @@ import { StatusTag, Quoted, Button, KV, Timeline } from '../components/primitive
 import { NbaBanner } from '../components/rail.jsx'
 import { leadsForProperty } from '../lib/matching.js'
 import { fileUrl } from '../lib/media.js'
-import { quotedLine, unitLabel, fmtDate, renewalSignal } from '../lib/format.js'
+import { quotedLine, unitLabel, fmtDate, renewalSignal, configLabel } from '../lib/format.js'
+import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
 import PropertyWizard from './PropertyWizard.jsx'
@@ -48,12 +49,14 @@ export default function Properties({ store, go, sel, setSel, topBar }) {
     kpis, view, onView: setView,
     // Grid/list toggle only applies to the flat unit views, hide it in project view.
     showViewSwitch: view !== 'projects',
+    // No import button here: the top bar already carries Import / Revert on
+    // every screen, and two buttons for one action in one viewport is a
+    // question ("are these different?") rather than a convenience.
     toolbarRight: <>
       <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
         onClick={() => setView(view === 'projects' ? 'grid' : 'projects')}>
         <Icon name="building" size={14} />Group by project
       </button>
-      <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'properties' })}>Import units</Button>
     </>,
     cta: { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) },
     emptyHint: 'Try clearing a filter or search.',
@@ -151,8 +154,8 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
               {siblings.map(s => (
                 <tr key={s.id} onClick={() => go('properties', { propId: s.id, propOpen: true })}>
                   <td><span className="unit-tag unit-tag-flush">{unitLabel(s) || '—'}</span></td>
-                  <td className="cell-txt">{s.type} · {s.totalFloors ? `${s.floor}/${s.totalFloors}` : '—'}</td>
-                  <td className="cell-txt">{s.carpet ? s.carpet + ' sqft' : '—'}</td>
+                  <td className="cell-txt">{configLabel(s)} · {s.totalFloors ? `${s.floor}/${s.totalFloors}` : '—'}</td>
+                  <td className="cell-txt">{s.carpet ? `${s.carpet} ${labelOf(AREA_UNITS, s.areaUnit || 'sqft')}` : '—'}</td>
                   <td className="cell-txt">{s.owner}</td>
                   <td><StatusTag status={s.status} /></td>
                   <td><Quoted q={quotedLine(s)} /></td>
@@ -171,30 +174,38 @@ function PropertyDetail({ store, go, sel, setSel, topBar }) {
       render: () => (
         <div className="pgal">
           {(p.media || []).map((m, i) => (
-            <a key={m.key} href={fileUrl(m.key)} target="_blank" rel="noreferrer"
-               className={'pgal-i' + (i === 0 ? ' pgal-cover' : '')}>
+            // Every tile the same size, cover named rather than enlarged. A
+            // double-width first tile made a two-photo listing look broken,
+            // and it disagreed with the picker in the add form, where the
+            // cover is a badge.
+            <a key={m.key} href={fileUrl(m.key)} target="_blank" rel="noreferrer" className="pgal-i">
               <img src={fileUrl(m.key)} alt="" loading="lazy" />
+              {i === 0 && <span className="pgal-cover">Cover</span>}
+              {m.kind === 'video' && <span className="pgal-cover pgal-vid">Video</span>}
             </a>
           ))}
         </div>
       ),
     },
     {
-      // C7. The owner lives on the property record, NOT in the add flow —
-      // nobody has these details to hand while typing a listing in — and never
-      // in anything a client receives. This section is that link: it's how the
-      // firm gets back to the owner about re-availability, price changes and
-      // access, which is the whole reason the link exists.
+      // C7. The owner is OPTIONAL and internal — never in anything a client
+      // receives. It can be captured with the listing (the broker is often on
+      // the phone to the owner) or added here later, and editing it happens
+      // here rather than in the stepped form, so fixing a phone number isn't a
+      // trip through three steps.
       id: 'owner',
       title: 'Owner · internal',
-      right: <span className="own-never">Never shared with clients</span>,
+      right: <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'ownerEdit', propId: p.id })}>
+        <Icon name="edit" size={13} />{p.owner || p.ownerPhone ? 'Edit owner' : 'Add owner'}
+      </button>,
       render: () => !p.owner && !p.ownerPhone
         ? <div className="detail-empty">
             No owner recorded. Add one so this listing can be chased when it goes
-            quiet — <button className="lnk" onClick={openEdit}>edit the property</button>.
+            quiet — <button className="lnk" onClick={() => store.openModal({ kind: 'ownerEdit', propId: p.id })}>add the owner</button>.
           </div>
         : (
           <div className="own">
+            <span className="own-never">Never shared with clients</span>
             <KV items={[
               { k: 'Name', v: p.owner || '—' },
               { k: 'Phone', v: p.ownerPhone || '—' },
@@ -323,8 +334,8 @@ function ProjectDetail({ store, go, sel, setSel, topBar }) {
                   {group.units.map(u => (
                     <tr key={u.id} onClick={() => openUnit(u.id)}>
                       <td><span className="unit-tag unit-tag-flush">{unitLabel(u) || '—'}</span></td>
-                      <td className="cell-txt">{u.type} · {u.totalFloors ? `${u.floor}/${u.totalFloors}` : (u.floor || '—')}</td>
-                      <td className="cell-txt">{u.carpet ? u.carpet + ' sqft' : '—'}</td>
+                      <td className="cell-txt">{configLabel(u)} · {u.totalFloors ? `${u.floor}/${u.totalFloors}` : (u.floor || '—')}</td>
+                      <td className="cell-txt">{u.carpet ? `${u.carpet} ${labelOf(AREA_UNITS, u.areaUnit || 'sqft')}` : '—'}</td>
                       <td className="cell-txt">{u.owner || '—'}</td>
                       <td><StatusTag status={u.status || 'Available'} /></td>
                       <td><Quoted q={quotedLine(u)} /></td>

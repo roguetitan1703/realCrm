@@ -151,6 +151,19 @@ function FilterValuePicker({ f, align, selected, onToggle }) {
 //   onChange(nextValue)
 //   search:  { value, onChange, placeholder }    (optional)
 //   sort:    <SortControl {...} />                (optional node on the right)
+// Preserves declaration order of both the groups and the fields inside them.
+// A module that declares no groups gets exactly the flat list it had before.
+function groupFields(fields) {
+  const order = []
+  const byGroup = new Map()
+  for (const f of fields) {
+    const g = f.group || ''
+    if (!byGroup.has(g)) { byGroup.set(g, []); order.push(g) }
+    byGroup.get(g).push(f)
+  }
+  return order.map(g => [g, byGroup.get(g)])
+}
+
 export function FilterBar({ fields = [], value = {}, onChange, search, right, cta }) {
   const [open, setOpen] = useState(null)   // null | 'add' | fieldKey (value picker)
   const barRef = useRef(null)
@@ -204,12 +217,18 @@ export function FilterBar({ fields = [], value = {}, onChange, search, right, ct
           </button>
           {open === 'add' && (
             <div className="popover">
-              <div className="p-head">Filter by</div>
-              {fields.map(f => (
-                <button key={f.key} className={'p-item' + ((value[f.key] || []).length ? ' on' : '')} onClick={() => setOpen(f.key)}>
-                  <span className="p-ic"><Icon name={f.icon || 'tag'} size={16} /></span>{f.label}
-                  {(value[f.key] || []).length ? <Icon name="check" size={15} className="ic p-chk" /> : null}
-                </button>
+              {/* Grouped when the module says so. A flat list of eleven filters
+                  is a list you read; four short groups is a list you scan. */}
+              {groupFields(fields).map(([groupName, items]) => (
+                <div key={groupName || '_'}>
+                  <div className="p-head">{groupName || 'Filter by'}</div>
+                  {items.map(f => (
+                    <button key={f.key} className={'p-item' + ((value[f.key] || []).length ? ' on' : '')} onClick={() => setOpen(f.key)}>
+                      <span className="p-ic"><Icon name={f.icon || 'tag'} size={16} /></span>{f.label}
+                      {(value[f.key] || []).length ? <Icon name="check" size={15} className="ic p-chk" /> : null}
+                    </button>
+                  ))}
+                </div>
               ))}
             </div>
           )}

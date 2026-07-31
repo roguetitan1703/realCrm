@@ -23,14 +23,17 @@ import React from 'react'
 import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA } from '../components/ModuleFields.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted } from '../components/primitives.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, budgetRange, quotedLine, unitLabel, thumbTint, initials, projectOf } from '../lib/format.js'
+import { reqShort, budgetRange, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel } from '../lib/format.js'
+import { generateMessage } from '../lib/matching.js'
 import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
 // out again here — that duplication is exactly what broke property filtering.
 import {
-  BHK, CATEGORIES, DEALS, FACING, FURNISH, OWNERSHIP, STATUS, SUBTYPES,
-  normaliseBhk, normaliseSubtype, normaliseTo, optionsOf,
+  AREA_UNITS, BHK, BHK_FILTER, CATEGORIES, DEALS, FACING, FURNISH, OWNERSHIP,
+  POSSESSION, STATUS, SUBTYPES, TRANSACTION,
+  isPlot, labelOf, normaliseBhk, normaliseSubtype, normaliseTo, optionsOf,
 } from '../data/propertyFields.js'
+
 
 // Shared option pools (kept here so filters and forms stay consistent).
 export const LEAD_LOCALITIES = [
@@ -40,6 +43,10 @@ export const LEAD_LOCALITIES = [
 const PROP_LOCALITIES = ['Wakad', 'Baner', 'Kothrud', 'Hinjewadi', 'Viman Nagar', 'Kalyani Nagar', 'Wagholi']
 
 const opt = (arr) => arr.map(v => ({ value: v, label: v }))
+
+// One square metre is 10.7639 square feet. Sorting mixed-unit inventory
+// without this ranks a 90 sq.m flat below a 500 sq.ft one.
+const areaInSqft = (v, unit) => (Number(v) || 0) * (unit === 'sqm' ? 10.7639 : 1)
 
 // small helper: does a value match, case-insensitively
 const eqi = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase()
@@ -193,7 +200,15 @@ export const PROPERTIES_DEF = {
   icon: 'building',
   schema: PROPERTY_MODULE_SCHEMA,
 
-  headerFacts: (p) => [p.type, p.locality, p.priceLabel, p.deal === 'rent' ? 'For rent' : 'For sale'].filter(Boolean),
+  // The identity line under the record name. Read `p.type` and `p.priceLabel`
+  // straight, so a listing added through the current form showed neither.
+  headerFacts: (p) => [
+    configLabel(p),
+    p.locality,
+    p.priceLabel || (p.price ? fmtMoney(p.price) : null),
+    p.deal === 'rent' ? 'For rent' : 'For sale',
+    labelOf(FURNISH, p.furnishType) || p.furnishing || null,
+  ].filter(Boolean),
 
   // A listing moves through a sale/lease lifecycle. Rendered as the same stepper.
   progression: {
@@ -204,30 +219,42 @@ export const PROPERTIES_DEF = {
       run: (store, p) => store.setPropStatus(p.id, 'Off-Market') },
   },
 
-  searchFields: ['society', 'title', 'locality', 'owner', 'type', 'project'],
+  // `tower` and `unit` are here because "B-701" is how a broker refers to a
+  // specific flat out loud — searching for it and getting nothing was a
+  // dead end with the record sitting right there.
+  searchFields: ['society', 'title', 'locality', 'owner', 'type', 'project', 'tower', 'unit'],
 
   filterFields: (store) => {
     // Project options are derived from the live inventory, so a broker can narrow
     // the unit list to one township/society.
     const projects = [...new Set((store?.state?.properties || []).map(projectOf))].sort()
+    const props = store?.state?.properties || []
+    // Sale-only concepts are hidden when the inventory holds no sale listings
+    // at all — a lettings-only desk should never be offered "Ownership" or
+    // "Transaction", which can only ever return nothing.
+    const hasSale = props.some(p => p.deal !== 'rent')
     return [
-      { key: 'project', label: 'Project', icon: 'building', options: opt(projects) },
-      { key: 'deal', label: 'Deal', icon: 'tag', multi: false, options: optionsOf(DEALS) },
+      { key: 'project', label: 'Project', icon: 'building', group: 'Where', options: opt(projects) },
+      { key: 'deal', label: 'Deal', icon: 'tag', multi: false, group: 'What', options: optionsOf(DEALS) },
       // Every option below is generated FROM the canonical vocabulary, so a
       // filter choice can no longer name a value the database doesn't store.
       // That was the whole C-fix bug: this list used to read
       // ['1BHK','2BHK','3BHK','Commercial','Plot'] while rows held
       // "3 BHK Apartment" and "Commercial Office", so almost nothing matched.
-      { key: 'category', label: 'Category', icon: 'building', options: optionsOf(CATEGORIES) },
-      { key: 'bhk', label: 'Configuration', icon: 'layers', options: optionsOf(BHK) },
-      { key: 'subtype', label: 'Property type', icon: 'home',
+      { key: 'category', label: 'Category', icon: 'building', group: 'What', options: optionsOf(CATEGORIES) },
+      { key: 'bhk', label: 'Configuration', icon: 'layers', group: 'What', options: optionsOf(BHK_FILTER) },
+      { key: 'subtype', label: 'Property type', icon: 'home', group: 'What',
         options: optionsOf([...SUBTYPES.residential, ...SUBTYPES.commercial]
           .filter((x, i, a) => a.findIndex(y => y.value === x.value) === i)) },
-      { key: 'locality', label: 'Locality', icon: 'building', options: opt(PROP_LOCALITIES) },
-      { key: 'status', label: 'Status', icon: 'check', options: optionsOf(STATUS) },
-      { key: 'furnishing', label: 'Furnishing', icon: 'home', options: optionsOf(FURNISH) },
-      { key: 'facing', label: 'Facing', icon: 'tag', options: optionsOf(FACING) },
-      { key: 'ownership', label: 'Ownership', icon: 'shield', options: optionsOf(OWNERSHIP) },
+      { key: 'locality', label: 'Locality', icon: 'building', group: 'Where', options: opt(PROP_LOCALITIES) },
+      { key: 'status', label: 'Status', icon: 'check', group: 'State', options: optionsOf(STATUS) },
+      { key: 'furnishing', label: 'Furnishing', icon: 'home', group: 'Condition', options: optionsOf(FURNISH) },
+      { key: 'facing', label: 'Facing', icon: 'tag', group: 'Condition', options: optionsOf(FACING) },
+      { key: 'possession', label: 'Possession', icon: 'clock', group: 'State', options: optionsOf(POSSESSION) },
+      ...(hasSale ? [
+        { key: 'ownership', label: 'Ownership', icon: 'shield', group: 'Sale only', options: optionsOf(OWNERSHIP) },
+        { key: 'transaction', label: 'Transaction', icon: 'tag', group: 'Sale only', options: optionsOf(TRANSACTION) },
+      ] : []),
     ]
   },
 
@@ -244,6 +271,8 @@ export const PROPERTIES_DEF = {
     if (key === 'furnishing') return vals.includes(p.furnishType ?? normaliseTo(FURNISH, p.furnishing))
     if (key === 'facing') return vals.includes(normaliseTo(FACING, p.facing))
     if (key === 'ownership') return vals.includes(p.ownership)
+    if (key === 'possession') return vals.includes(normaliseTo(POSSESSION, p.possession))
+    if (key === 'transaction') return vals.includes(normaliseTo(TRANSACTION, p.transactionType))
     // Status values ARE the display strings (see STATUS in propertyFields),
     // so this compares directly — case-insensitively, because legacy rows and
     // imports vary. No token translation, and nothing stored gets rewritten.
@@ -252,10 +281,16 @@ export const PROPERTIES_DEF = {
   },
 
   sortOptions: [
-    { key: 'recent', label: 'Recently added', value: () => 0 },
+    // `() => 0` meant every row compared equal, so this sorted by nothing and
+    // only appeared to work because the server already returns newest-first.
+    { key: 'recent', label: 'Recently added', value: (p) => (p.createdAt ? new Date(p.createdAt).getTime() : 0) },
+    { key: 'price', label: 'Price', value: (p) => Number(p.price) || 0 },
     { key: 'society', label: 'Name', value: (p) => (p.society || p.title || '').toLowerCase() },
     { key: 'locality', label: 'Locality', value: (p) => (p.locality || '').toLowerCase() },
-    { key: 'carpet', label: 'Carpet area', value: (p) => p.carpet || 0 },
+    // Areas are stored in whatever unit the listing was quoted in. Comparing
+    // 90 (sq.m) against 950 (sq.ft) as plain numbers ranks the bigger flat
+    // last, so everything converts to one unit before it is compared.
+    { key: 'carpet', label: 'Carpet area', value: (p) => areaInSqft(p.carpet, p.areaUnit) },
   ],
 
   // Property list uses a card view AND a table view. These columns drive the table.
@@ -266,10 +301,26 @@ export const PROPERTIES_DEF = {
         <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}</div><div className="sub">{p.locality}</div></div>
       </div>
     ) },
-    { key: 'config', label: 'Config · deal', render: (p) => <span className="cell-txt">{p.type || 'Property'} · {p.deal === 'rent' || p.tenancy ? 'Rent' : 'Sale'}</span> },
-    { key: 'carpet', label: 'Carpet', render: (p) => <span className="cell-txt">{p.carpet ? p.carpet + ' sqft' : '—'}</span> },
-    { key: 'floor', label: 'Floor', render: (p) => <span className="cell-txt">{p.type === 'Plot' ? '—' : (p.totalFloors ? `${p.floor}/${p.totalFloors}` : '—')}</span> },
-    { key: 'furnishing', label: 'Furnishing', render: (p) => <span className="cell-txt">{p.furnishing || '—'}</span> },
+    // These columns read the CANONICAL fields with a legacy fallback. They
+    // used to read `p.type`, `p.furnishing` and a hardcoded ' sqft' — so a
+    // listing added through the current form showed "—" in three columns, and
+    // a sq.m listing was labelled sqft. Same drift that broke the filters and
+    // the record sheet; this was the third place it was hiding.
+    { key: 'config', label: 'Config · deal', render: (p) => (
+      <span className="cell-txt">{configLabel(p)} · {p.deal === 'rent' || p.tenancy ? 'Rent' : 'Sale'}</span>
+    ) },
+    { key: 'carpet', label: 'Area', render: (p) => {
+      const v = p.carpet || p.builtup || p.superBuiltup || p.plotArea
+      return <span className="cell-txt">{v ? `${v} ${labelOf(AREA_UNITS, p.areaUnit || 'sqft')}` : '—'}</span>
+    } },
+    // `p.type === 'Plot'` never matched once sub-type became a token, so plots
+    // were asked for a floor.
+    { key: 'floor', label: 'Floor', render: (p) => (
+      <span className="cell-txt">{isPlot(p.subtype ?? normaliseSubtype(p.type, p.category)) ? '—' : (p.floor ? (p.totalFloors ? `${p.floor}/${p.totalFloors}` : p.floor) : '—')}</span>
+    ) },
+    { key: 'furnishing', label: 'Furnishing', render: (p) => (
+      <span className="cell-txt">{labelOf(FURNISH, p.furnishType) || p.furnishing || '—'}</span>
+    ) },
     { key: 'status', label: 'Status', render: (p) => <StatusTag status={p.status} /> },
     { key: 'quoted', label: 'Quoted', render: (p) => <Quoted q={quotedLine(p)} /> },
   ],
@@ -277,17 +328,35 @@ export const PROPERTIES_DEF = {
   actions: [
     { id: 'share', tier: 'quick', icon: 'wa', tone: 'accent', label: 'Share',
       run: (store, p) => store.openModal({ kind: 'pickBuyer', propId: p.id }) },
-    { id: 'ownerUpdate', tier: 'quick', icon: 'wa', label: 'Owner update',
-      run: (store, p) => store.openModal({ kind: 'ownerUpdate', propId: p.id }) },
-    { id: 'callOwner', tier: 'quick', icon: 'phone', label: 'Call owner',
+    // Both owner actions are gated on there BEING an owner to reach. The owner
+    // is optional now, so an ungated "Call owner" opened a dialer on an
+    // undefined number, and "Owner update" composed a WhatsApp addressed to
+    // nobody. When there's no owner, the rail offers to add one instead.
+    { id: 'callOwner', tier: 'quick', icon: 'phone', label: 'Call owner', when: (p) => !!p.ownerPhone,
       run: (store, p) => store.openModal({ kind: 'contact', channel: 'call', name: p.owner, phone: p.ownerPhone, recordType: 'property', recordId: p.id }) },
+    { id: 'addOwner', tier: 'quick', icon: 'userPlus', label: 'Add owner', when: (p) => !p.owner && !p.ownerPhone,
+      run: (store, p) => store.openModal({ kind: 'ownerEdit', propId: p.id }) },
     { id: 'status', tier: 'quick', icon: 'tag', label: 'Set status',
       run: (store, p) => store.openModal({ kind: 'propStatus', propId: p.id }) },
     { id: 'remark', tier: 'quick', icon: 'note', label: 'Add remark',
       run: (store, p) => store.openModal({ kind: 'remark', recordType: 'property', recordId: p.id }) },
     // manage (behind "More"):
+    // Periodic, not per-visit — it belongs behind More, not in the five tiles
+    // you reach for on every record.
+    { id: 'ownerUpdate', tier: 'manage', icon: 'wa', label: 'Send owner an update',
+      when: (p) => !!p.ownerPhone, sub: (p) => p.owner,
+      run: (store, p) => store.openModal({ kind: 'ownerUpdate', propId: p.id }) },
+    // This used to toast "Listing copied to clipboard" and copy NOTHING. A
+    // button that reports success it didn't achieve is worse than no button:
+    // you paste and find an old clipboard. It now copies the same text the
+    // share flow sends, and only claims success once the write resolves.
     { id: 'copy', tier: 'manage', icon: 'copy', label: 'Copy listing details',
-      run: (store) => store.toast('Listing copied to clipboard') },
+      run: (store, p) => {
+        const text = generateMessage(p, { firmName: store.state.settings.firmName })
+        navigator.clipboard?.writeText(text)
+          .then(() => store.toast('Listing details copied'))
+          .catch(() => store.toast('Could not copy — your browser blocked it', 'warn'))
+      } },
     { id: 'tenancy', tier: 'manage', icon: 'people', when: (p) => p.deal === 'rent',
       label: (p) => p.tenancy ? 'Update tenancy' : 'Record tenancy', sub: (p) => p.tenancy ? p.tenancy.tenant : 'Mark as let / deposit',
       run: (store, p) => store.openModal({ kind: 'tenancy', propId: p.id }) },

@@ -7,8 +7,9 @@
     "dev": "vite",
     "dev:backend": "tsx watch backend/src/index.ts",
     "test": "tsx test_all.mjs",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "npm run check:vocab && vite build",
+    "preview": "vite preview",
+    "check:vocab": "node scripts/check-vocabulary.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1098.0",

@@ -30,7 +30,10 @@ export default function MobileSpeedDial({ store, context = {} }) {
     // attach to; open a lead/property first).
     actions = [
       { label: 'New Walk-in Lead', icon: 'plus', action: () => { setOpen(false); store.openModal({ kind: 'newLead' }) }, color: '#1E6F52', wash: '#E8FBEF' },
-      { label: 'Add Listing Property', icon: 'building', action: () => { setOpen(false); store.openModal({ kind: 'addProperty' }) }, color: '#4E6688', wash: '#EEF2F7' },
+      // "Add Listing Property" was here and opened the retired pre-Block-C
+      // form, which wrote values no filter, tag or match can read. Removed
+      // rather than left corrupting rows; it returns when the stepped page
+      // reaches the mobile shell (E3/E4).
     ]
   }
 

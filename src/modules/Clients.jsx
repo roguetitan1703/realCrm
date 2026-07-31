@@ -28,6 +28,12 @@ export default function Clients({ store, go, sel, topBar }) {
   const [view, setView] = useState('list')
   const [selClient, setSelClient] = useState(null)
 
+  // Clicking Clients/Owners in the sub-nav while a contact was open did
+  // nothing visible: the sub-nav changed `sel.contactsTab`, but the open
+  // contact is LOCAL state and kept rendering over the list. Navigation has to
+  // win over a selection — so changing tab closes the record.
+  useEffect(() => { setSelClient(null) }, [tab])
+
   // build a uniform contact list
   const rows = []
   state.leads.forEach(l => rows.push({
@@ -48,6 +54,10 @@ export default function Clients({ store, go, sel, topBar }) {
   const owners = {}
   state.properties.forEach(p => {
     const ownerKey = ownerKeyOf(p)
+    // Skip listings with no owner recorded rather than inventing a contact for
+    // them. They surface as "no owner recorded" on the property, which is the
+    // honest prompt to add one.
+    if (!ownerKey) return
     const o = (owners[ownerKey] = owners[ownerKey] || { name: ownerKey, props: [] })
     o.props.push(p)
   })

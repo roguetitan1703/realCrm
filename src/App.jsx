@@ -125,14 +125,24 @@ export default function App() {
       return n
     })
 
+  // Every flag that makes a screen render something OTHER than its list. They
+  // are cleared on each navigation unless the caller explicitly sets one.
+  //
+  // This used to name only `leadOpen` and `propOpen` — the two that existed
+  // when it was written — and spread the rest of `sel` forward untouched. So
+  // once a takeover added since then was set, it never cleared: leaving the
+  // add-property wizard and clicking Properties re-opened the wizard, because
+  // `propAdd` was still true. Listing them in one place is what stops the next
+  // takeover from quietly inheriting the same bug.
+  const TAKEOVER_KEYS = ['leadOpen', 'leadId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey']
+
   const go = (key, patch = {}) => {
     setScreen(key)
-    setSel(s => ({
-      ...s,
-      leadOpen: patch.leadOpen !== undefined ? patch.leadOpen : false,
-      propOpen: patch.propOpen !== undefined ? patch.propOpen : false,
-      ...patch,
-    }))
+    setSel(s => {
+      const next = { ...s }
+      for (const k of TAKEOVER_KEYS) if (patch[k] === undefined) next[k] = null
+      return { ...next, ...patch }
+    })
   }
 
   const footer = {

@@ -419,7 +419,11 @@ function reducer(state, action) {
           return {
             ...p,
             tenancy: tenancy || undefined,
-            status: tenancy ? 'Under offer' : 'Available',
+            // A let flat is Leased. This wrote 'Under offer' — not a real
+            // status (the value is 'Under Offer'), so the row landed with a
+            // status nothing matches — and the wrong idea besides: the flat
+            // isn't under offer, it's tenanted.
+            status: tenancy ? 'Leased' : 'Available',
             timeline: [{ type: 'note', label, ago: 'just now' }, ...(p.timeline || [])],
           }
         }),
@@ -604,8 +608,16 @@ export function StoreProvider({ children }) {
   // "composing" animation, which would imply AI authorship we don't do.
   const composeFor = useCallback((wa) => {
     const prop = state.properties.find(p => p.id === wa.propId)
-    return prop ? generateMessage(prop, { lang: wa.lang, tone: wa.tone, variant: wa.variant }) : ''
-  }, [state.properties])
+    // The firm name MUST come from the signed-in tenant. Leaving it out fell
+    // back to the bundled demo brand, so a client received another firm's
+    // name at the bottom of the message.
+    return prop
+      ? generateMessage(prop, {
+          lang: wa.lang, tone: wa.tone, variant: wa.variant,
+          firmName: state.settings.firmName,
+        })
+      : ''
+  }, [state.properties, state.settings.firmName])
 
   const openWhatsApp = useCallback((propId, leadId) => {
     const wa = { propId, leadId, lang: 'Hinglish', tone: 'Standard', variant: 0 }
@@ -797,7 +809,7 @@ export function StoreProvider({ children }) {
     setTenancy: (propId, tenancy) => {
       dispatch({ type: 'SET_TENANCY', propId, tenancy })
       toast(tenancy ? 'Tenancy saved' : 'Flat freed')
-      apiClient.updateProperty(propId, { tenancy, status: tenancy ? 'Under offer' : 'Available' }).catch(err => console.warn('[Tenancy API] Backend error:', err.message))
+      apiClient.updateProperty(propId, { tenancy, status: tenancy ? 'Leased' : 'Available' }).catch(err => console.warn('[Tenancy API] Backend error:', err.message))
     },
     returnDeposit: (propId) => {
       dispatch({ type: 'RETURN_DEPOSIT', propId })

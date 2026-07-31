@@ -18,10 +18,17 @@ export const theme = {
     'Closed Won': 'stage-won',
     'Closed Lost': 'stage-lost',
   },
+  // Keys must be exactly the STATUS values (src/data/propertyFields.js) — an
+  // unmatched key means the tag falls through to the default styling, which is
+  // how an Available listing once rendered as closed. 'Under offer' (lowercase
+  // o) was a leftover that matched nothing and hid the missing entry.
   statusClass: {
     Available: 'status-available',
-    'Under offer': 'status-offer',
+    'Token Pending': 'status-offer',
     'Under Offer': 'status-offer',
+    Leased: 'status-closed',
+    Blocked: 'status-closed',
+    'Off-Market': 'status-closed',
     Closed: 'status-closed',
     Sold: 'status-closed',
     Let: 'status-closed',
