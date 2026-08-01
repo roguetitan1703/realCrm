@@ -78,6 +78,26 @@ workspaceRouter.get('/audit', async (req: Request, res: Response) => {
  * plus tenancies inside the renewal window. Replaces scanning every lead and
  * every property in the firm to build one screen.
  */
+/**
+ * GET /api/v1/workspace/bootstrap
+ * Everything the app needs before it can render anything, and nothing else:
+ * who you are, the roster, the firm's settings and brand, routing. No leads and
+ * no listings — screens read those for themselves, a page at a time.
+ *
+ * /workspace/state, which returns the entire tenant, stays for the desk until
+ * its own screens are migrated. On a real book it serialises to ~10MB, which is
+ * a blank phone for two seconds and too big to keep as an offline snapshot.
+ */
+workspaceRouter.get('/bootstrap', requireTenantAuth, async (_req: Request, res: Response) => {
+  try {
+    const full = await getState();
+    const { leads, properties, timeline_events, ...rest } = full as any;
+    return res.status(200).json({ success: true, state: rest });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to bootstrap', message: err.message });
+  }
+});
+
 workspaceRouter.get('/today', requireTenantAuth, async (req: Request, res: Response) => {
   try {
     const scopeAgentId = req.user?.role === 'agent' ? req.user?.userId : undefined;

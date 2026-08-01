@@ -28,8 +28,9 @@ export default function PhoneActions({ store, go, context = {} }) {
   if (kind === 'lead' || kind === 'prop') {
     const isLead = kind === 'lead'
     const def = isLead ? LEADS_DEF : PROPERTIES_DEF
-    const list = isLead ? store.state.leads : store.state.properties
-    const record = list.find(x => x.id === context.id)
+    // The record the sheet is acting on, from the cache rather than by scanning
+    // the whole collection. Whatever opened this sheet already loaded it.
+    const record = store.lookup(isLead ? 'lead' : 'property', context.id)
     if (record) {
       const { quick, manage } = buildActionTiers(def, store, record, context.actionCtx || {})
       actions = [...quick, ...manage]

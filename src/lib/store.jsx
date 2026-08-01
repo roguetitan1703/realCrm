@@ -18,6 +18,13 @@ export const useStore = () => useContext(StoreCtx)
 
 const clone = (x) => JSON.parse(JSON.stringify(x))
 
+// Which chrome is mounted. The two share this store, and only one of them has
+// finished moving off the collections, so the boot read differs for now.
+function isPhoneChrome() {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia?.('(max-width: 900px)')?.matches === true
+}
+
 // ── Offline snapshot ────────────────────────────────────────────────────────
 // The last server state, cached per tenant so an offline reload still shows the
 // firm's real data (the service worker can't cache the cross-origin API in the
@@ -609,7 +616,12 @@ export function StoreProvider({ children }) {
   // show — but doing that on a routine poll means one dropped packet flips a
   // working desk into looking offline, then back, every few seconds.
   const loadServerState = useCallback((background = false) => {
-    return apiClient.getState()
+    // The phone's four screens each read what they show — a page of leads, a
+    // page of listings, the Today feed, one record at a time — so it has no use
+    // for the collections and must not pay ~10MB to launch. The desk still has
+    // screens that read them, so it keeps the full read until those move.
+    const fetchState = isPhoneChrome() ? apiClient.getBootstrap : apiClient.getState
+    return fetchState()
       .then(res => {
         if (res && res.success && res.state) {
           dispatch({ type: 'HYDRATE_SERVER', state: res.state })

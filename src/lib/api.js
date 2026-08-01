@@ -195,6 +195,8 @@ export const api = {
   getAdminToken: () => lsGet(ADMIN_TOKEN_KEY),
   clearAdminToken: () => lsSet(ADMIN_TOKEN_KEY, ''),
   getState: () => request('/workspace/state'),
+  // Session + firm identity, no record collections. What the phone boots on.
+  getBootstrap: () => request('/workspace/bootstrap'),
   // Tiny change-token used by the live-refresh loop; see getPulse() on the server.
   getPulse: () => request('/workspace/pulse'),
   hasPendingWrites,
@@ -227,6 +229,17 @@ export const api = {
   // /records/:id/actions/* below are the separate actionsRouter endpoints.
   getLeads: () => request('/leads'),
   getLead: (id) => request(`/leads/${encodeURIComponent(id)}`),
+  listLeads: (params = {}) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
+    const s = qs.toString()
+    return request(`/leads/page${s ? `?${s}` : ''}`)
+  },
+  getLeadsSummary: () => request('/leads/summary'),
+  // Candidate listings for a lead's requirement. Scored client-side by
+  // matching.js — this only narrows what it runs against.
+  getLeadMatches: (id) => request(`/leads/${encodeURIComponent(id)}/matches`),
+  getToday: () => request('/workspace/today'),
   createLead: (lead) => request('/leads', { method: 'POST', body: JSON.stringify(lead) }),
   updateLead: (id, patch) => request(`/modules/leads/records/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteLead: (id) => request(`/modules/leads/records/${id}`, { method: 'DELETE' }),

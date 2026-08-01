@@ -11,6 +11,8 @@
 // deals: a lead being worked with nothing scheduled after it, and a lead nobody
 // owns. Both are always answerable from data we actually hold, rather than
 // needing a timestamp the follow-up model does not carry.
+import { useEffect, useState } from 'react'
+import { api } from '../../lib/api.js'
 import { Overdue, StageTag, MoreRows, useCap } from '../../components/primitives.jsx'
 import { initials, reqShort, renewalSignal, unitLabel } from '../../lib/format.js'
 import InstallPrompt from '../../components/InstallPrompt.jsx'
@@ -94,14 +96,33 @@ function Group({ g, onOpen, store, onSeeAll }) {
   )
 }
 
+// One read for the whole screen. Kept here rather than in the store because
+// Today is the only thing that wants it, and it is a view, not shared state.
+function useTodayFeed(dataAsOf) {
+  const [feed, setFeed] = useState({ leads: [], renewals: [] })
+  useEffect(() => {
+    let live = true
+    api.getToday()
+      .then(r => { if (live && r?.success) setFeed({ leads: r.leads || [], renewals: r.renewals || [] }) })
+      .catch(() => {})
+    return () => { live = false }
+  }, [dataAsOf])
+  return feed
+}
+
 export default function PhoneToday({ store, me, go, topBar }) {
   const { state } = store
   // An agent's queue is their own leads. A manager or owner on a phone is
   // looking at the same queue for the whole desk — the scope changes, the
   // screen does not.
-  const scoped = state.role === 'agent' && me
-    ? state.leads.filter(l => l.agentId === me.id)
-    : state.leads
+  // The feed is one request for exactly the rows that can appear in a group on
+  // this screen — leads that are overdue, scheduled, unassigned, new or recent,
+  // plus tenancies inside the renewal window. It used to be a scan over every
+  // lead and every property in the firm. The grouping below is unchanged; only
+  // where the rows come from is different. Scope (an agent sees their own
+  // queue) is applied in the query.
+  const feed = useTodayFeed(state.dataAsOf)
+  const scoped = feed.leads
 
   const onOpen = (l) => go('leads', { leadId: l.id, leadOpen: true })
   const openProp = (p) => go('properties', { propId: p.id, propOpen: true })
@@ -109,7 +130,7 @@ export default function PhoneToday({ store, me, go, topBar }) {
 
   // Expiring tenancies, soonest first. Scoped to the whole desk: a renewal
   // belongs to the listing, not to whoever last touched the lead.
-  const renewals = state.properties
+  const renewals = feed.renewals
     .map(p => ({ p, signal: renewalSignal(p.tenancy) }))
     .filter(r => r.signal && r.signal.tone !== 'ok')
     .sort((a, b) => a.signal.days - b.signal.days)

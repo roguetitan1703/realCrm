@@ -6,6 +6,9 @@ import { Button, Timeline, Overdue, Avatar, CappedList } from '../components/pri
 import { fitReasons, thumbTint, initials, unitLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
+import { useServerList } from '../lib/serverList.js'
+import { api } from '../lib/api.js'
+import { useEffect } from 'react'
 import Icon from '../components/Icon.jsx'
 import { LEADS_DEF } from './definitions.jsx'
 
@@ -14,6 +17,17 @@ import { LEADS_DEF } from './definitions.jsx'
 // label is user-facing text that has changed spelling before.
 function isSiteVisit(followUp) {
   return /site\s*visit/i.test(followUp?.action || '')
+}
+
+// Segment pill counts, straight from the database.
+function useLeadsSummary(dataAsOf) {
+  const [counts, setCounts] = useState({})
+  useEffect(() => {
+    let live = true
+    api.getLeadsSummary().then(r => { if (live && r?.success) setCounts(r.summary) }).catch(() => {})
+    return () => { live = false }
+  }, [dataAsOf])
+  return counts
 }
 
 export default function Leads({ store, go, sel, setSel, topBar, phone }) {
@@ -36,10 +50,14 @@ export default function Leads({ store, go, sel, setSel, topBar, phone }) {
   const open = sel.leadOpen && sel.leadId
   if (open) return <LeadRecord store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} />
 
-  // Agent role sees only their own pipeline; the shared engine handles filter/search/sort.
-  const records = state.role === 'agent'
-    ? state.leads.filter(l => l.agentId === state.activeAgentId)
-    : state.leads
+  // One page from the server. The agent's own-pipeline scope is applied in the
+  // query, not by filtering an array here — a filter the client applies is a
+  // display choice, not a permission.
+  const source = useServerList(
+    (params) => api.listLeads({ page: params.page, limit: params.limit, q: params.q, segment: seg === 'all' ? undefined : seg }),
+    { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
+    [state.dataAsOf, seg],
+  )
 
   const onOpen = (l) => go('leads', { leadId: l.id, leadOpen: true })
   // The KPI strip used to sit above these pills reading Total / Overdue /
@@ -49,19 +67,21 @@ export default function Leads({ store, go, sel, setSel, topBar, phone }) {
   // B2 — sub-segments. The buckets live on LEADS_DEF (definitions.jsx) so the
   // pattern belongs to the module standard, not to this screen. Counts are of
   // what the agent can actually see, so an agent's "Overdue 3" is their three.
+  // Pill counts come from Postgres. They used to be `records.filter(...).length`
+  // over every lead in the firm, which is the same number only while the whole
+  // collection is in the browser.
+  const counts = useLeadsSummary(state.dataAsOf)
   const segs = (LEADS_DEF.segments || []).map(sg => ({
     key: sg.key,
     label: sg.label,
     tone: sg.tone,
     on: seg === sg.key,
-    count: records.filter(sg.match).length,
+    count: counts[sg.key] ?? counts.total ?? 0,
     onClick: () => setSegP(sg.key),
   }))
-  const activeSeg = (LEADS_DEF.segments || []).find(sg => sg.key === seg)
-  const scoped = activeSeg && seg !== 'all' ? records.filter(activeSeg.match) : records
 
   const { header, toolbar, body } = ModuleListView({
-    def: LEADS_DEF, records: scoped, store, onOpen,
+    def: LEADS_DEF, source, store, onOpen,
     filters: flt, onFilters: setFltP,
     search: q, onSearch: setQP,
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
@@ -87,12 +107,29 @@ export default function Leads({ store, go, sel, setSel, topBar, phone }) {
   )
 }
 
+// The listings worth showing this lead. The server narrows the book to
+// candidates; matching.js still does the scoring and the fit reasons, so the
+// answers are the ones the product has always given.
+function useLeadMatches(lead) {
+  const [cands, setCands] = useState([])
+  useEffect(() => {
+    if (!lead?.id) { setCands([]); return }
+    let live = true
+    api.getLeadMatches(lead.id).then(r => { if (live) setCands(r?.data || []) }).catch(() => { if (live) setCands([]) })
+    return () => { live = false }
+  }, [lead?.id])
+  return lead ? matchesForLead(lead, cands) : []
+}
+
 function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   // The lead this screen is showing — fetched on its own if we don't already
   // hold it. This used to be a find() over every lead in the firm, which meant
   // a deep link from a notification sat on "Opening lead details…" until the
   // whole collection had downloaded, and said it forever if it never did.
   const { record: l, loading, error } = useRecord(store, 'lead', sel.leadId)
+  // Above the early return: a hook cannot be called conditionally, and the
+  // "record not loaded yet" branch below is exactly such a condition.
+  const matches = useLeadMatches(l)
   if (!l) {
     return (
       <>
@@ -104,7 +141,6 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     )
   }
   const a = store.agentById(l.agentId)
-  const matches = matchesForLead(l, store.state.properties)
   const overdue = l.overdue
   const back = () => setSel(s => ({ ...s, leadOpen: false }))
 
@@ -116,7 +152,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
 
   // merged property list: shortlisted pinned first, then system matches
   const shortlistIds = l.shortlist || []
-  const byId = (id) => store.state.properties.find(p => p.id === id)
+  const byId = (id) => store.lookup('property', id)
   const fbMap = l.feedback || {}
   const propRows = [
     ...shortlistIds.map(byId).filter(Boolean).map(p => ({ p, shortlisted: true, fit: fitReasons(p, l.req).score, line: quotedShort(p) })),

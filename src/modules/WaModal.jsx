@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+import { api } from '../lib/api.js'
 import { WaCanvas } from '../components/chrome.jsx'
 import { Segmented } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
@@ -21,17 +23,29 @@ import { MESSAGE_LANGUAGES } from '../data/vocabLocale.js'
 
 export default function WaModal({ store }) {
   const wa = store.state.waState
+  // Candidate listings for the attach menu. Fetched for the lead in play rather
+  // than derived from every property in the firm; the shortlist is pinned from
+  // the cache. Declared before the early return — a hook cannot be conditional.
+  const [cands, setCands] = useState([])
+  const leadId = wa?.leadId || null
+  useEffect(() => {
+    if (!leadId) { setCands([]); return }
+    let live = true
+    api.getLeadMatches(leadId).then(r => { if (live) setCands(r?.data || []) }).catch(() => { if (live) setCands([]) })
+    return () => { live = false }
+  }, [leadId])
+
   if (!wa) return null
-  const p = store.state.properties.find(x => x.id === wa.propId) || null
-  const l = store.state.leads.find(x => x.id === wa.leadId) || null
+  const p = store.lookup('property', wa.propId)
+  const l = store.lookup('lead', wa.leadId)
 
   // Shortlisted first — someone put them there on purpose — then what the
   // system found, minus anything already shortlisted.
   const options = (() => {
     if (!l) return []
-    const short = (l.shortlist || []).map(id => store.state.properties.find(x => x.id === id)).filter(Boolean)
+    const short = (l.shortlist || []).map(id => store.lookup('property', id)).filter(Boolean)
     const shortIds = new Set(short.map(x => x.id))
-    const matched = matchesForLead(l, store.state.properties).filter(m => !shortIds.has(m.id))
+    const matched = matchesForLead(l, cands).filter(m => !shortIds.has(m.id))
     return [
       ...short.map(x => ({ p: x, tag: 'Shortlisted' })),
       ...matched.map(x => ({ p: x, tag: `${fitReasons(x, l.req).score}% match` })),
