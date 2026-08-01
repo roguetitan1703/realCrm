@@ -221,6 +221,10 @@ const TARGETS = [
   { key: 'name', label: 'Name', required: true },
   { key: 'phone', label: 'Phone', required: true },
   { key: 'email', label: 'Email' },
+  // Unmapped, this silently defaults to Sale for every enquiry — map it
+  // whenever the source distinguishes rent from sale, so a rent-seeker
+  // doesn't land in the sale bucket and get matched against sale-only stock.
+  { key: 'req.deal', label: 'Deal type (sale or rent)' },
   { key: 'req.locality', label: 'Locality' },
   { key: 'req.config', label: 'Configuration' },
   { key: 'req.budgetMin', label: 'Budget from' },

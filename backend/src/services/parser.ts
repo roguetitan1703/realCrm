@@ -105,6 +105,19 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
     if (/l|lakh|lac/.test(s)) return Math.round(n * 100000);
     return Math.round(n);
   },
+  /**
+   * "For Rent" / "Resale" / "New Booking" / "Buyer Lead" → 'rent' | 'sale'.
+   * Portals bury this in a transaction-type or category field rather than
+   * sending a clean enum, and it's never guessed at by a mapping — read
+   * `null` (unrecognised text) and the default-if-still-empty stage below
+   * fills the tenant's fallback, the same as any other field.
+   */
+  deal_in: (v) => {
+    const s = String(v ?? '').toLowerCase();
+    if (/\brent(al)?\b|\blease\b|\btenant\b|\bletting\b/.test(s)) return 'rent';
+    if (/\bsale\b|\bsell\b|\bresale\b|\bbuy(er)?\b|\bpurchase\b|\bnew\s*booking\b/.test(s)) return 'sale';
+    return null;
+  },
 };
 
 // The lead fields a config is allowed to write. An allow-list, because the
@@ -231,6 +244,7 @@ const HINTS: Record<string, string[]> = {
   name: ['name', 'full_name', 'fullname', 'customer_name', 'lead_name', 'client_name', 'contact_name'],
   phone: ['phone', 'mobile', 'phone_number', 'mobile_number', 'contact_number', 'contact', 'msisdn'],
   email: ['email', 'email_id', 'email_address', 'mail'],
+  'req.deal': ['deal', 'deal_type', 'dealtype', 'listing_type', 'transaction_type', 'purpose', 'category', 'property_for'],
   'req.locality': ['locality', 'location', 'area', 'preferred_locality', 'city', 'project_location'],
   'req.config': ['config', 'bhk', 'configuration', 'property_type', 'requirement', 'unit_type'],
   'req.budgetMin': ['budget_min', 'min_budget', 'budget_from', 'price_min'],
@@ -242,6 +256,7 @@ const HINTS: Record<string, string[]> = {
 const DEFAULT_TRANSFORM: Record<string, string> = {
   phone: 'phone_in', name: 'trim', email: 'trim',
   'req.config': 'bhk', 'req.budgetMin': 'money_in', 'req.budgetMax': 'money_in',
+  'req.deal': 'deal_in',
 };
 
 /**
