@@ -93,22 +93,25 @@ export function ModuleDetail({
   const progOnPath = progStages ? progStages.includes(progCurrent) : false
 
   return (
-    <DetailLayout rail={
+    // The whole rail is desk furniture and is not drawn on a phone, where it
+    // stacks ABOVE the record: the first thing on a lead was a follow-up card
+    // and on a listing a "Share listing" banner, both standing in front of the
+    // identity of the thing you just opened and offering what the action bar
+    // already offers a few pixels below. Its actions live in the definition, so
+    // the action button still carries every one of them. Rendering an empty
+    // ActionRail would leave its "Actions" strip behind, so it is skipped whole.
+    <DetailLayout rail={phone ? null : (
       <ActionRail>
         {nba && <RailSection>{nba}</RailSection>}
         {railTop && <RailSection>{railTop}</RailSection>}
-        {/* On a phone this block is deleted, not restyled. The action button
-            already carries these exact actions for the open record — rendering
-            them again as a grid at the bottom of the page is the same button
-            twice, and the one at the bottom is the one nobody reaches. */}
-        {!phone && (quick.length > 0 || manage.length > 0) && (
+        {(quick.length > 0 || manage.length > 0) && (
           <RailSection title="Quick actions">
             <QuickActions items={quick} />
             <MoreMenu items={manage} />
           </RailSection>
         )}
       </ActionRail>
-    }>
+    )}>
       {/* 1. Record header — identity band: icon + title + facts + actions, with
           the progression stepper beneath. Same for every module. */}
       <div className="rechead">

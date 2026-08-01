@@ -181,6 +181,24 @@ export const LEADS_DEF = {
       run: (store, l) => store.openWhatsApp(null, l.id) },
     { id: 'logCall', tier: 'quick', icon: 'phone', label: 'Log call',
       run: (store, l) => store.openModal({ kind: 'logCall', leadId: l.id }) },
+    // Scheduling was deliberately NOT here while the follow-up card owned it —
+    // see the note above. The card is gone on a phone (it rendered above the
+    // record's own identity, restating what the action bar already offers), and
+    // the moment it went, a phone had no way to schedule or close a follow-up at
+    // all. So the intent belongs to the definition, where every surface gets it,
+    // rather than to one bespoke card only the desk renders.
+    { id: 'schedule', tier: 'quick', icon: 'calendar',
+      label: (l) => (l.followUp ? 'Reschedule appointment' : 'Schedule appointment'),
+      sub: (l) => (l.followUp ? `${l.followUp.date} · ${l.followUp.time}` : null),
+      run: (store, l) => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id }) },
+    // A site visit closes with proof (B4); everything else is a plain done.
+    { id: 'followDone', tier: 'quick', icon: 'check', when: (l) => !!l.followUp,
+      label: (l) => (/site\s*visit/i.test(l.followUp?.action || '') ? 'Log site visit' : 'Mark follow-up done'),
+      sub: (l) => l.followUp?.action,
+      run: (store, l) => {
+        if (/site\s*visit/i.test(l.followUp?.action || '')) return store.openModal({ kind: 'visitProof', leadId: l.id })
+        store.setFollowUp(l.id, null); store.toast('Appointment marked completed')
+      } },
     // B4. Completing a scheduled Site Visit appointment also opens this, but
     // that path only exists if someone scheduled one — so a visit that just
     // happened had nowhere to be logged. This is the always-available entry.

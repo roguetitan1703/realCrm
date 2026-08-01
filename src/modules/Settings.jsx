@@ -5,6 +5,7 @@ import { theme, PROTECTED_STAGES } from '../data/theme.js'
 import { api } from '../lib/api.js'
 import { MESSAGE_LANGUAGES } from '../data/vocabLocale.js'
 import { DEFAULT_FOLLOWUPS, PLACEHOLDERS } from '../data/followUpTemplates.js'
+import InstallPanel from '../components/InstallPanel.jsx'
 
 const NAV = [
   { key: 'brand', label: 'Brand', icon: 'layers' },
@@ -410,6 +411,10 @@ function SystemSection({ store }) {
   return (
     <>
       <SecHead title="System & data" sub="Environment controls for this workspace. Your records live in a live PostgreSQL database — changes here affect real data." />
+      {/* The desk had no install route at all: the prompt card only ever
+          rendered on the phone's Today tab, so a browser on a laptop was never
+          offered it. Renders nothing when already installed. */}
+      <InstallPanel />
       <Panel>
         <SectionHead title="Database" />
         <div className="sys-row">

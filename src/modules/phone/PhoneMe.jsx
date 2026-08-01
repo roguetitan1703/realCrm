@@ -3,6 +3,7 @@ import { Avatar, Segmented } from '../../components/primitives.jsx'
 import { MESSAGE_LANGUAGES } from '../../data/vocabLocale.js'
 import { getPref, setPref } from '../../lib/prefs.js'
 import { pushPermission } from '../../lib/push.js'
+import InstallRow from '../../components/InstallRow.jsx'
 import Icon from '../../components/Icon.jsx'
 
 const ROLE_LABEL = { admin: 'Owner · Admin', manager: 'Manager', agent: 'Field agent' }
@@ -54,6 +55,11 @@ export default function PhoneMe({ store, me, topBar }) {
             </div>
           </div>
         )}
+
+        {/* The Today card is a one-time nudge and stays dismissed forever once
+            waved away, which left no route to installing at all. This is the
+            permanent one. */}
+        <InstallRow />
 
         <button className="me-signout" onClick={() => store.logout()}>
           <Icon name="x" size={16} />Sign out
