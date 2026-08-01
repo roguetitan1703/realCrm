@@ -32,7 +32,12 @@ async function getTenant(slug: string): Promise<any | null> {
 }
 
 function initialsOf(name: string): string {
-  return String(name || '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || PLATFORM.initials;
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return PLATFORM.initials;
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return parts.slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
 
 /**

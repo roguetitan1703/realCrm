@@ -1597,7 +1597,7 @@ export async function updateSettings(patch: any): Promise<any> {
     delete patch.renameStage;
   }
   if (patch.firmName) {
-    await sql`UPDATE tenants SET name = ${patch.firmName} WHERE id = ${tid()} OR slug = ${tid()};`;
+    await sql`UPDATE tenants SET name = ${patch.firmName}, pwa_config = NULL WHERE id = ${tid()} OR slug = ${tid()};`;
   }
   const current = await getSettings();
   const next = { ...current, ...patch };
