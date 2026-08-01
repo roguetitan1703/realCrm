@@ -2,19 +2,17 @@ import { useEffect, useState } from 'react'
 import { Panel, SectionHead, Button } from './primitives.jsx'
 import { canInstall, onInstallAvailable, promptInstall, isIOS, isStandalone } from '../lib/pwa.js'
 
-// The desk's install route. Same reasoning as InstallRow on the phone: the only
-// install affordance in the product was a dismissible card on the phone's Today
-// tab, so a laptop was never offered one and a dismissed card never came back.
+// The desk's install route. Same reasoning as InstallRow on the phone: a laptop
+// was never offered one and had to be installed through the browser's own
+// address-bar control, which most people do not know is there.
 export default function InstallPanel() {
   const [installable, setInstallable] = useState(canInstall())
   useEffect(() => onInstallAvailable(setInstallable), [])
 
   if (isStandalone()) return null
+  // No deferred prompt yet means we name the browser's own menu instead of
+  // showing a button that cannot do anything.
   const ios = isIOS()
-  // No deferred prompt means the browser has decided this is not installable
-  // right now — usually because it already is. A button that cannot do anything
-  // is worse than no button.
-  if (!installable && !ios) return null
 
   return (
     <Panel>
@@ -25,7 +23,9 @@ export default function InstallPanel() {
           <div className="sys-s">
             {ios
               ? 'In Safari, tap Share then Add to Home Screen. Alerts require this on iPhone and iPad.'
-              : 'Opens in its own window without the browser bar, and can receive alerts when closed.'}
+              : installable
+                ? 'Opens in its own window without the browser bar, and can receive alerts when closed.'
+                : 'Open the browser menu and choose Install app.'}
           </div>
         </div>
         {!ios && installable && <Button variant="primary" onClick={promptInstall}>Install</Button>}

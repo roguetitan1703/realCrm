@@ -77,6 +77,33 @@ function MoreMenu({ items }) {
   )
 }
 
+// A related zone. Most are always open; one that carries a long table (the 80
+// other units in a township) declares `collapsed` and starts shut, so opening a
+// listing on a phone doesn't mean scrolling past someone else's inventory to
+// reach the owner or the timeline.
+function DetailSection({ s, record, store }) {
+  const [open, setOpen] = useState(!s.collapsed)
+  const title = typeof s.title === 'function' ? s.title(record, store) : s.title
+  const right = typeof s.right === 'function' ? s.right(record, store) : s.right
+  if (!s.collapsed) {
+    return (
+      <Panel>
+        {s.title && <SectionHead title={title} right={right} />}
+        {s.render(record, store)}
+      </Panel>
+    )
+  }
+  return (
+    <Panel>
+      <button type="button" className={'sh sh-toggle' + (open ? ' open' : '')} onClick={() => setOpen(o => !o)}>
+        <span className="t">{title}</span>
+        <span className="r">{right}<Icon name="chevDown" size={15} /></span>
+      </button>
+      {open && s.render(record, store)}
+    </Panel>
+  )
+}
+
 export function ModuleDetail({
   def, record, store, onEdit, title, avatar,
   signals, primary = [], nba, railTop, beforeSheet, sections = [], actionCtx = {},
@@ -174,10 +201,7 @@ export function ModuleDetail({
 
       {/* 3. Related zones — declarative, module-supplied */}
       {visibleSections.map(s => (
-        <Panel key={s.id}>
-          {s.title && <SectionHead title={typeof s.title === 'function' ? s.title(record, store) : s.title} right={typeof s.right === 'function' ? s.right(record, store) : s.right} />}
-          {s.render(record, store)}
-        </Panel>
+        <DetailSection key={s.id} s={s} record={record} store={store} />
       ))}
     </DetailLayout>
   )

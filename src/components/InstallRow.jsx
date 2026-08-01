@@ -5,15 +5,9 @@ import { canInstall, onInstallAvailable, promptInstall, isIOS, isStandalone } fr
 // ============================================================================
 // 📲 Install — the PERMANENT route, as opposed to the one-time nudge card
 // ============================================================================
-// InstallPrompt is a dismissible card on Today, and dismissing it writes a
-// localStorage flag that never expires — so waving it away once removed the
-// only way to install the app. It also only ever rendered on the phone's Today
-// tab, meaning a desktop browser was never offered anything at all and had to
-// be installed through the browser's own address-bar control, which most people
-// do not know is there.
-//
-// This row is that missing route: always present while the app is installable
-// and not already installed, never dismissible.
+// InstallPrompt sits on Today. This row is the one on Me, so the app is always
+// reachable from the same place a person goes to change anything else about
+// their device. Both are silenced by exactly one thing: being installed.
 export default function InstallRow() {
   const [installable, setInstallable] = useState(canInstall())
   useEffect(() => onInstallAvailable(setInstallable), [])
@@ -21,12 +15,11 @@ export default function InstallRow() {
   // Already installed — there is nothing to offer.
   if (isStandalone()) return null
 
-  const ios = isIOS()
   // iOS has no install API at all: Safari only offers Share → Add to Home
   // Screen, so the instruction IS the feature there. Elsewhere, no deferred
-  // beforeinstallprompt means the browser has judged the app not installable
-  // (or already installed it), and claiming otherwise would be a dead button.
-  if (!installable && !ios) return null
+  // beforeinstallprompt yet means we name the browser's own menu rather than
+  // showing a button that cannot do anything.
+  const ios = isIOS()
 
   return (
     <div className="q-group">
@@ -38,7 +31,9 @@ export default function InstallRow() {
           <div className="install-row-sub">
             {ios
               ? 'Tap Share, then Add to Home Screen. Alerts need this on iPhone.'
-              : 'Opens without the browser bar and can receive alerts.'}
+              : installable
+                ? 'Opens without the browser bar and can receive alerts.'
+                : 'Open the browser menu and choose Install app.'}
           </div>
         </div>
         {!ios && installable && (

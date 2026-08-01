@@ -106,7 +106,7 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
 
   const startUrl = t ? `/?ws=${t.slug}` : '/';
   res.set('Content-Type', 'application/manifest+json');
-  res.set('Cache-Control', 'public, max-age=300');
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   return res.json({
     id: startUrl,
     name,

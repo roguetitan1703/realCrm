@@ -1596,6 +1596,9 @@ export async function updateSettings(patch: any): Promise<any> {
     await sql`UPDATE crm_leads SET stage = ${patch.renameStage.to} WHERE stage = ${patch.renameStage.from} AND tenant_id = ${tid()};`;
     delete patch.renameStage;
   }
+  if (patch.firmName) {
+    await sql`UPDATE tenants SET name = ${patch.firmName} WHERE id = ${tid()} OR slug = ${tid()};`;
+  }
   const current = await getSettings();
   const next = { ...current, ...patch };
   await sql`

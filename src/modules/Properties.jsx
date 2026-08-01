@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleTable, PropertyCard, ProjectCard } from '../components/collections.jsx'
 import { buildProjects, unitsInProject, unitsByWing } from '../lib/projects.js'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
-import { StatusTag, Quoted, Button, KV, Timeline, MoreRows, useCap, CappedList } from '../components/primitives.jsx'
+import { StatusTag, Quoted, Button, KV, Timeline, MoreRows, useCap, CappedList, Panel, SectionHead } from '../components/primitives.jsx'
 import { NbaBanner } from '../components/rail.jsx'
 import { leadsForProperty } from '../lib/matching.js'
 import { fileUrl } from '../lib/media.js'
@@ -169,6 +169,35 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
         sub={buyers[0] ? `${p.type} · ${p.locality}` : 'No matched contacts yet'}
         cta={{ label: 'WhatsApp', icon: 'wa', onClick: () => store.openModal({ kind: 'pickBuyer', propId: p.id }) }} />
 
+  // Photos sit directly under the identity band rather than four panels down.
+  // A listing IS its photos — they are what gets forwarded, and burying them
+  // under tenancy and a township's worth of other units meant nobody scrolled
+  // far enough to notice a listing had none.
+  // C8. Watermarked on the device before upload, so what's shown here is exactly
+  // what a client receives if it's forwarded on.
+  const media = (p.media || [])
+  const photos = media.length === 0 ? null : (
+    <Panel>
+      <SectionHead title="Photos" right={`${media.length}`} />
+      <div className="pgal">
+        {media.map((m, i) => (
+          // Every tile the same size, cover named rather than enlarged. A
+          // double-width first tile made a two-photo listing look broken, and
+          // it disagreed with the picker in the add form, where the cover is a
+          // badge. Opens in place — a target="_blank" threw the raw file at a
+          // new tab and lost the record the agent was reading.
+          <button type="button" key={m.key} className="pgal-i" onClick={() => setGallery(i)}>
+            {m.kind === 'video'
+              ? <span className="pgal-vidbox"><Icon name="play" size={22} fill /></span>
+              : <img src={fileUrl(m.key)} alt="" loading="lazy" />}
+            {i === 0 && <span className="pgal-cover">Cover</span>}
+            {m.kind === 'video' && <span className="pgal-cover pgal-vid">Video</span>}
+          </button>
+        ))}
+      </div>
+    </Panel>
+  )
+
   // Module-unique related sections (the record sheet already covers all fields).
   const sections = [
     {
@@ -195,34 +224,11 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
           </>,
     },
     {
-      id: 'siblings', when: () => siblings.length > 0,
+      // Collapsed. This is a neighbour's inventory, not this listing's — useful
+      // when you go looking for it, a wall of rows when you don't.
+      id: 'siblings', when: () => siblings.length > 0, collapsed: true,
       title: `Other units in ${proj || 'this project'}`, right: `${siblings.length} more`,
       render: () => <UnitsTable units={siblings} onOpen={(id) => go('properties', { propId: id, propOpen: true })} />,
-    },
-    {
-      // C8. Photos are watermarked on the device before upload, so what's shown
-      // here is exactly what a client receives if it's forwarded on.
-      id: 'media', when: () => (p.media || []).length > 0,
-      title: 'Photos', right: `${(p.media || []).length}`,
-      render: () => (
-        <div className="pgal">
-          {(p.media || []).map((m, i) => (
-            // Every tile the same size, cover named rather than enlarged. A
-            // double-width first tile made a two-photo listing look broken,
-            // and it disagreed with the picker in the add form, where the
-            // cover is a badge.
-            // Opens in place. A target="_blank" threw the raw file at a new
-            // tab and lost the record the agent was reading.
-            <button type="button" key={m.key} className="pgal-i" onClick={() => setGallery(i)}>
-              {m.kind === 'video'
-                ? <span className="pgal-vidbox"><Icon name="play" size={22} fill /></span>
-                : <img src={fileUrl(m.key)} alt="" loading="lazy" />}
-              {i === 0 && <span className="pgal-cover">Cover</span>}
-              {m.kind === 'video' && <span className="pgal-cover pgal-vid">Video</span>}
-            </button>
-          ))}
-        </div>
-      ),
     },
     {
       // C7. The owner is OPTIONAL and internal — never in anything a client
@@ -303,6 +309,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
           title={p.society}
           primary={[{ label: 'WhatsApp', icon: 'wa', onClick: () => store.openModal({ kind: 'pickBuyer', propId: p.id }) }]}
           nba={nba}
+          beforeSheet={photos}
           sections={sections}
           actionCtx={{ onClose: back }}
         />

@@ -75,9 +75,15 @@ export function isIOS() {
   return typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent);
 }
 
+// Installed or not. `standalone` is the common answer, but an app installed to
+// the Windows/ChromeOS shell can report `minimal-ui` or `fullscreen`, and iOS
+// answers on navigator.standalone instead of matchMedia at all. Reading only
+// the first of those told an installed app it wasn't installed.
 export function isStandalone() {
   if (typeof window === 'undefined') return false;
-  return window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const m = (q) => window.matchMedia?.(q)?.matches === true;
+  return m('(display-mode: standalone)') || m('(display-mode: fullscreen)')
+    || m('(display-mode: minimal-ui)') || window.navigator.standalone === true;
 }
 
 // ── Home-screen icons ──────────────────────────────────────────────────────
