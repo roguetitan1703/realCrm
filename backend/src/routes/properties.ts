@@ -10,28 +10,75 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getProperties, createProperty, getUnits, blockUnit, releaseUnit } from '../services/store';
+import {
+  createProperty, getUnits, blockUnit, releaseUnit,
+  listProperties, getPropertyById, getPropertiesSummary,
+} from '../services/store';
 import { canEditListing } from '../lib/permissions';
 
 export const propertiesRouter = Router();
 propertiesRouter.use(requireTenantAuth);
 
 /**
- * 1. GET ALL PROPERTIES FOR WORKSPACE
- * GET /api/v1/properties
+ * 1. ONE PAGE OF LISTINGS
+ * GET /api/v1/properties?page=&limit=&q=&status=&deal=&type=&locality=&project=
+ *
+ * Paged and filtered in Postgres. This route used to read every listing in the
+ * firm and filter the array in Node, which is the same mistake getState() made
+ * and the reason a launch shipped ~10MB.
  */
 propertiesRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const { tower } = req.query;
-    let properties = await getProperties();
-
-    if (tower && typeof tower === 'string') {
-      properties = properties.filter(p => p.tower?.toUpperCase() === tower.toUpperCase());
-    }
-
-    return res.status(200).json({ success: true, count: properties.length, data: properties });
+    const q = req.query;
+    const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+    const { rows, total, page, limit } = await listProperties({
+      page: Number(q.page) || 1,
+      limit: Number(q.limit) || 50,
+      q: str(q.q),
+      status: str(q.status),
+      deal: str(q.deal),
+      type: str(q.type),
+      locality: str(q.locality),
+      project: str(q.project),
+      excludeId: str(q.excludeId),
+    });
+    return res.status(200).json({
+      success: true, data: rows, total, page, limit,
+      pages: Math.max(1, Math.ceil(total / limit)),
+      count: rows.length,
+    });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to fetch properties', message: err.message });
+  }
+});
+
+/**
+ * 1b. COUNTS AND FILTER OPTIONS
+ * GET /api/v1/properties/summary
+ * The stat strip and the filter menus, without reading the listings themselves.
+ * Declared before /:id so 'summary' is never taken for an id.
+ */
+propertiesRouter.get('/summary', async (_req: Request, res: Response) => {
+  try {
+    return res.status(200).json({ success: true, summary: await getPropertiesSummary() });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to summarise properties', message: err.message });
+  }
+});
+
+/**
+ * 1c. ONE LISTING, IN FULL
+ * GET /api/v1/properties/:id
+ * The detail screen's own read. Everything that used to do
+ * `state.properties.find(p => p.id === id)` over the whole book comes here.
+ */
+propertiesRouter.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const p = await getPropertyById(req.params.id);
+    if (!p) return res.status(404).json({ success: false, error: 'Not found' });
+    return res.status(200).json({ success: true, property: p });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch property', message: err.message });
   }
 });
 

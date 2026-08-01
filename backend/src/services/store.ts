@@ -1260,6 +1260,94 @@ export async function getProperties(): Promise<any[]> {
   return rows.map(rowToProperty);
 }
 
+/**
+ * One page of listings, filtered and counted in Postgres.
+ *
+ * The desk used to read every listing in the firm on every launch, through
+ * getState(), and page it in the browser. That is fine at eight listings and
+ * fatal at a few thousand: one tenant's read was ~10MB, which is a two-second
+ * blank screen on a phone and too big to keep as an offline snapshot at all.
+ * And it only gets worse — the same row grows every time we add a field.
+ *
+ * So the database does the work it is for. `total` comes back with the page
+ * because a pager needs to know how many pages there are without fetching them.
+ */
+export async function listProperties(opts: {
+  page?: number; limit?: number; q?: string;
+  status?: string; deal?: string; type?: string; locality?: string; project?: string;
+  excludeId?: string;
+} = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
+  const t = tid();
+  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
+  const page = Math.max(Number(opts.page) || 1, 1);
+  const offset = (page - 1) * limit;
+
+  // Built as a list of fragments so an absent filter contributes no SQL at all,
+  // rather than a `WHERE (x IS NULL OR …)` that no index can use.
+  const where: any[] = [sql`tenant_id = ${t}`];
+  const q = String(opts.q || '').trim();
+  if (q) {
+    const like = `%${q.toLowerCase()}%`;
+    where.push(sql`(lower(title) LIKE ${like}
+      OR lower(coalesce(config->>'society', '')) LIKE ${like}
+      OR lower(coalesce(config->>'locality', '')) LIKE ${like}
+      OR lower(coalesce(config->>'project', '')) LIKE ${like})`);
+  }
+  if (opts.status) where.push(sql`coalesce(status, 'Available') = ${opts.status}`);
+  if (opts.deal) where.push(sql`coalesce(config->>'deal', 'sale') = ${opts.deal}`);
+  if (opts.type) where.push(sql`config->>'type' = ${opts.type}`);
+  if (opts.locality) where.push(sql`config->>'locality' = ${opts.locality}`);
+  if (opts.project) {
+    // A project is a grouping lens over the `project`/`society` fields, not a
+    // stored entity — same key the units view groups on.
+    where.push(sql`coalesce(nullif(config->>'project', ''), config->>'society') = ${opts.project}`);
+  }
+  if (opts.excludeId) where.push(sql`id <> ${opts.excludeId}`);
+
+  const clause = where.reduce((acc, frag, i) => (i === 0 ? frag : sql`${acc} AND ${frag}`));
+
+  const [rows, countRows] = await Promise.all([
+    sql`SELECT * FROM crm_properties WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+    sql`SELECT count(*)::int AS n FROM crm_properties WHERE ${clause}`,
+  ]);
+  return { rows: rows.map(rowToProperty), total: countRows[0]?.n ?? 0, page, limit };
+}
+
+export async function getPropertyById(id: string): Promise<any | null> {
+  const rows = await sql`SELECT * FROM crm_properties WHERE tenant_id = ${tid()} AND id = ${id} LIMIT 1`;
+  return rows[0] ? rowToProperty(rows[0]) : null;
+}
+
+/**
+ * The numbers the stat strip and the filter menus need, counted in Postgres.
+ * These are the only reason several screens were reading the whole table — a
+ * count of available listings does not require the listings.
+ */
+export async function getPropertiesSummary(): Promise<any> {
+  const t = tid();
+  const [totals, byStatus, byDeal, localities, projects] = await Promise.all([
+    sql`SELECT count(*)::int AS n FROM crm_properties WHERE tenant_id = ${t}`,
+    sql`SELECT coalesce(status, 'Available') AS k, count(*)::int AS n
+        FROM crm_properties WHERE tenant_id = ${t} GROUP BY 1`,
+    sql`SELECT coalesce(config->>'deal', 'sale') AS k, count(*)::int AS n
+        FROM crm_properties WHERE tenant_id = ${t} GROUP BY 1`,
+    sql`SELECT DISTINCT config->>'locality' AS v FROM crm_properties
+        WHERE tenant_id = ${t} AND coalesce(config->>'locality', '') <> '' ORDER BY 1`,
+    sql`SELECT coalesce(nullif(config->>'project', ''), config->>'society') AS v, count(*)::int AS n
+        FROM crm_properties WHERE tenant_id = ${t}
+        GROUP BY 1 HAVING coalesce(nullif(config->>'project', ''), config->>'society') IS NOT NULL
+        ORDER BY 2 DESC LIMIT 200`,
+  ]);
+  const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
+  return {
+    total: totals[0]?.n ?? 0,
+    byStatus: asMap(byStatus),
+    byDeal: asMap(byDeal),
+    localities: localities.map(r => r.v),
+    projects: projects.map(r => ({ name: r.v, units: r.n })),
+  };
+}
+
 export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
   // Random suffix: a bulk import fires these in the same millisecond, and a bare
   // Date.now() collided on the primary key — every row after the first 500'd.
