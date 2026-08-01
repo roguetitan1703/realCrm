@@ -936,12 +936,14 @@ export async function searchWorkspace(q: string, limit = 8): Promise<{ leads: an
  */
 export async function getDeskSummary(): Promise<any> {
   const t = tid();
-  const [totals, byStage, bySource, perAgent, props, owners] = await Promise.all([
+  const [totals, byStage, bySource, perAgent, perAgentStage, props, owners] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE NOT coalesce(stage, '') LIKE 'Closed%')::int AS open,
                count(*) FILTER (WHERE overdue)::int AS overdue,
                count(*) FILTER (WHERE follow_up IS NOT NULL)::int AS with_follow_up,
-               count(*) FILTER (WHERE stage = 'Closed Won')::int AS won
+               count(*) FILTER (WHERE stage = 'Closed Won')::int AS won,
+               count(*) FILTER (WHERE created_at > now() - interval '3 hours')::int AS new_today,
+               count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
           FROM crm_leads WHERE tenant_id = ${t}`,
     sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads WHERE tenant_id = ${t} GROUP BY 1`,
     sql`SELECT coalesce(source, 'Website') AS k, count(*)::int AS n FROM crm_leads WHERE tenant_id = ${t} GROUP BY 1`,
@@ -951,6 +953,12 @@ export async function getDeskSummary(): Promise<any> {
                count(*) FILTER (WHERE stage = 'Closed Won')::int AS won,
                count(*)::int AS total
           FROM crm_leads WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1`,
+    // Per-agent stage breakdown. Which stages count as "contacted" or "visited"
+    // depends on the firm's own configured stage order, which lives in settings
+    // on the client — so the counts come back per stage and the client applies
+    // its own meaning rather than this query hardcoding stage names.
+    sql`SELECT agent_id AS a, coalesce(stage, 'New') AS s, count(*)::int AS n
+          FROM crm_leads WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1, 2`,
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available
           FROM crm_properties WHERE tenant_id = ${t}`,
@@ -958,11 +966,19 @@ export async function getDeskSummary(): Promise<any> {
          WHERE tenant_id = ${t} AND coalesce(owner_name, '') <> ''`,
   ]);
   const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
+  const stagesByAgent = new Map<string, Record<string, number>>();
+  for (const r of perAgentStage as any[]) {
+    if (!stagesByAgent.has(r.a)) stagesByAgent.set(r.a, {});
+    stagesByAgent.get(r.a)![r.s] = r.n;
+  }
   return {
-    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0 },
+    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0 },
     byStage: asMap(byStage),
     bySource: asMap(bySource),
-    perAgent: Object.fromEntries(perAgent.map(r => [r.k, { open: r.open, overdue: r.overdue, won: r.won, total: r.total }])),
+    perAgent: Object.fromEntries(perAgent.map(r => [r.k, {
+      open: r.open, overdue: r.overdue, won: r.won, total: r.total,
+      byStage: stagesByAgent.get(r.k) || {},
+    }])),
     properties: props[0] || { total: 0, available: 0 },
     owners: owners[0]?.n ?? 0,
   };
@@ -1028,6 +1044,110 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
     }
   }
   return { leads, properties };
+}
+
+/**
+ * The contacts directory, paged.
+ *
+ * Two derived stores over the same two tables: "clients" are the leads (people
+ * with a requirement) and "owners" are the distinct owners across the listings
+ * (people with inventory). Neither is a stored entity, which is why the desk
+ * built them by walking both collections in full — a directory of a few hundred
+ * people that required downloading every lead and every property.
+ *
+ * Roles come from the same data they always did: a lead's deal decides
+ * buyer/tenant, and an owner's mix of sale and rent listings decides
+ * seller/landlord/both.
+ */
+export async function listContacts(opts: {
+  tab?: string; role?: string; q?: string; page?: number; limit?: number;
+} = {}): Promise<{ rows: any[]; total: number; counts: Record<string, number>; page: number; limit: number }> {
+  const t = tid();
+  const limit = Math.min(Math.max(Number(opts.limit) || 25, 1), 200);
+  const page = Math.max(Number(opts.page) || 1, 1);
+  const offset = (page - 1) * limit;
+  const q = String(opts.q || '').trim().toLowerCase();
+  const like = `%${q}%`;
+  const role = String(opts.role || 'all');
+
+  if (opts.tab !== 'owners') {
+    const where: any[] = [sql`tenant_id = ${t}`];
+    if (q) where.push(sql`(lower(name) LIKE ${like} OR phone LIKE ${like} OR lower(coalesce(email, '')) LIKE ${like})`);
+    const dealOf = sql`coalesce(deal, req->>'deal', 'sale')`;
+    if (role === 'Buyer') where.push(sql`${dealOf} = 'sale'`);
+    else if (role === 'Tenant') where.push(sql`${dealOf} = 'rent'`);
+    // The pill counts must ignore the pill itself -- "Buyers 40 / Tenants 12"
+    // has to keep showing both while one of them is selected.
+    const base = q
+      ? sql`tenant_id = ${t} AND (lower(name) LIKE ${like} OR phone LIKE ${like} OR lower(coalesce(email, '')) LIKE ${like})`
+      : sql`tenant_id = ${t}`;
+    const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+
+    const [rows, countRows] = await Promise.all([
+      sql`SELECT * FROM crm_leads WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+      sql`SELECT count(*)::int AS total,
+                 count(*) FILTER (WHERE ${dealOf} = 'sale')::int AS buyer,
+                 count(*) FILTER (WHERE ${dealOf} = 'rent')::int AS tenant
+            FROM crm_leads WHERE ${base}`,
+    ]);
+    const c = countRows[0] || { total: 0, buyer: 0, tenant: 0 };
+    const total = role === 'Buyer' ? c.buyer : role === 'Tenant' ? c.tenant : c.total;
+    return {
+      rows: rows.map(r => {
+        const lead = rowToLead(r);
+        return {
+          id: 'lead-' + lead.id, kind: 'demand',
+          role: (lead.req?.deal === 'rent') ? 'Tenant' : 'Buyer',
+          name: lead.name, phone: lead.phone, email: lead.email || '',
+          locality: lead.req?.locality || '', minsAgo: lead.minsAgo,
+          rawLeadId: lead.id, rawLead: lead, stage: lead.stage,
+        };
+      }),
+      total, counts: { all: c.total, Buyer: c.buyer, Tenant: c.tenant }, page, limit,
+    };
+  }
+
+  // Owners: one row per distinct owner name across the listings.
+  const where: any[] = [sql`tenant_id = ${t}`, sql`coalesce(owner_name, '') <> ''`];
+  if (q) where.push(sql`(lower(owner_name) LIKE ${like} OR coalesce(owner_phone, '') LIKE ${like})`);
+  const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+
+  const grouped = await sql`
+    SELECT owner_name AS name,
+           max(owner_phone) AS phone,
+           max(owner_email) AS email,
+           max(locality) AS locality,
+           count(*)::int AS listings,
+           count(*) FILTER (WHERE coalesce(deal, 'sale') = 'sale')::int AS sale,
+           count(*) FILTER (WHERE coalesce(deal, 'sale') = 'rent')::int AS rent,
+           array_remove(array_agg(DISTINCT locality), NULL) AS localities,
+           (array_agg(title ORDER BY created_at DESC))[1] AS first_title,
+           (array_agg(type ORDER BY created_at DESC))[1] AS first_type
+      FROM crm_properties WHERE ${clause}
+     GROUP BY owner_name ORDER BY 5 DESC`;
+
+  const roleOf = (r: any) => (r.sale > 0 && r.rent > 0) ? 'Seller / Landlord' : (r.rent > 0 ? 'Landlord' : 'Seller');
+  const all = grouped.map((r: any) => ({
+    id: 'owner-' + String(r.name).replace(/\s+/g, '-'), kind: 'supply',
+    role: roleOf(r), name: r.name, phone: r.phone || '+91 —', email: r.email || '',
+    locality: r.locality || '', minsAgo: 120, listings: r.listings,
+    localities: r.localities || [], firstTitle: r.first_title, firstType: r.first_type,
+  }));
+  const matchesRole = (rRole: string) => role === 'all'
+    || (role === 'Seller' ? (rRole === 'Seller' || rRole === 'Seller / Landlord')
+      : role === 'Landlord' ? (rRole === 'Landlord' || rRole === 'Seller / Landlord')
+      : rRole === role);
+  const filtered = all.filter(r => matchesRole(r.role));
+  return {
+    rows: filtered.slice(offset, offset + limit),
+    total: filtered.length,
+    counts: {
+      all: all.length,
+      Seller: all.filter(r => r.role === 'Seller' || r.role === 'Seller / Landlord').length,
+      Landlord: all.filter(r => r.role === 'Landlord' || r.role === 'Seller / Landlord').length,
+    },
+    page, limit,
+  };
 }
 
 export async function getState(): Promise<ServerState> {
@@ -1456,6 +1576,9 @@ export async function listLeads(opts: {
   if (opts.segment === 'overdue') where.push(sql`overdue = true`);
   else if (opts.segment === 'unassigned') where.push(sql`agent_id IS NULL`);
   else if (opts.segment === 'open') where.push(sql`stage NOT LIKE 'Closed%'`);
+  // The calendar shows leads with a next step booked, and only those. It used
+  // to find them by filtering the whole lead table in the browser.
+  else if (opts.segment === 'followup') where.push(sql`follow_up IS NOT NULL`);
 
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
   const [rows, countRows] = await Promise.all([

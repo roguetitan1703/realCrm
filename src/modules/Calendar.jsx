@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Empty, PageHeader } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
+import { api } from '../lib/api.js'
+import { useServerData } from '../lib/useServerData.js'
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -32,8 +34,14 @@ export default function Calendar({ store, go, topBar }) {
   const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), 1))
   const [picked, setPicked] = useState(ymd(today))
 
+  // Only leads with a next step booked can appear on a calendar, so that is
+  // what the server returns. This used to scan every lead in the firm to find
+  // the handful that had a follow-up date.
+  const { data: page } = useServerData(
+    () => api.listLeads({ segment: 'followup', limit: 200 }), [state.dataAsOf], { data: [] })
+
   // build event list with resolved dates
-  const events = state.leads.filter(l => l.followUp).map(l => {
+  const events = (page?.data || []).filter(l => l.followUp).map(l => {
     const date = resolveDate(l.followUp.date, today)
     const isVisit = /visit/i.test(l.followUp.action)
     const overdue = l.overdue

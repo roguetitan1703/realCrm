@@ -1,36 +1,51 @@
 import { Kpi, Panel, SectionHead, Avatar, StageTag } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
-import { sourcesUsed } from '../lib/suggest.js'
+import { api } from '../lib/api.js'
+import { useServerData } from '../lib/useServerData.js'
 
 // The hero first screen. Every tile, bar and row is clickable — it drills into
 // the underlying filtered list or record. KPIs reflect the real job (oversight/
 // throughput), not vanity money.
 export default function Dashboard({ store, go, topBar }) {
   const { state } = store
-  const leads = state.leads
-  const active = leads.filter(l => !l.stage.startsWith('Closed'))
-  const overdue = leads.filter(l => l.overdue)
-  const unassigned = leads.filter(l => !l.agentId)
-  const newToday = leads.filter(l => l.stage === 'New' || l.minsAgo < 180)
-  const visits = leads.filter(l => l.stage === 'Site Visit')
+  // Every number on this screen is a count. Not one of them needs a lead row,
+  // and this screen used to hold all of them in memory to produce a handful of
+  // integers -- the clearest example in the app of downloading a book to read
+  // its page count.
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null)
+  const { data: overduePage } = useServerData(
+    () => api.listLeads({ segment: 'overdue', limit: 12 }), [state.dataAsOf], { data: [] })
+  const overdue = overduePage?.data || []
+
+  const totals = desk?.leads || { total: 0, open: 0, overdue: 0, won: 0, new_today: 0, unassigned: 0 }
+  const byStage = desk?.byStage || {}
+  const bySource = desk?.bySource || {}
+  const perAgent = desk?.perAgent || {}
 
   const toLeads = (leadFilter) => go('leads', { leadFilter, leadOpen: false, leadId: undefined })
 
   const { stages } = state.settings
-  // Every source that has actually sent a lead — not settings.sources, which
-  // a new Connections integration never touches. See sourcesUsed().
-  const sources = sourcesUsed(store)
-  const stageCounts = stages.map(s => ({ name: s, list: leads.filter(l => l.stage === s) }))
-  const maxStage = Math.max(1, ...stageCounts.map(s => s.list.length))
-  const srcMax = Math.max(1, ...sources.map(sn => leads.filter(l => l.source === sn).length))
+  // Sources that have actually sent a lead, counted server-side. `bySource` is
+  // the firm's real traffic, not settings.sources -- which a new Connections
+  // integration never touches.
+  const sources = Object.keys(bySource).sort((a, b) => bySource[b] - bySource[a])
+  const stageCounts = stages.map(s => ({ name: s, n: byStage[s] || 0 }))
+  const maxStage = Math.max(1, ...stageCounts.map(s => s.n))
+  const srcMax = Math.max(1, ...sources.map(sn => bySource[sn]))
+  const visitCount = byStage['Site Visit'] || 0
 
+  // "Contacted" and "Visits" mean whatever this firm's stage order says they
+  // mean, so the meaning is applied here where the settings live; the server
+  // just returns the per-stage counts.
   const lb = state.agents.map(a => {
-    const mine = leads.filter(l => l.agentId === a.id)
+    const row = perAgent[a.id] || { total: 0, won: 0, byStage: {} }
+    const st = row.byStage || {}
+    const countStages = (pred) => stages.filter(pred).reduce((sum, name) => sum + (st[name] || 0), 0)
     return {
-      a, assigned: mine.length,
-      contacted: mine.filter(l => stages.indexOf(l.stage) >= 1).length,
-      visits: mine.filter(l => l.stage === 'Site Visit' || l.stage === 'Closed Won').length,
-      closed: mine.filter(l => l.stage === 'Closed Won').length,
+      a, assigned: row.total,
+      contacted: countStages((_, i) => i >= 1),
+      visits: countStages(name => name === 'Site Visit' || name === 'Closed Won'),
+      closed: row.won,
     }
   }).sort((x, y) => y.closed - x.closed)
 
@@ -40,21 +55,21 @@ export default function Dashboard({ store, go, topBar }) {
       <div className="app-body" style={{ padding: '20px 22px 44px', display: 'flex', flexDirection: 'column', gap: 18 }}>
         {/* KPIs — the day's job, each drills into the exact list */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }}>
-          <Kpi icon="clock" label="Overdue follow-ups" value={overdue.length} sub="action required" alert onClick={() => toLeads({ flag: ['overdue'] })} />
-          <Kpi icon="person" label="Unassigned" value={unassigned.length} sub="need routing" onClick={() => toLeads({ flag: ['unassigned'] })} />
-          <Kpi icon="plus" label="New today" value={newToday.length} sub="fresh enquiries" onClick={() => toLeads({ flag: ['new'] })} />
-          <Kpi icon="calendar" label="Site visits" value={visits.length} sub="booked & upcoming" onClick={() => toLeads({ stage: ['Site Visit'] })} />
+          <Kpi icon="clock" label="Overdue follow-ups" value={totals.overdue} sub="action required" alert onClick={() => toLeads({ flag: ['overdue'] })} />
+          <Kpi icon="person" label="Unassigned" value={totals.unassigned} sub="need routing" onClick={() => toLeads({ flag: ['unassigned'] })} />
+          <Kpi icon="plus" label="New today" value={totals.new_today} sub="fresh enquiries" onClick={() => toLeads({ flag: ['new'] })} />
+          <Kpi icon="calendar" label="Site visits" value={visitCount} sub="booked & upcoming" onClick={() => toLeads({ stage: ['Site Visit'] })} />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1.75fr 1fr', gap: 16, alignItems: 'start' }}>
           {/* pipeline — click a stage to open it */}
           <Panel>
-            <SectionHead title="Pipeline by stage" right={`${active.length} active`} />
+            <SectionHead title="Pipeline by stage" right={`${totals.open} active`} />
             {stageCounts.map(s => (
               <button key={s.name} className="drow" onClick={() => toLeads({ stage: [s.name] })}>
                 <span style={{ width: 96, fontSize: 12.5, fontWeight: 600, flexShrink: 0, textAlign: 'left' }}>{s.name}</span>
-                <div className="bar" style={{ flex: 1, height: 18 }}><i style={{ width: Math.round(s.list.length / maxStage * 100) + '%' }} /></div>
-                <span className="u-serif mono-num" style={{ width: 26, textAlign: 'right', fontWeight: 600 }}>{s.list.length}</span>
+                <div className="bar" style={{ flex: 1, height: 18 }}><i style={{ width: Math.round(s.n / maxStage * 100) + '%' }} /></div>
+                <span className="u-serif mono-num" style={{ width: 26, textAlign: 'right', fontWeight: 600 }}>{s.n}</span>
                 <Icon name="chevRight" size={15} className="ic drow-go" />
               </button>
             ))}
@@ -64,7 +79,7 @@ export default function Dashboard({ store, go, topBar }) {
             <SectionHead title="Leads by source" />
             {sources.length === 0 && <div className="detail-empty">No leads yet.</div>}
             {sources.map(sn => {
-              const c = leads.filter(l => l.source === sn).length
+              const c = bySource[sn]
               return (
                 <button key={sn} className="drow drow-col" onClick={() => toLeads({ source: [sn] })}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginBottom: 4, fontSize: 12.5 }}>
@@ -96,7 +111,7 @@ export default function Dashboard({ store, go, topBar }) {
           </Panel>
           {/* overdue — click a row to open the lead */}
           <Panel>
-            <SectionHead title="Overdue follow-ups" right={overdue.length ? `${overdue.length}` : undefined} />
+            <SectionHead title="Overdue follow-ups" right={totals.overdue ? `${totals.overdue}` : undefined} />
             {overdue.length === 0 && <div className="u-muted" style={{ fontSize: 13, textAlign: 'center', padding: '14px 0' }}>All caught up.</div>}
             {overdue.map(l => {
               const a = store.agentById(l.agentId)

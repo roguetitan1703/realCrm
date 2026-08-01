@@ -4,8 +4,9 @@ import { useNav } from './lib/useNav.js'
 import { AppShell } from './layouts/layouts.jsx'
 import { TopBar, Toasts, StaleBanner } from './components/chrome.jsx'
 import { PLATFORM, tenantDocTitle } from './data/platform.js'
-import { ownerCount } from './lib/format.js'
 import { autoEnablePush } from './lib/push.js'
+import { api } from './lib/api.js'
+import { useServerData } from './lib/useServerData.js'
 
 import Login from './modules/Login.jsx'
 import Dashboard from './modules/Dashboard.jsx'
@@ -107,10 +108,13 @@ export default function App() {
     )
   }
 
-  const leads = state.leads
-  const newCount = leads.filter(l => l.stage === 'New').length
+  // Sidebar badges are four integers. They were four array scans over every
+  // lead and every property the browser had downloaded to produce them.
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null)
+  const totals = desk?.leads || { total: 0, overdue: 0, unassigned: 0 }
+  const newCount = desk?.byStage?.['New'] || 0
   const unreadNotifs = (state.notifications || []).filter(n => !n.read).length
-  const unread = leads.filter(l => l.overdue).length + leads.filter(l => !l.agentId).length + unreadNotifs
+  const unread = totals.overdue + totals.unassigned + unreadNotifs
 
   // RBAC Navigation filtering: Agent role hides system management & settings
   const allowedKeys = state.role === 'agent' ? ['dashboard', 'leads', 'properties', 'clients', 'calendar'] : null
@@ -122,8 +126,8 @@ export default function App() {
       if (n.key === 'clients') return {
         ...n,
         children: [
-          { sub: 'clients', label: 'Clients', count: leads.length },
-          { sub: 'owners', label: 'Owners', count: ownerCount(state.properties) },
+          { sub: 'clients', label: 'Clients', count: totals.total },
+          { sub: 'owners', label: 'Owners', count: desk?.owners || 0 },
         ],
       }
       return n

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Avatar, Button, Field, Input, PhoneInput, SectionHead, PageHeader, Segmented, RowMenu, Pager } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
+import { useServerData } from '../lib/useServerData.js'
 
 const ROLE_LABEL = { admin: 'Owner / Admin', owner: 'Owner', agent: 'Sales Advisor', manager: 'Sales Manager' }
 const roleLabel = (r) => ROLE_LABEL[r] || (r ? r[0].toUpperCase() + r.slice(1) : 'Sales Advisor')
@@ -45,13 +46,16 @@ export default function Team({ store, go, topBar }) {
     return () => { live = false }
   }, [state.agents.length])
 
-  // Per-agent workload + performance from live state.
+  // Per-agent workload, counted in SQL. The roster is a table of integers and
+  // it used to need every lead in the firm in memory to produce them.
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null)
+  const perAgent = desk?.perAgent || {}
   const roster = state.agents.map(a => {
-    const mine = state.leads.filter(l => l.agentId === a.id)
-    const open = mine.filter(l => !l.stage.startsWith('Closed')).length
-    const won = mine.filter(l => l.stage === 'Closed Won').length
-    const lost = mine.filter(l => l.stage === 'Closed Lost').length
-    const overdue = mine.filter(l => l.overdue).length
+    const row = perAgent[a.id] || { open: 0, won: 0, overdue: 0, total: 0, byStage: {} }
+    const open = row.open
+    const won = row.won
+    const lost = row.byStage?.['Closed Lost'] || 0
+    const overdue = row.overdue
     const settled = won + lost
     const stateWinRate = settled ? Math.round((won / settled) * 100) : null
     const m = perf[a.id]
@@ -63,11 +67,11 @@ export default function Team({ store, go, topBar }) {
   })
 
   const activeCount = roster.filter(r => !r.off).length
-  const openLeads = state.leads.filter(l => !l.stage.startsWith('Closed'))
-  const unassigned = openLeads.filter(l => !l.agentId).length
-  const overdueTotal = state.leads.filter(l => l.overdue).length
+  const openTotal = desk?.leads?.open || 0
+  const unassigned = desk?.leads?.unassigned || 0
+  const overdueTotal = desk?.leads?.overdue || 0
 
-  const evenShare = activeCount ? openLeads.length / activeCount : 0
+  const evenShare = activeCount ? openTotal / activeCount : 0
   const maxLoad = Math.max(1, ...roster.map(r => r.open))
 
   // Rank: on-duty first, then most closed, then busiest — a real standings order.
@@ -78,7 +82,7 @@ export default function Team({ store, go, topBar }) {
   // Glance KPIs — same compact ph-stats row as Import and the other modules.
   const kpis = [
     { label: 'On the desk', value: `${activeCount}/${state.agents.length}` },
-    { label: 'Open leads', value: openLeads.length, onClick: () => toLeads({}) },
+    { label: 'Open leads', value: openTotal, onClick: () => toLeads({}) },
     { label: 'Unassigned', value: unassigned, tone: unassigned > 0 ? 'alert' : undefined, onClick: () => toLeads({ flag: ['unassigned'] }) },
     { label: 'Overdue', value: overdueTotal, tone: overdueTotal > 0 ? 'alert' : undefined, onClick: () => toLeads({ flag: ['overdue'] }) },
   ]

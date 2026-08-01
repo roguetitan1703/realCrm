@@ -228,5 +228,3 @@ export function thumbTint(id) {
 // Every ownerless listing used to collapse into one phantom contact that
 // couldn't be opened, edited or called, because there was nobody behind it.
 export const ownerKeyOf = (p) => (p && p.owner) || null
-export const ownerCount = (properties = []) =>
-  new Set(properties.map(ownerKeyOf).filter(Boolean)).size

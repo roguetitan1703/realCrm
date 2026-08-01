@@ -203,6 +203,12 @@ export const api = {
   // answer this by filtering two in-memory arrays, which is the single reason
   // the arrays had to exist at all.
   search: (q, limit = 8) => request(`/workspace/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  // The contacts directory: leads as clients, listing owners as owners. Both
+  // are derived views, paged and counted in SQL.
+  listContacts: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== '')).toString()
+    return request(`/workspace/contacts${qs ? `?${qs}` : ''}`)
+  },
   // Desk counters (open leads, overdue, per-agent load) computed server-side.
   getDeskSummary: () => request('/workspace/desk-summary'),
   // One request for a whole file's worth of duplicate checks.

@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates } from '../services/store';
+import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates, listContacts } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { listAudit, verifyAuditChain } from '../services/audit';
@@ -137,6 +137,24 @@ workspaceRouter.post('/dedupe-check', requireTenantAuth, async (req: Request, re
     return res.status(200).json({ success: true, ...(await checkDuplicates({ phones: b.phones, names: b.names, titles: b.titles })) });
   } catch (err: any) {
     return res.status(500).json({ error: 'Dedupe check failed', message: err.message });
+  }
+});
+
+workspaceRouter.get('/contacts', requireTenantAuth, async (req: Request, res: Response) => {
+  try {
+    const q = req.query;
+    const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+    const out = await listContacts({
+      tab: str(q.tab), role: str(q.role), q: str(q.q),
+      page: Number(q.page) || 1, limit: Number(q.limit) || 25,
+    });
+    return res.status(200).json({
+      success: true, data: out.rows, total: out.total, counts: out.counts,
+      page: out.page, limit: out.limit,
+      pages: Math.max(1, Math.ceil(out.total / out.limit)),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to list contacts', message: err.message });
   }
 });
 

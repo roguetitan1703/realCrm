@@ -3,8 +3,11 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { StageTag, StatusTag, Avatar, Button, KV } from '../components/primitives.jsx'
-import { initials, reqLine, budgetRange, ownerKeyOf } from '../lib/format.js'
+import { initials, reqLine, budgetRange } from '../lib/format.js'
 import { CLIENTS_DEF } from './definitions.jsx'
+import { api } from '../lib/api.js'
+import { useServerList } from '../lib/serverList.js'
+import { useServerData } from '../lib/useServerData.js'
 
 // B3: Contacts is ONE section with TWO subnavs — Clients (demand: buyers,
 // tenants) and Owners (supply: sellers, landlords) — backed by separate
@@ -42,70 +45,34 @@ export default function Clients({ store, go, sel, topBar }) {
   // win over a selection — so changing tab closes the record.
   useEffect(() => { setSelClient(null); setPage(1) }, [tab])
 
-  // build a uniform contact list
-  const rows = []
-  state.leads.forEach(l => rows.push({
-    id: 'lead-' + l.id,
-    kind: 'demand',
-    role: l.req?.deal === 'rent' ? 'Tenant' : 'Buyer',
-    name: l.name,
-    phone: l.phone,
-    email: l.email || '',
-    locality: l.req?.locality || '',
-    minsAgo: l.minsAgo,
-    rawLeadId: l.id,
-    rawLead: l,
-    detail: [l.req?.config, l.req?.locality, budgetRange(l.req)].filter(Boolean).join(' · '),
-    signal: <StageTag stage={l.stage} />,
+  // The directory is two derived views over the leads and the listings, and
+  // both are paged and counted in SQL. Building them in the browser is what
+  // made a few hundred contacts require every lead and every property.
+  const source = useServerList(
+    (params) => api.listContacts({ ...params, tab, role: seg === 'all' ? undefined : seg }),
+    { search: q, sortKey, sortDir, page, pageSize },
+    [tab, seg, state.dataAsOf],
+  )
+  const rows = (source.rows || []).map(r => ({
+    ...r,
+    detail: r.kind === 'demand'
+      ? [r.rawLead?.req?.config, r.rawLead?.req?.locality, budgetRange(r.rawLead?.req)].filter(Boolean).join(' · ')
+      : r.listings === 1
+        ? `1 listing · ${r.firstTitle || ''}${r.firstType ? ` (${r.firstType})` : ''}`
+        : `${r.listings} listings across ${(r.localities || []).join(', ')}`,
+    signal: r.kind === 'demand' ? <StageTag stage={r.stage} /> : <StatusTag status="Active owner" />,
+    onClick: () => setSelClient(r),
   }))
+  const counts = source.counts || {}
 
-  const owners = {}
-  state.properties.forEach(p => {
-    const ownerKey = ownerKeyOf(p)
-    // Skip listings with no owner recorded rather than inventing a contact for
-    // them. They surface as "no owner recorded" on the property, which is the
-    // honest prompt to add one.
-    if (!ownerKey) return
-    const o = (owners[ownerKey] = owners[ownerKey] || { name: ownerKey, props: [] })
-    o.props.push(p)
-  })
-
-  Object.values(owners).forEach(o => {
-    const p = o.props[0]
-    const hasSale = o.props.some(x => x.deal === 'sale')
-    const hasRent = o.props.some(x => x.deal === 'rent')
-    const role = hasSale && hasRent ? 'Seller / Landlord' : hasRent ? 'Landlord' : 'Seller'
-    rows.push({
-      id: 'owner-' + o.name.replace(/\s+/g, '-'),
-      kind: 'supply',
-      role,
-      name: o.name,
-      phone: p.ownerPhone || '+91 —',
-      email: p.ownerEmail || '',
-      locality: p.locality || '',
-      minsAgo: 120,
-      rawProps: o.props,
-      detail: o.props.length === 1
-        ? `1 listing · ${p.society} (${p.type})`
-        : `${o.props.length} listings across ${[...new Set(o.props.map(x => x.locality))].join(', ')}`,
-      signal: <StatusTag status="Active owner" />,
-    })
-  })
-
-  rows.forEach(r => {
-    r.onClick = () => setSelClient(r)
-  })
-
-  const roleMatch = (rRole, segKey) => {
-    if (segKey === 'all') return true
-    if (segKey === 'Seller') return rRole === 'Seller' || rRole === 'Seller / Landlord'
-    if (segKey === 'Landlord') return rRole === 'Landlord' || rRole === 'Seller / Landlord'
-    return rRole === segKey
-  }
-
-  const demandRows = rows.filter(r => r.kind === 'demand')
-  const supplyRows = rows.filter(r => r.kind === 'supply')
-  const scopeRows = tab === 'clients' ? demandRows : supplyRows
+  // An owner's portfolio, fetched when one is opened. Owners are derived from
+  // the listings, so "their properties" is a query on owner name -- it was an
+  // array the row carried only because every property was already in memory.
+  const { data: portfolio } = useServerData(
+    () => (selClient?.kind === 'supply' && selClient.name)
+      ? api.listProperties({ q: selClient.name, limit: 50 }).then(r => r?.data || [])
+      : Promise.resolve([]),
+    [selClient?.id], [])
 
   // A role pill from the other store (e.g. "Landlord") would silently zero out
   // this list, so reset to All whenever the sub-nav switches stores.
@@ -116,30 +83,18 @@ export default function Clients({ store, go, sel, topBar }) {
   const roleOptions = tab === 'clients'
     ? [{ key: 'all', label: 'All' }, { key: 'Buyer', label: 'Buyers' }, { key: 'Tenant', label: 'Tenants' }]
     : [{ key: 'all', label: 'All' }, { key: 'Seller', label: 'Sellers' }, { key: 'Landlord', label: 'Landlords' }]
-  const segs = roleOptions.map(s => ({
-    ...s,
-    on: seg === s.key,
-    count: s.key === 'all' ? scopeRows.length : scopeRows.filter(r => roleMatch(r.role, s.key)).length,
-    onClick: () => setSegP(s.key),
+  const segs = roleOptions.map(o => ({
+    ...o, on: seg === o.key, count: counts[o.key] ?? 0, onClick: () => setSegP(o.key),
   }))
 
-  // Segment pre-filters the derived directory; the shared engine handles the rest.
-  const records = seg === 'all' ? scopeRows : scopeRows.filter(r => roleMatch(r.role, seg))
-
-  const kpis = tab === 'clients'
-    ? [
-        { label: 'Clients', value: demandRows.length, onClick: () => setSegP('all') },
-        { label: 'Buyers', value: demandRows.filter(r => r.role === 'Buyer').length, onClick: () => setSegP('Buyer') },
-        { label: 'Tenants', value: demandRows.filter(r => r.role === 'Tenant').length, onClick: () => setSegP('Tenant') },
-      ]
-    : [
-        { label: 'Owners', value: supplyRows.length, onClick: () => setSegP('all') },
-        { label: 'Sellers', value: supplyRows.filter(r => roleMatch(r.role, 'Seller')).length, onClick: () => setSegP('Seller') },
-        { label: 'Landlords', value: supplyRows.filter(r => roleMatch(r.role, 'Landlord')).length, onClick: () => setSegP('Landlord') },
-      ]
+  const kpis = roleOptions.map(o => ({
+    label: o.key === 'all' ? (tab === 'clients' ? 'Clients' : 'Owners') : o.label,
+    value: counts[o.key] ?? 0,
+    onClick: () => setSegP(o.key),
+  }))
 
   const { header, toolbar, body } = ModuleListView({
-    def: CLIENTS_DEF, records, store,
+    def: CLIENTS_DEF, source: { ...source, rows }, store,
     onOpen: (r) => setSelClient(r),
     filters: flt, onFilters: setFltP,
     search: q, onSearch: setQP,
@@ -183,9 +138,9 @@ export default function Clients({ store, go, sel, topBar }) {
                     Open full lead workflow & timeline →
                   </Button>
                 </div>
-              ) : selClient.rawProps ? (
+              ) : selClient.kind === 'supply' ? (
                 <div className="cli-portfolio">
-                  {selClient.rawProps.map(p => (
+                  {(portfolio || []).map(p => (
                     <div key={p.id} className="cli-prop">
                       <div>
                         <div className="cli-prop-t">{p.society} <span className="u-muted cli-prop-meta">({p.type} · {p.locality})</span></div>
