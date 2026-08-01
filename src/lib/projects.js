@@ -6,10 +6,18 @@
 // lists scattered flats/shops/plots never has to create a project, while a
 // township broker gets their towers grouped for free.
 
-import { projectOf, wingOf, developerOf, fmtMoney, INDEPENDENT_PROJECT } from './format.js'
+import { projectOf, wingOf, developerOf, fmtMoney, INDEPENDENT_PROJECT, parseBudgetNum } from './format.js'
 
 const isAvailable = (p) => (p.status || 'Available') === 'Available'
-const isSold = (p) => ['Sold', 'Closed', 'Let'].includes(p.status)
+const isSold = (p) => ['Sold', 'Closed', 'Let', 'Leased'].includes(p.status)
+
+function parsePrice(val) {
+  if (val == null || val === '') return null
+  if (typeof val === 'number') return isNaN(val) ? null : val
+  const cleaned = String(val).replace(/,/g, '')
+  const n = parseBudgetNum(cleaned)
+  return isNaN(n) ? null : n
+}
 
 // Group a list of unit records into projects. Returns an array sorted with the
 // largest real projects first and "Independent / Direct" always last.
@@ -29,7 +37,7 @@ export function buildProjects(units = []) {
 
   const projects = [...map.values()].map(proj => {
     const units = proj.units
-    const prices = units.map(u => u.price).filter(Boolean)
+    const prices = units.map(u => parsePrice(u.price)).filter(p => p !== null && !isNaN(p))
     const min = prices.length ? Math.min(...prices) : null
     const max = prices.length ? Math.max(...prices) : null
     return {

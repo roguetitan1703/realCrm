@@ -401,6 +401,7 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     duplicateOf: r.duplicate_of || undefined,
     followUp: r.follow_up || null,
     overdue: Boolean(r.overdue),
+    importBatchId: r.import_batch_id || undefined,
     minsAgo,
     timeline: leadEvents.length > 0 ? leadEvents : (r.notes || []).map((n: string) => ({ type: 'note', label: n, ago: 'just now' })),
   };
@@ -982,16 +983,17 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // String([{...}]) === "[object Object]", which is exactly what the record
   // sheet then displayed. The event history is NEVER the possession target.
   const timelinePref = leadData.timeline_pref ?? req.timeline ?? null;
+  const importBatchId = leadData.importBatchId ?? leadData.import_batch_id ?? null;
 
   const t = tid();
   const rows = await sql`
     INSERT INTO crm_leads (
       id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback,
-      deal, requirement, locality, budget_min, budget_max, purpose, timeline_pref, tenant_id
+      deal, requirement, locality, budget_min, budget_max, purpose, timeline_pref, import_batch_id, tenant_id
     )
     VALUES (
       ${newId}, ${name}, ${phone}, ${email}, ${stage}, ${source}, ${agentId}, ${sql.json(req)}, ${sql.json(notes)}, ${sql.json(shortlist)}, ${sql.json(feedback)},
-      ${deal}, ${requirement}, ${locality}, ${budgetMin}, ${budgetMax}, ${purpose}, ${timelinePref}, ${t}
+      ${deal}, ${requirement}, ${locality}, ${budgetMin}, ${budgetMax}, ${purpose}, ${timelinePref}, ${importBatchId}, ${t}
     )
     RETURNING *;
   `;
@@ -1518,6 +1520,10 @@ export async function getSettings(): Promise<any> {
 }
 
 export async function updateSettings(patch: any): Promise<any> {
+  if (patch.renameStage?.from && patch.renameStage?.to) {
+    await sql`UPDATE crm_leads SET stage = ${patch.renameStage.to} WHERE stage = ${patch.renameStage.from} AND tenant_id = ${tid()};`;
+    delete patch.renameStage;
+  }
   const current = await getSettings();
   const next = { ...current, ...patch };
   await sql`

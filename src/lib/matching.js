@@ -10,8 +10,9 @@ import {
 export function matchesForLead(lead, allProps = []) {
   if (!lead?.req || !allProps?.length) return []
   const r = lead.req
+  const UNAVAILABLE = ['Sold', 'Leased', 'Off-Market', 'Blocked', 'Closed', 'Let']
   return allProps
-    .filter(p => p.deal === r.deal && p.type === r.config && p.status !== 'Closed')
+    .filter(p => p.deal === r.deal && p.type === r.config && !UNAVAILABLE.includes(p.status))
     .map(p => {
       let score = 0; const fit = []
       if (p.locality === r.locality) { score += 3; fit.push(r.locality) }

@@ -171,9 +171,8 @@ const SHARED_CONTEXT_KEYS = [
   'builder', 'possession', 'transactionType', 'ownership', 'areaUnit',
   'furnishType', 'fixtures', 'countedItems', 'societyAmenities',
   'consultingOption', 'consultingPercent', 'taxIncluded', 'maintenanceMode',
-  'preferredTenants', 'bachelorPref', 'petFriendly', 'totalFloors', 'rera', 'keyAccess',
-  // NOT owner/ownerPhone: two flats in one tower rarely share an owner, and
-  // copying one owner onto the next unit is a wrong fact, not a shortcut.
+  'preferredTenants', 'bachelorPref', 'petFriendly', 'totalFloors', 'rera',
+  // NOT keyAccess, owner, or ownerPhone — these are flat-specific facts.
 ]
 
 const blank = () => ({
@@ -394,6 +393,13 @@ export default function PropertyWizard({ store, go, sel, topBar }) {
   const counts = countsFor(form.bhk)
   const areaFields = areaFieldsFor(form)
 
+  // Re-synchronize form state if editing property target changes while mounted
+  useEffect(() => {
+    if (editing) {
+      setForm({ ...blank(), ...editing })
+    }
+  }, [editing?.id])
+
   // Persist the draft on every change — but never for an edit, or a half-made
   // change to an existing listing would resurface as a "new property" draft.
   useEffect(() => {
@@ -444,7 +450,11 @@ export default function PropertyWizard({ store, go, sel, topBar }) {
 
       if (again) {
         const next = blank()
-        for (const k of SHARED_CONTEXT_KEYS) if (form[k] !== undefined) next[k] = form[k]
+        for (const k of SHARED_CONTEXT_KEYS) {
+          if (form[k] !== undefined) {
+            next[k] = typeof form[k] === 'object' && form[k] !== null ? JSON.parse(JSON.stringify(form[k])) : form[k]
+          }
+        }
         setForm(next)
         setStep(0)
         store.toast(`Saved. Next unit in ${form.society || form.project || 'this project'}.`)

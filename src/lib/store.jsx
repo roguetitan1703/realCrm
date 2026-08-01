@@ -206,7 +206,7 @@ function reducer(state, action) {
 
     case 'LOGOUT': {
       clearAuthSession()
-      return { ...state, loggedIn: false }
+      return { ...freshState(), loggedIn: false }
     }
 
     case 'ONBOARD_TENANT': {
@@ -253,7 +253,7 @@ function reducer(state, action) {
       return {
         ...state,
         leads: state.leads.map(l => l.id === action.leadId
-          ? { ...l, agentId: action.agentId, timeline: [{ type: 'assign', label: 'Assigned to ' + (a ? a.first : ''), ago: 'just now' }, ...l.timeline] }
+          ? { ...l, agentId: action.agentId, timeline: [{ type: 'assign', label: 'Assigned to ' + (a ? a.first : ''), timestamp: Date.now(), ago: 'just now' }, ...l.timeline] }
           : l),
       }
     }
@@ -262,7 +262,7 @@ function reducer(state, action) {
       return {
         ...state,
         leads: state.leads.map(l => l.id === action.leadId
-          ? { ...l, stage: action.stage, timeline: [{ type: 'stage', label: 'Stage → ' + action.stage, ago: 'just now' }, ...l.timeline] }
+          ? { ...l, stage: action.stage, timeline: [{ type: 'stage', label: 'Stage → ' + action.stage, timestamp: Date.now(), ago: 'just now' }, ...l.timeline] }
           : l),
       }
     }
@@ -274,7 +274,7 @@ function reducer(state, action) {
       return {
         ...state,
         leads: state.leads.map(l => l.id === action.leadId
-          ? { ...l, followUp: fu, overdue: false, timeline: [{ type: 'follow', label, ago: 'just now' }, ...(l.timeline || [])] }
+          ? { ...l, followUp: fu, overdue: false, timeline: [{ type: 'follow', label, timestamp: Date.now(), ago: 'just now' }, ...(l.timeline || [])] }
           : l),
       }
     }
@@ -282,7 +282,7 @@ function reducer(state, action) {
     case 'UPDATE_LEAD': {
       return {
         ...state,
-        leads: state.leads.map(l => l.id === action.leadId ? { ...l, ...action.patch, timeline: [{ type: 'note', label: 'Updated details inline', ago: 'just now' }, ...l.timeline] } : l),
+        leads: state.leads.map(l => l.id === action.leadId ? { ...l, ...action.patch, timeline: [{ type: 'note', label: 'Updated details inline', timestamp: Date.now(), ago: 'just now' }, ...l.timeline] } : l),
       }
     }
 
@@ -297,7 +297,7 @@ function reducer(state, action) {
       return {
         ...state,
         leads: state.leads.map(l => l.id === action.leadId
-          ? { ...l, timeline: [{ type: action.kind === 'call' ? 'msg' : 'note', label: action.text, ago: 'just now' }, ...l.timeline] }
+          ? { ...l, timeline: [{ type: action.kind === 'call' ? 'msg' : 'note', label: action.text, timestamp: Date.now(), ago: 'just now' }, ...l.timeline] }
           : l),
       }
     }
@@ -305,7 +305,7 @@ function reducer(state, action) {
     case 'LOG_EVENT': {
       const { id, kind, text } = action
       const tlType = kind === 'call' ? 'msg' : kind === 'wa' ? 'msg' : kind === 'sms' ? 'msg' : 'note'
-      const entry = { type: tlType, label: text, ago: 'just now' }
+      const entry = { type: tlType, label: text, timestamp: Date.now(), ago: 'just now' }
       const inLeads = state.leads.some(l => l.id === id)
       if (inLeads) {
         return { ...state, leads: state.leads.map(l => l.id === id ? { ...l, timeline: [entry, ...l.timeline] } : l) }
@@ -318,13 +318,23 @@ function reducer(state, action) {
 
     case 'MERGE': {
       const dup = state.leads.find(l => l.id === action.leadId)
-      if (!dup || !dup.duplicateOf) return state
+      const primaryId = dup?.duplicateOf || action.primaryId
+      if (!dup || !primaryId) return state
+      const primaryLead = state.leads.find(l => l.id === primaryId)
+      const combinedShortlist = Array.from(new Set([...(primaryLead?.shortlist || []), ...(dup.shortlist || [])]))
+      const combinedFollowUp = primaryLead?.followUp || dup.followUp || null
       return {
         ...state,
         leads: state.leads
           .filter(l => l.id !== action.leadId)
-          .map(l => l.id === dup.duplicateOf
-            ? { ...l, timeline: [{ type: 'note', label: 'Merged duplicate from ' + dup.source, ago: 'just now' }, ...l.timeline] }
+          .map(l => l.id === primaryId
+            ? {
+                ...l,
+                shortlist: combinedShortlist,
+                followUp: combinedFollowUp,
+                notes: [`[MERGED INQUIRY] duplicate record ${dup.name || action.leadId} merged in`, ...(l.notes || [])],
+                timeline: [{ type: 'note', label: `Merged duplicate enquiry (${dup.name || 'Lead'})`, timestamp: Date.now(), ago: 'just now' }, ...(l.timeline || [])],
+              }
             : l),
       }
     }
@@ -336,7 +346,7 @@ function reducer(state, action) {
           if (l.id !== action.leadId) return l
           const shortlist = l.shortlist || []
           if (shortlist.includes(action.propId)) return l
-          return { ...l, shortlist: [action.propId, ...shortlist], timeline: [{ type: 'note', label: 'Shortlisted ' + (action.label || 'a property'), ago: 'just now' }, ...l.timeline] }
+          return { ...l, shortlist: [action.propId, ...shortlist], timeline: [{ type: 'note', label: 'Shortlisted ' + (action.label || 'a property'), timestamp: Date.now(), ago: 'just now' }, ...l.timeline] }
         }),
       }
     }
@@ -357,7 +367,7 @@ function reducer(state, action) {
         leads: state.leads.map(l => {
           if (l.id !== leadId) return l
           const feedback = { ...(l.feedback || {}), [propId]: { verdict, reason } }
-          return { ...l, feedback, timeline: [{ type: verdict === 'liked' ? 'note' : 'note', label, ago: 'just now' }, ...l.timeline] }
+          return { ...l, feedback, timeline: [{ type: verdict === 'liked' ? 'note' : 'note', label, timestamp: Date.now(), ago: 'just now' }, ...l.timeline] }
         }),
       }
     }
@@ -376,7 +386,11 @@ function reducer(state, action) {
 
     case 'DELETE_LEADS': {
       const ids = Array.isArray(action.ids) ? action.ids : [action.ids]
-      return { ...state, leads: state.leads.filter(l => !ids.includes(l.id)) }
+      return {
+        ...state,
+        leads: state.leads.filter(l => !ids.includes(l.id)),
+        notifications: (state.notifications || []).filter(n => !ids.includes(n.leadId)),
+      }
     }
 
     case 'DELETE_PROPERTIES': {
@@ -700,9 +714,13 @@ export function StoreProvider({ children }) {
       toast(kind === 'call' ? 'Call logged' : kind === 'wa' ? 'WhatsApp logged' : kind === 'sms' ? 'SMS logged' : 'Note added')
     },
     merge: (leadId) => {
-      dispatch({ type: 'MERGE', leadId })
+      const dup = state.leads.find(l => l.id === leadId)
+      const primaryId = dup?.duplicateOf
+      dispatch({ type: 'MERGE', leadId, primaryId })
       toast('Merged into one record')
-      apiClient.mergeRecords(leadId, leadId, 'combine_timeline').catch(err => console.warn('[Merge API] Backend error:', err.message))
+      if (primaryId) {
+        apiClient.mergeRecords(primaryId, leadId, 'combine_timeline').catch(err => console.warn('[Merge API] Backend error:', err.message))
+      }
     },
     // Remark thread (B1) — real persistence, not the old client-only note echo.
     // kind = 'lead' | 'property'.
@@ -884,7 +902,7 @@ export function StoreProvider({ children }) {
     renameStage: (from, to) => {
       dispatch({ type: 'RENAME_STAGE', from, to })
       toast('Stage renamed — leads moved')
-      apiClient.updateSettings({ stages: state.settings.stages.map(s => s === from ? to : s) }).catch(err => console.warn('[Settings API] error:', err.message))
+      apiClient.updateSettings({ stages: state.settings.stages.map(s => s === from ? to : s), renameStage: { from, to } }).catch(err => console.warn('[Settings API] error:', err.message))
     },
     removeStage: (name) => {
       dispatch({ type: 'REMOVE_STAGE', name })

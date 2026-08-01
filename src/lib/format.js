@@ -48,7 +48,7 @@ export function agentName(agents, id) {
   return a ? (a.first || a.name || id) : id
 }
 
-function parseBudgetNum(v) {
+export function parseBudgetNum(v) {
   if (v === null || v === undefined || v === '') return NaN
   if (typeof v === 'number') return v
   const s = String(v).trim()

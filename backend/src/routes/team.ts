@@ -473,7 +473,12 @@ teamRouter.patch('/users/:id/duty-status', async (req: Request, res: Response) =
     const { status } = req.body; // 'ACTIVE' vs 'OFF_DUTY' vs 'ON_LEAVE'
 
     await sql`UPDATE crm_agents SET duty_status = ${status} WHERE id = ${userId} AND tenant_id = ${req.tenantId}`;
-    console.log(`[Team Router - Duty Status] Updated Agent ${userId} -> ${status} in PostgreSQL`);
+    if (status === 'OFF_DUTY' || status === 'ON_LEAVE') {
+      await removeFromRouting(req.tenantId, userId);
+    } else if (status === 'ACTIVE') {
+      await addToRouting(req.tenantId, userId);
+    }
+    console.log(`[Team Router - Duty Status] Updated Agent ${userId} -> ${status} in PostgreSQL & synced routing pool`);
 
     return res.status(200).json({
       success: true,

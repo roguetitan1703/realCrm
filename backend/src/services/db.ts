@@ -144,6 +144,7 @@ export async function initSchema(): Promise<void> {
     // overdue — which empties the agent's Today screen and the Overdue KPI.
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS follow_up JSONB;`;
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS overdue BOOLEAN DEFAULT FALSE;`;
+    await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS import_batch_id TEXT;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS crm_settings (

@@ -104,7 +104,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
           notes: v.notes || undefined,
         },
       }
-      return { status: dup ? 'duplicate' : 'new', dupTarget: dup?.name || null, record, label: name, sub: phone, locality: v.locality || '—' }
+      return { status: dup ? 'duplicate' : 'new', dupTarget: dup?.name || null, dupId: dup?.id || null, record, label: name, sub: phone, locality: v.locality || '—' }
     }
 
     // Properties. A row is a unit; the project can come from a column or from
@@ -154,6 +154,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
     return {
       status: dup ? 'duplicate' : 'new',
       dupTarget: dup ? (dup.title || dup.society) : null,
+      dupId: dup?.id || null,
       record, label: title, sub: moneyLabel(v.price) || '—', locality: v.locality || '—',
     }
   })
@@ -180,10 +181,28 @@ export default function ImportPage({ store, go, sel, topBar }) {
         // Explicit id per row: the optimistic record and the stored row must
         // share one, or Undo can't find what it created. It also keeps rows
         // created inside the same millisecond from colliding.
-        const rec = { ...pr.record, id: `${kind === 'clients' ? 'l' : 'p'}_${batchId}_${n++}`, importBatchId: batchId }
-        if (kind === 'clients') await store.addLead(rec)
-        else await store.addProperty(rec)
-        if (pr.status === 'duplicate') { merged++; mergedDetails.push(`${pr.label} merged into existing record — ${pr.dupTarget}`) } else added++
+        const recId = `${kind === 'clients' ? 'l' : 'p'}_${batchId}_${n++}`
+        const rec = { ...pr.record, id: recId, importBatchId: batchId }
+        if (kind === 'clients') {
+          if (pr.status === 'duplicate' && pr.dupId) {
+            const dupRec = { ...rec, duplicateOf: pr.dupId }
+            await store.addLead(dupRec)
+            await store.merge(recId)
+            merged++
+            mergedDetails.push(`${pr.label} merged into existing record — ${pr.dupTarget}`)
+          } else {
+            await store.addLead(rec)
+            added++
+          }
+        } else {
+          await store.addProperty(rec)
+          if (pr.status === 'duplicate') {
+            merged++
+            mergedDetails.push(`${pr.label} merged into existing record — ${pr.dupTarget}`)
+          } else {
+            added++
+          }
+        }
       }
       store.logImportBatch({ batchId, timestamp: Date.now(), fileName: fileMeta?.name || 'import', module: kind === 'clients' ? 'Leads & Contacts' : 'Properties', addedCount: added, mergedCount: merged, mergedDetails, reverted: false })
       setLastBatchId(batchId); setImportStats({ added, merged, invalid: invalidCount, mergedDetails }); setStep('done'); setImporting(false)
