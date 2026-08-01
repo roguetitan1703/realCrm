@@ -86,10 +86,19 @@ export default function Leads({ store, go, sel, setSel, topBar, phone }) {
   )
 }
 
-// ---------------------------------------------------------------------------
 function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   const l = store.state.leads.find(x => x.id === sel.leadId)
-  if (!l) { return <>{topBar({ title: 'Lead', eyebrow: 'Leads', onBack: () => setSel(s => ({ ...s, leadOpen: false })) })}<div style={{ padding: 22 }}>Lead not found.</div></> }
+  if (!l) {
+    return (
+      <>
+        {topBar({ title: 'Lead', eyebrow: 'Leads', onBack: () => setSel(s => ({ ...s, leadOpen: false })) })}
+        <div style={{ padding: 28, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 10, fontSize: 14 }}>
+          <Icon name="refresh" size={16} style={{ animation: 'spin 1s linear infinite' }} />
+          <span>Opening lead details…</span>
+        </div>
+      </>
+    )
+  }
   const a = store.agentById(l.agentId)
   const matches = matchesForLead(l, store.state.properties)
   const overdue = l.overdue

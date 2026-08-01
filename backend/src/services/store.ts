@@ -1184,10 +1184,11 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       notify({
         userId: agentId,
         type: 'remark_added',
-        title: 'New note added to your lead',
+        title: '💬 New Note Added to Lead',
         body: `${name} · "${noteText.slice(0, 60)}"`,
         link,
-        push: false
+        push: true,
+        toSelf: true,
       }).catch(err => console.warn('[Notify] remark_added failed:', err?.message));
     }
   }
@@ -1636,11 +1637,33 @@ export async function getTimelineEvents(recordId?: string): Promise<TimelineEven
 export async function addTimelineEvent(evt: Omit<TimelineEvent, 'id' | 'timestamp'> & { timestamp?: string }): Promise<TimelineEvent> {
   const id = `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const ts = evt.timestamp || new Date().toISOString();
+  const t = tid();
   await sql`
     INSERT INTO crm_timeline_events (id, record_id, type, title, description, author, timestamp, metadata, tenant_id)
-    VALUES (${id}, ${evt.record_id}, ${evt.type}, ${evt.title}, ${evt.description}, ${evt.author || 'System'}, ${ts}, ${sql.json(evt.metadata || {})}, ${tid()})
+    VALUES (${id}, ${evt.record_id}, ${evt.type}, ${evt.title}, ${evt.description}, ${evt.author || 'System'}, ${ts}, ${sql.json(evt.metadata || {})}, ${t})
     ON CONFLICT (id) DO NOTHING;
   `;
+
+  if (evt.record_id && (evt.record_id.startsWith('l') || evt.type === 'note' || evt.type === 'remark')) {
+    sql`SELECT name, agent_id FROM crm_leads WHERE id = ${evt.record_id} AND tenant_id = ${t} LIMIT 1`
+      .then(rows => {
+        const lead = rows[0];
+        const ctx = getContext();
+        if (lead && lead.agent_id && ctx?.actorId && ctx.actorId !== lead.agent_id) {
+          notify({
+            userId: lead.agent_id,
+            tenantId: t,
+            type: 'remark_added',
+            title: '💬 New Note Added to Lead',
+            body: `${lead.name} · "${(evt.description || evt.title || '').slice(0, 60)}"`,
+            link: `?screen=leads&lead=${lead.id}`,
+            push: true,
+            toSelf: true,
+          }).catch(err => console.warn('[Notify] remark_added failed:', err?.message));
+        }
+      }).catch(() => {});
+  }
+
   return {
     id,
     timestamp: ts,
