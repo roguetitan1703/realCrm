@@ -321,12 +321,12 @@ export default function Login({ store }) {
           <div className="auth-mobile-mark" style={{ display: 'none', alignItems: 'center', gap: 12, marginBottom: 28 }}>
             {ws ? (
               <div style={{
-                width: 38, height: 38, borderRadius: 'var(--radius)', flexShrink: 0,
-                background: '#13281E', color: '#FFFFFF',
+                width: 42, height: 42, borderRadius: 'var(--radius)', flexShrink: 0,
+                background: 'var(--accent-wash)', color: 'var(--accent)', border: '1px solid var(--accent-line)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 15
+                fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 16, overflow: 'hidden'
               }}>
-                {ws.initials}
+                {ws.logoUrl ? <img src={ws.logoUrl} alt={ws.firmName} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : ws.initials}
               </div>
             ) : (
               <img src="/brand-mark.svg" width={38} height={38} alt={PLATFORM.name} style={{ display: 'block', borderRadius: 'var(--radius)', flexShrink: 0 }} />

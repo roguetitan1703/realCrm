@@ -22,7 +22,13 @@ const PLATFORM = { name: 'Real Estate by Delpat', initials: 'RE', primary: '#1E6
 async function getTenant(slug: string): Promise<any | null> {
   if (!slug || slug === '_platform') return null;
   const rows = await sql`SELECT id, name, slug, brand_config, pwa_config FROM tenants WHERE slug = ${slug} OR id = ${slug} LIMIT 1`;
-  return rows[0] || null;
+  if (!rows[0]) return null;
+  const settingsRows = await sql`SELECT value FROM crm_settings WHERE tenant_id = ${rows[0].id} AND key = 'default' LIMIT 1`;
+  const settings = settingsRows[0]?.value || {};
+  if (settings.firmName) {
+    rows[0].name = settings.firmName;
+  }
+  return rows[0];
 }
 
 function initialsOf(name: string): string {

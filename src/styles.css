@@ -1966,11 +1966,38 @@ body{overscroll-behavior:none;touch-action:manipulation}
 .app-mobile .rh-prog{overflow-x:auto;scrollbar-width:none}
 .app-mobile .rh-prog::-webkit-scrollbar{display:none}
 /* The record sheet is a two-column grid of 150px labels — at 390px that leaves
-   a value column too narrow to hold a price. Label over value, one column. */
-.app-mobile .rs-grid{grid-template-columns:1fr;gap:0}
-.app-mobile .rs-row,.app-mobile .rs-row-wide{grid-template-columns:1fr;gap:2px;padding:10px 0;min-height:0}
-.app-mobile .rs-label{font-size:11.5px}
+   a value column too narrow to hold a price. So the LABEL stacks over its value
+   instead of sitting beside it, which frees the row to hold TWO fields side by
+   side rather than one field and 200px of nothing. Long-form fields (notes,
+   chips) still span the full width. */
+.app-mobile .rs-grid{grid-template-columns:1fr 1fr;gap:0 18px}
+.app-mobile .rs-row{grid-template-columns:1fr;gap:1px;padding:9px 0;min-height:0}
+.app-mobile .rs-row-wide{grid-column:1 / -1;grid-template-columns:1fr;gap:1px;padding:9px 0;min-height:0}
+.app-mobile .rs-label{font-size:11px}
+.app-mobile .rs-value{font-size:13px}
 .app-mobile .panel{padding:14px}
+
+/* ---------------------------------------------------------------------------
+   WhatsApp composer — a bottom sheet on a phone, not a shrunken dialog.
+   It arrives from the thumb end, fills the width, and its send button is a
+   full-width target above the home indicator. The two Segmented controls are
+   allowed to wrap: cramming a language picker and a tone picker into one
+   390px row made both unreadable. */
+.app-mobile .wa-overlay{align-items:flex-end;justify-content:stretch;padding:0}
+.app-mobile .wa-sheet{width:100%;max-width:100%;max-height:92dvh;border-radius:16px 16px 0 0}
+.wa-grab{display:none}
+.app-mobile .wa-grab{display:block;width:36px;height:4px;border-radius:2px;background:rgba(255,255,255,.24);margin:8px auto 0;flex-shrink:0}
+.app-mobile .wa-head{padding:10px 14px 12px}
+.app-mobile .wa-head-p{display:none}
+.app-mobile .wa-attach{padding:0 14px 10px}
+.app-mobile .wa-sel-w{min-width:0;flex-basis:100%}
+.app-mobile .wa-sel{padding:11px 30px 11px 12px;font-size:13.5px}
+.app-mobile .wa-ctl{flex-wrap:wrap;padding:0 14px 10px}
+.app-mobile .wa-ctl .seg{flex:1;min-width:0;display:flex}
+.app-mobile .wa-ctl .seg button{flex:1;padding:7px 8px;font-size:12.5px;white-space:nowrap}
+.app-mobile .wa-var{padding:9px 11px}
+.app-mobile .wa-foot{flex-direction:column-reverse;gap:8px;padding:10px 14px calc(10px + env(safe-area-inset-bottom))}
+.app-mobile .wa-send,.app-mobile .wa-alt{flex:none;width:100%;padding:12px}
 
 /* ===========================================================================
    JsonView — a real payload tree. Monospace, typed colors, click-to-pick.

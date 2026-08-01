@@ -57,6 +57,8 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
       title={opts.title}
       sub={opts.eyebrow}
       onBack={opts.onBack}
+      firmName={state.settings?.firmName || state.brand?.name || 'Delpat Realty'}
+      logoUrl={state.brand?.logoUrl}
       right={
         <button className="m-bell" onClick={() => store.setNotif(true)} aria-label="Notifications">
           <Icon name="bell" size={19} />

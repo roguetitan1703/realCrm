@@ -61,8 +61,9 @@ export default function WaModal({ store }) {
   }
 
   return (
-    <div className="overlay" onClick={store.closeWhatsApp}>
+    <div className="overlay wa-overlay" onClick={store.closeWhatsApp}>
       <div className="wa-sheet" onClick={e => e.stopPropagation()}>
+        <div className="wa-grab" />
         <div className="wa-head">
           <Icon name="wa" size={19} fill />
           <div className="wa-head-t">{l ? l.name : 'WhatsApp message'}</div>

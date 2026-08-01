@@ -204,16 +204,24 @@ export function TabBar({ tabs, active, onNav }) {
 // ---- mobile top bar ----
 // title/eyebrow, optional back, optional right slot (avatar / action). This is
 // the CRM's phone chrome (agent role) — NOT a separate app.
-export function MobileTopBar({ title, sub, onBack, right, brand }) {
+export function MobileTopBar({ title, sub, onBack, right, brand, firmName, logoUrl }) {
+  const displayFirm = firmName || ''
+  const initials = displayFirm.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'RE'
   return (
     <div className="m-top">
-      {brand
-        ? <><div className="n-mono">{brandInitials(title)}</div>
-            <div style={{ flex: 1, minWidth: 0 }}><div className="m-fn">{title}</div>{sub && <div className="m-sub">{sub}</div>}</div></>
-        : <>
-            {onBack && <button className="m-back" onClick={onBack}><Icon name="chevLeft" size={20} /></button>}
-            <div style={{ flex: 1, minWidth: 0 }}><div className="m-fn" style={{ fontSize: onBack ? 16 : 17, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>{sub && <div className="m-sub">{sub}</div>}</div>
-          </>}
+      {onBack ? (
+        <button className="m-back" onClick={onBack} aria-label="Back"><Icon name="chevLeft" size={20} /></button>
+      ) : (
+        <div className={'n-mono' + (logoUrl ? ' has-logo' : '')} style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13, flexShrink: 0, overflow: 'hidden' }}>
+          {logoUrl ? <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : initials}
+        </div>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="m-fn" style={{ fontSize: 15, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {title || displayFirm}
+        </div>
+        {sub ? <div className="m-sub" style={{ fontSize: 11, color: 'var(--on-chrome-mut)' }}>{sub}</div> : (displayFirm && title !== displayFirm ? <div className="m-sub" style={{ fontSize: 11, color: 'var(--on-chrome-mut)' }}>{displayFirm}</div> : null)}
+      </div>
       <ConnectionBadge />
       {right}
     </div>
