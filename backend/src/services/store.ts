@@ -1576,10 +1576,11 @@ export async function updateBrand(patch: any): Promise<any> {
   const current = await getBrand();
   const next = { ...current, ...patch };
   const colorChanged = patch?.primaryColor && patch.primaryColor !== current.primaryColor;
+  const logoChanged = patch?.logoUrl !== undefined;
   await sql`
     UPDATE tenants
     SET brand_config = COALESCE(brand_config, '{}'::jsonb) || ${sql.json(next)}
-        ${colorChanged ? sql`, pwa_config = COALESCE(pwa_config, '{}'::jsonb) - 'icon192' - 'icon512'` : sql``}
+        ${colorChanged || logoChanged ? sql`, pwa_config = NULL` : sql``}
     WHERE id = ${t} OR slug = ${t}
   `;
   return next;

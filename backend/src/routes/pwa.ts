@@ -70,13 +70,20 @@ function shortNameOf(name: string, override?: string): string {
   return out || full.slice(0, 14);
 }
 
-function iconSvg(initials: string, bg: string, opts: { rounded?: boolean; fg?: string } = {}): string {
+function iconSvg(initials: string, bg: string, opts: { rounded?: boolean; fg?: string; logoUrl?: string } = {}): string {
   const fg = opts.fg || '#ffffff';
-  // Full-bleed (rounded=false) for the raster PNGs so maskable icons have no
-  // transparent corners; rounded for the standalone SVG.
+  const fillBg = opts.logoUrl ? '#ffffff' : bg;
   const rect = opts.rounded
-    ? `<rect width="512" height="512" rx="104" fill="${bg}"/>`
-    : `<rect width="512" height="512" fill="${bg}"/>`;
+    ? `<rect width="512" height="512" rx="104" fill="${fillBg}"/>`
+    : `<rect width="512" height="512" fill="${fillBg}"/>`;
+
+  if (opts.logoUrl && (opts.logoUrl.startsWith('data:image/') || opts.logoUrl.startsWith('http'))) {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">` +
+      rect +
+      `<image href="${opts.logoUrl}" x="64" y="64" width="384" height="384" preserveAspectRatio="xMidYMid meet"/>` +
+      `</svg>`;
+  }
+
   return `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">` +
     rect +
     `<text x="256" y="256" dy="0.35em" text-anchor="middle" font-family="Arial,'Space Grotesk',sans-serif" font-weight="700" font-size="230" fill="${fg}">${initials}</text>` +
@@ -84,8 +91,8 @@ function iconSvg(initials: string, bg: string, opts: { rounded?: boolean; fg?: s
 }
 
 /** Rasterize the icon SVG to a PNG Buffer at the given width. */
-function renderIconPng(initials: string, bg: string, size: number): Buffer {
-  const svg = iconSvg(initials, bg, { rounded: false });
+function renderIconPng(initials: string, bg: string, size: number, logoUrl?: string): Buffer {
+  const svg = iconSvg(initials, bg, { rounded: false, logoUrl });
   const r = new Resvg(svg, { fitTo: { mode: 'width', value: size }, font: { loadSystemFonts: true, defaultFontFamily: 'Arial' } });
   return r.render().asPng();
 }
@@ -134,7 +141,7 @@ pwaRouter.get('/:slug/icon.svg', async (req: Request, res: Response) => {
   const bg = brand.primaryColor || PLATFORM.primary;
   res.set('Content-Type', 'image/svg+xml');
   res.set('Cache-Control', 'public, max-age=300');
-  return res.send(iconSvg(initials, bg, { rounded: true }));
+  return res.send(iconSvg(initials, bg, { rounded: true, logoUrl: brand.logoUrl }));
 });
 
 pwaRouter.get('/:slug/icon-:size.png', async (req: Request, res: Response) => {
@@ -157,7 +164,7 @@ pwaRouter.get('/:slug/icon-:size.png', async (req: Request, res: Response) => {
   const brand = t?.brand_config || {};
   const initials = brand.initials || (t ? initialsOf(t.name) : PLATFORM.initials);
   const bg = brand.primaryColor || PLATFORM.primary;
-  const png = renderIconPng(initials, bg, size);
+  const png = renderIconPng(initials, bg, size, brand.logoUrl);
   if (t) {
     await sql`UPDATE tenants SET pwa_config = COALESCE(pwa_config, '{}'::jsonb) || ${sql.json({ [key]: png.toString('base64') })} WHERE id = ${t.id}`;
   }
