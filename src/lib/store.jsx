@@ -555,7 +555,12 @@ export function StoreProvider({ children }) {
   // mount AND right after login — the token/tenant changes at login, so the
   // desk must re-fetch under the new identity or it keeps showing whatever
   // loaded for the default tenant at startup.
-  const loadServerState = useCallback(() => {
+  // `background` marks a refresh nobody asked for. A failed one must stay
+  // silent: the first load falls back to the cached snapshot and paints the
+  // "as of <time>" stale banner, which is right when there is nothing else to
+  // show — but doing that on a routine poll means one dropped packet flips a
+  // working desk into looking offline, then back, every few seconds.
+  const loadServerState = useCallback((background = false) => {
     return apiClient.getState()
       .then(res => {
         if (res && res.success && res.state) {
@@ -564,6 +569,7 @@ export function StoreProvider({ children }) {
         }
       })
       .catch(err => {
+        if (background) return
         console.error('[Store Hydration] Backend unreachable:', err.message)
         // Offline: fall back to the last cached snapshot so the desk is still
         // readable, flagged stale so the UI can show "as of <time>".
@@ -610,6 +616,93 @@ export function StoreProvider({ children }) {
       .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: res.notifications }) })
       .catch(err => console.warn('[Notifications] load failed:', err.message))
   }, [])
+
+  // ── Live refresh ──────────────────────────────────────────────────────────
+  // The desk used to load once and then quietly go stale: a lead routed in by a
+  // portal, or reassigned by a manager, only appeared if you reloaded the page.
+  //
+  // The obvious fix — re-fetch /workspace/state every few seconds — is worse
+  // than the problem. That call is eight unbounded queries, so a room of ten
+  // open tabs would re-download every lead, property and timeline event in the
+  // firm every few seconds, forever, and the cost grows with the customer's
+  // data. Instead:
+  //
+  //   • poll a ~40-byte change token, and pay for the full state ONLY when it
+  //     actually moves;
+  //   • never poll a hidden tab — a backgrounded phone should not be working;
+  //   • refresh the instant the tab is looked at again, or the network returns,
+  //     which is when staleness is actually noticed;
+  //   • back off from 15s to 60s once the desk has been quiet for a while, so
+  //     an idle tab left open overnight is not a heartbeat all night;
+  //   • never apply a response while a write is in the air (see
+  //     hasPendingWrites) or it would briefly undo what was just done.
+  //
+  // Push arriving on the device is the better trigger and would replace the
+  // timer entirely; this is the version that works today on every browser,
+  // including the ones that never grant notification permission.
+  const pulseRef = useRef(null)
+  useEffect(() => {
+    if (!apiClient.getToken?.()) return
+
+    let stopped = false
+    let timer = null
+    let quiet = 0            // consecutive polls that found nothing new
+    let checking = false     // one poll at a time, however long the network takes
+
+    const FAST = 15000, SLOW = 60000, QUIET_AFTER = 8
+
+    const check = async () => {
+      if (stopped || checking) return
+      if (document.visibilityState !== 'visible') return
+      // A poll landing mid-write would paint the pre-write row back on screen.
+      if (apiClient.hasPendingWrites?.()) return
+      checking = true
+      try {
+        const res = await apiClient.getPulse()
+        const token = res?.token
+        if (!token || stopped) return
+        if (pulseRef.current === null) { pulseRef.current = token; return }
+        if (token !== pulseRef.current) {
+          pulseRef.current = token
+          quiet = 0
+          await loadServerState(true)
+          loadNotifications()
+        } else {
+          quiet++
+        }
+      } catch {
+        // Offline or a blip. The banner is driven by real writes failing, not
+        // by a poll we chose to make.
+      } finally {
+        checking = false
+      }
+    }
+
+    const arm = () => {
+      clearTimeout(timer)
+      if (stopped) return
+      timer = setTimeout(async () => { await check(); arm() }, quiet >= QUIET_AFTER ? SLOW : FAST)
+    }
+
+    // Coming back to the tab is the moment staleness is noticed, so it gets an
+    // immediate check rather than waiting out the interval.
+    const wake = () => {
+      if (document.visibilityState !== 'visible') return
+      quiet = 0
+      check().then(arm)
+    }
+    document.addEventListener('visibilitychange', wake)
+    window.addEventListener('online', wake)
+    arm()
+
+    return () => {
+      stopped = true
+      clearTimeout(timer)
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('online', wake)
+    }
+  }, [loadServerState, loadNotifications])
+
 
   const toast = useCallback((text, tone) => {
     dispatch({ type: 'TOAST', text, tone })

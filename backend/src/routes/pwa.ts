@@ -29,6 +29,36 @@ function initialsOf(name: string): string {
   return String(name || '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || PLATFORM.initials;
 }
 
+/**
+ * The caption under the installed home-screen icon. Android gives it roughly
+ * 12-14 characters and silently truncates the rest, so a long firm name has to
+ * be shortened HERE or the OS does it mid-word — "Real Estate by Delpat" was
+ * being installed as "Real Estate by", which reads like a broken string rather
+ * than a company. Cutting on a word boundary gives "Real Estate" instead.
+ */
+function shortNameOf(name: string, override?: string): string {
+  const explicit = String(override || '').trim();
+  if (explicit) return explicit.slice(0, 14);
+  const full = String(name || '').trim();
+  if (full.length <= 14) return full;
+  let out = '';
+  for (const w of full.split(/\s+/)) {
+    if ((out ? out.length + 1 : 0) + w.length > 14) break;
+    out = out ? `${out} ${w}` : w;
+  }
+  // Stopping on a word boundary is not enough on its own: "Real Estate by
+  // Delpat" fits "Real Estate by" in exactly 14, and a name ending in a
+  // connector still reads as a sentence that got cut off. Drop trailing
+  // connectors (and any dangling punctuation) until it ends on a real word.
+  let prev;
+  do {
+    prev = out;
+    out = out.replace(/[\s,&·|/-]+$/, '').replace(/\s+(by|and|of|the|for|at|in|on|with|&)$/i, '');
+  } while (out !== prev);
+  // A single word longer than the budget still has to be cut somewhere.
+  return out || full.slice(0, 14);
+}
+
 function iconSvg(initials: string, bg: string, opts: { rounded?: boolean; fg?: string } = {}): string {
   const fg = opts.fg || '#ffffff';
   // Full-bleed (rounded=false) for the raster PNGs so maskable icons have no
@@ -74,7 +104,7 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
   return res.json({
     id: startUrl,
     name,
-    short_name: name.length > 14 ? name.slice(0, 14) : name,
+    short_name: shortNameOf(name, brand.shortName),
     description: `${name} — real estate desk`,
     start_url: startUrl,
     scope: '/',

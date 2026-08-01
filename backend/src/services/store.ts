@@ -831,6 +831,33 @@ seedDatabase()
 // 📖 ASYNC READ & MUTATION HELPER API
 // ============================================================================
 
+/**
+ * A cheap "has anything changed?" token for the open desk to poll.
+ *
+ * getState() is eight unbounded queries — every lead, every property, every
+ * timeline event this tenant has ever written. Polling THAT on a timer to find
+ * out whether anything moved would cost more than the staleness it fixes, and
+ * would get worse exactly as a customer's data grows.
+ *
+ * So the desk polls this instead: six indexed aggregates returning a few dozen
+ * bytes, and only when the token differs from the one it already holds does it
+ * pay for a full getState(). Counts sit alongside the max timestamps because a
+ * DELETE moves no clock — without them, removing a lead would go unnoticed.
+ */
+export async function getPulse(): Promise<Record<string, any>> {
+  const t = tid();
+  const scope = agentLeadScope();
+  const [leads, props, events] = await Promise.all([
+    scope
+      ? sql`SELECT count(*)::int AS n, max(updated_at) AS at FROM crm_leads WHERE tenant_id = ${t} AND agent_id = ${scope}`
+      : sql`SELECT count(*)::int AS n, max(updated_at) AS at FROM crm_leads WHERE tenant_id = ${t}`,
+    sql`SELECT count(*)::int AS n, max(updated_at) AS at FROM crm_properties WHERE tenant_id = ${t}`,
+    sql`SELECT count(*)::int AS n, max(timestamp) AS at FROM crm_timeline_events WHERE tenant_id = ${t}`,
+  ]);
+  const stamp = (r: any) => `${r[0]?.n ?? 0}:${r[0]?.at ? new Date(r[0].at).getTime() : 0}`;
+  return { token: `${stamp(leads)}|${stamp(props)}|${stamp(events)}` };
+}
+
 export async function getState(): Promise<ServerState> {
   const t = tid();
   const agentScope = agentLeadScope();
@@ -1019,7 +1046,9 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // Alert the assigned agent, and give owners/managers team-wide visibility.
   const link = `?screen=leads&lead=${newId}`;
   const where = locality ? ` · ${locality}` : '';
-  notify({ userId: agentId, type: 'lead_assigned', title: 'New lead assigned to you', body: `${name}${where} (${source})`, link })
+  // PUSH: speed-to-lead decides who wins the deal. A lead sitting unseen for
+  // twenty minutes is usually a lead someone else has already called.
+  notify({ userId: agentId, type: 'lead_assigned', title: 'New lead assigned to you', body: `${name}${where} (${source})`, link, push: true })
     .catch(err => console.warn('[Notify] lead_assigned failed:', err?.message));
   // Name the agent, not their primary key. This read "routed to u_ms6oqbda",
   // which tells the person reading it nothing and looks broken besides.
@@ -1028,8 +1057,19 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
       ?? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name
       ?? 'an agent'
     : 'the queue';
+  // FEED ONLY: an owner wants to see the flow, but a desk taking 60 leads a day
+  // cannot have 60 phone buzzes — that is the volume at which people mute the
+  // app. The exception below is the one an owner genuinely must act on.
   notifyRoles(['owner', 'manager'], { type: 'lead_new', title: 'New lead captured', body: `${name}${where} → routed to ${agentName}`, link })
     .catch(err => console.warn('[Notify] lead_new failed:', err?.message));
+  // PUSH: nobody was assigned, so this lead is sitting with no owner and no
+  // one is coming for it. That is an exception, not a routine arrival.
+  if (!agentId) {
+    notifyRoles(['owner', 'manager'], {
+      type: 'lead_unrouted', title: 'Lead arrived with nobody to take it',
+      body: `${name}${where} (${source}) — assign it to someone`, link, push: true,
+    }).catch(err => console.warn('[Notify] lead_unrouted failed:', err?.message));
+  }
   return created;
 }
 
@@ -1083,7 +1123,8 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       budget_min = ${budgetMin},
       budget_max = ${budgetMax},
       purpose = ${purpose || null},
-      timeline_pref = ${timelinePref || null}
+      timeline_pref = ${timelinePref || null},
+      updated_at = NOW()
     WHERE id = ${id} AND tenant_id = ${tid()};
   `;
 
@@ -1108,16 +1149,30 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     ip: ctx.ip, user_agent: ctx.userAgent,
   });
   const link = `?screen=leads&lead=${id}`;
-  // Reassignment → alert the newly assigned agent.
+  // PUSH: someone handed you a live client. You now own a conversation you
+  // haven't read yet, so this can't wait for you to next open the app.
+  // notify() drops it when you assigned it to yourself.
   if (patch.agentId !== undefined && agentId && agentId !== oldLead.agentId) {
-    notify({ userId: agentId, type: 'lead_reassigned', title: 'A lead was assigned to you', body: `${name}`, link })
+    notify({ userId: agentId, type: 'lead_reassigned', title: 'A lead was assigned to you', body: `${name}`, link, push: true })
       .catch(err => console.warn('[Notify] lead_reassigned failed:', err?.message));
   }
-  // Follow-up set → remind the owning agent.
+  // FEED ONLY: worth seeing when a manager schedules something on your lead;
+  // never worth a buzz, and never at all when you scheduled it yourself — the
+  // form already confirmed it on screen a second ago.
   if (patch.followUp) {
     const when = (patch.followUp.action || patch.followUp.label || 'Follow-up scheduled');
     notify({ userId: agentId, type: 'followup_set', title: 'Follow-up scheduled', body: `${name} · ${when}`, link })
       .catch(err => console.warn('[Notify] followup_set failed:', err?.message));
+  }
+  // FEED ONLY: the outcome an owner actually tracks. Not urgent — the deal is
+  // already won or lost by the time this fires.
+  if (patch.stage && patch.stage !== oldLead.stage && /^closed/i.test(patch.stage)) {
+    const won = /won/i.test(patch.stage);
+    notifyRoles(['owner', 'manager'], {
+      type: won ? 'lead_won' : 'lead_lost',
+      title: won ? 'Deal won' : 'Deal lost',
+      body: `${name}${locality ? ` · ${locality}` : ''}`, link,
+    }).catch(err => console.warn('[Notify] lead outcome failed:', err?.message));
   }
   return updated;
 }

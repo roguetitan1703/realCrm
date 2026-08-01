@@ -25,6 +25,22 @@ export interface NotifyInput {
   body?: string | null;
   link?: string | null;
   tenantId?: string;            // defaults to the request tenant
+  /**
+   * Buzz the person's devices, or just file it in the in-app feed?
+   *
+   * Default FALSE, deliberately. A push interrupts someone who is driving, in a
+   * viewing, or asleep, and a product that interrupts for things that can wait
+   * gets its notifications switched off entirely — after which the two alerts
+   * that genuinely matter never arrive either. So push is reserved for "someone
+   * has to act on this now" and everything else lands silently in the feed.
+   */
+  push?: boolean;
+  /**
+   * Send even when the recipient is the person who caused it. Off by default:
+   * telling someone what they just did themselves is the fastest way to train
+   * them to ignore the bell.
+   */
+  toSelf?: boolean;
 }
 
 /** Insert one notification. Best-effort — callers fire-and-forget so a failed
@@ -32,6 +48,7 @@ export interface NotifyInput {
 export async function notify(n: NotifyInput): Promise<void> {
   const t = n.tenantId || tid();
   if (!n.userId) return;
+  if (!n.toSelf && getContext()?.userId && getContext()!.userId === n.userId) return;
   const id = `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   await sql`
     INSERT INTO notifications (id, tenant_id, user_id, type, title, body, link)
@@ -39,6 +56,7 @@ export async function notify(n: NotifyInput): Promise<void> {
   `;
   // Fan the same alert out to the user's devices (best-effort; push being off or
   // a device being unsubscribed never breaks the in-app feed).
+  if (!n.push) return;
   sendPushToUser(t, n.userId, {
     title: n.title,
     body: n.body || '',

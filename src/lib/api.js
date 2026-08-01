@@ -74,8 +74,21 @@ function getHeaders(customHeaders = {}) {
   return { ...base, ...customHeaders };
 }
 
+// How many writes are in the air right now.
+//
+// Mutations update local state immediately and send to the server in the
+// background. If a live-refresh response lands in that window it carries the
+// row as it was BEFORE the write — so applying it visibly reverts what the
+// person just did, and then un-reverts a few seconds later. Counting writes in
+// the one place every call passes through means the refresh loop can simply
+// wait, rather than every mutation having to remember to announce itself.
+let inFlightWrites = 0;
+export function hasPendingWrites() { return inFlightWrites > 0; }
+
 async function request(endpoint, options = {}) {
   const { queueable, ...fetchOptions } = options;
+  const isWrite = !!fetchOptions.method && fetchOptions.method.toUpperCase() !== 'GET';
+  if (isWrite) inFlightWrites++;
   try {
     const res = await fetch(`${BASE_URL}${endpoint}`, {
       ...fetchOptions,
@@ -109,6 +122,8 @@ async function request(endpoint, options = {}) {
     }
     console.warn(`[API Client Warning] Request to ${endpoint} failed:`, err.message);
     throw err;
+  } finally {
+    if (isWrite) inFlightWrites--;
   }
 }
 
@@ -179,6 +194,9 @@ export const api = {
   getAdminToken: () => lsGet(ADMIN_TOKEN_KEY),
   clearAdminToken: () => lsSet(ADMIN_TOKEN_KEY, ''),
   getState: () => request('/workspace/state'),
+  // Tiny change-token used by the live-refresh loop; see getPulse() on the server.
+  getPulse: () => request('/workspace/pulse'),
+  hasPendingWrites,
   resetDatabase: () => request('/workspace/reset', { method: 'POST' }),
 
   // Lead ingest (the per-tenant URL the client pastes into 99acres/MagicBricks)

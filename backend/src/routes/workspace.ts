@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getState, resetDatabase, updateSettings, getSettings, getBrand, updateBrand } from '../services/store';
+import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { listAudit, verifyAuditChain } from '../services/audit';
@@ -216,6 +216,18 @@ workspaceRouter.get('/state', async (req: Request, res: Response) => {
     success: true,
     state,
   });
+});
+
+/**
+ * GET /api/v1/workspace/pulse
+ * A few dozen bytes saying whether this tenant's desk has changed. Polled by
+ * every open tab; the expensive /state call only follows when the token moves.
+ * Never cached — a cached pulse is a pulse that reports nothing ever happens.
+ */
+workspaceRouter.get('/pulse', async (req: Request, res: Response) => {
+  const pulse = await getPulse();
+  res.set('Cache-Control', 'no-store');
+  res.status(200).json({ success: true, ...pulse });
 });
 
 /**
