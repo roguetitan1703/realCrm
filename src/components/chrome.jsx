@@ -206,7 +206,10 @@ export function TabBar({ tabs, active, onNav }) {
 // the CRM's phone chrome (agent role) — NOT a separate app.
 function initialsOfName(name) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
-  if (!parts.length) return 'RE'
+  // No name yet means an empty mark, not the platform's. A stock badge shown
+  // while the firm's identity is still loading is another second of the wrong
+  // brand on a client's screen.
+  if (!parts.length) return ''
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
   return parts.slice(0, 2).map(w => w[0]).join('').toUpperCase()
 }

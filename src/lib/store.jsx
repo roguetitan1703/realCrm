@@ -28,7 +28,26 @@ function stateCacheKey() {
   return `crm_state_cache_${t}`
 }
 function writeStateCache(serverState) {
-  try { window.localStorage?.setItem(stateCacheKey(), JSON.stringify({ state: serverState, at: Date.now() })) } catch (e) {}
+  try {
+    window.localStorage?.setItem(stateCacheKey(), JSON.stringify({ state: serverState, at: Date.now() }))
+  } catch (e) {
+    // Almost always QuotaExceededError: /workspace/state returns every property
+    // in the firm, and a real book of inventory serializes past the ~5MB origin
+    // budget. This used to fail into an empty catch, so the snapshot silently
+    // stopped existing the day a tenant got big and every launch went cold with
+    // nobody able to see why. Say it out loud until the read is paginated.
+    console.warn('[Store] offline snapshot not saved:', e?.name || e,
+      '— the desk will cold-start from the network on every launch.')
+  }
+}
+
+// The accent, stored on its own so it survives a snapshot that is too big to
+// write. index.html reads the same key before first paint.
+function lastBrandColor() {
+  try {
+    const c = window.localStorage?.getItem('crm_brand_color') || ''
+    return /^#?[a-f\d]{6}$/i.test(c) ? c : ''
+  } catch (e) { return '' }
 }
 function readStateCache() {
   try {
@@ -111,7 +130,12 @@ function freshState() {
     importLogs: [],
     inactiveAgentIds: Array.isArray(cs.inactiveAgentIds) ? cs.inactiveAgentIds : [],
     settings,                            // editable: firmName, stages, sources, slaHours, reminderDays
-    brand: cs.brand ? { ...clone(DEFAULT_BRAND), ...cs.brand } : clone(DEFAULT_BRAND),
+    brand: cs.brand
+      ? { ...clone(DEFAULT_BRAND), ...cs.brand }
+      // No snapshot yet, but the accent is a 7-character key of its own — read
+      // it so the store agrees with the color index.html already painted rather
+      // than starting from the stock green and repainting the desk mid-boot.
+      : { ...clone(DEFAULT_BRAND), ...(lastBrandColor() ? { primaryColor: lastBrandColor() } : {}) },
     routing: cs.routing_rules ? { strategy: 'round_robin', active_agent_ids: [], ...cs.routing_rules } : { strategy: 'round_robin', active_agent_ids: [] },
     toasts: [],
     notifications: [],   // server-backed per-user alert feed

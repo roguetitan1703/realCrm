@@ -52,12 +52,16 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
   // The module's own topBar call renders into the scrolling body and sticks to
   // the top of it, so a list can scroll under its own header without the shell
   // needing to know which screen is mounted.
+  // firmName has no hardcoded fallback: until the firm's name hydrates there is
+  // no name to show, and the bar renders fine without one. Printing a bundled
+  // demo firm instead meant a client watched someone else's brand for the first
+  // second and a half of every launch.
   const topBar = (opts) => (
     <MobileTopBar
       title={opts.title}
       sub={opts.eyebrow}
       onBack={opts.onBack}
-      firmName={state.settings?.firmName || state.brand?.name || 'Delpat Realty'}
+      firmName={state.settings?.firmName || ''}
       logoUrl={state.brand?.logoUrl}
       right={
         <button className="m-bell" onClick={() => store.setNotif(true)} aria-label="Notifications">

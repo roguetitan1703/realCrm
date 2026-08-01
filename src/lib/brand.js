@@ -29,12 +29,18 @@ const WHITE = { r: 255, g: 255, b: 255 }
 const BLACK = { r: 0, g: 0, b: 0 }
 
 /**
- * Point the app's accent tokens at `hex`. Falls back to the default accent for a
- * missing/invalid value, so a bad stored color can never blank the UI.
+ * Point the app's accent tokens at `hex`. A missing or invalid value is a no-op,
+ * NOT a repaint to the default: index.html paints the last-known accent before
+ * React mounts, and this ran on mount with an unhydrated brand, so it overwrote
+ * the firm's real color with the stock green until the server answered — an
+ * inch of correct color followed by a second and a half of the wrong one. The
+ * stylesheet already carries the default for a browser that has never seen a
+ * tenant, so there is nothing to fall back to here.
  */
 export function applyBrandColor(hex) {
   if (typeof document === 'undefined') return
-  const rgb = hexToRgb(hex) || hexToRgb(DEFAULT_ACCENT)
+  const rgb = hexToRgb(hex)
+  if (!rgb) return
   const root = document.documentElement.style
   root.setProperty('--accent', rgbToHex(rgb))
   root.setProperty('--accent-rgb', `${clamp(rgb.r)},${clamp(rgb.g)},${clamp(rgb.b)}`) // for rgba() tints on dark chrome
