@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed } from '../services/store';
+import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { listAudit, verifyAuditChain } from '../services/audit';
@@ -90,9 +90,7 @@ workspaceRouter.get('/audit', async (req: Request, res: Response) => {
  */
 workspaceRouter.get('/bootstrap', requireTenantAuth, async (_req: Request, res: Response) => {
   try {
-    const full = await getState();
-    const { leads, properties, timeline_events, ...rest } = full as any;
-    return res.status(200).json({ success: true, state: rest });
+    return res.status(200).json({ success: true, state: await getBootstrap() });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to bootstrap', message: err.message });
   }

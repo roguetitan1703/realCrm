@@ -859,6 +859,43 @@ export async function getPulse(): Promise<Record<string, any>> {
   return { token: `${stamp(leads)}|${stamp(props)}|${stamp(events)}` };
 }
 
+/**
+ * The boot read: identity and firm config, no records.
+ *
+ * This is NOT getState() with the collections stripped off. That is how it was
+ * first written and it was a lie of an optimisation — the server still ran all
+ * eight unbounded queries, still read 6,643 property rows and every timeline
+ * event out of Postgres, and then threw them away before serialising. The wire
+ * got smaller; the database did the same work.
+ *
+ * The logo is deliberately not returned inline. brand_config carries it as a
+ * base64 data URI on at least one tenant, which is 76KB riding in the one
+ * response that gates first paint. Callers fetch it as an image.
+ */
+export async function getBootstrap(): Promise<any> {
+  const t = tid();
+  const [agentsRows, settingsRows, routingRows, brandRows] = await Promise.all([
+    sql`SELECT a.* FROM crm_agents a
+        LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
+        WHERE a.tenant_id = ${t} AND u.deleted_at IS NULL`,
+    sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}`,
+    sql`SELECT * FROM crm_routing_rules WHERE tenant_id = ${t}`,
+    sql`SELECT brand_config FROM tenants WHERE id = ${t} OR slug = ${t} LIMIT 1`,
+  ]);
+  const agents = agentsRows.map(rowToAgent);
+  const brand = { ...(brandRows[0]?.brand_config || {}) };
+  if (typeof brand.logoUrl === 'string' && brand.logoUrl.startsWith('data:')) {
+    brand.logoUrl = `/pwa/${t}/logo`;
+  }
+  return {
+    agents,
+    inactiveAgentIds: agentsRows.filter(a => a.duty_status === 'OFF_DUTY').map(a => a.id),
+    settings: settingsRows[0]?.value || {},
+    routing_rules: routingRows[0] || null,
+    brand,
+  };
+}
+
 export async function getState(): Promise<ServerState> {
   const t = tid();
   const agentScope = agentLeadScope();

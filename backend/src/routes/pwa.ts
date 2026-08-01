@@ -140,6 +140,26 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
   });
 });
 
+/**
+ * GET /pwa/:slug/logo
+ * The firm's uploaded logo as an image, so the boot payload can carry a URL
+ * instead of the base64 data URI sitting in brand_config — 76KB of it on at
+ * least one tenant, in the one response that gates first paint. A browser
+ * caches this; a data URI in JSON is re-sent on every load.
+ */
+pwaRouter.get('/:slug/logo', async (req: Request, res: Response) => {
+  const t = await getTenant(req.params.slug);
+  const raw = String((t?.brand_config || {}).logoUrl || '');
+  const m = /^data:([\w/+.-]+);base64,(.*)$/s.exec(raw);
+  if (!m) {
+    if (/^https?:\/\//.test(raw)) return res.redirect(raw);
+    return res.status(404).end();
+  }
+  res.set('Content-Type', m[1]);
+  res.set('Cache-Control', 'public, max-age=300');
+  return res.end(Buffer.from(m[2], 'base64'));
+});
+
 pwaRouter.get('/:slug/icon.svg', async (req: Request, res: Response) => {
   const t = await getTenant(req.params.slug);
   const brand = t?.brand_config || {};
