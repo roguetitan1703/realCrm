@@ -12,7 +12,7 @@
 import { Router, Request, Response } from 'express';
 import { CallActionSchema, WhatsAppActionSchema, StageChangeSchema, MergeSchema } from '../models';
 import { requireTenantAuth, requireModuleEnabled, requireQuotaAvailable } from '../middleware/auth';
-import { getLeads, createLead, getAgents } from '../services/store';
+import { getLeads, createLead, getAgents, getLeadById } from '../services/store';
 import { sql } from '../services/db';
 
 export const leadsRouter = Router();
@@ -31,6 +31,23 @@ leadsRouter.get('/', async (req: Request, res: Response) => {
 /**
  * POST /api/v1/leads
  */
+/**
+ * ONE LEAD, IN FULL
+ * GET /api/v1/leads/:id
+ * The detail screen's own read, so opening a lead no longer requires the whole
+ * collection to be sitting in the browser. Declared before the /:id/actions/*
+ * routes it shares a prefix with.
+ */
+leadsRouter.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const lead = await getLeadById(req.params.id);
+    if (!lead) return res.status(404).json({ success: false, error: 'Not found' });
+    return res.status(200).json({ success: true, lead });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch lead', message: err.message });
+  }
+});
+
 leadsRouter.post('/', async (req: Request, res: Response) => {
   const newLead = await createLead(req.body, {
     actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,

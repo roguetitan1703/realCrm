@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { useServerList } from '../lib/serverList.js'
+import { useRecord } from '../lib/useRecord.js'
 import { api } from '../lib/api.js'
 import { ModuleListView, ModuleTable, PropertyCard, ProjectCard } from '../components/collections.jsx'
 import { buildProjects, unitsInProject, unitsByWing } from '../lib/projects.js'
@@ -195,9 +196,21 @@ function PropTable({ def, list, store, onOpen, allLeads }) {
 // standard ModuleDetail. Field viewing/editing + action rail are standardized.
 function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
   const [gallery, setGallery] = useState(null)
-  const p = store.state.properties.find(x => x.id === sel.propId)
+  // Fetched on its own when we don't already hold it — a listing opened from a
+  // deep link, a notification, or page 40 of the list is no longer conditional
+  // on the whole book being in memory.
+  const { record: p, loading, error } = useRecord(store, 'property', sel.propId)
   const back = () => setSel(s => ({ ...s, propOpen: false }))
-  if (!p) { return <>{topBar({ title: 'Property', eyebrow: 'Properties', onBack: back })}<div className="detail-missing">Not found.</div></> }
+  if (!p) {
+    return (
+      <>
+        {topBar({ title: 'Property', eyebrow: 'Properties', onBack: back })}
+        {loading
+          ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
+          : <div className="detail-missing">{error === 'not-found' ? 'This listing no longer exists.' : 'Could not open this listing.'}</div>}
+      </>
+    )
+  }
 
   const buyers = leadsForProperty(p, store.state.leads)
   const proj = p.project || p.society

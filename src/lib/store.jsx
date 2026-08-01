@@ -141,6 +141,10 @@ function freshState() {
     notifications: [],   // server-backed per-user alert feed
     dataAsOf: cached?.at || null,   // ms timestamp of the currently displayed data snapshot
     dataStale: false,    // true when we're showing a cached snapshot (offline read)
+    // Records fetched one at a time, keyed by kind then id. This is what
+    // replaces "the store holds every lead and every property": a screen asks
+    // for the record it is showing, and a miss is normal rather than a bug.
+    cache: { lead: {}, property: {} },
     // modal/overlay state
     modal: null,
     waState: null,
@@ -190,6 +194,15 @@ function reducer(state, action) {
         dataAsOf: action.at || null,
         dataStale: true,
       }
+    }
+
+    // One record, fetched on its own. `records` lets a list page seed the cache
+    // for free — the rows it just drew are the records the user is about to open.
+    case 'CACHE_RECORDS': {
+      const kind = action.kind
+      const next = { ...(state.cache?.[kind] || {}) }
+      for (const r of action.records || []) if (r?.id) next[r.id] = r
+      return { ...state, cache: { ...state.cache, [kind]: next } }
     }
 
     case 'SET_BRAND': return { ...state, brand: { ...state.brand, ...action.patch } }
@@ -838,6 +851,20 @@ export function StoreProvider({ children }) {
     me: () => state.agents.find(a => a.id === state.activeAgentId) || state.agents[0] || null,
     activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id)),
     
+    // ── Records ───────────────────────────────────────────────────────────
+    // Look a record up without assuming the whole collection is in memory.
+    // While `state.properties` / `state.leads` still exist they answer first —
+    // that keeps the desk working unchanged during the migration — but a miss
+    // is a normal outcome, not an error, and the caller fetches it.
+    lookup: (kind, id) => {
+      if (!id) return null
+      const cached = state.cache?.[kind]?.[id]
+      if (cached) return cached
+      const collection = kind === 'property' ? state.properties : state.leads
+      return (collection || []).find(r => r.id === id) || null
+    },
+    cacheRecords: (kind, records) => dispatch({ type: 'CACHE_RECORDS', kind, records }),
+
     assign: (leadId, agentId) => {
       dispatch({ type: 'ASSIGN', leadId, agentId })
       const a = state.agents.find(x => x.id === agentId)

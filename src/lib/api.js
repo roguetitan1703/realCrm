@@ -226,6 +226,7 @@ export const api = {
   // Leads CRUD — CRUD routes live under /modules/:moduleKey/records (recordsRouter);
   // /records/:id/actions/* below are the separate actionsRouter endpoints.
   getLeads: () => request('/leads'),
+  getLead: (id) => request(`/leads/${encodeURIComponent(id)}`),
   createLead: (lead) => request('/leads', { method: 'POST', body: JSON.stringify(lead) }),
   updateLead: (id, patch) => request(`/modules/leads/records/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteLead: (id) => request(`/modules/leads/records/${id}`, { method: 'DELETE' }),

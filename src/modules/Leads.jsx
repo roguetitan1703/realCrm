@@ -5,6 +5,7 @@ import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Overdue, Avatar, CappedList } from '../components/primitives.jsx'
 import { fitReasons, thumbTint, initials, unitLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
+import { useRecord } from '../lib/useRecord.js'
 import Icon from '../components/Icon.jsx'
 import { LEADS_DEF } from './definitions.jsx'
 
@@ -87,15 +88,18 @@ export default function Leads({ store, go, sel, setSel, topBar, phone }) {
 }
 
 function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
-  const l = store.state.leads.find(x => x.id === sel.leadId)
+  // The lead this screen is showing — fetched on its own if we don't already
+  // hold it. This used to be a find() over every lead in the firm, which meant
+  // a deep link from a notification sat on "Opening lead details…" until the
+  // whole collection had downloaded, and said it forever if it never did.
+  const { record: l, loading, error } = useRecord(store, 'lead', sel.leadId)
   if (!l) {
     return (
       <>
         {topBar({ title: 'Lead', eyebrow: 'Leads', onBack: () => setSel(s => ({ ...s, leadOpen: false })) })}
-        <div style={{ padding: 28, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 10, fontSize: 14 }}>
-          <Icon name="refresh" size={16} style={{ animation: 'spin 1s linear infinite' }} />
-          <span>Opening lead details…</span>
-        </div>
+        {loading
+          ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
+          : <div className="detail-missing">{error === 'not-found' ? 'This lead no longer exists.' : 'Could not open this lead.'}</div>}
       </>
     )
   }
