@@ -10,7 +10,7 @@ import { generateMessage, followUpMessage } from './matching.js'
 import { api as apiClient } from './api.js'
 import { applyBrandColor } from './brand.js'
 import { setTenantIdentity } from './tenant.js'
-import { applyPwaIdentity } from './pwa.js'
+import { applyPwaIdentity, ensurePwaIcons } from './pwa.js'
 import { getPref } from './prefs.js'
 
 const StoreCtx = createContext(null)
@@ -32,7 +32,17 @@ function writeStateCache(serverState) {
 }
 function readStateCache() {
   try {
-    const raw = window.localStorage?.getItem(stateCacheKey())
+    let t = window.localStorage?.getItem('crm_tenant_id') || ''
+    let raw = t ? window.localStorage?.getItem(`crm_state_cache_${t}`) : null
+    if (!raw) {
+      for (let i = 0; i < (window.localStorage?.length || 0); i++) {
+        const k = window.localStorage.key(i)
+        if (k && k.startsWith('crm_state_cache_')) {
+          raw = window.localStorage.getItem(k)
+          if (raw) break
+        }
+      }
+    }
     if (!raw) return null
     const c = JSON.parse(raw)
     return c && c.state ? c : null
@@ -615,7 +625,15 @@ export function StoreProvider({ children }) {
     setTenantIdentity({ firmName: state.settings.firmName, city: state.settings.city })
     const tid = typeof window !== 'undefined' ? window.localStorage?.getItem('crm_tenant_id') : null
     applyPwaIdentity(tid, state.settings.firmName)
-  }, [state.settings.firmName, state.settings.city])
+    if (tid && state.settings.firmName) {
+      ensurePwaIcons({
+        slug: tid,
+        initials: (state.settings.firmName || '').slice(0, 2).toUpperCase(),
+        color: state.brand?.primaryColor,
+        logoUrl: state.brand?.logoUrl
+      })
+    }
+  }, [state.settings.firmName, state.settings.city, state.brand?.primaryColor, state.brand?.logoUrl])
 
   // Pull the current user's alert feed. No-op without a token (the feed is
   // per-user, so it needs an authenticated identity).

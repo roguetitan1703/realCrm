@@ -101,30 +101,57 @@ export function isStandalone() {
 // generic fallback). We render the icon on a canvas — initials on the brand
 // color, full-bleed so it masks cleanly — and upload it once per tenant, so the
 // manifest can serve real PNGs. No server-side image library needed.
-function drawIcon(size, initials, bg, fg = '#ffffff') {
-  const c = document.createElement('canvas');
-  c.width = size; c.height = size;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, size, size); // full-bleed → Android applies its own mask
-  ctx.fillStyle = fg;
-  ctx.font = `700 ${Math.round(size * 0.42)}px "Space Grotesk", Arial, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText((initials || 'RE').toUpperCase(), size / 2, size / 2 + size * 0.02);
-  return c.toDataURL('image/png');
+function drawIcon(size, initials, bg, fg = '#ffffff', logoUrl = '') {
+  return new Promise((resolve) => {
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const ctx = c.getContext('2d');
+
+    if (logoUrl && (logoUrl.startsWith('data:image/') || logoUrl.startsWith('http'))) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, size, size);
+        const pad = Math.round(size * 0.12);
+        ctx.drawImage(img, pad, pad, size - pad * 2, size - pad * 2);
+        resolve(c.toDataURL('image/png'));
+      };
+      img.onerror = () => {
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, size, size);
+        ctx.fillStyle = fg;
+        ctx.font = `700 ${Math.round(size * 0.42)}px "Space Grotesk", Arial, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText((initials || 'RE').toUpperCase(), size / 2, size / 2 + size * 0.02);
+        resolve(c.toDataURL('image/png'));
+      };
+      img.src = logoUrl;
+      return;
+    }
+
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = fg;
+    ctx.font = `700 ${Math.round(size * 0.42)}px "Space Grotesk", Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText((initials || 'RE').toUpperCase(), size / 2, size / 2 + size * 0.02);
+    resolve(c.toDataURL('image/png'));
+  });
 }
 
 /** Generate + upload the tenant's PWA icons once (idempotent per device). */
-export async function ensurePwaIcons({ slug, initials, color } = {}) {
+export async function ensurePwaIcons({ slug, initials, color, logoUrl } = {}) {
   if (typeof document === 'undefined' || !slug || !initials) return;
-  const key = `pwa_icons_${slug}`;
+  const key = `pwa_icons_${slug}_${initials}_${color || ''}_${logoUrl ? 'logo' : 'nologo'}`;
   try { if (localStorage.getItem(key)) return; } catch (e) {}
   try {
     const { api } = await import('./api.js');
     const bg = color || '#1E6F52';
-    const icon192 = drawIcon(192, initials, bg);
-    const icon512 = drawIcon(512, initials, bg);
+    const icon192 = await drawIcon(192, initials, bg, '#ffffff', logoUrl);
+    const icon512 = await drawIcon(512, initials, bg, '#ffffff', logoUrl);
     await api.uploadPwaIcons({ icon192, icon512 });
     try { localStorage.setItem(key, '1'); } catch (e) {}
     // Repoint the manifest so a subsequent install picks up the real PNGs.

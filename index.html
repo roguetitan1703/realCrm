@@ -19,6 +19,26 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&display=swap" rel="stylesheet" />
+    <script>
+      (function() {
+        try {
+          var t = localStorage.getItem('crm_tenant_id') || '';
+          var c = localStorage.getItem('crm_brand_color') || '';
+          if (!c && t) {
+            var raw = localStorage.getItem('crm_state_cache_' + t);
+            if (raw) {
+              var parsed = JSON.parse(raw);
+              c = parsed && parsed.state && parsed.state.brand && parsed.state.brand.primaryColor;
+            }
+          }
+          if (c) {
+            document.documentElement.style.setProperty('--accent', c);
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.content = c;
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
