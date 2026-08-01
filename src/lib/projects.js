@@ -6,79 +6,17 @@
 // lists scattered flats/shops/plots never has to create a project, while a
 // township broker gets their towers grouped for free.
 
-import { projectOf, wingOf, developerOf, fmtMoney, INDEPENDENT_PROJECT, parseBudgetNum } from './format.js'
+import { wingOf, fmtMoney } from './format.js'
 
-const isAvailable = (p) => (p.status || 'Available') === 'Available'
-const isSold = (p) => ['Sold', 'Closed', 'Let', 'Leased'].includes(p.status)
-
-function parsePrice(val) {
-  if (val == null || val === '') return null
-  if (typeof val === 'number') return isNaN(val) ? null : val
-  const cleaned = String(val).replace(/,/g, '')
-  const n = parseBudgetNum(cleaned)
-  return isNaN(n) ? null : n
+// The price band, formatted. The server sends min/max as numbers -- formatting
+// is a display concern and stays here, shared by the project grid and the
+// project header so they can never disagree.
+export function priceRangeLabel(range) {
+  const min = range?.min, max = range?.max
+  if (min == null) return null
+  return min === max ? fmtMoney(min) : `${fmtMoney(min)} – ${fmtMoney(max)}`
 }
 
-// Group a list of unit records into projects. Returns an array sorted with the
-// largest real projects first and "Independent / Direct" always last.
-export function buildProjects(units = []) {
-  const map = new Map()
-  for (const u of units) {
-    const name = projectOf(u)
-    if (!map.has(name)) {
-      map.set(name, { key: name, name, units: [], localities: new Set(), wings: new Set(), developer: null })
-    }
-    const proj = map.get(name)
-    proj.units.push(u)
-    if (u.locality) proj.localities.add(u.locality)
-    if (wingOf(u)) proj.wings.add(wingOf(u))
-    if (!proj.developer && developerOf(u)) proj.developer = developerOf(u)
-  }
-
-  const projects = [...map.values()].map(proj => {
-    const units = proj.units
-    const prices = units.map(u => parsePrice(u.price)).filter(p => p !== null && !isNaN(p))
-    const min = prices.length ? Math.min(...prices) : null
-    const max = prices.length ? Math.max(...prices) : null
-    return {
-      key: proj.key,
-      name: proj.name,
-      independent: proj.name === INDEPENDENT_PROJECT,
-      developer: proj.developer,
-      locality: [...proj.localities].join(', ') || '—',
-      localityCount: proj.localities.size,
-      wings: [...proj.wings].sort(),
-      units,
-      counts: {
-        total: units.length,
-        available: units.filter(isAvailable).length,
-        sold: units.filter(isSold).length,
-        sale: units.filter(u => u.deal === 'sale').length,
-        rent: units.filter(u => u.deal === 'rent').length,
-      },
-      priceRange: {
-        min, max,
-        label: min == null ? '—'
-          : min === max ? fmtMoney(min)
-          : `${fmtMoney(min)} – ${fmtMoney(max)}`,
-      },
-    }
-  })
-
-  // Biggest projects first; Independent bucket always sinks to the bottom.
-  return projects.sort((a, b) => {
-    if (a.independent !== b.independent) return a.independent ? 1 : -1
-    return b.counts.total - a.counts.total
-  })
-}
-
-// All units in a single project (used by the project detail view).
-export function unitsInProject(units = [], key) {
-  return units.filter(u => projectOf(u) === key)
-}
-
-// Units of a project grouped by wing, for the wing-sectioned detail grid.
-// Returns [{ wing, units }] with an "Unassigned" bucket for wingless units.
 export function unitsByWing(units = []) {
   const map = new Map()
   for (const u of units) {

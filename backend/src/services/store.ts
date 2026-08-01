@@ -1552,6 +1552,9 @@ export async function getLeadCandidates(leadId: string, limit = 100): Promise<an
 // single definition of "the project this unit belongs to" and "its price as a
 // number", used by every query below.
 const PROJECT_KEY = sql`coalesce(nullif(project, ''), nullif(split_part(coalesce(title, ''), ' - ', 1), ''))`;
+// The bucket ungrouped units fall into. Must match INDEPENDENT_PROJECT in
+// src/lib/format.js -- the client filters and links on this exact string.
+const INDEPENDENT_PROJECT = 'Independent / Direct';
 // price_amount is numeric and price is the formatted text ("1,25,000"), so both
 // are cast to text before coalescing — mixing them raw is a type error that only
 // surfaced on leads that actually carry a budget.
@@ -1607,8 +1610,11 @@ export async function listProperties(opts: {
   if (locality.length) where.push(sql`locality IN ${sql(locality)}`);
   if (opts.project) {
     // A project is a grouping lens over the `project`/`society` fields, not a
-    // stored entity — same key the units view groups on.
-    where.push(sql`${PROJECT_KEY} = ${opts.project}`);
+    // stored entity — same key the units view groups on. The implicit bucket is
+    // the units that have no project at all, so it matches on absence.
+    where.push(opts.project === INDEPENDENT_PROJECT
+      ? sql`${PROJECT_KEY} IS NULL`
+      : sql`${PROJECT_KEY} = ${opts.project}`);
   }
   if (opts.excludeId) where.push(sql`id <> ${opts.excludeId}`);
 
@@ -1618,12 +1624,40 @@ export async function listProperties(opts: {
     sql`SELECT * FROM crm_properties WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
     sql`SELECT count(*)::int AS n FROM crm_properties WHERE ${clause}`,
   ]);
-  return { rows: rows.map(rowToProperty), total: countRows[0]?.n ?? 0, page, limit };
+
+  // The "N buyers waiting" badge on a card. The desk computed it by running the
+  // matcher over every lead in the firm, per card — which is the single reason
+  // the listings grid needed the leads in memory at all. One join, bounded to
+  // the page that is actually being rendered.
+  const demand = await demandFor(t, rows.map((r: any) => r.id));
+  const mapped = rows.map((r: any) => ({ ...rowToProperty(r), demandCount: demand.get(r.id) ?? 0 }));
+  return { rows: mapped, total: countRows[0]?.n ?? 0, page, limit };
+}
+
+/** Open leads whose requirement matches each of the given listings. */
+async function demandFor(t: string, ids: string[]): Promise<Map<string, number>> {
+  if (!ids.length) return new Map();
+  const rows = await sql`
+    SELECT p.id AS id, count(l.id)::int AS n
+      FROM crm_properties p
+      LEFT JOIN crm_leads l
+        ON l.tenant_id = p.tenant_id
+       AND NOT coalesce(l.stage, '') LIKE 'Closed%'
+       AND coalesce(l.deal, l.req->>'deal', 'sale') = coalesce(p.deal, 'sale')
+       AND (l.locality IS NULL OR p.locality IS NULL OR l.locality = p.locality)
+       AND (l.budget_max IS NULL OR p.price_amount IS NULL OR l.budget_max >= p.price_amount * 0.75)
+       AND (l.budget_min IS NULL OR p.price_amount IS NULL OR l.budget_min <= p.price_amount * 1.25)
+     WHERE p.tenant_id = ${t} AND p.id IN ${sql(ids)}
+     GROUP BY p.id`;
+  return new Map(rows.map((r: any) => [r.id, r.n]));
 }
 
 export async function getPropertyById(id: string): Promise<any | null> {
-  const rows = await sql`SELECT * FROM crm_properties WHERE tenant_id = ${tid()} AND id = ${id} LIMIT 1`;
-  return rows[0] ? rowToProperty(rows[0]) : null;
+  const t = tid();
+  const rows = await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id = ${id} LIMIT 1`;
+  if (!rows[0]) return null;
+  const demand = await demandFor(t, [id]);
+  return { ...rowToProperty(rows[0]), demandCount: demand.get(id) ?? 0 };
 }
 
 /**
@@ -1676,8 +1710,11 @@ export async function listProjects(opts: { q?: string; limit?: number } = {}): P
 
   // `mode()` picks the most common locality rather than an arbitrary one — a
   // township spanning two localities should read as the one most of it is in.
+  // Units with no project are not dropped — they collect in one implicit
+  // bucket, the same way the browser-side grouping did it. A broker who only
+  // lists scattered flats still sees their inventory here.
   const rows = await sql`
-    SELECT ${PROJECT_KEY} AS key,
+    SELECT coalesce(${PROJECT_KEY}, ${INDEPENDENT_PROJECT}) AS key,
            count(*)::int AS units,
            count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available,
            count(*) FILTER (WHERE coalesce(status, 'Available') = 'Sold')::int AS sold,
@@ -1685,18 +1722,29 @@ export async function listProjects(opts: { q?: string; limit?: number } = {}): P
            count(*) FILTER (WHERE coalesce(deal, 'sale') = 'sale')::int AS sale,
            mode() WITHIN GROUP (ORDER BY locality) AS locality,
            mode() WITHIN GROUP (ORDER BY builder) AS builder,
+           array_remove(array_agg(DISTINCT nullif(wing, '')), NULL) AS wings,
            min(${PRICE_NUM}) AS price_min,
            max(${PRICE_NUM}) AS price_max
       FROM crm_properties WHERE ${clause}
-     GROUP BY 1 HAVING ${PROJECT_KEY} IS NOT NULL
+     GROUP BY 1
      ORDER BY 2 DESC LIMIT ${limit}`;
 
+  // Biggest projects first, with the implicit bucket always last — it is a
+  // leftovers pile, not the firm's largest township.
+  const ordered = rows.slice().sort((a: any, b: any) => {
+    const ai = a.key === INDEPENDENT_PROJECT, bi = b.key === INDEPENDENT_PROJECT;
+    if (ai !== bi) return ai ? 1 : -1;
+    return b.units - a.units;
+  });
   return {
-    rows: rows.map(r => ({
+    rows: ordered.map(r => ({
       key: r.key,
       name: r.key,
+      independent: r.key === INDEPENDENT_PROJECT,
       locality: r.locality || null,
       builder: r.builder || null,
+      developer: r.builder || null,
+      wings: (r.wings || []).sort(),
       counts: { total: r.units, available: r.available, sold: r.sold, rent: r.rent, sale: r.sale },
       priceRange: { min: r.price_min != null ? Number(r.price_min) : null, max: r.price_max != null ? Number(r.price_max) : null },
     })),

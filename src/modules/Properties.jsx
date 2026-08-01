@@ -4,7 +4,8 @@ import { useServerList } from '../lib/serverList.js'
 import { useRecord } from '../lib/useRecord.js'
 import { api } from '../lib/api.js'
 import { ModuleListView, ModuleTable, PropertyCard, ProjectCard } from '../components/collections.jsx'
-import { buildProjects, unitsInProject, unitsByWing } from '../lib/projects.js'
+import { unitsByWing, priceRangeLabel } from '../lib/projects.js'
+import { useServerData } from '../lib/useServerData.js'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { StatusTag, Quoted, Button, KV, Timeline, MoreRows, useCap, CappedList, Panel, SectionHead } from '../components/primitives.jsx'
 import { NbaBanner } from '../components/rail.jsx'
@@ -98,17 +99,12 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
 
   // Shared query engine drives filter/search/sort; a custom renderTable keeps the
   // module-specific card grid (with demand count) + demand-column table view.
-  // Project view aggregates ALL units into cards — pagination is meaningless
-  // (and would silently drop units from the aggregate), so it only applies
-  // to the two flat unit views.
+  // The project view reads its own aggregate endpoint, so the unit pager is
+  // hidden there rather than paging rows it isn't showing.
   const paginated = view !== 'projects'
   const { header, toolbar, body } = ModuleListView({
     def: PROPERTIES_DEF, store,
-    // Flat unit views read one server page. The project view aggregates every
-    // unit in the firm into cards, which a page cannot answer — it stays on the
-    // in-memory collection until it has an endpoint of its own.
-    records: paginated ? undefined : state.properties,
-    source: paginated ? source : undefined,
+    source,
     onOpen: (p) => open(p.id),
     filters: flt, onFilters: setFltP,
     search: q, onSearch: setQP,
@@ -129,10 +125,10 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
     cta: mayEdit ? { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) } : null,
     emptyHint: 'Try clearing a filter or search.',
     renderTable: (list, v) => v === 'projects'
-      ? <div className="grid-cards">{buildProjects(list).map(pj => <ProjectCard key={pj.key} project={pj} onClick={() => openProject(pj.key)} />)}</div>
+      ? <ProjectGrid onOpen={openProject} />
       : v === 'grid'
-        ? <div className="grid-cards">{list.map(p => <PropertyCard key={p.id} p={p} matchCount={leadsForProperty(p, state.leads).length} onClick={() => open(p.id)} />)}</div>
-        : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open} allLeads={state.leads} />,
+        ? <div className="grid-cards">{list.map(p => <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} onClick={() => open(p.id)} />)}</div>
+        : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open} />,
   })
 
   return (
@@ -178,12 +174,27 @@ function UnitsTable({ units, onOpen }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// ProjectGrid — the township lens. The grouping is a GROUP BY on the server, so
+// this reads project rows directly instead of aggregating every unit in the
+// firm in the browser (which is what made this view require the collection).
+function ProjectGrid({ onOpen }) {
+  const { data, loading, error } = useServerData(() => api.listProjects(), [], { data: [] })
+  const rows = data?.data || []
+  if (loading && !rows.length) return <div className="list-spin" role="status" aria-label="Loading"><span /></div>
+  if (error) return <div className="detail-missing">Could not load projects.</div>
+  if (!rows.length) return <div className="detail-missing">No projects yet.</div>
+  return <div className="grid-cards">{rows.map(pj => <ProjectCard key={pj.key} project={pj} onClick={() => onOpen(pj.key)} />)}</div>
+}
+
 // Table view: definition columns + a module-specific "Buyers" demand column injected.
-function PropTable({ def, list, store, onOpen, allLeads }) {
-  const demandCol = { key: 'demand', label: 'Buyers', render: (p) => {
-    const demand = leadsForProperty(p, allLeads).length
-    return demand ? <span className="pc-demand"><Icon name="people" size={13} />{demand}</span> : <span className="cell-quiet">—</span>
-  } }
+// `demandCount` rides on the row from the server, counted by one join over the
+// page being rendered. It used to be leadsForProperty() run per row against
+// every lead in the firm.
+function PropTable({ def, list, store, onOpen }) {
+  const demandCol = { key: 'demand', label: 'Buyers', render: (p) => (
+    p.demandCount ? <span className="pc-demand"><Icon name="people" size={13} />{p.demandCount}</span> : <span className="cell-quiet">—</span>
+  ) }
   // insert Buyers just before the trailing Quoted column
   const cols = def.columns.slice()
   cols.splice(cols.length - 1, 0, demandCol)
@@ -200,6 +211,17 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
   // deep link, a notification, or page 40 of the list is no longer conditional
   // on the whole book being in memory.
   const { record: p, loading, error } = useRecord(store, 'property', sel.propId)
+  // The two things this page needs beyond the listing itself, each its own read:
+  // the buyers it matches, and the other units in its project. Both used to be
+  // array scans over collections held in memory for exactly this.
+  const { data: candidates } = useServerData(
+    () => sel.propId ? api.getPropertyBuyers(sel.propId).then(r => r?.buyers || []) : Promise.resolve([]),
+    [sel.propId], [])
+  const projKey = p?.project || p?.society || ''
+  const { data: siblingPage } = useServerData(
+    () => projKey ? api.listProperties({ project: projKey, excludeId: sel.propId, limit: 24 }) : Promise.resolve({ data: [] }),
+    [projKey, sel.propId], { data: [] })
+  const siblings = siblingPage?.data || []
   const back = () => setSel(s => ({ ...s, propOpen: false }))
   if (!p) {
     return (
@@ -212,9 +234,8 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
     )
   }
 
-  const buyers = leadsForProperty(p, store.state.leads)
   const proj = p.project || p.society
-  const siblings = store.state.properties.filter(x => x.id !== p.id && (x.project || x.society) === proj)
+  const buyers = leadsForProperty(p, candidates || [])
   const tenancy = p.deal === 'rent' ? p.tenancy : null
   const renewal = renewalSignal(tenancy)
   // Edit reuses the add page (spec) — one form to maintain, not two.
@@ -389,11 +410,22 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
 function ProjectDetail({ store, go, sel, setSel, topBar }) {
   const key = sel.projKey
   const back = () => setSel(s => ({ ...s, projOpen: false, projKey: undefined }))
-  const project = buildProjects(store.state.properties).find(pj => pj.key === key)
-  if (!project) { return <>{topBar({ title: 'Project', eyebrow: 'Properties', onBack: back })}<div className="detail-missing">No units in this project.</div></> }
+  // The header is one aggregate row and the units are one page of listings.
+  // Both used to be derived by grouping every property in the firm in the
+  // browser, which is why this screen could not exist without the collection.
+  const { data: project, loading } = useServerData(
+    () => api.getProject(key).then(r => r?.project || null), [key], null)
+  const { data: unitPage } = useServerData(
+    () => api.listProperties({ project: key, limit: 200 }), [key], { data: [] })
+  if (!project) {
+    return <>{topBar({ title: 'Project', eyebrow: 'Properties', onBack: back })}
+      {loading
+        ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
+        : <div className="detail-missing">No units in this project.</div>}</>
+  }
 
   const { name, locality, developer, counts, priceRange, wings } = project
-  const wingGroups = unitsByWing(unitsInProject(store.state.properties, key))
+  const wingGroups = unitsByWing(unitPage?.data || [])
   const openUnit = (id) => go('properties', { propId: id, propOpen: true })
 
   const facts = [
@@ -401,7 +433,7 @@ function ProjectDetail({ store, go, sel, setSel, topBar }) {
     `${counts.available} available`,
     counts.sold ? `${counts.sold} sold` : null,
     wings.length ? `${wings.length} wing${wings.length > 1 ? 's' : ''}` : null,
-    priceRange.label !== '—' ? priceRange.label : null,
+    priceRangeLabel(priceRange),
   ].filter(Boolean)
 
   return (

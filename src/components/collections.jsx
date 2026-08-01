@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import Icon from './Icon.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, NewTag, Quoted, PageHeader, ViewSwitch, Pager } from './primitives.jsx'
 import { quotedLine, unitLabel } from '../lib/format.js'
+import { priceRangeLabel } from '../lib/projects.js'
 import { getNestedValue } from './ModuleFields.jsx'
 
 // ---- SearchField: a text input that reports value AFTER a short pause. ----
@@ -596,7 +597,7 @@ export function ProjectCard({ project, onClick }) {
       <div className="pj-foot">
         <div>
           <span className="pj-flabel">Price range</span>
-          <span className="pj-price">{priceRange.label}</span>
+          <span className="pj-price">{priceRangeLabel(priceRange) || '—'}</span>
         </div>
         <Icon name="chevRight" size={16} className="ic pj-go" />
       </div>
