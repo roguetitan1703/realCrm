@@ -16,7 +16,7 @@
 import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
-import { getLeads, createLead, updateLead, getRoutingRules, updateRoutingRules } from './store';
+import { getLeads, createLead, updateLead, nextRoutedAgent } from './store';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
 
@@ -368,15 +368,13 @@ export async function processInboxRow(
         return { status: 'merged', leadId: existing.id };
       }
 
-      // Round-robin among agents actually on duty.
-      const rules = await getRoutingRules();
-      const active: string[] = rules.active_agent_ids?.length ? rules.active_agent_ids : [];
-      let agentId: string | null = null;
-      if (active.length) {
-        const next = (rules.last_assigned_index + 1) % active.length;
-        agentId = active[next];
-        await updateRoutingRules({ last_assigned_index: next });
-      }
+      // Round-robin among agents actually on duty. One atomic statement, not
+      // a separate read-then-write — this used to be its own copy of the
+      // same logic createLead() has, and both copies raced the same way: a
+      // batch of pushes arriving close together would all read the counter
+      // before any of their writes landed, so they'd all pick the same
+      // person. See nextRoutedAgent()'s doc comment.
+      const agentId = await nextRoutedAgent();
 
       const { external_id, ...leadFields } = lead;
       const created = await createLead({

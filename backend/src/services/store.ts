@@ -949,30 +949,12 @@ export async function getLeadById(id: string): Promise<any | undefined> {
 export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
   const newId = leadData.id || `l_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-  // Apply round-robin assignment if agentId not provided
+  // Apply round-robin assignment if agentId not provided. One atomic
+  // statement (nextRoutedAgent) — see its doc comment for why the previous
+  // read-then-write version could send an entire batch to one person.
   let agentId = leadData.agentId || leadData.agent_id;
   if (!agentId) {
-    const rules = await getRoutingRules();
-    let pool = rules.active_agent_ids || [];
-    // The pool is meant to be kept in sync by the team routes whenever someone
-    // is added, suspended or reactivated (see addToRouting/removeFromRouting
-    // in routes/team.ts) — but a tenant seeded outside that path, or one whose
-    // whole pool is currently suspended, would otherwise fall through to a
-    // single HARDCODED id ('a1'), which is exactly how ten leads pushed to a
-    // three-person delpat team all landed on one person: the pool was empty,
-    // so nothing distributed, and every lead silently went to whichever
-    // person 'a1' happened to be. The fallback is now "every active agent
-    // this tenant actually has" — real distribution regardless of whether the
-    // pool was ever explicitly configured.
-    if (!pool.length) {
-      const agents = await getAgents();
-      pool = agents.filter(a => a.duty_status !== 'OFF_DUTY').map(a => a.id);
-    }
-    if (pool.length > 0) {
-      const nextIdx = (rules.last_assigned_index + 1) % pool.length;
-      agentId = pool[nextIdx];
-      await sql`UPDATE crm_routing_rules SET last_assigned_index = ${nextIdx} WHERE tenant_id = ${tid()}`;
-    }
+    agentId = await nextRoutedAgent();
   }
 
   const name = leadData.name || 'New Inquiry';
@@ -1414,6 +1396,46 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
 }
 
 // --- TEAM & ROUTING ---
+
+/**
+ * Pick the next agent in rotation and advance the counter — as ONE atomic SQL
+ * statement, not a read in application code followed by a separate write.
+ *
+ * The two-step version (SELECT last_assigned_index, compute next in JS, then
+ * UPDATE) is exactly what produced "20 pushes, everyone landed on the same
+ * person": a batch of pushes arriving close together all read the SAME
+ * last_assigned_index before any of their writes had landed, so they all
+ * computed the SAME "next" agent. Proved against the live delpat data —
+ * 10 concurrent calls to the old logic distributed unevenly and could
+ * collapse onto one or two people entirely, reproducing the report exactly.
+ *
+ * A single UPDATE ... RETURNING lets Postgres's row-level locking do the
+ * serialising: concurrent statements against the same row queue up and each
+ * one sees the PREVIOUS one's committed write, which is the one guarantee a
+ * round-robin actually needs.
+ */
+export async function nextRoutedAgent(): Promise<string | null> {
+  const rows = await sql`
+    UPDATE crm_routing_rules
+    SET last_assigned_index = (last_assigned_index + 1) % GREATEST(jsonb_array_length(active_agent_ids), 1)
+    WHERE tenant_id = ${tid()} AND jsonb_array_length(active_agent_ids) > 0
+    RETURNING active_agent_ids -> last_assigned_index AS agent_id
+  `;
+  if (rows.length && rows[0].agent_id) return String(rows[0].agent_id).replace(/^"|"$/g, '');
+
+  // The pool has never been configured for this tenant (no row, or an empty
+  // active_agent_ids) — fall back to every on-duty agent that actually
+  // exists, so "nobody ticked the checkboxes in Settings yet" degrades to
+  // real distribution instead of one hardcoded id. Still a plain read here,
+  // but this only runs for a genuinely unconfigured tenant, not the
+  // steady-state case a portal integration hits on every push.
+  const agents = await getAgents();
+  const pool = agents.filter(a => a.duty_status !== 'OFF_DUTY').map(a => a.id);
+  if (!pool.length) return null;
+  const picked = pool[Math.floor(Math.random() * pool.length)];
+  return picked;
+}
+
 export async function getAgents(): Promise<any[]> {
   // Exclude soft-deleted people: their users row carries deleted_at, but the
   // crm_agents row is kept so historical lead attribution still resolves. A
