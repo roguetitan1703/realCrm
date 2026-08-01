@@ -574,7 +574,10 @@ export default function Connections({ store }) {
       )}
 
       {rows?.map(c => {
-        const pending = (c.counts || {}).pending || 0
+        // 'failed' is included: the mapper can drop a bad key and re-save,
+        // and those pushes deserve another try against the corrected mapping
+        // rather than showing the same stale error forever. See replayPending.
+        const pending = ((c.counts || {}).pending || 0) + ((c.counts || {}).failed || 0)
         const st = stateOf(c)
         const total = Object.values(c.counts || {}).reduce((a, b) => a + b, 0)
         return (
@@ -599,7 +602,7 @@ export default function Connections({ store }) {
 
             {pending > 0 && c.configured && (
               <div className="cx-replay">
-                <span>{pending} waiting</span>
+                <span>{pending} waiting or failed</span>
                 <Button size="sm" variant="secondary" onClick={() => replay(c)}>Process</Button>
               </div>
             )}

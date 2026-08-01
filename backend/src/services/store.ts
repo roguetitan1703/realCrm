@@ -953,12 +953,25 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   let agentId = leadData.agentId || leadData.agent_id;
   if (!agentId) {
     const rules = await getRoutingRules();
-    if (rules.active_agent_ids && rules.active_agent_ids.length > 0) {
-      const nextIdx = (rules.last_assigned_index + 1) % rules.active_agent_ids.length;
-      agentId = rules.active_agent_ids[nextIdx];
+    let pool = rules.active_agent_ids || [];
+    // The pool is meant to be kept in sync by the team routes whenever someone
+    // is added, suspended or reactivated (see addToRouting/removeFromRouting
+    // in routes/team.ts) — but a tenant seeded outside that path, or one whose
+    // whole pool is currently suspended, would otherwise fall through to a
+    // single HARDCODED id ('a1'), which is exactly how ten leads pushed to a
+    // three-person delpat team all landed on one person: the pool was empty,
+    // so nothing distributed, and every lead silently went to whichever
+    // person 'a1' happened to be. The fallback is now "every active agent
+    // this tenant actually has" — real distribution regardless of whether the
+    // pool was ever explicitly configured.
+    if (!pool.length) {
+      const agents = await getAgents();
+      pool = agents.filter(a => a.duty_status !== 'OFF_DUTY').map(a => a.id);
+    }
+    if (pool.length > 0) {
+      const nextIdx = (rules.last_assigned_index + 1) % pool.length;
+      agentId = pool[nextIdx];
       await sql`UPDATE crm_routing_rules SET last_assigned_index = ${nextIdx} WHERE tenant_id = ${tid()}`;
-    } else {
-      agentId = 'a1';
     }
   }
 
@@ -1416,7 +1429,10 @@ export async function getAgents(): Promise<any[]> {
 export async function getRoutingRules(): Promise<RoutingRule> {
   const rows = await sql`SELECT * FROM crm_routing_rules WHERE tenant_id = ${tid()}`;
   if (rows.length === 0) {
-    return { strategy: 'round_robin', active_agent_ids: ['a1', 'a2', 'a3', 'a4'], last_assigned_index: -1 };
+    // Not this tenant's real agents — a fixed 'a1'..'a4' read as configured
+    // when nothing was. createLead() derives the actual pool from getAgents()
+    // whenever this comes back empty, so an honest empty array is correct here.
+    return { strategy: 'round_robin', active_agent_ids: [], last_assigned_index: -1 };
   }
   return {
     strategy: rows[0].strategy as any,

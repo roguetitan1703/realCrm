@@ -59,6 +59,27 @@ async function removeFromRouting(tenantId: string, userId: string): Promise<void
   await sql`UPDATE crm_routing_rules SET active_agent_ids = ${sql.json(ids.filter(x => x !== userId))} WHERE tenant_id = ${tenantId}`;
 }
 
+/**
+ * Add a user to the round-robin's active pool — the counterpart removeFromRouting
+ * never had. Without this, a person exists to be assigned leads but the pool
+ * that decides who's next has never heard of them: every new hire had to be
+ * added by hand in Settings before they'd see a single lead, and a tenant that
+ * never opened that screen silently routed everything to whoever WAS in the
+ * pool (or, if the pool was empty outright, to a single hardcoded fallback —
+ * see the fix in createLead). Called on create, on reassign-seat, and on
+ * reactivate, so "added to the team" and "in rotation" can't drift apart.
+ */
+async function addToRouting(tenantId: string, userId: string): Promise<void> {
+  const rows = await sql`SELECT active_agent_ids FROM crm_routing_rules WHERE tenant_id = ${tenantId} LIMIT 1`;
+  const ids: string[] = rows[0]?.active_agent_ids || [];
+  if (ids.includes(userId)) return;
+  await sql`
+    INSERT INTO crm_routing_rules (strategy, active_agent_ids, last_assigned_index, tenant_id)
+    VALUES ('round_robin', ${sql.json([...ids, userId])}, -1, ${tenantId})
+    ON CONFLICT (tenant_id) DO UPDATE SET active_agent_ids = ${sql.json([...ids, userId])};
+  `;
+}
+
 async function loadUser(tenantId: string, id: string): Promise<any | null> {
   const rows = await sql`SELECT * FROM users WHERE id = ${id} AND tenant_id = ${tenantId} AND deleted_at IS NULL LIMIT 1`;
   return rows[0] || null;
@@ -139,6 +160,7 @@ teamRouter.post('/users', async (req: Request, res: Response) => {
       VALUES (${id}, ${cleanName}, ${cleanName.split(' ')[0]}, ${initials}, '', ${teamRole}, 'ACTIVE', ${sql.json(meta)}, ${req.tenantId})
     `;
     await adminSetPassword(req.tenantId!, id, initial, true);
+    await addToRouting(req.tenantId!, id);
 
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
@@ -211,6 +233,8 @@ teamRouter.post('/users/:id/status', async (req: Request, res: Response) => {
     if (status === 'suspended') {
       await revokeUserSessions(u.id);
       await removeFromRouting(req.tenantId!, u.id);
+    } else {
+      await addToRouting(req.tenantId!, u.id);
     }
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
@@ -257,6 +281,10 @@ teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) 
     `;
     await sql`UPDATE crm_agents SET name = ${cleanName}, first = ${cleanName.split(' ')[0]}, initials = ${initials}, metadata = ${sql.json(meta)} WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
     await adminSetPassword(req.tenantId!, u.id, initial, true);   // forces change + revokes sessions
+    // The status update above always sets 'active' — a seat handed to someone
+    // new is a working seat again, even if the previous holder was suspended
+    // (and so removed from routing) at the time.
+    await addToRouting(req.tenantId!, u.id);
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
       actor_label: getContext()?.userId ?? 'admin', action: 'user.seat_reassigned',

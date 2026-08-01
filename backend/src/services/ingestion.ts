@@ -393,8 +393,11 @@ export async function processInboxRow(
 }
 
 /**
- * Replay every push that is still waiting — what you press after configuring a
- * parser for a connection that has been collecting payloads.
+ * Replay every push that hasn't safely landed — what you press after
+ * configuring a parser, and also what recovers a push that failed against a
+ * config that has SINCE been fixed (a stale mapping key, a typo corrected).
+ * A 'failed' row never retries itself; without this it would show the same
+ * stale error forever even after the thing that caused it is gone.
  *
  * Sequential on purpose: dedup and round-robin both read state that the
  * previous row may have just changed, so running these in parallel would race
@@ -405,7 +408,7 @@ export async function replayPending(
 ): Promise<{ processed: number; ingested: number; merged: number; failed: number; ignored: number }> {
   const rows = await sql`
     SELECT id, integration_id, raw_body FROM webhook_inbox
-    WHERE tenant_id = ${tenantId} AND status = 'pending' AND raw_body IS NOT NULL
+    WHERE tenant_id = ${tenantId} AND status IN ('pending', 'failed') AND raw_body IS NOT NULL
       ${integrationId ? sql`AND integration_id = ${integrationId}` : sql``}
     ORDER BY received_at ASC
   `;
