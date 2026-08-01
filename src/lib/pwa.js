@@ -21,7 +21,7 @@ export function registerServiceWorker() {
  * identity when slug is falsy. Safe to call repeatedly; creates the <link>
  * elements if the HTML didn't ship them.
  */
-export function applyPwaIdentity(slug) {
+export function applyPwaIdentity(slug, firmName) {
   if (typeof document === 'undefined') return;
   const s = slug || '_platform';
   const ensure = (id, rel) => {
@@ -36,6 +36,16 @@ export function applyPwaIdentity(slug) {
   };
   ensure('app-manifest', 'manifest').href = `/pwa/${s}/manifest.webmanifest`;
   ensure('app-apple-icon', 'apple-touch-icon').href = `/pwa/${s}/icon-192.png`;
+  
+  if (firmName) {
+    let meta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (!meta) {
+      meta = document.createElement('meta');
+      meta.name = 'apple-mobile-web-app-title';
+      document.head.appendChild(meta);
+    }
+    meta.content = firmName;
+  }
 }
 
 // ── Install prompt ─────────────────────────────────────────────────────────

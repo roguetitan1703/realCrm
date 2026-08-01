@@ -10,6 +10,7 @@ import { generateMessage, followUpMessage } from './matching.js'
 import { api as apiClient } from './api.js'
 import { applyBrandColor } from './brand.js'
 import { setTenantIdentity } from './tenant.js'
+import { applyPwaIdentity } from './pwa.js'
 import { getPref } from './prefs.js'
 
 const StoreCtx = createContext(null)
@@ -612,6 +613,8 @@ export function StoreProvider({ children }) {
   // message with the wrong firm's name.
   useEffect(() => {
     setTenantIdentity({ firmName: state.settings.firmName, city: state.settings.city })
+    const tid = typeof window !== 'undefined' ? window.localStorage?.getItem('crm_tenant_id') : null
+    applyPwaIdentity(tid, state.settings.firmName)
   }, [state.settings.firmName, state.settings.city])
 
   // Pull the current user's alert feed. No-op without a token (the feed is
