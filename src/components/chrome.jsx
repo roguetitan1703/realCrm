@@ -204,9 +204,16 @@ export function TabBar({ tabs, active, onNav }) {
 // ---- mobile top bar ----
 // title/eyebrow, optional back, optional right slot (avatar / action). This is
 // the CRM's phone chrome (agent role) — NOT a separate app.
+function initialsOfName(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return 'RE'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return parts.slice(0, 2).map(w => w[0]).join('').toUpperCase()
+}
+
 export function MobileTopBar({ title, sub, onBack, right, brand, firmName, logoUrl }) {
   const displayFirm = firmName || ''
-  const initials = displayFirm.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'RE'
+  const initials = initialsOfName(displayFirm)
   return (
     <div className="m-top">
       {onBack ? (
