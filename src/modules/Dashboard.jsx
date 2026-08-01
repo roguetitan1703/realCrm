@@ -1,5 +1,6 @@
 import { Kpi, Panel, SectionHead, Avatar, StageTag } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
+import { sourcesUsed } from '../lib/suggest.js'
 
 // The hero first screen. Every tile, bar and row is clickable — it drills into
 // the underlying filtered list or record. KPIs reflect the real job (oversight/
@@ -15,7 +16,10 @@ export default function Dashboard({ store, go, topBar }) {
 
   const toLeads = (leadFilter) => go('leads', { leadFilter, leadOpen: false, leadId: undefined })
 
-  const { stages, sources } = state.settings
+  const { stages } = state.settings
+  // Every source that has actually sent a lead — not settings.sources, which
+  // a new Connections integration never touches. See sourcesUsed().
+  const sources = sourcesUsed(store)
   const stageCounts = stages.map(s => ({ name: s, list: leads.filter(l => l.stage === s) }))
   const maxStage = Math.max(1, ...stageCounts.map(s => s.list.length))
   const srcMax = Math.max(1, ...sources.map(sn => leads.filter(l => l.source === sn).length))
@@ -58,6 +62,7 @@ export default function Dashboard({ store, go, topBar }) {
           {/* sources — click to filter */}
           <Panel>
             <SectionHead title="Leads by source" />
+            {sources.length === 0 && <div className="detail-empty">No leads yet.</div>}
             {sources.map(sn => {
               const c = leads.filter(l => l.source === sn).length
               return (

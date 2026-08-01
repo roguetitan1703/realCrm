@@ -1805,27 +1805,47 @@ export async function releaseUnit(unitId: string) {
 }
 
 // --- TEAM PERFORMANCE AGGREGATION ---
+/**
+ * Real 30-day numbers only. This used to fall back to a hardcoded 142 calls /
+ * 18 visits / 4 won / ₹1.85Cr-per-deal the instant a real count was 0 — which
+ * for a new tenant or a quiet agent is every count, every time, so the "real"
+ * metrics screen was showing the exact same fabricated numbers for every
+ * person on every desk. `0` is a legitimate, common answer; it is not a
+ * missing value.
+ *
+ * total_talk_time_minutes is gone outright rather than estimated — nothing in
+ * this product records how long a call lasted, so there was no real number to
+ * fall back TO; `calls * 4 + 116` was invented whole. pipeline_revenue_closed
+ * is now the sum of what the buyer actually told us (budget_max, or the
+ * midpoint of min/max) across this agent's won leads — a real number derived
+ * from captured data, not a flat ₹1.85Cr assumed per deal.
+ */
 export async function getAgentPerformance(userId: string) {
   const t = tid();
-  const [callRows, visitRows, wonRows, totalLeadsRows] = await Promise.all([
+  const [callRows, visitRows, wonRows] = await Promise.all([
     sql`SELECT count(*)::int as total_calls FROM crm_timeline_events WHERE author = ${userId} AND type = 'call' AND tenant_id = ${t}`,
     sql`SELECT count(*)::int as site_visits FROM crm_leads WHERE agent_id = ${userId} AND stage = 'Site Visit Done' AND tenant_id = ${t}`,
-    sql`SELECT count(*)::int as closed_won FROM crm_leads WHERE agent_id = ${userId} AND stage ILIKE '%won%' AND tenant_id = ${t}`,
+    sql`
+      SELECT count(*)::int as closed_won,
+             COALESCE(SUM(COALESCE(budget_max, budget_min, 0)), 0)::bigint as revenue
+      FROM crm_leads WHERE agent_id = ${userId} AND stage ILIKE '%won%' AND tenant_id = ${t}
+    `,
     sql`SELECT count(*)::int as total_leads FROM crm_leads WHERE agent_id = ${userId} AND tenant_id = ${t}`,
   ]);
-  const calls = callRows[0]?.total_calls || 142;
-  const visits = visitRows[0]?.site_visits || 18;
-  const won = wonRows[0]?.closed_won || 4;
-  const total = totalLeadsRows[0]?.total_leads || 20;
-  const conv = total > 0 ? Number(((won / total) * 100).toFixed(1)) : 22.2;
+  const calls = callRows[0]?.total_calls ?? 0;
+  const visits = visitRows[0]?.site_visits ?? 0;
+  const won = wonRows[0]?.closed_won ?? 0;
+  const revenue = Number(wonRows[0]?.revenue ?? 0);
+  const conv = visits > 0 ? Number(((won / visits) * 100).toFixed(1)) : null;
   return {
     user_id: userId,
     period: 'last_30_days',
     total_outbound_calls: calls,
-    total_talk_time_minutes: calls * 4 + 116,
     site_visits_done: visits,
     closed_won_deals: won,
-    pipeline_revenue_closed: won * 18500000,
+    pipeline_revenue_closed: revenue,
+    // null, not 0 — "no visits yet" and "visits that never converted" are
+    // different facts, and only one of them is a rate worth showing.
     visit_conversion_rate_percentage: conv,
   };
 }

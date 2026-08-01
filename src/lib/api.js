@@ -86,8 +86,14 @@ async function request(endpoint, options = {}) {
     // the whole app "Offline — not saving" while saves were working fine.
     setOnline(true);
     if (!res.ok) {
+      // Routes are inconsistent about which field carries the human reason —
+      // most (team.ts entirely) only ever set `error`, a shorter set set both
+      // `error` (category) and `message` (detail). Reading only `.message`
+      // meant every validation error from team.ts — "Reassign this user's 3
+      // open leads first", "last active owner", duplicate email, all of it —
+      // silently dropped its reason and showed a bare "400 Bad Request".
       let detail = '';
-      try { detail = (await res.clone().json())?.message || ''; } catch { /* not json */ }
+      try { const body = await res.clone().json(); detail = body?.message || body?.error || ''; } catch { /* not json */ }
       throw new Error(`API Error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
     }
     return await res.json();

@@ -47,5 +47,18 @@ export function configs(store) {
   return frequent(s.leads || [], l => l.req?.config)
 }
 
+/**
+ * Where leads have actually come from — NOT settings.sources, a hand-typed
+ * list from onboarding that a new Connections integration never touches. A
+ * portal wired up through Connections tags every lead it sends with its own
+ * name (`lead.source = provider`), so the dashboard's "Leads by source" was
+ * reading a completely different list than the one new leads were arriving
+ * under — a source could receive fifty leads and never once show up.
+ */
+export function sourcesUsed(store) {
+  const s = store?.state || store || {}
+  return frequent(s.leads || [], l => l.source)
+}
+
 /** Shape a derived list for a filter's `options`. */
 export const asOptions = (list) => list.map(v => ({ value: v, label: v }))
