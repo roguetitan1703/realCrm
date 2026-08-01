@@ -96,7 +96,8 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
     cleanSlug = `${base}-${n}`;
   }
   const tenantId = cleanSlug;
-  const initials = firmName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
+  const parts = firmName.trim().split(/\s+/).filter(Boolean);
+  const initials = parts.length === 1 ? parts[0].slice(0, 2).toUpperCase() : parts.slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
   const brand_config = {
     primaryColor: input.primaryColor || '#1E6F52',
     surfaceColor: '#F6F5F2',
