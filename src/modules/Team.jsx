@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Avatar, Button, IconButton, Field, Input, PhoneInput, SectionHead, PageHeader, Segmented } from '../components/primitives.jsx'
+import { Avatar, Button, Field, Input, PhoneInput, SectionHead, PageHeader, Segmented, RowMenu, Pager } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 
@@ -128,9 +128,13 @@ export default function Team({ store, go, topBar }) {
                   <div className="bstat"><div className="bv">{visits == null ? '—' : visits}</div><div className="bl">Visits</div></div>
                 </div>
 
+                {/* Duty toggling used to live here as an unlabeled icon,
+                    reading as a second "Reassign" beside the real one — it's
+                    an account-lifecycle action now, in Manage Access above,
+                    named for what it does. This board stays workload +
+                    the one action that's actually about workload. */}
                 <div className="bactions">
-                  <Button size="sm" onClick={() => store.openModal({ kind: 'reassign', fromId: a.id })}>Reassign</Button>
-                  <IconButton icon={off ? 'refresh' : 'switch'} title={off ? 'Bring on duty' : 'Take off duty'} onClick={() => store.toggleAgent(a.id)} />
+                  <Button size="sm" onClick={() => store.openModal({ kind: 'reassign', fromId: a.id })}>Reassign leads</Button>
                 </div>
               </div>
             )
@@ -148,6 +152,8 @@ export default function Team({ store, go, topBar }) {
 // Backend enforces RBAC; we mirror it here only to avoid offering an action the
 // server will reject. Every mutation re-pulls the desk so the ranked board above
 // reflects a suspend / delete / seat-swap immediately.
+const PAGE_SIZE = 8
+
 function AccessPanel({ store }) {
   const meId = store.state.activeAgentId
   const [users, setUsers] = useState(null)   // null = loading
@@ -155,9 +161,17 @@ function AccessPanel({ store }) {
   const [reveal, setReveal] = useState(null) // { title, name, handle, password }
   const [seat, setSeat] = useState(null)     // user whose seat is being reassigned
   const [edit, setEdit] = useState(null)     // user being edited (name/email/phone/role)
+  const [page, setPage] = useState(1)
 
   const load = () => api.getUsers().then(r => setUsers(r.users || [])).catch(() => setUsers([]))
   useEffect(() => { load() }, [])
+
+  const pageCount = Math.max(1, Math.ceil((users?.length || 0) / PAGE_SIZE))
+  // A row acted on could move the person off the page they were on (a
+  // suspend re-sorts nothing here, but a shrinking last page after a delete
+  // would otherwise strand the view past the end).
+  useEffect(() => { if (page > pageCount) setPage(pageCount) }, [pageCount, page])
+  const pageRows = (users || []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const me = (users || []).find(u => u.id === meId)
   const myRole = me?.role || (store.state.role === 'agent' ? 'agent' : 'owner')
@@ -186,6 +200,16 @@ function AccessPanel({ store }) {
       .catch(err => store.toast(cleanErr(err), 'warn'))
       .finally(() => setBusy(''))
   }
+  // Duty status used to be an icon-only toggle sitting in the Team Activity
+  // board, unlabeled, next to a DIFFERENT "Reassign" — confusing enough that
+  // it's gone from there. The capability still matters (it gates who the
+  // router will hand a new lead to), so it lives here as a named action
+  // instead of disappearing outright.
+  const off = (u) => store.state.inactiveAgentIds.includes(u.id)
+  const toggleDuty = (u) => {
+    store.toggleAgent(u.id)
+    store.toast(off(u) ? `${u.name} back on duty` : `${u.name} marked off duty — won't receive new leads`)
+  }
 
   return (
     <div className="panel acc-panel">
@@ -211,10 +235,19 @@ function AccessPanel({ store }) {
               <tr><th>Person</th><th>User ID</th><th>Email</th><th>Status</th><th>Last active</th><th className="acc-actcol">Actions</th></tr>
             </thead>
             <tbody>
-              {users.map(u => {
+              {pageRows.map(u => {
                 const mine = canManage(u.role)
                 const self = u.id === meId
                 const rowBusy = busy === u.id
+                // Everything rare, or destructive, or both — behind the ⋯. What's
+                // left visible (Edit, Reassign seat, Suspend) is what an owner
+                // actually reaches for most.
+                const overflow = [
+                  { icon: 'shield', label: 'Reset password', onClick: () => resetPw(u) },
+                  { icon: 'x', label: 'Force logout', onClick: () => forceLogout(u) },
+                  ...(!self ? [{ icon: off(u) ? 'refresh' : 'clock', label: off(u) ? 'Bring on duty' : 'Mark off duty', onClick: () => toggleDuty(u) }] : []),
+                  ...(!self && canDelete ? [{ icon: 'trash', label: 'Delete', tone: 'danger', onClick: () => del(u) }] : []),
+                ]
                 return (
                   <tr key={u.id} className={isSuspended(u) ? 'acc-off' : ''}>
                     <td>
@@ -230,6 +263,7 @@ function AccessPanel({ store }) {
                     <td><span className="mono-num acc-handle">{u.email || '—'}</span></td>
                     <td>
                       <span className={'pill ' + (isSuspended(u) ? 'acc-pill-off' : 'acc-pill-on')}><span className="dot" />{isSuspended(u) ? 'Suspended' : 'Active'}</span>
+                      {!isSuspended(u) && off(u) && <span className="pill acc-pill-duty" style={{ marginLeft: 6 }}>Off duty</span>}
                       {u.must_change_password && <span className="acc-mustchg" title="They set their own password on first sign-in">first-login password pending</span>}
                     </td>
                     <td className="u-muted acc-last">{timeAgo(u.last_active)}</td>
@@ -237,8 +271,6 @@ function AccessPanel({ store }) {
                       {mine ? (
                         <div className="acc-actions">
                           <button className="acc-act" disabled={rowBusy} onClick={() => setEdit(u)} title="Edit name, email, phone or role">Edit</button>
-                          <button className="acc-act" disabled={rowBusy} onClick={() => resetPw(u)} title="Reset password — you hand over the new one">Reset password</button>
-                          <button className="acc-act" disabled={rowBusy} onClick={() => forceLogout(u)} title="Revoke every device this person is signed in on">Force logout</button>
                           {/* Handing over your own seat, suspending yourself or
                               deleting yourself are not real actions — they'd
                               either sign you out mid-click or lock the firm out
@@ -248,7 +280,7 @@ function AccessPanel({ store }) {
                               this screen has no business raising. */}
                           {!self && <button className="acc-act" disabled={rowBusy} onClick={() => setSeat(u)} title="Hand this seat (and its leads) to a new person">Reassign seat</button>}
                           {!self && <button className="acc-act" disabled={rowBusy} onClick={() => toggleSuspend(u)}>{isSuspended(u) ? 'Reactivate' : 'Suspend'}</button>}
-                          {!self && canDelete && <button className="acc-act danger" disabled={rowBusy} onClick={() => del(u)}>Delete</button>}
+                          <RowMenu items={overflow} disabled={rowBusy} />
                         </div>
                       ) : (
                         <span className="u-muted acc-noperm">{self ? '—' : 'Owner-managed'}</span>
@@ -259,6 +291,7 @@ function AccessPanel({ store }) {
               })}
             </tbody>
           </table>
+          <Pager page={page} pageCount={pageCount} onPage={setPage} total={users.length} pageSize={PAGE_SIZE} />
         </div>
       )}
 

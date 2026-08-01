@@ -1,5 +1,5 @@
 // Small pure components — each maps to a class in styles.css. Change look = edit styles.css.
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
 import { relTime, agentName } from '../lib/format.js'
@@ -17,6 +17,61 @@ export function Button({ variant = 'ghost', size, block, icon, children, classNa
 }
 export function IconButton({ icon, variant = 'ghost', ...rest }) {
   return <button className={`btn btn-${variant} btn-icon`} {...rest}><Icon name={icon} /></button>
+}
+
+// ---- RowMenu: the compact "⋯" overflow for a table row's less-used actions.
+// Frequent actions stay as visible buttons beside it; this is for the ones
+// that are rare, destructive, or both — reset password, force logout, delete.
+export function RowMenu({ items, disabled }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  // Registered on the NEXT frame: React's synthetic handler runs at the root,
+  // so stopPropagation there doesn't stop the native event reaching window —
+  // the click that opened the menu would otherwise close it again immediately.
+  useEffect(() => {
+    if (!open) return
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const id = requestAnimationFrame(() => window.addEventListener('click', close))
+    return () => { cancelAnimationFrame(id); window.removeEventListener('click', close) }
+  }, [open])
+  if (!items.length) return null
+  return (
+    <div className="rowmenu" ref={ref} onClick={e => e.stopPropagation()}>
+      <button className="rowmenu-btn" aria-label="More actions" disabled={disabled} onClick={() => setOpen(o => !o)}>
+        <Icon name="dots" size={16} />
+      </button>
+      {open && (
+        <div className="popover rowmenu-pop" role="menu">
+          {items.map((it, i) => (
+            <button key={i} className={'p-item' + (it.tone === 'danger' ? ' danger' : '')} onClick={() => { setOpen(false); it.onClick() }}>
+              <span className="p-ic"><Icon name={it.icon} size={15} /></span>{it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- Pager: page N of M, for any list that's grown past one screen ----
+export function Pager({ page, pageCount, onPage, total, pageSize }) {
+  if (pageCount <= 1) return null
+  const from = (page - 1) * pageSize + 1
+  const to = Math.min(page * pageSize, total)
+  return (
+    <div className="pager">
+      <span className="pager-range">{from}–{to} of {total}</span>
+      <div className="pager-nav">
+        <button className="btn btn-ghost btn-sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+          <Icon name="chevLeft" size={14} />
+        </button>
+        <span className="pager-pos">{page} / {pageCount}</span>
+        <button className="btn btn-ghost btn-sm" disabled={page >= pageCount} onClick={() => onPage(page + 1)}>
+          <Icon name="chevRight" size={14} />
+        </button>
+      </div>
+    </div>
+  )
 }
 
 // ---- Field / Input ----
