@@ -1,21 +1,30 @@
 /**
- * Service worker — the app shell + basic offline read.
- * Network-first with a cache fallback: every successful same-origin GET is
- * cached, so a later offline/flaky load serves the last-seen response instead of
- * a dead page. Step 2 (offline-read) refines this with tenant-scoped caches and
- * a staleness banner; this baseline is what makes the app installable and gives
- * a usable offline shell.
+ * Service worker — web push, and nothing else.
+ *
+ * It used to also intercept every same-origin GET, network-first, caching each
+ * response. That bought nothing and cost real time: the bundle is content-
+ * hashed, so the browser's own HTTP cache already serves it without asking, and
+ * routing it through the worker only added a hop. The "offline fallback" it
+ * promised never worked either — the one response worth having offline was the
+ * boot read, and at ~10MB it was too big to store, so the cache held a pile of
+ * stale API replies nobody read.
+ *
+ * A service worker is required for web push and for nothing else we do. So this
+ * is a push handler. If offline reads become a real requirement, they get built
+ * deliberately against the small bootstrap payload — not inferred from whatever
+ * happened to pass through a fetch listener.
  */
-const CACHE = 'recrm-v1';
-
 self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
+    // Drop every cache the old fetch handler wrote. Without this, an existing
+    // install keeps serving months-old responses from a worker that no longer
+    // has any code to refresh them.
     const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+    await Promise.all(keys.map((k) => caches.delete(k)));
     await self.clients.claim();
   })());
 });
@@ -26,7 +35,10 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) { data = { title: 'Notification', body: event.data && event.data.text() }; }
-  const title = data.title || 'Real Estate by Delpat';
+  // No hardcoded firm name in the fallback: this worker is installed under a
+  // tenant's own scope, and showing another firm's name on their phone is
+  // exactly the white-label leak the manifest fix removed everywhere else.
+  const title = data.title || 'New notification';
   const options = {
     body: data.body || '',
     icon: data.icon || '/pwa/_platform/icon-192.png',
@@ -50,31 +62,5 @@ self.addEventListener('notificationclick', (event) => {
       }
     }
     if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
-  })());
-});
-
-self.addEventListener('fetch', (event) => {
-  const req = event.request;
-  if (req.method !== 'GET') return;
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return; // leave cross-origin (fonts, etc.) alone
-
-  event.respondWith((async () => {
-    try {
-      const res = await fetch(req);
-      if (res && res.ok) {
-        const cache = await caches.open(CACHE);
-        cache.put(req, res.clone());
-      }
-      return res;
-    } catch (err) {
-      const cached = await caches.match(req);
-      if (cached) return cached;
-      if (req.mode === 'navigate') {
-        const root = await caches.match('/');
-        if (root) return root;
-      }
-      throw err;
-    }
   })());
 });

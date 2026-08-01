@@ -13,6 +13,7 @@ import { requireTenantAuth } from '../middleware/auth';
 import {
   createProperty, getUnits, blockUnit, releaseUnit,
   listProperties, getPropertyById, getPropertiesSummary,
+  listProjects, getProject, getPropertyBuyers,
 } from '../services/store';
 import { canEditListing } from '../lib/permissions';
 
@@ -63,6 +64,49 @@ propertiesRouter.get('/summary', async (_req: Request, res: Response) => {
     return res.status(200).json({ success: true, summary: await getPropertiesSummary() });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to summarise properties', message: err.message });
+  }
+});
+
+/**
+ * 1d. PROJECTS — the township grouping, aggregated in SQL.
+ * GET /api/v1/properties/projects
+ * GET /api/v1/properties/projects/:key   (header row; units come from ?project=)
+ * Both declared before /:id so 'projects' is never taken for an id.
+ */
+propertiesRouter.get('/projects', async (req: Request, res: Response) => {
+  try {
+    const { rows, total } = await listProjects({
+      q: typeof req.query.q === 'string' ? req.query.q : undefined,
+      limit: Number(req.query.limit) || 200,
+    });
+    return res.status(200).json({ success: true, data: rows, total });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to list projects', message: err.message });
+  }
+});
+
+propertiesRouter.get('/projects/:key', async (req: Request, res: Response) => {
+  try {
+    const project = await getProject(req.params.key);
+    if (!project) return res.status(404).json({ success: false, error: 'Not found' });
+    return res.status(200).json({ success: true, project });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch project', message: err.message });
+  }
+});
+
+/**
+ * 1e. THE BUYERS FOR ONE LISTING
+ * GET /api/v1/properties/:id/buyers
+ * `leadsForProperty(p, allLeads)` on the desk needed every lead in memory to
+ * answer a question about one flat. Same match, run where the leads are.
+ */
+propertiesRouter.get('/:id/buyers', async (req: Request, res: Response) => {
+  try {
+    const buyers = await getPropertyBuyers(req.params.id, Number(req.query.limit) || 50);
+    return res.status(200).json({ success: true, buyers, total: buyers.length });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch buyers', message: err.message });
   }
 });
 

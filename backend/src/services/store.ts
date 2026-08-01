@@ -896,6 +896,97 @@ export async function getBootstrap(): Promise<any> {
   };
 }
 
+/**
+ * Global search, run in Postgres.
+ *
+ * The command palette used to filter two in-memory arrays. That was the last
+ * feature that genuinely required the whole book to be in the browser, and it
+ * is the reason the arrays could not simply be deleted.
+ */
+export async function searchWorkspace(q: string, limit = 8): Promise<{ leads: any[]; properties: any[] }> {
+  const t = tid();
+  const term = String(q || '').trim();
+  if (term.length < 2) return { leads: [], properties: [] };
+  const like = `%${term.toLowerCase()}%`;
+  const n = Math.min(Math.max(Number(limit) || 8, 1), 25);
+
+  const [leadRows, propRows] = await Promise.all([
+    sql`SELECT id, name, phone, stage, locality, agent_id FROM crm_leads
+         WHERE tenant_id = ${t} AND (lower(coalesce(name, '')) LIKE ${like}
+            OR coalesce(phone, '') LIKE ${like}
+            OR lower(coalesce(email, '')) LIKE ${like})
+         ORDER BY created_at DESC LIMIT ${n}`,
+    sql`SELECT id, title, locality, project, status, deal, price FROM crm_properties
+         WHERE tenant_id = ${t} AND (lower(coalesce(title, '')) LIKE ${like}
+            OR lower(coalesce(locality, '')) LIKE ${like}
+            OR lower(coalesce(project, '')) LIKE ${like}
+            OR lower(coalesce(owner_name, '')) LIKE ${like})
+         ORDER BY created_at DESC LIMIT ${n}`,
+  ]);
+  return {
+    leads: leadRows.map(r => ({ id: r.id, name: r.name, phone: r.phone, stage: r.stage, locality: r.locality, agentId: r.agent_id })),
+    properties: propRows.map(r => ({ id: r.id, title: r.title, locality: r.locality, project: r.project, status: r.status, deal: r.deal, price: r.price })),
+  };
+}
+
+/**
+ * The counters the dashboard, the team roster and the sidebar badges need.
+ * Every one of these was a `.filter().length` over the full lead table held in
+ * the browser; none of them needs a single lead row.
+ */
+export async function getDeskSummary(): Promise<any> {
+  const t = tid();
+  const [totals, byStage, bySource, perAgent, props, owners] = await Promise.all([
+    sql`SELECT count(*)::int AS total,
+               count(*) FILTER (WHERE NOT coalesce(stage, '') LIKE 'Closed%')::int AS open,
+               count(*) FILTER (WHERE overdue)::int AS overdue,
+               count(*) FILTER (WHERE follow_up IS NOT NULL)::int AS with_follow_up,
+               count(*) FILTER (WHERE stage = 'Closed Won')::int AS won
+          FROM crm_leads WHERE tenant_id = ${t}`,
+    sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads WHERE tenant_id = ${t} GROUP BY 1`,
+    sql`SELECT coalesce(source, 'Website') AS k, count(*)::int AS n FROM crm_leads WHERE tenant_id = ${t} GROUP BY 1`,
+    sql`SELECT agent_id AS k,
+               count(*) FILTER (WHERE NOT coalesce(stage, '') LIKE 'Closed%')::int AS open,
+               count(*) FILTER (WHERE overdue)::int AS overdue,
+               count(*) FILTER (WHERE stage = 'Closed Won')::int AS won,
+               count(*)::int AS total
+          FROM crm_leads WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1`,
+    sql`SELECT count(*)::int AS total,
+               count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available
+          FROM crm_properties WHERE tenant_id = ${t}`,
+    sql`SELECT count(DISTINCT coalesce(owner_phone, owner_name))::int AS n FROM crm_properties
+         WHERE tenant_id = ${t} AND coalesce(owner_name, '') <> ''`,
+  ]);
+  const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
+  return {
+    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0 },
+    byStage: asMap(byStage),
+    bySource: asMap(bySource),
+    perAgent: Object.fromEntries(perAgent.map(r => [r.k, { open: r.open, overdue: r.overdue, won: r.won, total: r.total }])),
+    properties: props[0] || { total: 0, available: 0 },
+    owners: owners[0]?.n ?? 0,
+  };
+}
+
+/**
+ * Delete everything one import created. The desk used to do this by scanning
+ * its in-memory arrays for matching ids and firing a delete per row, so it
+ * could only ever revert what the browser happened to be holding.
+ *
+ * Leads carry the batch id in a column; properties carry it in `config`, which
+ * is where every non-column property field lives.
+ */
+export async function revertImportBatch(batchId: string): Promise<{ leads: number; properties: number }> {
+  const t = tid();
+  const [leadRows, propRows] = await Promise.all([
+    sql`DELETE FROM crm_leads WHERE tenant_id = ${t} AND import_batch_id = ${batchId} RETURNING id`,
+    sql`DELETE FROM crm_properties WHERE tenant_id = ${t} AND config->>'importBatchId' = ${batchId} RETURNING id`,
+  ]);
+  const leadIds = leadRows.map((r: any) => r.id);
+  if (leadIds.length) await sql`DELETE FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(leadIds)}`;
+  return { leads: leadRows.length, properties: propRows.length };
+}
+
 export async function getState(): Promise<ServerState> {
   const t = tid();
   const agentScope = agentLeadScope();
@@ -1520,6 +1611,93 @@ export async function getPropertiesSummary(): Promise<any> {
     localities: localities.map(r => r.v),
     projects: projects.map(r => ({ name: r.v, units: r.n })),
   };
+}
+
+/**
+ * Projects, grouped in SQL.
+ *
+ * A project is a lens over units, not a stored entity — so the desk built the
+ * grouping in JavaScript, which meant it needed every unit in memory to show a
+ * list of six project names. The grouping is a GROUP BY; do it here.
+ */
+export async function listProjects(opts: { q?: string; limit?: number } = {}): Promise<{ rows: any[]; total: number }> {
+  const t = tid();
+  const limit = Math.min(Math.max(Number(opts.limit) || 200, 1), 500);
+  const where: any[] = [sql`tenant_id = ${t}`];
+  const q = String(opts.q || '').trim();
+  if (q) {
+    const like = `%${q.toLowerCase()}%`;
+    where.push(sql`(lower(coalesce(project, '')) LIKE ${like} OR lower(coalesce(locality, '')) LIKE ${like})`);
+  }
+  const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+
+  // `mode()` picks the most common locality rather than an arbitrary one — a
+  // township spanning two localities should read as the one most of it is in.
+  const rows = await sql`
+    SELECT ${PROJECT_KEY} AS key,
+           count(*)::int AS units,
+           count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available,
+           count(*) FILTER (WHERE coalesce(status, 'Available') = 'Sold')::int AS sold,
+           count(*) FILTER (WHERE coalesce(deal, 'sale') = 'rent')::int AS rent,
+           count(*) FILTER (WHERE coalesce(deal, 'sale') = 'sale')::int AS sale,
+           mode() WITHIN GROUP (ORDER BY locality) AS locality,
+           mode() WITHIN GROUP (ORDER BY builder) AS builder,
+           min(${PRICE_NUM}) AS price_min,
+           max(${PRICE_NUM}) AS price_max
+      FROM crm_properties WHERE ${clause}
+     GROUP BY 1 HAVING ${PROJECT_KEY} IS NOT NULL
+     ORDER BY 2 DESC LIMIT ${limit}`;
+
+  return {
+    rows: rows.map(r => ({
+      key: r.key,
+      name: r.key,
+      locality: r.locality || null,
+      builder: r.builder || null,
+      counts: { total: r.units, available: r.available, sold: r.sold, rent: r.rent, sale: r.sale },
+      priceRange: { min: r.price_min != null ? Number(r.price_min) : null, max: r.price_max != null ? Number(r.price_max) : null },
+    })),
+    total: rows.length,
+  };
+}
+
+/** One project's header row. Its units come from listProperties({ project }). */
+export async function getProject(key: string): Promise<any | null> {
+  const { rows } = await listProjects({});
+  return rows.find(r => r.key === key) || null;
+}
+
+/**
+ * The buyers whose requirement matches one property.
+ *
+ * This is `getLeadCandidates` read from the other end, and it replaces running
+ * the client-side matcher across every lead in the firm to answer a question
+ * about a single flat.
+ */
+export async function getPropertyBuyers(propertyId: string, limit = 50): Promise<any[]> {
+  const t = tid();
+  const p = (await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id = ${propertyId} LIMIT 1`)[0];
+  if (!p) return [];
+  const price = p.price_amount != null ? Number(p.price_amount) : null;
+  const deal = p.deal || 'sale';
+
+  const where: any[] = [
+    sql`tenant_id = ${t}`,
+    sql`NOT coalesce(stage, '') LIKE 'Closed%'`,
+    sql`coalesce(deal, req->>'deal', 'sale') = ${deal}`,
+  ];
+  if (p.locality) where.push(sql`(locality IS NULL OR locality = ${p.locality})`);
+  // Same 25% headroom the other direction uses, and for the same reason: a
+  // budget stated as a round number is not a hard wall.
+  if (price != null) {
+    where.push(sql`(budget_max IS NULL OR budget_max >= ${Math.floor(price * 0.75)})`);
+    where.push(sql`(budget_min IS NULL OR budget_min <= ${Math.ceil(price * 1.25)})`);
+  }
+  const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+  const rows = await sql`SELECT * FROM crm_leads WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit}`;
+  const shortlistRows = await sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(rows.map(r => r.id).length ? rows.map(r => r.id) : [''])}`;
+  const byLead = groupShortlistByLead(shortlistRows);
+  return rows.map(r => rowToLead(r, [], byLead.get(r.id) || []));
 }
 
 export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {

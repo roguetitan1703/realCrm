@@ -199,6 +199,14 @@ export const api = {
   getBootstrap: () => request('/workspace/bootstrap'),
   // Tiny change-token used by the live-refresh loop; see getPulse() on the server.
   getPulse: () => request('/workspace/pulse'),
+  // Global search across leads and properties, run in SQL. The desk used to
+  // answer this by filtering two in-memory arrays, which is the single reason
+  // the arrays had to exist at all.
+  search: (q, limit = 8) => request(`/workspace/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  // Desk counters (open leads, overdue, per-agent load) computed server-side.
+  getDeskSummary: () => request('/workspace/desk-summary'),
+  // Every record created by one import, deleted where it lives.
+  revertImportBatch: (batchId) => request(`/workspace/import-batches/${encodeURIComponent(batchId)}`, { method: 'DELETE' }),
   hasPendingWrites,
   resetDatabase: () => request('/workspace/reset', { method: 'POST' }),
 
@@ -262,6 +270,16 @@ export const api = {
   },
   getProperty: (id) => request(`/properties/${encodeURIComponent(id)}`),
   getPropertiesSummary: () => request('/properties/summary'),
+  // The buyers already matched to one property. Replaces running the matcher
+  // over every lead in the browser to answer a question about a single flat.
+  getPropertyBuyers: (id) => request(`/properties/${encodeURIComponent(id)}/buyers`),
+  // Township inventory: projects are a grouping over units, derived in SQL so
+  // the browser doesn't need the units to see the groups.
+  listProjects: (params = {}) => {
+    const q = new URLSearchParams(params).toString()
+    return request(`/properties/projects${q ? `?${q}` : ''}`)
+  },
+  getProject: (key) => request(`/properties/projects/${encodeURIComponent(key)}`),
   createProperty: (prop) => request('/properties', { method: 'POST', body: JSON.stringify(prop) }),
 
   // Real 30-day sales metrics for one agent (calls / site visits / win rate)

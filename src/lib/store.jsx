@@ -855,6 +855,48 @@ export function StoreProvider({ children }) {
     dispatch({ type: 'WA_SET', patch: { ...patch, composing: false, message: composeFor(wa) } })
   }, [state.waState, composeFor])
 
+  // ── Writes ──────────────────────────────────────────────────────────────
+  // A write is not finished until the server says it is. Every mutation below
+  // used to dispatch, toast success, and hand the API rejection to
+  // `console.warn` — so a request the server refused looked identical to one it
+  // accepted, and the change quietly disappeared on the next reload. That is
+  // the worst failure mode a CRM can have: it tells someone their work is saved
+  // when it is not.
+  //
+  // There are exactly two shapes now, and no third:
+  //
+  //   write(...)      — server first. Nothing moves on screen until it confirms.
+  //   optimistic(...) — paint first, undo on failure. Reserved for the two
+  //                     interactions where the round trip is actually felt:
+  //                     dragging a lead between stages and ticking a follow-up.
+  const failed = useCallback((err, what) => {
+    console.warn(`[${what}]`, err?.message || err)
+    toast(err?.message || `Could not save — ${what} failed`, 'warn')
+  }, [toast])
+
+  // A 200 carrying `success: false` is still a refusal. Treat it as one.
+  const rejected = (res) => res && res.success === false
+
+  const write = useCallback((what, call, apply, okMsg) => call()
+    .then(res => {
+      if (rejected(res)) throw new Error(res.error || 'rejected')
+      if (apply) apply(res)
+      if (okMsg) toast(okMsg)
+      return res
+    })
+    .catch(err => { failed(err, what); return null }), [failed, toast])
+
+  const optimistic = useCallback((what, apply, revert, call, okMsg) => {
+    apply()
+    if (okMsg) toast(okMsg)
+    return call()
+      .then(res => {
+        if (rejected(res)) throw new Error(res.error || 'rejected')
+        return res
+      })
+      .catch(err => { revert(); failed(err, what); return null })
+  }, [failed, toast])
+
   const api = {
     state, dispatch, toast,
     // No invented fallback agent. A hardcoded name and phone number here is a
@@ -878,47 +920,54 @@ export function StoreProvider({ children }) {
     cacheRecords: (kind, records) => dispatch({ type: 'CACHE_RECORDS', kind, records }),
 
     assign: (leadId, agentId) => {
-      dispatch({ type: 'ASSIGN', leadId, agentId })
       const a = state.agents.find(x => x.id === agentId)
-      toast('Lead assigned to ' + (a ? a.first : ''))
-      apiClient.updateLead(leadId, { agentId }).catch(err => console.warn('[Assign API] Backend error:', err.message))
+      return write('Assign',
+        () => apiClient.updateLead(leadId, { agentId }),
+        () => dispatch({ type: 'ASSIGN', leadId, agentId }),
+        'Lead assigned to ' + (a ? a.first : ''))
     },
-    updateLead: (leadId, patch) => {
-      dispatch({ type: 'UPDATE_LEAD', leadId, patch })
-      toast('Lead details updated')
-      apiClient.updateLead(leadId, patch).catch(err => console.warn('[UpdateLead API] Backend error:', err.message))
-    },
-    updateProp: (propId, patch) => {
-      dispatch({ type: 'UPDATE_PROP', propId, patch })
-      toast('Property details updated')
-      apiClient.updateProperty(propId, patch).catch(err => console.warn('[UpdateProp API] Backend error:', err.message))
-    },
+    updateLead: (leadId, patch) => write('Update lead',
+      () => apiClient.updateLead(leadId, patch),
+      () => dispatch({ type: 'UPDATE_LEAD', leadId, patch }),
+      'Lead details updated'),
+    updateProp: (propId, patch) => write('Update property',
+      () => apiClient.updateProperty(propId, patch),
+      () => dispatch({ type: 'UPDATE_PROP', propId, patch }),
+      'Property details updated'),
+    // Optimistic: a stage change is a drag, and a card that hangs mid-air until
+    // the server answers reads as a broken drag. It snaps back if the write is
+    // refused — to the stage it actually had, read before the dispatch.
     setStage: (leadId, stage) => {
-      dispatch({ type: 'STAGE', leadId, stage })
-      toast('Stage → ' + stage)
-      apiClient.changeStage(leadId, stage, 'Stage updated via CRM view').catch(err => console.warn('[Stage API] Backend error:', err.message))
+      const prev = api.lookup('lead', leadId)?.stage
+      return optimistic('Stage change',
+        () => dispatch({ type: 'STAGE', leadId, stage }),
+        () => { if (prev) dispatch({ type: 'STAGE', leadId, stage: prev }) },
+        () => apiClient.changeStage(leadId, stage, 'Stage updated via CRM view'),
+        'Stage → ' + stage)
     },
+    // Optimistic for the same reason: this is a tick on a row the agent is
+    // working through, and the tick has to land under the finger.
     setFollowUp: (leadId, followUp) => {
-      dispatch({ type: 'FOLLOWUP', leadId, followUp })
-      toast('Follow-up set — added to calendar')
-      apiClient.updateLead(leadId, { followUp }).catch(err => console.warn('[FollowUp API] Backend error:', err.message))
+      const prev = api.lookup('lead', leadId)?.followUp ?? null
+      return optimistic('Follow-up',
+        () => dispatch({ type: 'FOLLOWUP', leadId, followUp }),
+        () => dispatch({ type: 'FOLLOWUP', leadId, followUp: prev }),
+        () => apiClient.updateLead(leadId, { followUp }),
+        'Follow-up set — added to calendar')
     },
-    addNote: (leadId, text, kind) => {
-      dispatch({ type: 'NOTE', leadId, text, kind })
-      toast(kind === 'call' ? 'Call logged' : 'Note added')
-    },
-    logEvent: (id, kind, text) => {
-      dispatch({ type: 'LOG_EVENT', id, kind, text })
-      toast(kind === 'call' ? 'Call logged' : kind === 'wa' ? 'WhatsApp logged' : kind === 'sms' ? 'SMS logged' : 'Note added')
-    },
+    // `addNote` and `logEvent` used to dispatch a timeline entry into local
+    // React state and toast "Call logged" — with no request behind either. The
+    // entry was gone on the next reload and no teammate ever saw it. Both now
+    // go through the same persisted remark thread everything else uses.
+    addNote: (leadId, text) => api.addRemark('lead', leadId, text),
+    logEvent: (id, kind, text) => api.addRemark(kind === 'property' ? 'property' : 'lead', id, text),
     merge: (leadId) => {
-      const dup = state.leads.find(l => l.id === leadId)
-      const primaryId = dup?.duplicateOf
-      dispatch({ type: 'MERGE', leadId, primaryId })
-      toast('Merged into one record')
-      if (primaryId) {
-        apiClient.mergeRecords(primaryId, leadId, 'combine_timeline').catch(err => console.warn('[Merge API] Backend error:', err.message))
-      }
+      const primaryId = api.lookup('lead', leadId)?.duplicateOf
+      if (!primaryId) { toast('No duplicate recorded for this lead', 'warn'); return Promise.resolve(null) }
+      return write('Merge',
+        () => apiClient.mergeRecords(primaryId, leadId, 'combine_timeline'),
+        () => dispatch({ type: 'MERGE', leadId, primaryId }),
+        'Merged into one record')
     },
     // Remark thread (B1) — real persistence, not the old client-only note echo.
     // kind = 'lead' | 'property'.
@@ -967,21 +1016,48 @@ export function StoreProvider({ children }) {
           resolve(null)
         })
     }),
+    // `shortlist` is REPLACED by the server, not appended to (store.ts syncs the
+    // lead_shortlist table to exactly what it receives). The old call sent
+    // `{ shortlist: [propId] }`, so shortlisting a second property deleted the
+    // first one server-side while local state showed both — the divergence only
+    // became visible after a reload, which is why nobody caught it. Send the
+    // whole list, every time.
     attachProp: (leadId, propId, label) => {
-      dispatch({ type: 'ATTACH_PROP', leadId, propId, label })
-      toast('Property shortlisted for this lead')
-      apiClient.updateLead(leadId, { shortlist: [propId] }).catch(err => console.warn('[Attach API] Backend error:', err.message))
+      const cur = api.lookup('lead', leadId)?.shortlist || []
+      if (cur.includes(propId)) { toast('Already on this lead’s shortlist'); return Promise.resolve(null) }
+      return write('Shortlist',
+        () => apiClient.updateLead(leadId, { shortlist: [...cur, propId] }),
+        () => dispatch({ type: 'ATTACH_PROP', leadId, propId, label }),
+        'Property shortlisted for this lead')
     },
+    detachProp: (leadId, propId) => {
+      const cur = api.lookup('lead', leadId)?.shortlist || []
+      return write('Remove from shortlist',
+        () => apiClient.updateLead(leadId, { shortlist: cur.filter(x => x !== propId) }),
+        () => dispatch({ type: 'DETACH_PROP', leadId, propId }))
+    },
+    // Visit feedback was purely local — the verdict that is supposed to refine
+    // this lead's matches never reached the server, so it was forgotten on
+    // reload and no teammate ever saw why a flat was rejected.
     visitFeedback: (leadId, propId, verdict, reason, society) => {
-      dispatch({ type: 'VISIT_FEEDBACK', leadId, propId, verdict, reason, society })
-      toast(verdict === 'liked' ? 'Marked as liked' : 'Rejection logged — refines matches')
+      const lead = api.lookup('lead', leadId)
+      const feedback = { ...(lead?.feedback || {}), [propId]: { verdict, reason: reason || null } }
+      const cur = lead?.shortlist || []
+      return write('Visit feedback',
+        () => apiClient.updateLead(leadId, { feedback, shortlist: cur.includes(propId) ? cur : [...cur, propId] }),
+        () => dispatch({ type: 'VISIT_FEEDBACK', leadId, propId, verdict, reason, society }),
+        verdict === 'liked' ? 'Marked as liked' : 'Rejection logged — refines matches')
     },
-    detachProp: (leadId, propId) => dispatch({ type: 'DETACH_PROP', leadId, propId }),
-    addLead: (lead) => {
-      dispatch({ type: 'ADD_LEAD', lead })
-      toast('Lead saved — routed')
-      apiClient.createLead(lead).catch(err => console.warn('[AddLead API] Backend error:', err.message))
-    },
+    // Same reason `addProperty` below resolves the server's row: the form data
+    // carries no id (the server mints it), so an optimistic prepend produced an
+    // unclickable card that then duplicated against the real row on hydrate.
+    addLead: (lead) => write('Add lead',
+      () => apiClient.createLead(lead),
+      (res) => {
+        const created = res?.data || res?.lead || res?.record || null
+        dispatch({ type: 'ADD_LEAD', lead: created?.id ? created : lead })
+      },
+      'Lead saved — routed'),
     // Resolves the SERVER's record, not the payload we sent. The old version
     // optimistically prepended the raw form data, which carries no id — the
     // server mints it — so the card was unclickable (open(undefined)) and
@@ -1007,69 +1083,88 @@ export function StoreProvider({ children }) {
         })
     }),
     // Bulk-add many units at once — one revertable batch, logged to Import history.
+    // Bulk-add many units at once. Only the rows the server actually accepted
+    // are added to the batch, so the Import-history entry says how many units
+    // exist rather than how many were attempted — and a partial failure is
+    // stated instead of hidden behind a "24 units added" toast.
     addProperties: (properties) => {
-      if (!properties?.length) return
-      dispatch({ type: 'ADD_PROPERTIES', properties })
-      toast(`${properties.length} unit${properties.length > 1 ? 's' : ''} added`)
-      const batchId = properties[0]?.importBatchId
-      if (batchId) {
-        const project = properties[0].project || properties[0].society || 'Project'
-        dispatch({ type: 'LOG_IMPORT_BATCH', logEntry: {
-          batchId, timestamp: Date.now(), fileName: `Added ${properties.length} unit(s) to ${project}`,
-          module: 'Properties', addedCount: properties.length, mergedCount: 0, mergedDetails: [], reverted: false,
-        } })
-      }
-      properties.forEach(p => apiClient.createProperty(p).catch(err => console.warn('[AddUnits API] Backend error:', err.message)))
+      if (!properties?.length) return Promise.resolve([])
+      return Promise.allSettled(properties.map(p => apiClient.createProperty(p).then(res => {
+        const created = res?.data || res?.property || null
+        if (!created?.id) throw new Error(res?.error || 'rejected')
+        return created
+      })))
+        .then(results => {
+          const made = results.filter(r => r.status === 'fulfilled').map(r => r.value)
+          const lost = results.length - made.length
+          if (made.length) dispatch({ type: 'ADD_PROPERTIES', properties: made })
+          const batchId = properties[0]?.importBatchId
+          if (batchId && made.length) {
+            const project = properties[0].project || properties[0].society || 'Project'
+            dispatch({ type: 'LOG_IMPORT_BATCH', logEntry: {
+              batchId, timestamp: Date.now(), fileName: `Added ${made.length} unit(s) to ${project}`,
+              module: 'Properties', addedCount: made.length, mergedCount: 0, mergedDetails: [], reverted: false,
+            } })
+          }
+          if (lost) toast(`${made.length} of ${results.length} units added — ${lost} failed`, 'warn')
+          else toast(`${made.length} unit${made.length > 1 ? 's' : ''} added`)
+          return made
+        })
     },
-    deleteLead: (ids) => {
+    // A partial delete is the outcome that has to be reported honestly: five of
+    // six rows gone is neither "deleted" nor "failed", and the old version
+    // toasted success unconditionally while dropping every rejection.
+    deleteLead: (ids) => api.deleteMany('lead', ids),
+    deleteProperty: (ids) => api.deleteMany('property', ids),
+    deleteMany: (kind, ids) => {
       const list = Array.isArray(ids) ? ids : [ids]
-      dispatch({ type: 'DELETE_LEADS', ids })
-      toast('Lead/Client record(s) deleted')
-      list.forEach(id => apiClient.deleteLead(id).catch(err => console.warn('[DeleteLead API] error:', err.message)))
+      const call = kind === 'lead' ? apiClient.deleteLead : apiClient.deleteProperty
+      const noun = kind === 'lead' ? 'Lead' : 'Property'
+      return Promise.allSettled(list.map(id => call(id).then(res => {
+        if (rejected(res)) throw new Error(res.error || 'rejected')
+        return id
+      })))
+        .then(results => {
+          const gone = results.filter(r => r.status === 'fulfilled').map(r => r.value)
+          const lost = results.length - gone.length
+          if (gone.length) dispatch({ type: kind === 'lead' ? 'DELETE_LEADS' : 'DELETE_PROPERTIES', ids: gone })
+          if (lost) toast(`${lost} of ${results.length} could not be deleted`, 'warn')
+          else toast(`${noun} record${gone.length > 1 ? 's' : ''} deleted`)
+          return gone
+        })
     },
-    deleteProperty: (ids) => {
-      const list = Array.isArray(ids) ? ids : [ids]
-      dispatch({ type: 'DELETE_PROPERTIES', ids })
-      toast('Property record(s) deleted')
-      list.forEach(id => apiClient.deleteProperty(id).catch(err => console.warn('[DeleteProp API] error:', err.message)))
-    },
-    revertImportBatch: (batchId) => {
-      // Collect the batch's record ids BEFORE the local state removes them, so we
-      // can also delete them on the backend — otherwise they reload on refresh.
-      const propIds = state.properties.filter(p => p.importBatchId === batchId).map(p => p.id)
-      const leadIds = state.leads.filter(l => l.importBatchId === batchId).map(l => l.id)
-      dispatch({ type: 'REVERT_IMPORT_BATCH', batchId })
-      toast('Import batch reverted — imported records removed', 'ok')
-      propIds.forEach(id => apiClient.deleteProperty(id).catch(err => console.warn('[Revert/Prop API] error:', err.message)))
-      leadIds.forEach(id => apiClient.deleteLead(id).catch(err => console.warn('[Revert/Lead API] error:', err.message)))
-    },
+    // The batch is deleted where it lives. The old version scanned the
+    // in-memory collections for matching ids and fired a delete per row — which
+    // meant it could only ever revert what the browser happened to be holding,
+    // and reverted nothing at all once those arrays went away.
+    revertImportBatch: (batchId) => write('Revert import',
+      () => apiClient.revertImportBatch(batchId),
+      () => dispatch({ type: 'REVERT_IMPORT_BATCH', batchId }),
+      'Import batch reverted — imported records removed'),
     logImportBatch: (logEntry) => {
       dispatch({ type: 'LOG_IMPORT_BATCH', logEntry })
     },
-    setPropStatus: (propId, status) => {
-      dispatch({ type: 'PROP_STATUS', propId, status })
-      toast('Status → ' + status)
-      apiClient.updateProperty(propId, { status }).catch(err => console.warn('[PropStatus API] Backend error:', err.message))
-    },
-    setTenancy: (propId, tenancy) => {
-      dispatch({ type: 'SET_TENANCY', propId, tenancy })
-      toast(tenancy ? 'Tenancy saved' : 'Flat freed')
-      apiClient.updateProperty(propId, { tenancy, status: tenancy ? 'Leased' : 'Available' }).catch(err => console.warn('[Tenancy API] Backend error:', err.message))
-    },
-    returnDeposit: (propId) => {
-      dispatch({ type: 'RETURN_DEPOSIT', propId })
-      toast('Deposit marked returned')
-      apiClient.updateProperty(propId, { depositReturned: true }).catch(err => console.warn('[ReturnDeposit API] Backend error:', err.message))
-    },
+    setPropStatus: (propId, status) => write('Status change',
+      () => apiClient.updateProperty(propId, { status }),
+      () => dispatch({ type: 'PROP_STATUS', propId, status }),
+      'Status → ' + status),
+    setTenancy: (propId, tenancy) => write('Tenancy',
+      () => apiClient.updateProperty(propId, { tenancy, status: tenancy ? 'Leased' : 'Available' }),
+      () => dispatch({ type: 'SET_TENANCY', propId, tenancy }),
+      tenancy ? 'Tenancy saved' : 'Flat freed'),
+    returnDeposit: (propId) => write('Deposit',
+      () => apiClient.updateProperty(propId, { depositReturned: true }),
+      () => dispatch({ type: 'RETURN_DEPOSIT', propId }),
+      'Deposit marked returned'),
     toggleAgent: (agentId) => {
-      dispatch({ type: 'TOGGLE_AGENT', agentId })
       const isOff = !state.inactiveAgentIds.includes(agentId)
-      apiClient.updateAgentStatus(agentId, isOff ? 'OFF_DUTY' : 'ACTIVE').catch(err => console.warn('[DutyStatus API] Backend error:', err.message))
+      return write('Duty status',
+        () => apiClient.updateAgentStatus(agentId, isOff ? 'OFF_DUTY' : 'ACTIVE'),
+        () => dispatch({ type: 'TOGGLE_AGENT', agentId }))
     },
-    reassignAll: (fromId, toId) => {
-      dispatch({ type: 'REASSIGN_ALL', fromId, toId })
-      apiClient.reassignLeads(fromId, toId).catch(err => console.warn('[Reassign API] Backend error:', err.message))
-    },
+    reassignAll: (fromId, toId) => write('Reassign',
+      () => apiClient.reassignLeads(fromId, toId),
+      () => dispatch({ type: 'REASSIGN_ALL', fromId, toId })),
     // Real teammate creation — the server makes a login-capable user, so we take
     // the server's roster as truth rather than an optimistic local guess.
     // Create a login-capable teammate (password auth). Resolves to the API
@@ -1087,64 +1182,55 @@ export function StoreProvider({ children }) {
         })
         .catch(err => { console.warn('[Add Agent API] error:', err.message); toast(err.message || 'Could not add teammate', 'warn'); return false })
     },
-    setFirmName: (name) => {
-      dispatch({ type: 'SET_FIRM_NAME', name })
-      toast('Firm name updated')
-      apiClient.updateSettings({ firmName: name }).catch(err => console.warn('[Settings API] error:', err.message))
-    },
-    addStage: (name) => {
-      dispatch({ type: 'ADD_STAGE', name })
-      toast('Stage added')
-      apiClient.updateSettings({ stages: [...state.settings.stages, name] }).catch(err => console.warn('[Settings API] error:', err.message))
-    },
-    renameStage: (from, to) => {
-      dispatch({ type: 'RENAME_STAGE', from, to })
-      toast('Stage renamed — leads moved')
-      apiClient.updateSettings({ stages: state.settings.stages.map(s => s === from ? to : s), renameStage: { from, to } }).catch(err => console.warn('[Settings API] error:', err.message))
-    },
-    removeStage: (name) => {
-      dispatch({ type: 'REMOVE_STAGE', name })
-      toast('Stage removed')
-      apiClient.updateSettings({ stages: state.settings.stages.filter(s => s !== name) }).catch(err => console.warn('[Settings API] error:', err.message))
-    },
+    setFirmName: (name) => write('Firm name',
+      () => apiClient.updateSettings({ firmName: name }),
+      () => dispatch({ type: 'SET_FIRM_NAME', name }),
+      'Firm name updated'),
+    addStage: (name) => write('Add stage',
+      () => apiClient.updateSettings({ stages: [...state.settings.stages, name] }),
+      () => dispatch({ type: 'ADD_STAGE', name }),
+      'Stage added'),
+    renameStage: (from, to) => write('Rename stage',
+      () => apiClient.updateSettings({ stages: state.settings.stages.map(s => s === from ? to : s), renameStage: { from, to } }),
+      () => dispatch({ type: 'RENAME_STAGE', from, to }),
+      'Stage renamed — leads moved'),
+    removeStage: (name) => write('Remove stage',
+      () => apiClient.updateSettings({ stages: state.settings.stages.filter(s => s !== name) }),
+      () => dispatch({ type: 'REMOVE_STAGE', name }),
+      'Stage removed'),
     moveStage: (name, dir) => {
-      dispatch({ type: 'MOVE_STAGE', name, dir })
       const arr = [...state.settings.stages]
       const idx = arr.indexOf(name)
-      if (idx !== -1 && idx + dir >= 0 && idx + dir < arr.length) {
-        const [removed] = arr.splice(idx, 1)
-        arr.splice(idx + dir, 0, removed)
-        apiClient.updateSettings({ stages: arr }).catch(err => console.warn('[Settings API] error:', err.message))
-      }
+      if (idx === -1 || idx + dir < 0 || idx + dir >= arr.length) return Promise.resolve(null)
+      const [removed] = arr.splice(idx, 1)
+      arr.splice(idx + dir, 0, removed)
+      return write('Reorder stages',
+        () => apiClient.updateSettings({ stages: arr }),
+        () => dispatch({ type: 'MOVE_STAGE', name, dir }))
     },
-    addSource: (name) => {
-      dispatch({ type: 'ADD_SOURCE', name })
-      toast('Source added')
-      apiClient.updateSettings({ sources: [...state.settings.sources, name] }).catch(err => console.warn('[Settings API] error:', err.message))
-    },
-    removeSource: (name) => {
-      dispatch({ type: 'REMOVE_SOURCE', name })
-      toast('Source removed')
-      apiClient.updateSettings({ sources: state.settings.sources.filter(s => s !== name) }).catch(err => console.warn('[Settings API] error:', err.message))
-    },
+    addSource: (name) => write('Add source',
+      () => apiClient.updateSettings({ sources: [...state.settings.sources, name] }),
+      () => dispatch({ type: 'ADD_SOURCE', name }),
+      'Source added'),
+    removeSource: (name) => write('Remove source',
+      () => apiClient.updateSettings({ sources: state.settings.sources.filter(s => s !== name) }),
+      () => dispatch({ type: 'REMOVE_SOURCE', name }),
+      'Source removed'),
     // Generic settings patch — persists any key (slaHours, reminderDays, currency, …).
-    patchSettings: (patch, note) => {
-      dispatch({ type: 'PATCH_SETTINGS', patch })
-      if (note) toast(note)
-      apiClient.updateSettings(patch).catch(err => console.warn('[Settings API] error:', err.message))
-    },
+    patchSettings: (patch, note) => write('Settings',
+      () => apiClient.updateSettings(patch),
+      () => dispatch({ type: 'PATCH_SETTINGS', patch }),
+      note),
     // Tenant brand (accent, logo) — the single source shared with the PWA icons.
-    updateBrand: (patch, note) => {
-      dispatch({ type: 'SET_BRAND', patch })
-      if (note) toast(note)
-      apiClient.updateBrand(patch).catch(err => console.warn('[Brand API] error:', err.message))
-    },
+    updateBrand: (patch, note) => write('Brand',
+      () => apiClient.updateBrand(patch),
+      () => dispatch({ type: 'SET_BRAND', patch }),
+      note),
     // Lead routing — backend round-robins new leads across active_agent_ids.
-    setRouting: (patch, note) => {
-      dispatch({ type: 'SET_ROUTING', patch })
-      if (note) toast(note)
-      apiClient.updateRouting(patch).catch(err => console.warn('[Routing API] error:', err.message))
-    },
+    setRouting: (patch, note) => write('Routing',
+      () => apiClient.updateRouting(patch),
+      () => dispatch({ type: 'SET_ROUTING', patch }),
+      note),
     openModal: (modal) => dispatch({ type: 'SET', patch: { modal } }),
     closeModal: () => dispatch({ type: 'SET', patch: { modal: null } }),
     // Re-pull the whole desk from the server (used after user-management edits so

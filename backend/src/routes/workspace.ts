@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap } from '../services/store';
+import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { listAudit, verifyAuditChain } from '../services/audit';
@@ -105,6 +105,32 @@ workspaceRouter.get('/today', requireTenantAuth, async (req: Request, res: Respo
   }
 });
 
+workspaceRouter.get('/search', requireTenantAuth, async (req: Request, res: Response) => {
+  try {
+    const out = await searchWorkspace(String(req.query.q || ''), Number(req.query.limit) || 8);
+    return res.status(200).json({ success: true, ...out });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Search failed', message: err.message });
+  }
+});
+
+workspaceRouter.get('/desk-summary', requireTenantAuth, async (_req: Request, res: Response) => {
+  try {
+    return res.status(200).json({ success: true, ...(await getDeskSummary()) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to build desk summary', message: err.message });
+  }
+});
+
+workspaceRouter.delete('/import-batches/:batchId', requireTenantAuth, async (req: Request, res: Response) => {
+  try {
+    const out = await revertImportBatch(req.params.batchId);
+    return res.status(200).json({ success: true, ...out });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to revert import', message: err.message });
+  }
+});
+
 workspaceRouter.get('/resolve', async (req: Request, res: Response) => {
   const slug = req.query.slug as string;
   const domain = req.query.domain as string;
@@ -153,84 +179,6 @@ workspaceRouter.get('/resolve', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Resolution Failed', message: err.message });
-  }
-});
-
-/**
- * 2. WORKSPACE BOOTSTRAP ENDPOINT (Called AFTER login!)
- * GET /api/v1/workspace/bootstrap
- */
-workspaceRouter.get('/bootstrap', requireTenantAuth, async (req: Request, res: Response) => {
-  const user = req.user!;
-  const tenant = req.tenant!;
-
-  console.log(`[Workspace Bootstrap] Initializing workspace for user: '${user.name}' (${user.role})`);
-
-  try {
-    const settings = await getSettings();
-    const allAvailableNav = [
-      { key: 'leads', label: 'Leads Pipeline', icon: 'Users', path: '/leads', is_enabled: true },
-      { key: 'properties', label: 'Properties & Inventory', icon: 'Building', path: '/properties', is_enabled: true },
-      { key: 'team', label: 'Team Members & Roster', icon: 'UserCheck', path: '/team', is_enabled: true },
-      { key: 'dialer', label: 'Telephony & Call Logs', icon: 'PhoneCall', path: '/dialer', is_enabled: true },
-      { key: 'import', label: 'Data Ingestion & Imports', icon: 'UploadCloud', path: '/import', is_enabled: true },
-      { key: 'settings', label: 'Workspace Settings', icon: 'Settings', path: '/settings', is_enabled: true },
-    ];
-
-    let rbacNavItems = [...allAvailableNav];
-    if (user.role === 'SALES_EXECUTIVE') {
-      rbacNavItems = allAvailableNav.filter((item) => ['leads', 'properties'].includes(item.key));
-    } else if (user.role === 'SALES_MANAGER') {
-      rbacNavItems = allAvailableNav.filter((item) => ['leads', 'properties', 'team'].includes(item.key));
-    }
-
-    const defaultStages = settings.stages || [
-      { id: '11111111-1111-1111-1111-111111111101', key: 'new', name: 'New Inquiry', color: '#3B82F6', order_index: 1 },
-      { id: '11111111-1111-1111-1111-111111111102', key: 'contacted', name: 'Contacted', color: '#8B5CF6', order_index: 2 },
-      { id: '11111111-1111-1111-1111-111111111103', key: 'visit_scheduled', name: 'Site Visit Scheduled', color: '#F59E0B', order_index: 3 },
-      { id: '11111111-1111-1111-1111-111111111104', key: 'visit_done', name: 'Site Visit Done', color: '#10B981', order_index: 4 },
-      { id: '11111111-1111-1111-1111-111111111106', key: 'won', name: 'Closed Won', color: '#059669', order_index: 6, is_closed: true },
-    ];
-
-    const modulesConfig = settings.modules_config || {
-      leads: {
-        stages: defaultStages,
-        customFields: settings.custom_fields?.leads || [
-          { field_key: 'budget_range', field_label: 'Budget Range', field_type: 'select', options: ['Under 50 Lakhs', '50 Lakhs - 1 Cr', '1 Cr - 1.5 Cr', '1.5 Cr - 2.5 Cr', '2.5 Cr+'], is_required: false },
-          { field_key: 'vastu_preference', field_label: 'Vastu Preference', field_type: 'select', options: ['East Facing', 'North Facing', 'North-East', 'Any'], is_required: false },
-          { field_key: 'property_type', field_label: 'Property Type Interested', field_type: 'select', options: ['2 BHK', '3 BHK', '4 BHK / Penthouse', 'Commercial Office', 'Plot / Land'], is_required: true },
-        ],
-      },
-      properties: {
-        customFields: settings.custom_fields?.properties || [
-          { field_key: 'rera_no', field_label: 'RERA Registration No.', field_type: 'text', is_required: true },
-          { field_key: 'possession_status', field_label: 'Possession Status', field_type: 'select', options: ['Ready to Move', 'Under Construction (2026)', 'New Launch'], is_required: true },
-        ],
-      },
-    };
-
-    return res.status(200).json({
-      success: true,
-      timestamp: new Date(),
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        branch_location: user.branch_location,
-      },
-      tenant: {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug,
-        brand_config: tenant.brand_config,
-        subscription_plan: tenant.subscription_plan,
-      },
-      rbac_nav_items: rbacNavItems,
-      modules_config: modulesConfig,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Bootstrap Failed', message: err.message });
   }
 });
 
