@@ -137,7 +137,7 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
 pwaRouter.get('/:slug/icon.svg', async (req: Request, res: Response) => {
   const t = await getTenant(req.params.slug);
   const brand = t?.brand_config || {};
-  const initials = brand.initials || (t ? initialsOf(t.name) : PLATFORM.initials);
+  const initials = t ? initialsOf(t.name) : PLATFORM.initials;
   const bg = brand.primaryColor || PLATFORM.primary;
   res.set('Content-Type', 'image/svg+xml');
   res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -150,7 +150,7 @@ pwaRouter.get('/:slug/icon-:size.png', async (req: Request, res: Response) => {
   const key = size === 512 ? 'icon512' : 'icon192';
   const t = await getTenant(slug);
   const brand = t?.brand_config || {};
-  const initials = brand.initials || (t ? initialsOf(t.name) : PLATFORM.initials);
+  const initials = t ? initialsOf(t.name) : PLATFORM.initials;
   const bg = brand.primaryColor || PLATFORM.primary;
   const signature = `${initials}_${bg}_${brand.logoUrl ? 'logo' : 'nologo'}`;
   const pwa = t?.pwa_config || {};
