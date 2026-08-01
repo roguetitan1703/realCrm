@@ -140,7 +140,7 @@ pwaRouter.get('/:slug/icon.svg', async (req: Request, res: Response) => {
   const initials = brand.initials || (t ? initialsOf(t.name) : PLATFORM.initials);
   const bg = brand.primaryColor || PLATFORM.primary;
   res.set('Content-Type', 'image/svg+xml');
-  res.set('Cache-Control', 'public, max-age=300');
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   return res.send(iconSvg(initials, bg, { rounded: true, logoUrl: brand.logoUrl }));
 });
 
@@ -149,26 +149,27 @@ pwaRouter.get('/:slug/icon-:size.png', async (req: Request, res: Response) => {
   const size = req.params.size === '512' ? 512 : 192;
   const key = size === 512 ? 'icon512' : 'icon192';
   const t = await getTenant(slug);
-  const pwa = t?.pwa_config || {};
-
-  // Serve the cached PNG if present.
-  const stored: string | undefined = pwa[key];
-  if (stored) {
-    const buf = Buffer.from(String(stored).replace(/^data:image\/png;base64,/, ''), 'base64');
-    res.set('Content-Type', 'image/png');
-    res.set('Cache-Control', 'public, max-age=31536000, immutable');
-    return res.send(buf);
-  }
-
-  // Otherwise render it server-side, cache it on the tenant, and serve it.
   const brand = t?.brand_config || {};
   const initials = brand.initials || (t ? initialsOf(t.name) : PLATFORM.initials);
   const bg = brand.primaryColor || PLATFORM.primary;
+  const signature = `${initials}_${bg}_${brand.logoUrl ? 'logo' : 'nologo'}`;
+  const pwa = t?.pwa_config || {};
+
+  // Serve the cached PNG ONLY if signature matches current brand config
+  const stored: string | undefined = pwa[key];
+  if (stored && pwa.signature === signature) {
+    const buf = Buffer.from(String(stored).replace(/^data:image\/png;base64,/, ''), 'base64');
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.send(buf);
+  }
+
+  // Otherwise render it server-side, cache it with signature on the tenant, and serve it.
   const png = renderIconPng(initials, bg, size, brand.logoUrl);
   if (t) {
-    await sql`UPDATE tenants SET pwa_config = COALESCE(pwa_config, '{}'::jsonb) || ${sql.json({ [key]: png.toString('base64') })} WHERE id = ${t.id}`;
+    await sql`UPDATE tenants SET pwa_config = COALESCE(pwa_config, '{}'::jsonb) || ${sql.json({ [key]: png.toString('base64'), signature })} WHERE id = ${t.id}`;
   }
   res.set('Content-Type', 'image/png');
-  res.set('Cache-Control', 'public, max-age=86400');
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   return res.send(png);
 });
