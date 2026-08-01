@@ -265,7 +265,7 @@ function AccessPanel({ store }) {
                   <tr key={u.id} className={isSuspended(u) ? 'acc-off' : ''}>
                     <td>
                       <div className="acc-who">
-                        <span className="av av-sm" style={{ background: 'var(--chrome)' }}>{(u.metadata?.initials) || (u.name || '?').split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()}</span>
+                        <span className="av av-sm">{(u.metadata?.initials) || (u.name || '?').split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()}</span>
                         <div className="acc-name">
                           <div className="acc-n">{u.name}{self && <span className="acc-youtag">You</span>}</div>
                           <div className="u-muted acc-role">{roleLabel(u.role)} · signs in with {u.login_id ? 'ID' : 'email'}</div>

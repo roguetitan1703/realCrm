@@ -198,9 +198,10 @@ export function Avatar({ agent, size = 'md', empty }) {
   if (empty || !agent) return <span className={`av av-${size} av-empty`}>?</span>
   const avatarVal = agent.avatar || ''
   const isColor = avatarVal.startsWith('#') || avatarVal.startsWith('rgb') || avatarVal.startsWith('hsl')
-  const cls = isColor || !avatarVal ? `av av-${size} av-a1` : `av av-${size} ${avatarVal}`
+  const cls = isColor ? `av av-${size}` : `av av-${size} av-a1`
+  const initials = agent.initials || (agent.name || agent.first || '?').split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'A'
   const style = isColor ? { background: avatarVal, color: '#fff' } : undefined
-  return <span className={cls} style={style}>{agent.initials || 'A'}</span>
+  return <span className={cls} style={style}>{initials}</span>
 }
 
 export function Fit({ ok, children }) {

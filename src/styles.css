@@ -147,11 +147,11 @@ input,textarea,select{font-family:inherit}
 .fit{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;border-radius:10px;padding:2px 8px}
 .fit.ok{background:var(--accent-wash);color:var(--accent-ink)}
 .fit.no{background:#EDECE9;color:var(--muted)}
-.av{border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:600;color:#fff;background:#2D5A42;flex-shrink:0}
+.av{border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:var(--accent-ink,var(--accent));background:var(--accent-wash);border:1px solid var(--accent-line,transparent);flex-shrink:0;-webkit-font-smoothing:antialiased}
 .av-sm{width:24px;height:24px;font-size:10px}.av-md{width:32px;height:32px;font-size:12px}.av-lg{width:44px;height:44px;font-size:15px}
 .av-empty{background:var(--card)!important;border:1.5px dashed var(--line);color:var(--faint)}
-/* agent avatar palette — muted, on-brand tints (not rainbow) */
-.av-a1{background:#3E6A57}.av-a2{background:#7A6A9B}.av-a3{background:#B07A2E}.av-a4{background:#4E6688}
+/* agent avatar palette — high-contrast light shade of main accent color */
+.av-a1,.av-a2,.av-a3,.av-a4{background:var(--accent-wash)!important;color:var(--accent-ink,var(--accent))!important;border:1px solid var(--accent-line,transparent);font-weight:700}
 .money{font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)}
 .money-sub{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
 
