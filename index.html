@@ -31,8 +31,14 @@
               c = parsed && parsed.state && parsed.state.brand && parsed.state.brand.primaryColor;
             }
           }
-          if (c) {
-            document.documentElement.style.setProperty('--accent', c);
+          if (c && /^#?[a-f\d]{6}$/i.test(c)) {
+            var root = document.documentElement.style;
+            root.setProperty('--accent', c);
+            var m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(c);
+            if (m) {
+              var r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+              root.setProperty('--accent-rgb', r + ',' + g + ',' + b);
+            }
             var meta = document.querySelector('meta[name="theme-color"]');
             if (meta) meta.content = c;
           }

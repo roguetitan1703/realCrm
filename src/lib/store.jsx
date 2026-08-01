@@ -616,6 +616,9 @@ export function StoreProvider({ children }) {
   // onboarding). Sourced from tenants.brand_config; falls back to the default.
   useEffect(() => {
     applyBrandColor(state.brand?.primaryColor)
+    if (state.brand?.primaryColor) {
+      try { window.localStorage?.setItem('crm_brand_color', state.brand.primaryColor) } catch (e) {}
+    }
   }, [state.brand?.primaryColor])
 
   // Publish the firm's identity to the plain modules that compose outbound
