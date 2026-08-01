@@ -96,6 +96,44 @@ function pageWindow(page, pageCount) {
   return out
 }
 
+// ---- MoreRows: reveal-in-place for a list INSIDE a page section ----
+// Numbered pages belong to a screen whose whole job is one list. A section
+// sitting inside a record — the other units in a project, one queue group on
+// Today — is not that: page controls there compete with the page's own, and on
+// a phone they are a precise tap where a thumb wants a big target. This only
+// ever grows the list, so nothing already read moves underneath you.
+export function MoreRows({ more, onMore, noun = 'more', step }) {
+  if (!more) return null
+  const n = step ? Math.min(more, step) : more
+  return (
+    <button type="button" className="showmore" onClick={onMore}>
+      Show {n} {noun}
+      <span className="showmore-of">{more} left</span>
+    </button>
+  )
+}
+
+// Cap a list at `step` rows, growing by `step` on each reveal. Resets whenever
+// the list's length changes underneath it (a filter, a delete, a live refresh),
+// so an expanded section doesn't silently stay expanded over different data.
+export function useCap(total, step = 8) {
+  const [cap, setCap] = useState(step)
+  useEffect(() => { setCap(step) }, [total, step])
+  return { cap, more: Math.max(0, total - cap), showMore: () => setCap(c => c + step) }
+}
+
+// The same thing as a wrapper, for lists rendered inside a section's render()
+// function — hooks can't live there, so the capping has to be a component.
+export function CappedList({ items = [], step = 8, noun = 'more', children }) {
+  const { cap, more, showMore } = useCap(items.length, step)
+  return (
+    <>
+      {items.slice(0, cap).map(children)}
+      <MoreRows more={more} step={step} noun={noun} onMore={showMore} />
+    </>
+  )
+}
+
 // ---- Pager: rows-per-page + numbered pages, for any list past one screen ----
 export function Pager({ page, pageCount, onPage, total, pageSize, onPageSize, pageSizeOptions = PAGE_SIZE_OPTIONS }) {
   if (!total) return null
@@ -403,14 +441,22 @@ function VisitProof({ meta }) {
 
 export function Timeline({ events = [], agents = [], currentUserId, onEditRemark }) {
   const list = events || [];
+  // A worked lead accumulates every call, remark and stage move it has ever
+  // had. Newest is what's being looked for; the rest is history, and rendering
+  // all of it pushed everything below the timeline off the end of the page.
+  const { cap, more, showMore } = useCap(list.length, 8);
+  const shown = list.slice(0, cap);
   const fmtLabel = (txt) => (txt || '').replace(/\bagent (\S+)\b/gi, (m, id) => agentName(agents, id));
   return (
-    <div className="tl">
-      {list.map((e, i) => (
-        <TimelineRow key={e.id || i} e={e} isLast={i === list.length - 1}
-          agents={agents} currentUserId={currentUserId} onEditRemark={onEditRemark} fmtLabel={fmtLabel} />
-      ))}
-    </div>
+    <>
+      <div className="tl">
+        {shown.map((e, i) => (
+          <TimelineRow key={e.id || i} e={e} isLast={i === shown.length - 1}
+            agents={agents} currentUserId={currentUserId} onEditRemark={onEditRemark} fmtLabel={fmtLabel} />
+        ))}
+      </div>
+      <MoreRows more={more} step={8} noun="older" onMore={showMore} />
+    </>
   )
 }
 

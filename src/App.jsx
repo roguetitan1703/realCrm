@@ -108,7 +108,10 @@ export default function App() {
     return (
       <div className="viewport">
         {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
-        <Phone store={store} framed={false} />
+        {/* The deep link has to reach the phone too: a push notification links
+            to ?screen=leads&lead=<id>, and without this the tap opened the app
+            on Today, leaving the person to find the lead the alert was about. */}
+        <Phone store={store} framed={false} boot={boot} />
         <Toasts toasts={state.toasts} />
       </div>
     )

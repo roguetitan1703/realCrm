@@ -120,14 +120,33 @@ export function ModuleDetail({
               {facts.length > 0 && <div className="rh-facts">{facts.map((f, i) => <span key={i}>{f}</span>)}</div>}
             </div>
           </div>
+          {/* On a phone these move out of the identity row entirely — see the
+              action bar below. Left here they were desktop's small buttons
+              wrapping under a long title, each too narrow to hit and none of
+              them reading as the main thing to do. */}
           <div className="rh-actions">
             {signals && <div className="rh-signals">{signals}</div>}
-            {primary.map((a, i) => (
+            {!phone && primary.map((a, i) => (
               <Button key={i} variant={i === 0 ? 'primary' : 'secondary'} size="sm" icon={a.icon} onClick={a.onClick}>{a.label}</Button>
             ))}
-            {onEdit && <Button variant="secondary" size="sm" icon="edit" onClick={onEdit}>Edit</Button>}
+            {!phone && onEdit && <Button variant="secondary" size="sm" icon="edit" onClick={onEdit}>Edit</Button>}
           </div>
         </div>
+
+        {/* The record's main actions, on the page, full width, thumb-sized.
+            The action button still carries the full list; these are the one or
+            two you reach for every single time, and hiding those behind a menu
+            makes the common case cost two taps. */}
+        {phone && (primary.length > 0 || onEdit) && (
+          <div className="rh-actbar">
+            {primary.map((a, i) => (
+              <button key={i} className={'rh-act' + (i === 0 ? ' primary' : '')} onClick={a.onClick}>
+                <Icon name={a.icon} size={17} />{a.label}
+              </button>
+            ))}
+            {onEdit && <button className="rh-act" onClick={onEdit}><Icon name="edit" size={17} />Edit</button>}
+          </div>
+        )}
         {prog && (
           <div className="rh-prog">
             <Stepper

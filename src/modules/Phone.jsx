@@ -34,10 +34,12 @@ const SCREENS = { leads: Leads, properties: Properties }
 
 const TAKEOVER_KEYS = ['leadOpen', 'leadId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey']
 
-export default function Phone({ store, framed = false }) {
+export default function Phone({ store, framed = false, boot }) {
   const { state } = store
-  const [tab, setTab] = useState('today')
-  const [sel, setSel] = useState({})
+  // Seeded from the URL so a notification tap, or any shared link, opens the
+  // record it names. `today` stays the default for a plain launch.
+  const [tab, setTab] = useState(() => (boot?.screen && (SCREENS[boot.screen] || boot.screen === 'me') ? boot.screen : 'today'))
+  const [sel, setSel] = useState(() => boot?.sel || {})
   const me = store.me()
 
   // A screen the phone doesn't carry (import, team, settings…) is never linked

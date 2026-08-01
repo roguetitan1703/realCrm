@@ -2042,6 +2042,23 @@ body{overscroll-behavior-y:none}
 /* Mobile's cumulative "Load more" — a big thumb target, not a page-jump control. */
 .loadmore{margin-top:14px}
 
+/* ---- MoreRows: reveal-in-place inside a page section ---- */
+.showmore{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:42px;margin-top:8px;padding:0 14px;
+  border:1px dashed var(--line);border-radius:10px;background:transparent;color:var(--ink-2);
+  font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.showmore:hover{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-wash)}
+.showmore-of{font-weight:500;color:var(--faint);font-size:12px}
+
+/* ---- Phone: a record's main actions, on the page ---- */
+/* Full width and 46px tall because this is the control the whole screen exists
+   for, and it competes with nothing — the long tail lives in the action button. */
+.rh-actbar{display:flex;gap:8px;margin-top:14px}
+.rh-act{flex:1;min-width:0;min-height:46px;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  border:1px solid var(--line);border-radius:11px;background:var(--card-2);color:var(--ink);
+  font:inherit;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rh-act.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.rh-act:active{transform:translateY(1px)}
+
 /* ---- RowMenu (⋯) ---- */
 .rowmenu{position:relative;display:inline-flex}
 .rowmenu-btn{width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:var(--card-2);color:var(--ink-2);display:flex;align-items:center;justify-content:center;cursor:pointer}

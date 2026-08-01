@@ -2,7 +2,7 @@
 // Every row here is a thing that has to be done today, and tapping it opens the
 // lead. The actions that create work live in the action button, not on a strip
 // of their own.
-import { Overdue, StageTag } from '../../components/primitives.jsx'
+import { Overdue, StageTag, MoreRows, useCap } from '../../components/primitives.jsx'
 import { initials, reqShort } from '../../lib/format.js'
 import InstallPrompt from '../../components/InstallPrompt.jsx'
 import Icon from '../../components/Icon.jsx'
@@ -29,6 +29,22 @@ function Row({ l, onOpen, store, tone }) {
         ><Icon name="phone" size={13} /></button>
       </div>
     </div>
+  )
+}
+
+// One queue group. Its own component so each group keeps its own reveal state —
+// "Not yet contacted" on a busy desk is every new lead in the firm, and dumping
+// all of them under a heading turned Today into a scroll with no bottom.
+function Group({ g, onOpen, store }) {
+  const { cap, more, showMore } = useCap(g.rows.length, 8)
+  return (
+    <section className="q-group">
+      <div className={'q-head' + (g.tone === 'overdue' ? ' q-head-alert' : '')}>
+        {g.label}<span className="q-count">{g.rows.length}</span>
+      </div>
+      {g.rows.slice(0, cap).map(l => <Row key={l.id} l={l} onOpen={onOpen} store={store} tone={g.tone} />)}
+      <MoreRows more={more} step={8} onMore={showMore} />
+    </section>
   )
 }
 
@@ -60,14 +76,7 @@ export default function PhoneToday({ store, me, go, topBar }) {
       {topBar({ title: 'Today' })}
       <div className="q-wrap">
         <InstallPrompt />
-        {groups.map(g => (
-          <section key={g.key} className="q-group">
-            <div className={'q-head' + (g.tone === 'overdue' ? ' q-head-alert' : '')}>
-              {g.label}<span className="q-count">{g.rows.length}</span>
-            </div>
-            {g.rows.map(l => <Row key={l.id} l={l} onOpen={onOpen} store={store} tone={g.tone} />)}
-          </section>
-        ))}
+        {groups.map(g => <Group key={g.key} g={g} onOpen={onOpen} store={store} />)}
         {!groups.length && (
           <div className="empty">
             <div className="e-t">Nothing due</div>

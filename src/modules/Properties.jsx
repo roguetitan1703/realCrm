@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleTable, PropertyCard, ProjectCard } from '../components/collections.jsx'
 import { buildProjects, unitsInProject, unitsByWing } from '../lib/projects.js'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
-import { StatusTag, Quoted, Button, KV, Timeline } from '../components/primitives.jsx'
+import { StatusTag, Quoted, Button, KV, Timeline, MoreRows, useCap, CappedList } from '../components/primitives.jsx'
 import { NbaBanner } from '../components/rail.jsx'
 import { leadsForProperty } from '../lib/matching.js'
 import { fileUrl } from '../lib/media.js'
@@ -98,6 +98,37 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
   )
 }
 
+// The unit table used by BOTH the "other units in this project" section on a
+// listing and each wing block on a project page. It was written out twice,
+// identically, and neither copy had a limit — a 200-unit township rendered 200
+// rows into a record page, which on a phone is a wall you scroll past to reach
+// anything below it.
+function UnitsTable({ units, onOpen }) {
+  const { cap, more, showMore } = useCap(units.length, 10)
+  return (
+    <>
+      <div className="tbl-scroll">
+        <table className="tbl tbl-flush">
+          <thead><tr><th>Unit</th><th>Config · floor</th><th>Carpet</th><th>Owner</th><th>Status</th><th>Quoted</th></tr></thead>
+          <tbody>
+            {units.slice(0, cap).map(u => (
+              <tr key={u.id} onClick={() => onOpen(u.id)}>
+                <td><span className="unit-tag unit-tag-flush">{unitLabel(u) || '—'}</span></td>
+                <td className="cell-txt">{configLabel(u)} · {u.totalFloors ? `${u.floor}/${u.totalFloors}` : (u.floor || '—')}</td>
+                <td className="cell-txt">{u.carpet ? `${u.carpet} ${labelOf(AREA_UNITS, u.areaUnit || 'sqft')}` : '—'}</td>
+                <td className="cell-txt">{u.owner || '—'}</td>
+                <td><StatusTag status={u.status || 'Available'} /></td>
+                <td><Quoted q={quotedLine(u)} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <MoreRows more={more} step={10} noun="units" onMore={showMore} />
+    </>
+  )
+}
+
 // Table view: definition columns + a module-specific "Buyers" demand column injected.
 function PropTable({ def, list, store, onOpen, allLeads }) {
   const demandCol = { key: 'demand', label: 'Buyers', render: (p) => {
@@ -166,25 +197,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
     {
       id: 'siblings', when: () => siblings.length > 0,
       title: `Other units in ${proj || 'this project'}`, right: `${siblings.length} more`,
-      render: () => (
-        <div className="tbl-scroll">
-          <table className="tbl tbl-flush">
-            <thead><tr><th>Unit</th><th>Config · floor</th><th>Carpet</th><th>Owner</th><th>Status</th><th>Quoted</th></tr></thead>
-            <tbody>
-              {siblings.map(s => (
-                <tr key={s.id} onClick={() => go('properties', { propId: s.id, propOpen: true })}>
-                  <td><span className="unit-tag unit-tag-flush">{unitLabel(s) || '—'}</span></td>
-                  <td className="cell-txt">{configLabel(s)} · {s.totalFloors ? `${s.floor}/${s.totalFloors}` : '—'}</td>
-                  <td className="cell-txt">{s.carpet ? `${s.carpet} ${labelOf(AREA_UNITS, s.areaUnit || 'sqft')}` : '—'}</td>
-                  <td className="cell-txt">{s.owner}</td>
-                  <td><StatusTag status={s.status} /></td>
-                  <td><Quoted q={quotedLine(s)} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ),
+      render: () => <UnitsTable units={siblings} onOpen={(id) => go('properties', { propId: id, propOpen: true })} />,
     },
     {
       // C8. Photos are watermarked on the device before upload, so what's shown
@@ -260,7 +273,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
       title: `Interested ${p.deal === 'rent' ? 'tenants' : 'buyers'}`, right: `${buyers.length} matched`,
       render: () => buyers.length === 0
         ? <div className="detail-empty">No matching contacts yet.</div>
-        : buyers.map((b, i) => (
+        : <CappedList items={buyers} step={6} noun="contacts">{(b, i) => (
             <div key={b.lead.id} className={'relrow' + (i ? ' relrow-div' : '')}>
               <button className="relrow-main" onClick={() => go('leads', { leadId: b.lead.id, leadOpen: true })}>
                 <div className="relrow-name">{b.lead.name}</div>
@@ -268,7 +281,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
               </button>
               <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(p.id, b.lead.id)}>Share</Button>
             </div>
-          )),
+          )}</CappedList>,
     },
     {
       id: 'history',
@@ -353,23 +366,7 @@ function ProjectDetail({ store, go, sel, setSel, topBar }) {
         {wingGroups.map(group => (
           <div key={group.wing} className="panel wing-panel">
             <div className="sh"><span className="t">{group.wing}</span><span className="r">{group.units.length} unit{group.units.length !== 1 ? 's' : ''}</span></div>
-            <div className="tbl-scroll">
-              <table className="tbl tbl-flush">
-                <thead><tr><th>Unit</th><th>Config · floor</th><th>Carpet</th><th>Owner</th><th>Status</th><th>Quoted</th></tr></thead>
-                <tbody>
-                  {group.units.map(u => (
-                    <tr key={u.id} onClick={() => openUnit(u.id)}>
-                      <td><span className="unit-tag unit-tag-flush">{unitLabel(u) || '—'}</span></td>
-                      <td className="cell-txt">{configLabel(u)} · {u.totalFloors ? `${u.floor}/${u.totalFloors}` : (u.floor || '—')}</td>
-                      <td className="cell-txt">{u.carpet ? `${u.carpet} ${labelOf(AREA_UNITS, u.areaUnit || 'sqft')}` : '—'}</td>
-                      <td className="cell-txt">{u.owner || '—'}</td>
-                      <td><StatusTag status={u.status || 'Available'} /></td>
-                      <td><Quoted q={quotedLine(u)} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <UnitsTable units={group.units} onOpen={openUnit} />
           </div>
         ))}
       </div>

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
-import { Button, Timeline, Overdue, Avatar } from '../components/primitives.jsx'
+import { Button, Timeline, Overdue, Avatar, CappedList } from '../components/primitives.jsx'
 import { fitReasons, thumbTint, initials, unitLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import Icon from '../components/Icon.jsx'
@@ -146,7 +146,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
       right: <button className="btn btn-secondary btn-sm" onClick={() => store.openModal({ kind: 'attachProp', leadId: l.id })}><Icon name="plus" size={14} /> Attach property</button>,
       render: () => propRows.length === 0
         ? <div className="detail-empty">No shortlisted or matching inventory yet. Attach one to get started.</div>
-        : propRows.map((row, i) => {
+        : <CappedList items={propRows} step={6} noun="properties">{(row, i) => {
             const fb = (l.feedback || {})[row.p.id]
             const rejected = fb?.verdict === 'rejected'
             return (
@@ -169,7 +169,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                 <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(row.p.id, l.id)} icon="wa">Share Match</Button>
               </div>
             )
-          }),
+          }}</CappedList>,
     },
     {
       id: 'timeline',
@@ -187,6 +187,13 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
           def={LEADS_DEF} record={l} store={store} onEdit={openEdit} phone={phone}
           avatar={<Avatar agent={{ initials: initials(l.name), avatar: '' }} size="lg" />}
           signals={overdue ? <Overdue>Overdue</Overdue> : null}
+          // Reaching a client is the whole reason this page gets opened, and
+          // both ways of doing it were only in the action button — two taps and
+          // a menu to read, for the thing every visit starts with.
+          primary={l.phone ? [
+            { label: 'Call', icon: 'phone', onClick: () => store.openModal({ kind: 'contact', channel: 'call', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id }) },
+            { label: 'WhatsApp', icon: 'wa', onClick: () => store.openModal({ kind: 'contact', channel: 'wa', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id }) },
+          ] : []}
           railTop={followUpCard}
           sections={sections}
           actionCtx={{ onClose: back }}
