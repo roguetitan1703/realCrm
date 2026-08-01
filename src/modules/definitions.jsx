@@ -432,10 +432,9 @@ export const CLIENTS_DEF = {
 
   // Clients filter set is minimal (locality); segments (Buyers/Tenants/...) handled by the module.
   filterFields: (store) => {
-    const dyn = [...new Set([
-      ...store.state.leads.map(l => l.req?.locality),
-      ...store.state.properties.map(p => p.locality),
-    ].filter(Boolean))]
+    // The firm's own locality vocabulary, from the boot payload. This used to
+    // be rebuilt by mapping every lead and every property on every render.
+    const dyn = localities(store)
     const list = dyn.length ? dyn : ['Hinjewadi Phase 3', 'Wakad', 'Baner', 'Kothrud']
     return [{ key: 'locality', label: 'Locality', icon: 'building', options: opt(list) }]
   },

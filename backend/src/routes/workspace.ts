@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates, listContacts } from '../services/store';
+import { getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates, listContacts } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { listAudit, verifyAuditChain } from '../services/audit';
@@ -84,9 +84,6 @@ workspaceRouter.get('/audit', async (req: Request, res: Response) => {
  * who you are, the roster, the firm's settings and brand, routing. No leads and
  * no listings — screens read those for themselves, a page at a time.
  *
- * /workspace/state, which returns the entire tenant, stays for the desk until
- * its own screens are migrated. On a real book it serialises to ~10MB, which is
- * a blank phone for two seconds and too big to keep as an offline snapshot.
  */
 workspaceRouter.get('/bootstrap', requireTenantAuth, async (_req: Request, res: Response) => {
   try {
@@ -214,26 +211,18 @@ workspaceRouter.get('/resolve', async (req: Request, res: Response) => {
 // removed so a visitor on the login page can no longer provision workspaces.
 // The provisioning engine now lives in services/store.ts → provisionTenant().
 
-/**
- * GET /api/v1/workspace/state
- * Returns full seeded workspace state from server store
- */
-workspaceRouter.get('/state', async (req: Request, res: Response) => {
-  const state = await getState();
-  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.set('Pragma', 'no-cache');
-  res.set('Expires', '0');
-  res.status(200).json({
-    success: true,
-    state,
-  });
-});
+// GET /workspace/state is gone. It returned the entire tenant in one response
+// -- every lead, every property, every timeline event -- and on a real book that
+// was ~10MB, which is a two-second blank screen on a phone and too large to keep
+// as an offline snapshot at all. Every screen that used to read it now reads
+// what it actually shows: a page, a summary, or one record.
 
 /**
  * GET /api/v1/workspace/pulse
  * A few dozen bytes saying whether this tenant's desk has changed. Polled by
- * every open tab; the expensive /state call only follows when the token moves.
- * Never cached — a cached pulse is a pulse that reports nothing ever happens.
+ * every open tab; the screens that are showing something only refetch when the
+ * token moves. Never cached — a cached pulse is a pulse that reports nothing
+ * ever happens.
  */
 import { processScheduledNotifications } from '../services/notifications.js';
 

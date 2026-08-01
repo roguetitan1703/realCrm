@@ -9,55 +9,25 @@
 //
 // There is no list of every locality in India worth shipping, and a wrong one
 // is worse than none. So: the field is FREE TEXT, and the suggestions are
-// whatever this firm has already typed — ranked by how often. It is empty on
-// day one and correct by day three, it fits any city, and it needs no upkeep.
+// whatever this firm has already typed. It is empty on day one and correct by
+// day three, it fits any city, and it needs no upkeep.
+//
+// The vocabulary arrives in the boot payload now, as one SELECT DISTINCT over
+// both tables. It used to be produced by walking every lead and every property
+// in the browser — a few dozen strings that required the entire book, and one
+// of the last things keeping the collections in memory.
+//
+// societies(), configs() and sourcesUsed() lived here too and are gone: every
+// screen that used them now reads the same counts from the server (the
+// dashboard's source bars come from /workspace/desk-summary, project names from
+// /properties/summary), and keeping a second client-side implementation beside
+// those would only give the two something to disagree about.
 // ============================================================================
-
-/** Distinct values of `path` across records, most-used first. */
-function frequent(records, read) {
-  const counts = new Map()
-  for (const r of records) {
-    const v = String(read(r) ?? '').trim()
-    if (!v) continue
-    counts.set(v, (counts.get(v) || 0) + 1)
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([v]) => v)
-}
 
 /** Everywhere this firm has a lead looking or a property listed. */
 export function localities(store) {
   const s = store?.state || store || {}
-  return frequent(
-    [...(s.leads || []), ...(s.properties || [])],
-    r => r.req?.locality ?? r.locality,
-  )
-}
-
-/** Project / society names already on the books. */
-export function societies(store) {
-  const s = store?.state || store || {}
-  return frequent(s.properties || [], p => p.society || p.project)
-}
-
-/** Requirement configurations leads have actually asked for. */
-export function configs(store) {
-  const s = store?.state || store || {}
-  return frequent(s.leads || [], l => l.req?.config)
-}
-
-/**
- * Where leads have actually come from — NOT settings.sources, a hand-typed
- * list from onboarding that a new Connections integration never touches. A
- * portal wired up through Connections tags every lead it sends with its own
- * name (`lead.source = provider`), so the dashboard's "Leads by source" was
- * reading a completely different list than the one new leads were arriving
- * under — a source could receive fifty leads and never once show up.
- */
-export function sourcesUsed(store) {
-  const s = store?.state || store || {}
-  return frequent(s.leads || [], l => l.source)
+  return s.localities || []
 }
 
 /** Shape a derived list for a filter's `options`. */

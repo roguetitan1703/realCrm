@@ -23,12 +23,35 @@ const clone = (x) => JSON.parse(JSON.stringify(x))
 // grow back into the whole book.
 const CACHE_LIMIT = 500
 
-// Which chrome is mounted. The two share this store, and only one of them has
-// finished moving off the collections, so the boot read differs for now.
-function isPhoneChrome() {
-  if (typeof window === 'undefined') return false
-  return window.matchMedia?.('(max-width: 900px)')?.matches === true
+// ── Cache helpers ───────────────────────────────────────────────────────────
+// The record cache replaced two arrays holding every lead and every property in
+// the firm. A write goes to the server; these keep the copy on screen in step
+// with what was just saved. Patching a record that isn't cached is a no-op by
+// design — nothing is showing it, and the next read fetches it fresh.
+const withCache = (state, kind, next) => ({ ...state, cache: { ...state.cache, [kind]: next } })
+
+function patchRecord(state, kind, id, fn) {
+  const cur = state.cache?.[kind]?.[id]
+  if (!cur) return state
+  const next = fn(cur)
+  if (!next || next === cur) return state
+  return withCache(state, kind, { ...state.cache[kind], [id]: next })
 }
+
+function cacheOne(state, kind, record) {
+  return withCache(state, kind, { ...(state.cache?.[kind] || {}), [record.id]: record })
+}
+
+function dropRecords(state, kind, ids) {
+  if (!ids?.length) return state
+  const next = { ...(state.cache?.[kind] || {}) }
+  for (const id of ids) delete next[id]
+  return withCache(state, kind, next)
+}
+
+/** Prepend a timeline event to a record, in the shape the detail views read. */
+const withEvent = (record, type, label) =>
+  [{ type, label, timestamp: Date.now(), ago: 'just now' }, ...(record.timeline || [])]
 
 // ── Offline snapshot ────────────────────────────────────────────────────────
 // The last server state, cached per tenant so an offline reload still shows the
@@ -137,8 +160,9 @@ function freshState() {
     activeAgentId: session.activeAgentId || 'a1',           // who "I" am in agent view
     loggedIn: session.loggedIn || false,
     agents: Array.isArray(cs.agents) ? cs.agents : [],
-    properties: Array.isArray(cs.properties) ? cs.properties : [],
-    leads: Array.isArray(cs.leads) ? cs.leads : [],
+    // The firm's own locality vocabulary, from the boot payload. Not records --
+    // a few dozen strings that filter menus and the locality field suggest from.
+    localities: Array.isArray(cs.localities) ? cs.localities : [],
     importLogs: [],
     inactiveAgentIds: Array.isArray(cs.inactiveAgentIds) ? cs.inactiveAgentIds : [],
     settings,                            // editable: firmName, stages, sources, slaHours, reminderDays
@@ -181,8 +205,7 @@ function reducer(state, action) {
       return {
         ...state,
         agents: Array.isArray(s.agents) ? s.agents : state.agents,
-        properties: Array.isArray(s.properties) ? s.properties : state.properties,
-        leads: Array.isArray(s.leads) ? s.leads : state.leads,
+        localities: Array.isArray(s.localities) ? s.localities : state.localities,
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         brand: s.brand ? { ...state.brand, ...s.brand } : state.brand,
@@ -198,8 +221,7 @@ function reducer(state, action) {
       return {
         ...state,
         agents: Array.isArray(s.agents) ? s.agents : state.agents,
-        properties: Array.isArray(s.properties) ? s.properties : state.properties,
-        leads: Array.isArray(s.leads) ? s.leads : state.leads,
+        localities: Array.isArray(s.localities) ? s.localities : state.localities,
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         brand: s.brand ? { ...state.brand, ...s.brand } : state.brand,
@@ -236,22 +258,17 @@ function reducer(state, action) {
 
     // Real, server-persisted remark events (B1) — kind picks the array so the
     // same actions serve leads and properties.
-    case 'ADD_TIMELINE_EVENT': {
-      const arrKey = action.kind === 'property' ? 'properties' : 'leads'
-      return { ...state, [arrKey]: state[arrKey].map(r => r.id === action.id ? { ...r, timeline: [action.event, ...(r.timeline || [])] } : r) }
-    }
-    case 'EDIT_TIMELINE_EVENT': {
-      const arrKey = action.kind === 'property' ? 'properties' : 'leads'
-      return {
-        ...state,
-        [arrKey]: state[arrKey].map(r => r.id !== action.id ? r : {
-          ...r,
-          timeline: (r.timeline || []).map(e => e.id === action.eventId
-            ? { ...e, label: action.text, metadata: { ...(e.metadata || {}), edited: true, ...(action.outcome ? { outcome: action.outcome } : {}) } }
-            : e),
-        }),
-      }
-    }
+    case 'ADD_TIMELINE_EVENT':
+      return patchRecord(state, action.kind === 'property' ? 'property' : 'lead', action.id, r => ({
+        ...r, timeline: [action.event, ...(r.timeline || [])],
+      }))
+    case 'EDIT_TIMELINE_EVENT':
+      return patchRecord(state, action.kind === 'property' ? 'property' : 'lead', action.id, r => ({
+        ...r,
+        timeline: (r.timeline || []).map(e => e.id === action.eventId
+          ? { ...e, label: action.text, metadata: { ...(e.metadata || {}), edited: true, ...(action.outcome ? { outcome: action.outcome } : {}) } }
+          : e),
+      }))
 
     case 'LOGIN': {
       // The verified user drives role + identity. Backend roles are
@@ -315,155 +332,107 @@ function reducer(state, action) {
     case 'UNTOAST':
       return { ...state, toasts: state.toasts.filter(t => t.id !== action.id) }
 
+    // ── Record patches ──────────────────────────────────────────────
+    // These used to rewrite an entire collection with .map(). There is no
+    // collection now: the write goes to the server, and these patch the cached
+    // copy so the screen the person is looking at reflects what they just did.
+    // A record that is not cached is simply not patched — the next read fetches
+    // it fresh, which is the correct outcome rather than a missed update.
     case 'ASSIGN': {
       const a = state.agents.find(x => x.id === action.agentId)
-      return {
-        ...state,
-        leads: state.leads.map(l => l.id === action.leadId
-          ? { ...l, agentId: action.agentId, timeline: [{ type: 'assign', label: 'Assigned to ' + (a ? a.first : ''), timestamp: Date.now(), ago: 'just now' }, ...l.timeline] }
-          : l),
-      }
+      return patchRecord(state, 'lead', action.leadId, l => ({
+        ...l, agentId: action.agentId,
+        timeline: withEvent(l, 'assign', 'Assigned to ' + (a ? a.first : '')),
+      }))
     }
 
-    case 'STAGE': {
-      return {
-        ...state,
-        leads: state.leads.map(l => l.id === action.leadId
-          ? { ...l, stage: action.stage, timeline: [{ type: 'stage', label: 'Stage → ' + action.stage, timestamp: Date.now(), ago: 'just now' }, ...l.timeline] }
-          : l),
-      }
-    }
+    case 'STAGE':
+      return patchRecord(state, 'lead', action.leadId, l => ({
+        ...l, stage: action.stage,
+        timeline: withEvent(l, 'stage', 'Stage → ' + action.stage),
+      }))
 
     case 'FOLLOWUP': {
       // fu === null means "marked done" — clearing the appointment, not setting one.
       const fu = action.followUp
-      const label = fu ? `Follow-up set · ${fu.action}` : 'Appointment completed'
-      return {
-        ...state,
-        leads: state.leads.map(l => l.id === action.leadId
-          ? { ...l, followUp: fu, overdue: false, timeline: [{ type: 'follow', label, timestamp: Date.now(), ago: 'just now' }, ...(l.timeline || [])] }
-          : l),
-      }
+      return patchRecord(state, 'lead', action.leadId, l => ({
+        ...l, followUp: fu, overdue: false,
+        timeline: withEvent(l, 'follow', fu ? 'Follow-up set · ' + fu.action : 'Appointment completed'),
+      }))
     }
 
-    case 'UPDATE_LEAD': {
-      return {
-        ...state,
-        leads: state.leads.map(l => l.id === action.leadId ? { ...l, ...action.patch, timeline: [{ type: 'note', label: 'Updated details inline', timestamp: Date.now(), ago: 'just now' }, ...l.timeline] } : l),
-      }
-    }
+    case 'UPDATE_LEAD':
+      return patchRecord(state, 'lead', action.leadId, l => ({
+        ...l, ...action.patch,
+        timeline: withEvent(l, 'note', 'Updated details inline'),
+      }))
 
-    case 'UPDATE_PROP': {
-      return {
-        ...state,
-        properties: state.properties.map(p => p.id === action.propId ? { ...p, ...action.patch } : p),
-      }
-    }
-
-    case 'NOTE': {
-      return {
-        ...state,
-        leads: state.leads.map(l => l.id === action.leadId
-          ? { ...l, timeline: [{ type: action.kind === 'call' ? 'msg' : 'note', label: action.text, timestamp: Date.now(), ago: 'just now' }, ...l.timeline] }
-          : l),
-      }
-    }
-
-    case 'LOG_EVENT': {
-      const { id, kind, text } = action
-      const tlType = kind === 'call' ? 'msg' : kind === 'wa' ? 'msg' : kind === 'sms' ? 'msg' : 'note'
-      const entry = { type: tlType, label: text, timestamp: Date.now(), ago: 'just now' }
-      const inLeads = state.leads.some(l => l.id === id)
-      if (inLeads) {
-        return { ...state, leads: state.leads.map(l => l.id === id ? { ...l, timeline: [entry, ...l.timeline] } : l) }
-      }
-      return {
-        ...state,
-        properties: state.properties.map(p => p.id === id ? { ...p, timeline: [entry, ...(p.timeline || [])] } : p),
-      }
-    }
+    case 'UPDATE_PROP':
+      return patchRecord(state, 'property', action.propId, p => ({ ...p, ...action.patch }))
 
     case 'MERGE': {
-      const dup = state.leads.find(l => l.id === action.leadId)
+      // The duplicate is gone; the primary absorbs its shortlist and follow-up.
+      const dup = state.cache?.lead?.[action.leadId]
       const primaryId = dup?.duplicateOf || action.primaryId
-      if (!dup || !primaryId) return state
-      const primaryLead = state.leads.find(l => l.id === primaryId)
-      const combinedShortlist = Array.from(new Set([...(primaryLead?.shortlist || []), ...(dup.shortlist || [])]))
-      const combinedFollowUp = primaryLead?.followUp || dup.followUp || null
-      return {
-        ...state,
-        leads: state.leads
-          .filter(l => l.id !== action.leadId)
-          .map(l => l.id === primaryId
-            ? {
-                ...l,
-                shortlist: combinedShortlist,
-                followUp: combinedFollowUp,
-                notes: [`[MERGED INQUIRY] duplicate record ${dup.name || action.leadId} merged in`, ...(l.notes || [])],
-                timeline: [{ type: 'note', label: `Merged duplicate enquiry (${dup.name || 'Lead'})`, timestamp: Date.now(), ago: 'just now' }, ...(l.timeline || [])],
-              }
-            : l),
-      }
+      if (!primaryId) return state
+      const merged = patchRecord(state, 'lead', primaryId, l => ({
+        ...l,
+        shortlist: Array.from(new Set([...(l.shortlist || []), ...(dup?.shortlist || [])])),
+        followUp: l.followUp || dup?.followUp || null,
+        notes: ['[MERGED INQUIRY] duplicate record ' + (dup?.name || action.leadId) + ' merged in', ...(l.notes || [])],
+        timeline: withEvent(l, 'note', 'Merged duplicate enquiry (' + (dup?.name || 'Lead') + ')'),
+      }))
+      return dropRecords(merged, 'lead', [action.leadId])
     }
 
-    case 'ATTACH_PROP': {
-      return {
-        ...state,
-        leads: state.leads.map(l => {
-          if (l.id !== action.leadId) return l
-          const shortlist = l.shortlist || []
-          if (shortlist.includes(action.propId)) return l
-          return { ...l, shortlist: [action.propId, ...shortlist], timeline: [{ type: 'note', label: 'Shortlisted ' + (action.label || 'a property'), timestamp: Date.now(), ago: 'just now' }, ...l.timeline] }
-        }),
-      }
-    }
-    case 'DETACH_PROP': {
-      return {
-        ...state,
-        leads: state.leads.map(l => l.id === action.leadId ? { ...l, shortlist: (l.shortlist || []).filter(id => id !== action.propId) } : l),
-      }
-    }
+    case 'ATTACH_PROP':
+      return patchRecord(state, 'lead', action.leadId, l => {
+        const shortlist = l.shortlist || []
+        if (shortlist.includes(action.propId)) return l
+        return {
+          ...l, shortlist: [action.propId, ...shortlist],
+          timeline: withEvent(l, 'note', 'Shortlisted ' + (action.label || 'a property')),
+        }
+      })
+
+    case 'DETACH_PROP':
+      return patchRecord(state, 'lead', action.leadId, l => ({
+        ...l, shortlist: (l.shortlist || []).filter(id => id !== action.propId),
+      }))
 
     case 'VISIT_FEEDBACK': {
       const { leadId, propId, verdict, reason, society } = action
       const label = verdict === 'liked'
-        ? `Liked ${society} on site visit`
-        : `Rejected ${society} — ${reason}`
-      return {
-        ...state,
-        leads: state.leads.map(l => {
-          if (l.id !== leadId) return l
-          const feedback = { ...(l.feedback || {}), [propId]: { verdict, reason } }
-          return { ...l, feedback, timeline: [{ type: verdict === 'liked' ? 'note' : 'note', label, timestamp: Date.now(), ago: 'just now' }, ...l.timeline] }
-        }),
-      }
+        ? 'Liked ' + society + ' on site visit'
+        : 'Rejected ' + society + ' — ' + reason
+      return patchRecord(state, 'lead', leadId, l => ({
+        ...l,
+        feedback: { ...(l.feedback || {}), [propId]: { verdict, reason } },
+        timeline: withEvent(l, 'note', label),
+      }))
     }
 
-    case 'ADD_LEAD': {
-      return { ...state, leads: [action.lead, ...state.leads] }
-    }
+    // A newly created record is cached so the screen that created it can open it
+    // immediately; the list it belongs to refetches on the next data token.
+    case 'ADD_LEAD':
+      return action.lead?.id ? cacheOne(state, 'lead', action.lead) : state
 
-    case 'ADD_PROPERTY': {
-      return { ...state, properties: [action.property, ...state.properties] }
-    }
+    case 'ADD_PROPERTY':
+      return action.property?.id ? cacheOne(state, 'property', action.property) : state
 
-    case 'ADD_PROPERTIES': {
-      return { ...state, properties: [...action.properties, ...state.properties] }
-    }
+    case 'ADD_PROPERTIES':
+      return (action.properties || []).reduce((acc, p) => (p?.id ? cacheOne(acc, 'property', p) : acc), state)
 
     case 'DELETE_LEADS': {
       const ids = Array.isArray(action.ids) ? action.ids : [action.ids]
       return {
-        ...state,
-        leads: state.leads.filter(l => !ids.includes(l.id)),
+        ...dropRecords(state, 'lead', ids),
         notifications: (state.notifications || []).filter(n => !ids.includes(n.leadId)),
       }
     }
 
-    case 'DELETE_PROPERTIES': {
-      const ids = Array.isArray(action.ids) ? action.ids : [action.ids]
-      return { ...state, properties: state.properties.filter(p => !ids.includes(p.id)) }
-    }
+    case 'DELETE_PROPERTIES':
+      return dropRecords(state, 'property', Array.isArray(action.ids) ? action.ids : [action.ids])
 
     case 'LOG_IMPORT_BATCH': {
       const logs = state.importLogs || []
@@ -471,59 +440,42 @@ function reducer(state, action) {
     }
 
     case 'REVERT_IMPORT_BATCH': {
+      // The server deleted the rows. Drop whatever copies the cache holds so a
+      // stale one can't be opened from a screen still on the page.
       const { batchId } = action
+      const gone = (kind) => Object.values(state.cache?.[kind] || {})
+        .filter(r => r.importBatchId === batchId).map(r => r.id)
       return {
-        ...state,
-        leads: state.leads.filter(l => l.importBatchId !== batchId),
-        properties: state.properties.filter(p => p.importBatchId !== batchId),
+        ...dropRecords(dropRecords(state, 'lead', gone('lead')), 'property', gone('property')),
         importLogs: (state.importLogs || []).map(log => log.batchId === batchId ? { ...log, reverted: true } : log),
       }
     }
 
-    case 'PROP_STATUS': {
-      return {
-        ...state,
-        properties: state.properties.map(p => p.id === action.propId ? { ...p, status: action.status } : p),
-      }
-    }
+    case 'PROP_STATUS':
+      return patchRecord(state, 'property', action.propId, p => ({ ...p, status: action.status }))
 
     case 'SET_TENANCY': {
       const { propId, tenancy } = action
-      return {
-        ...state,
-        properties: state.properties.map(p => {
-          if (p.id !== propId) return p
-          const label = tenancy
-            ? `Tenancy set · ${tenancy.tenant} · ${p.priceLabel} · deposit ${tenancy.depositLabel || '—'} held`
-            : 'Tenancy cleared — flat available again'
-          return {
-            ...p,
-            tenancy: tenancy || undefined,
-            // A let flat is Leased. This wrote 'Under offer' — not a real
-            // status (the value is 'Under Offer'), so the row landed with a
-            // status nothing matches — and the wrong idea besides: the flat
-            // isn't under offer, it's tenanted.
-            status: tenancy ? 'Leased' : 'Available',
-            timeline: [{ type: 'note', label, ago: 'just now' }, ...(p.timeline || [])],
-          }
-        }),
-      }
+      return patchRecord(state, 'property', propId, p => ({
+        ...p,
+        tenancy: tenancy || undefined,
+        // A let flat is Leased. This wrote 'Under offer' — not a real status
+        // (the value is 'Under Offer'), so the row landed with a status nothing
+        // matches — and the wrong idea besides: the flat isn't under offer,
+        // it's tenanted.
+        status: tenancy ? 'Leased' : 'Available',
+        timeline: withEvent(p, 'note', tenancy
+          ? 'Tenancy set · ' + tenancy.tenant + ' · ' + p.priceLabel + ' · deposit ' + (tenancy.depositLabel || '—') + ' held'
+          : 'Tenancy cleared — flat available again'),
+      }))
     }
 
-    case 'RETURN_DEPOSIT': {
-      const { propId } = action
-      return {
-        ...state,
-        properties: state.properties.map(p => {
-          if (p.id !== propId || !p.tenancy) return p
-          return {
-            ...p,
-            tenancy: { ...p.tenancy, depositReturned: true },
-            timeline: [{ type: 'note', label: `Deposit ${p.tenancy.depositLabel || ''} returned to ${p.tenancy.tenant}`, ago: 'just now' }, ...(p.timeline || [])],
-          }
-        }),
-      }
-    }
+    case 'RETURN_DEPOSIT':
+      return patchRecord(state, 'property', action.propId, p => (p.tenancy ? {
+        ...p,
+        tenancy: { ...p.tenancy, depositReturned: true },
+        timeline: withEvent(p, 'note', 'Deposit ' + (p.tenancy.depositLabel || '') + ' returned to ' + p.tenancy.tenant),
+      } : p))
 
     case 'TOGGLE_AGENT': {
       const on = state.inactiveAgentIds.includes(action.agentId)
@@ -534,13 +486,14 @@ function reducer(state, action) {
     }
 
     case 'REASSIGN_ALL': {
+      // The server moved every open lead. Only the cached copies need patching.
       const a = state.agents.find(x => x.id === action.toId)
-      return {
-        ...state,
-        leads: state.leads.map(l => (l.agentId === action.fromId && !l.stage.startsWith('Closed'))
-          ? { ...l, agentId: action.toId, timeline: [{ type: 'assign', label: 'Reassigned to ' + (a ? a.first : ''), ago: 'just now' }, ...l.timeline] }
-          : l),
-      }
+      return Object.values(state.cache?.lead || {})
+        .filter(l => l.agentId === action.fromId && !String(l.stage || '').startsWith('Closed'))
+        .reduce((acc, l) => patchRecord(acc, 'lead', l.id, r => ({
+          ...r, agentId: action.toId,
+          timeline: withEvent(r, 'assign', 'Reassigned to ' + (a ? a.first : '')),
+        })), state)
     }
 
     case 'ADD_AGENT': {
@@ -569,16 +522,18 @@ function reducer(state, action) {
       if (!name || from === name || PROTECTED_STAGES.includes(from)) return state
       if (state.settings.stages.includes(name)) return state
       const stages = state.settings.stages.map(s => s === from ? name : s)
-      const leads = state.leads.map(l => l.stage === from ? { ...l, stage: name } : l)
-      return { ...state, settings: { ...state.settings, stages }, leads }
+      const next = Object.values(state.cache?.lead || {}).filter(l => l.stage === from)
+        .reduce((acc, l) => patchRecord(acc, 'lead', l.id, r => ({ ...r, stage: name })), state)
+      return { ...next, settings: { ...next.settings, stages } }
     }
     case 'REMOVE_STAGE': {
       const { name } = action
       if (PROTECTED_STAGES.includes(name)) return state
       const stages = state.settings.stages.filter(s => s !== name)
       const fallback = stages[0] || 'New'
-      const leads = state.leads.map(l => l.stage === name ? { ...l, stage: fallback } : l)
-      return { ...state, settings: { ...state.settings, stages }, leads }
+      const next = Object.values(state.cache?.lead || {}).filter(l => l.stage === name)
+        .reduce((acc, l) => patchRecord(acc, 'lead', l.id, r => ({ ...r, stage: fallback })), state)
+      return { ...next, settings: { ...next.settings, stages } }
     }
     case 'MOVE_STAGE': {
       const { name, dir } = action
@@ -628,12 +583,11 @@ export function StoreProvider({ children }) {
   // show — but doing that on a routine poll means one dropped packet flips a
   // working desk into looking offline, then back, every few seconds.
   const loadServerState = useCallback((background = false) => {
-    // The phone's four screens each read what they show — a page of leads, a
-    // page of listings, the Today feed, one record at a time — so it has no use
-    // for the collections and must not pay ~10MB to launch. The desk still has
-    // screens that read them, so it keeps the full read until those move.
-    const fetchState = isPhoneChrome() ? apiClient.getBootstrap : apiClient.getState
-    return fetchState()
+    // One boot read, for both chromes. Every screen reads what it shows — a
+    // page of leads, a page of listings, the Today feed, one record at a time —
+    // so this carries identity, the roster, the firm's settings and brand, and
+    // nothing else. It used to be ~10MB on a real book; it is about 2KB.
+    return apiClient.getBootstrap()
       .then(res => {
         if (res && res.success && res.state) {
           dispatch({ type: 'HYDRATE_SERVER', state: res.state })
@@ -828,8 +782,8 @@ export function StoreProvider({ children }) {
   // It resolves synchronously; there is deliberately no artificial delay or
   // "composing" animation, which would imply AI authorship we don't do.
   const composeFor = useCallback((wa) => {
-    const prop = state.properties.find(p => p.id === wa.propId)
-    const lead = state.leads.find(l => l.id === wa.leadId)
+    const prop = state.cache?.property?.[wa.propId] || null
+    const lead = state.cache?.lead?.[wa.leadId] || null
     // The firm name MUST come from the signed-in tenant. Leaving it out fell
     // back to the bundled demo brand, so a client received another firm's
     // name at the bottom of the message.
@@ -848,7 +802,7 @@ export function StoreProvider({ children }) {
       lang: wa.lang, variant: wa.variant,
       templates: state.settings.followUpTemplates,
     }) : ''
-  }, [state.properties, state.leads, state.settings.firmName, state.settings.followUpTemplates])
+  }, [state.cache, state.settings.firmName, state.settings.followUpTemplates])
 
   const openWhatsApp = useCallback((propId, leadId) => {
     // The composer opens in the language this person writes in, not a fixed one.
@@ -918,17 +872,11 @@ export function StoreProvider({ children }) {
     activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id)),
     
     // ── Records ───────────────────────────────────────────────────────────
-    // Look a record up without assuming the whole collection is in memory.
-    // While `state.properties` / `state.leads` still exist they answer first —
-    // that keeps the desk working unchanged during the migration — but a miss
-    // is a normal outcome, not an error, and the caller fetches it.
-    lookup: (kind, id) => {
-      if (!id) return null
-      const cached = state.cache?.[kind]?.[id]
-      if (cached) return cached
-      const collection = kind === 'property' ? state.properties : state.leads
-      return (collection || []).find(r => r.id === id) || null
-    },
+    // Look a record up. The cache holds what the app has already shown — every
+    // row the server hands to a list lands there — so this answers without a
+    // request in the overwhelmingly common case. A miss is a normal outcome,
+    // not an error: useRecord() fetches that one record by id.
+    lookup: (kind, id) => (id && state.cache?.[kind]?.[id]) || null,
     cacheRecords: (kind, records) => dispatch({ type: 'CACHE_RECORDS', kind, records }),
 
     assign: (leadId, agentId) => {
@@ -1290,7 +1238,7 @@ export function StoreProvider({ children }) {
       if (config.tenantId) apiClient.setTenantId(config.tenantId)
       dispatch({ type: 'ONBOARD_TENANT', config })
       toast(`${config.firmName || 'Workspace'} is ready`)
-      apiClient.getState()
+      apiClient.getBootstrap()
         .then(res => { if (res?.success && res.state) dispatch({ type: 'HYDRATE_SERVER', state: res.state }) })
         .catch(err => console.warn('[Onboard hydrate] error:', err.message))
     },

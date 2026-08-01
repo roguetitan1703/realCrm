@@ -18,6 +18,10 @@ export default function Dashboard({ store, go, topBar }) {
   const overdue = overduePage?.data || []
 
   const totals = desk?.leads || { total: 0, open: 0, overdue: 0, won: 0, new_today: 0, unassigned: 0 }
+  // Until the counts arrive we do not know them, and rendering 0 says something
+  // false and alarming -- "you have no leads today" is a very different message
+  // from "still loading". An em dash says the honest thing.
+  const n = (v) => (desk ? v : '—')
   const byStage = desk?.byStage || {}
   const bySource = desk?.bySource || {}
   const perAgent = desk?.perAgent || {}
@@ -55,16 +59,16 @@ export default function Dashboard({ store, go, topBar }) {
       <div className="app-body" style={{ padding: '20px 22px 44px', display: 'flex', flexDirection: 'column', gap: 18 }}>
         {/* KPIs — the day's job, each drills into the exact list */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }}>
-          <Kpi icon="clock" label="Overdue follow-ups" value={totals.overdue} sub="action required" alert onClick={() => toLeads({ flag: ['overdue'] })} />
-          <Kpi icon="person" label="Unassigned" value={totals.unassigned} sub="need routing" onClick={() => toLeads({ flag: ['unassigned'] })} />
-          <Kpi icon="plus" label="New today" value={totals.new_today} sub="fresh enquiries" onClick={() => toLeads({ flag: ['new'] })} />
-          <Kpi icon="calendar" label="Site visits" value={visitCount} sub="booked & upcoming" onClick={() => toLeads({ stage: ['Site Visit'] })} />
+          <Kpi icon="clock" label="Overdue follow-ups" value={n(totals.overdue)} sub="action required" alert onClick={() => toLeads({ flag: ['overdue'] })} />
+          <Kpi icon="person" label="Unassigned" value={n(totals.unassigned)} sub="need routing" onClick={() => toLeads({ flag: ['unassigned'] })} />
+          <Kpi icon="plus" label="New today" value={n(totals.new_today)} sub="fresh enquiries" onClick={() => toLeads({ flag: ['new'] })} />
+          <Kpi icon="calendar" label="Site visits" value={n(visitCount)} sub="booked & upcoming" onClick={() => toLeads({ stage: ['Site Visit'] })} />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1.75fr 1fr', gap: 16, alignItems: 'start' }}>
           {/* pipeline — click a stage to open it */}
           <Panel>
-            <SectionHead title="Pipeline by stage" right={`${totals.open} active`} />
+            <SectionHead title="Pipeline by stage" right={desk ? `${totals.open} active` : ''} />
             {stageCounts.map(s => (
               <button key={s.name} className="drow" onClick={() => toLeads({ stage: [s.name] })}>
                 <span style={{ width: 96, fontSize: 12.5, fontWeight: 600, flexShrink: 0, textAlign: 'left' }}>{s.name}</span>

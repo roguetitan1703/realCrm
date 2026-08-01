@@ -370,7 +370,7 @@ function MediaPicker({ media = [], firmName, onChange, onError }) {
 }
 
 export default function PropertyWizard({ store, go, sel, topBar }) {
-  const editing = sel?.propId ? store.state.properties.find(p => p.id === sel.propId) : null
+  const editing = store.lookup('property', sel?.propId)
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(() => {

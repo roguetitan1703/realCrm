@@ -10,6 +10,8 @@
 import { MobileShell, MobileTopBar } from '../layouts/layouts.jsx'
 import { Avatar } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
+import { api } from '../lib/api.js'
+import { useServerData } from '../lib/useServerData.js'
 
 import Leads from './Leads.jsx'
 import Properties from './Properties.jsx'
@@ -74,8 +76,11 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
 
   const ctx = { store, go, sel, setSel, topBar, phone: true }
 
-  const myLeads = me ? state.leads.filter(l => l.agentId === me.id) : []
-  const overdueN = (state.role === 'agent' ? myLeads : state.leads).filter(l => l.overdue).length
+  // The tab badge is one number, and the server already scopes it: an agent's
+  // summary counts their own pipeline, an owner's counts the firm's. This used
+  // to filter every lead in memory to produce it.
+  const { data: leadCounts } = useServerData(() => api.getLeadsSummary(), [state.dataAsOf], null)
+  const overdueN = leadCounts?.overdue || 0
 
   const tabs = {
     tabs: TABS.map(t => (t.key === 'today' && overdueN ? { ...t, badge: overdueN } : t)),

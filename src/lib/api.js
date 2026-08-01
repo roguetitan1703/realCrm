@@ -194,7 +194,6 @@ export const api = {
   adminOnboard: (config) => request('/admin/onboard', { method: 'POST', body: JSON.stringify(config), headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   getAdminToken: () => lsGet(ADMIN_TOKEN_KEY),
   clearAdminToken: () => lsSet(ADMIN_TOKEN_KEY, ''),
-  getState: () => request('/workspace/state'),
   // Session + firm identity, no record collections. What the phone boots on.
   getBootstrap: () => request('/workspace/bootstrap'),
   // Tiny change-token used by the live-refresh loop; see getPulse() on the server.

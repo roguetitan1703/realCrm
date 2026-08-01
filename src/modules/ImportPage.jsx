@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import Icon from '../components/Icon.jsx'
 import { Button, Panel, PageHeader } from '../components/primitives.jsx'
 import { ListLayout } from '../layouts/layouts.jsx'
+import { api } from '../lib/api.js'
+import { useServerData } from '../lib/useServerData.js'
 import {
   PROPERTY_FIELDS, LEAD_FIELDS, GROUP_LABEL,
   parseSpreadsheet, guessMapping, readField,
@@ -77,6 +79,37 @@ export default function ImportPage({ store, go, sel, topBar }) {
 
   // Read every mapped field, then shape it into the record the app really
   // stores — so a rich sheet lands rich, instead of collapsing to four columns.
+  // Duplicate detection for the whole file, in one request. It used to compare
+  // each row against the collections the browser held, so it could only ever
+  // see part of the book -- and would see none of it once those went away.
+  const dupProbe = parsedRows.map(row => {
+    const v = {}
+    FIELDS.forEach(f => { const got = readField(row, mapping, f); if (got !== null) v[f.key] = got })
+    if (kind === 'clients') return { phone: v.phone || null, name: v.name || null }
+    let unitRaw = v.title
+    if (!unitRaw && headers.length) unitRaw = String(row[headers[0]] || '').trim()
+    if (!unitRaw) return {}
+    const project = intoProject || v.project || unitRaw
+    const parsed = splitUnit(unitRaw)
+    const wing = v.wing || parsed.wing || undefined
+    const flat = parsed.flat || unitRaw
+    return { title: [project, wing && `Wing ${wing}`, flat !== project ? flat : null].filter(Boolean).join(' - ') }
+  })
+  const dupKey = JSON.stringify(dupProbe)
+  const { data: dupes } = useServerData(
+    () => parsedRows.length
+      ? api.checkDuplicates({
+          phones: dupProbe.map(r => r.phone).filter(Boolean),
+          names: dupProbe.map(r => r.name).filter(Boolean),
+          titles: dupProbe.map(r => r.title).filter(Boolean),
+        })
+      : Promise.resolve({ leads: {}, properties: {} }),
+    [dupKey], { leads: {}, properties: {} })
+
+  // The project names already on the books, for the "import into project" box.
+  const { data: summary } = useServerData(() => api.getPropertiesSummary().then(r => r?.summary || null), [], null)
+  const projectNames = (summary?.projects || []).map(p => p.name)
+
   const previewRows = parsedRows.map((row) => {
     const v = {}
     FIELDS.forEach(f => { const got = readField(row, mapping, f); if (got !== null) v[f.key] = got })
@@ -86,8 +119,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
       const name = (v.name || 'Imported lead').replace(/^[*(]+/, '').trim()
       const phone = v.phone
       if (!phone) return { status: 'invalid', reason: 'Phone is missing or too short', row, name }
-      const key = normPhone(phone)
-      const dup = store.state.leads.find(l => normPhone(l.phone) === key)
+      const dupHit = dupes?.leads?.[phone] || dupes?.leads?.[normPhone(phone)] || null
       const record = {
         name, phone, email: v.email || undefined,
         source: v.source || 'Spreadsheet import',
@@ -104,7 +136,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
           notes: v.notes || undefined,
         },
       }
-      return { status: dup ? 'duplicate' : 'new', dupTarget: dup?.name || null, dupId: dup?.id || null, record, label: name, sub: phone, locality: v.locality || '—' }
+      return { status: dupHit ? 'duplicate' : 'new', dupTarget: dupHit?.name || null, dupId: dupHit?.id || null, record, label: name, sub: phone, locality: v.locality || '—' }
     }
 
     // Properties. A row is a unit; the project can come from a column or from
@@ -119,10 +151,11 @@ export default function ImportPage({ store, go, sel, topBar }) {
     const flat = parsed.flat || unitRaw
     const title = [project, wing && `Wing ${wing}`, flat !== project ? flat : null].filter(Boolean).join(' - ')
 
-    // Dedup on the thing that is actually unique: a unit inside a project.
-    const dupKey = `${project}|${wing || ''}|${flat}`.toLowerCase()
-    const dup = store.state.properties.find(p =>
-      `${p.project || p.society || ''}|${p.wing || p.tower || ''}|${p.flat || p.unit || ''}`.toLowerCase() === dupKey)
+    // Dedup on the thing that is actually unique: a unit inside a project. The
+    // comparison runs in the database (one request for the whole file) rather
+    // than against whatever listings the browser happened to be holding — which
+    // is what it used to do, and why it missed real duplicates.
+    const dupHit = dupes?.properties?.[title.toLowerCase()] || null
 
     const record = {
       title,
@@ -152,9 +185,9 @@ export default function ImportPage({ store, go, sel, topBar }) {
       highlights: v.notes ? [v.notes] : undefined,
     }
     return {
-      status: dup ? 'duplicate' : 'new',
-      dupTarget: dup ? (dup.title || dup.society) : null,
-      dupId: dup?.id || null,
+      status: dupHit ? 'duplicate' : 'new',
+      dupTarget: dupHit?.name || null,
+      dupId: dupHit?.id || null,
       record, label: title, sub: moneyLabel(v.price) || '—', locality: v.locality || '—',
     }
   })
@@ -302,7 +335,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     <input className="input" value={importProject} onChange={e => setImportProject(e.target.value)}
                       placeholder="e.g. Godrej Riverside — leave blank to import as independent listings" list="imp-proj-list" />
                     <datalist id="imp-proj-list">
-                      {[...new Set(store.state.properties.map(p => p.project || p.society).filter(Boolean))].map(n => <option key={n} value={n} />)}
+                      {(projectNames || []).map(n => <option key={n} value={n} />)}
                     </datalist>
                   </div>
                 )}

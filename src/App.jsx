@@ -90,6 +90,18 @@ export default function App() {
     if (signedIn) document.title = tenantDocTitle(state.settings.firmName)
   }, [signedIn, state.settings.firmName])
 
+  // Sidebar badges are four integers. They were four array scans over every
+  // lead and every property the browser had downloaded to produce them. Read
+  // here, ABOVE the early returns, because a hook cannot sit behind one — both
+  // the login gate and the phone/desk switch return before the sidebar exists,
+  // so a read placed next to its consumer would change the hook order on the
+  // frame someone signs in or resizes past 1024px.
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null)
+  const totals = desk?.leads || { total: 0, overdue: 0, unassigned: 0 }
+  const newCount = desk?.byStage?.['New'] || 0
+  const unreadNotifs = (state.notifications || []).filter(n => !n.read).length
+  const unread = totals.overdue + totals.unassigned + unreadNotifs
+
   // Workspace provisioning lives in the Delpat superadmin console (/admin), not
   // here — a visitor on the login page can no longer create tenants.
   if (!state.loggedIn && !boot?.forceLogin) {
@@ -108,14 +120,6 @@ export default function App() {
     )
   }
 
-  // Sidebar badges are four integers. They were four array scans over every
-  // lead and every property the browser had downloaded to produce them.
-  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null)
-  const totals = desk?.leads || { total: 0, overdue: 0, unassigned: 0 }
-  const newCount = desk?.byStage?.['New'] || 0
-  const unreadNotifs = (state.notifications || []).filter(n => !n.read).length
-  const unread = totals.overdue + totals.unassigned + unreadNotifs
-
   // RBAC Navigation filtering: Agent role hides system management & settings
   const allowedKeys = state.role === 'agent' ? ['dashboard', 'leads', 'properties', 'clients', 'calendar'] : null
   const contactsTab = sel.contactsTab || 'clients'
@@ -126,8 +130,8 @@ export default function App() {
       if (n.key === 'clients') return {
         ...n,
         children: [
-          { sub: 'clients', label: 'Clients', count: totals.total },
-          { sub: 'owners', label: 'Owners', count: desk?.owners || 0 },
+          { sub: 'clients', label: 'Clients', count: desk ? totals.total : undefined },
+          { sub: 'owners', label: 'Owners', count: desk ? desk.owners : undefined },
         ],
       }
       return n

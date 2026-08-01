@@ -1291,7 +1291,7 @@ function ImportModal({ store }) {
     const hit = kind === 'clients'
       ? (dupes?.leads?.[r.phone] || (r.name?.length > 3 ? dupes?.leads?.[r.name.toLowerCase()] : null))
       : dupes?.properties?.[String(r.title || '').toLowerCase()]
-    return hit ? { ...r, status: 'duplicate', dupTarget: hit } : r
+    return hit ? { ...r, status: 'duplicate', dupTarget: hit.name, dupId: hit.id } : r
   })
 
   const newCount = previewRows.filter(r => r.status === 'new').length

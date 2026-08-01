@@ -474,7 +474,7 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
   const [{ count }] = await sql`SELECT count(*)::int as count FROM crm_leads`;
   if (count > 0 && !forceReset) {
     console.log(`[Supabase DB] ℹ️ Database already contains ${count} leads. Skipping seed.`);
-    return await getState();
+    return await getBootstrap();
   }
 
   console.log(`[Supabase DB] 🔄 Bootstrapping default demo CRM dataset into PostgreSQL...`);
@@ -583,7 +583,7 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
   await repairPropertyDisplayCasing();
 
   console.log(`[Supabase DB] ✅ Seeded initial PostgreSQL data cleanly.`);
-  return await getState();
+  return await getBootstrap();
 }
 
 /**
@@ -874,13 +874,21 @@ export async function getPulse(): Promise<Record<string, any>> {
  */
 export async function getBootstrap(): Promise<any> {
   const t = tid();
-  const [agentsRows, settingsRows, routingRows, brandRows] = await Promise.all([
+  const [agentsRows, settingsRows, routingRows, brandRows, localityRows] = await Promise.all([
     sql`SELECT a.* FROM crm_agents a
         LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
         WHERE a.tenant_id = ${t} AND u.deleted_at IS NULL`,
     sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}`,
     sql`SELECT * FROM crm_routing_rules WHERE tenant_id = ${t}`,
     sql`SELECT brand_config FROM tenants WHERE id = ${t} OR slug = ${t} LIMIT 1`,
+    // Every locality this firm actually works in, from both sides of the book.
+    // Filter menus and the locality suggester need the vocabulary, not the
+    // records -- and building it from the collections is what several filter
+    // definitions were quietly doing.
+    sql`SELECT DISTINCT v FROM (
+          SELECT locality AS v FROM crm_properties WHERE tenant_id = ${t}
+          UNION SELECT locality FROM crm_leads WHERE tenant_id = ${t}
+        ) x WHERE coalesce(v, '') <> '' ORDER BY 1`,
   ]);
   const agents = agentsRows.map(rowToAgent);
   const brand = { ...(brandRows[0]?.brand_config || {}) };
@@ -893,6 +901,7 @@ export async function getBootstrap(): Promise<any> {
     settings: settingsRows[0]?.value || {},
     routing_rules: routingRows[0] || null,
     brand,
+    localities: localityRows.map((r: any) => r.v),
   };
 }
 
@@ -1012,35 +1021,39 @@ export async function revertImportBatch(batchId: string): Promise<{ leads: numbe
  * away. The file is the input; the matches are the output; the database does
  * the comparison.
  */
-export async function checkDuplicates(input: { phones?: string[]; names?: string[]; titles?: string[] }): Promise<{ leads: Record<string, string>; properties: Record<string, string> }> {
+export async function checkDuplicates(input: { phones?: string[]; names?: string[]; titles?: string[] }): Promise<{ leads: Record<string, any>; properties: Record<string, any> }> {
   const t = tid();
-  const leads: Record<string, string> = {};
-  const properties: Record<string, string> = {};
+  // Keyed by whatever the file can match on, valued with id AND name -- the id
+  // because a duplicate row is merged into the record it duplicates, and a
+  // merge needs to know which record that is.
+  const leads: Record<string, any> = {};
+  const properties: Record<string, any> = {};
 
   const phones = (input.phones || []).filter(Boolean).slice(0, 5000);
   const names = (input.names || []).filter(Boolean).map(n => n.toLowerCase()).slice(0, 5000);
   if (phones.length || names.length) {
     const rows = await sql`
-      SELECT name, phone FROM crm_leads
+      SELECT id, name, phone FROM crm_leads
        WHERE tenant_id = ${t}
          AND (${phones.length ? sql`phone IN ${sql(phones)}` : sql`false`}
            OR ${names.length ? sql`lower(name) IN ${sql(names)}` : sql`false`})`;
     for (const r of rows) {
-      if (r.phone) leads[r.phone] = r.name;
-      if (r.name) leads[String(r.name).toLowerCase()] = r.name;
+      const hit = { id: r.id, name: r.name };
+      if (r.phone) leads[r.phone] = hit;
+      if (r.name) leads[String(r.name).toLowerCase()] = hit;
     }
   }
 
   const titles = (input.titles || []).filter(Boolean).map(s => s.toLowerCase()).slice(0, 5000);
   if (titles.length) {
     const rows = await sql`
-      SELECT title, project FROM crm_properties
+      SELECT id, title, project FROM crm_properties
        WHERE tenant_id = ${t}
          AND (lower(coalesce(title, '')) IN ${sql(titles)} OR lower(coalesce(project, '')) IN ${sql(titles)})`;
     for (const r of rows) {
-      const label = r.project || r.title;
-      if (r.title) properties[String(r.title).toLowerCase()] = label;
-      if (r.project) properties[String(r.project).toLowerCase()] = label;
+      const hit = { id: r.id, name: r.project || r.title };
+      if (r.title) properties[String(r.title).toLowerCase()] = hit;
+      if (r.project) properties[String(r.project).toLowerCase()] = hit;
     }
   }
   return { leads, properties };
@@ -1150,84 +1163,12 @@ export async function listContacts(opts: {
   };
 }
 
-export async function getState(): Promise<ServerState> {
-  const t = tid();
-  const agentScope = agentLeadScope();
-  const [agentsRows, propsRows, leadsRows, settingsRows, routingRows, timelineRows, shortlistRows, brandRows] = await Promise.all([
-    // Same soft-delete exclusion as getAgents() so the roster/activity view and
-    // Manage access never disagree about who's on the team.
-    sql`SELECT a.* FROM crm_agents a
-        LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
-        WHERE a.tenant_id = ${t} AND u.deleted_at IS NULL`,
-    sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} ORDER BY created_at DESC`,
-    agentScope
-      ? sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND agent_id = ${agentScope} ORDER BY created_at DESC`
-      : sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} ORDER BY created_at DESC`,
-    sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}`,
-    sql`SELECT * FROM crm_routing_rules WHERE tenant_id = ${t}`,
-    sql`SELECT * FROM crm_timeline_events WHERE tenant_id = ${t} ORDER BY timestamp DESC`,
-    sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t}`,
-    sql`SELECT brand_config FROM tenants WHERE id = ${t} OR slug = ${t} LIMIT 1`,
-  ]);
-  const shortlistByLead = groupShortlistByLead(shortlistRows);
-
-  const timeline_events: TimelineEvent[] = timelineRows.map(r => ({
-    id: r.id,
-    record_id: r.record_id,
-    type: r.type,
-    title: r.title,
-    description: r.description,
-    author: r.author || undefined,
-    timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp),
-    metadata: r.metadata || {},
-  }));
-
-  const agents = agentsRows.map(rowToAgent);
-  const inactiveAgentIds = agentsRows.filter(a => a.duty_status === 'OFF_DUTY').map(a => a.id);
-  // Properties get the same crm_timeline_events feed as leads (Remark lives on
-  // both, B1) — merge matching events ahead of any legacy JSONB timeline items
-  // already on the row (real DB events are the source of truth going forward;
-  // legacy items just keep rendering, they're never migrated/rewritten).
-  const properties = propsRows.map(r => {
-    const p = rowToProperty(r);
-    const evs = timeline_events.filter(e => e.record_id === r.id).map(mapEventForClient);
-    return evs.length ? { ...p, timeline: [...evs, ...(p.timeline || [])] } : p;
-  });
-  // B4 activities live in their own table but belong in the same visible feed
-  // as remarks/calls, so they're merged per lead and the whole thing is sorted
-  // newest-first. Photo keys are already gated by role inside the mapper.
-  const activitiesByLead = await getActivitiesByLead();
-  const leads = leadsRows.map(r => {
-    const lead = rowToLead(r, timeline_events, shortlistByLead.get(r.id) || []);
-    const acts = activitiesByLead.get(r.id);
-    if (!acts?.length) return lead;
-    const merged = [...acts, ...(lead.timeline || [])].sort(
-      (a: any, b: any) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
-    );
-    return { ...lead, timeline: merged };
-  });
-
-  const settings = settingsRows[0]?.value || DEFAULT_SETTINGS;
-  const rRow = routingRows[0] || { strategy: 'round_robin', active_agent_ids: agents.map(a => a.id), last_assigned_index: -1 };
-  const routing_rules: RoutingRule = {
-    strategy: rRow.strategy as any,
-    active_agent_ids: rRow.active_agent_ids || [],
-    last_assigned_index: rRow.last_assigned_index || -1,
-  };
-
-  const brand = { primaryColor: '#1E6F52', surfaceColor: '#F6F5F2', logoUrl: '', ...(brandRows[0]?.brand_config || {}) };
-
-  return {
-    agents,
-    properties,
-    leads,
-    inactiveAgentIds,
-    settings,
-    brand,
-    routing_rules,
-    timeline_events,
-  };
-}
+// getState() is deleted. It read every lead, every property, every timeline
+// event and every shortlist row in the tenant to answer one request, and the
+// browser then filtered those arrays to produce lists, counts and single
+// records. All of that is now a query: listLeads, listProperties,
+// getDeskSummary, getLeadById, getPropertyById, searchWorkspace, listContacts,
+// listProjects. getBootstrap() is what a launch reads.
 
 // --- LEADS ---
 export async function getLeads(): Promise<any[]> {
