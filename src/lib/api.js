@@ -205,6 +205,8 @@ export const api = {
   search: (q, limit = 8) => request(`/workspace/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   // Desk counters (open leads, overdue, per-agent load) computed server-side.
   getDeskSummary: () => request('/workspace/desk-summary'),
+  // One request for a whole file's worth of duplicate checks.
+  checkDuplicates: (body) => request('/workspace/dedupe-check', { method: 'POST', body: JSON.stringify(body) }),
   // Every record created by one import, deleted where it lives.
   revertImportBatch: (batchId) => request(`/workspace/import-batches/${encodeURIComponent(batchId)}`, { method: 'DELETE' }),
   hasPendingWrites,

@@ -18,6 +18,11 @@ export const useStore = () => useContext(StoreCtx)
 
 const clone = (x) => JSON.parse(JSON.stringify(x))
 
+// How many records of each kind the cache holds. Enough that paging through a
+// list and opening rows from it never refetches, small enough that it can never
+// grow back into the whole book.
+const CACHE_LIMIT = 500
+
 // Which chrome is mounted. The two share this store, and only one of them has
 // finished moving off the collections, so the boot read differs for now.
 function isPhoneChrome() {
@@ -205,10 +210,17 @@ function reducer(state, action) {
 
     // One record, fetched on its own. `records` lets a list page seed the cache
     // for free — the rows it just drew are the records the user is about to open.
+    // Every row the server hands back lands here, so a screen can look up a
+    // record it has already shown without asking for it again. Bounded, because
+    // an unbounded one is just the in-memory collection rebuilt a page at a
+    // time — the exact thing this replaces. Oldest insertions go first; a record
+    // evicted from the cache is refetched by id, which is a normal outcome.
     case 'CACHE_RECORDS': {
       const kind = action.kind
       const next = { ...(state.cache?.[kind] || {}) }
-      for (const r of action.records || []) if (r?.id) next[r.id] = r
+      for (const r of action.records || []) if (r?.id) { delete next[r.id]; next[r.id] = r }
+      const keys = Object.keys(next)
+      if (keys.length > CACHE_LIMIT) for (const k of keys.slice(0, keys.length - CACHE_LIMIT)) delete next[k]
       return { ...state, cache: { ...state.cache, [kind]: next } }
     }
 

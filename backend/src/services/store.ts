@@ -987,6 +987,49 @@ export async function revertImportBatch(batchId: string): Promise<{ leads: numbe
   return { leads: leadRows.length, properties: propRows.length };
 }
 
+/**
+ * Import dedupe, answered for a whole file in one request.
+ *
+ * The import preview marked a row "duplicate" by scanning the in-memory
+ * collections. That was never actually correct — it could only ever see what
+ * the browser had loaded — and it becomes plainly wrong once the collections go
+ * away. The file is the input; the matches are the output; the database does
+ * the comparison.
+ */
+export async function checkDuplicates(input: { phones?: string[]; names?: string[]; titles?: string[] }): Promise<{ leads: Record<string, string>; properties: Record<string, string> }> {
+  const t = tid();
+  const leads: Record<string, string> = {};
+  const properties: Record<string, string> = {};
+
+  const phones = (input.phones || []).filter(Boolean).slice(0, 5000);
+  const names = (input.names || []).filter(Boolean).map(n => n.toLowerCase()).slice(0, 5000);
+  if (phones.length || names.length) {
+    const rows = await sql`
+      SELECT name, phone FROM crm_leads
+       WHERE tenant_id = ${t}
+         AND (${phones.length ? sql`phone IN ${sql(phones)}` : sql`false`}
+           OR ${names.length ? sql`lower(name) IN ${sql(names)}` : sql`false`})`;
+    for (const r of rows) {
+      if (r.phone) leads[r.phone] = r.name;
+      if (r.name) leads[String(r.name).toLowerCase()] = r.name;
+    }
+  }
+
+  const titles = (input.titles || []).filter(Boolean).map(s => s.toLowerCase()).slice(0, 5000);
+  if (titles.length) {
+    const rows = await sql`
+      SELECT title, project FROM crm_properties
+       WHERE tenant_id = ${t}
+         AND (lower(coalesce(title, '')) IN ${sql(titles)} OR lower(coalesce(project, '')) IN ${sql(titles)})`;
+    for (const r of rows) {
+      const label = r.project || r.title;
+      if (r.title) properties[String(r.title).toLowerCase()] = label;
+      if (r.project) properties[String(r.project).toLowerCase()] = label;
+    }
+  }
+  return { leads, properties };
+}
+
 export async function getState(): Promise<ServerState> {
   const t = tid();
   const agentScope = agentLeadScope();

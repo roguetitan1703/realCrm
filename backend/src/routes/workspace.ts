@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch } from '../services/store';
+import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { listAudit, verifyAuditChain } from '../services/audit';
@@ -128,6 +128,15 @@ workspaceRouter.delete('/import-batches/:batchId', requireTenantAuth, async (req
     return res.status(200).json({ success: true, ...out });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to revert import', message: err.message });
+  }
+});
+
+workspaceRouter.post('/dedupe-check', requireTenantAuth, async (req: Request, res: Response) => {
+  try {
+    const b = req.body || {};
+    return res.status(200).json({ success: true, ...(await checkDuplicates({ phones: b.phones, names: b.names, titles: b.titles })) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Dedupe check failed', message: err.message });
   }
 });
 

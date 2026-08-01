@@ -5,6 +5,7 @@ import { theme } from '../data/theme.js'
 import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink } from '../lib/matching.js'
 import { api } from '../lib/api.js'
+import { useServerData } from '../lib/useServerData.js'
 import { getPosition, processImage, uploadMedia } from '../lib/media.js'
 import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES, STATUS } from '../data/propertyFields.js'
 import CameraCapture from '../components/CameraCapture.jsx'
@@ -62,8 +63,8 @@ export default function Modals({ store, go }) {
 function ModuleFormModal({ store, moduleId, recordId }) {
   const def = MODULE_DEFINITIONS[moduleId]
   const record = moduleId === 'properties'
-    ? store.state.properties.find(p => p.id === recordId)
-    : store.state.leads.find(l => l.id === recordId)
+    ? store.lookup('property', recordId)
+    : store.lookup('lead', recordId)
   const [form, setForm] = useState(() => record ? JSON.parse(JSON.stringify(record)) : {})
   if (!def || !record) return null
 
@@ -151,7 +152,7 @@ function ModuleFormModal({ store, moduleId, recordId }) {
 // owner appear there; there is no separate owner record to keep in step (and
 // no blank one created for a listing that has no owner yet).
 function OwnerEditModal({ store, propId }) {
-  const p = store.state.properties.find(x => x.id === propId)
+  const p = store.lookup('property', propId)
   const [owner, setOwner] = useState(p?.owner || '')
   const [phone, setPhone] = useState(p?.ownerPhone || '')
   const [email, setEmail] = useState(p?.ownerEmail || '')
@@ -186,8 +187,18 @@ function OwnerEditModal({ store, propId }) {
 
 // ---- One-tap owner update: activity summary WhatsApp, logged to the listing ----
 function OwnerUpdateModal({ store, propId }) {
-  const p = store.state.properties.find(x => x.id === propId)
-  const [text, setText] = useState(() => p ? ownerUpdateMessage(p, store.state.leads, store.state.settings.firmName) : '')
+  const p = store.lookup('property', propId)
+  // The activity summary quotes the buyers this listing was shown to. That used
+  // to mean matching it against every lead in the firm, in the browser; the
+  // server answers the same question about one listing.
+  const { data: buyers } = useServerData(() => api.getPropertyBuyers(propId).then(r => r?.buyers || []), [propId], [])
+  const [text, setText] = useState('')
+  const [edited, setEdited] = useState(false)
+  useEffect(() => {
+    // Regenerate as the buyers arrive — but never over something already typed.
+    if (!p || edited) return
+    setText(ownerUpdateMessage(p, buyers || [], store.state.settings.firmName))
+  }, [p?.id, buyers, edited])
   if (!p) return null
   const digits = String(p.ownerPhone || '').replace(/\D/g, '')
   // Used to only call store.logEvent (client-only — the "logged" claim in the
@@ -207,7 +218,7 @@ function OwnerUpdateModal({ store, propId }) {
         To <b style={{ color: 'var(--ink)' }}>{p.owner}</b> · owner of {p.society} ({p.type} · {p.locality})
       </div>
       <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
-        <Textarea value={text} onChange={e => setText(e.target.value)} style={{ minHeight: 190, fontSize: 13, lineHeight: 1.55 }} />
+        <Textarea value={text} onChange={e => { setEdited(true); setText(e.target.value) }} style={{ minHeight: 190, fontSize: 13, lineHeight: 1.55 }} />
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} icon="wa" onClick={send}>Send & log to listing</Button>
@@ -222,7 +233,7 @@ function OwnerUpdateModal({ store, propId }) {
 
 // ---- Rental tenancy: tenant, agreement window, deposit held ----
 function TenancyModal({ store, propId }) {
-  const p = store.state.properties.find(x => x.id === propId)
+  const p = store.lookup('property', propId)
   const t = p?.tenancy
   const [f, setF] = useState({
     tenant: t?.tenant || '', phone: t?.phone || '',
@@ -267,15 +278,20 @@ function TenancyModal({ store, propId }) {
 
 // ---- Attach a property to a lead's shortlist ----
 function AttachPropModal({ store, leadId }) {
-  const l = store.state.leads.find(x => x.id === leadId)
+  const l = store.lookup('lead', leadId)
   const [q, setQ] = useState('')
+  // The search box queries inventory instead of filtering a downloaded copy of
+  // it: `deal` narrows server-side, the text goes to the same LIKE the listings
+  // page uses. Only the fit score stays in the browser, because it scores the
+  // fifty rows that came back — not the whole book.
+  const { data: page, loading } = useServerData(
+    () => l ? api.listProperties({ deal: l.req?.deal, q: q.trim() || undefined, status: 'Available', limit: 50 }) : Promise.resolve({ data: [] }),
+    [leadId, l?.req?.deal, q.trim()],
+    { data: [] })
   if (!l) return null
   const already = new Set(l.shortlist || [])
-  const ql = q.trim().toLowerCase()
-  // rank: same deal first, then matches, then everything; exclude already-attached
-  const cands = store.state.properties
-    .filter(p => !already.has(p.id) && p.deal === l.req.deal)
-    .filter(p => !ql || (p.society || p.title || '').toLowerCase().includes(ql) || (p.locality || '').toLowerCase().includes(ql) || (p.type || '').toLowerCase().includes(ql))
+  const cands = (page?.data || [])
+    .filter(p => !already.has(p.id))
     .map(p => ({ p, fit: fitReasons(p, l.req).score }))
     .sort((a, b) => b.fit - a.fit)
   const attach = (p) => { store.attachProp(leadId, p.id, p.society); store.closeModal() }
@@ -287,7 +303,8 @@ function AttachPropModal({ store, leadId }) {
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search society, locality, type…" autoFocus />
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '46vh', overflowY: 'auto' }}>
-        {cands.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '8px 0' }}>No matching inventory to attach.</div>}
+        {loading && cands.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '8px 0' }}>Searching inventory…</div>}
+        {!loading && cands.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '8px 0' }}>No matching inventory to attach.</div>}
         {cands.map(({ p, fit }) => (
           <button key={p.id} onClick={() => attach(p)}
             style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
@@ -311,7 +328,7 @@ function AttachPropModal({ store, leadId }) {
 // started with a choice nobody needed to make. WhatsApp is its own composer;
 // SMS is gone.
 function LogCallModal({ store, leadId }) {
-  const l = store.state.leads.find(x => x.id === leadId)
+  const l = store.lookup('lead', leadId)
   const [outcome, setOutcome] = useState(CALL_OUTCOMES[0].value)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -359,9 +376,13 @@ function LogCallModal({ store, leadId }) {
 
 // ---- Pick which matched BUYER to WhatsApp a property to (from the system) ----
 function PickBuyerModal({ store, propId }) {
-  const p = store.state.properties.find(x => x.id === propId)
+  const p = store.lookup('property', propId)
+  // The server narrows to the plausible buyers (deal, locality, budget band);
+  // the scorer that produces the fit line then runs over those few rows instead
+  // of over every lead in the firm. Same pattern as the lead-side matches.
+  const { data: candidates } = useServerData(() => api.getPropertyBuyers(propId).then(r => r?.buyers || []), [propId], [])
   if (!p) return null
-  const buyers = leadsForProperty(p, store.state.leads)
+  const buyers = leadsForProperty(p, candidates || [])
   const send = (leadId) => { store.closeModal(); store.openWhatsApp(propId, leadId) }
   return (
     <Modal title="Send this listing on WhatsApp" onClose={store.closeModal} width={440}>
@@ -413,7 +434,7 @@ const CONFIG_OPTIONS = [
 ];
 
 function LeadForm({ store, leadId }) {
-  const edit = leadId ? store.state.leads.find(l => l.id === leadId) : null
+  const edit = leadId ? store.lookup('lead', leadId) : null
   const [f, setF] = useState(edit ? {
     name: edit.name || '',
     phone: edit.phone || '',
@@ -582,10 +603,13 @@ const emptyRow = (over = {}) => ({ _id: 'r' + (++_unitRowSeq), flat: '', config:
 
 // ---- Assign lead ----
 function AssignModal({ store, leadId }) {
-  const l = store.state.leads.find(x => x.id === leadId)
-  // round-robin suggestion = agent with fewest active leads
-  const counts = {}; store.activeAgents().forEach(a => { counts[a.id] = store.state.leads.filter(x => x.agentId === a.id && !x.stage.startsWith('Closed')).length })
-  const sugg = store.activeAgents().sort((a, b) => counts[a.id] - counts[b.id])[0]
+  const l = store.lookup('lead', leadId)
+  // round-robin suggestion = agent with fewest active leads. Counted in SQL:
+  // "how many open leads does each agent have" needs no lead rows in the browser.
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [], null)
+  const counts = desk?.perAgent || {}
+  const openFor = (id) => counts[id]?.open ?? 0
+  const sugg = desk ? [...store.activeAgents()].sort((a, b) => openFor(a.id) - openFor(b.id))[0] : null
   return (
     <Modal title="Assign lead" onClose={store.closeModal} width={400}>
       <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 14 }}>Route <b>{l?.name}</b> to an agent:</div>
@@ -610,7 +634,8 @@ function ReassignModal({ store, fromId }) {
   const others = store.activeAgents().filter(a => a.id !== fromId)
   const [to, setTo] = useState(others[0]?.id)
   const [done, setDone] = useState(false)
-  const count = store.state.leads.filter(l => l.agentId === fromId && !l.stage.startsWith('Closed')).length
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [], null)
+  const count = desk?.perAgent?.[fromId]?.open ?? 0
   const doIt = () => { store.reassignAll(fromId, to); setDone(true) }
   const toName = store.agentById(to)?.first
   return (
@@ -841,7 +866,7 @@ const VISIT_OUTCOMES = [
 ]
 
 function VisitProofModal({ store, leadId, propId }) {
-  const l = store.state.leads.find(x => x.id === leadId)
+  const l = store.lookup('lead', leadId)
   const [step, setStep] = useState('geo')          // geo → shoot → confirm
   const [geo, setGeo] = useState(null)
   const [geoErr, setGeoErr] = useState('')
@@ -973,7 +998,7 @@ function VisitProofModal({ store, leadId, propId }) {
               <select className="input" value={property} onChange={e => setProperty(e.target.value)}>
                 <option value="">Not tied to one unit</option>
                 {(l.shortlist || []).map(pid => {
-                  const p = store.state.properties.find(x => x.id === pid)
+                  const p = store.lookup('property', pid)
                   return p ? <option key={pid} value={pid}>{p.society} · {p.type}</option> : null
                 })}
               </select>
@@ -1094,7 +1119,7 @@ function AmenitiesModal({ store, value = {}, onDone, only = 'all' }) {
 // had no colour for, and the lifecycle stepper didn't recognise. A read-side
 // drift shows the wrong thing; a write-side one corrupts the row.
 function StatusModal({ store, propId }) {
-  const p = store.state.properties.find(x => x.id === propId)
+  const p = store.lookup('property', propId)
   // A sale doesn't get Leased and a let doesn't get Sold — offering both is
   // how a listing ends up marked with the other deal's ending.
   const options = STATUS
@@ -1119,8 +1144,8 @@ function StatusModal({ store, propId }) {
 // ---- Structured site-visit outcome (Liked / Rejected + reason) ----
 const REJECT_REASONS = ['Price / budget', 'Vaastu / facing', 'Floor', 'Location', 'Noise', 'Size / layout', 'Furnishing', 'Parking']
 function VisitFeedbackModal({ store, leadId, propId }) {
-  const l = store.state.leads.find(x => x.id === leadId)
-  const p = store.state.properties.find(x => x.id === propId)
+  const l = store.lookup('lead', leadId)
+  const p = store.lookup('property', propId)
   const [verdict, setVerdict] = useState('liked')
   const [reason, setReason] = useState(REJECT_REASONS[0])
   if (!l || !p) return null
@@ -1219,38 +1244,54 @@ function ImportModal({ store }) {
     reader.readAsText(file)
   }
 
-  const previewRows = parsedRows.map((row) => {
+  // Parse the file into rows first, without deciding what is a duplicate.
+  const draftRows = parsedRows.map((row) => {
     if (kind === 'clients') {
       const nameRaw = mapping.name ? row[mapping.name] : ''
       const phoneRaw = mapping.phone ? row[mapping.phone] : ''
       if (!nameRaw && !phoneRaw) return { status: 'invalid', reason: 'Missing Name/Phone', row }
       const name = nameRaw ? nameRaw.replace(/^[*(]+/g, '').trim() : 'Imported Lead'
       const phone = (phoneRaw && /^[+0-9\s-]{7,15}$/.test(phoneRaw.trim())) ? phoneRaw.trim() : '+919800000000'
-      const dup = store.state.leads.find(l => l.phone === phone || (l.name.toLowerCase() === name.toLowerCase() && name.length > 3))
       return {
-        status: dup ? 'duplicate' : 'new',
-        dupTarget: dup ? dup.name : null,
-        name, phone,
+        status: 'new', dupTarget: null, name, phone,
         locality: mapping.locality ? (row[mapping.locality] || '') : '',
         config: mapping.config ? (row[mapping.config] || '2 BHK') : '2 BHK',
         budget: mapping.budget ? (row[mapping.budget] || '1.2 Cr') : '1.2 Cr',
       }
-    } else {
-      const titleRaw = mapping.title ? row[mapping.title] : ''
-      if (!titleRaw) return { status: 'invalid', reason: 'Missing Project Title', row }
-      const title = titleRaw.replace(/^[*(]+/g, '').trim()
-      const dup = store.state.properties.find(p => p.society.toLowerCase() === title.toLowerCase() || p.title.toLowerCase() === title.toLowerCase())
-      const priceRaw = mapping.price ? row[mapping.price] : ''
-      const priceNum = parseFloat(priceRaw)
-      return {
-        status: dup ? 'duplicate' : 'new',
-        dupTarget: dup ? dup.society : null,
-        title,
-        locality: mapping.locality ? (row[mapping.locality] || '') : '',
-        type: mapping.type ? (row[mapping.type] || '2 BHK') : '2 BHK',
-        price: (!isNaN(priceNum) && priceNum > 0) ? priceNum : 95,
-      }
     }
+    const titleRaw = mapping.title ? row[mapping.title] : ''
+    if (!titleRaw) return { status: 'invalid', reason: 'Missing Project Title', row }
+    const title = titleRaw.replace(/^[*(]+/g, '').trim()
+    const priceRaw = mapping.price ? row[mapping.price] : ''
+    const priceNum = parseFloat(priceRaw)
+    return {
+      status: 'new', dupTarget: null, title,
+      locality: mapping.locality ? (row[mapping.locality] || '') : '',
+      type: mapping.type ? (row[mapping.type] || '2 BHK') : '2 BHK',
+      price: (!isNaN(priceNum) && priceNum > 0) ? priceNum : 95,
+    }
+  })
+
+  // Then ask the database, once for the whole file. This used to compare each
+  // row against the in-memory collections, which meant the "duplicate" count
+  // was only ever as good as whatever the browser had loaded — it silently
+  // missed real duplicates, and would miss all of them once the collections go.
+  const phones = draftRows.filter(r => r.phone).map(r => r.phone)
+  const names = draftRows.filter(r => r.name && r.name.length > 3).map(r => r.name)
+  const titles = draftRows.filter(r => r.title).map(r => r.title)
+  const dupKey = JSON.stringify([phones, names, titles])
+  const { data: dupes } = useServerData(
+    () => (phones.length || names.length || titles.length)
+      ? api.checkDuplicates({ phones, names, titles })
+      : Promise.resolve({ leads: {}, properties: {} }),
+    [dupKey], { leads: {}, properties: {} })
+
+  const previewRows = draftRows.map(r => {
+    if (r.status === 'invalid') return r
+    const hit = kind === 'clients'
+      ? (dupes?.leads?.[r.phone] || (r.name?.length > 3 ? dupes?.leads?.[r.name.toLowerCase()] : null))
+      : dupes?.properties?.[String(r.title || '').toLowerCase()]
+    return hit ? { ...r, status: 'duplicate', dupTarget: hit } : r
   })
 
   const newCount = previewRows.filter(r => r.status === 'new').length
@@ -1538,13 +1579,14 @@ function matchesAllTerms(haystacks, terms) {
 // ---- Global search ----
 function SearchModal({ store, go }) {
   const [q, setQ] = useState('')
-  const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  const leads = terms.length ? store.state.leads.filter(l =>
-    matchesAllTerms([l.name, l.phone, l.email, l.req?.locality, l.req?.config], terms)
-  ).slice(0, 5) : []
-  const props = terms.length ? store.state.properties.filter(p =>
-    matchesAllTerms([p.society, p.title, p.locality, p.owner, p.ownerPhone, p.tower, p.unit, p.type], terms)
-  ).slice(0, 5) : []
+  const term = q.trim()
+  // Searched in Postgres. Filtering two downloaded arrays was the last feature
+  // that genuinely required the whole book to be in the browser.
+  const { data: hits, loading: searching } = useServerData(
+    () => term.length >= 2 ? api.search(term, 5) : Promise.resolve({ leads: [], properties: [] }),
+    [term], { leads: [], properties: [] })
+  const leads = hits?.leads || []
+  const props = hits?.properties || []
   const close = () => store.setSearch(false)
   const goTo = (fn) => { fn(); close() }
 
@@ -1570,20 +1612,21 @@ function SearchModal({ store, go }) {
           <button className="btn btn-icon btn-quiet" onClick={close}><Icon name="x" /></button>
         </div>
         <div style={{ maxHeight: '60vh', overflowY: 'auto', padding: '6px 8px 10px' }}>
-          {!terms.length && <div className="u-muted" style={{ padding: 22, textAlign: 'center', fontSize: 13 }}>Type a name, society, locality, or number.</div>}
-          {terms.length > 0 && !leads.length && !props.length && <div className="u-muted" style={{ padding: 22, textAlign: 'center', fontSize: 13 }}>No matches for “{q}”.</div>}
+          {term.length < 2 && <div className="u-muted" style={{ padding: 22, textAlign: 'center', fontSize: 13 }}>Type a name, society, locality, or number.</div>}
+          {term.length >= 2 && searching && !leads.length && !props.length && <div className="u-muted" style={{ padding: 22, textAlign: 'center', fontSize: 13 }}>Searching…</div>}
+          {term.length >= 2 && !searching && !leads.length && !props.length && <div className="u-muted" style={{ padding: 22, textAlign: 'center', fontSize: 13 }}>No matches for “{q}”.</div>}
           {leads.length > 0 && <div style={{ fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700, padding: '10px 10px 5px' }}>Leads</div>}
           {leads.map(l => (
             <button key={l.id} type="button" onClick={() => goTo(() => go('leads', { leadId: l.id, leadOpen: true }))} style={{ textAlign: 'left', width: '100%', background: 'transparent', border: 'none', borderRadius: 8, padding: '9px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 9, fontFamily: 'inherit' }}>
-              <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{l.name}</div><div className="u-muted" style={{ fontSize: 12 }}>{reqLine(l.req)}</div></div>
+              <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{l.name}</div><div className="u-muted" style={{ fontSize: 12 }}>{[l.phone, l.locality].filter(Boolean).join(' · ')}</div></div>
               <StageTag stage={l.stage} />
             </button>
           ))}
           {props.length > 0 && <div style={{ fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700, padding: '10px 10px 5px' }}>Properties</div>}
           {props.map(p => (
             <button key={p.id} type="button" onClick={() => goTo(() => go('properties', { propId: p.id, propOpen: true }))} style={{ textAlign: 'left', width: '100%', background: 'transparent', border: 'none', borderRadius: 8, padding: '9px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 9, fontFamily: 'inherit' }}>
-              <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{p.society}</div><div className="u-muted" style={{ fontSize: 12 }}>{p.title}</div></div>
-              <Money>{p.priceLabel}</Money>
+              <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{p.project || p.title}</div><div className="u-muted" style={{ fontSize: 12 }}>{[p.title, p.locality].filter(Boolean).join(' · ')}</div></div>
+              <Money>{p.price}</Money>
             </button>
           ))}
         </div>
@@ -1610,45 +1653,40 @@ function NotifModal({ store, go }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const items = []
-  store.state.leads.forEach(l => {
-    if (l.overdue) {
-      items.push({
-        id: l.id + '-overdue',
-        leadId: l.id,
-        kind: 'overdue',
-        tag: 'Overdue Follow-up',
-        icon: 'clock',
-        title: l.name,
-        sub: l.followUp?.action || 'Overdue interaction required',
-      })
-    }
-    if (!l.agentId) {
-      items.push({
-        id: l.id + '-unassigned',
-        leadId: l.id,
-        kind: 'unassigned',
-        tag: 'Unassigned Inquiry',
-        icon: 'person',
-        title: l.name,
-        sub: reqLine(l.req) || 'Needs agent assignment',
-      })
-    }
-    if (l.stage === 'New inquiry' && l.agentId && !l.overdue) {
-      items.push({
-        id: l.id + '-inquiry',
-        leadId: l.id,
-        kind: 'inquiry',
-        tag: 'New Inquiry',
-        icon: 'sparkle',
-        title: l.name,
-        sub: reqLine(l.req) || 'Pending initial outreach',
-      })
-    }
-  })
+  // The action queue is three narrow questions — overdue, unassigned, waiting on
+  // first contact — and each one is a query the server already answers. Building
+  // it meant walking every lead in the firm; the drawer only ever shows a
+  // handful, and the counts come from the summary that counts without reading.
+  //
+  // The first stage is read from the firm's own settings. This used to compare
+  // against the literal string 'New inquiry', which no tenant actually uses
+  // (Delpat's first stage is "New"), so the third bucket was permanently empty.
+  const firstStage = store.state.settings?.stages?.[0] || ''
+  const { data: queue } = useServerData(() => Promise.all([
+    api.listLeads({ segment: 'overdue', limit: 25 }),
+    api.listLeads({ segment: 'unassigned', limit: 25 }),
+    firstStage ? api.listLeads({ stage: firstStage, limit: 25 }) : Promise.resolve({ data: [] }),
+  ]).then(([o, u, i]) => ({ overdue: o?.data || [], unassigned: u?.data || [], inquiry: i?.data || [] })),
+    [firstStage], { overdue: [], unassigned: [], inquiry: [] })
+  const { data: counts } = useServerData(() => api.getLeadsSummary(), [], null)
 
-  const overdueCount = items.filter(x => x.kind === 'overdue').length
-  const unassignedCount = items.filter(x => x.kind === 'unassigned').length
+  const items = [
+    ...(queue?.overdue || []).map(l => ({
+      id: l.id + '-overdue', leadId: l.id, kind: 'overdue', tag: 'Overdue Follow-up', icon: 'clock',
+      title: l.name, sub: l.followUp?.action || 'Overdue interaction required',
+    })),
+    ...(queue?.unassigned || []).map(l => ({
+      id: l.id + '-unassigned', leadId: l.id, kind: 'unassigned', tag: 'Unassigned Inquiry', icon: 'person',
+      title: l.name, sub: reqLine(l.req) || 'Needs agent assignment',
+    })),
+    ...(queue?.inquiry || []).filter(l => l.agentId && !l.overdue).map(l => ({
+      id: l.id + '-inquiry', leadId: l.id, kind: 'inquiry', tag: 'New Inquiry', icon: 'sparkle',
+      title: l.name, sub: reqLine(l.req) || 'Pending initial outreach',
+    })),
+  ]
+
+  const overdueCount = counts?.overdue ?? items.filter(x => x.kind === 'overdue').length
+  const unassignedCount = counts?.unassigned ?? items.filter(x => x.kind === 'unassigned').length
   const inquiryCount = items.filter(x => x.kind === 'inquiry').length
 
   const filteredItems = items.filter(x => {
@@ -1788,7 +1826,7 @@ function NotifModal({ store, go }) {
 }
 
 function ScheduleFollowUpModal({ store, leadId }) {
-  const l = store.state.leads.find(x => x.id === leadId)
+  const l = store.lookup('lead', leadId)
   const [action, setAction] = useState('Site Visit')
   const [day, setDay] = useState('Tomorrow')
   const [customDate, setCustomDate] = useState('2026-07-10')
