@@ -31,13 +31,16 @@ export default function Team({ store, go, topBar }) {
   // mount; the roster degrades to state-derived numbers if the call fails, so
   // the desk still ranks correctly offline.
   const [perf, setPerf] = useState({})
+  const [perfLoaded, setPerfLoaded] = useState(false)
   useEffect(() => {
     let live = true
+    setPerfLoaded(false)
     Promise.all(state.agents.map(a =>
       api.getAgentPerformance(a.id).then(r => [a.id, r?.metrics]).catch(() => [a.id, null])
     )).then(pairs => {
       if (!live) return
       setPerf(Object.fromEntries(pairs.filter(([, m]) => m)))
+      setPerfLoaded(true)
     })
     return () => { live = false }
   }, [state.agents.length])
@@ -92,7 +95,25 @@ export default function Team({ store, go, topBar }) {
         <div className="acc-panel">
           <SectionHead title="Team activity" right={<span className="u-muted acc-hint">Who's carrying the load and who's closing</span>} />
           <div className="board">
-          {ranked.map(({ a, open, won, overdue, winRate, calls, visits, off }, i) => {
+          {!perfLoaded ? ranked.map(({ a }) => (
+            <div key={a.id} className="bcard skel-card">
+              <div className="rank"><span className="skel skel-line" style={{ width: 14 }} /></div>
+              <div className="bwho">
+                <span className="skel skel-av" />
+                <div className="bid">
+                  <span className="skel skel-line" style={{ width: 110 }} />
+                  <span className="skel skel-line sm" style={{ width: 70, marginTop: 6 }} />
+                </div>
+              </div>
+              <div className="bload">
+                <span className="skel skel-line" style={{ width: 90 }} />
+                <div className="bmeter"><i style={{ width: '0%' }} /></div>
+              </div>
+              <div className="bstats">
+                {[0, 1, 2].map(i => <div key={i} className="bstat"><span className="skel skel-line" style={{ width: 22 }} /></div>)}
+              </div>
+            </div>
+          )) : ranked.map(({ a, open, won, overdue, winRate, calls, visits, off }, i) => {
             const overloaded = !off && open > evenShare * 1.5 && open > 3
             const isLeader = a.id === leaderId
             const pct = Math.round((open / maxLoad) * 100)
@@ -129,10 +150,9 @@ export default function Team({ store, go, topBar }) {
                 </div>
 
                 {/* Duty toggling used to live here as an unlabeled icon,
-                    reading as a second "Reassign" beside the real one — it's
-                    an account-lifecycle action now, in Manage Access above,
-                    named for what it does. This board stays workload +
-                    the one action that's actually about workload. */}
+                    reading as a second "Reassign" beside the real one. It's
+                    gone — set from Settings → Routing instead. This board
+                    stays workload + the one action that's actually about it. */}
                 <div className="bactions">
                   <Button size="sm" onClick={() => store.openModal({ kind: 'reassign', fromId: a.id })}>Reassign leads</Button>
                 </div>
@@ -152,8 +172,6 @@ export default function Team({ store, go, topBar }) {
 // Backend enforces RBAC; we mirror it here only to avoid offering an action the
 // server will reject. Every mutation re-pulls the desk so the ranked board above
 // reflects a suspend / delete / seat-swap immediately.
-const PAGE_SIZE = 8
-
 function AccessPanel({ store }) {
   const meId = store.state.activeAgentId
   const [users, setUsers] = useState(null)   // null = loading
@@ -162,16 +180,18 @@ function AccessPanel({ store }) {
   const [seat, setSeat] = useState(null)     // user whose seat is being reassigned
   const [edit, setEdit] = useState(null)     // user being edited (name/email/phone/role)
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
 
   const load = () => api.getUsers().then(r => setUsers(r.users || [])).catch(() => setUsers([]))
   useEffect(() => { load() }, [])
 
-  const pageCount = Math.max(1, Math.ceil((users?.length || 0) / PAGE_SIZE))
+  const pageCount = Math.max(1, Math.ceil((users?.length || 0) / pageSize))
   // A row acted on could move the person off the page they were on (a
   // suspend re-sorts nothing here, but a shrinking last page after a delete
   // would otherwise strand the view past the end).
   useEffect(() => { if (page > pageCount) setPage(pageCount) }, [pageCount, page])
-  const pageRows = (users || []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const pageRows = (users || []).slice((page - 1) * pageSize, page * pageSize)
 
   const me = (users || []).find(u => u.id === meId)
   const myRole = me?.role || (store.state.role === 'agent' ? 'agent' : 'owner')
@@ -200,16 +220,10 @@ function AccessPanel({ store }) {
       .catch(err => store.toast(cleanErr(err), 'warn'))
       .finally(() => setBusy(''))
   }
-  // Duty status used to be an icon-only toggle sitting in the Team Activity
-  // board, unlabeled, next to a DIFFERENT "Reassign" — confusing enough that
-  // it's gone from there. The capability still matters (it gates who the
-  // router will hand a new lead to), so it lives here as a named action
-  // instead of disappearing outright.
+  // Off duty is READ here (the status pill below) but not toggled here — the
+  // action lived in this menu once and read as a confusing near-duplicate of
+  // Suspend, so it's gone. Routing eligibility is set from Settings → Routing.
   const off = (u) => store.state.inactiveAgentIds.includes(u.id)
-  const toggleDuty = (u) => {
-    store.toggleAgent(u.id)
-    store.toast(off(u) ? `${u.name} back on duty` : `${u.name} marked off duty — won't receive new leads`)
-  }
 
   return (
     <div className="panel acc-panel">
@@ -245,7 +259,6 @@ function AccessPanel({ store }) {
                 const overflow = [
                   { icon: 'shield', label: 'Reset password', onClick: () => resetPw(u) },
                   { icon: 'x', label: 'Force logout', onClick: () => forceLogout(u) },
-                  ...(!self ? [{ icon: off(u) ? 'refresh' : 'clock', label: off(u) ? 'Bring on duty' : 'Mark off duty', onClick: () => toggleDuty(u) }] : []),
                   ...(!self && canDelete ? [{ icon: 'trash', label: 'Delete', tone: 'danger', onClick: () => del(u) }] : []),
                 ]
                 return (
@@ -291,7 +304,7 @@ function AccessPanel({ store }) {
               })}
             </tbody>
           </table>
-          <Pager page={page} pageCount={pageCount} onPage={setPage} total={users.length} pageSize={PAGE_SIZE} />
+          <Pager page={page} pageCount={pageCount} onPage={setPage} total={users.length} pageSize={pageSize} onPageSize={setPageSizeP} />
         </div>
       )}
 

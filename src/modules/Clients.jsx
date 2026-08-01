@@ -27,12 +27,20 @@ export default function Clients({ store, go, sel, topBar }) {
   const [sortDir, setSortDir] = useState('asc')
   const [view, setView] = useState('list')
   const [selClient, setSelClient] = useState(null)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const setFltP = (v) => { setFlt(v); setPage(1) }
+  const setQP = (v) => { setQ(v); setPage(1) }
+  const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
+  const setSortDirP = (v) => { setSortDir(v); setPage(1) }
+  const setSegP = (v) => { setSeg(v); setPage(1) }
+  const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
 
   // Clicking Clients/Owners in the sub-nav while a contact was open did
   // nothing visible: the sub-nav changed `sel.contactsTab`, but the open
   // contact is LOCAL state and kept rendering over the list. Navigation has to
   // win over a selection — so changing tab closes the record.
-  useEffect(() => { setSelClient(null) }, [tab])
+  useEffect(() => { setSelClient(null); setPage(1) }, [tab])
 
   // build a uniform contact list
   const rows = []
@@ -112,7 +120,7 @@ export default function Clients({ store, go, sel, topBar }) {
     ...s,
     on: seg === s.key,
     count: s.key === 'all' ? scopeRows.length : scopeRows.filter(r => roleMatch(r.role, s.key)).length,
-    onClick: () => setSeg(s.key),
+    onClick: () => setSegP(s.key),
   }))
 
   // Segment pre-filters the derived directory; the shared engine handles the rest.
@@ -120,23 +128,24 @@ export default function Clients({ store, go, sel, topBar }) {
 
   const kpis = tab === 'clients'
     ? [
-        { label: 'Clients', value: demandRows.length, onClick: () => setSeg('all') },
-        { label: 'Buyers', value: demandRows.filter(r => r.role === 'Buyer').length, onClick: () => setSeg('Buyer') },
-        { label: 'Tenants', value: demandRows.filter(r => r.role === 'Tenant').length, onClick: () => setSeg('Tenant') },
+        { label: 'Clients', value: demandRows.length, onClick: () => setSegP('all') },
+        { label: 'Buyers', value: demandRows.filter(r => r.role === 'Buyer').length, onClick: () => setSegP('Buyer') },
+        { label: 'Tenants', value: demandRows.filter(r => r.role === 'Tenant').length, onClick: () => setSegP('Tenant') },
       ]
     : [
-        { label: 'Owners', value: supplyRows.length, onClick: () => setSeg('all') },
-        { label: 'Sellers', value: supplyRows.filter(r => roleMatch(r.role, 'Seller')).length, onClick: () => setSeg('Seller') },
-        { label: 'Landlords', value: supplyRows.filter(r => roleMatch(r.role, 'Landlord')).length, onClick: () => setSeg('Landlord') },
+        { label: 'Owners', value: supplyRows.length, onClick: () => setSegP('all') },
+        { label: 'Sellers', value: supplyRows.filter(r => roleMatch(r.role, 'Seller')).length, onClick: () => setSegP('Seller') },
+        { label: 'Landlords', value: supplyRows.filter(r => roleMatch(r.role, 'Landlord')).length, onClick: () => setSegP('Landlord') },
       ]
 
   const { header, toolbar, body } = ModuleListView({
     def: CLIENTS_DEF, records, store,
     onOpen: (r) => setSelClient(r),
-    filters: flt, onFilters: setFlt,
-    search: q, onSearch: setQ,
-    sortKey, onSortKey: setSortKey, sortDir, onSortDir: setSortDir,
+    filters: flt, onFilters: setFltP,
+    search: q, onSearch: setQP,
+    sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
     kpis, segments: segs, view, onView: setView,
+    page, onPage: setPage, pageSize, onPageSize: setPageSizeP,
     // Owners aren't created directly (that's B3's stated, deliberate gap —
     // they're derived from a property's owner field); the CTA that actually
     // adds a new one is adding the property.
@@ -147,7 +156,7 @@ export default function Clients({ store, go, sel, topBar }) {
     emptyHint: 'Adjust the role, filter or search.',
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} />
-      : <ModuleTable def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} sortKey={sortKey} sortDir={sortDir} onSort={setSortKey} />,
+      : <ModuleTable def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP} />,
   })
 
   // Full-page detail takeover — same pattern as Leads & Properties (not a drawer).

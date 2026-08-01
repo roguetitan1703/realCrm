@@ -1,9 +1,36 @@
 // Collection components: Toolbar (the ONE filter/sort bar), Table, ListRow, Card grid.
 import { useState, useEffect, useRef } from 'react'
 import Icon from './Icon.jsx'
-import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, NewTag, Quoted, PageHeader, ViewSwitch } from './primitives.jsx'
+import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, NewTag, Quoted, PageHeader, ViewSwitch, Pager } from './primitives.jsx'
 import { quotedLine, unitLabel } from '../lib/format.js'
 import { getNestedValue } from './ModuleFields.jsx'
+
+// ---- SearchField: a text input that reports value AFTER a short pause. ----
+// The box itself is an uncontrolled-feeling local buffer so every keystroke
+// lands instantly; `onChange` (which drives the actual filter + a page reset)
+// fires only once typing settles. Without this, filtering on every keystroke
+// against a click-away-prone popover made fast typing feel like it was being
+// fought — the "grace to type" the search needed.
+function SearchField({ value, onChange, placeholder, className, iconSize = 15, ...inputProps }) {
+  const [local, setLocal] = useState(value)
+  const first = useRef(true)
+  useEffect(() => { setLocal(value) }, [value])
+  useEffect(() => {
+    if (first.current) { first.current = false; return }
+    if (local === value) return
+    const t = setTimeout(() => onChange(local), 300)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [local])
+  const clear = () => { setLocal(''); onChange('') }
+  return (
+    <div className={className}>
+      <Icon name="search" size={iconSize} />
+      <input value={local} onChange={e => setLocal(e.target.value)} placeholder={placeholder} {...inputProps} />
+      {local && <button className="cx" onClick={clear} title="Clear" aria-label="Clear search"><Icon name="x" size={iconSize - 2} /></button>}
+    </div>
+  )
+}
 
 // ---- runModuleQuery: pure search+filter+sort from a MODULE_DEFINITION ----
 // Shared by ModuleListView and any custom module view (e.g. Properties card grid,
@@ -48,9 +75,10 @@ export function ModuleListView({
   def, records, store, onOpen,
   filters, onFilters, search, onSearch, sortKey, onSortKey, sortDir, onSortDir,
   kpis, segments, view, onView, viewExtra, showViewSwitch = true, cta, toolbarRight, emptyTitle, emptyHint, renderTable,
-  phone,
+  phone, page = 1, onPage, pageSize = 20, onPageSize,
 }) {
   const list = runModuleQuery(def, records, { filters, search, sortKey, sortDir, store })
+  const pageCount = Math.max(1, Math.ceil(list.length / pageSize))
 
   const fields = typeof def.filterFields === 'function' ? def.filterFields(store) : (def.filterFields || [])
   const sortOptions = def.sortOptions.map(s => ({ value: s.key, label: s.label }))
@@ -68,6 +96,12 @@ export function ModuleListView({
   // popovers that open off the edge of the screen. Filter and sort move into
   // one bottom sheet, which is where a thumb expects them.
   if (phone) {
+    // Cumulative reveal, not page-jump: a numbered pager asks for a precise tap
+    // a thumb can't reliably make. "Load more" only ever grows the list, so the
+    // scroll position a thumb already found never gets pulled out from under it.
+    const shown = onPage ? Math.min(page * pageSize, list.length) : list.length
+    const phoneList = list.slice(0, shown)
+    const more = list.length - shown
     return {
       header,
       toolbar: (
@@ -82,7 +116,10 @@ export function ModuleListView({
       // a 390px screen, and choosing between two bad options is not a feature.
       body: list.length === 0
         ? <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>
-        : renderTable ? renderTable(list, 'grid') : <ModuleCards def={def} rows={list} store={store} onOpen={onOpen} />,
+        : <>
+            {renderTable ? renderTable(phoneList, 'grid') : <ModuleCards def={def} rows={phoneList} store={store} onOpen={onOpen} />}
+            {more > 0 && <button className="btn btn-secondary btn-block loadmore" onClick={() => onPage(page + 1)}>Load {Math.min(more, pageSize)} more</button>}
+          </>,
       list,
     }
   }
@@ -105,11 +142,16 @@ export function ModuleListView({
     />
   )
 
+  const pageList = onPage ? list.slice((page - 1) * pageSize, page * pageSize) : list
+
   const body = list.length === 0
     ? <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>
-    : renderTable
-      ? renderTable(list, view)
-      : <ModuleTable def={def} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={onSortKey} />
+    : <>
+        {renderTable
+          ? renderTable(pageList, view)
+          : <ModuleTable def={def} rows={pageList} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={onSortKey} />}
+        {onPage && <Pager page={page} pageCount={pageCount} onPage={onPage} total={list.length} pageSize={pageSize} onPageSize={onPageSize} />}
+      </>
 
   return { header, toolbar, body, list }
 }
@@ -134,15 +176,11 @@ function PhoneToolbar({
   return (
     <>
       <div className="ptool">
-        <div className="ptool-search">
-          <Icon name="search" size={16} />
-          <input
-            value={search} onChange={e => onSearch(e.target.value)}
-            placeholder={`Search ${def.name.toLowerCase()}`}
-            type="search" enterKeyHint="search" autoCorrect="off" autoCapitalize="none"
-          />
-          {search && <button className="cx" onClick={() => onSearch('')} aria-label="Clear search"><Icon name="x" size={14} /></button>}
-        </div>
+        <SearchField
+          className="ptool-search" value={search} onChange={onSearch} iconSize={16}
+          placeholder={`Search ${def.name.toLowerCase()}`}
+          type="search" enterKeyHint="search" autoCorrect="off" autoCapitalize="none"
+        />
         <button className={'ptool-btn' + (activeCount ? ' on' : '')} onClick={() => setSheet(true)}>
           <Icon name="filter" size={16} />
           {activeCount ? <span className="ptool-n">{activeCount}</span> : null}
@@ -313,11 +351,7 @@ export function FilterBar({ fields = [], value = {}, onChange, search, right, ct
   return (
     <div className="fbar" ref={barRef}>
       {search && (
-        <div className="f-search">
-          <Icon name="search" size={15} />
-          <input value={search.value} onChange={e => search.onChange(e.target.value)} placeholder={search.placeholder || 'Search…'} />
-          {search.value && <button className="cx" onClick={() => search.onChange('')} title="Clear"><Icon name="x" size={13} /></button>}
-        </div>
+        <SearchField className="f-search" value={search.value} onChange={search.onChange} placeholder={search.placeholder || 'Search…'} iconSize={15} />
       )}
       {search && fields.length ? <div className="divider" /> : null}
 

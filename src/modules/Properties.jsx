@@ -20,9 +20,18 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
   const mayEdit = canEditListing(state.role)
   const [flt, setFlt] = useState({})
   const [q, setQ] = useState('')
-  const [view, setView] = useState('grid')
+  const [view, setView] = useState('list')
   const [sortKey, setSortKey] = useState('recent')
   const [sortDir, setSortDir] = useState('asc')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  // Any change to what's being asked for invalidates whatever page you were on —
+  // page 3 of "3BHK in Baner" is a different page 3 once the filter changes.
+  const setFltP = (v) => { setFlt(v); setPage(1) }
+  const setQP = (v) => { setQ(v); setPage(1) }
+  const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
+  const setSortDirP = (v) => { setSortDir(v); setPage(1) }
+  const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
 
   // Add/edit is a stepped PAGE, not a modal (spec C-add) — rendered inside this
   // screen the same way the detail takeover is, so no new route is needed.
@@ -45,13 +54,18 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
 
   // Shared query engine drives filter/search/sort; a custom renderTable keeps the
   // module-specific card grid (with demand count) + demand-column table view.
+  // Project view aggregates ALL units into cards — pagination is meaningless
+  // (and would silently drop units from the aggregate), so it only applies
+  // to the two flat unit views.
+  const paginated = view !== 'projects'
   const { header, toolbar, body } = ModuleListView({
     def: PROPERTIES_DEF, records: state.properties, store,
     onOpen: (p) => open(p.id),
-    filters: flt, onFilters: setFlt,
-    search: q, onSearch: setQ,
-    sortKey, onSortKey: setSortKey, sortDir, onSortDir: setSortDir,
+    filters: flt, onFilters: setFltP,
+    search: q, onSearch: setQP,
+    sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
     kpis, view, onView: setView, phone,
+    page, onPage: paginated ? setPage : undefined, pageSize, onPageSize: paginated ? setPageSizeP : undefined,
     // Grid/list toggle only applies to the flat unit views, hide it in project view.
     showViewSwitch: view !== 'projects',
     // No import button here: the top bar already carries Import / Revert on
@@ -59,7 +73,7 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
     // question ("are these different?") rather than a convenience.
     toolbarRight: <>
       <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
-        onClick={() => setView(view === 'projects' ? 'grid' : 'projects')}>
+        onClick={() => setView(view === 'projects' ? 'list' : 'projects')}>
         <Icon name="building" size={14} />Group by project
       </button>
     </>,

@@ -23,6 +23,14 @@ export default function Leads({ store, go, sel, setSel, topBar, phone }) {
   const [sortDir, setSortDir] = useState('asc')
   const [view, setView] = useState('list')
   const [seg, setSeg] = useState('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const setFltP = (v) => { setFlt(v); setPage(1) }
+  const setQP = (v) => { setQ(v); setPage(1) }
+  const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
+  const setSortDirP = (v) => { setSortDir(v); setPage(1) }
+  const setSegP = (v) => { setSeg(v); setPage(1) }
+  const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
 
   const open = sel.leadOpen && sel.leadId
   if (open) return <LeadRecord store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} />
@@ -46,21 +54,22 @@ export default function Leads({ store, go, sel, setSel, topBar, phone }) {
     tone: sg.tone,
     on: seg === sg.key,
     count: records.filter(sg.match).length,
-    onClick: () => setSeg(sg.key),
+    onClick: () => setSegP(sg.key),
   }))
   const activeSeg = (LEADS_DEF.segments || []).find(sg => sg.key === seg)
   const scoped = activeSeg && seg !== 'all' ? records.filter(activeSeg.match) : records
 
   const { header, toolbar, body } = ModuleListView({
     def: LEADS_DEF, records: scoped, store, onOpen,
-    filters: flt, onFilters: setFlt,
-    search: q, onSearch: setQ,
-    sortKey, onSortKey: setSortKey, sortDir, onSortDir: setSortDir,
+    filters: flt, onFilters: setFltP,
+    search: q, onSearch: setQP,
+    sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
     segments: segs, view, onView: setView, phone,
+    page, onPage: setPage, pageSize, onPageSize: setPageSizeP,
     cta: { label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) },
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} />
-      : <ModuleTable def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={setSortKey} />,
+      : <ModuleTable def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP} />,
   })
 
   return (

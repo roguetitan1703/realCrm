@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Icon from '../components/Icon.jsx'
 import { Button, Field, Input, PhoneInput, Textarea, Segmented, Avatar, Source, StageTag, Money } from '../components/primitives.jsx'
 import { theme } from '../data/theme.js'
@@ -1526,25 +1526,52 @@ function ImportModal({ store }) {
   )
 }
 
+// Every term the person typed must match somewhere in the record — an AND
+// across words, not one big substring. Typing "rahul baner" narrows to leads
+// that mention BOTH "rahul" and "baner" (anywhere across their searchable
+// fields), the way a second word is expected to narrow, not widen, a search.
+function matchesAllTerms(haystacks, terms) {
+  const text = haystacks.filter(Boolean).join(' ').toLowerCase()
+  return terms.every(t => text.includes(t))
+}
+
 // ---- Global search ----
 function SearchModal({ store, go }) {
   const [q, setQ] = useState('')
-  const ql = q.trim().toLowerCase()
-  const leads = ql ? store.state.leads.filter(l => (l.name || '').toLowerCase().includes(ql) || (l.req?.locality || '').toLowerCase().includes(ql) || (l.phone || '').includes(ql)).slice(0, 5) : []
-  const props = ql ? store.state.properties.filter(p => (p.society || p.title || '').toLowerCase().includes(ql) || (p.locality || '').toLowerCase().includes(ql)).slice(0, 5) : []
+  const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const leads = terms.length ? store.state.leads.filter(l =>
+    matchesAllTerms([l.name, l.phone, l.email, l.req?.locality, l.req?.config], terms)
+  ).slice(0, 5) : []
+  const props = terms.length ? store.state.properties.filter(p =>
+    matchesAllTerms([p.society, p.title, p.locality, p.owner, p.ownerPhone, p.tower, p.unit, p.type], terms)
+  ).slice(0, 5) : []
   const close = () => store.setSearch(false)
   const goTo = (fn) => { fn(); close() }
+
+  const panelRef = useRef(null)
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') close() }
+    // mousedown (not click) so the outside-click that OPENED search — still
+    // bubbling as a click when this listener attaches — can't immediately
+    // close it again; and this fires even if a result button's own onClick
+    // does something async that a plain overlay-backdrop click could race.
+    const onDown = (e) => { if (panelRef.current && !panelRef.current.contains(e.target)) close() }
+    window.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onDown)
+    return () => { window.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onDown) }
+  }, [])
+
   return (
-    <div className="overlay top" onClick={close}>
-      <div style={{ width: 520, maxWidth: '100%', background: 'var(--bg)', borderRadius: 14, boxShadow: 'var(--shadow-pop)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+    <div className="overlay top">
+      <div ref={panelRef} style={{ width: 520, maxWidth: '100%', background: 'var(--bg)', borderRadius: 14, boxShadow: 'var(--shadow-pop)', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: '1px solid var(--line)' }}>
           <Icon name="search" style={{ color: 'var(--muted)' }} />
           <input value={q} onChange={e => setQ(e.target.value)} autoFocus placeholder="Search leads, properties, people…" style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'var(--sans)', fontSize: 15, color: 'var(--ink)' }} />
           <button className="btn btn-icon btn-quiet" onClick={close}><Icon name="x" /></button>
         </div>
         <div style={{ maxHeight: '60vh', overflowY: 'auto', padding: '6px 8px 10px' }}>
-          {!ql && <div className="u-muted" style={{ padding: 22, textAlign: 'center', fontSize: 13 }}>Type a name, society, locality, or number.</div>}
-          {ql && !leads.length && !props.length && <div className="u-muted" style={{ padding: 22, textAlign: 'center', fontSize: 13 }}>No matches for “{q}”.</div>}
+          {!terms.length && <div className="u-muted" style={{ padding: 22, textAlign: 'center', fontSize: 13 }}>Type a name, society, locality, or number.</div>}
+          {terms.length > 0 && !leads.length && !props.length && <div className="u-muted" style={{ padding: 22, textAlign: 'center', fontSize: 13 }}>No matches for “{q}”.</div>}
           {leads.length > 0 && <div style={{ fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700, padding: '10px 10px 5px' }}>Leads</div>}
           {leads.map(l => (
             <button key={l.id} type="button" onClick={() => goTo(() => go('leads', { leadId: l.id, leadOpen: true }))} style={{ textAlign: 'left', width: '100%', background: 'transparent', border: 'none', borderRadius: 8, padding: '9px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 9, fontFamily: 'inherit' }}>

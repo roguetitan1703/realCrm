@@ -1,5 +1,6 @@
 // Small pure components — each maps to a class in styles.css. Change look = edit styles.css.
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
 import { relTime, agentName } from '../lib/format.js'
@@ -22,54 +23,109 @@ export function IconButton({ icon, variant = 'ghost', ...rest }) {
 // ---- RowMenu: the compact "⋯" overflow for a table row's less-used actions.
 // Frequent actions stay as visible buttons beside it; this is for the ones
 // that are rare, destructive, or both — reset password, force logout, delete.
+// The popover renders in a portal at document.body: table wrappers scroll with
+// overflow-x:auto, which (per spec) forces overflow-y:auto too, clipping any
+// absolutely-positioned popover anchored inside a bottom row. A portal, positioned
+// from the trigger button's live rect, escapes that clipping entirely.
 export function RowMenu({ items, disabled }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  // Registered on the NEXT frame: React's synthetic handler runs at the root,
-  // so stopPropagation there doesn't stop the native event reaching window —
-  // the click that opened the menu would otherwise close it again immediately.
+  const [pos, setPos] = useState(null)
+  const btnRef = useRef(null)
+  const popRef = useRef(null)
+
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return
+    const r = btnRef.current.getBoundingClientRect()
+    setPos({ top: r.bottom + 4, right: window.innerWidth - r.right })
+  }, [open])
+
+  // Capture phase: runs before any row's onClick can stopPropagation in the
+  // bubble phase, so opening one row's menu reliably closes any other that's open.
   useEffect(() => {
     if (!open) return
-    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    const id = requestAnimationFrame(() => window.addEventListener('click', close))
-    return () => { cancelAnimationFrame(id); window.removeEventListener('click', close) }
+    const close = (e) => {
+      if (btnRef.current?.contains(e.target)) return
+      if (popRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
+    window.addEventListener('click', close, true)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('click', close, true)
+      window.removeEventListener('scroll', close, true)
+    }
   }, [open])
+
   if (!items.length) return null
   return (
-    <div className="rowmenu" ref={ref} onClick={e => e.stopPropagation()}>
-      <button className="rowmenu-btn" aria-label="More actions" disabled={disabled} onClick={() => setOpen(o => !o)}>
+    <div className="rowmenu">
+      <button ref={btnRef} className="rowmenu-btn" aria-label="More actions" disabled={disabled} onClick={(e) => { e.stopPropagation(); setOpen(o => !o) }}>
         <Icon name="dots" size={16} />
       </button>
-      {open && (
-        <div className="popover rowmenu-pop" role="menu">
+      {open && pos && createPortal(
+        <div ref={popRef} className="popover rowmenu-pop" role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right, left: 'auto' }} onClick={e => e.stopPropagation()}>
           {items.map((it, i) => (
             <button key={i} className={'p-item' + (it.tone === 'danger' ? ' danger' : '')} onClick={() => { setOpen(false); it.onClick() }}>
               <span className="p-ic"><Icon name={it.icon} size={15} /></span>{it.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
 }
 
-// ---- Pager: page N of M, for any list that's grown past one screen ----
-export function Pager({ page, pageCount, onPage, total, pageSize }) {
-  if (pageCount <= 1) return null
+// The standard row-count choices across every paginated table in the app —
+// one set, so "rows per page" means the same thing wherever it appears.
+export const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+
+// Windowed page numbers with '…' gaps: always show first, last, and a run
+// around the current page, so jumping to page 1 or the end is one click
+// instead of N clicks through every page in between.
+function pageWindow(page, pageCount) {
+  const out = []
+  let last = 0
+  for (let p = 1; p <= pageCount; p++) {
+    if (p === 1 || p === pageCount || (p >= page - 1 && p <= page + 1)) {
+      if (last && p - last > 1) out.push('…' + p)
+      out.push(p)
+      last = p
+    }
+  }
+  return out
+}
+
+// ---- Pager: rows-per-page + numbered pages, for any list past one screen ----
+export function Pager({ page, pageCount, onPage, total, pageSize, onPageSize, pageSizeOptions = PAGE_SIZE_OPTIONS }) {
+  if (!total) return null
   const from = (page - 1) * pageSize + 1
   const to = Math.min(page * pageSize, total)
   return (
     <div className="pager">
+      {onPageSize && (
+        <label className="pager-size">
+          <span>Rows per page</span>
+          <select value={pageSize} onChange={e => onPageSize(Number(e.target.value))}>
+            {pageSizeOptions.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+      )}
       <span className="pager-range">{from}–{to} of {total}</span>
-      <div className="pager-nav">
-        <button className="btn btn-ghost btn-sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-          <Icon name="chevLeft" size={14} />
-        </button>
-        <span className="pager-pos">{page} / {pageCount}</span>
-        <button className="btn btn-ghost btn-sm" disabled={page >= pageCount} onClick={() => onPage(page + 1)}>
-          <Icon name="chevRight" size={14} />
-        </button>
-      </div>
+      {pageCount > 1 && (
+        <div className="pager-nav">
+          <button className="pager-btn" aria-label="Previous page" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+            <Icon name="chevLeft" size={14} />
+          </button>
+          {pageWindow(page, pageCount).map(p => typeof p === 'number'
+            ? <button key={p} className={'pager-num' + (p === page ? ' on' : '')} onClick={() => onPage(p)}>{p}</button>
+            : <span key={p} className="pager-ellipsis">…</span>
+          )}
+          <button className="pager-btn" aria-label="Next page" disabled={page >= pageCount} onClick={() => onPage(page + 1)}>
+            <Icon name="chevRight" size={14} />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
