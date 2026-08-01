@@ -585,12 +585,18 @@ export function StoreProvider({ children }) {
   useEffect(() => {
     if (apiClient.getToken?.()) loadServerState()
 
-    // Validate a stored token against the backend. If it's expired or the user
-    // no longer exists, drop the session so a stale token can't linger.
+    // Validate a stored token against the backend. Only drop session if the server
+    // explicitly rejects it with a 401/403 — network errors, page reload aborts,
+    // or temporary 5xx errors must NEVER log out the user.
     if (apiClient.getToken?.()) {
       apiClient.me()
         .then(res => { if (!res?.success) throw new Error('invalid') })
-        .catch(() => { apiClient.clearToken?.(); dispatch({ type: 'LOGOUT' }) })
+        .catch(err => {
+          if (err?.message && (err.message.includes('401') || err.message.includes('403'))) {
+            apiClient.clearToken?.();
+            dispatch({ type: 'LOGOUT' });
+          }
+        })
       loadNotifications()
     }
   }, [])
