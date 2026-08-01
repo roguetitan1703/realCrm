@@ -233,6 +233,21 @@ export const api = {
 
   // Properties CRUD
   getProperties: () => request('/properties'),
+
+  // Paged reads. The desk used to hold every listing in memory and slice it in
+  // the browser; these let a screen ask for the page it is showing and nothing
+  // else. `params` maps 1:1 onto the query string the route accepts:
+  // page, limit, q, status, deal, type, locality, project, excludeId.
+  listProperties: (params = {}) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
+    }
+    const s = qs.toString()
+    return request(`/properties${s ? `?${s}` : ''}`)
+  },
+  getProperty: (id) => request(`/properties/${encodeURIComponent(id)}`),
+  getPropertiesSummary: () => request('/properties/summary'),
   createProperty: (prop) => request('/properties', { method: 'POST', body: JSON.stringify(prop) }),
 
   // Real 30-day sales metrics for one agent (calls / site visits / win rate)

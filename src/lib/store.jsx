@@ -650,6 +650,13 @@ export function StoreProvider({ children }) {
   // message with the wrong firm's name.
   useEffect(() => {
     setTenantIdentity({ firmName: state.settings.firmName, city: state.settings.city })
+    // Keep the session's copy of the firm's name current. It is what seeds the
+    // sidebar before the server answers, and it was written once at login and
+    // never again — so renaming a firm left every launch opening under the old
+    // name until the hydrate landed.
+    if (state.settings.firmName) {
+      persistAuthSession({ tenantName: state.settings.firmName, tenantCity: state.settings.city || '' })
+    }
     // slugFromLocation, not raw localStorage: a device opening the firm's app
     // for the first time has nothing stored yet, so this effect was pointing the
     // manifest back at _platform right after index.html had correctly pointed it

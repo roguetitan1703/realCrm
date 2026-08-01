@@ -233,7 +233,12 @@ export function Quoted({ q }) {
 }
 
 export function Avatar({ agent, size = 'md', empty }) {
-  if (empty || !agent) return <span className={`av av-${size} av-empty`}>?</span>
+  // `empty` is a deliberate "nobody is assigned" — it earns the question mark.
+  // A missing `agent` is usually just an identity that has not hydrated yet, and
+  // drawing a "?" there put a question mark on the user's own face in the
+  // sidebar for the first second of every launch.
+  if (empty) return <span className={`av av-${size} av-empty`}>?</span>
+  if (!agent) return <span className={`av av-${size} av-empty`} />
   const avatarVal = agent.avatar || ''
   const isColor = avatarVal.startsWith('#') || avatarVal.startsWith('rgb') || avatarVal.startsWith('hsl')
   const cls = isColor ? `av av-${size}` : `av av-${size} av-a1`
