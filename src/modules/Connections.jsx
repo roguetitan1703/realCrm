@@ -88,7 +88,10 @@ function Endpoint({ endpoint, headerName, store }) {
 // The key, on the card
 // ---------------------------------------------------------------------------
 
-function KeyRow({ connection, store, fresh, onRotate }) {
+// Rotating lives in one place: the card's ⋯ menu. A second "New key" link
+// here, next to the just-minted key, was the same action offered twice in the
+// same view.
+function KeyRow({ connection, store, fresh }) {
   const [key, setKey] = useState(fresh || null)
   const [shown, setShown] = useState(!!fresh)
   const [busy, setBusy] = useState(false)
@@ -123,7 +126,6 @@ function KeyRow({ connection, store, fresh, onRotate }) {
       <button className="cx-icb" title="Copy" onClick={() => need(k => copy(k, 'key'))}>
         <Icon name={copied === 'key' ? 'check' : 'copy'} size={15} />
       </button>
-      {fresh && <button className="lnk cx-fresh" onClick={onRotate}>New key</button>}
     </div>
   )
 }
@@ -328,14 +330,22 @@ function Mapper({ connection, store, onClose, onSaved }) {
 
   const armedField = TARGETS.find(t => t.key === armed)
   const mappedPaths = new Set(Object.values(config?.map || {}))
+  const payloadKeys = data.payload && typeof data.payload === 'object' ? Object.keys(data.payload) : []
 
   return (
     <div className="cx-map cx-map-split">
       <div className="cx-map-fields">
+        {data.droppedFields?.length > 0 && (
+          <div className="cx-map-note">
+            This connection's saved mapping referenced {data.droppedFields.length === 1 ? 'a field' : 'fields'} ({data.droppedFields.join(', ')}) that {data.droppedFields.length === 1 ? "isn't" : "aren't"} valid anymore and {data.droppedFields.length === 1 ? 'has' : 'have'} been removed. Map the fields below and save to replace it.
+          </div>
+        )}
         <div className="cx-map-hint">
-          {armedField
-            ? <>Click the field in <b>{connection.provider}'s payload</b> that holds <b>{armedField.label}</b>{armedField.required ? <i className="req">*</i> : null}.</>
-            : 'All fields mapped — pick a row to remap it.'}
+          {payloadKeys.length === 0
+            ? 'The last push had no fields in it. Send a real enquiry, then reopen this to map it.'
+            : armedField
+              ? <>Click the field in <b>{connection.provider}'s payload</b> that holds <b>{armedField.label}</b>{armedField.required ? <i className="req">*</i> : null}.</>
+              : 'All fields mapped — pick a row to remap it.'}
         </div>
         <div className="cx-map-grid">
           {TARGETS.map(t => {
@@ -370,7 +380,9 @@ function Mapper({ connection, store, onClose, onSaved }) {
       <div className="cx-map-payload">
         <div className="cx-map-payload-h">{connection.provider} sent this</div>
         <div className="cx-map-payload-b jv-surface">
-          <JsonView data={data.payload} onPick={pick} picked={armed ? config?.map?.[armed] : null} />
+          {payloadKeys.length === 0
+            ? <div className="jv-empty">Empty body — nothing to click here.</div>
+            : <JsonView data={data.payload} onPick={pick} picked={armed ? config?.map?.[armed] : null} />}
         </div>
         {mappedPaths.size > 0 && (
           <div className="cx-map-payload-f">{mappedPaths.size} field{mappedPaths.size > 1 ? 's' : ''} mapped</div>
@@ -583,7 +595,7 @@ export default function Connections({ store }) {
               </div>
             </div>
 
-            <KeyRow connection={c} store={store} fresh={fresh[c.id]} onRotate={() => rotate(c)} />
+            <KeyRow connection={c} store={store} fresh={fresh[c.id]} />
 
             {pending > 0 && c.configured && (
               <div className="cx-replay">
@@ -643,11 +655,21 @@ export default function Connections({ store }) {
               <button className="cx-x" onClick={() => setPack(null)} aria-label="Close"><Icon name="x" size={16} /></button>
             </div>
             <div className="cx-pack">
-              <textarea className="textarea cx-pack-t" readOnly rows={16} value={pack.email} />
+              <textarea className="textarea cx-pack-t" readOnly rows={9} value={pack.email} />
+              <div className="cx-pack-docs">
+                <div>
+                  <div className="cx-pack-docs-l">Documentation page</div>
+                  <div className="cx-pack-docs-u">{pack.docsUrl}</div>
+                </div>
+                <Button variant="secondary" size="sm" icon={copiedPack === 'docs' ? 'check' : 'copy'}
+                  onClick={() => copyPack(pack.docsUrl, 'docs')}>
+                  {copiedPack === 'docs' ? 'Copied' : 'Copy link'}
+                </Button>
+              </div>
               <div className="cx-map-foot">
                 <Button variant="secondary" icon={copiedPack === 'pack' ? 'check' : 'copy'}
                   onClick={() => copyPack(pack.email, 'pack')}>
-                  {copiedPack === 'pack' ? 'Copied' : 'Copy'}
+                  {copiedPack === 'pack' ? 'Copied' : 'Copy email'}
                 </Button>
                 <Button variant="ghost" onClick={() => setPack(null)}>Close</Button>
               </div>

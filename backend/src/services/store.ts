@@ -146,7 +146,7 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   return {
     tenant: { id: tenantId, name: firmName, slug: cleanSlug, brand_config },
     owner: { id: ownerId, name: ownerName, email: ownerEmail, phone: ownerPhone, role: 'owner' },
-    ingest: { tenantSlug: cleanSlug, secret: ingestSecret },
+    ingest: { tenantSlug: cleanSlug, secret: '' },
     loginWith: ownerEmail,
     initialPassword,
   };

@@ -238,10 +238,17 @@ function AccessPanel({ store }) {
                         <div className="acc-actions">
                           <button className="acc-act" disabled={rowBusy} onClick={() => setEdit(u)} title="Edit name, email, phone or role">Edit</button>
                           <button className="acc-act" disabled={rowBusy} onClick={() => resetPw(u)} title="Reset password — you hand over the new one">Reset password</button>
-                          <button className="acc-act" disabled={rowBusy} onClick={() => setSeat(u)} title="Hand this seat (and its leads) to a new person">Reassign seat</button>
                           <button className="acc-act" disabled={rowBusy} onClick={() => forceLogout(u)} title="Revoke every device this person is signed in on">Force logout</button>
-                          <button className="acc-act" disabled={rowBusy || self} onClick={() => toggleSuspend(u)}>{isSuspended(u) ? 'Reactivate' : 'Suspend'}</button>
-                          {canDelete && <button className="acc-act danger" disabled={rowBusy || self} onClick={() => del(u)}>Delete</button>}
+                          {/* Handing over your own seat, suspending yourself or
+                              deleting yourself are not real actions — they'd
+                              either sign you out mid-click or lock the firm out
+                              of its own owner account. Not disabled, absent:
+                              a greyed-out Delete button on your own row still
+                              asks "could I delete myself?", which is a question
+                              this screen has no business raising. */}
+                          {!self && <button className="acc-act" disabled={rowBusy} onClick={() => setSeat(u)} title="Hand this seat (and its leads) to a new person">Reassign seat</button>}
+                          {!self && <button className="acc-act" disabled={rowBusy} onClick={() => toggleSuspend(u)}>{isSuspended(u) ? 'Reactivate' : 'Suspend'}</button>}
+                          {!self && canDelete && <button className="acc-act danger" disabled={rowBusy} onClick={() => del(u)}>Delete</button>}
                         </div>
                       ) : (
                         <span className="u-muted acc-noperm">{self ? '—' : 'Owner-managed'}</span>

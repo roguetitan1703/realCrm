@@ -15,7 +15,7 @@
 
 import crypto from 'crypto';
 import { sql } from './db';
-import { parsePayload } from './parser';
+import { parsePayload, sanitizeConfig } from './parser';
 import { getLeads, createLead, updateLead, getRoutingRules, updateRoutingRules } from './store';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
@@ -150,6 +150,21 @@ export async function getIntegration(tenantId: string, id: string): Promise<Inte
     FROM integrations WHERE id = ${id} AND tenant_id = ${tenantId} LIMIT 1
   `;
   return (rows[0] as Integration) || null;
+}
+
+/**
+ * Looked up by id alone, no tenant scope — for the public setup-docs page,
+ * which a provider's engineer opens with no CRM login of their own. Safe: the
+ * id carries no secret, and the page it renders never includes the key.
+ */
+export async function getIntegrationById(id: string): Promise<(Integration & { tenant_slug: string }) | null> {
+  const rows = await sql`
+    SELECT i.id, i.tenant_id, i.provider, i.api_key_last4, i.parser_config, i.active,
+           i.created_at, i.created_by, i.last_received_at, t.slug AS tenant_slug
+    FROM integrations i JOIN tenants t ON t.id = i.tenant_id
+    WHERE i.id = ${id} LIMIT 1
+  `;
+  return (rows[0] as any) || null;
 }
 
 export async function setParserConfig(tenantId: string, id: string, config: any): Promise<boolean> {
@@ -307,7 +322,13 @@ export async function logReject(args: {
 export async function processInboxRow(
   integration: Integration, inboxId: string, body: any,
 ): Promise<{ status: string; leadId?: string | null; reason?: string }> {
-  const parsed = parsePayload(body, integration.parser_config);
+  // Sanitised at the point of use, not only when the mapper saves — a config
+  // stored before the target vocabulary was normalised (flat "locality" from
+  // before the req.* namespace existed) would otherwise fail every push with
+  // the same error forever, until someone happened to reopen the mapper and
+  // re-save. This way the very next push after the fix ships parses clean.
+  const { clean } = sanitizeConfig(integration.parser_config as any);
+  const parsed = parsePayload(body, clean);
   if (!parsed.ok) {
     const why = parsed.errors.length
       ? parsed.errors.join(' ')

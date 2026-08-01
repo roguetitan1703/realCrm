@@ -23,9 +23,9 @@ import { Router, Request, Response } from 'express';
 import {
   createIntegration, listIntegrations, rotateIntegrationKey, setParserConfig,
   setIntegrationActive, deleteIntegration, listInbox, inboxCounts, lastPayload,
-  replayPending, getIntegration, revealKey,
+  replayPending, getIntegration, getIntegrationById, revealKey,
 } from '../services/ingestion';
-import { parsePayload, suggestConfig, flattenPaths, TRANSFORMS } from '../services/parser';
+import { parsePayload, suggestConfig, flattenPaths, TRANSFORMS, sanitizeConfig } from '../services/parser';
 import { audit } from '../services/audit';
 
 export const connectionsRouter = Router();
@@ -196,12 +196,19 @@ connectionsRouter.get('/:id/sample', async (req: Request, res: Response) => {
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 
   const payload = await lastPayload(tenant, req.params.id);
+  // A config saved before the target vocabulary was normalised (flat
+  // "locality" from before req.* existed) would otherwise show as mapped,
+  // then fail the moment it's saved back — the field looks configured and
+  // isn't. Clean it before it reaches the mapper, and say so if anything
+  // was dropped rather than silently changing what the owner sees.
+  const { clean, dropped } = sanitizeConfig(integration.parser_config as any);
   return res.status(200).json({
     success: true,
     payload,
     paths: payload ? flattenPaths(payload) : {},
     transforms: Object.keys(TRANSFORMS),
-    config: integration.parser_config,
+    config: clean,
+    droppedFields: dropped,
     // No payload means no mapping is possible yet, and saying so is the point:
     // "no blind presets" — a mapping can only be built from real data.
     suggestion: payload ? suggestConfig(payload, integration.provider) : null,
@@ -233,8 +240,9 @@ connectionsRouter.put('/:id/parser', async (req: Request, res: Response) => {
   const tenant = requireTenant(req, res); if (!tenant) return;
   if (!requireOwner(req, res)) return;
 
-  const config = req.body?.config ?? null;
+  let config = req.body?.config ?? null;
   if (config !== null) {
+    config = sanitizeConfig(config).clean;
     // The guardrail, enforced on the SERVER. A UI that merely shows a preview
     // can be skipped by anything that calls the API directly; refusing a config
     // that does not parse is what actually prevents a broken mapping landing.
@@ -299,46 +307,116 @@ connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => 
   const integration = await getIntegration(tenant, req.params.id);
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 
-  const endpoint = endpointFor(req, tenant);
-  const keyToken = '<YOUR_API_KEY>';
+  const docsUrl = `${process.env.PUBLIC_APP_URL || `${req.protocol}://${req.get('host')}`}/api/v1/connections/${integration.id}/docs`;
 
+  // Auth methods, accepted body formats and the example all live on the docs
+  // page (below) — the email exists only to hand over the link. Explaining
+  // three header formats in prose here was the actual complaint: it read
+  // worse than the page it was duplicating, in a format the reader cannot
+  // scan. One link, one sentence.
   const email = [
-    `Subject: Enquiry integration — ${integration.provider}`,
+    `Subject: ${integration.provider} integration setup`,
     '',
     'Hi,',
     '',
-    'Please post enquiries to the endpoint below as they come in. Any JSON body',
-    'works — field names are mapped on our end, so no reformatting is needed.',
+    'Please send enquiries to the endpoint documented here:',
+    docsUrl,
     '',
-    `  Endpoint   POST ${endpoint}`,
-    `  Header     X-API-Key: ${keyToken}`,
-    '  Content    application/json',
-    '',
-    "(If your system can't set a custom header, the key may be passed as a",
-    `?key= query parameter instead.)`,
-    '',
-    'Example request:',
-    '',
-    `  curl -X POST "${endpoint}" \\`,
-    `    -H "X-API-Key: ${keyToken}" \\`,
-    '    -H "Content-Type: application/json" \\',
-    `    -d '{"name":"Test Enquiry","phone":"9876543210","locality":"Wakad"}'`,
-    '',
-    "Send one test enquiry first — we'll confirm receipt before you switch on",
-    'the live feed.',
-    '',
-    "The API key will follow separately. Let us know if you'd rather receive",
-    'it another way.',
+    'Send one test enquiry first. We will confirm it on our side before the',
+    'live feed goes on.',
     '',
     'Thanks,',
   ].join('\n');
 
   return res.status(200).json({
     success: true,
-    endpoint,
-    headerName: 'X-API-Key',
+    docsUrl,
     provider: integration.provider,
     email,
-    curl: `curl -X POST "${endpoint}" -H "X-API-Key: ${keyToken}" -H "Content-Type: application/json" -d '{"name":"Test Enquiry","phone":"9876543210"}'`,
   });
+});
+
+// ---------------------------------------------------------------------------
+// D2, gap G4 — the hosted docs page. Public, unauthenticated: the person
+// reading it is the provider's engineer, who has no login here. Safe to
+// expose by id because the id carries no secret and the page never prints the
+// key — same rule as the email above.
+// ---------------------------------------------------------------------------
+
+function escapeHtml(s: string): string {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+}
+
+connectionsRouter.get('/:id/docs', async (req: Request, res: Response) => {
+  const integration = await getIntegrationById(req.params.id);
+  if (!integration) return res.status(404).send('Not found.');
+
+  const endpoint = `${process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`}/api/v1/ingest/${integration.tenant_slug}`;
+  const provider = escapeHtml(integration.provider);
+  const key = '&lt;YOUR_API_KEY&gt;';
+
+  const html = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${provider} integration</title>
+<style>
+:root{color-scheme:light dark;--ink:#1a1d1a;--muted:#6b7570;--line:#e2e5e1;--card:#fff;--wash:#f6f5f2;--accent:#1e6f52}
+@media(prefers-color-scheme:dark){:root{--ink:#eef0ec;--muted:#9aa39c;--line:#2c322d;--card:#1a1d1a;--wash:#14161380;--accent:#4fae86}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--wash);color:var(--ink);font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;padding:40px 20px}
+main{max-width:640px;margin:0 auto}
+h1{font-size:20px;font-weight:600;margin:0 0 4px}
+.sub{color:var(--muted);font-size:13.5px;margin:0 0 32px}
+h2{font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:32px 0 10px}
+p{margin:0 0 10px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+td{padding:9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+td:first-child{color:var(--muted);white-space:nowrap;padding-right:16px;width:110px}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+code{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;line-height:1.6;margin:0}
+ul{margin:0;padding-left:20px}
+li{margin-bottom:6px}
+footer{margin-top:40px;color:var(--muted);font-size:12px}
+</style>
+</head><body><main>
+
+<h1>${provider} integration</h1>
+<p class="sub">How to send enquiries to this endpoint.</p>
+
+<h2>Endpoint</h2>
+<table><tbody>
+<tr><td>URL</td><td><code>${endpoint}</code></td></tr>
+<tr><td>Method</td><td>POST (GET, PUT and PATCH are also accepted for systems that can only submit a URL)</td></tr>
+<tr><td>Body</td><td>A JSON object. Form-encoded and plain-text JSON bodies are also accepted.</td></tr>
+</tbody></table>
+
+<h2>Authentication</h2>
+<p>Use the API key you were given, in any one of these:</p>
+<ul>
+<li>Header <code>X-API-Key: ${key}</code></li>
+<li>Header <code>Authorization: Bearer ${key}</code></li>
+<li>Query parameter <code>?key=${key}</code>, if your system cannot set custom headers</li>
+</ul>
+
+<h2>Example</h2>
+<pre>curl -X POST "${endpoint}" \\
+  -H "X-API-Key: ${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"name":"Test Enquiry","phone":"9876543210","locality":"Wakad"}'</pre>
+
+<h2>Response</h2>
+<table><tbody>
+<tr><td>200</td><td>Received. The enquiry is queued for processing on our side.</td></tr>
+<tr><td>401</td><td>The key is missing or incorrect.</td></tr>
+</tbody></table>
+
+<footer>Send one test enquiry before switching on the live feed.</footer>
+</main></body></html>`;
+
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.set('Cache-Control', 'no-store');
+  return res.status(200).send(html);
 });

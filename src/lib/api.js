@@ -193,7 +193,7 @@ export const api = {
   previewParser: (id, config, payload) => request(`/connections/${id}/preview`, { method: 'POST', body: JSON.stringify({ config, payload }) }),
   saveParser: (id, config) => request(`/connections/${id}/parser`, { method: 'PUT', body: JSON.stringify({ config }) }),
   replayConnection: (id) => request(`/connections/${id}/replay`, { method: 'POST' }),
-  getSetupPack: (id, key) => request(`/connections/${id}/setup-pack${key ? `?key=${encodeURIComponent(key)}` : ''}`),
+  getSetupPack: (id) => request(`/connections/${id}/setup-pack`),
 
   // Integrations
   // /workspace/integrations is gone with the KV table behind it.

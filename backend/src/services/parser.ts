@@ -120,6 +120,39 @@ const WRITABLE = new Set([
 /** A lead is worth creating only if it can be contacted. */
 const REQUIRED = ['name', 'phone'];
 
+/**
+ * Drop any map/default/transform entry that targets a field WRITABLE no
+ * longer recognizes, instead of letting it silently ride along in a saved
+ * config. Two ways this happens in practice: a config saved before the target
+ * vocabulary was normalised (flat "locality" from before the req.* namespace
+ * existed), or a direct PUT that never went through the mapper UI at all.
+ * Without this, a single stale key blocks every future save with the same
+ * confusing error and gives no way to recover except editing the database.
+ */
+export function sanitizeConfig(config: ParserConfig | null): { clean: ParserConfig | null; dropped: string[] } {
+  if (!config || typeof config !== 'object') return { clean: config, dropped: [] };
+  const dropped: string[] = [];
+  const map: Record<string, string> = {};
+  for (const [target, source] of Object.entries(config.map || {})) {
+    if (WRITABLE.has(target)) map[target] = source; else dropped.push(target);
+  }
+  const defaults: Record<string, any> = {};
+  for (const [target, value] of Object.entries(config.defaults || {})) {
+    if (WRITABLE.has(target)) defaults[target] = value; else dropped.push(target);
+  }
+  // Transforms and valueMaps are keyed by the same target names — carrying one
+  // for a target that no longer exists in `map` is inert but still clutter.
+  const transforms: Record<string, string> = {};
+  for (const [target, name] of Object.entries(config.transforms || {})) {
+    if (map[target] !== undefined) transforms[target] = name;
+  }
+  const valueMaps: Record<string, Record<string, string>> = {};
+  for (const [target, vmap] of Object.entries(config.valueMaps || {})) {
+    if (map[target] !== undefined) valueMaps[target] = vmap;
+  }
+  return { clean: { map, defaults, transforms, valueMaps }, dropped: [...new Set(dropped)] };
+}
+
 export function parsePayload(payload: any, config: ParserConfig | null): ParseResult {
   const trace: ParseResult['trace'] = [];
   const errors: string[] = [];
