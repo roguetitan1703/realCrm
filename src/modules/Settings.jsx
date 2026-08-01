@@ -62,6 +62,10 @@ const COLOR_PRESETS = ['#1E6F52', '#1D4ED8', '#7C3AED', '#B45309', '#B91C1C', '#
 function BrandSection({ store, settings }) {
   const brand = store.state.brand || {}
   const [firm, setFirm] = useState(settings.firmName)
+
+  useEffect(() => {
+    setFirm(settings.firmName)
+  }, [settings.firmName])
   const dirty = firm.trim() && firm.trim() !== settings.firmName
   const color = brand.primaryColor || '#1E6F52'
   const logoUrl = brand.logoUrl || ''

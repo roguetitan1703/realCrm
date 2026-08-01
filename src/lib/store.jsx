@@ -485,7 +485,7 @@ function reducer(state, action) {
 
     case 'SET_FIRM_NAME': {
       const firmName = action.name.trim() || state.settings.firmName
-      return { ...state, settings: { ...state.settings, firmName } }
+      return { ...state, settings: { ...state.settings, firmName }, brand: { ...state.brand, name: firmName, firmName } }
     }
     case 'ADD_STAGE': {
       const name = action.name.trim()
