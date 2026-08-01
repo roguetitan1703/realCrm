@@ -7,10 +7,6 @@
     <!-- Platform identity. Swapped to the tenant's name once a workspace is
          selected (see src/data/platform.js + the title effect in App.jsx). -->
     <title>Real Estate by Delpat</title>
-    <!-- PWA: default (platform) manifest; src/lib/pwa.js repoints these at the
-         tenant's manifest/icon once a workspace is chosen. -->
-    <link rel="manifest" id="app-manifest" href="/pwa/_platform/manifest.webmanifest" />
-    <link rel="apple-touch-icon" id="app-apple-icon" href="/pwa/_platform/icon-192.png" />
     <meta name="theme-color" content="#1E6F52" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -19,8 +15,42 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Devanagari:wght@400;500;600&display=swap" rel="stylesheet" />
+    <!--
+      Tenant identity, resolved BEFORE the browser reads the manifest.
+
+      This used to ship a hardcoded <link rel="manifest" href="/pwa/_platform/…">
+      and let src/lib/pwa.js repoint it after React mounted. A PWA does not work
+      that way: the browser captures name, icon, theme_color and start_url ONCE,
+      at install, from whatever manifest the document was linking then. Anyone who
+      installed before the swap landed — which is everyone, since the swap needs
+      the bundle to boot — installed the platform manifest. That is the whole
+      story behind the wrong icon, the stale app name, the green splash screen,
+      and the app opening on the "type your firm name" prompt instead of the
+      firm's own login: _platform is called "Real Estate by Delpat", is coloured
+      #1E6F52, and starts at "/".
+
+      So the link is written here, synchronously, from the slug in the URL —
+      before the parser reaches any manifest element. Nothing to race.
+    -->
     <script>
       (function() {
+        try {
+          var seg = decodeURIComponent(
+            location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '');
+          if (seg === 'admin') seg = '';
+          var slug = new URLSearchParams(location.search).get('ws')
+            || seg
+            || localStorage.getItem('crm_tenant_id')
+            || '_platform';
+          var link = document.createElement('link');
+          link.rel = 'manifest'; link.id = 'app-manifest';
+          link.href = '/pwa/' + encodeURIComponent(slug) + '/manifest.webmanifest';
+          document.head.appendChild(link);
+          var icon = document.createElement('link');
+          icon.rel = 'apple-touch-icon'; icon.id = 'app-apple-icon';
+          icon.href = '/pwa/' + encodeURIComponent(slug) + '/icon-192.png';
+          document.head.appendChild(icon);
+        } catch (e) {}
         try {
           var t = localStorage.getItem('crm_tenant_id') || '';
           var c = localStorage.getItem('crm_brand_color') || '';

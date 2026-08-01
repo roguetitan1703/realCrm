@@ -10,7 +10,7 @@ import { generateMessage, followUpMessage } from './matching.js'
 import { api as apiClient } from './api.js'
 import { applyBrandColor } from './brand.js'
 import { setTenantIdentity } from './tenant.js'
-import { applyPwaIdentity, ensurePwaIcons } from './pwa.js'
+import { applyPwaIdentity, ensurePwaIcons, slugFromLocation } from './pwa.js'
 import { getPref } from './prefs.js'
 
 const StoreCtx = createContext(null)
@@ -650,7 +650,12 @@ export function StoreProvider({ children }) {
   // message with the wrong firm's name.
   useEffect(() => {
     setTenantIdentity({ firmName: state.settings.firmName, city: state.settings.city })
-    const tid = typeof window !== 'undefined' ? window.localStorage?.getItem('crm_tenant_id') : null
+    // slugFromLocation, not raw localStorage: a device opening the firm's app
+    // for the first time has nothing stored yet, so this effect was pointing the
+    // manifest back at _platform right after index.html had correctly pointed it
+    // at the tenant — and _platform is the wrong name, the wrong icon and the
+    // green theme colour that an install would then capture forever.
+    const tid = slugFromLocation()
     applyPwaIdentity(tid, state.settings.firmName)
     if (tid && state.settings.firmName) {
       ensurePwaIcons({

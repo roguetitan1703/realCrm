@@ -60,7 +60,13 @@ export async function notify(n: NotifyInput): Promise<void> {
   sendPushToUser(t, n.userId, {
     title: n.title,
     body: n.body || '',
-    url: n.link || '/',
+    // Links are stored relative (`?screen=leads&lead=…`) because in-app they
+    // resolve against whatever page you are on. A push does not have a page: the
+    // service worker resolves against the origin, which turned every deep link
+    // into `/?screen=…` — outside the installed app's tenant scope, so tapping an
+    // alert dropped you onto the bare workspace prompt instead of the lead.
+    // Qualify it with the tenant so the link stands on its own.
+    url: n.link ? `/${t}${n.link}` : `/${t}`,
     icon: `/pwa/${t}/icon-192.png`,
   }).catch(() => {});
 }

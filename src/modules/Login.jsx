@@ -14,7 +14,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { PLATFORM, recentWorkspaces, rememberWorkspace, resolveWorkspace, normalizeSlug, tenantDocTitle } from '../data/platform.js'
 import { api } from '../lib/api.js'
-import { applyPwaIdentity } from '../lib/pwa.js'
+import { applyPwaIdentity, isStandalone } from '../lib/pwa.js'
 import { applyBrandColor, DEFAULT_ACCENT } from '../lib/brand.js'
 import { Button } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
@@ -555,7 +555,11 @@ export default function Login({ store }) {
 
           {/* Minimal Support Help */}
           <div style={{ textAlign: 'center', marginTop: 28, fontSize: 12, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {ws ? (
+            {/* An installed app belongs to one firm: its manifest scope is that
+                firm's path, so leaving the workspace would navigate out of
+                scope and spill the app into a browser tab. The control stays in
+                the browser, where switching workspaces is a real thing to do. */}
+            {ws && !isStandalone() ? (
               <button
                 type="button"
                 onClick={leaveWorkspace}

@@ -17,9 +17,32 @@ export function registerServiceWorker() {
 }
 
 /**
+ * Which tenant this document belongs to, read the same way the inline script in
+ * index.html reads it so the two can never disagree: the first path segment
+ * (`/acme-realty`), else an explicit `?ws=`, else the last workspace this
+ * browser opened. Empty when there is no tenant in play yet.
+ */
+export function slugFromLocation() {
+  if (typeof window === 'undefined') return '';
+  try {
+    let seg = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '');
+    if (seg === 'admin') seg = '';
+    return new URLSearchParams(window.location.search).get('ws')
+      || seg
+      || window.localStorage?.getItem('crm_tenant_id')
+      || '';
+  } catch (e) { return ''; }
+}
+
+/**
  * Point the app manifest + apple-touch-icon at a tenant (slug), or the platform
  * identity when slug is falsy. Safe to call repeatedly; creates the <link>
  * elements if the HTML didn't ship them.
+ *
+ * Note this only matters for a browser that has not installed yet — an already
+ * installed app keeps the identity captured at install time no matter what this
+ * does later. index.html writes the correct link before first paint for that
+ * reason; this keeps it in step when the workspace changes mid-session.
  */
 export function applyPwaIdentity(slug, firmName) {
   if (typeof document === 'undefined') return;

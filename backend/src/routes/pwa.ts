@@ -116,7 +116,13 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
     { src: `/pwa/${slug}/icon.svg`, sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
   ];
 
-  const startUrl = t ? `/?ws=${t.slug}` : '/';
+  // Path-based, not `/?ws=<slug>`. Two reasons, and the second was the visible
+  // bug: `scope` is a path prefix, so only a path can fence the installed app to
+  // one firm — a query string scopes nothing. And the login screen auto-enters a
+  // workspace by reading the first path segment, so a start_url of
+  // `/?ws=delpat` landed on the bare "type your firm name" prompt on every
+  // launch, which is exactly what a firm-branded installed app must never show.
+  const startUrl = t ? `/${t.slug}` : '/';
   res.set('Content-Type', 'application/manifest+json');
   res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   return res.json({
@@ -125,7 +131,7 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
     short_name: shortNameOf(name, brand.shortName),
     description: `${name} — real estate desk`,
     start_url: startUrl,
-    scope: '/',
+    scope: startUrl,
     display: 'standalone',
     orientation: 'portrait',
     background_color: surface,
