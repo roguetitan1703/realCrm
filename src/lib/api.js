@@ -91,6 +91,7 @@ async function request(endpoint, options = {}) {
   if (isWrite) inFlightWrites++;
   try {
     const res = await fetch(`${BASE_URL}${endpoint}`, {
+      cache: 'no-store',
       ...fetchOptions,
       headers: getHeaders(fetchOptions.headers || {}),
     });

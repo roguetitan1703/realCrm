@@ -212,6 +212,9 @@ workspaceRouter.get('/bootstrap', requireTenantAuth, async (req: Request, res: R
  */
 workspaceRouter.get('/state', async (req: Request, res: Response) => {
   const state = await getState();
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   res.status(200).json({
     success: true,
     state,
