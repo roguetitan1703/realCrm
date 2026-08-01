@@ -150,7 +150,7 @@ export default function Admin() {
   // ── Authenticated console ────────────────────────────────────────────────
   const audit = data?.audit
   return (
-    <div style={{ minHeight: '100dvh', background: 'var(--bg, #F6F5F2)', color: 'var(--ink, #1a1a1a)' }}>
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: 'var(--bg, #F6F5F2)', color: 'var(--ink, #1a1a1a)', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '16px 28px', borderBottom: '1px solid var(--line, #e5e3dd)', background: '#0F1F18', color: '#fff',
