@@ -212,7 +212,7 @@ export function MobileTopBar({ title, sub, onBack, right, brand, firmName, logoU
       {onBack ? (
         <button className="m-back" onClick={onBack} aria-label="Back"><Icon name="chevLeft" size={20} /></button>
       ) : (
-        <div className={'n-mono' + (logoUrl ? ' has-logo' : '')} style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13, flexShrink: 0, overflow: 'hidden' }}>
+        <div className={'n-mono' + (logoUrl ? ' has-logo' : '')} style={{ width: 34, height: 34, borderRadius: 9, background: logoUrl ? '#ffffff' : 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13, flexShrink: 0, overflow: 'hidden' }}>
           {logoUrl ? <img src={logoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : initials}
         </div>
       )}
