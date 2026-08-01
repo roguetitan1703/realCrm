@@ -35,6 +35,7 @@ export default function Admin() {
   const [provisioning, setProvisioning] = useState(false)
   const [provErr, setProvErr] = useState('')
   const [provisioned, setProvisioned] = useState(null)
+  const [selectedTenant, setSelectedTenant] = useState(null)
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.ownerEmail.trim())
   const canProvision = form.firmName.trim() && form.city.trim() && emailOk
 
@@ -285,12 +286,12 @@ export default function Admin() {
                 </thead>
                 <tbody>
                   {data.tenants.map(t => (
-                    <tr key={t.id} style={{ borderTop: '1px solid var(--line, #e5e3dd)' }}>
+                    <tr key={t.id} onClick={() => setSelectedTenant(t)} style={{ borderTop: '1px solid var(--line, #e5e3dd)', cursor: 'pointer' }} className="tenant-row-hover">
                       <td style={tdStyle}>
-                        <div style={{ fontWeight: 600 }}>{t.name}</div>
-                        <a href={`/?ws=${t.slug}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent, #1E6F52)', fontSize: 12, textDecoration: 'none' }} className="mono-num">
-                          {`/${t.slug}`} ↗
-                        </a>
+                        <div style={{ fontWeight: 600, color: 'var(--ink, #1a1a1a)' }}>{t.name}</div>
+                        <div className="mono-num" style={{ color: 'var(--accent, #1E6F52)', fontSize: 12 }}>
+                          {`/${t.slug}`}
+                        </div>
                       </td>
                       <td style={tdStyle}>{t.subscription_plan}</td>
                       <td style={tdStyle}>
@@ -310,6 +311,52 @@ export default function Admin() {
           </section>
         )}
       </main>
+
+      {/* Tenant Details Modal */}
+      {selectedTenant && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }} onClick={() => setSelectedTenant(null)}>
+          <div style={{ background: 'var(--card, #fff)', border: '1px solid var(--line, #e5e3dd)', borderRadius: 16, maxWidth: 540, width: '100%', padding: 26, color: 'var(--ink, #1a1a1a)', boxShadow: '0 20px 50px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+              <div>
+                <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 20 }}>{selectedTenant.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>Workspace ID: {selectedTenant.id} · Slug: /{selectedTenant.slug}</div>
+              </div>
+              <button onClick={() => setSelectedTenant(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)' }}>✕</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+              <div style={{ background: 'var(--bg, #f6f5f2)', padding: 12, borderRadius: 10, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700 }}>Users</div>
+                <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{selectedTenant.users}</div>
+              </div>
+              <div style={{ background: 'var(--bg, #f6f5f2)', padding: 12, borderRadius: 10, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700 }}>Leads</div>
+                <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{selectedTenant.leads}</div>
+              </div>
+              <div style={{ background: 'var(--bg, #f6f5f2)', padding: 12, borderRadius: 10, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700 }}>Properties</div>
+                <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{selectedTenant.properties}</div>
+              </div>
+            </div>
+
+            <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '10px 18px', margin: 0, fontSize: 13.5 }}>
+              <dt style={dtStyle}>Plan</dt>
+              <dd style={ddStyle}><span className="mono-num">{selectedTenant.subscription_plan} ({selectedTenant.subscription_status})</span></dd>
+              <dt style={dtStyle}>Workspace URL</dt>
+              <dd style={ddStyle}><a href={`/?ws=${selectedTenant.slug}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent, #1E6F52)', fontWeight: 600 }}>{`${window.location.origin}/?ws=${selectedTenant.slug}`} ↗</a></dd>
+              <dt style={dtStyle}>99acres Ingest</dt>
+              <dd style={ddStyle}><span className="mono-num" style={{ wordBreak: 'break-all', fontSize: 12 }}>{`${api.baseUrl()}/ingest/${selectedTenant.slug}/99acres`}</span></dd>
+            </dl>
+
+            <div style={{ marginTop: 22, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={() => setSelectedTenant(null)} style={ghostBtn}>Close</button>
+              <a href={`/?ws=${selectedTenant.slug}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 18px', height: 40, borderRadius: 9, background: '#C6842A', color: '#1a1205', fontWeight: 700, fontSize: 13.5, textDecoration: 'none' }}>
+                Open Workspace ↗
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
