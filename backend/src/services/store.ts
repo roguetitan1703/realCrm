@@ -1159,20 +1159,37 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // FEED ONLY: worth seeing when a manager schedules something on your lead;
   // never worth a buzz, and never at all when you scheduled it yourself — the
   // form already confirmed it on screen a second ago.
-  if (patch.followUp) {
+  if (patch.followUp && agentId) {
     const when = (patch.followUp.action || patch.followUp.label || 'Follow-up scheduled');
-    notify({ userId: agentId, type: 'followup_set', title: 'Follow-up scheduled', body: `${name} · ${when}`, link })
-      .catch(err => console.warn('[Notify] followup_set failed:', err?.message));
+    const isVisit = /visit/i.test(when);
+    if (ctx.actorId && ctx.actorId !== agentId) {
+      notify({
+        userId: agentId,
+        type: 'calendar_task_assigned',
+        title: isVisit ? '📅 New Site Visit assigned to you' : '📅 New Task assigned to you',
+        body: `${name} · ${when}`,
+        link,
+        push: true
+      }).catch(err => console.warn('[Notify] calendar_task_assigned failed:', err?.message));
+    } else {
+      notify({ userId: agentId, type: 'followup_set', title: 'Follow-up scheduled', body: `${name} · ${when}`, link })
+        .catch(err => console.warn('[Notify] followup_set failed:', err?.message));
+    }
   }
-  // FEED ONLY: the outcome an owner actually tracks. Not urgent — the deal is
-  // already won or lost by the time this fires.
-  if (patch.stage && patch.stage !== oldLead.stage && /^closed/i.test(patch.stage)) {
-    const won = /won/i.test(patch.stage);
-    notifyRoles(['owner', 'manager'], {
-      type: won ? 'lead_won' : 'lead_lost',
-      title: won ? 'Deal won' : 'Deal lost',
-      body: `${name}${locality ? ` · ${locality}` : ''}`, link,
-    }).catch(err => console.warn('[Notify] lead outcome failed:', err?.message));
+
+  if (patch.notes && Array.isArray(patch.notes) && patch.notes.length > (oldLead.notes?.length || 0)) {
+    const latest = patch.notes[patch.notes.length - 1];
+    const noteText = typeof latest === 'string' ? latest : (latest?.text || latest?.body || '');
+    if (agentId && ctx.actorId && ctx.actorId !== agentId && noteText) {
+      notify({
+        userId: agentId,
+        type: 'remark_added',
+        title: 'New note added to your lead',
+        body: `${name} · "${noteText.slice(0, 60)}"`,
+        link,
+        push: false
+      }).catch(err => console.warn('[Notify] remark_added failed:', err?.message));
+    }
   }
   return updated;
 }

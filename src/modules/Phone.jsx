@@ -7,7 +7,6 @@
 // drifted: it filtered on '2BHK' string matches, wrote invented property facts,
 // and opened four modal kinds nothing on that side handled. Every one of those
 // bugs was a consequence of the fork, not of the phone.
-import { useState } from 'react'
 import { MobileShell, MobileTopBar } from '../layouts/layouts.jsx'
 import { Avatar } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
@@ -32,26 +31,20 @@ const TABS = [
 
 const SCREENS = { leads: Leads, properties: Properties }
 
-const TAKEOVER_KEYS = ['leadOpen', 'leadId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey']
-
-export default function Phone({ store, framed = false, boot }) {
+export default function Phone({ store, framed = false, screen, sel, setSel, go: navGo }) {
   const { state } = store
-  // Seeded from the URL so a notification tap, or any shared link, opens the
-  // record it names. `today` stays the default for a plain launch.
-  const [tab, setTab] = useState(() => (boot?.screen && (SCREENS[boot.screen] || boot.screen === 'me') ? boot.screen : 'today'))
-  const [sel, setSel] = useState(() => boot?.sel || {})
+  // Nav is owned by App and mirrored to the URL, so the phone and the desk
+  // cannot disagree about where you are, a reload lands back on this record,
+  // and the back button unwinds through screens instead of leaving the app.
+  const tab = (SCREENS[screen] || screen === 'today' || screen === 'me') ? screen : 'today'
   const me = store.me()
 
   // A screen the phone doesn't carry (import, team, settings…) is never linked
   // from here — modules read ctx.phone and drop those affordances — so `go`
   // only has to handle the tabs it owns.
   const go = (key, patch = {}) => {
-    if (SCREENS[key] || key === 'today' || key === 'me') setTab(key)
-    setSel(s => {
-      const next = { ...s }
-      for (const k of TAKEOVER_KEYS) if (patch[k] === undefined) next[k] = null
-      return { ...next, ...patch }
-    })
+    if (SCREENS[key] || key === 'today' || key === 'me') return navGo(key, patch)
+    navGo(tab, patch)
   }
 
   const unreadNotifs = (state.notifications || []).filter(n => !n.read).length

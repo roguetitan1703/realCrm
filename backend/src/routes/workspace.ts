@@ -224,7 +224,10 @@ workspaceRouter.get('/state', async (req: Request, res: Response) => {
  * every open tab; the expensive /state call only follows when the token moves.
  * Never cached — a cached pulse is a pulse that reports nothing ever happens.
  */
+import { processScheduledNotifications } from '../services/notifications.js';
+
 workspaceRouter.get('/pulse', async (req: Request, res: Response) => {
+  processScheduledNotifications().catch(() => {});
   const pulse = await getPulse();
   res.set('Cache-Control', 'no-store');
   res.status(200).json({ success: true, ...pulse });

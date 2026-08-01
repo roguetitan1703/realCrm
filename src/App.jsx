@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useStore } from './lib/store.jsx'
+import { useNav } from './lib/useNav.js'
 import { AppShell } from './layouts/layouts.jsx'
 import { TopBar, Toasts, StaleBanner } from './components/chrome.jsx'
 import { PLATFORM, tenantDocTitle } from './data/platform.js'
@@ -42,22 +43,8 @@ const SCREENS = {
   calendar: Calendar, import: ImportPage, team: Team, settings: Settings, integrations: Integrations,
 }
 
-// Optional deep-link bootstrap for URL parameters (?screen=leads&lead=l2&prop=p7).
-// No-op unless params are present; safe to keep in production.
-function bootFromUrl() {
-  if (typeof window === 'undefined') return null
-  const p = new URLSearchParams(window.location.search)
-  if (![...p.keys()].length) return null
-  return {
-    screen: p.get('screen') || 'dashboard',
-    sel: {
-      leadId: p.get('lead') || undefined, leadOpen: !!p.get('lead'),
-      propId: p.get('prop') || undefined, propOpen: !!p.get('prop'),
-    },
-    forceLogin: p.has('autologin') || p.has('demo'),
-    role: p.get('role') || null,
-  }
-}
+// Deep-link parsing lives in lib/nav.js now — it is the same parser the URL
+// writer uses, so a link the app produces is always a link it can read back.
 
 function useResponsiveLayout() {
   const [isMobile, setIsMobile] = useState(() => {
@@ -75,13 +62,19 @@ function useResponsiveLayout() {
 export default function App() {
   const store = useStore()
   const { state } = store
-  const boot = bootFromUrl()
-  const [screen, setScreen] = useState(boot?.screen || 'dashboard')
-  const [sel, setSel] = useState(boot?.sel || {})
   // Screen size only. Role used to force the phone chrome, so an agent at a
   // desk got a phone app on a 27" monitor while a manager on a 13" laptop got
   // the desk. What an agent may see is RBAC's job, not the layout's.
   const isPhone = useResponsiveLayout()
+  // One nav for both chromes, mirrored to the URL. `home` differs because the
+  // root a back press unwinds to is the dashboard on a desk and Today on a
+  // phone — otherwise back on Today would keep trying to reach a dashboard the
+  // phone does not have.
+  const warnExit = useCallback(() => store.toast('Press back again to exit'), [store])
+  const { screen, setScreen, sel, setSel, go, boot } = useNav({
+    home: isPhone ? 'today' : 'dashboard',
+    onExitWarning: warnExit,
+  })
 
   // Alerts are on by default — no toggle exists, so subscribing is the app's
   // job, once, as soon as there's a signed-in person to attach the device to.
@@ -108,10 +101,7 @@ export default function App() {
     return (
       <div className="viewport">
         {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
-        {/* The deep link has to reach the phone too: a push notification links
-            to ?screen=leads&lead=<id>, and without this the tap opened the app
-            on Today, leaving the person to find the lead the alert was about. */}
-        <Phone store={store} framed={false} boot={boot} />
+        <Phone store={store} framed={false} screen={screen} sel={sel} setSel={setSel} go={go} />
         <Toasts toasts={state.toasts} />
       </div>
     )
@@ -139,25 +129,8 @@ export default function App() {
       return n
     })
 
-  // Every flag that makes a screen render something OTHER than its list. They
-  // are cleared on each navigation unless the caller explicitly sets one.
-  //
-  // This used to name only `leadOpen` and `propOpen` — the two that existed
-  // when it was written — and spread the rest of `sel` forward untouched. So
-  // once a takeover added since then was set, it never cleared: leaving the
-  // add-property wizard and clicking Properties re-opened the wizard, because
-  // `propAdd` was still true. Listing them in one place is what stops the next
-  // takeover from quietly inheriting the same bug.
-  const TAKEOVER_KEYS = ['leadOpen', 'leadId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey']
-
-  const go = (key, patch = {}) => {
-    setScreen(key)
-    setSel(s => {
-      const next = { ...s }
-      for (const k of TAKEOVER_KEYS) if (patch[k] === undefined) next[k] = null
-      return { ...next, ...patch }
-    })
-  }
+  // `go` and the takeover-key clearing moved into useNav, so the desk and the
+  // phone navigate through one function and both end up in the URL.
 
   // me() returns null when the signed-in user isn't in the agent roster (the
   // invented fallback agent was removed). Reading .name off it crashed the shell.

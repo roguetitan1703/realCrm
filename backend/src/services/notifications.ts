@@ -94,3 +94,105 @@ export async function markRead(id: string, userId: string): Promise<void> {
 export async function markAllRead(userId: string): Promise<void> {
   await sql`UPDATE notifications SET read = TRUE WHERE user_id = ${userId} AND tenant_id = ${tid()} AND read = FALSE`;
 }
+
+/**
+ * Periodically processes scheduled notifications (followup_due, site_visit_reminder, lead_stale_sla)
+ * across all active tenants using the exact same notify() and notifyRoles() primitives.
+ */
+export async function processScheduledNotifications(): Promise<void> {
+  try {
+    const tenants = await sql`SELECT DISTINCT tenant_id FROM users WHERE status ILIKE 'active'`;
+    for (const { tenant_id: t } of tenants) {
+      // 1. followup_due & site_visit_reminder
+      const dueLeads = await sql`
+        SELECT id, name, agent_id, locality, follow_up
+        FROM crm_leads
+        WHERE tenant_id = ${t}
+          AND follow_up IS NOT NULL
+          AND (follow_up->>'due_at') IS NOT NULL
+          AND (follow_up->>'due_at')::timestamptz <= NOW()
+          AND (follow_up->>'due_notified') IS NULL
+        LIMIT 50
+      `;
+
+      for (const l of dueLeads) {
+        if (l.agent_id) {
+          const action = l.follow_up?.action || l.follow_up?.label || 'Follow-up';
+          const isVisit = /visit/i.test(action);
+          notify({
+            userId: l.agent_id,
+            tenantId: t,
+            type: isVisit ? 'site_visit_reminder' : 'followup_due',
+            title: isVisit ? '🚗 Site Visit Due Now' : '⏰ Follow-up Due Now',
+            body: `${l.name}${l.locality ? ` · ${l.locality}` : ''} (${action})`,
+            link: `?screen=leads&lead=${l.id}`,
+            push: true,
+            toSelf: true
+          }).catch(() => {});
+        }
+        await sql`
+          UPDATE crm_leads
+          SET follow_up = jsonb_set(follow_up, '{due_notified}', 'true')
+          WHERE id = ${l.id} AND tenant_id = ${t}
+        `;
+      }
+
+      // 2. lead_stale_sla (2-hour agent warning & 4-hour manager escalation)
+      const staleLeads = await sql`
+        SELECT id, name, agent_id, locality, created_at,
+          COALESCE((metadata->>'sla_agent_notified')::boolean, false) AS agent_notified,
+          COALESCE((metadata->>'sla_mgr_notified')::boolean, false) AS mgr_notified
+        FROM crm_leads
+        WHERE tenant_id = ${t}
+          AND stage ILIKE 'New Inquiry'
+          AND created_at <= NOW() - INTERVAL '2 hours'
+          AND (metadata->>'sla_mgr_notified') IS NULL
+        LIMIT 30
+      `;
+
+      for (const l of staleLeads) {
+        const hoursAge = (Date.now() - new Date(l.created_at).getTime()) / (1000 * 3600);
+        const link = `?screen=leads&lead=${l.id}`;
+
+        if (hoursAge >= 2 && !l.agent_notified && l.agent_id) {
+          notify({
+            userId: l.agent_id,
+            tenantId: t,
+            type: 'lead_stale_sla',
+            title: '⚠️ SLA Warning: Untouched Lead',
+            body: `${l.name} has been in New Inquiry for over 2 hours`,
+            link,
+            push: true,
+            toSelf: true
+          }).catch(() => {});
+
+          await sql`
+            UPDATE crm_leads
+            SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{sla_agent_notified}', 'true')
+            WHERE id = ${l.id} AND tenant_id = ${t}
+          `;
+        }
+
+        if (hoursAge >= 4 && !l.mgr_notified) {
+          notifyRoles(['owner', 'manager'], {
+            tenantId: t,
+            type: 'lead_stale_sla',
+            title: '🚨 SLA Escalation: Untouched Lead',
+            body: `${l.name} untouched in New Inquiry for >4 hours — action required`,
+            link,
+            push: true,
+            toSelf: true
+          }).catch(() => {});
+
+          await sql`
+            UPDATE crm_leads
+            SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{sla_mgr_notified}', 'true')
+            WHERE id = ${l.id} AND tenant_id = ${t}
+          `;
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('[ScheduledNotify] Scanner iteration failed:', err?.message);
+  }
+}
