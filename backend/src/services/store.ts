@@ -1254,7 +1254,138 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
   return await getLeadById(primaryId);
 }
 
+/**
+ * One page of leads, filtered and counted in Postgres — the same treatment
+ * listProperties got, for the same reason.
+ */
+export async function listLeads(opts: {
+  page?: number; limit?: number; q?: string; stage?: string; agentId?: string;
+  segment?: string; scopeAgentId?: string;
+} = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
+  const t = tid();
+  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
+  const page = Math.max(Number(opts.page) || 1, 1);
+  const offset = (page - 1) * limit;
+
+  const where: any[] = [sql`tenant_id = ${t}`];
+  // An agent sees their own pipeline. Enforced here rather than by filtering in
+  // the browser, because a filter the client applies is not a permission.
+  if (opts.scopeAgentId) where.push(sql`agent_id = ${opts.scopeAgentId}`);
+  const q = String(opts.q || '').trim();
+  if (q) {
+    const like = `%${q.toLowerCase()}%`;
+    where.push(sql`(lower(name) LIKE ${like} OR phone LIKE ${like}
+      OR lower(coalesce(email, '')) LIKE ${like} OR lower(coalesce(locality, '')) LIKE ${like})`);
+  }
+  const many = (v?: string) => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
+  const stages = many(opts.stage);
+  if (stages.length) where.push(sql`stage IN ${sql(stages)}`);
+  if (opts.agentId) where.push(sql`agent_id = ${opts.agentId}`);
+  // The segment pills, as query rather than as array scans.
+  if (opts.segment === 'overdue') where.push(sql`overdue = true`);
+  else if (opts.segment === 'unassigned') where.push(sql`agent_id IS NULL`);
+  else if (opts.segment === 'open') where.push(sql`stage NOT LIKE 'Closed%'`);
+
+  const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+  const [rows, countRows] = await Promise.all([
+    sql`SELECT * FROM crm_leads WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+    sql`SELECT count(*)::int AS n FROM crm_leads WHERE ${clause}`,
+  ]);
+  return { rows: rows.map(r => rowToLead(r)), total: countRows[0]?.n ?? 0, page, limit };
+}
+
+/** Counts for the lead segment pills, without reading the leads. */
+export async function getLeadsSummary(scopeAgentId?: string): Promise<any> {
+  const t = tid();
+  const scope = scopeAgentId ? sql`AND agent_id = ${scopeAgentId}` : sql``;
+  const rows = await sql`
+    SELECT count(*)::int AS total,
+           count(*) FILTER (WHERE overdue) ::int AS overdue,
+           count(*) FILTER (WHERE agent_id IS NULL) ::int AS unassigned,
+           count(*) FILTER (WHERE stage NOT LIKE 'Closed%') ::int AS open
+    FROM crm_leads WHERE tenant_id = ${t} ${scope}`;
+  return rows[0] || { total: 0, overdue: 0, unassigned: 0, open: 0 };
+}
+
+/**
+ * Everything the Today screen needs, and nothing else.
+ *
+ * Today groups leads seven ways — overdue, due today, never contacted, nobody
+ * assigned, no next step, upcoming — plus tenancies coming up for renewal. It
+ * used to do that by scanning every lead and every property in the firm. The
+ * groups are all narrow, so the database can hand back just the rows that can
+ * possibly appear in one, and the screen groups those as it always has.
+ */
+export async function getTodayFeed(scopeAgentId?: string): Promise<any> {
+  const t = tid();
+  const scope = scopeAgentId ? sql`AND agent_id = ${scopeAgentId}` : sql``;
+  const [leads, renewals] = await Promise.all([
+    sql`SELECT * FROM crm_leads
+        WHERE tenant_id = ${t} ${scope}
+          AND stage NOT LIKE 'Closed%'
+          AND (overdue = true OR follow_up IS NOT NULL OR agent_id IS NULL
+               OR stage = 'New' OR created_at > now() - interval '14 days')
+        ORDER BY created_at DESC LIMIT 200`,
+    // A tenancy that has ended, or ends inside the 60-day window the renewal
+    // signal treats as due. Anything further out is not today's problem.
+    sql`SELECT * FROM crm_properties
+        WHERE tenant_id = ${t}
+          AND config->'tenancy'->>'end' IS NOT NULL
+          AND (config->'tenancy'->>'end')::date <= (now() + interval '60 days')::date
+        ORDER BY (config->'tenancy'->>'end')::date ASC LIMIT 50`,
+  ]);
+  return { leads: leads.map(r => rowToLead(r)), renewals: renewals.map(rowToProperty) };
+}
+
+/**
+ * Candidate listings for a lead's requirement.
+ *
+ * Scoring and the fit reasons stay in the client's matching.js — that is
+ * product logic and it must keep giving the same answers — but it no longer
+ * needs the whole book to run against. Postgres does the coarse cut (same deal,
+ * budget in range with headroom, same locality or type) and the client scores
+ * what comes back.
+ */
+export async function getLeadCandidates(leadId: string, limit = 100): Promise<any[]> {
+  const t = tid();
+  const lead = (await sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND id = ${leadId} LIMIT 1`)[0];
+  if (!lead) return [];
+  const req = lead.req || {};
+  const deal = lead.deal || req.deal || 'sale';
+  const locality = lead.locality || req.locality || null;
+  const config = lead.requirement || req.config || null;
+  const min = lead.budget_min != null ? Number(lead.budget_min) : (req.minBudget ?? null);
+  const max = lead.budget_max != null ? Number(lead.budget_max) : (req.maxBudget ?? null);
+
+  const where: any[] = [
+    sql`tenant_id = ${t}`,
+    sql`coalesce(deal, 'sale') = ${deal}`,
+    sql`coalesce(status, 'Available') = 'Available'`,
+  ];
+  // 25% headroom either side: a listing just outside the stated budget is still
+  // worth showing, and the client's scorer is what decides how good a fit it is.
+  if (min != null) where.push(sql`(${PRICE_NUM} IS NULL OR ${PRICE_NUM} >= ${Math.floor(min * 0.75)})`);
+  // An unpriced listing is not excluded by an upper bound — "price on request"
+  // is common and the client's scorer can still rank it.
+  if (max != null) where.push(sql`(${PRICE_NUM} IS NULL OR ${PRICE_NUM} <= ${Math.ceil(max * 1.25)})`);
+  if (locality) where.push(sql`locality = ${locality}`);
+  const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+  const rows = await sql`SELECT * FROM crm_properties WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit}`;
+  return rows.map(rowToProperty);
+}
+
 // --- PROPERTIES ---
+// Domain fields live in real COLUMNS on crm_properties, not in the `config`
+// JSONB — config only carries a couple of legacy extras. Querying config for
+// deal/locality/type silently matched nothing, so these two fragments are the
+// single definition of "the project this unit belongs to" and "its price as a
+// number", used by every query below.
+const PROJECT_KEY = sql`coalesce(nullif(project, ''), nullif(split_part(coalesce(title, ''), ' - ', 1), ''))`;
+// price_amount is numeric and price is the formatted text ("1,25,000"), so both
+// are cast to text before coalescing — mixing them raw is a type error that only
+// surfaced on leads that actually carry a budget.
+const PRICE_NUM = sql`nullif(regexp_replace(coalesce(price_amount::text, price::text, ''), '[^0-9]', '', 'g'), '')::numeric`;
+
 export async function getProperties(): Promise<any[]> {
   const rows = await sql`SELECT * FROM crm_properties WHERE tenant_id = ${tid()} ORDER BY created_at DESC`;
   return rows.map(rowToProperty);
@@ -1288,10 +1419,10 @@ export async function listProperties(opts: {
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
-    where.push(sql`(lower(title) LIKE ${like}
-      OR lower(coalesce(config->>'society', '')) LIKE ${like}
-      OR lower(coalesce(config->>'locality', '')) LIKE ${like}
-      OR lower(coalesce(config->>'project', '')) LIKE ${like})`);
+    where.push(sql`(lower(coalesce(title, '')) LIKE ${like}
+      OR lower(coalesce(locality, '')) LIKE ${like}
+      OR lower(coalesce(project, '')) LIKE ${like}
+      OR lower(coalesce(owner_name, '')) LIKE ${like})`);
   }
   // The filter UI is multi-select — "Available or Blocked" is one filter, not
   // two — so every value filter accepts a comma-separated list and matches any
@@ -1300,13 +1431,13 @@ export async function listProperties(opts: {
   const status = many(opts.status), deal = many(opts.deal);
   const type = many(opts.type), locality = many(opts.locality);
   if (status.length) where.push(sql`coalesce(status, 'Available') IN ${sql(status)}`);
-  if (deal.length) where.push(sql`coalesce(config->>'deal', 'sale') IN ${sql(deal)}`);
-  if (type.length) where.push(sql`config->>'type' IN ${sql(type)}`);
-  if (locality.length) where.push(sql`config->>'locality' IN ${sql(locality)}`);
+  if (deal.length) where.push(sql`coalesce(deal, 'sale') IN ${sql(deal)}`);
+  if (type.length) where.push(sql`type IN ${sql(type)}`);
+  if (locality.length) where.push(sql`locality IN ${sql(locality)}`);
   if (opts.project) {
     // A project is a grouping lens over the `project`/`society` fields, not a
     // stored entity — same key the units view groups on.
-    where.push(sql`coalesce(nullif(config->>'project', ''), config->>'society') = ${opts.project}`);
+    where.push(sql`${PROJECT_KEY} = ${opts.project}`);
   }
   if (opts.excludeId) where.push(sql`id <> ${opts.excludeId}`);
 
@@ -1335,13 +1466,13 @@ export async function getPropertiesSummary(): Promise<any> {
     sql`SELECT count(*)::int AS n FROM crm_properties WHERE tenant_id = ${t}`,
     sql`SELECT coalesce(status, 'Available') AS k, count(*)::int AS n
         FROM crm_properties WHERE tenant_id = ${t} GROUP BY 1`,
-    sql`SELECT coalesce(config->>'deal', 'sale') AS k, count(*)::int AS n
+    sql`SELECT coalesce(deal, 'sale') AS k, count(*)::int AS n
         FROM crm_properties WHERE tenant_id = ${t} GROUP BY 1`,
-    sql`SELECT DISTINCT config->>'locality' AS v FROM crm_properties
-        WHERE tenant_id = ${t} AND coalesce(config->>'locality', '') <> '' ORDER BY 1`,
-    sql`SELECT coalesce(nullif(config->>'project', ''), config->>'society') AS v, count(*)::int AS n
+    sql`SELECT DISTINCT locality AS v FROM crm_properties
+        WHERE tenant_id = ${t} AND coalesce(locality, '') <> '' ORDER BY 1`,
+    sql`SELECT ${PROJECT_KEY} AS v, count(*)::int AS n
         FROM crm_properties WHERE tenant_id = ${t}
-        GROUP BY 1 HAVING coalesce(nullif(config->>'project', ''), config->>'society') IS NOT NULL
+        GROUP BY 1 HAVING ${PROJECT_KEY} IS NOT NULL
         ORDER BY 2 DESC LIMIT 200`,
   ]);
   const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));

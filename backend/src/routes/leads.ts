@@ -12,7 +12,7 @@
 import { Router, Request, Response } from 'express';
 import { CallActionSchema, WhatsAppActionSchema, StageChangeSchema, MergeSchema } from '../models';
 import { requireTenantAuth, requireModuleEnabled, requireQuotaAvailable } from '../middleware/auth';
-import { getLeads, createLead, getAgents, getLeadById } from '../services/store';
+import { getLeads, createLead, getAgents, getLeadById, listLeads, getLeadsSummary, getLeadCandidates } from '../services/store';
 import { sql } from '../services/db';
 
 export const leadsRouter = Router();
@@ -31,6 +31,56 @@ leadsRouter.get('/', async (req: Request, res: Response) => {
 /**
  * POST /api/v1/leads
  */
+/**
+ * ONE PAGE OF LEADS
+ * GET /api/v1/leads/page?page=&limit=&q=&stage=&segment=&agentId=
+ * A separate path from GET / so the existing unpaged route keeps working for
+ * callers not yet migrated. An agent's scope is applied here, not in the
+ * browser — a filter the client applies is not a permission.
+ */
+leadsRouter.get('/page', async (req: Request, res: Response) => {
+  try {
+    const q = req.query;
+    const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+    const scopeAgentId = req.user?.role === 'agent' ? req.user?.userId : undefined;
+    const { rows, total, page, limit } = await listLeads({
+      page: Number(q.page) || 1, limit: Number(q.limit) || 50,
+      q: str(q.q), stage: str(q.stage), agentId: str(q.agentId),
+      segment: str(q.segment), scopeAgentId,
+    });
+    return res.status(200).json({
+      success: true, data: rows, total, page, limit,
+      pages: Math.max(1, Math.ceil(total / limit)), count: rows.length,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch leads', message: err.message });
+  }
+});
+
+/** GET /api/v1/leads/summary — counts for the segment pills. */
+leadsRouter.get('/summary', async (req: Request, res: Response) => {
+  try {
+    const scopeAgentId = req.user?.role === 'agent' ? req.user?.userId : undefined;
+    return res.status(200).json({ success: true, summary: await getLeadsSummary(scopeAgentId) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to summarise leads', message: err.message });
+  }
+});
+
+/**
+ * GET /api/v1/leads/:id/matches
+ * Candidate listings for this lead's requirement. The client scores them with
+ * matching.js exactly as before — this only replaces "run it over every
+ * property in the firm" with "run it over the ones that could possibly match".
+ */
+leadsRouter.get('/:id/matches', async (req: Request, res: Response) => {
+  try {
+    return res.status(200).json({ success: true, data: await getLeadCandidates(req.params.id) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to fetch matches', message: err.message });
+  }
+});
+
 /**
  * ONE LEAD, IN FULL
  * GET /api/v1/leads/:id

@@ -12,7 +12,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand } from '../services/store';
+import { getState, getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { listAudit, verifyAuditChain } from '../services/audit';
@@ -72,6 +72,21 @@ workspaceRouter.get('/audit', async (req: Request, res: Response) => {
  * 1. PUBLIC TENANT RESOLUTION (Called BEFORE login by the frontend!)
  * GET /api/v1/workspace/resolve
  */
+/**
+ * GET /api/v1/workspace/today
+ * The Today screen's own read: the leads that can appear in one of its groups,
+ * plus tenancies inside the renewal window. Replaces scanning every lead and
+ * every property in the firm to build one screen.
+ */
+workspaceRouter.get('/today', requireTenantAuth, async (req: Request, res: Response) => {
+  try {
+    const scopeAgentId = req.user?.role === 'agent' ? req.user?.userId : undefined;
+    return res.status(200).json({ success: true, ...(await getTodayFeed(scopeAgentId)) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to build today', message: err.message });
+  }
+});
+
 workspaceRouter.get('/resolve', async (req: Request, res: Response) => {
   const slug = req.query.slug as string;
   const domain = req.query.domain as string;
