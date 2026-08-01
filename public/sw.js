@@ -39,13 +39,17 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || '/';
+  const rawUrl = (event.notification.data && event.notification.data.url) || '/';
+  const targetUrl = new URL(rawUrl, self.location.origin).href;
   event.waitUntil((async () => {
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const c of all) {
-      if ('focus' in c) { c.navigate(url).catch(() => {}); return c.focus(); }
+      if ('focus' in c) {
+        c.navigate(targetUrl).catch(() => {});
+        return c.focus();
+      }
     }
-    if (self.clients.openWindow) return self.clients.openWindow(url);
+    if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
   })());
 });
 
