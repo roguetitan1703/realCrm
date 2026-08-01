@@ -288,7 +288,9 @@ export default function Admin() {
                     <tr key={t.id} style={{ borderTop: '1px solid var(--line, #e5e3dd)' }}>
                       <td style={tdStyle}>
                         <div style={{ fontWeight: 600 }}>{t.name}</div>
-                        <div className="mono-num" style={{ color: 'var(--muted)', fontSize: 12 }}>app.{t.slug}.com</div>
+                        <a href={`/?ws=${t.slug}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent, #1E6F52)', fontSize: 12, textDecoration: 'none' }} className="mono-num">
+                          {`/${t.slug}`} ↗
+                        </a>
                       </td>
                       <td style={tdStyle}>{t.subscription_plan}</td>
                       <td style={tdStyle}>
