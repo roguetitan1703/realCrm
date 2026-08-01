@@ -2116,3 +2116,19 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .rowmenu-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent-ink)}
 .rowmenu-btn:disabled{opacity:.45;cursor:default}
 .rowmenu-pop{position:absolute;top:calc(100% + 4px);left:auto;right:0;min-width:180px;z-index:20}
+
+/* ---- list loading ----------------------------------------------------------
+   A list that is waiting shows a spinner ONLY when it has nothing to show yet.
+   Once there are rows, they stay on screen and dim: replacing readable data with
+   skeleton bars on every filter change is a downgrade, not a loading state. */
+@keyframes crm-spin{to{transform:rotate(360deg)}}
+.list-spin{display:flex;align-items:center;justify-content:center;padding:56px 0}
+.list-spin span{width:22px;height:22px;border-radius:50%;display:block;
+  border:2px solid var(--line);border-top-color:var(--accent);
+  animation:crm-spin .7s linear infinite}
+.list-body{transition:opacity .12s ease}
+.list-body.is-loading{opacity:.55}
+@media (prefers-reduced-motion:reduce){
+  .list-spin span{animation-duration:2s}
+  .list-body{transition:none}
+}

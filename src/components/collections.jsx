@@ -71,14 +71,33 @@ export function runModuleQuery(def, records, { filters = {}, search = '', sortKe
 // an onOpen(record) handler, and optional segments/extra toolbar nodes.
 // NOTE: this is a PURE builder (no hooks) — modules call it directly and may
 // early-return before/after it, so it must never call useState/useMemo/etc.
+// The only thing shown when a list has no rows YET. Deliberately not a skeleton:
+// a skeleton claims a layout before the data can support it, and it is the same
+// wall of grey whether one row is coming or two hundred.
+function ListSpinner() {
+  return <div className="list-spin" role="status" aria-label="Loading"><span /></div>
+}
+
 export function ModuleListView({
   def, records, store, onOpen,
   filters, onFilters, search, onSearch, sortKey, onSortKey, sortDir, onSortDir,
   kpis, segments, view, onView, viewExtra, showViewSwitch = true, cta, toolbarRight, emptyTitle, emptyHint, renderTable,
-  phone, page = 1, onPage, pageSize = 20, onPageSize,
+  phone, page = 1, onPage, pageSize = 20, onPageSize, source,
 }) {
-  const list = runModuleQuery(def, records, { filters, search, sortKey, sortDir, store })
-  const pageCount = Math.max(1, Math.ceil(list.length / pageSize))
+  // Two sources, one surface. `records` is the classic in-memory collection,
+  // queried here. `source` is a page the SERVER already filtered, sorted and cut
+  // — used by modules whose collection is too big to hold in a browser, which is
+  // every module once a real firm's book is in it. Filters, search, sort and the
+  // pager are identical either way; only who did the work changes.
+  const server = !!source
+  const list = server
+    ? (source.rows || [])
+    : runModuleQuery(def, records, { filters, search, sortKey, sortDir, store })
+  const total = server ? (source.total || 0) : list.length
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+  // A server page is already the page; an in-memory list still has to be cut.
+  const cut = (from, to) => (server ? list : list.slice(from, to))
+  const loading = server && source.loading
 
   const fields = typeof def.filterFields === 'function' ? def.filterFields(store) : (def.filterFields || [])
   const sortOptions = def.sortOptions.map(s => ({ value: s.key, label: s.label }))
@@ -99,9 +118,12 @@ export function ModuleListView({
     // Cumulative reveal, not page-jump: a numbered pager asks for a precise tap
     // a thumb can't reliably make. "Load more" only ever grows the list, so the
     // scroll position a thumb already found never gets pulled out from under it.
-    const shown = onPage ? Math.min(page * pageSize, list.length) : list.length
-    const phoneList = list.slice(0, shown)
-    const more = list.length - shown
+    // On a server source the rows ARE the accumulation (the hook appends each
+    // page), so there is nothing to cut — and `more` comes from the true total,
+    // not from the length of what happens to be downloaded.
+    const shown = server ? list.length : (onPage ? Math.min(page * pageSize, list.length) : list.length)
+    const phoneList = server ? list : list.slice(0, shown)
+    const more = total - shown
     return {
       header,
       toolbar: (
@@ -109,16 +131,25 @@ export function ModuleListView({
           def={def} fields={fields} filters={filters} onFilters={onFilters}
           search={search} onSearch={onSearch}
           sortKey={sortKey} onSortKey={onSortKey} sortDir={sortDir} onSortDir={onSortDir}
-          sortOptions={sortOptions} resultCount={list.length}
+          sortOptions={sortOptions} resultCount={total}
         />
       ),
       // One layout, no switch. A table needs a horizontal scroll to be read on
       // a 390px screen, and choosing between two bad options is not a feature.
+      // "Nothing matches" is a claim about the data. It must not be made while
+      // the answer is still in flight, or the first frame of every search reads
+      // as no results.
       body: list.length === 0
-        ? <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>
+        ? (loading
+            ? <ListSpinner />
+            : <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>)
         : <>
             {renderTable ? renderTable(phoneList, 'grid') : <ModuleCards def={def} rows={phoneList} store={store} onOpen={onOpen} />}
-            {more > 0 && <button className="btn btn-secondary btn-block loadmore" onClick={() => onPage(page + 1)}>Load {Math.min(more, pageSize)} more</button>}
+            {more > 0 && (
+              <button className="btn btn-secondary btn-block loadmore" disabled={loading} onClick={() => onPage(page + 1)}>
+                {loading ? 'Loading…' : `Load ${Math.min(more, pageSize)} more`}
+              </button>
+            )}
           </>,
       list,
     }
@@ -142,18 +173,22 @@ export function ModuleListView({
     />
   )
 
-  const pageList = onPage ? list.slice((page - 1) * pageSize, page * pageSize) : list
+  const pageList = onPage ? cut((page - 1) * pageSize, page * pageSize) : list
 
   const body = list.length === 0
-    ? <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>
-    : <>
+    ? (loading
+        ? <ListSpinner />
+        : <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>)
+    // While a new page loads, the rows already on screen stay put and only fade.
+    // Replacing them with skeletons throws away readable data to show a shape.
+    : <div className={'list-body' + (loading ? ' is-loading' : '')}>
         {renderTable
           ? renderTable(pageList, view)
           : <ModuleTable def={def} rows={pageList} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={onSortKey} />}
-        {onPage && <Pager page={page} pageCount={pageCount} onPage={onPage} total={list.length} pageSize={pageSize} onPageSize={onPageSize} />}
-      </>
+        {onPage && <Pager page={page} pageCount={pageCount} onPage={onPage} total={total} pageSize={pageSize} onPageSize={onPageSize} />}
+      </div>
 
-  return { header, toolbar, body, list }
+  return { header, toolbar, body, list, total }
 }
 
 // ---- PhoneToolbar: search always visible, filter + sort in one bottom sheet ----

@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
+import { useServerList } from '../lib/serverList.js'
+import { api } from '../lib/api.js'
 import { ModuleListView, ModuleTable, PropertyCard, ProjectCard } from '../components/collections.jsx'
 import { buildProjects, unitsInProject, unitsByWing } from '../lib/projects.js'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
@@ -14,6 +16,34 @@ import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
 import PropertyWizard from './PropertyWizard.jsx'
 import { canEditListing } from '../lib/permissions.js'
+
+// The filter bar speaks in arrays ({ status: ['Available','Blocked'] }) because
+// its controls are multi-select; the API speaks in comma-separated values. This
+// is the whole translation, kept in one place so no screen invents its own.
+const API_FILTERS = ['status', 'deal', 'type', 'locality', 'project']
+function toQuery({ page, limit, q, ...filters }) {
+  const out = { page, limit, q }
+  for (const k of API_FILTERS) {
+    const v = filters[k]
+    if (Array.isArray(v)) { if (v.length) out[k] = v.join(',') }
+    else if (v) out[k] = v
+  }
+  return out
+}
+
+// Counts for the stat strip, straight from Postgres. Refetched whenever the
+// desk's data moves, so adding a listing moves the number without a reload.
+function usePropertiesSummary(dataAsOf) {
+  const [summary, setSummary] = useState({ total: 0, byStatus: {}, byDeal: {} })
+  useEffect(() => {
+    let live = true
+    api.getPropertiesSummary()
+      .then(r => { if (live && r?.success) setSummary(r.summary) })
+      .catch(() => {})   // the strip degrades to zeros; the list still works
+    return () => { live = false }
+  }, [dataAsOf])
+  return summary
+}
 
 export default function Properties({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
@@ -44,13 +74,26 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
   const open = (id) => go('properties', { propId: id, propOpen: true })
   const openProject = (key) => go('properties', { projKey: key, projOpen: true })
 
-  const available = state.properties.filter(p => (p.status || 'Available') === 'Available').length
-  const rentals = state.properties.filter(p => p.deal === 'rent').length
+  // Counts come from Postgres, not from counting an array the browser had to
+  // download first. `Listings` is the firm's real total — it used to be the
+  // length of whatever happened to be in memory, which is the same number only
+  // for as long as the whole book fits there.
+  const summary = usePropertiesSummary(state.dataAsOf)
   const kpis = [
-    { label: 'Listings', value: state.properties.length, onClick: () => setFlt({}) },
-    { label: 'Available', value: available, tone: 'accent', onClick: () => setFlt({ status: ['Available'] }) },
-    { label: 'Rentals', value: rentals, onClick: () => setFlt({ deal: ['rent'] }) },
+    { label: 'Listings', value: summary.total, onClick: () => setFltP({}) },
+    { label: 'Available', value: summary.byStatus?.Available || 0, tone: 'accent', onClick: () => setFltP({ status: ['Available'] }) },
+    { label: 'Rentals', value: summary.byDeal?.rent || 0, onClick: () => setFltP({ deal: ['rent'] }) },
   ]
+
+  // The listings themselves: one page, fetched for the filters actually on
+  // screen. The project view is an aggregate over the whole book and cannot be
+  // built from a page, so it keeps the in-memory collection until it gets its
+  // own endpoint.
+  const source = useServerList(
+    (params) => api.listProperties(toQuery(params)),
+    { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
+    [state.dataAsOf],
+  )
 
   // Shared query engine drives filter/search/sort; a custom renderTable keeps the
   // module-specific card grid (with demand count) + demand-column table view.
@@ -59,7 +102,12 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
   // to the two flat unit views.
   const paginated = view !== 'projects'
   const { header, toolbar, body } = ModuleListView({
-    def: PROPERTIES_DEF, records: state.properties, store,
+    def: PROPERTIES_DEF, store,
+    // Flat unit views read one server page. The project view aggregates every
+    // unit in the firm into cards, which a page cannot answer — it stays on the
+    // in-memory collection until it has an endpoint of its own.
+    records: paginated ? undefined : state.properties,
+    source: paginated ? source : undefined,
     onOpen: (p) => open(p.id),
     filters: flt, onFilters: setFltP,
     search: q, onSearch: setQP,

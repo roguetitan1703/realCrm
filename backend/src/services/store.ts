@@ -1293,10 +1293,16 @@ export async function listProperties(opts: {
       OR lower(coalesce(config->>'locality', '')) LIKE ${like}
       OR lower(coalesce(config->>'project', '')) LIKE ${like})`);
   }
-  if (opts.status) where.push(sql`coalesce(status, 'Available') = ${opts.status}`);
-  if (opts.deal) where.push(sql`coalesce(config->>'deal', 'sale') = ${opts.deal}`);
-  if (opts.type) where.push(sql`config->>'type' = ${opts.type}`);
-  if (opts.locality) where.push(sql`config->>'locality' = ${opts.locality}`);
+  // The filter UI is multi-select — "Available or Blocked" is one filter, not
+  // two — so every value filter accepts a comma-separated list and matches any
+  // of them. A single value is just a list of one.
+  const many = (v?: string) => String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+  const status = many(opts.status), deal = many(opts.deal);
+  const type = many(opts.type), locality = many(opts.locality);
+  if (status.length) where.push(sql`coalesce(status, 'Available') IN ${sql(status)}`);
+  if (deal.length) where.push(sql`coalesce(config->>'deal', 'sale') IN ${sql(deal)}`);
+  if (type.length) where.push(sql`config->>'type' IN ${sql(type)}`);
+  if (locality.length) where.push(sql`config->>'locality' IN ${sql(locality)}`);
   if (opts.project) {
     // A project is a grouping lens over the `project`/`society` fields, not a
     // stored entity — same key the units view groups on.
