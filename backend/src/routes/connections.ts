@@ -351,20 +351,4 @@ connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => 
   });
 });
 
-// ---------------------------------------------------------------------------
-// D2, gap G4 — the hosted docs page. Public, unauthenticated: the person
-// reading it is the provider's engineer, who has no login here. Safe to
-// expose by id because the id carries no secret and the page never prints the
-// key — same rule as the email above.
-// ---------------------------------------------------------------------------
 
-function escapeHtml(s: string): string {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
-}
-
-connectionsRouter.get('/:id/docs', async (req: Request, res: Response) => {
-  const integration = await getIntegrationById(req.params.id);
-  if (!integration) return res.status(404).send('Not found.');
-  const q = req.query.key ? `?key=${encodeURIComponent(String(req.query.key))}` : '';
-  return res.redirect(301, `/docs/${integration.tenant_slug}${q}`);
-});
