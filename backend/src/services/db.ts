@@ -64,6 +64,16 @@ export const LEGACY_TENANT_IDS = ['bhumi-propcity', 'org_bhumi_109'];
 export async function initSchema(): Promise<void> {
   console.log('[Supabase DB] ⚙️ Verifying PostgreSQL schema and DDL tables...');
   try {
+    // Which one-time repairs have already run. Without this every historical
+    // migration re-ran on every boot, forever — which is fine for a DDL guarded
+    // by IF NOT EXISTS and actively destructive for one that rewrites rows by
+    // value. See runOnce() and migrateLeadStatuses().
+    await sql`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        name TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
     await sql`
       CREATE TABLE IF NOT EXISTS tenants (
         id TEXT PRIMARY KEY,

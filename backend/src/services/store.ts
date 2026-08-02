@@ -580,6 +580,21 @@ async function syncLeadShortlist(leadId: string, shortlist: string[], feedback: 
  * actually meant rather than collapsing everything into "New" — a lead that had
  * reached Negotiation is Interested, not new business.
  */
+/**
+ * Run a one-time repair exactly once, ever, per database.
+ *
+ * The boot chain re-ran every historical migration on every restart. For DDL
+ * that is harmless. For a migration that rewrites ROWS BY VALUE it is not: it
+ * has no way to tell "this row was never migrated" from "someone deliberately
+ * set it to that value afterwards", so it keeps undoing the second one.
+ */
+async function runOnce(name: string, fn: () => Promise<void>): Promise<void> {
+  const done = await sql`SELECT 1 FROM schema_migrations WHERE name = ${name} LIMIT 1`;
+  if (done.length) return;
+  await fn();
+  await sql`INSERT INTO schema_migrations (name) VALUES (${name}) ON CONFLICT DO NOTHING`;
+}
+
 export async function migrateLeadStatuses(): Promise<void> {
   const MAP: Record<string, string> = {
     'Contacted': 'Follow-Up',
@@ -595,12 +610,19 @@ export async function migrateLeadStatuses(): Promise<void> {
   }
   // Each tenant's configured list, so the filter menus and the status picker
   // offer the statuses that now exist rather than the pipeline that doesn't.
+  //
+  // "Stale" means it still names a status that no longer exists, or is empty.
+  // It used to ALSO mean "does not contain every default", which made any
+  // customised pipeline stale by definition — a firm that removed one stage in
+  // Settings had their whole list overwritten with the defaults on the next
+  // backend restart. Settings → Pipeline is a real editor; this is a repair for
+  // a vocabulary change, and it has no business having an opinion about a list
+  // that is merely different.
   const rows = await sql`SELECT tenant_id, value FROM crm_settings WHERE key = 'default'`;
   for (const r of rows as any[]) {
     const v = r.value || {};
     const cur: string[] = Array.isArray(v.stages) ? v.stages : [];
-    const stale = cur.some(x => MAP[x]) || cur.length === 0
-      || !LEAD_STATUSES.every(x => cur.includes(x));
+    const stale = cur.some(x => MAP[x]) || cur.length === 0;
     if (!stale) continue;
     await sql`UPDATE crm_settings SET value = ${sql.json({ ...v, stages: LEAD_STATUSES })}
                WHERE key = 'default' AND tenant_id = ${r.tenant_id}`;
@@ -986,7 +1008,11 @@ seedDatabase()
   .then(() => backfillShortlist())
   .then(() => backfillPropertyCanonicalFields())
   .then(() => repairPropertyDisplayCasing())
-  .then(() => migrateLeadStatuses())
+  // Gated: this one rewrites lead rows by stage NAME. Left ungated, a firm that
+  // renamed a stage to "Contacted" in Settings — an obvious thing to call a
+  // stage — had every lead on it silently moved to "Follow-Up" on the next
+  // restart. It is a one-time vocabulary migration and now runs like one.
+  .then(() => runOnce('lead_statuses_2024_vocab', () => migrateLeadStatuses()))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
