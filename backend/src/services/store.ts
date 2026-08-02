@@ -17,7 +17,7 @@ import { audit } from './audit.js';
 import { getContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
-import { assertLeadWrite } from '../lib/permissions.js';
+import { assertLeadWrite, ForbiddenError } from '../lib/permissions.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
 // and three copies of that rule would drift.
@@ -1720,6 +1720,52 @@ export async function listLeads(opts: {
     sql`SELECT count(*)::int AS n FROM crm_leads WHERE ${clause}`,
   ]);
   return { rows: rows.map(r => rowToLead(r)), total: countRows[0]?.n ?? 0, page, limit };
+}
+
+/**
+ * Assign many leads to one person in a single statement.
+ *
+ * Not a loop over updateLead: a desk selecting forty rows would otherwise fire
+ * forty round trips, forty audit rows and forty push notifications — the last
+ * of which is how someone's phone buzzes forty times and the app gets muted.
+ * One UPDATE, one audit entry, one notification naming the count.
+ *
+ * Assignment is desk work, so agents are refused outright rather than being
+ * silently scoped to their own rows: a bulk action that quietly does less than
+ * it says is worse than one that declines.
+ */
+export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
+  const who = getContext();
+  if (who?.role === 'agent') throw new ForbiddenError('Assigning leads is done from the desk.');
+  const clean = [...new Set((ids || []).filter(Boolean))];
+  if (clean.length === 0) return 0;
+
+  const t = tid();
+  const res = await sql`
+    UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW()
+    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
+      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
+  const n = res.count;
+  if (n === 0) return 0;
+
+  const name = agentId
+    ? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name ?? 'a colleague'
+    : null;
+  audit({
+    tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'lead.bulk_assign', target_type: 'lead', target_id: null,
+    summary: agentId ? `${n} lead${n === 1 ? '' : 's'} assigned to ${name}` : `${n} lead${n === 1 ? '' : 's'} unassigned`,
+    metadata: { ids: clean, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  if (agentId) {
+    notify({
+      userId: agentId, type: 'lead_reassigned', push: true,
+      title: `${n} lead${n === 1 ? '' : 's'} assigned to you`,
+      body: n === 1 ? 'Open your leads to pick it up.' : 'Open your leads to pick them up.',
+      link: '?screen=leads',
+    }).catch(err => console.warn('[Notify] bulk assign failed:', err?.message));
+  }
+  return n;
 }
 
 /**

@@ -307,6 +307,9 @@ export const api = {
     return request(`/leads/page${s ? `?${s}` : ''}`)
   },
   getLeadsSummary: () => request('/leads/summary'),
+  // One request for the whole selection — see bulkAssignLeads() for why this is
+  // not a loop of updateLead on the client.
+  bulkAssignLeads: (ids, agentId) => request('/leads/bulk-assign', { method: 'POST', body: JSON.stringify({ ids, agentId }) }),
   // Candidate listings for a lead's requirement. Scored client-side by
   // matching.js — this only narrows what it runs against.
   getLeadMatches: (id) => request(`/leads/${encodeURIComponent(id)}/matches`),
