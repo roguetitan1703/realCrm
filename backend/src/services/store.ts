@@ -653,9 +653,21 @@ export async function backfillShortlist(): Promise<void> {
 export async function seedDatabase(forceReset = false): Promise<ServerState> {
   await initSchema();
 
-  const [{ count }] = await sql`SELECT count(*)::int as count FROM crm_leads`;
+  // The guard used to be "does ANY tenant have ANY lead", which is only
+  // accidentally true on a production database. On an empty one — a fresh
+  // deploy, a restored backup, a migration — it planted the full demo firm,
+  // including a workspace owner at a hardcoded personal address. Seeding a demo
+  // dataset is now something you ask for.
+  //
+  // forceReset bypasses it: that is the workspace reset in Settings → System,
+  // an explicit action on a workspace someone is looking at.
+  if (!forceReset && process.env.SEED_DEMO !== 'true') {
+    console.log('[Supabase DB] ℹ️ SEED_DEMO is not set — skipping demo seed.');
+    return await getBootstrap();
+  }
+  const [{ count }] = await sql`SELECT count(*)::int as count FROM crm_leads WHERE tenant_id = ${DEFAULT_TENANT_ID}`;
   if (count > 0 && !forceReset) {
-    console.log(`[Supabase DB] ℹ️ Database already contains ${count} leads. Skipping seed.`);
+    console.log(`[Supabase DB] ℹ️ Demo tenant already has ${count} leads. Skipping seed.`);
     return await getBootstrap();
   }
 
@@ -799,6 +811,10 @@ export async function ensureAuthIdentity(): Promise<void> {
   // touches a legacy id that still exists and isn't the current one.
   for (const legacy of LEGACY_TENANT_IDS) {
     if (legacy === DEFAULT_TENANT_ID) continue;
+    // A retired id could legitimately be reused by a real workspace later; this
+    // loop would then re-home that firm's data onto the demo tenant and delete
+    // them. It has already done its job, so it runs once.
+    if ((await sql`SELECT 1 FROM schema_migrations WHERE name = ${'retire_' + legacy} LIMIT 1`).length) continue;
     const exists = await sql`SELECT 1 FROM tenants WHERE id = ${legacy} LIMIT 1`;
     if (exists.length === 0) continue;
     for (const tbl of TENANT_SCOPED_TABLES) {
@@ -812,6 +828,7 @@ export async function ensureAuthIdentity(): Promise<void> {
       WHERE tenant_id = ${DEFAULT_TENANT_ID} AND (value->>'firmName') IN ('Bhumi Propcity', 'Bhumi Propcity CRM Workspace')
     `;
     await sql`DELETE FROM tenants WHERE id = ${legacy}`;
+    await sql`INSERT INTO schema_migrations (name) VALUES (${'retire_' + legacy}) ON CONFLICT DO NOTHING`;
     console.log(`[Auth] Retired legacy demo tenant '${legacy}' -> '${DEFAULT_TENANT_ID}'.`);
   }
 
@@ -843,9 +860,18 @@ export async function ensureAuthIdentity(): Promise<void> {
     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, email = EXCLUDED.email, role = EXCLUDED.role;
   `;
 
-  // Mirror agents into users (role 'agent'); carry phone + a plausible email so
-  // either can receive an OTP.
-  const agentRows = await sql`SELECT id, name, first, initials, avatar, metadata, tenant_id FROM crm_agents`;
+  // Mirror the DEMO tenant's agents into users, so the bundled dataset can log
+  // in. Scoped to that tenant on purpose.
+  //
+  // Unscoped, this ran over every tenant in the database on every boot and
+  // overwrote name/email/metadata from crm_agents — and where an agent had no
+  // email recorded it invented one on the demo firm's domain. Two real users on
+  // a live client tenant were carrying `@skylinerealty.in` addresses because of
+  // it, refreshed on every restart. Real tenants never needed this: both
+  // provisionTenant and the Team screen write `users` and `crm_agents`
+  // together, with a real login_id and a real address.
+  const agentRows = await sql`SELECT id, name, first, initials, avatar, metadata, tenant_id
+                                FROM crm_agents WHERE tenant_id = ${DEFAULT_TENANT_ID}`;
   for (const a of agentRows) {
     const meta = a.metadata || { initials: a.initials, avatar: a.avatar };
     const phone = (a.metadata && a.metadata.phone) || null;
@@ -1002,16 +1028,26 @@ export async function resetDatabase(): Promise<ServerState> {
 // Ensure seeded on module load. ensureAuthIdentity runs after, so an
 // already-populated database (seed skipped by the lead-count guard) still gets
 // the Phase 0 identity model — tenant, superadmin, and users mirror.
+// Everything below the schema is a ONE-TIME repair, and each was re-running on
+// every restart against live client rows. A repair cannot tell "this row was
+// never migrated" from "someone set it to that deliberately afterwards", so
+// left ungated it keeps undoing the second one — which is exactly what the
+// stage migration was doing to the Pipeline editor.
+//
+// ensureAuthIdentity is NOT in the ledger: it also refreshes the superadmin
+// credentials from the environment and guarantees the demo tenant exists, and
+// both of those genuinely belong on every boot. Its one-time part (retiring
+// legacy tenant ids) carries its own guard.
 seedDatabase()
   .then(() => ensureAuthIdentity())
-  .then(() => backfillPasswordAuth())
-  .then(() => backfillShortlist())
-  .then(() => backfillPropertyCanonicalFields())
-  .then(() => repairPropertyDisplayCasing())
-  // Gated: this one rewrites lead rows by stage NAME. Left ungated, a firm that
+  .then(() => runOnce('backfill_password_auth', () => backfillPasswordAuth()))
+  .then(() => runOnce('backfill_shortlist', () => backfillShortlist()))
+  .then(() => runOnce('backfill_property_canonical', () => backfillPropertyCanonicalFields()))
+  .then(() => runOnce('repair_property_casing', () => repairPropertyDisplayCasing()))
+  // This one rewrites lead rows by stage NAME. Left ungated, a firm that
   // renamed a stage to "Contacted" in Settings — an obvious thing to call a
   // stage — had every lead on it silently moved to "Follow-Up" on the next
-  // restart. It is a one-time vocabulary migration and now runs like one.
+  // restart.
   .then(() => runOnce('lead_statuses_2024_vocab', () => migrateLeadStatuses()))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
