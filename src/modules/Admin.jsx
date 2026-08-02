@@ -662,6 +662,9 @@ function HandoverModal({ data, onClose }) {
   const initialPassword = data.initialPassword
   const team = data.team || []
 
+  const agents = team.filter(t => t.role === 'agent')
+  const managers = team.filter(t => t.role === 'manager')
+
   const formattedText = `Welcome to ${tenant.name} CRM
 
 Workspace URL:
@@ -671,7 +674,7 @@ Owner Credentials:
 - User ID: ${owner.login_id || owner.email}
 - Password: ${initialPassword}
 
-${team.length > 0 ? `Team Member Credentials:\n${team.map(t => `- ${t.name} (${t.role === 'agent' ? 'Sales Executive' : 'Manager'}): User ID: ${t.loginId || t.email} | Password: ${t.password}`).join('\n')}\n\n` : ''}Installed PWA:
+${managers.length > 0 ? `Managers Credentials:\n${managers.map(t => `- ${t.name}: User ID: ${t.loginId || t.email} | Password: ${t.password}`).join('\n')}\n\n` : ''}${agents.length > 0 ? `Sales Executives Credentials:\n${agents.map(t => `- ${t.name}: User ID: ${t.loginId || t.email} | Password: ${t.password}`).join('\n')}\n\n` : ''}Installed PWA:
 Open https://${window.location.host}/${tenant.slug} on your phone browser and tap "Add to Home Screen".`
 
   const copyToClipboard = () => {
