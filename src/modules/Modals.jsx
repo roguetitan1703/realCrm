@@ -38,6 +38,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'editLead' && <LeadForm store={store} leadId={m.leadId} />}
       {m?.kind === 'editRecord' && <ModuleFormModal store={store} moduleId={m.moduleId} recordId={m.recordId} />}
       {m?.kind === 'assign' && <AssignModal store={store} leadId={m.leadId} />}
+      {m?.kind === 'bulkAssign' && <BulkAssignModal store={store} leadIds={m.leadIds} onDone={m.onDone} />}
       {m?.kind === 'reassign' && <ReassignModal store={store} fromId={m.fromId} />}
       {m?.kind === 'addAgent' && <AddAgentModal store={store} />}
       {m?.kind === 'contact' && <ContactConfirmModal store={store} channel={m.channel} name={m.name} phone={m.phone} waText={m.waText} recordType={m.recordType} recordId={m.recordId} />}
@@ -671,6 +672,47 @@ function AssignModal({ store, leadId }) {
             <span style={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: 13.5 }}>{a.first}</span>
             {!l?.agentId && sugg?.id === a.id && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-wash)', borderRadius: 4, padding: '2px 6px' }}>SUGGESTED</span>}
             {l?.agentId === a.id && <Icon name="check" style={{ color: 'var(--accent)' }} />}
+          </button>
+        ))}
+      </div>
+    </Modal>
+  )
+}
+
+// ---- Bulk assign: the same route AssignModal uses (bulkAssignLeads), just
+// with more than one id. One code path for one row and for a whole selection,
+// rather than a loop of single-lead assigns from the client. ----
+function BulkAssignModal({ store, leadIds = [], onDone }) {
+  const [busy, setBusy] = useState(false)
+  const n = leadIds.length
+  const assign = (agentId) => {
+    setBusy(true)
+    api.bulkAssignLeads(leadIds, agentId)
+      .then(res => {
+        if (res?.success) {
+          store.toast(agentId ? `${res.assigned ?? n} lead${n === 1 ? '' : 's'} assigned` : `${res.assigned ?? n} lead${n === 1 ? '' : 's'} unassigned`)
+          store.reloadServer?.()
+          onDone?.()
+          store.closeModal()
+        } else {
+          store.toast(res?.message || 'Could not assign', 'warn')
+          setBusy(false)
+        }
+      })
+      .catch(err => { store.toast(err.message || 'Could not assign', 'warn'); setBusy(false) })
+  }
+  return (
+    <Modal title={`Assign ${n} lead${n === 1 ? '' : 's'}`} onClose={store.closeModal} width={400}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <button disabled={busy} onClick={() => assign(null)}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 9, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+          <span style={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: 13.5 }}>Unassign</span>
+        </button>
+        {store.activeAgents().map(a => (
+          <button key={a.id} disabled={busy} onClick={() => assign(a.id)}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 9, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+            <Avatar agent={a} size="sm" />
+            <span style={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: 13.5 }}>{a.first}</span>
           </button>
         ))}
       </div>

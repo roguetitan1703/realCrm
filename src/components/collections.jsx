@@ -297,14 +297,136 @@ export function ModuleCards({ def, rows, store, onOpen }) {
 }
 
 // ---- ModuleTable: renders a definition's columns[] against records. ----
-export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort }) {
-  const columns = def.columns.map(c => ({ key: c.key, label: c.label, sortable: c.sortable }))
-  const tableRows = rows.map(rec => ({
-    id: rec.id || rec._id,
-    onClick: onOpen ? () => onOpen(rec) : undefined,
-    cells: def.columns.map(c => c.render ? c.render(rec, store) : getNestedValue(rec, c.key)),
-  }))
+// `selectable` + `selectedIds`/`onSelectionChange` add an optional leading
+// checkbox column (header select-all-on-this-page, shift-click range select).
+// `def.rowActions(record, store, ctx)` — if the definition declares it — adds
+// a trailing actions column. Both are opt-in per module, driven entirely by
+// what the caller passes, so a module that doesn't need them renders exactly
+// the plain table it always did.
+export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort, selectable, selectedIds, onSelectionChange }) {
+  const lastIndex = useRef(null)
+  const selected = selectedIds || new Set()
+  const allOn = selectable && rows.length > 0 && rows.every(r => selected.has(r.id || r._id))
+  const someOn = selectable && rows.some(r => selected.has(r.id || r._id))
+
+  const toggleAll = () => {
+    if (!onSelectionChange) return
+    onSelectionChange(allOn ? new Set() : new Set(rows.map(r => r.id || r._id)))
+  }
+  // Shift-click extends the last click into a range, same on/off state as the
+  // row that was shift-clicked — the affordance every spreadsheet-like table
+  // already trains people to expect.
+  const toggleRow = (id, idx, shiftKey) => {
+    if (!onSelectionChange) return
+    const next = new Set(selected)
+    if (shiftKey && lastIndex.current != null) {
+      const [from, to] = [lastIndex.current, idx].sort((a, b) => a - b)
+      const turnOn = !next.has(id)
+      for (let i = from; i <= to; i++) {
+        const rid = rows[i]?.id || rows[i]?._id
+        if (rid == null) continue
+        if (turnOn) next.add(rid); else next.delete(rid)
+      }
+    } else {
+      next.has(id) ? next.delete(id) : next.add(id)
+    }
+    lastIndex.current = idx
+    onSelectionChange(next)
+  }
+
+  const columns = [
+    ...(selectable ? [{ key: '__select', label: (
+      <input type="checkbox" checked={allOn} ref={el => { if (el) el.indeterminate = !allOn && someOn }} onChange={toggleAll} onClick={e => e.stopPropagation()} />
+    ), sortable: false }] : []),
+    ...def.columns.map(c => ({ key: c.key, label: c.label, sortable: c.sortable })),
+    ...(def.rowActions ? [{ key: '__actions', label: '', sortable: false }] : []),
+  ]
+  const tableRows = rows.map((rec, idx) => {
+    const id = rec.id || rec._id
+    return {
+      id,
+      onClick: onOpen ? () => onOpen(rec) : undefined,
+      cells: [
+        ...(selectable ? [
+          <input key="__sel" type="checkbox" checked={selected.has(id)} onClick={e => e.stopPropagation()}
+            onChange={e => toggleRow(id, idx, !!e.nativeEvent.shiftKey)} />
+        ] : []),
+        ...def.columns.map(c => c.render ? c.render(rec, store) : getNestedValue(rec, c.key)),
+        ...(def.rowActions ? [
+          <span key="__act" className="row-actions" onClick={e => e.stopPropagation()}>{def.rowActions(rec, store, { onOpen })}</span>
+        ] : []),
+      ],
+    }
+  })
   return <Table columns={columns} rows={tableRows} sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+}
+
+// ---- SelectDropdown: a labelled single-value dropdown (lead type, status…). ----
+// Same popover system as SortControl/FilterBar so a third control still reads
+// as the same toolbar language, not a bespoke widget.
+export function SelectDropdown({ value, options, onChange, label, align }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+  const active = options.find(o => o.value === value)
+  return (
+    <div className="seldd" ref={ref}>
+      <button className={'seldd-btn' + (open ? ' open' : '')} onClick={() => setOpen(o => !o)}>
+        <span className="seldd-l">{label}</span>
+        <span className="seldd-v">{active?.label ?? value}</span>
+        <Icon name="chevDown" size={14} className="seldd-cv" />
+      </button>
+      {open && (
+        <div className={'popover seldd-pop' + (align === 'right' ? ' right' : '')}>
+          {options.map(o => (
+            <button key={o.value} className={'p-item' + (o.value === value ? ' on' : '')} onClick={() => { onChange(o.value); setOpen(false) }}>
+              <span className="fvp-lbl">{o.label}</span>
+              {o.count != null && <span className="count-badge">{o.count}</span>}
+              {o.value === value && <Icon name="check" size={15} className="ic p-chk" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- QuickAssignMenu: assign/unassign one record from a row, no modal. ----
+// Reuses bulkAssignLeads with a single id — one code path for one row and for
+// a whole selection, rather than a separate single-assign endpoint.
+export function QuickAssignMenu({ agents, currentId, onAssign }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+  return (
+    <div className="qam" ref={ref}>
+      <button className={'qam-btn' + (open ? ' open' : '')} title="Quick assign" onClick={() => setOpen(o => !o)}>
+        <Icon name="userPlus" size={14} />
+      </button>
+      {open && (
+        <div className="popover qam-pop right">
+          <button className={'p-item' + (!currentId ? ' on' : '')} onClick={() => { onAssign(null); setOpen(false) }}>
+            Unassign
+          </button>
+          {agents.map(a => (
+            <button key={a.id} className={'p-item' + (currentId === a.id ? ' on' : '')} onClick={() => { onAssign(a.id); setOpen(false) }}>
+              {a.first}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // Value picker popover for a filter field. Long option lists (localities,

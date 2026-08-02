@@ -513,6 +513,33 @@ input,textarea,select{font-family:inherit}
   color:var(--muted);cursor:pointer;transition:background .12s,color .12s,border-color .12s}
 .sortc-diropt:hover{background:var(--card-2);color:var(--ink)}
 .sortc-diropt.on{background:var(--accent-wash);border-color:var(--accent-line);color:var(--accent-ink)}
+/* Standalone labelled dropdown (lead type, status…) — same trigger language
+   as SortControl but fully rounded since it has no split direction button. */
+.seldd{position:relative;display:inline-flex}
+.seldd-btn{display:inline-flex;align-items:center;gap:7px;height:var(--ctrl-h,34px);border:1px solid var(--line);
+  border-radius:var(--radius);background:var(--card);padding:0 11px;cursor:pointer;font-family:var(--sans);
+  color:var(--ink);transition:background .12s,border-color .12s}
+.seldd-btn:hover{background:var(--card-2)}
+.seldd-btn.open{border-color:var(--accent);background:var(--card-2)}
+.seldd-btn .seldd-l{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);font-weight:600}
+.seldd-btn .seldd-v{font-size:13px;font-weight:600;color:var(--ink)}
+.seldd-btn .seldd-cv{color:var(--muted);margin-left:1px;transition:transform .15s}
+.seldd-btn.open .seldd-cv{transform:rotate(180deg)}
+.seldd-pop{min-width:200px;max-height:340px;overflow-y:auto}
+.leads-dd-row{display:flex;align-items:center;gap:8px;margin-right:12px}
+
+/* Row-level quick assign menu (table actions column) */
+.row-actions{display:inline-flex;align-items:center;gap:6px}
+.qam{position:relative;display:inline-flex}
+.qam-btn{width:28px;height:28px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink-2);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s,border-color .12s,color .12s}
+.qam-btn:hover,.qam-btn.open{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-wash)}
+.qam-pop{min-width:170px}
+
+/* Selection bar — shown above the list only while rows are checked */
+.selbar{display:flex;align-items:center;gap:10px;background:var(--accent-wash);border:1px solid var(--accent-line);
+  color:var(--accent-ink);border-radius:var(--radius-lg);padding:9px 12px;font-size:13px;font-weight:600;margin-top:10px}
+
 .viewsw{display:inline-flex;height:var(--ctrl-h,34px);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
 .viewsw button{border:none;background:var(--card);padding:0 10px;cursor:pointer;color:var(--muted);display:flex;align-items:center;border-left:1px solid var(--line);transition:background .12s,color .12s}
 .viewsw button:first-child{border-left:none}

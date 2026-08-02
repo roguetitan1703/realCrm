@@ -52,15 +52,23 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const [view, setView] = useState('list')
   const [seg, setSeg] = useState('all')
   const [intent, setIntent] = useState('all')
+  const [stage, setStage] = useState('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const setFltP = (v) => { setFlt(v); setPage(1) }
-  const setQP = (v) => { setQ(v); setPage(1) }
+  // Which rows are checked, on the page currently shown. A Set of lead ids.
+  const [selected, setSelected] = useState(new Set())
+  const setFltP = (v) => { setFlt(v); setPage(1); setSelected(new Set()) }
+  const setQP = (v) => { setQ(v); setPage(1); setSelected(new Set()) }
   const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
   const setSortDirP = (v) => { setSortDir(v); setPage(1) }
-  const setSegP = (v) => { setSeg(v); setPage(1) }
-  const setIntentP = (v) => { setIntent(v); setPage(1) }
+  const setSegP = (v) => { setSeg(v); setPage(1); setSelected(new Set()) }
+  const setIntentP = (v) => { setIntent(v); setPage(1); setSelected(new Set()) }
+  const setStageP = (v) => { setStage(v); setPage(1); setSelected(new Set()) }
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
+  const setPageP = (v) => { setPage(v); setSelected(new Set()) }
+
+  const role = state.role
+  const canAssign = canAssignLead(role)
 
   // One page from the server. The agent's own-pipeline scope is applied in the
   // query, not by filtering an array here — a filter the client applies is a
@@ -71,10 +79,19 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
       limit: params.limit,
       q: params.q,
       segment: seg === 'all' ? undefined : seg,
-      intent: intent === 'all' ? undefined : intent
+      intent: intent === 'all' ? undefined : intent,
+      stage: stage === 'all' ? undefined : stage,
+      // The filter panel's own fields. useServerList spreads them into `params`;
+      // they used to stop here, so Source / Locality / Sales Executive / Needs
+      // attention changed the chip and nothing else.
+      source: params.source, locality: params.locality,
+      agent: params.agent, flag: params.flag,
+      // Ordering is done in SQL, so the sort headers have to reach SQL. They
+      // did not: clicking one flipped the arrow and re-fetched the same order.
+      sortKey: params.sortKey, sortDir: params.sortDir,
     }),
     { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
-    [state.dataAsOf, seg, intent],
+    [state.dataAsOf, seg, intent, stage],
   )
 
   const onOpen = (l) => go('leads', { leadId: l.id, leadOpen: true })
@@ -87,16 +104,23 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   // what the agent can actually see, so an agent's "Overdue 3" is their three.
   // Pill counts come from Postgres. They used to be `records.filter(...).length`
   // over every lead in the firm, which is the same number only while the whole
-  // collection is in the browser.
+  // collection is in the browser. No `?? counts.total` fallback — a segment
+  // with a real zero shows 0, not the grand total borrowed from another pill.
   const counts = useLeadsSummary(state.dataAsOf)
   const segs = (LEADS_DEF.segments || []).map(sg => ({
     key: sg.key,
     label: sg.label,
     tone: sg.tone,
     on: seg === sg.key,
-    count: counts[sg.key] ?? counts.total ?? 0,
+    count: counts[sg.key] ?? 0,
     onClick: () => setSegP(sg.key),
   }))
+
+  const bulkAssign = () => store.openModal({
+    kind: 'bulkAssign',
+    leadIds: [...selected],
+    onDone: () => setSelected(new Set()),
+  })
 
   const { header, toolbar, body } = ModuleListView({
     def: LEADS_DEF, source, store, onOpen,
@@ -104,48 +128,27 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     search: q, onSearch: setQP,
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
     segments: segs, view, onView: setView, phone,
-    page, onPage: setPage, pageSize, onPageSize: setPageSizeP,
+    page, onPage: setPageP, pageSize, onPageSize: setPageSizeP,
     leftAddon: (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 12 }}>
-        <button
-          type="button"
-          onClick={() => setIntentP('all')}
-          style={{
-            padding: '6px 14px', borderRadius: 8, fontWeight: 700, fontSize: 13, border: '1px solid var(--line)', cursor: 'pointer',
-            background: intent === 'all' ? 'var(--accent, #1E6F52)' : '#fff',
-            color: intent === 'all' ? '#fff' : 'var(--ink)'
-          }}
-        >
-          All Leads
-        </button>
-        <button
-          type="button"
-          onClick={() => setIntentP('buy')}
-          style={{
-            padding: '6px 14px', borderRadius: 8, fontWeight: 700, fontSize: 13, border: '1px solid var(--line)', cursor: 'pointer',
-            background: intent === 'buy' ? 'var(--accent, #1E6F52)' : '#fff',
-            color: intent === 'buy' ? '#fff' : 'var(--ink)'
-          }}
-        >
-          Sale
-        </button>
-        <button
-          type="button"
-          onClick={() => setIntentP('rent')}
-          style={{
-            padding: '6px 14px', borderRadius: 8, fontWeight: 700, fontSize: 13, border: '1px solid var(--line)', cursor: 'pointer',
-            background: intent === 'rent' ? 'var(--accent, #1E6F52)' : '#fff',
-            color: intent === 'rent' ? '#fff' : 'var(--ink)'
-          }}
-        >
-          Rent
-        </button>
+      <div className="leads-dd-row">
+        <SelectDropdown
+          label="Type" value={intent} onChange={setIntentP}
+          options={[{ value: 'all', label: 'All' }, { value: 'buy', label: 'Sale' }, { value: 'rent', label: 'Rent' }]}
+        />
+        <SelectDropdown
+          label="Status" value={stage} onChange={setStageP}
+          options={[
+            { value: 'all', label: 'All' },
+            ...LEAD_STATUSES.map(s => ({ value: s, label: s, count: counts.byStage?.[s] ?? 0 })),
+          ]}
+        />
       </div>
     ),
     cta: { label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) },
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} />
-      : <ModuleTable def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP} />,
+      : <ModuleTable def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP}
+          selectable={canAssign} selectedIds={selected} onSelectionChange={setSelected} />,
   })
 
   return (
@@ -157,6 +160,16 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
         actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import / Revert</Button>
       })}
       {header}
+      {/* Only rendered while there IS a selection, and only for a role that
+          may act on it — an agent's table never gains checkboxes to begin
+          with (ModuleTable's `selectable` is already gated on canAssign). */}
+      {canAssign && selected.size > 0 && (
+        <div className="selbar">
+          <span>{selected.size} selected</span>
+          <Button variant="primary" size="sm" onClick={bulkAssign}>Bulk assign</Button>
+          <Button variant="quiet" size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
+        </div>
+      )}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>
     </>
   )

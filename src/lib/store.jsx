@@ -876,9 +876,20 @@ export function StoreProvider({ children }) {
   //   optimistic(...) — paint first, undo on failure. Reserved for the two
   //                     interactions where the round trip is actually felt:
   //                     dragging a lead between stages and ticking a follow-up.
+  // The api client throws Error("API Error: 403 Forbidden — <server message>").
+  // A 403 on updateLead carries the one sentence that matters — why a sales
+  // executive can't rewrite this field — and wrapping it in "API Error: 403
+  // Forbidden —" is exactly the wrapper that hid it. Same fix Team.jsx already
+  // applies to its own errors; this is the store-wide equivalent, so every
+  // write (not just user management) shows the server's own words verbatim.
+  const cleanErrMsg = (err) => {
+    const m = String(err?.message || '')
+    const i = m.indexOf('—')
+    return i >= 0 ? m.slice(i + 1).trim() : (m.replace(/^API Error:\s*/, '') || '')
+  }
   const failed = useCallback((err, what) => {
     console.warn(`[${what}]`, err?.message || err)
-    toast(err?.message || `Could not save — ${what} failed`, 'warn')
+    toast(cleanErrMsg(err) || `Could not save — ${what} failed`, 'warn')
   }, [toast])
 
   // A 200 carrying `success: false` is still a refusal. Treat it as one.
