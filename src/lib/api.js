@@ -189,6 +189,12 @@ export const api = {
     if (res?.token) lsSet(ADMIN_TOKEN_KEY, res.token);
     return res;
   },
+  adminLogin: async (email, password) => {
+    const res = await request('/auth/superadmin/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    if (res?.token) lsSet(ADMIN_TOKEN_KEY, res.token);
+    return res;
+  },
+  adminLogout: () => lsSet(ADMIN_TOKEN_KEY, ''),
   adminOverview: () => request('/admin/overview', { headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   // Provision a workspace — SUPERADMIN only, sent with the admin token.
   adminOnboard: (config) => request('/admin/onboard', { method: 'POST', body: JSON.stringify(config), headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
