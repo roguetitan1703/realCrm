@@ -79,7 +79,7 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
   // The tab badge is one number, and the server already scopes it: an agent's
   // summary counts their own pipeline, an owner's counts the firm's. This used
   // to filter every lead in memory to produce it.
-  const { data: leadCounts } = useServerData(() => api.getLeadsSummary(), [state.dataAsOf], null)
+  const { data: leadCounts } = useServerData(() => api.getLeadsSummary(), [state.dataAsOf], null, '/leads/summary')
   const overdueN = leadCounts?.overdue || 0
 
   const tabs = {

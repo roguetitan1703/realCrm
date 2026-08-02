@@ -606,7 +606,7 @@ function AssignModal({ store, leadId }) {
   const l = store.lookup('lead', leadId)
   // round-robin suggestion = agent with fewest active leads. Counted in SQL:
   // "how many open leads does each agent have" needs no lead rows in the browser.
-  const { data: desk } = useServerData(() => api.getDeskSummary(), [], null)
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [], null, '/workspace/desk-summary')
   const counts = desk?.perAgent || {}
   const openFor = (id) => counts[id]?.open ?? 0
   const sugg = desk ? [...store.activeAgents()].sort((a, b) => openFor(a.id) - openFor(b.id))[0] : null
@@ -634,7 +634,7 @@ function ReassignModal({ store, fromId }) {
   const others = store.activeAgents().filter(a => a.id !== fromId)
   const [to, setTo] = useState(others[0]?.id)
   const [done, setDone] = useState(false)
-  const { data: desk } = useServerData(() => api.getDeskSummary(), [], null)
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [], null, '/workspace/desk-summary')
   const count = desk?.perAgent?.[fromId]?.open ?? 0
   const doIt = () => { store.reassignAll(fromId, to); setDone(true) }
   const toName = store.agentById(to)?.first

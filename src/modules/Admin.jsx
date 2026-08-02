@@ -476,6 +476,30 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
         {/* STEP 1: FIRM & OWNER CREDENTIALS */}
         {step === 1 && (
           <div>
+            <div style={{ marginBottom: 16 }}>
+              <Button size="sm" variant="ghost" onClick={() => setShowPasteBox(!showPasteBox)} style={{ border: '1px solid var(--line)', background: '#f9f8f6', width: '100%', justifyContent: 'center' }}>
+                {showPasteBox ? 'Hide Quick Paste Area' : 'Paste All Workspace & Roster Data in One Go'}
+              </Button>
+            </div>
+
+            {showPasteBox && (
+              <div style={{ background: '#f4f3ef', padding: 14, borderRadius: 10, border: '1px solid var(--line)', marginBottom: 18 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>
+                  Paste Workspace, Owner, and Team Roster Text
+                </label>
+                <textarea
+                  value={rawText}
+                  onChange={e => setRawText(e.target.value)}
+                  placeholder={`Firm: Bhumi PropCity\nCity: Pune\nOwner: Bhumi PropCity, bhumipropcity@gmail.com, 8983337303, 00000000\n\nVinod Goswami, vinod, vinod.bhumipropcity@gmail.com, 9172287808, agent, vinod123\nBinod Bishwakarma, binod, binodbhumipropcity@gmail.com, 9172361915, agent, binod123`}
+                  rows={6}
+                  style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid var(--line)', fontSize: 12, fontFamily: 'monospace', resize: 'vertical', marginBottom: 10 }}
+                />
+                <Button size="sm" variant="primary" onClick={() => { parsePastedRoster(); setShowPasteBox(false); }} disabled={!rawText.trim()}>
+                  Populate Form & Team Roster
+                </Button>
+              </div>
+            )}
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
               <Field label="Firm Name *">
                 <Input value={form.firmName} onChange={e => setF('firmName', e.target.value)} placeholder="e.g. BHUmi Real Estate" autoFocus />

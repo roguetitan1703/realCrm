@@ -12,7 +12,7 @@ export default function Dashboard({ store, go, topBar }) {
   // and this screen used to hold all of them in memory to produce a handful of
   // integers -- the clearest example in the app of downloading a book to read
   // its page count.
-  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null)
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null, '/workspace/desk-summary')
   const { data: overduePage } = useServerData(
     () => api.listLeads({ segment: 'overdue', limit: 12 }), [state.dataAsOf], { data: [] })
   const overdue = overduePage?.data || []

@@ -179,7 +179,7 @@ function UnitsTable({ units, onOpen }) {
 // this reads project rows directly instead of aggregating every unit in the
 // firm in the browser (which is what made this view require the collection).
 function ProjectGrid({ onOpen }) {
-  const { data, loading, error } = useServerData(() => api.listProjects(), [], { data: [] })
+  const { data, loading, error } = useServerData(() => api.listProjects(), [], { data: [] }, '/properties/projects')
   const rows = data?.data || []
   if (loading && !rows.length) return <div className="list-spin" role="status" aria-label="Loading"><span /></div>
   if (error) return <div className="detail-missing">Could not load projects.</div>

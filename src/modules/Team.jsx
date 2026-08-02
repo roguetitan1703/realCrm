@@ -48,7 +48,7 @@ export default function Team({ store, go, topBar }) {
 
   // Per-agent workload, counted in SQL. The roster is a table of integers and
   // it used to need every lead in the firm in memory to produce them.
-  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null)
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null, '/workspace/desk-summary')
   const perAgent = desk?.perAgent || {}
   const roster = state.agents.map(a => {
     const row = perAgent[a.id] || { open: 0, won: 0, overdue: 0, total: 0, byStage: {} }

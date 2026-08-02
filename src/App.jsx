@@ -99,7 +99,8 @@ export default function App() {
   const { data: desk } = useServerData(
     () => (state.loggedIn ? api.getDeskSummary() : Promise.resolve(null)),
     [state.dataAsOf, state.loggedIn],
-    null
+    null,
+    '/workspace/desk-summary',
   )
   const totals = desk?.leads || { total: 0, overdue: 0, unassigned: 0 }
   const newCount = desk?.byStage?.['New'] || 0
