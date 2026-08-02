@@ -37,96 +37,11 @@ export function DetailLayout({ children, rail }) {
 
 // ---- mobile shell: sticky top, scrolling body, sticky tab bar ----
 // `framed` wraps it in a phone device frame (for viewing on desktop).
-export function MobileShell({ top, children, tabs, fab, actionBar, framed, modals, onRefresh }) {
-  const [pullDist, setPullDist] = useState(0)
-  const [refreshing, setRefreshing] = useState(false)
-  const startY = useRef(0)
-  const bodyRef = useRef(null)
-
-  const handleTouchStart = (e) => {
-    if (bodyRef.current && bodyRef.current.scrollTop <= 0) {
-      startY.current = e.touches[0].clientY
-    } else {
-      startY.current = 0
-    }
-  }
-
-  const handleTouchMove = (e) => {
-    if (!startY.current || refreshing) return
-    const diff = e.touches[0].clientY - startY.current
-    if (diff > 0 && bodyRef.current && bodyRef.current.scrollTop <= 0) {
-      setPullDist(Math.min(diff * 0.45, 65))
-    } else {
-      setPullDist(0)
-    }
-  }
-
-  const handleTouchEnd = async () => {
-    if (pullDist >= 45 && !refreshing) {
-      setRefreshing(true)
-      setPullDist(55)
-      try {
-        if (onRefresh) await Promise.resolve(onRefresh())
-      } catch (e) {}
-      setTimeout(() => {
-        setRefreshing(false)
-        setPullDist(0)
-      }, 500)
-    } else {
-      setPullDist(0)
-    }
-    startY.current = 0
-  }
-
-  const activeDist = refreshing ? 55 : pullDist
-  const progress = Math.min(pullDist / 45, 1)
-
+export function MobileShell({ top, children, tabs, fab, actionBar, framed, modals }) {
   const shell = (
-    <div className="app-mobile" style={{ position: 'relative' }}>
+    <div className="app-mobile">
       {top}
-      {activeDist > 0 && (
-        <div style={{
-          position: 'absolute',
-          top: 54,
-          left: '50%',
-          transform: `translateX(-50%) translateY(${Math.min(activeDist - 36, 20)}px)`,
-          zIndex: 99,
-          width: 36,
-          height: 36,
-          borderRadius: '50%',
-          background: 'var(--card, #ffffff)',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-          border: '1px solid var(--line, #e5e3dd)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          pointerEvents: 'none'
-        }}>
-          <div style={{
-            transform: refreshing ? 'none' : `rotate(${progress * 270}deg)`,
-            animation: refreshing ? 'crm-spin 0.75s cubic-bezier(0.4, 0, 0.2, 1) infinite' : 'none',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--accent, #1E6F52)'
-          }}>
-            <Icon name="refresh" size={18} />
-          </div>
-        </div>
-      )}
-      <div
-        className="m-body"
-        ref={bodyRef}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        style={{
-          transform: activeDist > 0 ? `translateY(${activeDist * 0.35}px)` : 'none',
-          transition: (refreshing || pullDist === 0) ? 'transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1)' : 'none'
-        }}
-      >
-        {children}
-      </div>
+      <div className="m-body">{children}</div>
       {fab}
       {actionBar}
       {tabs && <TabBar {...tabs} />}
