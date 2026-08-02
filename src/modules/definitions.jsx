@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA } from
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { QuickAssignMenu } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, budgetRange, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel } from '../lib/format.js'
+import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -130,7 +130,7 @@ export const LEADS_DEF = {
 
   sortOptions: [
     { key: 'activity', label: 'Last activity', value: (l) => l.minsAgo || 0 },
-    { key: 'budget', label: 'Budget', value: (l) => l.req?.budgetMax || 0 },
+    { key: 'budget', label: 'Budget', value: (l) => budgetOf(l.req).max || 0 },
     { key: 'name', label: 'Name', value: (l) => (l.name || '').toLowerCase() },
     { key: 'stage', label: 'Stage', value: (l, store) => (store.state.settings.stages || []).indexOf(l.stage) },
   ],

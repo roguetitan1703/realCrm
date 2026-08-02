@@ -944,7 +944,10 @@ button.btn-ghost.fu-done{color:var(--accent)}
 .nav .n-sub-item.on .n-sub-count{background:var(--accent);color:#fff}
 
 /* ---- PageHeader: lean in-page strip (KPIs + scope segments) ---- */
-.pagehead{display:flex;align-items:center;gap:20px;padding:16px 22px 4px;flex-wrap:wrap}
+.pagehead{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:16px 22px 4px}
+.ph-row{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+/* The pills sit on their own line, left-aligned under the controls. */
+.ph-segrow{gap:10px}
 .ph-stats{display:inline-flex;align-items:center;gap:28px}
 .ph-stat{position:relative;display:inline-flex;align-items:baseline;gap:7px;border:none;background:transparent;padding:0;text-align:left;font-family:inherit}
 /* subtle divider between stats — a hairline, not a box */
@@ -1978,10 +1981,12 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
    --------------------------------------------------------------------------- */
 
 /* Segment pills scroll sideways instead of wrapping into four stacked rows. */
-.app-mobile .pagehead{padding:10px 12px 0;gap:10px}
+.app-mobile .pagehead{padding:10px 12px 0;gap:8px}
 /* The spacer that pushes pills to the right of the KPIs on the desk has no
    KPIs to sit beside here — left in, it eats the width the pills need. */
 .app-mobile .pagehead .u-spring{display:none}
+/* The pill row is a single sideways-scrolling strip, so it must not wrap. */
+.app-mobile .ph-segrow{flex-wrap:nowrap}
 .app-mobile .segpills{flex:1;min-width:0;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px}
 .app-mobile .segpills::-webkit-scrollbar{display:none}
 .app-mobile .segpill{flex-shrink:0}

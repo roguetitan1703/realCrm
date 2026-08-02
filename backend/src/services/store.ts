@@ -1350,11 +1350,19 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   }
 
   const name = leadData.name || 'New Inquiry';
-  const phone = leadData.phone || '+910000000000';
+  // Null, not a placeholder number. This defaulted to '+910000000000', which
+  // the screens read as "this lead has a phone" — so Call and WhatsApp rendered
+  // and dialled it. A lead with no number shows no way to ring one.
+  const phone = leadData.phone || null;
   const email = leadData.email || null;
   const stage = leadData.stage || 'New';
   const source = leadData.source || 'Website';
-  const req = leadData.req || { locality: 'Wakad', config: '2 BHK', budgetLabel: '₹80L' };
+  // No invented requirement. This defaulted to { locality: 'Wakad', config:
+  // '2 BHK', budgetLabel: '₹80L' } — so every lead captured without one (a
+  // webhook, a quick add, a phone number jotted down mid-call) was born
+  // claiming to want a 2 BHK in Wakad at ₹80L, and then got matched against
+  // inventory on that basis. An unknown requirement is unknown.
+  const req = leadData.req || {};
   const notes = leadData.notes || [];
   const shortlist = leadData.shortlist || [];
   const feedback = leadData.feedback || {};
@@ -1363,8 +1371,11 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const deal = leadData.deal || req.deal || (leadData.purpose === 'Lease' ? 'rent' : 'sale');
   const requirement = leadData.requirement ?? req.config ?? null;
   const locality = leadData.locality ?? req.locality ?? null;
-  const budgetMin = digits(leadData.budgetMin ?? leadData.budget_min ?? req.minBudget);
-  const budgetMax = digits(leadData.budgetMax ?? leadData.budget_max ?? req.maxBudget);
+  // `req.budgetMin` is the other spelling of the same field. Webhook mappings
+  // already saved against it would otherwise drop an inbound enquiry's budget
+  // silently — accepted here so those connections keep working unchanged.
+  const budgetMin = digits(leadData.budgetMin ?? leadData.budget_min ?? req.minBudget ?? req.budgetMin);
+  const budgetMax = digits(leadData.budgetMax ?? leadData.budget_max ?? req.maxBudget ?? req.budgetMax);
   const purpose = leadData.purpose ?? req.purpose ?? null;
   // A lead carries TWO unrelated things called "timeline":
   //   • `lead.timeline`      — the event history, an ARRAY of {type,label,ago}

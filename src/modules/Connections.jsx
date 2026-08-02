@@ -236,8 +236,11 @@ const TARGETS = [
   { key: 'req.deal', label: 'Deal type (sale or rent)' },
   { key: 'req.locality', label: 'Locality' },
   { key: 'req.config', label: 'Configuration' },
-  { key: 'req.budgetMin', label: 'Budget from' },
-  { key: 'req.budgetMax', label: 'Budget to' },
+  // minBudget/maxBudget, not budgetMin/budgetMax — createLead reads the former.
+  // Mapped the other way round, an inbound enquiry's budget landed in a key
+  // nothing reads and the lead was created with no budget at all.
+  { key: 'req.minBudget', label: 'Budget from' },
+  { key: 'req.maxBudget', label: 'Budget to' },
   { key: 'req.notes', label: 'Message' },
   { key: 'external_id', label: 'Their reference' },
 ]

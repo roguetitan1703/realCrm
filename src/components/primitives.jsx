@@ -313,8 +313,13 @@ export function Kpi({ icon, label, value, sub, alert, onClick }) {
 // segments: [{ key, label, count, on, onClick }]  (scope selector, NOT a filter)
 export function PageHeader({ kpis = [], segments, leftAddon, right }) {
   if (!kpis.length && !segments && !leftAddon && !right) return null
-  return (
-    <div className="pagehead">
+  // Two rows, not one. The pills are a different kind of control from the
+  // dropdowns beside them — the dropdowns narrow a field, the pills jump to a
+  // working bucket — and on one line they read as more of the same row of
+  // buttons, which is exactly how the leads toolbar became a wall. Row one is
+  // the controls, row two is the buckets.
+  const top = (leftAddon || kpis.length > 0 || right) && (
+    <div className="ph-row">
       {leftAddon}
       {kpis.length > 0 && (
         <div className="ph-stats">
@@ -329,8 +334,13 @@ export function PageHeader({ kpis = [], segments, leftAddon, right }) {
         </div>
       )}
       <div className="u-spring" />
-      {segments && <SegmentPills segments={segments} />}
       {right}
+    </div>
+  )
+  return (
+    <div className="pagehead">
+      {top}
+      {segments && <div className="ph-row ph-segrow"><SegmentPills segments={segments} /></div>}
     </div>
   )
 }

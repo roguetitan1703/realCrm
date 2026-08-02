@@ -58,12 +58,36 @@ export function parseBudgetNum(v) {
   return Number(s)
 }
 
+/**
+ * A requirement's budget, whichever way it is spelled.
+ *
+ * There are two spellings in this codebase and only one of them is real. The
+ * dataset, the import schema, the lead form and the server (rowToLead) all
+ * write `minBudget` / `maxBudget`. The code that READS a budget — the range
+ * label, the fit reasons, both match scorers — asked for `budgetMin` /
+ * `budgetMax`, which nothing has ever set.
+ *
+ * So every budget comparison in the product was against `undefined`: NaN, false,
+ * "above budget", every time. One accessor, tolerant of both, so the two
+ * spellings can never disagree again.
+ */
+export function budgetOf(req) {
+  if (!req) return { min: NaN, max: NaN }
+  return {
+    min: parseBudgetNum(req.minBudget ?? req.budgetMin),
+    max: parseBudgetNum(req.maxBudget ?? req.budgetMax),
+  }
+}
+
 export function budgetRange(req) {
   if (!req) return '—'
   if (typeof req === 'string') return req
-  let min = parseBudgetNum(req.budgetMin), max = parseBudgetNum(req.budgetMax)
+  let { min, max } = budgetOf(req)
   if (isNaN(min) || isNaN(max) || (min === 0 && max === 0)) {
-    return req.budget || req.budgetLabel || '₹85L–₹1.2Cr'
+    // A lead with no budget shows no budget. This used to end in the literal
+    // '₹85L–₹1.2Cr' — an invented figure, rendered as fact, on every row of the
+    // table at once. Money is the last thing that should ever be guessed.
+    return req.budget || req.budgetLabel || '—'
   }
   if (req.deal === 'rent') {
     return '₹' + Math.round(min / 1000) + '–' + Math.round(max / 1000) + 'k/mo'
@@ -101,9 +125,13 @@ export function fitReasons(p, req) {
   if (p.type === req.config) { reasons.push({ ok: true, t: 'Config matches (' + p.type + ')' }); score += 25 }
   if (p.locality === req.locality) { reasons.push({ ok: true, t: 'Same locality · ' + req.locality }); score += 30 }
   else { reasons.push({ ok: false, t: 'Different area (' + p.locality + ')' }); score += 8 }
-  const inB = p.price >= req.budgetMin * 0.95 && p.price <= req.budgetMax * 1.08
+  const { min: bMin, max: bMax } = budgetOf(req)
+  const inB = p.price >= bMin * 0.95 && p.price <= bMax * 1.08
   if (inB) { reasons.push({ ok: true, t: 'Within budget' }); score += 30 }
-  else if (p.price < req.budgetMin) { reasons.push({ ok: true, t: 'Under budget — room to negotiate' }); score += 18 }
+  else if (p.price < bMin) { reasons.push({ ok: true, t: 'Under budget — room to negotiate' }); score += 18 }
+  // No budget on record is not the same as over budget, and saying so put
+  // "Above budget" on every match the product has ever shown.
+  else if (isNaN(bMin) || isNaN(bMax)) { score += 12 }
   else { reasons.push({ ok: false, t: 'Above budget' }); score += 5 }
   if (p.possession === 'Immediate') { reasons.push({ ok: true, t: 'Ready to move' }); score += 10 }
   if (p.status === 'Available') score += 5

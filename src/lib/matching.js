@@ -1,4 +1,5 @@
 import { isOpen } from '../data/leadStatus.js'
+import { budgetOf } from './format.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import { DEFAULT_FOLLOWUPS, fillTemplate, PLACEHOLDERS } from '../data/followUpTemplates.js'
@@ -17,9 +18,14 @@ export function matchesForLead(lead, allProps = []) {
     .map(p => {
       let score = 0; const fit = []
       if (p.locality === r.locality) { score += 3; fit.push(r.locality) }
-      const inBudget = p.price >= r.budgetMin * 0.95 && p.price <= r.budgetMax * 1.08
+      // budgetOf() reads whichever spelling the record carries — see its note.
+      // This compared against r.budgetMin, which no lead has, so `inBudget` was
+      // false for every property and the +3 it is worth was never awarded. With
+      // the threshold at >= 3, that alone decided which matches appeared.
+      const { min: bMin, max: bMax } = budgetOf(r)
+      const inBudget = p.price >= bMin * 0.95 && p.price <= bMax * 1.08
       if (inBudget) { score += 3; fit.push('in budget') }
-      else if (p.price < r.budgetMin) { score += 1; fit.push('under budget') }
+      else if (p.price < bMin) { score += 1; fit.push('under budget') }
       if (p.status === 'Available') score += 1
       // Compared against 'Immediate', which is not a POSSESSION value — so
       // this never fired once and no match ever showed "ready to move".
@@ -38,9 +44,10 @@ export function leadsForProperty(property, allLeads = []) {
     .map(l => {
       let score = 0; const fit = []
       if (l.req.locality === property.locality) { score += 3; fit.push(l.req.locality) }
-      const inBudget = property.price >= l.req.budgetMin * 0.95 && property.price <= l.req.budgetMax * 1.08
+      const { min: bMin, max: bMax } = budgetOf(l.req)
+      const inBudget = property.price >= bMin * 0.95 && property.price <= bMax * 1.08
       if (inBudget) { score += 3; fit.push('budget fits') }
-      else if (property.price < l.req.budgetMin) { score += 1; fit.push('under their budget') }
+      else if (property.price < bMin) { score += 1; fit.push('under their budget') }
       return { lead: l, _score: score, fitLine: fit.slice(0, 2).join(' · ') }
     })
     .filter(x => x._score >= 3)
