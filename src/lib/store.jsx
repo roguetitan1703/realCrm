@@ -1223,8 +1223,9 @@ export function StoreProvider({ children }) {
       if (typeof window !== 'undefined') {
         try {
           window.localStorage?.removeItem('crm_auth_session')
-          if (window.location.search) {
-            window.history.replaceState({}, document.title, window.location.pathname)
+          const currentSlug = slugFromLocation() || window.localStorage?.getItem('crm_tenant_id')
+          if (currentSlug) {
+            window.history.replaceState({}, document.title, `/${currentSlug}`)
           }
         } catch (e) {}
       }

@@ -105,20 +105,25 @@ export default function Login({ store }) {
     }
   }
 
-  // Auto-enter the workspace named in the URL path (baseurl/<slug>) on first
-  // load. A `/<slug>/reset?token=` link jumps straight to the reset form.
+  // Auto-enter the workspace named in the URL path (baseurl/<slug>), query parameter,
+  // or stored tenant id (PWA / previous session) on mount.
   useEffect(() => {
     const parts = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')
     const seg = decodeURIComponent(parts[0] || '')
     const token = new URLSearchParams(window.location.search).get('token')
-    if (seg && seg !== 'admin') {
-      if (parts[1] === 'reset' && token) { setResetToken(token); selectWorkspace(seg, 'reset') }
-      else selectWorkspace(seg)
+    const queryWs = new URLSearchParams(window.location.search).get('ws')
+    const storedSlug = slugFromLocation() || (typeof localStorage !== 'undefined' ? localStorage.getItem('crm_tenant_id') : '')
+    const targetSlug = (seg && seg !== 'admin') ? seg : (queryWs || storedSlug)
+
+    if (targetSlug) {
+      if (parts[1] === 'reset' && token) { setResetToken(token); selectWorkspace(targetSlug, 'reset') }
+      else selectWorkspace(targetSlug)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const leaveWorkspace = () => {
+    if (isStandalone()) return // Installed PWA is locked to its firm
     setWs(null)
     setPhase('workspace')
     setPassword(''); setHandle('')
