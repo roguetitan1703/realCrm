@@ -47,15 +47,15 @@ export default function Login({ store }) {
   const [wsInput, setWsInput] = useState('')
   const [ws, setWs] = useState(null) // resolved workspace, or null = platform identity
   const [resolving, setResolving] = useState(false)
-  const [rememberMe, setRememberMe] = useState(() => {
-    if (typeof localStorage === 'undefined') return true
-    return localStorage.getItem('crm_remember_me') !== 'false'
+  const [savedUser, setSavedUser] = useState(() => {
+    if (typeof localStorage === 'undefined') return null
+    try {
+      const str = localStorage.getItem('crm_pwa_last_user')
+      return str ? JSON.parse(str) : null
+    } catch (e) { return null }
   })
   // Credentials: handle = an email (owner/manager) or an assigned login ID (agent).
-  const [handle, setHandle] = useState(() => {
-    if (typeof localStorage === 'undefined') return ''
-    return localStorage.getItem('crm_remembered_handle') || ''
-  })
+  const [handle, setHandle] = useState(() => savedUser?.handle || '')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   // First-login change + reset flows.
@@ -147,17 +147,14 @@ export default function Login({ store }) {
     try {
       const res = await api.login(handle.trim(), password)
       if (!res?.token) throw new Error('no token')
-      if (rememberMe) {
-        try {
-          localStorage.setItem('crm_remembered_handle', handle.trim())
-          localStorage.setItem('crm_remember_me', 'true')
-        } catch (e) {}
-      } else {
-        try {
-          localStorage.removeItem('crm_remembered_handle')
-          localStorage.setItem('crm_remember_me', 'false')
-        } catch (e) {}
-      }
+      try {
+        localStorage.setItem('crm_pwa_last_user', JSON.stringify({
+          name: res.user?.name || handle.trim(),
+          handle: handle.trim(),
+          initials: res.user?.initials || String(res.user?.name || handle).slice(0, 2).toUpperCase(),
+          avatar: res.user?.avatar || '',
+        }))
+      } catch (e) {}
       if (res.mustChange) { setPhase('change'); setNewPw(''); setNewPw2(''); store.toast('Set a new password to continue.', 'ok'); return }
       store.toast(`Welcome to ${ws?.firmName || 'your desk'}`, 'ok')
       store.login({ token: res.token, user: res.user, tenant: { firmName: ws?.firmName, city: ws?.city } })
@@ -487,31 +484,42 @@ export default function Login({ store }) {
             ) : phase === 'creds' ? (
               /* PHASE 1: PASSWORD SIGN-IN (email or agent ID) */
               <form onSubmit={doLogin}>
-                <div className="field" style={{ marginBottom: 16 }}>
-                  <label style={LBL}>ID or email</label>
-                  <div className="input-group">
-                    <input type="text" value={handle} onChange={e => setHandle(e.target.value)}
-                      placeholder="you@firm.com or your ID" autoFocus disabled={loading}
-                      autoCapitalize="none" autoCorrect="off" spellCheck={false}
-                      style={{ fontWeight: 600, fontSize: 15 }} />
+                {savedUser ? (
+                  /* Native App User Card */
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'var(--card-2, #f4f3ef)', borderRadius: 12, marginBottom: 18, border: '1px solid var(--line, #e5e3dd)' }}>
+                    <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'var(--accent, #1E6F52)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, flexShrink: 0 }}>
+                      {savedUser.initials || 'U'}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--ink, #1a1a1a)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{savedUser.name}</div>
+                      <div style={{ fontSize: 12, color: 'var(--muted, #666)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{savedUser.handle}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setSavedUser(null); setHandle(''); setPassword('') }}
+                      style={{ fontSize: 12, color: 'var(--accent, #1E6F52)', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600, padding: '4px 8px' }}
+                    >
+                      Use another
+                    </button>
                   </div>
-                </div>
+                ) : (
+                  <div className="field" style={{ marginBottom: 16 }}>
+                    <label style={LBL}>ID or email</label>
+                    <div className="input-group">
+                      <input type="text" value={handle} onChange={e => setHandle(e.target.value)}
+                        placeholder="you@firm.com or your ID" autoFocus disabled={loading}
+                        autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                        style={{ fontWeight: 600, fontSize: 15 }} />
+                    </div>
+                  </div>
+                )}
                 <div className="field" style={{ marginBottom: 10 }}>
                   <label style={LBL}>Password</label>
-                  <PwField value={password} onChange={e => setPassword(e.target.value)} placeholder="Your password" disabled={loading} />
+                  <PwField value={password} onChange={e => setPassword(e.target.value)} placeholder="Your password" autoFocus={Boolean(savedUser)} disabled={loading} />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--ink-2)', cursor: 'pointer', userSelect: 'none' }}>
-                    <input
-                      type="checkbox"
-                      checked={rememberMe}
-                      onChange={e => setRememberMe(e.target.checked)}
-                      style={{ width: 16, height: 16, accentColor: 'var(--accent, #1E6F52)', cursor: 'pointer' }}
-                    />
-                    <span>Remember my ID</span>
-                  </label>
+                <div style={{ textAlign: 'right', marginBottom: 18 }}>
                   <button type="button" className="btn-quiet"
-                    onClick={() => { setForgotEmail(handle.includes('@') ? handle : ''); setForgotSent(false); setPhase('forgot') }}
+                    onClick={() => { setForgotEmail(handle.includes('@') ? handle : (savedUser?.handle || '')); setForgotSent(false); setPhase('forgot') }}
                     style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600 }}>Forgot password?</button>
                 </div>
                 <Button variant="primary" block type="submit" disabled={loading} style={{ ...BTN, cursor: loading ? 'wait' : 'pointer' }}>

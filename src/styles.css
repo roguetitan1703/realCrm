@@ -941,9 +941,9 @@ button.btn-ghost.fu-done{color:var(--accent)}
    two things that must never move. One element measures the viewport; the
    shell takes what's left. dvh, not vh, so a collapsing URL bar doesn't
    overshoot. */
-html,body,#root{height:100%;width:100%;margin:0;padding:0;overscroll-behavior-y:auto}
-body{overscroll-behavior-y:auto;touch-action:manipulation}
-.viewport{position:fixed;inset:0;width:100%;height:100%;height:100dvh;max-height:100dvh;display:flex;flex-direction:column;overflow:hidden;overscroll-behavior-y:auto}
+html,body,#root{height:100%;width:100%;margin:0;padding:0;overflow:hidden;overscroll-behavior:none}
+body{overscroll-behavior:none;touch-action:manipulation}
+.viewport{position:fixed;inset:0;width:100%;height:100%;height:100dvh;max-height:100dvh;display:flex;flex-direction:column;overflow:hidden;overscroll-behavior:none}
 .viewport>.app-desktop,.viewport>.app-mobile{flex:1;min-height:0;height:100%}
 .app-desktop{display:flex;height:100dvh;overflow:hidden}
 .app-main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
@@ -963,7 +963,7 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .m-frame .app-mobile{height:100%}
 @media (max-width:520px){.m-frame-bg{padding:0}.m-frame{width:100%;height:100vh;border-radius:0;border:none}}
 
-.app-mobile{display:flex;flex-direction:column;height:100%;height:100dvh;max-height:100dvh;position:relative;background:var(--bg);overflow:hidden;transform:translateZ(0);overscroll-behavior-y:auto}
+.app-mobile{display:flex;flex-direction:column;height:100%;height:100dvh;max-height:100dvh;position:fixed;inset:0;background:var(--bg);overflow:hidden;transform:translateZ(0);overscroll-behavior:none}
 .m-frame .app-mobile{height:100%}
 .m-top{background:var(--chrome);color:#fff;padding:14px 15px;display:flex;align-items:center;gap:11px;flex-shrink:0;z-index:5}
 .m-top .n-mono{width:34px;height:34px;border-radius:8px;background:var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-weight:700;font-size:13px;flex-shrink:0;overflow:hidden}
@@ -975,7 +975,7 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .m-top .m-av{flex-shrink:0}
 /* The scroll container for whichever module is mounted. It carries no padding
    of its own — the module owns its layout, exactly as it does on the desk. */
-.m-body{flex:1;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;min-height:0;padding-bottom:calc(78px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;overscroll-behavior-y:auto}
+.m-body{flex:1;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;min-height:0;padding-bottom:calc(78px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
 .m-body.has-actionbar{padding-bottom:14px}
 /* The module's own top bar scrolls with nothing — it sticks to the top of the
    scroller, so a long list runs under its header instead of pushing it away. */
