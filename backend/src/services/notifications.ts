@@ -105,20 +105,15 @@ export async function markAllRead(userId: string): Promise<void> {
  * Periodically processes scheduled notifications (followup_due, site_visit_reminder, lead_stale_sla)
  * across all active tenants using the exact same notify() and notifyRoles() primitives.
  *
- * NOTE — both halves of this are currently inert, and deliberately left that way
- * rather than quietly switched on:
+ * lead_stale_sla is LIVE (see the block below for what it now reads).
  *
- *   1. followup_due reads `follow_up->>'due_at'`. Nothing in the codebase ever
- *      writes that key — the follow-up model stores {date, time, action} — so it
- *      selects nothing.
- *   2. lead_stale_sla matches `stage ILIKE 'New Inquiry'`, a status that was
- *      renamed to 'New' (see migrateLeadStatuses). It also read crm_leads
- *      .metadata, a column that did not exist, so it threw before reaching the
- *      loop anyway.
- *
- * Repointing either at the current vocabulary would immediately fire on the
- * entire historical backlog of a live desk, so that is a decision to make on
- * purpose, with a bound on how far back it looks — not a rename.
+ * followup_due is still inert and is left that way on purpose: it reads
+ * `follow_up->>'due_at'`, and nothing in the codebase writes that key — the
+ * follow-up model stores {date, time, action}, where `date` is a display string
+ * like 'Today'. Making it fire means deciding how to turn that into a real
+ * timestamp, which is a change to the follow-up model rather than to this
+ * query, and the desk already surfaces the same fact through `overdue` on
+ * Today and the dashboard.
  */
 // It ran a multi-query scan across every tenant on EVERY /pulse — which every
 // open tab polls every few seconds — to find nothing. Whatever it eventually
@@ -167,15 +162,36 @@ export async function processScheduledNotifications(): Promise<void> {
         `;
       }
 
-      // 2. lead_stale_sla (2-hour agent warning & 4-hour manager escalation)
+      // 2. lead_stale_sla — a lead nobody has moved off the arrival stage.
+      //
+      // Three things were wrong and all three were silent. It matched
+      // `stage ILIKE 'New Inquiry'`, a status renamed to 'New' long ago, so it
+      // selected nothing. It hardcoded 2h/4h while Settings → Follow-up SLA has
+      // carried a configurable "first response" window the whole time. And it
+      // had no lower bound, so the day it started matching it would have walked
+      // a desk's entire history alerting on leads nobody considers urgent.
+      const cfg = (await sql`
+        SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}
+      `)[0]?.value || {};
+      // The stage a lead ARRIVES in is the firm's first configured stage — not
+      // a literal, because Settings → Pipeline lets them rename it.
+      const arrivalStage = (Array.isArray(cfg.stages) && cfg.stages[0]) || 'New';
+      const agentHours = Math.max(Number(cfg.slaHours) || 24, 1);
+      const mgrHours = agentHours * 2;
+      // Only recent arrivals. Without this, turning the feature on notifies the
+      // whole backlog at once — a real desk has months of leads parked on the
+      // arrival stage that nobody needs paging about now. Scales with the SLA
+      // rather than being another hardcoded number.
+      const lookbackHours = mgrHours * 3;
       const staleLeads = await sql`
         SELECT id, name, agent_id, locality, created_at,
           COALESCE((metadata->>'sla_agent_notified')::boolean, false) AS agent_notified,
           COALESCE((metadata->>'sla_mgr_notified')::boolean, false) AS mgr_notified
         FROM crm_leads
         WHERE tenant_id = ${t}
-          AND stage ILIKE 'New Inquiry'
-          AND created_at <= NOW() - INTERVAL '2 hours'
+          AND stage = ${arrivalStage}
+          AND created_at <= NOW() - (${agentHours}::text || ' hours')::interval
+          AND created_at >= NOW() - (${lookbackHours}::text || ' hours')::interval
           AND (metadata->>'sla_mgr_notified') IS NULL
         LIMIT 30
       `;
@@ -184,13 +200,13 @@ export async function processScheduledNotifications(): Promise<void> {
         const hoursAge = (Date.now() - new Date(l.created_at).getTime()) / (1000 * 3600);
         const link = `?screen=leads&lead=${l.id}`;
 
-        if (hoursAge >= 2 && !l.agent_notified && l.agent_id) {
+        if (hoursAge >= agentHours && !l.agent_notified && l.agent_id) {
           notify({
             userId: l.agent_id,
             tenantId: t,
             type: 'lead_stale_sla',
             title: '⚠️ SLA Warning: Untouched Lead',
-            body: `${l.name} has been in New Inquiry for over 2 hours`,
+            body: `${l.name} has been in ${arrivalStage} for over ${agentHours}h`,
             link,
             push: true,
             toSelf: true
@@ -203,12 +219,12 @@ export async function processScheduledNotifications(): Promise<void> {
           `;
         }
 
-        if (hoursAge >= 4 && !l.mgr_notified) {
+        if (hoursAge >= mgrHours && !l.mgr_notified) {
           notifyRoles(['owner', 'manager'], {
             tenantId: t,
             type: 'lead_stale_sla',
             title: '🚨 SLA Escalation: Untouched Lead',
-            body: `${l.name} untouched in New Inquiry for >4 hours — action required`,
+            body: `${l.name} untouched in ${arrivalStage} for over ${mgrHours}h — action required`,
             link,
             push: true,
             toSelf: true
