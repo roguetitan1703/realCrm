@@ -344,16 +344,22 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
         const parts = line.split(/,|\t/).map(p => p.trim())
         if (parts.length >= 1) {
           let name = parts[0].replace(/^[\*\-\•\d\.\s]+/, '').replace(/^Full Name:\s*/i, '')
+          let loginId = parts[1] && !parts[1].includes('@') && !/^\d+$/.test(parts[1]) ? parts[1] : ''
           let email = parts.find(p => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p)) || ''
           let phone = parts.find(p => /^\+?\d{10,12}$/.test(p.replace(/\s+/g, ''))) || ''
+          let customPw = parts.find(p => /^[a-zA-Z0-9@#$]{5,20}$/.test(p) && p !== name && p !== loginId && p !== email && p !== phone && p !== 'agent' && p !== 'manager')
+          
+          const firstWord = name.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '') || 'user'
+          const autoPw = customPw || `${firstWord}123`
+
           if (name) {
             rows.push({
               name,
-              loginId: '',
+              loginId,
               email,
               phone: phone ? phone.replace(/\D/g, '').slice(-10) : '',
               role: 'agent',
-              password: form.ownerPassword.trim() || 'Bhumi@2026'
+              password: autoPw
             })
           }
         }
@@ -363,7 +369,10 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
         const phoneMatch = line.match(/(?:\+?91[\s\-]?)?(\d{10})/)
 
         if (nameMatch) {
-          if (curName) rows.push({ name: curName, loginId: '', email: curEmail, phone: curPhone, role: 'agent', password: form.ownerPassword.trim() || 'Bhumi@2026' })
+          if (curName) {
+            const firstWord = curName.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '') || 'user'
+            rows.push({ name: curName, loginId: '', email: curEmail, phone: curPhone, role: 'agent', password: `${firstWord}123` })
+          }
           curName = nameMatch[1].replace(/[\*]/g, '').trim()
           curEmail = ''; curPhone = ''
         } else if (emailMatch) {
@@ -376,7 +385,8 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
       }
     }
     if (curName) {
-      rows.push({ name: curName, loginId: '', email: curEmail, phone: curPhone, role: 'agent', password: form.ownerPassword.trim() || 'Bhumi@2026' })
+      const firstWord = curName.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '') || 'user'
+      rows.push({ name: curName, loginId: '', email: curEmail, phone: curPhone, role: 'agent', password: `${firstWord}123` })
     }
 
     if (rows.length > 0) {
