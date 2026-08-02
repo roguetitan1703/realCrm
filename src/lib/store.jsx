@@ -680,6 +680,7 @@ export function StoreProvider({ children }) {
     // green theme colour that an install would then capture forever. Once the
     // session is known it is authoritative, because the PWA identity captured at
     // install must be the firm whose data the app will show.
+    const sessionSlug = state.tenant?.slug || state.tenant?.id || ''
     const tid = sessionSlug || slugFromLocation()
     applyPwaIdentity(tid, state.settings.firmName)
     if (tid && state.settings.firmName) {

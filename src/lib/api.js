@@ -63,12 +63,15 @@ function lsGet(k) { try { return (typeof window !== 'undefined' && window.localS
 function lsSet(k, v) { try { if (typeof window === 'undefined' || !window.localStorage) return; if (v) window.localStorage.setItem(k, v); else window.localStorage.removeItem(k); } catch { /* storage blocked */ } }
 
 function getHeaders(customHeaders = {}) {
-  const tenantId = typeof window !== 'undefined' ? (window.localStorage?.getItem('crm_tenant_id') || '') : '';
+  const slug = typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '';
+  const tenantId = typeof window !== 'undefined' ? (window.localStorage?.getItem('crm_tenant_id') || slug || '') : '';
   const base = {
     'X-Tenant-ID': tenantId,
     'Content-Type': 'application/json',
   };
-  const token = lsGet(TOKEN_KEY);
+  const token = typeof window !== 'undefined' && slug && slug !== 'admin'
+    ? (lsGet(`crm_auth_token_${slug}`) || lsGet(TOKEN_KEY))
+    : lsGet(TOKEN_KEY);
   if (token) base.Authorization = `Bearer ${token}`;
   // customHeaders wins — lets the admin console override with its own token.
   return { ...base, ...customHeaders };
@@ -204,15 +207,38 @@ export const api = {
     return res;
   },
   me: () => request('/auth/me'),
-  getToken: () => lsGet(TOKEN_KEY),
-  setToken: (t) => lsSet(TOKEN_KEY, t),
-  clearToken: () => lsSet(TOKEN_KEY, ''),
+  getToken: (slug) => {
+    const s = slug || (typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '');
+    if (s && s !== 'admin') {
+      const t = lsGet(`crm_auth_token_${s}`);
+      if (t) return t;
+    }
+    return lsGet(TOKEN_KEY);
+  },
+  setToken: (t, slug) => {
+    const s = slug || (typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '');
+    if (s && s !== 'admin') {
+      lsSet(`crm_auth_token_${s}`, t);
+    }
+    lsSet(TOKEN_KEY, t);
+  },
+  clearToken: (slug) => {
+    const s = slug || (typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '');
+    if (s && s !== 'admin') {
+      lsSet(`crm_auth_token_${s}`, '');
+    }
+    lsSet(TOKEN_KEY, '');
+  },
 
   // ── Password auth (auth v2) ────────────────────────────────────────────────
   // Handle is an email (owner/manager) or an assigned login_id (agent).
-  login: async (handle, password) => {
+  login: async (handle, password, tenantSlug) => {
     const res = await request('/auth/login', { method: 'POST', body: JSON.stringify({ handle, password }) });
-    if (res?.token) lsSet(TOKEN_KEY, res.token);
+    if (res?.token) {
+      const slug = tenantSlug || (typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '');
+      if (slug && slug !== 'admin') lsSet(`crm_auth_token_${slug}`, res.token);
+      lsSet(TOKEN_KEY, res.token);
+    }
     return res;
   },
   logout: () => request('/auth/logout', { method: 'POST' }).catch(() => {}),
