@@ -25,6 +25,7 @@ import { notificationsRouter } from './routes/notifications';
 import { pwaRouter } from './routes/pwa';
 import { filesRouter, mediaRouter } from './routes/files';
 import { withRequestContext } from './middleware/auth';
+import { getTenantForIngest } from './services/store';
 
 const app = express();
 const PORT = process.env.PORT || 5000;

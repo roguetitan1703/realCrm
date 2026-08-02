@@ -73,10 +73,9 @@ function Endpoint({ endpoint, docsUrl: serverDocsUrl, headerName, store }) {
         <button className="btn btn-ghost btn-sm" onClick={() => copy(endpoint, 'url')}>
           <Icon name={copied === 'url' ? 'check' : 'copy'} size={14} />{copied === 'url' ? 'Copied' : 'Copy API URL'}
         </button>
-        <button className={'cx-q' + (help ? ' on' : '')} onClick={() => setHelp(h => !h)} aria-label="Endpoint details">?</button>
       </div>
       <div className="cx-url-row">
-        <span className="cx-url-tag" style={{ background: '#7c3aed', color: '#fff' }}>DOCS</span>
+        <span className="cx-url-tag">DOCS</span>
         <code className="cx-url-v">{docsUrl}</code>
         <button className="btn btn-ghost btn-sm" onClick={() => copy(docsUrl, 'docs')}>
           <Icon name={copied === 'docs' ? 'check' : 'copy'} size={14} />{copied === 'docs' ? 'Copied' : 'Copy Docs Link'}
