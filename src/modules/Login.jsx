@@ -47,15 +47,9 @@ export default function Login({ store }) {
   const [wsInput, setWsInput] = useState('')
   const [ws, setWs] = useState(null) // resolved workspace, or null = platform identity
   const [resolving, setResolving] = useState(false)
-  const [savedUser, setSavedUser] = useState(() => {
-    if (typeof localStorage === 'undefined') return null
-    try {
-      const str = localStorage.getItem('crm_pwa_last_user')
-      return str ? JSON.parse(str) : null
-    } catch (e) { return null }
-  })
+  const [savedUser, setSavedUser] = useState(null)
   // Credentials: handle = an email (owner/manager) or an assigned login ID (agent).
-  const [handle, setHandle] = useState(() => savedUser?.handle || '')
+  const [handle, setHandle] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   // First-login change + reset flows.
@@ -71,6 +65,21 @@ export default function Login({ store }) {
   // workspace is chosen, the firm's name after.
   useEffect(() => {
     document.title = ws ? tenantDocTitle(ws.firmName) : PLATFORM.docTitle
+    if (!ws?.tenantId) {
+      setSavedUser(null)
+      return
+    }
+    try {
+      const key = `crm_pwa_last_user_${ws.tenantId}`
+      const str = localStorage.getItem(key)
+      if (str) {
+        const u = JSON.parse(str)
+        setSavedUser(u)
+        if (u?.handle) setHandle(u.handle)
+      } else {
+        setSavedUser(null)
+      }
+    } catch (e) { setSavedUser(null) }
   }, [ws])
 
   // Enter a workspace — but ONLY if it really exists. The backend resolver is
@@ -149,12 +158,16 @@ export default function Login({ store }) {
       const res = await api.login(targetHandle, password)
       if (!res?.token) throw new Error('no token')
       try {
-        localStorage.setItem('crm_pwa_last_user', JSON.stringify({
-          name: res.user?.name || targetHandle,
-          handle: targetHandle,
-          initials: res.user?.initials || String(res.user?.name || targetHandle).slice(0, 2).toUpperCase(),
-          avatar: res.user?.avatar || '',
-        }))
+        if (ws?.tenantId) {
+          const key = `crm_pwa_last_user_${ws.tenantId}`
+          localStorage.setItem(key, JSON.stringify({
+            name: res.user?.name || targetHandle,
+            handle: targetHandle,
+            initials: res.user?.initials || String(res.user?.name || targetHandle).slice(0, 2).toUpperCase(),
+            avatar: res.user?.avatar || '',
+            tenantId: ws.tenantId
+          }))
+        }
       } catch (e) {}
       if (res.mustChange) { setPhase('change'); setNewPw(''); setNewPw2(''); store.toast('Set a new password to continue.', 'ok'); return }
       store.toast(`Welcome to ${ws?.firmName || 'your desk'}`, 'ok')
@@ -498,6 +511,9 @@ export default function Login({ store }) {
                     <button
                       type="button"
                       onClick={() => {
+                        if (ws?.tenantId) {
+                          try { localStorage.removeItem(`crm_pwa_last_user_${ws.tenantId}`) } catch (e) {}
+                        }
                         try { localStorage.removeItem('crm_pwa_last_user') } catch (e) {}
                         setSavedUser(null); setHandle(''); setPassword('')
                       }}
