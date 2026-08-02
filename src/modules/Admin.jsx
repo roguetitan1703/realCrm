@@ -335,15 +335,38 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
   const parsePastedRoster = () => {
     if (!rawText.trim()) return
     const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean)
-    const rows = []
     
+    let newForm = { ...form }
+    let rows = []
     let curName = '', curEmail = '', curPhone = ''
 
     for (const line of lines) {
+      if (/^firm:\s*/i.test(line) || /^workspace:\s*/i.test(line)) {
+        newForm.firmName = line.replace(/^firm:\s*|^workspace:\s*/i, '').trim()
+        continue
+      }
+      if (/^city:\s*/i.test(line)) {
+        newForm.city = line.replace(/^city:\s*/i, '').trim()
+        continue
+      }
+      if (/^owner:\s*/i.test(line)) {
+        const parts = line.replace(/^owner:\s*/i, '').split(',').map(p => p.trim())
+        if (parts[0]) newForm.ownerName = parts[0]
+        const email = parts.find(p => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p))
+        if (email) newForm.ownerEmail = email
+        const phone = parts.find(p => /^\+?\d{10,12}$/.test(p.replace(/\s+/g, '')))
+        if (phone) newForm.ownerPhone = phone.replace(/\D/g, '').slice(-10)
+        const pw = parts.find(p => p.length >= 4 && p !== parts[0] && p !== email && p !== phone)
+        if (pw) newForm.ownerPassword = pw
+        continue
+      }
+
       if (line.includes(',') || line.includes('\t')) {
         const parts = line.split(/,|\t/).map(p => p.trim())
-        if (parts.length >= 1) {
-          let name = parts[0].replace(/^[\*\-\•\d\.\s]+/, '').replace(/^Full Name:\s*/i, '')
+        if (parts.length >= 2) {
+          let name = parts[0].replace(/^[\*\-\•\d\.\s]+/, '').replace(/^Full Name:\s*/i, '').trim()
+          if (!name || /firm name|workspace name/i.test(name)) continue
+
           let loginId = parts[1] && !parts[1].includes('@') && !/^\d+$/.test(parts[1]) ? parts[1] : ''
           let email = parts.find(p => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p)) || ''
           let phone = parts.find(p => /^\+?\d{10,12}$/.test(p.replace(/\s+/g, ''))) || ''
@@ -352,16 +375,14 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
           const firstWord = name.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '') || 'user'
           const autoPw = customPw || `${firstWord}123`
 
-          if (name) {
-            rows.push({
-              name,
-              loginId,
-              email,
-              phone: phone ? phone.replace(/\D/g, '').slice(-10) : '',
-              role: 'agent',
-              password: autoPw
-            })
-          }
+          rows.push({
+            name,
+            loginId,
+            email,
+            phone: phone ? phone.replace(/\D/g, '').slice(-10) : '',
+            role: 'agent',
+            password: autoPw
+          })
         }
       } else {
         const nameMatch = line.match(/(?:full name|name):\s*([^\*\n]+)/i)
@@ -389,11 +410,12 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
       rows.push({ name: curName, loginId: '', email: curEmail, phone: curPhone, role: 'agent', password: `${firstWord}123` })
     }
 
+    setForm(newForm)
     if (rows.length > 0) {
       setTeam(rows)
-      setShowPasteBox(false)
-      setRawText('')
     }
+    setShowPasteBox(false)
+    setRawText('')
   }
 
   const updateTeamRow = (idx, field, val) => {
