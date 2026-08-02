@@ -130,12 +130,10 @@ teamRouter.post('/users', async (req: Request, res: Response) => {
     const normPhone = cleanPhone ? `+91${cleanPhone.slice(-10)}` : null;
     const normEmail = email ? String(email).trim().toLowerCase() : null;
 
-    let loginIdVal: string | null = null;
-    if (teamRole === 'agent') {
-      loginIdVal = String(loginId || '').trim() || await deriveLoginId(req.tenantId!, cleanName);
-      if (loginIdVal.includes('@')) return res.status(400).json({ error: 'A login ID cannot contain "@".' });
-    } else if (!normEmail || !EMAIL_RE.test(normEmail)) {
-      return res.status(400).json({ error: 'An owner or manager needs a valid email to sign in.' });
+    let loginIdVal: string | null = String(loginId || '').trim() || await deriveLoginId(req.tenantId!, cleanName);
+    if (loginIdVal && loginIdVal.includes('@')) return res.status(400).json({ error: 'A login ID cannot contain "@".' });
+    if ((teamRole === 'owner' || teamRole === 'manager') && normEmail && !EMAIL_RE.test(normEmail)) {
+      return res.status(400).json({ error: 'An owner or manager needs a valid email.' });
     }
     if (normEmail && await emailTaken(req.tenantId!, normEmail)) {
       return res.status(409).json({ error: 'Someone on this team already uses that email.' });

@@ -121,9 +121,17 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   const initialPassword = input.ownerPassword ? input.ownerPassword.trim() : suggestPassword();
   const mustChange = input.mustChangePassword !== false; // default true
   const ownerPwHash = await bcrypt.hash(initialPassword, 10);
+  
+  // Auto-slug login_id for owner
+  const ownerBase = ownerName.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'owner';
+  let ownerLoginId = ownerBase;
+  for (let n = 2; (await sql`SELECT 1 FROM users WHERE tenant_id = ${tenantId} AND login_id = ${ownerLoginId} LIMIT 1`).length; n++) {
+    ownerLoginId = `${ownerBase}${n}`;
+  }
+
   await sql`
-    INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
-    VALUES (${ownerId}, ${tenantId}, ${ownerName}, ${ownerPhone}, ${ownerEmail}, 'owner', 'active', ${sql.json(ownerMeta)}, ${ownerPwHash}, TRUE, ${mustChange})
+    INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
+    VALUES (${ownerId}, ${tenantId}, ${ownerName}, ${ownerLoginId}, ${ownerPhone}, ${ownerEmail}, 'owner', 'active', ${sql.json(ownerMeta)}, ${ownerPwHash}, TRUE, ${mustChange})
   `;
   await sql`
     INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
@@ -131,7 +139,7 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   `;
 
   // 2.1 Bulk Team Members Provisioning if provided
-  const createdTeam: Array<{ name: string; email: string; role: string; password: string }> = [];
+  const createdTeam: Array<{ name: string; email: string; loginId: string; role: string; password: string }> = [];
   if (Array.isArray(input.initialTeam) && input.initialTeam.length > 0) {
     for (let idx = 0; idx < input.initialTeam.length; idx++) {
       const tm = input.initialTeam[idx];
@@ -146,9 +154,15 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
       const tmInitials = tmParts.length === 1 ? tmParts[0].slice(0, 2).toUpperCase() : tmParts.slice(0, 2).map(w => w[0]).join('').toUpperCase();
       const tmMeta = { initials: tmInitials, avatar: '', phone: tm.phone || null, email: tmEmail };
 
+      const tmBase = tmName.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'user';
+      let tmLoginId = tmBase;
+      for (let n = 2; (await sql`SELECT 1 FROM users WHERE tenant_id = ${tenantId} AND login_id = ${tmLoginId} LIMIT 1`).length; n++) {
+        tmLoginId = `${tmBase}${n}`;
+      }
+
       await sql`
-        INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
-        VALUES (${tmId}, ${tenantId}, ${tmName}, ${tm.phone || null}, ${tmEmail}, ${tmRole}, 'active', ${sql.json(tmMeta)}, ${tmPwHash}, TRUE, ${mustChange})
+        INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
+        VALUES (${tmId}, ${tenantId}, ${tmName}, ${tmLoginId}, ${tm.phone || null}, ${tmEmail}, ${tmRole}, 'active', ${sql.json(tmMeta)}, ${tmPwHash}, TRUE, ${mustChange})
         ON CONFLICT DO NOTHING
       `;
       await sql`
@@ -156,7 +170,7 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
         VALUES (${tmId}, ${tmName}, ${tmParts[0] || 'Agent'}, ${tmInitials}, '', ${tmRole}, 'ACTIVE', ${sql.json(tmMeta)}, ${tenantId})
         ON CONFLICT DO NOTHING
       `;
-      createdTeam.push({ name: tmName, email: tmEmail, role: tmRole, password: tmPw });
+      createdTeam.push({ name: tmName, email: tmEmail, loginId: tmLoginId, role: tmRole, password: tmPw });
     }
   }
 
@@ -814,12 +828,12 @@ export async function repairPropertyDisplayCasing(): Promise<void> {
 export async function backfillPasswordAuth(): Promise<void> {
   const DEMO_PW = process.env.DEMO_USER_PASSWORD || 'delpat-demo-1';
 
-  const agentsNoId = await sql`
+  const usersNoId = await sql`
     SELECT id, tenant_id, name FROM users
-    WHERE role = 'agent' AND (login_id IS NULL OR login_id = '') AND deleted_at IS NULL
+    WHERE (login_id IS NULL OR login_id = '') AND deleted_at IS NULL
   `;
-  for (const u of agentsNoId) {
-    const base = String(u.name || 'agent').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'agent';
+  for (const u of usersNoId) {
+    const base = String(u.name || 'user').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'user';
     let candidate = base;
     for (let n = 2; (await sql`SELECT 1 FROM users WHERE tenant_id = ${u.tenant_id} AND login_id = ${candidate} AND id <> ${u.id} LIMIT 1`).length; n++) {
       candidate = `${base}${n}`;

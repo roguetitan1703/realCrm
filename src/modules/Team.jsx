@@ -272,7 +272,7 @@ function AccessPanel({ store }) {
                         <span className="av av-sm">{(u.metadata?.initials) || (u.name || '?').split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()}</span>
                         <div className="acc-name">
                           <div className="acc-n">{u.name}{self && <span className="acc-youtag">You</span>}</div>
-                          <div className="u-muted acc-role">{roleLabel(u.role)} · signs in with {u.login_id ? 'ID' : 'email'}</div>
+                          <div className="u-muted acc-role">{roleLabel(u.role)} · ID: <b style={{ color: 'var(--ink)' }}>{u.login_id || '—'}</b></div>
                         </div>
                       </div>
                     </td>
@@ -421,15 +421,9 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
       <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
         <div className="m-head"><h3>Edit {user.name}</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
         <div className="m-content">
-          {user.login_id ? (
-            <Field label="User ID (used to sign in — fixed)">
-              <Input value={user.login_id} disabled readOnly />
-            </Field>
-          ) : (
-            <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
-              Signs in with their <b style={{ color: 'var(--ink)' }}>email</b>. To hand this seat to a different person, use “Reassign seat”.
-            </div>
-          )}
+          <Field label="User ID (used to sign in — fixed)">
+            <Input value={user.login_id || '—'} disabled readOnly />
+          </Field>
           <Field label="Full name"><Input value={name} onChange={e => setName(e.target.value)} autoFocus /></Field>
           <Field label={needsEmail ? 'Email' : 'Email (optional)'}><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@firm.com" type="email" /></Field>
           <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
