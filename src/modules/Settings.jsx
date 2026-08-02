@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react'
-import { Panel, SectionHead, StageTag, Button, Input, Segmented, Toggle } from '../components/primitives.jsx'
+import { Panel, SectionHead, StageTag, Button, Input, Segmented, Toggle, Avatar } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES, DEFAULT_WHATSAPP_INTRO } from '../data/theme.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import InstallPanel from '../components/InstallPanel.jsx'
+import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 
 const NAV = [
   { key: 'brand', label: 'Brand', icon: 'layers' },
   { key: 'pipeline', label: 'Pipeline', icon: 'leads' },
-  { key: 'sources', label: 'Lead sources', icon: 'tag' },
   { key: 'routing', label: 'Routing', icon: 'team' },
   { key: 'followup', label: 'Follow-up SLA', icon: 'clock' },
   { key: 'messages', label: 'Message templates', icon: 'wa' },
@@ -37,7 +37,6 @@ export default function Settings({ store, topBar }) {
             <div className="set-main">
               {section === 'brand' && <BrandSection store={store} settings={settings} />}
               {section === 'pipeline' && <PipelineSection store={store} settings={settings} />}
-              {section === 'sources' && <SourcesSection store={store} settings={settings} />}
               {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} />}
               {section === 'followup' && <FollowUpSection store={store} settings={settings} />}
               {section === 'messages' && <MessagesSection store={store} settings={settings} />}
@@ -122,35 +121,98 @@ function BrandSection({ store, settings }) {
 }
 
 // ---- Pipeline stages ------------------------------------------------------
+// Both pipelines are configured here, on one switch, for the same reason
+// routing is: they are the same edit — rename, reorder, add, remove — against
+// two different lists. The calling queue's statuses used to be a constant in
+// the source, so a firm that says "Warm" instead of "Interested" had no way to
+// say so.
 function PipelineSection({ store, settings }) {
+  const [side, setSide] = useState('leads')
+  const isLeads = side === 'leads'
+  const stages = isLeads
+    ? (settings.stages || [])
+    : (settings.ownerStages || OWNER_STATUSES)
+  // A lead's Closed won / lost are fixed because reporting keys off them; a
+  // caller's terminal two are fixed because the sweeps and every "open" count
+  // do. Same rule, two lists.
+  const locked = isLeads ? PROTECTED_STAGES : OWNER_TERMINAL_STATUSES
+
   const [newStage, setNewStage] = useState('')
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState('')
-  const lastClosedFree = settings.stages.filter(s => !PROTECTED_STAGES.includes(s)).length
+  useEffect(() => { setEditing(null); setDraft(''); setNewStage('') }, [side])
+
+  const freeCount = stages.filter(s => !locked.includes(s)).length
+
+  // Lead stages have their own three store methods (they also move the leads
+  // on a renamed stage). Calling statuses go through one generic writer.
+  const writeOwner = (next, note, rename) => store.setOwnerStages(next, note, rename)
 
   const commitRename = () => {
-    if (draft.trim() && draft.trim() !== editing) store.renameStage(editing, draft.trim())
+    const to = draft.trim()
+    if (to && to !== editing && !stages.includes(to)) {
+      if (isLeads) store.renameStage(editing, to)
+      else writeOwner(stages.map(s => (s === editing ? to : s)), 'Status renamed — owners moved', { from: editing, to })
+    }
     setEditing(null); setDraft('')
   }
-  const addStage = () => { if (newStage.trim()) { store.addStage(newStage.trim()); setNewStage('') } }
+  const add = () => {
+    const name = newStage.trim()
+    if (!name || stages.includes(name)) return
+    if (isLeads) store.addStage(name)
+    else writeOwner([...stages, name], 'Status added')
+    setNewStage('')
+  }
+  const remove = (s) => {
+    const noun = isLeads ? 'Leads' : 'Owners'
+    if (!window.confirm(`Remove "${s}"? ${noun} on it move to "${stages[0]}".`)) return
+    if (isLeads) store.removeStage(s)
+    else writeOwner(stages.filter(x => x !== s), 'Status removed')
+  }
+  const move = (s, dir) => {
+    if (isLeads) return store.moveStage(s, dir)
+    const arr = [...stages]
+    const i = arr.indexOf(s)
+    if (i === -1 || i + dir < 0 || i + dir >= arr.length) return
+    const [got] = arr.splice(i, 1)
+    arr.splice(i + dir, 0, got)
+    writeOwner(arr, 'Order updated')
+  }
 
   return (
     <>
-      <SecHead title="Pipeline stages" sub="Rename stages to how your team actually talks. Every lead on a renamed stage moves with it. Closed won / lost are fixed." />
+      <SecHead
+        title="Pipeline stages"
+        sub="Rename these to how your team actually talks. Every record on a renamed stage moves with it."
+      />
+
+      <div className="rt-switch" role="tablist">
+        {[{ k: 'leads', l: 'Leads' }, { k: 'owners', l: 'Calling' }].map(t => (
+          <button key={t.k} role="tab" aria-selected={side === t.k}
+            className={'rt-tab' + (side === t.k ? ' on' : '')} onClick={() => setSide(t.k)}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
       <Panel>
-        <SectionHead title="Stages" right={`${settings.stages.length}`} />
+        <SectionHead title={isLeads ? 'Lead stages' : 'Calling statuses'} right={`${stages.length}`} />
+        <div className="set-sec-sub">
+          {isLeads
+            ? 'The funnel a buyer moves down. Closed won and closed lost are fixed.'
+            : 'What a cold call can end in. Not interested and Do not call are fixed — the sweeps and every open count read them.'}
+        </div>
         <div className="chip-list">
-          {settings.stages.map((s, i) => {
-            const protectedStage = PROTECTED_STAGES.includes(s)
-            const closed = PROTECTED_STAGES.includes(s)
+          {stages.map((s, i) => {
+            const isLocked = locked.includes(s)
             const isEditing = editing === s
-            const canUp = i > 0 && !PROTECTED_STAGES.includes(settings.stages[i - 1]) && !closed
-            const canDown = i < settings.stages.length - 1 && !PROTECTED_STAGES.includes(settings.stages[i + 1]) && !closed
+            const canUp = i > 0 && !locked.includes(stages[i - 1]) && !isLocked
+            const canDown = i < stages.length - 1 && !locked.includes(stages[i + 1]) && !isLocked
             return (
               <div key={s} className="chip-row">
                 <div className="chip-reorder">
-                  <button className="icon-mini" disabled={!canUp} onClick={() => store.moveStage(s, -1)} title="Move up"><Icon name="chevUp" size={12} /></button>
-                  <button className="icon-mini" disabled={!canDown} onClick={() => store.moveStage(s, 1)} title="Move down"><Icon name="chevDown" size={12} /></button>
+                  <button className="icon-mini" disabled={!canUp} onClick={() => move(s, -1)} title="Move up"><Icon name="chevUp" size={12} /></button>
+                  <button className="icon-mini" disabled={!canDown} onClick={() => move(s, 1)} title="Move down"><Icon name="chevDown" size={12} /></button>
                 </div>
                 {isEditing ? (
                   <input className="input chip-in" value={draft} autoFocus
@@ -160,230 +222,190 @@ function PipelineSection({ store, settings }) {
                 ) : (
                   <span className="chip-grow"><StageTag stage={s} /></span>
                 )}
-                {!protectedStage && !isEditing && (
+                {!isLocked && !isEditing && (
                   <>
                     <button className="icon-mini" onClick={() => { setEditing(s); setDraft(s) }} title="Rename"><Icon name="edit" size={13} /></button>
-                    <button className="icon-mini danger" disabled={lastClosedFree <= 1} onClick={() => { if (window.confirm(`Remove stage "${s}"? Leads on this stage move to "${settings.stages[0] || 'New'}".`)) store.removeStage(s) }} title="Remove"><Icon name="x" size={13} /></button>
+                    <button className="icon-mini danger" disabled={freeCount <= 1} onClick={() => remove(s)} title="Remove"><Icon name="x" size={13} /></button>
                   </>
                 )}
-                {protectedStage && <span className="chip-lock">locked</span>}
+                {isLocked && <span className="chip-lock">locked</span>}
               </div>
             )
           })}
         </div>
         <div className="add-row">
-          <input className="input" value={newStage} placeholder="e.g. Token pending"
-            onChange={e => setNewStage(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addStage() }} />
-          <Button variant="ghost" size="sm" icon="plus" onClick={addStage}>Add stage</Button>
+          <input className="input" value={newStage} placeholder={isLeads ? 'e.g. Token pending' : 'e.g. Wants valuation'}
+            onChange={e => setNewStage(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') add() }} />
+          <Button variant="ghost" size="sm" icon="plus" onClick={add}>Add</Button>
         </div>
       </Panel>
     </>
   )
 }
 
-// ---- Lead sources ---------------------------------------------------------
-function SourcesSection({ store, settings }) {
-  const [newSource, setNewSource] = useState('')
-  const addSource = () => { if (newSource.trim()) { store.addSource(newSource.trim()); setNewSource('') } }
-  return (
-    <>
-      <SecHead title="Lead sources" sub="Where your enquiries come from. Sources appear on the new-lead form, in filters and in the source breakdown on your dashboard." />
-      <Panel>
-        <SectionHead title="Sources" right={`${settings.sources.length}`} />
-        <div className="source-chips">
-          {settings.sources.map(s => (
-            <span key={s} className="source-chip">
-              {s}
-              <button className="icon-mini danger" onClick={() => store.removeSource(s)} title={`Remove ${s}`}><Icon name="x" size={12} /></button>
-            </span>
-          ))}
-        </div>
-        <div className="add-row add-row-cap">
-          <input className="input" value={newSource} placeholder="e.g. Housing.com"
-            onChange={e => setNewSource(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addSource() }} />
-          <Button variant="ghost" size="sm" icon="plus" onClick={addSource}>Add source</Button>
-        </div>
-      </Panel>
-    </>
-  )
+// ---- Routing ---------------------------------------------------------------
+// Leads and the calling queue route independently — a firm may want everyone
+// catching enquiries but only two people cold-calling, or one running and the
+// other off. That is a real difference in settings, not a real difference in
+// controls: both are "who catches a new one", "who is in the rotation", and
+// two sweeps over what is already on the desk.
+//
+// So there is ONE section with a switch at the top, not two stacked ones. The
+// previous version rendered ten panels down a single column — the same four
+// controls twice, a screen apart, with no way to compare them. Everything
+// below reads the pair of field names for whichever side is selected.
+const ROUTING_SIDES = {
+  leads: {
+    key: 'leads', label: 'Leads', noun: 'lead', arrival: 'When a new enquiry arrives',
+    arrivalSub: 'A lead landing from a portal, your website or a walk-in is assigned before your team even opens the app.',
+    f: {
+      strategy: 'strategy', rota: 'active_agent_ids',
+      sweepOn: 'sweep_unassigned_enabled', sweepHours: 'sweep_unassigned_hours',
+      idleOn: 'reassign_idle_enabled', idleHours: 'reassign_idle_hours',
+    },
+    autoSub: 'Distribute evenly across the agents in rotation. Fair, and no lead sits unclaimed.',
+    manualSub: 'New leads land in a shared pool. A manager picks who takes each one.',
+    idleSub: 'A lead with no activity from its assignee for this long — and no upcoming scheduled visit — is handed to the next agent in rotation, and the record shows why.',
+  },
+  owners: {
+    key: 'owners', label: 'Calling', noun: 'owner', arrival: 'When a new owner is imported',
+    arrivalSub: 'Owners usually arrive by the hundred from a sheet. This decides who they land on as each row imports.',
+    f: {
+      strategy: 'owner_strategy', rota: 'owner_active_agent_ids',
+      sweepOn: 'owner_sweep_unassigned_enabled', sweepHours: 'owner_sweep_unassigned_hours',
+      idleOn: 'owner_reassign_idle_enabled', idleHours: 'owner_reassign_idle_hours',
+    },
+    autoSub: 'Distribute evenly across the callers in rotation as each row imports.',
+    manualSub: 'Imported owners land in a shared pool. A manager picks who calls each one.',
+    idleSub: 'An owner with no activity from its assignee for this long is handed to the next caller in rotation, and the record shows why. Rows marked Not interested or Do not call are never swept.',
+  },
 }
 
-// ---- Lead routing (real: /team/routing round-robin) -----------------------
 function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
-  const strategy = routing?.strategy || 'round_robin'
-  const rota = routing?.active_agent_ids || []
-  const rosterAgents = agents.filter(a => a.role !== 'admin' || true) // include all; admins can also take leads
+  const [sideKey, setSideKey] = useState('leads')
+  const side = ROUTING_SIDES[sideKey]
+  const f = side.f
 
-  // How many open leads each agent is carrying, counted in SQL. This read the
+  const strategy = routing?.[f.strategy] || (sideKey === 'leads' ? 'round_robin' : 'manual')
+  const rota = routing?.[f.rota] || []
+
+  // How many open records each agent is carrying, counted in SQL. This read the
   // whole lead collection out of the store and filtered it per agent; when the
   // collection went away `leads` was undefined and the section threw on render,
   // taking the entire Settings screen down with it.
   const { data: desk } = useServerData(() => api.getDeskSummary(), [], null, '/workspace/desk-summary')
   const openLoad = (id) => desk?.perAgent?.[id]?.open ?? 0
 
-  const setStrategy = (s) => store.setRouting({ strategy: s }, s === 'round_robin' ? 'New leads auto-assign, round-robin' : 'New leads land unassigned')
-  const toggleAgent = (id) => {
-    const next = rota.includes(id) ? rota.filter(x => x !== id) : [...rota, id]
-    store.setRouting({ active_agent_ids: next })
-  }
+  const set = (patch, msg) => store.setRouting(patch, msg)
+  const setStrategy = (s) => set({ [f.strategy]: s },
+    s === 'round_robin' ? `New ${side.noun}s auto-assign, round-robin` : `New ${side.noun}s land unassigned`)
+  const setRota = (next) => set({ [f.rota]: next })
+  const toggleAgent = (id) => setRota(rota.includes(id) ? rota.filter(x => x !== id) : [...rota, id])
+  const allOn = agents.length > 0 && rota.length === agents.length
 
   return (
     <>
-      <SecHead title="Lead routing" sub="Decide who catches a new enquiry the moment it arrives from a portal, website or walk-in. This runs on the server — every incoming lead is assigned before your team even opens the app." />
+      <SecHead title="Routing" sub="Who catches new work, and what happens to work nobody has picked up. This runs on the server, so it applies whether or not anyone has the app open." />
+
+      <div className="rt-switch" role="tablist">
+        {Object.values(ROUTING_SIDES).map(s => (
+          <button key={s.key} role="tab" aria-selected={sideKey === s.key}
+            className={'rt-tab' + (sideKey === s.key ? ' on' : '')}
+            onClick={() => setSideKey(s.key)}>
+            {s.label}
+            <span className={'rt-dot' + ((routing?.[s.f.strategy] || (s.key === 'leads' ? 'round_robin' : 'manual')) === 'round_robin' ? ' on' : '')} />
+          </button>
+        ))}
+      </div>
+
       <Panel>
-        <SectionHead title="When a new lead arrives" />
+        <SectionHead title={side.arrival} />
+        <div className="set-sec-sub">{side.arrivalSub}</div>
         <div className="opt-list">
           <button className={'opt' + (strategy === 'round_robin' ? ' on' : '')} onClick={() => setStrategy('round_robin')}>
             <span className="opt-radio" />
-            <span><span className="opt-t">Auto-assign · round-robin</span><span className="opt-s">Distribute evenly across the agents in rotation below. Fair, no lead sits unclaimed.</span></span>
+            <span><span className="opt-t">Auto-assign · round-robin</span><span className="opt-s">{side.autoSub}</span></span>
           </button>
           <button className={'opt' + (strategy === 'manual' ? ' on' : '')} onClick={() => setStrategy('manual')}>
             <span className="opt-radio" />
-            <span><span className="opt-t">Leave unassigned</span><span className="opt-s">New leads land in a shared pool. A manager picks who takes each one.</span></span>
+            <span><span className="opt-t">Leave unassigned</span><span className="opt-s">{side.manualSub}</span></span>
           </button>
         </div>
       </Panel>
 
       {strategy === 'round_robin' && (
         <Panel>
-          <SectionHead title="Agents in rotation" right={`${rota.length} of ${rosterAgents.length}`} />
-          <div className="set-sec-sub">Only agents you tick receive auto-assigned leads. Their current open load is shown so you can balance the desk.</div>
-          <div className="rot-list">
-            {rosterAgents.map(a => {
+          <SectionHead
+            title="In rotation"
+            right={
+              // Ticking eleven names one at a time to say "everyone" is the
+              // common case, and it was the slowest thing on this screen.
+              <button className="rt-all" onClick={() => setRota(allOn ? [] : agents.map(a => a.id))}>
+                {allOn ? 'Clear all' : 'Select all'}
+              </button>
+            }
+          />
+          <div className="set-sec-sub">{rota.length} of {agents.length} receive auto-assigned {side.noun}s. Current open load is shown so you can balance the desk.</div>
+          {/* A grid of chips, not a vertical checklist. Eleven agents was
+              eleven full-width rows and half a screen of scrolling to answer
+              "who is on". */}
+          <div className="rot-grid">
+            {agents.map(a => {
               const on = rota.includes(a.id)
               const off = inactiveAgentIds.includes(a.id)
               return (
-                <div key={a.id} className={'rot-row' + (on ? ' on' : '')} onClick={() => toggleAgent(a.id)} role="checkbox" aria-checked={on}>
-                  <span className="rot-check">{on && <Icon name="check" size={12} />}</span>
-                  <span className="rot-name">{a.name}{off && <span className="chip-lock"> · off duty</span>}</span>
-                  <span className="rot-load">{openLoad(a.id)} open</span>
-                </div>
+                <button key={a.id} className={'rot-chip' + (on ? ' on' : '') + (off ? ' off' : '')}
+                  role="checkbox" aria-checked={on} onClick={() => toggleAgent(a.id)}>
+                  <span className="rot-check">{on && <Icon name="check" size={11} />}</span>
+                  <Avatar agent={a} size="sm" />
+                  <span className="rot-name">{a.first || a.name}</span>
+                  <span className="rot-load">{openLoad(a.id)}</span>
+                </button>
               )
             })}
           </div>
+          {!agents.length && <div className="detail-empty">No team members yet.</div>}
         </Panel>
       )}
 
-      <SecHead title="Leads already in the pipeline" sub="Separate from the routing above, which only ever looks at the lead that just arrived. These two sweeps periodically check leads already sitting in the desk and act on them." />
+      {/* Both sweeps in one panel. They are the same kind of rule — a periodic
+          check over records already on the desk — and splitting them across two
+          panels made the page read as a list of unrelated settings. */}
       <Panel>
-        <div className="set-toggle-row">
-          <div>
-            <SectionHead title="Pick up unowned leads" />
-            <div className="set-sec-sub">A lead with nobody on it — never assigned, or its owner left the firm — is auto-routed after it's been unowned this long.</div>
+        <SectionHead title={`${side.label === 'Calling' ? 'Owners' : 'Leads'} already on the desk`} />
+        <div className="set-sec-sub">Separate from the routing above, which only ever looks at the {side.noun} that just arrived.</div>
+
+        <div className="rt-rule">
+          <div className="rt-rule-h">
+            <div>
+              <div className="rt-rule-t">Pick up unowned {side.noun}s</div>
+              <div className="rt-rule-s">Nobody on it — never assigned, or its owner left the firm.</div>
+            </div>
+            <Toggle on={!!routing?.[f.sweepOn]} onClick={() => set(
+              { [f.sweepOn]: !routing?.[f.sweepOn] },
+              routing?.[f.sweepOn] ? 'Unowned sweep turned off' : 'Unowned sweep turned on')} />
           </div>
-          <Toggle on={!!routing?.sweep_unassigned_enabled} onClick={() => store.setRouting({ sweep_unassigned_enabled: !routing?.sweep_unassigned_enabled }, routing?.sweep_unassigned_enabled ? 'Unowned-lead sweep turned off' : 'Unowned-lead sweep turned on')} />
+          {!!routing?.[f.sweepOn] && (
+            <NumField value={Number(routing?.[f.sweepHours] ?? 4)} suffix="hours unowned"
+              onChange={(v) => set({ [f.sweepHours]: Math.max(1, v) })} />
+          )}
         </div>
-        {!!routing?.sweep_unassigned_enabled && (
-          <NumField
-            value={Number(routing?.sweep_unassigned_hours ?? 4)} suffix="hours unowned"
-            onChange={(v) => store.setRouting({ sweep_unassigned_hours: Math.max(1, v) })}
-          />
-        )}
-      </Panel>
-      <Panel>
-        <div className="set-toggle-row">
-          <div>
-            <SectionHead title="Reassign idle leads" />
-            <div className="set-sec-sub">A lead with no activity from its assignee for this long — and no upcoming scheduled visit — is handed to the next agent in rotation, and the record shows why.</div>
+
+        <div className="rt-rule">
+          <div className="rt-rule-h">
+            <div>
+              <div className="rt-rule-t">Reassign idle {side.noun}s</div>
+              <div className="rt-rule-s">{side.idleSub}</div>
+            </div>
+            <Toggle on={!!routing?.[f.idleOn]} onClick={() => set(
+              { [f.idleOn]: !routing?.[f.idleOn] },
+              routing?.[f.idleOn] ? 'Idle reassignment turned off' : 'Idle reassignment turned on')} />
           </div>
-          <Toggle on={!!routing?.reassign_idle_enabled} onClick={() => store.setRouting({ reassign_idle_enabled: !routing?.reassign_idle_enabled }, routing?.reassign_idle_enabled ? 'Idle-lead reassignment turned off' : 'Idle-lead reassignment turned on')} />
+          {!!routing?.[f.idleOn] && (
+            <NumField value={Number(routing?.[f.idleHours] ?? 2)} suffix="hours idle"
+              onChange={(v) => set({ [f.idleHours]: Math.max(1, v) })} />
+          )}
         </div>
-        {!!routing?.reassign_idle_enabled && (
-          <NumField
-            value={Number(routing?.reassign_idle_hours ?? 2)} suffix="hours idle"
-            onChange={(v) => store.setRouting({ reassign_idle_hours: Math.max(1, v) })}
-          />
-        )}
-      </Panel>
-
-      <OwnerRoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} />
-    </>
-  )
-}
-
-// ---- Owner (cold-calling) routing — same three controls as lead routing
-// above, entirely separate settings: a firm may staff leads and owner
-// outreach with different people, or run one and not the other. Off by
-// default (owner_strategy is 'manual', both sweeps false) — owners usually
-// arrive by the hundred via import, and auto-assigning all of them the
-// moment a sheet lands is not a default a firm should get without choosing it.
-function OwnerRoutingSection({ store, agents, routing, inactiveAgentIds }) {
-  const strategy = routing?.owner_strategy || 'manual'
-  const rota = routing?.owner_active_agent_ids || []
-  const rosterAgents = agents
-
-  const setStrategy = (s) => store.setRouting({ owner_strategy: s }, s === 'round_robin' ? 'New owners auto-assign, round-robin' : 'New owners land unassigned')
-  const toggleAgent = (id) => {
-    const next = rota.includes(id) ? rota.filter(x => x !== id) : [...rota, id]
-    store.setRouting({ owner_active_agent_ids: next })
-  }
-
-  return (
-    <>
-      <SecHead title="Owner (cold-calling) routing" sub="The same three controls as lead routing, for the owner outreach list instead — who catches a newly imported owner, and the two sweeps that check the list already on the desk." />
-      <Panel>
-        <SectionHead title="When a new owner is imported" />
-        <div className="opt-list">
-          <button className={'opt' + (strategy === 'round_robin' ? ' on' : '')} onClick={() => setStrategy('round_robin')}>
-            <span className="opt-radio" />
-            <span><span className="opt-t">Auto-assign · round-robin</span><span className="opt-s">Distribute evenly across the agents in rotation below as each row imports.</span></span>
-          </button>
-          <button className={'opt' + (strategy === 'manual' ? ' on' : '')} onClick={() => setStrategy('manual')}>
-            <span className="opt-radio" />
-            <span><span className="opt-t">Leave unassigned</span><span className="opt-s">Imported owners land in a shared pool. A manager picks who calls each one.</span></span>
-          </button>
-        </div>
-      </Panel>
-
-      {strategy === 'round_robin' && (
-        <Panel>
-          <SectionHead title="Agents in rotation" right={`${rota.length} of ${rosterAgents.length}`} />
-          <div className="set-sec-sub">Only agents you tick receive auto-assigned owners.</div>
-          <div className="rot-list">
-            {rosterAgents.map(a => {
-              const on = rota.includes(a.id)
-              const off = inactiveAgentIds.includes(a.id)
-              return (
-                <div key={a.id} className={'rot-row' + (on ? ' on' : '')} onClick={() => toggleAgent(a.id)} role="checkbox" aria-checked={on}>
-                  <span className="rot-check">{on && <Icon name="check" size={12} />}</span>
-                  <span className="rot-name">{a.name}{off && <span className="chip-lock"> · off duty</span>}</span>
-                </div>
-              )
-            })}
-          </div>
-        </Panel>
-      )}
-
-      <SecHead title="Owners already on the desk" sub="Separate from the routing above, which only ever looks at the owner row that just imported. These two sweeps periodically check the owner list already on the desk and act on it." />
-      <Panel>
-        <div className="set-toggle-row">
-          <div>
-            <SectionHead title="Pick up unowned rows" />
-            <div className="set-sec-sub">An owner with nobody on it — never assigned, or its owner left the firm — is auto-routed after it's been unowned this long.</div>
-          </div>
-          <Toggle on={!!routing?.owner_sweep_unassigned_enabled} onClick={() => store.setRouting({ owner_sweep_unassigned_enabled: !routing?.owner_sweep_unassigned_enabled }, routing?.owner_sweep_unassigned_enabled ? 'Unowned-owner sweep turned off' : 'Unowned-owner sweep turned on')} />
-        </div>
-        {!!routing?.owner_sweep_unassigned_enabled && (
-          <NumField
-            value={Number(routing?.owner_sweep_unassigned_hours ?? 4)} suffix="hours unowned"
-            onChange={(v) => store.setRouting({ owner_sweep_unassigned_hours: Math.max(1, v) })}
-          />
-        )}
-      </Panel>
-      <Panel>
-        <div className="set-toggle-row">
-          <div>
-            <SectionHead title="Reassign idle rows" />
-            <div className="set-sec-sub">An owner with no activity from its assignee for this long is handed to the next agent in rotation, and the record shows why.</div>
-          </div>
-          <Toggle on={!!routing?.owner_reassign_idle_enabled} onClick={() => store.setRouting({ owner_reassign_idle_enabled: !routing?.owner_reassign_idle_enabled }, routing?.owner_reassign_idle_enabled ? 'Idle-owner reassignment turned off' : 'Idle-owner reassignment turned on')} />
-        </div>
-        {!!routing?.owner_reassign_idle_enabled && (
-          <NumField
-            value={Number(routing?.owner_reassign_idle_hours ?? 2)} suffix="hours idle"
-            onChange={(v) => store.setRouting({ owner_reassign_idle_hours: Math.max(1, v) })}
-          />
-        )}
       </Panel>
     </>
   )

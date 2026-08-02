@@ -8,30 +8,15 @@ import { CLIENTS_DEF } from './definitions.jsx'
 import { api } from '../lib/api.js'
 import { useServerList } from '../lib/serverList.js'
 import { useServerData } from '../lib/useServerData.js'
-import Owners from './Owners.jsx'
 
-// B3: Contacts is ONE section with TWO subnavs — Clients (demand: buyers,
-// tenants) and Owners (supply: cold-calling list). They're backed by two
-// entirely different things: Clients is a derived view over leads; Owners is
-// a real, importable, assignable record of its own (see Owners.jsx and the
-// OWNERS block in backend/src/services/store.ts) — a property owner a firm
-// calls to ask if they want to sell/rent, not a buyer-side enquiry.
-/**
- * Clients is a ROUTER and holds no hooks of its own — same reason as
- * Leads/Properties: rendering Owners (which has its own hooks) from partway
- * through this component's body would mean the 'clients' render calls more
- * hooks than the 'owners' render, and React throws the moment the subnav
- * switches. The two stores are separate screens, not two branches of one.
- */
-export default function Clients(props) {
-  const tab = props.sel?.contactsTab === 'owners' ? 'owners' : 'clients'
-  if (tab === 'owners') return <Owners store={props.store} go={props.go} sel={props.sel} topBar={props.topBar} phone={props.phone} />
-  return <ClientsList {...props} />
-}
-
-function ClientsList({ store, go, sel, setSel, topBar, phone }) {
+// Contacts is the directory: people this firm already has a relationship with,
+// derived from the leads and the listings. The cold-calling list used to live
+// here as a second subnav, which was the wrong shelf — it is a pipeline with
+// statuses, routing, a queue and callbacks, and it now has its own top-level
+// screen (Calling → src/modules/Owners.jsx). Contacts is a directory again.
+export default function Clients({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
-  const tab = 'clients'
+  const tab = sel?.contactsTab === 'owners' ? 'owners' : 'clients'
   const [seg, setSeg] = useState('all')
   const [flt, setFlt] = useState({})
   const [q, setQ] = useState('')
@@ -97,7 +82,7 @@ function ClientsList({ store, go, sel, setSel, topBar, phone }) {
   }))
 
   const kpis = roleOptions.map(o => ({
-    label: o.key === 'all' ? (tab === 'clients' ? 'Clients' : 'Owners') : o.label,
+    label: o.key === 'all' ? (tab === 'clients' ? 'Clients' : 'Listing owners') : o.label,
     value: counts[o.key] ?? 0,
     onClick: () => setSegP(o.key),
   }))
@@ -110,13 +95,13 @@ function ClientsList({ store, go, sel, setSel, topBar, phone }) {
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
     kpis, segments: segs, view, onView: setView,
     page, onPage: setPage, pageSize, onPageSize: setPageSizeP,
-    // Owners aren't created directly (that's B3's stated, deliberate gap —
-    // they're derived from a property's owner field); the CTA that actually
-    // adds a new one is adding the property.
+    // A listing owner is not created here — they exist because a listing names
+    // them, so the CTA that adds one is adding the property. Someone you want
+    // to cold-call and don't hold a listing for belongs in Calling instead.
     cta: tab === 'clients'
       ? { label: 'New client', onClick: () => store.openModal({ kind: 'newLead' }) }
       : { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) },
-    emptyTitle: tab === 'clients' ? 'No clients match' : 'No owners match',
+    emptyTitle: tab === 'clients' ? 'No clients match' : 'No listing owners match',
     emptyHint: 'Adjust the role, filter or search.',
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} />

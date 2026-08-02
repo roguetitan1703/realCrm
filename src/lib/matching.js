@@ -3,7 +3,8 @@ import { budgetOf } from './format.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import {
-  AREA_UNITS, BHK, FACING, FURNISH, POSSESSION, SOCIETY_AMENITIES, SUBTYPES,
+  AREA_UNITS, BHK, COUNTED_ITEMS, FACING, FIXTURES, FURNISH, OWNERSHIP,
+  POSSESSION, SOCIETY_AMENITIES, SUBTYPES, TRANSACTION,
   labelOf, normaliseBhk, normaliseSubtype, normaliseTo,
 } from '../data/propertyFields.js'
 
@@ -151,74 +152,154 @@ export function describeProperty(p = {}, lang = 'English') {
 // Every line is built from a fact that may be missing on a hand-added listing.
 // `bullet` drops any empty part and skips the line entirely if nothing survives,
 // so a message can never print "undefined" or a dangling label in front of a client.
-function bullet(parts) {
+function bullet(parts, marker = '•') {
   const kept = parts.filter(x => x !== null && x !== undefined && String(x).trim() !== '')
-  return kept.length ? '• ' + kept.join(' · ') : null
+  return kept.length ? marker + ' ' + kept.join(' · ') : null
 }
 const push = (L, line) => { if (line) L.push(line) }
 
-function buildSale(p, t, opener, closer, firmName, lang) {
+// Emoji here are LINE MARKERS, one per line, each meaning the thing beside it —
+// a price line starts with a price emoji, a location line with a pin. That is
+// how brokers on WhatsApp already write, and it makes a message scannable on a
+// phone without reading it. Decorative emoji, or two on one line, is the tell
+// that a machine wrote it, so there are none.
+const E = {
+  home: '🏡', pin: '📍', area: '📐', floor: '🏢', bath: '🛁', car: '🚗',
+  key: '🔑', star: '✨', money: '💰', call: '📞', info: 'ℹ️',
+  doc: '📄', sofa: '🛋️',
+}
+
+// The listing's own description, appended only when the sender asks for it.
+//
+// This is the one part of a message we could never write: the client typed a
+// real paragraph about the township, its clubhouse and its green cover, and no
+// template can invent that. It is opt-in rather than automatic because it is
+// long — pasting 1,500 characters into a chat reads as a forwarded brochure,
+// not as a broker talking to someone — so the sender decides per message.
+function descriptionBlock(p, t) {
+  const text = String(p.description || '').trim()
+  if (!text) return null
+  return ['', `${E.info} *${t.about}*`, text]
+}
+
+function buildSale(p, t, opener, closer, firmName, lang, opts) {
   const d = describeProperty(p, lang)
   const L = []
-  L.push(`*${d.headline} ${t.forSale}${d.locality ? ' — ' + d.locality : ''}*`)
-  push(L, d.society); L.push('')
-  L.push(opener)
-  push(L, bullet([
-    d.area ? `${d.area} ${t.carpet}` : null,
-    d.floor ? `${d.floor}${t.floorSuffix(d.floor)} ${t.floor}` : null,
-    d.facing ? `${d.facing} ${t.facing}` : null,
-  ]))
+  // Headline carries what it IS and where. The society used to sit on its own
+  // line under it, which cost a line to say one word.
+  L.push(`${E.home} *${d.headline} — ${t.forSale}*`)
+  push(L, d.society ? `*${d.society}*` : null)
+  push(L, d.locality ? `${E.pin} ${d.locality}` : null)
+  L.push('')
+  // The openers were three canned sentences that asserted nothing checkable
+  // ("prime location", "best price in the market") and pushed the actual facts
+  // a line further down. A buyer scanning ten forwards reads the specs.
+  push(L, facts(L, d, p, t))
   push(L, bullet([
     d.bathrooms ? `${d.bathrooms} ${t.bath}` : null,
     d.balconies ? `${d.balconies} ${t.balcony}` : null,
     d.parking || null,
-  ]))
+  ], E.bath))
   push(L, bullet([
-    d.age ? `${d.age} ${t.yrsOld}` : null,
+    d.possession || null,
     d.furnish || null,
-    d.possession ? `${t.possession} ${d.possession.toLowerCase()}` : null,
-  ]))
-  // Highlights come from the listing's own amenities now, not a field nobody
-  // fills in — so this section stops being permanently absent.
+    d.age ? `${d.age} ${t.yrsOld}` : null,
+  ], E.key))
+  push(L, paperwork(p, t, lang))
+  push(L, bullet(contents(p, lang), E.sofa))
+  // Amenities on ONE line, separated. Six ✓ lines for "Lift, Power Backup"
+  // spent a third of the message on the least distinguishing facts in it.
   const feats = (p.features || p.highlights || d.amenities)
-  if (feats && feats.length) { L.push(''); L.push(t.highlights); feats.slice(0, 6).forEach(f => L.push(`✓ ${f}`)) }
+  if (feats && feats.length) { L.push(''); L.push(`${E.star} ${feats.slice(0, 8).join(' · ')}`) }
   L.push('')
   // Only print a price line when there IS a price. "Price: **" reads as a
-  // mistake to whoever receives it.
-  if (d.price) L.push(`${t.price}: *${d.price}*${p.negotiable ? ` ${t.negotiable}` : ` — ${t.fixed}`}`)
-  L.push(t.ownerDirect)
-  L.push(closer); if (firmName) L.push('— ' + firmName)
+  // mistake to whoever receives it. `— fixed` is gone: stating a negotiating
+  // position the sender did not choose is not this template's call. Negotiable
+  // still prints, because that one is a fact someone ticked.
+  if (d.price) L.push(`${E.money} *${d.price}*${p.negotiable ? ` ${t.negotiable}` : ''}`)
+  if (opts?.includeDescription) push2(L, descriptionBlock(p, t))
+  L.push('')
+  L.push(`${E.call} ${closer}`)
+  if (firmName) L.push(`— ${firmName}`)
   return L.join('\n')
 }
 
-function buildRent(p, t, opener, closer, firmName, lang) {
+function buildRent(p, t, opener, closer, firmName, lang, opts) {
   const d = describeProperty(p, lang)
   const L = []
-  L.push(`*${d.headline}${d.furnish ? ' ' + d.furnish : ''} — ${t.onRent}*`)
-  push(L, [d.society, d.locality].filter(Boolean).join(', '))
+  L.push(`${E.home} *${d.headline}${d.furnish ? ' ' + d.furnish : ''} — ${t.onRent}*`)
+  push(L, d.society ? `*${d.society}*` : null)
+  push(L, d.locality ? `${E.pin} ${d.locality}` : null)
   L.push('')
-  L.push(opener)
-  push(L, bullet([
-    d.area || null,
-    d.floor ? `${d.floor}${t.floorSuffix(d.floor)} ${t.floor}` : null,
-    d.facing ? `${d.facing} ${t.facing}` : null,
-  ]))
+  push(L, facts(L, d, p, t))
   push(L, bullet([
     d.bathrooms ? `${d.bathrooms} ${t.bath}` : null,
     d.parking || null,
-  ]))
+  ], E.bath))
   push(L, bullet([
     p.tenants || t.family,
-    d.possession ? `${t.possession} ${d.possession.toLowerCase()}` : null,
-  ]))
+    d.possession || null,
+  ], E.key))
+  push(L, bullet(contents(p, lang), E.sofa))
   const feats = (p.features || p.highlights || d.amenities)
-  if (feats && feats.length) { L.push(''); L.push(d.furnish || t.highlights); feats.slice(0, 6).forEach(f => L.push(`✓ ${f}`)) }
+  if (feats && feats.length) { L.push(''); L.push(`${E.star} ${feats.slice(0, 8).join(' · ')}`) }
   if (p.billsByOwner) { L.push(''); L.push(t.billsByOwner) }
   L.push('')
-  if (d.price) L.push(`${t.rent}: *${d.price}*` + (d.deposit ? ` · ${t.deposit}: *${d.deposit}*` : ''))
-  L.push(closer); if (firmName) L.push('— ' + firmName)
+  if (d.price) L.push(`${E.money} *${d.price}*` + (d.deposit ? ` · ${t.deposit} *${d.deposit}*` : ''))
+  if (opts?.includeDescription) push2(L, descriptionBlock(p, t))
+  L.push('')
+  L.push(`${E.call} ${closer}`)
+  if (firmName) L.push(`— ${firmName}`)
   return L.join('\n')
 }
+
+// Size and position — the first thing anyone checks. Carpet was the only area
+// printed, so a listing that recorded all three showed the smallest of them
+// and nothing else; an Indian buyer asks for super built-up by name.
+function facts(L, d, p, t) {
+  // All three areas when the listing records all three. Only carpet used to
+  // print, so a record that captured built-up and super built-up showed the
+  // smallest of the three and nothing else — and super built-up is the one an
+  // Indian buyer asks for by name.
+  const areas = [
+    d.area ? `${d.area} ${t.carpet}` : null,
+    p.builtup ? `${fmtArea(p.builtup, p.areaUnit)} ${t.builtUp}` : null,
+    p.superBuiltup ? `${fmtArea(p.superBuiltup, p.areaUnit)} ${t.superBuiltUp}` : null,
+  ].filter(Boolean)
+  push(L, bullet(areas, E.area))
+  // Tower and floor, not the flat number — the tower is enough for a client to
+  // picture where in the project it sits, and the door number is what lets
+  // them knock and deal direct (see OWNER_IDENTITY_FIELDS).
+  return bullet([
+    p.tower || null,
+    d.floor ? `${d.floor}${t.floorSuffix(d.floor)} ${t.floor}${p.totalFloors ? ` ${t.of} ${p.totalFloors}` : ''}` : null,
+    d.facing ? `${d.facing} ${t.facing}` : null,
+  ], E.floor)
+}
+
+// What's inside the flat, when it is furnished enough for there to be anything
+// to list. `countedItems` is stored as {token: n}, `fixtures` as tokens — both
+// were recorded on the form and neither ever reached a client.
+function contents(p, lang) {
+  const counted = Object.entries(p.countedItems || {})
+    .filter(([, n]) => Number(n) > 0)
+    .map(([k, n]) => `${n} ${localLabel(lang, 'counted', k, labelOf(COUNTED_ITEMS, k)) || k}`)
+  const fixtures = (p.fixtures || [])
+    .map(f => localLabel(lang, 'fixture', f, labelOf(FIXTURES, f))).filter(Boolean)
+  return [...counted, ...fixtures]
+}
+
+// Paper facts a buyer asks before a visit, both already on the form and
+// neither ever sent. Freehold-vs-leasehold and new-vs-resale decide whether
+// someone is interested at all.
+function paperwork(p, t, lang) {
+  return bullet([
+    p.ownership ? localLabel(lang, 'ownership', p.ownership, labelOf(OWNERSHIP, p.ownership)) : null,
+    p.transactionType ? localLabel(lang, 'transaction', p.transactionType, labelOf(TRANSACTION, p.transactionType)) : null,
+  ], E.doc)
+}
+const fmtArea = (v, unit) => `${v} ${unit === 'sqm' ? 'sq.m' : 'sq.ft'}`
+const push2 = (L, lines) => { if (lines) lines.forEach(x => L.push(x)) }
 
 // Each pack carries BOTH the sentence variants and the structural labels, so
 // switching language changes the whole message — not just the first and last line.
@@ -226,20 +307,22 @@ const PACKS = {
   Hinglish: {
     openers: ['Bahut hi prime location mein available:', 'Shifting-ready flat, seedha owner se:', 'Genuine deal, market se best price:'],
     closers: ['Site visit ke liye reply karein — weekend slots open hain.', 'Interested ho toh reply karein, aaj hi visit fix kar dete hain.', 'Details ya visit ke liye message karein, turant arrange ho jayega.'],
-    forSale: 'for Sale', onRent: 'On Rent', carpet: 'carpet', floor: 'floor', floorSuffix: ord,
+    forSale: 'For Sale', onRent: 'On Rent', carpet: 'carpet', floor: 'floor', floorSuffix: ord,
     facing: 'facing', yrsOld: 'yrs old', possession: 'possession', highlights: 'Highlights:',
     bath: 'bath', balcony: 'balcony',
     price: 'Price', rent: 'Rent', deposit: 'Deposit', negotiable: '(thoda negotiable)', fixed: 'fixed',
-    ownerDirect: 'Owner direct deal, no chain.', family: 'Family', billsByOwner: 'Owner electricity & gas bill pay karega.',
+    family: 'Family', billsByOwner: 'Owner electricity & gas bill pay karega.',
+    superBuiltUp: 'super built-up', of: 'of', about: 'Project ke baare mein', builtUp: 'built-up',
   },
   English: {
     openers: ['Available in a prime location:', 'Move-in ready, directly from owner:', 'Genuine deal at the best market price:'],
     closers: ['Reply to book a site visit — weekend slots open.', "Interested? Reply and we'll fix a visit today.", 'Message for details or a visit, arranged right away.'],
-    forSale: 'for Sale', onRent: 'On Rent', carpet: 'carpet', floor: 'floor', floorSuffix: ord,
+    forSale: 'For Sale', onRent: 'On Rent', carpet: 'carpet', floor: 'floor', floorSuffix: ord,
     facing: 'facing', yrsOld: 'years old', possession: 'possession', highlights: 'Highlights:',
     bath: 'bath', balcony: 'balcony',
     price: 'Price', rent: 'Rent', deposit: 'Deposit', negotiable: '(negotiable)', fixed: 'fixed',
-    ownerDirect: 'Direct from owner, no chain.', family: 'Family', billsByOwner: 'Electricity & gas bills paid by owner.',
+    family: 'Family', billsByOwner: 'Electricity & gas bills paid by owner.',
+    superBuiltUp: 'super built-up', of: 'of', about: 'About the project', builtUp: 'built-up',
   },
   Marathi: {
     openers: ['अतिशय उत्तम ठिकाणी उपलब्ध:', 'राहायला तयार फ्लॅट, थेट मालकाकडून:', 'प्रामाणिक व्यवहार, बाजारातील सर्वोत्तम किंमत:'],
@@ -248,7 +331,8 @@ const PACKS = {
     facing: 'दिशा', yrsOld: 'वर्षे जुने', possession: 'ताबा', highlights: 'ठळक वैशिष्ट्ये:',
     bath: 'बाथरूम', balcony: 'बाल्कनी',
     price: 'किंमत', rent: 'भाडे', deposit: 'डिपॉझिट', negotiable: '(वाटाघाटीस वाव)', fixed: 'निश्चित',
-    ownerDirect: 'थेट मालकाकडून, मध्यस्थ नाही.', family: 'कुटुंब', billsByOwner: 'वीज व गॅस बिल मालक भरेल.',
+    family: 'कुटुंब', billsByOwner: 'वीज व गॅस बिल मालक भरेल.',
+    superBuiltUp: 'सुपर बिल्ट-अप', of: 'पैकी', about: 'प्रकल्पाविषयी', builtUp: 'बिल्ट-अप',
   },
 }
 
@@ -296,14 +380,17 @@ export function generateMessage(rawProperty, opts = {}) {
   const i = ((variant % 3) + 3) % 3
   const opener = pack.openers[i], closer = pack.closers[i]
   let msg = property.deal === 'rent'
-    ? buildRent(property, pack, opener, closer, firmName, lang)
-    : buildSale(property, pack, opener, closer, firmName, lang)
+    ? buildRent(property, pack, opener, closer, firmName, lang, opts)
+    : buildSale(property, pack, opener, closer, firmName, lang, opts)
   if (tone === 'Short') {
+    // Identity, price, one call to action. The price line is found by its
+    // marker rather than by an English prefix — the old version looked for
+    // 'Price:' / 'Rent:', so a Marathi message came out with no price in it.
     const rows = msg.split('\n')
-    const head = rows.slice(0, 3)
-    const priceLine = rows.find(x => x.startsWith('Rent:') || x.startsWith('Price:'))
-    msg = [...head, '', opener, priceLine, closer, firmName && '— ' + firmName]
-      .filter(x => x !== undefined && x !== false).join('\n')
+    const head = rows.slice(0, 3).filter(Boolean)
+    const priceLine = rows.find(x => x.startsWith(E.money))
+    msg = [...head, '', priceLine, `${E.call} ${closer}`, firmName && '— ' + firmName]
+      .filter(Boolean).join('\n')
   }
   return msg
 }

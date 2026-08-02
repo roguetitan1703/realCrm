@@ -24,11 +24,12 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel } from '../lib/format.js'
+import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, relTime } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
 import { OWNER_STATUSES } from '../data/ownerStatus.js'
+
 import { canAssignLead, canEditLead, canUpdateLeadStatus } from '../lib/permissions.js'
 import { api } from '../lib/api.js'
 import Icon from '../components/Icon.jsx'
@@ -39,6 +40,14 @@ import {
   POSSESSION, STATUS, SUBTYPES, TRANSACTION,
   isPlot, labelOf, normaliseBhk, normaliseSubtype, normaliseTo, optionsOf,
 } from '../data/propertyFields.js'
+
+// The firm's own calling statuses, falling back to the shipped set until one is
+// configured. Read through a helper rather than importing the constant at every
+// call site, so renaming a status in Settings reaches the stage cells, the
+// dropdowns and the record's progression at once.
+const ownerStages = (store) => store?.state?.settings?.ownerStages?.length
+  ? store.state.settings.ownerStages
+  : OWNER_STATUSES
 
 
 // Localities are DERIVED from the firm's own records, never listed here. There
@@ -285,7 +294,18 @@ export const LEADS_DEF = {
   // the far right of the middle line, which left it stranded in the white space
   // between the requirement and the buttons — belonging to neither. It reads as
   // what it is now: the last fact on the last line.
-  phoneCard: (l, store) => {
+  // Three full-width lines, and the actions on the last one.
+  //
+  // This was a three-line text block squeezed beside a fixed column of icon
+  // buttons: the buttons took 120px of a 390px screen so long names and
+  // requirements ran off the card, and they sat vertically centred against the
+  // text, leaving a tall empty gap. Now every line gets the whole width and the
+  // buttons sit bottom-right, where a thumb already is.
+  //
+  // The phone number is gone. It was the widest thing on the row and it is not
+  // a decision input — anyone who wants to ring taps Call, and anyone who wants
+  // to read the number opens the record.
+  phoneCard: (l, store, actions) => {
     const a = store.agentById(l.agentId)
     return (
       <div className="prow">
@@ -299,11 +319,16 @@ export const LEADS_DEF = {
           />
         </div>
         {reqShort(l.req) && <div className="prow-req">{reqShort(l.req)}</div>}
-        <div className="prow-meta">
-          {l.phone && <span className="mono-num">{l.phone}</span>}
-          {a
-            ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span>
-            : <Unassigned />}
+        <div className="prow-foot">
+          <div className="prow-meta">
+            {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
+            {/* What makes this row urgent, which the list never showed —
+                Today had it and the list you actually work from did not. */}
+            {l.overdue
+              ? <Overdue>{l.followUp?.date || 'Overdue'}</Overdue>
+              : l.followUp ? <span>{l.followUp.date}</span> : null}
+          </div>
+          {actions}
         </div>
       </div>
     )
@@ -359,25 +384,35 @@ export const OWNERS_DEF = {
     ] },
   ],
 
-  headerFacts: (o) => [
-    o.phone,
-    o.email || null,
-    o.project ? <span className="rh-loc"><Icon name="building" size={12} className="ic" />{o.project}</span> : null,
-    o.unitRef || null,
-    o.locality || null,
-    o.source ? `Via ${o.source}` : null,
-  ].filter(Boolean),
+  headerFacts: (o) => {
+    const cb = callbackSignal(o.callbackAt)
+    return [
+      o.phone,
+      o.email || null,
+      o.project ? <span className="rh-loc"><Icon name="building" size={12} className="ic" />{o.project}</span> : null,
+      o.unitRef || null,
+      o.locality || null,
+      // The one fact a caller opens this record to check. Overdue reads as
+      // overdue here for the same reason it does in the queue.
+      cb ? (cb.tone === 'overdue'
+        ? <Overdue>Callback {cb.label}</Overdue>
+        : <span className="rh-loc"><Icon name="phone" size={12} className="ic" />Callback {cb.label}</span>) : null,
+      o.source ? `Via ${o.source}` : null,
+    ].filter(Boolean)
+  },
 
   progression: {
     flat: true,
-    stages: () => OWNER_STATUSES,
+    stages: (store) => ownerStages(store),
     current: (o) => o.stage,
     set: (store, o, stage) => store.setOwnerStage(o.id, stage),
     canSet: (store, o) => canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o),
   },
 
   sortOptions: [
+    { key: 'callback', label: 'Callback due' },
     { key: 'recent', label: 'Recently added' },
+    { key: 'lastCall', label: 'Last called' },
     { key: 'name', label: 'Name' },
     { key: 'project', label: 'Project' },
   ],
@@ -388,9 +423,14 @@ export const OWNERS_DEF = {
     ) },
     { key: 'project', label: 'Project', render: (o) => o.project || '—' },
     { key: 'unitRef', label: 'Unit', render: (o) => <span className="cell-quiet">{o.unitRef || '—'}</span> },
+    { key: 'callback', label: 'Callback', sortable: true, render: (o) => {
+      const cb = callbackSignal(o.callbackAt)
+      if (!cb) return <span className="cell-quiet">{o.lastCallAt ? 'No callback' : 'Not called'}</span>
+      return cb.tone === 'overdue' ? <Overdue>{cb.label}</Overdue> : <span className="source">{cb.label}</span>
+    } },
     { key: 'stage', label: 'Status', sortable: true, render: (o, store) => (
       <StageCell
-        record={o} store={store} stages={OWNER_STATUSES}
+        record={o} store={store} stages={ownerStages(store)}
         canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o)}
         onSet={(stage) => store.setOwnerStage(o.id, stage)}
       />
@@ -427,7 +467,7 @@ export const OWNERS_DEF = {
       <div className="rc-top">
         <div className="rc-title">{o.name || 'Unnamed owner'}</div>
         <StageCell
-          record={o} store={store} stages={OWNER_STATUSES}
+          record={o} store={store} stages={ownerStages(store)}
           canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o)}
           onSet={(stage) => store.setOwnerStage(o.id, stage)}
         />
@@ -440,12 +480,71 @@ export const OWNERS_DEF = {
     </>
   ),
 
+  // The cold-calling loop, in the order it happens: dial, note what they said,
+  // book the callback, come back. Until this existed the module had a
+  // "Callback" status with nowhere to record when — so the status meant
+  // someone had said "call me back" and nothing ever surfaced them again.
   actions: [
+    { id: 'call', tier: 'quick', icon: 'phone', label: 'Call',
+      when: (o) => !!o.phone,
+      sub: (o) => (o.lastCallAt ? `Last called ${relTime(o.lastCallAt)}` : 'Not called yet'),
+      run: (store, o) => store.openModal({
+        kind: 'contact', channel: 'call', name: o.name, phone: o.phone, email: o.email,
+        recordType: 'owner', recordId: o.id,
+      }) },
+    { id: 'whatsapp', tier: 'quick', icon: 'wa', label: 'WhatsApp',
+      when: (o) => !!o.phone,
+      run: (store, o) => store.openModal({
+        kind: 'contact', channel: 'wa', name: o.name, phone: o.phone,
+        recordType: 'owner', recordId: o.id,
+      }) },
+    { id: 'callback', tier: 'quick', icon: 'calendar',
+      label: (o) => (o.callbackAt ? 'Reschedule callback' : 'Schedule callback'),
+      sub: (o) => { const cb = callbackSignal(o.callbackAt); return cb ? cb.label : null },
+      run: (store, o) => store.openModal({ kind: 'ownerCallback', ownerId: o.id }) },
+    { id: 'callbackDone', tier: 'quick', icon: 'check', label: 'Callback done',
+      when: (o) => !!o.callbackAt,
+      sub: (o) => 'Clears it from the queue',
+      run: (store, o) => store.setOwnerCallback(o.id, null) },
     { id: 'remark', tier: 'quick', icon: 'note', label: 'Add remark',
       run: (store, o) => store.openModal({ kind: 'remark', recordType: 'owner', recordId: o.id }) },
+    { id: 'assign', tier: 'manage', icon: 'userPlus',
+      label: (o) => (o.agentId ? 'Reassign caller' : 'Assign caller'),
+      when: (o, store) => canAssignLead(store.state.role),
+      sub: (o, store) => { const a = store.agentById(o.agentId); return a ? a.name : 'Unassigned' },
+      run: (store, o) => store.openModal({ kind: 'bulkAssign', leadIds: [o.id], isOwner: true }) },
     { id: 'delete', tier: 'manage', icon: 'trash', label: 'Delete owner', tone: 'danger',
       run: (store, o, ctx) => { if (window.confirm('Delete this owner record permanently?')) { store.deleteOwner(o.id); ctx?.onClose?.() } } },
   ],
+
+  // Compact phone row for the calling queue — the three things a caller needs
+  // before deciding to dial: who, where, and whether they are already late.
+  phoneCard: (o, store, actions) => {
+    const cb = callbackSignal(o.callbackAt)
+    const a = store.agentById(o.agentId)
+    return (
+      <div className="prow">
+        <div className="prow-top">
+          <span className="prow-name">{o.name || 'Unnamed owner'}</span>
+          <StageCell
+            record={o} store={store} stages={ownerStages(store)}
+            canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o)}
+            onSet={(stage) => store.setOwnerStage(o.id, stage)}
+          />
+        </div>
+        {(o.project || o.unitRef) && <div className="prow-req">{[o.project, o.unitRef].filter(Boolean).join(' · ')}</div>}
+        <div className="prow-foot">
+          <div className="prow-meta">
+            {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
+            {/* The callback time, not the phone number — this is the fact that
+                decides whether this one gets dialled next. */}
+            {cb && (cb.tone === 'overdue' ? <Overdue>{cb.label}</Overdue> : <span>{cb.label}</span>)}
+          </div>
+          {actions}
+        </div>
+      </div>
+    )
+  },
 }
 
 // ---------------------------------------------------------------------------

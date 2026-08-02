@@ -593,14 +593,6 @@ function reducer(state, action) {
       ;[stages[i], stages[j]] = [stages[j], stages[i]]
       return { ...state, settings: { ...state.settings, stages } }
     }
-    case 'ADD_SOURCE': {
-      const name = action.name.trim()
-      if (!name || state.settings.sources.includes(name)) return state
-      return { ...state, settings: { ...state.settings, sources: [...state.settings.sources, name] } }
-    }
-    case 'REMOVE_SOURCE': {
-      return { ...state, settings: { ...state.settings, sources: state.settings.sources.filter(s => s !== action.name) } }
-    }
 
     case 'WA_OPEN':
       return { ...state, waState: { ...action.wa, composing: true, message: null } }
@@ -846,6 +838,9 @@ export function StoreProvider({ children }) {
       return generateMessage(prop, {
         lang: wa.lang, tone: wa.tone, variant: wa.variant,
         firmName: state.settings.firmName,
+        // Off unless the sender asks. The description is the client's own copy
+        // and can run to a page — see descriptionBlock() in matching.js.
+        includeDescription: !!wa.withDescription,
       })
     }
     // No property attached is a normal case — a plain follow-up. Returning ''
@@ -1158,6 +1153,20 @@ export function StoreProvider({ children }) {
       () => apiClient.updateOwner(id, patch),
       () => dispatch({ type: 'UPDATE_OWNER', id, patch }),
       'Owner details updated'),
+    // A callback is one moment, so it travels as one ISO timestamp — not the
+    // lead follow-up's {date,time,action}, where 'Today' is a display string
+    // the server has to guess a date from. Setting the status to Callback is
+    // part of scheduling one: the two disagreeing is what made "Callback" mean
+    // nothing. Passing `at: null` clears both.
+    setOwnerCallback: (id, at, note) => {
+      const patch = at
+        ? { callbackAt: at, callbackNote: note || null, stage: 'Callback' }
+        : { callbackAt: null, callbackNote: null }
+      return write('Schedule callback',
+        () => apiClient.updateOwner(id, patch),
+        () => dispatch({ type: 'UPDATE_OWNER', id, patch }),
+        at ? 'Callback scheduled' : 'Callback cleared')
+    },
     deleteOwner: (ids) => api.deleteMany('owner', ids),
     // A partial delete is the outcome that has to be reported honestly: five of
     // six rows gone is neither "deleted" nor "failed", and the old version
@@ -1257,14 +1266,15 @@ export function StoreProvider({ children }) {
         () => apiClient.updateSettings({ stages: arr }),
         () => dispatch({ type: 'MOVE_STAGE', name, dir }))
     },
-    addSource: (name) => write('Add source',
-      () => apiClient.updateSettings({ sources: [...state.settings.sources, name] }),
-      () => dispatch({ type: 'ADD_SOURCE', name }),
-      'Source added'),
-    removeSource: (name) => write('Remove source',
-      () => apiClient.updateSettings({ sources: state.settings.sources.filter(s => s !== name) }),
-      () => dispatch({ type: 'REMOVE_SOURCE', name }),
-      'Source removed'),
+    // Calling statuses. Same three edits as lead stages, against
+    // settings.ownerStages — one generic writer instead of three near-copies,
+    // because the two terminal statuses are locked and everything else is just
+    // an array of strings the queue reads. `renameOwnerStage` moves the rows on
+    // the old status with it, exactly as renaming a lead stage does.
+    setOwnerStages: (next, note, rename) => write('Calling statuses',
+      () => apiClient.updateSettings({ ownerStages: next, ...(rename ? { renameOwnerStage: rename } : {}) }),
+      () => dispatch({ type: 'PATCH_SETTINGS', patch: { ownerStages: next } }),
+      note),
     // Generic settings patch — persists any key (slaHours, reminderDays, currency, …).
     patchSettings: (patch, note) => write('Settings',
       () => apiClient.updateSettings(patch),

@@ -130,6 +130,14 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     search: q, onSearch: setQP,
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
     segments: segs, view, onView: setView, phone,
+    // The toolbar becomes the selection bar rather than a second band appearing
+    // above it — see FilterBar. An agent's table never gains checkboxes at all
+    // (ModuleTable's `selectable` is already gated on canAssign).
+    selection: (canAssign && selected.size > 0) ? {
+      count: selected.size,
+      actions: [{ label: 'Bulk assign', icon: 'userPlus', onClick: bulkAssign }],
+      onClear: () => setSelected(new Set()),
+    } : null,
     page, onPage: setPageP, pageSize, onPageSize: setPageSizeP,
     leftAddon: (
       <div className="leads-dd-row">
@@ -166,18 +174,6 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
         actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import / Revert</Button>
       })}
       {header}
-      {/* Only rendered while there IS a selection, and only for a role that
-          may act on it — an agent's table never gains checkboxes to begin
-          with (ModuleTable's `selectable` is already gated on canAssign). */}
-      {canAssign && selected.size > 0 && (
-        <div className="selbar">
-          <span className="selbar-count">{selected.size} selected</span>
-          <div className="selbar-actions">
-            <Button variant="primary" size="sm" onClick={bulkAssign}>Bulk assign</Button>
-            <Button variant="quiet" size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
-          </div>
-        </div>
-      )}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>
     </>
   )

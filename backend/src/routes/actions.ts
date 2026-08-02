@@ -23,7 +23,7 @@ import { dispatchOutboundWebhook } from '../services/webhookSender';
 import {
   addTimelineEvent, updateLead, mergeLeads, getLeadById,
   getTimelineEventById, updateTimelineEvent, maybeAutoAdvanceStage,
-  addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES,
+  addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES, noteOwnerContact,
 } from '../services/store';
 import { isSafeKey, tenantOfKey } from '../services/media';
 import { audit } from '../services/audit';
@@ -137,6 +137,10 @@ actionsRouter.post('/:id/actions/contact-log', async (req: Request, res: Respons
       record_id: recordId, type: dbType, title, description: `${title} initiated`,
       author: authorId || undefined,
     });
+    // No-ops unless the record is an owner: stamps the attempt and moves
+    // New → Contacted, so a cold-calling queue can tell "not dialled yet" from
+    // "dialled, no answer" without reading every record's timeline.
+    await noteOwnerContact(recordId, channel);
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,
       actor_label: authorId || 'system', action: 'contact_action.logged',

@@ -1,7 +1,7 @@
 // Collection components: Toolbar (the ONE filter/sort bar), Table, ListRow, Card grid.
 import { useState, useEffect, useRef } from 'react'
 import Icon from './Icon.jsx'
-import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, NewTag, Quoted, PageHeader, ViewSwitch, Pager } from './primitives.jsx'
+import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, NewTag, Quoted, PageHeader, ViewSwitch, Pager, Button } from './primitives.jsx'
 import { quotedLine, unitLabel } from '../lib/format.js'
 import { priceRangeLabel } from '../lib/projects.js'
 import { getNestedValue } from './ModuleFields.jsx'
@@ -82,7 +82,7 @@ function ListSpinner() {
 export function ModuleListView({
   def, records, store, onOpen,
   filters, onFilters, search, onSearch, sortKey, onSortKey, sortDir, onSortDir,
-  kpis, segments, leftAddon, view, onView, viewExtra, showViewSwitch = true, cta, toolbarRight, emptyTitle, emptyHint, renderTable,
+  kpis, segments, leftAddon, view, onView, viewExtra, showViewSwitch = true, cta, toolbarRight, emptyTitle, emptyHint, renderTable, selection,
   phone, page = 1, onPage, pageSize = 20, onPageSize, source,
 }) {
   // Two sources, one surface. `records` is the classic in-memory collection,
@@ -161,6 +161,7 @@ export function ModuleListView({
       fields={fields}
       value={filters}
       onChange={onFilters}
+      selection={selection}
       search={{ value: search, onChange: onSearch, placeholder: `Search ${def.name.toLowerCase()}…` }}
       right={<>
         <SortControl
@@ -284,14 +285,23 @@ function PhoneToolbar({
 
 // ---- ModuleCards: grid of cards from a definition's `card(record,store)` fn. ----
 // On a phone a module may declare `phoneCard` (a compact row layout, in place
-// of the desktop grid tile) and `phoneActions` (icon buttons beside the row —
-// e.g. call/WhatsApp on a lead). A row with actions can't be a <button> that
-// wraps another <button> — nested buttons are invalid HTML, and the browser
-// silently closes the outer one early — so it renders as a clickable div
-// instead, with the actions stopping their own click from also opening it.
+// of the desktop grid tile) and `phoneActions` (what the row can do).
+//
+// The actions used to render as a fixed column on the RIGHT of the row, with
+// the text squeezed into whatever was left. That was wrong twice over: three
+// buttons took 120px of a 390px screen so the text ran out of the card, and the
+// buttons sat vertically centred against a three-line block, leaving a tall
+// empty column beside them. So the row now gets the FULL width for its text and
+// the definition places the actions itself — the layout is the module's, the
+// list of actions is still the definition's, and there is still exactly one
+// place that says what a lead row can do.
+//
+// A row with actions can't be a <button> that wraps another <button> — nested
+// buttons are invalid HTML and the browser silently closes the outer one early
+// — so it renders as a clickable div, with the actions stopping their own click
+// from also opening the record.
 export function ModuleCards({ def, rows, store, onOpen, phone }) {
   if (!def.card) return <ModuleTable def={def} rows={rows} store={store} onOpen={onOpen} />
-  const renderBody = (rec) => (phone && def.phoneCard) ? def.phoneCard(rec, store) : def.card(rec, store)
   // A phone module that declares a row renders as a LIST — one panel, hairline
   // dividers — not as a column of separate floating cards with air between
   // them. Detached cards read as a grid that lost its second column.
@@ -300,26 +310,34 @@ export function ModuleCards({ def, rows, store, onOpen, phone }) {
     <div className={'grid-cards' + (asList ? ' cardlist' : '')}>
       {rows.map(rec => {
         const actions = phone && def.phoneActions ? def.phoneActions(rec, store) : []
-        if (actions.length > 0) {
+        if (asList) {
+          const actionBar = actions.length > 0 ? (
+            <div className="rcard-actions" onClick={e => e.stopPropagation()}>
+              {actions.map(a => (
+                <Button
+                  key={a.key || a.icon}
+                  // Same order of prominence the record header uses: the call
+                  // is the accent, WhatsApp is the black one beside it.
+                  variant={a.key === 'call' ? 'primary' : a.tone === 'wa' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  aria-label={a.label} title={a.label} onClick={a.onClick}
+                >
+                  <Icon name={a.icon} size={16} />
+                </Button>
+              ))}
+            </div>
+          ) : null
           return (
             <div key={rec.id} className="rcard rcard-row" role="button" tabIndex={0}
               onClick={onOpen ? () => onOpen(rec) : undefined}
               onKeyDown={onOpen ? (e) => { if (e.key === 'Enter') onOpen(rec) } : undefined}>
-              <div className="rcard-body">{renderBody(rec)}</div>
-              <div className="rcard-actions" onClick={e => e.stopPropagation()}>
-                {actions.map(a => (
-                  <button key={a.key || a.icon} className={'rcard-act' + (a.tone ? ' ' + a.tone : '')}
-                    aria-label={a.label} title={a.label} onClick={a.onClick}>
-                    <Icon name={a.icon} size={16} />
-                  </button>
-                ))}
-              </div>
+              {def.phoneCard(rec, store, actionBar)}
             </div>
           )
         }
         return (
           <button key={rec.id} className="rcard" onClick={onOpen ? () => onOpen(rec) : undefined}>
-            {renderBody(rec)}
+            {def.card(rec, store)}
           </button>
         )
       })}
@@ -524,7 +542,12 @@ export function OwnerCell({ record, store, onAssign, canAssign }) {
       agents={store.activeAgents()} currentId={record.agentId} onAssign={onAssign}
       className={'own-cell own-btn' + (orphaned || (owner && owner.departed) ? ' own-alert' : '')}
       title={record.agentId ? 'Change owner' : 'Assign owner'}
-    >{body}</QuickAssignMenu>
+    >
+      {body}
+      {/* A name with no affordance next to it reads as a printed fact. The
+          caret is the only thing telling a manager this cell reassigns. */}
+      <Icon name="chevDown" size={13} className="ic own-caret" />
+    </QuickAssignMenu>
   )
 }
 
@@ -616,7 +639,13 @@ function groupFields(fields) {
   return order.map(g => [g, byGroup.get(g)])
 }
 
-export function FilterBar({ fields = [], value = {}, onChange, search, right, cta }) {
+// `selection` turns this bar into the selection bar rather than adding a second
+// one above it. Two bands meant the controls that reshuffle the list (search,
+// filter, sort, view) stayed live next to a count of rows selected out of that
+// list — so changing a filter silently left ids selected that were no longer on
+// screen. Taking the controls away while a selection is live states the rule
+// instead of documenting it: finish the selection, or clear it and re-filter.
+export function FilterBar({ fields = [], value = {}, onChange, search, right, cta, selection }) {
   const [open, setOpen] = useState(null)   // null | 'add' | fieldKey (value picker)
   const barRef = useRef(null)
   useEffect(() => {
@@ -639,6 +668,22 @@ export function FilterBar({ fields = [], value = {}, onChange, search, right, ct
   const ValuePicker = ({ f, align }) => (
     <FilterValuePicker f={f} align={align} selected={value[f.key] || []} onToggle={(v) => toggleVal(f, v)} />
   )
+
+  if (selection?.count > 0) {
+    return (
+      <div className="fbar fbar-sel">
+        <span className="fsel-n">{selection.count} selected</span>
+        <span className="fsel-hint">Filters and sort are paused while rows are selected</span>
+        <div className="u-spring" />
+        {(selection.actions || []).map(a => (
+          <button key={a.label} className="btn btn-primary btn-sm" onClick={a.onClick}>
+            {a.icon && <Icon name={a.icon} size={15} />}{a.label}
+          </button>
+        ))}
+        <button className="f-clear" onClick={selection.onClear}>Clear</button>
+      </div>
+    )
+  }
 
   return (
     <div className="fbar" ref={barRef}>

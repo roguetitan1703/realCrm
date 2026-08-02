@@ -233,9 +233,37 @@ function agentLeadScope(): string | null {
  * that round-robins to a colleague the moment it is saved would otherwise
  * vanish from the person who just entered it.
  */
-function leadScope() {
-  const me = agentLeadScope();
-  return me ? sql`(agent_id = ${me} OR created_by = ${me})` : sql`TRUE`;
+/**
+ * Whose records a query should return.
+ *
+ * An agent always sees their own — that is RBAC and it is not negotiable here.
+ * A manager or owner sees the whole desk BY DEFAULT, but can ask for just their
+ * own with `mine`. That flag is what the phone sends: a manager standing in a
+ * lift wants the eleven things they personally have to do today, not the
+ * seven hundred the firm has. The desk screens never send it.
+ */
+function scopeUserId(mine?: boolean): string | null {
+  const c = getContext();
+  if (!c?.userId) return null;
+  if (c.role === 'agent') return c.userId;
+  return mine ? c.userId : null;
+}
+
+/**
+ * Two different questions, and conflating them is a bug we shipped once.
+ *
+ * VISIBILITY (an agent's RBAC scope) is "records I own or created" — someone
+ * who enters a walk-in must keep seeing it even before it is routed to them.
+ *
+ * MY WORKLIST (`mine`, what the phone asks for) is "records ASSIGNED to me",
+ * and nothing else. The manager who ran the 732-row import is `created_by` on
+ * every one of them, so folding `created_by` into `mine` handed their phone
+ * the entire firm — the exact number this flag exists to avoid.
+ */
+function leadScope(mine?: boolean) {
+  const me = scopeUserId(mine);
+  if (!me) return sql`TRUE`;
+  return mine ? sql`agent_id = ${me}` : sql`(agent_id = ${me} OR created_by = ${me})`;
 }
 
 /** Actor context for the audit ledger, threaded from the route down to the mutation. */
@@ -1004,7 +1032,7 @@ export async function getPulse(): Promise<Record<string, any>> {
  */
 export async function getBootstrap(): Promise<any> {
   const t = tid();
-  const [agentsRows, formerRows, settingsRows, routingRows, brandRows, localityRows, projectRows, configRows, dealRows] = await Promise.all([
+  const [agentsRows, formerRows, settingsRows, routingRows, brandRows, localityRows, projectRows, configRows, dealRows, sourceRows] = await Promise.all([
     sql`SELECT a.* FROM crm_agents a
         LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
         WHERE a.tenant_id = ${t} AND u.deleted_at IS NULL`,
@@ -1047,6 +1075,14 @@ export async function getBootstrap(): Promise<any> {
     sql`SELECT count(*) FILTER (WHERE coalesce(deal, 'sale') = 'sale')::int AS sale,
                count(*) FILTER (WHERE coalesce(deal, 'sale') = 'rent')::int AS rent
           FROM crm_properties WHERE tenant_id = ${t}`,
+    // Sources that have actually sent something, biggest first. This used to be
+    // a hand-curated list in settings that nothing kept in step with reality:
+    // a Connections integration or an import invented a source and never told
+    // it, so the filter menu offered five names while the dashboard's own
+    // breakdown showed seven. Derived, it cannot disagree with the data.
+    sql`SELECT source AS v, count(*)::int AS n FROM crm_leads
+         WHERE tenant_id = ${t} AND coalesce(source, '') <> ''
+         GROUP BY 1 ORDER BY 2 DESC LIMIT 60`,
   ]);
   const agents = agentsRows.map(rowToAgent);
   const brand = { ...(brandRows[0]?.brand_config || {}) };
@@ -1064,7 +1100,10 @@ export async function getBootstrap(): Promise<any> {
     // off to say "left the firm" rather than silently showing a name.
     formerAgents: formerRows.map(r => ({ ...rowToAgent(r), departed: true })),
     inactiveAgentIds: agentsRows.filter(a => a.duty_status === 'OFF_DUTY').map(a => a.id),
-    settings: settingsRows[0]?.value || {},
+    // `sources` is overwritten with the derived list — settings may still
+    // carry a stale curated array from before this was derived, and the one
+    // that matches the records has to win.
+    settings: { ...(settingsRows[0]?.value || {}), sources: sourceRows.map((r: any) => r.v) },
     routing_rules: routingRows[0] || null,
     brand,
     localities: localityRows.map((r: any) => r.v),
@@ -1114,7 +1153,7 @@ export async function searchWorkspace(q: string, limit = 8): Promise<{ leads: an
  */
 export async function getDeskSummary(): Promise<any> {
   const t = tid();
-  const [totals, byStage, bySource, perAgent, perAgentStage, props, owners] = await Promise.all([
+  const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
                count(*) FILTER (WHERE overdue)::int AS overdue,
@@ -1140,7 +1179,24 @@ export async function getDeskSummary(): Promise<any> {
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available
           FROM crm_properties WHERE tenant_id = ${t}`,
-    sql`SELECT count(*)::int AS n FROM crm_owners WHERE tenant_id = ${t}`,
+    // The Contacts directory's "Listing owners" count — distinct people named
+    // on the listings this firm holds. NOT crm_owners: that is the cold-calling
+    // queue, it has its own top-level screen and its own counts, and pointing
+    // this at it made the directory's subnav claim 732 rows it does not show.
+    sql`SELECT count(DISTINCT owner_name)::int AS n FROM crm_properties
+         WHERE tenant_id = ${t} AND coalesce(owner_name, '') <> ''`,
+    // Per-agent CALLING throughput. The roster used to derive "contacted" from
+    // the lead stage order — everything past index 0 — which is a guess, not a
+    // measurement, and it said nothing at all about the outbound half of the
+    // day. These are counted, not inferred: rows carried, rows actually
+    // dialled, dialled today, and how many said yes.
+    sql`SELECT agent_id AS k,
+               count(*)::int AS owners,
+               count(*) FILTER (WHERE last_call_at IS NOT NULL)::int AS called,
+               count(*) FILTER (WHERE last_call_at >= date_trunc('day', NOW()))::int AS called_today,
+               count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
+               count(*) FILTER (WHERE callback_at IS NOT NULL AND callback_at < NOW())::int AS late
+          FROM crm_owners WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1`,
   ]);
   const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
   const stagesByAgent = new Map<string, Record<string, number>>();
@@ -1158,6 +1214,10 @@ export async function getDeskSummary(): Promise<any> {
     }])),
     properties: props[0] || { total: 0, available: 0 },
     owners: owners[0]?.n ?? 0,
+    perAgentCalls: Object.fromEntries((perAgentCalls as any[]).map(r => [r.k, {
+      owners: r.owners, called: r.called, calledToday: r.called_today,
+      interested: r.interested, late: r.late,
+    }])),
   };
 }
 
@@ -1903,9 +1963,10 @@ export const OWNER_TERMINAL_STATUSES = ['Not Interested', 'Do Not Call'];
 
 /** Same rule as leadScope, over crm_owners: an agent sees what's assigned to
  *  or created by them; everyone else sees the tenant. */
-function ownerScope() {
-  const me = agentLeadScope();
-  return me ? sql`(agent_id = ${me} OR created_by = ${me})` : sql`TRUE`;
+function ownerScope(mine?: boolean) {
+  const me = scopeUserId(mine);
+  if (!me) return sql`TRUE`;
+  return mine ? sql`agent_id = ${me}` : sql`(agent_id = ${me} OR created_by = ${me})`;
 }
 
 function rowToOwner(r: any): any {
@@ -1922,9 +1983,48 @@ function rowToOwner(r: any): any {
     agentId: r.agent_id || null,
     createdBy: r.created_by || null,
     importBatchId: r.import_batch_id || null,
+    callbackAt: r.callback_at || null,
+    callbackNote: r.callback_note || null,
+    lastCallAt: r.last_call_at || null,
+    // Computed here, not in the client: every surface that shows a queue needs
+    // the same answer to "is this one late", and a browser clock that is an
+    // hour off would give a different one on every desk.
+    callbackOverdue: Boolean(r.callback_at && new Date(r.callback_at).getTime() < Date.now()),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+}
+
+/**
+ * Owners arrive in bulk. An import is hundreds of createOwner calls with no
+ * batch boundary the server can see, so notifying inside createOwner the way
+ * the lead path does would put one push per row on an agent's phone — the
+ * 732-row import that prompted this would have sent 732.
+ *
+ * Instead each auto-routed arrival bumps a per-agent counter and pushes the
+ * flush out by ARRIVAL_QUIET_MS. The notification goes out once the import
+ * stops, naming the real total. In-memory on purpose: a process restart
+ * mid-import costs one notification, and the owners are still assigned — the
+ * timeline and the queue are the durable record, this is only the nudge.
+ */
+const ARRIVAL_QUIET_MS = 20_000;
+const arrivalTally = new Map<string, { n: number; timer: NodeJS.Timeout }>();
+
+function queueOwnerArrivalNotice(agentId: string): void {
+  const prev = arrivalTally.get(agentId);
+  if (prev) clearTimeout(prev.timer);
+  const n = (prev?.n || 0) + 1;
+  const timer = setTimeout(() => {
+    arrivalTally.delete(agentId);
+    notify({
+      userId: agentId, type: 'owner_assigned', push: true,
+      title: `${n} owner${n === 1 ? '' : 's'} assigned to you`,
+      body: 'Added to your calling queue.',
+      link: '?screen=calling',
+    }).catch(err => console.warn('[Notify] owner arrival failed:', err?.message));
+  }, ARRIVAL_QUIET_MS);
+  timer.unref?.();
+  arrivalTally.set(agentId, { n, timer });
 }
 
 export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
@@ -1936,9 +2036,13 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
   // actually turned it on (owner_strategy defaults to 'manual') and nobody
   // already named an agent for this row.
   let agentId = data.agentId || null;
+  let autoRouted = false;
   if (!agentId) {
     const rules = await getRoutingRules();
-    if (rules.owner_strategy === 'round_robin') agentId = await nextRoutedOwnerAgent();
+    if (rules.owner_strategy === 'round_robin') {
+      agentId = await nextRoutedOwnerAgent();
+      autoRouted = Boolean(agentId);
+    }
   }
   const rows = await sql`
     INSERT INTO crm_owners (id, tenant_id, name, phone, email, project, unit_ref, locality, stage, source, agent_id, created_by, import_batch_id)
@@ -1949,6 +2053,7 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
     RETURNING *;
   `;
   const created = rowToOwner(rows[0]);
+  if (autoRouted && agentId) queueOwnerArrivalNotice(agentId);
   if (data.notes) {
     await addTimelineEvent({ record_id: id, type: 'note', title: 'Note', description: String(data.notes), author: 'Import' });
   }
@@ -1960,9 +2065,24 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
   return created;
 }
 
+/**
+ * The queue segments — the same predicates getOwnerQueueCounts counts, so a
+ * pill that says 104 opens a list of 104. Defined once, used by both.
+ */
+const OWNER_OPEN = sql`coalesce(stage, 'New') NOT IN ('Not Interested', 'Do Not Call')`;
+const OWNER_SEGMENTS: Record<string, any> = {
+  open: OWNER_OPEN,
+  callbacks_overdue: sql`${OWNER_OPEN} AND callback_at IS NOT NULL AND callback_at < NOW()`,
+  callbacks_today: sql`${OWNER_OPEN} AND callback_at >= NOW() AND callback_at < date_trunc('day', NOW()) + interval '1 day'`,
+  callbacks: sql`${OWNER_OPEN} AND callback_at IS NOT NULL`,
+  to_call: sql`${OWNER_OPEN} AND callback_at IS NULL AND last_call_at IS NULL`,
+  never_called: sql`${OWNER_OPEN} AND last_call_at IS NULL`,
+  unassigned: sql`${OWNER_OPEN} AND agent_id IS NULL`,
+};
+
 export async function listOwners(opts: {
   page?: number; limit?: number; q?: string; stage?: string; project?: string; agentId?: string;
-  locality?: string; agent?: string; source?: string;
+  locality?: string; agent?: string; source?: string; segment?: string; mine?: boolean;
   sortKey?: string; sortDir?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
   const t = tid();
@@ -1970,7 +2090,7 @@ export async function listOwners(opts: {
   const page = Math.max(Number(opts.page) || 1, 1);
   const offset = (page - 1) * limit;
 
-  const where: any[] = [sql`tenant_id = ${t}`, ownerScope()];
+  const where: any[] = [sql`tenant_id = ${t}`, ownerScope(opts.mine)];
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
@@ -1978,6 +2098,8 @@ export async function listOwners(opts: {
   }
   const stages = String(opts.stage || '').split(',').map(x => x.trim()).filter(Boolean);
   if (stages.length) where.push(sql`stage IN ${sql(stages)}`);
+  const seg = OWNER_SEGMENTS[String(opts.segment || '')];
+  if (seg) where.push(seg);
   // '_none' is the "No project" bucket from listOwnerProjects — those rows
   // have project NULL or ''. Without this branch a click on that card sent
   // project: undefined, which is not a filter at all and returned every
@@ -2010,6 +2132,10 @@ export async function listOwners(opts: {
 
   const sortCols: Record<string, any> = {
     name: sql`name`, recent: sql`created_at`, project: sql`project`,
+    // NULLS LAST on both: a row with no callback and a row never dialled are
+    // the bottom of a queue sorted by either, not the top.
+    callback: sql`callback_at ASC NULLS LAST, created_at`,
+    lastCall: sql`last_call_at DESC NULLS LAST, created_at`,
   };
   const orderCol = sortCols[opts.sortKey || 'recent'] || sortCols.recent;
   const dir = opts.sortDir === 'desc' ? sql`DESC` : opts.sortDir === 'asc' ? sql`ASC` : sql`DESC`;
@@ -2022,17 +2148,22 @@ export async function listOwners(opts: {
 }
 
 /** Segment pill counts for the owners list, scoped the same way listOwners is. */
-export async function getOwnersSummary(): Promise<any> {
+export async function getOwnersSummary(mine?: boolean): Promise<any> {
   const t = tid();
-  const scope = ownerScope();
+  const scope = ownerScope(mine);
   const [totals, byStage] = await Promise.all([
     sql`SELECT count(*)::int AS total FROM crm_owners WHERE tenant_id = ${t} AND ${scope}`,
     sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
         FROM crm_owners WHERE tenant_id = ${t} AND ${scope} GROUP BY 1`,
   ]);
+  // Queue counts ride along with the stage counts because every caller of this
+  // wants both — the status pills AND "how many are actually waiting to be
+  // dialled". Two round trips to draw one toolbar was the alternative.
+  const queue = await getOwnerQueueCounts(mine);
   return {
     total: totals[0]?.total ?? 0,
     byStage: Object.fromEntries((byStage as any[]).map(r => [r.stage, r.n])),
+    queue,
   };
 }
 
@@ -2078,10 +2209,26 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
     locality: patch.locality !== undefined ? patch.locality : existing.locality,
     stage: patch.stage !== undefined ? patch.stage : existing.stage,
     agent_id: patch.agentId !== undefined ? patch.agentId : existing.agentId,
+    // null is a real value here — it is how a callback is cleared once it has
+    // been made — so these read `!== undefined`, never a truthiness check.
+    callback_at: patch.callbackAt !== undefined
+      ? (patch.callbackAt ? new Date(patch.callbackAt) : null)
+      : (existing.callbackAt ? new Date(existing.callbackAt) : null),
+    callback_note: patch.callbackNote !== undefined ? patch.callbackNote : existing.callbackNote,
   };
   await sql`UPDATE crm_owners SET ${sql(next)}, updated_at = NOW() WHERE id = ${id} AND tenant_id = ${t}`;
   if (patch.stage !== undefined && patch.stage !== existing.stage) {
     await addTimelineEvent({ record_id: id, type: 'stage_change', title: `Stage → ${patch.stage}`, description: `Marked ${patch.stage}`, author: ctx.actorLabel || 'System' });
+  }
+  if (patch.callbackAt !== undefined && patch.callbackAt !== existing.callbackAt) {
+    await addTimelineEvent({
+      record_id: id, type: patch.callbackAt ? 'follow_up' : 'note',
+      title: patch.callbackAt ? 'Callback scheduled' : 'Callback cleared',
+      description: patch.callbackAt
+        ? `${new Date(patch.callbackAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}${patch.callbackNote ? ` — ${patch.callbackNote}` : ''}`
+        : 'No callback scheduled',
+      author: ctx.actorLabel || 'System',
+    });
   }
   const updated = await getOwnerById(id);
   audit({
@@ -2137,6 +2284,108 @@ export async function bulkAssignOwners(ids: string[], agentId: string | null, ct
 }
 
 /**
+ * A contact attempt landed on some record. If that record is an owner, stamp
+ * the attempt and move New → Contacted.
+ *
+ * No-ops silently when the id belongs to a lead or a property: the contact-log
+ * route is deliberately record-agnostic (one timeline, any record), so the
+ * cheapest correct way to ask "was that an owner?" is to try the UPDATE and
+ * read the row count. Nothing here throws — logging a call must never fail
+ * because the bookkeeping after it did.
+ */
+export async function noteOwnerContact(recordId: string, channel: string): Promise<void> {
+  const t = tid();
+  try {
+    const rows = await sql`
+      UPDATE crm_owners SET
+        last_call_at = ${channel === 'call' ? sql`NOW()` : sql`last_call_at`},
+        stage = CASE WHEN coalesce(stage, 'New') = 'New' THEN 'Contacted' ELSE stage END,
+        updated_at = NOW()
+      WHERE id = ${recordId} AND tenant_id = ${t}
+      RETURNING stage`;
+    if (rows.length && rows[0].stage === 'Contacted') {
+      await addTimelineEvent({
+        record_id: recordId, type: 'stage_change', title: 'Stage → Contacted',
+        description: 'First outreach logged', author: 'System', metadata: { auto: true },
+      });
+    }
+  } catch (err: any) {
+    console.warn('[Owners] noteOwnerContact failed:', err?.message);
+  }
+}
+
+/**
+ * Owner counts for every surface that shows the calling queue: the segment
+ * pills, Today's groups, and the dashboard block all read this one query.
+ * Scoped like listOwners, so an agent's numbers are their own.
+ *
+ * `toCall` is the actual work: open, mine, and never dialled. It is NOT
+ * `byStage.New` — an owner can be Contacted with no callback set and still be
+ * the next thing to pick up.
+ */
+export async function getOwnerQueueCounts(mine?: boolean): Promise<any> {
+  const t = tid();
+  const scope = ownerScope(mine);
+  const open = sql`coalesce(stage, 'New') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}`;
+  const rows = await sql`
+    SELECT count(*)::int AS total,
+           count(*) FILTER (WHERE ${open})::int AS open,
+           count(*) FILTER (WHERE ${open} AND agent_id IS NULL)::int AS unassigned,
+           count(*) FILTER (WHERE ${open} AND last_call_at IS NULL)::int AS never_called,
+           count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL AND callback_at < NOW())::int AS callbacks_overdue,
+           count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL AND callback_at >= NOW()
+                            AND callback_at < date_trunc('day', NOW()) + interval '1 day')::int AS callbacks_today,
+           count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL
+                            AND callback_at >= date_trunc('day', NOW()) + interval '1 day')::int AS callbacks_upcoming,
+           count(*) FILTER (WHERE ${open} AND callback_at IS NULL AND last_call_at IS NULL)::int AS to_call,
+           count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
+           count(*) FILTER (WHERE last_call_at >= date_trunc('day', NOW()))::int AS called_today
+      FROM crm_owners WHERE tenant_id = ${t} AND ${scope}`;
+  const r: any = rows[0] || {};
+  return {
+    total: r.total ?? 0, open: r.open ?? 0, unassigned: r.unassigned ?? 0,
+    neverCalled: r.never_called ?? 0,
+    callbacksOverdue: r.callbacks_overdue ?? 0,
+    callbacksToday: r.callbacks_today ?? 0,
+    callbacksUpcoming: r.callbacks_upcoming ?? 0,
+    toCall: r.to_call ?? 0,
+    interested: r.interested ?? 0,
+    calledToday: r.called_today ?? 0,
+  };
+}
+
+/**
+ * The owner rows Today actually shows — a handful per group, not the queue.
+ *
+ * Deliberately LIMITed small and paired with getOwnerQueueCounts: Today prints
+ * the count from the counts query and the rows from this one, so a group can
+ * say "104" and show six without the number being a lie about how many were
+ * fetched.
+ */
+export async function getOwnerTodayRows(perGroup = 6, mine?: boolean): Promise<any> {
+  const t = tid();
+  const scope = ownerScope(mine);
+  const open = sql`coalesce(stage, 'New') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}`;
+  const n = Math.min(Math.max(Number(perGroup) || 6, 1), 25);
+  const [overdue, today, toCall] = await Promise.all([
+    sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${open}
+          AND callback_at IS NOT NULL AND callback_at < NOW()
+        ORDER BY callback_at ASC LIMIT ${n}`,
+    sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${open}
+          AND callback_at >= NOW() AND callback_at < date_trunc('day', NOW()) + interval '1 day'
+        ORDER BY callback_at ASC LIMIT ${n}`,
+    sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${open}
+          AND callback_at IS NULL AND last_call_at IS NULL
+        ORDER BY created_at ASC LIMIT ${n}`,
+  ]);
+  return {
+    callbacksOverdue: overdue.map(rowToOwner),
+    callbacksToday: today.map(rowToOwner),
+    toCall: toCall.map(rowToOwner),
+  };
+}
+
+/**
  * Counts for the lead segment pills, without reading the leads.
  *
  * Every segment gets a real count, from the same predicate that filters it, in
@@ -2178,10 +2427,16 @@ export async function getLeadsSummary(): Promise<any> {
  * groups are all narrow, so the database can hand back just the rows that can
  * possibly appear in one, and the screen groups those as it always has.
  */
-export async function getTodayFeed(): Promise<any> {
+export async function getTodayFeed(mine?: boolean): Promise<any> {
   const t = tid();
-  const scope = sql`AND ${leadScope()}`;
-  const [leads, renewals] = await Promise.all([
+  const scope = sql`AND ${leadScope(mine)}`;
+  // LIMIT 200 over every open lead was the whole feed. Import a thousand and
+  // "Not yet contacted" held the first two hundred of them, the group header
+  // counted the rows it had rather than the rows that exist, and every other
+  // group was buried below a scroll with no bottom. The rows below are still
+  // capped — Today only ever shows a handful per group — but the counts now
+  // come from their own query, so a group can honestly say 1,000 and show six.
+  const [leads, renewals, leadCounts, ownerCounts, ownerRows] = await Promise.all([
     sql`SELECT * FROM crm_leads
         WHERE tenant_id = ${t} ${scope}
           AND ${OPEN}
@@ -2195,8 +2450,26 @@ export async function getTodayFeed(): Promise<any> {
           AND config->'tenancy'->>'end' IS NOT NULL
           AND (config->'tenancy'->>'end')::date <= (now() + interval '60 days')::date
         ORDER BY (config->'tenancy'->>'end')::date ASC LIMIT 50`,
+    // The true size of each group, regardless of how many rows came back above.
+    sql`SELECT count(*) FILTER (WHERE overdue)::int AS overdue,
+               count(*) FILTER (WHERE stage = 'New')::int AS fresh,
+               count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned,
+               count(*) FILTER (WHERE stage <> 'New' AND follow_up IS NULL AND NOT overdue)::int AS no_next,
+               count(*) FILTER (WHERE follow_up IS NOT NULL AND NOT overdue)::int AS scheduled
+          FROM crm_leads WHERE tenant_id = ${t} ${scope} AND ${OPEN}`,
+    getOwnerQueueCounts(mine),
+    getOwnerTodayRows(6, mine),
   ]);
-  return { leads: leads.map(r => rowToLead(r)), renewals: renewals.map(rowToProperty) };
+  const lc: any = leadCounts[0] || {};
+  return {
+    leads: leads.map(r => rowToLead(r)),
+    renewals: renewals.map(rowToProperty),
+    counts: {
+      overdue: lc.overdue ?? 0, fresh: lc.fresh ?? 0, unassigned: lc.unassigned ?? 0,
+      noNext: lc.no_next ?? 0, scheduled: lc.scheduled ?? 0,
+    },
+    owners: { counts: ownerCounts, ...ownerRows },
+  };
 }
 
 /**
@@ -2958,6 +3231,7 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
       AND o.created_at < NOW() - (${hours}::text || ' hours')::interval
   `;
   let n = 0;
+  const tally = new Map<string, number>();
   for (const owner of rows) {
     const agentId = await nextRoutedOwnerAgent();
     if (!agentId) break;
@@ -2968,9 +3242,30 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
       description: `Unowned for ${hours}h — routed to ${name}`,
       author: 'System', metadata: { agentId, reason: 'sweep_unassigned', hours },
     });
+    tally.set(agentId, (tally.get(agentId) || 0) + 1);
     n++;
   }
+  await notifyOwnerBatch(tally, 'owner_assigned', 'to call');
   return n;
+}
+
+/**
+ * One notification per agent per sweep, naming the count.
+ *
+ * The lead path notifies per record, which is right when leads arrive one at a
+ * time from a portal. A sweep over a cold-calling list routes hundreds in a
+ * single pass — copied verbatim that is hundreds of pushes to one phone, and
+ * the agent turns alerts off. So the sweep tallies and sends one.
+ */
+async function notifyOwnerBatch(tally: Map<string, number>, type: string, verb: string): Promise<void> {
+  for (const [agentId, count] of tally) {
+    notify({
+      userId: agentId, type, push: true,
+      title: `${count} owner${count === 1 ? '' : 's'} ${verb}`,
+      body: count === 1 ? 'Added to your calling queue.' : 'Added to your calling queue.',
+      link: '?screen=calling',
+    }).catch(err => console.warn(`[Notify] ${type} failed:`, err?.message));
+  }
 }
 
 export async function sweepIdleOwners(tenantId: string): Promise<number> {
@@ -2983,6 +3278,7 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
       AND updated_at < NOW() - (${hours}::text || ' hours')::interval
   `;
   let n = 0;
+  const tally = new Map<string, number>();
   for (const owner of rows) {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${owner.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
     const agentId = await nextRoutedOwnerAgent();
@@ -2994,8 +3290,10 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
       description: `No activity from ${prevOwner} for ${hours}h — routed to ${name}`,
       author: 'System', metadata: { agentId, previousAgentId: owner.agent_id, reason: 'sweep_idle', hours },
     });
+    tally.set(agentId, (tally.get(agentId) || 0) + 1);
     n++;
   }
+  await notifyOwnerBatch(tally, 'owner_reassigned', 'moved to you');
   return n;
 }
 
@@ -3044,6 +3342,21 @@ export async function updateSettings(patch: any): Promise<any> {
   if (patch.renameStage?.from && patch.renameStage?.to) {
     await sql`UPDATE crm_leads SET stage = ${patch.renameStage.to} WHERE stage = ${patch.renameStage.from} AND tenant_id = ${tid()};`;
     delete patch.renameStage;
+  }
+  // Same contract as renameStage, over the calling queue: the rows sitting on
+  // the old status move with it, so renaming never orphans a queue.
+  if (patch.renameOwnerStage?.from && patch.renameOwnerStage?.to) {
+    await sql`UPDATE crm_owners SET stage = ${patch.renameOwnerStage.to} WHERE stage = ${patch.renameOwnerStage.from} AND tenant_id = ${tid()};`;
+    delete patch.renameOwnerStage;
+  }
+  // The two terminal statuses are what the sweeps and every "open" count key
+  // off in SQL. A firm can rename or add anything else; removing these would
+  // silently put "Do not call" rows back into the auto-assign rotation.
+  if (Array.isArray(patch.ownerStages)) {
+    patch.ownerStages = [
+      ...patch.ownerStages.filter((s: string) => s && !OWNER_TERMINAL_STATUSES.includes(s)),
+      ...OWNER_TERMINAL_STATUSES,
+    ];
   }
   if (patch.firmName) {
     await sql`UPDATE tenants SET name = ${patch.firmName}, pwa_config = NULL WHERE id = ${tid()} OR slug = ${tid()};`;

@@ -339,7 +339,10 @@ export const api = {
   // Candidate listings for a lead's requirement. Scored client-side by
   // matching.js — this only narrows what it runs against.
   getLeadMatches: (id) => request(`/leads/${encodeURIComponent(id)}/matches`),
-  getToday: () => request('/workspace/today'),
+  // `mine` is the phone asking for the signed-in person's own day. An agent
+  // is scoped to themselves server-side regardless; this is what lets a
+  // manager's phone show their eleven jobs instead of the firm's seven hundred.
+  getToday: (mine) => request('/workspace/today' + (mine ? '?mine=1' : '')),
   createLead: (lead) => request('/leads', { method: 'POST', body: JSON.stringify(lead) }),
   updateLead: (id, patch) => request(`/modules/leads/records/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteLead: (id) => request(`/modules/leads/records/${id}`, { method: 'DELETE' }),
@@ -352,7 +355,7 @@ export const api = {
     const s = qs.toString()
     return request(`/owners${s ? `?${s}` : ''}`)
   },
-  getOwnersSummary: () => request('/owners/summary'),
+  getOwnersSummary: (mine) => request('/owners/summary' + (mine ? '?mine=1' : '')),
   listOwnerProjects: () => request('/owners/projects'),
   getOwner: (id) => request(`/owners/${encodeURIComponent(id)}`),
   createOwner: (owner) => request('/owners', { method: 'POST', body: JSON.stringify(owner) }),

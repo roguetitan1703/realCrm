@@ -13,7 +13,7 @@
 import { useState, useEffect } from 'react'
 import Icon from '../../components/Icon.jsx'
 import { canEditListing, canDeleteRecord, canEditLead } from '../../lib/permissions.js'
-import { buildActionTiers, LEADS_DEF, PROPERTIES_DEF } from '../definitions.jsx'
+import { buildActionTiers, LEADS_DEF, PROPERTIES_DEF, OWNERS_DEF } from '../definitions.jsx'
 
 export default function PhoneActions({ store, go, context = {} }) {
   const [open, setOpen] = useState(false)
@@ -25,7 +25,17 @@ export default function PhoneActions({ store, go, context = {} }) {
   const close = () => setOpen(false)
 
   let actions = []
-  if (kind === 'lead' || kind === 'prop') {
+  if (kind === 'owner') {
+    // The calling queue's own record. Same definition-driven tiers as a lead —
+    // Call and WhatsApp stay in the sheet here rather than being stripped,
+    // because an owner's record has no full-width contact bar of its own.
+    const record = store.lookup('owner', context.id)
+    if (record) {
+      const { quick, manage } = buildActionTiers(OWNERS_DEF, store, record, context.actionCtx || {})
+      actions = [...quick, ...manage]
+      if (!canDeleteRecord(role)) actions = actions.filter(a => a.id !== 'delete')
+    }
+  } else if (kind === 'lead' || kind === 'prop') {
     const isLead = kind === 'lead'
     const def = isLead ? LEADS_DEF : PROPERTIES_DEF
     // The record the sheet is acting on, from the cache rather than by scanning
@@ -61,6 +71,8 @@ export default function PhoneActions({ store, go, context = {} }) {
         }
       }
     }
+  } else if (kind === 'calling') {
+    actions = [{ id: 'newOwner', icon: 'plus', label: 'New owner', onClick: () => store.openModal({ kind: 'newOwner' }) }]
   } else {
     actions = [{ id: 'newLead', icon: 'plus', label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) }]
     if (canEditListing(role)) {

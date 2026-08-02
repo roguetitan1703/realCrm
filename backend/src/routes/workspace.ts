@@ -95,7 +95,9 @@ workspaceRouter.get('/bootstrap', requireTenantAuth, async (_req: Request, res: 
 
 workspaceRouter.get('/today', requireTenantAuth, async (req: Request, res: Response) => {
   try {
-    return res.status(200).json({ success: true, ...(await getTodayFeed()) });
+    // `mine=1` is the phone asking for the signed-in person's own day rather
+    // than the firm's. An agent is scoped to themselves either way.
+    return res.status(200).json({ success: true, ...(await getTodayFeed(req.query.mine === '1')) });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to build today', message: err.message });
   }

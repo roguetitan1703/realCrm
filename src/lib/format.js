@@ -241,6 +241,29 @@ export function renewalSignal(tenancy, from = new Date()) {
   return { tone: 'ok', label: `Renews ${fmtDate(tenancy.end)}`, days }
 }
 
+// A scheduled callback, read the way a caller reads it: how late, or how soon.
+// Takes an ISO timestamp (the server sends one), returns null | {tone,label}.
+// `tone` is 'overdue' | 'due' | 'ok' — the same three the renewal signal uses,
+// so the queue rows and the tenancy rows can share one set of styles.
+export function callbackSignal(iso, from = new Date()) {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (isNaN(d)) return null
+  const mins = Math.round((d - from) / 60000)
+  const T = d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }).toLowerCase()
+  if (mins < 0) {
+    const late = Math.abs(mins)
+    if (late < 60) return { tone: 'overdue', label: `${late}m late`, mins }
+    if (late < 1440) return { tone: 'overdue', label: `${Math.round(late / 60)}h late`, mins }
+    return { tone: 'overdue', label: `${Math.round(late / 1440)}d late`, mins }
+  }
+  const sameDay = d.toDateString() === from.toDateString()
+  if (sameDay) return { tone: 'due', label: T, mins }
+  const days = Math.ceil(mins / 1440)
+  if (days === 1) return { tone: 'ok', label: `Tomorrow ${T}`, mins }
+  return { tone: 'ok', label: `${fmtDate(d.toISOString().slice(0, 10))} ${T}`, mins }
+}
+
 // avatar palette cycling for thumbs
 export function thumbTint(id) {
   const arr = ['#EEF1F6', '#E9EEF5', '#F6EEDD', '#EDECE9', '#E8F1EC']

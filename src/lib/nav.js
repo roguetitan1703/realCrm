@@ -17,19 +17,21 @@
 
 // Every flag that makes a screen render something OTHER than its list.
 export const TAKEOVER_KEYS = [
-  'leadOpen', 'leadId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey',
+  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey',
 ]
 
 /** Read screen + selection out of the current URL. */
 export function parseUrl(search = window.location.search) {
   const p = new URLSearchParams(search)
   const lead = p.get('lead')
+  const owner = p.get('owner')
   const prop = p.get('prop')
   const project = p.get('project')
   return {
     screen: p.get('screen') || null,
     sel: {
       leadId: lead || undefined, leadOpen: !!lead,
+      ownerId: owner || undefined, ownerOpen: !!owner,
       propId: prop || undefined, propOpen: !!prop,
       projKey: project || undefined, projOpen: !!project,
       propAdd: p.get('new') === 'property' || undefined,
@@ -52,6 +54,7 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   }
   if (screen) p.set('screen', screen)
   if (sel.leadOpen && sel.leadId) p.set('lead', sel.leadId)
+  if (sel.ownerOpen && sel.ownerId) p.set('owner', sel.ownerId)
   if (sel.propOpen && sel.propId) p.set('prop', sel.propId)
   if (sel.projOpen && sel.projKey) p.set('project', sel.projKey)
   if (sel.propAdd) p.set('new', 'property')

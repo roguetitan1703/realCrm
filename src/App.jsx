@@ -11,6 +11,7 @@ import { useServerData } from './lib/useServerData.js'
 import Login from './modules/Login.jsx'
 import Dashboard from './modules/Dashboard.jsx'
 import Leads from './modules/Leads.jsx'
+import Owners from './modules/Owners.jsx'
 import Properties from './modules/Properties.jsx'
 import Clients from './modules/Clients.jsx'
 import Calendar from './modules/Calendar.jsx'
@@ -26,10 +27,17 @@ const NAV = [
   { section: 'Workspace' },
   { key: 'dashboard', label: 'Dashboard', icon: 'grid' },
   { key: 'leads', label: 'Leads', icon: 'leads' },
+  // The outbound half of the desk. It sat under Contacts as a child, which is
+  // where it broke: Contacts is a directory of people you already have a
+  // relationship with, and this is a pipeline — statuses, routing, a queue,
+  // callbacks. Every surface that organises around pipelines (Today, the
+  // dashboard, the phone tabs) had nowhere to hang it while it was a sub-item.
+  { key: 'calling', label: 'Calling', icon: 'phone' },
   { key: 'properties', label: 'Properties', icon: 'building' },
-  // Contacts holds TWO separate stores (B3) — demand and supply. They're nav
-  // children, not in-page tabs, because switching store is navigation; the
-  // pills inside the page are for filtering a role WITHIN the active store.
+  // Contacts is the directory of people, both sides of the desk: Clients
+  // (derived from leads) and Listing owners (derived from the listings we
+  // hold). Both are views over records that already exist — nothing here is
+  // created or assigned, which is exactly what separates it from Calling.
   { key: 'clients', label: 'Contacts', icon: 'people', subKey: 'contactsTab' },
   { key: 'calendar', label: 'Calendar', icon: 'calendar' },
   { section: 'Manage' },
@@ -40,7 +48,7 @@ const NAV = [
 ]
 
 const SCREENS = {
-  dashboard: Dashboard, leads: Leads, properties: Properties, clients: Clients,
+  dashboard: Dashboard, leads: Leads, calling: Owners, properties: Properties, clients: Clients,
   calendar: Calendar, import: ImportPage, team: Team, settings: Settings, integrations: Integrations,
 }
 
@@ -102,6 +110,15 @@ export default function App() {
     null,
     '/workspace/desk-summary',
   )
+  // The calling queue's own counts — same read the Calling screen and Today
+  // use, so the sidebar badge and the screen it opens never disagree.
+  const { data: ownerSummary } = useServerData(
+    () => (state.loggedIn ? api.getOwnersSummary() : Promise.resolve(null)),
+    [state.dataAsOf, state.loggedIn],
+    null,
+    '/owners/summary',
+  )
+  const callQueue = ownerSummary?.summary?.queue || null
   const totals = desk?.leads || { total: 0, overdue: 0, unassigned: 0 }
   const newCount = desk?.byStage?.['New'] || 0
   const unreadNotifs = (state.notifications || []).filter(n => !n.read).length
@@ -126,17 +143,20 @@ export default function App() {
   }
 
   // RBAC Navigation filtering: Agent role hides system management & settings
-  const allowedKeys = state.role === 'agent' ? ['dashboard', 'leads', 'properties', 'clients', 'calendar'] : null
+  const allowedKeys = state.role === 'agent' ? ['dashboard', 'leads', 'calling', 'properties', 'clients', 'calendar'] : null
   const contactsTab = sel.contactsTab || 'clients'
   const nav = NAV
     .filter(n => !allowedKeys || (n.key && allowedKeys.includes(n.key)) || (n.section && ['Workspace'].includes(n.section)))
     .map(n => {
       if (n.key === 'leads') return { ...n, badge: newCount }
+      // The badge is what is waiting to be dialled, not the size of the list.
+      // 732 next to Calling forever is not a number anyone acts on.
+      if (n.key === 'calling') return { ...n, badge: callQueue?.callbacksOverdue || 0 }
       if (n.key === 'clients') return {
         ...n,
         children: [
           { sub: 'clients', label: 'Clients', count: desk ? totals.total : undefined },
-          { sub: 'owners', label: 'Owners', count: desk ? desk.owners : undefined },
+          { sub: 'owners', label: 'Listing owners', count: desk ? desk.owners : undefined },
         ],
       }
       return n
@@ -195,7 +215,7 @@ export default function App() {
     <div className="viewport">
       {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
       <AppShell nav={nav} active={effectiveScreen} activeSub={contactsTab} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
-        <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.propId || ''}`} {...ctx} />
+        <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.ownerId || ''}-${sel.propId || ''}`} {...ctx} />
       </AppShell>
       {state.waState && <WaModal store={store} />}
       <Modals store={store} go={go} />

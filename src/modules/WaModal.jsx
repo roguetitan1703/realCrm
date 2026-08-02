@@ -127,6 +127,18 @@ export default function WaModal({ store }) {
           <div className="wa-ctl">
             <Segmented value={wa.lang} onChange={v => store.recompose({ lang: v })} options={MESSAGE_LANGUAGES} />
             <Segmented value={wa.tone} onChange={v => store.recompose({ tone: v })} options={['Standard', 'Short']} />
+            {/* Only offered when there is one to add. A dead toggle on every
+                listing that has no description teaches people to ignore it. */}
+            {p.description && wa.tone !== 'Short' && (
+              <button type="button"
+                className={'wa-desc' + (wa.withDescription ? ' on' : '')}
+                aria-pressed={!!wa.withDescription}
+                onClick={() => store.recompose({ withDescription: !wa.withDescription })}>
+                <Icon name={wa.withDescription ? 'check' : 'plus'} size={13} />
+                Description
+                <span className="wa-desc-n">{p.description.trim().length}</span>
+              </button>
+            )}
           </div>
         )}
 

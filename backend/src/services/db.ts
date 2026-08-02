@@ -224,6 +224,19 @@ export async function initSchema(): Promise<void> {
       );
     `;
     await sql`CREATE INDEX IF NOT EXISTS idx_crm_owners_tenant ON crm_owners (tenant_id);`;
+    // A cold-calling list without a callback time is a list that gets called
+    // once. `Callback` was already one of the six statuses with nowhere to
+    // record WHEN — so the status meant "someone said call me back" and then
+    // nothing surfaced it again. A real timestamp, not the lead's
+    // {date,time,action} JSONB: a callback is one moment, it sorts, and
+    // "overdue" is `callback_at < now()` rather than a parsed display string.
+    await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS callback_at TIMESTAMPTZ;`;
+    await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS callback_note TEXT;`;
+    // Last outbound attempt, so "never called" is answerable without walking
+    // the timeline for every row on a 700-row queue.
+    await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS last_call_at TIMESTAMPTZ;`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_crm_owners_callback ON crm_owners (tenant_id, callback_at) WHERE callback_at IS NOT NULL;`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_crm_owners_agent ON crm_owners (tenant_id, agent_id);`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS crm_timeline_events (

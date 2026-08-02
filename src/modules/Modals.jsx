@@ -38,6 +38,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'editLead' && <NewLeadModal store={store} leadId={m.leadId} />}
       {m?.kind === 'newOwner' && <NewOwnerModal store={store} />}
       {m?.kind === 'editOwner' && <NewOwnerModal store={store} ownerId={m.ownerId} />}
+      {m?.kind === 'ownerCallback' && <OwnerCallbackModal store={store} ownerId={m.ownerId} />}
       {m?.kind === 'editRecord' && <ModuleFormModal store={store} moduleId={m.moduleId} recordId={m.recordId} />}
       {m?.kind === 'assign' && <AssignModal store={store} leadId={m.leadId} />}
       {m?.kind === 'bulkAssign' && <BulkAssignModal store={store} leadIds={m.leadIds} isOwner={m.isOwner} onDone={m.onDone} />}
@@ -819,21 +820,33 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
       })
       .catch(err => { store.toast(err.message || 'Could not assign', 'warn'); setBusy(false) })
   }
+  // Who is already carrying what. Handing twenty owners to whoever is at the
+  // top of the roster is the mistake this modal exists to prevent, and the
+  // number that prevents it was one query away and not being shown.
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [], null, '/workspace/desk-summary')
+  const agents = store.activeAgents()
+
   return (
     <Modal title={`Assign ${n} ${noun}${n === 1 ? '' : 's'}`} onClose={store.closeModal} width={400}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <button disabled={busy} onClick={() => assign(null)}
-          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 9, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
-          <span style={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: 13.5 }}>Unassign</span>
-        </button>
-        {store.activeAgents().map(a => (
-          <button key={a.id} disabled={busy} onClick={() => assign(a.id)}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 9, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
-            <Avatar agent={a} size="sm" />
-            <span style={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: 13.5 }}>{a.first}</span>
-          </button>
-        ))}
+      <div className="pick-list">
+        {agents.map(a => {
+          const open = desk?.perAgent?.[a.id]?.open ?? 0
+          return (
+            <button key={a.id} className="pick-row" disabled={busy} onClick={() => assign(a.id)}>
+              <Avatar agent={a} size="sm" />
+              <span className="pick-name">{a.name || a.first}</span>
+              <span className="pick-load">{open} open</span>
+              <Icon name="chevRight" size={15} className="ic pick-go" />
+            </button>
+          )
+        })}
+        {!agents.length && <div className="detail-empty">No active team members to assign to.</div>}
       </div>
+      {/* Taking work off the desk is a different intent from handing it to
+          someone, so it does not sit in the same list as the people. */}
+      <button className="pick-unassign" disabled={busy} onClick={() => assign(null)}>
+        Leave unassigned
+      </button>
     </Modal>
   )
 }
@@ -1058,6 +1071,86 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
       <div style={{ display: 'flex', gap: 8 }}>
         <Button onClick={store.closeModal}>No</Button>
         <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} icon={channel === 'wa' ? 'wa' : 'phone'} onClick={proceed}>Yes, continue</Button>
+      </div>
+    </Modal>
+  )
+}
+
+// ---- Schedule a callback on an owner ----------------------------------------
+// A cold call ends one of two ways: a decision, or "call me back". The second
+// one is most of them, and until this existed there was nowhere to put the
+// when — the Callback status was a label with no time behind it.
+//
+// The quick options are what a caller actually says out loud. They round to a
+// sensible working hour rather than "now + 2h" landing at 9:40pm; the exact
+// picker below is there for when the owner names a time.
+const CALLBACK_PRESETS = [
+  { key: '2h', label: 'In 2 hours', at: () => new Date(Date.now() + 2 * 3600e3) },
+  { key: 'eod', label: 'Later today', at: () => atHour(new Date(), 17) },
+  { key: 'tmr', label: 'Tomorrow morning', at: () => atHour(addDays(new Date(), 1), 11) },
+  { key: '3d', label: 'In 3 days', at: () => atHour(addDays(new Date(), 3), 11) },
+  { key: 'week', label: 'Next week', at: () => atHour(addDays(new Date(), 7), 11) },
+]
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+const atHour = (d, h) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, 0, 0, 0)
+// <input type="datetime-local"> wants local wall-clock with no zone, and
+// toISOString() would hand it UTC — an hour picked at 11am would come back 5:30.
+const toLocalInput = (d) => {
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+function OwnerCallbackModal({ store, ownerId }) {
+  // The cache holds whatever list the record was opened from, but this modal
+  // also opens from Today and from the action button, where it may never have
+  // been. Fetch is the fallback, not the path — an already-cached owner never
+  // waits on the network to see its own existing callback.
+  const cached = store.lookup('owner', ownerId)
+  const { data: fetched } = useServerData(
+    () => (cached ? Promise.resolve(null) : api.getOwner(ownerId).then(r => r?.owner || null)),
+    [ownerId, !!cached], null)
+  const owner = cached || fetched
+  const [when, setWhen] = useState(() => toLocalInput(CALLBACK_PRESETS[2].at()))
+  const [note, setNote] = useState('')
+  // Only seeds from an existing callback, and only once it is known — typing
+  // into the note and having a late fetch wipe it is the bug this guards.
+  const seeded = useRef(false)
+  useEffect(() => {
+    if (seeded.current || !owner) return
+    seeded.current = true
+    if (owner.callbackAt) setWhen(toLocalInput(new Date(owner.callbackAt)))
+    if (owner.callbackNote) setNote(owner.callbackNote)
+  }, [owner])
+
+  const save = () => {
+    const d = new Date(when)
+    if (isNaN(d)) { store.toast('Pick a date and time', 'warn'); return }
+    store.setOwnerCallback(ownerId, d.toISOString(), note.trim() || null)
+    store.closeModal()
+  }
+  const clear = () => { store.setOwnerCallback(ownerId, null); store.closeModal() }
+
+  return (
+    <Modal title={owner?.callbackAt ? 'Reschedule callback' : 'Schedule callback'} onClose={store.closeModal} width={420}>
+      <div className="cb-presets">
+        {CALLBACK_PRESETS.map(p => {
+          const v = toLocalInput(p.at())
+          return (
+            <button key={p.key} className={'cb-preset' + (v === when ? ' on' : '')} onClick={() => setWhen(v)}>
+              {p.label}
+            </button>
+          )
+        })}
+      </div>
+      <Field label="Call back at">
+        <Input type="datetime-local" value={when} onChange={e => setWhen(e.target.value)} />
+      </Field>
+      <Field label="What to say (optional)">
+        <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Wants a valuation before deciding…" />
+      </Field>
+      <div className="m-actions">
+        {owner?.callbackAt && <Button variant="quiet" onClick={clear}>Clear callback</Button>}
+        <Button variant="primary" onClick={save}>{owner?.callbackAt ? 'Reschedule' : 'Schedule'}</Button>
       </div>
     </Modal>
   )

@@ -60,7 +60,12 @@ export function setNestedValue(obj, path, value) {
 //   terms    — closed. Deposit, lock-in, booking amount, fee. Real and needed,
 //              but only once you're negotiating — not while you're deciding
 //              whether this is even the right unit.
-//   internal — closed. Flat number, keys, description. Operational.
+//   listing  — closed. The client's own description of the project. Shared only
+//              when the sender ticks it on a message, never automatically.
+//   internal — closed. Flat number, keys. Operational, and genuinely never
+//              leaves the desk — which is why the description moved OUT of it:
+//              a field sitting under "never shared" that a button then shares
+//              makes the label a lie.
 //
 // A closed section still says how much is in it, so collapsing never hides the
 // fact that something is there.
@@ -69,6 +74,7 @@ const SECTION_META = {
   domain: { title: 'Details', open: true },
   additional: { title: 'Details', open: true },
   terms: { title: 'Terms & charges', open: false },
+  listing: { title: 'Listing description', open: false },
   internal: { title: 'Internal · never shared', open: false },
 }
 const SECTION_TITLES = Object.fromEntries(
@@ -447,7 +453,10 @@ export const PROPERTY_MODULE_SCHEMA = {
     // ---- Internal --------------------------------------------------------
     { key: 'unit', label: 'Unit / flat no.', type: 'text', section: 'internal' },
     { key: 'keyAccess', label: 'Key / access', type: 'text', section: 'internal' },
-    { key: 'description', label: 'Description', type: 'textarea', section: 'internal' },
+    // ---- Listing copy ----------------------------------------------------
+    // The one thing no template can write: the client's own paragraph about
+    // the project. Opt-in per message (see the composer), never automatic.
+    { key: 'description', label: 'Description', type: 'textarea', section: 'listing' },
   ]
 }
 

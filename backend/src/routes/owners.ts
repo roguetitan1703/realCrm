@@ -27,6 +27,7 @@ ownersRouter.get('/', async (req: Request, res: Response) => {
       page: Number(q.page) || 1, limit: Number(q.limit) || 50,
       q: str(q.q), stage: str(q.stage), project: str(q.project), agentId: str(q.agentId),
       locality: str(q.locality), agent: str(q.agent), source: str(q.source),
+      segment: str(q.segment), mine: q.mine === '1',
       sortKey: str(q.sortKey), sortDir: str(q.sortDir),
     });
     return res.status(200).json({
@@ -39,9 +40,9 @@ ownersRouter.get('/', async (req: Request, res: Response) => {
 });
 
 /** GET /api/v1/owners/summary — counts for the segment pills. Before /:id. */
-ownersRouter.get('/summary', async (_req: Request, res: Response) => {
+ownersRouter.get('/summary', async (req: Request, res: Response) => {
   try {
-    return res.status(200).json({ success: true, summary: { ...(await getOwnersSummary()), statuses: OWNER_STATUSES } });
+    return res.status(200).json({ success: true, summary: { ...(await getOwnersSummary(req.query.mine === '1')), statuses: OWNER_STATUSES } });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to summarise owners', message: err.message });
   }
