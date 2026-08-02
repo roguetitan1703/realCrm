@@ -362,6 +362,9 @@ connectionsRouter.get('/:id/docs', async (req: Request, res: Response) => {
   const rawKey = typeof req.query.key === 'string' && req.query.key.trim() ? req.query.key.trim() : null;
   const key = rawKey ? escapeHtml(rawKey) : '&lt;YOUR_API_KEY&gt;';
 
+  const sampleJson = '{"name":"Test Enquiry","phone":"9876543210","locality":"Wakad"}';
+  const curlExample = `curl -X POST "${endpoint}" \\\n  -H "X-API-Key: ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '${sampleJson}'`;
+
   const html = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -409,10 +412,7 @@ footer{margin-top:40px;color:var(--muted);font-size:12px}
 </ul>
 
 <h2>Example</h2>
-<pre>curl -X POST "${endpoint}" \\
-  -H "X-API-Key: ${key}" \\
-  -H "Content-Type: application/json" \\
-  -d '{"name":"Test Enquiry","phone":"9876543210","locality":"Wakad"}'</pre>
+<pre>${curlExample}</pre>
 
 <h2>Response</h2>
 <table><tbody>
