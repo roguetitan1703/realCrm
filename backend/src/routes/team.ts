@@ -157,7 +157,8 @@ teamRouter.post('/users', async (req: Request, res: Response) => {
       INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
       VALUES (${id}, ${cleanName}, ${cleanName.split(' ')[0]}, ${initials}, '', ${teamRole}, 'ACTIVE', ${sql.json(meta)}, ${req.tenantId})
     `;
-    await adminSetPassword(req.tenantId!, id, initial, true);
+    const mustChange = req.body?.mustChangePassword !== false;
+    await adminSetPassword(req.tenantId!, id, initial, mustChange);
     await addToRouting(req.tenantId!, id);
 
     audit({
@@ -278,7 +279,8 @@ teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) 
       WHERE id = ${u.id} AND tenant_id = ${req.tenantId}
     `;
     await sql`UPDATE crm_agents SET name = ${cleanName}, first = ${cleanName.split(' ')[0]}, initials = ${initials}, metadata = ${sql.json(meta)} WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
-    await adminSetPassword(req.tenantId!, u.id, initial, true);   // forces change + revokes sessions
+    const mustChangeSeat = req.body?.mustChangePassword !== false;
+    await adminSetPassword(req.tenantId!, u.id, initial, mustChangeSeat);   // revokes sessions
     // The status update above always sets 'active' — a seat handed to someone
     // new is a working seat again, even if the previous holder was suspended
     // (and so removed from routing) at the time.
