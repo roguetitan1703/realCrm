@@ -558,7 +558,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
             <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
               <Button size="sm" onClick={addTeamRow}>+ Add Row</Button>
               <Button size="sm" variant="ghost" onClick={() => setShowPasteBox(!showPasteBox)} style={{ border: '1px solid var(--line)', background: '#f9f8f6' }}>
-                {showPasteBox ? 'Hide Paste Box' : '📋 Paste CSV / WhatsApp Text'}
+                {showPasteBox ? 'Hide Paste Box' : 'Paste CSV / WhatsApp Text'}
               </Button>
             </div>
 
