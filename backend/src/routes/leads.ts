@@ -46,7 +46,7 @@ leadsRouter.get('/page', async (req: Request, res: Response) => {
     const { rows, total, page, limit } = await listLeads({
       page: Number(q.page) || 1, limit: Number(q.limit) || 50,
       q: str(q.q), stage: str(q.stage), agentId: str(q.agentId),
-      segment: str(q.segment), scopeAgentId,
+      segment: str(q.segment), intent: str(q.intent), scopeAgentId,
     });
     return res.status(200).json({
       success: true, data: rows, total, page, limit,

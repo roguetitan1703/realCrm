@@ -160,9 +160,16 @@ function freshState() {
     activeAgentId: session.activeAgentId || 'a1',           // who "I" am in agent view
     loggedIn: session.loggedIn || false,
     agents: Array.isArray(cs.agents) ? cs.agents : [],
-    // The firm's own locality vocabulary, from the boot payload. Not records --
-    // a few dozen strings that filter menus and the locality field suggest from.
+    // The firm's own vocabulary, from the boot payload. Not records -- a few
+    // dozen strings that filter menus, the locality field and the requirement
+    // picker suggest from. These were all derived by mapping the collections,
+    // so they went silently EMPTY when the collections went away: no crash, no
+    // error, just dropdowns with nothing in them.
     localities: Array.isArray(cs.localities) ? cs.localities : [],
+    projects: Array.isArray(cs.projects) ? cs.projects : [],
+    configs: Array.isArray(cs.configs) ? cs.configs : [],
+    dealMix: cs.dealMix || { sale: 0, rent: 0 },
+    tenant: cs.tenant || null,
     importLogs: [],
     inactiveAgentIds: Array.isArray(cs.inactiveAgentIds) ? cs.inactiveAgentIds : [],
     settings,                            // editable: firmName, stages, sources, slaHours, reminderDays
@@ -206,6 +213,10 @@ function reducer(state, action) {
         ...state,
         agents: Array.isArray(s.agents) ? s.agents : state.agents,
         localities: Array.isArray(s.localities) ? s.localities : state.localities,
+        projects: Array.isArray(s.projects) ? s.projects : state.projects,
+        configs: Array.isArray(s.configs) ? s.configs : state.configs,
+        dealMix: s.dealMix || state.dealMix,
+        tenant: s.tenant || state.tenant,
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         brand: s.brand ? { ...state.brand, ...s.brand } : state.brand,
@@ -222,6 +233,10 @@ function reducer(state, action) {
         ...state,
         agents: Array.isArray(s.agents) ? s.agents : state.agents,
         localities: Array.isArray(s.localities) ? s.localities : state.localities,
+        projects: Array.isArray(s.projects) ? s.projects : state.projects,
+        configs: Array.isArray(s.configs) ? s.configs : state.configs,
+        dealMix: s.dealMix || state.dealMix,
+        tenant: s.tenant || state.tenant,
         settings: s.settings ? { ...state.settings, ...s.settings } : state.settings,
         routing: s.routing_rules ? { ...state.routing, ...s.routing_rules } : state.routing,
         brand: s.brand ? { ...state.brand, ...s.brand } : state.brand,
@@ -648,12 +663,38 @@ export function StoreProvider({ children }) {
     if (state.settings.firmName) {
       persistAuthSession({ tenantName: state.settings.firmName, tenantCity: state.settings.city || '' })
     }
+    // ── The signed-in workspace wins over the URL ──────────────────────
+    // Opening another firm's URL while holding a session did NOT show their
+    // data — the token decides the tenant on every request, so the server kept
+    // serving this one correctly. What it did do is leave the address bar, the
+    // manifest and the installable identity claiming a firm the session has
+    // nothing to do with: their name on our data. In a white-label product that
+    // is the whole product being wrong, and it also let the stored tenant id
+    // drift away from the token, which is a real leak the day any endpoint
+    // trusts the X-Tenant-ID header instead of the claim.
+    //
+    // So the URL is corrected to the workspace the session actually belongs to.
+    // replaceState, not a redirect: nothing is reloaded and no history entry is
+    // left pointing back at the wrong firm.
+    const sessionSlug = state.tenant?.slug || state.tenant?.id || ''
+    const urlSlug = slugFromLocation()
+    if (sessionSlug && urlSlug && urlSlug !== sessionSlug && urlSlug !== state.tenant?.id) {
+      try {
+        const rest = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/').slice(1)
+        const path = '/' + [sessionSlug, ...rest].join('/')
+        window.history.replaceState({}, document.title, path + window.location.search)
+        window.localStorage?.setItem('crm_tenant_id', state.tenant?.id || sessionSlug)
+      } catch (e) {}
+    }
+
     // slugFromLocation, not raw localStorage: a device opening the firm's app
     // for the first time has nothing stored yet, so this effect was pointing the
     // manifest back at _platform right after index.html had correctly pointed it
     // at the tenant — and _platform is the wrong name, the wrong icon and the
-    // green theme colour that an install would then capture forever.
-    const tid = slugFromLocation()
+    // green theme colour that an install would then capture forever. Once the
+    // session is known it is authoritative, because the PWA identity captured at
+    // install must be the firm whose data the app will show.
+    const tid = sessionSlug || slugFromLocation()
     applyPwaIdentity(tid, state.settings.firmName)
     if (tid && state.settings.firmName) {
       ensurePwaIcons({
@@ -663,7 +704,7 @@ export function StoreProvider({ children }) {
         logoUrl: state.brand?.logoUrl
       })
     }
-  }, [state.settings.firmName, state.settings.city, state.brand?.primaryColor, state.brand?.logoUrl])
+  }, [state.settings.firmName, state.settings.city, state.brand?.primaryColor, state.brand?.logoUrl, state.tenant?.slug, state.tenant?.id])
 
   // Pull the current user's alert feed. No-op without a token (the feed is
   // per-user, so it needs an authenticated identity).
@@ -773,7 +814,7 @@ export function StoreProvider({ children }) {
       if (timers.current[t.id]) return
       timers.current[t.id] = setTimeout(
         () => dispatch({ type: 'UNTOAST', id: t.id }),
-        5000 + i * 900,
+        2000,
       )
     })
   }, [state.toasts])

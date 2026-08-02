@@ -919,34 +919,59 @@ export async function getPulse(): Promise<Record<string, any>> {
  */
 export async function getBootstrap(): Promise<any> {
   const t = tid();
-  const [agentsRows, settingsRows, routingRows, brandRows, localityRows] = await Promise.all([
+  const [agentsRows, settingsRows, routingRows, brandRows, localityRows, projectRows, configRows, dealRows] = await Promise.all([
     sql`SELECT a.* FROM crm_agents a
         LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
         WHERE a.tenant_id = ${t} AND u.deleted_at IS NULL`,
     sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}`,
     sql`SELECT * FROM crm_routing_rules WHERE tenant_id = ${t}`,
-    sql`SELECT brand_config FROM tenants WHERE id = ${t} OR slug = ${t} LIMIT 1`,
-    // Every locality this firm actually works in, from both sides of the book.
-    // Filter menus and the locality suggester need the vocabulary, not the
-    // records -- and building it from the collections is what several filter
-    // definitions were quietly doing.
+    sql`SELECT id, slug, name, brand_config FROM tenants WHERE id = ${t} OR slug = ${t} LIMIT 1`,
+    // The firm's own VOCABULARY -- localities, project names, configurations.
+    // Filter menus, the locality suggester and the requirement-config picker
+    // need these lists, not the records behind them, and every one of them was
+    // building the list by mapping a collection the browser had downloaded in
+    // full. Three DISTINCTs, a few dozen strings, no rows.
     sql`SELECT DISTINCT v FROM (
           SELECT locality AS v FROM crm_properties WHERE tenant_id = ${t}
           UNION SELECT locality FROM crm_leads WHERE tenant_id = ${t}
         ) x WHERE coalesce(v, '') <> '' ORDER BY 1`,
+    // Real project names only -- the `project` column, not PROJECT_KEY. The key
+    // falls back to the first segment of the title, which for imported rows is
+    // the OWNER's name, so a picker built on it offered "ASHA BHARAT KOTHARI"
+    // as a township. Ordered by size so the biggest developments come first.
+    sql`SELECT project AS v, count(*)::int AS n FROM crm_properties
+         WHERE tenant_id = ${t} AND coalesce(project, '') <> ''
+         GROUP BY 1 ORDER BY 2 DESC LIMIT 200`,
+    sql`SELECT DISTINCT v FROM (
+          SELECT type AS v FROM crm_properties WHERE tenant_id = ${t}
+          UNION SELECT requirement FROM crm_leads WHERE tenant_id = ${t}
+        ) x WHERE coalesce(v, '') <> '' ORDER BY 1`,
+    // Whether this desk sells, lets, or both. Two integers that decide which
+    // filters are worth offering at all.
+    sql`SELECT count(*) FILTER (WHERE coalesce(deal, 'sale') = 'sale')::int AS sale,
+               count(*) FILTER (WHERE coalesce(deal, 'sale') = 'rent')::int AS rent
+          FROM crm_properties WHERE tenant_id = ${t}`,
   ]);
   const agents = agentsRows.map(rowToAgent);
   const brand = { ...(brandRows[0]?.brand_config || {}) };
   if (typeof brand.logoUrl === 'string' && brand.logoUrl.startsWith('data:')) {
     brand.logoUrl = `/pwa/${t}/logo`;
   }
+  const tenantRow = brandRows[0] || {};
   return {
+    // Who this session actually belongs to. The token decides the tenant on
+    // every request, so the client needs to know which workspace that is —
+    // otherwise a URL naming a different firm goes uncontradicted.
+    tenant: { id: tenantRow.id || t, slug: tenantRow.slug || t, name: tenantRow.name || '' },
     agents,
     inactiveAgentIds: agentsRows.filter(a => a.duty_status === 'OFF_DUTY').map(a => a.id),
     settings: settingsRows[0]?.value || {},
     routing_rules: routingRows[0] || null,
     brand,
     localities: localityRows.map((r: any) => r.v),
+    projects: projectRows.map((r: any) => r.v),
+    configs: configRows.map((r: any) => r.v),
+    dealMix: dealRows[0] || { sale: 0, rent: 0 },
   };
 }
 
@@ -1537,7 +1562,7 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
  */
 export async function listLeads(opts: {
   page?: number; limit?: number; q?: string; stage?: string; agentId?: string;
-  segment?: string; scopeAgentId?: string;
+  segment?: string; intent?: string; scopeAgentId?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
   const t = tid();
   const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
@@ -1558,6 +1583,8 @@ export async function listLeads(opts: {
   const stages = many(opts.stage);
   if (stages.length) where.push(sql`stage IN ${sql(stages)}`);
   if (opts.agentId) where.push(sql`agent_id = ${opts.agentId}`);
+  if (opts.intent === 'buy') where.push(sql`(lower(coalesce(intent, 'buy')) LIKE '%buy%' OR lower(coalesce(intent, '')) LIKE '%sale%')`);
+  else if (opts.intent === 'rent') where.push(sql`lower(coalesce(intent, '')) LIKE '%rent%'`);
   // The segment pills, as query rather than as array scans.
   if (opts.segment === 'overdue') where.push(sql`overdue = true`);
   else if (opts.segment === 'unassigned') where.push(sql`agent_id IS NULL`);
@@ -1689,6 +1716,12 @@ export async function getProperties(): Promise<any[]> {
 export async function listProperties(opts: {
   page?: number; limit?: number; q?: string;
   status?: string; deal?: string; type?: string; locality?: string; project?: string;
+  // The canonical facets. The filter bar has always offered these; while the
+  // browser held every listing it filtered them itself, so they were never
+  // wired through — and the moment the list became a server page, eight of the
+  // twelve filters silently stopped doing anything.
+  category?: string; bhk?: string; subtype?: string; furnishing?: string;
+  facing?: string; possession?: string; ownership?: string; transaction?: string;
   excludeId?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
   const t = tid();
@@ -1717,6 +1750,22 @@ export async function listProperties(opts: {
   if (deal.length) where.push(sql`coalesce(deal, 'sale') IN ${sql(deal)}`);
   if (type.length) where.push(sql`type IN ${sql(type)}`);
   if (locality.length) where.push(sql`locality IN ${sql(locality)}`);
+
+  // Canonical facets, matched on the indexed columns. `category` defaults to
+  // residential the same way the client's rowMatch did, so rows written before
+  // the column existed still answer the filter instead of vanishing from it.
+  const category = many(opts.category), bhk = many(opts.bhk), subtype = many(opts.subtype);
+  const furnishing = many(opts.furnishing), facing = many(opts.facing);
+  const possession = many(opts.possession), ownership = many(opts.ownership);
+  const transaction = many(opts.transaction);
+  if (category.length) where.push(sql`coalesce(nullif(category, ''), 'residential') IN ${sql(category)}`);
+  if (bhk.length) where.push(sql`bhk IN ${sql(bhk)}`);
+  if (subtype.length) where.push(sql`subtype IN ${sql(subtype)}`);
+  if (furnishing.length) where.push(sql`coalesce(nullif(furnish_type, ''), furnishing) IN ${sql(furnishing)}`);
+  if (facing.length) where.push(sql`facing IN ${sql(facing)}`);
+  if (possession.length) where.push(sql`possession IN ${sql(possession)}`);
+  if (ownership.length) where.push(sql`ownership IN ${sql(ownership)}`);
+  if (transaction.length) where.push(sql`transaction_type IN ${sql(transaction)}`);
   if (opts.project) {
     // A project is a grouping lens over the `project`/`society` fields, not a
     // stored entity — same key the units view groups on. The implicit bucket is

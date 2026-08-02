@@ -239,7 +239,7 @@ export function MobileTopBar({ title, sub, onBack, right, brand, firmName, logoU
 }
 
 // ---- toasts ----
-export function Toasts({ toasts }) {
+export function Toasts({ toasts, onDismiss }) {
   const [hovered, setHovered] = useState(false)
   if (!toasts || !toasts.length) return null
 
@@ -264,16 +264,19 @@ export function Toasts({ toasts }) {
           <div
             key={t.id}
             className={`toast-card ${isAlert ? 'toast-alert' : ''}`}
+            onClick={() => onDismiss?.(t.id)}
             style={{
               transform: `translateY(${translateY}px) scale(${scale})`,
               opacity,
               zIndex: 100 - depth,
+              cursor: 'pointer',
             }}
           >
             <span className={`toast-badge ${isAlert ? 'badge-alert' : 'badge-ok'}`}>
               <Icon name={isAlert ? 'x' : 'check'} size={14} />
             </span>
             <span className="toast-text">{t.text}</span>
+            <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 6 }}>✕</span>
           </div>
         )
       })}

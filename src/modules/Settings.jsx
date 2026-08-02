@@ -3,6 +3,7 @@ import { Panel, SectionHead, StageTag, Button, Input, Segmented } from '../compo
 import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES } from '../data/theme.js'
 import { api } from '../lib/api.js'
+import { useServerData } from '../lib/useServerData.js'
 import { MESSAGE_LANGUAGES } from '../data/vocabLocale.js'
 import { DEFAULT_FOLLOWUPS, PLACEHOLDERS } from '../data/followUpTemplates.js'
 import InstallPanel from '../components/InstallPanel.jsx'
@@ -19,7 +20,7 @@ const NAV = [
 ]
 
 export default function Settings({ store, topBar }) {
-  const { settings, agents, routing, leads, inactiveAgentIds } = store.state
+  const { settings, agents, routing, inactiveAgentIds } = store.state
   const [section, setSection] = useState('brand')
 
   return (
@@ -39,7 +40,7 @@ export default function Settings({ store, topBar }) {
               {section === 'brand' && <BrandSection store={store} settings={settings} />}
               {section === 'pipeline' && <PipelineSection store={store} settings={settings} />}
               {section === 'sources' && <SourcesSection store={store} settings={settings} />}
-              {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} leads={leads} inactiveAgentIds={inactiveAgentIds} />}
+              {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} />}
               {section === 'followup' && <FollowUpSection store={store} settings={settings} />}
               {section === 'messages' && <MessagesSection store={store} settings={settings} />}
               {section === 'audit' && <AuditSection />}
@@ -210,12 +211,17 @@ function SourcesSection({ store, settings }) {
 }
 
 // ---- Lead routing (real: /team/routing round-robin) -----------------------
-function RoutingSection({ store, agents, routing, leads, inactiveAgentIds }) {
+function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
   const strategy = routing?.strategy || 'round_robin'
   const rota = routing?.active_agent_ids || []
   const rosterAgents = agents.filter(a => a.role !== 'admin' || true) // include all; admins can also take leads
 
-  const openLoad = (id) => leads.filter(l => l.agentId === id && !String(l.stage).startsWith('Closed')).length
+  // How many open leads each agent is carrying, counted in SQL. This read the
+  // whole lead collection out of the store and filtered it per agent; when the
+  // collection went away `leads` was undefined and the section threw on render,
+  // taking the entire Settings screen down with it.
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [], null, '/workspace/desk-summary')
+  const openLoad = (id) => desk?.perAgent?.[id]?.open ?? 0
 
   const setStrategy = (s) => store.setRouting({ strategy: s }, s === 'round_robin' ? 'New leads auto-assign, round-robin' : 'New leads land unassigned')
   const toggleAgent = (id) => {

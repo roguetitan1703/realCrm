@@ -22,7 +22,16 @@ import { canEditListing } from '../lib/permissions.js'
 // The filter bar speaks in arrays ({ status: ['Available','Blocked'] }) because
 // its controls are multi-select; the API speaks in comma-separated values. This
 // is the whole translation, kept in one place so no screen invents its own.
-const API_FILTERS = ['status', 'deal', 'type', 'locality', 'project']
+// Every key the filter bar can set. It listed five, while PROPERTIES_DEF
+// defines twelve — so Configuration, Category, Property type, Furnishing,
+// Facing, Possession, Ownership and Transaction were dropped on the floor.
+// While the browser held the whole book the client filtered them locally and
+// nobody noticed; once the list became a server page they did nothing at all.
+const API_FILTERS = [
+  'status', 'deal', 'type', 'locality', 'project',
+  'category', 'bhk', 'subtype', 'furnishing', 'facing',
+  'possession', 'ownership', 'transaction',
+]
 function toQuery({ page, limit, q, ...filters }) {
   const out = { page, limit, q }
   for (const k of API_FILTERS) {
@@ -47,9 +56,28 @@ function usePropertiesSummary(dataAsOf) {
   return summary
 }
 
+/**
+ * Properties is a ROUTER, and holds no hooks of its own.
+ *
+ * It used to declare the list's state and then, further down, return the
+ * wizard / record / project takeover before reaching the reads below — so
+ * opening a listing rendered FEWER hooks than the list did, and React threw
+ * "Rendered more hooks than during the previous render" on the way back. The
+ * takeovers are siblings, not early exits, and the list's state belongs to the
+ * list.
+ */
 export default function Properties({ store, go, sel, setSel, topBar, phone }) {
+  const mayEdit = canEditListing(store.state.role)
+  // A listing's facts are desk-owned. An agent reaching the wizard by any route
+  // — deep link, stale sel, a button we missed — lands back on the list.
+  if (sel.propAdd && mayEdit) return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} />
+  if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} mayEdit={mayEdit} phone={phone} />
+  if (sel.projOpen && sel.projKey) return <ProjectDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
+  return <PropertyList store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} mayEdit={mayEdit} />
+}
+
+function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit }) {
   const { state } = store
-  const mayEdit = canEditListing(state.role)
   const [flt, setFlt] = useState({})
   const [q, setQ] = useState('')
   const [view, setView] = useState('list')
@@ -64,14 +92,6 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
   const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
   const setSortDirP = (v) => { setSortDir(v); setPage(1) }
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
-
-  // Add/edit is a stepped PAGE, not a modal (spec C-add) — rendered inside this
-  // screen the same way the detail takeover is, so no new route is needed.
-  // A listing's facts are desk-owned. An agent reaching the wizard by any route
-  // — deep link, stale sel, a button we missed — lands back on the list.
-  if (sel.propAdd && mayEdit) return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} />
-  if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} mayEdit={mayEdit} phone={phone} />
-  if (sel.projOpen && sel.projKey) return <ProjectDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
 
   const open = (id) => go('properties', { propId: id, propOpen: true })
   const openProject = (key) => go('properties', { projKey: key, projOpen: true })

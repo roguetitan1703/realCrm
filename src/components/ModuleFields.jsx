@@ -189,7 +189,7 @@ export const LEAD_MODULE_SCHEMA = {
     {
       key: 'req.config', label: 'Requirement Config', type: 'select', section: 'domain',
       options: (store) => {
-        const fromStock = (store?.state?.properties || []).map(configLabel)
+        const fromStock = store?.state?.configs || []
         const canonical = BHK_FILTER.flatMap(b =>
           ['apartment', 'villa', 'independent_house'].map(st =>
             `${b.label} ${labelOf(SUBTYPES.residential, st)}`))
@@ -200,10 +200,7 @@ export const LEAD_MODULE_SCHEMA = {
     {
       key: 'req.locality', label: 'Preferred Locality', type: 'select', section: 'domain',
       // The localities you actually hold stock in, plus the ones leads ask for.
-      options: (store) => [...new Set([
-        ...(store?.state?.properties || []).map(p => p.locality),
-        ...(store?.state?.leads || []).map(l => l.req?.locality),
-      ].filter(Boolean))].sort().map(v => ({ value: v, label: v })),
+      options: (store) => (store?.state?.localities || []).map(v => ({ value: v, label: v })),
     },
     {
       key: 'req.timeline', label: 'Possession Target', type: 'select', section: 'domain',

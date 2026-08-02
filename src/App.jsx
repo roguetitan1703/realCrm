@@ -120,7 +120,7 @@ export default function App() {
       <div className="viewport">
         {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
         <Phone store={store} framed={false} screen={screen} sel={sel} setSel={setSel} go={go} />
-        <Toasts toasts={state.toasts} />
+        <Toasts toasts={state.toasts} onDismiss={(id) => dispatch({ type: 'UNTOAST', id })} />
       </div>
     )
   }
@@ -151,7 +151,7 @@ export default function App() {
   const footer = {
     agent: me,
     name: me?.name || state.settings.firmName,
-    role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Agent',
+    role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Executive',
   }
 
   // Profile menu carries only real product actions. Role comes from the signed-in
@@ -172,7 +172,7 @@ export default function App() {
   const profile = {
     agent: me,
     name: me?.name || state.settings.firmName,
-    role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Agent',
+    role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Executive',
     items: profileItems,
   }
 
@@ -199,7 +199,7 @@ export default function App() {
       </AppShell>
       {state.waState && <WaModal store={store} />}
       <Modals store={store} go={go} />
-      <Toasts toasts={state.toasts} />
+      <Toasts toasts={state.toasts} onDismiss={(id) => dispatch({ type: 'UNTOAST', id })} />
     </div>
   )
 }

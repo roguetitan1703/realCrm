@@ -41,6 +41,14 @@ propertiesRouter.get('/', async (req: Request, res: Response) => {
       type: str(q.type),
       locality: str(q.locality),
       project: str(q.project),
+      category: str(q.category),
+      bhk: str(q.bhk),
+      subtype: str(q.subtype),
+      furnishing: str(q.furnishing),
+      facing: str(q.facing),
+      possession: str(q.possession),
+      ownership: str(q.ownership),
+      transaction: str(q.transaction),
       excludeId: str(q.excludeId),
     });
     return res.status(200).json({

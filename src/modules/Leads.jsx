@@ -30,7 +30,20 @@ function useLeadsSummary(dataAsOf) {
   return counts
 }
 
-export default function Leads({ store, go, sel, setSel, topBar, phone }) {
+/**
+ * Leads is a ROUTER and holds no hooks of its own — same reason as Properties:
+ * returning the record takeover from the middle of the list component rendered
+ * fewer hooks than the list did, and React threw on the way back.
+ */
+export default function Leads(props) {
+  const { store, go, sel, setSel, topBar, phone } = props
+  if (sel.leadOpen && sel.leadId) {
+    return <LeadRecord store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} />
+  }
+  return <LeadList {...props} />
+}
+
+function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
   const [flt, setFlt] = useState(sel.leadFilter || {})
   const [q, setQ] = useState('')
@@ -46,9 +59,6 @@ export default function Leads({ store, go, sel, setSel, topBar, phone }) {
   const setSortDirP = (v) => { setSortDir(v); setPage(1) }
   const setSegP = (v) => { setSeg(v); setPage(1) }
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
-
-  const open = sel.leadOpen && sel.leadId
-  if (open) return <LeadRecord store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} />
 
   // One page from the server. The agent's own-pipeline scope is applied in the
   // query, not by filtering an array here — a filter the client applies is a

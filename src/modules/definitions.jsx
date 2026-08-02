@@ -274,12 +274,13 @@ export const PROPERTIES_DEF = {
   filterFields: (store) => {
     // Project options are derived from the live inventory, so a broker can narrow
     // the unit list to one township/society.
-    const projects = [...new Set((store?.state?.properties || []).map(projectOf))].sort()
-    const props = store?.state?.properties || []
+    const projects = store?.state?.projects || []
     // Sale-only concepts are hidden when the inventory holds no sale listings
     // at all — a lettings-only desk should never be offered "Ownership" or
-    // "Transaction", which can only ever return nothing.
-    const hasSale = props.some(p => p.deal !== 'rent')
+    // "Transaction", which can only ever return nothing. Counted on the server;
+    // asking an in-memory array was only ever right while the array was the
+    // whole book.
+    const hasSale = (store?.state?.dealMix?.sale ?? 1) > 0
     return [
       { key: 'project', label: 'Project', icon: 'building', group: 'Where', options: opt(projects) },
       { key: 'deal', label: 'Deal', icon: 'tag', multi: false, group: 'What', options: optionsOf(DEALS) },
