@@ -364,7 +364,7 @@ export async function passwordLogin(
 
   const rows = isEmail(handle)
     ? await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND lower(email) = ${handle.toLowerCase()} AND deleted_at IS NULL LIMIT 1`
-    : await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND login_id = ${handle} AND deleted_at IS NULL LIMIT 1`;
+    : await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND lower(login_id) = ${handle.toLowerCase()} AND deleted_at IS NULL LIMIT 1`;
   const u = rows[0];
 
   const fail = () => {
