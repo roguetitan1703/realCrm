@@ -12,7 +12,7 @@
 // that CHANGE a record's facts are gated.
 import { useState, useEffect } from 'react'
 import Icon from '../../components/Icon.jsx'
-import { canEditListing, canDeleteRecord } from '../../lib/permissions.js'
+import { canEditListing, canDeleteRecord, canEditLead } from '../../lib/permissions.js'
 import { buildActionTiers, LEADS_DEF, PROPERTIES_DEF } from '../definitions.jsx'
 
 export default function PhoneActions({ store, go, context = {} }) {
@@ -42,15 +42,23 @@ export default function PhoneActions({ store, go, context = {} }) {
       if (!canDeleteRecord(role)) {
         actions = actions.filter(a => a.id !== 'delete' && a.id !== 'merge')
       }
-      // On a phone, calling means the device dialer — there is no telephony and
-      // none is planned. The confirm flow opens tel:, logs the call, and asks
-      // for the outcome when the agent comes back, which is the only moment
-      // they actually know how it went.
-      if (isLead && record.phone) {
-        actions = [
-          { id: 'call', icon: 'phone', label: 'Call', onClick: () => store.openModal({ kind: 'contact', channel: 'call', name: record.name, phone: record.phone, recordType: 'lead', recordId: record.id }) },
-          ...actions.filter(a => a.id !== 'logCall'),
-        ]
+      // Call and WhatsApp are NOT here. They sit on the lead's own screen, full
+      // width, one tap — reaching the client is the reason the page gets opened
+      // at all, so it does not belong behind a menu. This button used to
+      // prepend a Call and carry the definition's WhatsApp besides, which made
+      // three routes to two things.
+      if (isLead) {
+        actions = actions.filter(a => a.id !== 'whatsapp' && a.id !== 'logCall')
+        // Editing a lead's facts, for whoever may: the desk always, an agent
+        // only on a lead they created. Gated here as well as hidden, because
+        // the server refuses it either way and an action that 403s is worse
+        // than one that isn't offered.
+        if (canEditLead(role, store.state.activeAgentId, record)) {
+          actions = [
+            { id: 'edit', icon: 'edit', label: 'Edit lead', onClick: () => store.openModal({ kind: 'editRecord', moduleId: 'leads', recordId: record.id }) },
+            ...actions,
+          ]
+        }
       }
     }
   } else {

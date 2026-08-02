@@ -28,7 +28,7 @@ import { reqShort, budgetRange, quotedLine, unitLabel, thumbTint, initials, proj
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
-import { canAssignLead, canEditLead } from '../lib/permissions.js'
+import { canAssignLead, canEditLead, canUpdateLeadStatus } from '../lib/permissions.js'
 import { api } from '../lib/api.js'
 import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
@@ -63,15 +63,31 @@ export const LEADS_DEF = {
   icon: 'leads',
   schema: LEAD_MODULE_SCHEMA,
 
-  // Header facts strip — the identifying line under the record name.
-  headerFacts: (l) => [l.phone, reqShort(l.req), budgetRange(l.req)].filter(Boolean),
+  // Header facts strip — the identifying line under the record name. Email is
+  // only added when the lead has one (no empty row); locality gets a pin so it
+  // reads as a place, and sale/rent is a small tag rather than plain text — a
+  // sentence like "3 BHK · rent · Wakad" made the deal type invisible.
+  headerFacts: (l) => [
+    l.phone,
+    l.email || null,
+    l.req?.config || null,
+    l.req?.locality ? <span className="rh-loc"><Icon name="mapPin" size={12} className="ic" />{l.req.locality}</span> : null,
+    l.req?.deal ? <span className={'rh-dealtag' + (l.req.deal === 'rent' ? ' rent' : '')}>{l.req.deal === 'rent' ? 'Rent' : 'Sale'}</span> : null,
+    l.req ? budgetRange(l.req) : null,
+  ].filter(Boolean),
 
-  // Progression — a lead moves through pipeline stages. The standard header
-  // renders this as a clickable journey stepper. `exit` = quiet off-path action.
+  // Progression — a lead's status, not a pipeline position (see
+  // src/data/leadStatus.js: the list is flat and unordered). `flat: true`
+  // tells the shared ModuleDetail to draw this as an "update status" dropdown
+  // instead of the walkable journey stepper properties still get.
   progression: {
+    flat: true,
     stages: (store) => store.state.settings.stages.filter(s => s !== REJECTED_STATUS),
     current: (l) => l.stage,
     set: (store, l, stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) },
+    // Same scope as the record's own edit permission for status: desk always,
+    // an agent only on a lead they created or are assigned.
+    canSet: (store, l) => canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l),
     exit: { label: 'Mark as rejected', when: (l) => l.stage !== REJECTED_STATUS,
       run: (store, l) => store.openModal({ kind: 'rejectLead', leadId: l.id }) },
   },
@@ -221,14 +237,22 @@ export const LEADS_DEF = {
       } },
     // B4. Completing a scheduled Site Visit appointment also opens this, but
     // that path only exists if someone scheduled one — so a visit that just
-    // happened had nowhere to be logged. This is the always-available entry.
+    // happened had nowhere to be logged. This is the always-available entry —
+    // except when `followDone` (above) is ALREADY offering "Log site visit"
+    // for the same scheduled appointment, which read as the same button twice
+    // in both the desk rail's Quick actions and the phone action button.
     { id: 'logVisit', tier: 'quick', icon: 'camera', label: 'Log site visit',
+      when: (l) => !(l.followUp && /site\s*visit/i.test(l.followUp.action || '')),
       run: (store, l) => store.openModal({ kind: 'visitProof', leadId: l.id }) },
     { id: 'remark', tier: 'quick', icon: 'note', label: 'Add remark',
       run: (store, l) => store.openModal({ kind: 'remark', recordType: 'lead', recordId: l.id }) },
     // manage (behind "More"):
+    // Assignment is desk work. Offered to an agent this was an action the
+    // server refuses — the picker opened, a name was chosen, and the save came
+    // back 403.
     { id: 'assign', tier: 'manage', icon: 'userPlus',
       label: (l) => l.agentId ? 'Reassign owner' : 'Assign owner',
+      when: (l, store) => canAssignLead(store.state.role),
       sub: (l, store) => { const a = store.agentById(l.agentId); return a ? a.name : 'Unassigned' },
       run: (store, l) => store.openModal({ kind: 'assign', leadId: l.id }) },
     { id: 'merge', tier: 'manage', icon: 'copy', label: 'Merge duplicate', tone: 'danger',
@@ -236,6 +260,35 @@ export const LEADS_DEF = {
     { id: 'delete', tier: 'manage', icon: 'trash', label: 'Delete lead', tone: 'danger',
       run: (store, l, ctx) => { if (window.confirm('Delete this lead record permanently?')) { store.deleteLead(l.id); ctx?.onClose?.() } } },
   ],
+
+  // Phone list row — one tap to open, two icons beside it for the thing every
+  // visit to this screen starts with. Same modal kind LeadRecord's own
+  // Call/WhatsApp buttons open, so a call logged from the list is logged the
+  // same way as one logged from the record.
+  phoneActions: (l, store) => l.phone ? [
+    { icon: 'phone', label: 'Call', onClick: () => store.openModal({ kind: 'contact', channel: 'call', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id }) },
+    { icon: 'wa', label: 'WhatsApp', onClick: () => store.openModal({ kind: 'contact', channel: 'wa', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id }) },
+  ] : [],
+
+  // Compact phone row — a full-width scan line, not the desktop grid tile
+  // (`card` below). Money stays out of it; the desktop card already keeps it
+  // quiet, a list row keeps it out entirely.
+  phoneCard: (l, store) => {
+    const a = store.agentById(l.agentId)
+    return (
+      <div className="prow">
+        <div className="prow-top">
+          <span className="prow-name">{l.name}</span>
+          <StageTag stage={l.stage} />
+        </div>
+        <div className="prow-sub mono-num">{l.phone}</div>
+        <div className="prow-meta">
+          <span>{reqShort(l.req)}</span>
+          {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
+        </div>
+      </div>
+    )
+  },
 
   // Grid-view card for a lead.
   card: (l, store) => {

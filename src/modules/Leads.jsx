@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
-import { ModuleListView, ModuleCards, ModuleTable } from '../components/collections.jsx'
+import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Overdue, Avatar, CappedList } from '../components/primitives.jsx'
 import { fitReasons, thumbTint, initials, unitLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
+import { canEditLead, canAssignLead } from '../lib/permissions.js'
+import { LEAD_STATUSES } from '../data/leadStatus.js'
 import { useServerList } from '../lib/serverList.js'
 import { api } from '../lib/api.js'
 import { useEffect } from 'react'
@@ -146,7 +148,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     ),
     cta: { label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) },
     renderTable: (list, v) => v === 'grid'
-      ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} />
+      ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} phone={phone} />
       : <ModuleTable def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP}
           selectable={canAssign} selectedIds={selected} onSelectionChange={setSelected} />,
   })
@@ -211,6 +213,9 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   const a = store.agentById(l.agentId)
   const overdue = l.overdue
   const back = () => setSel(s => ({ ...s, leadOpen: false }))
+  const role = store.state.role
+  const userId = store.state.activeAgentId
+  const editable = canEditLead(role, userId, l)
 
   // The next-best-action banner is gone. With a follow-up scheduled it
   // restated the follow-up card sitting directly beneath it; without one it
@@ -301,12 +306,20 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
       {topBar({ eyebrow: 'Leads', title: l.name, onBack: back })}
       <div className="app-body">
         <ModuleDetail
-          def={LEADS_DEF} record={l} store={store} onEdit={openEdit} phone={phone}
+          // On a phone Edit is carried by the action button (PhoneActions), so
+          // it is deliberately absent here — otherwise the header's action bar
+          // would offer it a second time, next to the two things you actually
+          // came to do. On the desk it stays in the header where it always was.
+          def={LEADS_DEF} record={l} store={store} phone={phone}
+          onEdit={(!phone && editable) ? openEdit : undefined}
           avatar={<Avatar agent={{ initials: initials(l.name), avatar: '' }} size="lg" />}
           signals={overdue ? <Overdue>Overdue</Overdue> : null}
           // Reaching a client is the whole reason this page gets opened, and
-          // both ways of doing it were only in the action button — two taps and
-          // a menu to read, for the thing every visit starts with.
+          // both ways of doing it were once only in the action button — two taps
+          // and a menu to read, for the thing every visit starts with. So they
+          // stay here, on the record, full width, on the phone as well as the
+          // desk. Editing is the opposite: rare, and it moved to the action
+          // button, so the phone's action bar is these two and nothing else.
           primary={l.phone ? [
             { label: 'Call', icon: 'phone', onClick: () => store.openModal({ kind: 'contact', channel: 'call', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id }) },
             { label: 'WhatsApp', icon: 'wa', onClick: () => store.openModal({ kind: 'contact', channel: 'wa', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id }) },

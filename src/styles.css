@@ -618,10 +618,24 @@ input,textarea,select{font-family:inherit}
 .rh-facts{display:flex;flex-wrap:wrap;gap:4px 0;margin-top:3px}
 .rh-facts span{font-size:13px;color:var(--muted)}
 .rh-facts span:not(:last-child)::after{content:"·";margin:0 8px;color:var(--faint)}
+/* A locality reads as a place once it carries a pin, not just a word among
+   other words in the facts strip. */
+.rh-facts .rh-loc{display:inline-flex;align-items:center;gap:3px;color:var(--muted)}
+/* Sale/rent was plain text indistinguishable from every other fact — a lead's
+   deal type is the first thing that filters which inventory even applies. */
+.rh-facts .rh-dealtag{display:inline-flex;align-items:center;padding:1px 7px;border-radius:5px;
+  background:var(--accent-wash);color:var(--accent-ink);font-weight:700;font-size:11px;
+  text-transform:uppercase;letter-spacing:.03em}
+.rh-facts .rh-dealtag.rent{background:var(--card-2);color:var(--ink-2);border:1px solid var(--line)}
 .rh-actions{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
 .rh-signals{display:inline-flex;align-items:center;gap:8px;margin-right:4px}
 .rh-prog{display:flex;align-items:center;gap:16px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line-2)}
 .rh-prog .jstep{flex:1}
+/* A flat status list (leads) has no sequence to walk, so it's a plain select
+   rather than the journey stepper — same row, same "Mark as rejected" exit. */
+.rh-status-select{flex:1;min-height:38px;padding:0 12px;border-radius:9px;border:1px solid var(--line);
+  background:var(--card-2);color:var(--ink);font-family:var(--sans);font-size:13.5px;font-weight:600;cursor:pointer}
+.rh-status-select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-wash)}
 .rh-exit{flex-shrink:0;border:none;background:transparent;color:var(--muted);font-family:var(--sans);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;padding:4px 2px}
 .rh-exit:hover{color:var(--alert)}
 /* legacy md-head kept for any remaining callers */
@@ -1876,6 +1890,25 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
    phone shell there is ONE scroller (.m-body), so the nested ones flatten. */
 .app-mobile .app-body{flex:none;overflow:visible;min-height:0}
 .app-mobile .list-layout{flex:none;min-height:0}
+
+/* Lead list rows on a phone: a full-width scan line (name/stage, phone,
+   requirement/owner) with Call + WhatsApp docked on the right — one tap each,
+   no menu. `.rcard-row` renders as a div (not a button — it holds real
+   buttons of its own), so its own hover/active affordance is drawn here. */
+.app-mobile .rcard-row{flex-direction:row;align-items:center;padding:11px 12px;gap:10px;cursor:pointer}
+.app-mobile .rcard-row:active{border-color:var(--muted)}
+.app-mobile .rcard-body{flex:1;min-width:0}
+.app-mobile .rcard-actions{display:flex;gap:8px;flex-shrink:0}
+.app-mobile .rcard-act{width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid var(--line);background:var(--card-2);color:var(--ink-2);cursor:pointer}
+.app-mobile .rcard-act:active{background:var(--accent-wash);color:var(--accent-ink);border-color:var(--accent-line)}
+
+.app-mobile .prow{display:flex;flex-direction:column;gap:3px;min-width:0}
+.app-mobile .prow-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.app-mobile .prow-name{font-weight:600;font-size:14.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app-mobile .prow-sub{font-size:12.5px;color:var(--muted)}
+.app-mobile .prow-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--ink-2)}
+.app-mobile .prow-agent{display:inline-flex;align-items:center;gap:5px;color:var(--muted)}
 .app-mobile .ll-toolbar{padding:12px 12px 0}
 .app-mobile .ll-content{flex:none;overflow:visible;padding:12px 12px 8px}
 .app-mobile .detail-layout{grid-template-columns:minmax(0,1fr);padding:12px 12px 8px;gap:14px}
