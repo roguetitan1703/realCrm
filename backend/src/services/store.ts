@@ -31,6 +31,19 @@ import {
  * no context) it falls back to the default tenant — those paths set tenant_id
  * explicitly anyway.
  */
+// Lead status is flat, not a pipeline — see src/data/leadStatus.js for why.
+// These two must stay in step with that file.
+export const LEAD_STATUSES = ['New', 'Follow-Up', 'Callback', 'Call Not Received', 'Interested', 'Site Visit', 'Deal Closed', 'Rejected'];
+export const TERMINAL_STATUSES = ['Deal Closed', 'Rejected'];
+export const WON_STATUS = 'Deal Closed';
+/**
+ * "Still open." Every one of these used to read `stage NOT LIKE 'Closed%'`,
+ * which was a string test standing in for a concept — and the moment the
+ * statuses stopped starting with the word "Closed" it silently counted every
+ * finished lead as open. An explicit list cannot drift like that.
+ */
+const OPEN = sql`coalesce(stage, '') NOT IN ${sql(TERMINAL_STATUSES)}`;
+
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
 }
@@ -176,7 +189,7 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   // 3. Default settings + routing UNDER the new tenant. A new firm starts EMPTY.
   const settings = {
     firmName, city,
-    stages: ['New', 'Contacted', 'Site Visit', 'Negotiation', 'Closed Won', 'Closed Lost'],
+    stages: LEAD_STATUSES,
     sources: ['99acres', 'MagicBricks', 'Walk-in', 'Referral', 'Website'],
   };
   await sql`
@@ -492,6 +505,41 @@ async function syncLeadShortlist(leadId: string, shortlist: string[], feedback: 
  * don't already exist (ON CONFLICT DO NOTHING keyed on lead_id+property_id).
  * Safe to run on every boot.
  */
+/**
+ * Move live leads off the old ordered pipeline onto the client's flat statuses.
+ *
+ * Idempotent: it only rewrites values that are still old ones, so it is safe on
+ * every boot and a no-op once done. The mapping preserves what each position
+ * actually meant rather than collapsing everything into "New" — a lead that had
+ * reached Negotiation is Interested, not new business.
+ */
+export async function migrateLeadStatuses(): Promise<void> {
+  const MAP: Record<string, string> = {
+    'Contacted': 'Follow-Up',
+    'Negotiation': 'Interested',
+    'Closed Won': 'Deal Closed',
+    'Closed Lost': 'Rejected',
+    'New inquiry': 'New',
+    'won': 'Deal Closed',
+    'lost': 'Rejected',
+  };
+  for (const [from, to] of Object.entries(MAP)) {
+    await sql`UPDATE crm_leads SET stage = ${to} WHERE stage = ${from}`;
+  }
+  // Each tenant's configured list, so the filter menus and the status picker
+  // offer the statuses that now exist rather than the pipeline that doesn't.
+  const rows = await sql`SELECT tenant_id, value FROM crm_settings WHERE key = 'default'`;
+  for (const r of rows as any[]) {
+    const v = r.value || {};
+    const cur: string[] = Array.isArray(v.stages) ? v.stages : [];
+    const stale = cur.some(x => MAP[x]) || cur.length === 0
+      || !LEAD_STATUSES.every(x => cur.includes(x));
+    if (!stale) continue;
+    await sql`UPDATE crm_settings SET value = ${sql.json({ ...v, stages: LEAD_STATUSES })}
+               WHERE key = 'default' AND tenant_id = ${r.tenant_id}`;
+  }
+}
+
 export async function backfillShortlist(): Promise<void> {
   const rows = await sql`SELECT id, tenant_id, shortlist, feedback FROM crm_leads`;
   for (const r of rows) {
@@ -871,6 +919,7 @@ seedDatabase()
   .then(() => backfillShortlist())
   .then(() => backfillPropertyCanonicalFields())
   .then(() => repairPropertyDisplayCasing())
+  .then(() => migrateLeadStatuses())
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
@@ -1017,19 +1066,19 @@ export async function getDeskSummary(): Promise<any> {
   const t = tid();
   const [totals, byStage, bySource, perAgent, perAgentStage, props, owners] = await Promise.all([
     sql`SELECT count(*)::int AS total,
-               count(*) FILTER (WHERE NOT coalesce(stage, '') LIKE 'Closed%')::int AS open,
+               count(*) FILTER (WHERE ${OPEN})::int AS open,
                count(*) FILTER (WHERE overdue)::int AS overdue,
                count(*) FILTER (WHERE follow_up IS NOT NULL)::int AS with_follow_up,
-               count(*) FILTER (WHERE stage = 'Closed Won')::int AS won,
+               count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*) FILTER (WHERE created_at > now() - interval '3 hours')::int AS new_today,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
           FROM crm_leads WHERE tenant_id = ${t}`,
     sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads WHERE tenant_id = ${t} GROUP BY 1`,
     sql`SELECT coalesce(source, 'Website') AS k, count(*)::int AS n FROM crm_leads WHERE tenant_id = ${t} GROUP BY 1`,
     sql`SELECT agent_id AS k,
-               count(*) FILTER (WHERE NOT coalesce(stage, '') LIKE 'Closed%')::int AS open,
+               count(*) FILTER (WHERE ${OPEN})::int AS open,
                count(*) FILTER (WHERE overdue)::int AS overdue,
-               count(*) FILTER (WHERE stage = 'Closed Won')::int AS won,
+               count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*)::int AS total
           FROM crm_leads WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1`,
     // Per-agent stage breakdown. Which stages count as "contacted" or "visited"
@@ -1588,7 +1637,7 @@ export async function listLeads(opts: {
   // The segment pills, as query rather than as array scans.
   if (opts.segment === 'overdue') where.push(sql`overdue = true`);
   else if (opts.segment === 'unassigned') where.push(sql`agent_id IS NULL`);
-  else if (opts.segment === 'open') where.push(sql`stage NOT LIKE 'Closed%'`);
+  else if (opts.segment === 'open') where.push(OPEN);
   // The calendar shows leads with a next step booked, and only those. It used
   // to find them by filtering the whole lead table in the browser.
   else if (opts.segment === 'followup') where.push(sql`follow_up IS NOT NULL`);
@@ -1609,7 +1658,7 @@ export async function getLeadsSummary(scopeAgentId?: string): Promise<any> {
     SELECT count(*)::int AS total,
            count(*) FILTER (WHERE overdue) ::int AS overdue,
            count(*) FILTER (WHERE agent_id IS NULL) ::int AS unassigned,
-           count(*) FILTER (WHERE stage NOT LIKE 'Closed%') ::int AS open
+           count(*) FILTER (WHERE ${OPEN}) ::int AS open
     FROM crm_leads WHERE tenant_id = ${t} ${scope}`;
   return rows[0] || { total: 0, overdue: 0, unassigned: 0, open: 0 };
 }
@@ -1629,7 +1678,7 @@ export async function getTodayFeed(scopeAgentId?: string): Promise<any> {
   const [leads, renewals] = await Promise.all([
     sql`SELECT * FROM crm_leads
         WHERE tenant_id = ${t} ${scope}
-          AND stage NOT LIKE 'Closed%'
+          AND ${OPEN}
           AND (overdue = true OR follow_up IS NOT NULL OR agent_id IS NULL
                OR stage = 'New' OR created_at > now() - interval '14 days')
         ORDER BY created_at DESC LIMIT 200`,
@@ -1800,7 +1849,7 @@ async function demandFor(t: string, ids: string[]): Promise<Map<string, number>>
       FROM crm_properties p
       LEFT JOIN crm_leads l
         ON l.tenant_id = p.tenant_id
-       AND NOT coalesce(l.stage, '') LIKE 'Closed%'
+       AND coalesce(l.stage, '') NOT IN ${sql(TERMINAL_STATUSES)}
        AND coalesce(l.deal, l.req->>'deal', 'sale') = coalesce(p.deal, 'sale')
        AND (l.locality IS NULL OR p.locality IS NULL OR l.locality = p.locality)
        AND (l.budget_max IS NULL OR p.price_amount IS NULL OR l.budget_max >= p.price_amount * 0.75)
@@ -1932,7 +1981,7 @@ export async function getPropertyBuyers(propertyId: string, limit = 50): Promise
 
   const where: any[] = [
     sql`tenant_id = ${t}`,
-    sql`NOT coalesce(stage, '') LIKE 'Closed%'`,
+    OPEN,
     sql`coalesce(deal, req->>'deal', 'sale') = ${deal}`,
   ];
   if (p.locality) where.push(sql`(locality IS NULL OR locality = ${p.locality})`);

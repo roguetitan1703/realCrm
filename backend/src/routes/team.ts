@@ -353,7 +353,7 @@ teamRouter.delete('/users/:id', async (req: Request, res: Response) => {
     const openLeads = await sql`
       SELECT COUNT(*)::int AS n FROM crm_leads
       WHERE tenant_id = ${req.tenantId} AND agent_id = ${u.id}
-        AND COALESCE(stage, '') NOT IN ('Closed Won', 'Closed Lost', 'won', 'lost')
+        AND COALESCE(stage, '') NOT IN ('Deal Closed', 'Rejected')
     `;
     if (openLeads[0].n > 0) {
       return res.status(400).json({ error: `Reassign this user's ${openLeads[0].n} open lead(s) before deleting.`, openLeads: openLeads[0].n });

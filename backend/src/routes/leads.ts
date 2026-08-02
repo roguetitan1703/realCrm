@@ -218,7 +218,7 @@ leadsRouter.post('/:id/actions/convert-to-client', async (req: Request, res: Res
     const recordId = req.params.id;
     const { booking_amount, unit_number, property_id } = req.body;
 
-    await sql`UPDATE crm_leads SET stage = 'Closed Won' WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
+    await sql`UPDATE crm_leads SET stage = 'Deal Closed' WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
     if (unit_number) {
       // crm_units keeps status inside the `data` JSONB, not a column.
       await sql`UPDATE crm_units SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{status}', '"Sold"') WHERE (id = ${unit_number} OR title = ${unit_number}) AND tenant_id = ${req.tenantId}`;

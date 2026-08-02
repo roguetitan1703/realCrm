@@ -307,7 +307,9 @@ connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => 
   const integration = await getIntegration(tenant, req.params.id);
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 
-  const docsUrl = `${process.env.PUBLIC_APP_URL || `${req.protocol}://${req.get('host')}`}/api/v1/connections/${integration.id}/docs`;
+  const rawHost = req.get('x-forwarded-host') || req.get('host') || '';
+  const domain = rawHost.includes('realestate.delpat.in') || rawHost.includes('delpat.in') ? 'https://realestate.delpat.in' : (process.env.PUBLIC_APP_URL || `${req.protocol}://${rawHost || 'realestate.delpat.in'}`);
+  const docsUrl = `${domain}/api/v1/connections/${integration.id}/docs`;
 
   // Auth methods, accepted body formats and the example all live on the docs
   // page (below) — the email exists only to hand over the link. Explaining
@@ -347,13 +349,12 @@ function escapeHtml(s: string): string {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 }
 
-connectionsRouter.get('/:id/docs', async (req: Request, res: Response) => {
-  const integration = await getIntegrationById(req.params.id);
-  if (!integration) return res.status(404).send('Not found.');
-
-  const endpoint = `${process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`}/api/v1/ingest/${integration.tenant_slug}`;
+  const rawHost = req.get('x-forwarded-host') || req.get('host') || '';
+  const domain = rawHost.includes('realestate.delpat.in') || rawHost.includes('delpat.in') ? 'https://realestate.delpat.in' : (process.env.PUBLIC_API_URL || `${req.protocol}://${rawHost || 'realestate.delpat.in'}`);
+  const endpoint = `${domain}/api/v1/ingest/${integration.tenant_slug}`;
   const provider = escapeHtml(integration.provider);
-  const key = '&lt;YOUR_API_KEY&gt;';
+  const rawKey = typeof req.query.key === 'string' && req.query.key.trim() ? req.query.key.trim() : null;
+  const key = rawKey ? escapeHtml(rawKey) : '&lt;YOUR_API_KEY&gt;';
 
   const html = `<!doctype html>
 <html lang="en"><head>
