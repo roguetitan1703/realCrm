@@ -245,7 +245,7 @@ export default function Admin() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--ink)' }}>Tamper-Evident Audit Ledger</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>Cryptographic chain status: {auditOk ? '✅ Intact' : '❌ Broken'}</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>Cryptographic chain status: {auditOk ? 'Intact' : 'Broken'}</div>
               </div>
             </div>
 
@@ -518,18 +518,18 @@ function HandoverModal({ data, onClose }) {
   const initialPassword = data.initialPassword
   const team = data.team || []
 
-  const formattedText = `🏡 *Welcome to ${tenant.name} CRM!*
+  const formattedText = `Welcome to ${tenant.name} CRM
 
-📍 *Your Workspace URL:*
+Workspace URL:
 https://${window.location.host}/${tenant.slug}
 
-🔑 *Owner Credentials:*
+Owner Credentials:
 - User ID: ${owner.login_id || owner.email}
 - Email: ${owner.email}
 - Password: ${initialPassword}
 
-${team.length > 0 ? `👥 *Team Credentials:*\n${team.map(t => `- ${t.name} (${t.role}): User ID: ${t.loginId || t.email} | Email: ${t.email} | Password: ${t.password}`).join('\n')}\n` : ''}
-📲 *Installed PWA:*
+${team.length > 0 ? `Team Credentials:\n${team.map(t => `- ${t.name} (${t.role}): User ID: ${t.loginId || t.email} | Email: ${t.email} | Password: ${t.password}`).join('\n')}\n` : ''}
+Installed PWA:
 Open https://${window.location.host}/${tenant.slug} on your phone and tap "Add to Home Screen".`
 
   const copyToClipboard = () => {
@@ -542,7 +542,7 @@ Open https://${window.location.host}/${tenant.slug} on your phone and tap "Add t
     <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
       <div style={{ width: '100%', maxWidth: 540, background: '#fff', borderRadius: 16, border: '1px solid var(--line)', padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.3)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#15803d', fontWeight: 700, fontSize: 17, marginBottom: 14 }}>
-          <span>🎉 Workspace '{tenant.name}' Provisioned!</span>
+          <span>Workspace '{tenant.name}' Provisioned</span>
         </div>
 
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
