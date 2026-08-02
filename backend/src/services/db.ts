@@ -233,6 +233,12 @@ export async function initSchema(): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `;
+    // The SLA scanner in services/notifications.ts reads and writes
+    // crm_leads.metadata, which was never in this schema — so it threw on every
+    // iteration, once per /pulse from every open tab, and had never run once.
+    // Adding the column stops the exception; it does not switch the feature on
+    // (see processScheduledNotifications for why it still matches nothing).
+    await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;`;
     await sql`CREATE INDEX IF NOT EXISTS idx_crm_owners_tenant ON crm_owners (tenant_id);`;
     // A cold-calling list without a callback time is a list that gets called
     // once. `Callback` was already one of the six statuses with nowhere to

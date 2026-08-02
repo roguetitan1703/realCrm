@@ -104,8 +104,32 @@ export async function markAllRead(userId: string): Promise<void> {
 /**
  * Periodically processes scheduled notifications (followup_due, site_visit_reminder, lead_stale_sla)
  * across all active tenants using the exact same notify() and notifyRoles() primitives.
+ *
+ * NOTE — both halves of this are currently inert, and deliberately left that way
+ * rather than quietly switched on:
+ *
+ *   1. followup_due reads `follow_up->>'due_at'`. Nothing in the codebase ever
+ *      writes that key — the follow-up model stores {date, time, action} — so it
+ *      selects nothing.
+ *   2. lead_stale_sla matches `stage ILIKE 'New Inquiry'`, a status that was
+ *      renamed to 'New' (see migrateLeadStatuses). It also read crm_leads
+ *      .metadata, a column that did not exist, so it threw before reaching the
+ *      loop anyway.
+ *
+ * Repointing either at the current vocabulary would immediately fire on the
+ * entire historical backlog of a live desk, so that is a decision to make on
+ * purpose, with a bound on how far back it looks — not a rename.
  */
+// It ran a multi-query scan across every tenant on EVERY /pulse — which every
+// open tab polls every few seconds — to find nothing. Whatever it eventually
+// does, it does not need doing hundreds of times a minute.
+const SCAN_INTERVAL_MS = 60_000;
+let lastScanAt = 0;
+
 export async function processScheduledNotifications(): Promise<void> {
+  const now = Date.now();
+  if (now - lastScanAt < SCAN_INTERVAL_MS) return;
+  lastScanAt = now;
   try {
     const tenants = await sql`SELECT DISTINCT tenant_id FROM users WHERE status ILIKE 'active'`;
     for (const { tenant_id: t } of tenants) {
