@@ -669,12 +669,10 @@ https://${window.location.host}/${tenant.slug}
 
 Owner Credentials:
 - User ID: ${owner.login_id || owner.email}
-- Email: ${owner.email}
 - Password: ${initialPassword}
 
-${team.length > 0 ? `Team Credentials:\n${team.map(t => `- ${t.name} (${t.role}): User ID: ${t.loginId || t.email} | Email: ${t.email} | Password: ${t.password}`).join('\n')}\n` : ''}
-Installed PWA:
-Open https://${window.location.host}/${tenant.slug} on your phone and tap "Add to Home Screen".`
+${team.length > 0 ? `Team Member Credentials:\n${team.map(t => `- ${t.name} (${t.role}): User ID: ${t.loginId || t.email} | Password: ${t.password}`).join('\n')}\n\n` : ''}Installed PWA:
+Open https://${window.location.host}/${tenant.slug} on your phone browser and tap "Add to Home Screen".`
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(formattedText)
