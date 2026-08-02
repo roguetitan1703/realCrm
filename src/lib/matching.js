@@ -312,7 +312,7 @@ const PACKS = {
     bath: 'bath', balcony: 'balcony',
     price: 'Price', rent: 'Rent', deposit: 'Deposit', negotiable: '(thoda negotiable)', fixed: 'fixed',
     family: 'Family', billsByOwner: 'Owner electricity & gas bill pay karega.',
-    superBuiltUp: 'super built-up', of: 'of', about: 'Project ke baare mein', builtUp: 'built-up',
+    superBuiltUp: 'super built-up', of: 'of', about: 'Project ke baare mein', builtUp: 'built-up',  // vocab-ok: display prose
   },
   English: {
     openers: ['Available in a prime location:', 'Move-in ready, directly from owner:', 'Genuine deal at the best market price:'],
@@ -322,7 +322,7 @@ const PACKS = {
     bath: 'bath', balcony: 'balcony',
     price: 'Price', rent: 'Rent', deposit: 'Deposit', negotiable: '(negotiable)', fixed: 'fixed',
     family: 'Family', billsByOwner: 'Electricity & gas bills paid by owner.',
-    superBuiltUp: 'super built-up', of: 'of', about: 'About the project', builtUp: 'built-up',
+    superBuiltUp: 'super built-up', of: 'of', about: 'About the project', builtUp: 'built-up',  // vocab-ok: display prose
   },
   Marathi: {
     openers: ['अतिशय उत्तम ठिकाणी उपलब्ध:', 'राहायला तयार फ्लॅट, थेट मालकाकडून:', 'प्रामाणिक व्यवहार, बाजारातील सर्वोत्तम किंमत:'],
