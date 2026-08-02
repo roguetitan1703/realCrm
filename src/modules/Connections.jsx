@@ -62,15 +62,27 @@ function Endpoint({ endpoint, headerName, store }) {
   const [copied, copy] = useCopy(store)
   const [help, setHelp] = useState(false)
   if (!endpoint) return <div className="cx-url"><Skel w="60%" h={13} /></div>
+
+  const tenantSlug = endpoint.split('/').pop() || 'tenant'
+  const domain = endpoint.split('/api/v1')[0] || ''
+  const docsUrl = `${domain}/docs/${tenantSlug}`
+
   return (
-    <div className="cx-url">
+    <div className="cx-url" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div className="cx-url-row">
         <span className="cx-url-tag">POST</span>
         <code className="cx-url-v">{endpoint}</code>
         <button className="btn btn-ghost btn-sm" onClick={() => copy(endpoint, 'url')}>
-          <Icon name={copied === 'url' ? 'check' : 'copy'} size={14} />{copied === 'url' ? 'Copied' : 'Copy'}
+          <Icon name={copied === 'url' ? 'check' : 'copy'} size={14} />{copied === 'url' ? 'Copied' : 'Copy API URL'}
         </button>
         <button className={'cx-q' + (help ? ' on' : '')} onClick={() => setHelp(h => !h)} aria-label="Endpoint details">?</button>
+      </div>
+      <div className="cx-url-row">
+        <span className="cx-url-tag" style={{ background: '#7c3aed', color: '#fff' }}>DOCS</span>
+        <code className="cx-url-v">{docsUrl}</code>
+        <button className="btn btn-ghost btn-sm" onClick={() => copy(docsUrl, 'docs')}>
+          <Icon name={copied === 'docs' ? 'check' : 'copy'} size={14} />{copied === 'docs' ? 'Copied' : 'Copy Docs Link'}
+        </button>
       </div>
       {help && (
         <dl className="cx-url-help">

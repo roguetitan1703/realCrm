@@ -1644,6 +1644,37 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
 }
 
 /**
+ * ── The segment pills, defined ONCE, as SQL ─────────────────────────────────
+ *
+ * One definition drives both the filter and the count, which is the only way
+ * they can agree. They did not: the browser held eight pills but the server
+ * understood four segment names, so clicking "Fresh" or "Closed" filtered
+ * nothing, and every pill the summary had no count for fell back to
+ * `counts.total` — five of the eight displayed the same number, the total, and
+ * it looked like data.
+ *
+ * Two of them ("Working" = Contacted/Negotiation) also still named pipeline
+ * stages that no longer exist, so they could only ever have counted zero.
+ */
+const LEAD_SEGMENTS = {
+  overdue: sql`overdue = true`,
+  unassigned: sql`agent_id IS NULL`,
+  open: OPEN,
+  // "New today" is about arrival, not about status: a lead that came in this
+  // morning and has already been called is still today's lead.
+  today: sql`created_at >= date_trunc('day', now())`,
+  month: sql`created_at >= date_trunc('month', now())`,
+  // The client asked for this one specifically, one click from the list — it is
+  // the pile you work down at 6pm.
+  noanswer: sql`stage = 'Call Not Received'`,
+  closed: sql`NOT (${OPEN})`,
+  // The calendar shows leads with a next step booked, and only those.
+  followup: sql`follow_up IS NOT NULL`,
+} as const;
+
+export type LeadSegment = keyof typeof LEAD_SEGMENTS;
+
+/**
  * One page of leads, filtered and counted in Postgres — the same treatment
  * listProperties got, for the same reason.
  */
@@ -1673,15 +1704,15 @@ export async function listLeads(opts: {
   const stages = many(opts.stage);
   if (stages.length) where.push(sql`stage IN ${sql(stages)}`);
   if (opts.agentId) where.push(sql`agent_id = ${opts.agentId}`);
-  if (opts.intent === 'buy') where.push(sql`(lower(coalesce(intent, 'buy')) LIKE '%buy%' OR lower(coalesce(intent, '')) LIKE '%sale%')`);
-  else if (opts.intent === 'rent') where.push(sql`lower(coalesce(intent, '')) LIKE '%rent%'`);
-  // The segment pills, as query rather than as array scans.
-  if (opts.segment === 'overdue') where.push(sql`overdue = true`);
-  else if (opts.segment === 'unassigned') where.push(sql`agent_id IS NULL`);
-  else if (opts.segment === 'open') where.push(OPEN);
-  // The calendar shows leads with a next step booked, and only those. It used
-  // to find them by filtering the whole lead table in the browser.
-  else if (opts.segment === 'followup') where.push(sql`follow_up IS NOT NULL`);
+  // Sale vs rent. This queried a column called `intent`, which crm_leads does
+  // not have and never had — the toggle at the top of the leads list returned
+  // a 500 on every click. The column is `deal`, written by createLead, and a
+  // lead whose purpose is "Lease" is a rental whatever `deal` says.
+  const RENT = sql`(lower(coalesce(deal, '')) IN ('rent', 'lease') OR lower(coalesce(purpose, '')) IN ('rent', 'lease'))`;
+  if (opts.intent === 'buy' || opts.intent === 'sale') where.push(sql`NOT ${RENT}`);
+  else if (opts.intent === 'rent') where.push(RENT);
+  const segment = LEAD_SEGMENTS[opts.segment as keyof typeof LEAD_SEGMENTS];
+  if (segment) where.push(segment);
 
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
   const [rows, countRows] = await Promise.all([
@@ -1691,17 +1722,33 @@ export async function listLeads(opts: {
   return { rows: rows.map(r => rowToLead(r)), total: countRows[0]?.n ?? 0, page, limit };
 }
 
-/** Counts for the lead segment pills, without reading the leads. */
+/**
+ * Counts for the lead segment pills, without reading the leads.
+ *
+ * Every segment gets a real count, from the same predicate that filters it, in
+ * one pass. A pill whose count the server cannot produce has no business being
+ * on the screen: it will show something, and whatever it shows will be wrong.
+ * Counts respect the caller's scope, so an agent's "Overdue 3" is their three.
+ *
+ * Also counts leads by status, which is what the status dropdown needs to say
+ * how many are in each — one query rather than one per status.
+ */
 export async function getLeadsSummary(): Promise<any> {
   const t = tid();
-  const scope = sql`AND ${leadScope()}`;
-  const rows = await sql`
-    SELECT count(*)::int AS total,
-           count(*) FILTER (WHERE overdue) ::int AS overdue,
-           count(*) FILTER (WHERE agent_id IS NULL) ::int AS unassigned,
-           count(*) FILTER (WHERE ${OPEN}) ::int AS open
-    FROM crm_leads WHERE tenant_id = ${t} ${scope}`;
-  return rows[0] || { total: 0, overdue: 0, unassigned: 0, open: 0 };
+  const scope = leadScope();
+  const filters = Object.entries(LEAD_SEGMENTS)
+    .map(([key, pred]) => sql`count(*) FILTER (WHERE ${pred})::int AS ${sql(key)}`)
+    .reduce((acc, f) => sql`${acc}, ${f}`);
+  const [totals, byStage] = await Promise.all([
+    sql`SELECT count(*)::int AS total, ${filters} FROM crm_leads WHERE tenant_id = ${t} AND ${scope}`,
+    sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
+        FROM crm_leads WHERE tenant_id = ${t} AND ${scope} GROUP BY 1`,
+  ]);
+  return {
+    ...(totals[0] || { total: 0 }),
+    all: totals[0]?.total ?? 0,
+    byStage: Object.fromEntries((byStage as any[]).map(r => [r.stage, r.n])),
+  };
 }
 
 /**
