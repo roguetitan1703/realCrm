@@ -66,10 +66,14 @@ export interface ProvisionInput {
   ownerEmail: string;
   ownerPhone?: string;
   primaryColor?: string;
+  ownerPassword?: string;
+  mustChangePassword?: boolean;
+  initialTeam?: Array<{ name: string; email?: string; phone?: string; role?: string; password?: string }>;
 }
 export interface ProvisionResult {
   tenant: { id: string; name: string; slug: string; brand_config: any };
   owner: { id: string; name: string; email: string; phone: string | null; role: 'owner' };
+  team?: Array<{ name: string; email: string; role: string; password: string }>;
   ingest: { tenantSlug: string; secret: string };
   loginWith: string;
   initialPassword: string;   // hand this to the owner (they change it on first login)
@@ -114,19 +118,47 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   const ownerId = `owner_${tenantId}`;
   const ownerName = (input.ownerName || 'Owner').trim();
   const ownerMeta = { initials, avatar: '', phone: ownerPhone, email: ownerEmail };
-  // Owner logs in by email + password (auth v2). Generate an initial password to
-  // hand over; the email is admin-vouched (verified) so self-reset works; they're
-  // forced to change it on first login.
-  const initialPassword = suggestPassword();
+  const initialPassword = input.ownerPassword ? input.ownerPassword.trim() : suggestPassword();
+  const mustChange = input.mustChangePassword !== false; // default true
   const ownerPwHash = await bcrypt.hash(initialPassword, 10);
   await sql`
     INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
-    VALUES (${ownerId}, ${tenantId}, ${ownerName}, ${ownerPhone}, ${ownerEmail}, 'owner', 'active', ${sql.json(ownerMeta)}, ${ownerPwHash}, TRUE, TRUE)
+    VALUES (${ownerId}, ${tenantId}, ${ownerName}, ${ownerPhone}, ${ownerEmail}, 'owner', 'active', ${sql.json(ownerMeta)}, ${ownerPwHash}, TRUE, ${mustChange})
   `;
   await sql`
     INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
     VALUES (${ownerId}, ${ownerName}, ${ownerName.split(' ')[0]}, ${initials}, '', 'owner', 'ACTIVE', ${sql.json(ownerMeta)}, ${tenantId})
   `;
+
+  // 2.1 Bulk Team Members Provisioning if provided
+  const createdTeam: Array<{ name: string; email: string; role: string; password: string }> = [];
+  if (Array.isArray(input.initialTeam) && input.initialTeam.length > 0) {
+    for (let idx = 0; idx < input.initialTeam.length; idx++) {
+      const tm = input.initialTeam[idx];
+      const tmName = (tm.name || `Team Member ${idx + 1}`).trim();
+      const tmEmail = tm.email ? String(tm.email).trim().toLowerCase() : '';
+      if (!tmEmail) continue;
+      const tmRole = tm.role === 'manager' ? 'manager' : 'agent';
+      const tmPw = tm.password ? tm.password.trim() : suggestPassword();
+      const tmPwHash = await bcrypt.hash(tmPw, 10);
+      const tmId = `usr_${tenantId}_${Date.now()}_${idx}`;
+      const tmParts = tmName.split(/\s+/).filter(Boolean);
+      const tmInitials = tmParts.length === 1 ? tmParts[0].slice(0, 2).toUpperCase() : tmParts.slice(0, 2).map(w => w[0]).join('').toUpperCase();
+      const tmMeta = { initials: tmInitials, avatar: '', phone: tm.phone || null, email: tmEmail };
+
+      await sql`
+        INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
+        VALUES (${tmId}, ${tenantId}, ${tmName}, ${tm.phone || null}, ${tmEmail}, ${tmRole}, 'active', ${sql.json(tmMeta)}, ${tmPwHash}, TRUE, ${mustChange})
+        ON CONFLICT DO NOTHING
+      `;
+      await sql`
+        INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
+        VALUES (${tmId}, ${tmName}, ${tmParts[0] || 'Agent'}, ${tmInitials}, '', ${tmRole}, 'ACTIVE', ${sql.json(tmMeta)}, ${tenantId})
+        ON CONFLICT DO NOTHING
+      `;
+      createdTeam.push({ name: tmName, email: tmEmail, role: tmRole, password: tmPw });
+    }
+  }
 
   // 3. Default settings + routing UNDER the new tenant. A new firm starts EMPTY.
   const settings = {

@@ -71,13 +71,20 @@ adminRouter.get('/overview', async (_req: Request, res: Response) => {
 adminRouter.post('/onboard', async (req: Request, res: Response) => {
   const sa = (req as any).superadmin;
   try {
-    const { firmName, city, slug, adminName, ownerName, adminEmail, ownerEmail, adminPhone, ownerPhone, primaryColor } = req.body || {};
+    const {
+      firmName, city, slug, adminName, ownerName, adminEmail, ownerEmail,
+      adminPhone, ownerPhone, primaryColor, ownerPassword, mustChangePassword, initialTeam
+    } = req.body || {};
+
     const result = await provisionTenant({
       firmName, city, slug,
       ownerName: ownerName || adminName,
       ownerEmail: ownerEmail || adminEmail,
       ownerPhone: ownerPhone || adminPhone,
       primaryColor,
+      ownerPassword,
+      mustChangePassword,
+      initialTeam,
     });
     audit({
       tenant_id: result.tenant.id, actor_type: 'superadmin', actor_id: sa?.superadmin_id || null,
@@ -88,7 +95,6 @@ adminRouter.post('/onboard', async (req: Request, res: Response) => {
     });
     return res.status(201).json({ success: true, message: `Workspace '${result.tenant.name}' provisioned.`, ...result });
   } catch (err: any) {
-    // Validation errors from provisionTenant read cleanly as 400s.
     const msg = err?.message || 'Provisioning failed';
     const isValidation = /required|email/i.test(msg);
     return res.status(isValidation ? 400 : 500).json({ success: false, error: isValidation ? 'Invalid workspace details' : 'Provisioning failed', message: msg });

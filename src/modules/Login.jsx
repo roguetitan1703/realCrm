@@ -14,7 +14,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { PLATFORM, recentWorkspaces, rememberWorkspace, resolveWorkspace, normalizeSlug, tenantDocTitle } from '../data/platform.js'
 import { api } from '../lib/api.js'
-import { applyPwaIdentity, isStandalone } from '../lib/pwa.js'
+import { applyPwaIdentity, isStandalone, slugFromLocation } from '../lib/pwa.js'
 import { applyBrandColor, DEFAULT_ACCENT } from '../lib/brand.js'
 import { Button } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'

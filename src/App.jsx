@@ -96,7 +96,11 @@ export default function App() {
   // the login gate and the phone/desk switch return before the sidebar exists,
   // so a read placed next to its consumer would change the hook order on the
   // frame someone signs in or resizes past 1024px.
-  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null)
+  const { data: desk } = useServerData(
+    () => (state.loggedIn ? api.getDeskSummary() : Promise.resolve(null)),
+    [state.dataAsOf, state.loggedIn],
+    null
+  )
   const totals = desk?.leads || { total: 0, overdue: 0, unassigned: 0 }
   const newCount = desk?.byStage?.['New'] || 0
   const unreadNotifs = (state.notifications || []).filter(n => !n.read).length
