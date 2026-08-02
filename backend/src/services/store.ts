@@ -143,18 +143,19 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   if (Array.isArray(input.initialTeam) && input.initialTeam.length > 0) {
     for (let idx = 0; idx < input.initialTeam.length; idx++) {
       const tm = input.initialTeam[idx];
-      const tmName = (tm.name || `Team Member ${idx + 1}`).trim();
-      const tmEmail = tm.email ? String(tm.email).trim().toLowerCase() : '';
-      if (!tmEmail) continue;
+      const tmName = (tm.name || '').trim();
+      if (!tmName) continue;
+      const tmEmail = tm.email ? String(tm.email).trim().toLowerCase() : null;
+      const tmPhone = tm.phone ? String(tm.phone).trim() : null;
       const tmRole = tm.role === 'manager' ? 'manager' : 'agent';
-      const tmPw = tm.password ? tm.password.trim() : suggestPassword();
+      const tmPw = tm.password ? String(tm.password).trim() : (input.ownerPassword ? input.ownerPassword.trim() : suggestPassword());
       const tmPwHash = await bcrypt.hash(tmPw, 10);
       const tmId = `usr_${tenantId}_${Date.now()}_${idx}`;
       const tmParts = tmName.split(/\s+/).filter(Boolean);
       const tmInitials = tmParts.length === 1 ? tmParts[0].slice(0, 2).toUpperCase() : tmParts.slice(0, 2).map(w => w[0]).join('').toUpperCase();
-      const tmMeta = { initials: tmInitials, avatar: '', phone: tm.phone || null, email: tmEmail };
+      const tmMeta = { initials: tmInitials, avatar: '', phone: tmPhone, email: tmEmail };
 
-      const tmBase = tmName.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'user';
+      const tmBase = tm.loginId ? String(tm.loginId).trim().toLowerCase().replace(/[^a-z0-9]+/g, '') : (tmName.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'user');
       let tmLoginId = tmBase;
       for (let n = 2; (await sql`SELECT 1 FROM users WHERE tenant_id = ${tenantId} AND login_id = ${tmLoginId} LIMIT 1`).length; n++) {
         tmLoginId = `${tmBase}${n}`;
@@ -162,15 +163,13 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
 
       await sql`
         INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
-        VALUES (${tmId}, ${tenantId}, ${tmName}, ${tmLoginId}, ${tm.phone || null}, ${tmEmail}, ${tmRole}, 'active', ${sql.json(tmMeta)}, ${tmPwHash}, TRUE, ${mustChange})
-        ON CONFLICT DO NOTHING
+        VALUES (${tmId}, ${tenantId}, ${tmName}, ${tmLoginId}, ${tmPhone}, ${tmEmail}, ${tmRole}, 'active', ${sql.json(tmMeta)}, ${tmPwHash}, ${!!tmEmail}, ${mustChange})
       `;
       await sql`
         INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
-        VALUES (${tmId}, ${tmName}, ${tmParts[0] || 'Agent'}, ${tmInitials}, '', ${tmRole}, 'ACTIVE', ${sql.json(tmMeta)}, ${tenantId})
-        ON CONFLICT DO NOTHING
+        VALUES (${tmId}, ${tmName}, ${tmParts[0]}, ${tmInitials}, '', ${tmRole}, 'ACTIVE', ${sql.json(tmMeta)}, ${tenantId})
       `;
-      createdTeam.push({ name: tmName, email: tmEmail, loginId: tmLoginId, role: tmRole, password: tmPw });
+      createdTeam.push({ name: tmName, email: tmEmail || '—', loginId: tmLoginId, role: tmRole, password: tmPw });
     }
   }
 

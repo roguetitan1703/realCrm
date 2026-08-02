@@ -322,7 +322,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
 
   // Bulk team setup array
   const [team, setTeam] = useState([
-    { name: '', email: '', phone: '', role: 'agent', password: 'Bhumi@2026' }
+    { name: '', loginId: '', email: '', phone: '', role: 'agent', password: 'Bhumi@2026' }
   ])
 
   const [busy, setBusy] = useState(false)
@@ -339,7 +339,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
   }
 
   const addTeamRow = () => {
-    setTeam(list => [...list, { name: '', email: '', phone: '', role: 'agent', password: 'Bhumi@2026' }])
+    setTeam(list => [...list, { name: '', loginId: '', email: '', phone: '', role: 'agent', password: 'Bhumi@2026' }])
   }
 
   const removeTeamRow = (idx) => {
@@ -353,15 +353,16 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
     if (!canProceed) { setError('Firm name, city and owner email are required'); return }
     setBusy(true); setError('')
 
-    // Clean valid team members
+    // Clean valid team members (only requires Name!)
     const cleanedTeam = team
-      .filter(t => t.name.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t.email.trim()))
+      .filter(t => t.name.trim())
       .map(t => ({
         name: t.name.trim(),
+        loginId: t.loginId.trim(),
         email: t.email.trim(),
         phone: t.phone.trim(),
         role: t.role,
-        password: t.password.trim() || 'Bhumi@2026'
+        password: t.password.trim() || form.ownerPassword.trim() || 'Bhumi@2026',
       }))
 
     try {
@@ -482,10 +483,11 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
               {team.map((row, i) => (
-                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.5fr 1fr 0.9fr 28px', gap: 8, alignItems: 'center', background: '#f9f8f6', padding: 10, borderRadius: 10, border: '1px solid var(--line)' }}>
-                  <Input value={row.name} onChange={e => updateTeamRow(i, 'name', e.target.value)} placeholder="Full Name" style={{ fontSize: 12.5 }} />
-                  <Input type="email" value={row.email} onChange={e => updateTeamRow(i, 'email', e.target.value)} placeholder="Email / Login ID" style={{ fontSize: 12.5 }} />
-                  <Input value={row.phone} onChange={e => updateTeamRow(i, 'phone', e.target.value)} placeholder="Phone" style={{ fontSize: 12.5 }} />
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.9fr 1.3fr 0.9fr 0.8fr 24px', gap: 8, alignItems: 'center', background: '#f9f8f6', padding: 10, borderRadius: 10, border: '1px solid var(--line)' }}>
+                  <Input value={row.name} onChange={e => updateTeamRow(i, 'name', e.target.value)} placeholder="Full Name *" style={{ fontSize: 12.5 }} />
+                  <Input value={row.loginId} onChange={e => updateTeamRow(i, 'loginId', e.target.value)} placeholder="User ID (optional)" style={{ fontSize: 12.5 }} />
+                  <Input type="email" value={row.email} onChange={e => updateTeamRow(i, 'email', e.target.value)} placeholder="Email (optional)" style={{ fontSize: 12.5 }} />
+                  <Input value={row.phone} onChange={e => updateTeamRow(i, 'phone', e.target.value)} placeholder="Phone (optional)" style={{ fontSize: 12.5 }} />
                   <select value={row.role} onChange={e => updateTeamRow(i, 'role', e.target.value)} style={{ padding: '8px 6px', borderRadius: 6, border: '1px solid var(--line)', fontSize: 12, background: '#fff' }}>
                     <option value="agent">Agent</option>
                     <option value="manager">Manager</option>
