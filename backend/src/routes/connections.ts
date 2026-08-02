@@ -69,10 +69,22 @@ function requireTenant(req: Request, res: Response): string | null {
 
 connectionsRouter.get('/', async (req: Request, res: Response) => {
   const tenant = requireTenant(req, res); if (!tenant) return;
-  const [rows, counts] = await Promise.all([listIntegrations(tenant), inboxCounts(tenant)]);
+  const [rows, counts, tenantRows] = await Promise.all([
+    listIntegrations(tenant),
+    inboxCounts(tenant),
+    sql`SELECT slug, id FROM tenants WHERE id = ${tenant} LIMIT 1`,
+  ]);
+  const slug = tenantRows[0]?.slug || tenantRows[0]?.id || tenant;
+  const host = req.get('x-forwarded-host') || req.get('host') || 'api.re.delpat.in';
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
+  const domain = process.env.PUBLIC_API_URL || `${proto}://${host}`;
+  const endpoint = `${domain}/api/v1/ingest/${slug}`;
+  const docsUrl = `${domain}/docs/${slug}`;
+
   return res.status(200).json({
     success: true,
-    endpoint: endpointFor(req, tenant),
+    endpoint,
+    docsUrl,
     headerName: 'X-API-Key',
     connections: rows.map(r => ({
       ...r,

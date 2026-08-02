@@ -58,14 +58,12 @@ function Skel({ w, h = 11 }) {
 // The endpoint, once
 // ---------------------------------------------------------------------------
 
-function Endpoint({ endpoint, headerName, store }) {
+function Endpoint({ endpoint, docsUrl: serverDocsUrl, headerName, store }) {
   const [copied, copy] = useCopy(store)
   const [help, setHelp] = useState(false)
   if (!endpoint) return <div className="cx-url"><Skel w="60%" h={13} /></div>
 
-  const tenantSlug = endpoint.split('/').pop() || 'tenant'
-  const domain = endpoint.split('/api/v1')[0] || ''
-  const docsUrl = `${domain}/docs/${tenantSlug}`
+  const docsUrl = serverDocsUrl || (endpoint.replace(/\/api\/v1\/ingest\/.*/, '') + '/docs/' + (endpoint.split('/').pop() || 'tenant'))
 
   return (
     <div className="cx-url" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -580,7 +578,7 @@ export default function Connections({ store }) {
         )}
       </div>
 
-      <Endpoint endpoint={meta.endpoint} headerName={meta.headerName} store={store} />
+      <Endpoint endpoint={meta.endpoint} docsUrl={meta.docsUrl} headerName={meta.headerName} store={store} />
 
       {adding && <AddSource onCreate={create} onCancel={() => setAdding(false)} busy={creating} />}
 
