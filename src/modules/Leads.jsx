@@ -233,6 +233,12 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   ].sort((a, b) => (fbMap[a.p.id]?.verdict === 'rejected' ? 1 : 0) - (fbMap[b.p.id]?.verdict === 'rejected' ? 1 : 0))
 
   const openEdit = () => store.openModal({ kind: 'editRecord', moduleId: 'leads', recordId: l.id })
+  // One way to open any channel, so the record screen and the list rows reach
+  // the client through the same confirm-and-log flow.
+  const contact = (channel) => store.openModal({
+    kind: 'contact', channel, name: l.name, phone: l.phone, email: l.email,
+    recordType: 'lead', recordId: l.id,
+  })
   // Rail: the follow-up card, which is the only thing that changes per lead.
   const followUpCard = (
     <div className="fu-card">
@@ -320,10 +326,15 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
           // stay here, on the record, full width, on the phone as well as the
           // desk. Editing is the opposite: rare, and it moved to the action
           // button, so the phone's action bar is these two and nothing else.
-          primary={l.phone ? [
-            { label: 'Call', icon: 'phone', onClick: () => store.openModal({ kind: 'contact', channel: 'call', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id }) },
-            { label: 'WhatsApp', icon: 'wa', onClick: () => store.openModal({ kind: 'contact', channel: 'wa', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id }) },
-          ] : []}
+          // Email joins them when the lead has one — same confirm-and-log path,
+          // so an email is recorded on the timeline exactly like a call is.
+          primary={[
+            ...(l.phone ? [
+              { label: 'Call', icon: 'phone', onClick: () => contact('call') },
+              { label: 'WhatsApp', icon: 'wa', tone: 'wa', onClick: () => contact('wa') },
+            ] : []),
+            ...(l.email ? [{ label: 'Email', icon: 'mail', onClick: () => contact('email') }] : []),
+          ]}
           railTop={followUpCard}
           sections={sections}
           actionCtx={{ onClose: back }}

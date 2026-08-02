@@ -176,7 +176,7 @@ export function ModuleDetail({
         {phone && (primary.length > 0 || onEdit) && (
           <div className="rh-actbar">
             {primary.map((a, i) => (
-              <button key={i} className={'rh-act' + (i === 0 ? ' primary' : '')} onClick={a.onClick}>
+              <button key={i} className={'rh-act' + (i === 0 ? ' primary' : '') + (a.tone ? ' ' + a.tone : '')} onClick={a.onClick}>
                 <Icon name={a.icon} size={17} />{a.label}
               </button>
             ))}

@@ -537,8 +537,11 @@ input,textarea,select{font-family:inherit}
 .qam-pop{min-width:170px}
 
 /* Selection bar — shown above the list only while rows are checked */
-.selbar{display:flex;align-items:center;gap:10px;background:var(--accent-wash);border:1px solid var(--accent-line);
-  color:var(--accent-ink);border-radius:var(--radius-lg);padding:9px 12px;font-size:13px;font-weight:600;margin-top:10px}
+.selbar{display:flex;align-items:center;gap:14px;background:var(--accent-wash);border:1px solid var(--accent-line);
+  color:var(--accent-ink);border-radius:var(--radius-lg);padding:12px 18px;font-size:13.5px;font-weight:600;margin:12px 0 14px}
+
+.table-sel-cell{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;padding:8px;cursor:pointer;user-select:none;margin:-8px -12px}
+.table-sel-cell input[type="checkbox"]{cursor:pointer;width:16px;height:16px}
 
 .viewsw{display:inline-flex;height:var(--ctrl-h,34px);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
 .viewsw button{border:none;background:var(--card);padding:0 10px;cursor:pointer;color:var(--muted);display:flex;align-items:center;border-left:1px solid var(--line);transition:background .12s,color .12s}
@@ -1898,20 +1901,51 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
    requirement/owner) with Call + WhatsApp docked on the right — one tap each,
    no menu. `.rcard-row` renders as a div (not a button — it holds real
    buttons of its own), so its own hover/active affordance is drawn here. */
-.app-mobile .rcard-row{flex-direction:row;align-items:center;padding:11px 12px;gap:10px;cursor:pointer}
-.app-mobile .rcard-row:active{border-color:var(--muted)}
+/* ONE panel with hairline dividers, not a stack of detached cards. The gaps
+   between cards made a single-column grid look like a grid missing a column. */
+.app-mobile .cardlist{gap:0;background:var(--card);border:1px solid var(--line);
+  border-radius:var(--radius-lg);overflow:hidden}
+.app-mobile .cardlist > .rcard{border:0;border-radius:0;background:transparent;
+  box-shadow:none;border-bottom:1px solid var(--line)}
+.app-mobile .cardlist > .rcard:last-child{border-bottom:0}
+/* Clear the floating action button, which otherwise sits on top of the last
+   row's buttons — the one row you can see but not use. */
+.app-mobile .cardlist{margin-bottom:68px}
+
+.app-mobile .rcard-row{flex-direction:row;align-items:center;padding:11px 13px;gap:12px;cursor:pointer}
+.app-mobile .rcard-row:active{background:var(--card-2)}
 .app-mobile .rcard-body{flex:1;min-width:0}
-.app-mobile .rcard-actions{display:flex;gap:8px;flex-shrink:0}
-.app-mobile .rcard-act{width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
-  border:1px solid var(--line);background:var(--card-2);color:var(--ink-2);cursor:pointer}
+
+/* Squared to the app's own radius, not circles. Round buttons read as floating
+   chips dropped onto the row; these sit in it. Sized to the 36px thumb target
+   the rest of the phone UI uses. */
+.app-mobile .rcard-actions{display:flex;gap:6px;flex-shrink:0}
+.app-mobile .rcard-act{width:36px;height:36px;border-radius:9px;display:inline-flex;
+  align-items:center;justify-content:center;border:1px solid var(--line);
+  background:var(--card-2);color:var(--ink-2);cursor:pointer;transition:background .12s,color .12s}
 .app-mobile .rcard-act:active{background:var(--accent-wash);color:var(--accent-ink);border-color:var(--accent-line)}
+/* WhatsApp carries its own green because that is how it is recognised — it is
+   the one colour in this row, and everything beside it stays quiet. */
+.app-mobile .rcard-act.wa{background:#25D366;border-color:#1FAE53;color:#fff}
+.app-mobile .rcard-act.wa:active{background:#1FAE53;border-color:#1a9247;color:#fff}
 
 .app-mobile .prow{display:flex;flex-direction:column;gap:3px;min-width:0}
-.app-mobile .prow-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.app-mobile .prow-name{font-weight:600;font-size:14.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.app-mobile .prow-sub{font-size:12.5px;color:var(--muted)}
-.app-mobile .prow-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--ink-2)}
-.app-mobile .prow-agent{display:inline-flex;align-items:center;gap:5px;color:var(--muted)}
+/* The status sits directly AFTER the name, not pushed to the far edge of the
+   text block. Right-aligned it landed in the gap between the name and the
+   buttons — belonging to neither, and ragged down the list. */
+.app-mobile .prow-top{display:flex;align-items:center;gap:7px}
+.app-mobile .prow-name{min-width:0;flex-shrink:1;font-weight:600;font-size:14.5px;color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app-mobile .prow-top .stagetag{flex-shrink:0}
+/* Nobody assigned is a gap to fill, not an alarm. As a dashed accent-coloured
+   chip it was the loudest thing on a row where it is the least urgent. */
+.app-mobile .prow-meta .unassigned-tag{border:0;padding:0;font-weight:500;color:var(--muted)}
+.app-mobile .prow-req{font-size:12.5px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Left-aligned, with a dot between the facts. Previously space-between pushed
+   the owner chip into the middle of the row. */
+.app-mobile .prow-meta{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);min-width:0}
+.app-mobile .prow-meta > * + *::before{content:'·';margin-right:7px;color:var(--line-2,var(--line))}
+.app-mobile .prow-agent{display:inline-flex;align-items:center;gap:5px;color:var(--muted);flex-shrink:0}
 .app-mobile .ll-toolbar{padding:12px 12px 0}
 .app-mobile .ll-content{flex:none;overflow:visible;padding:12px 12px 8px}
 .app-mobile .detail-layout{grid-template-columns:minmax(0,1fr);padding:12px 12px 8px;gap:14px}
@@ -2159,6 +2193,10 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
   border:1px solid var(--line);border-radius:11px;background:var(--card-2);color:var(--ink);
   font:inherit;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rh-act.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+/* WhatsApp keeps its green here too, so the same action looks the same on the
+   list row and on the record. `.wa` wins over `.primary` — it is more specific
+   about what the button IS. */
+.rh-act.wa{background:#25D366;border-color:#1FAE53;color:#fff}
 .rh-act:active{transform:translateY(1px)}
 
 /* ---- Install (permanent row on Me) ---- */

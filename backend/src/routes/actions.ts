@@ -113,7 +113,7 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
  * Leads-specific /actions/call above) — it exists purely to record "the user
  * confirmed and was redirected to their dialer/WhatsApp", author-attributed,
  * so it can be edited afterward with an outcome + remark via the route above.
- * POST /api/v1/records/:id/actions/contact-log   body { channel: 'call'|'wa'|'sms' }
+ * POST /api/v1/records/:id/actions/contact-log   body { channel: 'call'|'wa'|'sms'|'email' }
  */
 actionsRouter.post('/:id/actions/contact-log', async (req: Request, res: Response) => {
   try {
@@ -121,10 +121,11 @@ actionsRouter.post('/:id/actions/contact-log', async (req: Request, res: Respons
     // Frontend-facing channel name stays 'wa' (matches the rest of the app);
     // the DB type is 'whatsapp' to match the existing WABA dispatch route's
     // convention — one spelling for "this was a WhatsApp event", not two.
-    const channel = ['call', 'wa', 'sms'].includes(req.body?.channel) ? req.body.channel : 'call';
+    const channel = ['call', 'wa', 'sms', 'email'].includes(req.body?.channel) ? req.body.channel : 'call';
     const dbType = channel === 'wa' ? 'whatsapp' : channel;
     const authorId = req.user?.id || null;
-    const title = channel === 'call' ? 'Call' : channel === 'wa' ? 'WhatsApp' : 'SMS';
+    const TITLES: Record<string, string> = { call: 'Call', wa: 'WhatsApp', sms: 'SMS', email: 'Email' };
+    const title = TITLES[channel] || 'Call';
     const evt = await addTimelineEvent({
       record_id: recordId, type: dbType, title, description: `${title} initiated`,
       author: authorId || undefined,

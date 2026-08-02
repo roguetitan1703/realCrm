@@ -108,12 +108,17 @@ function loadAuthSession() {
   if (typeof window === 'undefined' || !window.localStorage) return { loggedIn: false }
   try {
     const raw = window.localStorage.getItem('crm_auth_session')
-    // A session is only "logged in" if a real JWT is present. This kills the
-    // old fake session (loggedIn flag with no token) — those now see the login
-    // screen and must complete a real OTP.
     const hasToken = Boolean(apiClient.getToken?.())
     if (raw) {
       const p = JSON.parse(raw)
+      const urlSlug = slugFromLocation()
+      const tokenTenant = window.localStorage.getItem('crm_tenant_id') || p.tenantSlug || ''
+      // Strict Tenant URL Isolation: if a specific tenant URL is requested (e.g. /bhumi)
+      // and the signed-in session belongs to a different tenant (e.g. delpat),
+      // do NOT auto-login to delpat on /bhumi. Present the login screen for /bhumi!
+      if (urlSlug && tokenTenant && urlSlug !== tokenTenant && urlSlug !== p.tenantSlug) {
+        return { loggedIn: false }
+      }
       return {
         loggedIn: Boolean(p.loggedIn) && hasToken,
         role: p.role || 'admin',
@@ -661,30 +666,11 @@ export function StoreProvider({ children }) {
     // never again — so renaming a firm left every launch opening under the old
     // name until the hydrate landed.
     if (state.settings.firmName) {
-      persistAuthSession({ tenantName: state.settings.firmName, tenantCity: state.settings.city || '' })
-    }
-    // ── The signed-in workspace wins over the URL ──────────────────────
-    // Opening another firm's URL while holding a session did NOT show their
-    // data — the token decides the tenant on every request, so the server kept
-    // serving this one correctly. What it did do is leave the address bar, the
-    // manifest and the installable identity claiming a firm the session has
-    // nothing to do with: their name on our data. In a white-label product that
-    // is the whole product being wrong, and it also let the stored tenant id
-    // drift away from the token, which is a real leak the day any endpoint
-    // trusts the X-Tenant-ID header instead of the claim.
-    //
-    // So the URL is corrected to the workspace the session actually belongs to.
-    // replaceState, not a redirect: nothing is reloaded and no history entry is
-    // left pointing back at the wrong firm.
-    const sessionSlug = state.tenant?.slug || state.tenant?.id || ''
-    const urlSlug = slugFromLocation()
-    if (sessionSlug && urlSlug && urlSlug !== sessionSlug && urlSlug !== state.tenant?.id) {
-      try {
-        const rest = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/').slice(1)
-        const path = '/' + [sessionSlug, ...rest].join('/')
-        window.history.replaceState({}, document.title, path + window.location.search)
-        window.localStorage?.setItem('crm_tenant_id', state.tenant?.id || sessionSlug)
-      } catch (e) {}
+      persistAuthSession({
+        tenantName: state.settings.firmName,
+        tenantCity: state.settings.city || '',
+        tenantSlug: state.tenant?.slug || state.tenant?.id || '',
+      })
     }
 
     // slugFromLocation, not raw localStorage: a device opening the firm's app

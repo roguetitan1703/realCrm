@@ -292,8 +292,12 @@ function PhoneToolbar({
 export function ModuleCards({ def, rows, store, onOpen, phone }) {
   if (!def.card) return <ModuleTable def={def} rows={rows} store={store} onOpen={onOpen} />
   const renderBody = (rec) => (phone && def.phoneCard) ? def.phoneCard(rec, store) : def.card(rec, store)
+  // A phone module that declares a row renders as a LIST — one panel, hairline
+  // dividers — not as a column of separate floating cards with air between
+  // them. Detached cards read as a grid that lost its second column.
+  const asList = Boolean(phone && def.phoneCard)
   return (
-    <div className="grid-cards">
+    <div className={'grid-cards' + (asList ? ' cardlist' : '')}>
       {rows.map(rec => {
         const actions = phone && def.phoneActions ? def.phoneActions(rec, store) : []
         if (actions.length > 0) {
@@ -304,8 +308,9 @@ export function ModuleCards({ def, rows, store, onOpen, phone }) {
               <div className="rcard-body">{renderBody(rec)}</div>
               <div className="rcard-actions" onClick={e => e.stopPropagation()}>
                 {actions.map(a => (
-                  <button key={a.icon} className="rcard-act" aria-label={a.label} title={a.label} onClick={a.onClick}>
-                    <Icon name={a.icon} size={17} />
+                  <button key={a.key || a.icon} className={'rcard-act' + (a.tone ? ' ' + a.tone : '')}
+                    aria-label={a.label} title={a.label} onClick={a.onClick}>
+                    <Icon name={a.icon} size={16} />
                   </button>
                 ))}
               </div>
@@ -362,7 +367,9 @@ export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort
 
   const columns = [
     ...(selectable ? [{ key: '__select', label: (
-      <input type="checkbox" checked={allOn} ref={el => { if (el) el.indeterminate = !allOn && someOn }} onChange={toggleAll} onClick={e => e.stopPropagation()} />
+      <div className="table-sel-cell" onClick={e => e.stopPropagation()}>
+        <input type="checkbox" checked={allOn} ref={el => { if (el) el.indeterminate = !allOn && someOn }} onChange={toggleAll} onClick={e => e.stopPropagation()} />
+      </div>
     ), sortable: false }] : []),
     ...def.columns.map(c => ({ key: c.key, label: c.label, sortable: c.sortable })),
     ...(def.rowActions ? [{ key: '__actions', label: '', sortable: false }] : []),
@@ -374,8 +381,9 @@ export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort
       onClick: onOpen ? () => onOpen(rec) : undefined,
       cells: [
         ...(selectable ? [
-          <input key="__sel" type="checkbox" checked={selected.has(id)} onClick={e => e.stopPropagation()}
-            onChange={e => toggleRow(id, idx, !!e.nativeEvent.shiftKey)} />
+          <div key="__sel" className="table-sel-cell" onClick={e => { e.stopPropagation(); toggleRow(id, idx, !!e.shiftKey || !!e.nativeEvent?.shiftKey) }}>
+            <input type="checkbox" checked={selected.has(id)} readOnly onClick={e => e.stopPropagation()} />
+          </div>
         ] : []),
         ...def.columns.map(c => c.render ? c.render(rec, store) : getNestedValue(rec, c.key)),
         ...(def.rowActions ? [

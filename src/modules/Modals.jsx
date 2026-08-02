@@ -41,7 +41,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'bulkAssign' && <BulkAssignModal store={store} leadIds={m.leadIds} onDone={m.onDone} />}
       {m?.kind === 'reassign' && <ReassignModal store={store} fromId={m.fromId} />}
       {m?.kind === 'addAgent' && <AddAgentModal store={store} />}
-      {m?.kind === 'contact' && <ContactConfirmModal store={store} channel={m.channel} name={m.name} phone={m.phone} waText={m.waText} recordType={m.recordType} recordId={m.recordId} />}
+      {m?.kind === 'contact' && <ContactConfirmModal store={store} channel={m.channel} name={m.name} phone={m.phone} email={m.email} waText={m.waText} recordType={m.recordType} recordId={m.recordId} />}
       {m?.kind === 'remark' && <RemarkModal store={store} recordType={m.recordType} recordId={m.recordId} />}
       {m?.kind === 'propStatus' && <StatusModal store={store} propId={m.propId} />}
       {m?.kind === 'import' && <ImportModal store={store} />}
@@ -856,17 +856,29 @@ function AddAgentModal({ store }) {
 // immediately attach an outcome + remark to what was just logged — otherwise
 // (no resolvable record yet, e.g. a not-yet-split Owner contact) it still
 // redirects, it just can't log anywhere real yet.
-function ContactConfirmModal({ store, channel, name, phone, waText, recordType, recordId }) {
+// The three ways out of this screen and into something that actually reaches
+// the client. Kept as one table so the title, the verb and the destination
+// can't drift apart.
+const CHANNELS = {
+  call: { title: 'Call', noun: 'call', dest: 'dialer' },
+  wa: { title: 'WhatsApp', noun: 'WhatsApp message', dest: 'WhatsApp' },
+  email: { title: 'Email', noun: 'email', dest: 'mail app' },
+}
+
+function ContactConfirmModal({ store, channel, name, phone, email, waText, recordType, recordId }) {
   const [step, setStep] = useState('confirm')   // 'confirm' | 'outcome'
   const [loggedId, setLoggedId] = useState(null)
   const [text, setText] = useState('')
   const [outcome, setOutcome] = useState('')
   const first = (name || 'them').split(' ')[0]
   const digits = String(phone || '').replace(/\D/g, '')
-  const label = channel === 'wa' ? 'WhatsApp' : 'call'
+  const ch = CHANNELS[channel] || CHANNELS.call
+  const label = ch.noun
 
   const proceed = () => {
-    if (digits) {
+    if (channel === 'email') {
+      if (email) window.location.href = `mailto:${email}`
+    } else if (digits) {
       if (channel === 'wa') window.open(whatsappLink(waText || '', digits), '_blank', 'noopener')
       else window.location.href = `tel:+${digits.length > 10 ? digits : '91' + digits}`
     }
@@ -888,7 +900,7 @@ function ContactConfirmModal({ store, channel, name, phone, waText, recordType, 
 
   if (step === 'outcome') {
     return (
-      <Modal title={`${label === 'call' ? 'Call' : 'WhatsApp'} logged`} onClose={store.closeModal} width={400}>
+      <Modal title={`${ch.title} logged`} onClose={store.closeModal} width={400}>
         <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>Optional — how did it go with {first}?</div>
         {channel === 'call' && (
           <select className="input" value={outcome} onChange={e => setOutcome(e.target.value)} style={{ width: '100%', marginBottom: 10 }}>
@@ -906,10 +918,12 @@ function ContactConfirmModal({ store, channel, name, phone, waText, recordType, 
   }
 
   return (
-    <Modal title={channel === 'wa' ? 'Message on WhatsApp' : 'Call'} onClose={store.closeModal} width={400}>
-      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 14 }}>{name} · <span className="mono-num">{phone || '—'}</span></div>
+    <Modal title={ch.title} onClose={store.closeModal} width={400}>
+      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 14 }}>
+        {name} · {channel === 'email' ? (email || '—') : <span className="mono-num">{phone || '—'}</span>}
+      </div>
       <div style={{ fontSize: 13.5, lineHeight: 1.5, marginBottom: 16 }}>
-        This records an action and will redirect you to your {label === 'call' ? 'dialer' : 'WhatsApp'}. Continue?
+        This records an action and will redirect you to your {ch.dest}. Continue?
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <Button onClick={store.closeModal}>No</Button>

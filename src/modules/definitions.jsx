@@ -144,8 +144,25 @@ export const LEADS_DEF = {
     { key: 'stage', label: 'Stage', sortable: true, render: (l) => <StageTag stage={l.stage} /> },
     { key: 'source', label: 'Source', render: (l) => <Source>{l.source}</Source> },
     { key: 'agent', label: 'Sales Executive', render: (l, store) => {
-      const a = store.agentById(l.agentId)
-      return a ? <div className="cell-agent"><Avatar agent={a} size="sm" /><span>{a.first}</span></div> : <Unassigned />
+      const assignable = canAssignLead(store.state.role)
+      const doAssign = (agentId) => {
+        api.bulkAssignLeads([l.id], agentId)
+          .then(res => {
+            if (res?.success) { store.toast(agentId ? 'Lead assigned' : 'Lead unassigned'); store.reloadServer?.() }
+            else store.toast(res?.message || 'Could not assign', 'warn')
+          })
+          .catch(err => store.toast(err.message || 'Could not assign', 'warn'))
+      }
+      return assignable ? (
+        <QuickAssignMenu agents={store.activeAgents()} currentId={l.agentId} onAssign={doAssign} />
+      ) : (
+        l.agentId ? (
+          <div className="cell-agent">
+            <Avatar agent={store.agentById(l.agentId)} size="sm" />
+            <span>{store.agentById(l.agentId)?.first}</span>
+          </div>
+        ) : <Unassigned />
+      )
     } },
     { key: 'next', label: 'Next follow-up', render: (l) => {
       const nf = l.followUp ? `${l.followUp.date} · ${l.followUp.time}` : '—'
@@ -178,32 +195,8 @@ export const LEADS_DEF = {
     { key: 'unassigned', label: 'Unassigned' },
   ],
 
-  // Trailing actions column (ModuleTable, driven off this definition). Quick
-  // assign is desk-only (canAssignLead); Edit is gated the same way the record
-  // sheet's own edit button is (canEditLead) — an agent viewing a lead they
-  // didn't create and don't own gets Open only.
-  rowActions: (l, store, ctx) => {
-    const role = store.state.role
-    const userId = store.state.activeAgentId
-    const assignable = canAssignLead(role)
-    const editable = canEditLead(role, userId, l)
-    const doAssign = (agentId) => {
-      api.bulkAssignLeads([l.id], agentId)
-        .then(res => {
-          if (res?.success) { store.toast(agentId ? 'Lead assigned' : 'Lead unassigned'); store.reloadServer?.() }
-          else store.toast(res?.message || 'Could not assign', 'warn')
-        })
-        .catch(err => store.toast(err.message || 'Could not assign', 'warn'))
-    }
-    return (
-      <>
-        {assignable && <QuickAssignMenu agents={store.activeAgents()} currentId={l.agentId} onAssign={doAssign} />}
-        {/* No "Open" here — the row itself opens the lead. A button that
-            duplicates the row's own click is a second way to do one thing. */}
-        {editable && <Button variant="quiet" size="sm" onClick={() => store.openModal({ kind: 'editRecord', moduleId: 'leads', recordId: l.id })}>Edit</Button>}
-      </>
-    )
-  },
+  // Trailing actions column (ModuleTable, driven off this definition).
+  rowActions: null,
 
   // Standardized action set for the detail rail. `group` buckets them; `when`
   // gates by record state; `run(store, record)` calls existing store api.
@@ -265,14 +258,30 @@ export const LEADS_DEF = {
   // visit to this screen starts with. Same modal kind LeadRecord's own
   // Call/WhatsApp buttons open, so a call logged from the list is logged the
   // same way as one logged from the record.
-  phoneActions: (l, store) => l.phone ? [
-    { icon: 'phone', label: 'Call', onClick: () => store.openModal({ kind: 'contact', channel: 'call', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id }) },
-    { icon: 'wa', label: 'WhatsApp', onClick: () => store.openModal({ kind: 'contact', channel: 'wa', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id }) },
-  ] : [],
+  // The three ways to reach someone, in the order they get used. Each appears
+  // only when the lead actually carries what it needs — an email button on a
+  // lead with no email is a button that does nothing.
+  phoneActions: (l, store) => {
+    const open = (channel) => () => store.openModal({
+      kind: 'contact', channel, name: l.name, phone: l.phone, email: l.email,
+      recordType: 'lead', recordId: l.id,
+    })
+    return [
+      ...(l.phone ? [
+        { key: 'call', icon: 'phone', label: 'Call', onClick: open('call') },
+        { key: 'wa', icon: 'wa', label: 'WhatsApp', tone: 'wa', onClick: open('wa') },
+      ] : []),
+      ...(l.email ? [{ key: 'email', icon: 'mail', label: 'Email', onClick: open('email') }] : []),
+    ]
+  },
 
   // Compact phone row — a full-width scan line, not the desktop grid tile
   // (`card` below). Money stays out of it; the desktop card already keeps it
   // quiet, a list row keeps it out entirely.
+  // Three tight lines, all left-aligned. The owner chip used to be pushed to
+  // the far right of the middle line, which left it stranded in the white space
+  // between the requirement and the buttons — belonging to neither. It reads as
+  // what it is now: the last fact on the last line.
   phoneCard: (l, store) => {
     const a = store.agentById(l.agentId)
     return (
@@ -281,10 +290,12 @@ export const LEADS_DEF = {
           <span className="prow-name">{l.name}</span>
           <StageTag stage={l.stage} />
         </div>
-        <div className="prow-sub mono-num">{l.phone}</div>
+        {reqShort(l.req) && <div className="prow-req">{reqShort(l.req)}</div>}
         <div className="prow-meta">
-          <span>{reqShort(l.req)}</span>
-          {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
+          {l.phone && <span className="mono-num">{l.phone}</span>}
+          {a
+            ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span>
+            : <Unassigned />}
         </div>
       </div>
     )
