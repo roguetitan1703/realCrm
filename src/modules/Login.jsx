@@ -527,10 +527,10 @@ export default function Login({ store }) {
                   </div>
                 ) : (
                   <div className="field" style={{ marginBottom: 16 }}>
-                    <label style={LBL}>Email</label>
+                    <label style={LBL}>User ID</label>
                     <div className="input-group">
                       <input type="text" value={handle} onChange={e => setHandle(e.target.value)}
-                        placeholder="you@firm.com" autoFocus disabled={loading}
+                        placeholder="your User ID (e.g. aniket)" autoFocus disabled={loading}
                         autoCapitalize="none" autoCorrect="off" spellCheck={false}
                         style={{ fontWeight: 600, fontSize: 15 }} />
                     </div>
