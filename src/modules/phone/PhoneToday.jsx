@@ -13,12 +13,13 @@
 // needing a timestamp the follow-up model does not carry.
 import { useEffect, useState } from 'react'
 import { api } from '../../lib/api.js'
+import { isTerminal } from '../../data/leadStatus.js'
 import { Overdue, StageTag, MoreRows, useCap } from '../../components/primitives.jsx'
 import { initials, reqShort, renewalSignal, unitLabel } from '../../lib/format.js'
 import InstallPrompt from '../../components/InstallPrompt.jsx'
 import Icon from '../../components/Icon.jsx'
 
-const CLOSED = (l) => String(l.stage || '').startsWith('Closed')
+const CLOSED = (l) => isTerminal(l.stage)
 
 // "4:30 pm" → minutes, so the day reads in the order it happens rather than in
 // whatever order the leads were created.

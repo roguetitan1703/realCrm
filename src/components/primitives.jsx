@@ -213,7 +213,7 @@ export function Toggle({ on, ...rest }) { return <button className={'toggle' + (
 // ---- Signals (contained) ----
 export function StageTag({ stage }) {
   const cls = stageClassFor(stage)
-  const label = stage === 'Closed Won' ? 'Closed won' : stage === 'Closed Lost' ? 'Closed lost' : stage === 'Site Visit' ? 'Site visit' : stage
+  const label = stage
   return <span className={'stage ' + cls}><span className="dot" />{label}</span>
 }
 export function StatusTag({ status }) {
@@ -383,7 +383,7 @@ export function Empty({ title, sub, action }) {
 // Journey stepper — shows a record's position along a progression as a track of
 // connected nodes. Past = done, current = filled, ahead = reachable. Click any
 // node to move there. Module-generic (used for lead stage AND property status).
-const STEP_SHORT = { 'Site Visit': 'Visit', 'Negotiation': 'Nego', 'Closed Won': 'Won', 'Closed Lost': 'Lost', 'Token Pending': 'Token', 'Under Offer': 'Offer', 'Available': 'Available' }
+const STEP_SHORT = { 'Site Visit': 'Visit', 'Call Not Received': 'No answer', 'Deal Closed': 'Closed', 'Follow-Up': 'Follow-up', 'Token Pending': 'Token', 'Under Offer': 'Offer', 'Available': 'Available' }
 export function Stepper({ stages, current, onPick }) {
   const idx = stages.indexOf(current)
   return (

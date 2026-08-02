@@ -2,6 +2,7 @@ import { Kpi, Panel, SectionHead, Avatar, StageTag } from '../components/primiti
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
+import { WON_STATUS } from '../data/leadStatus.js'
 
 // The hero first screen. Every tile, bar and row is clickable — it drills into
 // the underlying filtered list or record. KPIs reflect the real job (oversight/
@@ -48,7 +49,7 @@ export default function Dashboard({ store, go, topBar }) {
     return {
       a, assigned: row.total,
       contacted: countStages((_, i) => i >= 1),
-      visits: countStages(name => name === 'Site Visit' || name === 'Closed Won'),
+      visits: countStages(name => name === 'Site Visit' || name === WON_STATUS),
       closed: row.won,
     }
   }).sort((x, y) => y.closed - x.closed)

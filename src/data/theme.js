@@ -1,3 +1,4 @@
+import { LEAD_STATUSES, STATUS_CLASS, TERMINAL_STATUSES } from './leadStatus.js'
 // White-label config. `brand` is DELIBERATELY EMPTY: the firm's name and city
 // come from the signed-in tenant at runtime (src/lib/tenant.js). A default here
 // is not a convenience — it is a wrong firm name printed on a real client's
@@ -10,15 +11,8 @@ export const theme = {
   },
   // Design tokens live in styles.css (:root). These are the data-signal maps
   // the app reads for stage/status/source — kept here so a tenant can retune them.
-  stages: ['New', 'Contacted', 'Site Visit', 'Negotiation', 'Closed Won', 'Closed Lost'],
-  stageClass: {
-    New: 'stage-new',
-    Contacted: 'stage-contacted',
-    'Site Visit': 'stage-visit',
-    Negotiation: 'stage-nego',
-    'Closed Won': 'stage-won',
-    'Closed Lost': 'stage-lost',
-  },
+  stages: [...LEAD_STATUSES],
+  stageClass: { ...STATUS_CLASS },
   // Keys must be exactly the STATUS values (src/data/propertyFields.js) — an
   // unmatched key means the tag falls through to the default styling, which is
   // how an Available listing once rendered as closed. 'Under offer' (lowercase
@@ -56,9 +50,9 @@ export const DEFAULT_BRAND = {
   logoUrl: '',
 }
 
-// Closed stages are terminal and can't be renamed/removed — the app keys logic off
-// them (`stage.startsWith('Closed')`), so they're protected in the editor.
-export const PROTECTED_STAGES = ['Closed Won', 'Closed Lost']
+// Terminal statuses can't be renamed or removed — reporting, the won/lost
+// counts and every "is this still open" question key off them by name.
+export const PROTECTED_STAGES = [...TERMINAL_STATUSES]
 
 // A stage's colour class. Built-in stages use the curated map; custom stages get a
 // stable palette class by hashing the name so the colour never flickers.

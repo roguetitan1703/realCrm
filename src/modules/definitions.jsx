@@ -26,6 +26,7 @@ import { getNestedValue } from '../components/ModuleFields.jsx'
 import { reqShort, budgetRange, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
+import { isOpen, isTerminal, REJECTED_STATUS, NO_ANSWER_STATUS } from '../data/leadStatus.js'
 import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
 // out again here — that duplication is exactly what broke property filtering.
@@ -65,14 +66,11 @@ export const LEADS_DEF = {
   // Progression — a lead moves through pipeline stages. The standard header
   // renders this as a clickable journey stepper. `exit` = quiet off-path action.
   progression: {
-    stages: (store) => store.state.settings.stages.filter(s => s !== 'Closed Lost'),
+    stages: (store) => store.state.settings.stages.filter(s => s !== REJECTED_STATUS),
     current: (l) => l.stage,
     set: (store, l, stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) },
-    exit: { label: 'Mark as lost', when: (l) => l.stage !== 'Closed Lost',
-      run: (store, l) => {
-        const reason = window.prompt('Reason for marking lead as lost? (e.g. Budget, Competition, Timeline)', 'Budget mismatch')
-        if (reason !== null) { store.setStage(l.id, 'Closed Lost'); store.toast('Lead marked as Closed Lost') }
-      } },
+    exit: { label: 'Mark as rejected', when: (l) => l.stage !== REJECTED_STATUS,
+      run: (store, l) => store.openModal({ kind: 'rejectLead', leadId: l.id }) },
   },
 
   searchFields: ['name', 'phone', 'req.locality', 'req.config'],
@@ -164,9 +162,10 @@ export const LEADS_DEF = {
     { key: 'fresh', label: 'Fresh', match: (l) => l.stage === 'New' },
     { key: 'working', label: 'Working', match: (l) => ['Contacted', 'Negotiation'].includes(l.stage) },
     { key: 'visiting', label: 'Visiting', match: (l) => l.stage === 'Site Visit' },
-    { key: 'overdue', label: 'Overdue', tone: 'alert', match: (l) => !!l.overdue && !String(l.stage || '').startsWith('Closed') },
-    { key: 'unassigned', label: 'Unassigned', match: (l) => !l.agentId && !String(l.stage || '').startsWith('Closed') },
-    { key: 'closed', label: 'Closed', match: (l) => String(l.stage || '').startsWith('Closed') },
+    { key: 'overdue', label: 'Overdue', tone: 'alert', match: (l) => !!l.overdue && isOpen(l.stage) },
+    { key: 'unassigned', label: 'Unassigned', match: (l) => !l.agentId && isOpen(l.stage) },
+    { key: 'noanswer', label: 'Call not received', match: (l) => l.stage === NO_ANSWER_STATUS },
+    { key: 'closed', label: 'Closed', match: (l) => isTerminal(l.stage) },
   ],
 
   // Standardized action set for the detail rail. `group` buckets them; `when`

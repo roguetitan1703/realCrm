@@ -3,6 +3,7 @@ import { Avatar, Button, Field, Input, PhoneInput, SectionHead, PageHeader, Segm
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
+import { REJECTED_STATUS } from '../data/leadStatus.js'
 
 const ROLE_LABEL = { admin: 'Owner / Admin', owner: 'Owner', agent: 'Sales Advisor', manager: 'Sales Manager' }
 const roleLabel = (r) => ROLE_LABEL[r] || (r ? r[0].toUpperCase() + r.slice(1) : 'Sales Advisor')
@@ -54,7 +55,7 @@ export default function Team({ store, go, topBar }) {
     const row = perAgent[a.id] || { open: 0, won: 0, overdue: 0, total: 0, byStage: {} }
     const open = row.open
     const won = row.won
-    const lost = row.byStage?.['Closed Lost'] || 0
+    const lost = row.byStage?.[REJECTED_STATUS] || 0
     const overdue = row.overdue
     const settled = won + lost
     const stateWinRate = settled ? Math.round((won / settled) * 100) : null

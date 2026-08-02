@@ -12,6 +12,7 @@ import { applyBrandColor } from './brand.js'
 import { setTenantIdentity } from './tenant.js'
 import { applyPwaIdentity, ensurePwaIcons, slugFromLocation } from './pwa.js'
 import { getPref } from './prefs.js'
+import { isOpen } from '../data/leadStatus.js'
 
 const StoreCtx = createContext(null)
 export const useStore = () => useContext(StoreCtx)
@@ -504,7 +505,7 @@ function reducer(state, action) {
       // The server moved every open lead. Only the cached copies need patching.
       const a = state.agents.find(x => x.id === action.toId)
       return Object.values(state.cache?.lead || {})
-        .filter(l => l.agentId === action.fromId && !String(l.stage || '').startsWith('Closed'))
+        .filter(l => l.agentId === action.fromId && isOpen(l.stage))
         .reduce((acc, l) => patchRecord(acc, 'lead', l.id, r => ({
           ...r, agentId: action.toId,
           timeline: withEvent(r, 'assign', 'Reassigned to ' + (a ? a.first : '')),
@@ -525,10 +526,10 @@ function reducer(state, action) {
     case 'ADD_STAGE': {
       const name = action.name.trim()
       if (!name || state.settings.stages.includes(name)) return state
-      const stages = state.settings.stages.slice()
-      const firstClosed = stages.findIndex(s => s.startsWith('Closed'))
-      const at = firstClosed === -1 ? stages.length : firstClosed
-      stages.splice(at, 0, name)
+      // Statuses have no order, so a new one simply goes on the end. This used
+      // to insert "before the first Closed stage" to keep a funnel intact —
+      // there is no funnel.
+      const stages = [...state.settings.stages, name]
       return { ...state, settings: { ...state.settings, stages } }
     }
     case 'RENAME_STAGE': {
@@ -556,8 +557,7 @@ function reducer(state, action) {
       const i = stages.indexOf(name)
       const j = i + dir
       if (i < 0 || j < 0 || j >= stages.length) return state
-      if (stages[j] && stages[j].startsWith('Closed')) return state
-      if (name.startsWith('Closed')) return state
+      if (PROTECTED_STAGES.includes(name)) return state
       ;[stages[i], stages[j]] = [stages[j], stages[i]]
       return { ...state, settings: { ...state.settings, stages } }
     }

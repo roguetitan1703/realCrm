@@ -6,6 +6,7 @@ import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/fo
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
+import { REJECTION_REASONS, REJECTED_STATUS } from '../data/leadStatus.js'
 import { getPosition, processImage, uploadMedia } from '../lib/media.js'
 import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES, STATUS } from '../data/propertyFields.js'
 import CameraCapture from '../components/CameraCapture.jsx'
@@ -45,6 +46,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'import' && <ImportModal store={store} />}
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
+      {m?.kind === 'rejectLead' && <RejectLeadModal store={store} leadId={m.leadId} />}
       {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} only={m.only} />}
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
@@ -600,6 +602,54 @@ function parsePrice(raw, deal) {
 let _unitRowSeq = 0
 const emptyRow = (over = {}) => ({ _id: 'r' + (++_unitRowSeq), flat: '', config: '2BHK', floor: '', owner: '', price: '', status: 'Available', ...over })
 
+
+// ---- Reject a lead, with the reason recorded ----
+// This was a window.prompt asking for free text — and the answer was thrown
+// away. The lead went to Closed Lost and WHY was lost with it, which is the one
+// thing a rejection is worth recording. The reasons are the client's own list.
+function RejectLeadModal({ store, leadId }) {
+  const l = store.lookup('lead', leadId)
+  const [reason, setReason] = useState(REJECTION_REASONS[0])
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const save = async () => {
+    setBusy(true)
+    const text = note.trim() ? `${reason} — ${note.trim()}` : reason
+    await store.updateLead(leadId, { stage: REJECTED_STATUS, rejectionReason: reason })
+    await store.addRemark('lead', leadId, `Rejected: ${text}`)
+    setBusy(false)
+    store.closeModal()
+  }
+
+  return (
+    <Modal title="Mark as rejected" onClose={store.closeModal} width={420}>
+      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
+        Why did <b style={{ color: 'var(--ink)' }}>{l?.name || 'this lead'}</b> not go ahead?
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 12 }}>
+        {REJECTION_REASONS.map(r => (
+          <button key={r} onClick={() => setReason(r)}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', textAlign: 'left',
+              border: '1px solid ' + (reason === r ? 'var(--accent)' : 'var(--line)'),
+              background: reason === r ? 'var(--accent-wash)' : '#fff', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600 }}>
+            <span style={{ flex: 1 }}>{r}</span>
+            {reason === r && <Icon name="check" style={{ color: 'var(--accent)' }} />}
+          </button>
+        ))}
+      </div>
+      <Field label="Anything to add (optional)">
+        <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Context for whoever picks this up later" />
+      </Field>
+      <div className="lc-foot">
+        <Button onClick={store.closeModal}>Cancel</Button>
+        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} disabled={busy} onClick={save}>
+          {busy ? 'Saving…' : 'Mark as rejected'}
+        </Button>
+      </div>
+    </Modal>
+  )
+}
 
 // ---- Assign lead ----
 function AssignModal({ store, leadId }) {

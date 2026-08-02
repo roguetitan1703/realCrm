@@ -128,7 +128,7 @@ function PipelineSection({ store, settings }) {
   const [newStage, setNewStage] = useState('')
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState('')
-  const lastClosedFree = settings.stages.filter(s => !s.startsWith('Closed')).length
+  const lastClosedFree = settings.stages.filter(s => !PROTECTED_STAGES.includes(s)).length
 
   const commitRename = () => {
     if (draft.trim() && draft.trim() !== editing) store.renameStage(editing, draft.trim())
@@ -144,10 +144,10 @@ function PipelineSection({ store, settings }) {
         <div className="chip-list">
           {settings.stages.map((s, i) => {
             const protectedStage = PROTECTED_STAGES.includes(s)
-            const closed = s.startsWith('Closed')
+            const closed = PROTECTED_STAGES.includes(s)
             const isEditing = editing === s
-            const canUp = i > 0 && !settings.stages[i - 1].startsWith('Closed') && !closed
-            const canDown = i < settings.stages.length - 1 && !settings.stages[i + 1].startsWith('Closed') && !closed
+            const canUp = i > 0 && !PROTECTED_STAGES.includes(settings.stages[i - 1]) && !closed
+            const canDown = i < settings.stages.length - 1 && !PROTECTED_STAGES.includes(settings.stages[i + 1]) && !closed
             return (
               <div key={s} className="chip-row">
                 <div className="chip-reorder">

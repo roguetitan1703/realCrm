@@ -1,3 +1,4 @@
+import { isOpen } from '../data/leadStatus.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import { DEFAULT_FOLLOWUPS, fillTemplate, PLACEHOLDERS } from '../data/followUpTemplates.js'
@@ -33,7 +34,7 @@ export function matchesForLead(lead, allProps = []) {
 export function leadsForProperty(property, allLeads = []) {
   if (!property || !allLeads?.length) return []
   return allLeads
-    .filter(l => l.req && l.req.deal === property.deal && l.req.config === property.type && !l.stage?.startsWith('Closed'))
+    .filter(l => l.req && l.req.deal === property.deal && l.req.config === property.type && isOpen(l.stage))
     .map(l => {
       let score = 0; const fit = []
       if (l.req.locality === property.locality) { score += 3; fit.push(l.req.locality) }
