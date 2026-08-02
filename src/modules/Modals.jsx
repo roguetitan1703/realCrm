@@ -749,7 +749,7 @@ function AddAgentModal({ store }) {
       <div className="u-muted" style={{ fontSize: 12, margin: '2px 0 4px' }}>
         {role === 'manager'
           ? 'A manager signs in with their email + password and can self-reset by email. Managers see the whole desk.'
-          : "An agent signs in with their ID + password. We'll create a starter password to hand over; the admin resets it if forgotten. Agents see only their own leads."}
+          : "A sales executive signs in with their ID + password. We'll create a starter password to hand over; the admin resets it if forgotten. Sales executives see only their own leads."}
       </div>
       <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Adding…' : 'Add to team'}</Button>
     </Modal>
@@ -1912,7 +1912,7 @@ function ScheduleFollowUpModal({ store, leadId }) {
         </div>
 
         <div className="field">
-          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Assigned Agent</label>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Assigned Sales Executive</label>
           <select value={assignedAgentId} onChange={e => setAssignedAgentId(e.target.value)}
             style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)', marginTop: 5, fontSize: 13, fontFamily: 'inherit' }}>
             {store.state.agents.map(a => (

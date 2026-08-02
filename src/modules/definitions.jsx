@@ -85,7 +85,7 @@ export const LEADS_DEF = {
     { key: 'deal', label: 'Deal', icon: 'tag', options: [{ value: 'sale', label: 'Sale' }, { value: 'rent', label: 'Rent' }] },
     { key: 'source', label: 'Source', icon: 'trend', options: opt(store.state.settings.sources) },
     { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
-    { key: 'agent', label: 'Agent', icon: 'person', options: [
+    { key: 'agent', label: 'Sales Executive', icon: 'person', options: [
       { value: '_none', label: 'Unassigned' }, ...store.activeAgents().map(a => ({ value: a.id, label: a.first })),
     ] },
   ],
@@ -131,7 +131,7 @@ export const LEADS_DEF = {
     { key: 'budget', label: 'Budget', sortable: true, render: (l) => <Money>{budgetRange(l.req)}</Money> },
     { key: 'stage', label: 'Stage', sortable: true, render: (l) => <StageTag stage={l.stage} /> },
     { key: 'source', label: 'Source', render: (l) => <Source>{l.source}</Source> },
-    { key: 'agent', label: 'Agent', render: (l, store) => {
+    { key: 'agent', label: 'Sales Executive', render: (l, store) => {
       const a = store.agentById(l.agentId)
       return a ? <div className="cell-agent"><Avatar agent={a} size="sm" /><span>{a.first}</span></div> : <Unassigned />
     } },

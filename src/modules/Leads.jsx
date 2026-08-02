@@ -51,6 +51,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const [sortDir, setSortDir] = useState('asc')
   const [view, setView] = useState('list')
   const [seg, setSeg] = useState('all')
+  const [intent, setIntent] = useState('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const setFltP = (v) => { setFlt(v); setPage(1) }
@@ -58,15 +59,22 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
   const setSortDirP = (v) => { setSortDir(v); setPage(1) }
   const setSegP = (v) => { setSeg(v); setPage(1) }
+  const setIntentP = (v) => { setIntent(v); setPage(1) }
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
 
   // One page from the server. The agent's own-pipeline scope is applied in the
   // query, not by filtering an array here — a filter the client applies is a
   // display choice, not a permission.
   const source = useServerList(
-    (params) => api.listLeads({ page: params.page, limit: params.limit, q: params.q, segment: seg === 'all' ? undefined : seg }),
+    (params) => api.listLeads({
+      page: params.page,
+      limit: params.limit,
+      q: params.q,
+      segment: seg === 'all' ? undefined : seg,
+      intent: intent === 'all' ? undefined : intent
+    }),
     { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
-    [state.dataAsOf, seg],
+    [state.dataAsOf, seg, intent],
   )
 
   const onOpen = (l) => go('leads', { leadId: l.id, leadOpen: true })
@@ -111,6 +119,41 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
         // must not offer a route to one.
         actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import / Revert</Button>
       })}
+      <div style={{ padding: '12px 20px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button
+          type="button"
+          onClick={() => setIntentP('all')}
+          style={{
+            padding: '6px 14px', borderRadius: 8, fontWeight: 700, fontSize: 13, border: '1px solid var(--line)', cursor: 'pointer',
+            background: intent === 'all' ? 'var(--accent, #1E6F52)' : '#fff',
+            color: intent === 'all' ? '#fff' : 'var(--ink)'
+          }}
+        >
+          All Leads
+        </button>
+        <button
+          type="button"
+          onClick={() => setIntentP('buy')}
+          style={{
+            padding: '6px 14px', borderRadius: 8, fontWeight: 700, fontSize: 13, border: '1px solid var(--line)', cursor: 'pointer',
+            background: intent === 'buy' ? 'var(--accent, #1E6F52)' : '#fff',
+            color: intent === 'buy' ? '#fff' : 'var(--ink)'
+          }}
+        >
+          Sale
+        </button>
+        <button
+          type="button"
+          onClick={() => setIntentP('rent')}
+          style={{
+            padding: '6px 14px', borderRadius: 8, fontWeight: 700, fontSize: 13, border: '1px solid var(--line)', cursor: 'pointer',
+            background: intent === 'rent' ? 'var(--accent, #1E6F52)' : '#fff',
+            color: intent === 'rent' ? '#fff' : 'var(--ink)'
+          }}
+        >
+          Rent
+        </button>
+      </div>
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>
     </>
