@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { Sidebar, TopBar, TabBar, MobileTopBar } from '../components/chrome.jsx'
+import Icon from '../components/Icon.jsx'
 
 // ---- desktop app shell: sidebar | (topbar / body) ----
 export function AppShell({ nav, active, activeSub, onNav, footer, topbar, children, firmName, logoUrl, sub }) {
@@ -101,15 +102,16 @@ export function MobileShell({ top, children, tabs, fab, actionBar, framed, modal
           justifyContent: 'center',
           pointerEvents: 'none'
         }}>
-          <svg
-            width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent, #1E6F52)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            style={{
-              transform: refreshing ? 'rotate(0deg)' : `rotate(${progress * 270}deg)`,
-              animation: refreshing ? 'spin 0.8s linear infinite' : 'none'
-            }}
-          >
-            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
-          </svg>
+          <div style={{
+            transform: refreshing ? 'none' : `rotate(${progress * 270}deg)`,
+            animation: refreshing ? 'crm-spin 0.75s cubic-bezier(0.4, 0, 0.2, 1) infinite' : 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--accent, #1E6F52)'
+          }}>
+            <Icon name="refresh" size={18} />
+          </div>
         </div>
       )}
       <div
