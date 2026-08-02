@@ -50,6 +50,23 @@ const ASSIGNEE_WRITABLE = new Set([
   'shortlist', 'feedback',
 ]);
 
+// The refused fields are shown to the person who tried, so they read as things
+// on the screen rather than as column names.
+const FIELD_LABEL: Record<string, string> = {
+  name: 'the name', phone: 'the phone number', email: 'the email',
+  agentId: 'who it is assigned to', agent_id: 'who it is assigned to',
+  source: 'the source', req: 'the requirement', requirement: 'the requirement',
+  locality: 'the locality', deal: 'the deal type', purpose: 'the purpose',
+  budgetMin: 'the budget', budgetMax: 'the budget',
+  budget_min: 'the budget', budget_max: 'the budget',
+  timeline_pref: 'the timeline', delete: 'deleting it',
+};
+const labelFields = (keys: string[]) => {
+  const seen = [...new Set(keys.map(k => FIELD_LABEL[k] || `\`${k}\``))];
+  if (seen.length === 1) return seen[0];
+  return `${seen.slice(0, -1).join(', ')} or ${seen[seen.length - 1]}`;
+};
+
 export class ForbiddenError extends Error {
   status = 403;
   code = 'FORBIDDEN';
@@ -76,7 +93,7 @@ export function assertLeadWrite(
     const denied = Object.keys(patch).filter(k => !ASSIGNEE_WRITABLE.has(k));
     if (denied.length === 0) return;
     throw new ForbiddenError(
-      `This lead was created by someone else, so you can change its status and remarks but not ${denied.join(', ')}.`,
+      `This lead was created by someone else. You can change its status and add remarks, but not ${labelFields(denied)}.`,
     );
   }
 
