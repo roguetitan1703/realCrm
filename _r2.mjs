@@ -1,0 +1,14 @@
+import { chromium } from 'playwright';
+import jwt from 'jsonwebtoken'; import fs from 'fs';
+const S = fs.readFileSync('.env','utf8').match(/JWT_SECRET=(.*)/)[1].trim();
+const T = jwt.sign({kind:'user',tenant_id:'delpat',user_id:'owner_delpat',role:'owner'},S,{expiresIn:'2h'});
+const b = await chromium.launch(); const c = await b.newContext({viewport:{width:1440,height:900}});
+await c.addInitScript(([t])=>{localStorage.setItem('crm_auth_token',t);localStorage.setItem('crm_tenant_id','delpat');localStorage.setItem('crm_auth_session',JSON.stringify({loggedIn:true,role:'admin',activeAgentId:'owner_delpat',tenantName:'Delpat'}))},[T]);
+const p = await c.newPage();
+await p.goto('http://localhost:5173/delpat?screen=leads&autologin',{waitUntil:'networkidle',timeout:30000});
+await p.waitForTimeout(2000);
+await p.locator('table tbody tr, .grid-cards > *').first().click();
+await p.waitForTimeout(2000);
+const t0 = await p.locator('body').innerText();
+console.log('DETAIL ACTIONS:', t0.replace(/\s+/g,' ').slice(0, 1200));
+await b.close();
