@@ -320,10 +320,12 @@ connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => 
   const integration = await getIntegration(tenant, req.params.id);
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 
+  const t = await getTenantForIngest(tenant);
+  const slug = t?.slug || t?.id || tenant;
   const host = req.get('x-forwarded-host') || req.get('host') || 'api.re.delpat.in';
   const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
   const domain = process.env.PUBLIC_API_URL || `${proto}://${host}`;
-  const docsUrl = `${domain}/api/v1/ingest/${integration.tenant_slug}/docs`;
+  const docsUrl = `${domain}/docs/${slug}`;
 
   // Auth methods, accepted body formats and the example all live on the docs
   // page (below) — the email exists only to hand over the link. Explaining

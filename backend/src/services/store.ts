@@ -1681,6 +1681,8 @@ export type LeadSegment = keyof typeof LEAD_SEGMENTS;
 export async function listLeads(opts: {
   page?: number; limit?: number; q?: string; stage?: string; agentId?: string;
   segment?: string; intent?: string;
+  source?: string; locality?: string; agent?: string; flag?: string;
+  sortKey?: string; sortDir?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
   const t = tid();
   const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
@@ -1714,9 +1716,68 @@ export async function listLeads(opts: {
   const segment = LEAD_SEGMENTS[opts.segment as keyof typeof LEAD_SEGMENTS];
   if (segment) where.push(segment);
 
+  // The filter panel's own fields. These were collected by the screen and then
+  // dropped on the floor: useServerList spreads them into the fetcher, but the
+  // fetcher forwarded only page/limit/q/segment/intent, so Source, Locality,
+  // Sales Executive and Needs-attention were four controls that visibly changed
+  // state and filtered nothing.
+  // OR binds LOOSER than AND, so any group of alternatives has to carry its own
+  // parentheses before it joins the AND chain. Without them a two-value filter
+  // reads as `(tenant AND scope AND a) OR b` — the second alternative escapes
+  // the tenant clause AND the agent's permission scope, and starts returning
+  // other firms' rows. Every OR group below goes through this.
+  const anyOf = (parts: any[]) => sql`(${parts.reduce((a, c) => sql`${a} OR ${c}`)})`;
+
+  const sources = many(opts.source);
+  if (sources.length) where.push(sql`lower(coalesce(source, '')) IN ${sql(sources.map(s => s.toLowerCase()))}`);
+
+  // Locality is matched loosely on purpose — the option list is derived from the
+  // firm's own records, where "Wakad" and "Wakad / Hinjewadi" are the same place
+  // typed twice.
+  const localities = many(opts.locality);
+  if (localities.length) {
+    where.push(anyOf(localities.map(l =>
+      sql`lower(coalesce(locality, '')) LIKE ${'%' + l.toLowerCase().split('/')[0].trim() + '%'}`)));
+  }
+
+  // '_none' is the Unassigned option, which is NULL rather than a value.
+  const agents = many(opts.agent);
+  if (agents.length) {
+    const named = agents.filter(a => a !== '_none');
+    const parts: any[] = [];
+    if (named.length) parts.push(sql`agent_id IN ${sql(named)}`);
+    if (agents.includes('_none')) parts.push(sql`agent_id IS NULL`);
+    if (parts.length) where.push(anyOf(parts));
+  }
+
+  // "Needs attention" reuses the segment predicates rather than restating them.
+  const flags = many(opts.flag);
+  if (flags.length) {
+    const parts = flags
+      .map(f => LEAD_SEGMENTS[(f === 'new' ? 'today' : f) as keyof typeof LEAD_SEGMENTS])
+      .filter(Boolean);
+    if (parts.length) where.push(anyOf(parts));
+  }
+
+  // Sorting, from a whitelist — a sort key is a column name arriving from the
+  // browser, so it can never reach the query as text. This was not wired at all:
+  // the table's sort headers changed the arrow and re-requested the same
+  // created_at ordering, because the ordering is done in SQL and nobody was
+  // telling SQL about it.
+  const SORTS: Record<string, any> = {
+    activity: sql`created_at`, name: sql`lower(name)`,
+    budget: sql`budget_max`, stage: sql`stage`,
+  };
+  const col = SORTS[String(opts.sortKey || '')] || sql`created_at`;
+  // "Last activity" ascending means most-recent-first; for a name it means A→Z.
+  const asc = String(opts.sortDir || 'asc') === 'asc';
+  const dir = opts.sortKey === 'activity' || !opts.sortKey
+    ? (asc ? sql`DESC` : sql`ASC`)
+    : (asc ? sql`ASC` : sql`DESC`);
+
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
   const [rows, countRows] = await Promise.all([
-    sql`SELECT * FROM crm_leads WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+    sql`SELECT * FROM crm_leads WHERE ${clause} ORDER BY ${col} ${dir} NULLS LAST LIMIT ${limit} OFFSET ${offset}`,
     sql`SELECT count(*)::int AS n FROM crm_leads WHERE ${clause}`,
   ]);
   return { rows: rows.map(r => rowToLead(r)), total: countRows[0]?.n ?? 0, page, limit };

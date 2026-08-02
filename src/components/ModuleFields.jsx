@@ -74,12 +74,20 @@ const SECTION_META = {
 const SECTION_TITLES = Object.fromEntries(
   Object.entries(SECTION_META).map(([k, v]) => [k, v.title]))
 
-export function ModuleRecordSheet({ schema, record, store }) {
+export function ModuleRecordSheet({ schema, record, store, phone }) {
   // Which sections the reader has opened or closed. Keyed by section so it
   // survives re-renders while you read, and resets when you open another
   // record — the next property is a fresh question, not a continuation.
   const [openMap, setOpenMap] = useState({})
   if (!schema || !record) return null
+
+  const rawValueOf = (field) => {
+    const raw = getNestedValue(record, field.key)
+    if (field.renderValue) return field.renderValue(raw, record, store)
+    if (raw === undefined || raw === null || raw === '') return ''
+    return String(raw)
+  }
+  const isEmptyVal = (v) => Array.isArray(v) ? v.length === 0 : (v === '' || v === null || v === undefined)
 
   // group fields by section, preserving declaration order of sections.
   // A field may declare `when(record)` — a rental has no booking amount and a
@@ -90,16 +98,18 @@ export function ModuleRecordSheet({ schema, record, store }) {
   const groups = {}
   for (const f of schema.fields) {
     if (f.when && !f.when(record)) continue
+    // A field can be genuinely editable (kept in the schema, so the full-form
+    // modal still offers it) while being redundant on THIS read-only sheet —
+    // a lead's name and phone are already the record header. `hideInSheet`
+    // drops it from the grouped read view only; the edit form ignores the flag.
+    if (f.hideInSheet) continue
+    // On a phone a "—" row costs the same tap-scroll as a real one, forty
+    // times over. The desk keeps the placeholder (it shows the field exists
+    // and can be filled); a phone just drops the row.
+    if (phone && isEmptyVal(rawValueOf(f))) continue
     const sec = f.section || 'domain'
     if (!groups[sec]) { groups[sec] = []; order.push(sec) }
     groups[sec].push(f)
-  }
-
-  const rawValueOf = (field) => {
-    const raw = getNestedValue(record, field.key)
-    if (field.renderValue) return field.renderValue(raw, record, store)
-    if (raw === undefined || raw === null || raw === '') return ''
-    return String(raw)
   }
 
   const valueOf = (field) => {
@@ -162,16 +172,22 @@ export const LEAD_MODULE_SCHEMA = {
   id: 'leads',
   moduleName: 'Lead Record',
   fields: [
-    // Core Fields Section
-    { key: 'name', label: 'Full Name', type: 'text', section: 'core', required: true },
-    { key: 'phone', label: 'Primary Phone', type: 'text', section: 'core', required: true },
-    { key: 'email', label: 'Email Address', type: 'email', section: 'core' },
-    { key: 'source', label: 'Attribution Source', type: 'select', section: 'core', options: ['Website', '99acres', 'MagicBricks', 'Referral', 'Walk-in', 'Meta Ads'] },
+    // Core Fields Section — name and phone stay editable here (the full-form
+    // modal still groups them under "Core"), but the read-only sheet already
+    // carries both in the record header (avatar + title + facts strip), so
+    // they're hidden from the sheet rather than shown twice.
+    { key: 'name', label: 'Full Name', type: 'text', section: 'core', required: true, hideInSheet: true },
+    { key: 'phone', label: 'Primary Phone', type: 'text', section: 'core', required: true, hideInSheet: true },
+    // Email, source and owner are NOT in the header facts strip — they only
+    // ever appear here, so they move to the "Details" section instead of a
+    // now-empty "Overview" one.
+    { key: 'email', label: 'Email Address', type: 'email', section: 'domain' },
+    { key: 'source', label: 'Attribution Source', type: 'select', section: 'domain', options: ['Website', '99acres', 'MagicBricks', 'Referral', 'Walk-in', 'Meta Ads'] },
     {
       key: 'agentId',
       label: 'Assigned Owner',
       type: 'select',
-      section: 'core',
+      section: 'domain',
       options: (store) => store?.state?.agents?.map(a => ({ value: a.id, label: a.name })) || [],
       renderValue: (val, record, store) => {
         const ag = store?.state?.agents?.find(a => a.id === val)

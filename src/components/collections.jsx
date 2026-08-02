@@ -145,7 +145,7 @@ export function ModuleListView({
             ? <ListSpinner />
             : <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>)
         : <>
-            {renderTable ? renderTable(phoneList, 'grid') : <ModuleCards def={def} rows={phoneList} store={store} onOpen={onOpen} />}
+            {renderTable ? renderTable(phoneList, 'grid') : <ModuleCards def={def} rows={phoneList} store={store} onOpen={onOpen} phone={phone} />}
             {more > 0 && (
               <button className="btn btn-secondary btn-block loadmore" disabled={loading} onClick={() => onPage(page + 1)}>
                 {loading ? 'Loading…' : `Load ${Math.min(more, pageSize)} more`}
@@ -283,15 +283,41 @@ function PhoneToolbar({
 }
 
 // ---- ModuleCards: grid of cards from a definition's `card(record,store)` fn. ----
-export function ModuleCards({ def, rows, store, onOpen }) {
+// On a phone a module may declare `phoneCard` (a compact row layout, in place
+// of the desktop grid tile) and `phoneActions` (icon buttons beside the row —
+// e.g. call/WhatsApp on a lead). A row with actions can't be a <button> that
+// wraps another <button> — nested buttons are invalid HTML, and the browser
+// silently closes the outer one early — so it renders as a clickable div
+// instead, with the actions stopping their own click from also opening it.
+export function ModuleCards({ def, rows, store, onOpen, phone }) {
   if (!def.card) return <ModuleTable def={def} rows={rows} store={store} onOpen={onOpen} />
+  const renderBody = (rec) => (phone && def.phoneCard) ? def.phoneCard(rec, store) : def.card(rec, store)
   return (
     <div className="grid-cards">
-      {rows.map(rec => (
-        <button key={rec.id} className="rcard" onClick={onOpen ? () => onOpen(rec) : undefined}>
-          {def.card(rec, store)}
-        </button>
-      ))}
+      {rows.map(rec => {
+        const actions = phone && def.phoneActions ? def.phoneActions(rec, store) : []
+        if (actions.length > 0) {
+          return (
+            <div key={rec.id} className="rcard rcard-row" role="button" tabIndex={0}
+              onClick={onOpen ? () => onOpen(rec) : undefined}
+              onKeyDown={onOpen ? (e) => { if (e.key === 'Enter') onOpen(rec) } : undefined}>
+              <div className="rcard-body">{renderBody(rec)}</div>
+              <div className="rcard-actions" onClick={e => e.stopPropagation()}>
+                {actions.map(a => (
+                  <button key={a.icon} className="rcard-act" aria-label={a.label} title={a.label} onClick={a.onClick}>
+                    <Icon name={a.icon} size={17} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        }
+        return (
+          <button key={rec.id} className="rcard" onClick={onOpen ? () => onOpen(rec) : undefined}>
+            {renderBody(rec)}
+          </button>
+        )
+      })}
     </div>
   )
 }

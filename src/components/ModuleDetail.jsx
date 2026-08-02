@@ -27,7 +27,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { ModuleRecordSheet } from './ModuleFields.jsx'
-import { Panel, SectionHead, Button, Stepper } from './primitives.jsx'
+import { Panel, SectionHead, Button, Stepper, StageTag } from './primitives.jsx'
 import { DetailLayout } from '../layouts/layouts.jsx'
 import { ActionRail, RailSection } from './rail.jsx'
 import Icon from './Icon.jsx'
@@ -118,6 +118,12 @@ export function ModuleDetail({
   const progStages = prog ? prog.stages(store) : null
   const progCurrent = prog ? prog.current(record) : null
   const progOnPath = progStages ? progStages.includes(progCurrent) : false
+  // A `flat` progression (leads) has no sequence — "New", "Callback", "Site
+  // Visit" don't happen in order, so drawing them as a walkable journey implied
+  // a funnel that doesn't exist. It renders as a plain "update status" dropdown
+  // instead, gated by `canSet` (a lead an agent doesn't own is view-only here,
+  // same as everywhere else on the record).
+  const canSetProg = prog ? (prog.canSet ? prog.canSet(store, record) : true) : false
 
   return (
     // The whole rail is desk furniture and is not drawn on a phone, where it
@@ -179,11 +185,25 @@ export function ModuleDetail({
         )}
         {prog && (
           <div className="rh-prog">
-            <Stepper
-              stages={progStages}
-              current={progOnPath ? progCurrent : progStages[0]}
-              onPick={(s) => prog.set(store, record, s)}
-            />
+            {prog.flat ? (
+              canSetProg ? (
+                <select
+                  className="rh-status-select"
+                  value={progOnPath ? progCurrent : progStages[0]}
+                  onChange={(e) => prog.set(store, record, e.target.value)}
+                >
+                  {progStages.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              ) : (
+                <StageTag stage={progCurrent} />
+              )
+            ) : (
+              <Stepper
+                stages={progStages}
+                current={progOnPath ? progCurrent : progStages[0]}
+                onPick={(s) => prog.set(store, record, s)}
+              />
+            )}
             {prog.exit && (!prog.exit.when || prog.exit.when(record, store)) && (
               <button className="rh-exit" onClick={() => prog.exit.run(store, record)}>{prog.exit.label}</button>
             )}
@@ -196,7 +216,7 @@ export function ModuleDetail({
 
       {/* 2. Record sheet — read-only Zoho-style view (edit via header button) */}
       <Panel>
-        <ModuleRecordSheet schema={def.schema} record={record} store={store} />
+        <ModuleRecordSheet schema={def.schema} record={record} store={store} phone={phone} />
       </Panel>
 
       {/* 3. Related zones — declarative, module-supplied */}
