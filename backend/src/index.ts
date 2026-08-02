@@ -14,6 +14,7 @@ import { workspaceRouter } from './routes/workspace';
 import { modulesRouter } from './routes/modules';
 import { recordsRouter } from './routes/records';
 import { leadsRouter } from './routes/leads';
+import { ownersRouter } from './routes/owners';
 import { propertiesRouter } from './routes/properties';
 import { teamRouter } from './routes/team';
 import { actionsRouter } from './routes/actions';
@@ -25,7 +26,7 @@ import { notificationsRouter } from './routes/notifications';
 import { pwaRouter } from './routes/pwa';
 import { filesRouter, mediaRouter } from './routes/files';
 import { withRequestContext } from './middleware/auth';
-import { getTenantForIngest } from './services/store';
+import { getTenantForIngest, runRoutingSweeps } from './services/store';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -116,6 +117,7 @@ app.use('/api/v1/modules/:moduleKey/records', recordsRouter);
 
 // 4. Explicit Coded Domain Workflows & Actions
 app.use('/api/v1/leads', leadsRouter);
+app.use('/api/v1/owners', ownersRouter);
 app.use('/api/v1/properties', propertiesRouter);
 app.use('/api/v1/team', teamRouter);
 
@@ -245,6 +247,10 @@ if (isMain || process.env.START_SERVER === 'true') {
     console.log(`🌐 Workspace Resolver: http://localhost:${PORT}/api/v1/workspace/resolve?slug=skyline-realty`);
     console.log(`============================================================================`);
   });
+  // Lead routing sweeps (unowned + idle) — both off per-tenant by default,
+  // configured in Settings → Lead routing. Runs on a timer because neither
+  // condition is triggered by a request; something has to check the clock.
+  setInterval(() => { runRoutingSweeps().catch(err => console.warn('[Routing Sweep] run failed:', err?.message)); }, 5 * 60 * 1000);
 }
 
 export default app;

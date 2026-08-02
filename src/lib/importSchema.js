@@ -134,6 +134,38 @@ export const LEAD_FIELDS = [
   { key: 'notes', label: 'Notes', group: 'detail', syn: ['notes', 'remarks', 'comment', 'description', 'requirement details'] },
 ]
 
+// The cold-calling list: one row per owner (usually per unit — a township
+// sheet has one row per flat/shop, all under the same project). `project` is
+// free text, nothing here links to an actual crm_properties row.
+//
+// A real sheet from this client's data does NOT hand over one pre-built "Unit"
+// column — it's project, unit number, tower, configuration and two area
+// figures (carpet, saleable) as five separate columns, e.g.:
+//   Godrej Green Vistas | GGVT10401 | T1 | 1 BHK | 423 | 631.83 | <owner> | <phone>
+// So those stay separate fields here and get composed into the stored
+// `unitRef` string ("T1 · 1 BHK · GGVT10401 · 423/631.83 sqft") at import
+// time (see ImportPage.jsx) rather than asking a broker to pre-join them.
+//
+// Any column that maps to nothing here still isn't lost: ImportPage folds
+// every unmapped column with a value into the owner's opening note, tagged
+// with its own header — how a sheet with a "Binod" / "Vinod" / "Disha" column
+// per past caller keeps that call history instead of silently dropping it.
+export const OWNER_FIELDS = [
+  { key: 'project', label: 'Project / society', group: 'key', syn: ['project', 'society', 'building', 'tower name', 'scheme', 'complex'] },
+  { key: 'unitNo', label: 'Unit number', group: 'key', syn: ['unit no', 'unit number', 'flat no', 'flat', 'unit code', 'unit'] },
+  { key: 'wing', label: 'Tower / wing', group: 'key', syn: ['tower', 'wing', 'block'] },
+  { key: 'config', label: 'Configuration', group: 'key', parse: parseConfig, syn: ['config', 'bhk', 'type', 'configuration', 'unit type'] },
+  { key: 'name', label: 'Owner name', group: 'key', syn: ['owner', 'owner name', 'name', 'contact person'] },
+  { key: 'phone', label: 'Phone', group: 'key', required: true, parse: parsePhone, syn: ['phone', 'mobile', 'contact', 'cell', 'whatsapp', 'owner phone', 'owner mobile', 'number'] },
+
+  { key: 'carpet', label: 'Carpet area (sqft)', group: 'detail', parse: parseNum, syn: ['carpet', 'carpet area'] },
+  { key: 'saleable', label: 'Saleable / built-up area (sqft)', group: 'detail', parse: parseNum, syn: ['saleable', 'saleable area', 'built up', 'builtup', 'super built up'] },
+  { key: 'email', label: 'Email', group: 'detail', syn: ['email', 'mail', 'e-mail'] },
+  { key: 'locality', label: 'Locality', group: 'detail', syn: ['locality', 'area', 'location', 'address', 'city'] },
+  { key: 'source', label: 'Source', group: 'detail', syn: ['source', 'list source', 'from'] },
+  { key: 'notes', label: 'Notes', group: 'detail', syn: ['notes', 'remarks', 'comment', 'description'] },
+]
+
 export const GROUP_LABEL = {
   key: 'Core fields',
   detail: 'Property details',

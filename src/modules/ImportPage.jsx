@@ -5,9 +5,9 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import {
-  PROPERTY_FIELDS, LEAD_FIELDS, GROUP_LABEL,
+  PROPERTY_FIELDS, LEAD_FIELDS, OWNER_FIELDS, GROUP_LABEL,
   parseSpreadsheet, guessMapping, readField,
-  normPhone, splitUnit, moneyLabel,
+  normPhone, splitUnit, moneyLabel, parseMoney,
 } from '../lib/importSchema.js'
 
 // Guided import wizard: Choose → Upload → Map → Review → Done. The parsing,
@@ -33,7 +33,7 @@ function WizardSteps({ step }) {
 
 export default function ImportPage({ store, go, sel, topBar }) {
   const [tab, setTab] = useState('import') // 'import' | 'history'
-  const [kind, setKind] = useState(sel?.kind || null) // null until chosen | 'clients' | 'properties'
+  const [kind, setKind] = useState(sel?.kind || null) // null until chosen | 'clients' | 'properties' | 'owners'
   const [step, setStep] = useState('choose') // choose | upload | map | review | done
   const [fileMeta, setFileMeta] = useState(null)
   const [parsedRows, setParsedRows] = useState([])
@@ -48,13 +48,14 @@ export default function ImportPage({ store, go, sel, topBar }) {
   const [importStats, setImportStats] = useState(null)
 
   useEffect(() => {
-    if (sel?.kind === 'clients' || sel?.kind === 'properties') { setKind(sel.kind); setStep('upload') }
+    if (sel?.kind === 'clients' || sel?.kind === 'properties' || sel?.kind === 'owners') { setKind(sel.kind); setStep('upload') }
   }, [sel?.kind])
 
   const chooseKind = (k) => { setKind(k); setStep('upload'); setError(null) }
   const restart = () => { setKind(null); setStep('choose'); setParsedRows([]); setHeaders([]); setFileMeta(null); setError(null); setImportStats(null) }
 
-  const FIELDS = kind === 'clients' ? LEAD_FIELDS : PROPERTY_FIELDS
+  const FIELDS = kind === 'clients' ? LEAD_FIELDS : kind === 'owners' ? OWNER_FIELDS : PROPERTY_FIELDS
+  const kindLabel = kind === 'clients' ? 'Leads & contacts' : kind === 'owners' ? 'Owners' : 'Properties'
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0]
@@ -86,6 +87,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
     const v = {}
     FIELDS.forEach(f => { const got = readField(row, mapping, f); if (got !== null) v[f.key] = got })
     if (kind === 'clients') return { phone: v.phone || null, name: v.name || null }
+    if (kind === 'owners') return { phone: v.phone || null }
     let unitRaw = v.title
     if (!unitRaw && headers.length) unitRaw = String(row[headers[0]] || '').trim()
     if (!unitRaw) return {}
@@ -103,8 +105,8 @@ export default function ImportPage({ store, go, sel, topBar }) {
           names: dupProbe.map(r => r.name).filter(Boolean),
           titles: dupProbe.map(r => r.title).filter(Boolean),
         })
-      : Promise.resolve({ leads: {}, properties: {} }),
-    [dupKey], { leads: {}, properties: {} })
+      : Promise.resolve({ leads: {}, properties: {}, owners: {} }),
+    [dupKey], { leads: {}, properties: {}, owners: {} })
 
   // The project names already on the books, for the "import into project" box.
   const { data: summary } = useServerData(() => api.getPropertiesSummary().then(r => r?.summary || null), [], null)
@@ -114,11 +116,54 @@ export default function ImportPage({ store, go, sel, topBar }) {
     const v = {}
     FIELDS.forEach(f => { const got = readField(row, mapping, f); if (got !== null) v[f.key] = got })
 
+    if (kind === 'owners') {
+      if (!v.phone) return { status: 'invalid', reason: 'Phone is missing or too short', row, values: v }
+      const name = (v.name || 'Owner').trim()
+      // Any column nobody mapped still isn't lost — a sheet with a "Binod" /
+      // "Vinod" / "Disha" column per past caller is call history, not noise.
+      // Folded into the opening note, each tagged with its own header, so
+      // the outreach history survives even though there's no per-agent field.
+      const mappedCols = new Set(Object.values(mapping).filter(Boolean))
+      const extra = headers
+        .filter(h => !mappedCols.has(h))
+        .map(h => [h, String(row[h] ?? '').trim()])
+        .filter(([, val]) => val)
+        .map(([h, val]) => `${h}: ${val}`)
+      const notes = [v.notes, ...extra].filter(Boolean).join('; ') || undefined
+      // The sheet hands over unit number / tower / config / two areas as
+      // separate columns, not one pre-built "Unit" field — composed here into
+      // the one free-text reference the owner record actually stores.
+      const areaPart = v.carpet && v.saleable ? `${v.carpet}/${v.saleable} sqft`
+        : v.carpet ? `${v.carpet} sqft carpet`
+        : v.saleable ? `${v.saleable} sqft saleable`
+        : null
+      const unitRef = [v.wing, v.config, v.unitNo, areaPart].filter(Boolean).join(' · ') || undefined
+      const record = {
+        name, phone: v.phone, email: v.email || undefined,
+        project: importProject.trim() || v.project || undefined,
+        unitRef,
+        locality: v.locality || undefined,
+        source: v.source || 'Spreadsheet import',
+        notes,
+      }
+      // An owner already on file, matched by phone — this is what makes
+      // re-running an import that stopped partway through safe: rows already
+      // saved before the browser closed come back "duplicate" and are
+      // skipped, not saved a second time. There's no merge step for owners
+      // (unlike leads) — an existing owner has nothing worth combining, it's
+      // just already there.
+      const dupHit = dupes?.owners?.[v.phone] || null
+      return {
+        status: dupHit ? 'duplicate' : 'new', dupTarget: dupHit?.name || null, dupId: dupHit?.id || null,
+        record, label: name, sub: v.phone, locality: v.locality || '—', values: v,
+      }
+    }
+
     if (kind === 'clients') {
-      if (!v.name && !v.phone) return { status: 'invalid', reason: 'No name and no phone', row }
+      if (!v.name && !v.phone) return { status: 'invalid', reason: 'No name and no phone', row, values: v }
       const name = (v.name || 'Imported lead').replace(/^[*(]+/, '').trim()
       const phone = v.phone
-      if (!phone) return { status: 'invalid', reason: 'Phone is missing or too short', row, name }
+      if (!phone) return { status: 'invalid', reason: 'Phone is missing or too short', row, name, values: v }
       const dupHit = dupes?.leads?.[phone] || dupes?.leads?.[normPhone(phone)] || null
       const record = {
         name, phone, email: v.email || undefined,
@@ -136,14 +181,14 @@ export default function ImportPage({ store, go, sel, topBar }) {
           notes: v.notes || undefined,
         },
       }
-      return { status: dupHit ? 'duplicate' : 'new', dupTarget: dupHit?.name || null, dupId: dupHit?.id || null, record, label: name, sub: phone, locality: v.locality || '—' }
+      return { status: dupHit ? 'duplicate' : 'new', dupTarget: dupHit?.name || null, dupId: dupHit?.id || null, record, label: name, sub: phone, locality: v.locality || '—', values: v }
     }
 
     // Properties. A row is a unit; the project can come from a column or from
     // the "import into project" box applied to the whole file.
     let unitRaw = v.title
     if (!unitRaw && headers.length) unitRaw = String(row[headers[0]] || '').trim()
-    if (!unitRaw) return { status: 'invalid', reason: 'No unit / listing name', row }
+    if (!unitRaw) return { status: 'invalid', reason: 'No unit / listing name', row, values: v }
 
     const project = intoProject || v.project || unitRaw
     const parsed = splitUnit(unitRaw)
@@ -188,7 +233,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
       status: dupHit ? 'duplicate' : 'new',
       dupTarget: dupHit?.name || null,
       dupId: dupHit?.id || null,
-      record, label: title, sub: moneyLabel(v.price) || '—', locality: v.locality || '—',
+      record, label: title, sub: moneyLabel(v.price) || '—', locality: v.locality || '—', values: v,
     }
   })
 
@@ -196,48 +241,89 @@ export default function ImportPage({ store, go, sel, topBar }) {
   // "is my data coming across, or just the name?"
   const mappedCount = new Set(Object.values(mapping).filter(Boolean)).size
   const unmappedHeaders = headers.filter(h => !Object.values(mapping).includes(h))
+  // The Review table's own columns — every field that was actually mapped to
+  // a column, in schema order. Not "core fields", not a fixed guess: whatever
+  // you pointed at a column is what you get to check before confirming.
+  const reviewCols = FIELDS.filter(f => mapping[f.key])
 
   const newCount = previewRows.filter(r => r.status === 'new').length
   const dupCount = previewRows.filter(r => r.status === 'duplicate').length
   const invalidCount = previewRows.filter(r => r.status === 'invalid').length
   const filteredRows = previewRows.filter(r => filterStatus === 'all' || r.status === filterStatus)
+  // Owners have no merge step — a duplicate is skipped, not sent to the
+  // server at all, so it shouldn't be counted as something about to be saved.
+  const dupWord = kind === 'owners' ? 'already on file' : 'to merge'
+  const dupBadge = kind === 'owners' ? 'Skip' : 'Merge'
+  const sendCount = newCount + (kind === 'owners' ? 0 : dupCount)
+
+  // One row at a time, awaited before the next one started, was N sequential
+  // round trips for one file — a 200-row township sheet took as long as 200
+  // separate saves. Every row's create request now fires together
+  // (Promise.allSettled starts them all before waiting on any of them); a
+  // duplicate's merge still has to happen after ITS create succeeds (there's
+  // nothing to merge into until the row exists), but those also all run
+  // together rather than one merge blocking the next row's create.
+  const CREATE_BY_KIND = { clients: api.createLead, owners: api.createOwner, properties: api.createProperty }
+  const CACHE_KIND = { clients: 'lead', owners: 'owner', properties: 'property' }
 
   const handleConfirm = async () => {
     if (!parsedRows.length) return
     setImporting(true)
     const batchId = 'imp_' + Date.now()
-    let added = 0, merged = 0; const mergedDetails = []
-    try {
-      let n = 0
-      for (const pr of previewRows) {
-        if (pr.status === 'invalid') continue
-        // Explicit id per row: the optimistic record and the stored row must
-        // share one, or Undo can't find what it created. It also keeps rows
-        // created inside the same millisecond from colliding.
-        const recId = `${kind === 'clients' ? 'l' : 'p'}_${batchId}_${n++}`
+    // Explicit id per row: the optimistic record and the stored row must share
+    // one, or Undo can't find what it created. It also keeps rows created
+    // inside the same millisecond from colliding.
+    let n = 0
+    // Owners have no merge step (unlike leads) — a duplicate owner isn't
+    // created at all, just skipped, which is also what makes re-running an
+    // import that stopped partway through safe.
+    const toCreate = previewRows
+      .filter(pr => pr.status !== 'invalid' && !(kind === 'owners' && pr.status === 'duplicate'))
+      .map(pr => {
+        const recId = `${kind === 'clients' ? 'l' : kind === 'owners' ? 'own' : 'p'}_${batchId}_${n++}`
         const rec = { ...pr.record, id: recId, importBatchId: batchId }
-        if (kind === 'clients') {
-          if (pr.status === 'duplicate' && pr.dupId) {
-            const dupRec = { ...rec, duplicateOf: pr.dupId }
-            await store.addLead(dupRec)
-            await store.merge(recId)
-            merged++
-            mergedDetails.push(`${pr.label} merged into existing record — ${pr.dupTarget}`)
-          } else {
-            await store.addLead(rec)
-            added++
-          }
-        } else {
-          await store.addProperty(rec)
-          if (pr.status === 'duplicate') {
-            merged++
-            mergedDetails.push(`${pr.label} merged into existing record — ${pr.dupTarget}`)
-          } else {
-            added++
-          }
-        }
+        if (kind === 'clients' && pr.status === 'duplicate' && pr.dupId) rec.duplicateOf = pr.dupId
+        return { pr, rec }
+      })
+
+    try {
+      const creator = CREATE_BY_KIND[kind]
+      const results = await Promise.allSettled(toCreate.map(({ rec }) => creator(rec)))
+
+      const created = []
+      const toMerge = []
+      let added = 0, merged = 0, failed = 0
+      const mergedDetails = []
+      if (kind === 'owners') {
+        previewRows.forEach(pr => {
+          if (pr.status !== 'duplicate') return
+          merged++
+          mergedDetails.push(`${pr.label} already on file — skipped (${pr.dupTarget})`)
+        })
       }
-      store.logImportBatch({ batchId, timestamp: Date.now(), fileName: fileMeta?.name || 'import', module: kind === 'clients' ? 'Leads & Contacts' : 'Properties', addedCount: added, mergedCount: merged, mergedDetails, reverted: false })
+      results.forEach((res, i) => {
+        const { pr, rec } = toCreate[i]
+        const body = res.status === 'fulfilled' ? res.value : null
+        const savedRec = body?.data || body?.owner || body?.property || body?.lead || null
+        if (!savedRec?.id) { failed++; return }
+        created.push(savedRec)
+        if (pr.status === 'duplicate') {
+          merged++
+          mergedDetails.push(`${pr.label} merged into existing record — ${pr.dupTarget}`)
+          if (kind === 'clients' && pr.dupId) toMerge.push(savedRec.id)
+        } else {
+          added++
+        }
+      })
+
+      if (created.length) store.cacheRecords(CACHE_KIND[kind], created)
+      // Each merge needs its row already in cache (store.merge reads
+      // duplicateOf off the cached record) — safe now that the create above
+      // has resolved and been cached, and these can also all run together.
+      if (toMerge.length) await Promise.allSettled(toMerge.map(id => store.merge(id)))
+
+      store.logImportBatch({ batchId, timestamp: Date.now(), fileName: fileMeta?.name || 'import', module: kindLabel, addedCount: added, mergedCount: merged, mergedDetails, reverted: false })
+      if (failed) store.toast(`${failed} row${failed === 1 ? '' : 's'} failed to save`, 'warn')
       setLastBatchId(batchId); setImportStats({ added, merged, invalid: invalidCount, mergedDetails }); setStep('done'); setImporting(false)
     } catch (err) { setError('Import failed while saving: ' + err.message); setImporting(false) }
   }
@@ -295,6 +381,11 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     <span className="imp-choice-t">Properties</span>
                     <span className="imp-choice-d">Units and listings — carpet, floor, facing, owner, price. Deduplicated per unit inside a project.</span>
                   </button>
+                  <button className="imp-choice" onClick={() => chooseKind('owners')}>
+                    <span className="imp-choice-ic"><Icon name="home" size={24} /></span>
+                    <span className="imp-choice-t">Owners</span>
+                    <span className="imp-choice-d">A cold-calling list — property owners to ask about selling or renting. Not linked to a listing, grouped by project.</span>
+                  </button>
                 </div>
               </Panel>
             )}
@@ -303,7 +394,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
             {step === 'upload' && (
               <Panel>
                 <div className="imp-bar">
-                  <div className="imp-step-title">Upload your file <span className="imp-target">{kind === 'clients' ? 'Leads & contacts' : 'Properties'}</span></div>
+                  <div className="imp-step-title">Upload your file <span className="imp-target">{kindLabel}</span></div>
                   <button className="btn btn-quiet btn-sm" onClick={restart}>Change type</button>
                 </div>
                 {error && <div className="imp-error">{error}</div>}
@@ -329,9 +420,9 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     <Button variant="primary" size="sm" disabled={newCount + dupCount === 0} onClick={() => setStep('review')}>Continue to review</Button>
                   </div>
                 </div>
-                {kind === 'properties' && (
+                {(kind === 'properties' || kind === 'owners') && (
                   <div className="imp-project">
-                    <label className="imp-map-label">Import into project <span className="imp-map-hint">optional — groups every row as a unit of one township/society</span></label>
+                    <label className="imp-map-label">Import into project <span className="imp-map-hint">optional — groups every row under one township/society{kind === 'owners' ? ' in the Owners project view' : ''}</span></label>
                     <input className="input" value={importProject} onChange={e => setImportProject(e.target.value)}
                       placeholder="e.g. Godrej Riverside — leave blank to import as independent listings" list="imp-proj-list" />
                     <datalist id="imp-proj-list">
@@ -373,7 +464,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
 
                 <div className="imp-counts">
                   <span className="imp-count new">{newCount} new</span>
-                  <span className="imp-count dup">{dupCount} duplicate{dupCount === 1 ? '' : 's'} to merge</span>
+                  <span className="imp-count dup">{dupCount} duplicate{dupCount === 1 ? '' : 's'} {dupWord}</span>
                   <span className="imp-count skip">{invalidCount} will be skipped</span>
                   <span className="imp-count" style={{ marginLeft: 'auto' }}>{mappedCount} of {headers.length} columns mapped</span>
                 </div>
@@ -392,24 +483,27 @@ export default function ImportPage({ store, go, sel, topBar }) {
                   <div className="imp-step-title">Review & confirm</div>
                   <div className="imp-bar-actions">
                     <Button variant="secondary" size="sm" onClick={() => setStep('map')}>Back</Button>
-                    <Button variant="primary" size="sm" disabled={importing || (newCount + dupCount === 0)} onClick={handleConfirm}>
-                      {importing ? 'Importing…' : `Import ${newCount + dupCount} record${newCount + dupCount === 1 ? '' : 's'}`}
+                    <Button variant="primary" size="sm" disabled={importing || sendCount === 0} onClick={handleConfirm}>
+                      {importing ? 'Importing…' : `Import ${sendCount} record${sendCount === 1 ? '' : 's'}`}
                     </Button>
                   </div>
                 </div>
                 <div className="imp-review-filters">
-                  {[['all', `All ${previewRows.length}`], ['new', `New ${newCount}`], ['duplicate', `Merge ${dupCount}`], ['invalid', `Skip ${invalidCount}`]].map(([k, label]) => (
+                  {[['all', `All ${previewRows.length}`], ['new', `New ${newCount}`], ['duplicate', `${dupBadge} ${dupCount}`], ['invalid', `Skip ${invalidCount}`]].map(([k, label]) => (
                     <button key={k} className={'imp-fchip ' + k + (filterStatus === k ? ' on' : '')} onClick={() => setFilterStatus(k)}>{label}</button>
                   ))}
                 </div>
+                {/* Every field YOU mapped, not a fixed guess at what matters — a
+                    hardcoded Name/Phone/Locality triple hid exactly the fields
+                    (project, unit, tower, config…) someone most needed to check
+                    before confirming, and any field not in that fixed set never
+                    appeared here even though it was mapped and about to be saved. */}
                 <div className="tbl-scroll imp-review-tbl">
                   <table className="tbl">
                     <thead>
                       <tr>
                         <th>Status</th>
-                        <th>{kind === 'clients' ? 'Name' : 'Unit'}</th>
-                        <th>{kind === 'clients' ? 'Phone' : 'Price'}</th>
-                        <th>Locality</th>
+                        {reviewCols.map(f => <th key={f.key}>{f.label}</th>)}
                         <th>Action</th>
                       </tr>
                     </thead>
@@ -418,13 +512,22 @@ export default function ImportPage({ store, go, sel, topBar }) {
                         <tr key={i}>
                           <td>
                             {pr.status === 'new' && <span className="imp-badge new">New</span>}
-                            {pr.status === 'duplicate' && <span className="imp-badge dup">Merge</span>}
+                            {pr.status === 'duplicate' && <span className="imp-badge dup">{dupBadge}</span>}
                             {pr.status === 'invalid' && <span className="imp-badge skip">Skip</span>}
                           </td>
-                          <td className="name">{pr.label || '—'}</td>
-                          <td className="mono-num">{pr.sub || '—'}</td>
-                          <td>{pr.locality || '—'}</td>
-                          <td className="cell-quiet">{pr.dupTarget ? `Merges into ${pr.dupTarget}` : pr.status === 'invalid' ? (pr.reason || 'Skipped') : 'Create new'}</td>
+                          {reviewCols.map(f => {
+                            const raw = pr.values?.[f.key]
+                            // A money field's real value is a bare rupee integer
+                            // (parseMoney's job) — shown as-is that reads as a
+                            // broken price, not the ₹85L the sheet actually said.
+                            const shown = raw == null ? '—' : f.parse === parseMoney ? (moneyLabel(raw) || raw) : raw
+                            return <td key={f.key} className={f.key === 'phone' ? 'mono-num' : undefined}>{shown}</td>
+                          })}
+                          <td className="cell-quiet">
+                            {pr.dupTarget
+                              ? (kind === 'owners' ? `Already on file — ${pr.dupTarget}` : `Merges into ${pr.dupTarget}`)
+                              : pr.status === 'invalid' ? (pr.reason || 'Skipped') : 'Create new'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

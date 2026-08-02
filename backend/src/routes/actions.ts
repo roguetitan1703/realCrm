@@ -22,7 +22,7 @@ import {
 import { dispatchOutboundWebhook } from '../services/webhookSender';
 import {
   addTimelineEvent, updateLead, mergeLeads, getLeadById,
-  getTimelineEventById, updateTimelineEvent,
+  getTimelineEventById, updateTimelineEvent, maybeAutoAdvanceStage,
   addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES,
 } from '../services/store';
 import { isSafeKey, tenantOfKey } from '../services/media';
@@ -89,6 +89,13 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
     const finalText = text || existing.description;
     const updated = await updateTimelineEvent(eventId, req.tenantId!, finalText, outcome);
     if (!updated) return res.status(404).json({ error: 'Not found' });
+    // A call that rang out is something the system observed directly, not a
+    // judgment call — so it moves the lead's status on its own, same as a
+    // proven site visit. Everything else logged here ("Interested", "Not
+    // interested"…) stays a human decision.
+    if (existing.type === 'call' && outcome && /no\s*answer/i.test(outcome)) {
+      await maybeAutoAdvanceStage(existing.record_id, 'Call Not Received', 'No answer logged on a call');
+    }
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,
       actor_label: authorId, action: existing.type === 'remark' ? 'remark.updated' : 'contact_action.updated',

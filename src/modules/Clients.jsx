@@ -8,21 +8,30 @@ import { CLIENTS_DEF } from './definitions.jsx'
 import { api } from '../lib/api.js'
 import { useServerList } from '../lib/serverList.js'
 import { useServerData } from '../lib/useServerData.js'
+import Owners from './Owners.jsx'
 
 // B3: Contacts is ONE section with TWO subnavs — Clients (demand: buyers,
-// tenants) and Owners (supply: sellers, landlords) — backed by separate
-// records (a person who is both gets two distinct rows, never merged). Each
-// subnav gets its own role tab-pills underneath. An owner isn't its own
-// stored record yet (it's derived from grouping properties by owner name),
-// but it already has a stable id + is always reachable contextually from its
-// property — the Contacts→Owners list is the "browse all owners" view, not
-// the only path in.
-export default function Clients({ store, go, sel, topBar }) {
+// tenants) and Owners (supply: cold-calling list). They're backed by two
+// entirely different things: Clients is a derived view over leads; Owners is
+// a real, importable, assignable record of its own (see Owners.jsx and the
+// OWNERS block in backend/src/services/store.ts) — a property owner a firm
+// calls to ask if they want to sell/rent, not a buyer-side enquiry.
+/**
+ * Clients is a ROUTER and holds no hooks of its own — same reason as
+ * Leads/Properties: rendering Owners (which has its own hooks) from partway
+ * through this component's body would mean the 'clients' render calls more
+ * hooks than the 'owners' render, and React throws the moment the subnav
+ * switches. The two stores are separate screens, not two branches of one.
+ */
+export default function Clients(props) {
+  const tab = props.sel?.contactsTab === 'owners' ? 'owners' : 'clients'
+  if (tab === 'owners') return <Owners store={props.store} go={props.go} sel={props.sel} topBar={props.topBar} phone={props.phone} />
+  return <ClientsList {...props} />
+}
+
+function ClientsList({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
-  // Which store we're in is NAVIGATION, so it lives in the sidebar sub-nav and
-  // is carried in `sel` — not in local component state. That way the nav and
-  // the list can't disagree about which one is open, and a deep link works.
-  const tab = sel?.contactsTab === 'owners' ? 'owners' : 'clients'
+  const tab = 'clients'
   const [seg, setSeg] = useState('all')
   const [flt, setFlt] = useState({})
   const [q, setQ] = useState('')

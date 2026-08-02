@@ -135,7 +135,11 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
       <div className="leads-dd-row">
         <SelectDropdown
           label="Type" value={intent} onChange={setIntentP}
-          options={[{ value: 'all', label: 'All' }, { value: 'buy', label: 'Sale' }, { value: 'rent', label: 'Rent' }]}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'buy', label: 'Sale', count: counts.byIntent?.buy ?? 0 },
+            { value: 'rent', label: 'Rent', count: counts.byIntent?.rent ?? 0 },
+          ]}
         />
         <SelectDropdown
           label="Status" value={stage} onChange={setStageP}
@@ -167,9 +171,11 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
           with (ModuleTable's `selectable` is already gated on canAssign). */}
       {canAssign && selected.size > 0 && (
         <div className="selbar">
-          <span>{selected.size} selected</span>
-          <Button variant="primary" size="sm" onClick={bulkAssign}>Bulk assign</Button>
-          <Button variant="quiet" size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
+          <span className="selbar-count">{selected.size} selected</span>
+          <div className="selbar-actions">
+            <Button variant="primary" size="sm" onClick={bulkAssign}>Bulk assign</Button>
+            <Button variant="quiet" size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
+          </div>
         </div>
       )}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>

@@ -179,6 +179,51 @@ export async function initSchema(): Promise<void> {
         last_assigned_index INT DEFAULT -1
       );
     `;
+    // Two sweeps, off by default, distinct from arrival-time routing above:
+    // B — pick up a lead nobody owns (never assigned, or its owner left);
+    // C — take a lead back from an assignee who has gone quiet on it.
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS sweep_unassigned_enabled BOOLEAN DEFAULT false;`;
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS sweep_unassigned_hours INT DEFAULT 4;`;
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS reassign_idle_enabled BOOLEAN DEFAULT false;`;
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS reassign_idle_hours INT DEFAULT 2;`;
+    // Same shape again, for the owner cold-calling list (crm_owners further
+    // below) — its own rotation pool and its own pair of sweeps, entirely
+    // separate from lead routing above: a firm may want every agent calling
+    // leads but only two people cold-calling owners, or the reverse.
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_strategy TEXT DEFAULT 'manual';`;
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_active_agent_ids JSONB DEFAULT '[]'::jsonb;`;
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_last_assigned_index INT DEFAULT -1;`;
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_sweep_unassigned_enabled BOOLEAN DEFAULT false;`;
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_sweep_unassigned_hours INT DEFAULT 4;`;
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_reassign_idle_enabled BOOLEAN DEFAULT false;`;
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_reassign_idle_hours INT DEFAULT 2;`;
+
+    // Owner cold-calling list — property owners a firm calls to ask if they
+    // want to sell/rent, deliberately NOT linked to a crm_properties row (the
+    // desk doesn't necessarily list what they own) and NOT a crm_leads row
+    // (a lead is buyer/tenant demand; this is supply-side outreach with its
+    // own small status set). `project` is a free-text grouping key, same
+    // spirit as crm_properties.project — a lens, not a foreign key.
+    await sql`
+      CREATE TABLE IF NOT EXISTS crm_owners (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT,
+        phone TEXT,
+        email TEXT,
+        project TEXT,
+        unit_ref TEXT,
+        locality TEXT,
+        stage TEXT DEFAULT 'New',
+        source TEXT DEFAULT 'Import',
+        agent_id TEXT,
+        created_by TEXT,
+        import_batch_id TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_crm_owners_tenant ON crm_owners (tenant_id);`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS crm_timeline_events (

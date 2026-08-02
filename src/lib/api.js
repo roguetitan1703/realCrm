@@ -345,6 +345,21 @@ export const api = {
   deleteLead: (id) => request(`/modules/leads/records/${id}`, { method: 'DELETE' }),
   deleteProperty: (id) => request(`/modules/properties/records/${id}`, { method: 'DELETE' }),
 
+  // Owners — the cold-calling list (supply-side outreach, not a lead).
+  listOwners: (params = {}) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
+    const s = qs.toString()
+    return request(`/owners${s ? `?${s}` : ''}`)
+  },
+  getOwnersSummary: () => request('/owners/summary'),
+  listOwnerProjects: () => request('/owners/projects'),
+  getOwner: (id) => request(`/owners/${encodeURIComponent(id)}`),
+  createOwner: (owner) => request('/owners', { method: 'POST', body: JSON.stringify(owner) }),
+  updateOwner: (id, patch) => request(`/owners/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteOwner: (id) => request(`/owners/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  bulkAssignOwners: (ids, agentId) => request('/owners/bulk-assign', { method: 'POST', body: JSON.stringify({ ids, agentId }) }),
+
   // Properties CRUD
   getProperties: () => request('/properties'),
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Panel, SectionHead, StageTag, Button, Input, Segmented } from '../components/primitives.jsx'
+import { Panel, SectionHead, StageTag, Button, Input, Segmented, Toggle } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES, DEFAULT_WHATSAPP_INTRO } from '../data/theme.js'
 import { api } from '../lib/api.js'
@@ -10,7 +10,7 @@ const NAV = [
   { key: 'brand', label: 'Brand', icon: 'layers' },
   { key: 'pipeline', label: 'Pipeline', icon: 'leads' },
   { key: 'sources', label: 'Lead sources', icon: 'tag' },
-  { key: 'routing', label: 'Lead routing', icon: 'team' },
+  { key: 'routing', label: 'Routing', icon: 'team' },
   { key: 'followup', label: 'Follow-up SLA', icon: 'clock' },
   { key: 'messages', label: 'Message templates', icon: 'wa' },
   { key: 'audit', label: 'Audit ledger', icon: 'shield' },
@@ -263,6 +263,128 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
           </div>
         </Panel>
       )}
+
+      <SecHead title="Leads already in the pipeline" sub="Separate from the routing above, which only ever looks at the lead that just arrived. These two sweeps periodically check leads already sitting in the desk and act on them." />
+      <Panel>
+        <div className="set-toggle-row">
+          <div>
+            <SectionHead title="Pick up unowned leads" />
+            <div className="set-sec-sub">A lead with nobody on it — never assigned, or its owner left the firm — is auto-routed after it's been unowned this long.</div>
+          </div>
+          <Toggle on={!!routing?.sweep_unassigned_enabled} onClick={() => store.setRouting({ sweep_unassigned_enabled: !routing?.sweep_unassigned_enabled }, routing?.sweep_unassigned_enabled ? 'Unowned-lead sweep turned off' : 'Unowned-lead sweep turned on')} />
+        </div>
+        {!!routing?.sweep_unassigned_enabled && (
+          <NumField
+            value={Number(routing?.sweep_unassigned_hours ?? 4)} suffix="hours unowned"
+            onChange={(v) => store.setRouting({ sweep_unassigned_hours: Math.max(1, v) })}
+          />
+        )}
+      </Panel>
+      <Panel>
+        <div className="set-toggle-row">
+          <div>
+            <SectionHead title="Reassign idle leads" />
+            <div className="set-sec-sub">A lead with no activity from its assignee for this long — and no upcoming scheduled visit — is handed to the next agent in rotation, and the record shows why.</div>
+          </div>
+          <Toggle on={!!routing?.reassign_idle_enabled} onClick={() => store.setRouting({ reassign_idle_enabled: !routing?.reassign_idle_enabled }, routing?.reassign_idle_enabled ? 'Idle-lead reassignment turned off' : 'Idle-lead reassignment turned on')} />
+        </div>
+        {!!routing?.reassign_idle_enabled && (
+          <NumField
+            value={Number(routing?.reassign_idle_hours ?? 2)} suffix="hours idle"
+            onChange={(v) => store.setRouting({ reassign_idle_hours: Math.max(1, v) })}
+          />
+        )}
+      </Panel>
+
+      <OwnerRoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} />
+    </>
+  )
+}
+
+// ---- Owner (cold-calling) routing — same three controls as lead routing
+// above, entirely separate settings: a firm may staff leads and owner
+// outreach with different people, or run one and not the other. Off by
+// default (owner_strategy is 'manual', both sweeps false) — owners usually
+// arrive by the hundred via import, and auto-assigning all of them the
+// moment a sheet lands is not a default a firm should get without choosing it.
+function OwnerRoutingSection({ store, agents, routing, inactiveAgentIds }) {
+  const strategy = routing?.owner_strategy || 'manual'
+  const rota = routing?.owner_active_agent_ids || []
+  const rosterAgents = agents
+
+  const setStrategy = (s) => store.setRouting({ owner_strategy: s }, s === 'round_robin' ? 'New owners auto-assign, round-robin' : 'New owners land unassigned')
+  const toggleAgent = (id) => {
+    const next = rota.includes(id) ? rota.filter(x => x !== id) : [...rota, id]
+    store.setRouting({ owner_active_agent_ids: next })
+  }
+
+  return (
+    <>
+      <SecHead title="Owner (cold-calling) routing" sub="The same three controls as lead routing, for the owner outreach list instead — who catches a newly imported owner, and the two sweeps that check the list already on the desk." />
+      <Panel>
+        <SectionHead title="When a new owner is imported" />
+        <div className="opt-list">
+          <button className={'opt' + (strategy === 'round_robin' ? ' on' : '')} onClick={() => setStrategy('round_robin')}>
+            <span className="opt-radio" />
+            <span><span className="opt-t">Auto-assign · round-robin</span><span className="opt-s">Distribute evenly across the agents in rotation below as each row imports.</span></span>
+          </button>
+          <button className={'opt' + (strategy === 'manual' ? ' on' : '')} onClick={() => setStrategy('manual')}>
+            <span className="opt-radio" />
+            <span><span className="opt-t">Leave unassigned</span><span className="opt-s">Imported owners land in a shared pool. A manager picks who calls each one.</span></span>
+          </button>
+        </div>
+      </Panel>
+
+      {strategy === 'round_robin' && (
+        <Panel>
+          <SectionHead title="Agents in rotation" right={`${rota.length} of ${rosterAgents.length}`} />
+          <div className="set-sec-sub">Only agents you tick receive auto-assigned owners.</div>
+          <div className="rot-list">
+            {rosterAgents.map(a => {
+              const on = rota.includes(a.id)
+              const off = inactiveAgentIds.includes(a.id)
+              return (
+                <div key={a.id} className={'rot-row' + (on ? ' on' : '')} onClick={() => toggleAgent(a.id)} role="checkbox" aria-checked={on}>
+                  <span className="rot-check">{on && <Icon name="check" size={12} />}</span>
+                  <span className="rot-name">{a.name}{off && <span className="chip-lock"> · off duty</span>}</span>
+                </div>
+              )
+            })}
+          </div>
+        </Panel>
+      )}
+
+      <SecHead title="Owners already on the desk" sub="Separate from the routing above, which only ever looks at the owner row that just imported. These two sweeps periodically check the owner list already on the desk and act on it." />
+      <Panel>
+        <div className="set-toggle-row">
+          <div>
+            <SectionHead title="Pick up unowned rows" />
+            <div className="set-sec-sub">An owner with nobody on it — never assigned, or its owner left the firm — is auto-routed after it's been unowned this long.</div>
+          </div>
+          <Toggle on={!!routing?.owner_sweep_unassigned_enabled} onClick={() => store.setRouting({ owner_sweep_unassigned_enabled: !routing?.owner_sweep_unassigned_enabled }, routing?.owner_sweep_unassigned_enabled ? 'Unowned-owner sweep turned off' : 'Unowned-owner sweep turned on')} />
+        </div>
+        {!!routing?.owner_sweep_unassigned_enabled && (
+          <NumField
+            value={Number(routing?.owner_sweep_unassigned_hours ?? 4)} suffix="hours unowned"
+            onChange={(v) => store.setRouting({ owner_sweep_unassigned_hours: Math.max(1, v) })}
+          />
+        )}
+      </Panel>
+      <Panel>
+        <div className="set-toggle-row">
+          <div>
+            <SectionHead title="Reassign idle rows" />
+            <div className="set-sec-sub">An owner with no activity from its assignee for this long is handed to the next agent in rotation, and the record shows why.</div>
+          </div>
+          <Toggle on={!!routing?.owner_reassign_idle_enabled} onClick={() => store.setRouting({ owner_reassign_idle_enabled: !routing?.owner_reassign_idle_enabled }, routing?.owner_reassign_idle_enabled ? 'Idle-owner reassignment turned off' : 'Idle-owner reassignment turned on')} />
+        </div>
+        {!!routing?.owner_reassign_idle_enabled && (
+          <NumField
+            value={Number(routing?.owner_reassign_idle_hours ?? 2)} suffix="hours idle"
+            onChange={(v) => store.setRouting({ owner_reassign_idle_hours: Math.max(1, v) })}
+          />
+        )}
+      </Panel>
     </>
   )
 }

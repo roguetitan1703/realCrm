@@ -182,7 +182,22 @@ export const LEAD_MODULE_SCHEMA = {
     // ever appear here, so they move to the "Details" section instead of a
     // now-empty "Overview" one.
     { key: 'email', label: 'Email Address', type: 'email', section: 'domain' },
-    { key: 'source', label: 'Attribution Source', type: 'select', section: 'domain', options: ['Website', '99acres', 'MagicBricks', 'Referral', 'Walk-in', 'Meta Ads'] },
+    {
+      key: 'source', label: 'Attribution Source', type: 'select', section: 'domain',
+      // The firm's own configured source list (Settings), not a fixed guess —
+      // this used to be a hardcoded ['Website','99acres',...] that never
+      // matched what Settings actually offered, AND had no entry for
+      // 'Spreadsheet import' (every imported lead's real source). A <select>
+      // with no matching <option> silently falls back to whichever renders
+      // first, so opening Edit on an imported lead and saving without
+      // touching this field was silently rewriting its source to "Website".
+      options: (store, record) => {
+        const live = (store?.state?.settings?.sources || []).map(v => ({ value: v, label: v }))
+        const cur = record?.source
+        if (!cur || live.some(o => o.value === cur)) return live
+        return [{ value: cur, label: cur }, ...live]
+      },
+    },
     {
       key: 'agentId',
       label: 'Assigned Owner',
@@ -242,6 +257,42 @@ export const LEAD_MODULE_SCHEMA = {
       renderValue: (v) => (v && typeof v === 'object') ? '' : v,
     },
     { key: 'req.notes', label: 'Requirement Notes & Purpose', type: 'textarea', section: 'domain' }
+  ]
+}
+
+// Owner cold-calling record. Deliberately thin next to LEAD_MODULE_SCHEMA — no
+// budget, no requirement config, no buyer funnel — because an owner isn't a
+// lead with fewer fields, it's a different question ("will they sell/rent")
+// asked of a different person.
+export const OWNER_MODULE_SCHEMA = {
+  id: 'owners',
+  moduleName: 'Owner Record',
+  fields: [
+    { key: 'name', label: 'Full Name', type: 'text', section: 'core', required: true, hideInSheet: true },
+    { key: 'phone', label: 'Primary Phone', type: 'text', section: 'core', required: true, hideInSheet: true },
+    { key: 'email', label: 'Email Address', type: 'email', section: 'domain' },
+    { key: 'project', label: 'Project / Society', type: 'text', section: 'domain' },
+    { key: 'unitRef', label: 'Unit reference', type: 'text', section: 'domain' },
+    { key: 'locality', label: 'Locality', type: 'text', section: 'domain' },
+    { key: 'source', label: 'Source', type: 'text', section: 'domain' },
+    {
+      key: 'agentId', label: 'Assigned Owner', type: 'select', section: 'domain',
+      // Same disabled-departed-holder guard as the lead schema — see there for why.
+      options: (store, record) => {
+        const live = store?.state?.agents?.map(a => ({ value: a.id, label: a.name })) || []
+        const cur = record?.agentId
+        if (!cur || live.some(o => o.value === cur)) return live
+        const former = store?.state?.formerAgents?.find(a => a.id === cur)
+        return [{ value: cur, label: (former?.name || 'Former owner') + ' (left)', disabled: true }, ...live]
+      },
+      renderValue: (val, record, store) => {
+        if (!val) return 'Unassigned'
+        const ag = store?.state?.agents?.find(a => a.id === val)
+        if (ag) return ag.name
+        const former = store?.state?.formerAgents?.find(a => a.id === val)
+        return former ? `${former.name} (left the firm)` : 'Former owner (left the firm)'
+      }
+    },
   ]
 }
 

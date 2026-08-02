@@ -295,11 +295,11 @@ function reducer(state, action) {
     // Real, server-persisted remark events (B1) — kind picks the array so the
     // same actions serve leads and properties.
     case 'ADD_TIMELINE_EVENT':
-      return patchRecord(state, action.kind === 'property' ? 'property' : 'lead', action.id, r => ({
+      return patchRecord(state, action.kind, action.id, r => ({
         ...r, timeline: [action.event, ...(r.timeline || [])],
       }))
     case 'EDIT_TIMELINE_EVENT':
-      return patchRecord(state, action.kind === 'property' ? 'property' : 'lead', action.id, r => ({
+      return patchRecord(state, action.kind, action.id, r => ({
         ...r,
         timeline: (r.timeline || []).map(e => e.id === action.eventId
           ? { ...e, label: action.text, metadata: { ...(e.metadata || {}), edited: true, ...(action.outcome ? { outcome: action.outcome } : {}) } }
@@ -459,6 +459,18 @@ function reducer(state, action) {
     case 'ADD_PROPERTIES':
       return (action.properties || []).reduce((acc, p) => (p?.id ? cacheOne(acc, 'property', p) : acc), state)
 
+    case 'ADD_OWNER':
+      return action.owner?.id ? cacheOne(state, 'owner', action.owner) : state
+
+    case 'SET_OWNER_STAGE':
+      return patchRecord(state, 'owner', action.id, o => ({ ...o, stage: action.stage }))
+
+    case 'UPDATE_OWNER':
+      return patchRecord(state, 'owner', action.id, o => ({ ...o, ...action.patch }))
+
+    case 'DELETE_OWNERS':
+      return dropRecords(state, 'owner', Array.isArray(action.ids) ? action.ids : [action.ids])
+
     case 'DELETE_LEADS': {
       const ids = Array.isArray(action.ids) ? action.ids : [action.ids]
       return {
@@ -482,7 +494,7 @@ function reducer(state, action) {
       const gone = (kind) => Object.values(state.cache?.[kind] || {})
         .filter(r => r.importBatchId === batchId).map(r => r.id)
       return {
-        ...dropRecords(dropRecords(state, 'lead', gone('lead')), 'property', gone('property')),
+        ...dropRecords(dropRecords(dropRecords(state, 'lead', gone('lead')), 'property', gone('property')), 'owner', gone('owner')),
         importLogs: (state.importLogs || []).map(log => log.batchId === batchId ? { ...log, reverted: true } : log),
       }
     }
@@ -988,7 +1000,7 @@ export function StoreProvider({ children }) {
         'Merged into one record')
     },
     // Remark thread (B1) — real persistence, not the old client-only note echo.
-    // kind = 'lead' | 'property'.
+    // kind = 'lead' | 'property' | 'owner'.
     addRemark: (kind, id, text) => {
       apiClient.addRemark(id, text)
         .then(res => {
@@ -1129,6 +1141,24 @@ export function StoreProvider({ children }) {
           return made
         })
     },
+    // Owner cold-calling list. `addOwner` mirrors addLead; import uses this
+    // one row at a time (owners import at seed scale, not township scale).
+    addOwner: (owner) => write('Add owner',
+      () => apiClient.createOwner(owner),
+      (res) => {
+        const created = res?.owner || null
+        dispatch({ type: 'ADD_OWNER', owner: created?.id ? created : owner })
+      },
+      null),
+    setOwnerStage: (id, stage) => write('Status change',
+      () => apiClient.updateOwner(id, { stage }),
+      () => dispatch({ type: 'SET_OWNER_STAGE', id, stage }),
+      'Status → ' + stage),
+    updateOwner: (id, patch) => write('Update owner',
+      () => apiClient.updateOwner(id, patch),
+      () => dispatch({ type: 'UPDATE_OWNER', id, patch }),
+      'Owner details updated'),
+    deleteOwner: (ids) => api.deleteMany('owner', ids),
     // A partial delete is the outcome that has to be reported honestly: five of
     // six rows gone is neither "deleted" nor "failed", and the old version
     // toasted success unconditionally while dropping every rejection.
@@ -1136,8 +1166,9 @@ export function StoreProvider({ children }) {
     deleteProperty: (ids) => api.deleteMany('property', ids),
     deleteMany: (kind, ids) => {
       const list = Array.isArray(ids) ? ids : [ids]
-      const call = kind === 'lead' ? apiClient.deleteLead : apiClient.deleteProperty
-      const noun = kind === 'lead' ? 'Lead' : 'Property'
+      const call = kind === 'lead' ? apiClient.deleteLead : kind === 'owner' ? apiClient.deleteOwner : apiClient.deleteProperty
+      const noun = kind === 'lead' ? 'Lead' : kind === 'owner' ? 'Owner' : 'Property'
+      const actionType = kind === 'lead' ? 'DELETE_LEADS' : kind === 'owner' ? 'DELETE_OWNERS' : 'DELETE_PROPERTIES'
       return Promise.allSettled(list.map(id => call(id).then(res => {
         if (rejected(res)) throw new Error(res.error || 'rejected')
         return id
@@ -1145,7 +1176,7 @@ export function StoreProvider({ children }) {
         .then(results => {
           const gone = results.filter(r => r.status === 'fulfilled').map(r => r.value)
           const lost = results.length - gone.length
-          if (gone.length) dispatch({ type: kind === 'lead' ? 'DELETE_LEADS' : 'DELETE_PROPERTIES', ids: gone })
+          if (gone.length) dispatch({ type: actionType, ids: gone })
           if (lost) toast(`${lost} of ${results.length} could not be deleted`, 'warn')
           else toast(`${noun} record${gone.length > 1 ? 's' : ''} deleted`)
           return gone

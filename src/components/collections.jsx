@@ -528,6 +528,41 @@ export function OwnerCell({ record, store, onAssign, canAssign }) {
   )
 }
 
+/**
+ * The stage tag, and the control to change it — one cell, so the row itself
+ * can move a lead instead of forcing a trip into the detail page for a
+ * one-field change. Read-only (a bare tag) for anyone `canSet` refuses,
+ * matching the same gate the detail page's status dropdown already uses.
+ */
+export function StageCell({ record, store, stages, canSet, onSet }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+  if (!canSet) return <StageTag stage={record.stage} />
+  return (
+    <div className="stg-cell" ref={ref}>
+      <button className={'stg-btn' + (open ? ' open' : '')} onClick={e => { e.stopPropagation(); setOpen(o => !o) }}>
+        <StageTag stage={record.stage} />
+        <Icon name="chevDown" size={12} className="stg-cv" />
+      </button>
+      {open && (
+        <div className="popover stg-pop" onClick={e => e.stopPropagation()}>
+          {stages.map(s => (
+            <button key={s} className={'p-item' + (s === record.stage ? ' on' : '')} onClick={() => { onSet(s); setOpen(false) }}>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Value picker popover for a filter field. Long option lists (localities,
 // sources, stages) get an inline search box; selected values show a checkbox.
 function FilterValuePicker({ f, align, selected, onToggle }) {

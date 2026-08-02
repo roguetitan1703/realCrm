@@ -34,17 +34,18 @@ export default function Modals({ store, go }) {
     <>
       {store.state.searchOpen && <SearchModal store={store} go={go} />}
       {store.state.notifOpen && <NotifModal store={store} go={go} />}
-      {m?.kind === 'newLead' && <LeadForm store={store} />}
-      {m?.kind === 'editLead' && <LeadForm store={store} leadId={m.leadId} />}
+      {m?.kind === 'newLead' && <NewLeadModal store={store} />}
+      {m?.kind === 'editLead' && <NewLeadModal store={store} leadId={m.leadId} />}
+      {m?.kind === 'newOwner' && <NewOwnerModal store={store} />}
+      {m?.kind === 'editOwner' && <NewOwnerModal store={store} ownerId={m.ownerId} />}
       {m?.kind === 'editRecord' && <ModuleFormModal store={store} moduleId={m.moduleId} recordId={m.recordId} />}
       {m?.kind === 'assign' && <AssignModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'bulkAssign' && <BulkAssignModal store={store} leadIds={m.leadIds} onDone={m.onDone} />}
+      {m?.kind === 'bulkAssign' && <BulkAssignModal store={store} leadIds={m.leadIds} isOwner={m.isOwner} onDone={m.onDone} />}
       {m?.kind === 'reassign' && <ReassignModal store={store} fromId={m.fromId} />}
       {m?.kind === 'addAgent' && <AddAgentModal store={store} />}
       {m?.kind === 'contact' && <ContactConfirmModal store={store} channel={m.channel} name={m.name} phone={m.phone} email={m.email} waText={m.waText} recordType={m.recordType} recordId={m.recordId} />}
       {m?.kind === 'remark' && <RemarkModal store={store} recordType={m.recordType} recordId={m.recordId} />}
       {m?.kind === 'propStatus' && <StatusModal store={store} propId={m.propId} />}
-      {m?.kind === 'import' && <ImportModal store={store} />}
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'rejectLead' && <RejectLeadModal store={store} leadId={m.leadId} />}
@@ -621,6 +622,73 @@ function NewLeadModal({ store, leadId }) {
   )
 }
 
+// New owner — one-at-a-time entry for the cold-calling list, the manual
+// counterpart to the import wizard's bulk path. Deliberately thin, same as
+// OWNER_MODULE_SCHEMA: no requirement, no budget, this isn't a lead.
+function NewOwnerModal({ store, ownerId }) {
+  const edit = ownerId ? store.lookup('owner', ownerId) : null
+  const [f, setF] = useState(edit ? {
+    name: edit.name || '', phone: edit.phone || '', email: edit.email || '',
+    project: edit.project || '', unitRef: edit.unitRef || '', locality: edit.locality || '',
+    agentId: edit.agentId || null,
+  } : {
+    name: '', phone: '', email: '', project: '', unitRef: '', locality: '',
+    agentId: null,
+  })
+  const set = (k, v) => setF(s => ({ ...s, [k]: v }))
+
+  const save = () => {
+    if (!f.phone.trim()) { store.toast('Phone is required', 'warn'); return }
+    if (edit) {
+      store.updateOwner(edit.id, {
+        name: f.name.trim() || undefined, phone: f.phone.trim(), email: f.email.trim() || undefined,
+        project: f.project.trim() || undefined, unitRef: f.unitRef.trim() || undefined,
+        locality: f.locality.trim() || undefined, agentId: f.agentId || null,
+      })
+      store.toast('Owner updated')
+    } else {
+      store.addOwner({
+        name: f.name.trim() || undefined, phone: f.phone.trim(), email: f.email.trim() || undefined,
+        project: f.project.trim() || undefined, unitRef: f.unitRef.trim() || undefined,
+        locality: f.locality.trim() || undefined, agentId: f.agentId || undefined, source: 'Manual entry',
+      })
+      store.toast('Owner added')
+    }
+    store.closeModal()
+  }
+
+  return (
+    <Modal title={edit ? `Edit Owner — ${edit.name || edit.phone}` : 'New Owner'} onClose={store.closeModal} width={480}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
+          <Field label="Owner Name"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Optional" autoFocus /></Field>
+          <Field label="Phone *"><Input value={f.phone} onChange={e => set('phone', e.target.value)} placeholder="+91 98xxx xxxxx" /></Field>
+        </div>
+        <Field label="Email"><Input value={f.email} onChange={e => set('email', e.target.value)} placeholder="Optional" /></Field>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Project / Society"><Input value={f.project} onChange={e => set('project', e.target.value)} placeholder="e.g. Godrej Green Vistas" /></Field>
+          <Field label="Unit reference"><Input value={f.unitRef} onChange={e => set('unitRef', e.target.value)} placeholder="e.g. T1 · 2 BHK · GGVT10402" /></Field>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="field">
+            <label>Locality</label>
+            <SuggestInput id="owner-locality" value={f.locality} onChange={v => set('locality', v)}
+              options={localities(store)} placeholder="Where's the unit?" />
+          </div>
+          <div className="field">
+            <label>Assign to</label>
+            <select className="input" value={f.agentId || ''} onChange={e => set('agentId', e.target.value || null)} style={{ width: '100%' }}>
+              <option value="">Unassigned</option>
+              {store.activeAgents().map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+        </div>
+        <Button variant="primary" block onClick={save} icon="check">{edit ? 'Save Changes' : 'Add Owner'}</Button>
+      </div>
+    </Modal>
+  )
+}
+
 // The pre-Block-C add-property modal lived here and has been DELETED.
 //
 // It was superseded by the stepped page (PropertyWizard) but stayed reachable
@@ -730,15 +798,17 @@ function AssignModal({ store, leadId }) {
 // ---- Bulk assign: the same route AssignModal uses (bulkAssignLeads), just
 // with more than one id. One code path for one row and for a whole selection,
 // rather than a loop of single-lead assigns from the client. ----
-function BulkAssignModal({ store, leadIds = [], onDone }) {
+function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
   const [busy, setBusy] = useState(false)
   const n = leadIds.length
+  const noun = isOwner ? 'owner' : 'lead'
   const assign = (agentId) => {
     setBusy(true)
-    api.bulkAssignLeads(leadIds, agentId)
+    const call = isOwner ? api.bulkAssignOwners : api.bulkAssignLeads
+    call(leadIds, agentId)
       .then(res => {
         if (res?.success) {
-          store.toast(agentId ? `${res.assigned ?? n} lead${n === 1 ? '' : 's'} assigned` : `${res.assigned ?? n} lead${n === 1 ? '' : 's'} unassigned`)
+          store.toast(agentId ? `${res.assigned ?? n} ${noun}${n === 1 ? '' : 's'} assigned` : `${res.assigned ?? n} ${noun}${n === 1 ? '' : 's'} unassigned`)
           store.reloadServer?.()
           onDone?.()
           store.closeModal()
@@ -750,7 +820,7 @@ function BulkAssignModal({ store, leadIds = [], onDone }) {
       .catch(err => { store.toast(err.message || 'Could not assign', 'warn'); setBusy(false) })
   }
   return (
-    <Modal title={`Assign ${n} lead${n === 1 ? '' : 's'}`} onClose={store.closeModal} width={400}>
+    <Modal title={`Assign ${n} ${noun}${n === 1 ? '' : 's'}`} onClose={store.closeModal} width={400}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <button disabled={busy} onClick={() => assign(null)}
           style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 9, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
@@ -1330,405 +1400,6 @@ function VisitFeedbackModal({ store, leadId, propId }) {
         </>
       )}
       <Button variant="primary" block style={{ marginTop: 18 }} onClick={save}>Save outcome</Button>
-    </Modal>
-  )
-}
-
-// ---- Staged bulk import (CSV parser, live preview, deduplication & revert) ----
-// ---- Staged bulk import (CSV parser, live preview, deduplication & revert logs) ----
-function ImportModal({ store }) {
-  const [tab, setTab] = useState('import') // 'import' | 'history'
-  const [kind, setKind] = useState('clients')
-  const [step, setStep] = useState('upload') // 'upload' | 'preview' | 'done'
-  const [fileMeta, setFileMeta] = useState(null)
-  const [parsedRows, setParsedRows] = useState([])
-  const [headers, setHeaders] = useState([])
-  const [mapping, setMapping] = useState({ name: '', phone: '', locality: '', config: '', budget: '', title: '', price: '', type: '' })
-  const [error, setError] = useState(null)
-  const [importing, setImporting] = useState(false)
-  const [lastBatchId, setLastBatchId] = useState(null)
-  const [importStats, setImportStats] = useState(null)
-
-  const handleFile = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setFileMeta({ name: file.name, size: Math.round(file.size / 1024) + ' KB' })
-    const reader = new FileReader()
-    reader.onload = (evt) => {
-      try {
-        const text = evt.target.result
-        const lines = text.split(/\r?\n/).filter(line => line.trim())
-        if (lines.length < 2) {
-          setError('File must contain a header row and at least one data row.')
-          return
-        }
-        const parseCSVLine = (str) => {
-          const res = []
-          let cur = ''
-          let inQuotes = false
-          for (let i = 0; i < str.length; i++) {
-            const ch = str[i]
-            if (ch === '"') inQuotes = !inQuotes
-            else if (ch === ',' && !inQuotes) {
-              res.push(cur.trim().replace(/^"|"$/g, ''))
-              cur = ''
-            } else {
-              cur += ch
-            }
-          }
-          res.push(cur.trim().replace(/^"|"$/g, ''))
-          return res
-        }
-        const cols = parseCSVLine(lines[0])
-        const rows = lines.slice(1).map(line => {
-          const vals = parseCSVLine(line)
-          const obj = {}
-          cols.forEach((h, idx) => { obj[h] = vals[idx] || '' })
-          return obj
-        })
-        setHeaders(cols)
-        const guess = { name: '', phone: '', locality: '', config: '', budget: '', title: '', price: '', type: '' }
-        cols.forEach(c => {
-          const cl = c.toLowerCase()
-          if (/name|client|buyer/i.test(cl) && !guess.name) guess.name = c
-          if (/phone|mobile|contact|tel/i.test(cl) && !guess.phone) guess.phone = c
-          if (/area|locality|city|location/i.test(cl) && !guess.locality) guess.locality = c
-          if (/bhk|config|req|type/i.test(cl) && !guess.config) guess.config = c
-          if (/budget|amount/i.test(cl) && !guess.budget) guess.budget = c
-          if (/project|society|title|building/i.test(cl) && !guess.title) guess.title = c
-          if (/price|cost|rate/i.test(cl) && !guess.price) guess.price = c
-          if (/type|bhk/i.test(cl) && !guess.type) guess.type = c
-        })
-        setMapping(guess)
-        setParsedRows(rows)
-        setError(null)
-        setStep('preview')
-      } catch (err) {
-        setError('Failed to parse file: ' + err.message)
-      }
-    }
-    reader.readAsText(file)
-  }
-
-  // Parse the file into rows first, without deciding what is a duplicate.
-  const draftRows = parsedRows.map((row) => {
-    if (kind === 'clients') {
-      const nameRaw = mapping.name ? row[mapping.name] : ''
-      const phoneRaw = mapping.phone ? row[mapping.phone] : ''
-      if (!nameRaw && !phoneRaw) return { status: 'invalid', reason: 'Missing Name/Phone', row }
-      const name = nameRaw ? nameRaw.replace(/^[*(]+/g, '').trim() : 'Imported Lead'
-      const phone = (phoneRaw && /^[+0-9\s-]{7,15}$/.test(phoneRaw.trim())) ? phoneRaw.trim() : '+919800000000'
-      return {
-        status: 'new', dupTarget: null, name, phone,
-        locality: mapping.locality ? (row[mapping.locality] || '') : '',
-        config: mapping.config ? (row[mapping.config] || '2 BHK') : '2 BHK',
-        budget: mapping.budget ? (row[mapping.budget] || '1.2 Cr') : '1.2 Cr',
-      }
-    }
-    const titleRaw = mapping.title ? row[mapping.title] : ''
-    if (!titleRaw) return { status: 'invalid', reason: 'Missing Project Title', row }
-    const title = titleRaw.replace(/^[*(]+/g, '').trim()
-    const priceRaw = mapping.price ? row[mapping.price] : ''
-    const priceNum = parseFloat(priceRaw)
-    return {
-      status: 'new', dupTarget: null, title,
-      locality: mapping.locality ? (row[mapping.locality] || '') : '',
-      type: mapping.type ? (row[mapping.type] || '2 BHK') : '2 BHK',
-      price: (!isNaN(priceNum) && priceNum > 0) ? priceNum : 95,
-    }
-  })
-
-  // Then ask the database, once for the whole file. This used to compare each
-  // row against the in-memory collections, which meant the "duplicate" count
-  // was only ever as good as whatever the browser had loaded — it silently
-  // missed real duplicates, and would miss all of them once the collections go.
-  const phones = draftRows.filter(r => r.phone).map(r => r.phone)
-  const names = draftRows.filter(r => r.name && r.name.length > 3).map(r => r.name)
-  const titles = draftRows.filter(r => r.title).map(r => r.title)
-  const dupKey = JSON.stringify([phones, names, titles])
-  const { data: dupes } = useServerData(
-    () => (phones.length || names.length || titles.length)
-      ? api.checkDuplicates({ phones, names, titles })
-      : Promise.resolve({ leads: {}, properties: {} }),
-    [dupKey], { leads: {}, properties: {} })
-
-  const previewRows = draftRows.map(r => {
-    if (r.status === 'invalid') return r
-    const hit = kind === 'clients'
-      ? (dupes?.leads?.[r.phone] || (r.name?.length > 3 ? dupes?.leads?.[r.name.toLowerCase()] : null))
-      : dupes?.properties?.[String(r.title || '').toLowerCase()]
-    return hit ? { ...r, status: 'duplicate', dupTarget: hit.name, dupId: hit.id } : r
-  })
-
-  const newCount = previewRows.filter(r => r.status === 'new').length
-  const dupCount = previewRows.filter(r => r.status === 'duplicate').length
-  const invalidCount = previewRows.filter(r => r.status === 'invalid').length
-
-  const handleConfirm = async () => {
-    if (!parsedRows.length) return
-    setImporting(true)
-    const batchId = 'imp_' + Date.now()
-    let added = 0, merged = 0
-    const mergedDetails = []
-    try {
-      for (const pr of previewRows) {
-        if (pr.status === 'invalid') continue
-        if (kind === 'clients') {
-          await store.addLead({
-            name: pr.name, phone: pr.phone, source: 'CSV Import',
-            req: { locality: pr.locality, config: pr.config, budget: pr.budget },
-            budget: pr.budget, stage: 'New', importBatchId: batchId
-          })
-          if (pr.status === 'duplicate') {
-            merged++
-            mergedDetails.push(`${pr.name} (${pr.phone}) merged into existing lead [${pr.dupTarget}]`)
-          } else added++
-        } else {
-          await store.addProperty({
-            title: pr.title, locality: pr.locality, type: pr.type,
-            price: pr.price, status: 'Available', importBatchId: batchId
-          })
-          if (pr.status === 'duplicate') {
-            merged++
-            mergedDetails.push(`Project "${pr.title}" updated existing inventory [${pr.dupTarget}]`)
-          } else added++
-        }
-      }
-      store.logImportBatch({
-        batchId,
-        timestamp: Date.now(),
-        fileName: fileMeta?.name || 'bulk_import.csv',
-        module: kind === 'clients' ? 'Leads & Clients' : 'Properties',
-        addedCount: added,
-        mergedCount: merged,
-        mergedDetails,
-        reverted: false,
-      })
-      setLastBatchId(batchId)
-      setImportStats({ added, merged, invalid: invalidCount, mergedDetails })
-      setStep('done')
-      setImporting(false)
-    } catch (err) {
-      setError('Import failed during saving: ' + err.message)
-      setImporting(false)
-    }
-  }
-
-  const handleRevert = (batchIdToRevert) => {
-    if (batchIdToRevert) {
-      store.revertImportBatch(batchIdToRevert)
-    }
-  }
-
-  const importLogs = store.state.importLogs || []
-
-  return (
-    <Modal title="Import & Data Hygiene Suite" onClose={store.closeModal} width={700}>
-      <div style={{ marginBottom: 16 }}>
-        <Segmented block value={tab} onChange={setTab}
-          options={[
-            { value: 'import', label: 'New Bulk Import' },
-            { value: 'history', label: `Import Logs & Revert (${importLogs.length})` }
-          ]} />
-      </div>
-
-      {tab === 'history' && (
-        <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-          {importLogs.length === 0 ? (
-            <div className="u-muted" style={{ padding: 40, textAlign: 'center', fontSize: 13 }}>
-              No import batches recorded yet. Run a bulk import to view logs and revert options.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {importLogs.map((log) => (
-                <div key={log.batchId} style={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 10, padding: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>{log.fileName}</div>
-                      <div className="u-muted" style={{ fontSize: 11.5 }}>
-                        {new Date(log.timestamp).toLocaleString()} · Target: {log.module}
-                      </div>
-                    </div>
-                    <div>
-                      {!log.reverted ? (
-                        <Button variant="secondary" size="sm"
-                          style={{ color: 'var(--danger, #dc2626)', borderColor: 'var(--danger-border, #fca5a5)' }}
-                          onClick={() => handleRevert(log.batchId)}>
-                          Revert Entire Import
-                        </Button>
-                      ) : (
-                        <span style={{ fontSize: 11, fontWeight: 700, background: 'var(--chrome)', color: 'var(--muted)', padding: '4px 10px', borderRadius: 99 }}>
-                          Reverted (Records Removed)
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 10, fontSize: 12, marginBottom: log.mergedDetails?.length ? 8 : 0 }}>
-                    <span style={{ color: 'var(--green, #166534)', fontWeight: 600 }}>+{log.addedCount} Created</span>
-                    <span style={{ color: 'var(--blue, #1e40af)', fontWeight: 600 }}>🔗 {log.mergedCount} Deduplicated / Merged</span>
-                  </div>
-                  {log.mergedDetails && log.mergedDetails.length > 0 && (
-                    <div style={{ background: 'var(--chrome)', padding: '8px 10px', borderRadius: 6, fontSize: 11.5, marginTop: 6 }}>
-                      <div style={{ fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>Merged Items Details:</div>
-                      {log.mergedDetails.map((m, idx) => (
-                        <div key={idx} style={{ color: 'var(--ink)', marginBottom: 2 }}>• {m}</div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === 'import' && step === 'upload' && (
-        <>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 6 }}>1. Select Target CRM Module</div>
-          <Segmented block value={kind} onChange={v => { setKind(v); setError(null) }}
-            options={[{ value: 'clients', label: 'Leads & Clients' }, { value: 'properties', label: 'Properties / Inventory' }]} />
-
-          <label style={{ width: '100%', marginTop: 14, border: '1.5px dashed var(--accent-line)', background: 'var(--accent-wash)', borderRadius: 12, padding: '32px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
-            <input type="file" accept=".csv,.txt" onChange={handleFile} style={{ display: 'none' }} />
-            <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--card)', border: '1px solid var(--accent-line)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-ink)' }}><Icon name="layers" size={24} /></div>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>Drop your .csv file here or click to browse</div>
-            <div className="u-muted" style={{ fontSize: 12.5 }}>Preview table, mapping & deduplication check runs automatically</div>
-          </label>
-        </>
-      )}
-
-      {tab === 'import' && step === 'preview' && (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>Step 2: Column Mapping & Live Preview</div>
-              <div className="u-muted" style={{ fontSize: 12 }}>{fileMeta?.name} ({fileMeta?.size})</div>
-            </div>
-            <button className="btn btn-quiet btn-sm" onClick={() => setStep('upload')}>Change file</button>
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, background: 'var(--green-wash, #dcfce7)', color: 'var(--green, #166534)', padding: '4px 10px', borderRadius: 99 }}>✨ {newCount} New</span>
-            <span style={{ fontSize: 12, fontWeight: 600, background: 'var(--blue-wash, #dbeafe)', color: 'var(--blue, #1e40af)', padding: '4px 10px', borderRadius: 99 }}>🔗 {dupCount} Duplicates (Merge)</span>
-            <span style={{ fontSize: 12, fontWeight: 600, background: 'var(--chrome)', color: 'var(--muted)', padding: '4px 10px', borderRadius: 99 }}>⚠️ {invalidCount} Skipped</span>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, background: 'var(--card)', padding: 12, borderRadius: 10, border: '1px solid var(--line)', marginBottom: 14 }}>
-            {kind === 'clients' ? (
-              <>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 3 }}>Name Column</label>
-                  <select className="input" value={mapping.name} onChange={e => setMapping({ ...mapping, name: e.target.value })} style={{ width: '100%' }}>
-                    <option value="">-- None --</option>
-                    {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 3 }}>Phone Column</label>
-                  <select className="input" value={mapping.phone} onChange={e => setMapping({ ...mapping, phone: e.target.value })} style={{ width: '100%' }}>
-                    <option value="">-- None --</option>
-                    {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 3 }}>Locality Column</label>
-                  <select className="input" value={mapping.locality} onChange={e => setMapping({ ...mapping, locality: e.target.value })} style={{ width: '100%' }}>
-                    <option value="">Not mapped</option>
-                    {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 3 }}>Budget Column</label>
-                  <select className="input" value={mapping.budget} onChange={e => setMapping({ ...mapping, budget: e.target.value })} style={{ width: '100%' }}>
-                    <option value="">-- Default 1.2 Cr --</option>
-                    {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-              </>
-            ) : (
-              <>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 3 }}>Society / Title</label>
-                  <select className="input" value={mapping.title} onChange={e => setMapping({ ...mapping, title: e.target.value })} style={{ width: '100%' }}>
-                    <option value="">-- Select --</option>
-                    {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 3 }}>Price Column</label>
-                  <select className="input" value={mapping.price} onChange={e => setMapping({ ...mapping, price: e.target.value })} style={{ width: '100%' }}>
-                    <option value="">-- Default 95 L --</option>
-                    {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-              </>
-            )}
-          </div>
-
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 6 }}>Live Preview (First 5 Rows)</div>
-          <div style={{ border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden', maxHeight: 180, overflowY: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: 'var(--chrome)', borderBottom: '1px solid var(--line)', textAlign: 'left' }}>
-                  <th style={{ padding: '6px 10px' }}>Status</th>
-                  <th style={{ padding: '6px 10px' }}>{kind === 'clients' ? 'Lead Name' : 'Society'}</th>
-                  <th style={{ padding: '6px 10px' }}>{kind === 'clients' ? 'Phone' : 'Price'}</th>
-                  <th style={{ padding: '6px 10px' }}>Locality</th>
-                </tr>
-              </thead>
-              <tbody>
-                {previewRows.slice(0, 5).map((pr, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid var(--line)' }}>
-                    <td style={{ padding: '6px 10px' }}>
-                      {pr.status === 'new' && <span style={{ color: 'var(--green, #166534)', fontWeight: 600 }}>✨ New</span>}
-                      {pr.status === 'duplicate' && <span style={{ color: 'var(--blue, #1e40af)', fontWeight: 600 }}>🔗 Merge ({pr.dupTarget})</span>}
-                      {pr.status === 'invalid' && <span style={{ color: 'var(--muted)' }}>⚠️ Skip</span>}
-                    </td>
-                    <td style={{ padding: '6px 10px', fontWeight: 600 }}>{pr.name || pr.title || '—'}</td>
-                    <td style={{ padding: '6px 10px' }}>{pr.phone || pr.price || '—'}</td>
-                    <td style={{ padding: '6px 10px' }}>{pr.locality || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-            <Button variant="secondary" onClick={() => setStep('upload')}>Back</Button>
-            <Button variant="primary" disabled={importing || (newCount + dupCount === 0)} onClick={handleConfirm}>
-              {importing ? 'Importing...' : `Run Import (${newCount + dupCount} records)`}
-            </Button>
-          </div>
-        </>
-      )}
-
-      {tab === 'import' && step === 'done' && (
-        <div style={{ textAlign: 'center', padding: '16px 8px' }}>
-          <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--green-wash, #dcfce7)', color: 'var(--green, #166534)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
-            <Icon name="check" size={24} />
-          </div>
-          <div style={{ fontFamily: 'var(--disp)', fontWeight: 700, fontSize: 18, marginBottom: 6 }}>Import Successfully Executed</div>
-          <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>
-            Saved {importStats?.added || 0} new records and deduplicated/merged {importStats?.merged || 0} items.
-          </div>
-          {importStats?.mergedDetails?.length > 0 && (
-            <div style={{ background: 'var(--chrome)', padding: 10, borderRadius: 8, fontSize: 12, textAlign: 'left', maxHeight: 110, overflowY: 'auto', marginBottom: 16 }}>
-              <div style={{ fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>Merged Records:</div>
-              {importStats.mergedDetails.map((m, idx) => (
-                <div key={idx} style={{ color: 'var(--ink)' }}>• {m}</div>
-              ))}
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-            <Button variant="secondary" style={{ color: 'var(--danger, #dc2626)', borderColor: 'var(--danger-border, #fca5a5)' }} onClick={() => handleRevert(lastBatchId)}>
-              Revert / Undo This Import
-            </Button>
-            <Button variant="primary" onClick={() => setTab('history')}>
-              View Import Logs & History
-            </Button>
-          </div>
-        </div>
-      )}
     </Modal>
   )
 }

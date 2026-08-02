@@ -30,6 +30,7 @@ import { ModuleRecordSheet } from './ModuleFields.jsx'
 import { Panel, SectionHead, Button, Stepper, StageTag } from './primitives.jsx'
 import { DetailLayout } from '../layouts/layouts.jsx'
 import { ActionRail, RailSection } from './rail.jsx'
+import { SelectDropdown } from './collections.jsx'
 import Icon from './Icon.jsx'
 import { buildActionTiers } from '../modules/definitions.jsx'
 
@@ -187,13 +188,12 @@ export function ModuleDetail({
           <div className="rh-prog">
             {prog.flat ? (
               canSetProg ? (
-                <select
-                  className="rh-status-select"
+                <SelectDropdown
+                  label="Status"
                   value={progOnPath ? progCurrent : progStages[0]}
-                  onChange={(e) => prog.set(store, record, e.target.value)}
-                >
-                  {progStages.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+                  onChange={(v) => prog.set(store, record, v)}
+                  options={progStages.map(s => ({ value: s, label: s }))}
+                />
               ) : (
                 <StageTag stage={progCurrent} />
               )

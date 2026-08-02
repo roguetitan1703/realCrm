@@ -260,6 +260,8 @@ input,textarea,select{font-family:inherit}
 .set-main{display:flex;flex-direction:column;gap:16px;min-width:0}
 .set-sec-h{font-family:var(--disp);font-weight:600;font-size:19px;letter-spacing:-.01em}
 .set-sec-sub{font-size:13px;color:var(--muted);margin-top:2px;margin-bottom:4px;line-height:1.5}
+.set-toggle-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.set-toggle-row .set-sec-sub{max-width:440px}
 
 /* toggle option rows (routing strategy, sla presets) */
 .opt-list{display:flex;flex-direction:column;gap:9px}
@@ -561,9 +563,20 @@ input,textarea,select{font-family:inherit}
   color:var(--alert);background:var(--alert-wash);border-radius:5px;padding:1px 5px;white-space:nowrap}
 .own-btn.own-alert{border-color:#E4C4C0}
 
+/* Stage cell — the tag IS the control, same treatment as the owner cell so
+   the row itself can move a lead without a trip into the record. */
+.stg-cell{position:relative;display:inline-flex}
+.stg-btn{display:inline-flex;align-items:center;gap:3px;border:1px solid transparent;border-radius:8px;background:none;
+  padding:2px 4px;margin:-2px -4px;cursor:pointer;transition:background .12s,border-color .12s}
+.stg-btn:hover,.stg-btn.open{border-color:var(--line);background:var(--card-2)}
+.stg-cv{color:var(--muted);flex:none}
+.stg-pop{min-width:160px}
+
 /* Selection bar — shown above the list only while rows are checked */
-.selbar{display:flex;align-items:center;gap:14px;background:var(--accent-wash);border:1px solid var(--accent-line);
+.selbar{display:flex;align-items:center;justify-content:space-between;gap:14px;background:var(--accent-wash);border:1px solid var(--accent-line);
   color:var(--accent-ink);border-radius:var(--radius-lg);padding:12px 18px;font-size:13.5px;font-weight:600;margin:12px 0 14px}
+.selbar-count{white-space:nowrap}
+.selbar-actions{display:flex;align-items:center;gap:8px}
 
 .table-sel-cell{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;padding:8px;cursor:pointer;user-select:none;margin:-8px -12px}
 .table-sel-cell input[type="checkbox"]{cursor:pointer;width:16px;height:16px}
@@ -579,6 +592,15 @@ input,textarea,select{font-family:inherit}
 .grp-toggle .ic{color:var(--muted)}
 .grp-toggle.on{background:var(--accent-wash);color:var(--accent-ink);border-color:var(--accent)}
 .grp-toggle.on .ic{color:var(--accent)}
+/* The "inside a project" chip that replaces .grp-toggle once one is picked —
+   same height/radius so swapping between them doesn't jump the toolbar. */
+.proj-chip{display:inline-flex;align-items:center;gap:6px;height:var(--ctrl-h,34px);padding:0 6px 0 12px;
+  border:1px solid var(--accent);border-radius:var(--radius);background:var(--accent-wash);color:var(--accent-ink);
+  font-family:var(--sans);font-size:13px;font-weight:600;max-width:220px}
+.proj-chip .proj-chip-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.proj-chip button{flex:none;display:flex;align-items:center;justify-content:center;width:22px;height:22px;
+  border:none;border-radius:6px;background:transparent;color:var(--accent-ink);cursor:pointer;transition:background .12s}
+.proj-chip button:hover{background:rgba(0,0,0,.06)}
 .wa-source-lite{display:flex;align-items:flex-start;gap:6px;font-size:11.5px;line-height:1.4;color:var(--muted);margin-bottom:12px}
 .wa-source-lite .ic{color:var(--accent);flex-shrink:0;margin-top:1px}
 /* honest provenance line under the WhatsApp preview */
@@ -2093,8 +2115,13 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .app-mobile .dl-rail{position:static;order:-1;width:auto;box-shadow:none;background:transparent;max-height:none;overflow:visible}
 .app-mobile .dl-rail .rail-strip{display:none}
 .app-mobile .dl-rail .rail-full{display:block}
-.app-mobile .rh-prog{overflow-x:auto;scrollbar-width:none}
-.app-mobile .rh-prog::-webkit-scrollbar{display:none}
+/* Scroll lives on the stepper itself (.jstep), not on .rh-prog — that row also
+   holds the flat-status dropdown (SelectDropdown/StageCell) for leads and
+   owners, and its popover is absolutely positioned. overflow-x:auto on an
+   ancestor implicitly clips the other axis too, so the popover opened and was
+   invisible: nothing wrong with the dropdown, its container was clipping it. */
+.app-mobile .rh-prog .jstep{overflow-x:auto;scrollbar-width:none}
+.app-mobile .rh-prog .jstep::-webkit-scrollbar{display:none}
 /* The record sheet is a two-column grid of 150px labels — at 390px that leaves
    a value column too narrow to hold a price. So the LABEL stacks over its value
    instead of sitting beside it, which frees the row to hold TWO fields side by

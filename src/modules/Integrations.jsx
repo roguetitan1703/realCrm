@@ -11,7 +11,7 @@ import Connections from './Connections.jsx'
 // described capabilities instead of providing them, and the portal ones are
 // now genuinely handled by Connections.
 
-export default function Integrations({ store, topBar }) {
+export default function Integrations({ store, go, topBar }) {
   return (
     <>
       {topBar({ title: 'Integrations' })}
@@ -20,7 +20,7 @@ export default function Integrations({ store, topBar }) {
           <Connections store={store} />
 
           <div className="itg-sec">Bring your data</div>
-          <button className="itg-import" onClick={() => store.openModal({ kind: 'import' })}>
+          <button className="itg-import" onClick={() => go('import')}>
             <span className="itg-import-i"><Icon name="layers" size={22} /></span>
             <span className="itg-import-b">
               <span className="itg-import-t">Import from Excel / Google Sheets</span>

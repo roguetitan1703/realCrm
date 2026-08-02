@@ -14,7 +14,7 @@ import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { audit } from './audit.js';
-import { getContext } from './context.js';
+import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
 import { assertLeadWrite, ForbiddenError } from '../lib/permissions.js';
@@ -270,6 +270,24 @@ export interface RoutingRule {
   strategy: 'round_robin' | 'weighted' | 'strict_territory';
   active_agent_ids: string[];
   last_assigned_index: number;
+  // B — sweep leads nobody currently owns (never assigned, or the owner left).
+  sweep_unassigned_enabled: boolean;
+  sweep_unassigned_hours: number;
+  // C — take a lead back from an assignee who hasn't acted on it.
+  reassign_idle_enabled: boolean;
+  reassign_idle_hours: number;
+  // Same three concerns again, for the owner cold-calling list — its own
+  // pool, its own strategy, its own sweeps. Defaults to 'manual' (not
+  // round_robin): owners usually arrive by the hundred via import, and
+  // auto-assigning every one of them the moment a sheet lands is not a
+  // default a firm should get without choosing it.
+  owner_strategy: 'round_robin' | 'manual';
+  owner_active_agent_ids: string[];
+  owner_last_assigned_index: number;
+  owner_sweep_unassigned_enabled: boolean;
+  owner_sweep_unassigned_hours: number;
+  owner_reassign_idle_enabled: boolean;
+  owner_reassign_idle_hours: number;
 }
 
 export interface ServerState {
@@ -720,7 +738,7 @@ function demoEmail(name: string): string {
 // on purpose — it's an append-only hash-chained ledger; rewriting tenant_id
 // would break chain verification, so old entries stay under the old id.
 const TENANT_SCOPED_TABLES = [
-  'crm_agents', 'crm_properties', 'crm_units', 'crm_leads', 'crm_settings',
+  'crm_agents', 'crm_properties', 'crm_units', 'crm_leads', 'crm_owners', 'crm_settings',
   'crm_routing_rules', 'crm_timeline_events', 'users',
   'auth_otp', 'push_subscriptions', 'lead_shortlist', 'notifications',
 ];
@@ -927,7 +945,7 @@ export async function resetDatabase(): Promise<ServerState> {
   console.log(`[Supabase DB] 🧹 Truncating all CRM tables for workspace reset...`);
   // users is re-seeded from agents; superadmins are platform-level and must
   // survive a workspace reset, so they are deliberately NOT truncated.
-  await sql`TRUNCATE TABLE activities, crm_timeline_events, crm_units, crm_leads, crm_properties, crm_agents, crm_settings, crm_routing_rules, users, auth_otp CASCADE;`;
+  await sql`TRUNCATE TABLE activities, crm_timeline_events, crm_units, crm_leads, crm_owners, crm_properties, crm_agents, crm_settings, crm_routing_rules, users, auth_otp CASCADE;`;
   return await seedDatabase(true);
 }
 
@@ -1122,8 +1140,7 @@ export async function getDeskSummary(): Promise<any> {
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available
           FROM crm_properties WHERE tenant_id = ${t}`,
-    sql`SELECT count(DISTINCT coalesce(owner_phone, owner_name))::int AS n FROM crm_properties
-         WHERE tenant_id = ${t} AND coalesce(owner_name, '') <> ''`,
+    sql`SELECT count(*)::int AS n FROM crm_owners WHERE tenant_id = ${t}`,
   ]);
   const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
   const stagesByAgent = new Map<string, Record<string, number>>();
@@ -1152,15 +1169,16 @@ export async function getDeskSummary(): Promise<any> {
  * Leads carry the batch id in a column; properties carry it in `config`, which
  * is where every non-column property field lives.
  */
-export async function revertImportBatch(batchId: string): Promise<{ leads: number; properties: number }> {
+export async function revertImportBatch(batchId: string): Promise<{ leads: number; properties: number; owners: number }> {
   const t = tid();
-  const [leadRows, propRows] = await Promise.all([
+  const [leadRows, propRows, ownerRows] = await Promise.all([
     sql`DELETE FROM crm_leads WHERE tenant_id = ${t} AND import_batch_id = ${batchId} RETURNING id`,
     sql`DELETE FROM crm_properties WHERE tenant_id = ${t} AND config->>'importBatchId' = ${batchId} RETURNING id`,
+    sql`DELETE FROM crm_owners WHERE tenant_id = ${t} AND import_batch_id = ${batchId} RETURNING id`,
   ]);
   const leadIds = leadRows.map((r: any) => r.id);
   if (leadIds.length) await sql`DELETE FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(leadIds)}`;
-  return { leads: leadRows.length, properties: propRows.length };
+  return { leads: leadRows.length, properties: propRows.length, owners: ownerRows.length };
 }
 
 /**
@@ -1172,13 +1190,14 @@ export async function revertImportBatch(batchId: string): Promise<{ leads: numbe
  * away. The file is the input; the matches are the output; the database does
  * the comparison.
  */
-export async function checkDuplicates(input: { phones?: string[]; names?: string[]; titles?: string[] }): Promise<{ leads: Record<string, any>; properties: Record<string, any> }> {
+export async function checkDuplicates(input: { phones?: string[]; names?: string[]; titles?: string[] }): Promise<{ leads: Record<string, any>; properties: Record<string, any>; owners: Record<string, any> }> {
   const t = tid();
   // Keyed by whatever the file can match on, valued with id AND name -- the id
   // because a duplicate row is merged into the record it duplicates, and a
   // merge needs to know which record that is.
   const leads: Record<string, any> = {};
   const properties: Record<string, any> = {};
+  const owners: Record<string, any> = {};
 
   const phones = (input.phones || []).filter(Boolean).slice(0, 5000);
   const names = (input.names || []).filter(Boolean).map(n => n.toLowerCase()).slice(0, 5000);
@@ -1195,6 +1214,19 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
     }
   }
 
+  // Owners are their own table (see the OWNERS block) and matched on phone
+  // only — an owner's name is often blank in the source sheet, and two
+  // different owners legitimately sharing a name is far likelier than two
+  // people sharing a phone number. This is also what makes re-running an
+  // interrupted import safe: rows already saved before the browser closed
+  // are recognised and skipped/merged instead of duplicated.
+  if (phones.length) {
+    const rows = await sql`
+      SELECT id, name, phone FROM crm_owners
+       WHERE tenant_id = ${t} AND phone IN ${sql(phones)}`;
+    for (const r of rows) if (r.phone) owners[r.phone] = { id: r.id, name: r.name || r.phone };
+  }
+
   const titles = (input.titles || []).filter(Boolean).map(s => s.toLowerCase()).slice(0, 5000);
   if (titles.length) {
     const rows = await sql`
@@ -1207,7 +1239,7 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
       if (r.project) properties[String(r.project).toLowerCase()] = hit;
     }
   }
-  return { leads, properties };
+  return { leads, properties, owners };
 }
 
 /**
@@ -1854,6 +1886,256 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
   return n;
 }
 
+// ============================================================================
+// 📞 OWNERS — the cold-calling list (supply-side outreach)
+// ============================================================================
+// A property owner a firm calls to ask if they want to sell/rent. Deliberately
+// its own table, not a crm_leads row with a flag: a lead is buyer/tenant
+// demand working a status funnel toward a deal; an owner record is a much
+// flatter "did we reach them, are they interested in listing" outreach loop,
+// and mixing the two would put cold-call rows in every leads count and filter
+// in the app. Also deliberately NOT linked to a crm_properties row — the desk
+// often doesn't have (or need) a listing for what's being called about;
+// `project` is a free-text grouping key, same spirit as crm_properties.project.
+
+export const OWNER_STATUSES = ['New', 'Contacted', 'Callback', 'Interested', 'Not Interested', 'Do Not Call'];
+export const OWNER_TERMINAL_STATUSES = ['Not Interested', 'Do Not Call'];
+
+/** Same rule as leadScope, over crm_owners: an agent sees what's assigned to
+ *  or created by them; everyone else sees the tenant. */
+function ownerScope() {
+  const me = agentLeadScope();
+  return me ? sql`(agent_id = ${me} OR created_by = ${me})` : sql`TRUE`;
+}
+
+function rowToOwner(r: any): any {
+  return {
+    id: r.id,
+    name: r.name || '',
+    phone: r.phone || '',
+    email: r.email || null,
+    project: r.project || null,
+    unitRef: r.unit_ref || null,
+    locality: r.locality || null,
+    stage: r.stage || 'New',
+    source: r.source || 'Import',
+    agentId: r.agent_id || null,
+    createdBy: r.created_by || null,
+    importBatchId: r.import_batch_id || null,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
+  const t = tid();
+  const id = data.id || `own_${Date.now()}_${randomBytes(3).toString('hex')}`;
+  const createdBy = ctx.actorId ?? getContext()?.userId ?? null;
+  // Arrival-time routing — same idea as a lead landing from a portal, just for
+  // an owner arriving via import or the API. Only kicks in when the desk has
+  // actually turned it on (owner_strategy defaults to 'manual') and nobody
+  // already named an agent for this row.
+  let agentId = data.agentId || null;
+  if (!agentId) {
+    const rules = await getRoutingRules();
+    if (rules.owner_strategy === 'round_robin') agentId = await nextRoutedOwnerAgent();
+  }
+  const rows = await sql`
+    INSERT INTO crm_owners (id, tenant_id, name, phone, email, project, unit_ref, locality, stage, source, agent_id, created_by, import_batch_id)
+    VALUES (${id}, ${t}, ${data.name || null}, ${data.phone || null}, ${data.email || null},
+      ${data.project || null}, ${data.unitRef || null}, ${data.locality || null},
+      ${data.stage || 'New'}, ${data.source || 'Import'}, ${agentId},
+      ${createdBy}, ${data.importBatchId || null})
+    RETURNING *;
+  `;
+  const created = rowToOwner(rows[0]);
+  if (data.notes) {
+    await addTimelineEvent({ record_id: id, type: 'note', title: 'Note', description: String(data.notes), author: 'Import' });
+  }
+  audit({
+    tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'owner.create', target_type: 'owner', target_id: id,
+    summary: `Owner "${created.name || created.phone}" added`, metadata: { after: created }, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return created;
+}
+
+export async function listOwners(opts: {
+  page?: number; limit?: number; q?: string; stage?: string; project?: string; agentId?: string;
+  locality?: string; agent?: string; source?: string;
+  sortKey?: string; sortDir?: string;
+} = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
+  const t = tid();
+  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
+  const page = Math.max(Number(opts.page) || 1, 1);
+  const offset = (page - 1) * limit;
+
+  const where: any[] = [sql`tenant_id = ${t}`, ownerScope()];
+  const q = String(opts.q || '').trim();
+  if (q) {
+    const like = `%${q.toLowerCase()}%`;
+    where.push(sql`(lower(coalesce(name, '')) LIKE ${like} OR phone LIKE ${like} OR lower(coalesce(project, '')) LIKE ${like})`);
+  }
+  const stages = String(opts.stage || '').split(',').map(x => x.trim()).filter(Boolean);
+  if (stages.length) where.push(sql`stage IN ${sql(stages)}`);
+  // '_none' is the "No project" bucket from listOwnerProjects — those rows
+  // have project NULL or ''. Without this branch a click on that card sent
+  // project: undefined, which is not a filter at all and returned every
+  // owner instead of the handful with no project.
+  if (opts.project === '_none') where.push(sql`coalesce(project, '') = ''`);
+  else if (opts.project) where.push(sql`project = ${opts.project}`);
+  if (opts.agentId) where.push(sql`agent_id = ${opts.agentId}`);
+
+  // The filter-bar fields — same shapes as listLeads' Locality/Sales
+  // Executive so the two toolbars behave identically, not just look alike.
+  const many = (v?: string) => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
+  const anyOf = (parts: any[]) => sql`(${parts.reduce((a, c) => sql`${a} OR ${c}`)})`;
+  const localities = many(opts.locality);
+  if (localities.length) {
+    where.push(anyOf(localities.map(l =>
+      sql`lower(coalesce(locality, '')) LIKE ${'%' + l.toLowerCase().split('/')[0].trim() + '%'}`)));
+  }
+  const agents = many(opts.agent);
+  if (agents.length) {
+    const named = agents.filter(a => a !== '_none');
+    const parts: any[] = [];
+    if (named.length) parts.push(sql`agent_id IN ${sql(named)}`);
+    if (agents.includes('_none')) parts.push(sql`agent_id IS NULL`);
+    if (parts.length) where.push(anyOf(parts));
+  }
+  const sources = many(opts.source);
+  if (sources.length) where.push(sql`lower(coalesce(source, '')) IN ${sql(sources.map(s => s.toLowerCase()))}`);
+
+  const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+
+  const sortCols: Record<string, any> = {
+    name: sql`name`, recent: sql`created_at`, project: sql`project`,
+  };
+  const orderCol = sortCols[opts.sortKey || 'recent'] || sortCols.recent;
+  const dir = opts.sortDir === 'desc' ? sql`DESC` : opts.sortDir === 'asc' ? sql`ASC` : sql`DESC`;
+
+  const [rows, totalRows] = await Promise.all([
+    sql`SELECT * FROM crm_owners WHERE ${clause} ORDER BY ${orderCol} ${dir} LIMIT ${limit} OFFSET ${offset}`,
+    sql`SELECT count(*)::int AS n FROM crm_owners WHERE ${clause}`,
+  ]);
+  return { rows: rows.map(rowToOwner), total: totalRows[0]?.n || 0, page, limit };
+}
+
+/** Segment pill counts for the owners list, scoped the same way listOwners is. */
+export async function getOwnersSummary(): Promise<any> {
+  const t = tid();
+  const scope = ownerScope();
+  const [totals, byStage] = await Promise.all([
+    sql`SELECT count(*)::int AS total FROM crm_owners WHERE tenant_id = ${t} AND ${scope}`,
+    sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
+        FROM crm_owners WHERE tenant_id = ${t} AND ${scope} GROUP BY 1`,
+  ]);
+  return {
+    total: totals[0]?.total ?? 0,
+    byStage: Object.fromEntries((byStage as any[]).map(r => [r.stage, r.n])),
+  };
+}
+
+/** Owners grouped by project — the same "township lens" as listProjects, over
+ *  the cold-calling list instead of the inventory. */
+export async function listOwnerProjects(): Promise<{ rows: any[]; total: number }> {
+  const t = tid();
+  const scope = ownerScope();
+  const rows = await sql`
+    SELECT coalesce(nullif(project, ''), 'No project') AS key,
+           count(*)::int AS total,
+           count(*) FILTER (WHERE coalesce(stage, 'New') = 'New')::int AS "new",
+           count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
+           mode() WITHIN GROUP (ORDER BY locality) AS locality
+      FROM crm_owners WHERE tenant_id = ${t} AND ${scope}
+     GROUP BY 1 ORDER BY 2 DESC`;
+  return {
+    rows: rows.map((r: any) => ({
+      key: r.key, name: r.key, locality: r.locality || null,
+      counts: { total: r.total, new: r.new, interested: r.interested },
+    })),
+    total: rows.length,
+  };
+}
+
+export async function getOwnerById(id: string): Promise<any | null> {
+  const rows = await sql`SELECT * FROM crm_owners WHERE id = ${id} AND tenant_id = ${tid()} LIMIT 1`;
+  if (!rows[0]) return null;
+  const events = await getTimelineEvents(id);
+  return { ...rowToOwner(rows[0]), timeline: events.map(mapEventForClient) };
+}
+
+export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any | null> {
+  const t = tid();
+  const existing = await getOwnerById(id);
+  if (!existing) return null;
+  const next = {
+    name: patch.name !== undefined ? patch.name : existing.name,
+    phone: patch.phone !== undefined ? patch.phone : existing.phone,
+    email: patch.email !== undefined ? patch.email : existing.email,
+    project: patch.project !== undefined ? patch.project : existing.project,
+    unit_ref: patch.unitRef !== undefined ? patch.unitRef : existing.unitRef,
+    locality: patch.locality !== undefined ? patch.locality : existing.locality,
+    stage: patch.stage !== undefined ? patch.stage : existing.stage,
+    agent_id: patch.agentId !== undefined ? patch.agentId : existing.agentId,
+  };
+  await sql`UPDATE crm_owners SET ${sql(next)}, updated_at = NOW() WHERE id = ${id} AND tenant_id = ${t}`;
+  if (patch.stage !== undefined && patch.stage !== existing.stage) {
+    await addTimelineEvent({ record_id: id, type: 'stage_change', title: `Stage → ${patch.stage}`, description: `Marked ${patch.stage}`, author: ctx.actorLabel || 'System' });
+  }
+  const updated = await getOwnerById(id);
+  audit({
+    tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'owner.update', target_type: 'owner', target_id: id,
+    summary: `Owner "${updated?.name || id}" updated`, metadata: { patch }, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return updated;
+}
+
+export async function deleteOwner(id: string, ctx: ActorCtx = SYSTEM_CTX): Promise<boolean> {
+  const t = tid();
+  const existing = await getOwnerById(id);
+  const res = await sql`DELETE FROM crm_owners WHERE id = ${id} AND tenant_id = ${t}`;
+  if (res.count > 0) {
+    audit({
+      tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+      actor_label: ctx.actorLabel ?? null, action: 'owner.delete', target_type: 'owner', target_id: id,
+      summary: `Owner "${existing?.name || id}" deleted`, metadata: { before: existing }, ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+  }
+  return res.count > 0;
+}
+
+/** Same shape as bulkAssignLeads: one UPDATE, notify the new owner-caller. */
+export async function bulkAssignOwners(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
+  const who = getContext();
+  if (who?.role === 'agent') throw new ForbiddenError('Assigning owners is done from the desk.');
+  const clean = [...new Set((ids || []).filter(Boolean))];
+  if (clean.length === 0) return 0;
+  const t = tid();
+  const res = await sql`
+    UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW()
+    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
+      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
+  const n = res.count;
+  if (n === 0) return 0;
+  audit({
+    tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'owner.bulk_assign', target_type: 'owner', target_id: null,
+    summary: agentId ? `${n} owner${n === 1 ? '' : 's'} assigned` : `${n} owner${n === 1 ? '' : 's'} unassigned`,
+    metadata: { ids: clean, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  if (agentId) {
+    notify({
+      userId: agentId, type: 'owner_reassigned', push: true,
+      title: `${n} owner${n === 1 ? '' : 's'} assigned to you`,
+      body: n === 1 ? 'Open Owners to start calling.' : 'Open Owners to start calling.',
+      link: '?screen=clients&tab=owners',
+    }).catch(err => console.warn('[Notify] owner bulk assign failed:', err?.message));
+  }
+  return n;
+}
+
 /**
  * Counts for the lead segment pills, without reading the leads.
  *
@@ -1871,15 +2153,19 @@ export async function getLeadsSummary(): Promise<any> {
   const filters = Object.entries(LEAD_SEGMENTS)
     .map(([key, pred]) => sql`count(*) FILTER (WHERE ${pred})::int AS ${sql(key)}`)
     .reduce((acc, f) => sql`${acc}, ${f}`);
-  const [totals, byStage] = await Promise.all([
+  const RENT = sql`(lower(coalesce(deal, '')) IN ('rent', 'lease') OR lower(coalesce(purpose, '')) IN ('rent', 'lease'))`;
+  const [totals, byStage, byIntent] = await Promise.all([
     sql`SELECT count(*)::int AS total, ${filters} FROM crm_leads WHERE tenant_id = ${t} AND ${scope}`,
     sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
         FROM crm_leads WHERE tenant_id = ${t} AND ${scope} GROUP BY 1`,
+    sql`SELECT count(*) FILTER (WHERE NOT ${RENT})::int AS buy, count(*) FILTER (WHERE ${RENT})::int AS rent
+        FROM crm_leads WHERE tenant_id = ${t} AND ${scope}`,
   ]);
   return {
     ...(totals[0] || { total: 0 }),
     all: totals[0]?.total ?? 0,
     byStage: Object.fromEntries((byStage as any[]).map(r => [r.stage, r.n])),
+    byIntent: byIntent[0] || { buy: 0, rent: 0 },
   };
 }
 
@@ -2470,6 +2756,29 @@ export async function nextRoutedAgent(): Promise<string | null> {
   return picked;
 }
 
+/**
+ * Runs both sweeps for every tenant that has them turned on. Called on a
+ * timer (see index.ts) — never from a request, so each tenant gets its own
+ * system-actor context instead of inheriting whichever request happened to
+ * trigger it.
+ */
+export async function runRoutingSweeps(): Promise<void> {
+  const tenants = await sql`SELECT id FROM tenants`;
+  for (const t of tenants) {
+    await runWithContext({ tenantId: t.id, userId: null, role: null, actorType: 'system' }, async () => {
+      try {
+        const n1 = await sweepUnassignedLeads(t.id);
+        const n2 = await sweepIdleLeads(t.id);
+        const n3 = await sweepUnassignedOwners(t.id);
+        const n4 = await sweepIdleOwners(t.id);
+        if (n1 || n2 || n3 || n4) console.log(`[Routing Sweep] tenant ${t.id}: leads ${n1} unowned / ${n2} idle, owners ${n3} unowned / ${n4} idle`);
+      } catch (err: any) {
+        console.warn(`[Routing Sweep] tenant ${t.id} failed:`, err?.message);
+      }
+    });
+  }
+}
+
 export async function getAgents(): Promise<any[]> {
   // Exclude soft-deleted people: their users row carries deleted_at, but the
   // crm_agents row is kept so historical lead attribution still resolves. A
@@ -2488,12 +2797,30 @@ export async function getRoutingRules(): Promise<RoutingRule> {
     // Not this tenant's real agents — a fixed 'a1'..'a4' read as configured
     // when nothing was. createLead() derives the actual pool from getAgents()
     // whenever this comes back empty, so an honest empty array is correct here.
-    return { strategy: 'round_robin', active_agent_ids: [], last_assigned_index: -1 };
+    return {
+      strategy: 'round_robin', active_agent_ids: [], last_assigned_index: -1,
+      sweep_unassigned_enabled: false, sweep_unassigned_hours: 4,
+      reassign_idle_enabled: false, reassign_idle_hours: 2,
+      owner_strategy: 'manual', owner_active_agent_ids: [], owner_last_assigned_index: -1,
+      owner_sweep_unassigned_enabled: false, owner_sweep_unassigned_hours: 4,
+      owner_reassign_idle_enabled: false, owner_reassign_idle_hours: 2,
+    };
   }
   return {
     strategy: rows[0].strategy as any,
     active_agent_ids: rows[0].active_agent_ids || [],
     last_assigned_index: rows[0].last_assigned_index || -1,
+    sweep_unassigned_enabled: rows[0].sweep_unassigned_enabled ?? false,
+    sweep_unassigned_hours: rows[0].sweep_unassigned_hours ?? 4,
+    reassign_idle_enabled: rows[0].reassign_idle_enabled ?? false,
+    reassign_idle_hours: rows[0].reassign_idle_hours ?? 2,
+    owner_strategy: rows[0].owner_strategy || 'manual',
+    owner_active_agent_ids: rows[0].owner_active_agent_ids || [],
+    owner_last_assigned_index: rows[0].owner_last_assigned_index ?? -1,
+    owner_sweep_unassigned_enabled: rows[0].owner_sweep_unassigned_enabled ?? false,
+    owner_sweep_unassigned_hours: rows[0].owner_sweep_unassigned_hours ?? 4,
+    owner_reassign_idle_enabled: rows[0].owner_reassign_idle_enabled ?? false,
+    owner_reassign_idle_hours: rows[0].owner_reassign_idle_hours ?? 2,
   };
 }
 
@@ -2501,14 +2828,175 @@ export async function updateRoutingRules(patch: Partial<RoutingRule>): Promise<R
   const current = await getRoutingRules();
   const next = { ...current, ...patch };
   await sql`
-    INSERT INTO crm_routing_rules (strategy, active_agent_ids, last_assigned_index, tenant_id)
-    VALUES (${next.strategy}, ${sql.json(next.active_agent_ids)}, ${next.last_assigned_index}, ${tid()})
+    INSERT INTO crm_routing_rules (
+      strategy, active_agent_ids, last_assigned_index,
+      sweep_unassigned_enabled, sweep_unassigned_hours,
+      reassign_idle_enabled, reassign_idle_hours,
+      owner_strategy, owner_active_agent_ids, owner_last_assigned_index,
+      owner_sweep_unassigned_enabled, owner_sweep_unassigned_hours,
+      owner_reassign_idle_enabled, owner_reassign_idle_hours, tenant_id
+    )
+    VALUES (
+      ${next.strategy}, ${sql.json(next.active_agent_ids)}, ${next.last_assigned_index},
+      ${next.sweep_unassigned_enabled}, ${next.sweep_unassigned_hours},
+      ${next.reassign_idle_enabled}, ${next.reassign_idle_hours},
+      ${next.owner_strategy}, ${sql.json(next.owner_active_agent_ids)}, ${next.owner_last_assigned_index},
+      ${next.owner_sweep_unassigned_enabled}, ${next.owner_sweep_unassigned_hours},
+      ${next.owner_reassign_idle_enabled}, ${next.owner_reassign_idle_hours}, ${tid()}
+    )
     ON CONFLICT (tenant_id) DO UPDATE SET
       strategy = EXCLUDED.strategy,
       active_agent_ids = EXCLUDED.active_agent_ids,
-      last_assigned_index = EXCLUDED.last_assigned_index;
+      last_assigned_index = EXCLUDED.last_assigned_index,
+      sweep_unassigned_enabled = EXCLUDED.sweep_unassigned_enabled,
+      sweep_unassigned_hours = EXCLUDED.sweep_unassigned_hours,
+      reassign_idle_enabled = EXCLUDED.reassign_idle_enabled,
+      reassign_idle_hours = EXCLUDED.reassign_idle_hours,
+      owner_strategy = EXCLUDED.owner_strategy,
+      owner_active_agent_ids = EXCLUDED.owner_active_agent_ids,
+      owner_last_assigned_index = EXCLUDED.owner_last_assigned_index,
+      owner_sweep_unassigned_enabled = EXCLUDED.owner_sweep_unassigned_enabled,
+      owner_sweep_unassigned_hours = EXCLUDED.owner_sweep_unassigned_hours,
+      owner_reassign_idle_enabled = EXCLUDED.owner_reassign_idle_enabled,
+      owner_reassign_idle_hours = EXCLUDED.owner_reassign_idle_hours;
   `;
   return next;
+}
+
+/** Same round-robin as nextRoutedAgent(), against the owner pool instead of
+ *  the lead pool — a firm may staff cold-calling differently from leads. */
+export async function nextRoutedOwnerAgent(): Promise<string | null> {
+  const rows = await sql`
+    UPDATE crm_routing_rules
+    SET owner_last_assigned_index = (owner_last_assigned_index + 1) % GREATEST(jsonb_array_length(owner_active_agent_ids), 1)
+    WHERE tenant_id = ${tid()} AND jsonb_array_length(owner_active_agent_ids) > 0
+    RETURNING owner_active_agent_ids -> owner_last_assigned_index AS agent_id
+  `;
+  if (rows.length && rows[0].agent_id) return String(rows[0].agent_id).replace(/^"|"$/g, '');
+  return null;
+}
+
+/**
+ * The two sweeps, run for every tenant on a timer (see index.ts). Distinct
+ * from nextRoutedAgent(): that one only ever looks at the single lead that
+ * just arrived. These look BACKWARD across leads already sitting in the
+ * pipeline — one for leads nobody owns, one for leads whose owner has gone
+ * quiet — which arrival-time routing was never in a position to catch.
+ */
+export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
+  const rules = await getRoutingRules();
+  if (!rules.sweep_unassigned_enabled) return 0;
+  const hours = Math.max(Number(rules.sweep_unassigned_hours) || 4, 1);
+  // "Unowned" includes an agent_id that no longer resolves to a live user —
+  // the same orphaned state the desk sees as "Former owner" on the row.
+  const rows = await sql`
+    SELECT l.id, l.name, l.created_at FROM crm_leads l
+    LEFT JOIN users u ON u.id = l.agent_id AND u.tenant_id = l.tenant_id AND u.deleted_at IS NULL
+    WHERE l.tenant_id = ${tenantId} AND ${OPEN}
+      AND (l.agent_id IS NULL OR u.id IS NULL)
+      AND l.created_at < NOW() - (${hours}::text || ' hours')::interval
+  `;
+  let n = 0;
+  for (const lead of rows) {
+    const agentId = await nextRoutedAgent();
+    if (!agentId) break;
+    await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${lead.id} AND tenant_id = ${tenantId}`;
+    const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
+    await addTimelineEvent({
+      record_id: lead.id, type: 'assignment', title: 'Auto-assigned',
+      description: `Unowned for ${hours}h — routed to ${name}`,
+      author: 'System', metadata: { agentId, reason: 'sweep_unassigned', hours },
+    });
+    n++;
+  }
+  return n;
+}
+
+export async function sweepIdleLeads(tenantId: string): Promise<number> {
+  const rules = await getRoutingRules();
+  if (!rules.reassign_idle_enabled) return 0;
+  const hours = Math.max(Number(rules.reassign_idle_hours) || 2, 1);
+  // Excludes: terminal leads (nothing left to chase) and leads with a future
+  // scheduled follow-up (the assignee has a plan; going quiet on the record
+  // isn't the same as going quiet on the buyer).
+  const rows = await sql`
+    SELECT id, name, agent_id FROM crm_leads
+    WHERE tenant_id = ${tenantId} AND ${OPEN} AND agent_id IS NOT NULL
+      AND updated_at < NOW() - (${hours}::text || ' hours')::interval
+      AND NOT (follow_up IS NOT NULL AND (follow_up->>'date')::date >= CURRENT_DATE)
+  `;
+  let n = 0;
+  for (const lead of rows) {
+    const prevOwner = (await sql`SELECT name FROM users WHERE id = ${lead.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
+    const agentId = await nextRoutedAgent();
+    if (!agentId || agentId === lead.agent_id) continue;
+    await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${lead.id} AND tenant_id = ${tenantId}`;
+    const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
+    await addTimelineEvent({
+      record_id: lead.id, type: 'assignment', title: 'Reassigned — idle',
+      description: `No activity from ${prevOwner} for ${hours}h — routed to ${name}`,
+      author: 'System', metadata: { agentId, previousAgentId: lead.agent_id, reason: 'sweep_idle', hours },
+    });
+    n++;
+  }
+  return n;
+}
+
+// Same two sweeps again, over crm_owners — no OPEN/terminal-status guard the
+// way leads have one (owner statuses are already a short, mostly-terminal-free
+// list; Do Not Call and Not Interested are the only ones excluded here, same
+// reasoning as TERMINAL_STATUSES for leads: nothing left to chase).
+export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
+  const rules = await getRoutingRules();
+  if (!rules.owner_sweep_unassigned_enabled) return 0;
+  const hours = Math.max(Number(rules.owner_sweep_unassigned_hours) || 4, 1);
+  const rows = await sql`
+    SELECT o.id FROM crm_owners o
+    LEFT JOIN users u ON u.id = o.agent_id AND u.tenant_id = o.tenant_id AND u.deleted_at IS NULL
+    WHERE o.tenant_id = ${tenantId} AND coalesce(o.stage, '') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}
+      AND (o.agent_id IS NULL OR u.id IS NULL)
+      AND o.created_at < NOW() - (${hours}::text || ' hours')::interval
+  `;
+  let n = 0;
+  for (const owner of rows) {
+    const agentId = await nextRoutedOwnerAgent();
+    if (!agentId) break;
+    await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${owner.id} AND tenant_id = ${tenantId}`;
+    const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
+    await addTimelineEvent({
+      record_id: owner.id, type: 'assignment', title: 'Auto-assigned',
+      description: `Unowned for ${hours}h — routed to ${name}`,
+      author: 'System', metadata: { agentId, reason: 'sweep_unassigned', hours },
+    });
+    n++;
+  }
+  return n;
+}
+
+export async function sweepIdleOwners(tenantId: string): Promise<number> {
+  const rules = await getRoutingRules();
+  if (!rules.owner_reassign_idle_enabled) return 0;
+  const hours = Math.max(Number(rules.owner_reassign_idle_hours) || 2, 1);
+  const rows = await sql`
+    SELECT id, agent_id FROM crm_owners
+    WHERE tenant_id = ${tenantId} AND coalesce(stage, '') NOT IN ${sql(OWNER_TERMINAL_STATUSES)} AND agent_id IS NOT NULL
+      AND updated_at < NOW() - (${hours}::text || ' hours')::interval
+  `;
+  let n = 0;
+  for (const owner of rows) {
+    const prevOwner = (await sql`SELECT name FROM users WHERE id = ${owner.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
+    const agentId = await nextRoutedOwnerAgent();
+    if (!agentId || agentId === owner.agent_id) continue;
+    await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${owner.id} AND tenant_id = ${tenantId}`;
+    const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
+    await addTimelineEvent({
+      record_id: owner.id, type: 'assignment', title: 'Reassigned — idle',
+      description: `No activity from ${prevOwner} for ${hours}h — routed to ${name}`,
+      author: 'System', metadata: { agentId, previousAgentId: owner.agent_id, reason: 'sweep_idle', hours },
+    });
+    n++;
+  }
+  return n;
 }
 
 // --- BRAND (single source of truth: tenants.brand_config) ---
@@ -2769,7 +3257,37 @@ export async function addActivity(input: ActivityInput): Promise<any> {
     )
     RETURNING *
   `;
+  // A completed, proven site visit (photo + geo already required to reach
+  // here) is a fact the system observed directly — not a judgment call like
+  // "Interested", which stays manual. See maybeAutoAdvanceStage for the
+  // never-backwards / never-out-of-terminal guard.
+  if (input.type === 'site_visit' && input.lead_id) {
+    await maybeAutoAdvanceStage(input.lead_id, 'Site Visit', 'Site visit logged with proof');
+  }
   return rows[0];
+}
+
+/**
+ * Move a lead's stage automatically, but only forward and never out of a
+ * terminal status — the same restraint a desk expects of a human. Statuses
+ * are flat (not a funnel), so LEAD_STATUSES' order is used only as a rough
+ * "how far along" signal to decide what counts as backwards; a manual status
+ * a human already set (e.g. Interested, ahead of Call Not Received) is never
+ * overwritten by an automatic one behind it.
+ */
+export async function maybeAutoAdvanceStage(leadId: string, targetStage: string, reason: string): Promise<void> {
+  const t = tid();
+  const rows = await sql`SELECT stage FROM crm_leads WHERE id = ${leadId} AND tenant_id = ${t} LIMIT 1`;
+  const cur = rows[0]?.stage || 'New';
+  if (!rows.length || TERMINAL_STATUSES.includes(cur) || cur === targetStage) return;
+  const curIdx = LEAD_STATUSES.indexOf(cur);
+  const targetIdx = LEAD_STATUSES.indexOf(targetStage);
+  if (targetIdx === -1 || (curIdx !== -1 && targetIdx < curIdx)) return;
+  await sql`UPDATE crm_leads SET stage = ${targetStage}, updated_at = NOW() WHERE id = ${leadId} AND tenant_id = ${t}`;
+  await addTimelineEvent({
+    record_id: leadId, type: 'stage_change', title: `Stage → ${targetStage}`,
+    description: reason, author: 'System', metadata: { auto: true, from: cur, to: targetStage },
+  });
 }
 
 /** Coordinates for properties referenced by the given activities, so distance

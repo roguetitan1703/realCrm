@@ -20,14 +20,15 @@
 // ============================================================================
 
 import React from 'react'
-import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA } from '../components/ModuleFields.jsx'
+import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER_MODULE_SCHEMA } from '../components/ModuleFields.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
-import { OwnerCell } from '../components/collections.jsx'
+import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
 import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
+import { OWNER_STATUSES } from '../data/ownerStatus.js'
 import { canAssignLead, canEditLead, canUpdateLeadStatus } from '../lib/permissions.js'
 import { api } from '../lib/api.js'
 import Icon from '../components/Icon.jsx'
@@ -143,7 +144,14 @@ export const LEADS_DEF = {
     ) },
     { key: 'req', label: 'Requirement', render: (l) => reqShort(l.req) },
     { key: 'budget', label: 'Budget', sortable: true, render: (l) => <Money>{budgetRange(l.req)}</Money> },
-    { key: 'stage', label: 'Stage', sortable: true, render: (l) => <StageTag stage={l.stage} /> },
+    { key: 'stage', label: 'Stage', sortable: true, render: (l, store) => (
+      <StageCell
+        record={l} store={store}
+        stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
+        canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l)}
+        onSet={(stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) }}
+      />
+    ) },
     { key: 'source', label: 'Source', render: (l) => <Source>{l.source}</Source> },
     // WHO HAS THIS LEAD, and the way to change it — the same cell. It used to
     // render only a bare + button for anyone who could assign, so the column
@@ -283,7 +291,12 @@ export const LEADS_DEF = {
       <div className="prow">
         <div className="prow-top">
           <span className="prow-name">{l.name}</span>
-          <StageTag stage={l.stage} />
+          <StageCell
+            record={l} store={store}
+            stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
+            canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l)}
+            onSet={(stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) }}
+          />
         </div>
         {reqShort(l.req) && <div className="prow-req">{reqShort(l.req)}</div>}
         <div className="prow-meta">
@@ -303,7 +316,12 @@ export const LEADS_DEF = {
       <>
         <div className="rc-top">
           <div className="rc-title">{l.name}</div>
-          <StageTag stage={l.stage} />
+          <StageCell
+            record={l} store={store}
+            stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
+            canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l)}
+            onSet={(stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) }}
+          />
         </div>
         <div className="rc-sub mono-num">{l.phone}</div>
         <div className="rc-facts"><span>{reqShort(l.req)}</span></div>
@@ -314,6 +332,120 @@ export const LEADS_DEF = {
       </>
     )
   },
+}
+
+// ---------------------------------------------------------------------------
+// OWNERS — the cold-calling list. Same UI machinery as leads (bulk assign,
+// segments, sortable columns, status-in-row), a much smaller status set, and
+// deliberately no requirement/budget/matching — this is supply-side outreach,
+// not a buyer working a funnel. See OWNER_MODULE_SCHEMA for why the schema is
+// thin, and backend/src/services/store.ts's OWNERS block for why this isn't a
+// crm_leads row.
+// ---------------------------------------------------------------------------
+export const OWNERS_DEF = {
+  id: 'owners',
+  name: 'Owners',
+  singularName: 'Owner',
+  icon: 'home',
+  schema: OWNER_MODULE_SCHEMA,
+
+  // Same two fields as the lead filter bar (minus Source/Needs-attention,
+  // which don't have an owner-side equivalent yet) — same shape, same
+  // options source, so the two toolbars behave identically.
+  filterFields: (store) => [
+    { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
+    { key: 'agent', label: 'Sales Executive', icon: 'person', options: [
+      { value: '_none', label: 'Unassigned' }, ...store.activeAgents().map(a => ({ value: a.id, label: a.first })),
+    ] },
+  ],
+
+  headerFacts: (o) => [
+    o.phone,
+    o.email || null,
+    o.project ? <span className="rh-loc"><Icon name="building" size={12} className="ic" />{o.project}</span> : null,
+    o.unitRef || null,
+    o.locality || null,
+    o.source ? `Via ${o.source}` : null,
+  ].filter(Boolean),
+
+  progression: {
+    flat: true,
+    stages: () => OWNER_STATUSES,
+    current: (o) => o.stage,
+    set: (store, o, stage) => store.setOwnerStage(o.id, stage),
+    canSet: (store, o) => canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o),
+  },
+
+  sortOptions: [
+    { key: 'recent', label: 'Recently added' },
+    { key: 'name', label: 'Name' },
+    { key: 'project', label: 'Project' },
+  ],
+
+  columns: [
+    { key: 'name', label: 'Name', sortable: true, render: (o) => (
+      <div><div className="name">{o.name || '—'}</div><div className="sub mono-num">{o.phone}</div></div>
+    ) },
+    { key: 'project', label: 'Project', render: (o) => o.project || '—' },
+    { key: 'unitRef', label: 'Unit', render: (o) => <span className="cell-quiet">{o.unitRef || '—'}</span> },
+    { key: 'stage', label: 'Status', sortable: true, render: (o, store) => (
+      <StageCell
+        record={o} store={store} stages={OWNER_STATUSES}
+        canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o)}
+        onSet={(stage) => store.setOwnerStage(o.id, stage)}
+      />
+    ) },
+    { key: 'agent', label: 'Sales Executive', render: (o, store) => (
+      <OwnerCell
+        record={o} store={store} canAssign={canAssignLead(store.state.role)}
+        onAssign={(agentId) => api.bulkAssignOwners([o.id], agentId)
+          .then(res => {
+            if (res?.success) { store.toast(agentId ? 'Owner assigned' : 'Owner unassigned'); store.reloadServer?.() }
+            else store.toast(res?.message || 'Could not assign', 'warn')
+          })
+          .catch(err => store.toast(err.message || 'Could not assign', 'warn'))}
+      />
+    ) },
+  ],
+
+  phoneActions: (o, store) => {
+    const open = (channel) => () => store.openModal({
+      kind: 'contact', channel, name: o.name, phone: o.phone, email: o.email,
+      recordType: 'owner', recordId: o.id,
+    })
+    return [
+      ...(o.phone ? [
+        { key: 'call', icon: 'phone', label: 'Call', onClick: open('call') },
+        { key: 'wa', icon: 'wa', label: 'WhatsApp', tone: 'wa', onClick: open('wa') },
+      ] : []),
+      ...(o.email ? [{ key: 'email', icon: 'mail', label: 'Email', onClick: open('email') }] : []),
+    ]
+  },
+
+  card: (o, store) => (
+    <>
+      <div className="rc-top">
+        <div className="rc-title">{o.name || 'Unnamed owner'}</div>
+        <StageCell
+          record={o} store={store} stages={OWNER_STATUSES}
+          canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o)}
+          onSet={(stage) => store.setOwnerStage(o.id, stage)}
+        />
+      </div>
+      <div className="rc-sub mono-num">{o.phone}</div>
+      <div className="rc-facts"><span>{[o.project, o.unitRef].filter(Boolean).join(' · ') || '—'}</span></div>
+      <div className="rc-foot">
+        {(() => { const a = store.agentById(o.agentId); return a ? <span className="rc-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned /> })()}
+      </div>
+    </>
+  ),
+
+  actions: [
+    { id: 'remark', tier: 'quick', icon: 'note', label: 'Add remark',
+      run: (store, o) => store.openModal({ kind: 'remark', recordType: 'owner', recordId: o.id }) },
+    { id: 'delete', tier: 'manage', icon: 'trash', label: 'Delete owner', tone: 'danger',
+      run: (store, o, ctx) => { if (window.confirm('Delete this owner record permanently?')) { store.deleteOwner(o.id); ctx?.onClose?.() } } },
+  ],
 }
 
 // ---------------------------------------------------------------------------
