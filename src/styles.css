@@ -975,7 +975,7 @@ body{overscroll-behavior:none;touch-action:manipulation}
 .m-top .m-av{flex-shrink:0}
 /* The scroll container for whichever module is mounted. It carries no padding
    of its own — the module owns its layout, exactly as it does on the desk. */
-.m-body{flex:1;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;min-height:0;padding-bottom:calc(78px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;overscroll-behavior-y:auto}
+.m-body{flex:1;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;min-height:0;padding-bottom:calc(78px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
 .m-body.has-actionbar{padding-bottom:14px}
 /* The module's own top bar scrolls with nothing — it sticks to the top of the
    scroller, so a long list runs under its header instead of pushing it away. */
