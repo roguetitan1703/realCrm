@@ -142,16 +142,17 @@ export default function Login({ store }) {
   // ── Password auth handlers ─────────────────────────────────────────────────
   const doLogin = async (e) => {
     if (e) e.preventDefault()
-    if (!handle.trim() || !password) { store.toast('Enter your ID or email and password.', 'warn'); return }
+    const targetHandle = (savedUser ? savedUser.handle : handle).trim()
+    if (!targetHandle || !password) { store.toast('Enter your ID or email and password.', 'warn'); return }
     setLoading(true)
     try {
-      const res = await api.login(handle.trim(), password)
+      const res = await api.login(targetHandle, password)
       if (!res?.token) throw new Error('no token')
       try {
         localStorage.setItem('crm_pwa_last_user', JSON.stringify({
-          name: res.user?.name || handle.trim(),
-          handle: handle.trim(),
-          initials: res.user?.initials || String(res.user?.name || handle).slice(0, 2).toUpperCase(),
+          name: res.user?.name || targetHandle,
+          handle: targetHandle,
+          initials: res.user?.initials || String(res.user?.name || targetHandle).slice(0, 2).toUpperCase(),
           avatar: res.user?.avatar || '',
         }))
       } catch (e) {}
@@ -496,7 +497,10 @@ export default function Login({ store }) {
                     </div>
                     <button
                       type="button"
-                      onClick={() => { setSavedUser(null); setHandle(''); setPassword('') }}
+                      onClick={() => {
+                        try { localStorage.removeItem('crm_pwa_last_user') } catch (e) {}
+                        setSavedUser(null); setHandle(''); setPassword('')
+                      }}
                       style={{ fontSize: 12, color: 'var(--accent, #1E6F52)', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600, padding: '4px 8px' }}
                     >
                       Use another

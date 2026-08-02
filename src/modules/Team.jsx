@@ -217,13 +217,8 @@ function AccessPanel({ store }) {
     if (!window.confirm(`Delete ${u.name}? Their past deals stay for attribution, but they can no longer sign in. This can't be undone from here.`)) return
     act(u.id, () => api.deleteUser(u.id), `${u.name} removed`)
   }
-  const resetPw = (u) => {
-    setBusy(u.id)
-    api.adminResetPassword(u.id)
-      .then(r => setReveal({ title: 'Password reset', name: u.name, handle: u.login_id || u.email, byId: !!u.login_id, password: r.initialPassword }))
-      .catch(err => store.toast(cleanErr(err), 'warn'))
-      .finally(() => setBusy(''))
-  }
+  const [resetTarget, setResetTarget] = useState(null) // user being reset
+  const resetPw = (u) => setResetTarget(u)
   // Off duty is READ here (the status pill below) but not toggled here — the
   // action lived in this menu once and read as a confusing near-duplicate of
   // Suspend, so it's gone. Routing eligibility is set from Settings → Routing.
@@ -314,6 +309,8 @@ function AccessPanel({ store }) {
 
       {edit && <EditUserModal store={store} user={edit} canManage={canManage} onClose={() => setEdit(null)}
         onDone={() => { setEdit(null); store.reloadServer?.(); load() }} />}
+      {resetTarget && <ResetPasswordModal store={store} user={resetTarget} onClose={() => setResetTarget(null)}
+        onDone={(res) => { const u = resetTarget; setResetTarget(null); store.reloadServer?.(); load(); setReveal({ title: 'Password reset', name: u.name, handle: u.login_id || u.email, byId: !!u.login_id, password: res.password }) }} />}
       {reveal && <RevealCard data={reveal} store={store} onClose={() => setReveal(null)} />}
       {seat && <SeatModal store={store} user={seat} onClose={() => setSeat(null)}
         onDone={(res) => { setSeat(null); store.reloadServer?.(); load(); setReveal({ title: 'Seat reassigned', name: res.name, handle: res.loginId || res.handle, byId: !!res.loginId, password: res.initialPassword }) }} />}
@@ -494,4 +491,55 @@ function prettyUA(ua) {
   const os = /Windows/i.test(ua) ? 'Windows' : /iPhone|iOS/i.test(ua) ? 'iPhone' : /Android/i.test(ua) ? 'Android' : /Mac/i.test(ua) ? 'Mac' : /Linux/i.test(ua) ? 'Linux' : 'Device'
   const br = /Edg/i.test(ua) ? 'Edge' : /Chrome/i.test(ua) ? 'Chrome' : /Firefox/i.test(ua) ? 'Firefox' : /Safari/i.test(ua) ? 'Safari' : 'Browser'
   return `${br} on ${os}`
+}
+
+function ResetPasswordModal({ store, user, onClose, onDone }) {
+  const [password, setPassword] = useState('Firm@2026')
+  const [mustChange, setMustChange] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  const submit = (e) => {
+    if (e) e.preventDefault()
+    if (!password.trim()) { store.toast('Enter a new password.', 'warn'); return }
+    setSaving(true)
+    api.adminResetPassword(user.id, password.trim(), mustChange)
+      .then(() => onDone({ password: password.trim(), mustChange }))
+      .catch(err => { store.toast(cleanErr(err), 'warn'); setSaving(false) })
+  }
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
+        <div className="m-head">
+          <h3>Reset Password — {user.name}</h3>
+          <button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button>
+        </div>
+        <div className="m-content">
+          <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>
+            Set a custom new password for <b style={{ color: 'var(--ink)' }}>{user.name}</b> ({user.login_id || user.email}).
+          </div>
+
+          <Field label="New Password">
+            <Input value={password} onChange={e => setPassword(e.target.value)} placeholder="Type new password" autoFocus />
+          </Field>
+
+          <div style={{ marginBottom: 18, background: 'var(--card-2)', padding: 12, borderRadius: 10, border: '1px solid var(--line)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13, color: 'var(--ink)', fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={mustChange}
+                onChange={e => setMustChange(e.target.checked)}
+                style={{ width: 16, height: 16, accentColor: 'var(--accent)' }}
+              />
+              <span>Require user to change password on next sign-in</span>
+            </label>
+          </div>
+
+          <Button variant="primary" block disabled={saving} onClick={submit}>
+            {saving ? 'Resetting Password…' : 'Set New Password'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 }
