@@ -327,8 +327,64 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [showPasteBox, setShowPasteBox] = useState(false)
+  const [rawText, setRawText] = useState('')
 
   const setF = (k, v) => setForm(s => ({ ...s, [k]: v }))
+
+  const parsePastedRoster = () => {
+    if (!rawText.trim()) return
+    const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean)
+    const rows = []
+    
+    let curName = '', curEmail = '', curPhone = ''
+
+    for (const line of lines) {
+      if (line.includes(',') || line.includes('\t')) {
+        const parts = line.split(/,|\t/).map(p => p.trim())
+        if (parts.length >= 1) {
+          let name = parts[0].replace(/^[\*\-\•\d\.\s]+/, '').replace(/^Full Name:\s*/i, '')
+          let email = parts.find(p => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p)) || ''
+          let phone = parts.find(p => /^\+?\d{10,12}$/.test(p.replace(/\s+/g, ''))) || ''
+          if (name) {
+            rows.push({
+              name,
+              loginId: '',
+              email,
+              phone: phone ? phone.replace(/\D/g, '').slice(-10) : '',
+              role: 'agent',
+              password: form.ownerPassword.trim() || 'Bhumi@2026'
+            })
+          }
+        }
+      } else {
+        const nameMatch = line.match(/(?:full name|name):\s*([^\*\n]+)/i)
+        const emailMatch = line.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)
+        const phoneMatch = line.match(/(?:\+?91[\s\-]?)?(\d{10})/)
+
+        if (nameMatch) {
+          if (curName) rows.push({ name: curName, loginId: '', email: curEmail, phone: curPhone, role: 'agent', password: form.ownerPassword.trim() || 'Bhumi@2026' })
+          curName = nameMatch[1].replace(/[\*]/g, '').trim()
+          curEmail = ''; curPhone = ''
+        } else if (emailMatch) {
+          curEmail = emailMatch[0]
+        } else if (phoneMatch) {
+          curPhone = phoneMatch[1]
+        } else if (!curName && line.length > 2 && !line.startsWith('[') && !line.includes('@')) {
+          curName = line.replace(/[\*]/g, '').trim()
+        }
+      }
+    }
+    if (curName) {
+      rows.push({ name: curName, loginId: '', email: curEmail, phone: curPhone, role: 'agent', password: form.ownerPassword.trim() || 'Bhumi@2026' })
+    }
+
+    if (rows.length > 0) {
+      setTeam(rows)
+      setShowPasteBox(false)
+      setRawText('')
+    }
+  }
 
   const updateTeamRow = (idx, field, val) => {
     setTeam(list => {
@@ -499,7 +555,30 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
               ))}
             </div>
 
-            <Button size="sm" onClick={addTeamRow} style={{ marginBottom: 20 }}>+ Add Team Member</Button>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+              <Button size="sm" onClick={addTeamRow}>+ Add Row</Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowPasteBox(!showPasteBox)} style={{ border: '1px solid var(--line)', background: '#f9f8f6' }}>
+                {showPasteBox ? 'Hide Paste Box' : '📋 Paste CSV / WhatsApp Text'}
+              </Button>
+            </div>
+
+            {showPasteBox && (
+              <div style={{ background: '#f4f3ef', padding: 14, borderRadius: 10, border: '1px solid var(--line)', marginBottom: 20 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>
+                  Paste CSV, Excel, or WhatsApp Roster Text
+                </label>
+                <textarea
+                  value={rawText}
+                  onChange={e => setRawText(e.target.value)}
+                  placeholder={`e.g. Vinod Goswami, vinod.bhumipropcity@gmail.com, 9172287808\nor paste WhatsApp messages with Full Name, Email, Phone...`}
+                  rows={5}
+                  style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid var(--line)', fontSize: 12, fontFamily: 'monospace', resize: 'vertical', marginBottom: 10 }}
+                />
+                <Button size="sm" variant="primary" onClick={parsePastedRoster} disabled={!rawText.trim()}>
+                  Load Roster into Grid
+                </Button>
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--line)', paddingTop: 16 }}>
               <Button variant="ghost" onClick={() => setStep(1)}>← Back</Button>
