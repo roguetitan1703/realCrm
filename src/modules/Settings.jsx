@@ -13,7 +13,7 @@ const NAV = [
   { key: 'routing', label: 'Routing', icon: 'team' },
   { key: 'followup', label: 'Follow-up SLA', icon: 'clock' },
   { key: 'messages', label: 'Message templates', icon: 'wa' },
-  { key: 'audit', label: 'Audit ledger', icon: 'shield' },
+  // { key: 'audit', label: 'Audit ledger', icon: 'shield' },
   { key: 'system', label: 'System & data', icon: 'settings' },
 ]
 
@@ -41,7 +41,7 @@ export default function Settings({ store, topBar }) {
               {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} />}
               {section === 'followup' && <FollowUpSection store={store} settings={settings} />}
               {section === 'messages' && <MessagesSection store={store} settings={settings} />}
-              {section === 'audit' && <AuditSection />}
+              {/* {section === 'audit' && <AuditSection />} */}
               {section === 'system' && <SystemSection store={store} />}
             </div>
           </div>
@@ -541,7 +541,7 @@ function SystemSection({ store }) {
           rendered on the phone's Today tab, so a browser on a laptop was never
           offered it. Renders nothing when already installed. */}
       <InstallPanel />
-      <Panel>
+      {/* <Panel>
         <SectionHead title="Database" />
         <div className="sys-row">
           <div>
@@ -550,7 +550,7 @@ function SystemSection({ store }) {
           </div>
           <Button variant="ghost" className="btn-danger" onClick={store.resetDatabase}>Reset data</Button>
         </div>
-      </Panel>
+      </Panel> */}
     </>
   )
 }
