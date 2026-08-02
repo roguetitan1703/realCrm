@@ -105,6 +105,7 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
     <MobileShell
       framed={framed}
       tabs={tabs}
+      onRefresh={() => store.loadServerState?.()}
       fab={<PhoneActions store={store} go={go} context={actionCtx} />}
       modals={<>{state.waState && <WaModal store={store} />}<Modals store={store} go={go} /></>}
     >
