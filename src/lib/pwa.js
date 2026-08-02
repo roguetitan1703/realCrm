@@ -58,8 +58,10 @@ export function applyPwaIdentity(slug, firmName) {
     return el;
   };
   ensure('app-manifest', 'manifest').href = `/pwa/${s}/manifest.webmanifest`;
-  ensure('app-apple-icon', 'apple-touch-icon').href = `/pwa/${s}/icon-192.png`;
-  
+  const appleIcon = ensure('app-apple-icon', 'apple-touch-icon');
+  appleIcon.setAttribute('sizes', '180x180');
+  appleIcon.href = `/pwa/${s}/icon-180.png`;
+
   if (firmName) {
     let meta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
     if (!meta) {
@@ -68,6 +70,13 @@ export function applyPwaIdentity(slug, firmName) {
       document.head.appendChild(meta);
     }
     meta.content = firmName;
+    // Remember it for the NEXT cold load. index.html has to write this title
+    // before the parser reaches the head, and on a first visit there is no
+    // session yet to ask — so the answer has to already be on the device.
+    try {
+      localStorage.setItem(`crm_firm_name_${s}`, firmName);
+      localStorage.setItem('crm_firm_name', firmName);
+    } catch (e) {}
   }
 }
 
@@ -105,7 +114,61 @@ export async function promptInstall() {
 }
 
 export function isIOS() {
-  return typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (typeof navigator === 'undefined') return false;
+  if (/iphone|ipad|ipod/i.test(navigator.userAgent)) return true;
+  // An iPad on iPadOS 13+ reports itself as a Mac. It is still an iPad, it
+  // still has no install API, and it still installs through the Share sheet —
+  // so it has to answer yes here or it gets desktop instructions it cannot
+  // follow. A real Mac has no touch points.
+  return /Macintosh/i.test(navigator.userAgent) && (navigator.maxTouchPoints || 0) > 1;
+}
+
+/**
+ * Where the person actually is, because on iOS that decides whether installing
+ * is even possible.
+ *
+ * Add to Home Screen is a Safari feature. Open the same link inside WhatsApp,
+ * Gmail, Instagram or LinkedIn — which is how an agent receives a link, every
+ * time — and iOS renders it in an embedded web view whose Share sheet has no
+ * "Add to Home Screen" row at all. Telling that person to "tap Share, then Add
+ * to Home Screen" sends them looking for a button that is not there, and they
+ * conclude the app is broken. So the guide has to know the difference and say
+ * "open this in Safari first" instead.
+ *
+ * Returns { ios, inApp, browser, canPrompt, installed }.
+ */
+export function installEnv() {
+  if (typeof navigator === 'undefined') return { ios: false, inApp: false, browser: 'browser', canPrompt: false, installed: false };
+  const ua = navigator.userAgent || '';
+  const ios = isIOS();
+
+  // iOS browsers that are not Safari. Chrome and Edge do carry Add to Home
+  // Screen (they hand it to the same iOS webclip machinery), Firefox and Opera
+  // do not — they get the "open in Safari" route as well.
+  const criOS = /CriOS/i.test(ua), edgiOS = /EdgiOS/i.test(ua);
+  const fxiOS = /FxiOS/i.test(ua), opiOS = /OPiOS|OPT\//i.test(ua);
+
+  // Embedded web views. Each of these is an app showing a page inside itself,
+  // not a browser, and none of them can install anything.
+  const inApp = /FBAN|FBAV|FB_IAB|Instagram|Line\/|Snapchat|LinkedInApp|Twitter|MicroMessenger|GSA\//i.test(ua)
+    // iOS Safari's own UA always carries "Version/<n> Safari". A web view built
+    // on WKWebView carries "Safari" without "Version/", which is the only
+    // reliable tell for the in-app browsers that ship no name of their own.
+    || (ios && !criOS && !edgiOS && !fxiOS && !opiOS && /Safari/i.test(ua) && !/Version\//i.test(ua));
+
+  const browser = inApp ? 'inapp'
+    : criOS ? 'chrome' : edgiOS ? 'edge' : fxiOS ? 'firefox' : opiOS ? 'opera'
+    : ios ? 'safari' : 'browser';
+
+  return {
+    ios,
+    inApp,
+    browser,
+    // Safari, Chrome-iOS and Edge-iOS reach the Add to Home Screen row.
+    canAddToHome: ios && (browser === 'safari' || browser === 'chrome' || browser === 'edge'),
+    canPrompt: canInstall(),
+    installed: isStandalone(),
+  };
 }
 
 // Installed or not. `standalone` is the common answer, but an app installed to
@@ -119,67 +182,20 @@ export function isStandalone() {
     || m('(display-mode: minimal-ui)') || window.navigator.standalone === true;
 }
 
-// ── Home-screen icons ──────────────────────────────────────────────────────
-// Chrome/Android uses a PNG for the installed icon (an SVG-only manifest gets a
-// generic fallback). We render the icon on a canvas — initials on the brand
-// color, full-bleed so it masks cleanly — and upload it once per tenant, so the
-// manifest can serve real PNGs. No server-side image library needed.
-function drawIcon(size, initials, bg, fg = '#ffffff', logoUrl = '') {
-  return new Promise((resolve) => {
-    const c = document.createElement('canvas');
-    c.width = size; c.height = size;
-    const ctx = c.getContext('2d');
-
-    if (logoUrl && (logoUrl.startsWith('data:image/') || logoUrl.startsWith('http'))) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, size, size);
-        const pad = Math.round(size * 0.12);
-        ctx.drawImage(img, pad, pad, size - pad * 2, size - pad * 2);
-        resolve(c.toDataURL('image/png'));
-      };
-      img.onerror = () => {
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, size, size);
-        ctx.fillStyle = fg;
-        ctx.font = `700 ${Math.round(size * 0.42)}px "Space Grotesk", Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText((initials || 'RE').toUpperCase(), size / 2, size / 2 + size * 0.02);
-        resolve(c.toDataURL('image/png'));
-      };
-      img.src = logoUrl;
-      return;
-    }
-
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, size, size);
-    ctx.fillStyle = fg;
-    ctx.font = `700 ${Math.round(size * 0.42)}px "Space Grotesk", Arial, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText((initials || 'RE').toUpperCase(), size / 2, size / 2 + size * 0.02);
-    resolve(c.toDataURL('image/png'));
-  });
-}
-
-/** Generate + upload the tenant's PWA icons once (idempotent per device). */
-export async function ensurePwaIcons({ slug, initials, color, logoUrl } = {}) {
-  if (typeof document === 'undefined' || !slug || !initials) return;
-  const key = `pwa_icons_${slug}_${initials}_${color || ''}_${logoUrl ? 'logo' : 'nologo'}`;
-  try { if (localStorage.getItem(key)) return; } catch (e) {}
-  try {
-    const { api } = await import('./api.js');
-    const bg = color || '#1E6F52';
-    const icon192 = await drawIcon(192, initials, bg, '#ffffff', logoUrl);
-    const icon512 = await drawIcon(512, initials, bg, '#ffffff', logoUrl);
-    await api.uploadPwaIcons({ icon192, icon512 });
-    try { localStorage.setItem(key, '1'); } catch (e) {}
-    // Repoint the manifest so a subsequent install picks up the real PNGs.
-    applyPwaIdentity(slug);
-  } catch (e) {
-    console.warn('[PWA] icon generation/upload failed:', e?.message || e);
-  }
-}
+// ── Home-screen icons ──────────────────────────────────────
+// There is no client-side icon generator any more, and that is the fix rather
+// than an omission.
+//
+// This file used to draw the icon on a <canvas> and POST it to the tenant, back
+// when the server had no image library. The server has had resvg for a while
+// and renders the firm's real uploaded logo on demand at /pwa/<slug>/icon-N.png
+// — so the canvas was a second implementation of the same picture, and the two
+// disagreed. The boot payload sends brand.logoUrl as the URL "/pwa/<slug>/logo"
+// (store.ts rewrites it there, so a 76KB data URI is not re-sent on every load),
+// but the canvas only accepted "data:" or "http" and fell through to its
+// initials fallback on everything else. So every device that opened the app
+// quietly uploaded INITIALS-ON-BRAND-COLOUR over the correctly rendered logo,
+// and did not update pwa_config.signature — which is the only thing that would
+// have invalidated it. That is the whole story behind the letters icon.
+//
+// One renderer now: the server. Nothing here to drift from it.

@@ -416,7 +416,6 @@ export const api = {
   getAuditLog: () => request('/workspace/audit'),
 
   // PWA home-screen icons (generated client-side, stored on the tenant)
-  uploadPwaIcons: (body) => request('/workspace/pwa-icons', { method: 'POST', body: JSON.stringify(body) }),
 
   // Notifications (per-user alert feed)
   getNotifications: () => request('/notifications'),

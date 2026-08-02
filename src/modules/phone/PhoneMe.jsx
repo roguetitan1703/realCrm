@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Avatar, Button, Textarea } from '../../components/primitives.jsx'
 import { pushPermission, enablePush as subscribeToPush } from '../../lib/push.js'
-import { canInstall, onInstallAvailable, promptInstall, isIOS, isStandalone } from '../../lib/pwa.js'
+import { canInstall, onInstallAvailable, promptInstall, installEnv, isStandalone } from '../../lib/pwa.js'
+import InstallGuide from '../../components/InstallGuide.jsx'
 import Icon from '../../components/Icon.jsx'
 
 const ROLE_LABEL = { admin: 'Owner · Admin', manager: 'Manager', agent: 'Field agent' }
@@ -13,6 +14,7 @@ export default function PhoneMe({ store, me, topBar }) {
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied'
   )
   const [installable, setInstallable] = useState(canInstall())
+  const [guide, setGuide] = useState(false)
   const [intro, setIntro] = useState(() => state.settings?.whatsappIntroTemplate || '')
 
   useEffect(() => onInstallAvailable(setInstallable), [])
@@ -98,15 +100,18 @@ export default function PhoneMe({ store, me, topBar }) {
                 <div>
                   <div style={{ fontWeight: 600 }}>App Installation</div>
                   <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
-                    {isIOS() ? 'Safari: Share → Add to Home Screen' : installable ? 'Install standalone app window' : 'Use browser menu to install'}
+                    {installEnv().ios
+                      ? (installEnv().canAddToHome ? 'Add to Home Screen' : 'Open in Safari to install')
+                      : installable ? 'Install standalone app window' : 'Use browser menu to install'}
                   </div>
                 </div>
               </div>
-              {!isIOS() && installable && (
-                <Button variant="primary" size="sm" onClick={promptInstall}>Install</Button>
-              )}
+              {installEnv().ios
+                ? <Button variant="primary" size="sm" onClick={() => setGuide(true)}>Install</Button>
+                : installable && <Button variant="primary" size="sm" onClick={promptInstall}>Install</Button>}
             </div>
           )}
+          {guide && <InstallGuide onClose={() => setGuide(false)} />}
         </div>
 
         {/* Single WhatsApp Intro Message Template Card */}

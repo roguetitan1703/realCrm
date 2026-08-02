@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
-import { canInstall, onInstallAvailable, promptInstall, isIOS, isStandalone } from '../lib/pwa.js'
+import { canInstall, onInstallAvailable, promptInstall, installEnv, isStandalone } from '../lib/pwa.js'
+import InstallGuide from './InstallGuide.jsx'
 
 // ============================================================================
 // 📲 Install — the PERMANENT route, as opposed to the one-time nudge card
@@ -10,16 +11,17 @@ import { canInstall, onInstallAvailable, promptInstall, isIOS, isStandalone } fr
 // their device. Both are silenced by exactly one thing: being installed.
 export default function InstallRow() {
   const [installable, setInstallable] = useState(canInstall())
+  const [guide, setGuide] = useState(false)
   useEffect(() => onInstallAvailable(setInstallable), [])
 
   // Already installed — there is nothing to offer.
   if (isStandalone()) return null
 
   // iOS has no install API at all: Safari only offers Share → Add to Home
-  // Screen, so the instruction IS the feature there. Elsewhere, no deferred
-  // beforeinstallprompt yet means we name the browser's own menu rather than
-  // showing a button that cannot do anything.
-  const ios = isIOS()
+  // Screen, so the button opens a guide to that gesture rather than a system
+  // dialog. Elsewhere, no deferred beforeinstallprompt yet means we name the
+  // browser's own menu rather than showing a button that cannot do anything.
+  const env = installEnv()
 
   return (
     <div className="q-group">
@@ -29,17 +31,20 @@ export default function InstallRow() {
         <div className="install-row-body">
           <div className="install-row-title">Install on this device</div>
           <div className="install-row-sub">
-            {ios
-              ? 'Tap Share, then Add to Home Screen. Alerts need this on iPhone.'
+            {env.ios
+              ? env.canAddToHome
+                ? 'Alerts need this on iPhone.'
+                : 'Open this link in Safari to install.'
               : installable
                 ? 'Opens without the browser bar and can receive alerts.'
                 : 'Open the browser menu and choose Install app.'}
           </div>
         </div>
-        {!ios && installable && (
-          <button className="btn btn-primary btn-sm" onClick={promptInstall}>Install</button>
-        )}
+        {env.ios
+          ? <button className="btn btn-primary btn-sm" onClick={() => setGuide(true)}>Install</button>
+          : installable && <button className="btn btn-primary btn-sm" onClick={promptInstall}>Install</button>}
       </div>
+      {guide && <InstallGuide onClose={() => setGuide(false)} />}
     </div>
   )
 }

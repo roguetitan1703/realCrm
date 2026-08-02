@@ -2429,3 +2429,19 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .wa-desc:hover{border-color:rgba(255,255,255,.34);color:#fff}
 .wa-desc.on{background:#15803D;border-color:#15803D;color:#fff}
 .wa-desc-n{font-variant-numeric:tabular-nums;opacity:.7;font-weight:500}
+
+/* ── Install guide ──────────────────────────────────────────────────────────
+   Reuses the phone sheet chrome (.sheet / .sheet-back). Fixed rather than
+   absolute because the guide is opened from Me and from the desk panel, which
+   are not inside the phone shell that positions .sheet. */
+.ig-back{position:fixed;z-index:120}
+.ig-sheet{position:fixed;z-index:121}
+.ig-note{font-size:12.5px;line-height:1.45;color:var(--ink-2);background:var(--accent-wash);border:1px solid var(--accent-line);border-radius:var(--radius);padding:10px 12px}
+.ig-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.ig-step{display:flex;align-items:center;gap:12px;padding:12px 2px;border-bottom:1px solid var(--line)}
+.ig-step:last-child{border-bottom:none}
+.ig-num{flex-shrink:0;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.ig-text{flex:1;min-width:0;font-size:13.5px;line-height:1.45;color:var(--ink)}
+.ig-text b{font-weight:700}
+.ig-glyph{flex-shrink:0;width:32px;height:32px;border-radius:9px;background:var(--card-2);border:1px solid var(--line);color:var(--ink-2);display:inline-flex;align-items:center;justify-content:center}
+.ig-copy{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:8px}

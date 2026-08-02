@@ -10,7 +10,7 @@ import { generateMessage, followUpMessage } from './matching.js'
 import { api as apiClient } from './api.js'
 import { applyBrandColor } from './brand.js'
 import { setTenantIdentity } from './tenant.js'
-import { applyPwaIdentity, ensurePwaIcons, slugFromLocation } from './pwa.js'
+import { applyPwaIdentity, slugFromLocation } from './pwa.js'
 import { getPref } from './prefs.js'
 import { isOpen } from '../data/leadStatus.js'
 
@@ -701,15 +701,11 @@ export function StoreProvider({ children }) {
     // install must be the firm whose data the app will show.
     const sessionSlug = state.tenant?.slug || state.tenant?.id || ''
     const tid = sessionSlug || slugFromLocation()
+    // Icons are the server's job alone — /pwa/<slug>/icon-N.png renders the
+    // firm's real logo. The browser used to generate and upload them too, which
+    // is how every tenant with a logo ended up with an initials icon; see the
+    // note in lib/pwa.js.
     applyPwaIdentity(tid, state.settings.firmName)
-    if (tid && state.settings.firmName) {
-      ensurePwaIcons({
-        slug: tid,
-        initials: (state.settings.firmName || '').slice(0, 2).toUpperCase(),
-        color: state.brand?.primaryColor,
-        logoUrl: state.brand?.logoUrl
-      })
-    }
   }, [state.settings.firmName, state.settings.city, state.brand?.primaryColor, state.brand?.logoUrl, state.tenant?.slug, state.tenant?.id])
 
   // Pull the current user's alert feed. No-op without a token (the feed is

@@ -46,10 +46,29 @@
           link.rel = 'manifest'; link.id = 'app-manifest';
           link.href = '/pwa/' + encodeURIComponent(slug) + '/manifest.webmanifest';
           document.head.appendChild(link);
+          // iOS never reads the manifest for the home-screen icon — only this
+          // link — so the tenant icon has to be here, not just in the manifest.
           var icon = document.createElement('link');
           icon.rel = 'apple-touch-icon'; icon.id = 'app-apple-icon';
-          icon.href = '/pwa/' + encodeURIComponent(slug) + '/icon-192.png';
+          icon.setAttribute('sizes', '180x180');
+          icon.href = '/pwa/' + encodeURIComponent(slug) + '/icon-180.png';
           document.head.appendChild(icon);
+          // ...and the same is true of the caption under it: iOS takes
+          // apple-mobile-web-app-title over the manifest's short_name. Both are
+          // read at the moment the person taps "Add", which on a first visit is
+          // long before the boot payload lands — so the last known firm name is
+          // written here, synchronously, rather than waiting for React.
+          var fn = localStorage.getItem('crm_firm_name_' + slug)
+            || localStorage.getItem('crm_firm_name') || '';
+          if (fn) {
+            var tm = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+            if (!tm) {
+              tm = document.createElement('meta');
+              tm.name = 'apple-mobile-web-app-title';
+              document.head.appendChild(tm);
+            }
+            tm.content = fn;
+          }
         } catch (e) {}
         try {
           var t = localStorage.getItem('crm_tenant_id') || '';

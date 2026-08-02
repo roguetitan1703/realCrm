@@ -52,6 +52,10 @@ const P = {
   alert: 'M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01',
   play: 'M8 5.5v13l11-6.5z',
   upload: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v13',
+  // iOS's Share glyph, drawn as iOS draws it — a tray with an arrow leaving the
+  // top. The install guide points at a real button on the person's screen, so
+  // it has to be that button's shape and not a generic export arrow.
+  share: 'M8 11H6a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-2M12 15V3M8.5 6.5 12 3l3.5 3.5',
 }
 
 export default function Icon({ name, size = 16, className = 'ic', fill = false, ...rest }) {

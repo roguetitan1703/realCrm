@@ -105,7 +105,12 @@ export default function Login({ store }) {
         logoUrl: bc.logoUrl || '', primaryColor: bc.primaryColor || '',
       }
       api.setTenantId(t.id)
-      applyPwaIdentity(t.id)                 // canonical id — matches the manifest/icon route
+      // Canonical id — matches the manifest/icon route. The name goes with it:
+      // iOS reads apple-mobile-web-app-title at the moment someone taps "Add to
+      // Home Screen", and most people install BEFORE they ever sign in, so
+      // waiting for the boot payload to supply the firm name meant the icon on
+      // their phone was captioned "Real Estate".
+      applyPwaIdentity(t.id, t.name)
       applyBrandColor(bc.primaryColor)       // dress the login in the firm's real accent
       setWs(resolved)
       rememberWorkspace(resolved)   // this browser has now opened it

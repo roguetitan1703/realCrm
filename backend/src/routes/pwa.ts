@@ -13,6 +13,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Resvg } from '@resvg/resvg-js';
+import { createHash } from 'crypto';
 import { sql } from '../services/db';
 
 export const pwaRouter = Router();
@@ -109,11 +110,27 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
   // Always advertise PNGs — the icon route renders them on demand (server-side,
   // so it never depends on the browser) and caches them. A 512 maskable + a 192
   // "any" is what Chrome/Android need for a proper install (not a shortcut).
+  //
+  // The `?v=` is load-bearing on Android. Chrome captures the icon ONCE, at
+  // install, and afterwards treats the URL as the identity of the image — a
+  // firm that uploads a new logo would keep the old icon on every installed
+  // phone, because /icon-512.png is still /icon-512.png. Stamping the signature
+  // into the URL makes a new logo a new URL, which is the only thing Chrome
+  // re-fetches.
+  // Hashed, not the raw signature: the signature contains the brand colour, and
+  // a '#' in a URL starts the fragment — "?v=BP_#1E6F52_logo…" would have been
+  // truncated to "?v=BP_" by every client that read it.
+  const v = createHash('sha1')
+    .update(iconSignature(t ? initialsOf(t.name) : PLATFORM.initials, primary, brand.logoUrl))
+    .digest('hex').slice(0, 12);
   const icons: any[] = [
-    { src: `/pwa/${slug}/icon-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
-    { src: `/pwa/${slug}/icon-512.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
-    { src: `/pwa/${slug}/icon-512.png`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-    { src: `/pwa/${slug}/icon.svg`, sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+    { src: `/pwa/${slug}/icon-192.png?v=${v}`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: `/pwa/${slug}/icon-512.png?v=${v}`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+    // Maskable means Android may crop it to a circle/squircle, keeping only the
+    // middle ~80%. A logo drawn edge to edge would lose its edges, so the
+    // renderer insets it — see iconSvg's 64px pad on a 512 canvas.
+    { src: `/pwa/${slug}/icon-512.png?v=${v}`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    { src: `/pwa/${slug}/icon.svg?v=${v}`, sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
   ];
 
   // Path-based, not `/?ws=<slug>`. Two reasons, and the second was the visible
@@ -170,15 +187,35 @@ pwaRouter.get('/:slug/icon.svg', async (req: Request, res: Response) => {
   return res.send(iconSvg(initials, bg, { rounded: true, logoUrl: brand.logoUrl }));
 });
 
+// 180 is iOS's own home-screen size. It is not vanity: Safari does not read the
+// manifest for the installed icon at all — it reads <link rel="apple-touch-icon">
+// — and handing it a 192 leaves the OS to rescale on every launch surface. The
+// three sizes share one renderer, so a new one costs a line.
+const ICON_SIZES: Record<string, number> = { '180': 180, '192': 192, '512': 512 };
+
+/**
+ * What the cached PNG was rendered FROM. Any change to it must produce a
+ * different string, or the cache serves yesterday's picture forever.
+ *
+ * This used to end in the word 'logo' — present or absent. So a firm that
+ * REPLACED its logo kept the old one on every phone, because "has a logo" was
+ * still true and the signature never moved. Hashing the logo bytes is what
+ * makes "they changed it" visible.
+ */
+function iconSignature(initials: string, bg: string, logoUrl?: string): string {
+  const logo = String(logoUrl || '');
+  return `${initials}_${bg}_${logo ? 'logo' + createHash('sha1').update(logo).digest('hex').slice(0, 10) : 'nologo'}`;
+}
+
 pwaRouter.get('/:slug/icon-:size.png', async (req: Request, res: Response) => {
   const slug = req.params.slug;
-  const size = req.params.size === '512' ? 512 : 192;
-  const key = size === 512 ? 'icon512' : 'icon192';
+  const size = ICON_SIZES[req.params.size] || 192;
+  const key = `icon${size}`;
   const t = await getTenant(slug);
   const brand = t?.brand_config || {};
   const initials = t ? initialsOf(t.name) : PLATFORM.initials;
   const bg = brand.primaryColor || PLATFORM.primary;
-  const signature = `${initials}_${bg}_${brand.logoUrl ? 'logo' : 'nologo'}`;
+  const signature = iconSignature(initials, bg, brand.logoUrl);
   const pwa = t?.pwa_config || {};
 
   // Serve the cached PNG ONLY if signature matches current brand config
@@ -190,10 +227,27 @@ pwaRouter.get('/:slug/icon-:size.png', async (req: Request, res: Response) => {
     return res.send(buf);
   }
 
-  // Otherwise render it server-side, cache it with signature on the tenant, and serve it.
+  // Signature moved on, so every cached size is stale — not just this one. The
+  // cache holds ONE signature for a tenant but a separate blob per size, so
+  // merging the new signature in beside the old blobs marks all of them fresh:
+  // fetching /icon-180.png would validate a months-old /icon-192.png, and the
+  // next request for 192 would serve it. That is not theoretical — it is how a
+  // tenant with a logo kept serving an initials icon at one size after the
+  // others had been fixed. Replace the object rather than merging into it.
+  //
+  // Dropping the sibling sizes only when the signature actually moved matters:
+  // dropping them every time would make each size evict the other two, so no
+  // request would ever hit the cache.
   const png = renderIconPng(initials, bg, size, brand.logoUrl);
   if (t) {
-    await sql`UPDATE tenants SET pwa_config = COALESCE(pwa_config, '{}'::jsonb) || ${sql.json({ [key]: png.toString('base64'), signature })} WHERE id = ${t.id}`;
+    const patch = sql.json({ [key]: png.toString('base64'), signature });
+    if (pwa.signature && pwa.signature !== signature) {
+      await sql`UPDATE tenants SET pwa_config =
+        (COALESCE(pwa_config, '{}'::jsonb) - 'icon180' - 'icon192' - 'icon512') || ${patch}
+        WHERE id = ${t.id}`;
+    } else {
+      await sql`UPDATE tenants SET pwa_config = COALESCE(pwa_config, '{}'::jsonb) || ${patch} WHERE id = ${t.id}`;
+    }
   }
   res.set('Content-Type', 'image/png');
   res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
