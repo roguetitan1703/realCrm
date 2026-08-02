@@ -27,6 +27,7 @@ import {
 } from '../services/ingestion';
 import { parsePayload, suggestConfig, flattenPaths, TRANSFORMS, sanitizeConfig } from '../services/parser';
 import { audit } from '../services/audit';
+import { getTenantForIngest } from '../services/store';
 
 export const connectionsRouter = Router();
 
@@ -69,12 +70,12 @@ function requireTenant(req: Request, res: Response): string | null {
 
 connectionsRouter.get('/', async (req: Request, res: Response) => {
   const tenant = requireTenant(req, res); if (!tenant) return;
-  const [rows, counts, tenantRows] = await Promise.all([
+  const [rows, counts, t] = await Promise.all([
     listIntegrations(tenant),
     inboxCounts(tenant),
-    sql`SELECT slug, id FROM tenants WHERE id = ${tenant} LIMIT 1`,
+    getTenantForIngest(tenant),
   ]);
-  const slug = tenantRows[0]?.slug || tenantRows[0]?.id || tenant;
+  const slug = t?.slug || t?.id || tenant;
   const host = req.get('x-forwarded-host') || req.get('host') || 'api.re.delpat.in';
   const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
   const domain = process.env.PUBLIC_API_URL || `${proto}://${host}`;

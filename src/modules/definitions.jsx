@@ -21,12 +21,15 @@
 
 import React from 'react'
 import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA } from '../components/ModuleFields.jsx'
-import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted } from '../components/primitives.jsx'
+import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
+import { QuickAssignMenu } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
 import { reqShort, budgetRange, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
-import { isOpen, isTerminal, REJECTED_STATUS, NO_ANSWER_STATUS } from '../data/leadStatus.js'
+import { REJECTED_STATUS } from '../data/leadStatus.js'
+import { canAssignLead, canEditLead } from '../lib/permissions.js'
+import { api } from '../lib/api.js'
 import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
 // out again here — that duplication is exactly what broke property filtering.
@@ -75,12 +78,14 @@ export const LEADS_DEF = {
 
   searchFields: ['name', 'phone', 'req.locality', 'req.config'],
 
+  // `stage` and `deal` deliberately stay OUT of this list — the lead type and
+  // status dropdowns above the pills (Leads.jsx) ask exactly these two
+  // questions against the server. A third control asking the same thing here
+  // would just be a second way to filter the same field.
   filterFields: (store) => [
     { key: 'flag', label: 'Needs attention', icon: 'clock', options: [
       { value: 'overdue', label: 'Overdue' }, { value: 'unassigned', label: 'Unassigned' }, { value: 'new', label: 'New today' },
     ] },
-    { key: 'stage', label: 'Stage', icon: 'layers', options: opt(store.state.settings.stages) },
-    { key: 'deal', label: 'Deal', icon: 'tag', options: [{ value: 'sale', label: 'Sale' }, { value: 'rent', label: 'Rent' }] },
     { key: 'source', label: 'Source', icon: 'trend', options: opt(store.state.settings.sources) },
     { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
     { key: 'agent', label: 'Sales Executive', icon: 'person', options: [
@@ -90,15 +95,8 @@ export const LEADS_DEF = {
 
   // Per-key filter logic (mirrors the module's normalized predicates).
   rowMatch(l, key, vals) {
-    if (key === 'stage') return vals.some(s => eqi(l.stage, s))
     if (key === 'source') return vals.some(s => eqi(l.source, s))
     if (key === 'agent') return vals.includes(l.agentId || '_none')
-    if (key === 'deal') {
-      const raw = String(l.req?.deal || l.deal || '').toLowerCase().trim()
-      const pur = String(l.req?.purpose || '').toLowerCase().trim()
-      const isRent = raw === 'rent' || raw === 'lease' || pur === 'lease' || pur === 'rent'
-      return vals.some(fd => String(fd).toLowerCase().trim() === (isRent ? 'rent' : 'sale'))
-    }
     if (key === 'locality') {
       return vals.some(loc => {
         const target = String(loc).toLowerCase().split('/')[0].trim()
@@ -143,30 +141,52 @@ export const LEADS_DEF = {
    * B2 — SUB-SEGMENTS as tab pills. Defined here, not in the screen, so the
    * pattern is reusable by any module rather than hand-rolled per page.
    *
-   * These are WORKING BUCKETS, not pipeline position. The pills used to be the
-   * stages themselves, which is a different question: "where is this lead in
-   * the funnel" is what the stage filter answers, and it is still in the filter
-   * bar. What an agent triages by each morning is "who is new, who is warm, who
-   * have I let slip" — that is this row.
+   * Keys match the server's `segment` values exactly (api.listLeads / the
+   * /leads/summary buckets) — there is no client-side `match()` any more.
+   * These used to be evaluated in the browser against a stage vocabulary
+   * ('Contacted', 'Negotiation') the statuses no longer have, so every pill
+   * but "All" quietly matched nothing. The server counts and filters what the
+   * signed-in user can actually see; the pill is just a label for one of its
+   * segment names.
    *
-   * Deal (buy vs rent) deliberately stays a filter chip, not a second pill row:
-   * two axes of pills is how a toolbar becomes a wall.
-   *
-   * Not represented yet: Sellers / Landlords. A lead records what someone is
-   * LOOKING FOR (`req.deal`), so there is no field that says they are supplying
-   * a property instead of seeking one. Faking it off the owner name on a
-   * property would be a guess. It needs the contact-store split (B3).
+   * What an agent triages by each morning is "who is new, who is warm, who
+   * have I let slip" — not pipeline position, which is what the status
+   * dropdown (Leads.jsx) answers instead.
    */
   segments: [
-    { key: 'all', label: 'All', match: () => true },
-    { key: 'fresh', label: 'Fresh', match: (l) => l.stage === 'New' },
-    { key: 'working', label: 'Working', match: (l) => ['Contacted', 'Negotiation'].includes(l.stage) },
-    { key: 'visiting', label: 'Visiting', match: (l) => l.stage === 'Site Visit' },
-    { key: 'overdue', label: 'Overdue', tone: 'alert', match: (l) => !!l.overdue && isOpen(l.stage) },
-    { key: 'unassigned', label: 'Unassigned', match: (l) => !l.agentId && isOpen(l.stage) },
-    { key: 'noanswer', label: 'Call not received', match: (l) => l.stage === NO_ANSWER_STATUS },
-    { key: 'closed', label: 'Closed', match: (l) => isTerminal(l.stage) },
+    { key: 'all', label: 'All' },
+    { key: 'today', label: 'New today' },
+    { key: 'month', label: 'This month' },
+    { key: 'noanswer', label: 'Call not received' },
+    { key: 'overdue', label: 'Overdue', tone: 'alert' },
+    { key: 'unassigned', label: 'Unassigned' },
   ],
+
+  // Trailing actions column (ModuleTable, driven off this definition). Quick
+  // assign is desk-only (canAssignLead); Edit is gated the same way the record
+  // sheet's own edit button is (canEditLead) — an agent viewing a lead they
+  // didn't create and don't own gets Open only.
+  rowActions: (l, store, ctx) => {
+    const role = store.state.role
+    const userId = store.state.activeAgentId
+    const assignable = canAssignLead(role)
+    const editable = canEditLead(role, userId, l)
+    const doAssign = (agentId) => {
+      api.bulkAssignLeads([l.id], agentId)
+        .then(res => {
+          if (res?.success) { store.toast(agentId ? 'Lead assigned' : 'Lead unassigned'); store.reloadServer?.() }
+          else store.toast(res?.message || 'Could not assign', 'warn')
+        })
+        .catch(err => store.toast(err.message || 'Could not assign', 'warn'))
+    }
+    return (
+      <>
+        {assignable && <QuickAssignMenu agents={store.activeAgents()} currentId={l.agentId} onAssign={doAssign} />}
+        <Button variant="quiet" size="sm" onClick={() => ctx?.onOpen?.(l)}>Open</Button>
+        {editable && <Button variant="quiet" size="sm" onClick={() => store.openModal({ kind: 'editRecord', moduleId: 'leads', recordId: l.id })}>Edit</Button>}
+      </>
+    )
+  },
 
   // Standardized action set for the detail rail. `group` buckets them; `when`
   // gates by record state; `run(store, record)` calls existing store api.
