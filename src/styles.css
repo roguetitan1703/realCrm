@@ -1010,7 +1010,7 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .m-frame .app-mobile{height:100%}
 @media (max-width:520px){.m-frame-bg{padding:0}.m-frame{width:100%;height:100vh;border-radius:0;border:none}}
 
-.app-mobile{display:flex;flex-direction:column;height:100%;height:100dvh;max-height:100dvh;position:relative;background:var(--bg);overflow:hidden;transform:translateZ(0);overscroll-behavior-y:auto}
+.app-mobile{display:flex;flex-direction:column;height:100%;height:100dvh;max-height:100dvh;position:relative;background:var(--bg);overflow:hidden;transform:translateZ(0);overscroll-behavior-y:none;touch-action:manipulation}
 .m-frame .app-mobile{height:100%}
 .m-top{background:var(--chrome);color:#fff;padding:14px 15px;display:flex;align-items:center;gap:11px;flex-shrink:0;z-index:5}
 .m-top .n-mono{width:34px;height:34px;border-radius:8px;background:var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-weight:700;font-size:13px;flex-shrink:0;overflow:hidden}
@@ -1028,7 +1028,7 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
    scroller, so a long list runs under its header instead of pushing it away. */
 .m-body>.m-top{position:sticky;top:0}
 
-.tabbar{display:flex;background:rgba(18,22,20,.95);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:8px 8px calc(8px + env(safe-area-inset-bottom));gap:4px;flex-shrink:0;border-top:1px solid rgba(255,255,255,.08);box-shadow:0 -4px 24px rgba(0,0,0,.25);z-index:9999;position:fixed;bottom:0;left:0;right:0;margin-top:auto}
+.tabbar{display:flex;background:rgba(18,22,20,.95);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:8px 8px calc(8px + env(safe-area-inset-bottom));gap:4px;flex-shrink:0;border-top:1px solid rgba(255,255,255,.08);box-shadow:0 -4px 24px rgba(0,0,0,.25);z-index:9999;position:fixed;bottom:0;left:0;right:0;margin-top:auto;transform:translateZ(0);-webkit-transform:translateZ(0)}
 .tab-slider{position:absolute;top:8px;bottom:calc(8px + env(safe-area-inset-bottom));left:8px;z-index:1;border-radius:14px;background:var(--accent);border:1px solid rgba(255,255,255,.2);box-shadow:0 4px 16px rgba(0,0,0,.35);transition:transform .28s cubic-bezier(.2,.8,.2,1),width .28s ease;pointer-events:none}
 .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:7px 0;color:var(--on-chrome-mut);text-decoration:none;cursor:pointer;border-radius:14px;font-size:10.5px;font-weight:600;transition:all .2s cubic-bezier(.34,1.56,.64,1);position:relative;z-index:2;background:transparent !important;border:1px solid transparent !important;box-shadow:none !important}
 .tabbar a.on{color:#fff;font-weight:700;transform:translateY(-2px)}
@@ -1926,8 +1926,8 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .app-mobile .rcard-act:active{background:var(--accent-wash);color:var(--accent-ink);border-color:var(--accent-line)}
 /* WhatsApp carries its own green because that is how it is recognised — it is
    the one colour in this row, and everything beside it stays quiet. */
-.app-mobile .rcard-act.wa{background:#25D366;border-color:#1FAE53;color:#fff}
-.app-mobile .rcard-act.wa:active{background:#1FAE53;border-color:#1a9247;color:#fff}
+.app-mobile .rcard-act.wa{background:#15803D;border-color:#166534;color:#fff}
+.app-mobile .rcard-act.wa:active{background:#166534;border-color:#14532D;color:#fff}
 
 .app-mobile .prow{display:flex;flex-direction:column;gap:3px;min-width:0}
 /* The status sits directly AFTER the name, not pushed to the far edge of the
@@ -2196,7 +2196,8 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 /* WhatsApp keeps its green here too, so the same action looks the same on the
    list row and on the record. `.wa` wins over `.primary` — it is more specific
    about what the button IS. */
-.rh-act.wa{background:#25D366;border-color:#1FAE53;color:#fff}
+.rh-act.wa{background:#15803D;border-color:#166534;color:#fff}
+.rh-act.wa:hover{background:#166534}
 .rh-act:active{transform:translateY(1px)}
 
 /* ---- Install (permanent row on Me) ---- */

@@ -3,14 +3,14 @@ import Icon from '../components/Icon.jsx'
 import { Button, Field, Input, PhoneInput, Textarea, Segmented, Avatar, Source, StageTag, Money } from '../components/primitives.jsx'
 import { theme } from '../data/theme.js'
 import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/format.js'
-import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink } from '../lib/matching.js'
+import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink, followUpMessage } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { REJECTION_REASONS, REJECTED_STATUS } from '../data/leadStatus.js'
 import { getPosition, processImage, uploadMedia } from '../lib/media.js'
 import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES, STATUS } from '../data/propertyFields.js'
 import CameraCapture from '../components/CameraCapture.jsx'
-import { pushPermission } from '../lib/push.js'
+import { pushPermission, enablePush as subscribeToPush } from '../lib/push.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities } from '../lib/suggest.js'
@@ -90,8 +90,16 @@ function ModuleFormModal({ store, moduleId, recordId }) {
       // rebuild nested patch (e.g. req.config) into nested shape
       if (f.key.includes('.')) {
         const [head, ...rest] = f.key.split('.')
-        patch[head] = patch[head] || JSON.parse(JSON.stringify(getNestedValue(record, head) || {}))
-        setNestedValue(patch[head], rest.join('.'), v)
+        const base = patch[head] || JSON.parse(JSON.stringify(getNestedValue(record, head) || {}))
+        // setNestedValue returns a NEW object rather than mutating in place —
+        // the return value was being discarded here, so `patch[head]` stayed
+        // frozen at its very first clone of the original record forever.
+        // Every nested field (req.config, req.locality, req.timeline,
+        // req.notes — anything with a dot in its key, on ANY module) appeared
+        // to save in the form, showed the picked value in the dropdown, and
+        // then silently reverted, because the actual PATCH sent to the server
+        // never carried it.
+        patch[head] = setNestedValue(base, rest.join('.'), v)
       } else {
         patch[f.key] = v
       }
@@ -436,15 +444,17 @@ const CONFIG_OPTIONS = [
   '4 BHK+ Villa', 'Commercial Office', 'Plot'
 ];
 
-function LeadForm({ store, leadId }) {
+function NewLeadModal({ store, leadId }) {
   const edit = leadId ? store.lookup('lead', leadId) : null
   const [f, setF] = useState(edit ? {
     name: edit.name || '',
     phone: edit.phone || '',
     email: edit.email || '',
-    deal: edit.req?.deal || (edit.req?.purpose === 'Lease' ? 'rent' : 'sale'),
-    config: edit.req?.config || '',
-    locality: edit.req?.locality || '',
+    deal: edit.req?.deal || edit.deal || (edit.req?.purpose === 'Lease' ? 'rent' : 'sale'),
+    config: edit.req?.config || edit.requirement || '',
+    locality: edit.req?.locality || edit.locality || '',
+    minBudget: edit.req?.minBudget ?? edit.req?.budgetMin ?? '',
+    maxBudget: edit.req?.maxBudget ?? edit.req?.budgetMax ?? '',
     timeline: edit.req?.timeline || 'Immediate',
     source: edit.source || 'Website',
     agentId: edit.agentId || null,
@@ -456,6 +466,8 @@ function LeadForm({ store, leadId }) {
     deal: 'sale',
     config: '',
     locality: '',
+    minBudget: '',
+    maxBudget: '',
     timeline: 'Within 60 days',
     source: 'Website',
     agentId: store.state.agents[0]?.id || null,
@@ -467,13 +479,26 @@ function LeadForm({ store, leadId }) {
     if (!f.name.trim()) { store.toast('Lead Name is required', 'warn'); return }
     if (!f.phone.trim()) { store.toast('Phone Number is required', 'warn'); return }
 
+    const minB = parseBudgetNum(f.minBudget)
+    const maxB = parseBudgetNum(f.maxBudget)
+    const budgetObj = (!isNaN(minB) || !isNaN(maxB))
+      ? { minBudget: isNaN(minB) ? 0 : minB, maxBudget: isNaN(maxB) ? 0 : maxB }
+      : (f.deal === 'rent'
+          ? { minBudget: 25000, maxBudget: 45000 }
+          : { minBudget: 11000000, maxBudget: 14000000 })
+
     if (edit) {
       store.updateLead(edit.id, {
         name: f.name.trim(),
         phone: f.phone.trim(),
         email: f.email.trim() || undefined,
         source: f.source,
-        agentId: f.agentId,
+        agentId: f.agentId || undefined,
+        deal: f.deal,
+        requirement: f.config,
+        locality: f.locality,
+        budgetMin: budgetObj.minBudget,
+        budgetMax: budgetObj.maxBudget,
         req: {
           ...edit.req,
           deal: f.deal,
@@ -481,14 +506,12 @@ function LeadForm({ store, leadId }) {
           locality: f.locality,
           timeline: f.timeline,
           purpose: f.notes.trim() || (f.deal === 'rent' ? 'Lease' : 'Self Use'),
-          notes: f.notes.trim() || undefined
+          notes: f.notes.trim() || undefined,
+          ...budgetObj
         }
       })
       store.toast('Lead details updated successfully')
     } else {
-      const budget = f.deal === 'rent'
-        ? { budget: '₹25,000 - ₹45,000/mo', minBudget: 25000, maxBudget: 45000 }
-        : { budget: '₹1.10 - ₹1.40 Cr', minBudget: 11000000, maxBudget: 14000000 }
       const lead = {
         id: 'l_' + Date.now(),
         name: f.name.trim(),
@@ -498,6 +521,11 @@ function LeadForm({ store, leadId }) {
         stage: 'New',
         minsAgo: 0,
         agentId: f.agentId || store.state.agents[0]?.id || 'a1',
+        deal: f.deal,
+        requirement: f.config,
+        locality: f.locality,
+        budgetMin: budgetObj.minBudget,
+        budgetMax: budgetObj.maxBudget,
         req: {
           deal: f.deal,
           config: f.config,
@@ -505,7 +533,7 @@ function LeadForm({ store, leadId }) {
           purpose: f.notes.trim() || (f.deal === 'rent' ? 'Lease' : 'Self Use'),
           notes: f.notes.trim() || undefined,
           timeline: f.timeline,
-          ...budget
+          ...budgetObj
         },
         notes: [],
         shortlist: [],
@@ -524,7 +552,7 @@ function LeadForm({ store, leadId }) {
   )
 
   return (
-    <Modal title={edit ? `Edit Lead Schema — ${edit.name}` : 'New Lead Record Schema'} onClose={store.closeModal} width={520}>
+    <Modal title={edit ? `Edit Lead — ${edit.name}` : 'New Lead Record'} onClose={store.closeModal} width={520}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
           <Field label="Full Name *"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Client Name" autoFocus /></Field>
@@ -539,15 +567,32 @@ function LeadForm({ store, leadId }) {
 
         <div className="field">
           <label>Requirement Configuration</label>
+          <Input
+            value={f.config}
+            onChange={e => set('config', e.target.value)}
+            placeholder="e.g. 2 BHK Apartment, 3 BHK, Plot..."
+            style={{ marginBottom: 8 }}
+          />
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-            {CONFIG_OPTIONS.map(t => chip(f.config === t, () => set('config', t), t))}
+            {['1 BHK', '2 BHK', '3 BHK', '4 BHK+ Villa', 'Commercial Office', 'Plot'] /* vocab-ok */.map(t =>
+              chip(f.config === t || f.config?.toLowerCase().startsWith(t.toLowerCase()), () => set('config', t), t)
+            )}
           </div>
         </div>
 
         <div className="field">
-          <label>Preferred locality</label>
+          <label>Preferred Locality</label>
           <SuggestInput id="lead-locality" value={f.locality} onChange={v => set('locality', v)}
             options={localities(store)} placeholder="Where are they looking?" />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label={f.deal === 'rent' ? 'Min Budget (₹/mo)' : 'Min Budget (e.g. 80L or 1.2Cr)'}>
+            <Input value={f.minBudget} onChange={e => set('minBudget', e.target.value)} placeholder={f.deal === 'rent' ? '25000' : '80L'} />
+          </Field>
+          <Field label={f.deal === 'rent' ? 'Max Budget (₹/mo)' : 'Max Budget (e.g. 1.4Cr)'}>
+            <Input value={f.maxBudget} onChange={e => set('maxBudget', e.target.value)} placeholder={f.deal === 'rent' ? '45000' : '1.4Cr'} />
+          </Field>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -567,7 +612,7 @@ function LeadForm({ store, leadId }) {
         </div>
 
         <Field label="Requirement Notes & Purpose"><Textarea value={f.notes} onChange={e => set('notes', e.target.value)} placeholder="Specific buyer preferences, budget flexibility, timeline notes..." rows={3} /></Field>
-        <Button variant="primary" block onClick={save} icon="check">{edit ? 'Save Schema Changes' : 'Create Lead Record'}</Button>
+        <Button variant="primary" block onClick={save} icon="check">{edit ? 'Save Changes' : 'Create Lead Record'}</Button>
       </div>
     </Modal>
   )
@@ -879,8 +924,20 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
     if (channel === 'email') {
       if (email) window.location.href = `mailto:${email}`
     } else if (digits) {
-      if (channel === 'wa') window.open(whatsappLink(waText || '', digits), '_blank', 'noopener')
-      else window.location.href = `tel:+${digits.length > 10 ? digits : '91' + digits}`
+      if (channel === 'wa') {
+        let msg = waText || ''
+        if (!msg && recordType === 'lead' && recordId) {
+          const lead = store.lookup('lead', recordId)
+          if (lead) {
+            msg = followUpMessage(lead, store.state.settings.firmName, {
+              whatsappIntroTemplate: store.state.settings.whatsappIntroTemplate,
+            })
+          }
+        }
+        window.open(whatsappLink(msg, digits), '_blank', 'noopener')
+      } else {
+        window.location.href = `tel:+${digits.length > 10 ? digits : '91' + digits}`
+      }
     }
     if (recordType && recordId) {
       store.logContactAction(recordType, recordId, channel).then(res => {
@@ -1742,74 +1799,42 @@ function SearchModal({ store, go }) {
 }
 
 // ---- Right-Side Slide-In Notifications Drawer ----
-function NotifModal({ store, go }) {
-  const [filter, setFilter] = useState('all')
+export function NotifModal({ store, go }) {
   const close = () => store.setNotif(false)
-
-  // Device alerts are ON by default — the app subscribes on first use and there
-  // is no switch here. The only thing worth surfacing is when the browser has
-  // blocked them, because then the app is silent and nobody chose that.
-  const alertsBlocked = pushPermission() === 'denied'
-
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') close()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
-  // The action queue is three narrow questions — overdue, unassigned, waiting on
-  // first contact — and each one is a query the server already answers. Building
-  // it meant walking every lead in the firm; the drawer only ever shows a
-  // handful, and the counts come from the summary that counts without reading.
-  //
-  // The first stage is read from the firm's own settings. This used to compare
-  // against the literal string 'New inquiry', which no tenant actually uses
-  // (Delpat's first stage is "New"), so the third bucket was permanently empty.
-  const firstStage = store.state.settings?.stages?.[0] || ''
-  const { data: queue } = useServerData(() => Promise.all([
-    api.listLeads({ segment: 'overdue', limit: 25 }),
-    api.listLeads({ segment: 'unassigned', limit: 25 }),
-    firstStage ? api.listLeads({ stage: firstStage, limit: 25 }) : Promise.resolve({ data: [] }),
-  ]).then(([o, u, i]) => ({ overdue: o?.data || [], unassigned: u?.data || [], inquiry: i?.data || [] })),
-    [firstStage], { overdue: [], unassigned: [], inquiry: [] })
-  const { data: counts } = useServerData(() => api.getLeadsSummary(), [], null)
-
-  const items = [
-    ...(queue?.overdue || []).map(l => ({
-      id: l.id + '-overdue', leadId: l.id, kind: 'overdue', tag: 'Overdue Follow-up', icon: 'clock',
-      title: l.name, sub: l.followUp?.action || 'Overdue interaction required',
-    })),
-    ...(queue?.unassigned || []).map(l => ({
-      id: l.id + '-unassigned', leadId: l.id, kind: 'unassigned', tag: 'Unassigned Inquiry', icon: 'person',
-      title: l.name, sub: reqLine(l.req) || 'Needs agent assignment',
-    })),
-    ...(queue?.inquiry || []).filter(l => l.agentId && !l.overdue).map(l => ({
-      id: l.id + '-inquiry', leadId: l.id, kind: 'inquiry', tag: 'New Inquiry', icon: 'sparkle',
-      title: l.name, sub: reqLine(l.req) || 'Pending initial outreach',
-    })),
-  ]
-
-  const overdueCount = counts?.overdue ?? items.filter(x => x.kind === 'overdue').length
-  const unassignedCount = counts?.unassigned ?? items.filter(x => x.kind === 'unassigned').length
-  const inquiryCount = items.filter(x => x.kind === 'inquiry').length
-
-  const filteredItems = items.filter(x => {
-    if (filter === 'overdue') return x.kind === 'overdue'
-    if (filter === 'unassigned') return x.kind === 'unassigned'
-    if (filter === 'inquiry') return x.kind === 'inquiry'
-    return true
-  })
-
-  // Server-backed alert feed (real notifications persisted per user), distinct
-  // from the derived action queue below.
   const notifs = store.state.notifications || []
   const unreadNotifs = notifs.filter(n => !n.read).length
-  const openNotif = (n) => {
-    const m = (n.link || '').match(/lead=([^&]+)/)
-    if (m) { close(); go('leads', { leadId: m[1], leadOpen: true }) }
+  const [filter, setFilter] = useState('all') // 'all' | 'unread' | 'assigned'
+  const [pushState, setPushState] = useState(() =>
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied'
+  )
+
+  useEffect(() => {
+    const onPop = () => close()
+    window.addEventListener('popstate', onPop)
+    const onKey = (e) => { if (e.key === 'Escape') close() }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [])
+
+  // Same no-op as PhoneMe had: pushPermission() takes no argument and only
+  // reads the current permission. subscribeToPush() is what actually prompts
+  // and registers the subscription.
+  const enablePush = async () => {
+    await subscribeToPush()
+    setPushState(pushPermission())
   }
+
+  const openNotif = (n) => {
+    if (!n.read) store.markAllNotifsRead()
+    const m = (n.link || '').match(/lead=([^&]+)/)
+    close()
+    if (m) go('leads', { leadId: m[1], leadOpen: true })
+    else go('leads')
+  }
+
   const notifAgo = (ts) => {
     if (!ts) return ''
     const mins = Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 60000))
@@ -1819,112 +1844,112 @@ function NotifModal({ store, go }) {
     return hrs < 24 ? `${hrs}h ago` : `${Math.floor(hrs / 24)}d ago`
   }
 
+  const filteredNotifs = notifs.filter(n => {
+    if (filter === 'unread') return !n.read
+    if (filter === 'assigned') return (n.title || '').toLowerCase().includes('assign') || (n.body || '').toLowerCase().includes('assign')
+    return true
+  })
+
   return (
     <div className="notif-drawer-overlay" onClick={close}>
       <div className="notif-drawer" onClick={e => e.stopPropagation()}>
-        <div className="notif-drawer-head">
-          <div className="nd-title">
+        <div className="notif-drawer-head" style={{ borderBottom: '1px solid var(--line)', padding: '16px 20px' }}>
+          <div className="nd-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Icon name="bell" size={18} />
-            <span>Activity & Action Queue</span>
-            {items.length > 0 && <span className="nd-badge">{items.length} active</span>}
+            <span style={{ fontSize: 16, fontWeight: 700 }}>Notifications</span>
+            {unreadNotifs > 0 && (
+              <span className="nd-badge" style={{ background: 'var(--accent)', color: '#fff', padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
+                {unreadNotifs} new
+              </span>
+            )}
           </div>
-          <button className="btn btn-icon btn-quiet" onClick={close} title="Close drawer (Esc)">
-            <Icon name="x" size={16} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {unreadNotifs > 0 && (
+              <button
+                type="button"
+                className="btn-quiet"
+                style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, border: 'none', background: 'transparent', cursor: 'pointer' }}
+                onClick={() => store.markAllNotifsRead()}
+              >
+                Mark all read
+              </button>
+            )}
+            <button className="btn btn-icon btn-quiet" onClick={close} title="Close drawer (Esc)">
+              <Icon name="x" size={16} />
+            </button>
+          </div>
         </div>
 
-        <div className="notif-drawer-tabs">
+        <div style={{ display: 'flex', gap: 6, padding: '10px 16px', borderBottom: '1px solid var(--line)', background: 'var(--card-2)' }}>
           <button
-            className={`notif-drawer-tab ${filter === 'all' ? 'active' : ''}`}
+            className={`qchip ${filter === 'all' ? 'on' : ''}`}
             onClick={() => setFilter('all')}
           >
-            All ({items.length})
+            All ({notifs.length})
           </button>
           <button
-            className={`notif-drawer-tab ${filter === 'overdue' ? 'active' : ''}`}
-            onClick={() => setFilter('overdue')}
+            className={`qchip ${filter === 'unread' ? 'on' : ''}`}
+            onClick={() => setFilter('unread')}
           >
-            Overdue ({overdueCount})
+            Unread ({unreadNotifs})
           </button>
           <button
-            className={`notif-drawer-tab ${filter === 'unassigned' ? 'active' : ''}`}
-            onClick={() => setFilter('unassigned')}
+            className={`qchip ${filter === 'assigned' ? 'on' : ''}`}
+            onClick={() => setFilter('assigned')}
           >
-            Unassigned ({unassignedCount})
-          </button>
-          <button
-            className={`notif-drawer-tab ${filter === 'inquiry' ? 'active' : ''}`}
-            onClick={() => setFilter('inquiry')}
-          >
-            New ({inquiryCount})
+            Assignments ({notifs.filter(n => (n.title || '').toLowerCase().includes('assign')).length})
           </button>
         </div>
 
-        <div className="notif-drawer-body">
-          {notifs.length > 0 && (
-            <div className="notif-alerts">
-              <div className="notif-alerts-head">
-                <span>Notifications{unreadNotifs > 0 ? ` · ${unreadNotifs} new` : ''}</span>
-                {unreadNotifs > 0 && (
-                  <button type="button" className="btn-quiet" style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600 }} onClick={() => store.markAllNotifsRead()}>
-                    Mark all read
-                  </button>
-                )}
-              </div>
-              {notifs.slice(0, 8).map(n => (
-                <button key={n.id} className={`notif-alert-row${n.read ? '' : ' is-unread'}`} onClick={() => openNotif(n)}>
-                  <span className="notif-alert-dot" aria-hidden />
-                  <div className="notif-alert-content">
-                    <div className="notif-alert-title">{n.title}</div>
-                    {n.body && <div className="notif-alert-body">{n.body}</div>}
-                  </div>
-                  <span className="notif-alert-ago">{notifAgo(n.created_at)}</span>
-                </button>
-              ))}
-              <div className="notif-alerts-label">Action queue</div>
-            </div>
-          )}
-          {!filteredItems.length ? (
-            <div className="empty" style={{ margin: 'auto 0', padding: '48px 20px' }}>
+        <div className="notif-drawer-body" style={{ padding: 12, flex: 1, overflowY: 'auto' }}>
+          {filteredNotifs.length === 0 ? (
+            <div className="empty" style={{ margin: 'auto 0', padding: '60px 20px', textAlign: 'center' }}>
               <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--card-2)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', color: 'var(--muted)' }}>
                 <Icon name="check" size={20} />
               </div>
-              <div className="e-t">All clear</div>
-              <div className="e-s">No action items found in this queue.</div>
+              <div className="e-t" style={{ fontWeight: 600, fontSize: 15 }}>No notifications found</div>
+              <div className="e-s" style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4 }}>No items match your current filter.</div>
             </div>
           ) : (
-            filteredItems.map(n => (
+            filteredNotifs.map(n => (
               <button
                 key={n.id}
-                className={`notif-item-card is-${n.kind}`}
-                onClick={() => {
-                  close()
-                  go('leads', { leadId: n.leadId, leadOpen: true })
+                className={`notif-alert-row${n.read ? '' : ' is-unread'}`}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 12, width: '100%', padding: '14px',
+                  background: n.read ? 'transparent' : 'var(--accent-wash)', border: '1px solid var(--line)',
+                  borderRadius: 12, marginBottom: 8, textAlign: 'left', cursor: 'pointer'
                 }}
+                onClick={() => openNotif(n)}
               >
-                <span className="notif-item-icon">
-                  <Icon name={n.icon} size={16} />
-                </span>
-                <div className="notif-item-content">
-                  <span className="notif-item-tag">{n.tag}</span>
-                  <div className="notif-item-title">{n.title}</div>
-                  <div className="notif-item-sub">{n.sub}</div>
+                <span className="notif-alert-dot" style={{ width: 8, height: 8, borderRadius: '50%', background: n.read ? 'transparent' : 'var(--accent)', marginTop: 6, flexShrink: 0 }} />
+                <div className="notif-alert-content" style={{ flex: 1, minWidth: 0 }}>
+                  <div className="notif-alert-title" style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--ink)' }}>{n.title}</div>
+                  {n.body && <div className="notif-alert-body" style={{ fontSize: 12.5, color: 'var(--ink-2)', marginTop: 2 }}>{n.body}</div>}
                 </div>
-                <span className="notif-item-arrow">
-                  <Icon name="chevRight" size={16} />
-                </span>
+                <span className="notif-alert-ago" style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>{notifAgo(n.created_at)}</span>
               </button>
             ))
           )}
         </div>
 
-        <div className="notif-drawer-footer">
-          {alertsBlocked && (
-            <span className="notif-blocked"><Icon name="bell" size={14} />Alerts blocked in your browser settings</span>
+        <div className="notif-drawer-footer" style={{ padding: '14px 20px', borderTop: '1px solid var(--line)', background: 'var(--card-2)' }}>
+          {pushState === 'default' && (
+            <Button variant="primary" size="sm" style={{ width: '100%' }} onClick={enablePush}>
+              <Icon name="bell" size={14} /> Enable Device Notifications
+            </Button>
           )}
-          <Button variant="secondary" size="sm" onClick={() => { close(); go('leads') }}>
-            Open Leads Workspace
-          </Button>
+          {pushState === 'denied' && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 8, lineHeight: 1.35 }}>
+              <Icon name="bell" size={14} />
+              <span>Push alerts blocked in browser settings. Tap the lock icon in address bar to allow notifications.</span>
+            </div>
+          )}
+          {pushState === 'granted' && (
+            <div style={{ fontSize: 12, color: 'var(--accent-ink)', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+              <Icon name="check" size={14} /> Device notifications active
+            </div>
+          )}
         </div>
       </div>
     </div>

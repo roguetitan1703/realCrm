@@ -827,10 +827,9 @@ export function StoreProvider({ children }) {
     // the property branch of it — a follow-up with no listing attached is still
     // being sent in Marathi if that is what the agent chose.
     return lead ? followUpMessage(lead, state.settings.firmName, {
-      lang: wa.lang, variant: wa.variant,
-      templates: state.settings.followUpTemplates,
+      whatsappIntroTemplate: state.settings.whatsappIntroTemplate,
     }) : ''
-  }, [state.cache, state.settings.firmName, state.settings.followUpTemplates])
+  }, [state.cache, state.settings.firmName, state.settings.whatsappIntroTemplate])
 
   const openWhatsApp = useCallback((propId, leadId) => {
     // The composer opens in the language this person writes in, not a fixed one.

@@ -123,16 +123,12 @@ export default function WaModal({ store }) {
           </div>
         )}
 
-        {/* Always shown. These are properties of the MESSAGE, not of the
-            listing — a follow-up with nothing attached is still being written
-            in Marathi if that is what was picked. */}
-        <div className="wa-ctl">
-          <Segmented value={wa.lang} onChange={v => store.recompose({ lang: v })} options={MESSAGE_LANGUAGES} />
-          {p && <Segmented value={wa.tone} onChange={v => store.recompose({ tone: v })} options={['Standard', 'Short']} />}
-          <button className="wa-var" title="Another wording" onClick={() => store.recompose({ variant: wa.variant + 1 })}>
-            <Icon name="refresh" size={15} />
-          </button>
-        </div>
+        {p && (
+          <div className="wa-ctl">
+            <Segmented value={wa.lang} onChange={v => store.recompose({ lang: v })} options={MESSAGE_LANGUAGES} />
+            <Segmented value={wa.tone} onChange={v => store.recompose({ tone: v })} options={['Standard', 'Short']} />
+          </div>
+        )}
 
         <WaCanvas message={wa.message} deva={wa.lang === 'Marathi'}
           style={{ borderRadius: 0, minHeight: 190, flex: 1, overflowY: 'auto' }} />

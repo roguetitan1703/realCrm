@@ -33,12 +33,15 @@ export const theme = {
 
 export const FIRM = theme.brand.firmName
 
+export const DEFAULT_WHATSAPP_INTRO = 'Hello {name}, I received your inquiry for a {requirement} in {locality} via {source}. I am reaching out from {firmName}. We have several excellent options matching your preferences. When would be a convenient time to connect over a quick call?'
+
 // Default editable settings — the store seeds from these, then owns them. Renaming
 // a stage / adding a source in Settings mutates state, never this object.
 export const DEFAULT_SETTINGS = {
   firmName: theme.brand.firmName,
   stages: [...theme.stages],
   sources: [...theme.sources],
+  whatsappIntroTemplate: DEFAULT_WHATSAPP_INTRO,
 }
 
 // Tenant brand identity lives on the tenant row (tenants.brand_config), NOT in

@@ -36,7 +36,9 @@ export function useNav({ home, onExitWarning }) {
     if (window.history.state?.nav) return
     const url = urlFor(first.screen || home, first.sel)
     window.history.replaceState({ nav: true, floor: true }, '', url)
-    window.history.pushState({ nav: true }, '', url)
+    if (!isStandaloneApp()) {
+      window.history.pushState({ nav: true }, '', url)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

@@ -10,25 +10,27 @@ export default function InstallPanel() {
   useEffect(() => onInstallAvailable(setInstallable), [])
 
   if (isStandalone()) return null
-  // No deferred prompt yet means we name the browser's own menu instead of
-  // showing a button that cannot do anything.
   const ios = isIOS()
 
   return (
     <Panel>
-      <SectionHead title="App" />
-      <div className="sys-row">
+      <SectionHead title="App Installation" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '4px 0' }}>
         <div>
-          <div className="sys-t">Install on this device</div>
-          <div className="sys-s">
+          <div className="sys-t" style={{ fontWeight: 600, fontSize: 14 }}>Install CRM Application</div>
+          <div className="sys-s" style={{ color: 'var(--muted)', fontSize: 13, marginTop: 4, lineHeight: 1.4 }}>
             {ios
-              ? 'In Safari, tap Share then Add to Home Screen. Alerts require this on iPhone and iPad.'
+              ? 'In Safari, tap the Share icon then select "Add to Home Screen" to install and enable push alerts.'
               : installable
-                ? 'Opens in its own window without the browser bar, and can receive alerts when closed.'
-                : 'Open the browser menu and choose Install app.'}
+                ? 'Install on your desktop or mobile device for standalone app windowing and instant alert notifications.'
+                : 'Open your browser settings menu and choose "Install App" or "Add to Home Screen".'}
           </div>
         </div>
-        {!ios && installable && <Button variant="primary" onClick={promptInstall}>Install</Button>}
+        {!ios && installable && (
+          <div>
+            <Button variant="primary" size="sm" onClick={promptInstall}>Install App</Button>
+          </div>
+        )}
       </div>
     </Panel>
   )

@@ -70,10 +70,12 @@ export const LEADS_DEF = {
   headerFacts: (l) => [
     l.phone,
     l.email || null,
-    l.req?.config || null,
-    l.req?.locality ? <span className="rh-loc"><Icon name="mapPin" size={12} className="ic" />{l.req.locality}</span> : null,
-    l.req?.deal ? <span className={'rh-dealtag' + (l.req.deal === 'rent' ? ' rent' : '')}>{l.req.deal === 'rent' ? 'Rent' : 'Sale'}</span> : null,
+    l.req?.config || l.requirement || null,
+    (l.req?.locality || l.locality) ? <span className="rh-loc"><Icon name="mapPin" size={12} className="ic" />{l.req?.locality || l.locality}</span> : null,
+    (l.req?.deal || l.deal) ? <span className={'rh-dealtag' + ((l.req?.deal || l.deal) === 'rent' ? ' rent' : '')}>{(l.req?.deal || l.deal) === 'rent' ? 'Rent' : 'Sale'}</span> : null,
     l.req ? budgetRange(l.req) : null,
+    l.req?.timeline || null,
+    l.source ? `Via ${l.source}` : null,
   ].filter(Boolean),
 
   // Progression — a lead's status, not a pipeline position (see

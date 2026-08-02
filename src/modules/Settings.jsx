@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Panel, SectionHead, StageTag, Button, Input, Segmented } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
-import { theme, PROTECTED_STAGES } from '../data/theme.js'
+import { theme, PROTECTED_STAGES, DEFAULT_WHATSAPP_INTRO } from '../data/theme.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import { MESSAGE_LANGUAGES } from '../data/vocabLocale.js'
-import { DEFAULT_FOLLOWUPS, PLACEHOLDERS } from '../data/followUpTemplates.js'
 import InstallPanel from '../components/InstallPanel.jsx'
 
 const NAV = [
@@ -292,47 +290,43 @@ function FollowUpSection({ store, settings }) {
   )
 }
 
-// ---- Message templates ----------------------------------------------------
-// The wording sent when NO property is attached. Three per language so the same
-// buyer chased three times does not get the identical paragraph, and editable
-// because a broker's own phrasing beats ours — this is the text their client
-// actually reads.
+// ---- Single WhatsApp Intro Message ---------------------------------------
 function MessagesSection({ store, settings }) {
-  const [lang, setLang] = useState(MESSAGE_LANGUAGES[0])
-  const saved = settings.followUpTemplates || {}
-  const current = (saved[lang]?.length ? saved[lang] : DEFAULT_FOLLOWUPS[lang]) || []
-  const [draft, setDraft] = useState(current)
-  const [editingLang, setEditingLang] = useState(lang)
+  const tpl = settings.whatsappIntroTemplate || DEFAULT_WHATSAPP_INTRO
+  const [draft, setDraft] = useState(tpl)
 
-  // Switching language loads that language's set rather than carrying edits across.
-  if (editingLang !== lang) { setEditingLang(lang); setDraft(current) }
+  useEffect(() => {
+    setDraft(settings.whatsappIntroTemplate || DEFAULT_WHATSAPP_INTRO)
+  }, [settings.whatsappIntroTemplate])
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(current)
-  const save = () => store.patchSettings(
-    { followUpTemplates: { ...saved, [lang]: draft.map(t => t.trim()).filter(Boolean) } },
-    'Templates saved')
+  const dirty = draft !== tpl
+  const save = () => store.patchSettings({ whatsappIntroTemplate: draft.trim() }, 'WhatsApp intro message saved')
   const reset = () => {
-    const next = { ...saved }; delete next[lang]
-    setDraft(DEFAULT_FOLLOWUPS[lang]); store.patchSettings({ followUpTemplates: next }, 'Templates reset')
+    setDraft(DEFAULT_WHATSAPP_INTRO)
+    store.patchSettings({ whatsappIntroTemplate: DEFAULT_WHATSAPP_INTRO }, 'Intro message reset to default')
   }
 
   return (
     <>
-      <SecHead title="Message templates" sub="Sent on WhatsApp when no property is attached." />
-      <div className="set-card">
-        <Segmented value={lang} onChange={setLang} options={MESSAGE_LANGUAGES} />
-        <div className="msgt-ph">
-          {PLACEHOLDERS.map(ph => <code key={ph.token}>{ph.token}</code>)}
+      <SecHead title="WhatsApp Intro Message" sub="The single introductory message sent to leads on WhatsApp. Customize the template below using placeholders." />
+      <Panel>
+        <SectionHead title="Intro Template" />
+        <div className="set-sec-sub" style={{ marginBottom: 8 }}>Available Placeholders:</div>
+        <div className="msgt-ph" style={{ marginBottom: 12 }}>
+          <code>{"{name}"}</code> <code>{"{firmName}"}</code> <code>{"{requirement}"}</code> <code>{"{locality}"}</code> <code>{"{source}"}</code>
         </div>
-        {draft.map((t, i) => (
-          <textarea key={i} className="textarea msgt-t" rows={2} value={t}
-            onChange={e => setDraft(d => d.map((x, j) => (j === i ? e.target.value : x)))} />
-        ))}
-        <div className="msgt-foot">
-          <Button variant="primary" disabled={!dirty} onClick={save}>Save</Button>
+        <textarea
+          className="textarea msgt-t"
+          rows={3}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          placeholder="Enter introductory message template..."
+        />
+        <div className="msgt-foot" style={{ marginTop: 14, display: 'flex', gap: 10 }}>
+          <Button variant="primary" disabled={!dirty} onClick={save}>Save Message</Button>
           <Button variant="ghost" onClick={reset}>Reset to default</Button>
         </div>
-      </div>
+      </Panel>
     </>
   )
 }

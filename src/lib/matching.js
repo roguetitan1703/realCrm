@@ -2,7 +2,6 @@ import { isOpen } from '../data/leadStatus.js'
 import { budgetOf } from './format.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
-import { DEFAULT_FOLLOWUPS, fillTemplate, PLACEHOLDERS } from '../data/followUpTemplates.js'
 import {
   AREA_UNITS, BHK, FACING, FURNISH, POSSESSION, SOCIETY_AMENITIES, SUBTYPES,
   labelOf, normaliseBhk, normaliseSubtype, normaliseTo,
@@ -317,32 +316,25 @@ export function generateMessage(rawProperty, opts = {}) {
 // whatever the firm wrote in Settings.
 export function followUpMessage(lead, firmName = tenantFirm(), opts = {}) {
   if (!lead) return ''
-  const lang = opts.lang || 'Hinglish'
-  const set = (opts.templates && opts.templates[lang]?.length)
-    ? opts.templates[lang]
-    : (DEFAULT_FOLLOWUPS[lang] || DEFAULT_FOLLOWUPS.English)
-  const values = {
-    name: String(lead.name || '').split(' ')[0],
-    config: labelOf(BHK, lead.req?.config) || lead.req?.config || '',
-    locality: lead.req?.locality || '',
-    firm: firmName || '',
-  }
+  const tpl = opts.whatsappIntroTemplate
+    || opts.introTemplate
+    || 'Hello {name}, I received your inquiry for a {requirement} in {locality} via {source}. I am reaching out from {firmName}. We have several excellent options matching your preferences. When would be a convenient time to connect over a quick call?'
 
-  // Pick a template this lead can actually fill, starting from the requested
-  // variant. Gutting a sentence that referenced a missing locality produced
-  // "Hello Amit Shall I send them across?" — the third wording in every set
-  // needs only a name, so there is always something that fits.
-  const start = ((Number(opts.variant) || 0) % set.length + set.length) % set.length
-  const fits = (t) => !PLACEHOLDERS.some(ph =>
-    t.includes(ph.token) && !String(values[ph.token.slice(1, -1)] ?? '').trim())
-  let chosen = set[start]
-  for (let k = 0; k < set.length; k++) {
-    const cand = set[(start + k) % set.length]
-    if (fits(cand)) { chosen = cand; break }
-  }
+  const firstName = String(lead.name || 'there').trim().split(' ')[0]
+  const configLabel = labelOf(BHK, lead.req?.config) || lead.req?.config || ''
+  const dealLabel = lead.req?.deal ? (lead.req.deal === 'rent' ? 'Rent' : 'Sale') : ''
+  const reqStr = [configLabel, dealLabel].filter(Boolean).join(' ') || 'property'
+  const locStr = lead.req?.locality || 'your preferred location'
+  const sourceStr = lead.source || 'our portal'
+  const firm = firmName || 'our team'
 
-  const body = fillTemplate(chosen, values)
-  const L = [body]
-  if (firmName && !body.includes(firmName)) { L.push(''); L.push('— ' + firmName) }
-  return L.join('\n')
+  let text = tpl
+    .replace(/\{name\}/gi, firstName)
+    .replace(/\{firmName\}/gi, firm)
+    .replace(/\{firm\}/gi, firm)
+    .replace(/\{requirement\}/gi, reqStr)
+    .replace(/\{locality\}/gi, locStr)
+    .replace(/\{source\}/gi, sourceStr)
+
+  return text.trim()
 }
