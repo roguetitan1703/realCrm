@@ -178,6 +178,9 @@ function freshState() {
     tenant: cs.tenant || null,
     importLogs: [],
     inactiveAgentIds: Array.isArray(cs.inactiveAgentIds) ? cs.inactiveAgentIds : [],
+    // People who have left. Kept apart from `agents` so they resolve for
+    // display but can never be picked — see getBootstrap().
+    formerAgents: Array.isArray(cs.formerAgents) ? cs.formerAgents : [],
     settings,                            // editable: firmName, stages, sources, slaHours, reminderDays
     brand: cs.brand
       ? { ...clone(DEFAULT_BRAND), ...cs.brand }
@@ -218,6 +221,16 @@ function reducer(state, action) {
       return {
         ...state,
         agents: Array.isArray(s.agents) ? s.agents : state.agents,
+        // This was missing entirely — freshState() (the FIRST paint, from the
+        // localStorage snapshot) reads formerAgents/inactiveAgentIds, but the
+        // actual live boot response lands here, and this reducer never copied
+        // either one across. So a departed agent resolved correctly for one
+        // frame on load and then reverted to unresolved the instant the real
+        // network response arrived — every lead of theirs read "Former owner"
+        // (the safe fallback for an unresolvable id) instead of their name,
+        // and duty-off agents reappeared in every picker.
+        formerAgents: Array.isArray(s.formerAgents) ? s.formerAgents : state.formerAgents,
+        inactiveAgentIds: Array.isArray(s.inactiveAgentIds) ? s.inactiveAgentIds : state.inactiveAgentIds,
         localities: Array.isArray(s.localities) ? s.localities : state.localities,
         projects: Array.isArray(s.projects) ? s.projects : state.projects,
         configs: Array.isArray(s.configs) ? s.configs : state.configs,
@@ -238,6 +251,8 @@ function reducer(state, action) {
       return {
         ...state,
         agents: Array.isArray(s.agents) ? s.agents : state.agents,
+        formerAgents: Array.isArray(s.formerAgents) ? s.formerAgents : state.formerAgents,
+        inactiveAgentIds: Array.isArray(s.inactiveAgentIds) ? s.inactiveAgentIds : state.inactiveAgentIds,
         localities: Array.isArray(s.localities) ? s.localities : state.localities,
         projects: Array.isArray(s.projects) ? s.projects : state.projects,
         configs: Array.isArray(s.configs) ? s.configs : state.configs,
@@ -905,7 +920,12 @@ export function StoreProvider({ children }) {
     state, dispatch, toast,
     // No invented fallback agent. A hardcoded name and phone number here is a
     // real person's contact details shown for an id we could not resolve.
-    agentById: (id) => state.agents.find(a => a.id === id) || null,
+    // Resolves people who have LEFT as well, flagged `departed`. Without that
+    // fallback a lead belonging to someone who quit rendered as "Unassigned" —
+    // which is a different fact, and the one that made the Unassigned pill
+    // disagree with the rows underneath it.
+    agentById: (id) => (id && (state.agents.find(a => a.id === id)
+      || state.formerAgents.find(a => a.id === id))) || null,
     me: () => state.agents.find(a => a.id === state.activeAgentId) || state.agents[0] || null,
     activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id)),
     

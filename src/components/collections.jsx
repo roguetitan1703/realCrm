@@ -366,10 +366,18 @@ export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort
   }
 
   const columns = [
+    // A <label> wrapping the <input>, not a <div> with a hand-rolled click
+    // handler. The div version put its own onClick on the INPUT to stop the
+    // click reaching the row (so opening the record didn't fire) — but that
+    // same handler did nothing else, so a click landing exactly on the
+    // checkbox square stopped right there and never toggled anything. Only
+    // the div's padding around it worked. A <label> toggles its input on any
+    // click inside it natively; the actual state change moves to onChange,
+    // which fires reliably wherever the click landed.
     ...(selectable ? [{ key: '__select', label: (
-      <div className="table-sel-cell" onClick={e => e.stopPropagation()}>
-        <input type="checkbox" checked={allOn} ref={el => { if (el) el.indeterminate = !allOn && someOn }} onChange={toggleAll} onClick={e => e.stopPropagation()} />
-      </div>
+      <label className="table-sel-cell" onClick={e => e.stopPropagation()}>
+        <input type="checkbox" checked={allOn} ref={el => { if (el) el.indeterminate = !allOn && someOn }} onChange={toggleAll} />
+      </label>
     ), sortable: false }] : []),
     ...def.columns.map(c => ({ key: c.key, label: c.label, sortable: c.sortable })),
     ...(def.rowActions ? [{ key: '__actions', label: '', sortable: false }] : []),
@@ -381,9 +389,14 @@ export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort
       onClick: onOpen ? () => onOpen(rec) : undefined,
       cells: [
         ...(selectable ? [
-          <div key="__sel" className="table-sel-cell" onClick={e => { e.stopPropagation(); toggleRow(id, idx, !!e.shiftKey || !!e.nativeEvent?.shiftKey) }}>
-            <input type="checkbox" checked={selected.has(id)} readOnly onClick={e => e.stopPropagation()} />
-          </div>
+          // React fires a checkbox's onChange off the underlying native click,
+          // so e.nativeEvent still carries shiftKey here — same range-select
+          // behaviour as before, now triggered by every click in the label,
+          // not only ones that miss the input.
+          <label key="__sel" className="table-sel-cell" onClick={e => e.stopPropagation()}>
+            <input type="checkbox" checked={selected.has(id)}
+              onChange={e => toggleRow(id, idx, !!e.nativeEvent?.shiftKey)} />
+          </label>
         ] : []),
         ...def.columns.map(c => c.render ? c.render(rec, store) : getNestedValue(rec, c.key)),
         ...(def.rowActions ? [
@@ -433,7 +446,7 @@ export function SelectDropdown({ value, options, onChange, label, align }) {
 // ---- QuickAssignMenu: assign/unassign one record from a row, no modal. ----
 // Reuses bulkAssignLeads with a single id — one code path for one row and for
 // a whole selection, rather than a separate single-assign endpoint.
-export function QuickAssignMenu({ agents, currentId, onAssign }) {
+export function QuickAssignMenu({ agents, currentId, onAssign, children, className, title }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   useEffect(() => {
@@ -444,22 +457,74 @@ export function QuickAssignMenu({ agents, currentId, onAssign }) {
   }, [open])
   return (
     <div className="qam" ref={ref}>
-      <button className={'qam-btn' + (open ? ' open' : '')} title="Quick assign" onClick={() => setOpen(o => !o)}>
-        <Icon name="userPlus" size={14} />
+      {/* `children` makes the trigger the caller's own content — the owner cell
+          passes the person's name and avatar, so the thing you click to change
+          the owner IS the owner, rather than an unlabelled + button parked in a
+          separate column while the name sits somewhere else. */}
+      {/* stopPropagation: this used to only ever sit inside a rowActions cell
+          that already stopped propagation around it (ModuleTable's
+          `row-actions` span). Moving OwnerCell into a plain data column, with
+          no such wrapper, meant a click here also reached the <td>'s own
+          onClick and opened the record — so clicking "Reassign" navigated
+          away before the popover was ever visible. */}
+      <button className={(className || 'qam-btn') + (open ? ' open' : '')}
+        title={title || 'Change owner'}
+        onClick={e => { e.stopPropagation(); setOpen(o => !o) }}>
+        {children || <Icon name="userPlus" size={14} />}
       </button>
       {open && (
-        <div className="popover qam-pop right">
-          <button className={'p-item' + (!currentId ? ' on' : '')} onClick={() => { onAssign(null); setOpen(false) }}>
-            Unassign
-          </button>
+        // Same reason as the trigger — this sits inside the same table cell,
+        // so a click on any item here would otherwise also open the record.
+        <div className="popover qam-pop right" onClick={e => e.stopPropagation()}>
           {agents.map(a => (
             <button key={a.id} className={'p-item' + (currentId === a.id ? ' on' : '')} onClick={() => { onAssign(a.id); setOpen(false) }}>
               {a.first}
             </button>
           ))}
+          {currentId && (
+            <button className="p-item danger" onClick={() => { onAssign(null); setOpen(false) }}>
+              Unassign
+            </button>
+          )}
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Who owns this record, and the control to change it — one cell, four honest
+ * states. It used to be two things in two places: a Sales Executive column that
+ * rendered `<Unassigned/>` whenever it could not resolve the id, and a separate
+ * trailing column holding a bare + button. So a lead assigned to someone who
+ * left showed "Unassigned" next to an add icon, and nowhere on the row did it
+ * say who actually had it.
+ *
+ *   nobody            → "Assign", and it is the invitation to do so
+ *   an active person  → their avatar and name
+ *   someone who left  → their name, marked, because the lead needs rehoming
+ *   an id we can't resolve at all → "Former owner", never a blank
+ */
+export function OwnerCell({ record, store, onAssign, canAssign }) {
+  const owner = store.agentById(record.agentId)
+  const orphaned = !!record.agentId && !owner
+  const body = !record.agentId
+    ? <span className="own-none"><Icon name="userPlus" size={13} />Assign</span>
+    : owner
+      ? <span className={'own-who' + (owner.departed ? ' gone' : '')}>
+          <Avatar agent={owner} size="sm" />
+          <span className="own-name">{owner.first || owner.name}</span>
+          {owner.departed && <span className="own-tag">left</span>}
+        </span>
+      : <span className="own-who gone"><span className="own-name">Former owner</span></span>
+
+  if (!canAssign) return <span className="own-cell">{body}</span>
+  return (
+    <QuickAssignMenu
+      agents={store.activeAgents()} currentId={record.agentId} onAssign={onAssign}
+      className={'own-cell own-btn' + (orphaned || (owner && owner.departed) ? ' own-alert' : '')}
+      title={record.agentId ? 'Change owner' : 'Assign owner'}
+    >{body}</QuickAssignMenu>
   )
 }
 

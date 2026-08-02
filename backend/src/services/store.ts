@@ -986,10 +986,21 @@ export async function getPulse(): Promise<Record<string, any>> {
  */
 export async function getBootstrap(): Promise<any> {
   const t = tid();
-  const [agentsRows, settingsRows, routingRows, brandRows, localityRows, projectRows, configRows, dealRows] = await Promise.all([
+  const [agentsRows, formerRows, settingsRows, routingRows, brandRows, localityRows, projectRows, configRows, dealRows] = await Promise.all([
     sql`SELECT a.* FROM crm_agents a
         LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
         WHERE a.tenant_id = ${t} AND u.deleted_at IS NULL`,
+    // People who have LEFT, sent separately so historical attribution resolves.
+    // The comment on getAgents() says the crm_agents row is kept "so historical
+    // lead attribution still resolves" — but the row was filtered out before it
+    // ever reached the browser, so agentById() returned null and every lead
+    // belonging to someone who left rendered as "Unassigned". That is a
+    // different fact: nobody has it versus the person who had it is gone.
+    // They go in their own list so pickers and the routing rota, which read
+    // `agents`, can never offer someone who no longer works here.
+    sql`SELECT a.* FROM crm_agents a
+        LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
+        WHERE a.tenant_id = ${t} AND u.deleted_at IS NOT NULL`,
     sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}`,
     sql`SELECT * FROM crm_routing_rules WHERE tenant_id = ${t}`,
     sql`SELECT id, slug, name, brand_config FROM tenants WHERE id = ${t} OR slug = ${t} LIMIT 1`,
@@ -1031,6 +1042,9 @@ export async function getBootstrap(): Promise<any> {
     // otherwise a URL naming a different firm goes uncontradicted.
     tenant: { id: tenantRow.id || t, slug: tenantRow.slug || t, name: tenantRow.name || '' },
     agents,
+    // Resolvable for display, never selectable. `departed` is what the UI keys
+    // off to say "left the firm" rather than silently showing a name.
+    formerAgents: formerRows.map(r => ({ ...rowToAgent(r), departed: true })),
     inactiveAgentIds: agentsRows.filter(a => a.duty_status === 'OFF_DUTY').map(a => a.id),
     settings: settingsRows[0]?.value || {},
     routing_rules: routingRows[0] || null,

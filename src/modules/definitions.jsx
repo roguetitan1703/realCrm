@@ -22,7 +22,7 @@
 import React from 'react'
 import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA } from '../components/ModuleFields.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
-import { QuickAssignMenu } from '../components/collections.jsx'
+import { OwnerCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
 import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
@@ -145,27 +145,20 @@ export const LEADS_DEF = {
     { key: 'budget', label: 'Budget', sortable: true, render: (l) => <Money>{budgetRange(l.req)}</Money> },
     { key: 'stage', label: 'Stage', sortable: true, render: (l) => <StageTag stage={l.stage} /> },
     { key: 'source', label: 'Source', render: (l) => <Source>{l.source}</Source> },
-    { key: 'agent', label: 'Sales Executive', render: (l, store) => {
-      const assignable = canAssignLead(store.state.role)
-      const doAssign = (agentId) => {
-        api.bulkAssignLeads([l.id], agentId)
+    // WHO HAS THIS LEAD, and the way to change it — the same cell. It used to
+    // render only a bare + button for anyone who could assign, so the column
+    // headed "Sales Executive" never actually named one.
+    { key: 'agent', label: 'Sales Executive', render: (l, store) => (
+      <OwnerCell
+        record={l} store={store} canAssign={canAssignLead(store.state.role)}
+        onAssign={(agentId) => api.bulkAssignLeads([l.id], agentId)
           .then(res => {
             if (res?.success) { store.toast(agentId ? 'Lead assigned' : 'Lead unassigned'); store.reloadServer?.() }
             else store.toast(res?.message || 'Could not assign', 'warn')
           })
-          .catch(err => store.toast(err.message || 'Could not assign', 'warn'))
-      }
-      return assignable ? (
-        <QuickAssignMenu agents={store.activeAgents()} currentId={l.agentId} onAssign={doAssign} />
-      ) : (
-        l.agentId ? (
-          <div className="cell-agent">
-            <Avatar agent={store.agentById(l.agentId)} size="sm" />
-            <span>{store.agentById(l.agentId)?.first}</span>
-          </div>
-        ) : <Unassigned />
-      )
-    } },
+          .catch(err => store.toast(err.message || 'Could not assign', 'warn'))}
+      />
+    ) },
     { key: 'next', label: 'Next follow-up', render: (l) => {
       const nf = l.followUp ? `${l.followUp.date} · ${l.followUp.time}` : '—'
       return l.overdue ? <Overdue>{nf}</Overdue> : <span className="cell-quiet mono-num">{nf}</span>

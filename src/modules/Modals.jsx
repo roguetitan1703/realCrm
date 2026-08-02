@@ -80,7 +80,10 @@ function ModuleFormModal({ store, moduleId, recordId }) {
   const coreFields = fields.filter(f => f.section === 'core')
   const domainFields = fields.filter(f => f.section !== 'core')
   const setField = (key, val) => setForm(prev => setNestedValue(prev, key, val))
-  const optionsOf = (f) => (typeof f.options === 'function' ? f.options(store) : f.options || [])
+  // `record` (the original, unmutated copy) so a field's options() can offer
+  // the current value even when it is no longer a live choice — see
+  // agentId's options() in ModuleFields.jsx for why that matters.
+  const optionsOf = (f) => (typeof f.options === 'function' ? f.options(store, record) : f.options || [])
     .map(o => (o && typeof o === 'object') ? o : { value: o, label: o })
 
   const save = () => {
@@ -120,7 +123,7 @@ function ModuleFormModal({ store, moduleId, recordId }) {
           const match = opts.find(o => String(o.value) === raw)
           setField(f.key, match ? match.value : raw)
         }}>
-          {opts.map(o => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}
+          {opts.map(o => <option key={String(o.value)} value={String(o.value)} disabled={o.disabled}>{o.label}</option>)}
         </select>
       )
     }

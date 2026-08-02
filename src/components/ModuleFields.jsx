@@ -188,10 +188,25 @@ export const LEAD_MODULE_SCHEMA = {
       label: 'Assigned Owner',
       type: 'select',
       section: 'domain',
-      options: (store) => store?.state?.agents?.map(a => ({ value: a.id, label: a.name })) || [],
+      // A departed agent's id is not one of `options` — a <select> with no
+      // matching <option> silently falls back to whichever one renders first,
+      // so opening Edit and saving without touching this field would have
+      // reassigned the lead to a random active agent. The current holder is
+      // added as its own (disabled) option so the value has somewhere to sit
+      // until someone actually picks a replacement.
+      options: (store, record) => {
+        const live = store?.state?.agents?.map(a => ({ value: a.id, label: a.name })) || []
+        const cur = record?.agentId
+        if (!cur || live.some(o => o.value === cur)) return live
+        const former = store?.state?.formerAgents?.find(a => a.id === cur)
+        return [{ value: cur, label: (former?.name || 'Former owner') + ' (left)', disabled: true }, ...live]
+      },
       renderValue: (val, record, store) => {
+        if (!val) return 'Unassigned'
         const ag = store?.state?.agents?.find(a => a.id === val)
-        return ag ? ag.name : 'Unassigned'
+        if (ag) return ag.name
+        const former = store?.state?.formerAgents?.find(a => a.id === val)
+        return former ? `${former.name} (left the firm)` : 'Former owner (left the firm)'
       }
     },
 
