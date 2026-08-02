@@ -311,6 +311,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
   const [step, setStep] = useState(1) // 1 = Workspace & Owner, 2 = Bulk Team Setup
   const [form, setForm] = useState({
     firmName: '',
+    slug: '',
     city: '',
     ownerName: '',
     ownerEmail: '',
@@ -343,6 +344,10 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
     for (const line of lines) {
       if (/^firm:\s*/i.test(line) || /^workspace:\s*/i.test(line)) {
         newForm.firmName = line.replace(/^firm:\s*|^workspace:\s*/i, '').trim()
+        continue
+      }
+      if (/^slug:\s*/i.test(line)) {
+        newForm.slug = line.replace(/^slug:\s*/i, '').trim().toLowerCase()
         continue
       }
       if (/^city:\s*/i.test(line)) {
@@ -522,9 +527,12 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
               </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
               <Field label="Firm Name *">
-                <Input value={form.firmName} onChange={e => setF('firmName', e.target.value)} placeholder="e.g. BHUmi Real Estate" autoFocus />
+                <Input value={form.firmName} onChange={e => setF('firmName', e.target.value)} placeholder="e.g. Bhumi Real Estate" autoFocus />
+              </Field>
+              <Field label="Workspace Slug (URL)">
+                <Input value={form.slug} onChange={e => setF('slug', e.target.value)} placeholder="e.g. bhumi" />
               </Field>
               <Field label="City *">
                 <Input value={form.city} onChange={e => setF('city', e.target.value)} placeholder="e.g. Pune" />
