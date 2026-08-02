@@ -213,6 +213,9 @@ actionsRouter.post(
         timeline_event: evt,
       });
     } catch (err: any) {
+      if (err?.status === 403) {
+        return res.status(403).json({ success: false, error: 'Forbidden', message: err.message, code: err.code });
+      }
       return res.status(500).json({ error: 'Stage Change Failed', message: err.message });
     }
   }

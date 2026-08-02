@@ -28,3 +28,36 @@ export function canDeleteRecord(role) {
 export function canLogActivity() {
   return true
 }
+
+export function isDeskRole(role) {
+  return DESK_ROLES.includes(role) || role === 'superadmin'
+}
+
+// ── A sales executive's scope on one lead ───────────────────────────────────
+// Mirrors assertLeadWrite() in backend/src/lib/permissions.ts. The server is
+// what enforces this; these two decide what to render, so that an agent is not
+// shown an Edit button that will come back 403.
+//
+// CREATED is what grants authorship, not ASSIGNED. A lead handed to you is a
+// lead you work, not a lead you own: you move its status and add remarks, and
+// the buyer's name, number, budget and requirement stay as the desk entered
+// them. Reassignment is a desk action either way.
+
+/** May this user rewrite the lead's facts — name, phone, budget, requirement? */
+export function canEditLead(role, userId, lead) {
+  if (isDeskRole(role)) return true
+  if (role !== 'agent' || !userId || !lead) return false
+  return !!lead.createdBy && lead.createdBy === userId
+}
+
+/** May this user change the status or add to the history? */
+export function canUpdateLeadStatus(role, userId, lead) {
+  if (isDeskRole(role)) return true
+  if (role !== 'agent' || !userId || !lead) return false
+  return lead.createdBy === userId || lead.agentId === userId
+}
+
+/** Assigning a lead to someone is a desk action, whoever created it. */
+export function canAssignLead(role) {
+  return isDeskRole(role)
+}

@@ -17,6 +17,7 @@ import { audit } from './audit.js';
 import { getContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
+import { assertLeadWrite } from '../lib/permissions.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
 // and three copies of that rule would drift.
@@ -36,6 +37,7 @@ import {
 export const LEAD_STATUSES = ['New', 'Follow-Up', 'Callback', 'Call Not Received', 'Interested', 'Site Visit', 'Deal Closed', 'Rejected'];
 export const TERMINAL_STATUSES = ['Deal Closed', 'Rejected'];
 export const WON_STATUS = 'Deal Closed';
+export const REJECTED_STATUS = 'Rejected';
 /**
  * "Still open." Every one of these used to read `stage NOT LIKE 'Closed%'`,
  * which was a string test standing in for a concept — and the moment the
@@ -473,6 +475,10 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     shortlist,
     feedback,
     duplicateOf: r.duplicate_of || undefined,
+    // Who entered this lead, as distinct from who is working it. The client
+    // needs both to decide whether to offer a full edit or only a status change.
+    createdBy: r.created_by || null,
+    rejectionReason: r.rejection_reason || null,
     followUp: r.follow_up || null,
     overdue: Boolean(r.overdue),
     importBatchId: r.import_batch_id || undefined,
@@ -1369,16 +1375,21 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // sheet then displayed. The event history is NEVER the possession target.
   const timelinePref = leadData.timeline_pref ?? req.timeline ?? null;
   const importBatchId = leadData.importBatchId ?? leadData.import_batch_id ?? null;
+  // Authorship comes from the signed-in actor, never from the request body — a
+  // client that could name its own author could name anyone's. Null for system
+  // callers (imports, webhooks, the seed), which is the honest answer: the firm
+  // created it, not a person.
+  const createdBy = ctx.actorId ?? getContext()?.userId ?? null;
 
   const t = tid();
   const rows = await sql`
     INSERT INTO crm_leads (
       id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback,
-      deal, requirement, locality, budget_min, budget_max, purpose, timeline_pref, import_batch_id, tenant_id
+      deal, requirement, locality, budget_min, budget_max, purpose, timeline_pref, import_batch_id, created_by, tenant_id
     )
     VALUES (
       ${newId}, ${name}, ${phone}, ${email}, ${stage}, ${source}, ${agentId}, ${sql.json(req)}, ${sql.json(notes)}, ${sql.json(shortlist)}, ${sql.json(feedback)},
-      ${deal}, ${requirement}, ${locality}, ${budgetMin}, ${budgetMax}, ${purpose}, ${timelinePref}, ${importBatchId}, ${t}
+      ${deal}, ${requirement}, ${locality}, ${budgetMin}, ${budgetMax}, ${purpose}, ${timelinePref}, ${importBatchId}, ${createdBy}, ${t}
     )
     RETURNING *;
   `;
@@ -1435,6 +1446,14 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   const oldLead = await getLeadById(id);
   if (!oldLead) return null;
 
+  // A sales executive gets a full edit only on a lead they created; on one
+  // merely assigned to them they may move the status and add to the history,
+  // and nothing else. Enforced here rather than in each route so every caller
+  // — the record form, the stage action, a future bulk edit — is covered by
+  // construction. Throws ForbiddenError; system callers pass through.
+  const who = getContext();
+  assertLeadWrite(who?.role, who?.userId, oldLead, patch);
+
   const name = patch.name !== undefined ? patch.name : oldLead.name;
   const phone = patch.phone !== undefined ? patch.phone : oldLead.phone;
   const email = patch.email !== undefined ? patch.email : oldLead.email;
@@ -1460,6 +1479,12 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   const timelinePref = patch.timeline_pref !== undefined
     ? patch.timeline_pref
     : (req?.timeline ?? oldLead.req?.timeline);
+  // The reason belongs to the rejection. If the lead comes back off Rejected it
+  // is dropped, because a live lead carrying "Budget Mismatch" reads as fact and
+  // would go straight into the loss report.
+  const rejectionReason = stage !== REJECTED_STATUS
+    ? null
+    : (patch.rejectionReason ?? patch.rejection_reason ?? oldLead.rejectionReason ?? null);
 
   await sql`
     UPDATE crm_leads SET
@@ -1482,6 +1507,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       budget_max = ${budgetMax},
       purpose = ${purpose || null},
       timeline_pref = ${timelinePref || null},
+      rejection_reason = ${rejectionReason},
       updated_at = NOW()
     WHERE id = ${id} AND tenant_id = ${tid()};
   `;
@@ -1494,8 +1520,8 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     await addTimelineEvent({
       record_id: id,
       type: 'stage_change',
-      title: 'Pipeline Stage Updated',
-      description: `Stage moved from "${oldLead.stage}" to "${patch.stage}".`,
+      title: 'Status Updated',
+      description: `Status changed from "${oldLead.stage}" to "${patch.stage}"${rejectionReason ? ` — ${rejectionReason}` : ''}.`,
     });
   }
 
@@ -1555,6 +1581,12 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
 
 export async function deleteLead(id: string, ctx: ActorCtx = SYSTEM_CTX): Promise<boolean> {
   const existing = await getLeadById(id);
+  if (!existing) return false;
+  // Deleting is a fact-level change, so it needs authorship. The route already
+  // limits delete to owners; this is the same rule stated where the deletion
+  // actually happens, so a new caller cannot route around it.
+  const who = getContext();
+  assertLeadWrite(who?.role, who?.userId, existing, { delete: true });
   const res = await sql`DELETE FROM crm_leads WHERE id = ${id} AND tenant_id = ${tid()}`;
   const ok = res.count > 0;
   if (ok) {

@@ -310,7 +310,7 @@ connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => 
   const host = req.get('x-forwarded-host') || req.get('host') || 'api.re.delpat.in';
   const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
   const domain = process.env.PUBLIC_API_URL || `${proto}://${host}`;
-  const docsUrl = `${domain}/api/v1/connections/${integration.id}/docs`;
+  const docsUrl = `${domain}/api/v1/ingest/${integration.tenant_slug}/docs`;
 
   // Auth methods, accepted body formats and the example all live on the docs
   // page (below) — the email exists only to hand over the link. Explaining

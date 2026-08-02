@@ -171,6 +171,11 @@ const updateHandler = async (req: Request, res: Response) => {
       data: updated,
     });
   } catch (err: any) {
+    // A refused write is a 403 with the reason, not a 500. The client shows this
+    // message verbatim, so it has to say which part of the edit was refused.
+    if (err?.status === 403) {
+      return res.status(403).json({ success: false, error: 'Forbidden', message: err.message, code: err.code });
+    }
     return res.status(500).json({ error: 'Update Failed', message: err.message });
   }
 };
@@ -203,6 +208,9 @@ recordsRouter.delete('/:id', async (req: Request, res: Response) => {
       message: `Record ${id} deleted from ${moduleKey}.`,
     });
   } catch (err: any) {
+    if (err?.status === 403) {
+      return res.status(403).json({ success: false, error: 'Forbidden', message: err.message, code: err.code });
+    }
     return res.status(500).json({ error: 'Delete Failed', message: err.message });
   }
 });

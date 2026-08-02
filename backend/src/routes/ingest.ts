@@ -157,6 +157,93 @@ async function handleIngest(req: Request, res: Response) {
 // telling a broker their aggregator "isn't supported"; accepting them costs one
 // route line. PUT/PATCH are here for the same reason: some senders use them for
 // an update-or-create and would otherwise get a 404 they cannot diagnose.
+function escapeHtml(s: string): string {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+}
+
+/**
+ * GET /api/v1/ingest/:tenantSlug/docs
+ * Clean, tenant-based documentation page for all lead provider integrations.
+ */
+ingestRouter.get('/:tenantSlug/docs', async (req: Request, res: Response) => {
+  const { tenantSlug } = req.params;
+  const t = await getTenantForIngest(tenantSlug);
+  const firmName = t?.name || tenantSlug;
+
+  const host = req.get('x-forwarded-host') || req.get('host') || 'api.re.delpat.in';
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
+  const domain = process.env.PUBLIC_API_URL || `${proto}://${host}`;
+  const endpoint = `${domain}/api/v1/ingest/${tenantSlug}`;
+
+  const rawKey = typeof req.query.key === 'string' && req.query.key.trim() ? req.query.key.trim() : null;
+  const key = rawKey ? escapeHtml(rawKey) : '&lt;YOUR_CONNECTION_API_KEY&gt;';
+
+  const sampleJson = '{"name":"Test Enquiry","phone":"9876543210","locality":"Wakad"}';
+  const curlExample = `curl -X POST "${endpoint}" \\\n  -H "X-API-Key: ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '${sampleJson}'`;
+
+  const html = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${escapeHtml(firmName)} — Inbound Webhook Integration</title>
+<style>
+:root{color-scheme:light dark;--ink:#1a1d1a;--muted:#6b7570;--line:#e2e5e1;--card:#fff;--wash:#f6f5f2;--accent:#1e6f52}
+@media(prefers-color-scheme:dark){:root{--ink:#eef0ec;--muted:#9aa39c;--line:#2c322d;--card:#1a1d1a;--wash:#14161380;--accent:#4fae86}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--wash);color:var(--ink);font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;padding:40px 20px}
+main{max-width:640px;margin:0 auto}
+h1{font-size:20px;font-weight:600;margin:0 0 4px}
+.sub{color:var(--muted);font-size:13.5px;margin:0 0 32px}
+h2{font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:32px 0 10px}
+p{margin:0 0 10px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+td{padding:9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+td:first-child{color:var(--muted);white-space:nowrap;padding-right:16px;width:110px}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+code{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;line-height:1.6;margin:0}
+ul{margin:0;padding-left:20px}
+li{margin-bottom:6px}
+footer{margin-top:40px;color:var(--muted);font-size:12px}
+</style>
+</head><body><main>
+
+<h1>${escapeHtml(firmName)} Webhook Integration</h1>
+<p class="sub">How to send real-time lead enquiries into this workspace.</p>
+
+<h2>Webhook Endpoint</h2>
+<table><tbody>
+<tr><td>URL</td><td><code>${endpoint}</code></td></tr>
+<tr><td>Method</td><td>POST (GET, PUT and PATCH are also accepted)</td></tr>
+<tr><td>Body</td><td>JSON payload (form-encoded and text/plain also accepted)</td></tr>
+</tbody></table>
+
+<h2>Authentication</h2>
+<p>Use your provider's assigned API key in any one of these:</p>
+<ul>
+<li>Header <code>X-API-Key: ${key}</code></li>
+<li>Header <code>Authorization: Bearer ${key}</code></li>
+<li>Query parameter <code>?key=${key}</code> (if your system cannot set custom headers)</li>
+</ul>
+
+<h2>Sample Request</h2>
+<pre>${curlExample}</pre>
+
+<h2>Response Codes</h2>
+<table><tbody>
+<tr><td>200</td><td>Received and queued for ingestion into CRM.</td></tr>
+<tr><td>401</td><td>Missing or invalid API key.</td></tr>
+</tbody></table>
+
+<footer>Send one test enquiry first to verify delivery before turning on the live feed.</footer>
+</main></body></html>`;
+
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.set('Cache-Control', 'no-store');
+  return res.status(200).send(html);
+});
+
 for (const path of ['/:tenantSlug', '/:tenantSlug/:source']) {
   ingestRouter.post(path, handleIngest);
   ingestRouter.get(path, handleIngest);
