@@ -13,8 +13,6 @@ import { api } from '../lib/api.js'
 import { useEffect } from 'react'
 import Icon from '../components/Icon.jsx'
 import { LEADS_DEF } from './definitions.jsx'
-import { LEAD_STATUSES } from '../data/leadStatus.js'
-import { canAssignLead } from '../lib/permissions.js'
 
 // A scheduled appointment's action reads like "Site Visit — Anita Rao", so the
 // type is a prefix rather than its own field. Matched loosely because the
