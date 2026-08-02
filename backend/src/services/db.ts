@@ -146,6 +146,21 @@ export async function initSchema(): Promise<void> {
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS overdue BOOLEAN DEFAULT FALSE;`;
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS import_batch_id TEXT;`;
 
+    // WHO CREATED THIS LEAD. A sales executive may fully edit a lead they
+    // created and only the status/remarks on one merely assigned to them, so
+    // ownership and assignment are two different questions and need two columns.
+    //
+    // Deliberately NOT backfilled from agent_id. Existing rows were created by
+    // the desk, by an import or by an inbound webhook — nobody knows by whom, and
+    // NULL says exactly that. Copying agent_id in would silently hand every agent
+    // full edit rights over every lead currently on their plate, which is the
+    // opposite of what this column is for. NULL grants nothing.
+    await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS created_by TEXT;`;
+
+    // The rejection reason, as a column rather than only as prose in a remark —
+    // "why do we lose deals" is a question the firm asks of the whole table.
+    await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS rejection_reason TEXT;`;
+
     await sql`
       CREATE TABLE IF NOT EXISTS crm_settings (
         key TEXT PRIMARY KEY,
@@ -421,6 +436,9 @@ export async function migrateProperColumns(): Promise<void> {
   `);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_leads_stage ON crm_leads (tenant_id, stage)`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_leads_agent ON crm_leads (tenant_id, agent_id)`);
+  // An agent's scope is "assigned to me OR created by me", so both sides of that
+  // OR need an index or every agent's list becomes a sequential scan.
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS idx_crm_leads_creator ON crm_leads (tenant_id, created_by)`);
 
   await migratePropertySchemaC4();
 }

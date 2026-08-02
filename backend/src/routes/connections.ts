@@ -307,9 +307,9 @@ connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => 
   const integration = await getIntegration(tenant, req.params.id);
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 
-  const rawHost = req.get('x-forwarded-host') || req.get('host') || '';
-  const isLocal = rawHost.includes('localhost') || rawHost.includes('127.0.0.1');
-  const domain = isLocal ? `http://${rawHost}` : 'https://realestate.delpat.in';
+  const host = req.get('x-forwarded-host') || req.get('host') || 'api.re.delpat.in';
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
+  const domain = process.env.PUBLIC_API_URL || `${proto}://${host}`;
   const docsUrl = `${domain}/api/v1/connections/${integration.id}/docs`;
 
   // Auth methods, accepted body formats and the example all live on the docs
@@ -354,9 +354,9 @@ connectionsRouter.get('/:id/docs', async (req: Request, res: Response) => {
   const integration = await getIntegrationById(req.params.id);
   if (!integration) return res.status(404).send('Not found.');
 
-  const rawHost = req.get('x-forwarded-host') || req.get('host') || '';
-  const isLocal = rawHost.includes('localhost') || rawHost.includes('127.0.0.1');
-  const domain = isLocal ? `http://${rawHost}` : 'https://realestate.delpat.in';
+  const host = req.get('x-forwarded-host') || req.get('host') || 'api.re.delpat.in';
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
+  const domain = process.env.PUBLIC_API_URL || `${proto}://${host}`;
   const endpoint = `${domain}/api/v1/ingest/${integration.tenant_slug}`;
   const provider = escapeHtml(integration.provider);
   const rawKey = typeof req.query.key === 'string' && req.query.key.trim() ? req.query.key.trim() : null;

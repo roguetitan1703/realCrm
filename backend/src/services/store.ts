@@ -221,6 +221,21 @@ function agentLeadScope(): string | null {
   return c && c.role === 'agent' && c.userId ? c.userId : null;
 }
 
+/**
+ * The same rule as a WHERE fragment: an agent sees leads assigned to them OR
+ * created by them, everyone else sees the tenant. Returns `TRUE` when there is
+ * no restriction so it can be AND-ed unconditionally.
+ *
+ * Created-by is in the scope because an agent may edit a lead they created, and
+ * a record you may edit but cannot see is not a permission, it is a bug. A lead
+ * that round-robins to a colleague the moment it is saved would otherwise
+ * vanish from the person who just entered it.
+ */
+function leadScope() {
+  const me = agentLeadScope();
+  return me ? sql`(agent_id = ${me} OR created_by = ${me})` : sql`TRUE`;
+}
+
 /** Actor context for the audit ledger, threaded from the route down to the mutation. */
 export interface ActorCtx {
   actorType?: 'user' | 'superadmin' | 'system';
@@ -941,11 +956,8 @@ seedDatabase()
  */
 export async function getPulse(): Promise<Record<string, any>> {
   const t = tid();
-  const scope = agentLeadScope();
   const [leads, props, events] = await Promise.all([
-    scope
-      ? sql`SELECT count(*)::int AS n, max(updated_at) AS at FROM crm_leads WHERE tenant_id = ${t} AND agent_id = ${scope}`
-      : sql`SELECT count(*)::int AS n, max(updated_at) AS at FROM crm_leads WHERE tenant_id = ${t}`,
+    sql`SELECT count(*)::int AS n, max(updated_at) AS at FROM crm_leads WHERE tenant_id = ${t} AND ${leadScope()}`,
     sql`SELECT count(*)::int AS n, max(updated_at) AS at FROM crm_properties WHERE tenant_id = ${t}`,
     sql`SELECT count(*)::int AS n, max(timestamp) AS at FROM crm_timeline_events WHERE tenant_id = ${t}`,
   ]);
@@ -1292,11 +1304,8 @@ export async function listContacts(opts: {
 // --- LEADS ---
 export async function getLeads(): Promise<any[]> {
   const t = tid();
-  const agentScope = agentLeadScope();
   const [leadsRows, timelineRows, shortlistRows] = await Promise.all([
-    agentScope
-      ? sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND agent_id = ${agentScope} ORDER BY created_at DESC`
-      : sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} ORDER BY created_at DESC`,
+    sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND ${leadScope()} ORDER BY created_at DESC`,
     sql`SELECT * FROM crm_timeline_events WHERE tenant_id = ${t} ORDER BY timestamp DESC`,
     sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t}`,
   ]);
@@ -1310,10 +1319,7 @@ export async function getLeads(): Promise<any[]> {
 
 export async function getLeadById(id: string): Promise<any | undefined> {
   const t = tid();
-  const agentScope = agentLeadScope();
-  const rows = agentScope
-    ? await sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND agent_id = ${agentScope}`
-    : await sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t}`;
+  const rows = await sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`;
   if (rows.length === 0) return undefined;
   const [timelineRows, shortlistRows] = await Promise.all([
     sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} AND tenant_id = ${t} ORDER BY timestamp DESC`,
@@ -1611,17 +1617,20 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
  */
 export async function listLeads(opts: {
   page?: number; limit?: number; q?: string; stage?: string; agentId?: string;
-  segment?: string; intent?: string; scopeAgentId?: string;
+  segment?: string; intent?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
   const t = tid();
   const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
   const page = Math.max(Number(opts.page) || 1, 1);
   const offset = (page - 1) * limit;
 
-  const where: any[] = [sql`tenant_id = ${t}`];
-  // An agent sees their own pipeline. Enforced here rather than by filtering in
-  // the browser, because a filter the client applies is not a permission.
-  if (opts.scopeAgentId) where.push(sql`agent_id = ${opts.scopeAgentId}`);
+  // An agent sees their own pipeline. Derived from the request context here,
+  // NOT passed in by the route: the routes were reading `req.user.userId`, a
+  // property that does not exist on req.user (it is `id`), so scopeAgentId
+  // arrived undefined and every agent was served the entire firm's leads. A
+  // permission that a caller has to remember to pass is a permission that will
+  // eventually not be passed.
+  const where: any[] = [sql`tenant_id = ${t}`, leadScope()];
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
@@ -1651,9 +1660,9 @@ export async function listLeads(opts: {
 }
 
 /** Counts for the lead segment pills, without reading the leads. */
-export async function getLeadsSummary(scopeAgentId?: string): Promise<any> {
+export async function getLeadsSummary(): Promise<any> {
   const t = tid();
-  const scope = scopeAgentId ? sql`AND agent_id = ${scopeAgentId}` : sql``;
+  const scope = sql`AND ${leadScope()}`;
   const rows = await sql`
     SELECT count(*)::int AS total,
            count(*) FILTER (WHERE overdue) ::int AS overdue,
@@ -1672,9 +1681,9 @@ export async function getLeadsSummary(scopeAgentId?: string): Promise<any> {
  * groups are all narrow, so the database can hand back just the rows that can
  * possibly appear in one, and the screen groups those as it always has.
  */
-export async function getTodayFeed(scopeAgentId?: string): Promise<any> {
+export async function getTodayFeed(): Promise<any> {
   const t = tid();
-  const scope = scopeAgentId ? sql`AND agent_id = ${scopeAgentId}` : sql``;
+  const scope = sql`AND ${leadScope()}`;
   const [leads, renewals] = await Promise.all([
     sql`SELECT * FROM crm_leads
         WHERE tenant_id = ${t} ${scope}

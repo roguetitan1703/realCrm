@@ -95,8 +95,7 @@ workspaceRouter.get('/bootstrap', requireTenantAuth, async (_req: Request, res: 
 
 workspaceRouter.get('/today', requireTenantAuth, async (req: Request, res: Response) => {
   try {
-    const scopeAgentId = req.user?.role === 'agent' ? req.user?.userId : undefined;
-    return res.status(200).json({ success: true, ...(await getTodayFeed(scopeAgentId)) });
+    return res.status(200).json({ success: true, ...(await getTodayFeed()) });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to build today', message: err.message });
   }

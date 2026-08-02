@@ -42,11 +42,13 @@ leadsRouter.get('/page', async (req: Request, res: Response) => {
   try {
     const q = req.query;
     const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
-    const scopeAgentId = req.user?.role === 'agent' ? req.user?.userId : undefined;
+    // No scope argument: listLeads reads the agent's scope from the request
+    // context itself, so it cannot be forgotten by a caller. It was forgotten
+    // here — `req.user.userId` is undefined (the field is `id`).
     const { rows, total, page, limit } = await listLeads({
       page: Number(q.page) || 1, limit: Number(q.limit) || 50,
       q: str(q.q), stage: str(q.stage), agentId: str(q.agentId),
-      segment: str(q.segment), intent: str(q.intent), scopeAgentId,
+      segment: str(q.segment), intent: str(q.intent),
     });
     return res.status(200).json({
       success: true, data: rows, total, page, limit,
@@ -60,8 +62,7 @@ leadsRouter.get('/page', async (req: Request, res: Response) => {
 /** GET /api/v1/leads/summary — counts for the segment pills. */
 leadsRouter.get('/summary', async (req: Request, res: Response) => {
   try {
-    const scopeAgentId = req.user?.role === 'agent' ? req.user?.userId : undefined;
-    return res.status(200).json({ success: true, summary: await getLeadsSummary(scopeAgentId) });
+    return res.status(200).json({ success: true, summary: await getLeadsSummary() });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to summarise leads', message: err.message });
   }
