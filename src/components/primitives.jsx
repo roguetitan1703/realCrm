@@ -311,10 +311,11 @@ export function Kpi({ icon, label, value, sub, alert, onClick }) {
 // Left: inline KPI stats the MODULE supplies. Right: optional scope segments.
 // kpis: [{ label, value, tone?: 'alert'|'accent', onClick? }]
 // segments: [{ key, label, count, on, onClick }]  (scope selector, NOT a filter)
-export function PageHeader({ kpis = [], segments, right }) {
-  if (!kpis.length && !segments && !right) return null
+export function PageHeader({ kpis = [], segments, leftAddon, right }) {
+  if (!kpis.length && !segments && !leftAddon && !right) return null
   return (
     <div className="pagehead">
+      {leftAddon}
       {kpis.length > 0 && (
         <div className="ph-stats">
           {kpis.map((k, i) => {

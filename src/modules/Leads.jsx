@@ -105,21 +105,8 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
     segments: segs, view, onView: setView, phone,
     page, onPage: setPage, pageSize, onPageSize: setPageSizeP,
-    cta: { label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) },
-    renderTable: (list, v) => v === 'grid'
-      ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} />
-      : <ModuleTable def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP} />,
-  })
-
-  return (
-    <>
-      {topBar({
-        title: 'Leads',
-        // Bulk import is desk work and has no phone screen, so the phone chrome
-        // must not offer a route to one.
-        actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import / Revert</Button>
-      })}
-      <div style={{ padding: '12px 20px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+    leftAddon: (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 12 }}>
         <button
           type="button"
           onClick={() => setIntentP('all')}
@@ -154,6 +141,21 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
           Rent
         </button>
       </div>
+    ),
+    cta: { label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) },
+    renderTable: (list, v) => v === 'grid'
+      ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} />
+      : <ModuleTable def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP} />,
+  })
+
+  return (
+    <>
+      {topBar({
+        title: 'Leads',
+        // Bulk import is desk work and has no phone screen, so the phone chrome
+        // must not offer a route to one.
+        actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import / Revert</Button>
+      })}
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>
     </>

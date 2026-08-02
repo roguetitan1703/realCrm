@@ -82,7 +82,7 @@ function ListSpinner() {
 export function ModuleListView({
   def, records, store, onOpen,
   filters, onFilters, search, onSearch, sortKey, onSortKey, sortDir, onSortDir,
-  kpis, segments, view, onView, viewExtra, showViewSwitch = true, cta, toolbarRight, emptyTitle, emptyHint, renderTable,
+  kpis, segments, leftAddon, view, onView, viewExtra, showViewSwitch = true, cta, toolbarRight, emptyTitle, emptyHint, renderTable,
   phone, page = 1, onPage, pageSize = 20, onPageSize, source,
 }) {
   // Two sources, one surface. `records` is the classic in-memory collection,
@@ -106,10 +106,10 @@ export function ModuleListView({
   // Lean in-page header: module KPIs (left) + scope segments (right). NOT the breadcrumb.
   // KPIs are dropped on a phone: a row of numbers costs a third of the screen
   // and the segment pills below already carry the same counts, tappable.
-  const header = ((!phone && kpis?.length) || segments)
+  const header = ((!phone && kpis?.length) || segments || leftAddon)
     // [] not null — a default parameter only fills in for undefined, so null
     // sailed past `kpis = []` and PageHeader read .length off it.
-    ? <PageHeader kpis={phone ? [] : kpis} segments={segments} />
+    ? <PageHeader kpis={phone ? [] : kpis} segments={segments} leftAddon={leftAddon} />
     : null
 
   // On a phone the desktop bar does not shrink — it wraps into three rows of
