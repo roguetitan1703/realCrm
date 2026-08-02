@@ -304,7 +304,8 @@ teamRouter.post('/users/:id/reset-password', async (req: Request, res: Response)
     const newPw = String(req.body?.password || '').trim() || suggestPassword();
     const issue = passwordIssue(newPw);
     if (issue) return res.status(400).json({ error: issue });
-    await adminSetPassword(req.tenantId!, u.id, newPw, true);
+    const mustChange = req.body?.mustChangePassword !== false;
+    await adminSetPassword(req.tenantId!, u.id, newPw, mustChange);
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
       actor_label: getContext()?.userId ?? 'admin', action: 'user.password_reset_by_admin',
