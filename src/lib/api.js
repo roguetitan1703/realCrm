@@ -85,10 +85,48 @@ function getHeaders(customHeaders = {}) {
 let inFlightWrites = 0;
 export function hasPendingWrites() { return inFlightWrites > 0; }
 
+// ── Read cache ──────────────────────────────────────────────────────────────
+// Screens read what they show, which is right — but it meant leaving a screen
+// and coming back re-fetched everything and flashed an empty list, and that
+// several components asking the same question at the same moment each asked the
+// server separately (the dashboard alone fired /workspace/desk-summary four
+// times on one mount).
+//
+// So: one cache, at the single place every request already passes through, keyed
+// by the URL that identifies the read. Two behaviours, and no third:
+//
+//   • In-flight dedupe — identical GETs issued together share one response.
+//   • Short TTL — a repeat GET within FRESH_MS is served from memory.
+//
+// Any write clears it, entirely. A mutation can change a count, a page, a
+// summary and a record at once; working out which is a guessing game that
+// silently goes stale the next time an endpoint is added. Clearing everything
+// is one line, always correct, and costs a refetch of the screen in front of
+// you — which is exactly what you want after a write anyway.
+const FRESH_MS = 30_000;
+const reads = new Map();    // url -> { at, data }
+const inflight = new Map(); // url -> Promise
+
+export function invalidateReads() { reads.clear(); }
+/** The cached value for a GET, or undefined. Lets a screen render on the first frame. */
+export function peekRead(endpoint) {
+  const hit = reads.get(endpoint);
+  return hit && Date.now() - hit.at < FRESH_MS ? hit.data : undefined;
+}
+
 async function request(endpoint, options = {}) {
   const { queueable, ...fetchOptions } = options;
   const isWrite = !!fetchOptions.method && fetchOptions.method.toUpperCase() !== 'GET';
+
+  if (!isWrite) {
+    const fresh = reads.get(endpoint);
+    if (fresh && Date.now() - fresh.at < FRESH_MS) return fresh.data;
+    const pending = inflight.get(endpoint);
+    if (pending) return pending;
+  }
+
   if (isWrite) inFlightWrites++;
+  const run = (async () => {
   try {
     const res = await fetch(`${BASE_URL}${endpoint}`, {
       cache: 'no-store',
@@ -110,7 +148,10 @@ async function request(endpoint, options = {}) {
       try { const body = await res.clone().json(); detail = body?.message || body?.error || ''; } catch { /* not json */ }
       throw new Error(`API Error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
     }
-    return await res.json();
+    const data = await res.json();
+    if (isWrite) invalidateReads();
+    else reads.set(endpoint, { at: Date.now(), data });
+    return data;
   } catch (err) {
     if (err instanceof TypeError) {
       setOnline(false); // fetch could not reach the host
@@ -126,6 +167,15 @@ async function request(endpoint, options = {}) {
   } finally {
     if (isWrite) inFlightWrites--;
   }
+  })();
+
+  // A failed read must not be remembered as an answer, so the in-flight entry is
+  // cleared either way and only a success is stored above.
+  if (!isWrite) {
+    inflight.set(endpoint, run);
+    run.catch(() => {}).finally(() => { if (inflight.get(endpoint) === run) inflight.delete(endpoint); });
+  }
+  return run;
 }
 
 // Drain the queue whenever the device comes back. `request` is passed in so the

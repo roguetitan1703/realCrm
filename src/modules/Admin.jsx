@@ -549,11 +549,12 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
               {team.map((row, i) => (
-                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.9fr 1.3fr 0.9fr 0.8fr 24px', gap: 8, alignItems: 'center', background: '#f9f8f6', padding: 10, borderRadius: 10, border: '1px solid var(--line)' }}>
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.8fr 1.2fr 0.9fr 0.9fr 0.7fr 24px', gap: 8, alignItems: 'center', background: '#f9f8f6', padding: 10, borderRadius: 10, border: '1px solid var(--line)' }}>
                   <Input value={row.name} onChange={e => updateTeamRow(i, 'name', e.target.value)} placeholder="Full Name *" style={{ fontSize: 12.5 }} />
                   <Input value={row.loginId} onChange={e => updateTeamRow(i, 'loginId', e.target.value)} placeholder="User ID (optional)" style={{ fontSize: 12.5 }} />
                   <Input type="email" value={row.email} onChange={e => updateTeamRow(i, 'email', e.target.value)} placeholder="Email (optional)" style={{ fontSize: 12.5 }} />
                   <Input value={row.phone} onChange={e => updateTeamRow(i, 'phone', e.target.value)} placeholder="Phone (optional)" style={{ fontSize: 12.5 }} />
+                  <Input value={row.password} onChange={e => updateTeamRow(i, 'password', e.target.value)} placeholder="Password" style={{ fontSize: 12.5, fontWeight: 600, color: '#7c3aed' }} />
                   <select value={row.role} onChange={e => updateTeamRow(i, 'role', e.target.value)} style={{ padding: '8px 6px', borderRadius: 6, border: '1px solid var(--line)', fontSize: 12, background: '#fff' }}>
                     <option value="agent">Agent</option>
                     <option value="manager">Manager</option>

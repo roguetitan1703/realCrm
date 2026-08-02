@@ -12,9 +12,21 @@
 // actually failed is lying about the data.
 
 import { useEffect, useRef, useState } from 'react'
+import { peekRead } from './api.js'
 
-export function useServerData(fetcher, deps = [], initial = null) {
-  const [state, setState] = useState({ data: initial, loading: true, error: null })
+/**
+ * @param cacheKey  the endpoint this read hits (e.g. '/workspace/desk-summary').
+ *                  Optional, and only ever an optimisation: with it, returning
+ *                  to a screen renders the last answer on the FIRST frame
+ *                  instead of showing an empty state for one frame and then
+ *                  filling in. Without it the read still comes from the cache,
+ *                  just a tick later.
+ */
+export function useServerData(fetcher, deps = [], initial = null, cacheKey = null) {
+  const cached = cacheKey ? peekRead(cacheKey) : undefined
+  const [state, setState] = useState(() => cached !== undefined
+    ? { data: cached, loading: false, error: null }
+    : { data: initial, loading: true, error: null })
   const seq = useRef(0)
 
   useEffect(() => {
