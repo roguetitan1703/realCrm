@@ -47,8 +47,15 @@ export default function Login({ store }) {
   const [wsInput, setWsInput] = useState('')
   const [ws, setWs] = useState(null) // resolved workspace, or null = platform identity
   const [resolving, setResolving] = useState(false)
+  const [rememberMe, setRememberMe] = useState(() => {
+    if (typeof localStorage === 'undefined') return true
+    return localStorage.getItem('crm_remember_me') !== 'false'
+  })
   // Credentials: handle = an email (owner/manager) or an assigned login ID (agent).
-  const [handle, setHandle] = useState('')
+  const [handle, setHandle] = useState(() => {
+    if (typeof localStorage === 'undefined') return ''
+    return localStorage.getItem('crm_remembered_handle') || ''
+  })
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   // First-login change + reset flows.
@@ -140,6 +147,17 @@ export default function Login({ store }) {
     try {
       const res = await api.login(handle.trim(), password)
       if (!res?.token) throw new Error('no token')
+      if (rememberMe) {
+        try {
+          localStorage.setItem('crm_remembered_handle', handle.trim())
+          localStorage.setItem('crm_remember_me', 'true')
+        } catch (e) {}
+      } else {
+        try {
+          localStorage.removeItem('crm_remembered_handle')
+          localStorage.setItem('crm_remember_me', 'false')
+        } catch (e) {}
+      }
       if (res.mustChange) { setPhase('change'); setNewPw(''); setNewPw2(''); store.toast('Set a new password to continue.', 'ok'); return }
       store.toast(`Welcome to ${ws?.firmName || 'your desk'}`, 'ok')
       store.login({ token: res.token, user: res.user, tenant: { firmName: ws?.firmName, city: ws?.city } })
@@ -482,7 +500,16 @@ export default function Login({ store }) {
                   <label style={LBL}>Password</label>
                   <PwField value={password} onChange={e => setPassword(e.target.value)} placeholder="Your password" disabled={loading} />
                 </div>
-                <div style={{ textAlign: 'right', marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--ink-2)', cursor: 'pointer', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={e => setRememberMe(e.target.checked)}
+                      style={{ width: 16, height: 16, accentColor: 'var(--accent, #1E6F52)', cursor: 'pointer' }}
+                    />
+                    <span>Remember my ID</span>
+                  </label>
                   <button type="button" className="btn-quiet"
                     onClick={() => { setForgotEmail(handle.includes('@') ? handle : ''); setForgotSent(false); setPhase('forgot') }}
                     style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600 }}>Forgot password?</button>
