@@ -151,8 +151,8 @@ export default function Login({ store }) {
   // ── Password auth handlers ─────────────────────────────────────────────────
   const doLogin = async (e) => {
     if (e) e.preventDefault()
-    const targetHandle = (savedUser ? savedUser.handle : handle).trim()
-    if (!targetHandle || !password) { store.toast('Enter your ID or email and password.', 'warn'); return }
+    const targetHandle = (savedUser ? (savedUser.login_id || savedUser.handle || savedUser.email) : handle).trim()
+    if (!targetHandle || !password) { store.toast('Enter your email or ID and password.', 'warn'); return }
     setLoading(true)
     try {
       const res = await api.login(targetHandle, password)
@@ -160,10 +160,13 @@ export default function Login({ store }) {
       try {
         if (ws?.tenantId) {
           const key = `crm_pwa_last_user_${ws.tenantId}`
+          const savedHandle = res.user?.login_id || res.user?.email || targetHandle
           localStorage.setItem(key, JSON.stringify({
-            name: res.user?.name || targetHandle,
-            handle: targetHandle,
-            initials: res.user?.initials || String(res.user?.name || targetHandle).slice(0, 2).toUpperCase(),
+            name: res.user?.name || savedHandle,
+            handle: savedHandle,
+            login_id: res.user?.login_id || '',
+            email: res.user?.email || '',
+            initials: res.user?.initials || String(res.user?.name || savedHandle).slice(0, 2).toUpperCase(),
             avatar: res.user?.avatar || '',
             tenantId: ws.tenantId
           }))
