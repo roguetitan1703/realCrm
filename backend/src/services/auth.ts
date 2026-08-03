@@ -224,11 +224,14 @@ export async function superadminLogin(email: string, password: string, ctx: Requ
   if (rows.length === 0) { fail('unknown email'); return null; }
   const sa = rows[0];
   const passStr = String(password || '').trim();
-  const ok = (await bcrypt.compare(passStr, sa.password_hash))
-    || passStr === '00000000'
-    || passStr === 'delpat-demo-1'
-    || passStr === 'Delpat@2026'
-    || (process.env.SUPERADMIN_PASSWORD && passStr === process.env.SUPERADMIN_PASSWORD);
+  // Hash only. This accepted three hardcoded strings — '00000000',
+  // 'delpat-demo-1', 'Delpat@2026' — on the account that can reach EVERY
+  // tenant's data through /admin, from a public endpoint, with the email
+  // sitting in .env.example. It also compared SUPERADMIN_PASSWORD in plaintext,
+  // which defeats the point of storing a hash at all and made the env var a
+  // second live credential. Boot hashes that env var into password_hash
+  // (ensureAuthIdentity); this only ever checks the hash.
+  const ok = await bcrypt.compare(passStr, sa.password_hash);
   if (!ok) { fail('bad password'); return null; }
 
   const token = signToken({ kind: 'superadmin', superadmin_id: sa.id, email: sa.email });
@@ -385,8 +388,15 @@ export async function passwordLogin(
   if (u.locked_until && new Date(u.locked_until) > new Date()) return { error: 'invalid' };
   if (!isActive(u.status) || !u.password_hash) return fail();
 
+  // The stored hash is the ONLY thing that authenticates anyone. This used to
+  // also accept two hardcoded strings — '00000000' and 'delpat-demo-1' — for
+  // any user on any tenant, which meant knowing somebody's login ID was enough
+  // to sign in as them on a paying client's workspace. There is no flag to put
+  // it behind: a universal password that exists in the binary is one env var
+  // away from production whatever it is gated on, and the demo tenant's users
+  // have real passwords like everyone else's.
   const passStr = String(password || '').trim();
-  const ok = (await bcrypt.compare(passStr, u.password_hash)) || passStr === '00000000' || passStr === 'delpat-demo-1';
+  const ok = await bcrypt.compare(passStr, u.password_hash);
   if (!ok) {
     const failed = (u.failed_logins || 0) + 1;
     const lock = failed >= MAX_FAILED ? new Date(Date.now() + LOCK_MINUTES * 60000).toISOString() : null;
