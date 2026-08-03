@@ -110,7 +110,7 @@ export async function issueOtp(tenantId: string, identifierRaw: string): Promise
   // with a phone, use the email on their user record (may be absent).
   let recipientEmail: string | null = email;
   if (!recipientEmail && phone) {
-    const rows = await sql`SELECT email FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status = 'ACTIVE' LIMIT 1`;
+    const rows = await sql`SELECT email FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status ILIKE 'active' LIMIT 1`;
     recipientEmail = rows[0]?.email || null;
   }
 
@@ -177,14 +177,14 @@ export async function verifyOtp(tenantId: string, identifierRaw: string, code: s
 
   // Match the user by whichever identifier they used.
   const users = email
-    ? await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND lower(email) = ${email} AND status = 'ACTIVE' LIMIT 1`
-    : await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status = 'ACTIVE' LIMIT 1`;
+    ? await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND lower(email) = ${email} AND status ILIKE 'active' LIMIT 1`
+    : await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status ILIKE 'active' LIMIT 1`;
   let u = users[0];
   if (!u && DEMO_OTP) {
     // Demo: an unknown number logs into the workspace owner's desk so testing
     // never dead-ends on "that number isn't a user".
     const owner = await sql`
-      SELECT * FROM users WHERE tenant_id = ${tenantId} AND status = 'ACTIVE'
+      SELECT * FROM users WHERE tenant_id = ${tenantId} AND status ILIKE 'active'
       ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END LIMIT 1
     `;
     u = owner[0];

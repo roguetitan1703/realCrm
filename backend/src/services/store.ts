@@ -2073,20 +2073,30 @@ const ARRIVAL_QUIET_MS = 20_000;
 const arrivalTally = new Map<string, { n: number; timer: NodeJS.Timeout }>();
 
 function queueOwnerArrivalNotice(agentId: string): void {
-  const prev = arrivalTally.get(agentId);
+  // Read HERE and closed over. The tally is keyed by tenant AND agent because
+  // it is process-wide: two firms importing at once would otherwise share a
+  // counter and each be told the other's total. Capturing the actor is what
+  // lets the self-check survive into the timer, so a manager importing owners
+  // onto their own name is not told about work they just gave themselves.
+  const tenantId = tid();
+  const actorId = getContext()?.userId ?? null;
+  const key = `${tenantId}:${agentId}`;
+  const prev = arrivalTally.get(key);
   if (prev) clearTimeout(prev.timer);
   const n = (prev?.n || 0) + 1;
   const timer = setTimeout(() => {
-    arrivalTally.delete(agentId);
+    arrivalTally.delete(key);
+    if (actorId === agentId) return;
     notify({
-      userId: agentId, type: 'owner_assigned', push: true,
+      userId: agentId, tenantId, type: 'owner_assigned', push: true,
       title: `${n} owner${n === 1 ? '' : 's'} assigned to you`,
       body: 'Added to your calling queue.',
       link: '?screen=calling',
+      toSelf: true,   // the actor check above already ran, with real context
     }).catch(err => console.warn('[Notify] owner arrival failed:', err?.message));
   }, ARRIVAL_QUIET_MS);
   timer.unref?.();
-  arrivalTally.set(agentId, { n, timer });
+  arrivalTally.set(key, { n, timer });
 }
 
 export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
@@ -2115,7 +2125,13 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
     RETURNING *;
   `;
   const created = rowToOwner(rows[0]);
-  if (autoRouted && agentId) queueOwnerArrivalNotice(agentId);
+  // Any agent, not only an auto-routed one. This used to require `autoRouted`,
+  // which meant a CSV carrying its own agent column — the ordinary way a desk
+  // hands out a calling list — assigned the work silently. On the live desk
+  // that was 731 of 732 owners routed and not one notification sent. The
+  // debounce is what makes this safe to widen: an import still produces one
+  // alert per agent, not one per row.
+  if (agentId) queueOwnerArrivalNotice(agentId);
   if (data.notes) {
     await addTimelineEvent({ record_id: id, type: 'note', title: 'Note', description: String(data.notes), author: 'Import' });
   }
@@ -2298,6 +2314,18 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
     actor_label: ctx.actorLabel ?? null, action: 'owner.update', target_type: 'owner', target_id: id,
     summary: `Owner "${updated?.name || id}" updated`, metadata: { patch }, ip: ctx.ip, user_agent: ctx.userAgent,
   });
+  // Handing someone a record to call is the same event as handing them a lead,
+  // and updateLead has always said so. This one said nothing — so a reassign
+  // that came through the record rather than the bulk action was silent.
+  // notify() drops it when you assigned it to yourself.
+  if (patch.agentId !== undefined && next.agent_id && next.agent_id !== existing.agentId) {
+    notify({
+      userId: next.agent_id, type: 'owner_reassigned', push: true,
+      title: 'An owner was assigned to you',
+      body: `${updated?.name || 'Owner'}${updated?.locality ? ` · ${updated.locality}` : ''}`,
+      link: `?screen=calling&owner=${id}`,
+    }).catch(err => console.warn('[Notify] owner_reassigned failed:', err?.message));
+  }
   return updated;
 }
 
@@ -3232,6 +3260,7 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
       AND l.created_at < NOW() - (${hours}::text || ' hours')::interval
   `;
   let n = 0;
+  const tally = new Map<string, number>();
   for (const lead of rows) {
     const agentId = await nextRoutedAgent();
     if (!agentId) break;
@@ -3242,8 +3271,16 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
       description: `Unowned for ${hours}h — routed to ${name}`,
       author: 'System', metadata: { agentId, reason: 'sweep_unassigned', hours },
     });
+    tally.set(agentId, (tally.get(agentId) || 0) + 1);
     n++;
   }
+  // The owner sweeps have always done this; the lead sweeps wrote a timeline
+  // entry and stopped. So the desk turned on auto-assignment, leads moved onto
+  // people's names overnight, and the only way to find out was to go looking.
+  await notifyAssignBatch(tenantId, tally, {
+    type: 'lead_assigned', noun: 'lead', verb: 'assigned to you',
+    body: 'Nobody had picked these up.', link: '?screen=leads',
+  });
   return n;
 }
 
@@ -3261,6 +3298,8 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
       AND NOT (follow_up IS NOT NULL AND (follow_up->>'date')::date >= CURRENT_DATE)
   `;
   let n = 0;
+  const tally = new Map<string, number>();
+  const lost = new Map<string, number>();
   for (const lead of rows) {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${lead.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
     const agentId = await nextRoutedAgent();
@@ -3272,7 +3311,25 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
       description: `No activity from ${prevOwner} for ${hours}h — routed to ${name}`,
       author: 'System', metadata: { agentId, previousAgentId: lead.agent_id, reason: 'sweep_idle', hours },
     });
+    tally.set(agentId, (tally.get(agentId) || 0) + 1);
+    lost.set(lead.agent_id, (lost.get(lead.agent_id) || 0) + 1);
     n++;
+  }
+  await notifyAssignBatch(tenantId, tally, {
+    type: 'lead_reassigned', noun: 'lead', verb: 'moved to you',
+    body: `Idle for over ${hours}h with their previous owner.`, link: '?screen=leads',
+  });
+  // The only place either module tells someone work has LEFT them. Losing a
+  // lead to the idle rule is a thing they should hear from the app rather than
+  // discover when a manager asks how the follow-up went — and unlike the
+  // arrival, it is not urgent, so it stays in the feed without a push.
+  for (const [agentId, count] of lost) {
+    notify({
+      userId: agentId, tenantId, type: 'lead_reassigned',
+      title: `${count} lead${count === 1 ? '' : 's'} reassigned away`,
+      body: `No activity for over ${hours}h, so ${count === 1 ? 'it was' : 'they were'} routed on.`,
+      link: '?screen=leads', toSelf: true,
+    }).catch(err => console.warn('[Notify] lead idle-loss failed:', err?.message));
   }
   return n;
 }
@@ -3307,7 +3364,7 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
     tally.set(agentId, (tally.get(agentId) || 0) + 1);
     n++;
   }
-  await notifyOwnerBatch(tally, 'owner_assigned', 'to call');
+  await notifyOwnerBatch(tenantId, tally, 'owner_assigned', 'to call');
   return n;
 }
 
@@ -3319,15 +3376,32 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
  * single pass — copied verbatim that is hundreds of pushes to one phone, and
  * the agent turns alerts off. So the sweep tallies and sends one.
  */
-async function notifyOwnerBatch(tally: Map<string, number>, type: string, verb: string): Promise<void> {
+interface AssignBatchCopy { type: string; noun: string; verb: string; body: string; link: string }
+
+async function notifyAssignBatch(tenantId: string, tally: Map<string, number>, c: AssignBatchCopy): Promise<void> {
   for (const [agentId, count] of tally) {
     notify({
-      userId: agentId, type, push: true,
-      title: `${count} owner${count === 1 ? '' : 's'} ${verb}`,
-      body: count === 1 ? 'Added to your calling queue.' : 'Added to your calling queue.',
-      link: '?screen=calling',
-    }).catch(err => console.warn(`[Notify] ${type} failed:`, err?.message));
+      // tenantId passed EXPLICITLY rather than left to notify()'s fallback.
+      // runRoutingSweeps does wrap each tenant in runWithContext, so the
+      // fallback resolves correctly today — but the tenant is already an
+      // argument to every sweep, and a notification landing in the wrong
+      // workspace is invisible rather than noisy. Not worth leaving to a
+      // caller's ambient state.
+      userId: agentId, tenantId, type: c.type, push: true,
+      title: `${count} ${c.noun}${count === 1 ? '' : 's'} ${c.verb}`,
+      body: c.body,
+      link: c.link,
+      // A sweep has no human actor — its context carries userId: null — so
+      // there is no "you did this yourself" case to suppress.
+      toSelf: true,
+    }).catch(err => console.warn(`[Notify] ${c.type} failed:`, err?.message));
   }
+}
+
+async function notifyOwnerBatch(tenantId: string, tally: Map<string, number>, type: string, verb: string): Promise<void> {
+  return notifyAssignBatch(tenantId, tally, {
+    type, noun: 'owner', verb, body: 'Added to your calling queue.', link: '?screen=calling',
+  });
 }
 
 export async function sweepIdleOwners(tenantId: string): Promise<number> {
@@ -3355,7 +3429,7 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
     tally.set(agentId, (tally.get(agentId) || 0) + 1);
     n++;
   }
-  await notifyOwnerBatch(tally, 'owner_reassigned', 'moved to you');
+  await notifyOwnerBatch(tenantId, tally, 'owner_reassigned', 'moved to you');
   return n;
 }
 

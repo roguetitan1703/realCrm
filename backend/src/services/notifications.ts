@@ -75,7 +75,14 @@ export async function notify(n: NotifyInput): Promise<void> {
  *  given roles (e.g. owners + managers for team-wide visibility). */
 export async function notifyRoles(roles: string[], n: Omit<NotifyInput, 'userId'>): Promise<void> {
   const t = n.tenantId || tid();
-  const users = await sql`SELECT id FROM users WHERE tenant_id = ${t} AND role IN ${sql(roles)} AND status = 'ACTIVE'`;
+  // ILIKE, not `= 'ACTIVE'`. users.status is written in two casings by two
+  // different paths — onboarding writes 'ACTIVE', the team/seat screen writes
+  // 'active' — and every real workspace goes through the second one. So an
+  // exact match found nobody on any live tenant, and every alert addressed to
+  // "the desk" (a new lead captured, a lead that arrived with no one to take
+  // it, the SLA escalation) was assembled, addressed and then delivered to an
+  // empty list. Silently: fanning out to zero users is not an error.
+  const users = await sql`SELECT id FROM users WHERE tenant_id = ${t} AND role IN ${sql(roles)} AND status ILIKE 'active'`;
   for (const u of users) await notify({ ...n, userId: u.id, tenantId: t });
 }
 
