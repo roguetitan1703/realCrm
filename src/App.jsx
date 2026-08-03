@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useStore } from './lib/store.jsx'
 import { useNav } from './lib/useNav.js'
 import { AppShell } from './layouts/layouts.jsx'
@@ -80,9 +80,21 @@ export default function App() {
   // phone — otherwise back on Today would keep trying to reach a dashboard the
   // phone does not have.
   const warnExit = useCallback(() => store.toast('Press back again to exit'), [store])
+  // Everything that draws over a screen, in one place, so nav can dismiss it
+  // without knowing what any of them are. All three are separate pieces of
+  // store state: the modal stack, the search panel and the alerts drawer.
+  const overlay = useMemo(() => ({
+    isOpen: () => Boolean(store.state.modal || store.state.searchOpen || store.state.notifOpen),
+    close: () => {
+      if (store.state.modal) store.closeModal()
+      if (store.state.searchOpen) store.setSearch(false)
+      if (store.state.notifOpen) store.setNotif(false)
+    },
+  }), [store])
   const { screen, setScreen, sel, setSel, go, boot } = useNav({
     home: isPhone ? 'today' : 'dashboard',
     onExitWarning: warnExit,
+    overlay,
   })
 
   // Alerts are on by default — no toggle exists, so subscribing is the app's

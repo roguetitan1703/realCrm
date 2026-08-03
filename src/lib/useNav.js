@@ -9,7 +9,20 @@ import { parseUrl, urlFor, isRoot, isStandaloneApp, TAKEOVER_KEYS } from './nav.
 //
 // `home` is the screen that counts as the root for the exit guard: 'dashboard'
 // on the desk, 'today' on a phone.
-export function useNav({ home, onExitWarning }) {
+//
+// `overlay` is how nav learns about anything drawn ON TOP of a screen — the
+// modals, the search panel, the notification drawer. Nav does not own that
+// state (the store does), and for a long time it did not know it existed
+// either: opening "New lead" and then tapping a bottom-tab or pressing back
+// changed the screen underneath while the form stayed on top of it, over a
+// page it no longer belonged to. Pass { isOpen, close }.
+export function useNav({ home, onExitWarning, overlay }) {
+  // Read through a ref so the popstate handler always sees the CURRENT overlay
+  // state. Closing over the value instead would re-register the listener on
+  // every open and close, and worse, a stale closure would answer "nothing is
+  // open" for the one press that matters.
+  const overlayRef = useRef(overlay)
+  overlayRef.current = overlay
   const first = useRef(parseUrl()).current
   const [screen, setScreenState] = useState(first.screen || home)
   const [sel, setSelState] = useState(first.sel)
@@ -52,6 +65,16 @@ export function useNav({ home, onExitWarning }) {
 
   useEffect(() => {
     const onPop = () => {
+      // A back press with a form on screen means "close the form", every time.
+      // It never means "go to the previous screen and leave the form floating
+      // over it", and on a phone — where back is a system gesture people use
+      // constantly — that is the only reading anyone expects. Consume the
+      // press by putting the entry back, so one gesture closes one thing.
+      if (overlayRef.current?.isOpen()) {
+        overlayRef.current.close()
+        window.history.pushState({ nav: true }, '', urlFor(screen, sel))
+        return
+      }
       const at = parseUrl()
       const nextScreen = at.screen || home
 
@@ -86,6 +109,11 @@ export function useNav({ home, onExitWarning }) {
   // Every takeover flag is cleared unless this call sets it, so leaving the
   // add-property wizard and tapping Properties cannot re-open the wizard.
   const go = useCallback((key, patch = {}) => {
+    // Every navigation dismisses what is on top of the screen. Tapping a tab
+    // while a half-filled form is open is an unambiguous "not now" — and a
+    // form that survives the trip is worse than one that closes, because it
+    // then submits against whatever screen you landed on.
+    overlayRef.current?.close()
     setScreenState(key)
     setSelState(s => {
       const next = { ...s }

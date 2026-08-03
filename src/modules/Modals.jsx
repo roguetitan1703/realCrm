@@ -1575,15 +1575,13 @@ export function NotifModal({ store, go }) {
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied'
   )
 
+  // Back is handled centrally in useNav now, for every overlay at once — this
+  // drawer was the only one that had ever grown its own handler, which is why
+  // back closed the alerts but left a half-typed lead form sitting there.
   useEffect(() => {
-    const onPop = () => close()
-    window.addEventListener('popstate', onPop)
     const onKey = (e) => { if (e.key === 'Escape') close() }
     window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('popstate', onPop)
-      window.removeEventListener('keydown', onKey)
-    }
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   // Same no-op as PhoneMe had: pushPermission() takes no argument and only
