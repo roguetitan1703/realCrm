@@ -147,7 +147,13 @@ function Group({ g, onOpen, store, onSeeAll }) {
           : g.kind === 'owner' ? <OwnerRow key={r.id} o={r} onOpen={onOpen} store={store} />
             : <LeadRow key={r.id} l={r} onOpen={onOpen} store={store} tone={g.tone} />
       ))}
-      <MoreRows more={Math.min(more, g.rows.length - cap)} step={6} onMore={showMore} />
+      {/* `more` straight from useCap, which already floors it at zero. This
+          used to re-derive the remainder as `rows.length - cap` and take the
+          min of the two, meaning to be careful — but cap keeps growing past
+          the last row, so that second expression goes negative and won the
+          min. A negative is truthy, so the button never went away and every
+          further tap counted further down: "-4 left", "-10 left". */}
+      <MoreRows more={more} step={6} onMore={showMore} />
     </section>
   )
 }

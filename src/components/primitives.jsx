@@ -103,7 +103,10 @@ function pageWindow(page, pageCount) {
 // a phone they are a precise tap where a thumb wants a big target. This only
 // ever grows the list, so nothing already read moves underneath you.
 export function MoreRows({ more, onMore, noun = 'more', step }) {
-  if (!more) return null
+  // `> 0`, not `!more`: a negative remainder is truthy, so a caller that hands
+  // one over kept this button on screen counting downwards instead of
+  // disappearing. Nothing left to show is the only reason to render, so say so.
+  if (!(more > 0)) return null
   const n = step ? Math.min(more, step) : more
   return (
     <button type="button" className="showmore" onClick={onMore}>
