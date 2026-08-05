@@ -372,7 +372,30 @@ export async function processInboxRow(
       const existing = leads.find(l => l.phone && l.phone.replace(/[^0-9+]/g, '') === cleanPhone);
       if (existing) {
         const note = `[Repeat enquiry via ${integration.provider}] ${new Date().toLocaleString('en-IN')}`;
-        await updateLead(existing.id, { notes: [note, ...(existing.notes || [])] });
+        // A repeat enquiry is usually RICHER than the first, and merging used
+        // to keep only the note. MagicBricks' early pushes carried name, phone
+        // and locality; the ones arriving now carry the budget, the deal type,
+        // the configuration and the buyer's own words. All of it was landing
+        // on a lead that stayed as thin as the day it was created — which is
+        // most of what "the info we're receiving is very less" actually was.
+        //
+        // Fill only what is EMPTY. An agent who has spoken to this person and
+        // corrected their budget outranks a portal repeating its own form.
+        const r = lead.req || {};
+        const cur = existing.req || {};
+        const merged: any = { ...cur };
+        for (const k of ['deal', 'config', 'locality', 'minBudget', 'maxBudget', 'purpose', 'timeline', 'interest'] as const) {
+          if ((cur as any)[k] == null && (r as any)[k] != null) merged[k] = (r as any)[k];
+        }
+        // The newest enquiry's message is appended rather than merged: two
+        // enquiries are two things the person said, and the second one is
+        // often the one that names a property.
+        const extra = [r.notes, r.interest && `Interested in: ${r.interest}`].filter(Boolean).join(' — ');
+        const notes = [extra ? `${note} ${extra}` : note, ...(existing.notes || [])];
+        await updateLead(existing.id, {
+          notes, req: merged,
+          ...(!existing.email && lead.email ? { email: lead.email } : {}),
+        });
         await markInbox(inboxId, 'parsed', { leadId: existing.id });
         return { status: 'merged', leadId: existing.id };
       }

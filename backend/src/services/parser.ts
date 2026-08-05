@@ -118,6 +118,29 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
     if (/\bsale\b|\bsell\b|\bresale\b|\bbuy(er)?\b|\bpurchase\b|\bnew\s*booking\b/.test(s)) return 'sale';
     return null;
   },
+  /**
+   * When the enquiry actually happened, per the portal.
+   *
+   * MagicBricks sends `"20260805183634"` — a compact local stamp with no
+   * separators and no zone, which `new Date()` reads as an invalid date (or,
+   * worse, as a year-20260805 nonsense). Portals stamp in IST, so that is what
+   * it is read as. Also accepts epoch seconds/millis and anything Date can
+   * already parse, and returns null rather than a wrong instant.
+   */
+  datetime_in: (v) => {
+    const s = String(v ?? '').trim();
+    if (!s) return null;
+    const compact = s.match(/^(\d{4})(\d{2})(\d{2})[ T]?(\d{2})(\d{2})(\d{2})$/);
+    if (compact) {
+      const [, y, mo, d, h, mi, se] = compact;
+      const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${se}+05:30`);
+      return isNaN(dt.getTime()) ? null : dt.toISOString();
+    }
+    if (/^\d{13}$/.test(s)) return new Date(Number(s)).toISOString();
+    if (/^\d{10}$/.test(s)) return new Date(Number(s) * 1000).toISOString();
+    const dt = new Date(s);
+    return isNaN(dt.getTime()) ? null : dt.toISOString();
+  },
 };
 
 // The lead fields a config is allowed to write. An allow-list, because the
@@ -136,6 +159,17 @@ const WRITABLE = new Set([
   // sanitizeConfig then dropped them silently, so the field read "Not mapped"
   // on a payload that plainly contained a budget.
   'req.budgetMin', 'req.budgetMax', 'req.minBudget', 'req.maxBudget',
+  // What they enquired ABOUT, as prose. MagicBricks names the listing the
+  // buyer was looking at ("Joyville Hinjawadi") and there is usually no row of
+  // ours to point that at, so it is carried as text and shown in the
+  // requirement line — the same decision the CSV importer's `interest` field
+  // makes. Without this the field was not writable at all, so the one thing
+  // that tells an agent what the call is about was dropped on every push.
+  'req.interest',
+  // When the portal says the enquiry happened, as opposed to when we processed
+  // it. Seconds apart on a live push and days apart on a replayed backlog —
+  // and the lead list now shows a received date, so the difference is on screen.
+  'received_at',
   'external_id',
 ]);
 
@@ -322,14 +356,21 @@ const HINTS: Record<string, string[]> = {
   'req.minBudget': ['budget_min', 'min_budget', 'budget_from', 'price_min'],
   'req.maxBudget': ['budget_max', 'max_budget', 'budget_to', 'price_max', 'budget'],
   'req.notes': ['message', 'comments', 'notes', 'query', 'remarks', 'description'],
+  'req.interest': ['property_interested', 'interested_in', 'enquired_for', 'property_name',
+    'project_name', 'listing', 'property', 'project'],
+  received_at: ['enquiry_timestamp', 'enquiry_date', 'enquiry_time', 'received_at',
+    'lead_date', 'created_time', 'timestamp'],
   external_id: ['external_id', 'lead_id', 'enquiry_id', 'id', 'reference_id'],
 };
 
 const DEFAULT_TRANSFORM: Record<string, string> = {
   phone: 'phone_in', name: 'trim', email: 'trim',
   'req.config': 'bhk', 'req.minBudget': 'money_in', 'req.maxBudget': 'money_in',
-  'req.deal': 'deal_in',
+  'req.deal': 'deal_in', 'req.interest': 'trim', received_at: 'datetime_in',
 };
+
+/** Does this text name a configuration ("2 BHK", "1 RK")? */
+const hasBhk = (v: any) => /(\d+(?:\.5)?)\s*(?:bhk|bedroom)|\b1\s*rk\b/i.test(String(v ?? ''));
 
 /**
  * Propose a mapping from a real payload. This is a SUGGESTION and the spec is
@@ -342,7 +383,8 @@ const DEFAULT_TRANSFORM: Record<string, string> = {
  * mapping that looks configured is worse than an obvious gap.
  */
 export function suggestConfig(payload: any, providerLabel?: string): ParserConfig {
-  const paths = Object.keys(flattenPaths(payload || {}));
+  const flat = flattenPaths(payload || {});
+  const paths = Object.keys(flat);
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
   const map: Record<string, string> = {};
   const transforms: Record<string, string> = {};
@@ -366,9 +408,26 @@ export function suggestConfig(payload: any, providerLabel?: string): ParserConfi
     }
   }
 
+  // The column called "BHK" is not always the BHK. MagicBricks sends
+  // {"BHK": "Multistorey Apartment"} — a property TYPE — and puts the real
+  // "2 BHK" inside the buyer's message. Matching on the name alone therefore
+  // files every enquiry under a configuration no listing has, and the buyer's
+  // actual requirement is never read. So the name match is checked against the
+  // sample: if the column it picked holds no configuration and another one
+  // does, take the one that does.
+  if (map['req.config'] && !hasBhk(flat[map['req.config']])) {
+    const better = paths.find(p => hasBhk(flat[p]));
+    if (better) map['req.config'] = better;
+  }
+
   const defaults: Record<string, any> = {};
   if (providerLabel) defaults.source = providerLabel;
-  if (!map['req.deal']) defaults['req.deal'] = 'sale';
+  // No blanket `req.deal = 'sale'`. This was the last of the five places that
+  // invented a deal type, and the most damaging: it is written into a saved
+  // config, so it kept re-applying long after the parser itself stopped
+  // guessing. Every MagicBricks enquiry on the live desk — all of them rent,
+  // at ₹22–26k a month — was stored as a sale by this one line. A source that
+  // does not say is left unsaid.
 
   return { map, defaults, transforms, valueMaps: {} };
 }

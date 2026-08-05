@@ -270,6 +270,13 @@ const TARGETS = [
   { key: 'req.minBudget', label: 'Budget from' },
   { key: 'req.maxBudget', label: 'Budget to' },
   { key: 'req.notes', label: 'Message' },
+  // Prose, not a link. Portals name the listing the buyer was looking at and
+  // we rarely hold that row, so it is carried as text into the requirement
+  // line where an agent reads it before calling.
+  { key: 'req.interest', label: 'Property interested' },
+  // The portal's own enquiry time. Unmapped, the lead is stamped when we
+  // processed it — identical on a live push, days out on a replayed backlog.
+  { key: 'received_at', label: 'Enquiry time' },
   { key: 'external_id', label: 'Their reference' },
 ]
 

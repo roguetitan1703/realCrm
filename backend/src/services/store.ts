@@ -1598,16 +1598,23 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // callers (imports, webhooks, the seed), which is the honest answer: the firm
   // created it, not a person.
   const createdBy = ctx.actorId ?? getContext()?.userId ?? null;
+  // When the enquiry happened, if the source told us. Falls back to now(), so
+  // every existing caller is unchanged. It matters for a replay: 67 pushes
+  // recovered from the inbox would otherwise all read as arriving the minute
+  // someone pressed the button, and "received on" is now a column agents sort
+  // and chase by.
+  const receivedAt = leadData.received_at ?? leadData.receivedAt ?? null;
 
   const t = tid();
   const rows = await sql`
     INSERT INTO crm_leads (
       id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback,
-      deal, requirement, locality, budget_min, budget_max, purpose, timeline_pref, import_batch_id, created_by, tenant_id
+      deal, requirement, locality, budget_min, budget_max, purpose, timeline_pref, import_batch_id, created_by, tenant_id, created_at
     )
     VALUES (
       ${newId}, ${name}, ${phone}, ${email}, ${stage}, ${source}, ${agentId}, ${sql.json(req)}, ${sql.json(notes)}, ${sql.json(shortlist)}, ${sql.json(feedback)},
-      ${deal}, ${requirement}, ${locality}, ${budgetMin}, ${budgetMax}, ${purpose}, ${timelinePref}, ${importBatchId}, ${createdBy}, ${t}
+      ${deal}, ${requirement}, ${locality}, ${budgetMin}, ${budgetMax}, ${purpose}, ${timelinePref}, ${importBatchId}, ${createdBy}, ${t},
+      COALESCE(${receivedAt}::timestamptz, NOW())
     )
     RETURNING *;
   `;
