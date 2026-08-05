@@ -291,6 +291,14 @@ function Mapper({ connection, store, onClose, onSaved }) {
   // provider is nine clicks in the payload, not nine trips through a dropdown.
   const [armed, setArmed] = useState(null)
 
+  // `store` is deliberately NOT a dependency. It is rebuilt as a fresh object
+  // on every render of the provider, so listing it re-ran this effect on any
+  // store change at all — including the one a toast causes. Re-running it
+  // re-fetches the sample and calls setConfig with the SAVED mapping, which
+  // silently threw away whatever was on screen: Re-detect appeared to do
+  // nothing but show its toast, because the toast itself undid it.
+  const storeRef = useRef(store)
+  storeRef.current = store
   useEffect(() => {
     api.getConnectionSample(connection.id)
       .then(r => {
@@ -300,8 +308,8 @@ function Mapper({ connection, store, onClose, onSaved }) {
         setConfig(cfg)
         setArmed(TARGETS.find(t => !cfg.map?.[t.key])?.key || TARGETS[0].key)
       })
-      .catch(() => store.toast('Could not load the sample', 'warn'))
-  }, [connection.id, store])
+      .catch(() => storeRef.current.toast('Could not load the sample', 'warn'))
+  }, [connection.id])
 
   // Any edit clears the preview, or you could preview one mapping and save
   // another.
