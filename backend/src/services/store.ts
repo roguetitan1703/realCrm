@@ -1835,23 +1835,60 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
  * Two of them ("Working" = Contacted/Negotiation) also still named pipeline
  * stages that no longer exist, so they could only ever have counted zero.
  */
-const LEAD_SEGMENTS = {
-  overdue: sql`overdue = true`,
-  unassigned: sql`agent_id IS NULL`,
-  open: OPEN,
-  // "New today" is about arrival, not about status: a lead that came in this
-  // morning and has already been called is still today's lead.
-  today: sql`created_at >= date_trunc('day', now())`,
-  month: sql`created_at >= date_trunc('month', now())`,
-  // The client asked for this one specifically, one click from the list — it is
-  // the pile you work down at 6pm.
-  noanswer: sql`stage = 'Call Not Received'`,
-  closed: sql`NOT (${OPEN})`,
-  // The calendar shows leads with a next step booked, and only those.
-  followup: sql`follow_up IS NOT NULL`,
-} as const;
+/**
+ * The pills, as SQL. Built per call because two of them depend on the tenant's
+ * own first pipeline stage, which is renameable in Settings.
+ *
+ * "New today" used to mean arrival ALONE — the note here said a lead that came
+ * in this morning and had already been called was still today's lead. In use
+ * that made the pills overlap badly: mark a lead Call Not Received and it stayed
+ * in New today while also appearing under its own pill, so the two counts
+ * described the same work twice and neither shrank as the desk worked. It is
+ * now a WORKLIST: arrived today AND not yet moved off the arrival stage, so
+ * touching a lead takes it out.
+ *
+ * today and month therefore PARTITION this month's arrivals — month is
+ * everything since the 1st that today is not claiming — rather than nesting.
+ * Without the exclusion a worked lead from this morning would fall through both.
+ */
+function leadSegments(arrivalStage: string) {
+  const untouched = sql`stage = ${arrivalStage}`;
+  const newToday = sql`(created_at >= date_trunc('day', now()) AND ${untouched})`;
+  return {
+    overdue: sql`overdue = true`,
+    unassigned: sql`agent_id IS NULL`,
+    open: OPEN,
+    today: newToday,
+    month: sql`(created_at >= date_trunc('month', now()) AND NOT ${newToday})`,
+    // The client asked for this one specifically, one click from the list — it is
+    // the pile you work down at 6pm.
+    noanswer: sql`stage = 'Call Not Received'`,
+    closed: sql`NOT (${OPEN})`,
+    // The calendar shows leads with a next step booked, and only those.
+    followup: sql`follow_up IS NOT NULL`,
+  };
+}
 
-export type LeadSegment = keyof typeof LEAD_SEGMENTS;
+export type LeadSegment = keyof ReturnType<typeof leadSegments>;
+
+/**
+ * The stage a lead ARRIVES on — the tenant's first configured pipeline stage,
+ * not the literal 'New', because Settings → Pipeline lets a firm rename it.
+ * Cached briefly: it is read on every list and every summary, and it changes
+ * about once in a workspace's lifetime.
+ */
+const arrivalStageCache = new Map<string, { v: string; at: number }>();
+const ARRIVAL_TTL_MS = 60_000;
+
+async function arrivalStageOf(tenantId: string): Promise<string> {
+  const hit = arrivalStageCache.get(tenantId);
+  if (hit && Date.now() - hit.at < ARRIVAL_TTL_MS) return hit.v;
+  const rows = await sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${tenantId} LIMIT 1`;
+  const stages = rows[0]?.value?.stages;
+  const v = (Array.isArray(stages) && stages[0]) || 'New';
+  arrivalStageCache.set(tenantId, { v, at: Date.now() });
+  return v;
+}
 
 /**
  * One page of leads, filtered and counted in Postgres — the same treatment
@@ -1892,7 +1929,8 @@ export async function listLeads(opts: {
   const RENT = sql`(lower(coalesce(deal, '')) IN ('rent', 'lease') OR lower(coalesce(purpose, '')) IN ('rent', 'lease'))`;
   if (opts.intent === 'buy' || opts.intent === 'sale') where.push(sql`NOT ${RENT}`);
   else if (opts.intent === 'rent') where.push(RENT);
-  const segment = LEAD_SEGMENTS[opts.segment as keyof typeof LEAD_SEGMENTS];
+  const SEGMENTS = leadSegments(await arrivalStageOf(t));
+  const segment = SEGMENTS[opts.segment as LeadSegment];
   if (segment) where.push(segment);
 
   // The filter panel's own fields. These were collected by the screen and then
@@ -1933,7 +1971,7 @@ export async function listLeads(opts: {
   const flags = many(opts.flag);
   if (flags.length) {
     const parts = flags
-      .map(f => LEAD_SEGMENTS[(f === 'new' ? 'today' : f) as keyof typeof LEAD_SEGMENTS])
+      .map(f => SEGMENTS[(f === 'new' ? 'today' : f) as LeadSegment])
       .filter(Boolean);
     if (parts.length) where.push(anyOf(parts));
   }
@@ -2489,7 +2527,7 @@ export async function getOwnerTodayRows(perGroup = 6, mine?: boolean): Promise<a
 export async function getLeadsSummary(): Promise<any> {
   const t = tid();
   const scope = leadScope();
-  const filters = Object.entries(LEAD_SEGMENTS)
+  const filters = Object.entries(leadSegments(await arrivalStageOf(t)))
     .map(([key, pred]) => sql`count(*) FILTER (WHERE ${pred})::int AS ${sql(key)}`)
     .reduce((acc, f) => sql`${acc}, ${f}`);
   const RENT = sql`(lower(coalesce(deal, '')) IN ('rent', 'lease') OR lower(coalesce(purpose, '')) IN ('rent', 'lease'))`;
@@ -3475,6 +3513,10 @@ export async function getSettings(): Promise<any> {
 }
 
 export async function updateSettings(patch: any): Promise<any> {
+  // The "New today" pill keys off the first pipeline stage, and that answer is
+  // cached. Renaming or reordering stages here has to drop it, or the pill
+  // silently counts nothing until the TTL lapses.
+  arrivalStageCache.delete(tid());
   if (patch.renameStage?.from && patch.renameStage?.to) {
     await sql`UPDATE crm_leads SET stage = ${patch.renameStage.to} WHERE stage = ${patch.renameStage.from} AND tenant_id = ${tid()};`;
     delete patch.renameStage;

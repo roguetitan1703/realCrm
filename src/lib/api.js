@@ -312,7 +312,8 @@ export const api = {
   rotateConnectionKey: (id) => request(`/connections/${id}/rotate`, { method: 'POST' }),
   setConnectionActive: (id, active) => request(`/connections/${id}`, { method: 'PATCH', body: JSON.stringify({ active }) }),
   deleteConnection: (id) => request(`/connections/${id}`, { method: 'DELETE' }),
-  getConnectionInbox: (id, limit = 25) => request(`/connections/inbox?connection=${encodeURIComponent(id)}&limit=${limit}`),
+  getConnectionInbox: (id, limit = 25, offset = 0) =>
+    request(`/connections/inbox?connection=${encodeURIComponent(id)}&limit=${limit}&offset=${offset}`),
   getConnectionSample: (id) => request(`/connections/${id}/sample`),
   previewParser: (id, config, payload) => request(`/connections/${id}/preview`, { method: 'POST', body: JSON.stringify({ config, payload }) }),
   saveParser: (id, config) => request(`/connections/${id}/parser`, { method: 'PUT', body: JSON.stringify({ config }) }),

@@ -129,6 +129,24 @@ function ModuleFormModal({ store, moduleId, recordId }) {
         </select>
       )
     }
+    // Money accepts what a broker actually types — "80L", "1.2Cr", "45000" —
+    // and normalises to rupees when the field loses focus. Left as plain text
+    // it would reach the server as "80L", whose non-digits get stripped, and
+    // the lead would be saved with a budget of eighty rupees. The full-form
+    // modal has always parsed this way; the record sheet has to agree.
+    if (f.type === 'money') {
+      return (
+        <Input
+          value={v}
+          onChange={e => setField(f.key, e.target.value)}
+          onBlur={e => {
+            const n = parseBudgetNum(e.target.value)
+            setField(f.key, Number.isNaN(n) ? '' : n)
+          }}
+          placeholder="80L, 1.2Cr or 45000"
+        />
+      )
+    }
     return <Input type={f.type === 'number' ? 'number' : 'text'} value={v} onChange={e => setField(f.key, e.target.value)} />
   }
 

@@ -159,6 +159,7 @@ export const LEADS_DEF = {
         stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
         canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l)}
         onSet={(stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) }}
+        onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
       />
     ) },
     { key: 'source', label: 'Source', render: (l) => <Source>{l.source}</Source> },
@@ -316,6 +317,7 @@ export const LEADS_DEF = {
             stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
             canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l)}
             onSet={(stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) }}
+            onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
           />
         </div>
         {reqShort(l.req) && <div className="prow-req">{reqShort(l.req)}</div>}
@@ -346,6 +348,7 @@ export const LEADS_DEF = {
             stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
             canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l)}
             onSet={(stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) }}
+            onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
           />
         </div>
         <div className="rc-sub mono-num">{l.phone}</div>

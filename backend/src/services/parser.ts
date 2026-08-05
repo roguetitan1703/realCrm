@@ -126,12 +126,60 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
 const WRITABLE = new Set([
   'name', 'phone', 'email', 'source', 'notes',
   'req.deal', 'req.locality', 'req.config', 'req.purpose', 'req.notes',
-  'req.timeline', 'req.budgetMin', 'req.budgetMax', 'req.budget',
+  'req.timeline', 'req.budget',
+  // BOTH spellings of the budget bounds, because both are real. createLead
+  // reads `req.minBudget ?? req.budgetMin` and the record sheet writes the
+  // first, while this file's auto-detect suggests the second. Listing only
+  // budgetMin/budgetMax here meant the mapper UI — which offers minBudget /
+  // maxBudget, the spelling createLead prefers — could not save a budget
+  // mapping at all: the validator rejected the only two keys it offers, and
+  // sanitizeConfig then dropped them silently, so the field read "Not mapped"
+  // on a payload that plainly contained a budget.
+  'req.budgetMin', 'req.budgetMax', 'req.minBudget', 'req.maxBudget',
   'external_id',
 ]);
 
 /** A lead is worth creating only if it can be contacted. */
 const REQUIRED = ['name', 'phone'];
+
+/**
+ * Collapse the two historical spellings of the budget bounds onto the one the
+ * mapper UI shows. Both are accepted on the way in (see WRITABLE) so an
+ * existing config keeps working, but everything is stored under one name —
+ * otherwise a connection auto-detected before this change keeps its budget
+ * under budgetMin, the UI renders its own key, and the field reads
+ * "Not mapped" forever while quietly working.
+ */
+const TARGET_ALIASES: Record<string, string> = {
+  'req.budgetMin': 'req.minBudget',
+  'req.budgetMax': 'req.maxBudget',
+};
+const canonicalTarget = (t: string): string => TARGET_ALIASES[t] || t;
+
+/**
+ * A rent is quoted per MONTH and a sale price is quoted outright, so the two
+ * live in different orders of magnitude and the number alone separates them.
+ * ₹5 lakh is the line: above it nobody is quoting monthly rent, below it
+ * nobody is buying property.
+ *
+ * Deliberately conservative — it returns null rather than guessing when the
+ * figure is missing or straddles the line, because a lead filed under the
+ * wrong deal type gets matched against the wrong stock, which is worse than
+ * one with no deal type at all.
+ */
+const RENT_CEILING = 500000;
+
+export function dealFromBudget(min: any, max: any): 'sale' | 'rent' | null {
+  const nums = [min, max]
+    .map(v => (typeof v === 'number' ? v : Number(String(v ?? '').replace(/[^0-9.]/g, ''))))
+    .filter(n => Number.isFinite(n) && n > 0);
+  if (!nums.length) return null;
+  // Judge on the TOP of the range. A "50,000 – 8,00,000" would be nonsense as
+  // rent, and reading the bottom of a sale range like "45L – 60L" against the
+  // ceiling is what would misfile it.
+  const top = Math.max(...nums);
+  return top >= RENT_CEILING ? 'sale' : 'rent';
+}
 
 /**
  * Drop any map/default/transform entry that targets a field WRITABLE no
@@ -146,21 +194,25 @@ export function sanitizeConfig(config: ParserConfig | null): { clean: ParserConf
   if (!config || typeof config !== 'object') return { clean: config, dropped: [] };
   const dropped: string[] = [];
   const map: Record<string, string> = {};
-  for (const [target, source] of Object.entries(config.map || {})) {
-    if (WRITABLE.has(target)) map[target] = source; else dropped.push(target);
+  for (const [rawTarget, source] of Object.entries(config.map || {})) {
+    const target = canonicalTarget(rawTarget);
+    if (WRITABLE.has(target)) map[target] = source; else dropped.push(rawTarget);
   }
   const defaults: Record<string, any> = {};
-  for (const [target, value] of Object.entries(config.defaults || {})) {
-    if (WRITABLE.has(target)) defaults[target] = value; else dropped.push(target);
+  for (const [rawTarget, value] of Object.entries(config.defaults || {})) {
+    const target = canonicalTarget(rawTarget);
+    if (WRITABLE.has(target)) defaults[target] = value; else dropped.push(rawTarget);
   }
   // Transforms and valueMaps are keyed by the same target names — carrying one
   // for a target that no longer exists in `map` is inert but still clutter.
   const transforms: Record<string, string> = {};
-  for (const [target, name] of Object.entries(config.transforms || {})) {
+  for (const [rawTarget, name] of Object.entries(config.transforms || {})) {
+    const target = canonicalTarget(rawTarget);
     if (map[target] !== undefined) transforms[target] = name;
   }
   const valueMaps: Record<string, Record<string, string>> = {};
-  for (const [target, vmap] of Object.entries(config.valueMaps || {})) {
+  for (const [rawTarget, vmap] of Object.entries(config.valueMaps || {})) {
+    const target = canonicalTarget(rawTarget);
     if (map[target] !== undefined) valueMaps[target] = vmap;
   }
   return { clean: { map, defaults, transforms, valueMaps }, dropped: [...new Set(dropped)] };
@@ -200,6 +252,21 @@ export function parsePayload(payload: any, config: ParserConfig | null): ParseRe
 
     if (!isEmpty(value)) setPath(lead, target, value);
     trace.push({ target, from: source, raw, value: isEmpty(value) ? null : value, via });
+  }
+
+  // Infer the deal type from the budget, but ONLY when the payload did not
+  // carry one. Ordered deliberately between map and defaults: what the portal
+  // actually said always wins, and a figure the buyer themselves gave is a
+  // better guess than the tenant's blanket fallback — which is how every
+  // MagicBricks lead on the live desk ended up filed as "sale" regardless of
+  // what the person wanted. Runs before the defaults loop for exactly that
+  // reason; after it, the default would already have filled the gap.
+  if (isEmpty(getPath(lead, 'req.deal'))) {
+    const derived = dealFromBudget(getPath(lead, 'req.minBudget'), getPath(lead, 'req.maxBudget'));
+    if (derived) {
+      setPath(lead, 'req.deal', derived);
+      trace.push({ target: 'req.deal', from: 'budget', raw: null, value: derived, via: 'derived' });
+    }
   }
 
   // Defaults fill gaps; they never overwrite. A provider that sends a deal type
@@ -247,15 +314,20 @@ const HINTS: Record<string, string[]> = {
   'req.deal': ['deal', 'deal_type', 'dealtype', 'listing_type', 'transaction_type', 'purpose', 'category', 'property_for'],
   'req.locality': ['locality', 'location', 'area', 'preferred_locality', 'city', 'project_location'],
   'req.config': ['config', 'bhk', 'configuration', 'property_type', 'requirement', 'unit_type'],
-  'req.budgetMin': ['budget_min', 'min_budget', 'budget_from', 'price_min'],
-  'req.budgetMax': ['budget_max', 'max_budget', 'budget_to', 'price_max', 'budget'],
+  // minBudget/maxBudget is the CANONICAL spelling: it is what the mapper UI
+  // offers and what createLead reads first. Auto-detect used to suggest
+  // budgetMin/budgetMax instead, so a budget it correctly found was written
+  // under a key the UI does not display — the mapping existed and the field
+  // still read "Not mapped".
+  'req.minBudget': ['budget_min', 'min_budget', 'budget_from', 'price_min'],
+  'req.maxBudget': ['budget_max', 'max_budget', 'budget_to', 'price_max', 'budget'],
   'req.notes': ['message', 'comments', 'notes', 'query', 'remarks', 'description'],
   external_id: ['external_id', 'lead_id', 'enquiry_id', 'id', 'reference_id'],
 };
 
 const DEFAULT_TRANSFORM: Record<string, string> = {
   phone: 'phone_in', name: 'trim', email: 'trim',
-  'req.config': 'bhk', 'req.budgetMin': 'money_in', 'req.budgetMax': 'money_in',
+  'req.config': 'bhk', 'req.minBudget': 'money_in', 'req.maxBudget': 'money_in',
   'req.deal': 'deal_in',
 };
 

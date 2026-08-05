@@ -244,18 +244,27 @@ export async function markInbox(
 }
 
 export async function listInbox(
-  tenantId: string, opts: { integrationId?: string; status?: string; limit?: number } = {},
-): Promise<any[]> {
+  tenantId: string, opts: { integrationId?: string; status?: string; limit?: number; offset?: number } = {},
+): Promise<{ rows: any[]; total: number }> {
   const limit = Math.min(opts.limit ?? 50, 200);
-  return await sql`
-    SELECT id, integration_id, received_at, source_ip, status, lead_id, error, parsed_at,
-           raw_body, body_purged_at, headers
-    FROM webhook_inbox
+  const offset = Math.max(opts.offset ?? 0, 0);
+  const where = sql`
     WHERE tenant_id = ${tenantId}
       ${opts.integrationId ? sql`AND integration_id = ${opts.integrationId}` : sql``}
       ${opts.status ? sql`AND status = ${opts.status}` : sql``}
-    ORDER BY received_at DESC LIMIT ${limit}
+  `;
+  // The page and the total are two queries, deliberately. Reporting rows.length
+  // as the total is how the activity strip claimed a connection had received 8
+  // pushes when it had received 18 — the feed asks for 8 and always got 8, so
+  // history looked like it stopped two days ago.
+  const rows = await sql`
+    SELECT id, integration_id, received_at, source_ip, status, lead_id, error, parsed_at,
+           raw_body, body_purged_at, headers
+    FROM webhook_inbox ${where}
+    ORDER BY received_at DESC LIMIT ${limit} OFFSET ${offset}
   ` as unknown as any[];
+  const [{ n }] = await sql`SELECT count(*)::int AS n FROM webhook_inbox ${where}` as unknown as [{ n: number }];
+  return { rows, total: n };
 }
 
 /** Counts for the per-connection activity strip. */

@@ -188,12 +188,13 @@ connectionsRouter.delete('/:id', async (req: Request, res: Response) => {
 
 connectionsRouter.get('/inbox', async (req: Request, res: Response) => {
   const tenant = requireTenant(req, res); if (!tenant) return;
-  const rows = await listInbox(tenant, {
+  const { rows, total } = await listInbox(tenant, {
     integrationId: req.query.connection as string | undefined,
     status: req.query.status as string | undefined,
     limit: Number(req.query.limit) || 50,
+    offset: Number(req.query.offset) || 0,
   });
-  return res.status(200).json({ success: true, pushes: rows });
+  return res.status(200).json({ success: true, pushes: rows, total });
 });
 
 // ---------------------------------------------------------------------------

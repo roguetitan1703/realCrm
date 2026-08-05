@@ -177,16 +177,35 @@ function Push({ push, store }) {
   )
 }
 
+// How many pushes a page holds. The feed used to ask for exactly this many and
+// show nothing else, so a connection that had received 18 looked like it
+// stopped after 8 — the history was there, the screen just never asked for it.
+const PAGE = 8
+
 function Activity({ connectionId, refreshKey, store }) {
   const [rows, setRows] = useState(null)
+  const [total, setTotal] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [openId, setOpenId] = useState(null)
   useEffect(() => {
     let alive = true
-    api.getConnectionInbox(connectionId, 8)
-      .then(r => { if (alive && r?.success) setRows(r.pushes) })
-      .catch(() => { if (alive) setRows([]) })
+    setRows(null)
+    api.getConnectionInbox(connectionId, PAGE, 0)
+      .then(r => { if (alive && r?.success) { setRows(r.pushes); setTotal(r.total ?? r.pushes.length) } })
+      .catch(() => { if (alive) { setRows([]); setTotal(0) } })
     return () => { alive = false }
   }, [connectionId, refreshKey])
+
+  // Appends the next page. Offset comes from what is already on screen rather
+  // than a page counter, so a push that arrives mid-read cannot make the next
+  // page skip a row.
+  const loadMore = () => {
+    setLoadingMore(true)
+    api.getConnectionInbox(connectionId, PAGE, rows.length)
+      .then(r => { if (r?.success) { setRows(cur => [...cur, ...r.pushes]); setTotal(r.total ?? total) } })
+      .catch(() => {})
+      .finally(() => setLoadingMore(false))
+  }
 
   if (rows === null) {
     return (
@@ -218,6 +237,14 @@ function Activity({ connectionId, refreshKey, store }) {
           </li>
         )
       })}
+      {rows.length < total && (
+        <li className="cx-act-more">
+          <button className="cx-more-btn" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? 'Loading…' : `Show ${Math.min(PAGE, total - rows.length)} more`}
+            <span className="cx-more-of">{rows.length} of {total}</span>
+          </button>
+        </li>
+      )}
     </ul>
   )
 }
@@ -236,9 +263,10 @@ const TARGETS = [
   { key: 'req.deal', label: 'Deal type (sale or rent)' },
   { key: 'req.locality', label: 'Locality' },
   { key: 'req.config', label: 'Configuration' },
-  // minBudget/maxBudget, not budgetMin/budgetMax — createLead reads the former.
-  // Mapped the other way round, an inbound enquiry's budget landed in a key
-  // nothing reads and the lead was created with no budget at all.
+  // minBudget/maxBudget is the canonical spelling — createLead reads it first,
+  // and the parser now auto-detects and stores it under the same name. The
+  // older budgetMin/budgetMax is still accepted on the way in and folded onto
+  // these on save, so a connection mapped before that change keeps working.
   { key: 'req.minBudget', label: 'Budget from' },
   { key: 'req.maxBudget', label: 'Budget to' },
   { key: 'req.notes', label: 'Message' },

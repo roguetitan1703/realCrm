@@ -205,7 +205,13 @@ export function ModuleDetail({
               />
             )}
             {prog.exit && (!prog.exit.when || prog.exit.when(record, store)) && (
-              <button className="rh-exit" onClick={() => prog.exit.run(store, record)}>{prog.exit.label}</button>
+              // A real button, in the danger tone. This was muted grey text
+              // that only turned red on hover, sitting beside a dropdown — so
+              // the one irreversible action on the record read as a caption and
+              // people hunted for it.
+              <button className="rh-exit" onClick={() => prog.exit.run(store, record)}>
+                <Icon name="x" size={14} />{prog.exit.label}
+              </button>
             )}
           </div>
         )}

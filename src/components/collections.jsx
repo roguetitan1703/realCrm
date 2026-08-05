@@ -557,14 +557,26 @@ export function OwnerCell({ record, store, onAssign, canAssign }) {
  * one-field change. Read-only (a bare tag) for anyone `canSet` refuses,
  * matching the same gate the detail page's status dropdown already uses.
  */
-export function StageCell({ record, store, stages, canSet, onSet }) {
+export function StageCell({ record, store, stages, canSet, onSet, onReject }) {
   const [open, setOpen] = useState(false)
+  // Which edge the menu hangs from. The popover is ~210px wide and was always
+  // anchored left:0 to a button only as wide as its own label — so on a short
+  // status like "New", in the right-hand status column, it ran off the screen.
+  // A longer label pushed the button left and hid the bug. Measured rather than
+  // assumed, because the same cell renders on a phone card too.
+  const [align, setAlign] = useState('left')
   const ref = useRef(null)
   useEffect(() => {
     if (!open) return
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
+  }, [open])
+  useEffect(() => {
+    if (!open || !ref.current) return
+    const box = ref.current.getBoundingClientRect()
+    // 210px is the popover's min-width; 12px keeps it off the viewport edge.
+    setAlign(box.left + 210 + 12 > window.innerWidth ? 'right' : 'left')
   }, [open])
   if (!canSet) return <StageTag stage={record.stage} />
   return (
@@ -574,12 +586,26 @@ export function StageCell({ record, store, stages, canSet, onSet }) {
         <Icon name="chevDown" size={12} className="stg-cv" />
       </button>
       {open && (
-        <div className="popover stg-pop" onClick={e => e.stopPropagation()}>
+        <div className={'popover stg-pop' + (align === 'right' ? ' right' : '')} onClick={e => e.stopPropagation()}>
           {stages.map(s => (
             <button key={s} className={'p-item' + (s === record.stage ? ' on' : '')} onClick={() => { onSet(s); setOpen(false) }}>
               {s}
             </button>
           ))}
+          {/* Rejecting is a status change like any other, so it belongs in the
+              status menu — it was reachable only from the detail rail, which
+              meant working down a list you had to open each dead lead to close
+              it. Separated and toned because it is the one entry that asks a
+              question back (the reason) instead of just setting a value. */}
+          {onReject && (
+            <>
+              <div className="p-sep" />
+              <button className="p-item danger" onClick={() => { setOpen(false); onReject(record) }}>
+                <span className="p-ic"><Icon name="x" size={14} /></span>
+                Mark as rejected
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -11,7 +11,7 @@ import {
   BHK_FILTER,
   appliesTo, areaFieldsFor, labelOf, normaliseBhk, normaliseSubtype, optionsOf,
 } from '../data/propertyFields.js'
-import { configLabel } from '../lib/format.js'
+import { configLabel, fmtMoney } from '../lib/format.js'
 
 // How soon the lead needs possession. A LEAD-side vocabulary (it describes the
 // buyer's urgency, not the property), so it lives with the lead schema — but
@@ -232,6 +232,30 @@ export const LEAD_MODULE_SCHEMA = {
     },
 
     // Additional / Domain Fields Section
+    //
+    // Deal type and budget belong HERE, not only in the full-form modal. There
+    // are two editors for one lead — this schema drives the record sheet, and
+    // NewLeadModal drives the full form — and they had drifted: the card, the
+    // detail header and every matcher READ req.deal and the budget, the full
+    // form could set them, and the record sheet offered neither. So a lead
+    // that arrived as "sale" (the ingestion default) could be shown as sale,
+    // matched against sale stock, and never corrected from the screen someone
+    // actually opens to correct it.
+    {
+      key: 'req.deal', label: 'Deal Type', type: 'select', section: 'domain',
+      // From the canonical vocabulary, not a typed-out pair — the labels here
+      // and the ones the property side uses have to be the same words.
+      options: () => DEALS.map(d => ({ value: d.value, label: d.label })),
+      renderValue: (v) => labelOf(DEALS, v) || '',
+    },
+    {
+      key: 'req.minBudget', label: 'Budget From', type: 'money', section: 'domain',
+      renderValue: (v) => (v ? fmtMoney(v) : ''),
+    },
+    {
+      key: 'req.maxBudget', label: 'Budget To', type: 'money', section: 'domain',
+      renderValue: (v) => (v ? fmtMoney(v) : ''),
+    },
     // What a lead WANTS has to be sayable in the same words the inventory is
     // described in, or a requirement can never match a property. These were a
     // hand-typed list that had already drifted from both: it offered
