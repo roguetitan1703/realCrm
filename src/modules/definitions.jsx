@@ -100,6 +100,8 @@ export const LEADS_DEF = {
     // Same scope as the record's own edit permission for status: desk always,
     // an agent only on a lead they created or are assigned.
     canSet: (store, l) => canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l),
+    // Shown next to the status once the lead is closed out.
+    note: (l) => (l.stage === REJECTED_STATUS ? (l.rejectionReason || null) : null),
     exit: { label: 'Mark as rejected', when: (l) => l.stage !== REJECTED_STATUS,
       run: (store, l) => store.openModal({ kind: 'rejectLead', leadId: l.id }) },
   },

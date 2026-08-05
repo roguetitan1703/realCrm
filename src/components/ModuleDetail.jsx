@@ -190,9 +190,19 @@ export function ModuleDetail({
               canSetProg ? (
                 <SelectDropdown
                   label="Status"
-                  value={progOnPath ? progCurrent : progStages[0]}
+                  // The record's REAL status, always. This showed
+                  // `progStages[0]` whenever the current one was not in the
+                  // list — and the list deliberately excludes Rejected, so a
+                  // rejected lead's detail page announced "New" while the row
+                  // in the list next to it said Rejected. The dropdown now
+                  // carries the off-path status as its own option, the same
+                  // way the owner dropdown carries an agent who has left, so
+                  // the control can state the truth and still offer a way out
+                  // of it: picking any live stage reopens the lead.
+                  value={progCurrent || progStages[0]}
                   onChange={(v) => prog.set(store, record, v)}
-                  options={progStages.map(s => ({ value: s, label: s }))}
+                  options={(progOnPath || !progCurrent ? progStages : [progCurrent, ...progStages])
+                    .map(s => ({ value: s, label: s }))}
                 />
               ) : (
                 <StageTag stage={progCurrent} />
@@ -203,6 +213,13 @@ export function ModuleDetail({
                 current={progOnPath ? progCurrent : progStages[0]}
                 onPick={(s) => prog.set(store, record, s)}
               />
+            )}
+            {/* Why it ended, beside what it ended as. The reason is collected
+                by the reject modal and was then only readable by scrolling the
+                remark timeline — so the status said Rejected and the page
+                could not say what for. */}
+            {prog.note && prog.note(record, store) && (
+              <span className="rh-prog-note">{prog.note(record, store)}</span>
             )}
             {prog.exit && (!prog.exit.when || prog.exit.when(record, store)) && (
               // A real button, in the danger tone. This was muted grey text
