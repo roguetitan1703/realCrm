@@ -108,9 +108,33 @@ export function reqLine(req) {
   return parts.join(' · ') || 'General inquiry'
 }
 
+/**
+ * What this person wants, as ONE readable line — not a grid of label:value.
+ *
+ * An agent about to dial should be able to read the whole enquiry in a glance:
+ * buy or rent, what size, where, how much, and whatever they told us they were
+ * interested in. This used to print `config · deal · locality` with `deal` as
+ * the raw stored 'sale', dropping the budget entirely and having nowhere at all
+ * to put the property they asked about — so the one thing that makes a call
+ * warm rather than cold was not on the screen the call is made from.
+ *
+ * `interest` is deliberately free text. A spreadsheet's "property interested"
+ * column holds "Godrej Riverside 2BHK, saw the show flat" — prose a human
+ * wrote. Forcing that into a link to a property record loses it whenever the
+ * listing is not on file, which for an imported sheet is most of the time.
+ * Linking a real property is what the shortlist does, separately and later.
+ */
 export function reqShort(req) {
   if (!req) return 'Any requirement'
-  const parts = [req.config, req.deal, req.locality].filter(x => x && x !== 'undefined' && x !== 'null')
+  const deal = req.deal === 'rent' ? 'Rent' : req.deal === 'sale' ? 'Buy' : null
+  const budget = budgetRange(req)
+  const parts = [
+    req.config,
+    deal,
+    req.locality,
+    budget && budget !== '—' ? budget : null,
+    req.interest,
+  ].filter(x => x && x !== 'undefined' && x !== 'null')
   return parts.join(' · ') || 'General inquiry'
 }
 

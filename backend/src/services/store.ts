@@ -483,7 +483,13 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
   // Columns are source of truth; fall back to the req JSONB when a column is null.
   const jreq = r.req || {};
   const req: any = { ...jreq };
-  req.deal = r.deal || jreq.deal || (jreq.purpose === 'Lease' ? 'rent' : 'sale');
+  // No fabricated fallback. This read `… : 'sale'`, so a lead with nothing
+  // stored came back as a confident "buying" no matter what — which is why
+  // every portal lead looked like a sale even after the ingestion default was
+  // removed. Three separate places were inventing it: the parser default, the
+  // import row builder, and here, on the way OUT. Unknown stays unknown, and
+  // the screens render a blank that prompts someone to ask.
+  req.deal = r.deal || jreq.deal || (jreq.purpose === 'Lease' ? 'rent' : undefined);
   req.config = r.requirement || jreq.config;
   req.locality = r.locality || jreq.locality;
   req.minBudget = r.budget_min != null ? Number(r.budget_min) : jreq.minBudget;
@@ -1321,16 +1327,35 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
   const properties: Record<string, any> = {};
   const owners: Record<string, any> = {};
 
-  const phones = (input.phones || []).filter(Boolean).slice(0, 5000);
+  // A phone is compared as its LAST TEN DIGITS, on both sides, always.
+  //
+  // This is the whole bug behind an import that duplicated everything. Leads
+  // are stored normalised — "+919876543210", and on one tenant "+91 98765
+  // 43210" with spaces — while a spreadsheet holds "9876543210". The old query
+  // compared the stored column to the raw file value with `phone IN (...)`, so
+  // it matched nothing, and then keyed the result map by the stored "+91…"
+  // form, which the browser looked up with a bare ten digits. Two independent
+  // reasons for the same answer: never a duplicate, every re-import a fresh
+  // copy. It left 315 surplus rows on the live client desk — one number twelve
+  // times over — before anyone noticed the counts climbing.
+  const norm = (p: string) => String(p ?? '').replace(/\D/g, '').slice(-10);
+  const phones = [...new Set((input.phones || []).map(norm).filter(p => p.length === 10))].slice(0, 5000);
   const names = (input.names || []).filter(Boolean).map(n => n.toLowerCase()).slice(0, 5000);
   if (phones.length || names.length) {
     const rows = await sql`
-      SELECT id, name, phone FROM crm_leads
+      SELECT id, name, phone, right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) AS phone10
+        FROM crm_leads
        WHERE tenant_id = ${t}
-         AND (${phones.length ? sql`phone IN ${sql(phones)}` : sql`false`}
+         AND (${phones.length
+              ? sql`right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) IN ${sql(phones)}`
+              : sql`false`}
            OR ${names.length ? sql`lower(name) IN ${sql(names)}` : sql`false`})`;
     for (const r of rows) {
       const hit = { id: r.id, name: r.name };
+      // Keyed by the normalised number — the only form the caller can produce
+      // from a spreadsheet cell. The raw stored value is kept as a key too so
+      // an already-normalised file still matches.
+      if (r.phone10) leads[r.phone10] = hit;
       if (r.phone) leads[r.phone] = hit;
       if (r.name) leads[String(r.name).toLowerCase()] = hit;
     }
@@ -1344,9 +1369,15 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
   // are recognised and skipped/merged instead of duplicated.
   if (phones.length) {
     const rows = await sql`
-      SELECT id, name, phone FROM crm_owners
-       WHERE tenant_id = ${t} AND phone IN ${sql(phones)}`;
-    for (const r of rows) if (r.phone) owners[r.phone] = { id: r.id, name: r.name || r.phone };
+      SELECT id, name, phone, right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) AS phone10
+        FROM crm_owners
+       WHERE tenant_id = ${t}
+         AND right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) IN ${sql(phones)}`;
+    for (const r of rows) {
+      const hit = { id: r.id, name: r.name || r.phone };
+      if (r.phone10) owners[r.phone10] = hit;
+      if (r.phone) owners[r.phone] = hit;
+    }
   }
 
   const titles = (input.titles || []).filter(Boolean).map(s => s.toLowerCase()).slice(0, 5000);
@@ -1536,7 +1567,10 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const feedback = leadData.feedback || {};
 
   // New first-class columns, source-of-truth going forward; req JSONB stays populated too.
-  const deal = leadData.deal || req.deal || (leadData.purpose === 'Lease' ? 'rent' : 'sale');
+  // The fourth and last place that used to force 'sale'. A lead arriving with
+  // no deal type now stores NULL, so "we were not told" survives all the way
+  // to the screen instead of being laundered into a fact on the way in.
+  const deal = leadData.deal || req.deal || (leadData.purpose === 'Lease' ? 'rent' : null);
   const requirement = leadData.requirement ?? req.config ?? null;
   const locality = leadData.locality ?? req.locality ?? null;
   // `req.budgetMin` is the other spelling of the same field. Webhook mappings

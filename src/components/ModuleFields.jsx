@@ -286,6 +286,12 @@ export const LEAD_MODULE_SCHEMA = {
       // "[object Object]" in front of the user.
       renderValue: (v) => (v && typeof v === 'object') ? '' : v,
     },
+    // Free text, and textarea rather than a picker on purpose — see reqShort.
+    // This is what the buyer said they were interested in, in their words or
+    // the agent's. It is NOT a link to a listing: on an imported sheet there
+    // usually is no matching listing, and a picker with nothing to pick drops
+    // the information altogether. Attaching a real property is the shortlist.
+    { key: 'req.interest', label: 'Property Interested', type: 'textarea', section: 'domain' },
     { key: 'req.notes', label: 'Requirement Notes & Purpose', type: 'textarea', section: 'domain' }
   ]
 }

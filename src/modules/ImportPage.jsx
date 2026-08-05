@@ -164,18 +164,34 @@ export default function ImportPage({ store, go, sel, topBar }) {
       const name = (v.name || 'Imported lead').replace(/^[*(]+/, '').trim()
       const phone = v.phone
       if (!phone) return { status: 'invalid', reason: 'Phone is missing or too short', row, name, values: v }
-      const dupHit = dupes?.leads?.[phone] || dupes?.leads?.[normPhone(phone)] || null
+      // normPhone FIRST. The server keys its answer by the normalised number
+      // because that is the only form a spreadsheet cell reliably produces —
+      // looking up the raw cell first would miss every stored "+91…" row,
+      // which is exactly how a re-import used to duplicate the whole file.
+      // Name is the last resort: two people share a name far more readily than
+      // a number, so it only decides when there is no phone match at all.
+      const dupHit = dupes?.leads?.[normPhone(phone)]
+        || dupes?.leads?.[phone]
+        || dupes?.leads?.[String(name || '').toLowerCase()]
+        || null
       const record = {
         name, phone, email: v.email || undefined,
         source: v.source || 'Spreadsheet import',
         stage: v.stage || 'New',
         req: {
-          deal: v.deal || 'sale',
+          // `undefined`, not 'sale'. A sheet with no buy/rent column told us
+          // nothing, and writing 'sale' anyway turned "we don't know" into a
+          // confident wrong answer on every row — which then matched rent
+          // seekers against sale stock. Blank prompts someone to ask; wrong
+          // does not. The deal type is inferred from the budget where there
+          // is one (see dealFromBudget), and left empty where there isn't.
+          deal: v.deal || undefined,
           locality: v.locality || '',
           config: v.config || '',
           minBudget: v.minBudget || undefined,
           maxBudget: v.maxBudget || undefined,
           budget: [moneyLabel(v.minBudget), moneyLabel(v.maxBudget)].filter(Boolean).join(' - ') || '',
+          interest: v.interest || undefined,
           purpose: v.purpose || undefined,
           timeline: v.timeline || undefined,
           notes: v.notes || undefined,

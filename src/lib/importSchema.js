@@ -53,9 +53,23 @@ export function normPhone(raw) {
   return String(raw ?? '').replace(/\D/g, '').slice(-10)
 }
 
-/** "sale" | "resale" | "rent" | "lease" | "rental" → 'sale' | 'rent' */
+/**
+ * "sale" | "resale" | "rent" | "lease" | "rental" -> 'sale' | 'rent', and
+ * `undefined` when the cell says neither.
+ *
+ * It used to answer 'sale' for anything that was not rent — including an empty
+ * cell, and including a column that was never mapped. So a blank became a
+ * confident "this person is buying", which is the wrong kind of wrong: it
+ * matches them against sale stock and nobody ever questions a filled-in field.
+ * Callers that genuinely need a value (a listing IS for sale or for rent)
+ * default it themselves at the call site.
+ */
 export function parseDeal(raw) {
-  return /rent|lease|let/i.test(String(raw ?? '')) ? 'rent' : 'sale'
+  const s = String(raw ?? '').trim()
+  if (!s) return undefined
+  if (/rent|lease|let/i.test(s)) return 'rent'
+  if (/sale|sell|resale|buy|purchas|book/i.test(s)) return 'sale'
+  return undefined
 }
 
 /** "3bhk" | "3 B.H.K" | "3" → "3 BHK Apartment"; passes through shop/plot/office. */
@@ -129,6 +143,16 @@ export const LEAD_FIELDS = [
   { key: 'locality', label: 'Preferred locality', group: 'detail', syn: ['locality', 'area', 'location', 'preferred area', 'city'] },
   { key: 'minBudget', label: 'Budget from', group: 'detail', parse: parseMoney, syn: ['min budget', 'budget from', 'budget min', 'from'] },
   { key: 'maxBudget', label: 'Budget to', group: 'detail', parse: parseMoney, syn: ['max budget', 'budget to', 'budget max', 'budget', 'amount', 'price'] },
+  // Free text, on purpose. A sheet's "property interested" column holds what a
+  // human typed — "Godrej Riverside 2BHK, saw the show flat" — and there is
+  // usually no matching listing on file to point at, especially on the first
+  // import. Kept as prose it reaches the agent intact and shows up in the
+  // requirement line; forcing it into a property link would drop it entirely
+  // whenever the match fails, which is most rows. Attaching a real property is
+  // the shortlist's job, done later from the record.
+  { key: 'interest', label: 'Property interested', group: 'detail',
+    syn: ['property interested', 'property', 'interested in', 'project interested', 'project',
+      'property name', 'listing', 'unit interested', 'interested property', 'enquired for'] },
   { key: 'purpose', label: 'Purpose', group: 'detail', syn: ['purpose', 'use', 'end use', 'investment'] },
   { key: 'timeline', label: 'Timeline', group: 'detail', syn: ['timeline', 'urgency', 'when', 'possession'] },
   { key: 'notes', label: 'Notes', group: 'detail', syn: ['notes', 'remarks', 'comment', 'description', 'requirement details'] },
