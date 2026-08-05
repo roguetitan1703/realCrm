@@ -331,6 +331,22 @@ function Mapper({ connection, store, onClose, onSaved }) {
     })
   }
 
+  // Re-run auto-detect against the latest push.
+  //
+  // The mapper loads the SAVED config when there is one, which is right until
+  // the portal changes its payload — and then it is exactly wrong. MagicBricks
+  // went from three fields to eleven, and the only way to pick the new ones up
+  // was to click twelve rows and set five transforms by hand, so the saved
+  // three-field mapping stayed put and eight fields per enquiry were dropped.
+  // Auto-detect already runs on every sample fetch; this just lets you take it.
+  const redetect = () => {
+    if (!data?.suggestion) return
+    setPreview(null)
+    setConfig(data.suggestion)
+    setArmed(TARGETS.find(t => !data.suggestion.map?.[t.key])?.key || null)
+    store.toast(`${Object.keys(data.suggestion.map || {}).length} fields detected — test before saving`)
+  }
+
   const runPreview = () => {
     setBusy(true)
     api.previewParser(connection.id, config)
@@ -441,6 +457,7 @@ function Mapper({ connection, store, onClose, onSaved }) {
       </div>
 
       <div className="cx-map-foot">
+        {data.suggestion && <Button variant="secondary" icon="refresh" onClick={redetect} disabled={busy}>Re-detect</Button>}
         <Button variant="secondary" onClick={runPreview} disabled={busy}>{busy ? 'Testing…' : 'Test'}</Button>
         <Button variant="primary" onClick={save} disabled={!preview?.ok || busy}>Save mapping</Button>
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
