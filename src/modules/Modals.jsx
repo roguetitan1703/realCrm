@@ -35,7 +35,15 @@ export default function Modals({ store, go }) {
       {store.state.searchOpen && <SearchModal store={store} go={go} />}
       {store.state.notifOpen && <NotifModal store={store} go={go} />}
       {m?.kind === 'newLead' && <NewLeadModal store={store} />}
-      {m?.kind === 'editLead' && <NewLeadModal store={store} leadId={m.leadId} />}
+      {/* There is exactly ONE edit screen for a lead, and it is the
+          schema-driven ModuleFormModal below ('editRecord'). A second
+          'editLead' route pointing at NewLeadModal used to sit here; nothing
+          opened it any more, but while it existed a lead had two editors with
+          two field lists that drifted — which is how Deal Type and budget came
+          to be missing from the one people actually use. NewLeadModal is the
+          CREATE form only. If you need a field on both, put it in
+          LEAD_MODULE_SCHEMA and add it here too; they are checked against each
+          other nowhere, so the only defence is keeping them small. */}
       {m?.kind === 'newOwner' && <NewOwnerModal store={store} />}
       {m?.kind === 'editOwner' && <NewOwnerModal store={store} ownerId={m.ownerId} />}
       {m?.kind === 'ownerCallback' && <OwnerCallbackModal store={store} ownerId={m.ownerId} />}
@@ -483,6 +491,7 @@ function NewLeadModal({ store, leadId }) {
     locality: edit.req?.locality || edit.locality || '',
     minBudget: edit.req?.minBudget ?? edit.req?.budgetMin ?? '',
     maxBudget: edit.req?.maxBudget ?? edit.req?.budgetMax ?? '',
+    interest: edit.req?.interest || '',
     timeline: edit.req?.timeline || 'Immediate',
     source: edit.source || 'Website',
     agentId: edit.agentId || null,
@@ -496,6 +505,7 @@ function NewLeadModal({ store, leadId }) {
     locality: '',
     minBudget: '',
     maxBudget: '',
+    interest: '',
     timeline: 'Within 60 days',
     source: 'Website',
     agentId: store.state.agents[0]?.id || null,
@@ -532,6 +542,7 @@ function NewLeadModal({ store, leadId }) {
           deal: f.deal,
           config: f.config,
           locality: f.locality,
+          interest: f.interest.trim() || undefined,
           timeline: f.timeline,
           purpose: f.notes.trim() || (f.deal === 'rent' ? 'Lease' : 'Self Use'),
           notes: f.notes.trim() || undefined,
@@ -558,6 +569,7 @@ function NewLeadModal({ store, leadId }) {
           deal: f.deal,
           config: f.config,
           locality: f.locality,
+          interest: f.interest.trim() || undefined,
           purpose: f.notes.trim() || (f.deal === 'rent' ? 'Lease' : 'Self Use'),
           notes: f.notes.trim() || undefined,
           timeline: f.timeline,
@@ -612,6 +624,16 @@ function NewLeadModal({ store, leadId }) {
           <label>Preferred Locality</label>
           <SuggestInput id="lead-locality" value={f.locality} onChange={v => set('locality', v)}
             options={localities(store)} placeholder="Where are they looking?" />
+        </div>
+
+        {/* Free text, matching req.interest on the record sheet and the import.
+            A picker would be wrong here for the same reason it is wrong there:
+            what they are interested in is often a project we hold no listing
+            for, and a picker with nothing to pick loses the answer. */}
+        <div className="field">
+          <label>Property Interested</label>
+          <Input value={f.interest} onChange={e => set('interest', e.target.value)}
+            placeholder="Project or unit they asked about" />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

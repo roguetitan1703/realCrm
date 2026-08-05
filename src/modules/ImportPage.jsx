@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Icon from '../components/Icon.jsx'
 import { Button, Panel, PageHeader } from '../components/primitives.jsx'
 import { ListLayout } from '../layouts/layouts.jsx'
@@ -112,18 +112,24 @@ export default function ImportPage({ store, go, sel, topBar }) {
   const { data: summary } = useServerData(() => api.getPropertiesSummary().then(r => r?.summary || null), [], null)
   const projectNames = (summary?.projects || []).map(p => p.name)
 
-  // Phones already claimed by an EARLIER row of this same file.
-  //
-  // Dedupe used to ask only one question — "is this person already in the
-  // database?" — which says nothing about a file that lists the same person
-  // twice. Real sheets do, constantly: the client's own 247-row file held just
-  // 179 people, so 68 rows were duplicates of a line further up and every one
-  // of them was created as a new lead, spread across different agents by
-  // round-robin. Both questions have to be asked, and the answer to the second
-  // one can only be built as the rows are walked.
-  const seenInFile = new Map()
-
-  const previewRows = parsedRows.map((row) => {
+  // Memoised, and not for tidiness. This walks every row of the file and
+  // rebuilds every record — on a 2,000-row sheet that ran again on every
+  // keystroke in the project box, every filter chip, every re-render, and the
+  // Review step visibly locked up. It only depends on the file, the mapping
+  // and the dedupe answer, so it recomputes when one of those changes.
+  const previewRows = useMemo(() => {
+    // Phones already claimed by an EARLIER row of this same file. Rebuilt on
+    // each pass, inside the memo, because it is state that belongs to one walk
+    // of the file — leaked across passes it would mark row 1 a duplicate of
+    // itself the second time through.
+    //
+    // Dedupe used to ask only one question — "is this person already in the
+    // database?" — which says nothing about a file that lists the same person
+    // twice. Real sheets do, constantly: the client's own 247-row file held
+    // just 179 people, so 68 rows duplicated a line further up and every one
+    // was created as a new lead, spread across agents by round-robin.
+    const seenInFile = new Map()
+    return parsedRows.map((row) => {
     const v = {}
     FIELDS.forEach(f => { const got = readField(row, mapping, f); if (got !== null) v[f.key] = got })
 
@@ -287,8 +293,10 @@ export default function ImportPage({ store, go, sel, topBar }) {
       dupTarget: dupHit?.name || null,
       dupId: dupHit?.id || null,
       record, label: title, sub: moneyLabel(v.price) || '—', locality: v.locality || '—', values: v,
-    }
-  })
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parsedRows, mapping, kind, headers, intoProject, dupes])
 
   // How much of each row actually survived the mapping — the honest answer to
   // "is my data coming across, or just the name?"
@@ -307,7 +315,19 @@ export default function ImportPage({ store, go, sel, topBar }) {
   // to merge into and nothing to gain from creating a second one.
   const selfDupCount = previewRows.filter(r => r.selfDup).length
   const invalidCount = previewRows.filter(r => r.status === 'invalid').length
-  const filteredRows = previewRows.filter(r => filterStatus === 'all' || r.status === filterStatus)
+  const filteredRows = useMemo(
+    () => previewRows.filter(r => filterStatus === 'all' || r.status === filterStatus),
+    [previewRows, filterStatus])
+  // The review table is a SAMPLE to check the mapping against, not a viewer for
+  // the whole file. Rendering every row put 2,000 <tr> with a cell each per
+  // mapped column into the DOM at once and the step stopped responding — and
+  // nobody reads two thousand rows to decide whether "Locality" landed in the
+  // right column. The counts above are the complete answer; this shows enough
+  // to trust them, and grows on request.
+  const REVIEW_PAGE = 50
+  const [reviewCap, setReviewCap] = useState(REVIEW_PAGE)
+  useEffect(() => { setReviewCap(REVIEW_PAGE) }, [filterStatus, previewRows])
+  const shownRows = filteredRows.slice(0, reviewCap)
   // Owners have no merge step — a duplicate is skipped, not sent to the
   // server at all, so it shouldn't be counted as something about to be saved.
   const dupWord = kind === 'owners' ? 'already on file' : 'to merge'
@@ -577,7 +597,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredRows.map((pr, i) => (
+                      {shownRows.map((pr, i) => (
                         <tr key={i}>
                           <td>
                             {pr.status === 'new' && <span className="imp-badge new">New</span>}
@@ -604,6 +624,12 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     </tbody>
                   </table>
                 </div>
+                {filteredRows.length > shownRows.length && (
+                  <button className="cx-more-btn" onClick={() => setReviewCap(c => c + REVIEW_PAGE)}>
+                    Show {Math.min(REVIEW_PAGE, filteredRows.length - shownRows.length)} more
+                    <span className="cx-more-of">{shownRows.length} of {filteredRows.length}</span>
+                  </button>
+                )}
               </Panel>
             )}
 
