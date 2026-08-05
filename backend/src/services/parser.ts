@@ -345,7 +345,8 @@ const HINTS: Record<string, string[]> = {
   name: ['name', 'full_name', 'fullname', 'customer_name', 'lead_name', 'client_name', 'contact_name'],
   phone: ['phone', 'mobile', 'phone_number', 'mobile_number', 'contact_number', 'contact', 'msisdn'],
   email: ['email', 'email_id', 'email_address', 'mail'],
-  'req.deal': ['deal', 'deal_type', 'dealtype', 'listing_type', 'transaction_type', 'purpose', 'category', 'property_for'],
+  'req.deal': ['deal', 'deal_type', 'dealtype', 'enquiry_type', 'requirement_type', 'listing_type',
+    'transaction_type', 'purpose', 'category', 'property_for', 'looking_for'],
   'req.locality': ['locality', 'location', 'area', 'preferred_locality', 'city', 'project_location'],
   'req.config': ['config', 'bhk', 'configuration', 'property_type', 'requirement', 'unit_type'],
   // minBudget/maxBudget is the CANONICAL spelling: it is what the mapper UI
@@ -360,7 +361,14 @@ const HINTS: Record<string, string[]> = {
     'project_name', 'listing', 'property', 'project'],
   received_at: ['enquiry_timestamp', 'enquiry_date', 'enquiry_time', 'received_at',
     'lead_date', 'created_time', 'timestamp'],
-  external_id: ['external_id', 'lead_id', 'enquiry_id', 'id', 'reference_id'],
+  // Deliberately NO bare 'id'. It matched Meta's `ad_id` and `form_id`, which
+  // identify a CAMPAIGN, not a person — and external_id is the idempotency key
+  // (`ingest:<integration>:<externalId>`), so every enquiry from one ad would
+  // have collided with the first and been discarded as a retry. An identifier
+  // we cannot tell apart from a campaign id is worse than none: with no
+  // external_id the key falls back to the phone number, which is per-person and
+  // correct.
+  external_id: ['external_id', 'lead_id', 'enquiry_id', 'reference_id', 'enquiry_no', 'lead_reference'],
 };
 
 const DEFAULT_TRANSFORM: Record<string, string> = {

@@ -24,7 +24,7 @@ It is a **live production SaaS with a paying client**, not a demo.
 | Slug | What it is | Rule |
 |---|---|---|
 | `bhumi` | **Bhumi PropCity — the paying client** | Do not modify their data. Ever. Read-only unless the user explicitly names them |
-| `delpat` | Delpat's own internal workspace | Real data, real users. Treat as production |
+| `delpat` | Delpat's own workspace — **the user's testing org** | Safe to experiment on. Its "leads" are webhook test fixtures, not people |
 | `skyline-realty` | The demo tenant (`DEFAULT_TENANT_ID`) | Safe to experiment on |
 | `test-org` | Scratch | Safe |
 
