@@ -112,6 +112,17 @@ export default function ImportPage({ store, go, sel, topBar }) {
   const { data: summary } = useServerData(() => api.getPropertiesSummary().then(r => r?.summary || null), [], null)
   const projectNames = (summary?.projects || []).map(p => p.name)
 
+  // Phones already claimed by an EARLIER row of this same file.
+  //
+  // Dedupe used to ask only one question — "is this person already in the
+  // database?" — which says nothing about a file that lists the same person
+  // twice. Real sheets do, constantly: the client's own 247-row file held just
+  // 179 people, so 68 rows were duplicates of a line further up and every one
+  // of them was created as a new lead, spread across different agents by
+  // round-robin. Both questions have to be asked, and the answer to the second
+  // one can only be built as the rows are walked.
+  const seenInFile = new Map()
+
   const previewRows = parsedRows.map((row) => {
     const v = {}
     FIELDS.forEach(f => { const got = readField(row, mapping, f); if (got !== null) v[f.key] = got })
@@ -152,9 +163,17 @@ export default function ImportPage({ store, go, sel, topBar }) {
       // skipped, not saved a second time. There's no merge step for owners
       // (unlike leads) — an existing owner has nothing worth combining, it's
       // just already there.
-      const dupHit = dupes?.owners?.[v.phone] || null
+      // Same two questions as leads, and for the same reasons: the stored
+      // number is normalised while the sheet's is not, and a calling list
+      // routinely names one owner on several unit rows.
+      const key10 = normPhone(v.phone)
+      const selfHit = seenInFile.get(key10) || null
+      const dupHit = selfHit || dupes?.owners?.[key10] || dupes?.owners?.[v.phone] || null
+      if (key10 && !dupHit) seenInFile.set(key10, { id: null, name, selfRow: true })
       return {
-        status: dupHit ? 'duplicate' : 'new', dupTarget: dupHit?.name || null, dupId: dupHit?.id || null,
+        status: dupHit ? 'duplicate' : 'new',
+        selfDup: Boolean(selfHit),
+        dupTarget: dupHit?.name || null, dupId: dupHit?.id || null,
         record, label: name, sub: v.phone, locality: v.locality || '—', values: v,
       }
     }
@@ -170,7 +189,13 @@ export default function ImportPage({ store, go, sel, topBar }) {
       // which is exactly how a re-import used to duplicate the whole file.
       // Name is the last resort: two people share a name far more readily than
       // a number, so it only decides when there is no phone match at all.
-      const dupHit = dupes?.leads?.[normPhone(phone)]
+      const key10 = normPhone(phone)
+      // An earlier line of THIS file wins over the database: if the sheet
+      // lists someone twice, the second line is a duplicate of the first even
+      // on a completely empty workspace.
+      const selfHit = seenInFile.get(key10) || null
+      const dupHit = selfHit
+        || dupes?.leads?.[key10]
         || dupes?.leads?.[phone]
         || dupes?.leads?.[String(name || '').toLowerCase()]
         || null
@@ -197,7 +222,19 @@ export default function ImportPage({ store, go, sel, topBar }) {
           notes: v.notes || undefined,
         },
       }
-      return { status: dupHit ? 'duplicate' : 'new', dupTarget: dupHit?.name || null, dupId: dupHit?.id || null, record, label: name, sub: phone, locality: v.locality || '—', values: v }
+      // Claim this number for the rest of the file. Only the FIRST occurrence
+      // claims it — later ones resolve to this same entry, so five lines for
+      // one person collapse to one lead rather than a chain of merges.
+      // `selfDup` (no dupId yet, since the record it duplicates is not saved)
+      // tells the accept step to fold it into the row that IS being created.
+      if (key10 && !dupHit) seenInFile.set(key10, { id: null, name, selfRow: true })
+      return {
+        status: dupHit ? 'duplicate' : 'new',
+        selfDup: Boolean(selfHit),
+        dupTarget: dupHit?.name || null,
+        dupId: dupHit?.id || null,
+        record, label: name, sub: phone, locality: v.locality || '—', values: v,
+      }
     }
 
     // Properties. A row is a unit; the project can come from a column or from
@@ -264,13 +301,18 @@ export default function ImportPage({ store, go, sel, topBar }) {
 
   const newCount = previewRows.filter(r => r.status === 'new').length
   const dupCount = previewRows.filter(r => r.status === 'duplicate').length
+  // Rows that duplicate an EARLIER LINE of the same file rather than something
+  // already saved. They are skipped outright: the first line creates the lead
+  // and the rest are the same person written down again, so there is no record
+  // to merge into and nothing to gain from creating a second one.
+  const selfDupCount = previewRows.filter(r => r.selfDup).length
   const invalidCount = previewRows.filter(r => r.status === 'invalid').length
   const filteredRows = previewRows.filter(r => filterStatus === 'all' || r.status === filterStatus)
   // Owners have no merge step — a duplicate is skipped, not sent to the
   // server at all, so it shouldn't be counted as something about to be saved.
   const dupWord = kind === 'owners' ? 'already on file' : 'to merge'
   const dupBadge = kind === 'owners' ? 'Skip' : 'Merge'
-  const sendCount = newCount + (kind === 'owners' ? 0 : dupCount)
+  const sendCount = newCount + (kind === 'owners' ? 0 : dupCount - selfDupCount)
 
   // One row at a time, awaited before the next one started, was N sequential
   // round trips for one file — a 200-row township sheet took as long as 200
@@ -294,7 +336,10 @@ export default function ImportPage({ store, go, sel, topBar }) {
     // created at all, just skipped, which is also what makes re-running an
     // import that stopped partway through safe.
     const toCreate = previewRows
-      .filter(pr => pr.status !== 'invalid' && !(kind === 'owners' && pr.status === 'duplicate'))
+      .filter(pr => pr.status !== 'invalid'
+        && !(kind === 'owners' && pr.status === 'duplicate')
+        // Never create a row for a line the file itself already listed.
+        && !pr.selfDup)
       .map(pr => {
         const recId = `${kind === 'clients' ? 'l' : kind === 'owners' ? 'own' : 'p'}_${batchId}_${n++}`
         const rec = { ...pr.record, id: recId, importBatchId: batchId }
@@ -481,6 +526,14 @@ export default function ImportPage({ store, go, sel, topBar }) {
                 <div className="imp-counts">
                   <span className="imp-count new">{newCount} new</span>
                   <span className="imp-count dup">{dupCount} duplicate{dupCount === 1 ? '' : 's'} {dupWord}</span>
+                  {/* Stated separately because it is a different fact about a
+                      different thing: not "already in your CRM" but "this file
+                      lists this person more than once". Without it, a sheet
+                      that repeats 68 rows reads as 68 merges into records the
+                      user knows they never had. */}
+                  {selfDupCount > 0 && (
+                    <span className="imp-count dup">{selfDupCount} repeated in this file</span>
+                  )}
                   <span className="imp-count skip">{invalidCount} will be skipped</span>
                   <span className="imp-count" style={{ marginLeft: 'auto' }}>{mappedCount} of {headers.length} columns mapped</span>
                 </div>
@@ -528,7 +581,9 @@ export default function ImportPage({ store, go, sel, topBar }) {
                         <tr key={i}>
                           <td>
                             {pr.status === 'new' && <span className="imp-badge new">New</span>}
-                            {pr.status === 'duplicate' && <span className="imp-badge dup">{dupBadge}</span>}
+                            {pr.status === 'duplicate' && (
+                              <span className="imp-badge dup">{pr.selfDup ? 'Repeat' : dupBadge}</span>
+                            )}
                             {pr.status === 'invalid' && <span className="imp-badge skip">Skip</span>}
                           </td>
                           {reviewCols.map(f => {
