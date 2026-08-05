@@ -292,6 +292,47 @@ export async function lastPayload(tenantId: string, integrationId: string): Prom
   return rows[0]?.raw_body ?? null;
 }
 
+/**
+ * The payload the mapper should be built against: the RICHEST of the recent
+ * pushes, not merely the latest.
+ *
+ * One provider sends more than one shape. Delpat's Meta connection received 31
+ * pushes carrying budget_amount, configuration, remarks and requirement_type,
+ * and one outlier carrying budget/created_time/lead_id. Auto-detect ran against
+ * whichever happened to be last, matched the outlier, and produced a mapping
+ * that fits one push in thirty-two — which is why 33 of those 34 leads have no
+ * budget and 31 have no configuration. Same story on MagicBricks, where thin
+ * three-field pushes are interleaved with the eleven-field ones.
+ *
+ * Still a REAL payload, never a synthetic merge: the mapper shows this body and
+ * you click fields in it, so inventing a union of keys nobody actually sent
+ * would be mapping against a fiction. Ties go to the newer push, so a provider
+ * that genuinely drops a field is followed rather than second-guessed.
+ */
+export async function bestPayload(
+  tenantId: string, integrationId: string, look = 50,
+): Promise<{ payload: any | null; shapes: number; consideredCount: number }> {
+  const rows = await sql`
+    SELECT raw_body FROM webhook_inbox
+    WHERE tenant_id = ${tenantId} AND integration_id = ${integrationId} AND raw_body IS NOT NULL
+    ORDER BY received_at DESC LIMIT ${look}
+  `;
+  if (!rows.length) return { payload: null, shapes: 0, consideredCount: 0 };
+  const shapes = new Set<string>();
+  let best: any = null;
+  let bestCount = -1;
+  for (const r of rows) {
+    const body = r.raw_body;
+    const keys = body && typeof body === 'object' ? Object.keys(body) : [];
+    shapes.add(keys.slice().sort().join(','));
+    // `_error`/`_unparsed` is what we store when a provider posts malformed
+    // JSON. It is a record of the failure, not a payload to map against.
+    if (keys.includes('_error') || keys.includes('_unparsed')) continue;
+    if (keys.length > bestCount) { bestCount = keys.length; best = body; }
+  }
+  return { payload: best ?? rows[0].raw_body, shapes: shapes.size, consideredCount: rows.length };
+}
+
 // ---------------------------------------------------------------------------
 // Unauthenticated callers
 // ---------------------------------------------------------------------------

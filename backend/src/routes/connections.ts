@@ -22,7 +22,7 @@
 import { Router, Request, Response } from 'express';
 import {
   createIntegration, listIntegrations, rotateIntegrationKey, setParserConfig,
-  setIntegrationActive, deleteIntegration, listInbox, inboxCounts, lastPayload,
+  setIntegrationActive, deleteIntegration, listInbox, inboxCounts, lastPayload, bestPayload,
   replayPending, getIntegration, getIntegrationById, revealKey,
 } from '../services/ingestion';
 import { parsePayload, suggestConfig, flattenPaths, TRANSFORMS, sanitizeConfig } from '../services/parser';
@@ -209,7 +209,7 @@ connectionsRouter.get('/:id/sample', async (req: Request, res: Response) => {
   const integration = await getIntegration(tenant, req.params.id);
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 
-  const payload = await lastPayload(tenant, req.params.id);
+  const { payload, shapes } = await bestPayload(tenant, req.params.id);
   // A config saved before the target vocabulary was normalised (flat
   // "locality" from before req.* existed) would otherwise show as mapped,
   // then fail the moment it's saved back — the field looks configured and
@@ -223,6 +223,7 @@ connectionsRouter.get('/:id/sample', async (req: Request, res: Response) => {
     transforms: Object.keys(TRANSFORMS),
     config: clean,
     droppedFields: dropped,
+    shapes,
     // No payload means no mapping is possible yet, and saying so is the point:
     // "no blind presets" — a mapping can only be built from real data.
     suggestion: payload ? suggestConfig(payload, integration.provider) : null,
@@ -239,7 +240,10 @@ connectionsRouter.post('/:id/preview', async (req: Request, res: Response) => {
   const tenant = requireTenant(req, res); if (!tenant) return;
   if (!requireOwner(req, res)) return;
 
-  const payload = req.body?.payload ?? await lastPayload(tenant, req.params.id);
+  // The SAME payload the mapper displayed and was mapped against — testing a
+  // mapping against a different body than the one on screen is how a mapping
+  // built for an eleven-field push gets validated against a three-field one.
+  const payload = req.body?.payload ?? (await bestPayload(tenant, req.params.id)).payload;
   if (!payload) {
     return res.status(400).json({
       error: 'Nothing to test against',
@@ -260,7 +264,7 @@ connectionsRouter.put('/:id/parser', async (req: Request, res: Response) => {
     // The guardrail, enforced on the SERVER. A UI that merely shows a preview
     // can be skipped by anything that calls the API directly; refusing a config
     // that does not parse is what actually prevents a broken mapping landing.
-    const payload = await lastPayload(tenant, req.params.id);
+    const { payload } = await bestPayload(tenant, req.params.id);
     if (!payload) {
       return res.status(400).json({
         error: 'No payload to verify against',
