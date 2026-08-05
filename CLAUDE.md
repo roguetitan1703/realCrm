@@ -50,6 +50,24 @@ production deploy once.
 **You verify build-time errors before pushing, not the user.** Always
 `npm run build`.
 
+### Never push to `main`
+
+Vercel deploys on **every commit to `main`**. A session that pushes six commits
+spends six production deployments off a capped plan. Commit on a branch; the
+user merges and deploys.
+
+### The frontend and the backend deploy separately
+
+Vercel (frontend) is automatic. AWS (backend) the user deploys by hand. So
+`main` is routinely **ahead of the running API**, and the two drift apart
+silently. This has already cost a debugging session: the mapper offered fields
+the deployed `WRITABLE` had never heard of, and the errors read like a code bug
+("`req.maxBudget` is not a lead field a mapping can write") when the code was
+right and the API was four commits stale.
+
+When a field, route or config "does not exist", check the deployed backend's
+version before you change any code.
+
 ### Running the backend for a scratch script
 
 ```bash
