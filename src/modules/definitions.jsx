@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, relTime } from '../lib/format.js'
+import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, relTime, arrivedOn } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -181,6 +181,10 @@ export const LEADS_DEF = {
       const nf = l.followUp ? `${l.followUp.date} · ${l.followUp.time}` : '—'
       return l.overdue ? <Overdue>{nf}</Overdue> : <span className="cell-quiet mono-num">{nf}</span>
     } },
+    // When it arrived. Sortable, because "show me this week's" is the question
+    // it exists to answer, and the server already orders on created_at.
+    { key: 'createdAt', label: 'Received', sortable: true,
+      render: (l) => <span className="cell-quiet">{arrivedOn(l.createdAt) || '—'}</span> },
   ],
 
   /**
@@ -329,6 +333,10 @@ export const LEADS_DEF = {
             {l.overdue
               ? <Overdue>{l.followUp?.date || 'Overdue'}</Overdue>
               : l.followUp ? <span>{l.followUp.date}</span> : null}
+            {/* When it came in. On a phone this is the difference between
+                calling a fresh enquiry and calling one that has been sitting
+                three weeks, and the card had no way to tell them apart. */}
+            {l.createdAt && <span className="prow-when">{arrivedOn(l.createdAt)}</span>}
           </div>
           {actions}
         </div>

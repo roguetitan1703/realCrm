@@ -11,7 +11,7 @@ import {
   BHK_FILTER,
   appliesTo, areaFieldsFor, labelOf, normaliseBhk, normaliseSubtype, optionsOf,
 } from '../data/propertyFields.js'
-import { configLabel, fmtMoney } from '../lib/format.js'
+import { configLabel, fmtMoney, arrivedOn } from '../lib/format.js'
 
 // How soon the lead needs possession. A LEAD-side vocabulary (it describes the
 // buyer's urgency, not the property), so it lives with the lead schema — but
@@ -188,6 +188,13 @@ export const LEAD_MODULE_SCHEMA = {
     // ever appear here, so they move to the "Details" section instead of a
     // now-empty "Overview" one.
     { key: 'email', label: 'Email Address', type: 'email', section: 'domain' },
+    // When the enquiry arrived. Read-only — a fact about the record, not a
+    // field anyone fills in — and shown with the time, because on the detail
+    // page the question is usually "how fast did we get to this one".
+    {
+      key: 'createdAt', label: 'Received On', type: 'text', section: 'domain', readOnly: true,
+      renderValue: (v) => (v ? arrivedOn(v, { withTime: true }) : ''),
+    },
     {
       key: 'source', label: 'Attribution Source', type: 'select', section: 'domain',
       // The firm's own configured source list (Settings), not a fixed guess —

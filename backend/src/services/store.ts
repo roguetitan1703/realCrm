@@ -534,6 +534,11 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     followUp: r.follow_up || null,
     overdue: Boolean(r.overdue),
     importBatchId: r.import_batch_id || undefined,
+    // The real timestamp, not only the derived "how long ago". A desk asks
+    // "when did this lead come in" and wants a date it can quote back to a
+    // client or line up against a portal's own report; minsAgo answers a
+    // different question and stops being useful after a week.
+    createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
     minsAgo,
     timeline: leadEvents.length > 0 ? leadEvents : (r.notes || []).map((n: string) => ({ type: 'note', label: n, ago: 'just now' })),
   };
@@ -1813,6 +1818,53 @@ export async function deleteLead(id: string, ctx: ActorCtx = SYSTEM_CTX): Promis
   return ok;
 }
 
+/**
+ * Delete a selection in one request.
+ *
+ * Per-record permission is re-checked for EVERY id, not once for the caller —
+ * a bulk endpoint that trusts the count is how one over-broad selection
+ * deletes rows its owner was never allowed to touch. Rows the caller may not
+ * delete are skipped and reported, rather than failing the whole batch: a
+ * selection of forty should not be refused because one of them belongs to
+ * somebody else.
+ */
+export async function bulkDeleteLeads(ids: string[], ctx: ActorCtx = SYSTEM_CTX): Promise<{ deleted: number; skipped: number }> {
+  const t = tid();
+  const who = getContext();
+  const clean = [...new Set((ids || []).filter(Boolean))].slice(0, 500);
+  if (!clean.length) return { deleted: 0, skipped: 0 };
+
+  const rows = await sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND id IN ${sql(clean)}`;
+  const allowed: string[] = [];
+  let skipped = clean.length - rows.length;   // ids that do not exist in this tenant
+  for (const r of rows) {
+    try {
+      assertLeadWrite(who?.role, who?.userId, rowToLeadShallow(r), { delete: true });
+      allowed.push(r.id);
+    } catch { skipped++; }
+  }
+  if (!allowed.length) return { deleted: 0, skipped };
+
+  const res = await sql`DELETE FROM crm_leads WHERE tenant_id = ${t} AND id IN ${sql(allowed)}`;
+  audit({
+    tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'lead.bulk_delete', target_type: 'lead', target_id: null,
+    summary: `${res.count} lead${res.count === 1 ? '' : 's'} deleted`,
+    // The ids AND the rows. A bulk delete is the one action with nothing left
+    // to inspect afterwards, so the audit entry has to carry enough to say
+    // what was destroyed.
+    metadata: { ids: allowed, skipped, before: rows.filter(r => allowed.includes(r.id)) },
+    ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return { deleted: res.count, skipped };
+}
+
+/** The few fields assertLeadWrite reads, without the timeline/shortlist reads
+ *  rowToLead does per record — this runs once per id in a batch. */
+function rowToLeadShallow(r: any): any {
+  return { id: r.id, agentId: r.agent_id, createdBy: r.created_by || null, stage: r.stage };
+}
+
 export async function deleteProperty(id: string, ctx: ActorCtx = SYSTEM_CTX): Promise<boolean> {
   const t = tid();
   const existingRows = await sql`SELECT * FROM crm_properties WHERE id = ${id} AND tenant_id = ${t}`;
@@ -2018,6 +2070,10 @@ export async function listLeads(opts: {
   const SORTS: Record<string, any> = {
     activity: sql`created_at`, name: sql`lower(name)`,
     budget: sql`budget_max`, stage: sql`stage`,
+    // The Received column is sortable, so its key has to be here. A key that
+    // is not in this map is silently ignored, which shows a sort arrow that
+    // reorders nothing.
+    createdAt: sql`created_at`,
   };
   const col = SORTS[String(opts.sortKey || '')] || sql`created_at`;
   // "Last activity" ascending means most-recent-first; for a name it means A→Z.

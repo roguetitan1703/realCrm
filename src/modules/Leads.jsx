@@ -6,7 +6,7 @@ import { Button, Timeline, Overdue, Avatar, CappedList } from '../components/pri
 import { fitReasons, thumbTint, initials, unitLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
-import { canEditLead, canAssignLead } from '../lib/permissions.js'
+import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
 import { LEAD_STATUSES } from '../data/leadStatus.js'
 import { useServerList } from '../lib/serverList.js'
 import { api } from '../lib/api.js'
@@ -124,6 +124,33 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     onDone: () => setSelected(new Set()),
   })
 
+  // Deleting a selection is the one bulk action with nothing to undo, so it
+  // states the number and makes you type nothing but still confirms. The
+  // server re-checks permission per record, so a selection that spans leads
+  // this person may not delete removes the ones they may and reports the rest
+  // rather than failing whole.
+  const canDelete = canDeleteRecord(role)
+  const bulkDelete = async () => {
+    const n = selected.size
+    if (!window.confirm(`Delete ${n} lead${n === 1 ? '' : 's'} permanently? This cannot be undone.`)) return
+    try {
+      const res = await api.bulkDeleteLeads([...selected])
+      if (res?.success) {
+        setSelected(new Set())
+        store.toast(
+          res.skipped
+            ? `${res.deleted} deleted · ${res.skipped} skipped (not yours to delete)`
+            : `${res.deleted} lead${res.deleted === 1 ? '' : 's'} deleted`,
+          res.skipped ? 'warn' : 'ok')
+        store.reloadServer?.()
+      } else {
+        store.toast(res?.message || 'Could not delete', 'warn')
+      }
+    } catch (err) {
+      store.toast(err.message || 'Could not delete', 'warn')
+    }
+  }
+
   const { header, toolbar, body } = ModuleListView({
     def: LEADS_DEF, source, store, onOpen,
     filters: flt, onFilters: setFltP,
@@ -135,7 +162,10 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     // (ModuleTable's `selectable` is already gated on canAssign).
     selection: (canAssign && selected.size > 0) ? {
       count: selected.size,
-      actions: [{ label: 'Bulk assign', icon: 'userPlus', onClick: bulkAssign }],
+      actions: [
+        { label: 'Bulk assign', icon: 'userPlus', onClick: bulkAssign },
+        ...(canDelete ? [{ label: 'Delete', icon: 'trash', tone: 'danger', onClick: bulkDelete }] : []),
+      ],
       onClear: () => setSelected(new Set()),
     } : null,
     page, onPage: setPageP, pageSize, onPageSize: setPageSizeP,

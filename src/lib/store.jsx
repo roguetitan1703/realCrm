@@ -192,6 +192,10 @@ function freshState() {
     toasts: [],
     notifications: [],   // server-backed per-user alert feed
     dataAsOf: cached?.at || null,   // ms timestamp of the currently displayed data snapshot
+    // Increments once per CONFIRMED write. Server-backed lists carry it in
+    // their deps, so a mutation refreshes the page you are looking at without
+    // a full reload of the workspace. See `settled()` below.
+    mutationTick: 0,
     dataStale: false,    // true when we're showing a cached snapshot (offline read)
     // Records fetched one at a time, keyed by kind then id. This is what
     // replaces "the store holds every lead and every property": a screen asks
@@ -291,6 +295,19 @@ function reducer(state, action) {
     case 'SET_ROUTING': return { ...state, routing: { ...state.routing, ...action.patch } }
 
     case 'SET': return { ...state, ...action.patch }
+    // A confirmed write moves the data snapshot forward, so `dataAsOf` moves
+    // with it. Every server-backed screen already carries dataAsOf in its
+    // deps — twenty of them — so bumping the token they all watch is what
+    // makes a status change, an assignment or a delete appear immediately
+    // instead of after a manual reload. Changing each dep array instead would
+    // work until the first screen someone forgot.
+    //
+    // No loop: only a write dispatches this, and a refetch is not a write.
+    case 'MUTATED': return {
+      ...state,
+      mutationTick: (state.mutationTick || 0) + 1,
+      dataAsOf: Date.now(),
+    }
 
     // Real, server-persisted remark events (B1) — kind picks the array so the
     // same actions serve leads and properties.
@@ -899,14 +916,29 @@ export function StoreProvider({ children }) {
   // A 200 carrying `success: false` is still a refusal. Treat it as one.
   const rejected = (res) => res && res.success === false
 
+  /**
+   * Every list on the desk is server-driven — useServerList holds the rows it
+   * fetched, and re-fetches only when one of its deps changes. A mutation
+   * dispatched into `state.leads` therefore changed nothing the list reads,
+   * which is the whole reason a status change, an assignment or a delete only
+   * appeared after a manual reload.
+   *
+   * So a confirmed write bumps a counter, and every server-backed screen has
+   * that counter in its deps. Bumped AFTER the server answers, not before:
+   * bumping first would re-fetch the old rows and visibly undo the optimistic
+   * update a moment before the write lands.
+   */
+  const settled = useCallback(() => dispatch({ type: 'MUTATED' }), [])
+
   const write = useCallback((what, call, apply, okMsg) => call()
     .then(res => {
       if (rejected(res)) throw new Error(res.error || 'rejected')
       if (apply) apply(res)
       if (okMsg) toast(okMsg)
+      settled()
       return res
     })
-    .catch(err => { failed(err, what); return null }), [failed, toast])
+    .catch(err => { failed(err, what); return null }), [failed, toast, settled])
 
   const optimistic = useCallback((what, apply, revert, call, okMsg) => {
     apply()
@@ -914,10 +946,11 @@ export function StoreProvider({ children }) {
     return call()
       .then(res => {
         if (rejected(res)) throw new Error(res.error || 'rejected')
+        settled()
         return res
       })
-      .catch(err => { revert(); failed(err, what); return null })
-  }, [failed, toast])
+      .catch(err => { revert(); failed(err, what); settled(); return null })
+  }, [failed, toast, settled])
 
   const api = {
     state, dispatch, toast,

@@ -12,7 +12,7 @@
 import { Router, Request, Response } from 'express';
 import { CallActionSchema, WhatsAppActionSchema, StageChangeSchema, MergeSchema } from '../models';
 import { requireTenantAuth, requireModuleEnabled, requireQuotaAvailable } from '../middleware/auth';
-import { getLeads, createLead, getAgents, getLeadById, listLeads, getLeadsSummary, getLeadCandidates, bulkAssignLeads } from '../services/store';
+import { getLeads, createLead, getAgents, getLeadById, listLeads, getLeadsSummary, getLeadCandidates, bulkAssignLeads, bulkDeleteLeads } from '../services/store';
 import { sql } from '../services/db';
 
 export const leadsRouter = Router();
@@ -92,6 +92,31 @@ leadsRouter.post('/bulk-assign', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: 'Forbidden', message: err.message, code: err.code });
     }
     return res.status(500).json({ success: false, error: 'Bulk assign failed', message: err.message });
+  }
+});
+
+/**
+ * POST /api/v1/leads/bulk-delete  { ids: [...] }
+ * Declared before /:id, same as bulk-assign, so the word is not read as an id.
+ * Per-record permission is enforced in the service for every id — this route
+ * does not pre-authorise the whole batch.
+ */
+leadsRouter.post('/bulk-delete', async (req: Request, res: Response) => {
+  try {
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'Pick at least one lead.' });
+    }
+    const { deleted, skipped } = await bulkDeleteLeads(ids, {
+      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
+      ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null,
+    });
+    return res.status(200).json({ success: true, deleted, skipped });
+  } catch (err: any) {
+    if (err?.status === 403) {
+      return res.status(403).json({ success: false, error: 'Forbidden', message: err.message, code: err.code });
+    }
+    return res.status(500).json({ success: false, error: 'Bulk delete failed', message: err.message });
   }
 });
 

@@ -701,8 +701,13 @@ export function FilterBar({ fields = [], value = {}, onChange, search, right, ct
         <span className="fsel-n">{selection.count} selected</span>
         <span className="fsel-hint">Filters and sort are paused while rows are selected</span>
         <div className="u-spring" />
+        {/* `tone` so a destructive bulk action does not render as the primary
+            button beside a harmless one — the two must not look alike when
+            they sit a few pixels apart and one cannot be undone. */}
         {(selection.actions || []).map(a => (
-          <button key={a.label} className="btn btn-primary btn-sm" onClick={a.onClick}>
+          <button key={a.label}
+            className={'btn btn-sm ' + (a.tone === 'danger' ? 'btn-danger' : 'btn-primary')}
+            onClick={a.onClick}>
             {a.icon && <Icon name={a.icon} size={15} />}{a.label}
           </button>
         ))}

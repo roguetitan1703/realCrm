@@ -40,6 +40,26 @@ export function relTime(iso) {
   return mins < 1 ? 'just now' : timeAgo(mins)
 }
 
+/**
+ * When a lead came in, as a date a person can quote.
+ *
+ * `relTime` answers "how long ago", which is the right thing on a timeline and
+ * the wrong thing on a record: "43 days ago" is not something anyone repeats
+ * back to a client or lines up against a portal's own report. Recent arrivals
+ * keep the relative form because that IS the useful answer for a lead that
+ * landed this morning, and older ones switch to the date.
+ */
+export function arrivedOn(iso, { withTime = false } = {}) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const hrs = (Date.now() - d.getTime()) / 3600000
+  if (hrs < 24) return relTime(iso)
+  const date = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  if (!withTime) return date
+  return `${date}, ${d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`
+}
+
 // Resolve a user/agent id (as stored on a timeline event's author) to a
 // display name, from the live roster — not a hardcoded id->name map.
 export function agentName(agents, id) {

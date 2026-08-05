@@ -78,7 +78,12 @@ function ModuleFormModal({ store, moduleId, recordId }) {
   // the fields live. Without this the modal offered a booking amount on a
   // rental and, worse, `save()` wrote every field in the schema, stamping
   // empty sale terms onto a let.
-  const fields = def.schema.fields.filter(f => !f.when || f.when(form))
+  // `readOnly` fields are facts ABOUT the record rather than fields of it —
+  // when a lead arrived, for instance. They belong on the read-only sheet and
+  // nowhere near an editor: rendered here they would offer a text box over a
+  // timestamp, and `save()` writes every field in this list, so an accidental
+  // keystroke would rewrite the arrival date of a real enquiry.
+  const fields = def.schema.fields.filter(f => (!f.when || f.when(form)) && !f.readOnly)
   const coreFields = fields.filter(f => f.section === 'core')
   const domainFields = fields.filter(f => f.section !== 'core')
   const setField = (key, val) => setForm(prev => setNestedValue(prev, key, val))

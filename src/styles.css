@@ -2456,3 +2456,6 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .cx-more-btn:hover:not(:disabled){background:var(--card-2)}
 .cx-more-btn:disabled{color:var(--muted);cursor:default}
 .cx-more-of{color:var(--muted);font-weight:500}
+
+/* Arrival date on the phone lead card — quiet, it is context not a headline. */
+.prow-when{color:var(--muted);white-space:nowrap}
