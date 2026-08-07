@@ -1527,6 +1527,34 @@ export async function getLeads(): Promise<any[]> {
   return leadsRows.map(r => rowToLead(r, events, shortlistByLead.get(r.id) || []));
 }
 
+/**
+ * The one place a phone number resolves to a person.
+ *
+ * Identity is the LAST TEN DIGITS, within the tenant — the same rule the
+ * importer's checkDuplicates() uses, and for the same reason. Stored numbers
+ * are "+919876543210" (and on one tenant "+91 98765 43210", with spaces);
+ * portals send whatever they please. An exact string compare on the cleaned
+ * value calls those different people, which is how one client desk ended up
+ * with 315 surplus rows.
+ *
+ * Deliberately NOT scoped by leadScope(). This answers "does this tenant
+ * already know this number", which must be true regardless of who is asking —
+ * an inbound webhook has no user, and an agent who cannot SEE a colleague's
+ * lead must still not be allowed to create a second copy of it. Callers that
+ * show the record to a human are responsible for their own disclosure rules.
+ */
+export async function findLeadByPhone(phone: string, tenantId?: string): Promise<any | undefined> {
+  const t = tenantId || tid();
+  const p10 = String(phone ?? '').replace(/\D/g, '').slice(-10);
+  if (p10.length !== 10) return undefined;
+  const rows = await sql`
+    SELECT * FROM crm_leads
+     WHERE tenant_id = ${t}
+       AND right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) = ${p10}
+     ORDER BY created_at ASC LIMIT 1`;
+  return rows[0];
+}
+
 export async function getLeadById(id: string): Promise<any | undefined> {
   const t = tid();
   const rows = await sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`;

@@ -5,6 +5,12 @@ Read this before touching anything. It is not a description of the product;
 and that have each cost real money or a client's trust when an agent guessed
 instead of checking.
 
+> ## Commits: no `Co-Authored-By`
+>
+> Do not add a `Co-Authored-By:` trailer, or any other attribution to an
+> assistant, to commit messages on this repo. The commit message explains **why
+> the thing was broken** — nothing else belongs in it.
+
 ---
 
 ## 1. What this is
@@ -144,6 +150,31 @@ boot against live rows, and cannot tell "never migrated" from "someone set it
 that way deliberately" — which is how a stage migration kept silently undoing a
 firm's Pipeline settings.
 
+### 3.7 A phone number is its LAST TEN DIGITS, in one function
+
+`findLeadByPhone()` in `services/store.ts`. Numbers are stored `+919876543210`,
+and on one tenant `+91 98765 43210` with spaces; portals and spreadsheets send
+whatever they please. Comparing cleaned strings calls those different people —
+it left 315 surplus rows on a live client desk, one number twelve times over.
+
+Two independent code paths each grew their own version of this, and the
+importer was fixed while the webhook was not. **Resolve a person in that one
+function.** It is deliberately not `leadScope()`-filtered: "does this tenant
+already know this number" must be true regardless of who is asking, or an agent
+who cannot *see* a colleague's lead will cheerfully create a second copy of it.
+
+### 3.8 A saved config outlives the code that wrote it
+
+Removing a bad default from the code does **not** remove it from configs already
+stored. `suggestConfig` stopped writing `defaults['req.deal'] = 'sale'` on
+2026-08-05; it kept firing until 2026-08-07 out of three saved
+`integrations.parser_config` rows, inventing a deal type on every push. The one
+provider that was clean was clean only because someone happened to re-run
+auto-detect on it.
+
+When you fix a generator, **check what it already generated.** The same applies
+to `crm_settings`, `crm_routing_rules` and `brand_config`.
+
 ---
 
 ## 4. Product rules the user holds you to
@@ -201,6 +232,10 @@ rediscovered a second time.
 | Unscoped mirror writes | An `agents → users` sync without a tenant filter overwrote real client emails with invented demo ones. Scope every write. |
 | Hardcoded passwords | `passwordLogin` and `superadminLogin` accepted `00000000` / `delpat-demo-1` / `Delpat@2026` for any account on any tenant. Removed. Never add a universal credential, gated or not. |
 | Scanners on `/pulse` | A multi-tenant scan ran on every poll from every open tab. Throttle background work. |
+| A cache that falls back to *any* tenant | `readStateCache()` looked up `crm_state_cache_<tenant>` and, failing that, **scanned localStorage for any key with that prefix and loaded the first one** — three lines under a comment promising the opposite. It fires whenever the tenant key is absent: cold boot before identity resolves, a cleared key, or a snapshot that lost its own write to `QuotaExceededError`. On a machine that has opened two workspaces, one firm's desk boots with another firm's records. No tenant now means no snapshot. |
+| A count and a size that look identical | The sidebar badge is **work waiting** (`byStage['New']`); the page header is the **total**. Both rendered as the same grey chip, so 19 beside 31 read as the app contradicting itself. Different meanings must look different — the badge is accent, the size is muted. |
+| `!= null` on a number | The mirror of the negative-truthiness trap. Both badge callers default to `0`, so `it.badge != null` rendered a badge saying "0" on every quiet desk. Test `> 0`. |
+| Deleting rows and leaving their references | `revertImportBatch` deletes leads, properties, owners and shortlist rows — and nothing else. A revert on 2026-08-03 left 3 timeline events pointing at records that no longer exist; the 2026-08-06 revert would have left 582 events and 1,444 notification links. `audit_log` is the deliberate exception: a ledger referring to deleted rows is correct. |
 
 ---
 
@@ -218,6 +253,32 @@ rediscovered a second time.
   user has seen them and chosen to leave them.
 - The user sets production env vars and runs deploys themselves. Only
   `.env.example` may be edited.
+
+### Open as of 2026-08-07
+
+- **`/api/v1/ingest` has no rate limit.** The key is write-only — it cannot read
+  a record — but a leaked one can fill a client's desk with junk enquiries
+  faster than agents can reject them. Keys are per-provider, so a leak is
+  rotated in isolation.
+- **`verifyAuditChain()` returns `ok: false` at seq 227** — a `delpat`
+  `property.create` from 2026-08-01, out of 2,661 rows. Predates the 08-07
+  session. The ledger is sold as tamper-evident and the owner-facing view reads
+  from it, so this is either a real break or another false positive like
+  `2af3c32`. Not yet diagnosed.
+- **Import history is browser-only.** `logImportBatch` dispatches to React state
+  and nothing else — there is no server table. It survives in
+  `crm_state_cache_*`, which `writeStateCache` warns can silently fail to
+  persist. The Revert button reads the batch id from that log, so losing the log
+  **loses the ability to revert** even though the rows still carry
+  `import_batch_id`.
+- **`bhumi` imports were reverted on 2026-08-07** at the client's request — 494
+  leads, 582 timeline events, 1,444 notifications. Archived first to
+  `archive_bhumi_leads_20260806` (517 rows, each tagged `archived_reason`),
+  `archive_bhumi_timeline_20260806`, `archive_bhumi_notifications_20260806`.
+  **Two `Deal Closed` records are in there** (Manan, Nitin Dhawan) — recoverable,
+  and the client was told. Do not drop those tables without asking.
+- Every bhumi lead now arrives by integration. That makes §3.7 the *only*
+  deduplication in the product.
 
 ---
 

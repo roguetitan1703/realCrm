@@ -1,5 +1,34 @@
 # RealEstate by Delpat — Product Roadmap
 
+> ## ⚠️ Status correction — 2026-08-07
+>
+> **The backlog below is out of date and misled a session into planning work
+> that had already shipped.** It was written 2026-07-29; blocks **A, B, C and D
+> were built in the week that followed** and still read ⬜ here. Trust
+> `git log` over this file until the table is rewritten.
+>
+> What actually happened since:
+>
+> | | |
+> |---|---|
+> | **A** auth/users | shipped — password login, seats, sessions, user management |
+> | **B** contacts & leads | shipped — Remark, status pills, Clients/Owners split, visit-proof, call-confirm-then-log |
+> | **C** properties | shipped — canonical vocabulary enforced by the build, portal-grade schema, stepped add page, photos + watermark |
+> | **D** ingestion | shipped — webhook inbox, click-to-map parser, replay, setup pack |
+> | *(unplanned)* | the in-memory collections were **deleted**; every list, count and phone screen now reads paged SQL |
+> | *(unplanned)* | Owners/Calling promoted to a top-level module |
+> | **F** enquiries | **new — [specs/enquiries.md](./specs/enquiries.md)**, planning, decisions locked |
+>
+> **2026-08-07, `bhumi`:** the client asked for both spreadsheet imports to be
+> reverted — 494 leads removed (archived first) — and to work only from the
+> integration feed. Every lead now arrives by webhook. That makes person
+> resolution (`CLAUDE.md §3.7`) the only deduplication left in the product, and
+> it is why **F** matters more than it did when it was written.
+>
+> Still genuinely open from below: **A0** (isolation — one live vector fixed
+> 08-07, see `readStateCache`), **E2** secrets, **E3/E4** PWA on a real device,
+> **E5** branding audit, **E6** backup restore, **E7** retention.
+
 > **Status: production.** The demo succeeded; we are onboarding our **first real
 > paying tenant**. This is the single working backlog. It clubs the original
 > client feedback (11 points), the post-audit gaps, and the new production list

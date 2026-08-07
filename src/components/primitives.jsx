@@ -420,9 +420,11 @@ export function Stepper({ stages, current, onPick }) {
 // older client-only entries render fine but can't be edited (no id to target).
 // Author-editable types (B1 remark, B5 call/wa/sms outcome+remark).
 const EDITABLE_TYPES = new Set(['remark', 'call', 'wa', 'sms'])
-const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit' }
+// Exported: the record header shows the latest of these at the top, and a
+// second copy of this map would be two vocabularies drifting apart.
+export const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit' }
 // B4 outcomes are stored as stable keys; these are what a person reads.
-const VISIT_OUTCOME_LABEL = {
+export const VISIT_OUTCOME_LABEL = {
   interested: 'Interested', not_interested: 'Not interested',
   negotiating: 'Negotiating', booked: 'Booked', no_show: 'No show',
 }

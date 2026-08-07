@@ -16,7 +16,7 @@
 import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
-import { getLeads, createLead, updateLead, nextRoutedAgent } from './store';
+import { findLeadByPhone, createLead, updateLead, nextRoutedAgent } from './store';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
 
@@ -409,8 +409,16 @@ export async function processInboxRow(
 
       // Dedup on the phone number within the tenant: the same buyer enquiring
       // twice is one lead with two enquiries, not two leads.
-      const leads = await getLeads();
-      const existing = leads.find(l => l.phone && l.phone.replace(/[^0-9+]/g, '') === cleanPhone);
+      //
+      // This compared the CLEANED STRINGS — "+919876543210" against whatever
+      // the portal sent — so a push carrying a bare "9876543210" matched
+      // nothing and created a second copy of a person already on file. The
+      // importer was moved onto the last-ten-digits rule when that bug cost a
+      // client desk 315 surplus rows; this path was missed, and once imports
+      // stopped and every lead arrived by webhook it became the ONLY dedupe
+      // left in the product. It also read every lead in the tenant into memory
+      // to do it — the full-collection scan removed everywhere else.
+      const existing = await findLeadByPhone(cleanPhone);
       if (existing) {
         const note = `[Repeat enquiry via ${integration.provider}] ${new Date().toLocaleString('en-IN')}`;
         // A repeat enquiry is usually RICHER than the first, and merging used

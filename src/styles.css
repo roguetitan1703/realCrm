@@ -682,6 +682,45 @@ input,textarea,select{font-family:inherit}
 .rh-facts .rh-dealtag.rent{background:var(--card-2);color:var(--ink-2);border:1px solid var(--line)}
 .rh-actions{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
 .rh-signals{display:inline-flex;align-items:center;gap:8px;margin-right:4px}
+/* The last thing an agent recorded — a remark, or the note they typed after a
+   call or a WhatsApp — read in the second before Call is pressed. Clamped to
+   two lines: an agent types a paragraph, and the identity of the record it
+   belongs to must not be pushed off the top of a phone to show all of it. The
+   full text is in the timeline directly below. */
+/* TWO rows. Row 1 is chrome — what kind of entry, who, when. Row 2 is the note
+   itself, clamped to two lines and tappable to open in place. It stays on the
+   record: sending someone to the timeline to read the end of a sentence is how
+   you lose the thing they opened the record for. */
+.rh-remark{margin-top:12px;padding:8px 10px;border-radius:9px;
+  background:var(--accent-wash);border:1px solid var(--line-2)}
+.rh-remark-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+/* Same chip as the timeline's, so "Call" means the same thing in both places. */
+.rh-remark-tag{flex-shrink:0;font-size:9.5px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--accent-ink);background:rgba(var(--accent-rgb),.16);
+  border-radius:5px;padding:2px 6px}
+.rh-remark-meta{flex:1;min-width:0;font-size:11.5px;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rh-remark-meta b{color:var(--ink-2);font-weight:600}
+.rh-remark-meta b::after{content:"·";margin-left:5px;color:var(--faint);font-weight:400}
+.rh-remark-toggle{flex-shrink:0;display:inline-flex;align-items:center;gap:2px;border:none;
+  background:none;padding:2px 0 2px 6px;cursor:pointer;font-family:inherit;font-size:11px;
+  font-weight:700;color:var(--accent-ink)}
+.rh-remark-toggle svg{transition:transform .15s}
+.rh-remark.open .rh-remark-toggle svg{transform:rotate(180deg)}
+.rh-remark-text{font-size:13px;line-height:1.45;color:var(--ink);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* Opened in place. No max-height animation: the height is unknown until it is
+   measured, and a wrong guess clips the last line of exactly the long note
+   somebody tapped to read. */
+.rh-remark.open .rh-remark-text{display:block;overflow:visible}
+.rh-remark-outcome{color:var(--ink);font-weight:700;margin-right:6px}
+/* On a phone the byline gives up the author and keeps the age. "2h ago" is
+   what decides whether to trust the note; which colleague wrote it is on the
+   timeline entry, and holding both cost the row its breathing space. */
+@media(max-width:640px){
+  .rh-remark{padding:7px 9px}
+  .rh-remark-meta b{display:none}
+}
 .rh-prog{display:flex;align-items:center;gap:16px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line-2)}
 .rh-prog .jstep{flex:1}
 /* A flat status list (leads) has no sequence to walk, so it's a plain select
@@ -974,7 +1013,14 @@ button.btn-ghost.fu-done{color:var(--accent)}
 .nav a:hover{background:rgba(255,255,255,.04);color:var(--on-chrome)}
 .nav a.on{color:#fff;background:rgba(var(--accent-rgb),.18);border-left-color:var(--accent)}
 .nav a.on svg{color:var(--accent)}
-.nav a .n-badge{margin-left:auto;font-size:10px;font-weight:700;background:rgba(255,255,255,.12);color:#fff;border-radius:9px;padding:1px 7px}
+/* A badge is WORK WAITING (leads not yet contacted, callbacks overdue) — see
+   the rule in App.jsx: "the badge is what is waiting to be dialled, not the
+   size of the list". A .n-sub-count is a SIZE. They were rgba(255,255,255,.12)
+   and .09 — the same chip to any eye — so a sidebar reading 19 next to a page
+   reading 31 looked like the app contradicting itself, when the two numbers
+   were never measuring the same thing. The accent means act on this; muted
+   means this is how many there are. */
+.nav a .n-badge{margin-left:auto;font-size:10px;font-weight:700;background:rgba(var(--accent-rgb),.22);color:var(--accent);border-radius:9px;padding:1px 7px}
 .nav a.on .n-badge{background:var(--accent);color:#fff}
 .nav .n-foot{padding:12px 16px;border-top:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:10px}
 .nav .n-poweredby{display:flex;align-items:center;gap:6px;padding:9px 16px 12px;font-size:10.5px;letter-spacing:.04em;color:rgba(255,255,255,.32)}

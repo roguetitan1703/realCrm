@@ -33,18 +33,105 @@ export function fileUrl(key) {
   return `${origin}/files/${String(key).split('/').map(encodeURIComponent).join('/')}`;
 }
 
-// Connection state — surfaced in the UI so a backend outage can never silently
-// masquerade as a working app (writes would be lost on refresh).
+// ---------------------------------------------------------------------------
+// Connection state
+// ---------------------------------------------------------------------------
+// "Offline" is the worst thing this app can say. It tells an agent standing
+// outside a building that the tool they came with is not working, so it has to
+// be TRUE, and it has to stop being true the moment it stops being true.
+//
+// It was neither. One failed fetch declared it — and a fetch rejects for
+// entirely ordinary reasons on a phone: a dropped packet, a DNS hiccup, a
+// connection reset while handing over between cells. Nothing then re-checked,
+// so the badge sat there until some unrelated request happened to succeed;
+// with the pulse backing off to 60s, skipping hidden tabs and skipping while
+// writes are pending, that could be a minute after the network came back.
+// Instant to appear, lazy to leave. That asymmetry is the whole complaint.
+//
+// Now: two consecutive confirmed failures to declare it (one blip is weather),
+// and an active probe that clears it by itself.
 let onlineState = { ok: true, checked: false };
 const listeners = new Set();
+let consecutiveFailures = 0;
+let probeTimer = null;
+let probeDelay = 0;
+
+const OFFLINE_AFTER = 2;          // consecutive confirmed failures
+const PROBE_MIN = 2_000;
+const PROBE_MAX = 30_000;
+
 function setOnline(ok) {
+  if (ok) { consecutiveFailures = 0; stopProbing(); }
   if (onlineState.ok === ok && onlineState.checked) return;
   onlineState = { ok, checked: true };
   listeners.forEach(fn => { try { fn(onlineState) } catch (e) {} });
   // The first successful call after an outage is the signal to replay whatever
   // was logged while there was no signal.
   if (ok) setTimeout(() => flushOutbox(request), 0);
+  else startProbing();
 }
+
+/**
+ * A request could not reach the host. Not the same as being offline: say so
+ * only when it happens twice running, because the single most common case on a
+ * mobile network is one request dying and the next one being fine.
+ */
+function noteUnreachable() {
+  consecutiveFailures++;
+  if (consecutiveFailures >= OFFLINE_AFTER) setOnline(false);
+  else startProbing();   // check for ourselves rather than wait for a second victim
+}
+
+/**
+ * While unreachable, ask. `/health` is unauthenticated and sits outside
+ * /api/v1, so it works on the login screen too and cannot be confused with a
+ * 401. ANY answer — including an error status — proves the host is reachable,
+ * which is the only question being asked.
+ *
+ * Backs off 2s → 30s so a genuinely dead backend is not hammered by every open
+ * tab, and stops the instant anything succeeds.
+ */
+function startProbing() {
+  if (probeTimer || typeof window === 'undefined') return;
+  probeDelay = PROBE_MIN;
+  const tick = async () => {
+    probeTimer = null;
+    if (onlineState.ok && consecutiveFailures === 0) return;
+    // A hidden tab is not worth waking the radio for; the visibility listener
+    // below picks it up the moment someone looks at the screen again.
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      probeTimer = setTimeout(tick, probeDelay);
+      return;
+    }
+    try {
+      const origin = BASE_URL.replace(/\/api\/v1$/, '');
+      await fetch(`${origin}/health`, { cache: 'no-store', method: 'GET' });
+      setOnline(true);          // it answered; that is the whole test
+      return;
+    } catch {
+      probeDelay = Math.min(probeDelay * 2, PROBE_MAX);
+      probeTimer = setTimeout(tick, probeDelay);
+    }
+  };
+  probeTimer = setTimeout(tick, probeDelay);
+}
+
+function stopProbing() {
+  if (probeTimer) { clearTimeout(probeTimer); probeTimer = null; }
+  probeDelay = 0;
+}
+
+if (typeof document !== 'undefined') {
+  // Coming back to the tab is the likeliest moment for the answer to have
+  // changed — the phone was in a pocket, in a lift, or on a different network.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !onlineState.ok) {
+      stopProbing();
+      startProbing();
+    }
+  });
+}
+
 export function subscribeConnection(fn) {
   listeners.add(fn);
   fn(onlineState);
@@ -107,6 +194,7 @@ export function hasPendingWrites() { return inFlightWrites > 0; }
 // is one line, always correct, and costs a refetch of the screen in front of
 // you — which is exactly what you want after a write anyway.
 const FRESH_MS = 30_000;
+const RETRY_MS = 600;       // one silent re-try for a read that could not reach the host
 const reads = new Map();    // url -> { at, data }
 const inflight = new Map(); // url -> Promise
 
@@ -131,11 +219,30 @@ async function request(endpoint, options = {}) {
   if (isWrite) inFlightWrites++;
   const run = (async () => {
   try {
-    const res = await fetch(`${BASE_URL}${endpoint}`, {
-      cache: 'no-store',
-      ...fetchOptions,
-      headers: getHeaders(fetchOptions.headers || {}),
-    });
+    let res;
+    // One silent retry, for READS only.
+    //
+    // Most flaky-network failures die here and the agent never learns there
+    // was one — which is the point. A screen that blanks and recovers on its
+    // own is a screen that never told anybody the app was broken.
+    //
+    // A WRITE is never retried. It is not idempotent: a POST that reached the
+    // server and lost only its RESPONSE would create a second lead on the
+    // replay. Failed writes have their own honest path — the outbox holds the
+    // ones that opted in and shows "N waiting to save".
+    for (let attempt = 0; ; attempt++) {
+      try {
+        res = await fetch(`${BASE_URL}${endpoint}`, {
+          cache: 'no-store',
+          ...fetchOptions,
+          headers: getHeaders(fetchOptions.headers || {}),
+        });
+        break;
+      } catch (err) {
+        if (!(err instanceof TypeError) || isWrite || attempt >= 1) throw err;
+        await new Promise(r => setTimeout(r, RETRY_MS));
+      }
+    }
     // A 4xx/5xx means the server answered — it is reachable. Only a failed
     // fetch means offline. Conflating the two made one rejected request paint
     // the whole app "Offline — not saving" while saves were working fine.
@@ -157,7 +264,10 @@ async function request(endpoint, options = {}) {
     return data;
   } catch (err) {
     if (err instanceof TypeError) {
-      setOnline(false); // fetch could not reach the host
+      // Could not reach the host — after a retry, for a read. Not the same as
+      // being offline: noteUnreachable() wants to see it happen twice running
+      // before it says so out loud, and probes in the meantime.
+      noteUnreachable();
       // Work done in the field is held and replayed. Only the writes that opt
       // in — see outbox.js for why edits deliberately do not.
       if (queueable) {

@@ -27,12 +27,97 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { ModuleRecordSheet } from './ModuleFields.jsx'
-import { Panel, SectionHead, Button, Stepper, StageTag } from './primitives.jsx'
+import { Panel, SectionHead, Button, Stepper, StageTag, TYPE_TAG, VISIT_OUTCOME_LABEL } from './primitives.jsx'
 import { DetailLayout } from '../layouts/layouts.jsx'
 import { ActionRail, RailSection } from './rail.jsx'
 import { SelectDropdown } from './collections.jsx'
 import Icon from './Icon.jsx'
+import { relTime, agentName } from '../lib/format.js'
 import { buildActionTiers } from '../modules/definitions.jsx'
+
+/**
+ * The last thing an agent actually wrote down, at the top of the record.
+ *
+ * An agent assigned a lead they did not create may change its status and add
+ * remarks, and nothing else (ASSIGNEE_WRITABLE, backend/src/lib/permissions.ts).
+ * So a remark is where everything they learn ends up — the property the buyer
+ * actually asked about, the budget they actually have, the fact that they only
+ * answer after seven. All of which reached the record and then sat in a
+ * chronological feed, below requirement fields a portal form supplied.
+ *
+ * "Remark" is not one action. Logging a call or a WhatsApp ends in the same
+ * outcome-and-remark step (ContactConfirmModal), so the note an agent types
+ * after a call is a remark that happens to be attached to a call — which is
+ * usually the most valuable one on the record. Hence every author-written type,
+ * not just the standalone one.
+ *
+ * Newest-first is what the server already returns, so this is a find, not a
+ * sort. Entries carrying neither text nor an outcome are skipped: a call logged
+ * with nothing added says only "someone dialled", and letting that outrank a
+ * real note would make the block worse than useless.
+ */
+const NOTE_TYPES = new Set(['remark', 'call', 'wa', 'sms', 'visit'])
+
+function LatestRemark({ record, store }) {
+  const latest = (record.timeline || []).find(e =>
+    NOTE_TYPES.has(e.type) && ((e.label || '').trim() || e.metadata?.outcome))
+  const textRef = useRef(null)
+  const [expanded, setExpanded] = useState(false)
+  const [clipped, setClipped] = useState(false)
+
+  // Whether the note is ACTUALLY cut off, measured rather than guessed from a
+  // character count — the same sentence fits on a desk and overflows on a
+  // phone, and a "tap to read the rest" that reveals nothing is worse than no
+  // affordance at all. Re-measured when the note changes, and collapsed again
+  // so opening the next record doesn't inherit the last one's expanded state.
+  const key = latest ? `${latest.id}:${latest.label}` : null
+  useEffect(() => {
+    setExpanded(false)
+    const el = textRef.current
+    if (!el) { setClipped(false); return }
+    const measure = () => setClipped(el.scrollHeight > el.clientHeight + 1)
+    measure()
+    // Rotating a phone or dragging a desk window across the breakpoint changes
+    // the answer, and nothing else would tell us.
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
+    ro?.observe(el)
+    return () => ro?.disconnect()
+  }, [key])
+
+  if (!latest) return null
+  const who = latest.authorId ? agentName(store.state.agents, latest.authorId) : null
+  const raw = latest.metadata?.outcome
+  const outcome = raw ? (VISIT_OUTCOME_LABEL[raw] || raw) : ''
+
+  // Two rows: what it is and when, then the note. No leading icon — a note
+  // glyph beside text reads as an edit button, and this one does nothing. The
+  // tag says what kind of entry it is; the real pencil is on the timeline entry
+  // below.
+  return (
+    <div className={'rh-remark' + (expanded ? ' open' : '')}>
+      <div className="rh-remark-head">
+        <span className="rh-remark-tag">{TYPE_TAG[latest.type] || 'Remark'}</span>
+        <span className="rh-remark-meta">
+          {who && <b>{who}</b>}
+          {latest.timestamp && relTime(latest.timestamp)}
+        </span>
+        {clipped && (
+          <button type="button" className="rh-remark-toggle" aria-expanded={expanded}
+            onClick={() => setExpanded(v => !v)}>
+            {expanded ? 'Less' : 'More'}<Icon name="chevDown" size={13} />
+          </button>
+        )}
+      </div>
+      {/* The text is the tap target too, so a thumb does not have to find the
+          word "More" on a phone. Inert when nothing is cut off. */}
+      <div ref={textRef} className="rh-remark-text"
+        onClick={clipped ? () => setExpanded(v => !v) : undefined}>
+        {outcome && <b className="rh-remark-outcome">{outcome}</b>}
+        {latest.label}
+      </div>
+    </div>
+  )
+}
 
 // A tidy grid of the most-used ("quick") actions.
 function QuickActions({ items }) {
@@ -169,6 +254,11 @@ export function ModuleDetail({
             {!phone && onEdit && <Button variant="secondary" size="sm" icon="edit" onClick={onEdit}>Edit</Button>}
           </div>
         </div>
+
+        {/* Above the action bar on purpose: on a phone this is read in the
+            second before the Call button is pressed, which is the moment it is
+            worth anything. */}
+        <LatestRemark record={record} store={store} />
 
         {/* The record's main actions, on the page, full width, thumb-sized.
             The action button still carries the full list; these are the one or

@@ -27,7 +27,11 @@ export function Sidebar({ items, active, activeSub, onNav, footer, firmName, log
             <div key={it.key}>
               <a className={active === it.key ? 'on' : ''} onClick={() => onNav(it.key)}>
                 <Icon name={it.icon} />{it.label}
-                {it.badge != null && <span className="n-badge">{it.badge}</span>}
+                {/* > 0, not != null. A badge means "this many are waiting for
+                    you", so a badge reading 0 is an alert about nothing —
+                    and both callers default to 0 rather than to null, so
+                    `!= null` rendered it on every quiet desk. */}
+                {it.badge > 0 && <span className="n-badge">{it.badge}</span>}
               </a>
               {/* A section that holds two stores (Contacts → Clients | Owners)
                   discloses them here rather than stacking a second pill row on
@@ -127,14 +131,23 @@ export function ConnectionBadge() {
 // Offline-read banner: shown when the app is serving a cached snapshot because
 // the server was unreachable at load. Tells the user the data is real but frozen
 // as of a point in time, so nothing here masquerades as live.
-export function StaleBanner({ asOf }) {
-  const when = asOf
-    ? new Date(asOf).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-    : null
+// This said "showing data as of 14:32", which was not true and had not been
+// true since 2026-08-02. The snapshot behind it is getBootstrap() — identity,
+// roster, settings, brand, about 2KB — and it has carried no leads, properties
+// or contacts since the in-memory collections were deleted and every screen
+// started reading its own page from SQL.
+//
+// So an agent outside a building got the sidebar, their own name, the firm's
+// colours and a confident timestamp, wrapped around screens that then loaded
+// nothing. Claiming to hold someone's data and showing them none is worse than
+// saying plainly that the server cannot be reached: the chrome tells them it
+// works while the content tells them it does not, and they are left to guess
+// which one is lying.
+export function StaleBanner() {
   return (
     <div className="stale-banner" role="status">
       <Icon name="zap" size={13} />
-      <span>Offline — showing data{when ? ` as of ${when}` : ' from your last visit'}. Changes won’t save until you reconnect.</span>
+      <span>Can’t reach the server — lists and records won’t load until you reconnect.</span>
     </div>
   )
 }

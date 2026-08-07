@@ -87,17 +87,20 @@ function lastBrandColor() {
 }
 function readStateCache() {
   try {
-    let t = window.localStorage?.getItem('crm_tenant_id') || ''
-    let raw = t ? window.localStorage?.getItem(`crm_state_cache_${t}`) : null
-    if (!raw) {
-      for (let i = 0; i < (window.localStorage?.length || 0); i++) {
-        const k = window.localStorage.key(i)
-        if (k && k.startsWith('crm_state_cache_')) {
-          raw = window.localStorage.getItem(k)
-          if (raw) break
-        }
-      }
-    }
+    const t = window.localStorage?.getItem('crm_tenant_id') || ''
+    // NO FALLBACK. This used to scan localStorage for any key starting with
+    // `crm_state_cache_` and load the first one it found, whichever firm it
+    // belonged to — three lines directly contradicting the "keyed by tenant so
+    // switching firms never crosses data" promise above. It fires whenever the
+    // tenant key is absent: before identity resolves on a cold boot, after a
+    // cleared key, or when writeStateCache lost its own snapshot to
+    // QuotaExceededError. On any machine that has opened a second workspace,
+    // that is one firm's desk booting with another firm's records on it.
+    //
+    // Without a tenant we have no snapshot, and the honest answer is none. A
+    // cold start from the network costs a spinner; the alternative was the one
+    // failure this product cannot have.
+    const raw = t ? window.localStorage?.getItem(`crm_state_cache_${t}`) : null
     if (!raw) return null
     const c = JSON.parse(raw)
     return c && c.state ? c : null

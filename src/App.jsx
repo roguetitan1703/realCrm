@@ -147,7 +147,7 @@ export default function App() {
   if (isPhone) {
     return (
       <div className="viewport">
-        {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
+        {state.dataStale && <StaleBanner />}
         <Phone store={store} framed={false} screen={screen} sel={sel} setSel={setSel} go={go} />
         <Toasts toasts={state.toasts} onDismiss={(id) => dispatch({ type: 'UNTOAST', id })} />
       </div>
@@ -225,7 +225,7 @@ export default function App() {
 
   return (
     <div className="viewport">
-      {state.dataStale && <StaleBanner asOf={state.dataAsOf} />}
+      {state.dataStale && <StaleBanner />}
       <AppShell nav={nav} active={effectiveScreen} activeSub={contactsTab} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
         <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.ownerId || ''}-${sel.propId || ''}`} {...ctx} />
       </AppShell>
