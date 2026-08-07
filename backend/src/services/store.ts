@@ -1223,9 +1223,22 @@ export async function searchWorkspace(q: string, limit = 8): Promise<{ leads: an
  * The counters the dashboard, the team roster and the sidebar badges need.
  * Every one of these was a `.filter().length` over the full lead table held in
  * the browser; none of them needs a single lead row.
+ *
+ * Every lead count here is `leadScope()`d, exactly like the list it labels.
+ * It was not, and that is a different bug from the one it looks like: the
+ * sidebar badge is `byStage['New']` and the Leads header is the total, so they
+ * are SUPPOSED to differ. But the badge counted the whole firm while the list
+ * showed one agent's rows, so an agent with nothing new saw a badge promising
+ * ten and opened an empty list. Invisible to an owner or a manager, for whom
+ * `leadScope()` is TRUE and both numbers were already the same population.
+ *
+ * A count and the rows it describes must come from the same WHERE clause. This
+ * is the third site where the RBAC scope was dropped from a counter (CLAUDE.md
+ * 3.4); if you add another counter here, scope it.
  */
 export async function getDeskSummary(): Promise<any> {
   const t = tid();
+  const mine = leadScope();
   const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
@@ -1234,21 +1247,23 @@ export async function getDeskSummary(): Promise<any> {
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*) FILTER (WHERE created_at > now() - interval '3 hours')::int AS new_today,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
-          FROM crm_leads WHERE tenant_id = ${t}`,
-    sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads WHERE tenant_id = ${t} GROUP BY 1`,
-    sql`SELECT coalesce(source, 'Website') AS k, count(*)::int AS n FROM crm_leads WHERE tenant_id = ${t} GROUP BY 1`,
+          FROM crm_leads WHERE tenant_id = ${t} AND ${mine}`,
+    sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
+         WHERE tenant_id = ${t} AND ${mine} GROUP BY 1`,
+    sql`SELECT coalesce(source, 'Website') AS k, count(*)::int AS n FROM crm_leads
+         WHERE tenant_id = ${t} AND ${mine} GROUP BY 1`,
     sql`SELECT agent_id AS k,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
                count(*) FILTER (WHERE overdue)::int AS overdue,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*)::int AS total
-          FROM crm_leads WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1`,
+          FROM crm_leads WHERE tenant_id = ${t} AND ${mine} AND agent_id IS NOT NULL GROUP BY 1`,
     // Per-agent stage breakdown. Which stages count as "contacted" or "visited"
     // depends on the firm's own configured stage order, which lives in settings
     // on the client — so the counts come back per stage and the client applies
     // its own meaning rather than this query hardcoding stage names.
     sql`SELECT agent_id AS a, coalesce(stage, 'New') AS s, count(*)::int AS n
-          FROM crm_leads WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1, 2`,
+          FROM crm_leads WHERE tenant_id = ${t} AND ${mine} AND agent_id IS NOT NULL GROUP BY 1, 2`,
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available
           FROM crm_properties WHERE tenant_id = ${t}`,
