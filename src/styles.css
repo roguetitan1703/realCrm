@@ -1141,6 +1141,9 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
    scroller, so a long list runs under its header instead of pushing it away. */
 .m-body>.m-top{position:sticky;top:0}
 
+/* Height of the bottom nav, so anything that must sit clear of it can say so
+   without guessing. Kept beside the rule that produces it. */
+:root{--tabbar-h:calc(72px + env(safe-area-inset-bottom))}
 .tabbar{display:flex;background:rgba(18,22,20,.95);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:8px 8px calc(8px + env(safe-area-inset-bottom));gap:4px;flex-shrink:0;border-top:1px solid rgba(255,255,255,.08);box-shadow:0 -4px 24px rgba(0,0,0,.25);z-index:9999;position:fixed;bottom:0;left:0;right:0;margin-top:auto;transform:translateZ(0);-webkit-transform:translateZ(0)}
 .tab-slider{position:absolute;top:8px;bottom:calc(8px + env(safe-area-inset-bottom));left:8px;z-index:1;border-radius:14px;background:var(--accent);border:1px solid rgba(255,255,255,.2);box-shadow:0 4px 16px rgba(0,0,0,.35);transition:transform .28s cubic-bezier(.2,.8,.2,1),width .28s ease;pointer-events:none}
 .tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:7px 0;color:var(--on-chrome-mut);text-decoration:none;cursor:pointer;border-radius:14px;font-size:10.5px;font-weight:600;transition:all .2s cubic-bezier(.34,1.56,.64,1);position:relative;z-index:2;background:transparent !important;border:1px solid transparent !important;box-shadow:none !important}
@@ -2073,7 +2076,13 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 /* Tables don't shrink; they scroll inside their own box rather than forcing
    the page sideways. */
 .app-mobile .table-wrap,.app-mobile .tbl-wrap{overflow-x:auto}
-.app-mobile .modal{max-height:88dvh}
+/* The bottom tab bar is position:fixed at z-index 9999 — above the overlay's
+   50 — so on a phone it sat ON TOP of the modal and clipped the Save button.
+   The overlay is lifted over it, and the modal is held clear of it, so the
+   action row lands above the nav instead of behind it. */
+.app-mobile .overlay{z-index:10000;align-items:flex-end;
+  padding:12px 12px calc(var(--tabbar-h) + 12px)}
+.app-mobile .modal{max-height:calc(100dvh - var(--tabbar-h) - 24px)}
 
 .m-top .conn-badge{margin-left:auto}
 .m-bell{position:relative;width:34px;height:34px;border-radius:9px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
