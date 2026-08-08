@@ -194,6 +194,7 @@ function Activity({ connectionId, refreshKey, store }) {
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [busy, setBusy] = useState(false)
   const [openId, setOpenId] = useState(null)
 
   // A new connection, or a refresh, starts at the top again — leaving page 4
@@ -203,18 +204,27 @@ function Activity({ connectionId, refreshKey, store }) {
 
   useEffect(() => {
     let alive = true
-    setRows(null)
+    // The rows on screen STAY on screen while the next page loads. Clearing
+    // them first collapsed the feed to a skeleton and pushed it back open a
+    // moment later, so every page turn threw the rest of the card up and down
+    // the screen — and the pager you were aiming at moved out from under the
+    // cursor. The page you are leaving is a perfectly good thing to look at
+    // until the one you asked for arrives.
+    setBusy(true)
     setOpenId(null)
     api.getConnectionInbox(connectionId, PAGE, (page - 1) * PAGE)
       .then(r => { if (alive && r?.success) { setRows(r.pushes); setTotal(r.total ?? r.pushes.length) } })
       .catch(() => { if (alive) { setRows([]); setTotal(0) } })
+      .finally(() => { if (alive) setBusy(false) })
     return () => { alive = false }
   }, [connectionId, refreshKey, page])
 
+  // Only the FIRST load has nothing to show. It draws a full page of rows
+  // rather than three, so the feed opens at the height it will settle at.
   if (rows === null) {
     return (
       <ul className="cx-act">
-        {[0, 1, 2].map(i => (
+        {Array.from({ length: PAGE }, (_, i) => (
           <li key={i}><span className="skel skel-av sm" style={{ width: 9, height: 9, borderRadius: '50%' }} />
             <Skel w={58} h={9} /><Skel w={120} h={9} /></li>
         ))}
@@ -223,7 +233,9 @@ function Activity({ connectionId, refreshKey, store }) {
   }
   if (!rows.length) return <div className="cx-act-empty">Nothing received yet</div>
   return (
-    <ul className="cx-act">
+    // `busy` only dims the rows and blocks clicks — the feed keeps its height
+    // and its position while the next page is on the wire.
+    <ul className={'cx-act' + (busy ? ' busy' : '')}>
       {rows.map(p => {
         const on = openId === p.id
         return (
