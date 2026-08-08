@@ -101,7 +101,7 @@ export default function Dashboard({ store, go, topBar }) {
               alert={oq.callbacksOverdue > 0} onClick={() => toCalling('callbacks_overdue')} />
           )}
           <Kpi icon="person" label="Unassigned" value={n(totals.unassigned)} sub="need routing" onClick={() => toLeads({ flag: ['unassigned'] })} />
-          <Kpi icon="plus" label="New today" value={n(totals.new_today)} sub="fresh enquiries" onClick={() => toLeads({ flag: ['new'] })} />
+          <Kpi icon="plus" label="Arrived today" value={n(totals.new_today)} sub="fresh enquiries" onClick={() => toLeads({ flag: ['new'] })} />
           {hasCalling && (
             <Kpi icon="check" label="Calls logged today" value={oq.calledToday} sub="outbound, today" onClick={() => toCalling('never_called')} />
           )}

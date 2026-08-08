@@ -114,7 +114,7 @@ export const LEADS_DEF = {
   // would just be a second way to filter the same field.
   filterFields: (store) => [
     { key: 'flag', label: 'Needs attention', icon: 'clock', options: [
-      { value: 'overdue', label: 'Overdue' }, { value: 'unassigned', label: 'Unassigned' }, { value: 'new', label: 'New today' },
+      { value: 'overdue', label: 'Overdue' }, { value: 'unassigned', label: 'Unassigned' }, { value: 'new', label: 'Arrived today' },
     ] },
     { key: 'source', label: 'Source', icon: 'trend', options: opt(store.state.settings.sources) },
     { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
@@ -207,7 +207,13 @@ export const LEADS_DEF = {
    */
   segments: [
     { key: 'all', label: 'All' },
-    { key: 'today', label: 'New today' },
+    // "Today", not "New today". This pill and the sidebar badge were both
+    // called New and mean different things — the badge is a STAGE (88 leads
+    // sitting untouched, whenever they arrived) and this is an ARRIVAL WINDOW
+    // (nothing came in today). Side by side, "New 88" against "New today 0"
+    // reads as the app contradicting itself. Its neighbours already make the
+    // meaning plain: Today, then This month.
+    { key: 'today', label: 'Today' },
     { key: 'month', label: 'This month' },
     { key: 'noanswer', label: 'Call not received' },
     { key: 'overdue', label: 'Overdue', tone: 'alert' },
