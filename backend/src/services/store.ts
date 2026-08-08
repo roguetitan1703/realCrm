@@ -1741,18 +1741,28 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   const followUp = patch.followUp !== undefined ? patch.followUp : (oldLead as any).followUp;
   const overdue = patch.overdue !== undefined ? patch.overdue : (oldLead as any).overdue;
 
-  const deal = patch.deal !== undefined ? patch.deal : (req?.deal ?? oldLead.req?.deal);
-  const requirement = patch.requirement !== undefined ? patch.requirement : (req?.config ?? oldLead.req?.config);
-  const locality = patch.locality !== undefined ? patch.locality : (req?.locality ?? oldLead.req?.locality);
-  const budgetMin = (patch.budgetMin !== undefined || patch.budget_min !== undefined || req?.minBudget !== undefined)
+  // When the caller sends a `req` object it is the WHOLE requirement, so a key
+  // missing from it means "cleared", not "unchanged". Falling through to
+  // oldLead.req left the column set while the JSONB was emptied: clearing Deal
+  // Type in the form blanked req.deal, the `deal` column kept its old value,
+  // and rowToLead reads the column first — so the field came back on reload and
+  // the record disagreed with itself in two places.
+  const sentReq = patch.req !== undefined;
+  const fromReq = (key: string, col: any) =>
+    sentReq ? ((req as any)?.[key] ?? null) : ((req as any)?.[key] ?? col);
+
+  const deal = patch.deal !== undefined ? patch.deal : fromReq('deal', oldLead.req?.deal);
+  const requirement = patch.requirement !== undefined ? patch.requirement : fromReq('config', oldLead.req?.config);
+  const locality = patch.locality !== undefined ? patch.locality : fromReq('locality', oldLead.req?.locality);
+  const budgetMin = (patch.budgetMin !== undefined || patch.budget_min !== undefined || sentReq)
     ? digits(patch.budgetMin ?? patch.budget_min ?? req?.minBudget) : digits(oldLead.req?.minBudget);
-  const budgetMax = (patch.budgetMax !== undefined || patch.budget_max !== undefined || req?.maxBudget !== undefined)
+  const budgetMax = (patch.budgetMax !== undefined || patch.budget_max !== undefined || sentReq)
     ? digits(patch.budgetMax ?? patch.budget_max ?? req?.maxBudget) : digits(oldLead.req?.maxBudget);
-  const purpose = patch.purpose !== undefined ? patch.purpose : (req?.purpose ?? oldLead.req?.purpose);
+  const purpose = patch.purpose !== undefined ? patch.purpose : fromReq('purpose', oldLead.req?.purpose);
   // Same collision on update — see createLead. `patch.timeline` is history.
   const timelinePref = patch.timeline_pref !== undefined
     ? patch.timeline_pref
-    : (req?.timeline ?? oldLead.req?.timeline);
+    : fromReq('timeline', oldLead.req?.timeline);
   // The reason belongs to the rejection. If the lead comes back off Rejected it
   // is dropped, because a live lead carrying "Budget Mismatch" reads as fact and
   // would go straight into the loss report.

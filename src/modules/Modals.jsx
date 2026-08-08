@@ -132,12 +132,24 @@ function ModuleFormModal({ store, moduleId, recordId }) {
     if (f.type === 'textarea') return <Textarea value={v} onChange={e => setField(f.key, e.target.value)} rows={3} />
     if (f.type === 'select') {
       const opts = optionsOf(f)
+      // A <select> with no empty option shows its FIRST option whenever the
+      // value is empty, so a lead nobody has asked about buying or renting sat
+      // in this form reading "Buy". The record sheet showed the same field as
+      // "—" a few pixels away. Saving without touching it was harmless — the
+      // stored null survived — but an agent reading the form would have taken
+      // it as fact and repeated it to the client.
+      //
+      // So an unset optional field says it is unset, and picking the blank
+      // clears the field rather than being ignored.
+      const isEmpty = v === undefined || v === null || v === ''
       return (
-        <select className="input" value={String(v)} onChange={e => {
+        <select className="input" value={isEmpty ? '' : String(v)} onChange={e => {
           const raw = e.target.value
+          if (raw === '') { setField(f.key, undefined); return }
           const match = opts.find(o => String(o.value) === raw)
           setField(f.key, match ? match.value : raw)
         }}>
+          {!f.required && <option value="">Not stated</option>}
           {opts.map(o => <option key={String(o.value)} value={String(o.value)} disabled={o.disabled}>{o.label}</option>)}
         </select>
       )
