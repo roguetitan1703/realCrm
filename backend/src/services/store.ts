@@ -1145,8 +1145,11 @@ export async function getBootstrap(): Promise<any> {
         ) x WHERE coalesce(v, '') <> '' ORDER BY 1`,
     // Whether this desk sells, lets, or both. Two integers that decide which
     // filters are worth offering at all.
-    sql`SELECT count(*) FILTER (WHERE coalesce(deal, 'sale') = 'sale')::int AS sale,
-               count(*) FILTER (WHERE coalesce(deal, 'sale') = 'rent')::int AS rent
+    // A listing counts as sale only if it SAYS sale. `coalesce(deal,'sale')`
+    // was harmless while the boot migration guaranteed no nulls; now that a
+    // row is allowed not to know, it would count every unknown as a sale.
+    sql`SELECT count(*) FILTER (WHERE deal = 'sale')::int AS sale,
+               count(*) FILTER (WHERE deal = 'rent')::int AS rent
           FROM crm_properties WHERE tenant_id = ${t}`,
     // Sources that have actually sent something, biggest first. This used to be
     // a hand-curated list in settings that nothing kept in step with reality:
@@ -1442,7 +1445,10 @@ export async function listContacts(opts: {
   if (opts.tab !== 'owners') {
     const where: any[] = [sql`tenant_id = ${t}`];
     if (q) where.push(sql`(lower(name) LIKE ${like} OR phone LIKE ${like} OR lower(coalesce(email, '')) LIKE ${like})`);
-    const dealOf = sql`coalesce(deal, req->>'deal', 'sale')`;
+    // No 'sale' tail: someone we have never established an intent for is not
+    // a buyer, and filing them as one is how a rent enquiry gets called back
+    // about flats to buy. They fall under neither pill.
+    const dealOf = sql`coalesce(deal, req->>'deal')`;
     if (role === 'Buyer') where.push(sql`${dealOf} = 'sale'`);
     else if (role === 'Tenant') where.push(sql`${dealOf} = 'rent'`);
     // The pill counts must ignore the pill itself -- "Buyers 40 / Tenants 12"
@@ -1487,8 +1493,8 @@ export async function listContacts(opts: {
            max(owner_email) AS email,
            max(locality) AS locality,
            count(*)::int AS listings,
-           count(*) FILTER (WHERE coalesce(deal, 'sale') = 'sale')::int AS sale,
-           count(*) FILTER (WHERE coalesce(deal, 'sale') = 'rent')::int AS rent,
+           count(*) FILTER (WHERE deal = 'sale')::int AS sale,
+           count(*) FILTER (WHERE deal = 'rent')::int AS rent,
            array_remove(array_agg(DISTINCT locality), NULL) AS localities,
            (array_agg(title ORDER BY created_at DESC))[1] AS first_title,
            (array_agg(type ORDER BY created_at DESC))[1] AS first_type
@@ -2063,7 +2069,12 @@ export async function listLeads(opts: {
   // a 500 on every click. The column is `deal`, written by createLead, and a
   // lead whose purpose is "Lease" is a rental whatever `deal` says.
   const RENT = sql`(lower(coalesce(deal, '')) IN ('rent', 'lease') OR lower(coalesce(purpose, '')) IN ('rent', 'lease'))`;
-  if (opts.intent === 'buy' || opts.intent === 'sale') where.push(sql`NOT ${RENT}`);
+  // `NOT RENT` is not "buy" — it is "not rent", which includes every lead
+  // nobody has asked yet. Filtering to Buy handed back all of them. Buy means
+  // the row says sale; a lead with no stated intent answers neither filter,
+  // which is the honest answer and makes the gap visible.
+  const SALE = sql`(lower(coalesce(deal, '')) = 'sale' OR lower(coalesce(purpose, '')) = 'sale')`;
+  if (opts.intent === 'buy' || opts.intent === 'sale') where.push(SALE);
   else if (opts.intent === 'rent') where.push(RENT);
   const SEGMENTS = leadSegments(await arrivalStageOf(t));
   const segment = SEGMENTS[opts.segment as LeadSegment];
@@ -2671,11 +2682,14 @@ export async function getLeadsSummary(): Promise<any> {
     .map(([key, pred]) => sql`count(*) FILTER (WHERE ${pred})::int AS ${sql(key)}`)
     .reduce((acc, f) => sql`${acc}, ${f}`);
   const RENT = sql`(lower(coalesce(deal, '')) IN ('rent', 'lease') OR lower(coalesce(purpose, '')) IN ('rent', 'lease'))`;
+  const SALE = sql`(lower(coalesce(deal, '')) = 'sale' OR lower(coalesce(purpose, '')) = 'sale')`;
   const [totals, byStage, byIntent] = await Promise.all([
     sql`SELECT count(*)::int AS total, ${filters} FROM crm_leads WHERE tenant_id = ${t} AND ${scope}`,
     sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
         FROM crm_leads WHERE tenant_id = ${t} AND ${scope} GROUP BY 1`,
-    sql`SELECT count(*) FILTER (WHERE NOT ${RENT})::int AS buy, count(*) FILTER (WHERE ${RENT})::int AS rent
+    // buy + rent no longer has to equal the total. What is left over is the
+    // leads whose intent nobody has established, and that gap is the point.
+    sql`SELECT count(*) FILTER (WHERE ${SALE})::int AS buy, count(*) FILTER (WHERE ${RENT})::int AS rent
         FROM crm_leads WHERE tenant_id = ${t} AND ${scope}`,
   ]);
   return {
@@ -2848,7 +2862,8 @@ export async function listProperties(opts: {
   const status = many(opts.status), deal = many(opts.deal);
   const type = many(opts.type), locality = many(opts.locality);
   if (status.length) where.push(sql`coalesce(status, 'Available') IN ${sql(status)}`);
-  if (deal.length) where.push(sql`coalesce(deal, 'sale') IN ${sql(deal)}`);
+  // Filtering to Sale must not sweep in listings that never said.
+  if (deal.length) where.push(sql`deal IN ${sql(deal)}`);
   if (type.length) where.push(sql`type IN ${sql(type)}`);
   if (locality.length) where.push(sql`locality IN ${sql(locality)}`);
 
@@ -2902,7 +2917,8 @@ async function demandFor(t: string, ids: string[]): Promise<Map<string, number>>
       LEFT JOIN crm_leads l
         ON l.tenant_id = p.tenant_id
        AND coalesce(l.stage, '') NOT IN ${sql(TERMINAL_STATUSES)}
-       AND coalesce(l.deal, l.req->>'deal', 'sale') = coalesce(p.deal, 'sale')
+       AND (coalesce(l.deal, l.req->>'deal') IS NULL OR p.deal IS NULL
+            OR coalesce(l.deal, l.req->>'deal') = p.deal)
        AND (l.locality IS NULL OR p.locality IS NULL OR l.locality = p.locality)
        AND (l.budget_max IS NULL OR p.price_amount IS NULL OR l.budget_max >= p.price_amount * 0.75)
        AND (l.budget_min IS NULL OR p.price_amount IS NULL OR l.budget_min <= p.price_amount * 1.25)
@@ -2930,7 +2946,8 @@ export async function getPropertiesSummary(): Promise<any> {
     sql`SELECT count(*)::int AS n FROM crm_properties WHERE tenant_id = ${t}`,
     sql`SELECT coalesce(status, 'Available') AS k, count(*)::int AS n
         FROM crm_properties WHERE tenant_id = ${t} GROUP BY 1`,
-    sql`SELECT coalesce(deal, 'sale') AS k, count(*)::int AS n
+    // Unknown is its own bucket, not folded into sale.
+    sql`SELECT coalesce(deal, 'unspecified') AS k, count(*)::int AS n
         FROM crm_properties WHERE tenant_id = ${t} GROUP BY 1`,
     sql`SELECT DISTINCT locality AS v FROM crm_properties
         WHERE tenant_id = ${t} AND coalesce(locality, '') <> '' ORDER BY 1`,
@@ -2977,8 +2994,8 @@ export async function listProjects(opts: { q?: string; limit?: number } = {}): P
            count(*)::int AS units,
            count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available,
            count(*) FILTER (WHERE coalesce(status, 'Available') = 'Sold')::int AS sold,
-           count(*) FILTER (WHERE coalesce(deal, 'sale') = 'rent')::int AS rent,
-           count(*) FILTER (WHERE coalesce(deal, 'sale') = 'sale')::int AS sale,
+           count(*) FILTER (WHERE deal = 'rent')::int AS rent,
+           count(*) FILTER (WHERE deal = 'sale')::int AS sale,
            mode() WITHIN GROUP (ORDER BY locality) AS locality,
            mode() WITHIN GROUP (ORDER BY builder) AS builder,
            array_remove(array_agg(DISTINCT nullif(wing, '')), NULL) AS wings,
@@ -3029,13 +3046,18 @@ export async function getPropertyBuyers(propertyId: string, limit = 50): Promise
   const p = (await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id = ${propertyId} LIMIT 1`)[0];
   if (!p) return [];
   const price = p.price_amount != null ? Number(p.price_amount) : null;
-  const deal = p.deal || 'sale';
+  // The listing's own deal type, and null if it has none. Matching a
+  // deal-less listing as though it were for sale showed its "interested
+  // buyers" as everyone we had never asked.
+  const deal = p.deal || null;
 
   const where: any[] = [
     sql`tenant_id = ${t}`,
     OPEN,
-    sql`coalesce(deal, req->>'deal', 'sale') = ${deal}`,
   ];
+  // Narrow only when BOTH sides know. Unknown on either side is not a
+  // mismatch, it is a missing answer, and the scorer ranks what comes back.
+  if (deal) where.push(sql`(coalesce(deal, req->>'deal') IS NULL OR coalesce(deal, req->>'deal') = ${deal})`);
   if (p.locality) where.push(sql`(locality IS NULL OR locality = ${p.locality})`);
   // Same 25% headroom the other direction uses, and for the same reason: a
   // budget stated as a round number is not a hard wall.
