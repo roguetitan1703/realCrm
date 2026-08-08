@@ -4,6 +4,7 @@ import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
+import { whenLabel } from '../lib/format.js'
 
 const ROLE_LABEL = { admin: 'Owner / Admin', owner: 'Owner', agent: 'Sales Advisor', manager: 'Sales Manager' }
 const roleLabel = (r) => ROLE_LABEL[r] || (r ? r[0].toUpperCase() + r.slice(1) : 'Sales Advisor')
@@ -15,14 +16,8 @@ const cleanErr = (err) => {
   return i >= 0 ? m.slice(i + 1).trim() : (m.replace(/^API Error:\s*/, '') || 'Something went wrong')
 }
 const isSuspended = (u) => String(u.status || '').toLowerCase() === 'suspended'
-const timeAgo = (ts) => {
-  if (!ts) return 'never'
-  const s = Math.max(0, (Date.now() - new Date(ts).getTime()) / 1000)
-  if (s < 90) return 'just now'
-  if (s < 3600) return `${Math.round(s / 60)}m ago`
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`
-  return `${Math.round(s / 86400)}d ago`
-}
+// When something happened is one rule, in one function — see whenLabel.
+const timeAgo = (ts) => (ts ? whenLabel(ts) : 'never')
 
 export default function Team({ store, go, topBar }) {
   const { state } = store

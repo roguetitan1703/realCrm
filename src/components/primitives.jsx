@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
-import { relTime, agentName } from '../lib/format.js'
+import { whenLabel, agentName } from '../lib/format.js'
 import { fileUrl, formatDistance } from '../lib/media.js'
 
 // ---- Button ----
@@ -487,7 +487,9 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel 
   const [outcome, setOutcome] = useState(e.metadata?.outcome || '')
   const tag = TYPE_TAG[e.type]
   const canEdit = tag && EDITABLE_TYPES.has(e.type) && e.id && e.authorId && currentUserId && e.authorId === currentUserId && !!onEditRemark
-  const ago = e.timestamp ? relTime(e.timestamp) : (e.ago || '')
+  // The moment, not the elapsed time. An agent has to be able to say "you
+  // called him Tuesday evening"; "2d ago" cannot be turned into that.
+  const ago = e.timestamp ? whenLabel(e.timestamp) : (e.ago || '')
   const author = e.authorId ? agentName(agents, e.authorId) : null
   const rawOutcome = e.metadata?.outcome
   const outcomeText = rawOutcome ? (VISIT_OUTCOME_LABEL[rawOutcome] || rawOutcome) : ''

@@ -7,11 +7,12 @@
     "dev": "vite",
     "dev:backend": "tsx watch backend/src/index.ts",
     "test": "tsx test_all.mjs",
-    "build": "npm run check:vocab && vite build",
+    "build": "npm run check:vocab && npm run check:scope && vite build",
     "preview": "vite preview",
     "check:vocab": "node scripts/check-vocabulary.mjs",
     "test:ingest": "node scripts/ingest-conformance.mjs",
-    "test:leadflows": "tsx scripts/ingest-lead-flows.mjs"
+    "test:leadflows": "tsx scripts/ingest-lead-flows.mjs",
+    "check:scope": "node scripts/check-scope.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1098.0",

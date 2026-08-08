@@ -4,7 +4,7 @@ import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../com
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Overdue, Timeline } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
-import { initials, callbackSignal, relTime } from '../lib/format.js'
+import { initials, callbackSignal, whenLabel } from '../lib/format.js'
 import { canAssignLead } from '../lib/permissions.js'
 import { OWNER_STATUSES } from '../data/ownerStatus.js'
 import { useServerList } from '../lib/serverList.js'
@@ -114,7 +114,7 @@ function OwnerRecord({ store, ownerId, topBar, phone, onBack }) {
         </div>
       ) : (
         <div className="detail-empty">
-          {o.lastCallAt ? `Last called ${relTime(o.lastCallAt)}. No callback set.` : 'Not called yet.'}
+          {o.lastCallAt ? `Last called ${whenLabel(o.lastCallAt)}. No callback set.` : 'Not called yet.'}
         </div>
       )}
       <Button variant="secondary" size="sm" block icon="calendar"

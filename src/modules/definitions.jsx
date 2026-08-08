@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, relTime, arrivedOn } from '../lib/format.js'
+import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -500,7 +500,7 @@ export const OWNERS_DEF = {
   actions: [
     { id: 'call', tier: 'quick', icon: 'phone', label: 'Call',
       when: (o) => !!o.phone,
-      sub: (o) => (o.lastCallAt ? `Last called ${relTime(o.lastCallAt)}` : 'Not called yet'),
+      sub: (o) => (o.lastCallAt ? `Last called ${whenLabel(o.lastCallAt)}` : 'Not called yet'),
       run: (store, o) => store.openModal({
         kind: 'contact', channel: 'call', name: o.name, phone: o.phone, email: o.email,
         recordType: 'owner', recordId: o.id,

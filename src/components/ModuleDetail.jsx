@@ -32,7 +32,7 @@ import { DetailLayout } from '../layouts/layouts.jsx'
 import { ActionRail, RailSection } from './rail.jsx'
 import { SelectDropdown } from './collections.jsx'
 import Icon from './Icon.jsx'
-import { relTime, agentName } from '../lib/format.js'
+import { whenLabel, agentName } from '../lib/format.js'
 import { buildActionTiers } from '../modules/definitions.jsx'
 
 /**
@@ -99,7 +99,7 @@ function LatestRemark({ record, store }) {
         <span className="rh-remark-tag">{TYPE_TAG[latest.type] || 'Remark'}</span>
         <span className="rh-remark-meta">
           {who && <b>{who}</b>}
-          {latest.timestamp && relTime(latest.timestamp)}
+          {latest.timestamp && whenLabel(latest.timestamp)}
         </span>
         {clipped && (
           <button type="button" className="rh-remark-toggle" aria-expanded={expanded}

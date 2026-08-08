@@ -3,6 +3,7 @@ import Icon from '../components/Icon.jsx'
 import { Button } from '../components/primitives.jsx'
 import { api } from '../lib/api.js'
 import JsonView from '../components/JsonView.jsx'
+import { whenLabel } from '../lib/format.js'
 
 // ============================================================================
 // 🔌 CONNECTIONS — where leads come from (spec: docs/specs/ingestion.md, D1)
@@ -22,14 +23,8 @@ const mark = (name) => String(name || '?')
   .replace(/[^a-zA-Z0-9 ]/g, ' ').trim().split(/\s+/)
   .map(w => w[0]).join('').slice(0, 2).toUpperCase()
 
-function relativeTime(iso) {
-  if (!iso) return 'never'
-  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  if (mins < 1440) return `${Math.round(mins / 60)}h ago`
-  return `${Math.round(mins / 1440)}d ago`
-}
+// When something happened is one rule, in one function — see whenLabel.
+const relativeTime = (iso) => (iso ? whenLabel(iso) : 'never')
 
 // Four states, each named. "Unmapped" is not a fault, and a firm that can't
 // tell it from a fault will report a working feed as broken.
@@ -159,7 +154,7 @@ function Push({ push, store }) {
   return (
     <div className="cx-push">
       <div className="cx-push-m">
-        <span>{new Date(push.received_at).toLocaleString('en-IN')}</span>
+        <span>{whenLabel(push.received_at)}</span>
         {push.source_ip && <span>{push.source_ip}</span>}
         {push.headers?.['content-type'] && <span>{push.headers['content-type']}</span>}
         {push.lead_id && <span>{push.lead_id}</span>}
