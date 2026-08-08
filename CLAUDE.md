@@ -1,45 +1,46 @@
 # CLAUDE.md — working agreement for agents on this repo
 
 Read this before touching anything. It is not a description of the product;
-`docs/` does that. It is the set of things that are **not visible from the code**
-and that have each cost real money or a client's trust when an agent guessed
+`docs/` does that. It is the things that are **not visible from the code** and
+that have each cost real money or a client's trust when an agent guessed
 instead of checking.
 
-> ## Commits: no `Co-Authored-By`
->
-> Do not add a `Co-Authored-By:` trailer, or any other attribution to an
-> assistant, to commit messages on this repo. The commit message explains **why
-> the thing was broken** — nothing else belongs in it.
+Keep it this length. When you add something, fold it into the rule it belongs
+to and delete what it duplicates. A file nobody finishes reading enforces
+nothing.
+
+> **Commits carry no assistant attribution.** No `Co-Authored-By`, no tool
+> name. The message explains **why the thing was broken** — nothing else.
 
 ---
 
 ## 1. What this is
 
-**Nivaas** — a white-label real-estate CRM sold by **Delpat** (the agency).
-It is a **live production SaaS with a paying client**, not a demo.
+**Nivaas** — a white-label real-estate CRM sold by **Delpat** to real firms.
+Live production with a paying client, not a demo.
 
 | | |
 |---|---|
-| Frontend | React 18 + Vite 6, **plain JSX, no TypeScript**, deployed on Vercel |
-| Backend | Express 5 + Postgres (Supabase) via `postgres.js`, run under `tsx`, on AWS |
-| Auth | JWT + bcrypt passwords, sliding sessions. OTP is legacy, being retired |
+| Frontend | React 18 + Vite 6, **plain JSX, no TypeScript**, Vercel |
+| Backend | Express 5 + Postgres (Supabase) via `postgres.js`, under `tsx`, on AWS |
+| Auth | JWT + bcrypt, sliding sessions. OTP is legacy, being retired |
 | Multi-tenancy | Real. Every row carries `tenant_id`; every read is scoped |
 
-### Live tenants — know which is which before you write anything
+### Tenants — know which is which before you write anything
 
 | Slug | What it is | Rule |
 |---|---|---|
-| `bhumi` | **Bhumi PropCity — the paying client** | Do not modify their data. Ever. Read-only unless the user explicitly names them |
-| `delpat` | Delpat's own workspace — **the user's testing org** | Safe to experiment on. Its "leads" are webhook test fixtures, not people |
-| `skyline-realty` | The demo tenant (`DEFAULT_TENANT_ID`) | Safe to experiment on |
+| `bhumi` | **Bhumi PropCity — the paying client** | Read-only unless the user names them. Never write on your own initiative |
+| `delpat` | The user's own testing org | Safe. Its leads are webhook fixtures, not people |
+| `skyline-realty` | Demo tenant (`DEFAULT_TENANT_ID`) | Safe |
 | `test-org` | Scratch | Safe |
 
-`DEFAULT_TENANT_ID = 'skyline-realty'`. Anything that falls back to a default
-tenant is a bug waiting to file a real firm's data under the demo.
+Anything that falls back to a *default* tenant is a bug waiting to file a real
+firm's data under the demo.
 
 ---
 
-## 2. Commands
+## 2. Commands and deploys
 
 ```bash
 npm run dev            # Vite on :5173, proxies /api and /pwa → localhost:5000
@@ -47,248 +48,257 @@ npm run dev:backend    # tsx watch backend/src/index.ts
 npm run build          # check:vocab && vite build   ← THE ONLY VALID BUILD CHECK
 ```
 
-### `npx vite build` is not a build check
+**`npx vite build` is not a build check.** It skips the vocabulary guard, passes
+happily, and the Vercel deploy then fails. You verify build errors before
+pushing, not the user.
 
-`npm run build` runs the **vocabulary guard** first. `npx vite build` skips it,
-passes happily, and the Vercel deploy then fails. This has already broken a
-production deploy once.
+**Never push to `main`.** Vercel deploys on every commit to it, off a capped
+plan. Commit locally or on a branch; the user merges and deploys.
 
-**You verify build-time errors before pushing, not the user.** Always
-`npm run build`.
+**Frontend and backend deploy separately** — Vercel automatic, AWS by hand, so
+`main` silently runs ahead of the live API. When a field or route "does not
+exist", check the deployed backend's version *before* changing code: an
+afternoon went into `"req.maxBudget" is not a lead field a mapping can write`,
+which was a four-commit-stale API.
 
-### Never push to `main`
-
-Vercel deploys on **every commit to `main`**. A session that pushes six commits
-spends six production deployments off a capped plan. Commit on a branch; the
-user merges and deploys.
-
-### The frontend and the backend deploy separately
-
-Vercel (frontend) is automatic. AWS (backend) the user deploys by hand. So
-`main` is routinely **ahead of the running API**, and the two drift apart
-silently. This has already cost a debugging session: the mapper offered fields
-the deployed `WRITABLE` had never heard of, and the errors read like a code bug
-("`req.maxBudget` is not a lead field a mapping can write") when the code was
-right and the API was four commits stale.
-
-When a field, route or config "does not exist", check the deployed backend's
-version before you change any code.
-
-### Running the backend for a scratch script
+### Scratch scripts
 
 ```bash
 cd backend
 set -a && source <(grep -v '^#' ../.env | sed -E 's/\r$//' | grep DATABASE_URL) && set +a
-npx tsx src/_scratch.mjs      # put scratch files in backend/src/, DELETE them after
+npx tsx src/_scratch.mjs      # put them in backend/src/, DELETE them after
 ```
 
-Supabase has a low connection cap. A scratch script contending with a running
-dev backend produces `too many clients already`. Use
-`postgres(url, { max: 1, ssl: 'require' })` for ad-hoc queries, and stop the dev
-backend first if you hit the cap.
+Supabase has a low connection cap — use `postgres(url, { max: 1, ssl: 'require' })`
+and stop the dev backend on `too many clients`. Reusable tools go in
+`backend/src/scripts/` with a header saying when to run them; one-off files get
+deleted the same session. Thirteen abandoned test scripts were swept up later,
+one of which POSTed fabricated leads at an ingest endpoint.
 
 ---
 
-## 3. Architecture invariants
+## 3. The five mistakes this codebase keeps making
 
-These are not style preferences. Breaking one produces a bug that ships.
+Every trap below is an instance of one of these. Learn the shape, not the
+incident — the next one will wear different clothes.
 
-### 3.1 `MODULE_DEFINITION` drives every module
+### 3.1 Unknown is not a default
 
-`src/modules/definitions.jsx` holds one definition per module. It drives columns,
-filters, sort, actions, `card`, `phoneCard`, `phoneActions`, `progression`.
+Absence is information. Overwrite it and you have invented a fact nobody can
+tell from a real one, and no screen will question it.
 
-- **Never hand-roll a screen.** Add a field/filter/sort/action by editing config.
-- The shared renderer reads some keys **unconditionally**. Omitting one crashes
-  at runtime — and because this is plain JSX, **`vite build` will not catch it**.
-  If you add a module or change a definition, load the screen in a browser.
+- `deal = 'sale'` was written by **five** separate places: `createLead`,
+  `rowToLead` on the way *out*, the import row builder, `suggestConfig`'s saved
+  default, and — the one that undid the other four — an **ungated boot
+  migration** re-stamping every null on every restart. See 3.4.
+- Reads did it too: `coalesce(deal, 'sale')` in eleven queries, and an intent
+  filter using `NOT RENT` for "buy", which returned every lead nobody had asked.
+  A row counts as sale only if it *says* sale. **buy + rent need not equal the
+  total** — the gap is the work.
+- A `<select>` with no empty option renders its **first** option when the value
+  is empty, so an unanswered field read "Buy" while the record sheet beside it
+  said "—". Optional selects carry "Not stated".
+- `if (!more)` fires on `-4`; `it.badge != null` renders a badge saying "0".
+  Test `> 0`.
+- Requirements once defaulted to `{locality:'Wakad', config:'2 BHK'}` and
+  budgets to a literal `'₹85L–₹1.2Cr'`, on every row of the table.
 
-### 3.2 The vocabulary guard
+### 3.2 One concept, one implementation
 
-A property's enumerable values are declared in `src/data/propertyFields.js` and
-**nowhere else**. This rule was broken five separate times, twice corrupting
-rows. It is now checked mechanically by `scripts/check-vocabulary.mjs`.
+Two implementations of one idea do not stay in agreement, and the day they
+diverge nobody is looking.
 
-Escape hatch when a literal is genuinely right:
+- **A phone number is its last ten digits**, in `findLeadByPhone()`
+  (`services/store.ts`) — stored `+919876543210`, on one tenant with spaces, and
+  portals send anything. Two paths each grew their own version; the importer was
+  fixed and the webhook was not, leaving 315 surplus rows on a live desk.
+  Deliberately **not** `leadScope()`-filtered: "does this tenant already know
+  this number" must hold regardless of who asks, or an agent who cannot *see* a
+  colleague's lead makes a second copy of it.
+- **When something happened** is `whenLabel()` (`src/lib/format.js`) — there
+  were three copies. Relative time is honest only under an hour; past that it
+  cannot be repeated to a client or lined up against a portal's report.
+- **A deal type's label** is `DEALS` (a listing: Sell) or `DEAL_LEAD` (a person:
+  Buy). One stored value once read "Sell", "Buy" and "Sale" on one record.
+- **One renderer per artefact.** A browser canvas and a server renderer both
+  made the PWA icon; the browser one could not see the logo and overwrote it.
+- A property's enumerable values live in `src/data/propertyFields.js` and
+  nowhere else — broken five times, twice corrupting rows, now checked by
+  `scripts/check-vocabulary.mjs`. Escape hatch: `// vocab-ok: <reason>`.
 
-```js
-'super built-up',  // vocab-ok: display prose
-```
+### 3.3 A count and the rows it describes come from the same query
 
-### 3.3 Server-side everything
+- The sidebar badge ran on `tenant_id` alone while the list it labelled ran on
+  `leadScope()`, so an agent with nothing new saw a badge promising ten. Third
+  site, after the phone worklist and Today.
+- Reporting `rows.length` as the total rendered 200 rows under a header claiming
+  200 of 1,000, and made a connection with 18 pushes look like it stopped at 8.
+- **Two scopes, never conflated:**
+  ```js
+  visibility (RBAC)   agent_id = me OR created_by = me
+  "my worklist"       agent_id = me                    ← mine=1, the phone
+  ```
+  Reusing the first for the second returned 732 rows instead of 110, because the
+  admin had imported everything and so `created_by` matched all of it.
+- Different meanings must **look** different: the badge is work waiting and is
+  accent; the header is the total and is muted. And they must not share a word —
+  a "New" badge (a stage) beside a "New today" pill (an arrival window) reads as
+  the app contradicting itself.
+- **A cache key must cover everything it validates.** `pwa_config` held one
+  signature for three icon sizes, so rendering one marked the other two fresh.
 
-Pagination, filtering, sorting and **counting** happen in SQL. Use
-`useServerList` / `useServerData`. Never `.filter()` a full collection in the
-browser — the client desk has 700+ owners and imports arrive in the thousands.
+### 3.4 A fix to the generator does not fix what it generated
 
-A group's **count** and its **rows** are two different queries. Reporting
-`rows.length` as the count is how Today once rendered 200 rows under a header
-claiming 200 out of 1,000.
+- `suggestConfig` stopped writing `defaults['req.deal']='sale'` on 2026-08-05.
+  It kept firing until 08-07 from three stored `parser_config` rows.
+- The boot migration above ran inside `initSchema()` **on every start**, with no
+  gate, re-applying a default the code had stopped writing.
+- One-time repairs go in the ledger: `schema_migrations` + `runOnce(name, fn)`.
+  An ungated repair cannot tell "never migrated" from "someone set it that way
+  deliberately", which is how a stage migration kept undoing a firm's Pipeline
+  settings.
 
-### 3.4 Two different scopes — do not conflate them
+When you fix a generator, **check what it already produced** — `parser_config`,
+`crm_settings`, `crm_routing_rules`, `brand_config`, and the columns any
+migration has touched.
 
-```js
-visibility (RBAC)   agent_id = me OR created_by = me
-"my worklist"       agent_id = me                    ← mine=1, the phone
-```
+### 3.5 Deleting or overwriting leaves references behind
 
-Reusing the RBAC scope for the phone's queue returned 732 rows instead of 110,
-because the admin had imported every row and so `created_by` matched everything.
-
-### 3.5 Request context
-
-`backend/src/services/context.ts` — `AsyncLocalStorage`, `runWithContext`,
-`getContext()`, `tid()`. It **does** propagate through `await` and into
-`setTimeout`. It does **not** exist in a scheduler that never wrapped itself, so
-`runRoutingSweeps` wraps each tenant explicitly. When a function already takes a
-`tenantId` argument, pass it explicitly rather than relying on ambient state.
-
-### 3.6 One-time repairs go in the ledger
-
-`schema_migrations` + `runOnce(name, fn)`. A repair left ungated re-runs on every
-boot against live rows, and cannot tell "never migrated" from "someone set it
-that way deliberately" — which is how a stage migration kept silently undoing a
-firm's Pipeline settings.
-
-### 3.7 A phone number is its LAST TEN DIGITS, in one function
-
-`findLeadByPhone()` in `services/store.ts`. Numbers are stored `+919876543210`,
-and on one tenant `+91 98765 43210` with spaces; portals and spreadsheets send
-whatever they please. Comparing cleaned strings calls those different people —
-it left 315 surplus rows on a live client desk, one number twelve times over.
-
-Two independent code paths each grew their own version of this, and the
-importer was fixed while the webhook was not. **Resolve a person in that one
-function.** It is deliberately not `leadScope()`-filtered: "does this tenant
-already know this number" must be true regardless of who is asking, or an agent
-who cannot *see* a colleague's lead will cheerfully create a second copy of it.
-
-### 3.8 A saved config outlives the code that wrote it
-
-Removing a bad default from the code does **not** remove it from configs already
-stored. `suggestConfig` stopped writing `defaults['req.deal'] = 'sale'` on
-2026-08-05; it kept firing until 2026-08-07 out of three saved
-`integrations.parser_config` rows, inventing a deal type on every push. The one
-provider that was clean was clean only because someone happened to re-run
-auto-detect on it.
-
-When you fix a generator, **check what it already generated.** The same applies
-to `crm_settings`, `crm_routing_rules` and `brand_config`.
+- `revertImportBatch` deletes leads, properties, owners and shortlist rows and
+  nothing else. One revert left 3 timeline events pointing at deleted records;
+  the next would have left 582 events and 1,444 notification links. `audit_log`
+  is the deliberate exception — a ledger referring to deleted rows is correct.
+- An `agents → users` sync without a tenant filter overwrote real client emails
+  with invented demo ones. Scope every write.
+- `readStateCache()` looked up `crm_state_cache_<tenant>` and, failing that,
+  **scanned localStorage and loaded the first snapshot it found** — any firm's.
+  On a machine that has opened two workspaces, one firm's desk booted with
+  another's records. No tenant now means no snapshot.
+- `updateLead` resolved columns as `req?.x ?? oldLead.req?.x`, which cannot tell
+  "not mentioned" from "cleared". The form sends the whole `req`, so clearing a
+  field emptied the JSONB, left the column set, and the value reappeared on
+  reload. **A sent `req` is the whole requirement.**
 
 ---
 
-## 4. Product rules the user holds you to
+## 4. Other invariants
 
-These come from the user directly and are non-negotiable.
+- **`MODULE_DEFINITION` drives every module** (`src/modules/definitions.jsx`):
+  columns, filters, sort, actions, `card`, `phoneCard`, `progression`. Never
+  hand-roll a screen. The shared renderer reads some keys unconditionally and
+  this is plain JSX, so **`vite build` will not catch a missing one** — load the
+  screen in a browser.
+- **Server-side everything.** Pagination, filtering, sorting, counting: in SQL,
+  via `useServerList` / `useServerData`. Never `.filter()` a full collection in
+  the browser — one desk has 700+ owners and imports arrive in thousands.
+- **Request context** (`services/context.ts`: `runWithContext`, `getContext()`,
+  `tid()`) propagates through `await` and into `setTimeout`, but does not exist
+  in a scheduler that never wrapped itself — `runRoutingSweeps` wraps each
+  tenant explicitly. If a function takes a `tenantId`, pass it.
+- **Compare status with `ILIKE`.** Onboarding writes `'ACTIVE'`, the team screen
+  `'active'`; every real tenant uses the second, so `notifyRoles` matched zero
+  users and every desk-wide alert was dropped for months.
+- **Assert the recipient count** — delivering to an empty list is not an error,
+  so it fails silently forever.
+- **Never add a universal credential**, gated or not. `passwordLogin` once took
+  `00000000` / `delpat-demo-1` / `Delpat@2026` for any account on any tenant.
+- **Throttle background work** — a multi-tenant scan ran on `/pulse` from every
+  open tab.
+- **Overlays are dismissed centrally in `useNav`**, or back and tab-switch
+  navigate out from under an open form.
+
+---
+
+## 5. Product rules the user holds you to
+
+Non-negotiable, and they come from the user directly.
 
 - **No fake features.** Nothing renders unless it works. No placeholder tiles,
-  no hardcoded statuses, no invented firm names, no fabricated KPIs. If a number
-  is on screen it came from the database.
+  hardcoded statuses, invented firm names or fabricated KPIs. A number on screen
+  came from the database.
 - **No explanatory UI copy.** Never caption or justify a design on screen.
-  Labels and values only.
-- **One module standard.** Every module inherits the same list/detail/data-view/
-  quick-actions machinery. No bespoke screens.
-- **Reuse existing components.** When asked for a new state (e.g. multi-select),
-  change the *existing* toolbar — do not render a second one beside it.
+  Labels and values only — the buttons are the message.
+- **One module standard.** Every module inherits the same list/detail/
+  data-view/quick-actions machinery. No bespoke screens.
+- **Reuse the existing component.** Asked for a new state (multi-select, say),
+  change the *existing* toolbar; do not render a second one beside it.
 - **Money is never a hero.** Data-dense, tiny-thumb-friendly cards.
-- Design: charcoal/linen with an ochre accent, table + full-page record.
+- Design: charcoal/linen, ochre accent, table + full-page record.
+- **Do not lose someone's work.** A modal's action row is sticky and a backdrop
+  click stops closing once anything has been typed.
 
 ---
 
-## 5. Verification discipline
+## 6. Verification discipline
 
-The user's standing complaint is agents asserting things they have not checked.
-This is the part of the file that matters most.
+The user's standing complaint is agents asserting what they have not checked.
+This is the part that matters most.
 
-1. **Check the database before claiming behaviour.** Reading the code tells you
-   what it intends. Querying tells you what happened. Several "working" features
-   here had delivered exactly zero rows in production for months.
-2. **Measure the blast radius before shipping anything that notifies or writes.**
-   Count the affected rows per tenant and state the numbers. Confirm `bhumi` is
-   unaffected, explicitly.
-3. **Run `npm run build`.** Every time.
-4. **Drive the real UI for UI changes.** Playwright is installed. Log in, click
-   the thing, assert. A phone viewport is `devices['iPhone 13']`.
-5. **Clean up.** Delete scratch scripts, probe rows and screenshots. Say so.
-6. **Correct yourself in place.** If mid-task you find your own explanation was
-   wrong, fix the comment and say so plainly — do not ship a code comment that
-   asserts a bug that never existed.
-
----
-
-## 6. Traps that have already bitten
-
-Each of these shipped and had to be fixed. They are here so they are not
-rediscovered a second time.
-
-| Trap | What happened |
-|---|---|
-| `status = 'ACTIVE'` | Onboarding writes `'ACTIVE'`, the team screen writes `'active'`. Every real tenant uses the second, so `notifyRoles` matched **zero users** and every desk-wide alert was silently dropped. Compare with `ILIKE`. |
-| Fanning out to nobody | Delivering to an empty user list is not an error. It fails silently forever. Assert the recipient count. |
-| Two renderers for one picture | A browser canvas and a server renderer both produced the PWA icon; the browser one couldn't see the logo and overwrote the good one. One renderer per artefact. |
-| Cache key vs cached items | `pwa_config` held one signature but three icon sizes, so refreshing one marked the other two fresh. A cache key must cover everything it validates. |
-| Negative truthiness | `if (!more) return null` renders when `more` is `-4`. Test `> 0`. |
-| Nav that ignores overlays | Screen state and modal state lived in different places, so back and tab-switch navigated out from under an open form. Overlays are now dismissed centrally in `useNav`. |
-| Unscoped mirror writes | An `agents → users` sync without a tenant filter overwrote real client emails with invented demo ones. Scope every write. |
-| Hardcoded passwords | `passwordLogin` and `superadminLogin` accepted `00000000` / `delpat-demo-1` / `Delpat@2026` for any account on any tenant. Removed. Never add a universal credential, gated or not. |
-| Scanners on `/pulse` | A multi-tenant scan ran on every poll from every open tab. Throttle background work. |
-| A cache that falls back to *any* tenant | `readStateCache()` looked up `crm_state_cache_<tenant>` and, failing that, **scanned localStorage for any key with that prefix and loaded the first one** — three lines under a comment promising the opposite. It fires whenever the tenant key is absent: cold boot before identity resolves, a cleared key, or a snapshot that lost its own write to `QuotaExceededError`. On a machine that has opened two workspaces, one firm's desk boots with another firm's records. No tenant now means no snapshot. |
-| A count and a size that look identical | The sidebar badge is **work waiting** (`byStage['New']`); the page header is the **total**. Both rendered as the same grey chip, so 19 beside 31 read as the app contradicting itself. Different meanings must look different — the badge is accent, the size is muted. |
-| `!= null` on a number | The mirror of the negative-truthiness trap. Both badge callers default to `0`, so `it.badge != null` rendered a badge saying "0" on every quiet desk. Test `> 0`. |
-| Deleting rows and leaving their references | `revertImportBatch` deletes leads, properties, owners and shortlist rows — and nothing else. A revert on 2026-08-03 left 3 timeline events pointing at records that no longer exist; the 2026-08-06 revert would have left 582 events and 1,444 notification links. `audit_log` is the deliberate exception: a ledger referring to deleted rows is correct. |
+1. **Query the database before claiming behaviour.** Code tells you what it
+   intends; the database tells you what happened. Several "working" features had
+   delivered exactly zero rows in production for months.
+2. **Do not report a number a tool gave you until you have read what is in it.**
+   A scope-checking script reported "65 unscoped reads"; every one was correctly
+   scoped through a variable its regex could not follow. It was presented as a
+   finding before one entry had been opened.
+3. **Measure the blast radius before anything that writes or notifies.** Rows
+   affected, per tenant, stated. Confirm `bhumi` is unaffected, explicitly.
+4. **Run `npm run build`.** Every time.
+5. **Drive the real UI for UI changes.** Playwright is installed; log in, click,
+   assert. Phone viewport is `devices['iPhone 13']`. Measure geometry rather than
+   eyeballing it — a nav bar assumed to be 63px is 72.
+6. **Clean up.** Probe rows, scratch scripts, screenshots. Say that you did.
+7. **Correct yourself in place**, in the code and to the user, the moment you
+   find your own explanation was wrong. Never ship a comment asserting a bug
+   that never existed.
 
 ---
 
 ## 7. Known open items
 
-- **9 accounts still hold default passwords** as stored hashes (5 on `delpat`
-  including the owner at `00000000`, 4 on `skyline-realty`). `bhumi` is clean.
-  Left from the one-time `backfillPasswordAuth` cutover, which was unscoped by
-  tenant. Fix is `must_change_password = TRUE` on those rows — not yet done.
-- **`followup_due` notifications are inert on purpose.** The query reads
-  `follow_up->>'due_at'`; nothing writes that key, because the follow-up model
-  stores `{date, time, action}` where `date` is a display string like `'Today'`.
-  Making it fire is a change to the follow-up model, not to the query.
-- **Two fabricated `@skylinerealty.in` emails** remain on `delpat` users. The
-  user has seen them and chosen to leave them.
-- The user sets production env vars and runs deploys themselves. Only
-  `.env.example` may be edited.
-
-### Open as of 2026-08-07
-
-- **`/api/v1/ingest` has no rate limit.** The key is write-only — it cannot read
-  a record — but a leaked one can fill a client's desk with junk enquiries
-  faster than agents can reject them. Keys are per-provider, so a leak is
-  rotated in isolation.
-- **`verifyAuditChain()` returns `ok: false` at seq 227** — a `delpat`
-  `property.create` from 2026-08-01, out of 2,661 rows. Predates the 08-07
-  session. The ledger is sold as tamper-evident and the owner-facing view reads
-  from it, so this is either a real break or another false positive like
-  `2af3c32`. Not yet diagnosed.
-- **Import history is browser-only.** `logImportBatch` dispatches to React state
-  and nothing else — there is no server table. It survives in
-  `crm_state_cache_*`, which `writeStateCache` warns can silently fail to
-  persist. The Revert button reads the batch id from that log, so losing the log
-  **loses the ability to revert** even though the rows still carry
-  `import_batch_id`.
-- **`bhumi` imports were reverted on 2026-08-07** at the client's request — 494
-  leads, 582 timeline events, 1,444 notifications. Archived first to
-  `archive_bhumi_leads_20260806` (517 rows, each tagged `archived_reason`),
-  `archive_bhumi_timeline_20260806`, `archive_bhumi_notifications_20260806`.
-  **Two `Deal Closed` records are in there** (Manan, Nitin Dhawan) — recoverable,
-  and the client was told. Do not drop those tables without asking.
-- Every bhumi lead now arrives by integration. That makes §3.7 the *only*
-  deduplication in the product.
+- **52 leads stamped `deal='sale'` are not repaired** (17 `bhumi`, 35 `delpat`),
+  from before the fabrication was removed. Which were genuinely sales is knowable
+  only from the stored payload:
+  `backend/src/scripts/reprocess-inbox.ts --overwrite=deal`.
+- **`perAgentCalls` in `getDeskSummary` is unscoped** — every agent's browser
+  gets colleagues' calling throughput. The lead counts beside it are scoped.
+- **`bhumi` Housing.com carries `defaults:{req.deal:'sale'}`** on a three-field
+  mapping, so every Housing enquiry is stamped a sale. Awaiting richer fields
+  from them. `99acres` ×2 are unmapped — nothing has arrived yet, but the first
+  push will fail to parse, and two connections for one provider smells like a
+  leftover.
+- **9 accounts hold default passwords** as real hashes (5 `delpat`, 4
+  `skyline-realty`; `bhumi` clean). Fix is `must_change_password = TRUE`.
+- **`followup_due` notifications are inert on purpose** — the query reads
+  `follow_up->>'due_at'` and nothing writes it; the model stores
+  `{date,time,action}` with `date` as a display string. Firing it means changing
+  the model, not the query.
+- **`/api/v1/ingest` has no rate limit.** Write-only key, but a leaked one fills
+  a desk with junk faster than agents can reject it.
+- **`verifyAuditChain()` returns `ok:false` at seq 227** (a `delpat`
+  `property.create`, 1 of 2,661). The ledger is sold as tamper-evident. Not
+  diagnosed.
+- **Import history is browser-only** — `logImportBatch` writes to React state,
+  surviving only in `crm_state_cache_*`, which can silently fail to persist.
+  Losing it loses the ability to revert, though rows keep `import_batch_id`.
+- **Do not drop `archive_bhumi_*_20260806`** without asking — 517 archived
+  leads, two of them `Deal Closed`.
+- `scripts/ingest-conformance.mjs` and `ingest-lead-flows.mjs` (`test:ingest`,
+  `test:leadflows`) hit a real endpoint and have not been audited for which
+  tenant.
+- The user sets production env vars and runs deploys. Only `.env.example` may be
+  edited.
 
 ---
 
 ## 8. Where the docs are
 
-`CLAUDE.md` deliberately does not duplicate them.
+This file deliberately does not duplicate them.
 
 - `docs/ROADMAP.md` — **the backlog. Source of truth for what to build next.**
 - `docs/specs/` — buildable plans: `auth.md`, `contacts-leads.md`,
-  `properties.md`, `ingestion.md`, `pwa.md`, `branding.md`, `data-lifecycle.md`
+  `properties.md`, `ingestion.md`, `enquiries.md`, `pwa.md`, `branding.md`,
+  `data-lifecycle.md`
 - `docs/architecture/` — architecture declaration, schema plan
 - `docs/ops/DEPLOY.md` — deploy runbook
 - `backend/API_SPECIFICATION.md` — API surface
@@ -299,11 +309,12 @@ rediscovered a second time.
 
 ## 9. Working style the user expects
 
-- Ship the whole task. If part is blocked, finish everything else and say
-  exactly what you left out.
-- Lead with what you found, not with what you did. The user reads results.
-- State numbers, not adjectives. "731 of 732 owners assigned, 0 notifications
-  sent" beats "notifications were not working well".
-- Do not re-litigate a decision already made. Do not ask permission for
-  ordinary work.
+- **Ship the whole task.** If part is blocked, finish the rest and say exactly
+  what you left out.
+- **Lead with what you found, not what you did.** State numbers, not adjectives:
+  "731 of 732 owners assigned, 0 notifications sent".
+- **Say plainly when you were wrong**, once, and move on.
+- **No padding.** No recaps of your reasoning, no restating the task back, no
+  cinematic framing of an ordinary fix. The user has said this explicitly.
+- Do not re-litigate a settled decision or ask permission for ordinary work.
 - Commit messages explain **why it was broken**, not what the diff shows.
