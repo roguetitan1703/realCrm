@@ -198,9 +198,23 @@ function Activity({ connectionId, refreshKey, store }) {
   const [openId, setOpenId] = useState(null)
 
   // A new connection, or a refresh, starts at the top again — leaving page 4
-  // selected while switching to a connection that has two pushes shows nothing
-  // and looks broken.
-  useEffect(() => { setPage(1) }, [connectionId, refreshKey])
+  // selected while switching to a connection that has two pushes shows an empty
+  // feed and reads as a fault.
+  //
+  // Reset DURING RENDER, not in an effect. As an effect it ran alongside the
+  // fetch below, which had already been handed the old page number — so
+  // switching connections while on page 3 fired a request for page 3 of the new
+  // connection, then immediately another for page 1. The first was discarded by
+  // the `alive` guard, so nothing was ever wrong on screen; it was just a wasted
+  // round trip on every switch. Adjusting state in render is React's documented
+  // answer to "a prop changed and some state derived from it is now stale", and
+  // it means the effect below only ever sees the page it should ask for.
+  const identity = `${connectionId}:${refreshKey}`
+  const [lastIdentity, setLastIdentity] = useState(identity)
+  if (lastIdentity !== identity) {
+    setLastIdentity(identity)
+    setPage(1)
+  }
 
   useEffect(() => {
     let alive = true
