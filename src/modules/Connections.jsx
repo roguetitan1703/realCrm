@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
-import { Button } from '../components/primitives.jsx'
+import { Button, Pager } from '../components/primitives.jsx'
 import { api } from '../lib/api.js'
 import JsonView from '../components/JsonView.jsx'
 import { whenLabel } from '../lib/format.js'
@@ -172,35 +172,44 @@ function Push({ push, store }) {
   )
 }
 
-// How many pushes a page holds. The feed used to ask for exactly this many and
-// show nothing else, so a connection that had received 18 looked like it
-// stopped after 8 — the history was there, the screen just never asked for it.
+// How many pushes a page holds.
 const PAGE = 8
 
+/**
+ * The received-push feed, paged.
+ *
+ * It used to append: every "Show more" left the previous page on screen, so
+ * reading back through a busy connection meant scrolling a list that only ever
+ * grew — and the row you wanted moved further away with each click. A feed is
+ * the one place you go BACKWARDS through time, so it needs to be able to move
+ * backwards, and the last page has to be reachable without loading everything
+ * in front of it.
+ *
+ * The offset is derived from the page number rather than from what is on
+ * screen, which is only correct because each page is a fresh read. A push
+ * arriving mid-read shifts rows by one; the range label is straight from the
+ * server's count, so it stays honest either way.
+ */
 function Activity({ connectionId, refreshKey, store }) {
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
-  const [loadingMore, setLoadingMore] = useState(false)
+  const [page, setPage] = useState(1)
   const [openId, setOpenId] = useState(null)
+
+  // A new connection, or a refresh, starts at the top again — leaving page 4
+  // selected while switching to a connection that has two pushes shows nothing
+  // and looks broken.
+  useEffect(() => { setPage(1) }, [connectionId, refreshKey])
+
   useEffect(() => {
     let alive = true
     setRows(null)
-    api.getConnectionInbox(connectionId, PAGE, 0)
+    setOpenId(null)
+    api.getConnectionInbox(connectionId, PAGE, (page - 1) * PAGE)
       .then(r => { if (alive && r?.success) { setRows(r.pushes); setTotal(r.total ?? r.pushes.length) } })
       .catch(() => { if (alive) { setRows([]); setTotal(0) } })
     return () => { alive = false }
-  }, [connectionId, refreshKey])
-
-  // Appends the next page. Offset comes from what is already on screen rather
-  // than a page counter, so a push that arrives mid-read cannot make the next
-  // page skip a row.
-  const loadMore = () => {
-    setLoadingMore(true)
-    api.getConnectionInbox(connectionId, PAGE, rows.length)
-      .then(r => { if (r?.success) { setRows(cur => [...cur, ...r.pushes]); setTotal(r.total ?? total) } })
-      .catch(() => {})
-      .finally(() => setLoadingMore(false))
-  }
+  }, [connectionId, refreshKey, page])
 
   if (rows === null) {
     return (
@@ -232,12 +241,10 @@ function Activity({ connectionId, refreshKey, store }) {
           </li>
         )
       })}
-      {rows.length < total && (
-        <li className="cx-act-more">
-          <button className="cx-more-btn" onClick={loadMore} disabled={loadingMore}>
-            {loadingMore ? 'Loading…' : `Show ${Math.min(PAGE, total - rows.length)} more`}
-            <span className="cx-more-of">{rows.length} of {total}</span>
-          </button>
+      {total > 0 && (
+        <li className="cx-act-pager">
+          <Pager page={page} pageCount={Math.ceil(total / PAGE)} onPage={setPage}
+            total={total} pageSize={PAGE} />
         </li>
       )}
     </ul>
