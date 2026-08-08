@@ -660,6 +660,19 @@ input,textarea,select{font-family:inherit}
 .mfm-grid .field{margin:0}
 .mfm .input,.mfm .textarea{width:100%}
 .mfm-foot{display:flex;justify-content:flex-end;gap:10px;margin-top:6px;padding-top:14px;border-top:1px solid var(--line-2)}
+/* Sticky, because the modal body scrolls and Save used to scroll away with it.
+   A long lead form on a phone put the only way to keep your work below the
+   fold, so people filled it in, saw no button, and tapped out. */
+.modal .mfm-foot,.modal .lc-foot{position:sticky;bottom:0;z-index:2;background:var(--bg);
+  margin-left:-20px;margin-right:-20px;padding:12px 20px calc(12px + env(safe-area-inset-bottom));
+  border-top:1px solid var(--line-2)}
+.modal .lc-foot{margin-top:16px}
+/* Tapping the backdrop with unsaved edits does not close — it brings the
+   footer to your attention instead of silently binning the work. No copy: the
+   buttons are the message. */
+@keyframes mfm-nudge{0%,100%{transform:translateY(0)}30%{transform:translateY(-4px)}60%{transform:translateY(0)}}
+.modal.nudge .mfm-foot,.modal.nudge .lc-foot{animation:mfm-nudge .34s ease;box-shadow:0 -10px 22px -12px rgba(0,0,0,.35)}
+@media (prefers-reduced-motion:reduce){.modal.nudge .mfm-foot,.modal.nudge .lc-foot{animation:none}}
 
 /* ---- ModuleDetail: standard record header band ---- */
 .rechead{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:18px 20px;margin-bottom:16px}

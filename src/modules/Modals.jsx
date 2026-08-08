@@ -16,11 +16,43 @@ import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities } from '../lib/suggest.js'
 import { CALL_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 
-// Generic modal frame
+/**
+ * Generic modal frame.
+ *
+ * A click on the backdrop used to close unconditionally, and the modal body
+ * scrolls — so on a long lead form the Save button sat below the fold, people
+ * filled the form in, saw nothing to press, and tapped outside believing they
+ * were done. The edit went in the bin without a word.
+ *
+ * Two changes, and the first mostly removes the need for the second: the action
+ * row is sticky, so Save is on screen the whole time. And once anything in the
+ * form has been touched, a backdrop click no longer closes — it draws the eye
+ * to the footer instead. Closing deliberately still works, by the X or Cancel,
+ * because the person clicking those has said what they mean.
+ *
+ * Dirtiness is watched here rather than declared by each of the twenty modals
+ * below: any input or change event inside the frame bubbles to this div, which
+ * is exactly the thing that means "somebody typed something".
+ */
 function Modal({ title, onClose, children, width = 440 }) {
+  const [dirty, setDirty] = useState(false)
+  const [nudge, setNudge] = useState(false)
+
+  const onBackdrop = () => {
+    if (!dirty) { onClose(); return }
+    setNudge(true)
+    setTimeout(() => setNudge(false), 360)
+  }
+
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width }} onClick={e => e.stopPropagation()}>
+    <div className="overlay" onClick={onBackdrop}>
+      <div
+        className={'modal' + (nudge ? ' nudge' : '')}
+        style={{ width }}
+        onClick={e => e.stopPropagation()}
+        onInput={() => { if (!dirty) setDirty(true) }}
+        onChange={() => { if (!dirty) setDirty(true) }}
+      >
         <div className="m-head"><h3>{title}</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
         <div className="m-content">{children}</div>
       </div>
