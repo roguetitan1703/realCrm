@@ -36,7 +36,7 @@ import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
 // out again here — that duplication is exactly what broke property filtering.
 import {
-  AREA_UNITS, BHK, BHK_FILTER, CATEGORIES, DEALS, FACING, FURNISH, OWNERSHIP,
+  AREA_UNITS, BHK, BHK_FILTER, CATEGORIES, DEALS, DEAL_LEAD, FACING, FURNISH, OWNERSHIP,
   POSSESSION, STATUS, SUBTYPES, TRANSACTION,
   isPlot, labelOf, normaliseBhk, normaliseSubtype, normaliseTo, optionsOf,
 } from '../data/propertyFields.js'
@@ -82,7 +82,7 @@ export const LEADS_DEF = {
     l.email || null,
     l.req?.config || l.requirement || null,
     (l.req?.locality || l.locality) ? <span className="rh-loc"><Icon name="mapPin" size={12} className="ic" />{l.req?.locality || l.locality}</span> : null,
-    (l.req?.deal || l.deal) ? <span className={'rh-dealtag' + ((l.req?.deal || l.deal) === 'rent' ? ' rent' : '')}>{(l.req?.deal || l.deal) === 'rent' ? 'Rent' : 'Sale'}</span> : null,
+    (l.req?.deal || l.deal) ? <span className={'rh-dealtag' + ((l.req?.deal || l.deal) === 'rent' ? ' rent' : '')}>{labelOf(DEAL_LEAD, l.req?.deal || l.deal)}</span> : null,
     l.req ? budgetRange(l.req) : null,
     l.req?.timeline || null,
     l.source ? `Via ${l.source}` : null,

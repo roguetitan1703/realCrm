@@ -465,7 +465,10 @@ export async function migrateProperColumns(): Promise<void> {
       project      = COALESCE(project, NULLIF(config->>'project',''), NULLIF(config->>'society','')),
       wing         = COALESCE(wing, NULLIF(config->>'wing',''), tower),
       unit_no      = COALESCE(unit_no, NULLIF(config->>'flat',''), unit),
-      deal         = COALESCE(deal, NULLIF(config->>'deal',''), 'sale'),
+      -- Same fabrication, same every-boot re-run. A listing usually IS for
+      -- sale or for rent, but "usually" is not a reason to write it down as
+      -- fact on a row that does not say so.
+      deal         = COALESCE(deal, NULLIF(config->>'deal','')),
       facing       = COALESCE(facing, NULLIF(config->>'facing','')),
       furnishing   = COALESCE(furnishing, NULLIF(config->>'furnishing','')),
       parking      = COALESCE(parking, NULLIF(config->>'parking','')),
@@ -500,7 +503,15 @@ export async function migrateProperColumns(): Promise<void> {
   }
   await sql.unsafe(`
     UPDATE crm_leads SET
-      deal          = COALESCE(deal, NULLIF(req->>'deal',''), 'sale'),
+      -- No 'sale' fallback. This backfill moves req.deal into its own column,
+      -- which is right; inventing one for a lead that never had a deal type is
+      -- not. And it runs on EVERY boot (initSchema -> migrateProperColumns, no
+      -- runOnce gate), so it silently undid the four write paths that had
+      -- stopped guessing: every restart re-stamped 'sale' onto every lead
+      -- whose source never said, which is why not one lead in any tenant had a
+      -- null deal. Unknown stays unknown, and the screens show a blank that
+      -- prompts someone to ask.
+      deal          = COALESCE(deal, NULLIF(req->>'deal','')),
       requirement   = COALESCE(requirement, NULLIF(req->>'config','')),
       locality      = COALESCE(locality, NULLIF(req->>'locality','')),
       purpose       = COALESCE(purpose, NULLIF(req->>'purpose','')),

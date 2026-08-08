@@ -30,6 +30,18 @@ export const CATEGORIES = [o('residential', 'Residential'), o('commercial', 'Com
 // the portal forms we modelled this on offer it.
 export const DEALS = [o('sale', 'Sell'), o('rent', 'Rent / Lease')]
 
+// The same two values, said from the LEAD's side.
+//
+// DEALS is written from the firm's side, because it labels a listing: the firm
+// sells it or lets it. A lead is the other party, so those words are wrong on
+// a person — a buyer is not "Sell". And with nothing shared, each screen picked
+// its own word: the edit dropdown said Sell, the requirement line said Buy and
+// the header tag said Sale, all for one stored value, on one record.
+//
+// Kept here beside DEALS rather than in a component, so the two can never drift
+// and there is still exactly one place a deal type is named.
+export const DEAL_LEAD = [o('sale', 'Buy'), o('rent', 'Rent')]
+
 export const SUBTYPES = {
   residential: [
     o('apartment', 'Apartment'), o('independent_house', 'Independent House'),

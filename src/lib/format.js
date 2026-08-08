@@ -1,6 +1,6 @@
 // Formatting + derived-data helpers (ported from legacy app.js).
 import {
-  AREA_UNITS, BHK, SUBTYPES, isPlot, labelOf, normaliseBhk, normaliseSubtype,
+  AREA_UNITS, BHK, DEAL_LEAD, SUBTYPES, isPlot, labelOf, normaliseBhk, normaliseSubtype,
 } from '../data/propertyFields.js'
 
 /**
@@ -184,7 +184,7 @@ export function reqLine(req) {
  */
 export function reqShort(req) {
   if (!req) return 'Any requirement'
-  const deal = req.deal === 'rent' ? 'Rent' : req.deal === 'sale' ? 'Buy' : null
+  const deal = labelOf(DEAL_LEAD, req.deal) || null
   const budget = budgetRange(req)
   const parts = [
     req.config,

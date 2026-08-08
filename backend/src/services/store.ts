@@ -2754,7 +2754,12 @@ export async function getLeadCandidates(leadId: string, limit = 100): Promise<an
   const lead = (await sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND id = ${leadId} LIMIT 1`)[0];
   if (!lead) return [];
   const req = lead.req || {};
-  const deal = lead.deal || req.deal || 'sale';
+  // Null, not 'sale'. A lead whose deal type nobody has established was being
+  // matched against sale stock only — so a rent-seeker's suggestions were every
+  // flat in the book except the ones they could actually rent, and it looked
+  // like a working feature. When we do not know, do not narrow: show both and
+  // let the scorer rank them.
+  const deal = lead.deal || req.deal || null;
   const locality = lead.locality || req.locality || null;
   const config = lead.requirement || req.config || null;
   const min = lead.budget_min != null ? Number(lead.budget_min) : (req.minBudget ?? null);
@@ -2762,9 +2767,9 @@ export async function getLeadCandidates(leadId: string, limit = 100): Promise<an
 
   const where: any[] = [
     sql`tenant_id = ${t}`,
-    sql`coalesce(deal, 'sale') = ${deal}`,
     sql`coalesce(status, 'Available') = 'Available'`,
   ];
+  if (deal) where.push(sql`deal = ${deal}`);
   // 25% headroom either side: a listing just outside the stated budget is still
   // worth showing, and the client's scorer is what decides how good a fit it is.
   if (min != null) where.push(sql`(${PRICE_NUM} IS NULL OR ${PRICE_NUM} >= ${Math.floor(min * 0.75)})`);

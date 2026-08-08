@@ -5,7 +5,7 @@ import Icon from './Icon.jsx'
 // the form stored "semi" — the exact drift that broke property filtering.
 import {
   AREA_UNITS, BACHELOR_PREF, BHK, CATEGORIES, CONSULTING_DAYS, CONSULTING_PERCENT,
-  COUNTED_ITEMS, DEALS, DEPOSIT_OPTIONS, FACING, FIXTURES, FURNISH, LOCKIN_OPTIONS,
+  COUNTED_ITEMS, DEALS, DEAL_LEAD, DEPOSIT_OPTIONS, FACING, FIXTURES, FURNISH, LOCKIN_OPTIONS,
   MAINTENANCE_MODE, OWNERSHIP, POSSESSION, SOCIETY_AMENITIES, STATUS, SUBTYPES,
   TENANT_TYPES, TRANSACTION,
   BHK_FILTER,
@@ -252,8 +252,8 @@ export const LEAD_MODULE_SCHEMA = {
       key: 'req.deal', label: 'Deal Type', type: 'select', section: 'domain',
       // From the canonical vocabulary, not a typed-out pair — the labels here
       // and the ones the property side uses have to be the same words.
-      options: () => DEALS.map(d => ({ value: d.value, label: d.label })),
-      renderValue: (v) => labelOf(DEALS, v) || '',
+      options: () => DEAL_LEAD.map(d => ({ value: d.value, label: d.label })),
+      renderValue: (v) => labelOf(DEAL_LEAD, v) || '',
     },
     {
       key: 'req.minBudget', label: 'Budget From', type: 'money', section: 'domain',
