@@ -2544,5 +2544,13 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
    one glyph per type, tone as colour only. */
 .notif-ico{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex-shrink:0;
   background:var(--card-2);color:var(--ink-2);border:1px solid var(--line)}
+/* attention is the FIRM's colour — applyBrandColor drives --accent from the
+   tenant's own hex, so these follow whatever the firm picked. urgent stays red
+   on purpose: a thing that has gone wrong has to read as wrong even on a desk
+   whose brand colour happens to be green. Same pair .kpi.alert already uses. */
 .notif-ico.t-attention{background:var(--accent-wash);color:var(--accent);border-color:transparent}
-.notif-ico.t-urgent{background:var(--alert-wash,var(--accent-wash));color:var(--alert,var(--accent));border-color:transparent}
+/* Urgent is a SOLID fill, not another tinted wash. Tone cannot be carried by
+   hue alone here: delpat's brand colour is #B91C1C and --alert is #C0392B, so
+   on that desk a tinted "urgent" and a tinted "attention" are the same red
+   square. Weight separates them on any brand, including a red one. */
+.notif-ico.t-urgent{background:var(--alert);color:#fff;border-color:transparent}

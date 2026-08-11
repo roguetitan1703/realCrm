@@ -42,7 +42,17 @@ self.addEventListener('push', (event) => {
   const options = {
     body: data.body || '',
     icon: data.icon || '/pwa/_platform/icon-192.png',
-    badge: data.icon || '/pwa/_platform/icon-192.png',
+    // NO `badge`. Android does not draw the badge as a picture: it takes the
+    // ALPHA CHANNEL and stamps it as a single-colour glyph in the status bar.
+    // This was handed the same full-colour 192px tenant logo as `icon`, and
+    // both tenants' logos are fully opaque — every pixel alpha 255 — so the
+    // silhouette is a solid rectangle. Android's own behaviour on a badge it
+    // cannot make sense of varies by version and skin: a filled blob, or
+    // nothing at all. Omitting it lets the launcher use the installed app's
+    // icon, which is already the tenant's and already the right shape.
+    //
+    // A real badge is a separate asset — one colour, transparent background,
+    // drawn for 24dp. It is not the logo scaled down.
     data: { url: data.url || '/' },
     tag: data.tag || undefined,
   };
