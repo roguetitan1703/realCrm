@@ -19,7 +19,6 @@ import {
   requireModuleEnabled,
   requireQuotaAvailable,
 } from '../middleware/auth';
-import { dispatchOutboundWebhook } from '../services/webhookSender';
 import {
   addTimelineEvent, updateLead, mergeLeads, getLeadById,
   getTimelineEventById, updateTimelineEvent, maybeAutoAdvanceStage,
@@ -208,13 +207,16 @@ actionsRouter.post(
         author: req.user?.id || 'admin',
       });
 
-      dispatchOutboundWebhook(
-        req.tenant?.slug || 'skyline-realty',
-        'LEAD_STAGE_CHANGED',
-        { record_id: recordId, new_stage_id, note, updated_by: req.user?.id || 'admin' },
-        'https://api.skylinerealty.in/webhooks/outbound',
-        'whsec_default'
-      ).catch(err => console.error('[Stage Change Webhook] Dispatch error:', err));
+      // No outbound webhook here. There is no outbound-webhook feature: no
+      // tenant configures a URL, nothing stores one, and this call site hard-
+      // coded the DEMO tenant's domain — so every stage change on the paying
+      // client POSTed that client's record id, stage, note and user id at
+      // api.skylinerealty.in, which is NXDOMAIN. It failed at DNS, retried five
+      // times with backoff and dead-lettered, on every stage change, forever.
+      // The domain being unregistered is the whole reason nothing leaked;
+      // anyone who registers it starts receiving a real firm's desk activity.
+      // If outbound webhooks are ever wanted they need a per-tenant configured
+      // URL and a secret, not a literal.
 
       return res.status(200).json({
         success: true,
