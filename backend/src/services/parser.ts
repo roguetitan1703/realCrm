@@ -114,6 +114,12 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
    */
   deal_in: (v) => {
     const s = String(v ?? '').toLowerCase();
+    // 99acres sends the whole field as a single letter — "S" / "R" — which no
+    // word-boundary pattern below can match, so the value was read as
+    // unrecognised and the deal came out of the budget inference instead.
+    // Only an exact one-letter value counts; a stray "s" inside prose does not.
+    if (s.trim() === 's') return 'sale';
+    if (s.trim() === 'r') return 'rent';
     if (/\brent(al)?\b|\blease\b|\btenant\b|\bletting\b/.test(s)) return 'rent';
     if (/\bsale\b|\bsell\b|\bresale\b|\bbuy(er)?\b|\bpurchase\b|\bnew\s*booking\b/.test(s)) return 'sale';
     return null;
@@ -138,6 +144,18 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
     }
     if (/^\d{13}$/.test(s)) return new Date(Number(s)).toISOString();
     if (/^\d{10}$/.test(s)) return new Date(Number(s) * 1000).toISOString();
+    // 99acres sends "2026-08-11 12:32:15" — separated, but still no zone. Date
+    // reads a zoneless stamp as the SERVER's local time, and the server is AWS
+    // on UTC, so the same enquiry that reads correctly in dev lands 5h30 early
+    // in production. A portal serving Indian brokers stamps IST; pin it, the
+    // same as the compact form above. Anything carrying its own zone (a Z, or
+    // an offset) is left alone and parsed as sent.
+    const zoneless = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (zoneless) {
+      const [, y, mo, d, h, mi, se] = zoneless;
+      const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${se || '00'}+05:30`);
+      return isNaN(dt.getTime()) ? null : dt.toISOString();
+    }
     const dt = new Date(s);
     return isNaN(dt.getTime()) ? null : dt.toISOString();
   },
