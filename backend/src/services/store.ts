@@ -1242,13 +1242,21 @@ export async function searchWorkspace(q: string, limit = 8): Promise<{ leads: an
 export async function getDeskSummary(): Promise<any> {
   const t = tid();
   const mine = leadScope();
+  // The dashboard tile labelled "Arrived today" opens the Leads list on the
+  // `new` pill, so it has to be counted by the pill's own definition — see
+  // leadSegments(). It was a rolling `now() - 3 hours`, which is neither today
+  // nor a worklist: at 2:20pm on bhumi the tile read 12, the list it opened
+  // held 13, and 16 leads had actually arrived that day. Three numbers for one
+  // word. The stage test is what makes it shrink as the desk works it.
+  const arrival = await arrivalStageOf(t);
+  const newToday = sql`(created_at >= date_trunc('day', now()) AND stage = ${arrival})`;
   const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
                count(*) FILTER (WHERE overdue)::int AS overdue,
                count(*) FILTER (WHERE follow_up IS NOT NULL)::int AS with_follow_up,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
-               count(*) FILTER (WHERE created_at > now() - interval '3 hours')::int AS new_today,
+               count(*) FILTER (WHERE ${newToday})::int AS new_today,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine}`,
     sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
