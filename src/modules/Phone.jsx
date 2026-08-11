@@ -55,7 +55,8 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
     navGo(tab, patch)
   }
 
-  const unreadNotifs = (state.notifications || []).filter(n => !n.read).length
+  // The server's count, not the length of the 30 rows it sent.
+  const unreadNotifs = state.notifUnread || 0
 
   // The module's own topBar call renders into the scrolling body and sticks to
   // the top of it, so a list can scroll under its own header without the shell

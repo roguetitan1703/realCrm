@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn } from '../lib/format.js'
+import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -113,8 +113,14 @@ export const LEADS_DEF = {
   // questions against the server. A third control asking the same thing here
   // would just be a second way to filter the same field.
   filterFields: (store) => [
+    // "Overdue" used to head this list. It read a boolean column nothing ever
+    // writes — 0 of 120 leads on a live desk — so it was a filter that could
+    // only ever return nothing. The two that replaced it are the piles the desk
+    // actually loses: never called, and called once then dropped.
     { key: 'flag', label: 'Needs attention', icon: 'clock', options: [
-      { value: 'overdue', label: 'Overdue' }, { value: 'unassigned', label: 'Unassigned' }, { value: 'new', label: 'Arrived today' },
+      { value: 'untouched_sla', label: 'Past SLA, never contacted' },
+      { value: 'noanswer_stale', label: 'No answer, not retried' },
+      { value: 'unassigned', label: 'Unassigned' }, { value: 'new', label: 'Arrived today' },
     ] },
     { key: 'source', label: 'Source', icon: 'trend', options: opt(store.state.settings.sources) },
     { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
@@ -180,7 +186,7 @@ export const LEADS_DEF = {
       />
     ) },
     { key: 'next', label: 'Next follow-up', render: (l) => {
-      const nf = l.followUp ? `${l.followUp.date} · ${l.followUp.time}` : '—'
+      const nf = l.followUp ? followUpLabel(l.followUp) : '—'
       return l.overdue ? <Overdue>{nf}</Overdue> : <span className="cell-quiet mono-num">{nf}</span>
     } },
     // When it arrived. Sortable, because "show me this week's" is the question
@@ -243,7 +249,7 @@ export const LEADS_DEF = {
     // rather than to one bespoke card only the desk renders.
     { id: 'schedule', tier: 'quick', icon: 'calendar',
       label: (l) => (l.followUp ? 'Reschedule appointment' : 'Schedule appointment'),
-      sub: (l) => (l.followUp ? `${l.followUp.date} · ${l.followUp.time}` : null),
+      sub: (l) => (l.followUp ? followUpLabel(l.followUp) : null),
       run: (store, l) => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id }) },
     // A site visit closes with proof (B4); everything else is a plain done.
     { id: 'followDone', tier: 'quick', icon: 'check', when: (l) => !!l.followUp,

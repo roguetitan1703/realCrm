@@ -13,6 +13,9 @@
 import { sql, DEFAULT_TENANT_ID } from './db.js';
 import { getContext } from './context.js';
 import { sendPushToUser } from './push.js';
+// The retry window is shared with the dashboard tile and the Leads filter that
+// count the same leads. Three definitions of "not retried" would drift.
+import { RETRY_DAYS } from './store.js';
 
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
@@ -86,7 +89,11 @@ export async function notifyRoles(roles: string[], n: Omit<NotifyInput, 'userId'
   for (const u of users) await notify({ ...n, userId: u.id, tenantId: t });
 }
 
-export async function listNotifications(userId: string, limit = 30): Promise<any[]> {
+// 30 was under a fifth of what a real desk had accumulated, so the drawer was a
+// window onto a pile rather than the pile. 100 covers every user on the live
+// tenant today; the actual fix is alerts that CLOSE when their work is done
+// (see ROADMAP-2 E5), not a bigger window.
+export async function listNotifications(userId: string, limit = 100): Promise<any[]> {
   return await sql`
     SELECT id, type, title, body, link, read, created_at
     FROM notifications
@@ -243,6 +250,54 @@ export async function processScheduledNotifications(): Promise<void> {
             WHERE id = ${l.id} AND tenant_id = ${t}
           `;
         }
+      }
+
+      // Rung, no answer, and nobody has been back since.
+      //
+      // The arrival sweep above only watches leads nobody has touched at all.
+      // The moment an agent logs one failed call the lead leaves that stage and
+      // every alert in the system goes quiet on it — permanently. On the live
+      // desk that was 26 leads, a fifth of everything in the system, 13 of them
+      // untouched for three days, with nothing anywhere telling a soul.
+      //
+      // Goes to the assigned agent, not a manager: the useful action is a second
+      // call, and the agent is who makes it. Once per lead, flagged like the
+      // others, and bounded by the same lookback so switching it on does not
+      // page anyone about the whole back catalogue.
+      const retryLeads = await sql`
+        SELECT id, name, agent_id, updated_at,
+               -- Aged in SQL, by the same clock the comparison below uses.
+               -- Computed as Date.now() minus this timestamp it read "3 days"
+               -- for a lead staged at exactly 4: the database clock runs a few
+               -- seconds ahead of the app server, so a whole-day age lands a
+               -- hair under the integer and floors down.
+               floor(EXTRACT(EPOCH FROM (NOW() - updated_at)) / 86400)::int AS age_days
+        FROM crm_leads
+        WHERE tenant_id = ${t}
+          AND stage = 'Call Not Received'
+          AND agent_id IS NOT NULL
+          AND updated_at <= NOW() - (${RETRY_DAYS}::text || ' days')::interval
+          AND updated_at >= NOW() - (${RETRY_DAYS * 5}::text || ' days')::interval
+          AND (metadata->>'retry_notified') IS NULL
+        LIMIT 30
+      `;
+      for (const l of retryLeads) {
+        const days = l.age_days;
+        notify({
+          userId: l.agent_id,
+          tenantId: t,
+          type: 'lead_retry_due',
+          title: '📞 No answer — try again',
+          body: `${l.name} has had no answer for ${days} day${days === 1 ? '' : 's'}`,
+          link: `?screen=leads&lead=${l.id}`,
+          push: true,
+          toSelf: true
+        }).catch(() => {});
+        await sql`
+          UPDATE crm_leads
+          SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{retry_notified}', 'true')
+          WHERE id = ${l.id} AND tenant_id = ${t}
+        `;
       }
     }
   } catch (err: any) {

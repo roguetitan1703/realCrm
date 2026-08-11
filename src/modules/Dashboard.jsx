@@ -3,6 +3,7 @@ import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { WON_STATUS } from '../data/leadStatus.js'
+import { whenLabel } from '../lib/format.js'
 
 // The first screen. It answers three questions in this order, and nothing else:
 // what needs doing right now, how each of the two pipelines is moving, and who
@@ -21,9 +22,17 @@ export default function Dashboard({ store, go, topBar }) {
   // integers -- the clearest example in the app of downloading a book to read
   // its page count.
   const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null, '/workspace/desk-summary')
-  const { data: overduePage } = useServerData(
-    () => api.listLeads({ segment: 'overdue', limit: 8 }), [state.dataAsOf], { data: [] })
-  const overdue = overduePage?.data || []
+  // The at-risk list, sorted oldest-activity-first so the top of it is the lead
+  // that has been waiting longest. Same two flags the tiles above count, asked
+  // of the same endpoint, so the panel and the tiles cannot disagree.
+  const { data: atRiskPage } = useServerData(
+    () => api.listLeads({ flag: ['untouched_sla', 'noanswer_stale'], sortKey: 'activity', sortDir: 'asc', limit: 8 }),
+    [state.dataAsOf], { data: [] })
+  const atRisk = atRiskPage?.data || []
+  // The server's count for the same query, NOT atRisk.length — the list is
+  // capped at 8, and reporting the rows you rendered as the total is how a
+  // header once claimed 200 of 1,000.
+  const atRiskTotal = atRiskPage?.total ?? 0
   const { data: ownerSummary } = useServerData(() => api.getOwnersSummary(), [state.dataAsOf], null, '/owners/summary')
 
   const totals = desk?.leads || { total: 0, open: 0, overdue: 0, won: 0, new_today: 0, unassigned: 0 }
@@ -95,12 +104,19 @@ export default function Dashboard({ store, go, topBar }) {
             the calling half of the desk was never the first thing anyone saw.
             The strip drops to four tiles on a desk that does no cold-calling. */}
         <div className={'dash-kpis' + (hasCalling ? ' has-calling' : '')}>
-          <Kpi icon="clock" label="Overdue follow-ups" value={n(totals.overdue)} sub="action required" alert onClick={() => toLeads({ flag: ['overdue'] })} />
+          {/* These two replaced "Overdue follow-ups" and "Unassigned", which on a
+              live desk read 0 and 0 permanently: overdue counts a boolean column
+              nothing writes, and unassigned is always 0 because routing and
+              pick-up work. Two of five tiles could not move. These two can, and
+              they go down when the desk works them — which is the whole test. */}
+          <Kpi icon="clock" label="Past SLA" value={n(totals.untouched_sla)} sub="never contacted"
+            alert={totals.untouched_sla > 0} onClick={() => toLeads({ flag: ['untouched_sla'] })} />
+          <Kpi icon="phone" label="No answer" value={n(totals.noanswer_stale)} sub="not retried"
+            alert={totals.noanswer_stale > 0} onClick={() => toLeads({ flag: ['noanswer_stale'] })} />
           {hasCalling && (
             <Kpi icon="phone" label="Late callbacks" value={oq.callbacksOverdue} sub="owners waiting on a call"
               alert={oq.callbacksOverdue > 0} onClick={() => toCalling('callbacks_overdue')} />
           )}
-          <Kpi icon="person" label="Unassigned" value={n(totals.unassigned)} sub="need routing" onClick={() => toLeads({ flag: ['unassigned'] })} />
           <Kpi icon="plus" label="Arrived today" value={n(totals.new_today)} sub="fresh enquiries" onClick={() => toLeads({ flag: ['new'] })} />
           {hasCalling && (
             <Kpi icon="check" label="Calls logged today" value={oq.calledToday} sub="outbound, today" onClick={() => toCalling('never_called')} />
@@ -111,7 +127,10 @@ export default function Dashboard({ store, go, topBar }) {
             the one every firm runs; outbound appears only when there is one. */}
         <div className={'dash-cols' + (hasCalling ? '' : ' one')}>
           <Panel>
-            <SectionHead title="Leads by stage" right={desk ? `${totals.open} active` : ''} />
+            {/* The header counted OPEN while the bars below it include Deal
+                Closed and Rejected, so it labelled 103 over bars summing to
+                120. Two populations, one panel, nothing saying so. */}
+            <SectionHead title="Leads by stage" right={desk ? `${totals.total} total` : ''} />
             {stageCounts.map(s => (
               <BarRow key={s.name} label={s.name} count={s.n} max={maxStage} onClick={() => toLeads({ stage: [s.name] })} />
             ))}
@@ -156,19 +175,24 @@ export default function Dashboard({ store, go, topBar }) {
               <BarRow key={sn} label={sn} count={bySource[sn]} max={srcMax} onClick={() => toLeads({ source: [sn] })} />
             ))}
           </Panel>
+          {/* This panel ran the same dead `overdue` flag as the tile did, so it
+              printed "All caught up." to a desk holding 13 leads rung once and
+              dropped and 11 never contacted at all. False reassurance is worse
+              than a wrong number: nobody goes looking behind it. It now lists
+              the leads that are actually at risk, longest-waiting first. */}
           <Panel>
-            <SectionHead title="Overdue follow-ups" right={totals.overdue ? String(totals.overdue) : undefined} />
-            {overdue.length === 0 && <div className="detail-empty">All caught up.</div>}
-            {overdue.map(l => {
+            <SectionHead title="At risk" right={atRisk.length ? `${atRiskTotal}` : undefined} />
+            {atRisk.length === 0 && <div className="detail-empty">Nothing overdue.</div>}
+            {atRisk.map(l => {
               const a = store.agentById(l.agentId)
               return (
                 <button key={l.id} className="od-row" onClick={() => go('leads', { leadId: l.id, leadOpen: true })}>
                   <div className="od-main">
                     <div className="od-name">{l.name}</div>
-                    <div className="od-sub">{l.followUp?.action}</div>
+                    <div className="od-sub">{l.stage}</div>
                   </div>
                   <div className="od-right">
-                    <div className="od-when">{l.followUp?.date}</div>
+                    <div className="od-when">{whenLabel(l.updatedAt || l.createdAt)}</div>
                     {a && <Avatar agent={a} size="sm" />}
                   </div>
                 </button>

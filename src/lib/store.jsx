@@ -291,8 +291,12 @@ function reducer(state, action) {
 
     case 'SET_BRAND': return { ...state, brand: { ...state.brand, ...action.patch } }
 
-    case 'SET_NOTIFICATIONS': return { ...state, notifications: action.notifications || [] }
-    case 'MARK_NOTIFS_READ': return { ...state, notifications: (state.notifications || []).map(n => ({ ...n, read: true })) }
+    // The feed is capped at the newest 30 rows; `notifUnread` is the server's
+    // count of ALL of them. Both are kept because they answer different
+    // questions — the list is what you read, the count is how many there are.
+    // Counting the 30 rows instead put "30" on a bell that owed 102.
+    case 'SET_NOTIFICATIONS': return { ...state, notifications: action.notifications || [], notifUnread: action.unread ?? 0 }
+    case 'MARK_NOTIFS_READ': return { ...state, notifications: (state.notifications || []).map(n => ({ ...n, read: true })), notifUnread: 0 }
 
     case 'PATCH_SETTINGS': return { ...state, settings: { ...state.settings, ...action.patch } }
     case 'SET_ROUTING': return { ...state, routing: { ...state.routing, ...action.patch } }
@@ -733,7 +737,7 @@ export function StoreProvider({ children }) {
   const loadNotifications = useCallback(() => {
     if (!apiClient.getToken?.()) return
     apiClient.getNotifications()
-      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: res.notifications }) })
+      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: res.notifications, unread: res.unread }) })
       .catch(err => console.warn('[Notifications] load failed:', err.message))
   }, [])
 

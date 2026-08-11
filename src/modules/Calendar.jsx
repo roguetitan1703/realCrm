@@ -3,12 +3,16 @@ import { Empty, PageHeader } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
+import { followUpOverdue } from '../lib/format.js'
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
-// Map the seed's relative day labels onto real dates around "today" so the grid
-// is realistically populated. (In production, follow-ups carry an ISO date.)
+// Legacy only. Follow-ups now carry `at`, a real instant — this maps the day
+// LABELS written before that existed onto dates. The parenthetical that used to
+// sit here claimed production follow-ups carried an ISO date; they did not, and
+// believing it is why nothing noticed that the labels the schedule modal
+// actually wrote ("This Sunday") match none of the cases below.
 function resolveDate(label, today) {
   if (!label) return null
   if (/^\d{4}-\d{2}-\d{2}/.test(label)) {
@@ -42,9 +46,17 @@ export default function Calendar({ store, go, topBar }) {
 
   // build event list with resolved dates
   const events = (page?.data || []).filter(l => l.followUp).map(l => {
-    const date = resolveDate(l.followUp.date, today)
+    // `at` is the appointment. resolveDate is the fallback for rows written
+    // before the schedule modal stored one, and it only ever understood a
+    // handful of labels — "This Sunday", which is what that modal actually
+    // wrote, matched none of them, so every real appointment on the live desk
+    // resolved to null and was filtered off this calendar entirely.
+    const date = l.followUp.at ? new Date(l.followUp.at) : resolveDate(l.followUp.date, today)
     const isVisit = /visit/i.test(l.followUp.action)
-    const overdue = l.overdue
+    // Was `l.overdue` — the boolean column nothing writes, so no appointment
+    // has ever been marked late. A follow-up is late when its own moment has
+    // passed, which is only knowable now that one is stored.
+    const overdue = followUpOverdue(l.followUp)
     return { lead: l, date, key: ymd(date), time: l.followUp.time, action: l.followUp.action, isVisit, overdue, agentId: l.agentId }
   }).filter(e => e.date)
 

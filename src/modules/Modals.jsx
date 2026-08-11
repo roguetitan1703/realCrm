@@ -1658,7 +1658,10 @@ function SearchModal({ store, go }) {
 export function NotifModal({ store, go }) {
   const close = () => store.setNotif(false)
   const notifs = store.state.notifications || []
-  const unreadNotifs = notifs.filter(n => !n.read).length
+  // The drawer's "N new" is the server's total unread, not how many of the 30
+  // fetched rows happen to be unread — those are different numbers the moment
+  // someone has more than a page of them.
+  const unreadNotifs = store.state.notifUnread || 0
   const [filter, setFilter] = useState('all') // 'all' | 'unread' | 'assigned'
   const [pushState, setPushState] = useState(() =>
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied'
@@ -1745,7 +1748,12 @@ export function NotifModal({ store, go }) {
             className={`qchip ${filter === 'unread' ? 'on' : ''}`}
             onClick={() => setFilter('unread')}
           >
-            Unread ({unreadNotifs})
+            {/* Counts the rows this tab will actually show, not the server's
+                total — those are different numbers once someone has more than
+                a page of alerts, and a tab promising 55 that opens onto 30 is
+                the same lie the bell used to tell. The true total is the
+                "N new" in the header above, which is a different question. */}
+            Unread ({notifs.filter(n => !n.read).length})
           </button>
           <button
             className={`qchip ${filter === 'assigned' ? 'on' : ''}`}
@@ -1810,11 +1818,53 @@ export function NotifModal({ store, go }) {
   )
 }
 
+// A day chip is a real date wearing a friendly label. It used to be the label
+// alone: the modal stored the literal string "This Sunday", and one of the
+// options was the hardcoded date 2026-07-15, a month in the past by the time a
+// live desk was using it. Nothing downstream could sort, query or fire on any
+// of it — which is why an appointment booked on a live desk never reached the
+// calendar and no reminder has ever gone out.
+const ymdOf = (d) => {
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+// Next occurrence of a weekday, never today — "this Saturday" said on a
+// Saturday means the coming one, not the one you are standing in.
+const nextDow = (dow) => {
+  const now = new Date()
+  return addDays(now, ((dow - now.getDay() + 7) % 7) || 7)
+}
+const dayChips = () => {
+  const now = new Date()
+  const short = (d) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  return [
+    { ymd: ymdOf(now), label: 'Today' },
+    { ymd: ymdOf(addDays(now, 1)), label: 'Tomorrow' },
+    { ymd: ymdOf(nextDow(6)), label: `Sat ${short(nextDow(6))}` },
+    { ymd: ymdOf(nextDow(0)), label: `Sun ${short(nextDow(0))}` },
+  ]
+}
+// "10:30 am" from a chip, "14:30" from the exact picker. Both end up as an
+// hour and a minute on the chosen day, in the user's own zone.
+const parseTimeOfDay = (s) => {
+  const m12 = String(s || '').match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i)
+  if (m12) return { h: (Number(m12[1]) % 12) + (/pm/i.test(m12[3]) ? 12 : 0), m: Number(m12[2]) }
+  const m24 = String(s || '').match(/^(\d{1,2}):(\d{2})$/)
+  return m24 ? { h: Number(m24[1]), m: Number(m24[2]) } : { h: 11, m: 0 }
+}
+const instantOf = (ymd, timeStr) => {
+  const [y, mo, d] = String(ymd).split('-').map(Number)
+  const { h, m } = parseTimeOfDay(timeStr)
+  const dt = new Date(y, (mo || 1) - 1, d || 1, h, m, 0, 0)
+  return isNaN(dt.getTime()) ? null : dt.toISOString()
+}
+
 function ScheduleFollowUpModal({ store, leadId }) {
   const l = store.lookup('lead', leadId)
   const [action, setAction] = useState('Site Visit')
-  const [day, setDay] = useState('Tomorrow')
-  const [customDate, setCustomDate] = useState('2026-07-10')
+  const chips = dayChips()
+  const [day, setDay] = useState(chips[1].ymd)
+  const [customDate, setCustomDate] = useState(chips[1].ymd)
   const [useCustomDate, setUseCustomDate] = useState(false)
   const [time, setTime] = useState('11:00 am')
   const [customTime, setCustomTime] = useState('11:00')
@@ -1830,6 +1880,9 @@ function ScheduleFollowUpModal({ store, leadId }) {
     const fullAction = `${action} — ${l.name}`
     store.setFollowUp(l.id, {
       action: fullAction,
+      // `at` is the appointment. date/time are kept only so the three rows
+      // written before this fix keep rendering; everything new reads `at`.
+      at: instantOf(finalDate, finalTime),
       date: finalDate,
       time: finalTime,
       note: note.trim() || undefined,
@@ -1869,8 +1922,8 @@ function ScheduleFollowUpModal({ store, leadId }) {
               style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)', marginTop: 5, fontSize: 13, fontFamily: 'inherit' }} />
           ) : (
             <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 5 }}>
-              {['Today', 'Tomorrow', 'This Saturday', 'This Sunday', '2026-07-15'].map(d =>
-                pill(day === d, () => { setDay(d); setUseCustomDate(false) }, d)
+              {chips.map(c =>
+                pill(day === c.ymd, () => { setDay(c.ymd); setUseCustomDate(false) }, c.label)
               )}
             </div>
           )}

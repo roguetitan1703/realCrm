@@ -84,6 +84,43 @@ export function whenLabel(iso) {
 
 
 /**
+ * WHEN A FOLLOW-UP IS DUE. The one function, for the same reason whenLabel is.
+ *
+ * `at` is the appointment — a real instant, written by the schedule modal.
+ * Rows saved before that existed carry only a `date` string a human typed
+ * ("This Sunday"), which cannot be parsed into a day and is therefore shown
+ * exactly as stored rather than guessed at. An agent re-picking the date is how
+ * one of those becomes real; inventing a Sunday for them is not.
+ */
+export function followUpLabel(fu) {
+  if (!fu) return ''
+  if (fu.at) {
+    const d = new Date(fu.at)
+    if (!isNaN(d.getTime())) {
+      const now = new Date()
+      const time = d.toLocaleTimeString('en-IN', TIME)
+      const sameDay = (a, b) => a.toDateString() === b.toDateString()
+      if (sameDay(d, now)) return `Today, ${time}`
+      const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1)
+      if (sameDay(d, tomorrow)) return `Tomorrow, ${time}`
+      const date = d.toLocaleDateString('en-IN', d.getFullYear() === now.getFullYear()
+        ? { weekday: 'short', day: 'numeric', month: 'short' }
+        : { day: 'numeric', month: 'short', year: 'numeric' })
+      return `${date}, ${time}`
+    }
+  }
+  return [fu.date, fu.time].filter(Boolean).join(' · ')
+}
+
+/** A follow-up whose moment has passed. Unknowable for the legacy string rows,
+ *  and false is the honest answer there — not a guess that marks work overdue. */
+export function followUpOverdue(fu) {
+  if (!fu?.at) return false
+  const d = new Date(fu.at)
+  return !isNaN(d.getTime()) && d.getTime() < Date.now()
+}
+
+/**
  * When a lead came in. Same rule as everything else — see whenLabel — with an
  * option to drop the clock time where only the day matters (a list column).
  */

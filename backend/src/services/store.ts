@@ -1242,21 +1242,21 @@ export async function searchWorkspace(q: string, limit = 8): Promise<{ leads: an
 export async function getDeskSummary(): Promise<any> {
   const t = tid();
   const mine = leadScope();
-  // The dashboard tile labelled "Arrived today" opens the Leads list on the
-  // `new` pill, so it has to be counted by the pill's own definition — see
-  // leadSegments(). It was a rolling `now() - 3 hours`, which is neither today
-  // nor a worklist: at 2:20pm on bhumi the tile read 12, the list it opened
-  // held 13, and 16 leads had actually arrived that day. Three numbers for one
-  // word. The stage test is what makes it shrink as the desk works it.
-  const arrival = await arrivalStageOf(t);
-  const newToday = sql`(created_at >= date_trunc('day', now()) AND stage = ${arrival})`;
+  // Every tile here is counted with the SAME expression as the list it opens,
+  // taken from leadSegments() rather than rewritten. The tile that wasn't read
+  // a rolling `now() - 3 hours` while its list read "arrived today and still
+  // untouched": at 2:20pm on bhumi the tile said 12, the list held 13, and 16
+  // leads had actually arrived. Three numbers for one word.
+  const S = leadSegments(await deskConfigOf(t));
   const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
                count(*) FILTER (WHERE overdue)::int AS overdue,
                count(*) FILTER (WHERE follow_up IS NOT NULL)::int AS with_follow_up,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
-               count(*) FILTER (WHERE ${newToday})::int AS new_today,
+               count(*) FILTER (WHERE ${S.today})::int AS new_today,
+               count(*) FILTER (WHERE ${S.untouched_sla})::int AS untouched_sla,
+               count(*) FILTER (WHERE ${S.noanswer_stale})::int AS noanswer_stale,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine}`,
     sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
@@ -1304,7 +1304,7 @@ export async function getDeskSummary(): Promise<any> {
     stagesByAgent.get(r.a)![r.s] = r.n;
   }
   return {
-    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0 },
+    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, untouched_sla: 0, noanswer_stale: 0 },
     byStage: asMap(byStage),
     bySource: asMap(bySource),
     perAgent: Object.fromEntries(perAgent.map(r => [r.k, {
@@ -2011,7 +2011,11 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
  * everything since the 1st that today is not claiming — rather than nesting.
  * Without the exclusion a worked lead from this morning would fall through both.
  */
-function leadSegments(arrivalStage: string) {
+/** A lead rung once and not rung again is not being worked. Days, not hours: a
+ *  buyer who missed a call at 11am is not owed another before lunch. */
+export const RETRY_DAYS = 3;
+
+function leadSegments({ arrivalStage, slaHours }: DeskConfig) {
   const untouched = sql`stage = ${arrivalStage}`;
   const newToday = sql`(created_at >= date_trunc('day', now()) AND ${untouched})`;
   return {
@@ -2026,6 +2030,18 @@ function leadSegments(arrivalStage: string) {
     closed: sql`NOT (${OPEN})`,
     // The calendar shows leads with a next step booked, and only those.
     followup: sql`follow_up IS NOT NULL`,
+    // The two piles the desk actually loses money on, and the reason they are
+    // defined HERE: the dashboard tile and the list it opens then read one
+    // expression. Counting them separately is what put a 12 on a tile above a
+    // list of 13.
+    //
+    // Past the SLA and still never contacted. Measured at 2x slaHours — the
+    // point the sweep escalates to a manager — so the tile agrees with the
+    // alert instead of quietly using a rounder number.
+    untouched_sla: sql`(${untouched} AND created_at <= now() - (${slaHours * 2}::text || ' hours')::interval)`,
+    // Rung, no answer, and nobody has been back since. This is the pile with no
+    // exit rule: on the live desk it was a fifth of every lead in the system.
+    noanswer_stale: sql`(stage = 'Call Not Received' AND updated_at <= now() - (${RETRY_DAYS}::text || ' days')::interval)`,
   };
 }
 
@@ -2037,17 +2053,30 @@ export type LeadSegment = keyof ReturnType<typeof leadSegments>;
  * Cached briefly: it is read on every list and every summary, and it changes
  * about once in a workspace's lifetime.
  */
-const arrivalStageCache = new Map<string, { v: string; at: number }>();
+const arrivalStageCache = new Map<string, { v: DeskConfig; at: number }>();
 const ARRIVAL_TTL_MS = 60_000;
 
-async function arrivalStageOf(tenantId: string): Promise<string> {
+/** The two settings every worklist question is asked against. */
+export type DeskConfig = { arrivalStage: string; slaHours: number };
+
+async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
   const hit = arrivalStageCache.get(tenantId);
   if (hit && Date.now() - hit.at < ARRIVAL_TTL_MS) return hit.v;
   const rows = await sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${tenantId} LIMIT 1`;
-  const stages = rows[0]?.value?.stages;
-  const v = (Array.isArray(stages) && stages[0]) || 'New';
+  const cfg = rows[0]?.value || {};
+  const stages = cfg.stages;
+  const v: DeskConfig = {
+    arrivalStage: (Array.isArray(stages) && stages[0]) || 'New',
+    // Same floor the SLA sweep applies, so an alert and the tile that counts
+    // the same leads cannot be reading two different windows.
+    slaHours: Math.max(Number(cfg.slaHours) || 24, 1),
+  };
   arrivalStageCache.set(tenantId, { v, at: Date.now() });
   return v;
+}
+
+async function arrivalStageOf(tenantId: string): Promise<string> {
+  return (await deskConfigOf(tenantId)).arrivalStage;
 }
 
 /**
@@ -2094,7 +2123,7 @@ export async function listLeads(opts: {
   const SALE = sql`(lower(coalesce(deal, '')) = 'sale' OR lower(coalesce(purpose, '')) = 'sale')`;
   if (opts.intent === 'buy' || opts.intent === 'sale') where.push(SALE);
   else if (opts.intent === 'rent') where.push(RENT);
-  const SEGMENTS = leadSegments(await arrivalStageOf(t));
+  const SEGMENTS = leadSegments(await deskConfigOf(t));
   const segment = SEGMENTS[opts.segment as LeadSegment];
   if (segment) where.push(segment);
 
@@ -2696,7 +2725,7 @@ export async function getOwnerTodayRows(perGroup = 6, mine?: boolean): Promise<a
 export async function getLeadsSummary(): Promise<any> {
   const t = tid();
   const scope = leadScope();
-  const filters = Object.entries(leadSegments(await arrivalStageOf(t)))
+  const filters = Object.entries(leadSegments(await deskConfigOf(t)))
     .map(([key, pred]) => sql`count(*) FILTER (WHERE ${pred})::int AS ${sql(key)}`)
     .reduce((acc, f) => sql`${acc}, ${f}`);
   const RENT = sql`(lower(coalesce(deal, '')) IN ('rent', 'lease') OR lower(coalesce(purpose, '')) IN ('rent', 'lease'))`;

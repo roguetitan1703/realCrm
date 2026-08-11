@@ -133,8 +133,15 @@ export default function App() {
   const callQueue = ownerSummary?.summary?.queue || null
   const totals = desk?.leads || { total: 0, overdue: 0, unassigned: 0 }
   const newCount = desk?.byStage?.['New'] || 0
-  const unreadNotifs = (state.notifications || []).filter(n => !n.read).length
-  const unread = totals.overdue + totals.unassigned + unreadNotifs
+  // The bell badge is unread NOTIFICATIONS — the thing the bell opens onto.
+  // It used to be `overdue + unassigned + unreadNotifs`, which was only ever
+  // right by accident: both lead counts were permanently 0, so the sum happened
+  // to equal the notification count. Replacing them with counts that actually
+  // move exposed it — 143 on a bell whose drawer said 55.
+  //
+  // Lead piles are the dashboard's job and they have tiles of their own. A
+  // count has to describe the rows behind the thing it is printed on.
+  const unread = state.notifUnread || 0
 
   // Workspace provisioning lives in the Delpat superadmin console (/admin), not
   // here — a visitor on the login page can no longer create tenants.
