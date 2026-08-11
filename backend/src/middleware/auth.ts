@@ -76,13 +76,44 @@ export async function withRequestContext(req: Request, res: Response, next: Next
     // Legacy tokens (no jti, from the dormant OTP flow) still pass. A transient DB
     // hiccup fails OPEN (don't log everyone out); only a definitively gone session
     // is rejected.
+    let sessionAlive = true;
     if (claims.jti) {
       try {
-        const session = await touchSession(claims.jti);
-        if (!session) return res.status(401).json({ error: 'Session expired', code: 'SESSION_INVALID' });
+        sessionAlive = !!(await touchSession(claims.jti));
       } catch (e: any) {
         console.warn('[Auth] session check errored (allowing):', e?.message);
       }
+    }
+    // A DEAD SESSION MAKES YOU ANONYMOUS. IT MUST NOT MAKE YOU UNSERVEABLE.
+    //
+    // This used to `return res.status(401)` right here — from middleware that
+    // runs on EVERY route, including /auth/login. An idle timeout kills the
+    // session row while the JWT it was issued with is still inside its own
+    // lifetime, so the browser goes on attaching a token that verifies fine and
+    // names a session that is gone. Every request 401s, including the one
+    // trying to sign back in: the login handler was never reached, the password
+    // was never checked, and the answer looked like an auth failure. Re-typing
+    // it could not help, and nothing short of clearing site data recovered it —
+    // which on an installed PWA is not something anyone should have to find.
+    //
+    // Falling through as anonymous costs nothing: requireTenantAuth rejects a
+    // request with no req.user, so every protected route still 401s. The only
+    // behaviour that changes is that the pre-login routes now work, which is
+    // the entire point of them.
+    if (!sessionAlive) {
+      // Take the token OFF the request, not just out of the context. Several
+      // auth routes (/auth/me, /auth/password/change, /auth/sessions) read the
+      // bearer straight out of the header rather than req.user, so leaving it
+      // in place would let a revoked or timed-out session keep answering —
+      // which is the opposite of what killing a session is for. Removing it
+      // here closes every one of those paths at once.
+      delete req.headers.authorization;
+      ctx = {
+        tenantId: headerTenant, userId: null, role: null, actorType: 'anonymous',
+        actorLabel: null, ip: req.ip || req.socket?.remoteAddress || null,
+        userAgent: (req.headers['user-agent'] as string) || null,
+      };
+      return runWithContext(ctx, () => next());
     }
     ctx = {
       tenantId: claims.tenant_id, userId: claims.user_id, role: claims.role, actorType: 'user',

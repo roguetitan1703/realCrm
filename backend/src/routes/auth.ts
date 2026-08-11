@@ -27,6 +27,23 @@ function tenantFromHeader(req: Request): string {
   return (req.headers['x-tenant-id'] as string) || DEFAULT_TENANT_ID;
 }
 
+/**
+ * The workspace a sign-in is FOR. No default.
+ *
+ * tenantFromHeader falls back to DEFAULT_TENANT_ID, which is the demo tenant.
+ * On a read that is merely wrong; on a login it means a request that forgot to
+ * say which firm it belongs to gets its credentials checked against the demo
+ * workspace — and answered "Invalid credentials", because the account lives
+ * somewhere else. A person with the correct password is told it is wrong, and
+ * nothing in the response hints at the real reason.
+ *
+ * Say so instead.
+ */
+function tenantForLogin(req: Request): string | null {
+  const t = (req.headers['x-tenant-id'] as string || '').trim();
+  return t || null;
+}
+
 function reqCtx(req: Request) {
   return { ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null };
 }
@@ -77,7 +94,9 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     const { handle, identifier, password } = req.body || {};
     const h = handle || identifier;
     if (!h || !password) return res.status(400).json({ error: 'handle and password are required' });
-    const out = await passwordLogin(tenantFromHeader(req), h, password, reqCtx(req));
+    const tenant = tenantForLogin(req);
+    if (!tenant) return res.status(400).json({ error: 'No workspace selected', message: 'Open your workspace URL and sign in there.' });
+    const out = await passwordLogin(tenant, h, password, reqCtx(req));
     if ('error' in out) return res.status(401).json({ error: 'Invalid credentials' });
     return res.status(200).json({ success: true, token: out.token, user: out.user, mustChange: out.mustChange });
   } catch (err: any) {

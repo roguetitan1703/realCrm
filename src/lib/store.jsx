@@ -7,7 +7,7 @@ import { createContext, useContext, useReducer, useCallback, useRef, useEffect }
 import { DEFAULT_SETTINGS, DEFAULT_BRAND, PROTECTED_STAGES } from '../data/theme.js'
 import { initials } from './format.js'
 import { generateMessage, followUpMessage } from './matching.js'
-import { api as apiClient } from './api.js'
+import { api as apiClient, invalidateReads } from './api.js'
 import { applyBrandColor } from './brand.js'
 import { setTenantIdentity } from './tenant.js'
 import { applyPwaIdentity, slugFromLocation } from './pwa.js'
@@ -1355,9 +1355,20 @@ export function StoreProvider({ children }) {
     logout: () => {
       apiClient.logout?.()          // revoke the server session (best-effort)
       apiClient.clearToken?.()
+      // Reads are cached for 30s keyed by URL alone, with no notion of who
+      // asked. Signing out and back in inside that window — which is exactly
+      // what happens when an idle timeout bounces you — would otherwise serve
+      // the previous session's answers, and on a shared laptop the previous
+      // PERSON's. Clearing on the way out costs one refetch.
+      invalidateReads()
       if (typeof window !== 'undefined') {
         try {
           window.localStorage?.removeItem('crm_auth_session')
+          // The workspace this browser last touched. Left behind, it outlived
+          // the session and was sent as X-Tenant-ID on the NEXT workspace's
+          // login — see getHeaders(). The URL is the authority; nothing needs
+          // this to persist across a sign-out.
+          window.localStorage?.removeItem('crm_tenant_id')
           const currentSlug = slugFromLocation() || window.localStorage?.getItem('crm_tenant_id')
           if (currentSlug) {
             window.history.replaceState({}, document.title, `/${currentSlug}`)

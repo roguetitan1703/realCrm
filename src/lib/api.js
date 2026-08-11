@@ -151,7 +151,19 @@ function lsSet(k, v) { try { if (typeof window === 'undefined' || !window.localS
 
 function getHeaders(customHeaders = {}) {
   const slug = typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '';
-  const tenantId = typeof window !== 'undefined' ? (window.localStorage?.getItem('crm_tenant_id') || slug || '') : '';
+  // THE URL DECIDES THE WORKSPACE. `crm_tenant_id` is a single global key that
+  // logout never cleared, so it survived from whichever workspace was opened
+  // last — and it used to win over the slug. Open bhumi, come back to /delpat,
+  // sign in with the right password, and the login POST carried bhumi's id:
+  // the server looked the account up in the wrong firm and answered "Invalid
+  // credentials". Nothing about the token was wrong, which is why re-logging-in
+  // never helped and it looked like the password had changed.
+  //
+  // Stored value is the fallback only — the workspace picker and /admin have no
+  // slug in the path.
+  const tenantId = typeof window !== 'undefined'
+    ? ((slug && slug !== 'admin' ? slug : '') || window.localStorage?.getItem('crm_tenant_id') || '')
+    : '';
   const base = {
     'X-Tenant-ID': tenantId,
     'Content-Type': 'application/json',
@@ -343,6 +355,18 @@ export const api = {
   // ── Password auth (auth v2) ────────────────────────────────────────────────
   // Handle is an email (owner/manager) or an assigned login_id (agent).
   login: async (handle, password, tenantSlug) => {
+    // Drop whatever token is lying around BEFORE asking for a new one.
+    //
+    // getHeaders() attaches the stored bearer to every call, this one included,
+    // and a token left over from a timed-out session names a session the server
+    // has already deleted. The backend used to reject the whole request on that
+    // basis from middleware that runs before any route — so the sign-in never
+    // reached the handler, the password was never checked, and the answer read
+    // as an auth failure that retyping could not fix. The server no longer does
+    // that, but there is no reason to present a dead credential while asking
+    // for a live one, and this half reaches production first: the frontend
+    // deploys on push, the API by hand.
+    api.clearToken(tenantSlug);
     const res = await request('/auth/login', { method: 'POST', body: JSON.stringify({ handle, password }) });
     if (res?.token) {
       const slug = tenantSlug || (typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '');
