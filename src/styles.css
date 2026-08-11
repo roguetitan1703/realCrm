@@ -2539,3 +2539,10 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 
 /* The reason a record was closed out, beside its status. */
 .rh-prog-note{display:inline-flex;align-items:center;padding:5px 10px;border-radius:var(--radius);background:var(--alert-wash);border:1px solid #E4C4C0;color:var(--alert);font-size:12.5px;font-weight:600;white-space:nowrap}
+
+/* Notification row icon. Replaces the emoji that used to lead each title —
+   one glyph per type, tone as colour only. */
+.notif-ico{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex-shrink:0;
+  background:var(--card-2);color:var(--ink-2);border:1px solid var(--line)}
+.notif-ico.t-attention{background:var(--accent-wash);color:var(--accent);border-color:transparent}
+.notif-ico.t-urgent{background:var(--alert-wash,var(--accent-wash));color:var(--alert,var(--accent));border-color:transparent}

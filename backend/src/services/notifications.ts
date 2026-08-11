@@ -16,6 +16,8 @@ import { sendPushToUser } from './push.js';
 // The retry window is shared with the dashboard tile and the Leads filter that
 // count the same leads. Three definitions of "not retried" would drift.
 import { RETRY_DAYS } from './store.js';
+// Every word a notification says, keyed on its type.
+import { copyFor } from './notificationCopy.js';
 
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
@@ -24,7 +26,16 @@ function tid(): string {
 export interface NotifyInput {
   userId: string;
   type: string;                 // lead_assigned | lead_new | followup_set | ...
-  title: string;
+  /**
+   * The facts. Words come from the catalogue in notificationCopy.ts, keyed on
+   * `type` — pass `data` and let it write the sentence.
+   *
+   * `title`/`body` remain accepted for anything not migrated yet, and win when
+   * given, so a call site can move over one at a time. New call sites use
+   * `data`: writing prose here is how one type ended up with three titles.
+   */
+  data?: Record<string, any>;
+  title?: string;
   body?: string | null;
   link?: string | null;
   tenantId?: string;            // defaults to the request tenant
@@ -52,17 +63,25 @@ export async function notify(n: NotifyInput): Promise<void> {
   const t = n.tenantId || tid();
   if (!n.userId) return;
   if (!n.toSelf && getContext()?.userId && getContext()!.userId === n.userId) return;
+  // Catalogue first, explicit text second. A call site that passes neither
+  // has nothing to say and is dropped rather than filed blank.
+  const c = n.title ? null : copyFor(n.type, n.data);
+  const title = n.title ?? c?.title;
+  const body = n.body ?? c?.body ?? null;
+  if (!title) return;
   const id = `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   await sql`
     INSERT INTO notifications (id, tenant_id, user_id, type, title, body, link)
-    VALUES (${id}, ${t}, ${n.userId}, ${n.type}, ${n.title}, ${n.body ?? null}, ${n.link ?? null});
+    VALUES (${id}, ${t}, ${n.userId}, ${n.type}, ${title}, ${body}, ${n.link ?? null});
   `;
   // Fan the same alert out to the user's devices (best-effort; push being off or
   // a device being unsubscribed never breaks the in-app feed).
   if (!n.push) return;
   sendPushToUser(t, n.userId, {
-    title: n.title,
-    body: n.body || '',
+    // The RENDERED text, not the raw input — a catalogue-driven call site
+    // passes no title at all, and this would have pushed `undefined`.
+    title,
+    body: body || '',
     // Links are stored relative (`?screen=leads&lead=…`) because in-app they
     // resolve against whatever page you are on. A push does not have a page: the
     // service worker resolves against the origin, which turned every deep link
@@ -135,12 +154,34 @@ export async function markAllRead(userId: string): Promise<void> {
 const SCAN_INTERVAL_MS = 60_000;
 let lastScanAt = 0;
 
-export async function processScheduledNotifications(): Promise<void> {
+/**
+ * Run the sweep. With no argument it does what the scheduler needs — every
+ * active tenant. With `onlySlug` it does exactly one.
+ *
+ * That argument exists because of a specific incident: this was called from a
+ * script to exercise ONE new alert against the testing org, and because the
+ * only thing it could do was walk every tenant, it delivered 13 notifications
+ * to the paying client's agents and stamped 13 of their leads. The alert was
+ * correct and the leads were real, which is precisely why nothing stopped it.
+ *
+ * A test that cannot name its target is not a test, it is a production run with
+ * an audience. `throttle: false` is here for the same reason — a scripted run
+ * must not silently no-op because a scheduled sweep happened forty seconds ago
+ * and leave someone believing the alert does not fire.
+ */
+export async function processScheduledNotifications(
+  { onlySlug, throttle = true }: { onlySlug?: string; throttle?: boolean } = {}
+): Promise<void> {
   const now = Date.now();
-  if (now - lastScanAt < SCAN_INTERVAL_MS) return;
-  lastScanAt = now;
+  if (throttle) {
+    if (now - lastScanAt < SCAN_INTERVAL_MS) return;
+    lastScanAt = now;
+  }
   try {
-    const tenants = await sql`SELECT DISTINCT tenant_id FROM users WHERE status ILIKE 'active'`;
+    const tenants = onlySlug
+      ? await sql`SELECT id AS tenant_id FROM tenants WHERE slug = ${onlySlug}`
+      : await sql`SELECT DISTINCT tenant_id FROM users WHERE status ILIKE 'active'`;
+    if (onlySlug && !tenants.length) throw new Error(`No tenant with slug "${onlySlug}" — refusing to fall back to all tenants.`);
     for (const { tenant_id: t } of tenants) {
       // 1. followup_due & site_visit_reminder
       const dueLeads = await sql`
@@ -162,8 +203,7 @@ export async function processScheduledNotifications(): Promise<void> {
             userId: l.agent_id,
             tenantId: t,
             type: isVisit ? 'site_visit_reminder' : 'followup_due',
-            title: isVisit ? '🚗 Site Visit Due Now' : '⏰ Follow-up Due Now',
-            body: `${l.name}${l.locality ? ` · ${l.locality}` : ''} (${action})`,
+            data: { name: l.name, locality: l.locality, action, when: l.follow_up?.time },
             link: `?screen=leads&lead=${l.id}`,
             push: true,
             toSelf: true
@@ -198,15 +238,19 @@ export async function processScheduledNotifications(): Promise<void> {
       // rather than being another hardcoded number.
       const lookbackHours = mgrHours * 3;
       const staleLeads = await sql`
-        SELECT id, name, agent_id, locality, created_at,
-          COALESCE((metadata->>'sla_agent_notified')::boolean, false) AS agent_notified,
-          COALESCE((metadata->>'sla_mgr_notified')::boolean, false) AS mgr_notified
-        FROM crm_leads
-        WHERE tenant_id = ${t}
-          AND stage = ${arrivalStage}
-          AND created_at <= NOW() - (${agentHours}::text || ' hours')::interval
-          AND created_at >= NOW() - (${lookbackHours}::text || ' hours')::interval
-          AND (metadata->>'sla_mgr_notified') IS NULL
+        SELECT l.id, l.name, l.agent_id, l.locality, l.created_at,
+          -- The manager's version names whose lead it is; without it an
+          -- escalation tells the desk something is late but not who to ask.
+          u.name AS agent_name,
+          COALESCE((l.metadata->>'sla_agent_notified')::boolean, false) AS agent_notified,
+          COALESCE((l.metadata->>'sla_mgr_notified')::boolean, false) AS mgr_notified
+        FROM crm_leads l
+        LEFT JOIN users u ON u.id = l.agent_id
+        WHERE l.tenant_id = ${t}
+          AND l.stage = ${arrivalStage}
+          AND l.created_at <= NOW() - (${agentHours}::text || ' hours')::interval
+          AND l.created_at >= NOW() - (${lookbackHours}::text || ' hours')::interval
+          AND (l.metadata->>'sla_mgr_notified') IS NULL
         LIMIT 30
       `;
 
@@ -218,9 +262,11 @@ export async function processScheduledNotifications(): Promise<void> {
           notify({
             userId: l.agent_id,
             tenantId: t,
-            type: 'lead_stale_sla',
-            title: '⚠️ SLA Warning: Untouched Lead',
-            body: `${l.name} has been in ${arrivalStage} for over ${agentHours}h`,
+            // Split from the single lead_stale_sla type, which carried both
+            // this and the manager escalation below — two readers, two
+            // urgencies, indistinguishable except by reading the string.
+            type: 'lead_untouched',
+            data: { name: l.name, hours: agentHours },
             link,
             push: true,
             toSelf: true
@@ -236,9 +282,8 @@ export async function processScheduledNotifications(): Promise<void> {
         if (hoursAge >= mgrHours && !l.mgr_notified) {
           notifyRoles(['owner', 'manager'], {
             tenantId: t,
-            type: 'lead_stale_sla',
-            title: '🚨 SLA Escalation: Untouched Lead',
-            body: `${l.name} untouched in ${arrivalStage} for over ${mgrHours}h — action required`,
+            type: 'lead_untouched_escalated',
+            data: { name: l.name, hours: mgrHours, agent: l.agent_name },
             link,
             push: true,
             toSelf: true
@@ -271,7 +316,10 @@ export async function processScheduledNotifications(): Promise<void> {
                -- for a lead staged at exactly 4: the database clock runs a few
                -- seconds ahead of the app server, so a whole-day age lands a
                -- hair under the integer and floors down.
-               floor(EXTRACT(EPOCH FROM (NOW() - updated_at)) / 86400)::int AS age_days
+               floor(EXTRACT(EPOCH FROM (NOW() - updated_at)) / 86400)::int AS age_days,
+               -- Rendered in the desk's own zone. An agent reads "last tried
+               -- 7 Aug", not a timestamp and not "4 days" twice over.
+               to_char(updated_at AT TIME ZONE 'Asia/Kolkata', 'FMDD Mon') AS last_tried
         FROM crm_leads
         WHERE tenant_id = ${t}
           AND stage = 'Call Not Received'
@@ -287,8 +335,7 @@ export async function processScheduledNotifications(): Promise<void> {
           userId: l.agent_id,
           tenantId: t,
           type: 'lead_retry_due',
-          title: '📞 No answer — try again',
-          body: `${l.name} has had no answer for ${days} day${days === 1 ? '' : 's'}`,
+          data: { name: l.name, days, when: l.last_tried },
           link: `?screen=leads&lead=${l.id}`,
           push: true,
           toSelf: true

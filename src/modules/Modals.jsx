@@ -6,6 +6,7 @@ import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/fo
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink, followUpMessage } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
+import { notifMeta, cleanTitle, isAssignment } from '../lib/notificationMeta.js'
 import { REJECTION_REASONS, REJECTED_STATUS } from '../data/leadStatus.js'
 import { getPosition, processImage, uploadMedia } from '../lib/media.js'
 import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES, STATUS } from '../data/propertyFields.js'
@@ -1759,7 +1760,9 @@ export function NotifModal({ store, go }) {
             className={`qchip ${filter === 'assigned' ? 'on' : ''}`}
             onClick={() => setFilter('assigned')}
           >
-            Assignments ({notifs.filter(n => (n.title || '').toLowerCase().includes('assign')).length})
+            {/* By TYPE. It matched on the title text, so it emptied itself
+                the moment any assignment copy changed. */}
+            Assignments ({notifs.filter(isAssignment).length})
           </button>
         </div>
 
@@ -1784,9 +1787,13 @@ export function NotifModal({ store, go }) {
                 }}
                 onClick={() => openNotif(n)}
               >
-                <span className="notif-alert-dot" style={{ width: 8, height: 8, borderRadius: '50%', background: n.read ? 'transparent' : 'var(--accent)', marginTop: 6, flexShrink: 0 }} />
+                {/* The icon comes from the type, not from a character someone
+                    typed at the front of the title. See notificationMeta.js. */}
+                <span className={'notif-ico t-' + notifMeta(n.type).tone}>
+                  <Icon name={notifMeta(n.type).icon} size={15} />
+                </span>
                 <div className="notif-alert-content" style={{ flex: 1, minWidth: 0 }}>
-                  <div className="notif-alert-title" style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--ink)' }}>{n.title}</div>
+                  <div className="notif-alert-title" style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--ink)' }}>{cleanTitle(n.title)}</div>
                   {n.body && <div className="notif-alert-body" style={{ fontSize: 12.5, color: 'var(--ink-2)', marginTop: 2 }}>{n.body}</div>}
                 </div>
                 <span className="notif-alert-ago" style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>{notifAgo(n.created_at)}</span>
