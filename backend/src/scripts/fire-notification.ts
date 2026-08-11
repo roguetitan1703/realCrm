@@ -128,10 +128,78 @@ async function countsByTenant() {
   return new Map((rows as any[]).map(r => [r.slug, r.n]));
 }
 
+/**
+ * One of EVERY catalogue type, delivered for real, and left in place to look at.
+ *
+ * Separate from the staged cases above on purpose: those prove the sweep's
+ * QUERIES find the right leads, this proves the WORDS. Sent straight through
+ * notify() so what lands is what a person would actually receive, push off so
+ * reviewing twenty of them does not buzz a phone twenty times.
+ *
+ *   --catalogue          send them
+ *   --catalogue --clear  take them away again
+ */
+const CATALOGUE: [string, any][] = [
+  ['lead_assigned', { name: 'Priya Shah', locality: 'Wakad', source: '99acres' }],
+  ['lead_assigned_bulk', { n: 4 }],
+  ['lead_new', { name: 'Rohit Menon', locality: 'Baner', agent: 'Kavish' }],
+  ['lead_unrouted', { name: 'Anjali Rao', source: 'Housing.com' }],
+  ['lead_reassigned', { name: 'Imran Sheikh' }],
+  ['lead_moved_away', { n: 3 }],
+  ['lead_untouched', { name: 'Priya Shah', hours: 24 }],
+  ['lead_untouched_escalated', { name: 'Rohit Menon', hours: 48, agent: 'Kavish' }],
+  ['lead_retry_due', { name: 'Imran Sheikh', days: 4, when: '7 Aug' }],
+  ['followup_set', { name: 'Anjali Rao', at: new Date(Date.now() + 3 * 86400e3).toISOString() }],
+  ['followup_due', { name: 'Priya Shah', action: 'Follow-up Call', locality: 'Baner' }],
+  ['site_visit_reminder', { name: 'Rohit Menon', when: '11:00 am', locality: 'Wakad' }],
+  ['calendar_task_assigned', { name: 'Anjali Rao', at: new Date(Date.now() + 86400e3).toISOString(), isVisit: true }],
+  ['remark_added', { name: 'Imran Sheikh' }],
+  ['owner_assigned', { n: 2 }],
+  ['owner_reassigned', { name: 'Ramesh Kulkarni' }],
+];
+
+async function catalogue(tenantId: string) {
+  const { notify } = await import('../services/notifications.js');
+  const [owner] = await sql`SELECT id, name FROM users WHERE tenant_id = ${tenantId} AND role = 'owner' ORDER BY id LIMIT 1`;
+  if (!owner) throw new Error('no owner on this tenant to address them to');
+
+  if (has('clear')) {
+    const gone = await sql`DELETE FROM notifications WHERE tenant_id = ${tenantId} AND user_id = ${owner.id}
+                           AND id LIKE 'ntf_cat_%' RETURNING id`;
+    console.log(`
+removed ${gone.length} catalogue notification(s) from ${owner.name}
+`);
+    return;
+  }
+
+  console.log(`
+sending one of every type to ${owner.name} (${owner.id})
+`);
+  for (const [type, data] of CATALOGUE) {
+    await notify({ userId: owner.id, tenantId, type, data, link: '?screen=leads', toSelf: true, push: false });
+  }
+  // Tag them so --clear can find exactly these and nothing else.
+  await sql`UPDATE notifications SET id = 'ntf_cat_' || id
+            WHERE tenant_id = ${tenantId} AND user_id = ${owner.id}
+              AND created_at > now() - interval '2 minutes' AND id NOT LIKE 'ntf_cat_%'`;
+  const rows = await sql`SELECT type, title, body FROM notifications
+    WHERE tenant_id = ${tenantId} AND user_id = ${owner.id} AND id LIKE 'ntf_cat_%' ORDER BY created_at`;
+  for (const r of rows as any[]) {
+    console.log(`  ${String(r.type).padEnd(26)}${r.title}`);
+    if (r.body) console.log(`  ${' '.repeat(26)}${r.body}`);
+  }
+  console.log(`
+${rows.length} delivered. Open the bell on /${slug}.`);
+  console.log(`Remove them with:  npx tsx src/scripts/fire-notification.ts --catalogue --clear
+`);
+}
+
 async function main() {
   const { processScheduledNotifications } = await import('../services/notifications.js');
   const [t] = await sql`SELECT id FROM tenants WHERE slug = ${slug}`;
   if (!t) throw new Error(`No tenant "${slug}"`);
+
+  if (has('catalogue')) { await catalogue(t.id); await sql.end(); process.exit(0); }
 
   const wanted = arg('type');
   const cases = has('all') ? CASES : CASES.filter(c => c.type === wanted);
