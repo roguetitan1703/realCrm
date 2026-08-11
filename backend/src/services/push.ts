@@ -50,6 +50,22 @@ export async function removeSubscription(endpoint: string): Promise<void> {
 
 export async function sendPushToUser(tenantId: string, userId: string, payload: any): Promise<void> {
   if (!enabled || !userId || !tenantId) return;
+  // A PUSH IS ONLY FOR SOMEONE WHO IS SIGNED IN.
+  //
+  // A push subscription is per-device and outlived the session that created it:
+  // nothing removed it at sign-out, and this fanned out to every row for the
+  // user regardless. So a phone that had been signed out went on buzzing with
+  // lead names and phone numbers — on a handset that had been handed to someone
+  // else, or sold, that is a firm's contact list leaving the building.
+  //
+  // The same liveness test the request path uses (auth.ts touchSession): not
+  // revoked, not expired. Signed out everywhere means no push, whether or not
+  // the browser managed to unsubscribe on the way out — which it cannot do at
+  // all if the sign-out happened by timeout, or on a device that is offline.
+  const [live] = await sql`
+    SELECT count(*)::int AS n FROM sessions
+    WHERE user_id = ${userId} AND revoked = FALSE AND expires_at > NOW()`;
+  if (!live?.n) return;
   const subs = await sql`SELECT * FROM push_subscriptions WHERE tenant_id = ${tenantId} AND user_id = ${userId}`;
   const body = JSON.stringify(payload);
   await Promise.all(subs.map(async (s: any) => {

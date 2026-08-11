@@ -1696,10 +1696,9 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   });
   // Alert the assigned agent, and give owners/managers team-wide visibility.
   const link = `?screen=leads&lead=${newId}`;
-  const where = locality ? ` · ${locality}` : '';
   // PUSH: speed-to-lead decides who wins the deal. A lead sitting unseen for
   // twenty minutes is usually a lead someone else has already called.
-  notify({ userId: agentId, type: 'lead_assigned', title: 'New lead assigned to you', body: `${name}${where} (${source})`, link, push: true })
+  notify({ userId: agentId, type: 'lead_assigned', data: { name, locality, source }, link, push: true })
     .catch(err => console.warn('[Notify] lead_assigned failed:', err?.message));
   // Name the agent, not their primary key. This read "routed to u_ms6oqbda",
   // which tells the person reading it nothing and looks broken besides.
@@ -1711,14 +1710,13 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // FEED ONLY: an owner wants to see the flow, but a desk taking 60 leads a day
   // cannot have 60 phone buzzes — that is the volume at which people mute the
   // app. The exception below is the one an owner genuinely must act on.
-  notifyRoles(['owner', 'manager'], { type: 'lead_new', title: 'New lead captured', body: `${name}${where} → routed to ${agentName}`, link })
+  notifyRoles(['owner', 'manager'], { type: 'lead_new', data: { name, locality, agent: agentName }, link })
     .catch(err => console.warn('[Notify] lead_new failed:', err?.message));
   // PUSH: nobody was assigned, so this lead is sitting with no owner and no
   // one is coming for it. That is an exception, not a routine arrival.
   if (!agentId) {
     notifyRoles(['owner', 'manager'], {
-      type: 'lead_unrouted', title: 'Lead arrived with nobody to take it',
-      body: `${name}${where} (${source}) — assign it to someone`, link, push: true,
+      type: 'lead_unrouted', data: { name, source }, link, push: true,
     }).catch(err => console.warn('[Notify] lead_unrouted failed:', err?.message));
   }
   return created;
@@ -1829,26 +1827,29 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // haven't read yet, so this can't wait for you to next open the app.
   // notify() drops it when you assigned it to yourself.
   if (patch.agentId !== undefined && agentId && agentId !== oldLead.agentId) {
-    notify({ userId: agentId, type: 'lead_reassigned', title: 'A lead was assigned to you', body: `${name}`, link, push: true })
+    notify({ userId: agentId, type: 'lead_reassigned', data: { name }, link, push: true })
       .catch(err => console.warn('[Notify] lead_reassigned failed:', err?.message));
   }
   // FEED ONLY: worth seeing when a manager schedules something on your lead;
   // never worth a buzz, and never at all when you scheduled it yourself — the
   // form already confirmed it on screen a second ago.
   if (patch.followUp && agentId) {
-    const when = (patch.followUp.action || patch.followUp.label || 'Follow-up scheduled');
-    const isVisit = /visit/i.test(when);
+    const action = (patch.followUp.action || patch.followUp.label || 'Follow-up scheduled');
+    const isVisit = /visit/i.test(action);
+    // The appointment itself, not the words describing it. The catalogue turns
+    // it into a readable day and time — a call site that formats its own is how
+    // the same fact ended up phrased four ways.
+    const at = patch.followUp.at || null;
     if (ctx.actorId && ctx.actorId !== agentId) {
       notify({
         userId: agentId,
         type: 'calendar_task_assigned',
-        title: isVisit ? '📅 New Site Visit assigned to you' : '📅 New Task assigned to you',
-        body: `${name} · ${when}`,
+        data: { name, at, isVisit },
         link,
         push: true
       }).catch(err => console.warn('[Notify] calendar_task_assigned failed:', err?.message));
     } else {
-      notify({ userId: agentId, type: 'followup_set', title: 'Follow-up scheduled', body: `${name} · ${when}`, link })
+      notify({ userId: agentId, type: 'followup_set', data: { name, at }, link })
         .catch(err => console.warn('[Notify] followup_set failed:', err?.message));
     }
   }
@@ -1860,8 +1861,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       notify({
         userId: agentId,
         type: 'remark_added',
-        title: '💬 New Note Added to Lead',
-        body: `${name} · "${noteText.slice(0, 60)}"`,
+        data: { name },
         link,
         push: true,
         toSelf: true,
@@ -2235,9 +2235,8 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
   });
   if (agentId) {
     notify({
-      userId: agentId, type: 'lead_reassigned', push: true,
-      title: `${n} lead${n === 1 ? '' : 's'} assigned to you`,
-      body: n === 1 ? 'Open your leads to pick it up.' : 'Open your leads to pick them up.',
+      userId: agentId, type: 'lead_assigned_bulk', push: true,
+      data: { n },
       link: '?screen=leads',
     }).catch(err => console.warn('[Notify] bulk assign failed:', err?.message));
   }
@@ -2325,8 +2324,7 @@ function queueOwnerArrivalNotice(agentId: string): void {
     if (actorId === agentId) return;
     notify({
       userId: agentId, tenantId, type: 'owner_assigned', push: true,
-      title: `${n} owner${n === 1 ? '' : 's'} assigned to you`,
-      body: 'Added to your calling queue.',
+      data: { n },
       link: '?screen=calling',
       toSelf: true,   // the actor check above already ran, with real context
     }).catch(err => console.warn('[Notify] owner arrival failed:', err?.message));
@@ -2557,8 +2555,7 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
   if (patch.agentId !== undefined && next.agent_id && next.agent_id !== existing.agentId) {
     notify({
       userId: next.agent_id, type: 'owner_reassigned', push: true,
-      title: 'An owner was assigned to you',
-      body: `${updated?.name || 'Owner'}${updated?.locality ? ` · ${updated.locality}` : ''}`,
+      data: { name: updated?.name || 'Owner' },
       link: `?screen=calling&owner=${id}`,
     }).catch(err => console.warn('[Notify] owner_reassigned failed:', err?.message));
   }
@@ -2601,8 +2598,7 @@ export async function bulkAssignOwners(ids: string[], agentId: string | null, ct
   if (agentId) {
     notify({
       userId: agentId, type: 'owner_reassigned', push: true,
-      title: `${n} owner${n === 1 ? '' : 's'} assigned to you`,
-      body: n === 1 ? 'Open Owners to start calling.' : 'Open Owners to start calling.',
+      data: { n },
       link: '?screen=clients&tab=owners',
     }).catch(err => console.warn('[Notify] owner bulk assign failed:', err?.message));
   }
@@ -3577,9 +3573,8 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
   // arrival, it is not urgent, so it stays in the feed without a push.
   for (const [agentId, count] of lost) {
     notify({
-      userId: agentId, tenantId, type: 'lead_reassigned',
-      title: `${count} lead${count === 1 ? '' : 's'} reassigned away`,
-      body: `No activity for over ${hours}h, so ${count === 1 ? 'it was' : 'they were'} routed on.`,
+      userId: agentId, tenantId, type: 'lead_moved_away',
+      data: { n: count },
       link: '?screen=leads', toSelf: true,
     }).catch(err => console.warn('[Notify] lead idle-loss failed:', err?.message));
   }
@@ -3806,8 +3801,10 @@ export async function addTimelineEvent(evt: Omit<TimelineEvent, 'id' | 'timestam
             userId: lead.agent_id,
             tenantId: t,
             type: 'remark_added',
-            title: '💬 New Note Added to Lead',
-            body: `${lead.name} · "${(evt.description || evt.title || '').slice(0, 60)}"`,
+            // No author: the event carries an author ID, not a name, and a
+            // notification reading "by u_ms6oqbda" is worse than one that does
+            // not say. Resolving it needs a lookup this path does not do.
+            data: { name: lead.name },
             link: `?screen=leads&lead=${lead.id}`,
             push: true,
             toSelf: true,

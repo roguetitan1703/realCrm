@@ -12,6 +12,7 @@ import { applyBrandColor } from './brand.js'
 import { setTenantIdentity } from './tenant.js'
 import { applyPwaIdentity, slugFromLocation } from './pwa.js'
 import { getPref } from './prefs.js'
+import { disablePush } from './push.js'
 import { isOpen } from '../data/leadStatus.js'
 
 const StoreCtx = createContext(null)
@@ -1353,6 +1354,13 @@ export function StoreProvider({ children }) {
       setTimeout(loadNotifications, 0)
     },
     logout: () => {
+      // Drop this device's push subscription FIRST, while the token still
+      // authenticates the call that removes it. It survived sign-out entirely
+      // — nothing here ever touched it — so a signed-out phone kept receiving
+      // lead names and numbers. The server now also refuses to push to a user
+      // with no live session, which covers the sign-outs this line cannot see
+      // (a timeout, or a device that is offline at the time).
+      disablePush?.().catch?.(() => {})
       apiClient.logout?.()          // revoke the server session (best-effort)
       apiClient.clearToken?.()
       // Reads are cached for 30s keyed by URL alone, with no notion of who

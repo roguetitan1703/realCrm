@@ -24,6 +24,21 @@ export type NotifCopy = { title: string; body?: string };
 /** "2 leads" / "1 lead" — the only place this decision is made. */
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/**
+ * An appointment instant as a person reads it, in the desk's own zone.
+ * Formatting here rather than at the call site is the point of this module —
+ * a "when" phrased at each site is how one fact ends up worded four ways.
+ */
+const whenLabel = (at?: string | null) => {
+  if (!at) return undefined;
+  const d = new Date(at);
+  if (isNaN(d.getTime())) return undefined;
+  return d.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short',
+    hour: 'numeric', minute: '2-digit',
+  });
+};
+
 /** Join the facts that are actually present. A body should never read "· ·". */
 const facts = (...parts: (string | null | undefined | false)[]) =>
   parts.filter(Boolean).join(' · ') || undefined;
@@ -73,7 +88,7 @@ export const COPY: Builders = {
 
   followup_set: (d) => ({
     title: 'Follow-up scheduled',
-    body: facts(d.name, d.when),
+    body: facts(d.name, whenLabel(d.at) || d.when),
   }),
   followup_due: (d) => ({
     title: 'Follow-up due now',
@@ -85,7 +100,7 @@ export const COPY: Builders = {
   }),
   calendar_task_assigned: (d) => ({
     title: d.isVisit ? 'Site visit assigned to you' : 'Task assigned to you',
-    body: facts(d.name, d.when),
+    body: facts(d.name, whenLabel(d.at) || d.when),
   }),
   remark_added: (d) => ({
     title: 'Note added',
