@@ -138,8 +138,13 @@ function KeyRow({ connection, store, fresh }) {
 // Activity
 // ---------------------------------------------------------------------------
 
+// "Lead created" was printed for pushes that created nothing. A repeat enquiry
+// from a buyer already on file is merged onto the existing lead, and the inbox
+// said the same words as a genuine first arrival — so one person who enquired
+// three times read as three new leads.
 const STATUS_TEXT = {
   parsed: 'Lead created',
+  merged: 'Added to an existing lead',
   pending: 'Waiting for mapping',
   ignored: 'Duplicate',
 }

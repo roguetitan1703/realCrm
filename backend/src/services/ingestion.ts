@@ -16,7 +16,7 @@
 import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
-import { findLeadByPhone, createLead, updateLead, nextRoutedAgent } from './store';
+import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent } from './store';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
 
@@ -233,7 +233,7 @@ export async function recordPush(args: {
 }
 
 export async function markInbox(
-  id: string, status: 'parsed' | 'failed' | 'ignored', extra: { leadId?: string | null; error?: string | null } = {},
+  id: string, status: 'parsed' | 'merged' | 'failed' | 'ignored', extra: { leadId?: string | null; error?: string | null } = {},
 ): Promise<void> {
   await sql`
     UPDATE webhook_inbox
@@ -399,13 +399,32 @@ export async function processInboxRow(
       // Idempotency: a portal that retries because our ack was slow must not
       // create the lead twice. Keyed on the provider's own id when they send
       // one, since that is the only identifier that survives a retry intact.
-      const externalId = lead.external_id || cleanPhone;
-      const lockKey = `ingest:${integration.id}:${externalId}`;
+      //
+      // It used to fall back to the PHONE NUMBER, held for seven days. On a
+      // connection that maps no external id — Housing.com sends three fields
+      // and has none to map — that reads "this person may enquire once a
+      // week": the second enquiry was dropped here, before the merge below
+      // could note it, so it never reached the lead, the timeline or anyone's
+      // screen. Two of Housing's were lost that way, 17 hours and 1h50m after
+      // the first. A retry arrives in seconds.
+      //
+      // With no provider id, dedupe on the BODY instead. Identical bytes are a
+      // retry; the same person saying something different is a new enquiry.
+      // And a short window, because with three fields a genuine second enquiry
+      // is byte-identical too — after which only the clock can tell them apart.
+      const providerId = lead.external_id;
+      const lockKey = providerId
+        ? `ingest:${integration.id}:${providerId}`
+        : `ingest:${integration.id}:body:${crypto.createHash('sha1').update(JSON.stringify(body ?? {})).digest('hex')}`;
+      // Seven days is right for a provider's own id — it is stable and unique.
+      // Fifteen minutes is right for a body hash: long enough to swallow every
+      // retry and a double-tap, short enough that coming back later counts.
+      const lockTtl = providerId ? 604800 : 900;
       if (queueManager.checkIdempotencyLock(lockKey)) {
         await markInbox(inboxId, 'ignored', { error: 'Duplicate of a push already processed' });
         return { status: 'ignored', reason: 'idempotent retry' };
       }
-      queueManager.setIdempotencyLock(lockKey, 604800);
+      queueManager.setIdempotencyLock(lockKey, lockTtl);
 
       // Dedup on the phone number within the tenant: the same buyer enquiring
       // twice is one lead with two enquiries, not two leads.
@@ -440,12 +459,44 @@ export async function processInboxRow(
         // enquiries are two things the person said, and the second one is
         // often the one that names a property.
         const extra = [r.notes, r.interest && `Interested in: ${r.interest}`].filter(Boolean).join(' — ');
-        const notes = [extra ? `${note} ${extra}` : note, ...(existing.notes || [])];
+        // A portal that fires the same enquiry twice — 99acres sent one buyer
+        // 0.4s apart under two different enquiry ids, which the idempotency
+        // lock above keys on and therefore cannot catch — must not leave two
+        // identical notes on the record. Same words already at the top means
+        // the same enquiry.
+        const head = String((existing.notes || [])[0] || '');
+        const sameProvider = head.startsWith(`[Repeat enquiry via ${integration.provider}]`);
+        // Identical words at the top means the same enquiry. When the provider
+        // maps no message there are no words to compare — Housing.com sends
+        // three fields — so the clock stands in: a second enquiry arriving
+        // within a minute of the last one is a double-fire, not a person.
+        const justNoted = sameProvider &&
+          Date.now() - new Date(existing.updated_at || 0).getTime() < 60_000;
+        const dupNote = extra ? (sameProvider && head.includes(extra)) : justNoted;
+        const notes = dupNote
+          ? (existing.notes || [])
+          : [extra ? `${note} ${extra}` : note, ...(existing.notes || [])];
         await updateLead(existing.id, {
           notes, req: merged,
           ...(!existing.email && lead.email ? { email: lead.email } : {}),
         });
-        await markInbox(inboxId, 'parsed', { leadId: existing.id });
+        // The timeline is where an agent reads a lead's history, and a repeat
+        // enquiry never reached it — the record showed "New Lead Created" and
+        // nothing else while the buyer had come back twice asking about a
+        // bigger flat. Notes alone are not the history.
+        if (!dupNote) {
+          await addTimelineEvent({
+            record_id: existing.id,
+            type: 'lead',
+            title: `Enquired again via ${integration.provider}`,
+            description: extra || undefined,
+          }).catch(() => {});
+        }
+        // 'merged', not 'parsed'. This function has always KNOWN the difference
+        // — it returns 'merged' below — and then wrote the same word to the
+        // inbox as a push that created a lead, so the activity list said "Lead
+        // created" three times for one buyer who exists once.
+        await markInbox(inboxId, 'merged', { leadId: existing.id });
         return { status: 'merged', leadId: existing.id };
       }
 
