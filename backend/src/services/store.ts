@@ -1156,9 +1156,22 @@ export async function getBootstrap(): Promise<any> {
     // a Connections integration or an import invented a source and never told
     // it, so the filter menu offered five names while the dashboard's own
     // breakdown showed seven. Derived, it cannot disagree with the data.
-    sql`SELECT source AS v, count(*)::int AS n FROM crm_leads
-         WHERE tenant_id = ${t} AND coalesce(source, '') <> ''
-         GROUP BY 1 ORDER BY 2 DESC LIMIT 60`,
+    //
+    // Derived from the leads AND from what the connections say they will send.
+    // Leads alone meant a source only existed once one had arrived under it, so
+    // a connection configured this morning was unfilterable until its first
+    // enquiry — and the person who set it up is told to go and type the name
+    // into Settings, which is the hand-curated list this replaced. A connection
+    // declaring `defaults.source` is a statement that leads will carry it.
+    sql`SELECT v, sum(n)::int AS n FROM (
+          SELECT source AS v, count(*)::int AS n FROM crm_leads
+           WHERE tenant_id = ${t} AND coalesce(source, '') <> ''
+           GROUP BY 1
+          UNION ALL
+          SELECT parser_config->'defaults'->>'source' AS v, 0 AS n FROM integrations
+           WHERE tenant_id = ${t} AND active
+             AND coalesce(parser_config->'defaults'->>'source', '') <> ''
+        ) x GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 60`,
   ]);
   const agents = agentsRows.map(rowToAgent);
   const brand = { ...(brandRows[0]?.brand_config || {}) };
