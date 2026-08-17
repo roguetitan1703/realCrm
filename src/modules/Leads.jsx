@@ -294,7 +294,10 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
               Log visit
             </button>
           ) : (
-            <button className="btn btn-ghost btn-sm fu-done" onClick={() => { store.setFollowUp(l.id, null); store.toast('Appointment marked completed') }}>Done</button>
+            <button className="btn btn-ghost btn-sm fu-done" onClick={() => {
+              store.addNote(l.id, `Appointment completed — ${l.followUp?.action || 'follow-up'}`)
+              store.setFollowUp(l.id, null); store.toast('Appointment marked completed')
+            }}>Done</button>
           )}
         </div>
       ) : <div className="detail-empty">No active appointment or follow-up scheduled.</div>}
@@ -369,6 +372,16 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
           // Email joins them when the lead has one — same confirm-and-log path,
           // so an email is recorded on the timeline exactly like a call is.
           primary={[
+            // A BOOKED SITE VISIT OUTRANKS EVERYTHING. The appointment card
+            // carries "Log visit", and the card is not rendered on a phone —
+            // so the one action the agent is standing outside the building to
+            // perform was reachable only through the overflow sheet, while Call
+            // and WhatsApp sat across the screen in full. It leads the row while
+            // the appointment exists and disappears the moment it is closed, so
+            // nothing changes on a lead with nothing booked.
+            ...(isSiteVisit(l.followUp)
+              ? [{ label: 'Log visit', icon: 'camera', onClick: () => store.openModal({ kind: 'visitProof', leadId: l.id }) }]
+              : []),
             ...(l.phone ? [
               { label: 'Call', icon: 'phone', onClick: () => contact('call') },
               { label: 'WhatsApp', icon: 'wa', tone: 'wa', onClick: () => contact('wa') },

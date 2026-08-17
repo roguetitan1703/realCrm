@@ -2,7 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import Icon from '../components/Icon.jsx'
 import { Button, Field, Input, PhoneInput, Textarea, Segmented, Avatar, Source, StageTag, Money } from '../components/primitives.jsx'
 import { theme } from '../data/theme.js'
-import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/format.js'
+// parseBudgetNum was USED in three places here and imported in none of them —
+// every money field's onBlur and the lead form's save were one ReferenceError
+// waiting for someone to type a budget. Plain JSX, so the build never said a
+// word about it.
+import { budgetRange, reqLine, initials, thumbTint, fitReasons, parseBudgetNum, moneyEcho } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink, followUpMessage } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -193,16 +197,24 @@ function ModuleFormModal({ store, moduleId, recordId }) {
     // the lead would be saved with a budget of eighty rupees. The full-form
     // modal has always parsed this way; the record sheet has to agree.
     if (f.type === 'money') {
+      // The echo is the whole point. "80L" and "45000" are both valid here and
+      // a rent of 4500 renders as ₹4.5k downstream, so the shorthand cannot
+      // tell you whether the box read four thousand five hundred or forty-five
+      // lakh. It says the number back in full while you type.
+      const echo = moneyEcho(v)
       return (
-        <Input
-          value={v}
-          onChange={e => setField(f.key, e.target.value)}
-          onBlur={e => {
-            const n = parseBudgetNum(e.target.value)
-            setField(f.key, Number.isNaN(n) ? '' : n)
-          }}
-          placeholder="80L, 1.2Cr or 45000"
-        />
+        <>
+          <Input
+            value={v}
+            onChange={e => setField(f.key, e.target.value)}
+            onBlur={e => {
+              const n = parseBudgetNum(e.target.value)
+              setField(f.key, Number.isNaN(n) ? '' : n)
+            }}
+            placeholder="80L, 1.2Cr or 45000"
+          />
+          {echo && <span className="money-echo">{echo}</span>}
+        </>
       )
     }
     return <Input type={f.type === 'number' ? 'number' : 'text'} value={v} onChange={e => setField(f.key, e.target.value)} />
@@ -567,13 +579,23 @@ function NewLeadModal({ store, leadId }) {
     if (!f.name.trim()) { store.toast('Lead Name is required', 'warn'); return }
     if (!f.phone.trim()) { store.toast('Phone Number is required', 'warn'); return }
 
+    // A BUDGET NOBODY GAVE IS NOT A BUDGET.
+    //
+    // Leaving both boxes empty used to invent one: ₹25,000–45,000 on a rental,
+    // ₹1.1Cr–1.4Cr on a sale. A figure a client never said, written to the
+    // record, indistinguishable from one they did — and it drives matching, the
+    // budget column, and what an agent repeats back on the phone. One bhumi
+    // lead is still carrying the sale pair; which of them is genuine is knowable
+    // only from the person who took the enquiry.
+    //
+    // Empty stays empty. A missing budget is the most common true state of a
+    // fresh lead and every reader already handles it.
     const minB = parseBudgetNum(f.minBudget)
     const maxB = parseBudgetNum(f.maxBudget)
-    const budgetObj = (!isNaN(minB) || !isNaN(maxB))
-      ? { minBudget: isNaN(minB) ? 0 : minB, maxBudget: isNaN(maxB) ? 0 : maxB }
-      : (f.deal === 'rent'
-          ? { minBudget: 25000, maxBudget: 45000 }
-          : { minBudget: 11000000, maxBudget: 14000000 })
+    const budgetObj = {
+      minBudget: isNaN(minB) ? undefined : minB,
+      maxBudget: isNaN(maxB) ? undefined : maxB,
+    }
 
     if (edit) {
       store.updateLead(edit.id, {
@@ -637,8 +659,11 @@ function NewLeadModal({ store, leadId }) {
     store.closeModal()
   }
 
+  // `key` on the element itself: these are rendered from a .map, and without it
+  // React warns and — worse — reuses DOM nodes by position, so a chip's pressed
+  // state can follow the slot rather than the value it stands for.
   const chip = (on, onClick, label) => (
-    <button type="button" className={'qchip' + (on ? ' on' : '')} onClick={onClick}>{label}</button>
+    <button key={label} type="button" className={'qchip' + (on ? ' on' : '')} onClick={onClick}>{label}</button>
   )
 
   return (
@@ -687,11 +712,16 @@ function NewLeadModal({ store, leadId }) {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {/* Both echo the figure back in full while it is typed — 4500 and
+              45L abbreviate to ₹4.5k and ₹45L downstream, and neither tells the
+              person typing which one the box understood. */}
           <Field label={f.deal === 'rent' ? 'Min Budget (₹/mo)' : 'Min Budget (e.g. 80L or 1.2Cr)'}>
             <Input value={f.minBudget} onChange={e => set('minBudget', e.target.value)} placeholder={f.deal === 'rent' ? '25000' : '80L'} />
+            {moneyEcho(f.minBudget) && <span className="money-echo">{moneyEcho(f.minBudget)}</span>}
           </Field>
           <Field label={f.deal === 'rent' ? 'Max Budget (₹/mo)' : 'Max Budget (e.g. 1.4Cr)'}>
             <Input value={f.maxBudget} onChange={e => set('maxBudget', e.target.value)} placeholder={f.deal === 'rent' ? '45000' : '1.4Cr'} />
+            {moneyEcho(f.maxBudget) && <span className="money-echo">{moneyEcho(f.maxBudget)}</span>}
           </Field>
         </div>
 
@@ -1909,7 +1939,6 @@ function ScheduleFollowUpModal({ store, leadId }) {
   const [time, setTime] = useState('11:00 am')
   const [customTime, setCustomTime] = useState('11:00')
   const [useCustomTime, setUseCustomTime] = useState(false)
-  const [assignedAgentId, setAssignedAgentId] = useState(l?.agentId || store.state.agents[0]?.id || '')
   const [note, setNote] = useState('')
 
   if (!l) return null
@@ -1926,7 +1955,6 @@ function ScheduleFollowUpModal({ store, leadId }) {
       date: finalDate,
       time: finalTime,
       note: note.trim() || undefined,
-      agentId: assignedAgentId,
     })
     store.addNote(l.id, `Scheduled ${action} on ${finalDate} at ${finalTime}${note.trim() ? ` — Agenda: ${note.trim()}` : ''}`, 'visit')
     store.toast(`Appointment scheduled: ${action} on ${finalDate} at ${finalTime}`)
@@ -1989,15 +2017,13 @@ function ScheduleFollowUpModal({ store, leadId }) {
           )}
         </div>
 
-        <div className="field">
-          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Assigned Sales Executive</label>
-          <select value={assignedAgentId} onChange={e => setAssignedAgentId(e.target.value)}
-            style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)', marginTop: 5, fontSize: 13, fontFamily: 'inherit' }}>
-            {store.state.agents.map(a => (
-              <option key={a.id} value={a.id}>{a.name}{a.role ? ` (${a.role})` : ''}</option>
-            ))}
-          </select>
-        </div>
+        {/* "Assigned Sales Executive" was here: a dropdown of the whole team
+            that wrote followUp.agentId, a field NOTHING in this codebase reads.
+            It looked like it handed the visit to a colleague and it did not
+            move the lead, did not notify them, and did not appear on their
+            Today. A control that appears to delegate work and silently drops it
+            is worse than no control — the appointment belongs to whoever the
+            lead is assigned to, and reassigning is done on the lead itself. */}
 
         <Field label="Appointment Agenda / Location Note (Optional)">
           <Input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Meet at Hinjewadi Phase 3 sales lounge" />

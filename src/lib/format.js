@@ -186,6 +186,25 @@ export function parseBudgetNum(v) {
 }
 
 /**
+ * What a typed money value actually is, in full, in rupees.
+ *
+ * The abbreviation is exactly the thing that is ambiguous: a rent of 4500 shows
+ * as ₹4.5k and a budget of 45 lakh shows as ₹45L, and neither tells the person
+ * typing whether the box understood them. Two zeroes either way is the
+ * difference between a flat and a car, and nobody finds out until a client is
+ * quoted the wrong number.
+ *
+ * So the field echoes the whole figure back, grouped the Indian way —
+ * "45,00,000", not "4,500,000" — while they type. Returns '' for anything that
+ * is not a usable number, so an empty field stays quiet rather than reading ₹0.
+ */
+export function moneyEcho(v) {
+  const n = parseBudgetNum(v)
+  if (!isFinite(n) || n <= 0) return ''
+  return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 })
+}
+
+/**
  * A requirement's budget, whichever way it is spelled.
  *
  * There are two spellings in this codebase and only one of them is real. The

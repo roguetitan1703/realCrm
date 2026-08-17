@@ -270,6 +270,11 @@ export const LEADS_DEF = {
       sub: (l) => l.followUp?.action,
       run: (store, l) => {
         if (/site\s*visit/i.test(l.followUp?.action || '')) return store.openModal({ kind: 'visitProof', leadId: l.id })
+        // The remark is the record. Clearing the appointment used to be the only
+        // thing that happened, and the "Appointment completed" line an agent saw
+        // afterwards lived in the browser until the next reload — so a follow-up
+        // marked done left nothing at all behind it.
+        store.addNote(l.id, `Appointment completed — ${l.followUp?.action || 'follow-up'}`)
         store.setFollowUp(l.id, null); store.toast('Appointment marked completed')
       } },
     // B4. Completing a scheduled Site Visit appointment also opens this, but

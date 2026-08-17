@@ -415,11 +415,17 @@ function reducer(state, action) {
 
     case 'FOLLOWUP': {
       // fu === null means "marked done" — clearing the appointment, not setting one.
+      //
+      // NO TIMELINE ENTRY. This wrote one into local React state and nowhere
+      // else, so it survived until the next server read and then vanished. Both
+      // directions already have a real, persisted record beside it: scheduling
+      // writes a remark naming the date and time, and completing a site visit
+      // writes the visit activity with its photo and GPS fix. The local entry
+      // was a second, thinner copy of the same fact — which is why logging a
+      // visit produced a bare "Appointment completed" sitting above the proof
+      // that had just been captured, and why it was gone after a refresh.
       const fu = action.followUp
-      return patchRecord(state, 'lead', action.leadId, l => ({
-        ...l, followUp: fu, overdue: false,
-        timeline: withEvent(l, 'follow', fu ? 'Follow-up set · ' + fu.action : 'Appointment completed'),
-      }))
+      return patchRecord(state, 'lead', action.leadId, l => ({ ...l, followUp: fu, overdue: false }))
     }
 
     case 'UPDATE_LEAD':
