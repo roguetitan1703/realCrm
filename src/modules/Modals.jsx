@@ -6,7 +6,7 @@ import { theme } from '../data/theme.js'
 // every money field's onBlur and the lead form's save were one ReferenceError
 // waiting for someone to type a budget. Plain JSX, so the build never said a
 // word about it.
-import { budgetRange, reqLine, reqShort, hasBudget, initials, thumbTint, fitReasons, parseBudgetNum, moneyEcho } from '../lib/format.js'
+import { budgetRange, reqLine, reqShort, hasBudget, initials, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink, followUpMessage } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -412,10 +412,17 @@ function AttachPropModal({ store, leadId }) {
   // What we actually know. Each of these narrows the server query, and only if
   // it is really there — `locality: undefined` must not become a filter on the
   // string "undefined".
+  // Read through the SHARED vocabulary, so a requirement saying "2 BHK" can
+  // address a listing stored as "2 BHK Apartment" — see reqFacets. Every one of
+  // these is an indexed column on crm_properties, so the narrowing happens in
+  // Postgres rather than over fifty rows that happened to come back.
+  const facets = reqFacets(req)
   const known = {
     deal: req.deal || undefined,
     locality: req.locality || undefined,
-    config: req.config || undefined,
+    category: facets.category || undefined,
+    bhk: facets.bhk || undefined,
+    subtype: facets.subtype || undefined,
   }
   // Locality and deal NARROW; config only RANKS.
   //
@@ -427,7 +434,7 @@ function AttachPropModal({ store, leadId }) {
   // are clean enumerations and can be trusted to filter; config is handed to
   // the fit score, which is allowed to be approximate because it only decides
   // the order.
-  const canSuggest = Boolean(known.locality || known.config || hasBudget(req))
+  const canSuggest = Boolean(known.locality || known.bhk || known.category || hasBudget(req))
   // Typing is the escape hatch and it always searches everything. Narrowing a
   // search by the requirement would hide the exact listing the agent is typing
   // the name of.
@@ -441,10 +448,17 @@ function AttachPropModal({ store, leadId }) {
         status: 'Available', limit: 50,
         deal: known.deal,
         q: q.trim() || undefined,
-        ...(suggesting ? { locality: known.locality } : {}),
+        // Category is the disqualifier and always narrows; locality and BHK are
+        // strong preferences. Subtype is deliberately NOT a filter — "penthouse"
+        // versus "apartment" is a preference people trade away, and filtering on
+        // it emptied the list. It still ranks, in fitReasons.
+        ...(suggesting ? { locality: known.locality, category: known.category, bhk: known.bhk } : {}),
+        // A commercial requirement must never be answered with flats, even when
+        // the agent is browsing everything.
+        ...(!suggesting && known.category ? { category: known.category } : {}),
       })
     },
-    [leadId, known.deal, known.locality, known.config, suggesting, q.trim()],
+    [leadId, known.deal, known.locality, known.category, known.bhk, suggesting, q.trim()],
     { data: [] })
 
   if (!l) return null
@@ -491,7 +505,7 @@ function AttachPropModal({ store, leadId }) {
           // possession are what separate one from the next; locality is only
           // the answer when nothing else is.
           const ok = (reasons || []).filter(r => r.ok)
-          const why = (suggesting ? ok.find(r => !/^Same locality/.test(r.t)) : null) || ok[0]
+          const why = (suggesting ? ok.find(r => !/^(Same locality|Config matches)/.test(r.t)) : null) || ok[0]
           return (
             <button key={p.id} className="ap-row" onClick={() => attach(p)}
               style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>

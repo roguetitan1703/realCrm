@@ -321,7 +321,20 @@ export function initials(name) {
 // Explainable match: ranked reasons + a 0–100 fit score (logic, not AI).
 export function fitReasons(p, req) {
   const reasons = []; let score = 0
-  if (p.type === req.config) { reasons.push({ ok: true, t: 'Config matches (' + p.type + ')' }); score += 25 }
+  // Config, through the shared vocabulary rather than `p.type === req.config`
+  // — which compared "2 BHK Apartment" against "2 BHK" and was therefore never
+  // true, so the config was worth 25 points to nobody.
+  const f = facetFit(p, req)
+  if (f.hard) {
+    // A shop against someone who wants a flat. Nothing else about the listing
+    // can make this a match, and letting locality and budget carry it to a
+    // respectable score is how a showroom ends up suggested to a family.
+    reasons.push({ ok: false, t: f.want.category === 'commercial' ? 'Residential — they want commercial' : 'Commercial — they want residential' })
+    return { reasons, score: 0 }
+  }
+  if (f.bhkMatch) { reasons.push({ ok: true, t: 'Config matches (' + configLabel(p) + ')' }); score += 25 }
+  else if (f.subtypeMatch) { reasons.push({ ok: true, t: labelOf(SUBTYPES[propFacets(p).category] || SUBTYPES.residential, propFacets(p).subtype) + ' as asked' }); score += 15 }
+  else if (f.categoryMatch && f.want.category === 'commercial') { score += 15 }
   if (p.locality === req.locality) { reasons.push({ ok: true, t: 'Same locality · ' + req.locality }); score += 30 }
   else { reasons.push({ ok: false, t: 'Different area (' + p.locality + ')' }); score += 8 }
   // A BUDGET IS USUALLY ONE NUMBER. This tested `price >= min && price <= max`,
@@ -350,6 +363,79 @@ export function fitReasons(p, req) {
   if (p.possession === 'Immediate') { reasons.push({ ok: true, t: 'Ready to move' }); score += 10 }
   if (p.status === 'Available') score += 5
   return { reasons: reasons.slice(0, 4), score: Math.min(99, score) }
+}
+
+// ============================================================================
+// WHAT SOMEONE WANTS, AND WHAT A LISTING IS — read through ONE vocabulary
+// ============================================================================
+// A property was fixed long ago: `type` was split into canonical `category`,
+// `bhk` and `subtype`, with normalisers that read the legacy free text so old
+// and new rows behave identically. The LEAD requirement was never given the
+// same treatment, and everything that compares the two did it by string:
+//
+//     p.type === req.config        matching.js, three times, as a HARD FILTER
+//     p.type === req.config        fitReasons, as the config score
+//
+// 77 leads say "2 BHK". 750 listings say "2 BHK Apartment". That comparison has
+// never once been true, so `matchesForLead` and `leadsForProperty` — the buyer
+// suggestions on a listing and the listing suggestions on a buyer — returned
+// almost nothing, on every desk, since they were written.
+//
+// These read a requirement into the same three facets a listing already has,
+// using the same normalisers, so the two sides can finally be compared.
+const COMMERCIAL_WORDS = /\b(commercial|office|shop|showroom|warehouse|godown|industrial|coworking|co-working|retail)\b/i
+
+/** A requirement's category / bhk / subtype, from whatever it actually holds. */
+export function reqFacets(req) {
+  if (!req) return { category: null, bhk: null, subtype: null }
+  // Everything the person told us, in one string — the config field is where a
+  // portal puts "Commercial Office", but the useful word is as often in the
+  // free-text interest or notes.
+  const text = [req.config, req.interest, req.notes].filter(Boolean).join(' ')
+  const category = req.category
+    // "0 BHK" is how 99acres describes a showroom: nought bedrooms is not a
+    // small flat, it is a building with no bedrooms in it.
+    || (COMMERCIAL_WORDS.test(text) || /\b0\s*bhk\b/i.test(text) ? 'commercial' : null)
+    || (normaliseBhk(text) ? 'residential' : null)
+  return {
+    category,
+    // A commercial requirement has no BHK, and reading "0" as one would file a
+    // showroom next to studio flats.
+    bhk: category === 'commercial' ? null : normaliseBhk(text),
+    subtype: req.subtype || normaliseSubtype(text, category || 'residential'),
+  }
+}
+
+/** The same three facets for a listing, tolerant of rows written before the
+ *  columns existed — the property half of the comparison above. */
+export function propFacets(p) {
+  if (!p) return { category: null, bhk: null, subtype: null }
+  const category = p.category || (COMMERCIAL_WORDS.test(p.type || '') ? 'commercial' : 'residential')
+  return {
+    category,
+    bhk: p.bhk || (category === 'commercial' ? null : normaliseBhk(p.type)),
+    subtype: p.subtype || normaliseSubtype(p.type, category),
+  }
+}
+
+/**
+ * Does this listing answer this requirement?
+ *
+ * `hard` is the disqualifier — a commercial requirement against a 2 BHK flat,
+ * which no amount of matching on locality or budget should rescue. Everything
+ * else is a degree, because "3 BHK when they asked for 2" is a conversation an
+ * agent legitimately has and a filter that forbids it is wrong.
+ */
+export function facetFit(p, req) {
+  const a = propFacets(p), b = reqFacets(req)
+  const hard = Boolean(a.category && b.category && a.category !== b.category)
+  return {
+    hard,
+    categoryMatch: Boolean(a.category && b.category && a.category === b.category),
+    bhkMatch: Boolean(a.bhk && b.bhk && a.bhk === b.bhk),
+    subtypeMatch: Boolean(a.subtype && b.subtype && a.subtype === b.subtype),
+    want: b,
+  }
 }
 
 // Rate per sqft (sale only) — a reference figure brokers cite. Data, not a hero.

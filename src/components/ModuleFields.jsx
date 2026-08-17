@@ -267,6 +267,30 @@ export const LEAD_MODULE_SCHEMA = {
       key: 'req.maxBudget', label: 'Budget To', type: 'money', section: 'domain',
       renderValue: (v, rec) => money(v, { perMonth: (rec?.req?.deal || rec?.deal) === 'rent' }),
     },
+    // WHAT KIND OF THING THEY WANT — the same two fields a listing carries.
+    //
+    // The requirement could only say a config string, so a commercial enquiry
+    // had nowhere to go: bhumi received a genuine 2.25 lakh a month showroom
+    // lease and it was recorded as wanting "0 BHK", which an agent rejected —
+    // fairly, since the record said a buyer wanted no bedrooms. Properties have
+    // carried category and subtype all along, with 1,778 commercial listings on
+    // file; only the lead side was mute.
+    //
+    // Same vocabulary on both sides, so a requirement and a listing can be
+    // compared at all (see reqFacets in lib/format.js).
+    // Longhand, NOT tokenField(): that helper is a const declared below this
+    // schema, so calling it here is a temporal-dead-zone crash at module load —
+    // and this is plain JSX, so the build would have said nothing.
+    {
+      key: "req.category", label: "Category", type: "select", section: "domain",
+      options: optionsOf(CATEGORIES),
+      renderValue: (v) => labelOf(CATEGORIES, v),
+    },
+    {
+      key: "req.subtype", label: "Property type", type: "select", section: "domain",
+      options: (store, rec) => optionsOf(SUBTYPES[getNestedValue(rec, "req.category") || "residential"] || SUBTYPES.residential),
+      renderValue: (v, rec) => labelOf(SUBTYPES[rec?.req?.category || "residential"] || SUBTYPES.residential, v),
+    },
     // What a lead WANTS has to be sayable in the same words the inventory is
     // described in, or a requirement can never match a property. These were a
     // hand-typed list that had already drifted from both: it offered

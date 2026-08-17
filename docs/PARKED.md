@@ -35,34 +35,24 @@ session while bigger things are open.
 
 ---
 
-## Commercial leads have nowhere to say they are commercial
+## Commercial leads — what is left
 
-**What happens.** bhumi received a genuine ₹2,25,000/month showroom lease from
-99acres on 17 Aug. It arrived as `deal_type: "L"`, `property_type: "0 BHK"`,
-message `"225000, Showrooms for Lease Mahalunge, Pune West"`. The lead was
-created with `config: "0 BHK"` and **an agent rejected it** — which is a fair
-reading of a record that says a buyer wants nought bedrooms.
+**Built.** The requirement now carries `category` and `subtype` in the same
+vocabulary a listing uses (`src/data/propertyFields.js`). The parser derives
+both from what the portal already sends — a subtype word in the message, or
+`0 BHK`, which no portal uses to describe a flat — and clears the bogus
+`config: "0 BHK"` rather than leaving a bedroom count on a showroom. Both
+matchers refuse to cross the category line, and the record sheet can say it.
 
-**What exists already.** The PROPERTY side has full commercial support:
-`CATEGORIES` and `SUBTYPES.commercial` (Office / Shop / Showroom / Warehouse)
-in `src/data/propertyFields.js`. It is only the LEAD that cannot express it.
+**Left to do.**
+- The leads LIST has no category/subtype filter, so "show me the commercial
+  enquiries" is still a search rather than a facet.
+- `crm_leads` has no indexed `category` column; the requirement lives in JSONB,
+  which is fine at this volume and will not be at ten times it.
 
-**What it needs.**
-- A category on the lead requirement (residential / commercial) and a subtype,
-  drawn from the same `propertyFields.js` vocabulary — one list, not a second.
-- The parser to read the commercial signal it is already being handed: `0 BHK`
-  plus a subtype word in the message is unambiguous.
-- Matching to respect it, so a commercial requirement stops being scored against
-  2 BHK flats.
-- The lead form, filters and the record sheet to show it.
-
-**Why it is parked.** It is a model change on a live desk, and it wants doing
-once rather than three times. The `deal_type: "L"` half is fixed — that value
-now maps to rent explicitly instead of being inferred from the budget.
-
-**Volume, so nobody over- or under-builds it:** 1 commercial enquiry of 40
-99acres payloads received so far. Rare, not zero, and buying commercial happens
-as well as leasing it.
+**Not needed:** a backfill. `reqFacets` reads the old rows through the same
+normalisers, so the ~10 leads already holding "Commercial Office", "Retail
+Shop" or "0 BHK" behave correctly without their stored value being rewritten.
 
 ---
 
@@ -99,26 +89,3 @@ A backfill is possible and would move real leads on a live desk. It is inference
 from prose, so it needs the user's explicit go-ahead, a stated blast radius per
 tenant, and `runOnce`. Some strings are unambiguous ("Call not rec"); others are
 not ("Call Not Received but details Will Share").
-
----
-
-## `req.config` and property `type` are different vocabularies
-
-A requirement's config is `"1BHK"` or `"2 BHK"`. A listing's type is
-`"1 BHK duplex"`, `"1rk BHK independent house"`, `"3 BHK studio"` — free-form
-composites typed by whoever entered the stock.
-
-So `p.type === req.config` in `fitReasons` is almost never true, and any server
-filter on `type IN (…)` returns nothing: Baner holds 2,000 available listings
-and a `1BHK` requirement matched zero of them.
-
-**Worked around, not fixed.** The attach-property suggestions narrow on locality
-and deal (clean enumerations) and let config influence only the ranking, where
-being approximate is acceptable. The scoring itself is still an exact string
-compare that essentially never fires.
-
-**The fix** is a BHK comparison that reads the number out of both sides
-(`1rk`, `1`, `2`, `4`) and compares that, with the rest of the type string
-treated as a sub-type. It touches `fitReasons` and both match scorers, which
-decide what every buyer is shown — worth doing deliberately rather than as a
-side effect of a modal.
