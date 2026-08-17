@@ -1,131 +1,236 @@
 # Repeat enquiries — one person, several enquiries
 
-A buyer who enquires twice is the strongest signal a portal desk gets. Today the
+A buyer who comes back is the strongest signal a portal desk gets. Today the
 second enquiry is recorded as a sentence and its requirement is thrown away.
+
+**Status: not built.** This is the second draft. The first one counted raw
+webhook payloads and was wrong about its own headline example — see §2, which is
+the reason this spec exists in this form. Everything below is measured from
+bhumi's `webhook_inbox`, not assumed.
 
 ---
 
-## 1. What actually happens, measured
+## 1. The loss, which is real
 
-From bhumi's raw `webhook_inbox` bodies (257 payloads, 228 distinct phones):
+`findLeadByPhone` merges on the last ten digits. That is correct and must stay:
+two rows for one person means two agents ring him. But the merge then writes a
+note and **keeps the first enquiry's requirement**, so the newer statement
+survives only as prose inside a timeline entry, where no filter, no match and no
+report can reach it.
 
-| | |
+There is also no counter anywhere — not on the row, the card or the record
+header. The only evidence that someone has come back three times is a timeline
+entry you have to scroll for.
+
+---
+
+## 2. A payload is not an enquiry
+
+This is the correction that reorganised the spec, and it should be read before
+anything else is designed.
+
+Of 33 consecutive-payload gaps from a repeating phone on bhumi:
+
+| gap between one payload and the next | n |
 |---|---|
-| phones that enquired more than once | **21** |
-| of those, the repeat carried a **different requirement** | **13** (62%) |
-| differing locality | 6 |
-| differing budget | 6 |
-| differing project / property type | 6 |
-| **differing deal type** | **0** |
+| **under 5 minutes** | **8** |
+| 5–60 minutes | 2 |
+| 1–24 hours | 11 |
+| 1–7 days | 11 |
+| over 7 days | 1 |
 
-Real cases:
+Those sub-five-minute pairs carry **different** `enquiry_id`s, so they are not
+the portal retrying. They are one person clicking "contact" on several listings
+in one sitting.
+
+The first draft's headline example was exactly this and it was read as a budget
+revision:
 
 ```
-9492917799  ×4  rent · Mahalunge · ₹29,999 → ₹24,999 → ₹25,000
-                Godrej Green Vistas AND VTP Township
-9056135378  ×3  sale · VTP Belair · ₹73L → ₹85L
-8789897611  ×2  rent · Hinjewadi → Bodkewadi Maan
-7507047970  ×3  Hinjawadi → Blue Ridge Town Pune
+9492917799  ×4   "rent · Mahalunge · ₹29,999 → ₹24,999 → ₹25,000"
+
+18:05:23   ₹24,999   Godrej Green Vistas
+18:05:52   ₹25,000   VTP Township Codename Blue Waters
+18:08:06   ₹29,999   Godrej Green Vistas
+18:10:32   ₹29,999   Godrej Green Vistas
 ```
 
-**Deal type never differs.** That kills the obvious design — splitting a person
-into a "buyer lead" and a "renter lead" — because nobody is doing that. What
-people actually do is shop across projects and localities inside one intent, and
-revise their budget as they go.
+Five minutes on the evening of 10 August. Nobody revised anything. Those four
+figures are the **asking prices of the four flats he clicked** — the honest read
+is "looking around ₹25–30k in Mahalunge", and a rule that takes the newest as
+his budget lands on whichever listing he happened to open last.
 
-## 2. The loss
+**So the unit is a session, not a payload.**
 
-`findLeadByPhone` merges on the last ten digits, which is right and must stay:
-two rows for one person means two agents ring him. But the merge then:
+| definition | phones that "came back" |
+|---|---|
+| more than one payload (first draft) | 25 |
+| more than one session, 60-minute gap | 20 |
+| more than one session, next-day gap | **12** |
 
-- writes a note and a timeline line, and
-- **keeps the first enquiry's requirement**
+Twelve, not twenty-five. Still the warmest twelve people on the desk — but a
+counter built on payloads would have said 25 and shown "4 enquiries" against a
+man who enquired once.
 
-So a lead reads ₹73L while the buyer's most recent statement was ₹85L. The newer
-figure survives only as prose inside a note, where no filter, no match and no
-report can reach it. **13 of 21 repeat enquirers on bhumi have a record that
-misstates what they currently want.**
+**Session rule:** payloads from one phone within **6 hours** of each other are
+one enquiry session. Long enough to cover a lunchtime and an evening browse,
+short enough that yesterday and today are always separate. It is a tenant
+setting with that default, not a constant, because the right number is a
+guess and guesses belong somewhere they can be changed.
 
-There is also no counter. Nothing on the row, the card, or the record header
-says this person has asked three times — the only evidence is a timeline entry
-you have to scroll for.
+---
 
 ## 3. The model
 
-**A person is one lead. An enquiry is an event with its own requirement.**
-
-Keep the lead as the unit of work — one owner, one call, one follow-up. Add the
-enquiry as a first-class record beneath it, so the history of what someone asked
-for is queryable rather than narrated.
+**A person is one lead. A session is an event with its own requirement.**
 
 ```
 crm_lead_enquiries
   id, tenant_id, lead_id, integration_id
-  received_at          -- portal enquiry time
+  session_key          -- lead_id + session bucket; UNIQUE with tenant
+  first_at, last_at    -- the session's span
+  payload_count        -- how many listings they clicked in it
   source               -- the connection's name at the time
-  req                  -- the parsed requirement snapshot, as sent
-  raw_ref              -- webhook_inbox id, for provenance
+  req                  -- the requirement for the session (see §4)
+  raw_refs             -- webhook_inbox ids, for provenance
+  UNIQUE (tenant_id, session_key)
 ```
 
-The first enquiry writes a row too, so the table is the whole history and not
-"everything after the first one".
+The first enquiry writes a row too, so the table is the whole history rather
+than "everything after the first one".
 
-## 4. How the lead's own requirement updates
+**Idempotency, at two levels.** One bhumi `enquiry_id` was delivered **three
+times** by the portal. A payload whose `enquiry_id` is already recorded is
+ignored outright; a payload without one falls back to the session key. Without
+this the counter inflates on the portal's retries alone, and it inflates
+invisibly.
 
-Not "latest wins" for everything — the fields differ in kind:
+---
 
-| field | rule | why |
-|---|---|---|
-| budget | **latest wins** | it is a revision; ₹85L supersedes ₹73L |
-| deal | **latest wins** | never observed to change; if it does, it is a correction |
-| locality | **accumulate** | Hinjawadi *and* Blue Ridge — they are shopping both |
-| project / interest | **accumulate** | Green Vistas *and* VTP Township |
-| config | **accumulate** | 2 BHK *and* 3 BHK is a real, common search |
-| anything absent from the new payload | **leave alone** | absence is not a correction (CLAUDE.md §3.1) |
+## 4. What a session's requirement is
 
-The accumulate fields need a display form that stays short — "Mahalunge +1" with
-the full set on the record — or the list row becomes unreadable.
+Within a session, the several payloads are a **range being browsed**, not a
+sequence of corrections:
 
-## 5. What the desk sees
+- **budget** — keep `min` and `max` across the session's payloads. Four clicks
+  at 24,999 / 25,000 / 29,999 / 29,999 is `₹25k–30k`, which is both true and
+  useful. Taking the last is neither.
+- **locality, project, config** — accumulate. Someone comparing Green Vistas and
+  VTP Township is telling you something; picking one discards it.
+- **deal** — never observed to differ within a session, and 0 of 25 phones
+  changed it at all. If it ever does, it is a correction: take the latest and
+  say so on the timeline.
 
-**On the lead row and card:** a count, only when it is more than one. `2 enquiries`.
-Never a badge reading `1` — that is every lead, and a badge on everything is a
-badge on nothing.
-
-**On the record header:** the count, and the drift when there is one:
+Across sessions weeks apart, a budget move **is** a revision and the newer
+session leads. But it is shown as a change, never silently applied:
 
 > **3 enquiries** · budget ₹73L → ₹85L · VTP Belair
 
-**In the timeline:** each enquiry as its own entry showing what was asked for,
-not a prose note. The existing "Enquired again via 99acres" line becomes the
-enquiry event, carrying its requirement.
+---
 
-**As a filter:** "Enquired more than once" belongs in the Needs-attention set. On
-bhumi that is 21 leads today, and they are the warmest ones on the desk.
+## 5. What must not be overwritten
 
-**Notification:** a repeat enquiry from a known buyer should not read the same as
-a new lead. It is a different, more urgent fact — someone who was already in the
-book has come back.
+**A human's requirement beats a portal's.** Three of the 25 repeating leads
+carry a long, hand-typed call remark — "Looking 3 bhk in vtp Leonara buy in c
+wing all inc -1.10cr", "Looking near highway 1bhk 2 bechulers". An agent spoke
+to that person. A payload arriving afterwards must not overwrite what was
+learned on the phone; it is recorded as a new session and surfaced as a
+difference for the agent to resolve. This is CLAUDE.md §3.5's `updateLead`
+lesson: a field that was set deliberately is not the same as one nobody filled.
 
-## 6. Rules
+**A portal must never downgrade a name.** Nine of the 25 repeating phones carry
+a *different* name across payloads, and the later one is usually worse:
 
-- **Never split a person on requirement drift.** Zero of twenty-one changed deal
-  type; splitting would recreate the duplicate-row problem the phone rule exists
-  to prevent.
-- **The lead's requirement is derived, never hand-merged in two places.** One
-  function takes the enquiry rows and produces the lead's current requirement,
-  or the columns and the history diverge (CLAUDE.md §3.2).
-- **Backfill is possible and worth doing.** `webhook_inbox.raw_body` still holds
-  the original payloads for bhumi's 257 pushes, so the enquiry table can be
-  built from history rather than starting empty. Note the 30-day purge in
-  `data-lifecycle.md` — bodies older than that are already gone, so this gets
-  cheaper to do the sooner it happens.
-- **Do not rewrite the notes that already exist.** They record what was said at
-  the time.
+```
+nilay nawghare → mbuser          (a MagicBricks placeholder)
+revati sonawane → reva
+akshay kamble → akshay
+janhavi → j
+```
 
-## 7. Not in scope
+Latest-wins on name replaces a real person with "mbuser". Rule: a new name is
+taken only when the record has none, or when the new one is strictly longer and
+contains the old one. Anything else is recorded on the enquiry and left off the
+lead. Nine of twenty-five is too high a rate to leave to chance.
 
-Commercial enquiries (`deal_type: "L"`, `property_type: "0 BHK"`) are a separate
-gap: Properties has a full commercial vocabulary — category, Office / Shop /
-Showroom / Warehouse — and the lead requirement model and parser have none, so a
-showroom can only land as `0 BHK`. That is its own spec, not this one.
+**Nobody is split on requirement drift.** Zero of 25 changed deal type;
+splitting would recreate the duplicate-row problem the phone rule exists to
+prevent.
+
+**The lead's requirement is derived by one function** from the enquiry rows, or
+the columns and the history diverge (CLAUDE.md §3.2).
+
+---
+
+## 6. Where a repeat actually lands
+
+The stage of the lead each repeating phone merges into, on bhumi today:
+
+| stage | n | what a repeat means there |
+|---|---|---|
+| Call Not Received | **8** | the best news on this list — someone who never picked up has come back on their own. Belongs at the top of the calling queue. |
+| Follow-Up | 6 | new information for a conversation already running |
+| Interested | 5 | do **not** touch the stage; add the session and notify |
+| Rejected | **4** | see below |
+| Site Visit | 1 | do not touch the stage |
+| New | 1 | nothing to decide |
+
+**Nothing here changes a stage automatically.** Not one of these piles is
+improved by being reset to New, and two of them would be actively damaged: a
+lead mid-negotiation or with a visit booked is work in progress, and moving it
+backwards throws away where the agent had got to.
+
+**Rejected is a human decision, every time.** One of bhumi's rejections reads
+"She said not interested don't call". Auto-reopening that because a portal fired
+again would put an agent back on the phone to someone who asked not to be rung —
+which is the one outcome this feature must never produce. A repeat on a Rejected
+lead raises a notification saying so and offers the agent a reopen. It does not
+take it.
+
+**Not a problem today: the assigned agent having left.** All 8 bhumi users are
+active and 0 repeats land on an inactive one. Do not build routing for it.
+
+---
+
+## 7. What the desk sees
+
+- **Row and card:** a count, only above one. `2 enquiries`. Never a badge reading
+  `1` — that is every lead, and a badge on everything is a badge on nothing.
+- **Record header:** the count and the drift, as in §4.
+- **Timeline:** each session as its own entry carrying its requirement, replacing
+  today's prose note. `3 listings · Mahalunge · ₹25k–30k`.
+- **Filter:** "Enquired more than once" in the Needs-attention set — 12 leads on
+  bhumi today, and they are the warmest on the desk.
+- **Notification:** a repeat from a known buyer must not read like a new lead.
+  One per session, never one per payload: the man above would have buzzed four
+  phones in five minutes.
+
+---
+
+## 8. Rollout, because this is a live desk
+
+**Phase 1 — observe, change nothing.** Write `crm_lead_enquiries` on ingest and
+backfill from history. Do not touch a single lead's requirement, name, or stage.
+Show the counter and the timeline entries; those are additive and cannot be
+wrong in a way that costs anything.
+
+**Phase 2 — after two weeks of real traffic**, compare the derived requirement
+against what is on each lead and read the differences. If the session rule is
+wrong the disagreements will say so, on real leads, before anything has been
+overwritten.
+
+**Phase 3 — apply**, one field at a time, budget first.
+
+**Backfill.** `webhook_inbox.raw_body` still holds bhumi's original payloads, so
+the enquiry table can be built from history rather than starting empty. It gets
+cheaper the sooner it happens: `data-lifecycle.md` purges bodies at 30 days and
+what is gone is gone. Through `runOnce`, with the per-tenant row count stated
+before it runs.
+
+---
+
+## 9. Not in scope
+
+Commercial enquiries — `deal_type: "L"`, `property_type: "0 BHK"`. Properties
+has a full commercial vocabulary and the lead requirement model has none, so a
+showroom can only land as `0 BHK`. See `docs/PARKED.md`; its own job.
