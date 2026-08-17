@@ -6,7 +6,7 @@ import { theme } from '../data/theme.js'
 // every money field's onBlur and the lead form's save were one ReferenceError
 // waiting for someone to type a budget. Plain JSX, so the build never said a
 // word about it.
-import { budgetRange, reqLine, initials, thumbTint, fitReasons, parseBudgetNum, moneyEcho } from '../lib/format.js'
+import { budgetRange, reqLine, reqShort, hasBudget, initials, thumbTint, fitReasons, parseBudgetNum, moneyEcho } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink, followUpMessage } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -381,45 +381,137 @@ function TenancyModal({ store, propId }) {
 }
 
 // ---- Attach a property to a lead's shortlist ----
+//
+// D4. This was one undifferentiated list of every available listing on the
+// deal type, fifty rows deep, ordered by a fit score that was never shown
+// unless it cleared 60 — so an agent scrolled an endless column of societies
+// with no way to tell which of them had anything to do with the person they
+// were looking at. The lead's requirement was already on screen and was not
+// being used to narrow anything.
+//
+// Two lists now, and the split is the point:
+//
+//   SUGGESTED    the lead's own requirement, asked of the server — same deal,
+//                same locality, same config where each is actually known —
+//                each row carrying the reason it is here.
+//   ALL          every available listing, which is how an agent attaches
+//                something the requirement does not describe. That happens
+//                constantly and it is not an error: a client says 2 BHK in
+//                Baner and takes a 3 BHK in Balewadi.
+//
+// A lead with no requirement on file gets no Suggested tab at all rather than
+// an empty one. Nothing on record means nothing to suggest from, and a tab that
+// implies we looked and found nothing is a different claim from "we were never
+// told what they want".
 function AttachPropModal({ store, leadId }) {
   const l = store.lookup('lead', leadId)
   const [q, setQ] = useState('')
-  // The search box queries inventory instead of filtering a downloaded copy of
-  // it: `deal` narrows server-side, the text goes to the same LIKE the listings
-  // page uses. Only the fit score stays in the browser, because it scores the
-  // fifty rows that came back — not the whole book.
+  const [mode, setMode] = useState('suggested')
+
+  const req = l?.req || {}
+  // What we actually know. Each of these narrows the server query, and only if
+  // it is really there — `locality: undefined` must not become a filter on the
+  // string "undefined".
+  const known = {
+    deal: req.deal || undefined,
+    locality: req.locality || undefined,
+    config: req.config || undefined,
+  }
+  // Locality and deal NARROW; config only RANKS.
+  //
+  // A requirement's config is "1BHK" or "2 BHK", and a listing's type is
+  // "1 BHK duplex", "1rk BHK independent house", "3 BHK studio" — free-form
+  // composites typed by whoever entered the stock. An exact `type IN (…)`
+  // filter against that matches almost nothing: Baner has 3,000 available
+  // listings and a 1BHK requirement returned zero of them. Locality and deal
+  // are clean enumerations and can be trusted to filter; config is handed to
+  // the fit score, which is allowed to be approximate because it only decides
+  // the order.
+  const canSuggest = Boolean(known.locality || known.config || hasBudget(req))
+  // Typing is the escape hatch and it always searches everything. Narrowing a
+  // search by the requirement would hide the exact listing the agent is typing
+  // the name of.
+  const searching = q.trim().length > 0
+  const suggesting = canSuggest && mode === 'suggested' && !searching
+
   const { data: page, loading } = useServerData(
-    () => l ? api.listProperties({ deal: l.req?.deal, q: q.trim() || undefined, status: 'Available', limit: 50 }) : Promise.resolve({ data: [] }),
-    [leadId, l?.req?.deal, q.trim()],
+    () => {
+      if (!l) return Promise.resolve({ data: [] })
+      return api.listProperties({
+        status: 'Available', limit: 50,
+        deal: known.deal,
+        q: q.trim() || undefined,
+        ...(suggesting ? { locality: known.locality } : {}),
+      })
+    },
+    [leadId, known.deal, known.locality, known.config, suggesting, q.trim()],
     { data: [] })
+
   if (!l) return null
   const already = new Set(l.shortlist || [])
   const cands = (page?.data || [])
     .filter(p => !already.has(p.id))
-    .map(p => ({ p, fit: fitReasons(p, l.req).score }))
-    .sort((a, b) => b.fit - a.fit)
+    .map(p => ({ p, ...fitReasons(p, req) }))
+    .sort((a, b) => b.score - a.score)
   const attach = (p) => { store.attachProp(leadId, p.id, p.society); store.closeModal() }
+
+  const emptyLine = searching ? 'Nothing matches that search.'
+    : suggesting ? 'No available listing fits this requirement — try All inventory.'
+      : 'No available inventory to attach.'
+
   return (
     <Modal title="Attach a property" onClose={store.closeModal} width={480}>
-      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>Shortlist inventory for <b style={{ color: 'var(--ink)' }}>{l.name}</b> ({l.req.config} · {l.req.deal} · {l.req.locality}).</div>
+      {/* reqShort handles a requirement that is half empty; the old line read
+          the three fields raw and printed "undefined · undefined · undefined"
+          on any lead nobody had filled in. */}
+      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
+        <b style={{ color: 'var(--ink)' }}>{l.name}</b>{reqShort(req) ? ` · ${reqShort(req)}` : ' · no requirement on record'}
+      </div>
+
+      {canSuggest && (
+        <div style={{ marginBottom: 12 }}>
+          <Segmented value={searching ? 'all' : mode} onChange={(v) => { setMode(v); if (v === 'all') setQ('') }}
+            options={[{ value: 'suggested', label: 'Suggested' }, { value: 'all', label: 'All inventory' }]} />
+        </div>
+      )}
+
       <div className="input-group" style={{ marginBottom: 12 }}>
         <span className="prefix"><Icon name="search" size={15} /></span>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search society, locality, type…" autoFocus />
       </div>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '46vh', overflowY: 'auto' }}>
         {loading && cands.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '8px 0' }}>Searching inventory…</div>}
-        {!loading && cands.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '8px 0' }}>No matching inventory to attach.</div>}
-        {cands.map(({ p, fit }) => (
-          <button key={p.id} onClick={() => attach(p)}
-            style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-            <div style={{ width: 40, height: 40, borderRadius: 8, background: thumbTint(p.id), display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--faint)', flexShrink: 0 }}><Icon name="building" size={19} strokeWidth={1.4} /></div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 13.5 }}>{p.society}</div>
-              <div className="u-muted" style={{ fontSize: 12 }}>{p.type} · {p.locality} · {p.priceLabel}{fit >= 60 ? ` · ${fit}% fit` : ''}</div>
-            </div>
-            <Icon name="plus" size={17} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-          </button>
-        ))}
+        {!loading && cands.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '8px 0' }}>{emptyLine}</div>}
+        {cands.map(({ p, score, reasons }) => {
+          // The best true thing about this listing for this person, and NOT the
+          // thing we filtered on. Suggested narrows by locality, so "Same
+          // locality · Baner" was printed identically on all fifty rows — true,
+          // and useless for choosing between them. Config, budget and
+          // possession are what separate one from the next; locality is only
+          // the answer when nothing else is.
+          const ok = (reasons || []).filter(r => r.ok)
+          const why = (suggesting ? ok.find(r => !/^Same locality/.test(r.t)) : null) || ok[0]
+          return (
+            <button key={p.id} className="ap-row" onClick={() => attach(p)}
+              style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: thumbTint(p.id), display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--faint)', flexShrink: 0 }}><Icon name="building" size={19} strokeWidth={1.4} /></div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{p.society}</div>
+                {/* Joined from what EXISTS. Written as `a · b · c` it printed a
+                    trailing separator on every one of delpat's imported rows,
+                    which carry no price — a dangling "·" reads as a value that
+                    failed to load rather than one that was never entered. */}
+                <div className="u-muted" style={{ fontSize: 12 }}>{[p.type, p.locality, p.priceLabel].filter(Boolean).join(' · ')}</div>
+                {/* Only when there IS a requirement to have matched. Against a
+                    blank req every listing scores the same and a badge would be
+                    decoration pretending to be a judgement. */}
+                {canSuggest && why && <div className="ap-why">{why.t}{score >= 60 ? ` · ${score}% fit` : ''}</div>}
+              </div>
+              <Icon name="plus" size={17} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+            </button>
+          )
+        })}
       </div>
     </Modal>
   )

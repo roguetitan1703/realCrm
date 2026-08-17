@@ -386,7 +386,13 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
               { label: 'Call', icon: 'phone', onClick: () => contact('call') },
               { label: 'WhatsApp', icon: 'wa', tone: 'wa', onClick: () => contact('wa') },
             ] : []),
-            ...(l.email ? [{ label: 'Email', icon: 'mail', onClick: () => contact('email') }] : []),
+            // Email steps aside for Log visit. The row is three across on a
+            // 390px screen; a fourth wraps, and a wrapped action row pushes the
+            // record's own identity down the page. Email is the least urgent of
+            // the four by a distance — it is still on the action button — and
+            // this only happens while a visit is actually booked.
+            ...(l.email && !isSiteVisit(l.followUp)
+              ? [{ label: 'Email', icon: 'mail', onClick: () => contact('email') }] : []),
           ]}
           railTop={followUpCard}
           sections={sections}

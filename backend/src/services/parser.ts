@@ -120,6 +120,14 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
     // Only an exact one-letter value counts; a stray "s" inside prose does not.
     if (s.trim() === 's') return 'sale';
     if (s.trim() === 'r') return 'rent';
+    // "L" is Lease, which is how 99acres sends COMMERCIAL renting — a showroom,
+    // an office, a warehouse. It was falling through to null, and the deal was
+    // then guessed from the budget: bhumi's one lease enquiry asked ₹2,25,000
+    // for a Mahalunge showroom, which the budget heuristic read as monthly and
+    // called rent. Right answer, wrong reason — the same enquiry quoted as an
+    // annual figure would have been filed as a sale. A portal that tells us the
+    // deal type should be believed rather than second-guessed.
+    if (s.trim() === 'l') return 'rent';
     if (/\brent(al)?\b|\blease\b|\btenant\b|\bletting\b/.test(s)) return 'rent';
     if (/\bsale\b|\bsell\b|\bresale\b|\bbuy(er)?\b|\bpurchase\b|\bnew\s*booking\b/.test(s)) return 'sale';
     return null;

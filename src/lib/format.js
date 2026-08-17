@@ -216,12 +216,21 @@ export function moneyEcho(v) {
  * So every budget comparison in the product was against `undefined`: NaN, false,
  * "above budget", every time. One accessor, tolerant of both, so the two
  * spellings can never disagree again.
+ *
+ * THREE, as it turns out. A plain `req.budget` is the third, and it is the one
+ * that matches how a budget is actually said: one number, not a range. 20
+ * delpat leads carry only that key, and every budget comparison on them —
+ * "within budget", the fit score, the budget column — was silently NaN. (bhumi
+ * has none, so the live desk was not affected.)
+ *
+ * A single figure is a CEILING: "budget 28867" means up to that, not from it.
+ * So it fills `max` and leaves `min` unknown, which is what it is.
  */
 export function budgetOf(req) {
   if (!req) return { min: NaN, max: NaN }
   return {
     min: parseBudgetNum(req.minBudget ?? req.budgetMin),
-    max: parseBudgetNum(req.maxBudget ?? req.budgetMax),
+    max: parseBudgetNum(req.maxBudget ?? req.budgetMax ?? req.budget),
   }
 }
 
@@ -315,14 +324,29 @@ export function fitReasons(p, req) {
   if (p.type === req.config) { reasons.push({ ok: true, t: 'Config matches (' + p.type + ')' }); score += 25 }
   if (p.locality === req.locality) { reasons.push({ ok: true, t: 'Same locality · ' + req.locality }); score += 30 }
   else { reasons.push({ ok: false, t: 'Different area (' + p.locality + ')' }); score += 8 }
+  // A BUDGET IS USUALLY ONE NUMBER. This tested `price >= min && price <= max`,
+  // so a requirement with only a ceiling — which is how a budget is actually
+  // stated, and now the commonest shape on file — fell through both branches to
+  // "we cannot say", and the listing that fitted perfectly got no more credit
+  // than the one at triple the money. Each end is judged on its own, and an end
+  // nobody gave is simply not judged.
   const { min: bMin, max: bMax } = budgetOf(req)
-  const inB = p.price >= bMin * 0.95 && p.price <= bMax * 1.08
-  if (inB) { reasons.push({ ok: true, t: 'Within budget' }); score += 30 }
-  else if (p.price < bMin) { reasons.push({ ok: true, t: 'Under budget — room to negotiate' }); score += 18 }
-  // No budget on record is not the same as over budget, and saying so put
-  // "Above budget" on every match the product has ever shown.
-  else if (isNaN(bMin) || isNaN(bMax)) { score += 12 }
-  else { reasons.push({ ok: false, t: 'Above budget' }); score += 5 }
+  const hasMin = !isNaN(bMin), hasMax = !isNaN(bMax)
+  const priced = p.price > 0
+  const underMax = hasMax && p.price <= bMax * 1.08
+  const overMin = hasMin && p.price >= bMin * 0.95
+  if (!priced || (!hasMin && !hasMax)) {
+    // No budget on record is not the same as over budget, and saying so put
+    // "Above budget" on every match the product has ever shown. A listing with
+    // no price on it cannot be judged either.
+    score += 12
+  } else if ((hasMin ? overMin : true) && (hasMax ? underMax : true)) {
+    reasons.push({ ok: true, t: 'Within budget' }); score += 30
+  } else if (hasMin && p.price < bMin) {
+    reasons.push({ ok: true, t: 'Under budget — room to negotiate' }); score += 18
+  } else {
+    reasons.push({ ok: false, t: 'Above budget' }); score += 5
+  }
   if (p.possession === 'Immediate') { reasons.push({ ok: true, t: 'Ready to move' }); score += 10 }
   if (p.status === 'Available') score += 5
   return { reasons: reasons.slice(0, 4), score: Math.min(99, score) }
