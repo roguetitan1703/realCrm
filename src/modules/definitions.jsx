@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel } from '../lib/format.js'
+import { reqShort, reqConfigLabel, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -80,7 +80,10 @@ export const LEADS_DEF = {
   headerFacts: (l) => [
     l.phone,
     l.email || null,
-    l.req?.config || l.requirement || null,
+    reqConfigLabel(l.req) || l.requirement || null,
+    // Came back, on the identity strip — the one fact about this person that
+    // changes how the call opens.
+    l.enquiryCount > 1 ? <span className="rh-repeat">{l.enquiryCount} enquiries</span> : null,
     (l.req?.locality || l.locality) ? <span className="rh-loc"><Icon name="mapPin" size={12} className="ic" />{l.req?.locality || l.locality}</span> : null,
     (l.req?.deal || l.deal) ? <span className={'rh-dealtag' + ((l.req?.deal || l.deal) === 'rent' ? ' rent' : '')}>{labelOf(DEAL_LEAD, l.req?.deal || l.deal)}</span> : null,
     // WHAT THEY ASKED ABOUT — "VTP Aethereus", "Blue Ridge". The list row showed
@@ -131,6 +134,10 @@ export const LEADS_DEF = {
       // Same question, with and without the clock: everyone nobody has reached
       // out to, and the subset of those that is already overdue.
       { value: 'never_contacted', label: 'Never called or messaged' },
+      // The warmest people on the desk: they came back on their own. Counted
+      // in sessions, so somebody who clicked four listings in one sitting is
+      // not in it — see docs/specs/repeat-enquiries.md.
+      { value: 'repeat_enquiry', label: 'Enquired more than once' },
       { value: 'untouched_sla', label: 'Past SLA, never contacted' },
       { value: 'noanswer_stale', label: 'No answer, not retried' },
       { value: 'unassigned', label: 'Unassigned' }, { value: 'new', label: 'Arrived today' },
@@ -360,6 +367,9 @@ export const LEADS_DEF = {
             This line is one row with an ellipsis, so every part it carries is
             room taken from `interest`, which sits last and is cut first. */}
         {reqShort(l.req, { budget: false }) && <div className="prow-req">{reqShort(l.req, { budget: false })}</div>}
+        {/* CAME BACK. Only above one — every lead has enquired once, and a
+            badge on everything is a badge on nothing. */}
+        {l.enquiryCount > 1 && <div className="prow-repeat">{l.enquiryCount} enquiries</div>}
         <div className="prow-foot">
           <div className="prow-meta">
             {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}

@@ -534,6 +534,11 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     followUp: r.follow_up || null,
     overdue: Boolean(r.overdue),
     importBatchId: r.import_batch_id || undefined,
+    // How many SESSIONS this person has enquired in — present only where the
+    // query asked for it, and undefined rather than 0 where it did not. A row
+    // that was never counted must not claim to have been counted and found
+    // nothing.
+    enquiryCount: r.enquiry_count == null ? undefined : Number(r.enquiry_count),
     // The real timestamp, not only the derived "how long ago". A desk asks
     // "when did this lead come in" and wants a date it can quote back to a
     // client or line up against a portal's own report; minsAgo answers a
@@ -1115,6 +1120,9 @@ seedDatabase()
   // system produces — but a firm could legitimately type it into a remark, and
   // an ungated pass would keep reaching for it forever.
   .then(() => runOnce('2026_08_18_outcome_keys', () => migrateOutcomeLabelsToKeys()))
+  // Builds the enquiry history from the pushes still on disk. Additive — it
+  // writes only to crm_lead_enquiries and touches no lead.
+  .then(() => runOnce('2026_08_18_enquiry_sessions', () => backfillEnquiries()))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
@@ -1721,6 +1729,10 @@ export async function getLeadById(id: string): Promise<any | undefined> {
   // site visit existed only in the database — photo, GPS fix and outcome
   // included. One history, newest first; which table a thing was written to is
   // an implementation detail the agent should never have been able to feel.
+  // The enquiry history. Read alongside the timeline so the record can show
+  // what was asked for on each occasion rather than a prose note about it.
+  lead.enquiries = await getEnquiriesForLead(id).catch(() => []);
+  lead.enquiryCount = lead.enquiries.length;
   const acts = await getActivitiesForLead(id);
   if (acts.length) {
     lead.timeline = [...(lead.timeline || []), ...acts]
@@ -2226,6 +2238,11 @@ function leadSegments({ arrivalStage, slaHours, timezone }: DeskConfig) {
     // "show me everyone we have never reached out to" is asked of the whole
     // desk rather than of the overdue pile.
     never_contacted: NEVER_CONTACTED,
+    // CAME BACK. Counted in sessions, so a man who clicked four listings in
+    // five minutes is not in it — 12 leads on the live desk, not the 25 a
+    // payload count would have claimed. They are the warmest people on it.
+    repeat_enquiry: sql`(SELECT count(*) FROM crm_lead_enquiries e
+                          WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) > 1`,
   };
 }
 
@@ -2415,7 +2432,14 @@ export async function listLeads(opts: {
 
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
   const [rows, countRows] = await Promise.all([
-    sql`SELECT * FROM crm_leads WHERE ${clause} ORDER BY ${col} ${dir} NULLS LAST LIMIT ${limit} OFFSET ${offset}`,
+    // The enquiry count rides along in the SAME query as the rows it labels.
+    // A separate request would be a second answer to one question, which is
+    // how a badge and the list under it come to disagree.
+    // NOT aliased. The segment predicates reference crm_leads.id by name
+    // (NEVER_CONTACTED does), and an alias makes every one of them invalid.
+    sql`SELECT crm_leads.*, (SELECT count(*)::int FROM crm_lead_enquiries e
+                              WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS enquiry_count
+           FROM crm_leads WHERE ${clause} ORDER BY ${col} ${dir} NULLS LAST LIMIT ${limit} OFFSET ${offset}`,
     sql`SELECT count(*)::int AS n FROM crm_leads WHERE ${clause}`,
   ]);
   return { rows: rows.map(r => rowToLead(r)), total: countRows[0]?.n ?? 0, page, limit };
@@ -4086,6 +4110,232 @@ export async function updateTimelineEvent(id: string, tenantId: string, text: st
     timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp),
     metadata: r.metadata || {},
   };
+}
+
+
+// ============================================================================
+// 📨 ENQUIRY SESSIONS — docs/specs/repeat-enquiries.md, phase 1
+// ============================================================================
+// Records what was asked for and when. Changes NOTHING about the lead: the
+// requirement, the name, the stage and the routing are all left exactly as the
+// existing merge leaves them. That is the whole design of phase 1 — the counter
+// and the history are additive and cannot be wrong in a way that costs
+// anything, and the disagreements between this and the lead can be read on real
+// traffic before a single field is overwritten.
+
+/** How long a browsing session lasts. Six hours covers a lunchtime and an
+ *  evening browse while keeping yesterday and today always separate. It is a
+ *  guess, so it lives where it can be changed rather than inline. */
+export const ENQUIRY_SESSION_MS = 6 * 60 * 60 * 1000;
+
+export interface EnquiryInput {
+  leadId: string;
+  at?: Date | string | null;
+  source?: string | null;
+  integrationId?: string | null;
+  req?: any;
+  enquiryId?: string | null;
+  rawRef?: string | null;
+}
+
+/** Both ends of the budget a session was browsing. Four clicks at 24,999 /
+ *  25,000 / 29,999 / 29,999 is a range someone is looking at, not a sequence of
+ *  revisions — taking the last is how "latest wins" lands on whichever listing
+ *  they happened to open last. */
+function mergeSessionReq(prev: any, next: any): any {
+  const out = { ...(prev || {}) };
+  const n = next || {};
+  const nums = (v: any) => (v == null || v === '' ? null : Number(v));
+  const lo = nums(n.minBudget ?? n.budget), hi = nums(n.maxBudget ?? n.budget);
+  if (lo != null && isFinite(lo)) out.minBudget = out.minBudget == null ? lo : Math.min(Number(out.minBudget), lo);
+  if (hi != null && isFinite(hi)) out.maxBudget = out.maxBudget == null ? hi : Math.max(Number(out.maxBudget), hi);
+  // Accumulated, because someone comparing Green Vistas and VTP Township is
+  // telling you something and picking one of them discards it.
+  for (const k of ['locality', 'config', 'interest', 'subtype'] as const) {
+    const v = n[k];
+    if (!v) continue;
+    const cur = out[k];
+    const list = Array.isArray(cur) ? cur : (cur ? [cur] : []);
+    if (!list.includes(v)) list.push(v);
+    out[k] = list.length === 1 ? list[0] : list;
+  }
+  // Single-valued: never observed to differ inside a session.
+  for (const k of ['deal', 'category'] as const) if (n[k] && !out[k]) out[k] = n[k];
+  if (n.notes) out.notes = n.notes;
+  return out;
+}
+
+/**
+ * Record one payload against its session, creating the session if this is a
+ * new one. Idempotent on the portal's own enquiry id.
+ *
+ * Never throws into the caller: this is bookkeeping alongside ingestion, and a
+ * lead must not fail to arrive because its history row could not be written.
+ */
+export async function recordEnquiry(input: EnquiryInput): Promise<string | null> {
+  try {
+    const t = tid();
+    const at = input.at ? new Date(input.at) : new Date();
+    const when = isNaN(at.getTime()) ? new Date() : at;
+
+    // ALREADY COUNTED? Two independent guards, because they catch different
+    // things and each one alone leaves a hole.
+    //
+    // The portal retrying one enquiry is not a second enquiry — one bhumi
+    // enquiry_id arrived three times. But not every payload carries an id, and
+    // for those the backfill replaying the same webhook_inbox row would raise
+    // payload_count again every time it ran: bhumi showed 589 payloads over 261
+    // pushes after two replays. The inbox row id is the payload's identity
+    // whether or not the portal gave it one.
+    if (input.rawRef) {
+      const seen = await sql`
+        SELECT 1 FROM crm_lead_enquiries
+         WHERE tenant_id = ${t} AND raw_refs @> ${sql.json([input.rawRef])} LIMIT 1`;
+      if (seen.length) return null;
+    }
+    if (input.enquiryId) {
+      const seen = await sql`
+        SELECT id, raw_refs FROM crm_lead_enquiries
+         WHERE tenant_id = ${t} AND enquiry_ids @> ${sql.json([input.enquiryId])} LIMIT 1`;
+      if (seen.length) {
+        // The delivery is still recorded, it just is not a second enquiry.
+        // Dropping the reference entirely left one bhumi push belonging to no
+        // session at all, so the table could not be reconciled against the
+        // inbox it was built from — and provenance is the reason raw_refs
+        // exists.
+        if (input.rawRef) {
+          const refs = seen[0].raw_refs || [];
+          if (!refs.includes(input.rawRef)) {
+            await sql`UPDATE crm_lead_enquiries SET raw_refs = ${sql.json([...refs, input.rawRef])}
+                       WHERE id = ${seen[0].id} AND tenant_id = ${t}`;
+          }
+        }
+        return null;
+      }
+    }
+
+    const open = await sql`
+      SELECT * FROM crm_lead_enquiries
+       WHERE tenant_id = ${t} AND lead_id = ${input.leadId}
+         AND last_at >= ${new Date(when.getTime() - ENQUIRY_SESSION_MS)}
+         AND first_at <= ${new Date(when.getTime() + ENQUIRY_SESSION_MS)}
+       ORDER BY last_at DESC LIMIT 1`;
+
+    if (open.length) {
+      const row = open[0];
+      await sql`
+        UPDATE crm_lead_enquiries SET
+          last_at = GREATEST(last_at, ${when}),
+          first_at = LEAST(first_at, ${when}),
+          payload_count = payload_count + 1,
+          req = ${sql.json(mergeSessionReq(row.req, input.req))},
+          enquiry_ids = ${sql.json([...(row.enquiry_ids || []), ...(input.enquiryId ? [input.enquiryId] : [])])},
+          raw_refs = ${sql.json([...(row.raw_refs || []), ...(input.rawRef ? [input.rawRef] : [])])}
+        WHERE id = ${row.id} AND tenant_id = ${t}`;
+      return row.id;
+    }
+
+    const id = `enq_${when.getTime()}_${Math.random().toString(36).slice(2, 6)}`;
+    await sql`
+      INSERT INTO crm_lead_enquiries
+        (id, tenant_id, lead_id, integration_id, session_key, first_at, last_at,
+         payload_count, source, req, enquiry_ids, raw_refs)
+      VALUES (${id}, ${t}, ${input.leadId}, ${input.integrationId ?? null},
+              ${`${input.leadId}:${when.toISOString()}`}, ${when}, ${when},
+              1, ${input.source ?? null}, ${sql.json(mergeSessionReq({}, input.req))},
+              ${sql.json(input.enquiryId ? [input.enquiryId] : [])},
+              ${sql.json(input.rawRef ? [input.rawRef] : [])})
+      ON CONFLICT (tenant_id, session_key) DO NOTHING`;
+    return id;
+  } catch (err: any) {
+    console.warn('[recordEnquiry]', err.message);
+    return null;
+  }
+}
+
+
+/**
+ * Build the enquiry history from the pushes that are still on disk.
+ *
+ * webhook_inbox keeps the original bodies, so the table can start full instead
+ * of empty — and it only gets cheaper the sooner it runs: data-lifecycle.md
+ * purges bodies at 30 days and what is gone is gone.
+ *
+ * It replays each payload through recordEnquiry, the SAME function live
+ * ingestion calls, rather than reimplementing the session rule. The first
+ * version of this kept its own in-memory map of open sessions and raced the
+ * boot chain: one lead ended up with two overlapping sessions 90 seconds apart,
+ * both claiming the same last payload. Two implementations of one rule is the
+ * mistake this codebase keeps making, and a migration is not exempt from it.
+ *
+ * Slower — a round trip per payload — and that is the correct trade for a
+ * one-time repair that has to agree with what happens tomorrow.
+ */
+export async function backfillEnquiries(): Promise<void> {
+  // A clean rebuild. The rows are derived entirely from webhook_inbox and no
+  // human has edited them, so starting over is safe and is the only way a
+  // half-finished earlier attempt gets corrected rather than compounded.
+  const wiped = await sql`DELETE FROM crm_lead_enquiries WHERE id LIKE 'enq_bf_%' OR id LIKE 'enq_%'`;
+
+  const rows = await sql`
+    SELECT id, tenant_id, integration_id, lead_id, received_at, raw_body
+      FROM webhook_inbox
+     WHERE lead_id IS NOT NULL AND raw_body IS NOT NULL
+     ORDER BY received_at ASC`;
+
+  const byTenant = new Map<string, number>();
+  for (const r of rows as any[]) {
+    let body: any = r.raw_body;
+    if (typeof body === 'string') { try { body = JSON.parse(body); } catch { continue; } }
+    if (!body || typeof body !== 'object') continue;
+    const when = new Date(r.received_at);
+    if (isNaN(when.getTime())) continue;
+    // recordEnquiry reads the tenant from the request context, so the replay
+    // has to stand in the right one for each row.
+    await runWithContext({ tenantId: r.tenant_id } as any, () => recordEnquiry({
+      leadId: r.lead_id,
+      at: when,
+      source: body.source || null,
+      integrationId: r.integration_id || null,
+      enquiryId: body.enquiry_id || body.lead_id || null,
+      rawRef: r.id,
+      req: {
+        locality: body.locality || body.location || undefined,
+        config: body.property_type || body.bhk || undefined,
+        minBudget: body.budget_min || undefined,
+        maxBudget: body.budget_max || body.budget || undefined,
+        notes: body.message || undefined,
+        interest: body.project || undefined,
+      },
+    }));
+    byTenant.set(r.tenant_id, (byTenant.get(r.tenant_id) || 0) + 1);
+  }
+
+  // Per tenant, out loud, and counted from the table rather than from what this
+  // function thinks it did. A repair that reports its own intentions instead of
+  // the result is how "65 unscoped reads" gets announced before one is opened.
+  const after = await sql`SELECT tenant_id, count(*)::int AS sessions,
+                                 count(DISTINCT lead_id)::int AS leads
+                            FROM crm_lead_enquiries GROUP BY 1 ORDER BY 1`;
+  console.log(`[migration] enquiry sessions rebuilt from ${rows.length} payloads`
+    + (wiped.count ? ` (cleared ${wiped.count} from an earlier attempt)` : '')
+    + ' — ' + (after as any[]).map(r => `${r.tenant_id}: ${r.sessions} sessions over ${r.leads} leads`).join(', '));
+}
+
+/** Every session on one lead, newest first. */
+export async function getEnquiriesForLead(leadId: string): Promise<any[]> {
+  const rows = await sql`
+    SELECT * FROM crm_lead_enquiries
+     WHERE tenant_id = ${tid()} AND lead_id = ${leadId}
+     ORDER BY first_at DESC`;
+  return rows.map(r => ({
+    id: r.id,
+    at: r.first_at instanceof Date ? r.first_at.toISOString() : String(r.first_at),
+    lastAt: r.last_at instanceof Date ? r.last_at.toISOString() : String(r.last_at),
+    listings: r.payload_count,
+    source: r.source,
+    req: r.req || {},
+  }));
 }
 
 // ============================================================================

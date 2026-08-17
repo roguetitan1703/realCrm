@@ -2687,3 +2687,19 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 /* Why a suggested listing is being suggested. One line, quiet, under the facts
    — the facts say what it is, this says what it has to do with the person. */
 .ap-why{margin-top:3px;font-size:11.5px;font-weight:600;color:var(--accent-ink)}
+
+/* ---- Enquiry history: what they asked for, each time (repeat-enquiries.md) ---- */
+.enq-list{display:flex;flex-direction:column}
+.enq-row{padding:11px 0}
+.enq-when{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--ink)}
+/* How many listings they opened in one sitting — a session, not a visit count. */
+.enq-n{font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--line-2);color:var(--muted);border-radius:5px;padding:2px 6px}
+.enq-req{margin-top:3px;font-size:13px;color:var(--ink-2)}
+.enq-src{margin-top:2px;font-size:11.5px;color:var(--muted)}
+
+/* Came back. Accent, because it is work waiting — and only ever rendered above
+   one, so it never appears on a lead that simply exists. */
+.prow-repeat,.rh-repeat{display:inline-flex;align-items:center;font-size:11px;font-weight:700;
+  letter-spacing:.03em;color:var(--accent-ink);background:var(--accent-wash);border-radius:6px;padding:2px 7px}
+.prow-repeat{margin-top:5px}

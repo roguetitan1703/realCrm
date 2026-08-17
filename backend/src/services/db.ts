@@ -697,6 +697,42 @@ async function createLedgerTables(): Promise<void> {
   await sql`CREATE INDEX IF NOT EXISTS idx_activities_lead ON activities (tenant_id, lead_id, at DESC);`;
   // Drives the derived "visits to this unit" view without scanning JSONB.
   await sql`CREATE INDEX IF NOT EXISTS idx_activities_property ON activities (tenant_id, property_id) WHERE property_id IS NOT NULL;`;
+
+  // 📨 ENQUIRY SESSIONS (docs/specs/repeat-enquiries.md)
+  //
+  // One row per SESSION, not per payload. A person clicking "contact" on four
+  // listings in five minutes has enquired once — 8 of 33 consecutive gaps from
+  // a repeating phone on the live desk are under five minutes, with different
+  // enquiry ids, so counting payloads would have shown "4 enquiries" against a
+  // man who enquired once and taken his budget from whichever flat he happened
+  // to open last.
+  //
+  // Deliberately additive: nothing here changes a lead. It records what was
+  // asked for, when, so the history is queryable instead of narrated in a note.
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_lead_enquiries (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      lead_id TEXT NOT NULL,
+      integration_id TEXT,
+      -- lead_id + the instant the session opened. UNIQUE per tenant so a
+      -- concurrent double-fire cannot create two rows for one sitting.
+      session_key TEXT NOT NULL,
+      first_at TIMESTAMPTZ NOT NULL,
+      last_at TIMESTAMPTZ NOT NULL,
+      payload_count INT NOT NULL DEFAULT 1,
+      source TEXT,
+      req JSONB DEFAULT '{}'::jsonb,
+      -- The portal's own ids, so a retry of one enquiry is recognised as such.
+      -- One bhumi enquiry_id was delivered three times.
+      enquiry_ids JSONB DEFAULT '[]'::jsonb,
+      raw_refs JSONB DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (tenant_id, session_key)
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_lead_enquiries_lead ON crm_lead_enquiries (tenant_id, lead_id, first_at DESC);`;
+
   await sql`CREATE INDEX IF NOT EXISTS idx_activities_agent ON activities (tenant_id, agent_id, type, at DESC);`;
 }
 

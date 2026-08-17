@@ -16,7 +16,7 @@
 import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
-import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent } from './store';
+import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent, recordEnquiry } from './store';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
 
@@ -496,6 +496,14 @@ export async function processInboxRow(
         // — it returns 'merged' below — and then wrote the same word to the
         // inbox as a push that created a lead, so the activity list said "Lead
         // created" three times for one buyer who exists once.
+        // The enquiry itself, recorded as history rather than only narrated in
+        // a note. Additive: it changes nothing above it. Sessions, not payloads
+        // — see docs/specs/repeat-enquiries.md.
+        await recordEnquiry({
+          leadId: existing.id, at: (lead as any).receivedAt || undefined,
+          source: integration.provider, integrationId: integration.id,
+          req: lead.req, enquiryId: (lead as any).external_id || null, rawRef: inboxId,
+        });
         await markInbox(inboxId, 'merged', { leadId: existing.id });
         return { status: 'merged', leadId: existing.id };
       }
@@ -516,6 +524,16 @@ export async function processInboxRow(
         source: leadFields.source || integration.provider,
       } as any);
 
+      // The FIRST enquiry gets a row too, so the table is the whole history
+      // rather than "everything after the first one" — otherwise a lead that
+      // has enquired twice would show a count of one.
+      if (created?.id) {
+        await recordEnquiry({
+          leadId: created.id, at: (lead as any).receivedAt || undefined,
+          source: leadFields.source || integration.provider, integrationId: integration.id,
+          req: lead.req, enquiryId: external_id || null, rawRef: inboxId,
+        });
+      }
       await markInbox(inboxId, 'parsed', { leadId: created?.id || null });
       return { status: 'ingested', leadId: created?.id || null };
     },

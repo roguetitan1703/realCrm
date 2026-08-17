@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Overdue, Avatar, CappedList } from '../components/primitives.jsx'
-import { fitReasons, thumbTint, initials, unitLabel } from '../lib/format.js'
+import { fitReasons, thumbTint, initials, unitLabel, budgetRange, whenLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
@@ -308,6 +308,48 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   )
 
   const sections = [
+    // WHAT THEY ASKED FOR, EACH TIME THEY ASKED.
+    //
+    // A repeat enquiry used to survive only as a note — "[Repeat enquiry via
+    // 99acres]" and a sentence — so the newer requirement was unreachable by
+    // any filter, match or report. This is the same history as data.
+    //
+    // Sessions, not payloads: on the live desk one man opened four listings
+    // between 18:05 and 18:10 and that is ONE enquiry, shown as "4 listings",
+    // not four visits. Counting the clicks would have said he enquired four
+    // times and taken his budget from whichever flat he opened last.
+    //
+    // The section only exists once there is more than one, because "1 enquiry"
+    // is every lead and a panel saying so is a panel about nothing.
+    ...((l.enquiries || []).length > 1 ? [{
+      id: 'enquiries',
+      title: `${l.enquiries.length} enquiries`,
+      render: () => (
+        <div className="enq-list">
+          {l.enquiries.map((e, i) => {
+            const list = (v) => (Array.isArray(v) ? v.join(' · ') : v)
+            const facts = [
+              list(e.req?.config),
+              list(e.req?.locality),
+              budgetRange(e.req),
+              list(e.req?.interest),
+            ].filter(x => x && x !== '—')
+            return (
+              <div key={e.id} className={'enq-row' + (i ? ' relrow-div' : '')}>
+                <div className="enq-when">
+                  {whenLabel(e.at)}
+                  {/* How many listings they opened in that sitting. Only when it
+                      is more than one — otherwise it is noise on every row. */}
+                  {e.listings > 1 && <span className="enq-n">{e.listings} listings</span>}
+                </div>
+                <div className="enq-req">{facts.length ? facts.join(' · ') : 'No requirement sent'}</div>
+                {e.source && <div className="enq-src">via {e.source}</div>}
+              </div>
+            )
+          })}
+        </div>
+      ),
+    }] : []),
     {
       id: 'inventory',
       title: 'Matched & shortlisted inventory',
