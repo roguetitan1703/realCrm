@@ -272,9 +272,32 @@ export function budgetRange(req) {
  *  why a record header read "3 BHK · Mahalunge · Buy · — · Via 99acres". */
 export const hasBudget = (req) => budgetRange(req) !== '—'
 
+/**
+ * WHAT THEY WANT, in one phrase — the string every row, card and header prints.
+ *
+ * `req.config` was read raw, and for a commercial requirement there is nothing
+ * in it: the parser clears "0 BHK" precisely because a showroom has no bedroom
+ * count. Left as it was, bhumi's 2.25 lakh a month showroom would have read
+ * "Rent · Mahalunge · 2.25L/mo" with nothing at all saying it was a showroom —
+ * strictly worse than the nonsense it replaced, because at least "0 BHK" made
+ * somebody ask.
+ *
+ * Residential keeps whatever config it holds. Commercial says its sub-type,
+ * which is the equivalent fact: "Showroom" is to a commercial enquiry what
+ * "2 BHK" is to a home.
+ */
+export function reqConfigLabel(req) {
+  if (!req) return null
+  const f = reqFacets(req)
+  if (f.category === 'commercial') {
+    return labelOf(SUBTYPES.commercial, f.subtype) || 'Commercial'
+  }
+  return req.config || (f.bhk ? labelOf(BHK, f.bhk) : null)
+}
+
 export function reqLine(req) {
   if (!req) return 'General inquiry'
-  const parts = [req.config, req.locality, budgetRange(req)].filter(x => x && x !== 'undefined' && x !== 'null')
+  const parts = [reqConfigLabel(req), req.locality, budgetRange(req)].filter(x => x && x !== 'undefined' && x !== 'null')
   return parts.join(' · ') || 'General inquiry'
 }
 
@@ -304,7 +327,7 @@ export function reqShort(req, { budget = true } = {}) {
   // room to render at all.
   const money = budget ? budgetRange(req) : null
   const parts = [
-    req.config,
+    reqConfigLabel(req),
     deal,
     req.locality,
     money && money !== '—' ? money : null,
