@@ -18,12 +18,44 @@ export function configLabel(p = {}) {
   return [bhk, sub].filter(Boolean).join(' ') || p.type || 'Property'
 }
 
+/**
+ * A rupee amount, split into the number to show and its unit.
+ *
+ * THE UNIT ESCALATES, at every magnitude. The rent path used to divide by 1000
+ * and stop there, so a ₹45,00,000 lease read "₹4500k/mo" on the list while the
+ * record sheet beside it said "₹45L".
+ *
+ * TWO DECIMALS, trailing zeros dropped by String(). Rounding to whole units put
+ * "₹2L" over a stored ₹2,25,000 — hiding ₹25,000, which is 11% of the figure and
+ * enough to change who gets shown what. ₹4.5k, ₹25k, ₹2.25L, ₹93L, ₹1.23Cr.
+ *
+ * NO SCALE GUESSING. There is no "a small number must already be in Lakhs" rule
+ * here. That heuristic made a stored 123 render "₹1.2Cr" in the list and "₹123"
+ * on the sheet — one number, two readings, neither of them checkable. A value in
+ * the database is rupees. If that is wrong the input is wrong, and the fix is at
+ * the input, not in six formatters each guessing differently.
+ */
+function moneyParts(v) {
+  const [unit, div] = v >= 10000000 ? ['Cr', 10000000]
+    : v >= 100000 ? ['L', 100000]
+      : v >= 1000 ? ['k', 1000] : ['', 1]
+  return { shown: Math.round((v / div) * 100) / 100, unit }
+}
+
+/** One figure. `perMonth` is the ONLY deal-awareness money needs — rent is a
+ *  rate, a sale price is not, and leaving it off made the record sheet claim a
+ *  ₹25,000 rental lead wanted to spend ₹25,000 outright. */
+export function money(n, { perMonth = false } = {}) {
+  const v = Number(n)
+  if (!isFinite(v) || v <= 0) return ''
+  const { shown, unit } = moneyParts(v)
+  return '₹' + shown + unit + (perMonth ? '/mo' : '')
+}
+
+/** Kept for callers that have an amount and no deal (a listing's price, a
+ *  project's band). Same core, so it can no longer disagree with budgetRange. */
 export function fmtMoney(n) {
-  if (!n) return '—'
-  if (n >= 10000000) return '₹' + (n / 10000000).toFixed(n >= 100000000 ? 0 : 1).replace(/\.0$/, '') + 'Cr'
-  if (n >= 100000) return '₹' + Math.round(n / 100000) + 'L'
-  if (n >= 1000) return '₹' + Math.round(n / 1000) + 'k'
-  return '₹' + n
+  return money(n) || '—'
 }
 
 export function timeAgo(mins) {
@@ -177,25 +209,40 @@ export function budgetOf(req) {
 export function budgetRange(req) {
   if (!req) return '—'
   if (typeof req === 'string') return req
-  let { min, max } = budgetOf(req)
-  if (isNaN(min) || isNaN(max) || (min === 0 && max === 0)) {
-    // A lead with no budget shows no budget. This used to end in the literal
-    // '₹85L–₹1.2Cr' — an invented figure, rendered as fact, on every row of the
-    // table at once. Money is the last thing that should ever be guessed.
-    return req.budget || req.budgetLabel || '—'
+  const { min, max } = budgetOf(req)
+  const perMonth = req.deal === 'rent'
+  const hasMin = !isNaN(min) && min > 0
+  const hasMax = !isNaN(max) && max > 0
+
+  // A PORTAL SENDS ONE NUMBER, NOT A RANGE. This required both and fell through
+  // to the dash whenever either was missing — so 83 of bhumi's leads carried a
+  // real budget and rendered "—" on the record, the list and the phone card, in
+  // the same slot a lead with genuinely no budget uses. A single figure is a
+  // fact; refusing to show it because its partner is absent is 3.1 (absence
+  // treated as a defect rather than as information).
+  if (hasMin && hasMax) {
+    const a = moneyParts(min), b = moneyParts(max)
+    const tail = (perMonth ? '/mo' : '')
+    // Share the unit when both ends land in it — "₹50–90L", not "₹50L–₹90L".
+    return a.unit === b.unit
+      ? `₹${a.shown}–${b.shown}${b.unit}${tail}`
+      : `₹${a.shown}${a.unit}–₹${b.shown}${b.unit}${tail}`
   }
-  if (req.deal === 'rent') {
-    return '₹' + Math.round(min / 1000) + '–' + Math.round(max / 1000) + 'k/mo'
-  }
-  // Normalize raw rupees (> 10000) to Lakhs
-  if (min > 10000) min = min / 100000
-  if (max > 10000) max = max / 100000
-  if (max >= 100) {
-    const minStr = min >= 100 ? `₹${(min / 100).toFixed(1)}Cr` : `₹${Math.round(min)}L`
-    return `${minStr}–₹${(max / 100).toFixed(1)}Cr`
-  }
-  return `₹${Math.round(min)}–₹${Math.round(max)}L`
+  // "Up to" and "from" rather than a bare figure: which end of the budget we
+  // were given changes what it means to an agent about to negotiate.
+  if (hasMax) return 'Up to ' + money(max, { perMonth })
+  if (hasMin) return money(min, { perMonth }) + '+'
+
+  // Still no budget shows no budget. This used to end in the literal
+  // '₹85L–₹1.2Cr' — an invented figure, rendered as fact, on every row of the
+  // table at once. Money is the last thing that should ever be guessed.
+  return req.budget || req.budgetLabel || '—'
 }
+
+/** Whether budgetRange() would render anything real. The dash is a placeholder,
+ *  not a fact, and a facts strip that filters on truthiness keeps it — which is
+ *  why a record header read "3 BHK · Mahalunge · Buy · — · Via 99acres". */
+export const hasBudget = (req) => budgetRange(req) !== '—'
 
 export function reqLine(req) {
   if (!req) return 'General inquiry'
@@ -219,15 +266,20 @@ export function reqLine(req) {
  * listing is not on file, which for an imported sheet is most of the time.
  * Linking a real property is what the shortlist does, separately and later.
  */
-export function reqShort(req) {
+export function reqShort(req, { budget = true } = {}) {
   if (!req) return 'Any requirement'
   const deal = labelOf(DEAL_LEAD, req.deal) || null
-  const budget = budgetRange(req)
+  // `budget: false` for a caller that shows the figure in its own slot — the
+  // phone list row puts it on the meta line beside the agent and the date. It
+  // would otherwise print twice on one card, and this line is single-line
+  // ellipsis-clipped, so the duplicate costs `interest` (last in the join) the
+  // room to render at all.
+  const money = budget ? budgetRange(req) : null
   const parts = [
     req.config,
     deal,
     req.locality,
-    budget && budget !== '—' ? budget : null,
+    money && money !== '—' ? money : null,
     req.interest,
   ].filter(x => x && x !== 'undefined' && x !== 'null')
   return parts.join(' · ') || 'General inquiry'

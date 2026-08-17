@@ -67,6 +67,23 @@ actionsRouter.post('/:id/actions/remark', async (req: Request, res: Response) =>
 const AUTHOR_EDITABLE_TYPES = new Set(['remark', 'call', 'whatsapp', 'sms']);
 
 /**
+ * The call outcomes that mean "we did not get through", which is exactly what
+ * the 'Call Not Received' status records.
+ *
+ * Two defects lived here. It matched /no\s*answer/ alone, so "Busy or switched
+ * off" — the same outcome for the desk, a person who has not been spoken to —
+ * moved nothing: the rule fired 15 times on bhumi and skipped 4. And it matched
+ * on the outcome's LABEL, because the label was what got stored, so this rule
+ * was regexing display copy and the wording could not be changed without
+ * silently breaking it.
+ *
+ * Both are gone. `metadata.outcome` holds the key now, so this is a set of two
+ * keys from src/data/callOutcomes.js and the labels above them are free to say
+ * whatever agents actually say.
+ */
+const DIDNT_REACH_THEM = new Set(['no_answer', 'unreachable']);
+
+/**
  * Edit a remark (or attach outcome+remark to a logged call/message) —
  * author-only. Not the last-write-wins pattern of stage/status changes: this
  * literally rejects anyone but the person who wrote it.
@@ -92,8 +109,8 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
     // judgment call — so it moves the lead's status on its own, same as a
     // proven site visit. Everything else logged here ("Interested", "Not
     // interested"…) stays a human decision.
-    if (existing.type === 'call' && outcome && /no\s*answer/i.test(outcome)) {
-      await maybeAutoAdvanceStage(existing.record_id, 'Call Not Received', 'No answer logged on a call');
+    if (existing.type === 'call' && outcome && DIDNT_REACH_THEM.has(outcome)) {
+      await maybeAutoAdvanceStage(existing.record_id, 'Call Not Received', 'Nobody answered the call');
     }
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,
@@ -195,17 +212,14 @@ actionsRouter.post(
 
       const { new_stage_id, note } = parseResult.data;
 
-      console.log(`[Stage Change] Record ${recordId} -> Stage ${new_stage_id} | Note: "${note}"`);
+      console.log(`[Stage Change] Record ${recordId} -> Stage ${new_stage_id} | Note: "${note ?? ''}"`);
 
-      await updateLead(recordId, { stage: new_stage_id });
-
-      const evt = await addTimelineEvent({
-        record_id: recordId,
-        type: 'stage_change',
-        title: `Stage Changed -> ${new_stage_id}`,
-        description: note || `Stage updated to ${new_stage_id}.`,
-        author: req.user?.id || 'admin',
-      });
+      // ONE event, written inside updateLead, which logs the transition for
+      // every caller (the record form, this route, a future bulk edit). This
+      // route also wrote its own, so a single status change produced two
+      // timeline rows in the same second saying the same thing differently.
+      // The note rides along instead of being the reason for a second row.
+      await updateLead(recordId, { stage: new_stage_id, stageNote: note });
 
       // No outbound webhook here. There is no outbound-webhook feature: no
       // tenant configures a URL, nothing stores one, and this call site hard-
@@ -223,8 +237,7 @@ actionsRouter.post(
         message: 'Record stage updated and audit note recorded atomically.',
         record_id: recordId,
         new_stage_id: new_stage_id,
-        audit_note: note,
-        timeline_event: evt,
+        audit_note: note ?? null,
       });
     } catch (err: any) {
       if (err?.status === 403) {

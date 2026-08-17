@@ -663,7 +663,11 @@ export default function Connections({ store }) {
   if (!canManage) return <div className="cx-locked">Owner or manager only.</div>
 
   return (
-    <div className="cx">
+    // cx-page, not cx. `.cx` is also the class on the search field's clear
+    // button and on every filter chip's remove button (components/collections),
+    // and this page's `.cx{margin-bottom:30px}` was unscoped — so both of those
+    // buttons carried 30px of bottom margin and sat shoved out of their boxes.
+    <div className="cx-page">
       <div className="itg-sec cx-sec">
         Lead sources
         {!adding && (

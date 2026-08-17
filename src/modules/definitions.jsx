@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel } from '../lib/format.js'
+import { reqShort, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -83,7 +83,17 @@ export const LEADS_DEF = {
     l.req?.config || l.requirement || null,
     (l.req?.locality || l.locality) ? <span className="rh-loc"><Icon name="mapPin" size={12} className="ic" />{l.req?.locality || l.locality}</span> : null,
     (l.req?.deal || l.deal) ? <span className={'rh-dealtag' + ((l.req?.deal || l.deal) === 'rent' ? ' rent' : '')}>{labelOf(DEAL_LEAD, l.req?.deal || l.deal)}</span> : null,
-    l.req ? budgetRange(l.req) : null,
+    // WHAT THEY ASKED ABOUT — "VTP Aethereus", "Blue Ridge". The list row showed
+    // this (reqShort carries it) and the record did not, so opening a lead lost
+    // a fact you could already see. It is the one thing that makes the call
+    // warm rather than cold, and it belongs on the screen the call is made from.
+    //
+    // It takes the slot the BUDGET used to hold. This strip is an identity line,
+    // not a summary, and two money-and-property facts fight each other in it —
+    // so it carries the one an agent reads before dialling. The budget is still
+    // on this screen, in the record sheet a few pixels below (req.minBudget /
+    // req.maxBudget), which is the single place every field is viewed.
+    l.req?.interest || null,
     l.req?.timeline || null,
     l.source ? `Via ${l.source}` : null,
   ].filter(Boolean),
@@ -118,6 +128,9 @@ export const LEADS_DEF = {
     // only ever return nothing. The two that replaced it are the piles the desk
     // actually loses: never called, and called once then dropped.
     { key: 'flag', label: 'Needs attention', icon: 'clock', options: [
+      // Same question, with and without the clock: everyone nobody has reached
+      // out to, and the subset of those that is already overdue.
+      { value: 'never_contacted', label: 'Never called or messaged' },
       { value: 'untouched_sla', label: 'Past SLA, never contacted' },
       { value: 'noanswer_stale', label: 'No answer, not retried' },
       { value: 'unassigned', label: 'Unassigned' }, { value: 'new', label: 'Arrived today' },
@@ -338,7 +351,10 @@ export const LEADS_DEF = {
             onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
           />
         </div>
-        {reqShort(l.req) && <div className="prow-req">{reqShort(l.req)}</div>}
+        {/* Without the budget — it has its own slot on the meta line below.
+            This line is one row with an ellipsis, so every part it carries is
+            room taken from `interest`, which sits last and is cut first. */}
+        {reqShort(l.req, { budget: false }) && <div className="prow-req">{reqShort(l.req, { budget: false })}</div>}
         <div className="prow-foot">
           <div className="prow-meta">
             {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
@@ -351,6 +367,11 @@ export const LEADS_DEF = {
                 calling a fresh enquiry and calling one that has been sitting
                 three weeks, and the card had no way to tell them apart. */}
             {l.createdAt && <span className="prow-when">{arrivedOn(l.createdAt)}</span>}
+            {/* The figure, last and quiet. This line has the width — the call
+                and WhatsApp buttons sit to the right of it, not through it —
+                and money on a lead row is a fact you check, never the thing the
+                card is about. */}
+            {hasBudget(l.req) && <span className="prow-money">{budgetRange(l.req)}</span>}
           </div>
           {actions}
         </div>

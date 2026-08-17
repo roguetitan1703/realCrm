@@ -104,7 +104,12 @@ export type WhatsAppActionPayload = z.infer<typeof WhatsAppActionSchema>;
  */
 export const StageChangeSchema = z.object({
   new_stage_id: z.string().min(1, "Stage ID required"),
-  note: z.string().min(3, "Mandatory stage change note must be at least 3 characters"),
+  // Optional, and it used to be mandatory at 3 characters — which the UI met by
+  // sending the literal "Stage updated via CRM view" on every single change.
+  // A required field satisfied by a hardcoded string is not a requirement, it
+  // is a sentence stapled to every row of the history. When a human types one
+  // it is recorded; when nobody does, the transition speaks for itself.
+  note: z.string().trim().min(1).optional(),
 });
 export type StageChangePayload = z.infer<typeof StageChangeSchema>;
 

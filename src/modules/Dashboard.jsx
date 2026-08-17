@@ -1,8 +1,8 @@
-import { Kpi, Panel, SectionHead, Avatar, StageTag } from '../components/primitives.jsx'
-import Icon from '../components/Icon.jsx'
+import { useState } from 'react'
+import { Kpi, Panel, SectionHead, Avatar, Segmented } from '../components/primitives.jsx'
+import { buildRoster, RosterRow } from '../components/roster.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import { WON_STATUS } from '../data/leadStatus.js'
 import { whenLabel } from '../lib/format.js'
 
 // The first screen. It answers three questions in this order, and nothing else:
@@ -25,9 +25,22 @@ export default function Dashboard({ store, go, topBar }) {
   // The at-risk list, sorted oldest-activity-first so the top of it is the lead
   // that has been waiting longest. Same two flags the tiles above count, asked
   // of the same endpoint, so the panel and the tiles cannot disagree.
+  // NEVER CALLED is its own question, so it is its own request.
+  //
+  // A lead nobody has dialled and a lead dialled once and dropped need different
+  // work from different people, and the first pile is the one a desk can clear
+  // in an afternoon. It cannot be filtered out of the rows in the browser: the
+  // panel holds six of fifty-one, so a client-side filter would hide five of six
+  // rows and still print 51 in the header.
+  const [coldMode, setColdMode] = useState('all')
+  const coldFlags = coldMode === 'never'
+    ? ['untouched_sla']
+    : ['untouched_sla', 'noanswer_stale']
   const { data: atRiskPage } = useServerData(
-    () => api.listLeads({ flag: ['untouched_sla', 'noanswer_stale'], sortKey: 'activity', sortDir: 'asc', limit: 8 }),
-    [state.dataAsOf], { data: [] })
+    // Six, not eight. The panel sits beside the calling queue and grew taller
+    // than it; the header count carries the total and "See all" carries the rest.
+    () => api.listLeads({ flag: coldFlags, sortKey: 'activity', sortDir: 'asc', limit: 6 }),
+    [state.dataAsOf, coldMode], { data: [] })
   const atRisk = atRiskPage?.data || []
   // The server's count for the same query, NOT atRisk.length — the list is
   // capped at 8, and reporting the rows you rendered as the total is how a
@@ -57,42 +70,54 @@ export default function Dashboard({ store, go, topBar }) {
   // integration never touches.
   const sources = Object.keys(bySource).sort((a, b) => bySource[b] - bySource[a])
   const stageCounts = stages.map(s => ({ name: s, n: byStage[s] || 0 }))
-  const maxStage = Math.max(1, ...stageCounts.map(s => s.n))
-  const srcMax = Math.max(1, ...sources.map(sn => bySource[sn]))
 
-  // Outreach outcomes, sorted by size — the same shape as the source bars, so
+  // Outreach outcomes, sorted by size — the same shape as the source list, so
   // "where they come from" and "where they end up" read as one pair.
   const outcomes = Object.entries(oStage).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
-  const outMax = Math.max(1, ...outcomes.map(o => o[1]))
 
-  // The roster. Lead columns come from the per-stage counts (which stages mean
-  // "contacted" is the firm's own settings question, applied here rather than
-  // hardcoded in SQL); the calling columns are counted in Postgres, not
-  // inferred — "called" is a real last_call_at, not a stage guessed at.
-  const lb = state.agents.map(a => {
-    const row = perAgent[a.id] || { total: 0, won: 0, byStage: {} }
-    const calls = perAgentCalls[a.id] || { owners: 0, called: 0, calledToday: 0, interested: 0 }
-    const st = row.byStage || {}
-    const countStages = (pred) => stages.filter(pred).reduce((sum, name) => sum + (st[name] || 0), 0)
-    return {
-      a, assigned: row.total,
-      contacted: countStages((_, i) => i >= 1),
-      closed: row.won,
-      owners: calls.owners, called: calls.called, calledToday: calls.calledToday,
-    }
-  }).sort((x, y) => (y.closed - x.closed) || (y.calledToday - x.calledToday))
-  const rosterHasCalling = hasCalling && lb.some(r => r.owners > 0)
+  // The roster, built by the SAME function the Team page uses — this screen used
+  // to derive its own "contacted" by counting every stage past index 0, which is
+  // a guess about what a stage means rather than a measurement.
+  const roster = buildRoster({ agents: state.agents, perAgent, perAgentCalls })
+  // An agent sees only themselves; the desk sees everyone, top few here and the
+  // rest on the Team page rather than a second full table on the dashboard.
+  const myRows = state.role === 'agent'
+    ? roster.rows.filter(r => r.a.id === state.activeAgentId)
+    : roster.rows.slice(0, 5)
 
-  // A stage/outcome bar row. One component for both columns, because they are
-  // the same control asking the same thing of two different pipelines.
-  const BarRow = ({ label, count, max, onClick }) => (
-    <button className="drow drow-col" onClick={onClick}>
-      <div className="drow-line">
-        <span className="drow-k">{label}</span><span className="drow-n">{count}</span>
-      </div>
-      <div className="bar"><i style={{ width: Math.round(count / max * 100) + '%' }} /></div>
-    </button>
-  )
+  // A DISTRIBUTION, not eight charts.
+  //
+  // This was one full-width bar per row, so eight stages cost eight rows of
+  // mostly empty track — and on a desk where four of them read 0, four of those
+  // rows carried no information at all while taking the same height as the ones
+  // that did. The proportion is now one stacked bar read in a glance, and the
+  // numbers are a two-column list under it. Same facts, about a third of the
+  // height, and the eye is no longer dragged to whichever bar is longest —
+  // which on a lead book is reliably "Rejected".
+  const Distribution = ({ rows, onPick }) => {
+    const total = rows.reduce((s, r) => s + r.n, 0) || 1
+    const live = rows.filter(r => r.n > 0)
+    return (
+      <>
+        <div className="dist-bar">
+          {live.map((r, i) => (
+            <i key={r.name} title={`${r.name} — ${r.n}`} data-i={i % 6}
+              style={{ width: (r.n / total * 100) + '%' }} />
+          ))}
+        </div>
+        <div className="dist-grid">
+          {rows.map((r, i) => (
+            <button key={r.name} className={'dist-row' + (r.n === 0 ? ' zero' : '')}
+              onClick={() => onPick(r)}>
+              <span className="dist-dot" data-i={live.findIndex(x => x.name === r.name) % 6} />
+              <span className="dist-k">{r.name}</span>
+              <span className="dist-n">{r.n}</span>
+            </button>
+          ))}
+        </div>
+      </>
+    )
+  }
 
   return (
     <>
@@ -109,6 +134,11 @@ export default function Dashboard({ store, go, topBar }) {
               nothing writes, and unassigned is always 0 because routing and
               pick-up work. Two of five tiles could not move. These two can, and
               they go down when the desk works them — which is the whole test. */}
+          {/* "never contacted" is true again. The tile used to count leads
+              sitting on the arrival stage and call that never contacted, which
+              is a fact about a dropdown — it read 4 on bhumi while 60 people
+              had gone 48 hours without a call or a message. The segment behind
+              it now asks whether anyone reached out. */}
           <Kpi icon="clock" label="Past SLA" value={n(totals.untouched_sla)} sub="never contacted"
             alert={totals.untouched_sla > 0} onClick={() => toLeads({ flag: ['untouched_sla'] })} />
           <Kpi icon="phone" label="No answer" value={n(totals.noanswer_stale)} sub="not retried"
@@ -123,109 +153,137 @@ export default function Dashboard({ store, go, topBar }) {
           )}
         </div>
 
-        {/* The two pipelines, side by side. Inbound on the left because it is
-            the one every firm runs; outbound appears only when there is one. */}
-        <div className={'dash-cols' + (hasCalling ? '' : ' one')}>
+        {/* The shape of the lead book: what stage it sits at, and where it came
+            from. Both are distributions of the same 140 rows read two ways, so
+            they belong on one row — stacked, they read as two unrelated
+            findings and burn a screen height between them. */}
+        <div className="dash-cols">
           <Panel>
             {/* The header counted OPEN while the bars below it include Deal
                 Closed and Rejected, so it labelled 103 over bars summing to
                 120. Two populations, one panel, nothing saying so. */}
             <SectionHead title="Leads by stage" right={desk ? `${totals.total} total` : ''} />
-            {stageCounts.map(s => (
-              <BarRow key={s.name} label={s.name} count={s.n} max={maxStage} onClick={() => toLeads({ stage: [s.name] })} />
-            ))}
+            <Distribution rows={stageCounts} onPick={(r) => toLeads({ stage: [r.name] })} />
           </Panel>
 
+          <Panel>
+            <SectionHead title="Leads by source" right={desk ? `${sources.length} live` : ''} />
+            {sources.length === 0
+              ? <div className="detail-empty">No leads yet.</div>
+              : <Distribution rows={sources.map(sn => ({ name: sn, n: bySource[sn] }))}
+                  onPick={(r) => toLeads({ source: [r.name] })} />}
+          </Panel>
+        </div>
+
+        {/* What is waiting. Both halves are worklists rather than distributions,
+            and the outbound one appears only on a desk that does cold-calling. */}
+        <div className={'dash-cols' + (hasCalling ? '' : ' one')}>
           {hasCalling && (
             <Panel>
               <SectionHead title="Calling queue" right={`${oq.open} open`} />
-              {/* Not stage bars: a calling queue is not a funnel, it is a
-                  worklist, and what matters is how much of it is waiting. */}
-              <div className="dash-tiles">
-                <button className={'dash-tile' + (oq.callbacksOverdue ? ' alert' : '')} onClick={() => toCalling('callbacks_overdue')}>
-                  <span className="dt-v">{oq.callbacksOverdue}</span><span className="dt-l">Late callbacks</span>
+              {/* ONE ROW OF FIGURES, not a 2x2 tile grid with its own bar chart
+                  under it. That was a dashboard drawn inside a panel on the
+                  dashboard — the same four numbers at KPI weight, competing with
+                  the strip at the top of the page for the same attention. These
+                  are reference figures for one queue; the urgent one is already
+                  a tile above. */}
+              <div className="qfig">
+                <button className={'qfig-i' + (oq.callbacksOverdue ? ' alert' : '')} onClick={() => toCalling('callbacks_overdue')}>
+                  <span className="qfig-v">{oq.callbacksOverdue}</span><span className="qfig-l">Late</span>
                 </button>
-                <button className="dash-tile" onClick={() => toCalling('callbacks_today')}>
-                  <span className="dt-v">{oq.callbacksToday}</span><span className="dt-l">Due today</span>
+                <button className="qfig-i" onClick={() => toCalling('callbacks_today')}>
+                  <span className="qfig-v">{oq.callbacksToday}</span><span className="qfig-l">Due today</span>
                 </button>
-                <button className="dash-tile" onClick={() => toCalling('to_call')}>
-                  <span className="dt-v">{oq.toCall}</span><span className="dt-l">Never called</span>
+                <button className="qfig-i" onClick={() => toCalling('to_call')}>
+                  <span className="qfig-v">{oq.toCall}</span><span className="qfig-l">Never called</span>
                 </button>
-                <button className="dash-tile" onClick={() => toCalling('unassigned')}>
-                  <span className="dt-v">{oq.unassigned}</span><span className="dt-l">Unassigned</span>
+                <button className="qfig-i" onClick={() => toCalling('unassigned')}>
+                  <span className="qfig-v">{oq.unassigned}</span><span className="qfig-l">Unassigned</span>
                 </button>
               </div>
               <div className="dash-sub">Outcomes</div>
               {outcomes.length === 0
                 ? <div className="detail-empty">Nothing called yet.</div>
-                : outcomes.map(([name, count]) => (
-                    <BarRow key={name} label={name} count={count} max={outMax} onClick={() => toCalling('open', name)} />
-                  ))}
+                : <Distribution rows={outcomes.map(([name, n]) => ({ name, n }))}
+                    onPick={(r) => toCalling('open', r.name)} />}
             </Panel>
           )}
-        </div>
 
-        {/* Where the work comes from, and what is late. Both are lists you scan
-            rather than numbers you act on, so they sit below the two pipelines. */}
-        <div className="dash-cols">
-          <Panel>
-            <SectionHead title="Leads by source" right={desk ? `${sources.length} live` : ''} />
-            {sources.length === 0 && <div className="detail-empty">No leads yet.</div>}
-            {sources.map(sn => (
-              <BarRow key={sn} label={sn} count={bySource[sn]} max={srcMax} onClick={() => toLeads({ source: [sn] })} />
-            ))}
-          </Panel>
           {/* This panel ran the same dead `overdue` flag as the tile did, so it
               printed "All caught up." to a desk holding 13 leads rung once and
               dropped and 11 never contacted at all. False reassurance is worse
               than a wrong number: nobody goes looking behind it. It now lists
               the leads that are actually at risk, longest-waiting first. */}
           <Panel>
-            <SectionHead title="At risk" right={atRisk.length ? `${atRiskTotal}` : undefined} />
-            {atRisk.length === 0 && <div className="detail-empty">Nothing overdue.</div>}
-            {atRisk.map(l => {
-              const a = store.agentById(l.agentId)
-              return (
-                <button key={l.id} className="od-row" onClick={() => go('leads', { leadId: l.id, leadOpen: true })}>
-                  <div className="od-main">
-                    <div className="od-name">{l.name}</div>
-                    <div className="od-sub">{l.stage}</div>
-                  </div>
-                  <div className="od-right">
-                    <div className="od-when">{whenLabel(l.updatedAt || l.createdAt)}</div>
-                    {a && <Avatar agent={a} size="sm" />}
-                  </div>
-                </button>
-              )
-            })}
+            <SectionHead title="Going cold" right={
+              <span className="sh-tools">
+                <Segmented value={coldMode} onChange={setColdMode}
+                  options={[{ value: 'all', label: 'All' }, { value: 'never', label: 'Never called' }]} />
+                {atRiskTotal ? <span>{atRiskTotal}</span> : null}
+              </span>
+            } />
+            {atRisk.length === 0 && <div className="detail-empty">Nothing going cold.</div>}
+            <div className="od-list">
+              {atRisk.map(l => {
+                const a = store.agentById(l.agentId)
+                // WHY this row is here. It read `l.stage` — so every row said
+                // "New", which is the least informative fact available and
+                // answers a question nobody asked.
+                //
+                // "Never contacted" was inferred from the lead sitting on the
+                // arrival stage, and on bhumi one of those rows had three
+                // WhatsApp messages and an unanswered call against it: the agent
+                // had typed "Call not received" into the remark box instead of
+                // choosing it from the dropdown, so the stage said nothing had
+                // happened while the timeline said four things had.
+                //
+                // The claim is now measured rather than reworded — untouched_sla
+                // asks whether anyone reached out — so the two reasons below are
+                // both true, and the toggle above narrows to the first of them.
+                const noAnswer = l.stage === 'Call Not Received'
+                const reason = noAnswer ? 'No answer, not retried' : 'Never contacted'
+                const since = new Date(l.updatedAt || l.createdAt).getTime()
+                const days = Math.floor((Date.now() - since) / 86400000)
+                const wait = days >= 1 ? `${days} day${days === 1 ? '' : 's'}` : 'today'
+                return (
+                  <button key={l.id} className="od-row" onClick={() => go('leads', { leadId: l.id, leadOpen: true })}>
+                    <div className="od-main">
+                      <div className="od-name">{l.name}</div>
+                      <div className="od-sub">{reason} · {wait}</div>
+                    </div>
+                    <div className="od-right">
+                      <div className="od-when">{whenLabel(l.updatedAt || l.createdAt)}</div>
+                      {a && <Avatar agent={a} size="sm" />}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+            {/* The panel shows a handful and says how many there are; the way to
+                see the rest is the list it came from, not a longer panel that
+                outgrows whatever sits beside it. */}
+            {atRiskTotal > atRisk.length && (
+              <button className="od-all" onClick={() => toLeads({ flag: coldFlags })}>
+                See all {atRiskTotal}
+              </button>
+            )}
           </Panel>
         </div>
 
-        {/* Who is doing the work — one roster covering both pipelines, because
-            it is one person doing both. The calling columns appear only when
-            there is a calling queue to report on. */}
+        {/* Who is doing the work. The SAME rows the Team page renders, at the
+            compact density and capped — a full table of every agent belongs on
+            the screen that is about the team, not on the one that is about
+            today. "All N" goes there rather than growing this panel. */}
         <Panel>
-          <SectionHead title={state.role === 'agent' ? 'My performance' : 'Team performance'} />
-          <div className={'lb' + (rosterHasCalling ? ' lb-calling' : '')}>
-            <div className="lb-h">
-              <div>Agent</div>
-              <div>Leads</div><div>Contacted</div><div>Closed</div>
-              {rosterHasCalling && <><div>Owners</div><div>Called</div><div>Today</div></>}
-            </div>
-            {(state.role === 'agent' ? lb.filter(r => r.a.id === state.activeAgentId) : lb).map(r => (
-              <button key={r.a.id} className="lb-row" onClick={() => go('leads', { agentFilter: r.a.id })}>
-                <div className="lb-who"><Avatar agent={r.a} size="sm" /><span>{r.a.first}</span></div>
-                <div className="mono-num">{r.assigned}</div>
-                <div className="mono-num">{r.contacted}</div>
-                <div className="mono-num lb-win">{r.closed}</div>
-                {rosterHasCalling && <>
-                  <div className="mono-num">{r.owners}</div>
-                  <div className="mono-num">{r.called}</div>
-                  <div className="mono-num lb-win">{r.calledToday}</div>
-                </>}
-              </button>
-            ))}
-          </div>
+          <SectionHead title={state.role === 'agent' ? 'My performance' : 'Team'}
+            right={state.role !== 'agent' && roster.rows.length > myRows.length
+              ? <button className="od-all od-all-inline" onClick={() => go('team')}>All {roster.rows.length}</button>
+              : undefined} />
+          {myRows.map(r => (
+            <RosterRow key={r.a.id} r={r} compact
+              evenShare={roster.evenShare} maxLoad={roster.maxLoad}
+              onOpen={() => go('leads', { agentFilter: r.a.id })} />
+          ))}
         </Panel>
       </div>
     </>

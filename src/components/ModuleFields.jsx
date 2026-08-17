@@ -11,7 +11,7 @@ import {
   BHK_FILTER,
   appliesTo, areaFieldsFor, labelOf, normaliseBhk, normaliseSubtype, optionsOf,
 } from '../data/propertyFields.js'
-import { configLabel, fmtMoney, arrivedOn } from '../lib/format.js'
+import { configLabel, fmtMoney, money, arrivedOn } from '../lib/format.js'
 
 // How soon the lead needs possession. A LEAD-side vocabulary (it describes the
 // buyer's urgency, not the property), so it lives with the lead schema — but
@@ -255,13 +255,17 @@ export const LEAD_MODULE_SCHEMA = {
       options: () => DEAL_LEAD.map(d => ({ value: d.value, label: d.label })),
       renderValue: (v) => labelOf(DEAL_LEAD, v) || '',
     },
+    // money(v, { perMonth }) reading the RECORD's deal, not fmtMoney. The sheet
+    // used the deal-blind formatter, so a rental lead's ₹45,00,000 read "₹45L"
+    // here and "₹4500k/mo" in the list — the same number, two units, on one
+    // screen. A rent figure without "/mo" is a different claim entirely.
     {
       key: 'req.minBudget', label: 'Budget From', type: 'money', section: 'domain',
-      renderValue: (v) => (v ? fmtMoney(v) : ''),
+      renderValue: (v, rec) => money(v, { perMonth: (rec?.req?.deal || rec?.deal) === 'rent' }),
     },
     {
       key: 'req.maxBudget', label: 'Budget To', type: 'money', section: 'domain',
-      renderValue: (v) => (v ? fmtMoney(v) : ''),
+      renderValue: (v, rec) => money(v, { perMonth: (rec?.req?.deal || rec?.deal) === 'rent' }),
     },
     // What a lead WANTS has to be sayable in the same words the inventory is
     // described in, or a requirement can never match a property. These were a

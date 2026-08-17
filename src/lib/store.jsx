@@ -850,8 +850,18 @@ export function StoreProvider({ children }) {
   // It resolves synchronously; there is deliberately no artificial delay or
   // "composing" animation, which would imply AI authorship we don't do.
   const composeFor = useCallback((wa) => {
-    const prop = state.cache?.property?.[wa.propId] || null
     const lead = state.cache?.lead?.[wa.leadId] || null
+    // THE MESSAGE THE BUYER ACTUALLY RECEIVES depended on the browser's property
+    // cache. On a desk with paged inventory that cache does not hold the
+    // shortlist, so `prop` was null, the property branch below never ran, and
+    // every "Share Match" fell through to the generic follow-up — "We have
+    // several excellent options matching your preferences" — with no society, no
+    // configuration and no price. The listing message generator was fine; it was
+    // never handed a listing. Same defect as the record's inventory section and
+    // the composer's own picker; this is the copy that leaves the building.
+    const prop = state.cache?.property?.[wa.propId]
+      || (lead?.shortlistProps || []).find(p => p.id === wa.propId)
+      || null
     // The firm name MUST come from the signed-in tenant. Leaving it out fell
     // back to the bundled demo brand, so a client received another firm's
     // name at the bottom of the message.
@@ -1004,7 +1014,10 @@ export function StoreProvider({ children }) {
       return optimistic('Stage change',
         () => dispatch({ type: 'STAGE', leadId, stage }),
         () => { if (prev) dispatch({ type: 'STAGE', leadId, stage: prev }) },
-        () => apiClient.changeStage(leadId, stage, 'Stage updated via CRM view'),
+        // No note. This sent the literal "Stage updated via CRM view" to satisfy
+        // a mandatory-note rule, and it was then printed on every stage row in
+        // every lead's history — a sentence that says only "this app did it".
+        () => apiClient.changeStage(leadId, stage),
         'Stage → ' + stage)
     },
     // Optimistic for the same reason: this is a tick on a row the agent is

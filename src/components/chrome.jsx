@@ -62,6 +62,16 @@ export function Sidebar({ items, active, activeSub, onNav, footer, firmName, log
             <button className="btn btn-icon" style={{ background: 'rgba(255,255,255,.07)', borderColor: 'rgba(255,255,255,.14)', color: '#fff' }}
               title="Switch to agent app" onClick={footer.onSwitch}><Icon name="switch" /></button>
           )}
+          {/* footer.items was passed and never rendered. The superadmin console
+              supplies exactly one — Sign out — fully wired to doAdminLogout, and
+              it has never been drawn, so there was no way out of /admin short of
+              clearing storage. Same shape as the rest of this week: the action
+              existed, the surface for it did not. */}
+          {(footer.items || []).map((it, i) => (
+            <button key={i} className="btn btn-icon"
+              style={{ background: 'rgba(255,255,255,.07)', borderColor: 'rgba(255,255,255,.14)', color: '#fff' }}
+              title={it.label} aria-label={it.label} onClick={it.onClick}><Icon name={it.icon || 'x'} /></button>
+          ))}
         </div>
       )}
       <div className="n-poweredby">

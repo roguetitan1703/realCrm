@@ -640,6 +640,56 @@ export async function migrateLeadStatuses(): Promise<void> {
   }
 }
 
+/**
+ * `metadata.outcome` held the option's LABEL. Move the existing rows onto the
+ * stable key so the wording above them can change without orphaning history.
+ *
+ * Every string below was read out of the live database, not guessed — the five
+ * long-form variants are the second, contradictory vocabulary that used to be
+ * hardcoded in components/primitives.jsx, so a row written from the timeline
+ * edit and a row written from the confirm modal could describe the same call in
+ * two different words. Both spellings map to one key.
+ *
+ * Anything not in this map is left exactly as it is. An unrecognised string is
+ * either a vocabulary nobody told us about or a person's own words, and the UI
+ * falls back to printing it verbatim — which is the right outcome for both.
+ */
+const OUTCOME_LABEL_TO_KEY: Record<string, string> = {
+  'No answer': 'no_answer',
+  'No Answer / Ringing': 'no_answer',
+  'Busy or switched off': 'unreachable',
+  'Number Busy / Switched Off': 'unreachable',
+  'Connected · discussed requirements': 'discussed',
+  'Connected & Discussed Requirements': 'discussed',
+  'Interested · scheduling a site visit': 'visit',
+  'Interested — Scheduling Site Visit': 'visit',
+  'Asked to call back': 'callback',
+  'Requested Callback Later': 'callback',
+  'Wrong number': 'wrong_number',
+  'Not interested': 'not_interested',
+};
+
+export async function migrateOutcomeLabelsToKeys(): Promise<void> {
+  let moved = 0;
+  for (const [label, key] of Object.entries(OUTCOME_LABEL_TO_KEY)) {
+    const res = await sql`
+      UPDATE crm_timeline_events
+         SET metadata = jsonb_set(metadata, '{outcome}', to_jsonb(${key}::text))
+       WHERE metadata->>'outcome' = ${label}`;
+    moved += res.count;
+  }
+  // Say what is left rather than assuming nothing is. A count of unmapped
+  // strings is the only way anyone finds out a sixth vocabulary existed.
+  const rest = await sql`
+    SELECT metadata->>'outcome' AS outcome, count(*)::int AS n
+      FROM crm_timeline_events
+     WHERE metadata->>'outcome' IS NOT NULL
+       AND metadata->>'outcome' !~ '^[a-z_]+$'
+     GROUP BY 1`;
+  console.log(`[migration] outcome labels → keys: ${moved} rewritten`
+    + (rest.length ? `, ${rest.length} unmapped left as written: ${rest.map((r: any) => `${r.outcome} (${r.n})`).join(', ')}` : ''));
+}
+
 export async function backfillShortlist(): Promise<void> {
   const rows = await sql`SELECT id, tenant_id, shortlist, feedback FROM crm_leads`;
   for (const r of rows) {
@@ -1060,6 +1110,11 @@ seedDatabase()
   // stage — had every lead on it silently moved to "Follow-Up" on the next
   // restart.
   .then(() => runOnce('lead_statuses_2024_vocab', () => migrateLeadStatuses()))
+  // Also gated, and for the same reason as the one above: it rewrites rows by
+  // VALUE. Once an outcome is a key, "No answer" is no longer a string this
+  // system produces — but a firm could legitimately type it into a remark, and
+  // an ungated pass would keep reaching for it forever.
+  .then(() => runOnce('2026_08_18_outcome_keys', () => migrateOutcomeLabelsToKeys()))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
@@ -1260,8 +1315,12 @@ export async function getDeskSummary(): Promise<any> {
   // a rolling `now() - 3 hours` while its list read "arrived today and still
   // untouched": at 2:20pm on bhumi the tile said 12, the list held 13, and 16
   // leads had actually arrived. Three numbers for one word.
-  const S = leadSegments(await deskConfigOf(t));
-  const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls] = await Promise.all([
+  const cfg = await deskConfigOf(t);
+  const S = leadSegments(cfg);
+  // The firm's midnight, not Postgres's. "Calls logged today" counted from
+  // 05:30 IST, so an agent who worked the phone before breakfast showed 0.
+  const today = dayStart(cfg.timezone);
+  const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls, perAgentLeadCalls, perAgentVisits] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
                count(*) FILTER (WHERE overdue)::int AS overdue,
@@ -1305,10 +1364,25 @@ export async function getDeskSummary(): Promise<any> {
     sql`SELECT agent_id AS k,
                count(*)::int AS owners,
                count(*) FILTER (WHERE last_call_at IS NOT NULL)::int AS called,
-               count(*) FILTER (WHERE last_call_at >= date_trunc('day', NOW()))::int AS called_today,
+               count(*) FILTER (WHERE last_call_at >= ${today})::int AS called_today,
                count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
                count(*) FILTER (WHERE callback_at IS NOT NULL AND callback_at < NOW())::int AS late
           FROM crm_owners WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1`,
+    // Per-agent LEAD outreach (30d) and proven site visits. Here rather than in
+    // getAgentPerformance because the Team page called that endpoint once PER
+    // AGENT on mount — nine requests for nine integers, on a screen this summary
+    // was already fetching. One query, and the dashboard roster and the Team
+    // roster now read the same numbers instead of each deriving their own.
+    sql`SELECT author AS k, count(*)::int AS calls
+          FROM crm_timeline_events
+         WHERE tenant_id = ${t} AND type = 'call' AND author IS NOT NULL
+           AND timestamp >= now() - interval '30 days'
+         GROUP BY 1`,
+    sql`SELECT agent_id AS k, count(*)::int AS visits
+          FROM activities
+         WHERE tenant_id = ${t} AND type = 'site_visit' AND agent_id IS NOT NULL
+           AND at >= now() - interval '30 days'
+         GROUP BY 1`,
   ]);
   const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
   const stagesByAgent = new Map<string, Record<string, number>>();
@@ -1320,10 +1394,18 @@ export async function getDeskSummary(): Promise<any> {
     leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, untouched_sla: 0, noanswer_stale: 0 },
     byStage: asMap(byStage),
     bySource: asMap(bySource),
-    perAgent: Object.fromEntries(perAgent.map(r => [r.k, {
-      open: r.open, overdue: r.overdue, won: r.won, total: r.total,
-      byStage: stagesByAgent.get(r.k) || {},
-    }])),
+    perAgent: (() => {
+      const calls = new Map((perAgentLeadCalls as any[]).map(r => [r.k, r.calls]));
+      const visits = new Map((perAgentVisits as any[]).map(r => [r.k, r.visits]));
+      return Object.fromEntries(perAgent.map(r => [r.k, {
+        open: r.open, overdue: r.overdue, won: r.won, total: r.total,
+        byStage: stagesByAgent.get(r.k) || {},
+        // 30-day, and named so. The roster's old "Calls · 30d" label sat over an
+        // all-time count from a different endpoint.
+        calls30d: calls.get(r.k) ?? 0,
+        visits30d: visits.get(r.k) ?? 0,
+      }]));
+    })(),
     properties: props[0] || { total: 0, available: 0 },
     owners: owners[0]?.n ?? 0,
     perAgentCalls: Object.fromEntries((perAgentCalls as any[]).map(r => [r.k, {
@@ -1605,11 +1687,46 @@ export async function getLeadById(id: string): Promise<any | undefined> {
     sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} AND tenant_id = ${t} ORDER BY timestamp DESC`,
     sql`SELECT * FROM lead_shortlist WHERE lead_id = ${id} AND tenant_id = ${t}`,
   ]);
+  // author and metadata are NOT optional here. This projection listed six
+  // fields and dropped both, so every event on a lead RECORD arrived with
+  // authorId null and metadata {} — while the same events fetched through
+  // getLeads (which passes rows straight through) carried them. Two shapes for
+  // one thing, and the detail screen got the poorer one.
+  //
+  // Load-bearing, not cosmetic: the remark block under the name renders "— who"
+  // from author, and reads metadata.outcome both to decide an event is worth
+  // showing and to print the outcome. Neither could ever arrive, so a site visit
+  // logged with an outcome showed as an unattributed bare line.
   const events = timelineRows.map(r => ({
     id: r.id, record_id: r.record_id, type: r.type, title: r.title,
-    description: r.description, timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp)
+    description: r.description, author: r.author, metadata: r.metadata,
+    timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp)
   }));
-  return rowToLead(rows[0], events, shortlistRows);
+  const lead = rowToLead(rows[0], events, shortlistRows);
+
+  // THE SHORTLISTED PROPERTIES THEMSELVES, not only their ids. The record screen
+  // resolved each id through the browser's property cache, which holds whatever
+  // the listings page happened to page in — so on a desk with 6,643 properties it
+  // held none of the shortlist, every row was dropped by a filter(Boolean), and a
+  // lead with four shortlisted flats rendered "No shortlisted or matching
+  // inventory yet". The attach had worked every time; only the reading of it was
+  // broken, so agents attached the same lead again and again. The WhatsApp
+  // composer read the same cache and offered "No property — message only".
+  const ids: string[] = lead.shortlist || [];
+  lead.shortlistProps = ids.length
+    ? (await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id IN ${sql(ids)}`).map(rowToProperty)
+    : [];
+
+  // Activities live in their own table and were never folded in, so a logged
+  // site visit existed only in the database — photo, GPS fix and outcome
+  // included. One history, newest first; which table a thing was written to is
+  // an implementation detail the agent should never have been able to feel.
+  const acts = await getActivitiesForLead(id);
+  if (acts.length) {
+    lead.timeline = [...(lead.timeline || []), ...acts]
+      .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }
+  return lead;
 }
 
 export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
@@ -1820,11 +1937,27 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   }
 
   if (patch.stage && patch.stage !== oldLead.stage) {
+    // THE ONLY stage-change event. /actions/stage-change used to call this
+    // function AND then write a second one of its own, so every status change
+    // laid down two rows in the same second saying the same thing in two
+    // wordings — "Status Updated: Status changed from New to Interested." above
+    // "Stage Changed -> Interested: Stage updated via CRM view". The route now
+    // passes its note through instead of logging separately.
+    //
+    // title === description on purpose: mapEventForClient joins them as
+    // `title: description` whenever they differ, which is what produced the
+    // doubled reading above.
+    const note = String(patch.stageNote || '').trim() || rejectionReason || '';
+    const line = `${oldLead.stage} → ${patch.stage}${note ? ` — ${note}` : ''}`;
     await addTimelineEvent({
       record_id: id,
       type: 'stage_change',
-      title: 'Status Updated',
-      description: `Status changed from "${oldLead.stage}" to "${patch.stage}"${rejectionReason ? ` — ${rejectionReason}` : ''}.`,
+      title: line,
+      description: line,
+      // Attributed. This event carried no author at all, so the history could
+      // not say who moved the lead — the route's duplicate was the only one
+      // that named anybody.
+      author: ctx.actorId ?? getContext()?.userId ?? undefined,
     });
   }
 
@@ -2028,15 +2161,44 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
  *  buyer who missed a call at 11am is not owed another before lunch. */
 export const RETRY_DAYS = 3;
 
-function leadSegments({ arrivalStage, slaHours }: DeskConfig) {
+/**
+ * NOBODY HAS REACHED OUT TO THIS PERSON — measured, not inferred.
+ *
+ * "Never contacted" used to be read off the stage: still on the arrival stage
+ * meant nobody had rung. That is not what the stage means, and the gap was not
+ * small. On bhumi the Past SLA tile read 4; the number of people nobody had
+ * called or messaged in over 48 hours was 60. The four were simply the leads
+ * whose agent had also forgotten to move the dropdown.
+ *
+ * Both places a contact is recorded are checked. Free-text calls and messages
+ * land in crm_timeline_events; calls and visits captured with an outcome land
+ * in `activities`. Asking only one of them calls a lead untouched because it
+ * was worked through the other screen.
+ */
+const NEVER_CONTACTED = sql`(
+  NOT EXISTS (SELECT 1 FROM crm_timeline_events e
+               WHERE e.record_id = crm_leads.id AND e.tenant_id = crm_leads.tenant_id
+                 AND e.type IN ('call', 'whatsapp', 'sms', 'email'))
+  AND NOT EXISTS (SELECT 1 FROM activities a
+                   WHERE a.lead_id = crm_leads.id AND a.tenant_id = crm_leads.tenant_id
+                     AND a.type IN ('call', 'meeting', 'site_visit'))
+)`;
+
+function leadSegments({ arrivalStage, slaHours, timezone }: DeskConfig) {
   const untouched = sql`stage = ${arrivalStage}`;
-  const newToday = sql`(created_at >= date_trunc('day', now()) AND ${untouched})`;
+  const today = dayStart(timezone);
+  // ARRIVED TODAY means arrived today. It used to also require the lead to be
+  // untouched, so working a lead deleted it from the count of leads that came
+  // in — on the morning 8 arrived, the tile said 1, because 7 had already been
+  // picked up. "How many came in today" and "how many are still unworked" are
+  // two questions and this is the first one; the second is `untouched_sla`.
+  const newToday = sql`created_at >= ${today}`;
   return {
     overdue: sql`overdue = true`,
     unassigned: sql`agent_id IS NULL`,
     open: OPEN,
     today: newToday,
-    month: sql`(created_at >= date_trunc('month', now()) AND NOT ${newToday})`,
+    month: sql`(created_at >= (date_trunc('month', now() AT TIME ZONE ${timezone}) AT TIME ZONE ${timezone}) AND NOT ${newToday})`,
     // The client asked for this one specifically, one click from the list — it is
     // the pile you work down at 6pm.
     noanswer: sql`stage = 'Call Not Received'`,
@@ -2051,10 +2213,19 @@ function leadSegments({ arrivalStage, slaHours }: DeskConfig) {
     // Past the SLA and still never contacted. Measured at 2x slaHours — the
     // point the sweep escalates to a manager — so the tile agrees with the
     // alert instead of quietly using a rounder number.
-    untouched_sla: sql`(${untouched} AND created_at <= now() - (${slaHours * 2}::text || ' hours')::interval)`,
+    //
+    // The first half was `stage = arrivalStage`, which is a fact about a
+    // dropdown. It now asks whether anyone actually reached out, which is what
+    // the tile has always claimed to count. See NEVER_CONTACTED above for what
+    // that swap was worth: 4 → 60 on the live desk.
+    untouched_sla: sql`(${NEVER_CONTACTED} AND created_at <= now() - (${slaHours * 2}::text || ' hours')::interval)`,
     // Rung, no answer, and nobody has been back since. This is the pile with no
     // exit rule: on the live desk it was a fifth of every lead in the system.
     noanswer_stale: sql`(stage = 'Call Not Received' AND updated_at <= now() - (${RETRY_DAYS}::text || ' days')::interval)`,
+    // The same question without the clock on it — for the leads filter, where
+    // "show me everyone we have never reached out to" is asked of the whole
+    // desk rather than of the overdue pile.
+    never_contacted: NEVER_CONTACTED,
   };
 }
 
@@ -2069,8 +2240,33 @@ export type LeadSegment = keyof ReturnType<typeof leadSegments>;
 const arrivalStageCache = new Map<string, { v: DeskConfig; at: number }>();
 const ARRIVAL_TTL_MS = 60_000;
 
-/** The two settings every worklist question is asked against. */
-export type DeskConfig = { arrivalStage: string; slaHours: number };
+/** The settings every worklist question is asked against. */
+export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string };
+
+/**
+ * The firm's own timezone. Every desk on this system is in India today, but the
+ * default belongs in one place rather than in eleven `date_trunc` calls, and a
+ * white-label CRM sold outside IST needs exactly this switch.
+ */
+export const DEFAULT_TIMEZONE = 'Asia/Kolkata';
+
+/**
+ * The instant the firm's day started.
+ *
+ * `date_trunc('day', now())` truncates in UTC, which is **05:30 IST**. So from
+ * midnight until half five in the morning, every "today" on this system meant
+ * yesterday: a bhumi lead that arrived at 00:40 was counted, filed and shown as
+ * having arrived the previous day, and the Today screen an agent opens first
+ * thing was the one place it could not be found.
+ *
+ * Reading it back: `now() AT TIME ZONE tz` gives the local wall clock as a
+ * naive timestamp, truncating that gives local midnight, and the second
+ * `AT TIME ZONE tz` turns that wall-clock midnight back into the real instant
+ * it happened — which is what a timestamptz column can be compared against.
+ */
+export function dayStart(tz: string) {
+  return sql`(date_trunc('day', now() AT TIME ZONE ${tz}) AT TIME ZONE ${tz})`;
+}
 
 async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
   const hit = arrivalStageCache.get(tenantId);
@@ -2083,9 +2279,23 @@ async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
     // Same floor the SLA sweep applies, so an alert and the tile that counts
     // the same leads cannot be reading two different windows.
     slaHours: Math.max(Number(cfg.slaHours) || 24, 1),
+    timezone: typeof cfg.timezone === 'string' && cfg.timezone ? cfg.timezone : DEFAULT_TIMEZONE,
   };
   arrivalStageCache.set(tenantId, { v, at: Date.now() });
   return v;
+}
+
+/**
+ * The firm's timezone, for callers that don't already hold a DeskConfig.
+ *
+ * Deliberately returns the STRING, not the sql fragment. A postgres.js query is
+ * thenable, so an `async` function returning `sql\`…\`` has its fragment
+ * executed by the caller's own `await` — the caller gets a result array, splices
+ * that into the next query, and Postgres answers "syntax error at or near
+ * date_trunc". Handing back a plain string makes that impossible.
+ */
+export async function timezoneOf(tenantId: string): Promise<string> {
+  return (await deskConfigOf(tenantId)).timezone;
 }
 
 async function arrivalStageOf(tenantId: string): Promise<string> {
@@ -2395,15 +2605,18 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
  * pill that says 104 opens a list of 104. Defined once, used by both.
  */
 const OWNER_OPEN = sql`coalesce(stage, 'New') NOT IN ('Not Interested', 'Do Not Call')`;
-const OWNER_SEGMENTS: Record<string, any> = {
+// Takes the firm's day boundary because "today" is a local question — see
+// dayStart(). As a module-level constant it could only ever ask Postgres for
+// UTC midnight, which is 05:30 in Pune.
+const ownerSegments = (d0: any): Record<string, any> => ({
   open: OWNER_OPEN,
   callbacks_overdue: sql`${OWNER_OPEN} AND callback_at IS NOT NULL AND callback_at < NOW()`,
-  callbacks_today: sql`${OWNER_OPEN} AND callback_at >= NOW() AND callback_at < date_trunc('day', NOW()) + interval '1 day'`,
+  callbacks_today: sql`${OWNER_OPEN} AND callback_at >= NOW() AND callback_at < ${d0} + interval '1 day'`,
   callbacks: sql`${OWNER_OPEN} AND callback_at IS NOT NULL`,
   to_call: sql`${OWNER_OPEN} AND callback_at IS NULL AND last_call_at IS NULL`,
   never_called: sql`${OWNER_OPEN} AND last_call_at IS NULL`,
   unassigned: sql`${OWNER_OPEN} AND agent_id IS NULL`,
-};
+});
 
 export async function listOwners(opts: {
   page?: number; limit?: number; q?: string; stage?: string; project?: string; agentId?: string;
@@ -2423,7 +2636,7 @@ export async function listOwners(opts: {
   }
   const stages = String(opts.stage || '').split(',').map(x => x.trim()).filter(Boolean);
   if (stages.length) where.push(sql`stage IN ${sql(stages)}`);
-  const seg = OWNER_SEGMENTS[String(opts.segment || '')];
+  const seg = ownerSegments(dayStart(await timezoneOf(t)))[String(opts.segment || '')];
   if (seg) where.push(seg);
   // '_none' is the "No project" bucket from listOwnerProjects — those rows
   // have project NULL or ''. Without this branch a click on that card sent
@@ -2661,6 +2874,7 @@ export async function noteOwnerContact(recordId: string, channel: string): Promi
 export async function getOwnerQueueCounts(mine?: boolean): Promise<any> {
   const t = tid();
   const scope = ownerScope(mine);
+  const today = dayStart(await timezoneOf(t));
   const open = sql`coalesce(stage, 'New') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}`;
   const rows = await sql`
     SELECT count(*)::int AS total,
@@ -2669,12 +2883,12 @@ export async function getOwnerQueueCounts(mine?: boolean): Promise<any> {
            count(*) FILTER (WHERE ${open} AND last_call_at IS NULL)::int AS never_called,
            count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL AND callback_at < NOW())::int AS callbacks_overdue,
            count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL AND callback_at >= NOW()
-                            AND callback_at < date_trunc('day', NOW()) + interval '1 day')::int AS callbacks_today,
+                            AND callback_at < ${today} + interval '1 day')::int AS callbacks_today,
            count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL
-                            AND callback_at >= date_trunc('day', NOW()) + interval '1 day')::int AS callbacks_upcoming,
+                            AND callback_at >= ${today} + interval '1 day')::int AS callbacks_upcoming,
            count(*) FILTER (WHERE ${open} AND callback_at IS NULL AND last_call_at IS NULL)::int AS to_call,
            count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
-           count(*) FILTER (WHERE last_call_at >= date_trunc('day', NOW()))::int AS called_today
+           count(*) FILTER (WHERE last_call_at >= ${today})::int AS called_today
       FROM crm_owners WHERE tenant_id = ${t} AND ${scope}`;
   const r: any = rows[0] || {};
   return {
@@ -2700,6 +2914,8 @@ export async function getOwnerQueueCounts(mine?: boolean): Promise<any> {
 export async function getOwnerTodayRows(perGroup = 6, mine?: boolean): Promise<any> {
   const t = tid();
   const scope = ownerScope(mine);
+  // NOT `today` — that name is taken below by the rows themselves.
+  const d0 = dayStart(await timezoneOf(t));
   const open = sql`coalesce(stage, 'New') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}`;
   const n = Math.min(Math.max(Number(perGroup) || 6, 1), 25);
   const [overdue, today, toCall] = await Promise.all([
@@ -2707,7 +2923,7 @@ export async function getOwnerTodayRows(perGroup = 6, mine?: boolean): Promise<a
           AND callback_at IS NOT NULL AND callback_at < NOW()
         ORDER BY callback_at ASC LIMIT ${n}`,
     sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${open}
-          AND callback_at >= NOW() AND callback_at < date_trunc('day', NOW()) + interval '1 day'
+          AND callback_at >= NOW() AND callback_at < ${d0} + interval '1 day'
         ORDER BY callback_at ASC LIMIT ${n}`,
     sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${open}
           AND callback_at IS NULL AND last_call_at IS NULL
@@ -4019,6 +4235,24 @@ async function propCoordsFor(propertyIds: string[]): Promise<Map<string, { lat: 
   return map;
 }
 
+/**
+ * One lead's activities, mapped for the client.
+ *
+ * THIS READ DID NOT EXIST. addActivity wrote site visits — photo, geo, outcome,
+ * the whole proof — into `activities`, and the only reader was
+ * getActivitiesByLead below, whose comment says "used by getState" and which had
+ * no callers at all. crm_timeline_events is a different table, so the record
+ * screen's timeline never showed them: on delpat, seven proven site visits,
+ * three of them on one lead, logged and then invisible. The agent's reasonable
+ * conclusion was that logging a visit does nothing.
+ */
+export async function getActivitiesForLead(leadId: string): Promise<any[]> {
+  const rows = await sql`
+    SELECT * FROM activities WHERE tenant_id = ${tid()} AND lead_id = ${leadId} ORDER BY at DESC`;
+  const coords = await propCoordsFor(rows.map((r: any) => r.property_id));
+  return rows.map((r: any) => mapActivityForClient(r, r.property_id ? coords.get(r.property_id) || null : null));
+}
+
 /** All activities for the tenant, mapped for the client and grouped by lead.
  *  Used by getState to fold them into each lead's timeline. */
 export async function getActivitiesByLead(): Promise<Map<string, any[]>> {
@@ -4111,15 +4345,35 @@ export async function releaseUnit(unitId: string) {
  * midpoint of min/max) across this agent's won leads — a real number derived
  * from captured data, not a flat ₹1.85Cr assumed per deal.
  */
+/**
+ * ALL THREE COUNTS WERE STRUCTURALLY ZERO. Not "quiet agent" zero — impossible.
+ *
+ *   visits  read `stage = 'Site Visit Done'`. No tenant has that stage; bhumi's
+ *           is 'Site Visit'. Also the wrong source: a visit is an activities row
+ *           with a photo and a GPS fix, not a stage someone may move away from
+ *           afterwards. Counted from `activities` now.
+ *   won     read `stage ILIKE '%won%'`. Every tenant's won stage is
+ *           'Deal Closed'. WON_STATUS has said so all along and is already
+ *           imported here — the query invented its own rule instead.
+ *   calls   was correct, but had NO date filter while the payload announced
+ *           `period: 'last_30_days'` and the UI labelled it "Calls · 30d".
+ *           A window in the label and none in the SQL.
+ *
+ * Verified against bhumi: Anil Dangi 55 calls, Binod 45 + 1 closed, Amit 8 + 1.
+ */
 export async function getAgentPerformance(userId: string) {
   const t = tid();
   const [callRows, visitRows, wonRows] = await Promise.all([
-    sql`SELECT count(*)::int as total_calls FROM crm_timeline_events WHERE author = ${userId} AND type = 'call' AND tenant_id = ${t}`,
-    sql`SELECT count(*)::int as site_visits FROM crm_leads WHERE agent_id = ${userId} AND stage = 'Site Visit Done' AND tenant_id = ${t}`,
+    sql`SELECT count(*)::int as total_calls FROM crm_timeline_events
+         WHERE author = ${userId} AND type = 'call' AND tenant_id = ${t}
+           AND timestamp >= now() - interval '30 days'`,
+    sql`SELECT count(*)::int as site_visits FROM activities
+         WHERE agent_id = ${userId} AND type = 'site_visit' AND tenant_id = ${t}
+           AND at >= now() - interval '30 days'`,
     sql`
       SELECT count(*)::int as closed_won,
              COALESCE(SUM(COALESCE(budget_max, budget_min, 0)), 0)::bigint as revenue
-      FROM crm_leads WHERE agent_id = ${userId} AND stage ILIKE '%won%' AND tenant_id = ${t}
+      FROM crm_leads WHERE agent_id = ${userId} AND stage = ${WON_STATUS} AND tenant_id = ${t}
     `,
     sql`SELECT count(*)::int as total_leads FROM crm_leads WHERE agent_id = ${userId} AND tenant_id = ${t}`,
   ]);
@@ -4130,7 +4384,13 @@ export async function getAgentPerformance(userId: string) {
   const conv = visits > 0 ? Number(((won / visits) * 100).toFixed(1)) : null;
   return {
     user_id: userId,
+    // Calls and visits ARE last-30-days. closed_won_deals is all-time: a stage
+    // has no date of its own, and a firm closing three deals a year would read 0
+    // on every 30-day window forever. Named so the client cannot print one
+    // window's label over the other's number — which is exactly what
+    // "Calls · 30d" over an unwindowed count was.
     period: 'last_30_days',
+    closed_won_period: 'all_time',
     total_outbound_calls: calls,
     site_visits_done: visits,
     closed_won_deals: won,

@@ -1661,6 +1661,8 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .ev-proof-img{display:block;line-height:0;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
 .ev-proof-img img{width:74px;height:74px;object-fit:cover;display:block}
 .ev-proof-locked,.ev-proof-geo{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--muted)}
+a.ev-proof-geo{text-decoration:none;font-variant-numeric:tabular-nums}
+a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 
 /* ---- C: stepped property wizard (page, not modal) ------------------------- */
 /* The form column is deliberately capped. A field row stretched across a 27"
@@ -1841,7 +1843,11 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .itg-import-t{display:block;font-family:var(--disp);font-weight:600;font-size:15.5px;color:var(--ink)}
 .itg-import-s{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
 
-.cx{margin-bottom:30px}
+/* cx-page, not `.cx` — that selector also matched the search field's clear
+   button and every filter chip's remove button (both `className="cx"` in
+   components/collections.jsx), neither of which declares a margin, so this
+   30px won and pushed them out of their own boxes. */
+.cx-page{margin-bottom:30px}
 .cx-locked{padding:24px;color:var(--muted);font-size:13.5px}
 
 /* The endpoint, once — it is identical for every source, so it sits above the
@@ -1990,6 +1996,15 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .wa-chip button:hover{color:#fff}
 .wa-ctl{display:flex;align-items:center;gap:9px;padding:0 16px 12px}
 .wa-var{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#fff;border-radius:8px;padding:7px 9px;cursor:pointer;display:flex;flex-shrink:0}
+/* The outcome step. The sheet is dark chrome, so the shared chip and input
+   styles — written for a linen page — are re-skinned here rather than a second
+   chip component being invented for one screen. */
+.wa-out{padding:4px 16px 14px;display:flex;flex-direction:column;gap:10px}
+.wa-out .chipo{min-height:34px;padding:0 12px;font-size:12.5px;background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.16);color:rgba(255,255,255,.86)}
+.wa-out .chipo.on{background:#7FD4B0;border-color:#7FD4B0;color:#0B3B2C}
+.wa-out-t{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:9px;padding:9px 11px;font-family:inherit;font-size:13px;resize:vertical}
+.wa-out-t::placeholder{color:var(--on-chrome-mut)}
+.wa-out-t:focus{outline:none;border-color:#7FD4B0}
 .wa-foot{padding:12px 14px;display:flex;gap:9px;border-top:1px solid rgba(255,255,255,.08)}
 .wa-send{flex:1.6;justify-content:center}
 .wa-alt{flex:1;justify-content:center;background:rgba(255,255,255,.06);color:#fff;border:1px solid rgba(255,255,255,.14)}
@@ -2077,6 +2092,10 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
   min-width:0;overflow:hidden}
 .app-mobile .prow-meta > * + *::before{content:'·';margin-right:7px;color:var(--line-2,var(--line))}
 .app-mobile .prow-agent{display:inline-flex;align-items:center;gap:5px;color:var(--muted);flex-shrink:0}
+/* The budget, on the meta line rather than in the requirement string above it.
+   flex-shrink:0 because it sits last on a row with overflow:hidden, and a
+   figure cut to "₹1.2C" is worse than one that pushed the follow-up date. */
+.app-mobile .prow-money{color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}
 .app-mobile .ll-toolbar{padding:12px 12px 0}
 .app-mobile .ll-content{flex:none;overflow:visible;padding:12px 12px 8px}
 .app-mobile .detail-layout{grid-template-columns:minmax(0,1fr);padding:12px 12px 8px;gap:14px}
@@ -2430,6 +2449,103 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
   .dash-cols{grid-template-columns:1fr}
 }
 
+/* ---- DISTRIBUTION: one stacked bar + a two-column number list ----
+   Replaces eight full-width bars, which cost eight rows of mostly empty track
+   and gave a zero the same height as a real figure. The stack answers "what
+   shape is the book"; the grid answers "how many, exactly", and is the part you
+   click. Segment tints step through one hue so the bar reads as one quantity
+   split up rather than six unrelated categories. */
+.dist-bar{display:flex;height:8px;border-radius:5px;overflow:hidden;background:var(--line-2);margin:2px 0 12px}
+.dist-bar i{display:block;height:100%;min-width:2px}
+.dist-bar i[data-i="0"]{background:var(--accent)}
+.dist-bar i[data-i="1"]{background:color-mix(in srgb, var(--accent) 78%, var(--card))}
+.dist-bar i[data-i="2"]{background:color-mix(in srgb, var(--accent) 60%, var(--card))}
+.dist-bar i[data-i="3"]{background:color-mix(in srgb, var(--accent) 45%, var(--card))}
+.dist-bar i[data-i="4"]{background:color-mix(in srgb, var(--accent) 32%, var(--card))}
+.dist-bar i[data-i="5"]{background:color-mix(in srgb, var(--accent) 20%, var(--card))}
+.dist-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px 16px}
+.dist-row{display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;border-radius:7px;
+  padding:6px 8px;margin:0 -8px;cursor:pointer;font-family:var(--sans);font-size:12.5px;color:var(--ink);text-align:left}
+.dist-row:hover{background:var(--card-2)}
+/* A zero is a real answer and stays readable, but it is not the thing to look at. */
+.dist-row.zero{color:var(--muted)}
+.dist-row.zero .dist-dot{background:var(--line)}
+.dist-dot{width:8px;height:8px;border-radius:3px;flex-shrink:0;background:var(--accent)}
+.dist-dot[data-i="1"]{background:color-mix(in srgb, var(--accent) 78%, var(--card))}
+.dist-dot[data-i="2"]{background:color-mix(in srgb, var(--accent) 60%, var(--card))}
+.dist-dot[data-i="3"]{background:color-mix(in srgb, var(--accent) 45%, var(--card))}
+.dist-dot[data-i="4"]{background:color-mix(in srgb, var(--accent) 32%, var(--card))}
+.dist-dot[data-i="5"]{background:color-mix(in srgb, var(--accent) 20%, var(--card))}
+.dist-k{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dist-n{color:var(--muted);font-variant-numeric:tabular-nums;flex-shrink:0}
+@media (max-width:640px){.dist-grid{grid-template-columns:1fr}}
+
+/* ---- Calling queue figures: one quiet row, not a grid of KPI tiles ---- */
+.qfig{display:flex;gap:4px;margin:2px 0 4px}
+.qfig-i{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;align-items:flex-start;
+  border:none;background:transparent;border-radius:8px;padding:7px 8px;cursor:pointer;font-family:inherit;text-align:left}
+.qfig-i:hover{background:var(--card-2)}
+.qfig-v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15;color:var(--ink)}
+.qfig-i.alert .qfig-v{color:var(--alert)}
+.qfig-l{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+
+/* A control in a section head, beside the count. The stock .seg is sized for a
+   toolbar (38px tall) and dwarfed an 11px uppercase heading, so it shrinks here
+   rather than a second segmented control being invented for the purpose. */
+.sh-tools{display:inline-flex;align-items:center;gap:10px}
+.sh-tools .seg{padding:2px}
+.sh-tools .seg button{padding:3px 9px;font-size:11.5px}
+
+/* "See all N" under a capped panel — a way out, not a longer panel. */
+.od-all{width:100%;border:none;background:transparent;border-top:1px solid var(--line-2);
+  padding:9px 0 2px;margin-top:4px;font-family:var(--sans);font-size:12.5px;font-weight:600;color:var(--accent);cursor:pointer}
+.od-all:hover{color:var(--ink)}
+
+/* ---- ROSTER: one row shape, two densities (components/roster.jsx) ---- */
+/* The row was left-heavy: identity and the load bar took two wide fr columns
+   while five figures crammed into whatever was left, so the same row read
+   spacious on one side and dense on the other. Identity is a fixed, generous
+   column; the bar takes the slack; the figures get real width each instead of
+   sharing the remainder. */
+.rst{display:grid;grid-template-columns:minmax(0,15rem) minmax(0,1fr) auto auto;gap:24px;align-items:center;
+  padding:14px 0;border-bottom:1px solid var(--line-2)}
+.rst:last-child{border-bottom:none}
+.rst.off{opacity:.55}
+.rst-c{grid-template-columns:minmax(0,9rem) minmax(0,1fr) auto;gap:16px;padding:10px 0}
+.rst-who{display:flex;align-items:center;gap:10px;min-width:0;background:none;border:none;padding:0;
+  font-family:inherit;color:var(--ink);text-align:left;cursor:pointer}
+.rst-who:disabled{cursor:default}
+.rst-who:not(:disabled):hover .rst-name{color:var(--accent)}
+.rst-id{min-width:0;display:flex;flex-direction:column;gap:2px}
+.rst-name{display:flex;align-items:center;gap:7px;font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rst-c .rst-name{font-size:13px}
+.rst-role{font-size:11.5px;color:var(--muted)}
+.rst-tag{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:5px;padding:2px 6px;flex-shrink:0}
+.rst-tag.off{background:var(--line-2);color:var(--muted)}
+.rst-tag.over{background:var(--alert-wash,var(--card-2));color:var(--alert)}
+.rst-load{min-width:0}
+.rst-load-t{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);margin-bottom:5px}
+.rst-load-t b{color:var(--ink);font-variant-numeric:tabular-nums}
+.rst-load-tag{font-size:11px;flex-shrink:0}
+.rst-load-tag.warn{color:var(--alert)}
+.rst-meter{height:6px;border-radius:4px;background:var(--line-2);overflow:hidden}
+.rst-meter i{display:block;height:100%;background:var(--accent);border-radius:4px}
+.rst-meter i.hot{background:var(--alert)}
+/* Each figure gets its own column of equal width, so the labels line up down the
+   roster instead of drifting with whatever number is above them. */
+.rst-stats{display:grid;grid-auto-flow:column;grid-auto-columns:5.5rem;flex-shrink:0}
+.rst-c .rst-stats{grid-auto-columns:4.75rem}
+.rst-stat{display:flex;flex-direction:column;align-items:center;gap:2px}
+.rst-stat b{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+.rst-c .rst-stat b{font-size:14.5px}
+.rst-stat small{font-size:10px;color:var(--muted);white-space:nowrap;letter-spacing:.02em}
+.rst-act{flex-shrink:0}
+@media (max-width:900px){
+  .rst,.rst-c{grid-template-columns:minmax(0,1fr);gap:9px;padding:12px 0}
+  .rst-stats{justify-content:flex-start;gap:22px}
+  .rst-stat{align-items:flex-start}
+}
+
 /* One bar row for both pipelines — same control, two datasets.
    .drow-col is align-items:flex-start, so a block child shrinks to its own
    content — which for an empty track is nothing. The bar has to be told to
@@ -2439,7 +2555,11 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .drow-k{font-weight:600}
 .drow-n{color:var(--muted);font-variant-numeric:tabular-nums}
 
-/* Overdue list — was ~10 inline style props per row. */
+/* Overdue list — was ~10 inline style props per row.
+   When the panel holds a whole row on its own (a desk with no calling queue
+   beside it) the rows go two-up: same eight leads, half the height. */
+.dash-cols.one .od-list{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;align-items:start}
+@media (max-width:1180px){.dash-cols.one .od-list{grid-template-columns:1fr}}
 .od-row{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:var(--alert-wash,var(--card-2));
   border:1px solid var(--alert-line,var(--line));border-radius:9px;padding:11px 12px;margin-bottom:8px;cursor:pointer;font-family:inherit;color:var(--ink)}
 .od-main{flex:1;min-width:0}

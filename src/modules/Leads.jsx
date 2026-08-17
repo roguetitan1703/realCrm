@@ -257,7 +257,12 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
 
   // merged property list: shortlisted pinned first, then system matches
   const shortlistIds = l.shortlist || []
-  const byId = (id) => store.lookup('property', id)
+  // Server first, browser cache only as a fallback. This was `store.lookup`
+  // alone — a read of whatever the listings page had paged into memory — so on
+  // any desk with more inventory than one page, a shortlisted property resolved
+  // to undefined and was dropped by the filter(Boolean) below. The section then
+  // said "No shortlisted or matching inventory yet" over a lead that had four.
+  const byId = (id) => (l.shortlistProps || []).find(p => p.id === id) || store.lookup('property', id)
   const fbMap = l.feedback || {}
   const propRows = [
     ...shortlistIds.map(byId).filter(Boolean).map(p => ({ p, shortlisted: true, fit: fitReasons(p, l.req).score, line: quotedShort(p) })),
@@ -324,7 +329,10 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                       ? <span className="fit ok fit-tight"><Icon name="check" size={11} />Shortlisted</span>
                       : <span className="source">{row.fit}% match</span>)}
                   </div>
-                  <div className="relrow-sub">{row.p.type} · {row.p.locality} · {row.line}</div>
+                  {/* Joined, not templated. Hardcoding the separators printed a
+                      trailing " · " whenever a property had no price, which on
+                      imported inventory is most of them. */}
+                  <div className="relrow-sub">{[row.p.type, row.p.locality, row.line].filter(Boolean).join(' · ')}</div>
                 </button>
                 <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(row.p.id, l.id)} icon="wa">Share Match</Button>
               </div>
@@ -384,5 +392,10 @@ function followFrom(f, l) {
 
 // compact, quiet money string for a property row (deal-aware)
 function quotedShort(p) {
+  // A property with no price has no price line. Template-stringing an absent
+  // priceLabel produced the literal word "undefined", which then rendered as a
+  // fact on the record: "2 BHK Apartment · Pune · undefined". Same shape as the
+  // budget dash — a missing value dressed up as a value.
+  if (!p?.priceLabel) return ''
   return p.deal === 'rent' ? `${p.priceLabel}` : `${p.priceLabel}${p.negotiable ? ' · neg.' : ''}`
 }

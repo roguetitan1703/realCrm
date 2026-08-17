@@ -15,7 +15,7 @@ import { pushPermission, enablePush as subscribeToPush } from '../lib/push.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities } from '../lib/suggest.js'
-import { CALL_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
+import { CALL_OUTCOMES, WA_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 
 /**
  * Generic modal frame.
@@ -429,6 +429,11 @@ function LogCallModal({ store, leadId }) {
   const save = () => {
     setBusy(true)
     const label = labelForOutcome(outcome)
+    // The KEY goes to the server, the label only to the toast. This used to
+    // send `label`, so metadata.outcome held "No answer" — display copy doing
+    // the work of a key, which meant renaming an option silently orphaned every
+    // row already written and changed what the auto-advance rule matched.
+    //
     // contact-log, NOT the "telephony bridge". That route fabricated a DID, an
     // API key and a call SID and wrote "Initiated outbound telephony call …
     // via DID 08045678900" to the timeline. No call was placed and no telephony
@@ -436,7 +441,7 @@ function LogCallModal({ store, leadId }) {
     api.logContactAction(l.id, 'call')
       .then(res => {
         const evtId = res?.timeline_event?.id
-        return evtId ? api.editRemark(l.id, evtId, text.trim(), label) : null
+        return evtId ? api.editRemark(l.id, evtId, text.trim(), outcome) : null
       })
       .catch(err => console.warn('[Call log] error:', err.message))
       .finally(() => { store.reloadServer?.(); store.toast(`Call logged · ${label}`); store.closeModal() })
@@ -1085,6 +1090,10 @@ const CHANNELS = {
   wa: { title: 'WhatsApp', noun: 'WhatsApp message', dest: 'WhatsApp' },
   email: { title: 'Email', noun: 'email', dest: 'mail app' },
 }
+// Which outcome list a channel is asked from. Email has none — nothing sends
+// one from here yet, and an empty dropdown teaches people to skip the control.
+const outcomesFor = (channel) =>
+  (channel === 'call' ? CALL_OUTCOMES : channel === 'wa' ? WA_OUTCOMES : null)
 
 function ContactConfirmModal({ store, channel, name, phone, email, waText, recordType, recordId }) {
   const [step, setStep] = useState('confirm')   // 'confirm' | 'outcome'
@@ -1128,6 +1137,13 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
   const saveOutcome = () => {
     if (!text.trim() && !outcome) { store.closeModal(); return }
     store.editRemark(recordType, recordId, loggedId, text.trim(), outcome || undefined)
+    // An outcome can move the lead's status on the server — "Call not received"
+    // does, and that is the whole point of capturing it. Only the timeline entry
+    // was being patched into local state, so the status pill kept showing the
+    // old stage until something else happened to reload: the automation worked
+    // and looked as though it had not, which is the fastest way to teach a desk
+    // to stop trusting it. The call-log modal already reloads; this one didn't.
+    store.reloadServer?.()
     store.closeModal()
   }
 
@@ -1135,10 +1151,18 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
     return (
       <Modal title={`${ch.title} logged`} onClose={store.closeModal} width={400}>
         <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>Optional — how did it go with {first}?</div>
-        {channel === 'call' && (
+        {/* The dropdown was gated to `call`, so a WhatsApp landed here with a
+            free-text box and nothing else — which is why bhumi has 219 WhatsApp
+            events and not one of them carries an outcome, against 186 calls that
+            mostly do. The difference was never the channel; it was that one of
+            them was asked and the other was not.
+            A message ends differently from a call, so it gets its own list
+            rather than being handed "No answer", which means nothing about a
+            message that has been delivered and not yet opened. */}
+        {outcomesFor(channel) && (
           <select className="input" value={outcome} onChange={e => setOutcome(e.target.value)} style={{ width: '100%', marginBottom: 10 }}>
             <option value="">No outcome yet</option>
-            {CALL_OUTCOMES.map(o => <option key={o.value} value={o.label}>{o.label}</option>)}
+            {outcomesFor(channel).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         )}
         <Textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a remark…" />
@@ -1416,8 +1440,13 @@ function VisitProofModal({ store, leadId, propId }) {
             <Field label="Which unit? (optional)">
               <select className="input" value={property} onChange={e => setProperty(e.target.value)}>
                 <option value="">Not tied to one unit</option>
+                {/* From the lead's own server-supplied shortlist, cache second.
+                    Cache-only meant every option resolved to null on a desk
+                    with paged inventory, so this select offered nothing but
+                    "Not tied to one unit" — an agent standing in a flat could
+                    not say which flat they were standing in. */}
                 {(l.shortlist || []).map(pid => {
-                  const p = store.lookup('property', pid)
+                  const p = (l.shortlistProps || []).find(x => x.id === pid) || store.lookup('property', pid)
                   return p ? <option key={pid} value={pid}>{p.society} · {p.type}</option> : null
                 })}
               </select>
@@ -1564,7 +1593,11 @@ function StatusModal({ store, propId }) {
 const REJECT_REASONS = ['Price / budget', 'Vaastu / facing', 'Floor', 'Location', 'Noise', 'Size / layout', 'Furnishing', 'Parking']
 function VisitFeedbackModal({ store, leadId, propId }) {
   const l = store.lookup('lead', leadId)
-  const p = store.lookup('property', propId)
+  // The property comes from the lead's shortlist first. Reading only the
+  // browser cache returned null on any desk with paged inventory, and the
+  // guard below then rendered NOTHING — the button opened a modal that was
+  // not there, with no error and no toast.
+  const p = (l?.shortlistProps || []).find(x => x.id === propId) || store.lookup('property', propId)
   const [verdict, setVerdict] = useState('liked')
   const [reason, setReason] = useState(REJECT_REASONS[0])
   if (!l || !p) return null
