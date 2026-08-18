@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
@@ -10,7 +10,6 @@ import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.
 import { LEAD_STATUSES } from '../data/leadStatus.js'
 import { useServerList } from '../lib/serverList.js'
 import { api } from '../lib/api.js'
-import { useEffect } from 'react'
 import Icon from '../components/Icon.jsx'
 import { LEADS_DEF } from './definitions.jsx'
 
@@ -59,6 +58,24 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const [pageSize, setPageSize] = useState(20)
   // Which rows are checked, on the page currently shown. A Set of lead ids.
   const [selected, setSelected] = useState(new Set())
+  // A tile on the dashboard names the slice it opens, and it names a SEGMENT —
+  // the pill row — not one of the filter panel's fields. It used to arrive as
+  // `leadFilter: { flag: [...] }`, which the server honoured and no control on
+  // screen reflected: the right rows appeared under a pill row still reading
+  // All, with nothing saying why and nothing to click to undo it.
+  //
+  // An effect rather than a useState seed, matching ownerSeg on the calling
+  // screen: arriving from a tile while this list is already open has to move
+  // the pills too. Read once and cleared, so it seeds the screen rather than
+  // pinning it — the pills work normally the moment you land.
+  useEffect(() => {
+    if (!sel?.leadSeg) return
+    setSeg(sel.leadSeg)
+    setPage(1)
+    setSelected(new Set())
+    setSel(s => ({ ...s, leadSeg: undefined }))
+  }, [sel?.leadSeg])
+
   const setFltP = (v) => { setFlt(v); setPage(1); setSelected(new Set()) }
   const setQP = (v) => { setQ(v); setPage(1); setSelected(new Set()) }
   const setSortKeyP = (v) => { setSortKey(v); setPage(1) }

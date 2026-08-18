@@ -30,7 +30,7 @@ import { currentTenant } from './api.js'
 
 export const TAKEOVER_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey',
-  'leadFilter', 'ownerSeg', 'ownerStage', 'agentFilter',
+  'leadFilter', 'leadSeg', 'ownerSeg', 'ownerStage', 'agentFilter',
 ]
 
 /** Read screen + selection out of the current URL. */

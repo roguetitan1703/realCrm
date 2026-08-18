@@ -45,7 +45,8 @@ export default function Dashboard({ store, go, topBar }) {
   // filter applied at all. These two ARE its options, by the names it uses —
   // one vocabulary, and the panel can hand the list something it understands.
   const [coldMode, setColdMode] = useState('never')
-  const coldFlags = coldMode === 'never' ? ['never_contacted'] : ['noanswer_stale']
+  const coldSeg = coldMode === 'never' ? 'never_contacted' : 'noanswer_stale'
+  const coldFlags = [coldSeg]
   const { data: atRiskPage } = useServerData(
     // Six, not eight. The panel sits beside the calling queue and grew taller
     // than it; the header count carries the total and "See all" carries the rest.
@@ -152,12 +153,13 @@ export default function Dashboard({ store, go, topBar }) {
           <Kpi icon="clock" label="Past SLA" value={n(totals.untouched_sla)} sub="never contacted"
             alert={totals.untouched_sla > 0} onClick={() => toLeads({ flag: ['untouched_sla'] })} />
           <Kpi icon="phone" label="No answer" value={n(totals.noanswer_stale)} sub="not retried"
-            alert={totals.noanswer_stale > 0} onClick={() => toLeads({ flag: ['noanswer_stale'] })} />
+            alert={totals.noanswer_stale > 0}
+            onClick={() => go('leads', { leadSeg: 'noanswer_stale', leadOpen: false, leadId: undefined })} />
           {hasCalling && (
             <Kpi icon="phone" label="Late callbacks" value={oq.callbacksOverdue} sub="owners waiting on a call"
               alert={oq.callbacksOverdue > 0} onClick={() => toCalling('callbacks_overdue')} />
           )}
-          <Kpi icon="plus" label="Arrived today" value={n(totals.new_today)} sub="fresh enquiries" onClick={() => toLeads({ flag: ['new'] })} />
+          <Kpi icon="plus" label="Arrived today" value={n(totals.new_today)} sub="fresh enquiries" onClick={() => go('leads', { leadSeg: 'today', leadOpen: false, leadId: undefined })} />
           {hasCalling && (
             <Kpi icon="check" label="Calls logged today" value={oq.calledToday} sub="outbound, today" onClick={() => toCalling('never_called')} />
           )}
@@ -276,7 +278,7 @@ export default function Dashboard({ store, go, topBar }) {
                 see the rest is the list it came from, not a longer panel that
                 outgrows whatever sits beside it. */}
             {atRiskTotal > atRisk.length && (
-              <button className="od-all" onClick={() => toLeads({ flag: coldFlags })}>
+              <button className="od-all" onClick={() => go('leads', { leadSeg: coldSeg, leadOpen: false, leadId: undefined })}>
                 See all {atRiskTotal}
               </button>
             )}
