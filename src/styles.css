@@ -2702,4 +2702,9 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
    one, so it never appears on a lead that simply exists. */
 .prow-repeat,.rh-repeat{display:inline-flex;align-items:center;font-size:11px;font-weight:700;
   letter-spacing:.03em;color:var(--accent-ink);background:var(--accent-wash);border-radius:6px;padding:2px 7px}
-.prow-repeat{margin-top:5px}
+/* Inline with the name on a card: a count, not a sentence. "2×" reads at a
+   glance and costs no row. */
+.prow-name .prow-repeat{margin-left:6px;font-size:10.5px;padding:1px 5px;vertical-align:middle}
+/* Beside the record title, where it can wrap with the name rather than pushing
+   the facts strip and the action buttons down a line each. */
+.rh-title .rh-repeat{margin-left:9px;vertical-align:middle;font-size:11px}

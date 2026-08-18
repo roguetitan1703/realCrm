@@ -1331,7 +1331,7 @@ export async function getDeskSummary(): Promise<any> {
   const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls, perAgentLeadCalls, perAgentVisits] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
-               count(*) FILTER (WHERE overdue)::int AS overdue,
+               count(*) FILTER (WHERE ${FOLLOWUP_PAST_DUE})::int AS overdue,
                count(*) FILTER (WHERE follow_up IS NOT NULL)::int AS with_follow_up,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*) FILTER (WHERE ${S.today})::int AS new_today,
@@ -1345,7 +1345,7 @@ export async function getDeskSummary(): Promise<any> {
          WHERE tenant_id = ${t} AND ${mine} GROUP BY 1`,
     sql`SELECT agent_id AS k,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
-               count(*) FILTER (WHERE overdue)::int AS overdue,
+               count(*) FILTER (WHERE ${FOLLOWUP_PAST_DUE})::int AS overdue,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*)::int AS total
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine} AND agent_id IS NOT NULL GROUP BY 1`,
@@ -2174,6 +2174,22 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
 export const RETRY_DAYS = 3;
 
 /**
+ * A follow-up whose moment has gone by.
+ *
+ * Exported because SIX queries read the dead `overdue` boolean and each one
+ * would otherwise grow its own copy of this CASE — which is how the column and
+ * the client's followUpOverdue() came to disagree in the first place.
+ *
+ * `[0-9]`, not `\d`: through this driver the backslash reaches Postgres
+ * literally, so the shorthand class silently matches nothing and every lead
+ * reads as not overdue — which is the bug this function exists to fix,
+ * reintroduced one layer down. Checked against a real row, not assumed.
+ */
+export const FOLLOWUP_PAST_DUE = sql`(CASE WHEN follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+                                          THEN (follow_up->>'at')::timestamptz < now() ELSE false END)`;
+
+
+/**
  * NOBODY HAS REACHED OUT TO THIS PERSON — measured, not inferred.
  *
  * "Never contacted" used to be read off the stage: still on the arrival stage
@@ -2206,7 +2222,23 @@ function leadSegments({ arrivalStage, slaHours, timezone }: DeskConfig) {
   // two questions and this is the first one; the second is `untouched_sla`.
   const newToday = sql`created_at >= ${today}`;
   return {
-    overdue: sql`overdue = true`,
+    // OVERDUE MEANS A FOLLOW-UP WHOSE TIME HAS PASSED.
+    //
+    // It read `overdue = true`, a boolean column NOTHING in this codebase ever
+    // writes: false on all 232 bhumi leads and all 94 delpat ones, true only on
+    // seed rows in the demo tenants. So the tab, the tile and the filter that
+    // read it could only ever return nothing — while 5 bhumi leads had an
+    // appointment whose moment had gone by and no screen said so.
+    //
+    // The client already knew: followUpOverdue() in lib/format.js reads
+    // `follow_up.at`, the real instant the schedule modal writes. The server was
+    // reading a different field for the same question — one concept, two
+    // implementations, and the losing one decided what the desk saw.
+    //
+    // Guarded by a pattern test rather than a bare cast: rows saved before `at`
+    // existed hold a human-typed date ("This Sunday"), and casting that throws
+    // and takes the whole query with it.
+    overdue: FOLLOWUP_PAST_DUE,
     unassigned: sql`agent_id IS NULL`,
     open: OPEN,
     today: newToday,
@@ -3018,7 +3050,7 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
     sql`SELECT * FROM crm_leads
         WHERE tenant_id = ${t} ${scope}
           AND ${OPEN}
-          AND (overdue = true OR follow_up IS NOT NULL OR agent_id IS NULL
+          AND (${FOLLOWUP_PAST_DUE} OR follow_up IS NOT NULL OR agent_id IS NULL
                OR stage = 'New' OR created_at > now() - interval '14 days')
         ORDER BY created_at DESC LIMIT 200`,
     // A tenancy that has ended, or ends inside the 60-day window the renewal
@@ -3029,11 +3061,11 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
           AND (config->'tenancy'->>'end')::date <= (now() + interval '60 days')::date
         ORDER BY (config->'tenancy'->>'end')::date ASC LIMIT 50`,
     // The true size of each group, regardless of how many rows came back above.
-    sql`SELECT count(*) FILTER (WHERE overdue)::int AS overdue,
+    sql`SELECT count(*) FILTER (WHERE ${FOLLOWUP_PAST_DUE})::int AS overdue,
                count(*) FILTER (WHERE stage = 'New')::int AS fresh,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned,
-               count(*) FILTER (WHERE stage <> 'New' AND follow_up IS NULL AND NOT overdue)::int AS no_next,
-               count(*) FILTER (WHERE follow_up IS NOT NULL AND NOT overdue)::int AS scheduled
+               count(*) FILTER (WHERE stage <> 'New' AND follow_up IS NULL AND NOT ${FOLLOWUP_PAST_DUE})::int AS no_next,
+               count(*) FILTER (WHERE follow_up IS NOT NULL AND NOT ${FOLLOWUP_PAST_DUE})::int AS scheduled
           FROM crm_leads WHERE tenant_id = ${t} ${scope} AND ${OPEN}`,
     getOwnerQueueCounts(mine),
     getOwnerTodayRows(6, mine),

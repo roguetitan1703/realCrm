@@ -257,7 +257,16 @@ export function ModuleDetail({
           <div className="rh-id">
             {avatar || <span className="rh-icon"><Icon name={def.icon || 'building'} size={20} /></span>}
             <div className="rh-idtext">
-              <div className="rh-title">{title || record.name || record.society || def.singularName}</div>
+              {/* A badge belongs BESIDE THE NAME, not in the facts strip. The
+                  facts strip is a wrapping row of small grey text and a pill
+                  dropped into it pushed the strip onto a second line, which
+                  pushed the action buttons onto a third — so a lead that had
+                  enquired twice cost the record its button row. Next to the
+                  name it is what it means: a fact about this person. */}
+              <div className="rh-title">
+                {title || record.name || record.society || def.singularName}
+                {def.titleBadge?.(record) || null}
+              </div>
               {facts.length > 0 && <div className="rh-facts">{facts.map((f, i) => <span key={i}>{f}</span>)}</div>}
             </div>
           </div>

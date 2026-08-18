@@ -81,9 +81,6 @@ export const LEADS_DEF = {
     l.phone,
     l.email || null,
     reqConfigLabel(l.req) || l.requirement || null,
-    // Came back, on the identity strip — the one fact about this person that
-    // changes how the call opens.
-    l.enquiryCount > 1 ? <span className="rh-repeat">{l.enquiryCount} enquiries</span> : null,
     (l.req?.locality || l.locality) ? <span className="rh-loc"><Icon name="mapPin" size={12} className="ic" />{l.req?.locality || l.locality}</span> : null,
     (l.req?.deal || l.deal) ? <span className={'rh-dealtag' + ((l.req?.deal || l.deal) === 'rent' ? ' rent' : '')}>{labelOf(DEAL_LEAD, l.req?.deal || l.deal)}</span> : null,
     // WHAT THEY ASKED ABOUT — "VTP Aethereus", "Blue Ridge". The list row showed
@@ -100,6 +97,12 @@ export const LEADS_DEF = {
     l.req?.timeline || null,
     l.source ? `Via ${l.source}` : null,
   ].filter(Boolean),
+
+  // Beside the NAME, not among the facts — a pill in that wrapping grey row
+  // cost the record its action buttons a line below. Only above one: every
+  // lead has enquired once, and a badge on everything is a badge on nothing.
+  titleBadge: (l) => (l.enquiryCount > 1
+    ? <span className="rh-repeat">{l.enquiryCount} enquiries</span> : null),
 
   // Progression — a lead's status, not a pipeline position (see
   // src/data/leadStatus.js: the list is flat and unordered). `flat: true`
@@ -125,23 +128,18 @@ export const LEADS_DEF = {
   // status dropdowns above the pills (Leads.jsx) ask exactly these two
   // questions against the server. A third control asking the same thing here
   // would just be a second way to filter the same field.
+  // ATTRIBUTES, not worklists. The piles a desk works are the tab row above;
+  // this narrows within whichever one is open.
+  //
+  // "Needs attention" was here — six options, of which "Unassigned" also
+  // appeared on the tab row AND on the Sales Executive filter below,
+  // "Arrived today" was the Today tab, and the other four are now pills. Three
+  // controls answering one question is how a desk stops trusting any of them.
+  //
+  // `untouched_sla` survives as a SEGMENT without a control: the dashboard's
+  // Past SLA tile links through to it, and a flag reached by a link does not
+  // also need a dropdown entry competing with the "Never called" pill beside it.
   filterFields: (store) => [
-    // "Overdue" used to head this list. It read a boolean column nothing ever
-    // writes — 0 of 120 leads on a live desk — so it was a filter that could
-    // only ever return nothing. The two that replaced it are the piles the desk
-    // actually loses: never called, and called once then dropped.
-    { key: 'flag', label: 'Needs attention', icon: 'clock', options: [
-      // Same question, with and without the clock: everyone nobody has reached
-      // out to, and the subset of those that is already overdue.
-      { value: 'never_contacted', label: 'Never called or messaged' },
-      // The warmest people on the desk: they came back on their own. Counted
-      // in sessions, so somebody who clicked four listings in one sitting is
-      // not in it — see docs/specs/repeat-enquiries.md.
-      { value: 'repeat_enquiry', label: 'Enquired more than once' },
-      { value: 'untouched_sla', label: 'Past SLA, never contacted' },
-      { value: 'noanswer_stale', label: 'No answer, not retried' },
-      { value: 'unassigned', label: 'Unassigned' }, { value: 'new', label: 'Arrived today' },
-    ] },
     { key: 'source', label: 'Source', icon: 'trend', options: opt(store.state.settings.sources) },
     { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
     { key: 'agent', label: 'Sales Executive', icon: 'person', options: [
@@ -231,19 +229,47 @@ export const LEADS_DEF = {
    * have I let slip" — not pipeline position, which is what the status
    * dropdown (Leads.jsx) answers instead.
    */
+  // THE TAB ROW IS THE WORKLIST. One control, one question per pill, and every
+  // pill a pile somebody actually clears.
+  //
+  // It was not. Three controls asked overlapping questions and the useful ones
+  // were the hardest to reach:
+  //
+  //   tabs     All · Today · This month · Call not received · Overdue · Unassigned
+  //   filter   Never called · Repeat · Past SLA never contacted · No answer not
+  //            retried · Unassigned · Arrived today
+  //   filter   Sales Executive → Unassigned
+  //
+  // "Unassigned" appeared three times. "Arrived today" and the Today tab are one
+  // thing. "Call not received" (a stage) sat beside "No answer, not retried"
+  // (that stage, gone stale) with nothing saying which was which. And the two
+  // biggest piles on the desk — 67 people nobody has ever rung and 46 rung once
+  // and dropped — were buried inside a dropdown called "Needs attention" while
+  // the tabs showed Overdue 0 and Unassigned 0, both permanently empty.
+  //
+  // What went, and why:
+  //   This month     232 of 232 on bhumi — the All tab wearing a date.
+  //   Unassigned     0, always: routing and pick-up mean a lead is never
+  //                  nobody's for long. Still on the Sales Executive filter,
+  //                  where it belongs, for the day it is not 0.
+  //   Call not received  a stage, and the stage dropdown above already asks it.
+  //                  Its useful half — rung and not rung again — is its own pill.
   segments: [
     { key: 'all', label: 'All' },
     // "Today", not "New today". This pill and the sidebar badge were both
     // called New and mean different things — the badge is a STAGE (88 leads
-    // sitting untouched, whenever they arrived) and this is an ARRIVAL WINDOW
-    // (nothing came in today). Side by side, "New 88" against "New today 0"
-    // reads as the app contradicting itself. Its neighbours already make the
-    // meaning plain: Today, then This month.
+    // sitting untouched, whenever they arrived) and this is an ARRIVAL WINDOW.
+    // Side by side, "New 88" against "New today 0" reads as the app
+    // contradicting itself.
     { key: 'today', label: 'Today' },
-    { key: 'month', label: 'This month' },
-    { key: 'noanswer', label: 'Call not received' },
-    { key: 'overdue', label: 'Overdue', tone: 'alert' },
-    { key: 'unassigned', label: 'Unassigned' },
+    // The two piles the desk loses money on, in the order it loses them.
+    { key: 'never_contacted', label: 'Never called' },
+    { key: 'noanswer_stale', label: 'No answer, not retried' },
+    // Real at last: a follow-up whose moment has gone by, read from the
+    // appointment rather than from a column nothing writes.
+    { key: 'overdue', label: 'Follow-up overdue', tone: 'alert' },
+    // The warmest people here — they came back on their own.
+    { key: 'repeat_enquiry', label: 'Came back' },
   ],
 
   // Trailing actions column (ModuleTable, driven off this definition).
@@ -354,7 +380,13 @@ export const LEADS_DEF = {
     return (
       <div className="prow">
         <div className="prow-top">
-          <span className="prow-name">{l.name}</span>
+          {/* Name and badge together, so the badge does not take a row of its
+              own on a 390px card — the same reason it sits beside the name on
+              the record rather than in the facts strip. */}
+          <span className="prow-name">
+            {l.name}
+            {l.enquiryCount > 1 && <span className="prow-repeat">{l.enquiryCount}×</span>}
+          </span>
           <StageCell
             record={l} store={store}
             stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
@@ -367,9 +399,6 @@ export const LEADS_DEF = {
             This line is one row with an ellipsis, so every part it carries is
             room taken from `interest`, which sits last and is cut first. */}
         {reqShort(l.req, { budget: false }) && <div className="prow-req">{reqShort(l.req, { budget: false })}</div>}
-        {/* CAME BACK. Only above one — every lead has enquired once, and a
-            badge on everything is a badge on nothing. */}
-        {l.enquiryCount > 1 && <div className="prow-repeat">{l.enquiryCount} enquiries</div>}
         <div className="prow-foot">
           <div className="prow-meta">
             {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
