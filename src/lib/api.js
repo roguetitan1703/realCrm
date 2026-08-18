@@ -182,19 +182,22 @@ function tokenTenant(token) {
  * just by being VISITED. Open /delpat, get its sign-in screen, never sign in,
  * and bhumi's tab now believes it is delpat.
  *
- * The URL is the authority. An installed PWA is the one exception: it is locked
- * to a single firm and its start_url may carry no slug, so it reads the stored
- * value — which is its own, because an installed app only ever opens one firm.
+ * THE URL IS THE AUTHORITY, AND THERE IS NO EXCEPTION.
+ *
+ * An earlier version of this carved one out for an installed PWA, on the
+ * grounds that its start_url might carry no slug — and read `crm_tenant_id`
+ * there. That was wrong on the facts: routes/pwa.ts builds the manifest with
+ * `start_url: '/<slug>'` AND `scope: '/<slug>'`, precisely because scope is a
+ * path prefix and only a path can fence an installed app to one firm. An
+ * installed PWA therefore always has its slug in the path, and cannot navigate
+ * outside it. The exception protected nothing and left the last route by which
+ * a single global key could decide which firm a tab belongs to.
+ *
+ * No slug means no workspace — the picker — which is the honest answer for a
+ * URL that names no firm.
  */
 export function currentTenant() {
-  if (typeof window === 'undefined') return '';
-  const slug = pathSlug();
-  if (slug) return slug;
-  try {
-    const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches
-      || window.navigator?.standalone === true;
-    return standalone ? (window.localStorage?.getItem('crm_tenant_id') || '') : '';
-  } catch { return ''; }
+  return pathSlug();
 }
 
 /** The workspace slug in the path, or '' on the picker and /admin. */
@@ -232,13 +235,11 @@ function tokenFor(tenantId) {
   // itself stopped auto-entering: the app asks `getToken()` whether to boot,
   // and a leftover global key kept answering yes.
   if (!tenantId) return '';
-  // The workspace's own key first, whether it came from the path or from the
-  // stored selection — so two firms signed in on one browser both keep working
-  // rather than the last one in evicting the other. The global key is the
-  // last-resort fallback for a session that predates per-workspace keys, and
-  // the claim check below still has to pass.
-  const slug = pathSlug();
-  const token = lsGet(`crm_auth_token_${slug || tenantId}`) || (slug ? '' : lsGet(TOKEN_KEY));
+  // That workspace's own key, and only it — so two firms signed in on one
+  // browser both keep working rather than the last one in evicting the other.
+  // No fallback to the global key: that fallback IS the bug this function
+  // exists to close.
+  const token = lsGet(`crm_auth_token_${tenantId}`);
   if (!token) return '';
   const owner = tokenTenant(token);
   // A token whose claim we cannot read is presented as before rather than
@@ -420,17 +421,7 @@ export const api = {
   // do we send?" can never answer differently. App.jsx boots the desk on this,
   // and with the old global fallback it answered yes on every workspace the
   // moment anyone signed into any one of them.
-  getToken: (slug) => {
-    const s = slug && slug !== 'admin' ? slug : pathSlug();
-    const tenantId = s || (typeof window !== 'undefined' ? (window.localStorage?.getItem('crm_tenant_id') || '') : '');
-    if (s) {
-      const t = lsGet(`crm_auth_token_${s}`);
-      if (!t) return '';
-      const owner = tokenTenant(t);
-      return (tenantId && owner && owner !== tenantId) ? '' : t;
-    }
-    return tokenFor(tenantId);
-  },
+  getToken: (slug) => tokenFor(slug && slug !== 'admin' ? slug : currentTenant()),
   setToken: (t, slug) => {
     const s = slug || (typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '');
     if (s && s !== 'admin') {
