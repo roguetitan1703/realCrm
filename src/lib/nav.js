@@ -26,6 +26,8 @@
 // stayed in `sel` forever — so opening Leads from the sidebar an hour later
 // re-applied a tile someone tapped once, and the list quietly showed 13 leads
 // out of 94 with no filter chip on screen to explain it.
+import { currentTenant } from './api.js'
+
 export const TAKEOVER_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey',
   'leadFilter', 'ownerSeg', 'ownerStage', 'agentFilter',
@@ -87,4 +89,39 @@ export function isStandaloneApp() {
     || window.matchMedia?.('(display-mode: fullscreen)')?.matches
     || window.matchMedia?.('(display-mode: minimal-ui)')?.matches
     || window.navigator.standalone === true
+}
+
+// ── A record id belongs to the workspace it was opened in ───────────────────
+// The workspace lives in the PATH and the open record lives in the QUERY, so
+// they travel independently: edit `/delpat?screen=leads&lead=l_17…` down to
+// `?screen=leads&lead=l_17…`, sign in somewhere else, and that other firm's
+// desk opens a lead id it has never held. It 404s and says "This lead no
+// longer exists", which is not what happened — the lead exists, it is not
+// theirs. Ids carry no tenant (`l_<ts>_<rand>`), so nothing can tell a foreign
+// id from a deleted one by looking at it.
+//
+// So the TAB remembers which workspace it was last navigating in, and a boot
+// that lands somewhere else drops the record. Tab-scoped on purpose: a push
+// notification opens a fresh tab with no stamp, and its deep link still works.
+const NAV_WS = 'crm_nav_ws'
+
+/** Called on every URL the desk writes, so the stamp is always the workspace
+ *  the person was actually reading records in — never one merely visited. */
+export function stampNavWorkspace() {
+  try { window.sessionStorage?.setItem(NAV_WS, currentTenant()) } catch (e) {}
+}
+
+/** parseUrl(), minus any record this workspace has no claim to. */
+export function bootNav(search = window.location.search) {
+  const at = parseUrl(search)
+  let prev = null
+  try { prev = window.sessionStorage?.getItem(NAV_WS) ?? null } catch (e) { prev = null }
+  if (prev !== null && prev !== currentTenant()) {
+    for (const k of TAKEOVER_KEYS) at.sel[k] = undefined
+    at.sel.leadOpen = false
+    at.sel.ownerOpen = false
+    at.sel.propOpen = false
+    at.sel.projOpen = false
+  }
+  return at
 }

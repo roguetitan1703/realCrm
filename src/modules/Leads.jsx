@@ -232,13 +232,25 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   // Above the early return: a hook cannot be called conditionally, and the
   // "record not loaded yet" branch below is exactly such a condition.
   const matches = useLeadMatches(l)
+  // A record we cannot open is a dead end, not a screen — and the message it
+  // used to park on ("This lead no longer exists") asserted a cause it does not
+  // know. An id reaches here from a link someone pasted, a lead a colleague
+  // deleted, or another firm's URL; only the last of those is now caught before
+  // the fetch (see bootNav), and none of them are worth stranding someone on.
+  // Land on the list, which is the thing they can actually act on.
+  useEffect(() => {
+    if (error !== 'not-found') return
+    store.toast('Lead not found')
+    setSel(s => ({ ...s, leadOpen: false, leadId: undefined }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error])
   if (!l) {
     return (
       <>
         {topBar({ title: 'Lead', eyebrow: 'Leads', onBack: () => setSel(s => ({ ...s, leadOpen: false })) })}
         {loading
           ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
-          : <div className="detail-missing">{error === 'not-found' ? 'This lead no longer exists.' : 'Could not open this lead.'}</div>}
+          : <div className="detail-missing">{error === 'not-found' ? null : 'Could not open this lead.'}</div>}
       </>
     )
   }

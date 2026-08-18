@@ -243,13 +243,21 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
     [projKey, sel.propId], { data: [] })
   const siblings = siblingPage?.data || []
   const back = () => setSel(s => ({ ...s, propOpen: false }))
+  // Same as the lead record: an id this workspace cannot resolve returns to the
+  // list rather than parking on a message that guesses at why.
+  useEffect(() => {
+    if (error !== 'not-found') return
+    store.toast('Listing not found')
+    setSel(s => ({ ...s, propOpen: false, propId: undefined }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error])
   if (!p) {
     return (
       <>
         {topBar({ title: 'Property', eyebrow: 'Properties', onBack: back })}
         {loading
           ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
-          : <div className="detail-missing">{error === 'not-found' ? 'This listing no longer exists.' : 'Could not open this listing.'}</div>}
+          : <div className="detail-missing">{error === 'not-found' ? null : 'Could not open this listing.'}</div>}
       </>
     )
   }

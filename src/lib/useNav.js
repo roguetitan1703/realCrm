@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { parseUrl, urlFor, isRoot, isStandaloneApp, TAKEOVER_KEYS } from './nav.js'
+import { parseUrl, bootNav, stampNavWorkspace, urlFor, isRoot, isStandaloneApp, TAKEOVER_KEYS } from './nav.js'
 
 // ============================================================================
 // useNav — screen + selection, mirrored to the URL, with a back-to-exit guard
@@ -23,7 +23,7 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
   // open" for the one press that matters.
   const overlayRef = useRef(overlay)
   overlayRef.current = overlay
-  const first = useRef(parseUrl()).current
+  const first = useRef(bootNav()).current
   const [screen, setScreenState] = useState(first.screen || home)
   const [sel, setSelState] = useState(first.sel)
 
@@ -53,6 +53,7 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
     if (!enabled) return
     if (window.history.state?.nav) return
     const url = urlFor(first.screen || home, first.sel)
+    stampNavWorkspace()
     window.history.replaceState({ nav: true, floor: true }, '', url)
     if (!isStandaloneApp()) {
       window.history.pushState({ nav: true }, '', url)
@@ -64,6 +65,7 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
     if (!enabled) return
     if (fromPop.current) { fromPop.current = false; return }
     const next = urlFor(screen, sel)
+    stampNavWorkspace()
     if (next !== window.location.search) {
       window.history.pushState({ nav: true }, '', next)
     }

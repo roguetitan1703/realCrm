@@ -62,15 +62,30 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const rawUrl = (event.notification.data && event.notification.data.url) || '/';
-  const targetUrl = new URL(rawUrl, self.location.origin).href;
+  const target = new URL(rawUrl, self.location.origin);
+  // THE WORKSPACE IS THE FIRST PATH SEGMENT, and it decides which installed app
+  // this alert belongs to. One worker is registered at the origin root, so it
+  // controls EVERY tenant's installed app on the device — `matchAll` returns
+  // all of them, and taking the first meant a Bhumi alert grabbed whichever
+  // window happened to be open, navigated it to Bhumi's URL and focused it.
+  // The person watched a demo tenant's app put on another firm's colours and
+  // then ask them to sign in. Only ever reuse a window already in the same
+  // workspace; otherwise let openWindow route the URL, which the browser
+  // matches against each installed manifest's scope and so opens the right app.
+  const slugOf = (u) => {
+    try { return decodeURIComponent(new URL(u).pathname.replace(/^\/+/, '').split('/')[0] || ''); }
+    catch (e) { return ''; }
+  };
+  const want = slugOf(target.href);
   event.waitUntil((async () => {
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const c of all) {
+    const mine = all.filter((c) => slugOf(c.url) === want);
+    for (const c of mine) {
       if ('focus' in c) {
-        c.navigate(targetUrl).catch(() => {});
+        c.navigate(target.href).catch(() => {});
         return c.focus();
       }
     }
-    if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    if (self.clients.openWindow) return self.clients.openWindow(target.href);
   })());
 });
