@@ -56,7 +56,11 @@ import { buildActionTiers } from '../modules/definitions.jsx'
  * with nothing added says only "someone dialled", and letting that outrank a
  * real note would make the block worse than useless.
  */
-const NOTE_TYPES = new Set(['remark', 'call', 'wa', 'sms', 'visit'])
+// `followup` is here because saying how a booked call or demo went is now the
+// way one is completed — it is the newest thing an agent has said about this
+// person, and leaving it out meant the card kept showing yesterday's remark
+// while the outcome recorded a minute ago sat two inches below it.
+const NOTE_TYPES = new Set(['remark', 'call', 'wa', 'sms', 'visit', 'followup'])
 
 /**
  * Text the SERVER wrote when a button was pressed — "WhatsApp initiated",
@@ -77,9 +81,13 @@ function LatestRemark({ record, store }) {
   // written anything does the newest logged action stand in — a lead where
   // someone only tapped WhatsApp should still say so rather than go blank. An
   // outcome typed onto that WhatsApp event later is human text, and takes over.
+  // A booking's label is the system's sentence, so what an agent SAID about it
+  // is metadata.remark — read it here, or a row with a real note would be
+  // ranked on words nobody chose and then rendered showing them.
+  const said = (e) => (e.metadata?.remark || '').trim() || (e.label || '').trim()
   const notes = (record.timeline || []).filter(e =>
-    NOTE_TYPES.has(e.type) && ((e.label || '').trim() || e.metadata?.outcome))
-  const written = (e) => !!e.metadata?.outcome || !AUTO_TEXT.test((e.label || '').trim())
+    NOTE_TYPES.has(e.type) && (said(e) || e.metadata?.outcome))
+  const written = (e) => !!e.metadata?.outcome || !AUTO_TEXT.test(said(e))
   const latest = notes.find(written) || notes[0]
   const textRef = useRef(null)
   const [expanded, setExpanded] = useState(false)
@@ -90,7 +98,7 @@ function LatestRemark({ record, store }) {
   // phone, and a "tap to read the rest" that reveals nothing is worse than no
   // affordance at all. Re-measured when the note changes, and collapsed again
   // so opening the next record doesn't inherit the last one's expanded state.
-  const key = latest ? `${latest.id}:${latest.label}` : null
+  const key = latest ? `${latest.id}:${said(latest)}` : null
   useEffect(() => {
     setExpanded(false)
     const el = textRef.current
@@ -132,7 +140,7 @@ function LatestRemark({ record, store }) {
       <div ref={textRef} className="rh-remark-text"
         onClick={clipped ? () => setExpanded(v => !v) : undefined}>
         {outcome && <b className="rh-remark-outcome">{outcome}</b>}
-        {latest.label}
+        {said(latest)}
       </div>
     </div>
   )

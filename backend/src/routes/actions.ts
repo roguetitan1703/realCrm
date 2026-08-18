@@ -109,8 +109,13 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
     if (!authorId || existing.author !== authorId) {
       return res.status(403).json({ error: 'You can only edit your own entry' });
     }
-    const finalText = text || existing.description;
-    const updated = await updateTimelineEvent(eventId, req.tenantId!, finalText, outcome);
+    // RAW, not pre-defaulted. This passed `text || existing.description`, and
+    // on a locked row that fallback landed in `metadata.remark` — so saving an
+    // outcome with no remark wrote the booking's own sentence underneath
+    // itself: "Follow-up Call — 20 Aug, 11:00 am" as the note beneath a title
+    // already saying exactly that. The fallback belongs to the description,
+    // which updateTimelineEvent owns; an empty remark is an empty remark.
+    const updated = await updateTimelineEvent(eventId, req.tenantId!, text, outcome);
     if (!updated) return res.status(404).json({ error: 'Not found' });
     // A call that rang out is something the system observed directly, not a
     // judgment call — so it moves the lead's status on its own, same as a

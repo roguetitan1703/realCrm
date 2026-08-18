@@ -1992,7 +1992,12 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     await addTimelineEvent({
       record_id: id,
       type: 'follow_up',
-      title: hadFollowUp ? 'Follow-up rescheduled' : 'Follow-up scheduled',
+      // 'Scheduled', not 'Follow-up scheduled'. The row already wears a
+      // Follow-up chip and the description names the type, so the old wording
+      // rendered "Follow-up · Follow-up scheduled: Follow-up Call — 20 Aug".
+      // The chip says what kind of entry this is; the title says what happened
+      // to it; the description says which follow-up. Three jobs, one word each.
+      title: hadFollowUp ? 'Rescheduled' : 'Scheduled',
       description: [followUpKind(fu), followUpWhen(fu)].filter(Boolean).join(' — '),
       author: getContext()?.userId || null,
     }).catch(() => {});
@@ -2004,7 +2009,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       await addTimelineEvent({
         record_id: id,
         type: 'follow_up',
-        title: 'Follow-up completed',
+        title: 'Completed',
         description: followUpKind({ action }),
         author: getContext()?.userId || null,
       }).catch(() => {});
@@ -4270,8 +4275,10 @@ export async function updateTimelineEvent(
   const meta: any = { ...(existing.metadata || {}), edited: true, edited_at: new Date().toISOString() };
   if (outcome) meta.outcome = outcome;
   const locked = LOCKED_TEXT_TYPES.has(existing.type);
-  if (locked && text) meta.remark = text;
-  const description = locked ? existing.description : text;
+  // Only a note somebody actually typed becomes one. An empty box means the
+  // agent recorded an outcome and nothing else, which is a complete answer.
+  if (locked && text?.trim()) meta.remark = text.trim();
+  const description = locked ? existing.description : (text || existing.description);
   const rows = await sql`
     UPDATE crm_timeline_events SET description = ${description}, metadata = ${sql.json(meta)}
     WHERE id = ${id} AND tenant_id = ${tenantId}
@@ -4834,7 +4841,7 @@ export async function closeFollowUpFor(leadId: string, activityType: string): Pr
     await addTimelineEvent({
       record_id: leadId,
       type: 'follow_up',
-      title: 'Follow-up completed',
+      title: 'Completed',
       description: followUpKind({ action }),
       author: getContext()?.userId || null,
     }).catch(() => {});
