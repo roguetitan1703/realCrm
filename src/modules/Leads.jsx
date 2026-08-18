@@ -312,22 +312,17 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
               {followUpLabel(l.followUp)}
             </div>
           </div>
-          {/* B4: a site visit closes with proof (live photo + location), not a
-              bare click. Every other appointment type — calls, meetings, demos
-              — keeps the one-click Done, because there's nothing to verify.
-              The completion event is now written by the SERVER, inside
-              updateLead, the moment follow_up clears — not from here. A local
-              addNote() landed as an editable remark, indistinguishable from a
-              sentence an agent typed; the server writes its own type instead. */}
+          {/* Log visit stays — it is the work, and it carries proof. The
+              plain "Done" that sat here for everything else is gone with its
+              twin in the phone menu: it closed the follow-up and recorded
+              nothing, which is why a completed call and a completed callback
+              looked like different species. Log the call from the Call button
+              and this closes itself. */}
           {isSiteVisit(l.followUp) ? (
             <button className="btn btn-primary btn-sm fu-done" onClick={() => store.openModal({ kind: 'visitProof', leadId: l.id })}>
               Log visit
             </button>
-          ) : (
-            <button className="btn btn-ghost btn-sm fu-done" onClick={() => {
-              store.setFollowUp(l.id, null); store.toast('Follow-up completed')
-            }}>Done</button>
-          )}
+          ) : null}
         </div>
       ) : <div className="detail-empty">No follow-up scheduled.</div>}
       <Button variant="secondary" size="sm" block icon="calendar" onClick={() => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id })}>

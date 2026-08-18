@@ -1970,6 +1970,31 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // outcome — and a second line saying it happened is the duplicate that used
   // to sit on top of the proof.
   const hadFollowUp = oldLead.followUp || (oldLead as any).follow_up || null;
+
+  // BOOKING ONE IS AN EVENT TOO, for the same reason closing one is.
+  //
+  // The schedule modal wrote "Scheduled Site Visit on 2026-08-19 at 11:00 am"
+  // through addNote(), which lands as a `remark`: tagged REMARK, carrying a
+  // pencil, and fully editable down to the last character. An agent could
+  // select that sentence, delete it, and type anything — so the only thing
+  // separating "the system recorded that a visit was booked" from "someone
+  // typed a line" was text that could be replaced. It also meant a booking
+  // offered "Add outcome & remark" and no outcome list, because `remark` has
+  // none: a prompt for something it could not accept.
+  //
+  // Written here, by the side that owns the row, as `follow_up` — outside the
+  // editable set, like the completion it will eventually pair with.
+  if (followUp && JSON.stringify(followUp) !== JSON.stringify(hadFollowUp)) {
+    const fu: any = followUp;
+    await addTimelineEvent({
+      record_id: id,
+      type: 'follow_up',
+      title: hadFollowUp ? 'Follow-up rescheduled' : 'Follow-up scheduled',
+      description: [followUpKind(fu), followUpWhen(fu)].filter(Boolean).join(' — '),
+      author: getContext()?.userId || null,
+    }).catch(() => {});
+  }
+
   if (hadFollowUp && !followUp) {
     const action = String((hadFollowUp as any).action || 'Follow-up');
     if (!/site\s*visit/i.test(action)) {
@@ -1977,7 +2002,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
         record_id: id,
         type: 'follow_up',
         title: 'Follow-up completed',
-        description: action,
+        description: followUpKind({ action }),
         author: getContext()?.userId || null,
       }).catch(() => {});
     }
@@ -2224,6 +2249,40 @@ export const RETRY_DAYS = 3;
  * reads as not overdue — which is the bug this function exists to fix,
  * reintroduced one layer down. Checked against a real row, not assumed.
  */
+/**
+ * WHAT a follow-up is, and WHEN it is due, as a person reads them.
+ *
+ * The schedule modal stores `action` as "<type> — <lead name>", so a timeline
+ * line built from it straight said the person's own name back to them on their
+ * own record. And `at` is a UTC instant: printed raw it read
+ * "2026-08-18T19:12:14.930Z" on a desk in Pune, which is not a time anybody
+ * can repeat to a client.
+ *
+ * Both live here rather than at each call site, for the reason whenLabel()
+ * exists on the client: this fact is written from three places and the same
+ * appointment must not be phrased three ways.
+ */
+function followUpKind(fu: any): string {
+  const raw = String(fu?.action || '').trim();
+  if (!raw) return 'Follow-up';
+  return raw.split(/\s+—\s+/)[0].trim() || raw;
+}
+
+function followUpWhen(fu: any): string {
+  if (fu?.at) {
+    const d = new Date(fu.at);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleString('en-IN', {
+        timeZone: DEFAULT_TIMEZONE, day: 'numeric', month: 'short',
+        hour: 'numeric', minute: '2-digit', hour12: true,
+      });
+    }
+  }
+  // Rows saved before `at` existed carry only what a person typed. Shown as
+  // stored rather than guessed at — see FOLLOWUP_PAST_DUE.
+  return [fu?.date, fu?.time].filter(Boolean).join(' ');
+}
+
 export const FOLLOWUP_PAST_DUE = sql`(CASE WHEN follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
                                           THEN (follow_up->>'at')::timestamptz < now() ELSE false END)`;
 
@@ -4677,28 +4736,68 @@ export async function addActivity(input: ActivityInput): Promise<any> {
 }
 
 /**
- * The visit that was booked has now happened, so the booking is over.
+ * THE WORK CLOSES THE FOLLOW-UP. There is no "mark it done" any more.
+ *
+ * There used to be a tick in the phone's action menu labelled "Mark follow-up
+ * done", which deleted the appointment and recorded nothing about it — while
+ * the site-visit path beside it demanded a photo, a GPS fix and an outcome for
+ * the same kind of event. Two ways to close one thing, one of them free. The
+ * client's verdict on it was that nobody knew it was there and nobody would use
+ * it, which is what a control that asks for a judgement and stores none earns.
+ *
+ * So a follow-up is discharged by doing the thing it was a reminder about. Log
+ * the site visit and the booked visit closes; log the call and the booked call
+ * closes — through the flow that already asks for an outcome and a remark. What
+ * gets recorded is what happened, not that somebody ticked a box.
+ *
+ * MATCHED, NOT BLANKET. A lead with a callback booked for Thursday who happens
+ * to be shown a flat on Tuesday keeps the callback: the visit did not answer
+ * it. So each activity only closes a follow-up of its own kind, and a
+ * follow-up whose kind matches nothing anyone can log (a free-text task) is
+ * left alone rather than quietly deleted.
  *
  * The client used to do this itself — log the activity, then send a second
  * request clearing `followUp`. Two writes, and the record screen re-read the
  * lead between them: it saw the visit land, refetched, and got a lead whose
  * appointment had not been cleared yet, so the appointment card came BACK a
  * few seconds after disappearing. Measured on a real save: cleared at 3s,
- * restored at 5s, cleared again at 9s.
- *
- * One write, on the side that owns the row. By the time the client is told the
- * visit was logged, the appointment is already gone — there is no window in
- * which a read can disagree.
- *
- * Only a SITE VISIT appointment is closed by a site visit. A lead with a
- * callback booked for Thursday who happens to be shown a flat on Tuesday keeps
- * the callback; the visit did not answer it.
+ * restored at 5s, cleared again at 9s. One write, on the side that owns the
+ * row.
  */
-async function closeSiteVisitAppointment(leadId: string): Promise<void> {
+const FOLLOW_UP_CLOSED_BY: Record<string, RegExp> = {
+  site_visit: /site\s*visit/i,
+  visit: /site\s*visit/i,
+  call: /call|callback/i,
+  meeting: /meeting|demo/i,
+};
+
+export async function closeFollowUpFor(leadId: string, activityType: string): Promise<void> {
+  const match = FOLLOW_UP_CLOSED_BY[activityType];
+  if (!leadId || !match) return;
+  const rows = await sql`
+    SELECT follow_up FROM crm_leads
+    WHERE id = ${leadId} AND tenant_id = ${tid()} AND follow_up IS NOT NULL LIMIT 1`;
+  const action = String(rows[0]?.follow_up?.action || '');
+  if (!action || !match.test(action)) return;
   await sql`
     UPDATE crm_leads SET follow_up = NULL, updated_at = NOW()
-    WHERE id = ${leadId} AND tenant_id = ${tid()}
-      AND follow_up->>'action' ILIKE '%site%visit%'`;
+    WHERE id = ${leadId} AND tenant_id = ${tid()}`;
+  // A site visit writes its own proven record — photo, GPS, outcome — and a
+  // second line saying the appointment ended is the duplicate that used to sit
+  // on top of it. Everything else gets the one event.
+  if (!/site\s*visit/i.test(action)) {
+    await addTimelineEvent({
+      record_id: leadId,
+      type: 'follow_up',
+      title: 'Follow-up completed',
+      description: followUpKind({ action }),
+      author: getContext()?.userId || null,
+    }).catch(() => {});
+  }
+}
+
+async function closeSiteVisitAppointment(leadId: string): Promise<void> {
+  await closeFollowUpFor(leadId, 'site_visit');
 }
 
 /**

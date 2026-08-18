@@ -22,8 +22,7 @@ import {
 import {
   addTimelineEvent, updateLead, mergeLeads, getLeadById,
   getTimelineEventById, updateTimelineEvent, maybeAutoAdvanceStage,
-  addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES, noteOwnerContact,
-} from '../services/store';
+  addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES, noteOwnerContact, closeFollowUpFor } from '../services/store';
 import { isSafeKey, tenantOfKey } from '../services/media';
 import { audit } from '../services/audit';
 
@@ -153,6 +152,10 @@ actionsRouter.post('/:id/actions/contact-log', async (req: Request, res: Respons
       record_id: recordId, type: dbType, title, description: `${title} initiated`,
       author: authorId || undefined,
     });
+    // The call that was booked has now been made, so the booking is over —
+    // and it is over because the work happened, not because anyone ticked a
+    // box. No-ops when the lead has no follow-up, or one of another kind.
+    await closeFollowUpFor(recordId, channel === 'call' ? 'call' : '').catch(() => {});
     // No-ops unless the record is an owner: stamps the attempt and moves
     // New → Contacted, so a cold-calling queue can tell "not dialled yet" from
     // "dialled, no answer" without reading every record's timeline.

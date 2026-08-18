@@ -306,26 +306,29 @@ export const LEADS_DEF = {
       label: (l) => (l.followUp ? 'Reschedule follow-up' : 'Schedule follow-up'),
       sub: (l) => (l.followUp ? followUpLabel(l.followUp) : null),
       run: (store, l) => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id }) },
-    // A site visit closes with proof (B4); everything else is a plain done.
-    { id: 'followDone', tier: 'quick', icon: 'check', when: (l, store, ctx) => !!l.followUp && !ctx?.onRail,
-      label: (l) => (/site\s*visit/i.test(l.followUp?.action || '') ? 'Log site visit' : 'Mark follow-up done'),
-      // The type and when it is due — not the raw stored string, which ends
-      // in the lead's own name. See followUpAction().
-      sub: (l) => [followUpAction(l.followUp), followUpLabel(l.followUp)].filter(Boolean).join(' · '),
-      run: (store, l) => {
-        if (/site\s*visit/i.test(l.followUp?.action || '')) return store.openModal({ kind: 'visitProof', leadId: l.id })
-        // The completion event is written by the SERVER now, inside updateLead,
-        // the instant follow_up clears — as its own type, not a remark somebody
-        // typed and could rewrite. See the doc comment on closeSiteVisitAppointment's
-        // sibling in store.ts.
-        store.setFollowUp(l.id, null); store.toast('Follow-up completed')
-      } },
+    // THERE IS NO "MARK FOLLOW-UP DONE". It was a tick in this menu that
+    // deleted the appointment and stored nothing about it — no outcome, no
+    // remark — sitting one row above "Log site visit", which demands a photo,
+    // a GPS fix and an outcome for the same kind of event. Two ways to close
+    // one thing, and the free one taught people that closing a follow-up means
+    // nothing happened. Nobody used it; the client did not know it existed.
+    //
+    // A follow-up now ends when the work does: log the call through the Call
+    // button, or the visit through Log site visit, and the matching booking
+    // closes server-side with what actually happened attached. See
+    // closeFollowUpFor() in services/store.ts.
     // B4. Completing a scheduled Site Visit appointment also opens this, but
     // that path only exists if someone scheduled one — so a visit that just
     // happened had nowhere to be logged. This is the always-available entry —
     // except when `followDone` (above) is ALREADY offering "Log site visit"
     // for the same scheduled appointment, which read as the same button twice
     // in both the desk rail's Quick actions and the phone action button.
+    // THE ALWAYS-AVAILABLE ENTRY, for a visit that happened with no
+    // appointment behind it. Hidden when one IS booked, because the phone
+    // record already promotes Log visit to a full-width button in that case
+    // and the desk rail's card carries it — offering it here as well is the
+    // same button twice, a few pixels apart, which is what this menu looked
+    // like before.
     { id: 'logVisit', tier: 'quick', icon: 'camera', label: 'Log site visit',
       when: (l) => !(l.followUp && /site\s*visit/i.test(l.followUp.action || '')),
       run: (store, l) => store.openModal({ kind: 'visitProof', leadId: l.id }) },

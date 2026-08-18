@@ -2057,7 +2057,10 @@ function ScheduleFollowUpModal({ store, leadId }) {
       time: finalTime,
       note: note.trim() || undefined,
     })
-    store.addNote(l.id, `Scheduled ${action} on ${finalDate} at ${finalTime}${note.trim() ? ` — Agenda: ${note.trim()}` : ''}`, 'visit')
+    // NO addNote HERE. This wrote the booking into the timeline as a plain
+    // remark — editable, pencil and all — so the record of an appointment being
+    // made could be rewritten into any sentence at all. updateLead writes it
+    // server-side now, as its own type. See the follow_up block in store.ts.
     store.toast(`Follow-up scheduled: ${action} on ${finalDate} at ${finalTime}`)
     store.closeModal()
   }
