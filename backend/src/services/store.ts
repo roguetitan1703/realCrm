@@ -452,6 +452,9 @@ function rowToProperty(r: any): any {
 function clientEventType(dbType: string): string {
   if (dbType === 'remark' || dbType === 'call' || dbType === 'sms') return dbType;
   if (dbType === 'whatsapp') return 'wa';
+  // Its own channel, deliberately outside the editable set: a closed
+  // appointment is an observation, not a note somebody can rewrite.
+  if (dbType === 'follow_up') return 'followup';
   if (dbType === 'stage_change') return 'stage';
   if (dbType === 'creation') return 'note';
   return 'msg';
@@ -1346,6 +1349,10 @@ export async function getDeskSummary(): Promise<any> {
                count(*) FILTER (WHERE ${S.today})::int AS new_today,
                count(*) FILTER (WHERE ${S.untouched_sla})::int AS untouched_sla,
                count(*) FILTER (WHERE ${S.noanswer_stale})::int AS noanswer_stale,
+               -- The sidebar's Leads badge. Same expression as the leads list's
+               -- "Never called" tab, so the badge and the pile it opens onto
+               -- cannot disagree.
+               count(*) FILTER (WHERE ${S.never_contacted})::int AS never_contacted,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine}`,
     sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
@@ -1408,7 +1415,7 @@ export async function getDeskSummary(): Promise<any> {
     stagesByAgent.get(r.a)![r.s] = r.n;
   }
   return {
-    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, untouched_sla: 0, noanswer_stale: 0 },
+    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, untouched_sla: 0, noanswer_stale: 0, never_contacted: 0 },
     byStage: asMap(byStage),
     bySource: asMap(bySource),
     perAgent: (() => {
@@ -1952,6 +1959,33 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       updated_at = NOW()
     WHERE id = ${id} AND tenant_id = ${tid()};
   `;
+
+  // AN APPOINTMENT CLOSING IS AN EVENT, NOT PROSE.
+  //
+  // Marking a non-visit follow-up done used to have the BROWSER write
+  // "Appointment completed — Follow-up Call" through addRemark. That lands as a
+  // `remark`: tagged REMARK, carrying a pencil, fully editable — so the record
+  // of an appointment being closed was indistinguishable from a sentence an
+  // agent typed, and could be rewritten into one. A thing the system observed
+  // should not be able to masquerade as something a person said.
+  //
+  // Written here, once, by the side that owns the row, as its own type. A site
+  // visit is excluded: it closes with the visit activity — photo, GPS fix and
+  // outcome — and a second line saying it happened is the duplicate that used
+  // to sit on top of the proof.
+  const hadFollowUp = oldLead.followUp || (oldLead as any).follow_up || null;
+  if (hadFollowUp && !followUp) {
+    const action = String((hadFollowUp as any).action || 'Follow-up');
+    if (!/site\s*visit/i.test(action)) {
+      await addTimelineEvent({
+        record_id: id,
+        type: 'follow_up',
+        title: 'Follow-up completed',
+        description: action,
+        author: getContext()?.userId || null,
+      }).catch(() => {});
+    }
+  }
 
   if (patch.shortlist !== undefined || patch.feedback !== undefined) {
     await syncLeadShortlist(id, shortlist || [], feedback || {}, tid());

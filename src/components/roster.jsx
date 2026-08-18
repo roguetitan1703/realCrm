@@ -55,9 +55,20 @@ export function buildRoster({ agents, perAgent = {}, perAgentCalls = {}, wonLabe
   // that is working from one that is not.
   rows.sort((x, y) => (Number(x.off) - Number(y.off))
     || (y.calls30d - x.calls30d) || (y.worked - x.worked) || (y.assigned - x.assigned))
-  const evenShare = rows.filter(r => !r.off).length
-    ? rows.reduce((s, r) => s + r.open, 0) / rows.filter(r => !r.off).length
-    : 0
+  // THE SHARE AND THE NUMBER IT JUDGES MUST MEASURE THE SAME THING.
+  //
+  // This averaged `open` and the badge below compared the result against
+  // `assigned` — a threshold built from a smaller pool than the number it
+  // gates. On bhumi that is 166 open over 8 people, so the line sat at 31,
+  // while assigned counts ran 26 to 40: FIVE OF EIGHT agents wore "Overloaded"
+  // on a desk whose load is even. A badge five of eight people wear says
+  // nothing, and it says it about the client's whole team.
+  //
+  // Off-duty agents are excluded from the divisor but their leads still sit in
+  // the numerator, which is right — work parked with somebody who is away is
+  // still work the desk is carrying.
+  const onDuty = rows.filter(r => !r.off).length
+  const evenShare = onDuty ? rows.reduce((s, r) => s + r.assigned, 0) / onDuty : 0
   const maxLoad = Math.max(1, ...rows.map(r => r.assigned))
   return { rows, evenShare, maxLoad, wonLabel }
 }

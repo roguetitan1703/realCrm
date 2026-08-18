@@ -288,14 +288,17 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
           </div>
           {/* B4: a site visit closes with proof (live photo + location), not a
               bare click. Every other appointment type — calls, meetings, demos
-              — keeps the one-click Done, because there's nothing to verify. */}
+              — keeps the one-click Done, because there's nothing to verify.
+              The completion event is now written by the SERVER, inside
+              updateLead, the moment follow_up clears — not from here. A local
+              addNote() landed as an editable remark, indistinguishable from a
+              sentence an agent typed; the server writes its own type instead. */}
           {isSiteVisit(l.followUp) ? (
             <button className="btn btn-primary btn-sm fu-done" onClick={() => store.openModal({ kind: 'visitProof', leadId: l.id })}>
               Log visit
             </button>
           ) : (
             <button className="btn btn-ghost btn-sm fu-done" onClick={() => {
-              store.addNote(l.id, `Appointment completed — ${l.followUp?.action || 'follow-up'}`)
               store.setFollowUp(l.id, null); store.toast('Appointment marked completed')
             }}>Done</button>
           )}

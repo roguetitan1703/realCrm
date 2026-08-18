@@ -423,7 +423,7 @@ export function Stepper({ stages, current, onPick }) {
 const EDITABLE_TYPES = new Set(['remark', 'call', 'wa', 'sms'])
 // Exported: the record header shows the latest of these at the top, and a
 // second copy of this map would be two vocabularies drifting apart.
-export const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit' }
+export const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit', followup: 'Follow-up' }
 // B4 outcomes are stored as stable keys; these are what a person reads.
 export const VISIT_OUTCOME_LABEL = {
   interested: 'Interested', not_interested: 'Not interested',
