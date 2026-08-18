@@ -133,7 +133,22 @@ export default function Login({ store }) {
     const seg = decodeURIComponent(parts[0] || '')
     const token = new URLSearchParams(window.location.search).get('token')
     const queryWs = new URLSearchParams(window.location.search).get('ws')
-    const storedSlug = slugFromLocation() || (typeof localStorage !== 'undefined' ? localStorage.getItem('crm_tenant_id') : '')
+    // THE STORED WORKSPACE IS NOT A DEFAULT — IT IS A PWA'S OWN IDENTITY.
+    //
+    // This fell back to `crm_tenant_id` for everybody, and that key is a single
+    // global holding whichever workspace was opened last. So the bare root URL
+    // did not show the workspace picker at all: it silently re-entered the last
+    // firm, which on a machine that had opened the demo meant realestate.delpat.in
+    // answered as the demo tenant, and on one that had opened a client meant it
+    // answered as the client. A URL with no workspace in it must not resolve to
+    // a workspace — that is the same "fallback to a default tenant" that files
+    // one firm's data under another's name.
+    //
+    // An INSTALLED PWA is the exception, and the only one: it is locked to a
+    // single firm (see leaveWorkspace), its start_url may carry no slug, and
+    // reopening it must land on that firm's desk rather than a picker.
+    const storedSlug = (typeof localStorage !== 'undefined' && isStandalone())
+      ? localStorage.getItem('crm_tenant_id') : ''
     const targetSlug = (seg && seg !== 'admin') ? seg : (queryWs || storedSlug)
 
     if (targetSlug) {

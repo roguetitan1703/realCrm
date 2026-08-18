@@ -149,6 +149,69 @@ const ADMIN_TOKEN_KEY = 'crm_admin_token';
 function lsGet(k) { try { return (typeof window !== 'undefined' && window.localStorage?.getItem(k)) || ''; } catch { return ''; } }
 function lsSet(k, v) { try { if (typeof window === 'undefined' || !window.localStorage) return; if (v) window.localStorage.setItem(k, v); else window.localStorage.removeItem(k); } catch { /* storage blocked */ } }
 
+/**
+ * WHICH FIRM A TOKEN BELONGS TO, read off the token itself.
+ *
+ * The server is token-authoritative: middleware/auth.ts sets the request's
+ * tenant from `claims.tenant_id` and IGNORES the X-Tenant-ID header for a
+ * signed-in user. That is the correct thing for it to do — nobody can read
+ * another firm by editing a header — but it means a client that sends the
+ * wrong token gets the wrong firm's desk rendered under the right firm's URL.
+ *
+ * Read here, not from a second key kept alongside the token, because a stored
+ * copy is one more thing that can drift out of step with what it describes.
+ * Unsigned and unverified on purpose: this decides only which credential to
+ * PRESENT. The server still verifies it.
+ */
+function tokenTenant(token) {
+  try {
+    const body = String(token || '').split('.')[1];
+    if (!body) return '';
+    const pad = body.replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(pad + '='.repeat((4 - (pad.length % 4)) % 4));
+    return JSON.parse(json)?.tenant_id || '';
+  } catch { return ''; }
+}
+
+/** The workspace slug in the path, or '' on the picker and /admin. */
+function pathSlug() {
+  if (typeof window === 'undefined') return '';
+  const s = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '';
+  return s === 'admin' ? '' : s;
+}
+
+/**
+ * The token to present for `tenantId`, or '' when we hold none for it.
+ *
+ * TWO RULES, AND THE SECOND IS THE ONE THAT WAS MISSING.
+ *
+ * 1. On a workspace path, only that workspace's own key counts. This read
+ *    `crm_auth_token_<slug> || crm_auth_token`, and that global fallback is
+ *    what made signing into one firm sign you into every other: open /bhumi,
+ *    then /skyline-realty, and the demo workspace had no key of its own so it
+ *    fell back to bhumi's — X-Tenant-ID said skyline, the bearer said bhumi,
+ *    and the server rightly believed the bearer. The paying client's desk
+ *    rendered under the demo tenant's URL, and the demo could not be opened at
+ *    all while anyone was signed in elsewhere.
+ *
+ * 2. A token is only presented to the firm it was ISSUED for. The picker and
+ *    local dev have no slug in the path, so rule 1 cannot help them — they
+ *    resolve the workspace from `crm_tenant_id`, which is a single global key
+ *    that a previous session may have set. Matching the token's own claim
+ *    closes that door too.
+ */
+function tokenFor(tenantId) {
+  const slug = pathSlug();
+  const token = slug ? lsGet(`crm_auth_token_${slug}`) : lsGet(TOKEN_KEY);
+  if (!token) return '';
+  const owner = tokenTenant(token);
+  // A token whose claim we cannot read is presented as before rather than
+  // dropped — an unparseable payload is a shape change, not an intrusion, and
+  // silently signing everybody out would be the worse failure.
+  if (tenantId && owner && owner !== tenantId) return '';
+  return token;
+}
+
 function getHeaders(customHeaders = {}) {
   const slug = typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '';
   // THE URL DECIDES THE WORKSPACE. `crm_tenant_id` is a single global key that
@@ -168,9 +231,7 @@ function getHeaders(customHeaders = {}) {
     'X-Tenant-ID': tenantId,
     'Content-Type': 'application/json',
   };
-  const token = typeof window !== 'undefined' && slug && slug !== 'admin'
-    ? (lsGet(`crm_auth_token_${slug}`) || lsGet(TOKEN_KEY))
-    : lsGet(TOKEN_KEY);
+  const token = typeof window !== 'undefined' ? tokenFor(tenantId) : '';
   if (token) base.Authorization = `Bearer ${token}`;
   // customHeaders wins — lets the admin console override with its own token.
   return { ...base, ...customHeaders };
@@ -329,13 +390,20 @@ export const api = {
     return res;
   },
   me: () => request('/auth/me'),
+  // Same resolution the request headers use, so "are we signed in?" and "what
+  // do we send?" can never answer differently. App.jsx boots the desk on this,
+  // and with the old global fallback it answered yes on every workspace the
+  // moment anyone signed into any one of them.
   getToken: (slug) => {
-    const s = slug || (typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '');
-    if (s && s !== 'admin') {
+    const s = slug && slug !== 'admin' ? slug : pathSlug();
+    const tenantId = s || (typeof window !== 'undefined' ? (window.localStorage?.getItem('crm_tenant_id') || '') : '');
+    if (s) {
       const t = lsGet(`crm_auth_token_${s}`);
-      if (t) return t;
+      if (!t) return '';
+      const owner = tokenTenant(t);
+      return (tenantId && owner && owner !== tenantId) ? '' : t;
     }
-    return lsGet(TOKEN_KEY);
+    return tokenFor(tenantId);
   },
   setToken: (t, slug) => {
     const s = slug || (typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '');

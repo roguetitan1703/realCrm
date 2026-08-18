@@ -408,11 +408,15 @@ export const LEADS_DEF = {
         <div className="prow-foot">
           <div className="prow-meta">
             {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
-            {/* What makes this row urgent, which the list never showed —
-                Today had it and the list you actually work from did not. */}
-            {l.overdue
-              ? <Overdue>{l.followUp?.date || 'Overdue'}</Overdue>
-              : l.followUp ? <span>{l.followUp.date}</span> : null}
+            {/* OVERDUE ONLY. The non-overdue branch rendered the appointment
+                date as a bare span — "Today", "Tomorrow", "This Saturday" —
+                sitting between the agent's name and the ARRIVAL date, in the
+                same muted grey, with nothing saying which date was which. Two
+                different facts drawn identically on a 390px row, and the one
+                that reads first attaches itself to the name beside it. An
+                appointment that has not yet come due is not what makes a row
+                urgent; an overdue one is, and it keeps its own red treatment. */}
+            {l.overdue ? <Overdue>{l.followUp?.date || 'Overdue'}</Overdue> : null}
             {/* When it came in. On a phone this is the difference between
                 calling a fresh enquiry and calling one that has been sitting
                 three weeks, and the card had no way to tell them apart. */}

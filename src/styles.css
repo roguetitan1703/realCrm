@@ -2059,7 +2059,15 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
    whatever was left to the text, so a long name ran off the card — and the
    buttons floated centred against a three-line block with a tall empty gap
    beside them. */
-.app-mobile .rcard-row{flex-direction:column;align-items:stretch;padding:12px 13px;gap:0;cursor:pointer}
+.app-mobile .rcard-row{flex-direction:column;align-items:stretch;padding:12px 13px;gap:0;cursor:pointer;
+  /* A GRID ITEM DEFAULTS TO min-width:auto, WHICH IS ITS CONTENT, NOT ITS TRACK.
+     So a card whose meta line ran long stopped honouring the 1fr column and
+     grew to fit — measured at 500px inside a 364px track on a 390px phone. The
+     list clips with overflow-x:hidden, so nothing scrolled sideways to reveal
+     it; the row simply ran off the screen and took the call and WhatsApp
+     buttons with it. Every child already ellipsises correctly once the card
+     itself is allowed to be narrower than its contents. */
+  min-width:0}
 .app-mobile .rcard-row:active{background:var(--card-2)}
 
 /* .btn is laid out for a label beside an icon — flex-start with an 8px gap.
