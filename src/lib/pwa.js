@@ -33,24 +33,38 @@ import { api } from './api.js';
 //
 // No workspace, no worker: the picker needs no push and a root-scoped
 // registration is the whole bug.
+// Resolves once this workspace's worker is registered AND the old root one has
+// been retired — so nothing subscribes to push in between. Without it the two
+// halves race: registration is scheduled on `load`, autoEnablePush runs from an
+// App effect the moment a session exists, and on the first launch after this
+// change the page is still controlled by the root worker. Subscribing there and
+// THEN retiring it leaves the device with no subscription at all until the next
+// launch, which is a silent day of missed alerts per phone.
+let swSettled = Promise.resolve();
+export function swReady() { return swSettled; }
+
 export function registerServiceWorker() {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
   // Only in production builds — a SW in `vite dev` would cache hashed modules and
   // fight HMR. Test the installable app with `vite preview` or the deploy.
   if (!import.meta.env.PROD) return;
+  let done;
+  swSettled = new Promise((res) => { done = res; });
   window.addEventListener('load', async () => {
-    const slug = slugFromLocation();
-    if (!slug) { await retireRootWorker(); return; }
-    const at = `/${encodeURIComponent(slug)}/`;
     try {
-      await navigator.serviceWorker.register(`${at}sw.js`, { scope: at });
-    } catch (err) {
-      console.warn('[PWA] Service worker registration failed:', err?.message || err);
-      return;
-    }
-    // Only once the scoped worker is in place, so a device is never left with
-    // neither.
-    await retireRootWorker();
+      const slug = slugFromLocation();
+      if (!slug) { await retireRootWorker(); return; }
+      const at = `/${encodeURIComponent(slug)}/`;
+      try {
+        await navigator.serviceWorker.register(`${at}sw.js`, { scope: at });
+      } catch (err) {
+        console.warn('[PWA] Service worker registration failed:', err?.message || err);
+        return;
+      }
+      // Only once the scoped worker is in place, so a device is never left with
+      // neither.
+      await retireRootWorker();
+    } finally { done(); }
   });
 }
 

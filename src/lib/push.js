@@ -7,6 +7,7 @@
 // it degrades quietly on browsers/OSes that don't support push (older iOS, etc.).
 
 import { api } from './api.js';
+import { swReady } from './pwa.js';
 
 export function pushSupported() {
   return typeof window !== 'undefined'
@@ -27,6 +28,10 @@ async function readyRegistration() {
   // normalisation sits outside every scope, and this would hang forever —
   // taking `autoEnablePush` and `disablePush` (which runs on sign-out, before
   // the token is dropped) with it. Time it out and degrade instead.
+  // Wait out registration first, or this subscribes against whichever worker
+  // happens to control the page at the time — which on the first launch after
+  // per-workspace scoping is the root one, about to be retired.
+  await swReady();
   try {
     return await Promise.race([
       navigator.serviceWorker.ready,
