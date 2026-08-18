@@ -214,18 +214,91 @@ backfill from history. Do not touch a single lead's requirement, name, or stage.
 Show the counter and the timeline entries; those are additive and cannot be
 wrong in a way that costs anything.
 
-**Phase 2 — after two weeks of real traffic**, compare the derived requirement
-against what is on each lead and read the differences. If the session rule is
-wrong the disagreements will say so, on real leads, before anything has been
-overwritten.
+**Phase 2 — DONE, 2026-08-18.** 18 leads have enquired more than once across
+317 sessions. Comparing each one's latest session against its stored
+requirement:
 
-**Phase 3 — apply**, one field at a time, budget first.
+| field | agrees | disagrees | session silent |
+|---|---|---|---|
+| `deal` | 10 | **0** | 8 |
+| `config` | 9 | 1 | 8 |
+| `locality` | 13 | 5 | 0 |
+| `interest` | 5 | 4 | 9 |
+| `maxBudget` | 4 | **6** | 8 |
+
+The first pass at this read the wrong thing: `backfillEnquiries` picked values
+out of the stored payloads with 99acres' field names, so 84 MagicBricks pushes
+recorded as a bare locality while the payload beside them carried BHK, budget,
+deal type and project. Fixed — it replays through each connection's own
+mapping — and the table above is from the rebuilt data. **Do not trust a
+comparison run against a shape one reader guessed at.**
+
+What the disagreements turned out to be:
+
+- **`maxBudget` is a price tag, not a statement.** Every figure these portals
+  send is the asking price of the listing that was opened. Five of the six
+  disagreements moved by under 8% — ₹25,000 → ₹25,999, ₹25,000 → ₹24,999.
+  That is browsing. Taking the newest would have narrowed one buyer from
+  ₹40,000 to ₹32,000 and hidden every flat between from her.
+- **`interest` accumulates.** All four disagreements are a *different project*,
+  and one session already held two at once. Somebody comparing Green Cove and
+  Blue Waters is telling you something.
+- **Four of the five `locality` disagreements arrived on a Housing.com push
+  carrying nothing but a locality** — no BHK, no budget, no project. Housing
+  sends four distinct localities across 110 pushes, which is the list of areas
+  this firm advertises in, not a buyer's preference.
+- **`deal` never conflicted.** Somebody renting stays renting.
+
+**Phase 3 — DONE, 2026-08-18**, and shaped by the above rather than by "latest
+wins", which the data says would make 6 of 10 leads worse:
+
+- `maxBudget` **widens** to the highest figure seen and never contracts.
+  `minBudget` is written only by a field that says minimum — an earlier draft
+  synthesised a floor from the single figure a portal sends, which both invents
+  a fact ("won't look below ₹32,000") and narrowed the very range it exists to
+  widen.
+- `interest` accumulates into a list. Safe because `interest` is displayed,
+  never matched on.
+- `locality`, `config`, `deal`, `category`, `subtype` — **filled when empty,
+  never overwritten.** A contradiction from a push that stated a requirement is
+  written into the note and the timeline as "Says 3 BHK now (had 2 BHK)" and
+  left for a person. Matching compares locality and config with `===`, so a
+  wrong one does not loosen a lead's results, it empties them.
+
+Dry-run over the 18 real repeat leads: 3 budgets widen, 3 are protected from
+narrowing, 4 interest lists grow, 2 conflicts get reported. **Existing leads
+are not retro-fixed** — this applies to enquiries arriving from now on.
 
 **Backfill.** `webhook_inbox.raw_body` still holds bhumi's original payloads, so
 the enquiry table can be built from history rather than starting empty. It gets
 cheaper the sooner it happens: `data-lifecycle.md` purges bodies at 30 days and
 what is gone is gone. Through `runOnce`, with the per-tenant row count stated
 before it runs.
+
+---
+
+## 8b. The three rules around the requirement
+
+**The owner does not change.** Somebody has been working this person; the call
+they made yesterday is why this enquiry exists. Handing the lead to whoever is
+next in the round-robin because a form was submitted again takes a live
+conversation away from the person having it. The one exception is when there is
+nobody to take it from — unassigned, or owned by someone who has left or been
+deactivated — in which case it routes like a new arrival. Every bhumi agent is
+currently active, so this is a case prepared for rather than one observed.
+
+**A better name, never a worse one.** Portals send placeholders; bhumi holds six
+leads called "USER" and one "MbUser". A real name replaces a placeholder and
+nothing replaces a real name. The placeholder list is explicit, not a rule about
+length — "Om", "M" and "Wr" are all real names on this desk.
+
+**A rejected lead is never reopened automatically.** One of bhumi's carries the
+remark "She said not interested don't call". The desk is told; the stage does
+not move.
+
+**One notification per session, never per payload.** The buyer who opened four
+listings between 18:05 and 18:10 gets one alert. Four would have taught the desk
+to ignore the fifth.
 
 ---
 

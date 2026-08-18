@@ -4207,13 +4207,149 @@ function mergeSessionReq(prev: any, next: any): any {
 }
 
 /**
+ * A name a portal filled in for somebody who did not give one.
+ *
+ * bhumi holds six leads called "USER", one "User" and one "MbUser" — the
+ * placeholder MagicBricks writes when the enquiry form is submitted without
+ * one. Whichever push happened to arrive first decides what an agent reads
+ * before dialling, so a repeat carrying the real name should win, and only in
+ * that direction.
+ *
+ * The list is EXPLICIT, not a heuristic about length. "Om", "M" and "Wr" are
+ * all real names on this desk; treating a short name as a placeholder would
+ * have let a portal overwrite three real people.
+ */
+const PLACEHOLDER_NAMES = /^(mb)?user\d*$|^guest$|^enquiry$|^lead$|^new inquiry$|^unknown$|^n\/?a$|^[0-9]+$/i;
+
+export function isPlaceholderName(name: any): boolean {
+  const s = String(name ?? '').trim();
+  return s === '' || PLACEHOLDER_NAMES.test(s);
+}
+
+/**
+ * The lead's owner, if there is still somebody there to own it.
+ *
+ * Returns null when the lead is unassigned, or when the person it names has
+ * left or been deactivated — the only two cases in which a repeat enquiry is
+ * allowed to route. Status is compared with ILIKE because onboarding writes
+ * 'ACTIVE' and the team screen writes 'active', and a `=` here would report
+ * every agent on a real tenant as departed and reassign the entire desk.
+ */
+export async function activeOwnerOf(agentId: string | null | undefined): Promise<string | null> {
+  if (!agentId) return null;
+  const rows = await sql`
+    SELECT id FROM users
+     WHERE id = ${agentId} AND tenant_id = ${tid()} AND status ILIKE 'active' LIMIT 1`;
+  return rows.length ? String(rows[0].id) : null;
+}
+
+/**
+ * WHAT A REPEAT ENQUIRY DOES TO THE LEAD'S REQUIREMENT (spec F5, phase 3).
+ *
+ * The rules below are read off bhumi's own traffic — 18 leads that enquired
+ * more than once, 317 sessions — not chosen in advance. What that data says:
+ *
+ *  • BUDGET IS NOT A STATEMENT, IT IS A PRICE TAG. Every `maxBudget` these
+ *    portals send is the asking price of the listing the person opened. It
+ *    disagreed with the stored value on 6 of the 10 leads that reported one,
+ *    and five of those six moved by under 8% — ₹25,000 → ₹25,999, ₹25,000 →
+ *    ₹24,999. That is browsing, not a change of mind. Taking the newest would
+ *    have narrowed one buyer from ₹40,000 to ₹32,000 and hidden every flat
+ *    between from her. So the budget WIDENS to cover everything they have
+ *    looked at, and never contracts.
+ *
+ *  • INTEREST ACCUMULATES. All 4 disagreements were a different project, and
+ *    one session already held two at once. Somebody comparing Green Cove and
+ *    Blue Waters is telling you something; picking the later one discards it.
+ *    Safe as a list — `interest` is read for display, never matched on.
+ *
+ *  • LOCALITY AND CONFIG ARE NOT OVERWRITTEN. Four of the five locality
+ *    disagreements arrived on a Housing.com push carrying nothing but a
+ *    locality — no BHK, no budget, no project — and Housing sends only four
+ *    distinct localities across 110 pushes, which is a list of the areas this
+ *    firm advertises in, not a buyer's preference. Matching compares locality
+ *    with `===`, so a wrong one does not soften a lead's results, it empties
+ *    them. An empty field is filled; a disagreement is reported to the agent
+ *    and left for a person to settle (see the caller).
+ *
+ *  • DEAL NEVER CONFLICTED — 10 of 10 agreed. Filled when empty, never moved.
+ *
+ * Returns the merged requirement AND the conflicts, so the caller can put the
+ * disagreements somewhere a human will see them instead of resolving them by
+ * arithmetic.
+ */
+export function mergeRepeatReq(stored: any, incoming: any): {
+  req: any; conflicts: Array<{ field: string; had: any; got: any }>;
+} {
+  const cur = { ...(stored || {}) };
+  const inc = incoming || {};
+  const conflicts: Array<{ field: string; had: any; got: any }> = [];
+  const num = (v: any) => (v == null || v === '' ? null : Number(v));
+
+  // A push that carries a requirement, as opposed to one that only says which
+  // page was open. Housing.com's three fields are the latter.
+  const rich = inc.config != null || inc.maxBudget != null || inc.minBudget != null;
+
+  const lo = num(inc.minBudget), hi = num(inc.maxBudget);
+  if (lo != null && isFinite(lo)) {
+    const had = num(cur.minBudget);
+    cur.minBudget = had == null ? lo : Math.min(had, lo);
+  }
+  if (hi != null && isFinite(hi)) {
+    const had = num(cur.maxBudget);
+    cur.maxBudget = had == null ? hi : Math.max(had, hi);
+  }
+  // NO SYNTHETIC FLOOR. An earlier draft of this set `minBudget` from the one
+  // figure a portal sends, which reads "they will not look below ₹32,000" —
+  // something nobody said. It also narrowed the very range it exists to widen:
+  // one buyer whose stored ceiling was ₹73L and whose next enquiry named ₹85L
+  // came out as 85–85L, with the 73L flats now below her floor. These payloads
+  // carry ONE number, the asking price of the listing that was opened, so the
+  // only thing it can honestly move is the ceiling. A minimum arrives only from
+  // a field that actually says minimum.
+
+  if (inc.interest) {
+    const list = Array.isArray(cur.interest) ? [...cur.interest] : (cur.interest ? [cur.interest] : []);
+    for (const v of (Array.isArray(inc.interest) ? inc.interest : [inc.interest])) {
+      if (v && !list.includes(v)) list.push(v);
+    }
+    cur.interest = list.length === 1 ? list[0] : list;
+  }
+
+  // Single-valued, and load-bearing for matching. Filled when unknown; a
+  // disagreement is reported, never applied.
+  for (const f of ['deal', 'locality', 'config', 'category', 'subtype'] as const) {
+    const got = (inc as any)[f];
+    if (got == null || got === '') continue;
+    const had = (cur as any)[f];
+    if (had == null || had === '') {
+      // A bare locality still fills an empty one — knowing the area beats
+      // knowing nothing. It just may not displace an answer already there.
+      (cur as any)[f] = got;
+    } else if (String(had).trim().toLowerCase() !== String(got).trim().toLowerCase()) {
+      // Only a push that stated a requirement gets to disagree about one.
+      if (rich || f === 'deal') conflicts.push({ field: f, had, got });
+    }
+  }
+
+  if (inc.notes) cur.notes = inc.notes;
+  return { req: cur, conflicts };
+}
+
+/**
  * Record one payload against its session, creating the session if this is a
  * new one. Idempotent on the portal's own enquiry id.
  *
  * Never throws into the caller: this is bookkeeping alongside ingestion, and a
  * lead must not fail to arrive because its history row could not be written.
  */
-export async function recordEnquiry(input: EnquiryInput): Promise<string | null> {
+/** What the caller needs to know: which session, and whether this payload
+ *  OPENED it. A repeat notification is one per session — the man who opened
+ *  four listings in five minutes is one enquiry, and four alerts on four
+ *  phones would have made the feature worse than silence. */
+export type EnquiryRecorded = { id: string; isNewSession: boolean };
+
+export async function recordEnquiry(input: EnquiryInput): Promise<EnquiryRecorded | null> {
   try {
     const t = tid();
     const at = input.at ? new Date(input.at) : new Date();
@@ -4273,7 +4409,7 @@ export async function recordEnquiry(input: EnquiryInput): Promise<string | null>
           enquiry_ids = ${sql.json([...(row.enquiry_ids || []), ...(input.enquiryId ? [input.enquiryId] : [])])},
           raw_refs = ${sql.json([...(row.raw_refs || []), ...(input.rawRef ? [input.rawRef] : [])])}
         WHERE id = ${row.id} AND tenant_id = ${t}`;
-      return row.id;
+      return { id: row.id, isNewSession: false };
     }
 
     const id = `enq_${when.getTime()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -4287,7 +4423,7 @@ export async function recordEnquiry(input: EnquiryInput): Promise<string | null>
               ${sql.json(input.enquiryId ? [input.enquiryId] : [])},
               ${sql.json(input.rawRef ? [input.rawRef] : [])})
       ON CONFLICT (tenant_id, session_key) DO NOTHING`;
-    return id;
+    return { id, isNewSession: true };
   } catch (err: any) {
     console.warn('[recordEnquiry]', err.message);
     return null;
