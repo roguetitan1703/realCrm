@@ -634,7 +634,13 @@ export const api = {
   // Tenant brand identity (accent colour, logo) — writes tenants.brand_config,
   // the single source the desk UI and the installed-app icon both read.
   updateBrand: (patch) => request('/workspace/brand', { method: 'POST', body: JSON.stringify(patch) }),
-  resolveWorkspace: (slug) => request(`/workspace/resolve?slug=${encodeURIComponent(slug || '')}`),
+  // `cache: 'default'` rather than the blanket no-store every other read uses.
+  // This one is 77kB of tenant branding that changes about never, it is fetched
+  // before sign-in on every single launch, and the server sends an ETag it will
+  // answer with a 304. no-store told the browser not to keep the response at
+  // all, so it re-downloaded the logo every time. Correctness is unaffected —
+  // `public, no-cache` on the response means it still revalidates on every hit.
+  resolveWorkspace: (slug) => request(`/workspace/resolve?slug=${encodeURIComponent(slug || '')}`, { cache: 'default' }),
 
   // Audit ledger (owner/manager only)
   getAuditLog: () => request('/workspace/audit'),

@@ -170,6 +170,21 @@ workspaceRouter.get('/resolve', async (req: Request, res: Response) => {
     }
 
     const brand = { primaryColor: '#1E6F52', surfaceColor: '#F6F5F2', logoUrl: '', firmName: t.name, ...(t.brand_config || {}) };
+    // THE BIGGEST PAYLOAD IN THE PRODUCT, AND IT WAS RE-SENT ON EVERY LAUNCH.
+    //
+    // 77kB for one workspace, 99.6% of it brand_config.logoUrl — a base64 SVG
+    // inlined into the JSON. This endpoint is unauthenticated and hit before
+    // anyone can sign in, so on a phone it is the first thing that happens and
+    // it happened in full every time the app was opened or reloaded.
+    //
+    // Express already emits a strong-enough ETag here and already answers a
+    // conditional request with 304 and no body — but with no Cache-Control the
+    // browser had no instruction to store the response, so it never asked
+    // conditionally. `no-cache` means STORE IT AND ALWAYS REVALIDATE: repeat
+    // launches cost one small round trip and zero bytes, and a firm that
+    // changes its logo still sees it immediately. `public` because a workspace's
+    // name and branding are what the sign-in screen shows to anyone who visits.
+    res.set('Cache-Control', 'public, no-cache');
     return res.status(200).json({
       success: true,
       resolved: true,
