@@ -148,7 +148,7 @@ function OwnerRecord({ store, ownerId, topBar, phone, onBack }) {
             title: 'Call history',
             render: () => <Timeline events={o.timeline || []} agents={store.state.agents}
               currentUserId={store.state.activeAgentId}
-              onEditRemark={(eventId, text) => store.editRemark('owner', o.id, eventId, text)} />,
+              onEditRemark={(eventId, text, outcome) => store.editRemark('owner', o.id, eventId, text, outcome)} />,
           }]}
           actionCtx={{ onClose: onBack }}
         />

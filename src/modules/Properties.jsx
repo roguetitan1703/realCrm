@@ -405,7 +405,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
       right: <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'ownerUpdate', propId: p.id })}><Icon name="wa" size={13} />Update owner</button>,
       render: () => (p.timeline && p.timeline.length)
         ? <Timeline events={p.timeline} agents={store.state.agents} currentUserId={store.state.activeAgentId}
-            onEditRemark={(eventId, text) => store.editRemark('property', p.id, eventId, text)} />
+            onEditRemark={(eventId, text, outcome) => store.editRemark('property', p.id, eventId, text, outcome)} />
         : <div className="detail-empty">No activity logged yet. Owner updates, calls, remarks and status changes appear here.</div>,
     },
   ]

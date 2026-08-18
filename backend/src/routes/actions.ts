@@ -22,7 +22,8 @@ import {
 import {
   addTimelineEvent, updateLead, mergeLeads, getLeadById,
   getTimelineEventById, updateTimelineEvent, maybeAutoAdvanceStage,
-  addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES, noteOwnerContact, closeFollowUpFor } from '../services/store';
+  addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES, noteOwnerContact, closeFollowUpFor,
+  mapEventForClient } from '../services/store';
 import { sql } from '../services/db';
 import { isSafeKey, tenantOfKey } from '../services/media';
 import { audit } from '../services/audit';
@@ -131,12 +132,17 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
       actor_label: authorId, action: existing.type === 'remark' ? 'remark.updated' : 'contact_action.updated',
       target_type: 'record', target_id: existing.record_id, summary: 'Entry edited', metadata: { outcome },
     });
-    // DB type -> client-facing channel vocabulary (whatsapp -> wa), same
-    // translation the contact-log route and mapEventForClient use.
-    const clientType = existing.type === 'whatsapp' ? 'wa' : existing.type;
+    // THE SAME MAPPER THE LIST USES, not a hand-built copy of it.
+    //
+    // This returned `label: finalText` — the text that was SENT. On a locked
+    // row the description is deliberately not overwritten, so the reply named
+    // the agent's note as the row's title and the screen printed it there:
+    // "Scheduled Online Demo…" became "spoke to his wife" until the next
+    // reload put it back. It also skipped the `title: description` join every
+    // other read applies, so even an ordinary edit briefly lost its prefix.
     return res.status(200).json({
       success: true,
-      timeline_event: { id: updated.id, type: clientType, label: finalText, authorId, timestamp: updated.timestamp, metadata: updated.metadata },
+      timeline_event: mapEventForClient(updated),
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to save', message: err.message });

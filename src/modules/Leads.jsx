@@ -428,7 +428,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
       id: 'timeline',
       title: 'Inquiry interaction timeline',
       render: () => <Timeline events={l.timeline} agents={store.state.agents} currentUserId={store.state.activeAgentId}
-        onEditRemark={(eventId, text) => store.editRemark('lead', l.id, eventId, text)} />,
+        onEditRemark={(eventId, text, outcome) => store.editRemark('lead', l.id, eventId, text, outcome)} />,
     },
   ]
 

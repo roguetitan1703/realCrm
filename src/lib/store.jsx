@@ -385,7 +385,7 @@ function reducer(state, action) {
       return patchRecord(state, action.kind, action.id, r => ({
         ...r,
         timeline: (r.timeline || []).map(e => e.id === action.eventId
-          ? { ...e, label: action.text, metadata: { ...(e.metadata || {}), edited: true, ...(action.outcome ? { outcome: action.outcome } : {}) } }
+          ? { ...e, ...action.event, metadata: { ...(e.metadata || {}), ...(action.event?.metadata || {}) } }
           : e),
       }))
 
@@ -1174,10 +1174,14 @@ export function StoreProvider({ children }) {
         })
         .catch(err => { console.warn('[Remark API] error:', err.message); toast('Could not save the remark — try again', 'warn') })
     },
+    // THE SERVER'S EVENT, WHOLE. This rebuilt the row from the two values it
+    // had sent — so a locked row (a booking) took the agent's note as its
+    // title, and the outcome shown was the one requested rather than the one
+    // stored. The reply is already the row; adopt it.
     editRemark: (kind, id, eventId, text, outcome) => {
       apiClient.editRemark(id, eventId, text, outcome)
         .then(res => {
-          if (res?.success) { dispatch({ type: 'EDIT_TIMELINE_EVENT', kind, id, eventId, text: res.timeline_event.label, outcome }); toast('Saved') }
+          if (res?.success) { dispatch({ type: 'EDIT_TIMELINE_EVENT', kind, id, eventId, event: res.timeline_event }); toast('Saved') }
           else toast('Could not save the edit', 'warn')
         })
         .catch(err => { console.warn('[Remark edit API] error:', err.message); toast('Could not save the edit — try again', 'warn') })

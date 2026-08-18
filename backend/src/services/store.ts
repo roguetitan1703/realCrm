@@ -467,7 +467,7 @@ const TAGGED_TYPES = new Set(['remark', 'call', 'wa', 'sms']);
 /** Rows whose description the system wrote and nobody may overwrite. */
 export const LOCKED_TEXT_TYPES = new Set(['follow_up']);
 
-function mapEventForClient(e: TimelineEvent) {
+export function mapEventForClient(e: TimelineEvent) {
   const ct = clientEventType(e.type);
   const tagged = TAGGED_TYPES.has(ct);
   return {
