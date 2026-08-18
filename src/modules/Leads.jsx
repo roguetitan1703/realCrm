@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
-import { fitReasons, thumbTint, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue } from '../lib/format.js'
+import { fitReasons, thumbTint, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
@@ -290,11 +290,11 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   // Rail: the follow-up card, which is the only thing that changes per lead.
   const followUpCard = (
     <div className="fu-card">
-      <div className="fu-head">Appointment & Follow-up</div>
+      <div className="fu-head">Next follow-up</div>
       {l.followUp ? (
         <div className="fu-active">
           <div>
-            <div className="fu-title">{l.followUp.action}</div>
+            <div className="fu-title">{followUpAction(l.followUp)}</div>
             {/* PAST DUE IS THE DATE'S OWN PROBLEM, not a separate badge. As a
                 word in the header signals it named no subject and pushed the
                 action row onto a second line to say it; here it sits on the
@@ -325,13 +325,13 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
             </button>
           ) : (
             <button className="btn btn-ghost btn-sm fu-done" onClick={() => {
-              store.setFollowUp(l.id, null); store.toast('Appointment marked completed')
+              store.setFollowUp(l.id, null); store.toast('Follow-up completed')
             }}>Done</button>
           )}
         </div>
-      ) : <div className="detail-empty">No active appointment or follow-up scheduled.</div>}
+      ) : <div className="detail-empty">No follow-up scheduled.</div>}
       <Button variant="secondary" size="sm" block icon="calendar" onClick={() => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id })}>
-        {l.followUp ? 'Reschedule appointment' : 'Schedule appointment'}
+        {l.followUp ? 'Reschedule follow-up' : 'Schedule follow-up'}
       </Button>
     </div>
   )

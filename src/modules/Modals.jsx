@@ -2058,7 +2058,7 @@ function ScheduleFollowUpModal({ store, leadId }) {
       note: note.trim() || undefined,
     })
     store.addNote(l.id, `Scheduled ${action} on ${finalDate} at ${finalTime}${note.trim() ? ` — Agenda: ${note.trim()}` : ''}`, 'visit')
-    store.toast(`Appointment scheduled: ${action} on ${finalDate} at ${finalTime}`)
+    store.toast(`Follow-up scheduled: ${action} on ${finalDate} at ${finalTime}`)
     store.closeModal()
   }
 
@@ -2067,7 +2067,7 @@ function ScheduleFollowUpModal({ store, leadId }) {
   )
 
   return (
-    <Modal title={`Schedule Appointment — ${l.name}`} onClose={store.closeModal} width={480}>
+    <Modal title={`Schedule follow-up — ${l.name}`} onClose={store.closeModal} width={480}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className="field">
           <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Activity Type</label>
@@ -2126,7 +2126,7 @@ function ScheduleFollowUpModal({ store, leadId }) {
             is worse than no control — the appointment belongs to whoever the
             lead is assigned to, and reassigning is done on the lead itself. */}
 
-        <Field label="Appointment Agenda / Location Note (Optional)">
+        <Field label="Agenda or location (optional)">
           <Input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Meet at Hinjewadi Phase 3 sales lounge" />
         </Field>
 

@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, reqConfigLabel, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue } from '../lib/format.js'
+import { reqShort, reqConfigLabel, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -303,20 +303,22 @@ export const LEADS_DEF = {
     // tiles: two labels, one modal, one action. `onRail` is set by the surface
     // that draws the card, so neither list is guessing about the other.
     { id: 'schedule', tier: 'quick', icon: 'calendar', when: (l, store, ctx) => !ctx?.onRail,
-      label: (l) => (l.followUp ? 'Reschedule appointment' : 'Schedule appointment'),
+      label: (l) => (l.followUp ? 'Reschedule follow-up' : 'Schedule follow-up'),
       sub: (l) => (l.followUp ? followUpLabel(l.followUp) : null),
       run: (store, l) => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id }) },
     // A site visit closes with proof (B4); everything else is a plain done.
     { id: 'followDone', tier: 'quick', icon: 'check', when: (l, store, ctx) => !!l.followUp && !ctx?.onRail,
       label: (l) => (/site\s*visit/i.test(l.followUp?.action || '') ? 'Log site visit' : 'Mark follow-up done'),
-      sub: (l) => l.followUp?.action,
+      // The type and when it is due — not the raw stored string, which ends
+      // in the lead's own name. See followUpAction().
+      sub: (l) => [followUpAction(l.followUp), followUpLabel(l.followUp)].filter(Boolean).join(' · '),
       run: (store, l) => {
         if (/site\s*visit/i.test(l.followUp?.action || '')) return store.openModal({ kind: 'visitProof', leadId: l.id })
         // The completion event is written by the SERVER now, inside updateLead,
         // the instant follow_up clears — as its own type, not a remark somebody
         // typed and could rewrite. See the doc comment on closeSiteVisitAppointment's
         // sibling in store.ts.
-        store.setFollowUp(l.id, null); store.toast('Appointment marked completed')
+        store.setFollowUp(l.id, null); store.toast('Follow-up completed')
       } },
     // B4. Completing a scheduled Site Visit appointment also opens this, but
     // that path only exists if someone scheduled one — so a visit that just

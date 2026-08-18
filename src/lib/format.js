@@ -116,6 +116,26 @@ export function whenLabel(iso) {
 
 
 /**
+ * WHAT THE FOLLOW-UP IS — the type, without the person it is with.
+ *
+ * The schedule modal saves `action` as "<type> — <lead name>", so every surface
+ * that printed the field raw said the person's own name back to them on their
+ * own record: a button reading "Mark follow-up done / Site Visit — Pooja
+ * Sharma", above a header already reading "Pooja Sharma". The name was never
+ * information here; the record is the name.
+ *
+ * Read through this, never `fu.action`, so the trailing name is stripped in one
+ * place rather than in each of the four that show it.
+ */
+export function followUpAction(fu) {
+  const raw = (fu?.action || '').trim()
+  if (!raw) return ''
+  // An em dash with spaces is what the modal writes, and nothing else uses one.
+  const cut = raw.split(/\s+—\s+/)[0].trim()
+  return cut || raw
+}
+
+/**
  * WHEN A FOLLOW-UP IS DUE. The one function, for the same reason whenLabel is.
  *
  * `at` is the appointment — a real instant, written by the schedule modal.

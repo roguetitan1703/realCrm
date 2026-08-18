@@ -90,7 +90,14 @@ export default function PhoneActions({ store, go, context = {} }) {
           {actions.map((a) => (
             <button key={a.id} className={'pa-item' + (a.tone === 'danger' ? ' danger' : '')}
               onClick={() => { close(); a.onClick() }}>
-              <span className="pa-ic"><Icon name={a.icon} size={16} /></span>{a.label}
+              {/* The sub-line, which this dropped. Every definition supplies one
+                  for the actions whose meaning depends on the record — what the
+                  follow-up is and when it is due, who a lead would be reassigned
+                  from — and without it "Mark follow-up done" is a tick with no
+                  subject: the sheet named an action but never the thing it acted
+                  on. The desk's More menu had shown it all along. */}
+              <span className="pa-ic"><Icon name={a.icon} size={16} /></span>
+              <span className="pa-lbl">{a.label}{a.sub && <span className="pa-sub">{a.sub}</span>}</span>
             </button>
           ))}
         </div>
