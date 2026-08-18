@@ -10,24 +10,55 @@
 // It is also deliberately not comfortable. There is no offline read cache and
 // no pretending: a queued write shows as queued until it lands.
 
-const KEY = 'crm_outbox';
+// ONE QUEUE PER WORKSPACE, not one queue with a tenant column.
+//
+// Stamping each entry and filtering on the way out works, but it leaves every
+// firm's unsent field notes in one blob that every workspace reads, and it only
+// stays correct as long as every reader remembers to filter. A key per
+// workspace makes it structural: a flush cannot see another firm's writes
+// because it never opens their list.
+//
+// `crm_outbox` (the old shared list) is drained into the right per-workspace
+// key on first read, so a write queued before this shipped is not stranded.
+const keyFor = (tenantId) => `crm_outbox_${tenantId || '_none'}`;
+const LEGACY_KEY = 'crm_outbox';
 const listeners = new Set();
 
-function read() {
-  try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { return []; }
+function migrateLegacy(tenantId) {
+  try {
+    const raw = localStorage.getItem(LEGACY_KEY);
+    if (!raw) return;
+    localStorage.removeItem(LEGACY_KEY);
+    for (const e of JSON.parse(raw) || []) {
+      // An entry from before entries carried a workspace goes to the one open
+      // now. It was written on THIS device, and a device is only ever inside
+      // one workspace at a time — filing it under "_none" would put it in a
+      // bucket no flush ever opens, which loses the write this migration
+      // exists to save.
+      const k = keyFor(e.tenantId || tenantId);
+      const list = JSON.parse(localStorage.getItem(k) || '[]');
+      list.push(e);
+      localStorage.setItem(k, JSON.stringify(list));
+    }
+  } catch (e) { /* a queue we cannot parse is not one we can rescue */ }
 }
-function write(list) {
-  try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) { /* quota */ }
+
+function read(tenantId) {
+  migrateLegacy(tenantId);
+  try { return JSON.parse(localStorage.getItem(keyFor(tenantId)) || '[]'); } catch (e) { return []; }
+}
+function write(tenantId, list) {
+  try { localStorage.setItem(keyFor(tenantId), JSON.stringify(list)); } catch (e) { /* quota */ }
   // The LIST, not its length: "3 waiting to save" has to mean three of THIS
   // workspace's, and only the subscriber knows which workspace is on screen.
   listeners.forEach(fn => { try { fn(list); } catch (e) {} });
 }
 
-export function pendingCount() { return read().length; }
+export function pendingCount(tenantId) { return read(tenantId).length; }
 
-export function subscribeOutbox(fn) {
+export function subscribeOutbox(fn, tenantId) {
   listeners.add(fn);
-  fn(read());
+  fn(read(tenantId));
   return () => listeners.delete(fn);
 }
 
@@ -48,17 +79,12 @@ export function subscribeOutbox(fn) {
  * that is not open waits rather than being spent against the wrong one.
  */
 export function enqueue(entry, tenantId) {
-  const list = read();
+  const list = read(tenantId);
   list.push({
     ...entry, tenantId: tenantId || '',
     id: `q${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, at: Date.now(), tries: 0,
   });
-  write(list);
-}
-
-/** How many are waiting for the workspace currently open. */
-export function pendingCountFor(tenantId) {
-  return read().filter(e => !e.tenantId || e.tenantId === tenantId).length;
+  write(tenantId, list);
 }
 
 let flushing = false;
@@ -72,22 +98,17 @@ let flushing = false;
  */
 export async function flushOutbox(send, tenantId) {
   if (flushing) return;
-  const list = read();
+  const list = read(tenantId);
   if (!list.length) return;
-  // Only this workspace's writes. Entries with no tenant were queued before
-  // they were stamped and are sent as before rather than stranded forever.
-  const mine = list.filter(e => !e.tenantId || e.tenantId === tenantId);
-  if (!mine.length) return;
-  const theirs = list.filter(e => !(!e.tenantId || e.tenantId === tenantId));
   flushing = true;
   try {
-    const remaining = [...mine];
+    const remaining = [...list];
     while (remaining.length) {
       const item = remaining[0];
       try {
         await send(item.endpoint, item.options);
         remaining.shift();
-        write([...theirs, ...remaining]);
+        write(tenantId, remaining);
       } catch (err) {
         // Still unreachable — stop and keep the queue. A server that ANSWERED
         // with an error is different: that write will never succeed on retry,
@@ -98,7 +119,7 @@ export async function flushOutbox(send, tenantId) {
           remaining.shift();
           console.warn('[Outbox] dropping a write the server keeps rejecting:', item.endpoint, err.message);
         }
-        write([...theirs, ...remaining]);
+        write(tenantId, remaining);
         if (item.tries < 3) break;
       }
     }

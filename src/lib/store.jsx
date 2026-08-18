@@ -123,7 +123,7 @@ function loadAuthSession() {
     //
     // Keyed by workspace, the isolation is structural: /bhumi reads bhumi's
     // session or none, and there is no comparison left to get wrong.
-    const raw = window.localStorage.getItem(sessionKey())
+    const raw = adoptLegacySession() ?? window.localStorage.getItem(sessionKey())
     const hasToken = Boolean(apiClient.getToken?.())
     if (raw) {
       const p = JSON.parse(raw)
@@ -137,6 +137,48 @@ function loadAuthSession() {
     }
   } catch (e) {}
   return { loggedIn: false }
+}
+
+/**
+ * ONE-TIME ADOPTION OF THE PRE-PER-WORKSPACE SESSION.
+ *
+ * Sessions used to live in a single `crm_auth_session`. Keying them by
+ * workspace means every already-signed-in device would find nothing under its
+ * new key and land on a sign-in form the moment this ships — a forced re-login
+ * for every user of every tenant, including agents who may not know their
+ * password. The token itself survives (it was already per workspace), so the
+ * session record is the only thing missing.
+ *
+ * Adopted only when BOTH hold:
+ *   • we have a token for this workspace, so this device really did sign in
+ *     here rather than somewhere else, and
+ *   • the old record names this workspace — it carried `tenantSlug` — or names
+ *     none and this device has signed into exactly one workspace, so there is
+ *     nothing it could be confused with.
+ * A record belonging to a different firm is discarded rather than adopted: a
+ * forced re-login is a nuisance, adopting another firm's role and user id is
+ * the failure this whole change exists to prevent.
+ *
+ * The legacy key is removed either way, so this can only ever run once.
+ */
+function adoptLegacySession() {
+  if (typeof window === 'undefined' || !window.localStorage) return null
+  const key = sessionKey()
+  if (!key) return null
+  try {
+    if (window.localStorage.getItem(key)) return null   // already migrated
+    const legacy = window.localStorage.getItem('crm_auth_session')
+    if (!legacy) return null
+    window.localStorage.removeItem('crm_auth_session')
+    if (!apiClient.getToken?.()) return null
+    const p = JSON.parse(legacy)
+    const here = currentTenant()
+    const tokenKeys = Object.keys(window.localStorage).filter(k => k.startsWith('crm_auth_token_'))
+    const unambiguous = !p.tenantSlug && tokenKeys.length === 1
+    if (p.tenantSlug !== here && !unambiguous) return null
+    window.localStorage.setItem(key, legacy)
+    return legacy
+  } catch (e) { return null }
 }
 
 /** Where this workspace's session lives. No workspace, no session. */

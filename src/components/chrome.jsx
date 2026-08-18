@@ -124,10 +124,9 @@ export function ConnectionBadge() {
   // Only this workspace's queued writes. The count used to be the whole
   // browser's, so a note held for one firm read as "1 waiting to save" on
   // another firm's desk, where nothing was waiting at all.
-  useEffect(() => subscribeOutbox((list) => {
-    const t = currentTenant()
-    setQueued(list.filter(e => !e.tenantId || e.tenantId === t).length)
-  }), [])
+  // This workspace's queue only — outbox.js keys the list by workspace, so
+  // what arrives here is already just ours.
+  useEffect(() => subscribeOutbox((list) => setQueued(list.length), currentTenant()), [])
   // A queued write is held work, not saved work. It stays visible until it
   // lands, so "I logged that visit" is never a thing the app quietly lied about.
   if (queued) {
