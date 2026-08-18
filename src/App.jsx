@@ -172,7 +172,7 @@ export default function App() {
       <div className="viewport">
         {state.dataStale && <StaleBanner />}
         <Phone store={store} framed={false} screen={screen} sel={sel} setSel={setSel} go={go} />
-        <Toasts toasts={state.toasts} onDismiss={(id) => dispatch({ type: 'UNTOAST', id })} />
+        <Toasts toasts={state.toasts} onDismiss={(id) => store.dispatch({ type: 'UNTOAST', id })} />
       </div>
     )
   }
@@ -254,7 +254,7 @@ export default function App() {
       </AppShell>
       {state.waState && <WaModal store={store} />}
       <Modals store={store} go={go} />
-      <Toasts toasts={state.toasts} onDismiss={(id) => dispatch({ type: 'UNTOAST', id })} />
+      <Toasts toasts={state.toasts} onDismiss={(id) => store.dispatch({ type: 'UNTOAST', id })} />
     </div>
   )
 }
