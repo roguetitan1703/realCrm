@@ -77,7 +77,7 @@ one of which POSTed fabricated leads at an ingest endpoint.
 
 ---
 
-## 3. The five mistakes this codebase keeps making
+## 3. The six mistakes this codebase keeps making
 
 Every trap below is an instance of one of these. Learn the shape, not the
 incident — the next one will wear different clothes.
@@ -162,7 +162,33 @@ When you fix a generator, **check what it already produced** — `parser_config`
 `crm_settings`, `crm_routing_rules`, `brand_config`, and the columns any
 migration has touched.
 
-### 3.5 Deleting or overwriting leaves references behind
+### 3.5 One global key cannot answer a per-workspace question
+
+Eight isolation bugs in two days, all this shape. The auth token, the session,
+the workspace itself, the offline outbox, the pre-paint accent, the installed-app
+caption, the manifest link, and the read cache: each was one browser-global slot
+holding something that differs per firm.
+
+- **The URL is the only authority on which workspace a tab is** —
+  `currentTenant()` in `src/lib/api.js`, and nothing else. It was derived in
+  FIVE places with five different fallbacks to `crm_tenant_id`, which any
+  workspace overwrites merely by being *visited* (the picker writes it before a
+  password is typed). Fixing the derivation in front of the bug report left the
+  other four answering; three "isolation is fixed" claims were wrong that way.
+- **No installed-PWA exception.** `routes/pwa.ts` sets `start_url: /<slug>` and
+  `scope: /<slug>`, so an installed app always has its slug and cannot navigate
+  out of it.
+- **Key it, never compare it.** `crm_auth_session_<tenant>`, not one record plus
+  a check that the tenant matches. Structural isolation cannot be got wrong.
+- **A written-but-unread key is a trap.** The next reader picks it up. Remove
+  the write.
+- **Changing a storage key needs a migration**, or every signed-in device meets
+  a login screen on deploy — see `adoptLegacySession()`.
+- Verify with **two real accounts in two workspaces, signed in at once in one
+  browser**, switching and reloading. A grep sweep finds only what you thought
+  to grep for.
+
+### 3.6 Deleting or overwriting leaves references behind
 
 - `revertImportBatch` deletes leads, properties, owners and shortlist rows and
   nothing else. One revert left 3 timeline events pointing at deleted records;
