@@ -132,18 +132,19 @@ export default function App() {
   )
   const callQueue = ownerSummary?.summary?.queue || null
   const totals = desk?.leads || { total: 0, overdue: 0, unassigned: 0 }
-  // THE LEADS BADGE IS WORK WAITING, NOT A DROPDOWN NOBODY MOVED.
+  // THE LEADS BADGE IS ARRIVALS, NOT THE WHOLE BACKLOG.
   //
-  // It was `byStage['New']` — 11 on bhumi, beside a Today tab reading 0 and a
-  // Past SLA tile reading 60, three numbers about "new" that all disagreed. It
-  // was also the exact measure the Past SLA tile was corrected AWAY from: a
-  // stage is a dropdown an agent may or may not have moved, and on bhumi 60
-  // people had been moved out of New without anyone ever ringing them.
+  // It was `byStage['New']` — 11 on bhumi, a dropdown an agent may or may not
+  // have moved, unrelated to whether anyone had called. Never-contacted (72 on
+  // bhumi) is the honest fix to what THAT number claimed, but a nav badge is
+  // read as "how many just landed", and a permanent 72 sitting on the sidebar
+  // reads as an alarm rather than a queue — never-contacted has its own home
+  // on the leads list's first tab and the dashboard's Past SLA tile.
   //
-  // Never contacted is the same expression the leads list's first tab uses, so
-  // the badge and the pile it opens onto are one query apart, and it goes DOWN
-  // when somebody works — which is what a badge is for.
-  const newCount = desk?.leads?.never_contacted || 0
+  // `new_today` is the same expression the leads list's Today tab uses (the
+  // tenant's own midnight, not UTC), so the badge, the tab and the dashboard
+  // tile all answer "arrived today" the same way.
+  const newCount = desk?.leads?.new_today || 0
   // The bell badge is unread NOTIFICATIONS — the thing the bell opens onto.
   // It used to be `overdue + unassigned + unreadNotifs`, which was only ever
   // right by accident: both lead counts were permanently 0, so the sum happened

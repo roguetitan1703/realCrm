@@ -1349,10 +1349,6 @@ export async function getDeskSummary(): Promise<any> {
                count(*) FILTER (WHERE ${S.today})::int AS new_today,
                count(*) FILTER (WHERE ${S.untouched_sla})::int AS untouched_sla,
                count(*) FILTER (WHERE ${S.noanswer_stale})::int AS noanswer_stale,
-               -- The sidebar's Leads badge. Same expression as the leads list's
-               -- "Never called" tab, so the badge and the pile it opens onto
-               -- cannot disagree.
-               count(*) FILTER (WHERE ${S.never_contacted})::int AS never_contacted,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine}`,
     sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
@@ -1415,7 +1411,7 @@ export async function getDeskSummary(): Promise<any> {
     stagesByAgent.get(r.a)![r.s] = r.n;
   }
   return {
-    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, untouched_sla: 0, noanswer_stale: 0, never_contacted: 0 },
+    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, untouched_sla: 0, noanswer_stale: 0 },
     byStage: asMap(byStage),
     bySource: asMap(bySource),
     perAgent: (() => {
