@@ -1346,8 +1346,8 @@ export async function getDeskSummary(): Promise<any> {
   const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls, perAgentLeadCalls, perAgentVisits] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
-               count(*) FILTER (WHERE ${FOLLOWUP_PAST_DUE})::int AS overdue,
-               count(*) FILTER (WHERE follow_up IS NOT NULL)::int AS with_follow_up,
+               count(*) FILTER (WHERE ${FOLLOWUP_OVERDUE})::int AS overdue,
+               count(*) FILTER (WHERE ${OPEN} AND follow_up IS NOT NULL)::int AS with_follow_up,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*) FILTER (WHERE ${S.today})::int AS new_today,
                count(*) FILTER (WHERE ${S.untouched_sla})::int AS untouched_sla,
@@ -1360,7 +1360,7 @@ export async function getDeskSummary(): Promise<any> {
          WHERE tenant_id = ${t} AND ${mine} GROUP BY 1`,
     sql`SELECT agent_id AS k,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
-               count(*) FILTER (WHERE ${FOLLOWUP_PAST_DUE})::int AS overdue,
+               count(*) FILTER (WHERE ${FOLLOWUP_OVERDUE})::int AS overdue,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*)::int AS total
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine} AND agent_id IS NOT NULL GROUP BY 1`,
@@ -2289,6 +2289,21 @@ function followUpWhen(fu: any): string {
 export const FOLLOWUP_PAST_DUE = sql`(CASE WHEN follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
                                           THEN (follow_up->>'at')::timestamptz < now() ELSE false END)`;
 
+/**
+ * OVERDUE MEANS WORK STILL OWED, so a finished lead cannot be overdue.
+ *
+ * Rejecting a lead does not clear the appointment somebody booked before they
+ * knew — the row keeps it — so a site visit for a person who has said no went
+ * on being counted, listed and flagged. The tile, the tab and the badge all
+ * read past-due alone; the screens now read `nextStepOf()`, which refuses a
+ * terminal lead, and this is the same rule on the same side of the wire.
+ *
+ * Separate from FOLLOWUP_PAST_DUE rather than folded into it: the calendar and
+ * the "no next step" segment ask a genuinely different question — has this
+ * moment gone by — and one of them wants the answer for closed leads too.
+ */
+export const FOLLOWUP_OVERDUE = sql`(${OPEN} AND ${FOLLOWUP_PAST_DUE})`;
+
 
 /**
  * NOBODY HAS REACHED OUT TO THIS PERSON — measured, not inferred.
@@ -2339,7 +2354,7 @@ function leadSegments({ arrivalStage, slaHours, timezone }: DeskConfig) {
     // Guarded by a pattern test rather than a bare cast: rows saved before `at`
     // existed hold a human-typed date ("This Sunday"), and casting that throws
     // and takes the whole query with it.
-    overdue: FOLLOWUP_PAST_DUE,
+    overdue: FOLLOWUP_OVERDUE,
     unassigned: sql`agent_id IS NULL`,
     open: OPEN,
     today: newToday,

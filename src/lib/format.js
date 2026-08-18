@@ -1,4 +1,5 @@
 // Formatting + derived-data helpers (ported from legacy app.js).
+import { isTerminal } from '../data/leadStatus.js'
 import {
   AREA_UNITS, BHK, DEAL_LEAD, SUBTYPES, isPlot, labelOf, normaliseBhk, normaliseSubtype,
 } from '../data/propertyFields.js'
@@ -170,6 +171,25 @@ export function followUpOverdue(fu) {
   if (!fu?.at) return false
   const d = new Date(fu.at)
   return !isNaN(d.getTime()) && d.getTime() < Date.now()
+}
+
+/**
+ * A CLOSED LEAD HAS NO NEXT STEP.
+ *
+ * Rejecting a lead does not clear the appointment that was booked before
+ * anyone knew — the row keeps it — so the desk went on nagging about a site
+ * visit for someone who had said no, in the list, on the record and in the
+ * overdue count. "Overdue" means work still owed, and no work is owed on a
+ * lead that is finished.
+ *
+ * Everything that draws a follow-up asks THIS, not `lead.followUp`, so the
+ * badge, the column, the record card and the phone's next line cannot disagree
+ * about whether a lead still has one. The server's `overdue` segment carries
+ * the same guard, so the count and the rows stay one query apart.
+ */
+export function nextStepOf(lead) {
+  if (!lead?.followUp) return null
+  return isTerminal(lead.stage) ? null : lead.followUp
 }
 
 /**

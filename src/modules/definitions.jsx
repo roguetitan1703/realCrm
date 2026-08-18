@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, reqConfigLabel, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction } from '../lib/format.js'
+import { reqShort, reqConfigLabel, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -161,7 +161,7 @@ export const LEADS_DEF = {
       })
     }
     if (key === 'flag') {
-      return (vals.includes('overdue') && followUpOverdue(l.followUp)) ||
+      return (vals.includes('overdue') && followUpOverdue(nextStepOf(l))) ||
         (vals.includes('unassigned') && !l.agentId) ||
         (vals.includes('new') && (l.minsAgo || 0) < 1440)
     }
@@ -206,8 +206,11 @@ export const LEADS_DEF = {
       />
     ) },
     { key: 'next', label: 'Next follow-up', render: (l) => {
-      const nf = l.followUp ? followUpLabel(l.followUp) : '—'
-      return followUpOverdue(l.followUp) ? <Overdue>{nf}</Overdue> : <span className="cell-quiet mono-num">{nf}</span>
+      // nextStepOf, not l.followUp: a rejected lead keeps whatever was booked
+      // before it was rejected, and this column is what is still owed.
+      const fu = nextStepOf(l)
+      const nf = fu ? followUpLabel(fu) : '—'
+      return followUpOverdue(fu) ? <Overdue>{nf}</Overdue> : <span className="cell-quiet mono-num">{nf}</span>
     } },
     // When it arrived. Sortable, because "show me this week's" is the question
     // it exists to answer, and the server already orders on created_at.
@@ -304,7 +307,7 @@ export const LEADS_DEF = {
     // that draws the card, so neither list is guessing about the other.
     { id: 'schedule', tier: 'quick', icon: 'calendar', when: (l, store, ctx) => !ctx?.onRail,
       label: (l) => (l.followUp ? 'Reschedule follow-up' : 'Schedule follow-up'),
-      sub: (l) => (l.followUp ? followUpLabel(l.followUp) : null),
+      sub: (l) => (nextStepOf(l) ? followUpLabel(l.followUp) : null),
       run: (store, l) => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id }) },
     // THERE IS NO "MARK FOLLOW-UP DONE". It was a tick in this menu that
     // deleted the appointment and stored nothing about it — no outcome, no
@@ -409,7 +412,7 @@ export const LEADS_DEF = {
               against the buttons. Same words the filter uses, so the row and
               the tab that selects it cannot describe the same lead
               differently. */}
-          {followUpOverdue(l.followUp) ? <span className="prow-flag"><span className="dot" />Follow-up overdue</span> : null}
+          {followUpOverdue(nextStepOf(l)) ? <span className="prow-flag"><span className="dot" />Follow-up overdue</span> : null}
           <StageCell
             record={l} store={store}
             stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}

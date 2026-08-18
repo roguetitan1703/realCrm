@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
-import { fitReasons, thumbTint, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction } from '../lib/format.js'
+import { fitReasons, thumbTint, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
@@ -288,13 +288,17 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     recordType: 'lead', recordId: l.id,
   })
   // Rail: the follow-up card, which is the only thing that changes per lead.
+  // A REJECTED OR CLOSED LEAD IS NOT WAITING ON ANYTHING. Rejecting does not
+  // clear an appointment booked before anyone knew, so this card went on
+  // offering "Log visit" for a person who had said no.
+  const nextStep = nextStepOf(l)
   const followUpCard = (
     <div className="fu-card">
       <div className="fu-head">Next follow-up</div>
-      {l.followUp ? (
+      {nextStep ? (
         <div className="fu-active">
           <div>
-            <div className="fu-title">{followUpAction(l.followUp)}</div>
+            <div className="fu-title">{followUpAction(nextStep)}</div>
             {/* PAST DUE IS THE DATE'S OWN PROBLEM, not a separate badge. As a
                 word in the header signals it named no subject and pushed the
                 action row onto a second line to say it; here it sits on the
@@ -308,8 +312,8 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                 typed and what a scheduler wrote months ago — "This Sunday" long
                 after that Sunday. The label reads the stored instant, which is
                 also the only thing followUpOverdue can judge. */}
-            <div className={'fu-when' + (followUpOverdue(l.followUp) ? ' is-late' : '')}>
-              {followUpLabel(l.followUp)}
+            <div className={'fu-when' + (followUpOverdue(nextStep) ? ' is-late' : '')}>
+              {followUpLabel(nextStep)}
             </div>
           </div>
           {/* Log visit stays — it is the work, and it carries proof. The
@@ -318,7 +322,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
               nothing, which is why a completed call and a completed callback
               looked like different species. Log the call from the Call button
               and this closes itself. */}
-          {isSiteVisit(l.followUp) ? (
+          {isSiteVisit(nextStep) ? (
             <button className="btn btn-primary btn-sm fu-done" onClick={() => store.openModal({ kind: 'visitProof', leadId: l.id })}>
               Log visit
             </button>
@@ -326,7 +330,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
         </div>
       ) : <div className="detail-empty">No follow-up scheduled.</div>}
       <Button variant="secondary" size="sm" block icon="calendar" onClick={() => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id })}>
-        {l.followUp ? 'Reschedule follow-up' : 'Schedule follow-up'}
+        {nextStep ? 'Reschedule follow-up' : 'Schedule follow-up'}
       </Button>
     </div>
   )
@@ -336,10 +340,10 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   // full-width button in the action bar below when a visit is booked, and
   // Reschedule is in the action menu. Information only, or it becomes the third
   // place offering the same two actions.
-  const nextUp = l.followUp ? (
-    <div className={'rh-next' + (followUpOverdue(l.followUp) ? ' is-late' : '')}>
-      <span className="rh-next-tag">{followUpOverdue(l.followUp) ? 'Overdue' : 'Next'}</span>
-      <span className="rh-next-body">{followUpAction(l.followUp)} · {followUpLabel(l.followUp)}</span>
+  const nextUp = nextStep ? (
+    <div className={'rh-next' + (followUpOverdue(nextStep) ? ' is-late' : '')}>
+      <span className="rh-next-tag">{followUpOverdue(nextStep) ? 'Overdue' : 'Next'}</span>
+      <span className="rh-next-body">{followUpAction(nextStep)} · {followUpLabel(nextStep)}</span>
     </div>
   ) : null
 
