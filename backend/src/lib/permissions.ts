@@ -45,7 +45,11 @@ export function isDeskRole(role?: string | null): boolean {
 // What an assignee may change on a lead that is not theirs: the status, and the
 // record's history. Everything else is a fact about the buyer or the deal.
 const ASSIGNEE_WRITABLE = new Set([
-  'stage', 'rejectionReason', 'rejection_reason',
+  // `stageNote` is the note attached to a status change, not a column. An
+  // assignee may change the status and may add remarks, so they may say WHY
+  // they changed it — refusing the note while allowing the change is a
+  // distinction with nothing behind it.
+  'stage', 'stageNote', 'rejectionReason', 'rejection_reason',
   'notes', 'timeline', 'followUp', 'follow_up', 'overdue',
   'shortlist', 'feedback',
 ]);
@@ -90,7 +94,14 @@ export function assertLeadWrite(
   if (lead.createdBy && lead.createdBy === userId) return;   // their own record
 
   if (lead.agentId && lead.agentId === userId) {
-    const denied = Object.keys(patch).filter(k => !ASSIGNEE_WRITABLE.has(k));
+    // A KEY THAT IS PRESENT BUT UNDEFINED IS STILL A KEY. `Object.keys({stage,
+    // stageNote: undefined})` is ['stage','stageNote'], so a caller that always
+    // spreads an optional field had it counted as an attempt to write that
+    // field — and was refused for sending nothing. Judge what is actually being
+    // set, not what the object happens to mention.
+    const denied = Object.keys(patch)
+      .filter(k => patch[k] !== undefined)
+      .filter(k => !ASSIGNEE_WRITABLE.has(k));
     if (denied.length === 0) return;
     throw new ForbiddenError(
       `This lead was created by someone else. You can change its status and add remarks, but not ${labelFields(denied)}.`,

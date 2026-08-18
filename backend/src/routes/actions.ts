@@ -219,7 +219,9 @@ actionsRouter.post(
       // route also wrote its own, so a single status change produced two
       // timeline rows in the same second saying the same thing differently.
       // The note rides along instead of being the reason for a second row.
-      await updateLead(recordId, { stage: new_stage_id, stageNote: note });
+      // The note only when there IS one — see assertLeadWrite: an always-present
+      // key reads as an attempt to write that field even when it carries nothing.
+      await updateLead(recordId, { stage: new_stage_id, ...(note ? { stageNote: note } : {}) });
 
       // No outbound webhook here. There is no outbound-webhook feature: no
       // tenant configures a URL, nothing stores one, and this call site hard-

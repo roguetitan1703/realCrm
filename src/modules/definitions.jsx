@@ -112,7 +112,9 @@ export const LEADS_DEF = {
     flat: true,
     stages: (store) => store.state.settings.stages.filter(s => s !== REJECTED_STATUS),
     current: (l) => l.stage,
-    set: (store, l, stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) },
+    // No toast here — store.setStage already raises "Stage → X" through
+    // optimistic()'s okMsg, so this produced the same words twice for one tap.
+    set: (store, l, stage) => store.setStage(l.id, stage),
     // Same scope as the record's own edit permission for status: desk always,
     // an agent only on a lead they created or are assigned.
     canSet: (store, l) => canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l),
@@ -184,7 +186,7 @@ export const LEADS_DEF = {
         record={l} store={store}
         stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
         canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l)}
-        onSet={(stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) }}
+        onSet={(stage) => store.setStage(l.id, stage)}
         onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
       />
     ) },
@@ -397,7 +399,7 @@ export const LEADS_DEF = {
             record={l} store={store}
             stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
             canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l)}
-            onSet={(stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) }}
+            onSet={(stage) => store.setStage(l.id, stage)}
             onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
           />
         </div>
@@ -444,7 +446,7 @@ export const LEADS_DEF = {
             record={l} store={store}
             stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
             canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l)}
-            onSet={(stage) => { store.setStage(l.id, stage); store.toast('Stage → ' + stage) }}
+            onSet={(stage) => store.setStage(l.id, stage)}
             onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
           />
         </div>
