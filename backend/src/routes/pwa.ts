@@ -139,11 +139,20 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
   // workspace by reading the first path segment, so a start_url of
   // `/?ws=delpat` landed on the bare "type your firm name" prompt on every
   // launch, which is exactly what a firm-branded installed app must never show.
-  const startUrl = t ? `/${t.slug}` : '/';
+  //
+  // TRAILING SLASH: the service worker registered for this app is scoped to
+  // `/<slug>/`, and scope is matched as a plain string prefix — `/<slug>` would
+  // also claim `/<slug>corp`, and a document at `/<slug>` would fall outside a
+  // `/<slug>/` scope and be controlled by no worker at all, so that device
+  // could never receive push. `id` deliberately does NOT get the slash: it is
+  // the installed app's identity, and changing it would make every phone that
+  // already has this app install a second copy beside it.
+  const startUrl = t ? `/${t.slug}/` : '/';
+  const appId = t ? `/${t.slug}` : '/';
   res.set('Content-Type', 'application/manifest+json');
   res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   return res.json({
-    id: startUrl,
+    id: appId,
     name,
     short_name: shortNameOf(name, brand.shortName),
     description: `${name} — real estate desk`,

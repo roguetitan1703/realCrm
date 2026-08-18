@@ -38,6 +38,17 @@
           var seg = decodeURIComponent(
             location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '');
           if (seg === 'admin') seg = '';
+          // A SERVICE WORKER'S SCOPE IS A PLAIN STRING PREFIX, so the app has
+          // to live under `/<slug>/` — with the slash. Scoped to `/bhumi` a
+          // worker would also claim `/bhumicorp`, and a document at `/bhumi`
+          // would sit outside a `/bhumi/` scope and be controlled by nothing,
+          // which is a device that can never subscribe to push. Normalised
+          // here, before the manifest link is written and long before React,
+          // so every URL that names a firm is inside that firm's scope.
+          if (seg && !/\/$/.test(location.pathname)) {
+            history.replaceState(history.state, '',
+              location.pathname + '/' + location.search + location.hash);
+          }
           // No stored fallback. This chose the manifest — the name, icon and
           // theme an "Add to Home Screen" captures forever — and `crm_tenant_id`
           // holds whichever workspace was opened last, so installing from a URL

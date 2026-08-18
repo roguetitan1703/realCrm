@@ -116,7 +116,7 @@ export default function Login({ store }) {
       rememberWorkspace(resolved)   // this browser has now opened it
       setRecents(recentWorkspaces())
       // Reflect the workspace in the URL so it's shareable: baseurl/<slug>.
-      try { window.history.pushState({}, '', `/${t.slug}`) } catch (e) {}
+      try { window.history.pushState({}, '', `/${t.slug}/`) } catch (e) {}
       // ALREADY SIGNED INTO THIS ONE? Go in. Whether we are signed in is
       // decided from the URL, and the URL only just became this workspace —
       // one line above. Without this the picker showed a sign-in form to
@@ -245,7 +245,7 @@ export default function Login({ store }) {
       if (r?.error) throw new Error(r.error)
       store.toast('Password reset — sign in with your new password.', 'ok')
       setPhase('creds'); setPassword(''); setNewPw(''); setNewPw2('')
-      try { window.history.replaceState({}, '', `/${ws?.tenantId || ''}`) } catch (e2) {}
+      try { window.history.replaceState({}, '', ws?.tenantId ? `/${ws.tenantId}/` : '/') } catch (e2) {}
     } catch (err) {
       store.toast(err.message || 'This reset link is invalid or has expired.', 'warn')
     } finally {

@@ -1,3 +1,5 @@
+import { api } from './api.js';
+
 // ============================================================================
 // 📱 PWA glue — service worker, per-tenant manifest identity, install prompt
 // ============================================================================
@@ -5,15 +7,79 @@
 // we point <link rel="manifest"> (and the iOS touch icon) at that tenant's
 // manifest, so an install captures the firm's name + icon. See PWA_PLAN.md.
 
+// ── One worker per workspace ────────────────────────────────────────────────
+// A service worker's SCOPE is what fences it, and this registered `/sw.js` at
+// the origin root — so ONE worker controlled every tenant's installed app on
+// the device. Two consequences, both of which a real client hit:
+//
+//   • `clients.matchAll()` returned every firm's window. A notification tap
+//     took the first one, navigated it to the alert's URL and focused it, so a
+//     Bhumi alert opened the demo tenant's app wearing Bhumi's colours.
+//   • A push subscription belongs to a REGISTRATION, and there was one. So a
+//     device had exactly one endpoint, `push_subscriptions` keys on it, and the
+//     first workspace to subscribe owned the phone. The second workspace's
+//     `autoEnablePush` saw a subscription already there, returned early, and
+//     that user received nothing — silently, forever, because subscribing is
+//     best-effort and delivering to an empty list is not an error.
+//
+// So the script is served per workspace (`/<slug>/sw.js`, a Vercel rewrite onto
+// the one file) and registered at scope `/<slug>/`. Each installed app gets its
+// own registration, its own subscription and its own view of `clients`.
+//
+// THE TRAILING SLASH IS LOAD-BEARING. Scope is matched as a plain string
+// prefix, not by path segment, so a scope of `/bhumi` would also claim
+// `/bhumicorp`. index.html normalises the path to `/<slug>/` before first
+// paint for exactly this reason, and the manifest's start_url/scope match it.
+//
+// No workspace, no worker: the picker needs no push and a root-scoped
+// registration is the whole bug.
 export function registerServiceWorker() {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
   // Only in production builds — a SW in `vite dev` would cache hashed modules and
   // fight HMR. Test the installable app with `vite preview` or the deploy.
   if (!import.meta.env.PROD) return;
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) =>
-      console.warn('[PWA] Service worker registration failed:', err?.message || err));
+  window.addEventListener('load', async () => {
+    const slug = slugFromLocation();
+    if (!slug) { await retireRootWorker(); return; }
+    const at = `/${encodeURIComponent(slug)}/`;
+    try {
+      await navigator.serviceWorker.register(`${at}sw.js`, { scope: at });
+    } catch (err) {
+      console.warn('[PWA] Service worker registration failed:', err?.message || err);
+      return;
+    }
+    // Only once the scoped worker is in place, so a device is never left with
+    // neither.
+    await retireRootWorker();
   });
+}
+
+/**
+ * Remove the origin-root registration every device installed before the change.
+ *
+ * Unregistering alone is not enough: it holds the device's only push
+ * subscription, and the row in `push_subscriptions` keyed to that endpoint
+ * still names whichever tenant claimed it first. Left behind, the server keeps
+ * pushing to an endpoint whose worker is gone. So the subscription is dropped
+ * server-side and browser-side before the registration goes; the scoped worker
+ * then subscribes fresh under this workspace on the next signed-in load.
+ */
+async function retireRootWorker() {
+  if (!navigator.serviceWorker?.getRegistrations) return;
+  let regs = [];
+  try { regs = await navigator.serviceWorker.getRegistrations(); } catch (e) { return; }
+  const root = new URL('/', window.location.origin).href;
+  for (const reg of regs) {
+    if (reg.scope !== root) continue;
+    try {
+      const sub = await reg.pushManager?.getSubscription();
+      if (sub) {
+        await api.unsubscribePush(sub.endpoint).catch(() => {});
+        await sub.unsubscribe().catch(() => {});
+      }
+    } catch (e) {}
+    await reg.unregister().catch(() => {});
+  }
 }
 
 /**

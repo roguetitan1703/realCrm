@@ -1507,7 +1507,7 @@ export function StoreProvider({ children }) {
           window.localStorage?.removeItem('crm_tenant_id')
           const currentSlug = currentTenant()
           if (currentSlug) {
-            window.history.replaceState({}, document.title, `/${currentSlug}`)
+            window.history.replaceState({}, document.title, `/${currentSlug}/`)
           }
         } catch (e) {}
       }

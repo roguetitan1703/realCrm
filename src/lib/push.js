@@ -21,7 +21,18 @@ export function pushPermission() {
 
 async function readyRegistration() {
   if (!pushSupported()) return null;
-  try { return await navigator.serviceWorker.ready; } catch (e) { return null; }
+  // `.ready` resolves for the registration whose SCOPE covers this document,
+  // and never resolves at all when nothing does. That is reachable now the
+  // worker is scoped to `/<slug>/`: a URL that missed the trailing-slash
+  // normalisation sits outside every scope, and this would hang forever —
+  // taking `autoEnablePush` and `disablePush` (which runs on sign-out, before
+  // the token is dropped) with it. Time it out and degrade instead.
+  try {
+    return await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((res) => setTimeout(() => res(null), 5000)),
+    ]);
+  } catch (e) { return null; }
 }
 
 export async function isPushSubscribed() {
