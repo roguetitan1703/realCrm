@@ -32,10 +32,20 @@ export default function Dashboard({ store, go, topBar }) {
   // in an afternoon. It cannot be filtered out of the rows in the browser: the
   // panel holds six of fifty-one, so a client-side filter would hide five of six
   // rows and still print 51 in the header.
-  const [coldMode, setColdMode] = useState('all')
-  const coldFlags = coldMode === 'never'
-    ? ['untouched_sla']
-    : ['untouched_sla', 'noanswer_stale']
+  // TWO PILES, NOT A PILE AND A SUBSET OF ITSELF.
+  //
+  // The toggle was All / Never called, where All meant `untouched_sla` PLUS
+  // `noanswer_stale` and Never called meant the first of them. So switching
+  // narrowed a list that was already sorted longest-waiting-first, and the six
+  // rows on screen were usually the same six either way — the control looked
+  // broken because nothing moved.
+  //
+  // And `untouched_sla` is not a filter the Leads screen offers, so "See all"
+  // handed it a flag with no option behind it and the list opened with no
+  // filter applied at all. These two ARE its options, by the names it uses —
+  // one vocabulary, and the panel can hand the list something it understands.
+  const [coldMode, setColdMode] = useState('never')
+  const coldFlags = coldMode === 'never' ? ['never_contacted'] : ['noanswer_stale']
   const { data: atRiskPage } = useServerData(
     // Six, not eight. The panel sits beside the calling queue and grew taller
     // than it; the header count carries the total and "See all" carries the rest.
@@ -218,7 +228,10 @@ export default function Dashboard({ store, go, topBar }) {
             <SectionHead title="Going cold" right={
               <span className="sh-tools">
                 <Segmented value={coldMode} onChange={setColdMode}
-                  options={[{ value: 'all', label: 'All' }, { value: 'never', label: 'Never called' }]} />
+                  options={[
+                    { value: 'never', label: 'Never called' },
+                    { value: 'noanswer', label: 'No answer, not retried' },
+                  ]} />
                 {atRiskTotal ? <span>{atRiskTotal}</span> : null}
               </span>
             } />
