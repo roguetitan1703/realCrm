@@ -214,7 +214,13 @@ export function ModuleDetail({
   signals, primary = [], nba, railTop, beforeSheet, sections = [], actionCtx = {},
   phone,
 }) {
-  const { quick, manage } = buildActionTiers(def, store, record, actionCtx)
+  // `onRail` tells the definition which surface is asking. The rail below is
+  // desk-only, and its blocks (the appointment card, on a lead) carry actions
+  // of their own — so an action already sitting in a rail block drops out of
+  // Quick actions here, and stays in the phone's action button, which is the
+  // only route there.
+  const actionScope = { ...actionCtx, onRail: !phone }
+  const { quick, manage } = buildActionTiers(def, store, record, actionScope)
   const visibleSections = sections.filter(s => !s.when || s.when(record, store))
 
   // Module-generic header data, all from the definition.

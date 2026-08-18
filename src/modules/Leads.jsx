@@ -414,14 +414,20 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
           // Email joins them when the lead has one — same confirm-and-log path,
           // so an email is recorded on the timeline exactly like a call is.
           primary={[
-            // A BOOKED SITE VISIT OUTRANKS EVERYTHING. The appointment card
-            // carries "Log visit", and the card is not rendered on a phone —
-            // so the one action the agent is standing outside the building to
-            // perform was reachable only through the overflow sheet, while Call
-            // and WhatsApp sat across the screen in full. It leads the row while
-            // the appointment exists and disappears the moment it is closed, so
-            // nothing changes on a lead with nothing booked.
-            ...(isSiteVisit(l.followUp)
+            // A BOOKED SITE VISIT OUTRANKS EVERYTHING — ON A PHONE. The
+            // appointment card carries "Log visit" and the rail it sits in is
+            // not drawn on a phone, so the one action the agent is standing
+            // outside the building to perform was reachable only through the
+            // overflow sheet, while Call and WhatsApp sat across the screen in
+            // full.
+            //
+            // PHONE ONLY, though. Unconditional, it put a second identical Log
+            // visit in the header of the desk record, a few pixels above the
+            // one on the appointment card — same label, same modal, two buttons
+            // for one action. The card's is the better of the two on a desk
+            // because it sits under the appointment it closes; this one exists
+            // solely to stand in for a card that isn't there.
+            ...(phone && isSiteVisit(l.followUp)
               ? [{ label: 'Log visit', icon: 'camera', onClick: () => store.openModal({ kind: 'visitProof', leadId: l.id }) }]
               : []),
             ...(l.phone ? [
@@ -432,8 +438,9 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
             // 390px screen; a fourth wraps, and a wrapped action row pushes the
             // record's own identity down the page. Email is the least urgent of
             // the four by a distance — it is still on the action button — and
-            // this only happens while a visit is actually booked.
-            ...(l.email && !isSiteVisit(l.followUp)
+            // this only happens on the phone, while a visit is actually booked.
+            // The desk row never gains a fourth button, so it never loses one.
+            ...(l.email && !(phone && isSiteVisit(l.followUp))
               ? [{ label: 'Email', icon: 'mail', onClick: () => contact('email') }] : []),
           ]}
           railTop={followUpCard}

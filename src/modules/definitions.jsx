@@ -293,12 +293,19 @@ export const LEADS_DEF = {
     // the moment it went, a phone had no way to schedule or close a follow-up at
     // all. So the intent belongs to the definition, where every surface gets it,
     // rather than to one bespoke card only the desk renders.
-    { id: 'schedule', tier: 'quick', icon: 'calendar',
+    //
+    // ON THE PHONE ONLY, though. The desk record draws the appointment card in
+    // its rail, a few pixels above Quick actions, and that card carries both of
+    // these — so a lead with a site visit booked showed "Reschedule appointment"
+    // twice and, worse, "Log visit" on the card beside "Log site visit" in the
+    // tiles: two labels, one modal, one action. `onRail` is set by the surface
+    // that draws the card, so neither list is guessing about the other.
+    { id: 'schedule', tier: 'quick', icon: 'calendar', when: (l, store, ctx) => !ctx?.onRail,
       label: (l) => (l.followUp ? 'Reschedule appointment' : 'Schedule appointment'),
       sub: (l) => (l.followUp ? followUpLabel(l.followUp) : null),
       run: (store, l) => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id }) },
     // A site visit closes with proof (B4); everything else is a plain done.
-    { id: 'followDone', tier: 'quick', icon: 'check', when: (l) => !!l.followUp,
+    { id: 'followDone', tier: 'quick', icon: 'check', when: (l, store, ctx) => !!l.followUp && !ctx?.onRail,
       label: (l) => (/site\s*visit/i.test(l.followUp?.action || '') ? 'Log site visit' : 'Mark follow-up done'),
       sub: (l) => l.followUp?.action,
       run: (store, l) => {
@@ -944,7 +951,11 @@ export function buildActionTiers(def, store, record, ctx = {}) {
     tone: a.tone,
     onClick: () => a.run(store, record, ctx),
   })
-  const actions = (def.actions || []).filter(a => !a.when || a.when(record, store))
+  // `ctx` reaches `when` as well as `run`. It carries `onRail` — true only on
+  // a desk record, where the module's rail is drawn — so an action that the
+  // rail's own block is already offering can step aside there while staying on
+  // the phone, which has no rail and reaches everything through this list.
+  const actions = (def.actions || []).filter(a => !a.when || a.when(record, store, ctx))
   return {
     quick: actions.filter(a => a.tier === 'quick').map(resolve),
     manage: actions.filter(a => a.tier !== 'quick').map(resolve),

@@ -4476,8 +4476,34 @@ export async function addActivity(input: ActivityInput): Promise<any> {
   // never-backwards / never-out-of-terminal guard.
   if (input.type === 'site_visit' && input.lead_id) {
     await maybeAutoAdvanceStage(input.lead_id, 'Site Visit', 'Site visit logged with proof');
+    await closeSiteVisitAppointment(input.lead_id);
   }
   return rows[0];
+}
+
+/**
+ * The visit that was booked has now happened, so the booking is over.
+ *
+ * The client used to do this itself — log the activity, then send a second
+ * request clearing `followUp`. Two writes, and the record screen re-read the
+ * lead between them: it saw the visit land, refetched, and got a lead whose
+ * appointment had not been cleared yet, so the appointment card came BACK a
+ * few seconds after disappearing. Measured on a real save: cleared at 3s,
+ * restored at 5s, cleared again at 9s.
+ *
+ * One write, on the side that owns the row. By the time the client is told the
+ * visit was logged, the appointment is already gone — there is no window in
+ * which a read can disagree.
+ *
+ * Only a SITE VISIT appointment is closed by a site visit. A lead with a
+ * callback booked for Thursday who happens to be shown a flat on Tuesday keeps
+ * the callback; the visit did not answer it.
+ */
+async function closeSiteVisitAppointment(leadId: string): Promise<void> {
+  await sql`
+    UPDATE crm_leads SET follow_up = NULL, updated_at = NOW()
+    WHERE id = ${leadId} AND tenant_id = ${tid()}
+      AND follow_up->>'action' ILIKE '%site%visit%'`;
 }
 
 /**

@@ -1453,7 +1453,8 @@ function VisitProofModal({ store, leadId, propId }) {
   const [outcome, setOutcome] = useState('')
   const [remark, setRemark] = useState('')
   const [busy, setBusy] = useState(false)
-  const [property, setProperty] = useState(propId || '')
+  // Whichever unit the modal was opened from, if any. Not a control.
+  const property = propId || ''
 
   // Ask for location the moment the modal opens. Failing fast is the whole
   // point: a denied permission ends the flow here, not after a photo.
@@ -1505,7 +1506,10 @@ function VisitProofModal({ store, leadId, propId }) {
       if (res) {
         // Completing the visit also clears the appointment — that's what the
         // agent came here to do; making them press Done again would be silly.
-        store.setFollowUp(leadId, null)
+        // The SERVER does it now, inside the same write that records the visit
+        // (addActivity → closeSiteVisitAppointment). It was a second request
+        // from here, and the record re-read the lead in the gap between the
+        // two: the appointment card vanished, came back, and vanished again.
         store.toast('Site visit logged with proof')
         store.closeModal()
       }
@@ -1569,25 +1573,16 @@ function VisitProofModal({ store, leadId, propId }) {
             </div>
           </Field>
 
-          {/* A visit REFERENCES a unit; it never gets written onto it. The
-              list is the lead's shortlist because that's what they'd be
-              shown — not the whole inventory. */}
-          {(l.shortlist || []).length > 0 && (
-            <Field label="Which unit? (optional)">
-              <select className="input" value={property} onChange={e => setProperty(e.target.value)}>
-                <option value="">Not tied to one unit</option>
-                {/* From the lead's own server-supplied shortlist, cache second.
-                    Cache-only meant every option resolved to null on a desk
-                    with paged inventory, so this select offered nothing but
-                    "Not tied to one unit" — an agent standing in a flat could
-                    not say which flat they were standing in. */}
-                {(l.shortlist || []).map(pid => {
-                  const p = (l.shortlistProps || []).find(x => x.id === pid) || store.lookup('property', pid)
-                  return p ? <option key={pid} value={pid}>{p.society} · {p.type}</option> : null
-                })}
-              </select>
-            </Field>
-          )}
+          {/* NO UNIT PICKER. A visit is logged standing outside a building with
+              a client waiting, and this asked a third question — optional, and
+              answered "Not tied to one unit" on 8 of the 9 visits ever logged.
+              A visit still REFERENCES a unit when the modal is opened from one
+              (`propId`); it is no longer a question put to the agent.
+
+              The cost, stated: `metadata.distanceM` — "180m from the listing" on
+              the timeline — needs a property to measure against, so a visit
+              logged from the lead screen now shows its coordinates instead of a
+              distance. Both are a link to the same map pin. */}
 
           <Field label="Remark (optional)">
             <Textarea value={remark} onChange={e => setRemark(e.target.value)} placeholder="What happened on the visit?" />
