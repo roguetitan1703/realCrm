@@ -2364,6 +2364,13 @@ function leadSegments({ arrivalStage, slaHours, timezone }: DeskConfig) {
     noanswer: sql`stage = 'Call Not Received'`,
     closed: sql`NOT (${OPEN})`,
     // The calendar shows leads with a next step booked, and only those.
+    //
+    // DELIBERATELY NOT open-only, unlike the overdue segment beside it. A slot
+    // that was booked still happened to the week: an agent looking at Thursday
+    // needs to see the visit that was arranged there, and whether it is now
+    // for a lead that has since been rejected is something the chip can say
+    // rather than something the grid should hide. Overdue is work still owed
+    // and a rejected lead owes none; the calendar is a record of the diary.
     followup: sql`follow_up IS NOT NULL`,
     // The two piles the desk actually loses money on, and the reason they are
     // defined HERE: the dashboard tile and the list it opens then read one
