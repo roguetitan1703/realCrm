@@ -331,6 +331,18 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     </div>
   )
 
+  // The phone's copy of the one line off the follow-up card: what is booked and
+  // when, red once its moment has gone. No buttons — Log visit is already a
+  // full-width button in the action bar below when a visit is booked, and
+  // Reschedule is in the action menu. Information only, or it becomes the third
+  // place offering the same two actions.
+  const nextUp = l.followUp ? (
+    <div className={'rh-next' + (followUpOverdue(l.followUp) ? ' is-late' : '')}>
+      <span className="rh-next-tag">{followUpOverdue(l.followUp) ? 'Overdue' : 'Next'}</span>
+      <span className="rh-next-body">{followUpAction(l.followUp)} · {followUpLabel(l.followUp)}</span>
+    </div>
+  ) : null
+
   const sections = [
     // WHAT THEY ASKED FOR, EACH TIME THEY ASKED.
     //
@@ -472,6 +484,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
               ? [{ label: 'Email', icon: 'mail', onClick: () => contact('email') }] : []),
           ]}
           railTop={followUpCard}
+          nextUp={nextUp}
           sections={sections}
           actionCtx={{ onClose: back }}
         />

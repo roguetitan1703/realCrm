@@ -211,7 +211,7 @@ function DetailSection({ s, record, store }) {
 
 export function ModuleDetail({
   def, record, store, onEdit, title, avatar,
-  signals, primary = [], nba, railTop, beforeSheet, sections = [], actionCtx = {},
+  signals, primary = [], nba, railTop, nextUp, beforeSheet, sections = [], actionCtx = {},
   phone,
 }) {
   // `onRail` tells the definition which surface is asking. The rail below is
@@ -289,9 +289,16 @@ const facts = def.headerFacts ? def.headerFacts(record, store).filter(Boolean) :
           </div>
         </div>
 
-        {/* Above the action bar on purpose: on a phone this is read in the
-            second before the Call button is pressed, which is the moment it is
-            worth anything. */}
+        {/* WHAT IS DUE, THEN WHAT WAS SAID — both above the action bar, because
+            both are read in the second before the Call button is pressed, which
+            is the moment either is worth anything.
+
+            PHONE ONLY. On a desk the same fact is on the rail's follow-up card,
+            a few pixels to the right, and drawing it twice is how this record
+            ended up with two Log visit buttons. The rail is not drawn on a
+            phone, so without this a phone record said nothing at all about a
+            follow-up — not that it was booked, not that it had passed. */}
+        {phone && nextUp}
         <LatestRemark record={record} store={store} />
 
         {/* The record's main actions, on the page, full width, thumb-sized.

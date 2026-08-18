@@ -710,6 +710,21 @@ input,textarea,select{font-family:inherit}
    itself, clamped to two lines and tappable to open in place. It stays on the
    record: sending someone to the timeline to read the end of a sentence is how
    you lose the thing they opened the record for. */
+/* WHAT IS DUE — one line, directly above the latest remark, so a phone record
+   reads "this is next / this is what was said" before the Call button. Same
+   shell as .rh-remark so the two stack as a pair rather than as two designs.
+   Quiet until it is late; then it is the loudest thing on the record, which is
+   the one moment it should be. */
+.rh-next{margin-top:12px;padding:8px 10px;border-radius:9px;display:flex;align-items:center;gap:8px;
+  background:var(--card-2);border:1px solid var(--line-2)}
+.rh-next-tag{flex-shrink:0;font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--ink-2);background:var(--line-2);border-radius:5px;padding:2px 6px}
+.rh-next-body{font-size:12.5px;font-weight:600;color:var(--ink);min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rh-next.is-late{background:var(--alert-wash);border-color:#E4C4C0}
+.rh-next.is-late .rh-next-tag{color:#fff;background:var(--alert)}
+.rh-next.is-late .rh-next-body{color:var(--alert)}
+
 .rh-remark{margin-top:12px;padding:8px 10px;border-radius:9px;
   background:var(--accent-wash);border:1px solid var(--line-2)}
 .rh-remark-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
