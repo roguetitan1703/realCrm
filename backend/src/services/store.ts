@@ -464,6 +464,9 @@ function clientEventType(dbType: string): string {
 // — the label must NOT also repeat the title there, or the tag duplicates it.
 const TAGGED_TYPES = new Set(['remark', 'call', 'wa', 'sms']);
 
+/** Rows whose description the system wrote and nobody may overwrite. */
+export const LOCKED_TEXT_TYPES = new Set(['follow_up']);
+
 function mapEventForClient(e: TimelineEvent) {
   const ct = clientEventType(e.type);
   const tagged = TAGGED_TYPES.has(ct);
@@ -4222,13 +4225,33 @@ export async function getTimelineEventById(id: string, tenantId: string): Promis
  *  touched — an edit doesn't reorder the thread or change who wrote it.
  *  `outcome` (B5) is optional — set when attaching an outcome to a logged
  *  call/message, e.g. "Connected", "No answer". */
-export async function updateTimelineEvent(id: string, tenantId: string, text: string, outcome?: string): Promise<TimelineEvent | null> {
+/**
+ * WHAT WAS PLANNED IS A FACT; WHAT CAME OF IT IS A JUDGEMENT. Both belong on
+ * the same row, and only the second one may be written twice.
+ *
+ * A remark IS its text, so editing it rewrites the description — that is the
+ * whole point of it. A `follow_up` row is not: "Online Demo — 19 Aug, 11:00 am"
+ * is something the system recorded, and the box that let an outcome be attached
+ * to it also let the sentence be selected, deleted and replaced. An agent
+ * recording how the demo went could wipe the record that a demo was ever
+ * booked, and nothing anywhere would know what it had said.
+ *
+ * So `lockedText` rows keep their description no matter what is sent, and the
+ * agent's note lands in `metadata.remark` beside the outcome. One row that
+ * reads: this was booked, this is what happened.
+ */
+export async function updateTimelineEvent(
+  id: string, tenantId: string, text: string, outcome?: string,
+): Promise<TimelineEvent | null> {
   const existing = await getTimelineEventById(id, tenantId);
   if (!existing) return null;
   const meta: any = { ...(existing.metadata || {}), edited: true, edited_at: new Date().toISOString() };
   if (outcome) meta.outcome = outcome;
+  const locked = LOCKED_TEXT_TYPES.has(existing.type);
+  if (locked && text) meta.remark = text;
+  const description = locked ? existing.description : text;
   const rows = await sql`
-    UPDATE crm_timeline_events SET description = ${text}, metadata = ${sql.json(meta)}
+    UPDATE crm_timeline_events SET description = ${description}, metadata = ${sql.json(meta)}
     WHERE id = ${id} AND tenant_id = ${tenantId}
     RETURNING *
   `;

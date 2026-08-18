@@ -23,6 +23,7 @@ import {
   addTimelineEvent, updateLead, mergeLeads, getLeadById,
   getTimelineEventById, updateTimelineEvent, maybeAutoAdvanceStage,
   addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES, noteOwnerContact, closeFollowUpFor } from '../services/store';
+import { sql } from '../services/db';
 import { isSafeKey, tenantOfKey } from '../services/media';
 import { audit } from '../services/audit';
 
@@ -63,7 +64,13 @@ actionsRouter.post('/:id/actions/remark', async (req: Request, res: Response) =>
 // wa/sms are B5's "add an outcome + remark to that action afterward" — same
 // author-only rule, same endpoint, just also accepts an `outcome`. System/
 // stage-change events are never author-editable — they're records, not notes.
-const AUTHOR_EDITABLE_TYPES = new Set(['remark', 'call', 'whatsapp', 'sms']);
+//
+// `follow_up` is here so an agent can say how the demo, the meeting or the
+// callback actually went — which was only possible before by editing the
+// booking's own sentence into something else. Its description is protected
+// server-side (LOCKED_TEXT_TYPES): the note lands beside the outcome and the
+// record of what was booked survives.
+const AUTHOR_EDITABLE_TYPES = new Set(['remark', 'call', 'whatsapp', 'sms', 'follow_up']);
 
 /**
  * The call outcomes that mean "we did not get through", which is exactly what
@@ -110,6 +117,14 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
     // interested"…) stays a human decision.
     if (existing.type === 'call' && outcome && DIDNT_REACH_THEM.has(outcome)) {
       await maybeAutoAdvanceStage(existing.record_id, 'Call Not Received', 'Nobody answered the call');
+    }
+    // SAYING HOW IT WENT IS WHAT FINISHES IT. There is no separate "mark done"
+    // — that control stored nothing, which is why it meant nothing. Recording
+    // an outcome against the booking closes it, and no second "completed" row
+    // is written: the one row now says what was planned and what came of it.
+    if (existing.type === 'follow_up' && outcome) {
+      await sql`UPDATE crm_leads SET follow_up = NULL, updated_at = NOW()
+                WHERE id = ${existing.record_id} AND tenant_id = ${req.tenantId!}`;
     }
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,

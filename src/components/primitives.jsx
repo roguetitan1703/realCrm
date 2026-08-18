@@ -5,7 +5,7 @@ import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
 import { whenLabel, agentName } from '../lib/format.js'
 import { fileUrl, formatDistance } from '../lib/media.js'
-import { CALL_OUTCOMES, WA_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
+import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 
 // ---- Button ----
 export function Button({ variant = 'ghost', size, block, icon, children, className, ...rest }) {
@@ -420,15 +420,19 @@ export function Stepper({ stages, current, onPick }) {
 // are only present on real DB-backed events (remarks, calls, stage changes…) —
 // older client-only entries render fine but can't be edited (no id to target).
 // Author-editable types (B1 remark, B5 call/wa/sms outcome+remark).
-const EDITABLE_TYPES = new Set(['remark', 'call', 'wa', 'sms'])
+const EDITABLE_TYPES = new Set(['remark', 'call', 'wa', 'sms', 'followup'])
+// Rows whose text the SYSTEM wrote. They can be given an outcome and a note —
+// that is the whole point of them being editable — but their own sentence is
+// the record and is never overwritten. Enforced again server-side; this is only
+// what stops the box being drawn. See LOCKED_TEXT_TYPES in services/store.ts.
+const LOCKED_TEXT_TYPES = new Set(['followup'])
 // Exported: the record header shows the latest of these at the top, and a
 // second copy of this map would be two vocabularies drifting apart.
 export const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit', followup: 'Follow-up' }
-// B4 outcomes are stored as stable keys; these are what a person reads.
-export const VISIT_OUTCOME_LABEL = {
-  interested: 'Interested', not_interested: 'Not interested',
-  negotiating: 'Negotiating', booked: 'Booked', no_show: 'No show',
-}
+// B4 outcomes are stored as stable keys; these are what a person reads. Derived
+// from the one list rather than typed a second time — the map and the list used
+// to be separate literals that agreed only by luck.
+export const VISIT_OUTCOME_LABEL = Object.fromEntries(VISIT_OUTCOMES.map(o => [o.value, o.label]))
 /**
  * The outcomes this entry can be given, by what kind of entry it is.
  *
@@ -448,7 +452,10 @@ export const VISIT_OUTCOME_LABEL = {
  * One list, imported, and WhatsApp gets its own — a message does not end the
  * way a call does.
  */
-const OUTCOMES_FOR = { call: CALL_OUTCOMES, wa: WA_OUTCOMES, sms: WA_OUTCOMES }
+// `followup` is a booked demo/meeting/callback being told how it went. It is
+// the reason this row is editable at all — see LOCKED_TEXT_TYPES server-side,
+// which keeps its sentence while letting the outcome and a note attach to it.
+const OUTCOMES_FOR = { call: CALL_OUTCOMES, wa: WA_OUTCOMES, sms: WA_OUTCOMES, followup: VISIT_OUTCOMES }
 
 /**
  * A stored outcome, as a person reads it — from any of the three vocabularies,
@@ -544,9 +551,14 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel,
   // (because another one opened) can leave the draft alone while still letting
   // the event's own values win once it is cleared.
   const [draft, setDraft] = useState(null)
+  // A LOCKED ROW IS A RECORD, NOT A NOTE. Its sentence was written by the
+  // system; the outcome and the note beside it are the agent's. Kept apart
+  // here so the textarea can never be pointed at the description.
+  const locked = LOCKED_TEXT_TYPES.has(e.type)
   const text = draft ? draft.text : (e.label || '')
+  const note = draft ? draft.note : (e.metadata?.remark || '')
   const outcome = draft ? draft.outcome : (e.metadata?.outcome || '')
-  const edit = (patch) => setDraft({ text, outcome, ...patch })
+  const edit = (patch) => setDraft({ text, note, outcome, ...patch })
   const tag = TYPE_TAG[e.type]
   const canEdit = tag && EDITABLE_TYPES.has(e.type) && e.id && e.authorId && currentUserId && e.authorId === currentUserId && !!onEditRemark
   // The moment, not the elapsed time. An agent has to be able to say "you
@@ -555,8 +567,9 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel,
   const author = e.authorId ? agentName(agents, e.authorId) : null
   const outcomeText = outcomeLabel(e.metadata?.outcome)
   const save = () => {
-    if (!text.trim() && !outcome) return
-    onEditRemark(e.id, text.trim(), outcome || undefined)
+    const body = locked ? note : text
+    if (!body.trim() && !outcome) return
+    onEditRemark(e.id, body.trim(), outcome || undefined)
     setDraft(null)
     onClose?.()
   }
@@ -569,13 +582,22 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel,
       <div className="ev-b">
         {editing ? (
           <div className="ev-edit">
+            {/* A booking's own sentence is not up for editing. It says what was
+                arranged, and this box existed to say how it went — an agent
+                recording the outcome of a demo could select "Scheduled Online
+                Demo on 19 Aug at 11:00 am", delete it, type anything, and
+                nothing afterwards could tell what it had been. The line stays
+                on screen, read-only, above the two fields that ARE theirs. */}
+            {locked && <div className="ev-locked">{fmtLabel(e.label)}</div>}
             {OUTCOMES_FOR[e.type] && (
               <select className="input" value={outcome} onChange={ev => edit({ outcome: ev.target.value })}>
                 <option value="">No outcome yet</option>
                 {OUTCOMES_FOR[e.type].map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             )}
-            <textarea className="textarea" value={text} onChange={ev => edit({ text: ev.target.value })} rows={2} placeholder="Add a remark…" autoFocus />
+            <textarea className="textarea" value={locked ? note : text}
+              onChange={ev => edit(locked ? { note: ev.target.value } : { text: ev.target.value })}
+              rows={2} placeholder={locked ? 'What happened?' : 'Add a remark…'} autoFocus />
             <div className="ev-edit-actions">
               <button className="btn btn-ghost btn-sm" onClick={() => { setDraft(null); onClose?.() }}>Cancel</button>
               <button className="btn btn-primary btn-sm" onClick={save}>Save</button>
@@ -584,6 +606,9 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel,
         ) : (
           <>
             <div className="ev-l">{tag && <span className="ev-remark-tag">{tag}</span>}{fmtLabel(e.label)}</div>
+            {/* What came of it, under what was arranged. On a locked row the
+                agent's words live here rather than replacing the line above. */}
+            {e.metadata?.remark && <div className="ev-note">{e.metadata.remark}</div>}
             {e.type === 'visit' && <VisitProof meta={e.metadata || {}} />}
             <div className="ev-a">
               {author ? `${author} · ` : ''}{ago}{outcomeText ? ` · ${outcomeText}` : ''}{e.metadata?.edited ? ' · edited' : ''}

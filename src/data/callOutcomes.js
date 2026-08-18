@@ -98,3 +98,22 @@ export const WA_OUTCOMES = [
 // not have to know which channel produced it.
 export const labelForOutcome = (value) =>
   [...CALL_OUTCOMES, ...WA_OUTCOMES].find(x => x.value === value)?.label || ''
+
+// ── How a visit, a meeting or a demo ended ──────────────────────────────────
+// Two copies of this existed: VISIT_OUTCOMES in Modals.jsx keyed on `key`, and
+// VISIT_OUTCOME_LABEL in primitives.jsx as a plain map. Same five outcomes,
+// two shapes, and neither knew about the other — so renaming one would have
+// left the timeline rendering the raw key. One list, `value`/`label` like the
+// two above it, because the same <select> renders all three.
+//
+// A follow-up that is not a call ends these ways too: an Online Demo or a
+// Client Meeting finishes interested, negotiating, booked, not interested, or
+// nobody turned up. That is why the timeline offers this list against a
+// booking as well as against a logged visit.
+export const VISIT_OUTCOMES = [
+  o('interested', 'Interested'),
+  o('negotiating', 'Negotiating'),
+  o('booked', 'Booked'),
+  o('not_interested', 'Not interested'),
+  o('no_show', 'No show'),
+]

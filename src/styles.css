@@ -2429,6 +2429,12 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .cb-preset:hover{border-color:var(--line-strong,var(--line));background:var(--card-2)}
 .cb-preset.on{border-color:var(--accent);background:var(--accent-wash);color:var(--accent-ink)}
 .fu-when.is-late{color:var(--alert)}
+/* The booking's own line, held above the fields that edit around it. Reads as
+   a quotation of the record rather than another input. */
+.ev-locked{font-size:12.5px;color:var(--ink-2);background:var(--card-2);border:1px solid var(--line);
+  border-radius:8px;padding:7px 9px;margin-bottom:7px}
+/* What came of it, under what was arranged. */
+.ev-note{font-size:12.5px;color:var(--ink-2);margin-top:2px}
 
 /* Assign picker — a real list of people with the load each is carrying, so
    "who should take these twenty" is answerable inside the modal. */

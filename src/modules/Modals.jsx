@@ -19,7 +19,7 @@ import { pushPermission, enablePush as subscribeToPush } from '../lib/push.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities } from '../lib/suggest.js'
-import { CALL_OUTCOMES, WA_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
+import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 
 /**
  * Generic modal frame.
@@ -1436,13 +1436,9 @@ function RemarkModal({ store, recordType, recordId }) {
 // Every one of these is re-checked server-side. The UI ordering is a courtesy
 // to the agent, not the enforcement.
 // ============================================================================
-const VISIT_OUTCOMES = [
-  { key: 'interested', label: 'Interested' },
-  { key: 'negotiating', label: 'Negotiating' },
-  { key: 'booked', label: 'Booked' },
-  { key: 'not_interested', label: 'Not interested' },
-  { key: 'no_show', label: 'No show' },
-]
+// VISIT_OUTCOMES now lives in src/data/callOutcomes.js beside the call and
+// message vocabularies — it was a second copy keyed on `key` while the timeline
+// kept a third as a label map.
 
 function VisitProofModal({ store, leadId, propId }) {
   const l = store.lookup('lead', leadId)
@@ -1564,10 +1560,10 @@ function VisitProofModal({ store, leadId, propId }) {
             <div className="vp-outcomes">
               {VISIT_OUTCOMES.map(o => (
                 <button
-                  key={o.key}
+                  key={o.value}
                   type="button"
-                  className={'qchip' + (outcome === o.key ? ' on' : '')}
-                  onClick={() => setOutcome(o.key)}
+                  className={'qchip' + (outcome === o.value ? ' on' : '')}
+                  onClick={() => setOutcome(o.value)}
                 >{o.label}</button>
               ))}
             </div>
