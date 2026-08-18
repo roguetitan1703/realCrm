@@ -67,7 +67,7 @@ function setOnline(ok) {
   listeners.forEach(fn => { try { fn(onlineState) } catch (e) {} });
   // The first successful call after an outage is the signal to replay whatever
   // was logged while there was no signal.
-  if (ok) setTimeout(() => flushOutbox(request), 0);
+  if (ok) setTimeout(() => flushOutbox(request, currentTenant()), 0);
   else startProbing();
 }
 
@@ -204,7 +204,11 @@ export function currentTenant() {
 function pathSlug() {
   if (typeof window === 'undefined') return '';
   const s = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '';
-  return s === 'admin' ? '' : s;
+  if (s && s !== 'admin') return s;
+  // `?ws=<slug>` is the alternate entry the login screen has always accepted.
+  // pwa.slugFromLocation() honours it, and if this did not, the two resolvers
+  // would disagree on exactly the URLs someone is most likely to be sent.
+  try { return new URLSearchParams(window.location.search).get('ws') || ''; } catch { return ''; }
 }
 
 /**
@@ -301,18 +305,26 @@ const inflight = new Map(); // url -> Promise
 export function invalidateReads() { reads.clear(); }
 /** The cached value for a GET, or undefined. Lets a screen render on the first frame. */
 export function peekRead(endpoint) {
-  const hit = reads.get(endpoint);
+  const hit = reads.get(`${currentTenant()}|${endpoint}`);
   return hit && Date.now() - hit.at < FRESH_MS ? hit.data : undefined;
 }
 
 async function request(endpoint, options = {}) {
   const { queueable, ...fetchOptions } = options;
   const isWrite = !!fetchOptions.method && fetchOptions.method.toUpperCase() !== 'GET';
+  // KEYED BY WORKSPACE AS WELL AS URL. The tenant travels in a header, not the
+  // path, so `/leads?page=1` names a different set of rows per firm and the two
+  // shared one cache slot. Nothing reaches it today — every workspace change is
+  // either a page load (which discards the map) or a sign-out (which clears
+  // it) — but "no caller can currently do the wrong thing" is a property of the
+  // callers, not of this cache, and restoreSession() has already added one
+  // workspace change that does not reload. Cheap to make it structural.
+  const key = `${currentTenant()}|${endpoint}`;
 
   if (!isWrite) {
-    const fresh = reads.get(endpoint);
+    const fresh = reads.get(key);
     if (fresh && Date.now() - fresh.at < FRESH_MS) return fresh.data;
-    const pending = inflight.get(endpoint);
+    const pending = inflight.get(key);
     if (pending) return pending;
   }
 
@@ -360,7 +372,7 @@ async function request(endpoint, options = {}) {
     }
     const data = await res.json();
     if (isWrite) invalidateReads();
-    else reads.set(endpoint, { at: Date.now(), data });
+    else reads.set(key, { at: Date.now(), data });
     return data;
   } catch (err) {
     if (err instanceof TypeError) {
@@ -371,7 +383,8 @@ async function request(endpoint, options = {}) {
       // Work done in the field is held and replayed. Only the writes that opt
       // in — see outbox.js for why edits deliberately do not.
       if (queueable) {
-        enqueue({ endpoint, options: fetchOptions });
+        // Stamped with the workspace it was written in — see outbox.js.
+        enqueue({ endpoint, options: fetchOptions }, currentTenant());
         return { queued: true };
       }
     }
@@ -385,26 +398,32 @@ async function request(endpoint, options = {}) {
   // A failed read must not be remembered as an answer, so the in-flight entry is
   // cleared either way and only a success is stored above.
   if (!isWrite) {
-    inflight.set(endpoint, run);
-    run.catch(() => {}).finally(() => { if (inflight.get(endpoint) === run) inflight.delete(endpoint); });
+    inflight.set(key, run);
+    run.catch(() => {}).finally(() => { if (inflight.get(key) === run) inflight.delete(key); });
   }
   return run;
 }
 
 // Drain the queue whenever the device comes back. `request` is passed in so the
 // outbox never has to know how a call is authenticated.
-export function flushPending() { return flushOutbox(request); }
+export function flushPending() { return flushOutbox(request, currentTenant()); }
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => { flushPending(); });
 }
 
 export const api = {
   // Workspace & State Hydration
-  setTenantId: (id) => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem('crm_tenant_id', id);
-    }
-  },
+  /**
+   * Kept as a no-op on purpose. It wrote `crm_tenant_id`, a single global that
+   * five different places then read as "which firm is this" — the token
+   * resolver, the session loader, the PWA identity, the pre-paint branding and
+   * the manifest link. Every one of them answered with whichever workspace was
+   * opened last, and the key was written the moment a workspace was RESOLVED,
+   * before anyone signed in. That is the whole family of cross-workspace bugs
+   * in this file. The URL is the authority now (currentTenant()), nothing reads
+   * this key, and it is not written so nothing can start reading it again.
+   */
+  setTenantId: () => {},
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   // Tenant users sign in by phone OTP; the returned JWT is stored and attached
@@ -413,7 +432,10 @@ export const api = {
   requestOtp: (identifier) => request('/auth/otp/request', { method: 'POST', body: JSON.stringify({ identifier }) }),
   verifyOtp: async (identifier, code) => {
     const res = await request('/auth/otp/verify', { method: 'POST', body: JSON.stringify({ identifier, code }) });
-    if (res?.token) lsSet(TOKEN_KEY, res.token);
+    // Through setToken so OTP lands in the same per-workspace key password
+    // sign-in uses. It wrote only the global one, which nothing reads now —
+    // OTP is legacy and being retired, and it would have retired itself.
+    if (res?.token) api.setToken(res.token);
     return res;
   },
   me: () => request('/auth/me'),
@@ -427,7 +449,6 @@ export const api = {
     if (s && s !== 'admin') {
       lsSet(`crm_auth_token_${s}`, t);
     }
-    lsSet(TOKEN_KEY, t);
   },
   clearToken: (slug) => {
     const s = slug || (typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '');
@@ -456,7 +477,6 @@ export const api = {
     if (res?.token) {
       const slug = tenantSlug || (typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '');
       if (slug && slug !== 'admin') lsSet(`crm_auth_token_${slug}`, res.token);
-      lsSet(TOKEN_KEY, res.token);
     }
     return res;
   },

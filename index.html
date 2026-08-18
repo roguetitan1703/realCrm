@@ -38,10 +38,12 @@
           var seg = decodeURIComponent(
             location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '');
           if (seg === 'admin') seg = '';
-          var slug = new URLSearchParams(location.search).get('ws')
-            || seg
-            || localStorage.getItem('crm_tenant_id')
-            || '_platform';
+          // No stored fallback. This chose the manifest — the name, icon and
+          // theme an "Add to Home Screen" captures forever — and `crm_tenant_id`
+          // holds whichever workspace was opened last, so installing from a URL
+          // that names no firm could bake in a DIFFERENT firm's identity.
+          // `_platform` is the honest answer when no workspace is named.
+          var slug = new URLSearchParams(location.search).get('ws') || seg || '_platform';
           var link = document.createElement('link');
           link.rel = 'manifest'; link.id = 'app-manifest';
           link.href = '/pwa/' + encodeURIComponent(slug) + '/manifest.webmanifest';
@@ -58,8 +60,13 @@
           // read at the moment the person taps "Add", which on a first visit is
           // long before the boot payload lands — so the last known firm name is
           // written here, synchronously, rather than waiting for React.
-          var fn = localStorage.getItem('crm_firm_name_' + slug)
-            || localStorage.getItem('crm_firm_name') || '';
+          // Per-slug ONLY. The `|| crm_firm_name` fallback here read a single
+          // global holding whichever firm was seen last, so opening a
+          // workspace this device had not seen captioned it with the last
+          // firm's name — and iOS reads this meta at the instant someone taps
+          // "Add to Home Screen", so that name is what got baked onto the
+          // installed icon. A workspace we cannot name is left unnamed.
+          var fn = localStorage.getItem('crm_firm_name_' + slug) || '';
           if (fn) {
             var tm = document.querySelector('meta[name="apple-mobile-web-app-title"]');
             if (!tm) {
@@ -71,8 +78,11 @@
           }
         } catch (e) {}
         try {
-          var t = localStorage.getItem('crm_tenant_id') || '';
-          var c = localStorage.getItem('crm_brand_color') || '';
+          // The workspace in the PATH, not the stored one — `crm_tenant_id` is
+          // a single global that any workspace overwrites by being visited, so
+          // it painted one firm's accent onto another firm's first frame.
+          var t = slug || '';
+          var c = t ? (localStorage.getItem('crm_brand_color_' + t) || '') : '';
           if (!c && t) {
             var raw = localStorage.getItem('crm_state_cache_' + t);
             if (raw) {

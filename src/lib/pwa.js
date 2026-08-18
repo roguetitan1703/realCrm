@@ -27,10 +27,12 @@ export function slugFromLocation() {
   try {
     let seg = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '');
     if (seg === 'admin') seg = '';
-    return new URLSearchParams(window.location.search).get('ws')
-      || seg
-      || window.localStorage?.getItem('crm_tenant_id')
-      || '';
+    // NO STORED FALLBACK. `crm_tenant_id` is one global key that any workspace
+    // overwrites merely by being visited, so this answered with the last firm
+    // opened rather than the one on screen — and it feeds the PWA identity, so
+    // the wrong answer is the name and icon an install captures forever.
+    // Matches api.js currentTenant(); the two must not drift.
+    return new URLSearchParams(window.location.search).get('ws') || seg || '';
   } catch (e) { return ''; }
 }
 
@@ -74,8 +76,9 @@ export function applyPwaIdentity(slug, firmName) {
     // before the parser reaches the head, and on a first visit there is no
     // session yet to ask — so the answer has to already be on the device.
     try {
+      // Per slug only. The global companion to this was read by index.html as
+      // a fallback and captioned unseen workspaces with the last firm's name.
       localStorage.setItem(`crm_firm_name_${s}`, firmName);
-      localStorage.setItem('crm_firm_name', firmName);
     } catch (e) {}
   }
 }

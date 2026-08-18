@@ -150,12 +150,12 @@ export default function Login({ store }) {
     // a workspace — that is the same "fallback to a default tenant" that files
     // one firm's data under another's name.
     //
-    // An INSTALLED PWA is the exception, and the only one: it is locked to a
-    // single firm (see leaveWorkspace), its start_url may carry no slug, and
-    // reopening it must land on that firm's desk rather than a picker.
-    const storedSlug = (typeof localStorage !== 'undefined' && isStandalone())
-      ? localStorage.getItem('crm_tenant_id') : ''
-    const targetSlug = (seg && seg !== 'admin') ? seg : (queryWs || storedSlug)
+    // There is NO installed-PWA exception. routes/pwa.ts builds the manifest
+    // with start_url `/<slug>` and scope `/<slug>`, so an installed app always
+    // has its workspace in the path and cannot navigate out of it — the
+    // exception that used to live here read `crm_tenant_id` and was the last
+    // way a global key could pick a firm.
+    const targetSlug = (seg && seg !== 'admin') ? seg : (queryWs || '')
 
     if (targetSlug) {
       if (parts[1] === 'reset' && token) { setResetToken(token); selectWorkspace(targetSlug, 'reset') }

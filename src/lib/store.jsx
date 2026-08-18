@@ -82,7 +82,8 @@ function writeStateCache(serverState) {
 // write. index.html reads the same key before first paint.
 function lastBrandColor() {
   try {
-    const c = window.localStorage?.getItem('crm_brand_color') || ''
+    const t = currentTenant()
+    const c = (t && window.localStorage?.getItem(`crm_brand_color_${t}`)) || ''
     return /^#?[a-f\d]{6}$/i.test(c) ? c : ''
   } catch (e) { return '' }
 }
@@ -743,7 +744,12 @@ export function StoreProvider({ children }) {
   useEffect(() => {
     applyBrandColor(state.brand?.primaryColor)
     if (state.brand?.primaryColor) {
-      try { window.localStorage?.setItem('crm_brand_color', state.brand.primaryColor) } catch (e) {}
+      // Per workspace — index.html reads it before first paint and a single
+      // global painted the last firm's accent onto the next firm's login.
+      try {
+        const t = currentTenant()
+        if (t) window.localStorage?.setItem(`crm_brand_color_${t}`, state.brand.primaryColor)
+      } catch (e) {}
     }
   }, [state.brand?.primaryColor])
 
@@ -1457,7 +1463,7 @@ export function StoreProvider({ children }) {
           // login — see getHeaders(). The URL is the authority; nothing needs
           // this to persist across a sign-out.
           window.localStorage?.removeItem('crm_tenant_id')
-          const currentSlug = slugFromLocation() || window.localStorage?.getItem('crm_tenant_id')
+          const currentSlug = currentTenant()
           if (currentSlug) {
             window.history.replaceState({}, document.title, `/${currentSlug}`)
           }

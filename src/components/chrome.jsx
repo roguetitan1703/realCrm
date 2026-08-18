@@ -5,6 +5,7 @@ import { theme } from '../data/theme.js'
 import { Avatar } from './primitives.jsx'
 import { subscribeConnection } from '../lib/api.js'
 import { subscribeOutbox } from '../lib/outbox.js'
+import { currentTenant } from '../lib/api.js'
 
 // Initials from whatever firm name we actually have. Never a bundled default:
 // two wrong letters in the corner of every screen is still the wrong firm.
@@ -120,7 +121,13 @@ export function ConnectionBadge() {
   const [conn, setConn] = useState({ ok: true, checked: false })
   const [queued, setQueued] = useState(0)
   useEffect(() => subscribeConnection(setConn), [])
-  useEffect(() => subscribeOutbox(setQueued), [])
+  // Only this workspace's queued writes. The count used to be the whole
+  // browser's, so a note held for one firm read as "1 waiting to save" on
+  // another firm's desk, where nothing was waiting at all.
+  useEffect(() => subscribeOutbox((list) => {
+    const t = currentTenant()
+    setQueued(list.filter(e => !e.tenantId || e.tenantId === t).length)
+  }), [])
   // A queued write is held work, not saved work. It stays visible until it
   // lands, so "I logged that visit" is never a thing the app quietly lied about.
   if (queued) {
