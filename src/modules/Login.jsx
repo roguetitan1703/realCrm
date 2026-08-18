@@ -117,6 +117,12 @@ export default function Login({ store }) {
       setRecents(recentWorkspaces())
       // Reflect the workspace in the URL so it's shareable: baseurl/<slug>.
       try { window.history.pushState({}, '', `/${t.slug}`) } catch (e) {}
+      // ALREADY SIGNED INTO THIS ONE? Go in. Whether we are signed in is
+      // decided from the URL, and the URL only just became this workspace —
+      // one line above. Without this the picker showed a sign-in form to
+      // somebody holding a live session for the firm they had just named, and
+      // only a manual reload let them through.
+      if (nextPhase !== 'reset' && store.restoreSession?.()) return
       setPhase(nextPhase)
       store.toast(`${t.name} workspace loaded`, 'ok')
     } catch (e) {

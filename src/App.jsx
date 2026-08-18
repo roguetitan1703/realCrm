@@ -95,6 +95,10 @@ export default function App() {
     home: isPhone ? 'today' : 'dashboard',
     onExitWarning: warnExit,
     overlay,
+    // The URL mirrors where you are on the DESK. Before sign-in there is no
+    // desk, and writing `?screen=dashboard` onto the login page named a screen
+    // that could not be opened.
+    enabled: state.loggedIn,
   })
 
   // Alerts are on by default — no toggle exists, so subscribing is the app's

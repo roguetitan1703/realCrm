@@ -364,6 +364,32 @@ function reducer(state, action) {
       return { ...state, loggedIn: true, role, activeAgentId, settings }
     }
 
+    // THE WORKSPACE CAN CHANGE WITHOUT THE PAGE RELOADING.
+    //
+    // `const initial = freshState()` runs once, at module load, so whether we
+    // are signed in was decided before React mounted — and it was decided for
+    // whatever workspace the URL named THEN. Picking a workspace pushes
+    // /<slug> with history.pushState, which changes the answer and remounts
+    // nothing, so a firm you were already signed into sat on its own sign-in
+    // form until you pressed reload. That is the "I'm authenticated but still
+    // at the login page" step.
+    //
+    // Re-reads the session for the workspace the URL now names. Same loader as
+    // boot, so there is one definition of "signed in" rather than two.
+    case 'RESTORE_SESSION': {
+      const s = action.session || {}
+      if (!s.loggedIn) return state
+      return {
+        ...state,
+        loggedIn: true,
+        role: s.role || state.role,
+        activeAgentId: s.activeAgentId || state.activeAgentId,
+        settings: s.tenantName
+          ? { ...state.settings, firmName: s.tenantName, city: s.tenantCity || state.settings.city }
+          : state.settings,
+      }
+    }
+
     case 'LOGOUT': {
       clearAuthSession()
       return { ...freshState(), loggedIn: false }
@@ -1394,6 +1420,18 @@ export function StoreProvider({ children }) {
       // default tenant before login.
       loadServerState()
       setTimeout(loadNotifications, 0)
+    },
+    /**
+     * Enter a workspace this browser is already signed into, without a reload.
+     * Returns whether there was one. Called after the picker pushes /<slug>.
+     */
+    restoreSession: () => {
+      const s = loadAuthSession()
+      if (!s.loggedIn) return false
+      dispatch({ type: 'RESTORE_SESSION', session: s })
+      loadServerState()
+      setTimeout(loadNotifications, 0)
+      return true
     },
     logout: () => {
       // Drop this device's push subscription FIRST, while the token still

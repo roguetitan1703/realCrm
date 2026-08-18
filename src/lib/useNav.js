@@ -16,7 +16,7 @@ import { parseUrl, urlFor, isRoot, isStandaloneApp, TAKEOVER_KEYS } from './nav.
 // either: opening "New lead" and then tapping a bottom-tab or pressing back
 // changed the screen underneath while the form stayed on top of it, over a
 // page it no longer belonged to. Pass { isOpen, close }.
-export function useNav({ home, onExitWarning, overlay }) {
+export function useNav({ home, onExitWarning, overlay, enabled = true }) {
   // Read through a ref so the popstate handler always sees the CURRENT overlay
   // state. Closing over the value instead would re-register the listener on
   // every open and close, and worse, a stale closure would answer "nothing is
@@ -46,6 +46,11 @@ export function useNav({ home, onExitWarning, overlay }) {
   // load would duplicate the current entry on each refresh, and backing out of
   // a record would then land on the same record again.
   useEffect(() => {
+    // NOTHING TO MIRROR UNTIL THERE IS A DESK. This ran above the sign-in gate,
+    // so the login screen wrote `?screen=dashboard` into its own URL — naming a
+    // screen nobody can reach yet, on a page that is not it. Worse on the bare
+    // root, where it made a workspace picker look like a route.
+    if (!enabled) return
     if (window.history.state?.nav) return
     const url = urlFor(first.screen || home, first.sel)
     window.history.replaceState({ nav: true, floor: true }, '', url)
@@ -53,15 +58,16 @@ export function useNav({ home, onExitWarning, overlay }) {
       window.history.pushState({ nav: true }, '', url)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [enabled])
 
   useEffect(() => {
+    if (!enabled) return
     if (fromPop.current) { fromPop.current = false; return }
     const next = urlFor(screen, sel)
     if (next !== window.location.search) {
       window.history.pushState({ nav: true }, '', next)
     }
-  }, [screen, sel])
+  }, [screen, sel, enabled])
 
   useEffect(() => {
     const onPop = () => {
