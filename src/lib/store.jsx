@@ -1053,6 +1053,15 @@ export function StoreProvider({ children }) {
     })
     .catch(err => { failed(err, what); return null }), [failed, toast, settled])
 
+  // A write that answers with the record it wrote should not be followed by a
+  // read asking what it wrote. Chain this onto the call: `.then(adopt('lead'))`.
+  // Returns the response untouched so `rejected()` still sees it.
+  const adopt = useCallback((kind) => (res) => {
+    const rec = res?.data
+    if (rec?.id) dispatch({ type: 'CACHE_RECORDS', kind, records: [rec] })
+    return res
+  }, [])
+
   const optimistic = useCallback((what, apply, revert, call, okMsg) => {
     apply()
     if (okMsg) toast(okMsg)
@@ -1089,16 +1098,16 @@ export function StoreProvider({ children }) {
     assign: (leadId, agentId) => {
       const a = state.agents.find(x => x.id === agentId)
       return write('Assign',
-        () => apiClient.updateLead(leadId, { agentId }),
+        () => apiClient.updateLead(leadId, { agentId }).then(adopt('lead')),
         () => dispatch({ type: 'ASSIGN', leadId, agentId }),
         'Lead assigned to ' + (a ? a.first : ''))
     },
     updateLead: (leadId, patch) => write('Update lead',
-      () => apiClient.updateLead(leadId, patch),
+      () => apiClient.updateLead(leadId, patch).then(adopt('lead')),
       () => dispatch({ type: 'UPDATE_LEAD', leadId, patch }),
       'Lead details updated'),
     updateProp: (propId, patch) => write('Update property',
-      () => apiClient.updateProperty(propId, patch),
+      () => apiClient.updateProperty(propId, patch).then(adopt('property')),
       () => dispatch({ type: 'UPDATE_PROP', propId, patch }),
       'Property details updated'),
     // Optimistic: a stage change is a drag, and a card that hangs mid-air until
@@ -1117,12 +1126,22 @@ export function StoreProvider({ children }) {
     },
     // Optimistic for the same reason: this is a tick on a row the agent is
     // working through, and the tick has to land under the finger.
+    // THE ANSWER IS IN THE REPLY. updateLead returns the whole record it just
+    // wrote, timeline included — the booking's own event among it — and this
+    // used to drop it on the floor and wait for `mutationTick` to provoke a
+    // second GET. Measured: the row appeared 2-3 seconds after Confirm, long
+    // enough to read as "it did not save".
+    //
+    // It only became visible when the booking's timeline line moved to the
+    // server. While the browser wrote that line itself the row was there
+    // instantly and the slow refetch behind it went unnoticed — so this is the
+    // same write costing a round trip it had already paid for.
     setFollowUp: (leadId, followUp) => {
       const prev = api.lookup('lead', leadId)?.followUp ?? null
       return optimistic('Follow-up',
         () => dispatch({ type: 'FOLLOWUP', leadId, followUp }),
         () => dispatch({ type: 'FOLLOWUP', leadId, followUp: prev }),
-        () => apiClient.updateLead(leadId, { followUp }),
+        () => apiClient.updateLead(leadId, { followUp }).then(adopt('lead')),
         'Follow-up set — added to calendar')
     },
     // `logEvent` used to dispatch a timeline entry into local React state and
