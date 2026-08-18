@@ -25,6 +25,9 @@ import {
   FURNISH, STATUS, labelOf,
   normaliseBhk, normaliseSubtype, normaliseTo,
 } from '../../../src/data/propertyFields.js';
+// backfillEnquiries replays stored payloads through the SAME reader the live
+// ingest uses, so a rebuilt session says what the push said.
+import { parsePayload } from './parser.js';
 
 /**
  * The tenant to scope the current request's queries to. Comes from the request
@@ -1122,7 +1125,13 @@ seedDatabase()
   .then(() => runOnce('2026_08_18_outcome_keys', () => migrateOutcomeLabelsToKeys()))
   // Builds the enquiry history from the pushes still on disk. Additive — it
   // writes only to crm_lead_enquiries and touches no lead.
-  .then(() => runOnce('2026_08_18_enquiry_sessions', () => backfillEnquiries()))
+  //
+  // `_v2`: the first pass read the payloads with a hardcoded guess at field
+  // names and so recorded 84 MagicBricks pushes as a bare locality when the
+  // push carried BHK, budget and project too. It rebuilds from scratch every
+  // time — the rows are derived from webhook_inbox and no human edits them —
+  // so a second ledger entry corrects the first rather than compounding it.
+  .then(() => runOnce('2026_08_18_enquiry_sessions_v2', () => backfillEnquiries()))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
@@ -4315,6 +4324,26 @@ export async function backfillEnquiries(): Promise<void> {
      WHERE lead_id IS NOT NULL AND raw_body IS NOT NULL
      ORDER BY received_at ASC`;
 
+  // THE CONNECTION'S OWN MAPPING, not a guess at field names.
+  //
+  // This read `body.locality || body.location`, `body.property_type ||
+  // body.bhk`, `body.budget`, `body.message`, `body.project` — which are
+  // 99acres' field names. MagicBricks sends `BHK`, `Budget`, `Property` and
+  // `Buyer's message`, so of a rich payload carrying all four, exactly one key
+  // survived: `locality`, the only name the two providers happen to share. 84
+  // of bhumi's 249 sessions were recorded as "they asked about Mahalunge" when
+  // the payload said 3 BHK, ₹34,000, Godrej Green Vistas, Rent. The data was
+  // never missing; this function could not read it.
+  //
+  // Which is the whole point of the parser config: one place that knows what a
+  // provider's fields are called. A second reader of the same payload is a
+  // second vocabulary, and it disagreed with the first on three providers out
+  // of four.
+  const configs = new Map<string, any>();
+  for (const i of await sql`SELECT id, provider, parser_config FROM integrations`) {
+    configs.set(i.id, i);
+  }
+
   const byTenant = new Map<string, number>();
   for (const r of rows as any[]) {
     let body: any = r.raw_body;
@@ -4322,23 +4351,23 @@ export async function backfillEnquiries(): Promise<void> {
     if (!body || typeof body !== 'object') continue;
     const when = new Date(r.received_at);
     if (isNaN(when.getTime())) continue;
-    // recordEnquiry reads the tenant from the request context, so the replay
-    // has to stand in the right one for each row.
+    const integration = r.integration_id ? configs.get(r.integration_id) : null;
+    const parsed = parsePayload(body, integration?.parser_config || null);
+    // `lead.req` is what the live ingest hands recordEnquiry — same shape, same
+    // derivations (deal type, commercial subtype, the "0 BHK" clean-up).
+    const req = parsed.lead?.req || {};
+    // The provider IS the source. `body.source` is a field only Meta sends, so
+    // reading it left `source` null on all 249 bhumi sessions and 62 of
+    // delpat's 68 — a column that has never once said where an enquiry came
+    // from, on the table built to answer exactly that.
     await runWithContext({ tenantId: r.tenant_id } as any, () => recordEnquiry({
       leadId: r.lead_id,
       at: when,
-      source: body.source || null,
+      source: integration?.provider || body.source || null,
       integrationId: r.integration_id || null,
-      enquiryId: body.enquiry_id || body.lead_id || null,
+      enquiryId: parsed.lead?.external_id || body.enquiry_id || body.lead_id || null,
       rawRef: r.id,
-      req: {
-        locality: body.locality || body.location || undefined,
-        config: body.property_type || body.bhk || undefined,
-        minBudget: body.budget_min || undefined,
-        maxBudget: body.budget_max || body.budget || undefined,
-        notes: body.message || undefined,
-        interest: body.project || undefined,
-      },
+      req,
     }));
     byTenant.set(r.tenant_id, (byTenant.get(r.tenant_id) || 0) + 1);
   }
