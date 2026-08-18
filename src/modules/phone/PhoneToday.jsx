@@ -21,7 +21,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../../lib/api.js'
 import { isTerminal } from '../../data/leadStatus.js'
 import { Overdue, StageTag, MoreRows, useCap } from '../../components/primitives.jsx'
-import { initials, reqShort, renewalSignal, unitLabel, callbackSignal } from '../../lib/format.js'
+import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue } from '../../lib/format.js'
 import InstallPrompt from '../../components/InstallPrompt.jsx'
 import Icon from '../../components/Icon.jsx'
 
@@ -201,14 +201,14 @@ export default function PhoneToday({ store, me, go, topBar }) {
     .sort((a, b) => a.signal.days - b.signal.days)
 
   const open = scoped.filter(l => !CLOSED(l))
-  const overdue = open.filter(l => l.overdue)
+  const overdue = open.filter(l => followUpOverdue(l.followUp))
   const todayFu = open
-    .filter(l => l.followUp && !l.overdue && l.followUp.date === 'Today')
+    .filter(l => l.followUp && !followUpOverdue(l.followUp) && l.followUp.date === 'Today')
     .sort((a, b) => timeRank(a.followUp.time) - timeRank(b.followUp.time))
   const fresh = open.filter(l => l.stage === 'New')
-  const noNext = open.filter(l => l.stage !== 'New' && !l.followUp && !l.overdue)
+  const noNext = open.filter(l => l.stage !== 'New' && !l.followUp)
   const unassigned = open.filter(l => !l.agentId)
-  const upcoming = open.filter(l => l.followUp && !l.overdue && l.followUp.date !== 'Today')
+  const upcoming = open.filter(l => l.followUp && !followUpOverdue(l.followUp) && l.followUp.date !== 'Today')
 
   const isDesk = state.role !== 'agent'
   const ownerRows = feed.owners || {}

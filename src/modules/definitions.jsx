@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, reqConfigLabel, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel } from '../lib/format.js'
+import { reqShort, reqConfigLabel, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -161,7 +161,7 @@ export const LEADS_DEF = {
       })
     }
     if (key === 'flag') {
-      return (vals.includes('overdue') && l.overdue) ||
+      return (vals.includes('overdue') && followUpOverdue(l.followUp)) ||
         (vals.includes('unassigned') && !l.agentId) ||
         (vals.includes('new') && (l.minsAgo || 0) < 1440)
     }
@@ -207,7 +207,7 @@ export const LEADS_DEF = {
     ) },
     { key: 'next', label: 'Next follow-up', render: (l) => {
       const nf = l.followUp ? followUpLabel(l.followUp) : '—'
-      return l.overdue ? <Overdue>{nf}</Overdue> : <span className="cell-quiet mono-num">{nf}</span>
+      return followUpOverdue(l.followUp) ? <Overdue>{nf}</Overdue> : <span className="cell-quiet mono-num">{nf}</span>
     } },
     // When it arrived. Sortable, because "show me this week's" is the question
     // it exists to answer, and the server already orders on created_at.
@@ -395,6 +395,16 @@ export const LEADS_DEF = {
             {l.name}
             {l.enquiryCount > 1 && <span className="prow-repeat">{l.enquiryCount}×</span>}
           </span>
+          {/* WHAT is overdue, next to WHO it is about. This was a bare date on
+              the meta line below — "Yesterday", "Tomorrow" — which named no
+              subject at all: beside an agent's name and an arrival date, in a
+              row of three muted facts, it read as another date belonging to
+              whatever sat next to it. It also cost the line the width the
+              budget needed, so the figure was the thing that got clipped
+              against the buttons. Same words the filter uses, so the row and
+              the tab that selects it cannot describe the same lead
+              differently. */}
+          {followUpOverdue(l.followUp) ? <span className="prow-flag"><span className="dot" />Follow-up overdue</span> : null}
           <StageCell
             record={l} store={store}
             stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
@@ -410,15 +420,6 @@ export const LEADS_DEF = {
         <div className="prow-foot">
           <div className="prow-meta">
             {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
-            {/* OVERDUE ONLY. The non-overdue branch rendered the appointment
-                date as a bare span — "Today", "Tomorrow", "This Saturday" —
-                sitting between the agent's name and the ARRIVAL date, in the
-                same muted grey, with nothing saying which date was which. Two
-                different facts drawn identically on a 390px row, and the one
-                that reads first attaches itself to the name beside it. An
-                appointment that has not yet come due is not what makes a row
-                urgent; an overdue one is, and it keeps its own red treatment. */}
-            {l.overdue ? <Overdue>{l.followUp?.date || 'Overdue'}</Overdue> : null}
             {/* When it came in. On a phone this is the difference between
                 calling a fresh enquiry and calling one that has been sitting
                 three weeks, and the card had no way to tell them apart. */}

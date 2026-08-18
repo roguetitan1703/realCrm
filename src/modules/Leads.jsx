@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
-import { Button, Timeline, Overdue, Avatar, CappedList } from '../components/primitives.jsx'
+import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
 import { fitReasons, thumbTint, initials, unitLabel, budgetRange, whenLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
@@ -255,7 +255,6 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     )
   }
   const a = store.agentById(l.agentId)
-  const overdue = l.overdue
   const back = () => setSel(s => ({ ...s, leadOpen: false }))
   const role = store.state.role
   const userId = store.state.activeAgentId
@@ -419,7 +418,11 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
           def={LEADS_DEF} record={l} store={store} phone={phone}
           onEdit={(!phone && editable) ? openEdit : undefined}
           avatar={<Avatar agent={{ initials: initials(l.name), avatar: '' }} size="lg" />}
-          signals={overdue ? <Overdue>Overdue</Overdue> : null}
+          // NO OVERDUE FLAG HERE. A word on its own said nothing about what
+          // was overdue, and on a phone it wrapped the header's action row onto
+          // a second line to say it. The follow-up card in the record carries
+          // the date and what the follow-up is for, which is the answer someone
+          // opening the record actually wants.
           // Reaching a client is the whole reason this page gets opened, and
           // both ways of doing it were once only in the action button — two taps
           // and a menu to read, for the thing every visit starts with. So they
