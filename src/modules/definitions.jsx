@@ -77,18 +77,7 @@ export const LEADS_DEF = {
   // only added when the lead has one (no empty row); locality gets a pin so it
   // reads as a place, and sale/rent is a small tag rather than plain text — a
   // sentence like "3 BHK · rent · Wakad" made the deal type invisible.
-  headerFacts: (l, store, { phone } = {}) => [
-    // PHONE ONLY, and this is the whole reason headerFacts knows. The
-    // appointment card carries the date on the desk, and it lives on the rail,
-    // which a phone does not draw — so a phone record showed nothing at all
-    // about a follow-up that had been booked, let alone one whose moment had
-    // gone by. On the desk this would be the same fact twice, a few pixels
-    // apart, which is how the record ended up with two Log visit buttons.
-    phone && l.followUp
-      ? <span className={followUpOverdue(l.followUp) ? 'rh-late' : undefined}>
-          {l.followUp.action} · {followUpLabel(l.followUp)}
-        </span>
-      : null,
+  headerFacts: (l) => [
     l.phone,
     l.email || null,
     reqConfigLabel(l.req) || l.requirement || null,
