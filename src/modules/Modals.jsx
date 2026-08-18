@@ -2,7 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import Icon from '../components/Icon.jsx'
 import { Button, Field, Input, PhoneInput, Textarea, Segmented, Avatar, Source, StageTag, Money } from '../components/primitives.jsx'
 import { theme } from '../data/theme.js'
-import { budgetRange, reqLine, initials, thumbTint, fitReasons } from '../lib/format.js'
+// parseBudgetNum was USED in three places here and imported in none of them —
+// every money field's onBlur and the lead form's save were one ReferenceError
+// waiting for someone to type a budget. Plain JSX, so the build never said a
+// word about it.
+import { budgetRange, reqLine, reqShort, hasBudget, initials, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink, followUpMessage } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -15,7 +19,7 @@ import { pushPermission, enablePush as subscribeToPush } from '../lib/push.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities } from '../lib/suggest.js'
-import { CALL_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
+import { CALL_OUTCOMES, WA_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 
 /**
  * Generic modal frame.
@@ -193,16 +197,24 @@ function ModuleFormModal({ store, moduleId, recordId }) {
     // the lead would be saved with a budget of eighty rupees. The full-form
     // modal has always parsed this way; the record sheet has to agree.
     if (f.type === 'money') {
+      // The echo is the whole point. "80L" and "45000" are both valid here and
+      // a rent of 4500 renders as ₹4.5k downstream, so the shorthand cannot
+      // tell you whether the box read four thousand five hundred or forty-five
+      // lakh. It says the number back in full while you type.
+      const echo = moneyEcho(v)
       return (
-        <Input
-          value={v}
-          onChange={e => setField(f.key, e.target.value)}
-          onBlur={e => {
-            const n = parseBudgetNum(e.target.value)
-            setField(f.key, Number.isNaN(n) ? '' : n)
-          }}
-          placeholder="80L, 1.2Cr or 45000"
-        />
+        <>
+          <Input
+            value={v}
+            onChange={e => setField(f.key, e.target.value)}
+            onBlur={e => {
+              const n = parseBudgetNum(e.target.value)
+              setField(f.key, Number.isNaN(n) ? '' : n)
+            }}
+            placeholder="80L, 1.2Cr or 45000"
+          />
+          {echo && <span className="money-echo">{echo}</span>}
+        </>
       )
     }
     return <Input type={f.type === 'number' ? 'number' : 'text'} value={v} onChange={e => setField(f.key, e.target.value)} />
@@ -369,45 +381,151 @@ function TenancyModal({ store, propId }) {
 }
 
 // ---- Attach a property to a lead's shortlist ----
+//
+// D4. This was one undifferentiated list of every available listing on the
+// deal type, fifty rows deep, ordered by a fit score that was never shown
+// unless it cleared 60 — so an agent scrolled an endless column of societies
+// with no way to tell which of them had anything to do with the person they
+// were looking at. The lead's requirement was already on screen and was not
+// being used to narrow anything.
+//
+// Two lists now, and the split is the point:
+//
+//   SUGGESTED    the lead's own requirement, asked of the server — same deal,
+//                same locality, same config where each is actually known —
+//                each row carrying the reason it is here.
+//   ALL          every available listing, which is how an agent attaches
+//                something the requirement does not describe. That happens
+//                constantly and it is not an error: a client says 2 BHK in
+//                Baner and takes a 3 BHK in Balewadi.
+//
+// A lead with no requirement on file gets no Suggested tab at all rather than
+// an empty one. Nothing on record means nothing to suggest from, and a tab that
+// implies we looked and found nothing is a different claim from "we were never
+// told what they want".
 function AttachPropModal({ store, leadId }) {
   const l = store.lookup('lead', leadId)
   const [q, setQ] = useState('')
-  // The search box queries inventory instead of filtering a downloaded copy of
-  // it: `deal` narrows server-side, the text goes to the same LIKE the listings
-  // page uses. Only the fit score stays in the browser, because it scores the
-  // fifty rows that came back — not the whole book.
+  const [mode, setMode] = useState('suggested')
+
+  const req = l?.req || {}
+  // What we actually know. Each of these narrows the server query, and only if
+  // it is really there — `locality: undefined` must not become a filter on the
+  // string "undefined".
+  // Read through the SHARED vocabulary, so a requirement saying "2 BHK" can
+  // address a listing stored as "2 BHK Apartment" — see reqFacets. Every one of
+  // these is an indexed column on crm_properties, so the narrowing happens in
+  // Postgres rather than over fifty rows that happened to come back.
+  const facets = reqFacets(req)
+  const known = {
+    deal: req.deal || undefined,
+    locality: req.locality || undefined,
+    category: facets.category || undefined,
+    bhk: facets.bhk || undefined,
+    subtype: facets.subtype || undefined,
+  }
+  // Locality and deal NARROW; config only RANKS.
+  //
+  // A requirement's config is "1BHK" or "2 BHK", and a listing's type is
+  // "1 BHK duplex", "1rk BHK independent house", "3 BHK studio" — free-form
+  // composites typed by whoever entered the stock. An exact `type IN (…)`
+  // filter against that matches almost nothing: Baner has 3,000 available
+  // listings and a 1BHK requirement returned zero of them. Locality and deal
+  // are clean enumerations and can be trusted to filter; config is handed to
+  // the fit score, which is allowed to be approximate because it only decides
+  // the order.
+  const canSuggest = Boolean(known.locality || known.bhk || known.category || hasBudget(req))
+  // Typing is the escape hatch and it always searches everything. Narrowing a
+  // search by the requirement would hide the exact listing the agent is typing
+  // the name of.
+  const searching = q.trim().length > 0
+  const suggesting = canSuggest && mode === 'suggested' && !searching
+
   const { data: page, loading } = useServerData(
-    () => l ? api.listProperties({ deal: l.req?.deal, q: q.trim() || undefined, status: 'Available', limit: 50 }) : Promise.resolve({ data: [] }),
-    [leadId, l?.req?.deal, q.trim()],
+    () => {
+      if (!l) return Promise.resolve({ data: [] })
+      return api.listProperties({
+        status: 'Available', limit: 50,
+        deal: known.deal,
+        q: q.trim() || undefined,
+        // Category is the disqualifier and always narrows; locality and BHK are
+        // strong preferences. Subtype is deliberately NOT a filter — "penthouse"
+        // versus "apartment" is a preference people trade away, and filtering on
+        // it emptied the list. It still ranks, in fitReasons.
+        ...(suggesting ? { locality: known.locality, category: known.category, bhk: known.bhk } : {}),
+        // A commercial requirement must never be answered with flats, even when
+        // the agent is browsing everything.
+        ...(!suggesting && known.category ? { category: known.category } : {}),
+      })
+    },
+    [leadId, known.deal, known.locality, known.category, known.bhk, suggesting, q.trim()],
     { data: [] })
+
   if (!l) return null
   const already = new Set(l.shortlist || [])
   const cands = (page?.data || [])
     .filter(p => !already.has(p.id))
-    .map(p => ({ p, fit: fitReasons(p, l.req).score }))
-    .sort((a, b) => b.fit - a.fit)
+    .map(p => ({ p, ...fitReasons(p, req) }))
+    .sort((a, b) => b.score - a.score)
   const attach = (p) => { store.attachProp(leadId, p.id, p.society); store.closeModal() }
+
+  const emptyLine = searching ? 'Nothing matches that search.'
+    : suggesting ? 'No available listing fits this requirement — try All inventory.'
+      : 'No available inventory to attach.'
+
   return (
     <Modal title="Attach a property" onClose={store.closeModal} width={480}>
-      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>Shortlist inventory for <b style={{ color: 'var(--ink)' }}>{l.name}</b> ({l.req.config} · {l.req.deal} · {l.req.locality}).</div>
+      {/* reqShort handles a requirement that is half empty; the old line read
+          the three fields raw and printed "undefined · undefined · undefined"
+          on any lead nobody had filled in. */}
+      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
+        <b style={{ color: 'var(--ink)' }}>{l.name}</b>{reqShort(req) ? ` · ${reqShort(req)}` : ' · no requirement on record'}
+      </div>
+
+      {canSuggest && (
+        <div style={{ marginBottom: 12 }}>
+          <Segmented value={searching ? 'all' : mode} onChange={(v) => { setMode(v); if (v === 'all') setQ('') }}
+            options={[{ value: 'suggested', label: 'Suggested' }, { value: 'all', label: 'All inventory' }]} />
+        </div>
+      )}
+
       <div className="input-group" style={{ marginBottom: 12 }}>
         <span className="prefix"><Icon name="search" size={15} /></span>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search society, locality, type…" autoFocus />
       </div>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '46vh', overflowY: 'auto' }}>
         {loading && cands.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '8px 0' }}>Searching inventory…</div>}
-        {!loading && cands.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '8px 0' }}>No matching inventory to attach.</div>}
-        {cands.map(({ p, fit }) => (
-          <button key={p.id} onClick={() => attach(p)}
-            style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-            <div style={{ width: 40, height: 40, borderRadius: 8, background: thumbTint(p.id), display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--faint)', flexShrink: 0 }}><Icon name="building" size={19} strokeWidth={1.4} /></div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 13.5 }}>{p.society}</div>
-              <div className="u-muted" style={{ fontSize: 12 }}>{p.type} · {p.locality} · {p.priceLabel}{fit >= 60 ? ` · ${fit}% fit` : ''}</div>
-            </div>
-            <Icon name="plus" size={17} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-          </button>
-        ))}
+        {!loading && cands.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '8px 0' }}>{emptyLine}</div>}
+        {cands.map(({ p, score, reasons }) => {
+          // The best true thing about this listing for this person, and NOT the
+          // thing we filtered on. Suggested narrows by locality, so "Same
+          // locality · Baner" was printed identically on all fifty rows — true,
+          // and useless for choosing between them. Config, budget and
+          // possession are what separate one from the next; locality is only
+          // the answer when nothing else is.
+          const ok = (reasons || []).filter(r => r.ok)
+          const why = (suggesting ? ok.find(r => !/^(Same locality|Config matches)/.test(r.t)) : null) || ok[0]
+          return (
+            <button key={p.id} className="ap-row" onClick={() => attach(p)}
+              style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: thumbTint(p.id), display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--faint)', flexShrink: 0 }}><Icon name="building" size={19} strokeWidth={1.4} /></div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{p.society}</div>
+                {/* Joined from what EXISTS. Written as `a · b · c` it printed a
+                    trailing separator on every one of delpat's imported rows,
+                    which carry no price — a dangling "·" reads as a value that
+                    failed to load rather than one that was never entered. */}
+                <div className="u-muted" style={{ fontSize: 12 }}>{[p.type, p.locality, p.priceLabel].filter(Boolean).join(' · ')}</div>
+                {/* Only when there IS a requirement to have matched. Against a
+                    blank req every listing scores the same and a badge would be
+                    decoration pretending to be a judgement. */}
+                {canSuggest && why && <div className="ap-why">{why.t}{score >= 60 ? ` · ${score}% fit` : ''}</div>}
+              </div>
+              <Icon name="plus" size={17} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+            </button>
+          )
+        })}
       </div>
     </Modal>
   )
@@ -429,6 +547,11 @@ function LogCallModal({ store, leadId }) {
   const save = () => {
     setBusy(true)
     const label = labelForOutcome(outcome)
+    // The KEY goes to the server, the label only to the toast. This used to
+    // send `label`, so metadata.outcome held "No answer" — display copy doing
+    // the work of a key, which meant renaming an option silently orphaned every
+    // row already written and changed what the auto-advance rule matched.
+    //
     // contact-log, NOT the "telephony bridge". That route fabricated a DID, an
     // API key and a call SID and wrote "Initiated outbound telephony call …
     // via DID 08045678900" to the timeline. No call was placed and no telephony
@@ -436,7 +559,7 @@ function LogCallModal({ store, leadId }) {
     api.logContactAction(l.id, 'call')
       .then(res => {
         const evtId = res?.timeline_event?.id
-        return evtId ? api.editRemark(l.id, evtId, text.trim(), label) : null
+        return evtId ? api.editRemark(l.id, evtId, text.trim(), outcome) : null
       })
       .catch(err => console.warn('[Call log] error:', err.message))
       .finally(() => { store.reloadServer?.(); store.toast(`Call logged · ${label}`); store.closeModal() })
@@ -562,13 +685,23 @@ function NewLeadModal({ store, leadId }) {
     if (!f.name.trim()) { store.toast('Lead Name is required', 'warn'); return }
     if (!f.phone.trim()) { store.toast('Phone Number is required', 'warn'); return }
 
+    // A BUDGET NOBODY GAVE IS NOT A BUDGET.
+    //
+    // Leaving both boxes empty used to invent one: ₹25,000–45,000 on a rental,
+    // ₹1.1Cr–1.4Cr on a sale. A figure a client never said, written to the
+    // record, indistinguishable from one they did — and it drives matching, the
+    // budget column, and what an agent repeats back on the phone. One bhumi
+    // lead is still carrying the sale pair; which of them is genuine is knowable
+    // only from the person who took the enquiry.
+    //
+    // Empty stays empty. A missing budget is the most common true state of a
+    // fresh lead and every reader already handles it.
     const minB = parseBudgetNum(f.minBudget)
     const maxB = parseBudgetNum(f.maxBudget)
-    const budgetObj = (!isNaN(minB) || !isNaN(maxB))
-      ? { minBudget: isNaN(minB) ? 0 : minB, maxBudget: isNaN(maxB) ? 0 : maxB }
-      : (f.deal === 'rent'
-          ? { minBudget: 25000, maxBudget: 45000 }
-          : { minBudget: 11000000, maxBudget: 14000000 })
+    const budgetObj = {
+      minBudget: isNaN(minB) ? undefined : minB,
+      maxBudget: isNaN(maxB) ? undefined : maxB,
+    }
 
     if (edit) {
       store.updateLead(edit.id, {
@@ -632,8 +765,11 @@ function NewLeadModal({ store, leadId }) {
     store.closeModal()
   }
 
+  // `key` on the element itself: these are rendered from a .map, and without it
+  // React warns and — worse — reuses DOM nodes by position, so a chip's pressed
+  // state can follow the slot rather than the value it stands for.
   const chip = (on, onClick, label) => (
-    <button type="button" className={'qchip' + (on ? ' on' : '')} onClick={onClick}>{label}</button>
+    <button key={label} type="button" className={'qchip' + (on ? ' on' : '')} onClick={onClick}>{label}</button>
   )
 
   return (
@@ -682,11 +818,16 @@ function NewLeadModal({ store, leadId }) {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {/* Both echo the figure back in full while it is typed — 4500 and
+              45L abbreviate to ₹4.5k and ₹45L downstream, and neither tells the
+              person typing which one the box understood. */}
           <Field label={f.deal === 'rent' ? 'Min Budget (₹/mo)' : 'Min Budget (e.g. 80L or 1.2Cr)'}>
             <Input value={f.minBudget} onChange={e => set('minBudget', e.target.value)} placeholder={f.deal === 'rent' ? '25000' : '80L'} />
+            {moneyEcho(f.minBudget) && <span className="money-echo">{moneyEcho(f.minBudget)}</span>}
           </Field>
           <Field label={f.deal === 'rent' ? 'Max Budget (₹/mo)' : 'Max Budget (e.g. 1.4Cr)'}>
             <Input value={f.maxBudget} onChange={e => set('maxBudget', e.target.value)} placeholder={f.deal === 'rent' ? '45000' : '1.4Cr'} />
+            {moneyEcho(f.maxBudget) && <span className="money-echo">{moneyEcho(f.maxBudget)}</span>}
           </Field>
         </div>
 
@@ -1085,6 +1226,10 @@ const CHANNELS = {
   wa: { title: 'WhatsApp', noun: 'WhatsApp message', dest: 'WhatsApp' },
   email: { title: 'Email', noun: 'email', dest: 'mail app' },
 }
+// Which outcome list a channel is asked from. Email has none — nothing sends
+// one from here yet, and an empty dropdown teaches people to skip the control.
+const outcomesFor = (channel) =>
+  (channel === 'call' ? CALL_OUTCOMES : channel === 'wa' ? WA_OUTCOMES : null)
 
 function ContactConfirmModal({ store, channel, name, phone, email, waText, recordType, recordId }) {
   const [step, setStep] = useState('confirm')   // 'confirm' | 'outcome'
@@ -1128,6 +1273,13 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
   const saveOutcome = () => {
     if (!text.trim() && !outcome) { store.closeModal(); return }
     store.editRemark(recordType, recordId, loggedId, text.trim(), outcome || undefined)
+    // An outcome can move the lead's status on the server — "Call not received"
+    // does, and that is the whole point of capturing it. Only the timeline entry
+    // was being patched into local state, so the status pill kept showing the
+    // old stage until something else happened to reload: the automation worked
+    // and looked as though it had not, which is the fastest way to teach a desk
+    // to stop trusting it. The call-log modal already reloads; this one didn't.
+    store.reloadServer?.()
     store.closeModal()
   }
 
@@ -1135,10 +1287,18 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
     return (
       <Modal title={`${ch.title} logged`} onClose={store.closeModal} width={400}>
         <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>Optional — how did it go with {first}?</div>
-        {channel === 'call' && (
+        {/* The dropdown was gated to `call`, so a WhatsApp landed here with a
+            free-text box and nothing else — which is why bhumi has 219 WhatsApp
+            events and not one of them carries an outcome, against 186 calls that
+            mostly do. The difference was never the channel; it was that one of
+            them was asked and the other was not.
+            A message ends differently from a call, so it gets its own list
+            rather than being handed "No answer", which means nothing about a
+            message that has been delivered and not yet opened. */}
+        {outcomesFor(channel) && (
           <select className="input" value={outcome} onChange={e => setOutcome(e.target.value)} style={{ width: '100%', marginBottom: 10 }}>
             <option value="">No outcome yet</option>
-            {CALL_OUTCOMES.map(o => <option key={o.value} value={o.label}>{o.label}</option>)}
+            {outcomesFor(channel).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         )}
         <Textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a remark…" />
@@ -1293,7 +1453,8 @@ function VisitProofModal({ store, leadId, propId }) {
   const [outcome, setOutcome] = useState('')
   const [remark, setRemark] = useState('')
   const [busy, setBusy] = useState(false)
-  const [property, setProperty] = useState(propId || '')
+  // Whichever unit the modal was opened from, if any. Not a control.
+  const property = propId || ''
 
   // Ask for location the moment the modal opens. Failing fast is the whole
   // point: a denied permission ends the flow here, not after a photo.
@@ -1345,7 +1506,10 @@ function VisitProofModal({ store, leadId, propId }) {
       if (res) {
         // Completing the visit also clears the appointment — that's what the
         // agent came here to do; making them press Done again would be silly.
-        store.setFollowUp(leadId, null)
+        // The SERVER does it now, inside the same write that records the visit
+        // (addActivity → closeSiteVisitAppointment). It was a second request
+        // from here, and the record re-read the lead in the gap between the
+        // two: the appointment card vanished, came back, and vanished again.
         store.toast('Site visit logged with proof')
         store.closeModal()
       }
@@ -1409,20 +1573,16 @@ function VisitProofModal({ store, leadId, propId }) {
             </div>
           </Field>
 
-          {/* A visit REFERENCES a unit; it never gets written onto it. The
-              list is the lead's shortlist because that's what they'd be
-              shown — not the whole inventory. */}
-          {(l.shortlist || []).length > 0 && (
-            <Field label="Which unit? (optional)">
-              <select className="input" value={property} onChange={e => setProperty(e.target.value)}>
-                <option value="">Not tied to one unit</option>
-                {(l.shortlist || []).map(pid => {
-                  const p = store.lookup('property', pid)
-                  return p ? <option key={pid} value={pid}>{p.society} · {p.type}</option> : null
-                })}
-              </select>
-            </Field>
-          )}
+          {/* NO UNIT PICKER. A visit is logged standing outside a building with
+              a client waiting, and this asked a third question — optional, and
+              answered "Not tied to one unit" on 8 of the 9 visits ever logged.
+              A visit still REFERENCES a unit when the modal is opened from one
+              (`propId`); it is no longer a question put to the agent.
+
+              The cost, stated: `metadata.distanceM` — "180m from the listing" on
+              the timeline — needs a property to measure against, so a visit
+              logged from the lead screen now shows its coordinates instead of a
+              distance. Both are a link to the same map pin. */}
 
           <Field label="Remark (optional)">
             <Textarea value={remark} onChange={e => setRemark(e.target.value)} placeholder="What happened on the visit?" />
@@ -1564,7 +1724,11 @@ function StatusModal({ store, propId }) {
 const REJECT_REASONS = ['Price / budget', 'Vaastu / facing', 'Floor', 'Location', 'Noise', 'Size / layout', 'Furnishing', 'Parking']
 function VisitFeedbackModal({ store, leadId, propId }) {
   const l = store.lookup('lead', leadId)
-  const p = store.lookup('property', propId)
+  // The property comes from the lead's shortlist first. Reading only the
+  // browser cache returned null on any desk with paged inventory, and the
+  // guard below then rendered NOTHING — the button opened a modal that was
+  // not there, with no error and no toast.
+  const p = (l?.shortlistProps || []).find(x => x.id === propId) || store.lookup('property', propId)
   const [verdict, setVerdict] = useState('liked')
   const [reason, setReason] = useState(REJECT_REASONS[0])
   if (!l || !p) return null
@@ -1876,7 +2040,6 @@ function ScheduleFollowUpModal({ store, leadId }) {
   const [time, setTime] = useState('11:00 am')
   const [customTime, setCustomTime] = useState('11:00')
   const [useCustomTime, setUseCustomTime] = useState(false)
-  const [assignedAgentId, setAssignedAgentId] = useState(l?.agentId || store.state.agents[0]?.id || '')
   const [note, setNote] = useState('')
 
   if (!l) return null
@@ -1893,7 +2056,6 @@ function ScheduleFollowUpModal({ store, leadId }) {
       date: finalDate,
       time: finalTime,
       note: note.trim() || undefined,
-      agentId: assignedAgentId,
     })
     store.addNote(l.id, `Scheduled ${action} on ${finalDate} at ${finalTime}${note.trim() ? ` — Agenda: ${note.trim()}` : ''}`, 'visit')
     store.toast(`Appointment scheduled: ${action} on ${finalDate} at ${finalTime}`)
@@ -1956,15 +2118,13 @@ function ScheduleFollowUpModal({ store, leadId }) {
           )}
         </div>
 
-        <div className="field">
-          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Assigned Sales Executive</label>
-          <select value={assignedAgentId} onChange={e => setAssignedAgentId(e.target.value)}
-            style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)', marginTop: 5, fontSize: 13, fontFamily: 'inherit' }}>
-            {store.state.agents.map(a => (
-              <option key={a.id} value={a.id}>{a.name}{a.role ? ` (${a.role})` : ''}</option>
-            ))}
-          </select>
-        </div>
+        {/* "Assigned Sales Executive" was here: a dropdown of the whole team
+            that wrote followUp.agentId, a field NOTHING in this codebase reads.
+            It looked like it handed the visit to a colleague and it did not
+            move the lead, did not notify them, and did not appear on their
+            Today. A control that appears to delegate work and silently drops it
+            is worse than no control — the appointment belongs to whoever the
+            lead is assigned to, and reassigning is done on the lead itself. */}
 
         <Field label="Appointment Agenda / Location Note (Optional)">
           <Input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Meet at Hinjewadi Phase 3 sales lounge" />

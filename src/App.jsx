@@ -132,7 +132,18 @@ export default function App() {
   )
   const callQueue = ownerSummary?.summary?.queue || null
   const totals = desk?.leads || { total: 0, overdue: 0, unassigned: 0 }
-  const newCount = desk?.byStage?.['New'] || 0
+  // THE LEADS BADGE IS WORK WAITING, NOT A DROPDOWN NOBODY MOVED.
+  //
+  // It was `byStage['New']` — 11 on bhumi, beside a Today tab reading 0 and a
+  // Past SLA tile reading 60, three numbers about "new" that all disagreed. It
+  // was also the exact measure the Past SLA tile was corrected AWAY from: a
+  // stage is a dropdown an agent may or may not have moved, and on bhumi 60
+  // people had been moved out of New without anyone ever ringing them.
+  //
+  // Never contacted is the same expression the leads list's first tab uses, so
+  // the badge and the pile it opens onto are one query apart, and it goes DOWN
+  // when somebody works — which is what a badge is for.
+  const newCount = desk?.leads?.never_contacted || 0
   // The bell badge is unread NOTIFICATIONS — the thing the bell opens onto.
   // It used to be `overdue + unassigned + unreadNotifs`, which was only ever
   // right by accident: both lead counts were permanently 0, so the sum happened

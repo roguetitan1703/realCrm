@@ -18,12 +18,44 @@ export function configLabel(p = {}) {
   return [bhk, sub].filter(Boolean).join(' ') || p.type || 'Property'
 }
 
+/**
+ * A rupee amount, split into the number to show and its unit.
+ *
+ * THE UNIT ESCALATES, at every magnitude. The rent path used to divide by 1000
+ * and stop there, so a ₹45,00,000 lease read "₹4500k/mo" on the list while the
+ * record sheet beside it said "₹45L".
+ *
+ * TWO DECIMALS, trailing zeros dropped by String(). Rounding to whole units put
+ * "₹2L" over a stored ₹2,25,000 — hiding ₹25,000, which is 11% of the figure and
+ * enough to change who gets shown what. ₹4.5k, ₹25k, ₹2.25L, ₹93L, ₹1.23Cr.
+ *
+ * NO SCALE GUESSING. There is no "a small number must already be in Lakhs" rule
+ * here. That heuristic made a stored 123 render "₹1.2Cr" in the list and "₹123"
+ * on the sheet — one number, two readings, neither of them checkable. A value in
+ * the database is rupees. If that is wrong the input is wrong, and the fix is at
+ * the input, not in six formatters each guessing differently.
+ */
+function moneyParts(v) {
+  const [unit, div] = v >= 10000000 ? ['Cr', 10000000]
+    : v >= 100000 ? ['L', 100000]
+      : v >= 1000 ? ['k', 1000] : ['', 1]
+  return { shown: Math.round((v / div) * 100) / 100, unit }
+}
+
+/** One figure. `perMonth` is the ONLY deal-awareness money needs — rent is a
+ *  rate, a sale price is not, and leaving it off made the record sheet claim a
+ *  ₹25,000 rental lead wanted to spend ₹25,000 outright. */
+export function money(n, { perMonth = false } = {}) {
+  const v = Number(n)
+  if (!isFinite(v) || v <= 0) return ''
+  const { shown, unit } = moneyParts(v)
+  return '₹' + shown + unit + (perMonth ? '/mo' : '')
+}
+
+/** Kept for callers that have an amount and no deal (a listing's price, a
+ *  project's band). Same core, so it can no longer disagree with budgetRange. */
 export function fmtMoney(n) {
-  if (!n) return '—'
-  if (n >= 10000000) return '₹' + (n / 10000000).toFixed(n >= 100000000 ? 0 : 1).replace(/\.0$/, '') + 'Cr'
-  if (n >= 100000) return '₹' + Math.round(n / 100000) + 'L'
-  if (n >= 1000) return '₹' + Math.round(n / 1000) + 'k'
-  return '₹' + n
+  return money(n) || '—'
 }
 
 export function timeAgo(mins) {
@@ -154,6 +186,25 @@ export function parseBudgetNum(v) {
 }
 
 /**
+ * What a typed money value actually is, in full, in rupees.
+ *
+ * The abbreviation is exactly the thing that is ambiguous: a rent of 4500 shows
+ * as ₹4.5k and a budget of 45 lakh shows as ₹45L, and neither tells the person
+ * typing whether the box understood them. Two zeroes either way is the
+ * difference between a flat and a car, and nobody finds out until a client is
+ * quoted the wrong number.
+ *
+ * So the field echoes the whole figure back, grouped the Indian way —
+ * "45,00,000", not "4,500,000" — while they type. Returns '' for anything that
+ * is not a usable number, so an empty field stays quiet rather than reading ₹0.
+ */
+export function moneyEcho(v) {
+  const n = parseBudgetNum(v)
+  if (!isFinite(n) || n <= 0) return ''
+  return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 })
+}
+
+/**
  * A requirement's budget, whichever way it is spelled.
  *
  * There are two spellings in this codebase and only one of them is real. The
@@ -165,41 +216,88 @@ export function parseBudgetNum(v) {
  * So every budget comparison in the product was against `undefined`: NaN, false,
  * "above budget", every time. One accessor, tolerant of both, so the two
  * spellings can never disagree again.
+ *
+ * THREE, as it turns out. A plain `req.budget` is the third, and it is the one
+ * that matches how a budget is actually said: one number, not a range. 20
+ * delpat leads carry only that key, and every budget comparison on them —
+ * "within budget", the fit score, the budget column — was silently NaN. (bhumi
+ * has none, so the live desk was not affected.)
+ *
+ * A single figure is a CEILING: "budget 28867" means up to that, not from it.
+ * So it fills `max` and leaves `min` unknown, which is what it is.
  */
 export function budgetOf(req) {
   if (!req) return { min: NaN, max: NaN }
   return {
     min: parseBudgetNum(req.minBudget ?? req.budgetMin),
-    max: parseBudgetNum(req.maxBudget ?? req.budgetMax),
+    max: parseBudgetNum(req.maxBudget ?? req.budgetMax ?? req.budget),
   }
 }
 
 export function budgetRange(req) {
   if (!req) return '—'
   if (typeof req === 'string') return req
-  let { min, max } = budgetOf(req)
-  if (isNaN(min) || isNaN(max) || (min === 0 && max === 0)) {
-    // A lead with no budget shows no budget. This used to end in the literal
-    // '₹85L–₹1.2Cr' — an invented figure, rendered as fact, on every row of the
-    // table at once. Money is the last thing that should ever be guessed.
-    return req.budget || req.budgetLabel || '—'
+  const { min, max } = budgetOf(req)
+  const perMonth = req.deal === 'rent'
+  const hasMin = !isNaN(min) && min > 0
+  const hasMax = !isNaN(max) && max > 0
+
+  // A PORTAL SENDS ONE NUMBER, NOT A RANGE. This required both and fell through
+  // to the dash whenever either was missing — so 83 of bhumi's leads carried a
+  // real budget and rendered "—" on the record, the list and the phone card, in
+  // the same slot a lead with genuinely no budget uses. A single figure is a
+  // fact; refusing to show it because its partner is absent is 3.1 (absence
+  // treated as a defect rather than as information).
+  if (hasMin && hasMax) {
+    const a = moneyParts(min), b = moneyParts(max)
+    const tail = (perMonth ? '/mo' : '')
+    // Share the unit when both ends land in it — "₹50–90L", not "₹50L–₹90L".
+    return a.unit === b.unit
+      ? `₹${a.shown}–${b.shown}${b.unit}${tail}`
+      : `₹${a.shown}${a.unit}–₹${b.shown}${b.unit}${tail}`
   }
-  if (req.deal === 'rent') {
-    return '₹' + Math.round(min / 1000) + '–' + Math.round(max / 1000) + 'k/mo'
+  // "Up to" and "from" rather than a bare figure: which end of the budget we
+  // were given changes what it means to an agent about to negotiate.
+  if (hasMax) return 'Up to ' + money(max, { perMonth })
+  if (hasMin) return money(min, { perMonth }) + '+'
+
+  // Still no budget shows no budget. This used to end in the literal
+  // '₹85L–₹1.2Cr' — an invented figure, rendered as fact, on every row of the
+  // table at once. Money is the last thing that should ever be guessed.
+  return req.budget || req.budgetLabel || '—'
+}
+
+/** Whether budgetRange() would render anything real. The dash is a placeholder,
+ *  not a fact, and a facts strip that filters on truthiness keeps it — which is
+ *  why a record header read "3 BHK · Mahalunge · Buy · — · Via 99acres". */
+export const hasBudget = (req) => budgetRange(req) !== '—'
+
+/**
+ * WHAT THEY WANT, in one phrase — the string every row, card and header prints.
+ *
+ * `req.config` was read raw, and for a commercial requirement there is nothing
+ * in it: the parser clears "0 BHK" precisely because a showroom has no bedroom
+ * count. Left as it was, bhumi's 2.25 lakh a month showroom would have read
+ * "Rent · Mahalunge · 2.25L/mo" with nothing at all saying it was a showroom —
+ * strictly worse than the nonsense it replaced, because at least "0 BHK" made
+ * somebody ask.
+ *
+ * Residential keeps whatever config it holds. Commercial says its sub-type,
+ * which is the equivalent fact: "Showroom" is to a commercial enquiry what
+ * "2 BHK" is to a home.
+ */
+export function reqConfigLabel(req) {
+  if (!req) return null
+  const f = reqFacets(req)
+  if (f.category === 'commercial') {
+    return labelOf(SUBTYPES.commercial, f.subtype) || 'Commercial'
   }
-  // Normalize raw rupees (> 10000) to Lakhs
-  if (min > 10000) min = min / 100000
-  if (max > 10000) max = max / 100000
-  if (max >= 100) {
-    const minStr = min >= 100 ? `₹${(min / 100).toFixed(1)}Cr` : `₹${Math.round(min)}L`
-    return `${minStr}–₹${(max / 100).toFixed(1)}Cr`
-  }
-  return `₹${Math.round(min)}–₹${Math.round(max)}L`
+  return req.config || (f.bhk ? labelOf(BHK, f.bhk) : null)
 }
 
 export function reqLine(req) {
   if (!req) return 'General inquiry'
-  const parts = [req.config, req.locality, budgetRange(req)].filter(x => x && x !== 'undefined' && x !== 'null')
+  const parts = [reqConfigLabel(req), req.locality, budgetRange(req)].filter(x => x && x !== 'undefined' && x !== 'null')
   return parts.join(' · ') || 'General inquiry'
 }
 
@@ -219,15 +317,20 @@ export function reqLine(req) {
  * listing is not on file, which for an imported sheet is most of the time.
  * Linking a real property is what the shortlist does, separately and later.
  */
-export function reqShort(req) {
+export function reqShort(req, { budget = true } = {}) {
   if (!req) return 'Any requirement'
   const deal = labelOf(DEAL_LEAD, req.deal) || null
-  const budget = budgetRange(req)
+  // `budget: false` for a caller that shows the figure in its own slot — the
+  // phone list row puts it on the meta line beside the agent and the date. It
+  // would otherwise print twice on one card, and this line is single-line
+  // ellipsis-clipped, so the duplicate costs `interest` (last in the join) the
+  // room to render at all.
+  const money = budget ? budgetRange(req) : null
   const parts = [
-    req.config,
+    reqConfigLabel(req),
     deal,
     req.locality,
-    budget && budget !== '—' ? budget : null,
+    money && money !== '—' ? money : null,
     req.interest,
   ].filter(x => x && x !== 'undefined' && x !== 'null')
   return parts.join(' · ') || 'General inquiry'
@@ -241,20 +344,121 @@ export function initials(name) {
 // Explainable match: ranked reasons + a 0–100 fit score (logic, not AI).
 export function fitReasons(p, req) {
   const reasons = []; let score = 0
-  if (p.type === req.config) { reasons.push({ ok: true, t: 'Config matches (' + p.type + ')' }); score += 25 }
+  // Config, through the shared vocabulary rather than `p.type === req.config`
+  // — which compared "2 BHK Apartment" against "2 BHK" and was therefore never
+  // true, so the config was worth 25 points to nobody.
+  const f = facetFit(p, req)
+  if (f.hard) {
+    // A shop against someone who wants a flat. Nothing else about the listing
+    // can make this a match, and letting locality and budget carry it to a
+    // respectable score is how a showroom ends up suggested to a family.
+    reasons.push({ ok: false, t: f.want.category === 'commercial' ? 'Residential — they want commercial' : 'Commercial — they want residential' })
+    return { reasons, score: 0 }
+  }
+  if (f.bhkMatch) { reasons.push({ ok: true, t: 'Config matches (' + configLabel(p) + ')' }); score += 25 }
+  else if (f.subtypeMatch) { reasons.push({ ok: true, t: labelOf(SUBTYPES[propFacets(p).category] || SUBTYPES.residential, propFacets(p).subtype) + ' as asked' }); score += 15 }
+  else if (f.categoryMatch && f.want.category === 'commercial') { score += 15 }
   if (p.locality === req.locality) { reasons.push({ ok: true, t: 'Same locality · ' + req.locality }); score += 30 }
   else { reasons.push({ ok: false, t: 'Different area (' + p.locality + ')' }); score += 8 }
+  // A BUDGET IS USUALLY ONE NUMBER. This tested `price >= min && price <= max`,
+  // so a requirement with only a ceiling — which is how a budget is actually
+  // stated, and now the commonest shape on file — fell through both branches to
+  // "we cannot say", and the listing that fitted perfectly got no more credit
+  // than the one at triple the money. Each end is judged on its own, and an end
+  // nobody gave is simply not judged.
   const { min: bMin, max: bMax } = budgetOf(req)
-  const inB = p.price >= bMin * 0.95 && p.price <= bMax * 1.08
-  if (inB) { reasons.push({ ok: true, t: 'Within budget' }); score += 30 }
-  else if (p.price < bMin) { reasons.push({ ok: true, t: 'Under budget — room to negotiate' }); score += 18 }
-  // No budget on record is not the same as over budget, and saying so put
-  // "Above budget" on every match the product has ever shown.
-  else if (isNaN(bMin) || isNaN(bMax)) { score += 12 }
-  else { reasons.push({ ok: false, t: 'Above budget' }); score += 5 }
+  const hasMin = !isNaN(bMin), hasMax = !isNaN(bMax)
+  const priced = p.price > 0
+  const underMax = hasMax && p.price <= bMax * 1.08
+  const overMin = hasMin && p.price >= bMin * 0.95
+  if (!priced || (!hasMin && !hasMax)) {
+    // No budget on record is not the same as over budget, and saying so put
+    // "Above budget" on every match the product has ever shown. A listing with
+    // no price on it cannot be judged either.
+    score += 12
+  } else if ((hasMin ? overMin : true) && (hasMax ? underMax : true)) {
+    reasons.push({ ok: true, t: 'Within budget' }); score += 30
+  } else if (hasMin && p.price < bMin) {
+    reasons.push({ ok: true, t: 'Under budget — room to negotiate' }); score += 18
+  } else {
+    reasons.push({ ok: false, t: 'Above budget' }); score += 5
+  }
   if (p.possession === 'Immediate') { reasons.push({ ok: true, t: 'Ready to move' }); score += 10 }
   if (p.status === 'Available') score += 5
   return { reasons: reasons.slice(0, 4), score: Math.min(99, score) }
+}
+
+// ============================================================================
+// WHAT SOMEONE WANTS, AND WHAT A LISTING IS — read through ONE vocabulary
+// ============================================================================
+// A property was fixed long ago: `type` was split into canonical `category`,
+// `bhk` and `subtype`, with normalisers that read the legacy free text so old
+// and new rows behave identically. The LEAD requirement was never given the
+// same treatment, and everything that compares the two did it by string:
+//
+//     p.type === req.config        matching.js, three times, as a HARD FILTER
+//     p.type === req.config        fitReasons, as the config score
+//
+// 77 leads say "2 BHK". 750 listings say "2 BHK Apartment". That comparison has
+// never once been true, so `matchesForLead` and `leadsForProperty` — the buyer
+// suggestions on a listing and the listing suggestions on a buyer — returned
+// almost nothing, on every desk, since they were written.
+//
+// These read a requirement into the same three facets a listing already has,
+// using the same normalisers, so the two sides can finally be compared.
+const COMMERCIAL_WORDS = /\b(commercial|office|shop|showroom|warehouse|godown|industrial|coworking|co-working|retail)\b/i
+
+/** A requirement's category / bhk / subtype, from whatever it actually holds. */
+export function reqFacets(req) {
+  if (!req) return { category: null, bhk: null, subtype: null }
+  // Everything the person told us, in one string — the config field is where a
+  // portal puts "Commercial Office", but the useful word is as often in the
+  // free-text interest or notes.
+  const text = [req.config, req.interest, req.notes].filter(Boolean).join(' ')
+  const category = req.category
+    // "0 BHK" is how 99acres describes a showroom: nought bedrooms is not a
+    // small flat, it is a building with no bedrooms in it.
+    || (COMMERCIAL_WORDS.test(text) || /\b0\s*bhk\b/i.test(text) ? 'commercial' : null)
+    || (normaliseBhk(text) ? 'residential' : null)
+  return {
+    category,
+    // A commercial requirement has no BHK, and reading "0" as one would file a
+    // showroom next to studio flats.
+    bhk: category === 'commercial' ? null : normaliseBhk(text),
+    subtype: req.subtype || normaliseSubtype(text, category || 'residential'),
+  }
+}
+
+/** The same three facets for a listing, tolerant of rows written before the
+ *  columns existed — the property half of the comparison above. */
+export function propFacets(p) {
+  if (!p) return { category: null, bhk: null, subtype: null }
+  const category = p.category || (COMMERCIAL_WORDS.test(p.type || '') ? 'commercial' : 'residential')
+  return {
+    category,
+    bhk: p.bhk || (category === 'commercial' ? null : normaliseBhk(p.type)),
+    subtype: p.subtype || normaliseSubtype(p.type, category),
+  }
+}
+
+/**
+ * Does this listing answer this requirement?
+ *
+ * `hard` is the disqualifier — a commercial requirement against a 2 BHK flat,
+ * which no amount of matching on locality or budget should rescue. Everything
+ * else is a degree, because "3 BHK when they asked for 2" is a conversation an
+ * agent legitimately has and a filter that forbids it is wrong.
+ */
+export function facetFit(p, req) {
+  const a = propFacets(p), b = reqFacets(req)
+  const hard = Boolean(a.category && b.category && a.category !== b.category)
+  return {
+    hard,
+    categoryMatch: Boolean(a.category && b.category && a.category === b.category),
+    bhkMatch: Boolean(a.bhk && b.bhk && a.bhk === b.bhk),
+    subtypeMatch: Boolean(a.subtype && b.subtype && a.subtype === b.subtype),
+    want: b,
+  }
 }
 
 // Rate per sqft (sale only) — a reference figure brokers cite. Data, not a hero.

@@ -5,6 +5,7 @@ import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
 import { whenLabel, agentName } from '../lib/format.js'
 import { fileUrl, formatDistance } from '../lib/media.js'
+import { CALL_OUTCOMES, WA_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 
 // ---- Button ----
 export function Button({ variant = 'ghost', size, block, icon, children, className, ...rest }) {
@@ -422,13 +423,45 @@ export function Stepper({ stages, current, onPick }) {
 const EDITABLE_TYPES = new Set(['remark', 'call', 'wa', 'sms'])
 // Exported: the record header shows the latest of these at the top, and a
 // second copy of this map would be two vocabularies drifting apart.
-export const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit' }
+export const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit', followup: 'Follow-up' }
 // B4 outcomes are stored as stable keys; these are what a person reads.
 export const VISIT_OUTCOME_LABEL = {
   interested: 'Interested', not_interested: 'Not interested',
   negotiating: 'Negotiating', booked: 'Booked', no_show: 'No show',
 }
-const CALL_OUTCOMES = ['Connected & Discussed Requirements', 'Interested — Scheduling Site Visit', 'Requested Callback Later', 'No Answer / Ringing', 'Number Busy / Switched Off']
+/**
+ * The outcomes this entry can be given, by what kind of entry it is.
+ *
+ * There was a SECOND call-outcome list hard-coded here — five strings that
+ * disagreed with the seven in src/data/callOutcomes.js on every single one:
+ * "No Answer / Ringing" against "No answer", "Requested Callback Later"
+ * against "Asked to call back", "Number Busy / Switched Off" against "Busy or
+ * switched off", and no "Wrong number" or "Not interested" at all.
+ *
+ * So the dropdown an agent saw depended on which control they reached it
+ * through — the confirm modal after a call offered one vocabulary, editing that
+ * same entry on the timeline five minutes later offered another. Both wrote to
+ * `metadata.outcome`, which stores the label, so one desk has been filling one
+ * column with two vocabularies. Any report grouping by outcome splits every
+ * category in half.
+ *
+ * One list, imported, and WhatsApp gets its own — a message does not end the
+ * way a call does.
+ */
+const OUTCOMES_FOR = { call: CALL_OUTCOMES, wa: WA_OUTCOMES, sms: WA_OUTCOMES }
+
+/**
+ * A stored outcome, as a person reads it — from any of the three vocabularies,
+ * and tolerant of what is already in the database.
+ *
+ * Contact outcomes are stored as stable keys (`no_answer`) and resolved here;
+ * visit outcomes have always been keys (`interested`); and rows written before
+ * the switch hold a display string ("No answer") which is returned unchanged.
+ * That last fallback is what lets the label be renamed without the history
+ * going blank — an old row keeps saying what it said when it was written.
+ */
+export const outcomeLabel = (raw) =>
+  (raw ? (labelForOutcome(raw) || VISIT_OUTCOME_LABEL[raw] || raw) : '')
 
 /**
  * The proof attached to a site visit (B4): the selfie, the GPS fix, and — when
@@ -450,11 +483,23 @@ function VisitProof({ meta }) {
         </a>
       )}
       {photoWithheld && <span className="ev-proof-locked"><Icon name="shield" size={12} />Proof on file</span>}
+      {/* WHERE, and it has to be somewhere a person can go and look.
+          This read "±15m accuracy" whenever the listing had no coordinates on
+          file — which is most of them — so the line about the location said
+          nothing about the location. Accuracy answers "how good is this fix",
+          and nobody had asked that; they had asked where the agent was.
+          The coordinates were being stored all along and never shown, so they
+          are the link now: one tap opens the exact spot in a map. A place NAME
+          needs a reverse-geocoding key we do not have yet; until then this is
+          the whole truth rather than a decorative part of it. */}
       {geo && (
-        <span className="ev-proof-geo">
+        <a className="ev-proof-geo" target="_blank" rel="noreferrer"
+          href={`https://www.google.com/maps/search/?api=1&query=${geo.lat},${geo.lng}`}>
           <Icon name="mapPin" size={12} />
-          {distanceM != null ? `${formatDistance(distanceM)} from the listing` : `±${Math.round(geo.accuracy || 0)}m accuracy`}
-        </span>
+          {distanceM != null
+            ? `${formatDistance(distanceM)} from the listing`
+            : `${Number(geo.lat).toFixed(5)}, ${Number(geo.lng).toFixed(5)}`}
+        </a>
       )}
     </div>
   )
@@ -462,6 +507,16 @@ function VisitProof({ meta }) {
 
 export function Timeline({ events = [], agents = [], currentUserId, onEditRemark }) {
   const list = events || [];
+  // WHICH ROW IS OPEN, decided here rather than by each row for itself.
+  //
+  // Every row held its own `editing` flag, so opening one did nothing to the
+  // others: a timeline could be opened all the way down, six textareas and six
+  // Save buttons stacked on one record with no way to tell which one a keypress
+  // was going into. One at a time, and the id says which.
+  //
+  // Closing a row does NOT discard what was typed into it — the draft stays on
+  // that row and comes back when it is reopened. Only Cancel or Save clears it.
+  const [editingId, setEditingId] = useState(null);
   // A worked lead accumulates every call, remark and stage move it has ever
   // had. Newest is what's being looked for; the rest is history, and rendering
   // all of it pushed everything below the timeline off the end of the page.
@@ -473,7 +528,9 @@ export function Timeline({ events = [], agents = [], currentUserId, onEditRemark
       <div className="tl">
         {shown.map((e, i) => (
           <TimelineRow key={e.id || i} e={e} isLast={i === shown.length - 1}
-            agents={agents} currentUserId={currentUserId} onEditRemark={onEditRemark} fmtLabel={fmtLabel} />
+            agents={agents} currentUserId={currentUserId} onEditRemark={onEditRemark} fmtLabel={fmtLabel}
+            editing={!!e.id && editingId === e.id}
+            onOpen={() => setEditingId(e.id)} onClose={() => setEditingId(null)} />
         ))}
       </div>
       <MoreRows more={more} step={8} noun="older" onMore={showMore} />
@@ -481,22 +538,27 @@ export function Timeline({ events = [], agents = [], currentUserId, onEditRemark
   )
 }
 
-function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel }) {
-  const [editing, setEditing] = useState(false)
-  const [text, setText] = useState(e.label || '')
-  const [outcome, setOutcome] = useState(e.metadata?.outcome || '')
+function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel, editing, onOpen, onClose }) {
+  // `null` means "nothing unsaved here" and the row reads straight from the
+  // event. Held as one object rather than two useStates so that closing the row
+  // (because another one opened) can leave the draft alone while still letting
+  // the event's own values win once it is cleared.
+  const [draft, setDraft] = useState(null)
+  const text = draft ? draft.text : (e.label || '')
+  const outcome = draft ? draft.outcome : (e.metadata?.outcome || '')
+  const edit = (patch) => setDraft({ text, outcome, ...patch })
   const tag = TYPE_TAG[e.type]
   const canEdit = tag && EDITABLE_TYPES.has(e.type) && e.id && e.authorId && currentUserId && e.authorId === currentUserId && !!onEditRemark
   // The moment, not the elapsed time. An agent has to be able to say "you
   // called him Tuesday evening"; "2d ago" cannot be turned into that.
   const ago = e.timestamp ? whenLabel(e.timestamp) : (e.ago || '')
   const author = e.authorId ? agentName(agents, e.authorId) : null
-  const rawOutcome = e.metadata?.outcome
-  const outcomeText = rawOutcome ? (VISIT_OUTCOME_LABEL[rawOutcome] || rawOutcome) : ''
+  const outcomeText = outcomeLabel(e.metadata?.outcome)
   const save = () => {
     if (!text.trim() && !outcome) return
     onEditRemark(e.id, text.trim(), outcome || undefined)
-    setEditing(false)
+    setDraft(null)
+    onClose?.()
   }
   return (
     <div className="ev">
@@ -507,15 +569,15 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel 
       <div className="ev-b">
         {editing ? (
           <div className="ev-edit">
-            {e.type === 'call' && (
-              <select className="input" value={outcome} onChange={ev => setOutcome(ev.target.value)}>
+            {OUTCOMES_FOR[e.type] && (
+              <select className="input" value={outcome} onChange={ev => edit({ outcome: ev.target.value })}>
                 <option value="">No outcome yet</option>
-                {CALL_OUTCOMES.map(o => <option key={o} value={o}>{o}</option>)}
+                {OUTCOMES_FOR[e.type].map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             )}
-            <textarea className="textarea" value={text} onChange={ev => setText(ev.target.value)} rows={2} placeholder="Add a remark…" autoFocus />
+            <textarea className="textarea" value={text} onChange={ev => edit({ text: ev.target.value })} rows={2} placeholder="Add a remark…" autoFocus />
             <div className="ev-edit-actions">
-              <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(false); setText(e.label || ''); setOutcome(e.metadata?.outcome || '') }}>Cancel</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setDraft(null); onClose?.() }}>Cancel</button>
               <button className="btn btn-primary btn-sm" onClick={save}>Save</button>
             </div>
           </div>
@@ -525,7 +587,7 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel 
             {e.type === 'visit' && <VisitProof meta={e.metadata || {}} />}
             <div className="ev-a">
               {author ? `${author} · ` : ''}{ago}{outcomeText ? ` · ${outcomeText}` : ''}{e.metadata?.edited ? ' · edited' : ''}
-              {canEdit && <button className="ev-edit-btn" onClick={() => setEditing(true)}>{e.metadata?.edited ? 'Edit' : 'Add outcome & remark'}</button>}
+              {canEdit && <button className="ev-edit-btn" onClick={onOpen}>{e.metadata?.edited ? 'Edit' : 'Add outcome & remark'}</button>}
             </div>
           </>
         )}

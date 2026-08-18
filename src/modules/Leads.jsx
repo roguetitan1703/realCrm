@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Overdue, Avatar, CappedList } from '../components/primitives.jsx'
-import { fitReasons, thumbTint, initials, unitLabel } from '../lib/format.js'
+import { fitReasons, thumbTint, initials, unitLabel, budgetRange, whenLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
@@ -257,7 +257,12 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
 
   // merged property list: shortlisted pinned first, then system matches
   const shortlistIds = l.shortlist || []
-  const byId = (id) => store.lookup('property', id)
+  // Server first, browser cache only as a fallback. This was `store.lookup`
+  // alone — a read of whatever the listings page had paged into memory — so on
+  // any desk with more inventory than one page, a shortlisted property resolved
+  // to undefined and was dropped by the filter(Boolean) below. The section then
+  // said "No shortlisted or matching inventory yet" over a lead that had four.
+  const byId = (id) => (l.shortlistProps || []).find(p => p.id === id) || store.lookup('property', id)
   const fbMap = l.feedback || {}
   const propRows = [
     ...shortlistIds.map(byId).filter(Boolean).map(p => ({ p, shortlisted: true, fit: fitReasons(p, l.req).score, line: quotedShort(p) })),
@@ -283,13 +288,19 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
           </div>
           {/* B4: a site visit closes with proof (live photo + location), not a
               bare click. Every other appointment type — calls, meetings, demos
-              — keeps the one-click Done, because there's nothing to verify. */}
+              — keeps the one-click Done, because there's nothing to verify.
+              The completion event is now written by the SERVER, inside
+              updateLead, the moment follow_up clears — not from here. A local
+              addNote() landed as an editable remark, indistinguishable from a
+              sentence an agent typed; the server writes its own type instead. */}
           {isSiteVisit(l.followUp) ? (
             <button className="btn btn-primary btn-sm fu-done" onClick={() => store.openModal({ kind: 'visitProof', leadId: l.id })}>
               Log visit
             </button>
           ) : (
-            <button className="btn btn-ghost btn-sm fu-done" onClick={() => { store.setFollowUp(l.id, null); store.toast('Appointment marked completed') }}>Done</button>
+            <button className="btn btn-ghost btn-sm fu-done" onClick={() => {
+              store.setFollowUp(l.id, null); store.toast('Appointment marked completed')
+            }}>Done</button>
           )}
         </div>
       ) : <div className="detail-empty">No active appointment or follow-up scheduled.</div>}
@@ -300,6 +311,48 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   )
 
   const sections = [
+    // WHAT THEY ASKED FOR, EACH TIME THEY ASKED.
+    //
+    // A repeat enquiry used to survive only as a note — "[Repeat enquiry via
+    // 99acres]" and a sentence — so the newer requirement was unreachable by
+    // any filter, match or report. This is the same history as data.
+    //
+    // Sessions, not payloads: on the live desk one man opened four listings
+    // between 18:05 and 18:10 and that is ONE enquiry, shown as "4 listings",
+    // not four visits. Counting the clicks would have said he enquired four
+    // times and taken his budget from whichever flat he opened last.
+    //
+    // The section only exists once there is more than one, because "1 enquiry"
+    // is every lead and a panel saying so is a panel about nothing.
+    ...((l.enquiries || []).length > 1 ? [{
+      id: 'enquiries',
+      title: `${l.enquiries.length} enquiries`,
+      render: () => (
+        <div className="enq-list">
+          {l.enquiries.map((e, i) => {
+            const list = (v) => (Array.isArray(v) ? v.join(' · ') : v)
+            const facts = [
+              list(e.req?.config),
+              list(e.req?.locality),
+              budgetRange(e.req),
+              list(e.req?.interest),
+            ].filter(x => x && x !== '—')
+            return (
+              <div key={e.id} className={'enq-row' + (i ? ' relrow-div' : '')}>
+                <div className="enq-when">
+                  {whenLabel(e.at)}
+                  {/* How many listings they opened in that sitting. Only when it
+                      is more than one — otherwise it is noise on every row. */}
+                  {e.listings > 1 && <span className="enq-n">{e.listings} listings</span>}
+                </div>
+                <div className="enq-req">{facts.length ? facts.join(' · ') : 'No requirement sent'}</div>
+                {e.source && <div className="enq-src">via {e.source}</div>}
+              </div>
+            )
+          })}
+        </div>
+      ),
+    }] : []),
     {
       id: 'inventory',
       title: 'Matched & shortlisted inventory',
@@ -324,7 +377,10 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                       ? <span className="fit ok fit-tight"><Icon name="check" size={11} />Shortlisted</span>
                       : <span className="source">{row.fit}% match</span>)}
                   </div>
-                  <div className="relrow-sub">{row.p.type} · {row.p.locality} · {row.line}</div>
+                  {/* Joined, not templated. Hardcoding the separators printed a
+                      trailing " · " whenever a property had no price, which on
+                      imported inventory is most of them. */}
+                  <div className="relrow-sub">{[row.p.type, row.p.locality, row.line].filter(Boolean).join(' · ')}</div>
                 </button>
                 <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(row.p.id, l.id)} icon="wa">Share Match</Button>
               </div>
@@ -361,11 +417,34 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
           // Email joins them when the lead has one — same confirm-and-log path,
           // so an email is recorded on the timeline exactly like a call is.
           primary={[
+            // A BOOKED SITE VISIT OUTRANKS EVERYTHING — ON A PHONE. The
+            // appointment card carries "Log visit" and the rail it sits in is
+            // not drawn on a phone, so the one action the agent is standing
+            // outside the building to perform was reachable only through the
+            // overflow sheet, while Call and WhatsApp sat across the screen in
+            // full.
+            //
+            // PHONE ONLY, though. Unconditional, it put a second identical Log
+            // visit in the header of the desk record, a few pixels above the
+            // one on the appointment card — same label, same modal, two buttons
+            // for one action. The card's is the better of the two on a desk
+            // because it sits under the appointment it closes; this one exists
+            // solely to stand in for a card that isn't there.
+            ...(phone && isSiteVisit(l.followUp)
+              ? [{ label: 'Log visit', icon: 'camera', onClick: () => store.openModal({ kind: 'visitProof', leadId: l.id }) }]
+              : []),
             ...(l.phone ? [
               { label: 'Call', icon: 'phone', onClick: () => contact('call') },
               { label: 'WhatsApp', icon: 'wa', tone: 'wa', onClick: () => contact('wa') },
             ] : []),
-            ...(l.email ? [{ label: 'Email', icon: 'mail', onClick: () => contact('email') }] : []),
+            // Email steps aside for Log visit. The row is three across on a
+            // 390px screen; a fourth wraps, and a wrapped action row pushes the
+            // record's own identity down the page. Email is the least urgent of
+            // the four by a distance — it is still on the action button — and
+            // this only happens on the phone, while a visit is actually booked.
+            // The desk row never gains a fourth button, so it never loses one.
+            ...(l.email && !(phone && isSiteVisit(l.followUp))
+              ? [{ label: 'Email', icon: 'mail', onClick: () => contact('email') }] : []),
           ]}
           railTop={followUpCard}
           sections={sections}
@@ -384,5 +463,10 @@ function followFrom(f, l) {
 
 // compact, quiet money string for a property row (deal-aware)
 function quotedShort(p) {
+  // A property with no price has no price line. Template-stringing an absent
+  // priceLabel produced the literal word "undefined", which then rendered as a
+  // fact on the record: "2 BHK Apartment · Pune · undefined". Same shape as the
+  // budget dash — a missing value dressed up as a value.
+  if (!p?.priceLabel) return ''
   return p.deal === 'rent' ? `${p.priceLabel}` : `${p.priceLabel}${p.negotiable ? ' · neg.' : ''}`
 }

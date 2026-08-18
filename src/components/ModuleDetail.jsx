@@ -27,7 +27,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { ModuleRecordSheet } from './ModuleFields.jsx'
-import { Panel, SectionHead, Button, Stepper, StageTag, TYPE_TAG, VISIT_OUTCOME_LABEL } from './primitives.jsx'
+import { Panel, SectionHead, Button, Stepper, StageTag, TYPE_TAG, outcomeLabel } from './primitives.jsx'
 import { DetailLayout } from '../layouts/layouts.jsx'
 import { ActionRail, RailSection } from './rail.jsx'
 import { SelectDropdown } from './collections.jsx'
@@ -58,9 +58,29 @@ import { buildActionTiers } from '../modules/definitions.jsx'
  */
 const NOTE_TYPES = new Set(['remark', 'call', 'wa', 'sms', 'visit'])
 
+/**
+ * Text the SERVER wrote when a button was pressed — "WhatsApp initiated",
+ * "Call initiated" (routes/actions.ts logs `${title} initiated`). It records
+ * that a thing happened; nobody chose those words.
+ */
+const AUTO_TEXT = /^(call|whatsapp|sms|email)\s+initiated\.?$/i
+
 function LatestRemark({ record, store }) {
-  const latest = (record.timeline || []).find(e =>
+  // Two passes, because recency alone is the wrong rank here. Tapping WhatsApp
+  // writes "WhatsApp initiated", which is newer than the remark an agent typed
+  // after a call — so a lead whose history read "Looking For September" showed
+  // "WhatsApp initiated" the moment anyone opened WhatsApp, and the one fact
+  // worth reading before dialling was pushed off the record by a side effect of
+  // pressing a button.
+  //
+  // So: the newest thing a HUMAN wrote wins, however old. Only when nobody has
+  // written anything does the newest logged action stand in — a lead where
+  // someone only tapped WhatsApp should still say so rather than go blank. An
+  // outcome typed onto that WhatsApp event later is human text, and takes over.
+  const notes = (record.timeline || []).filter(e =>
     NOTE_TYPES.has(e.type) && ((e.label || '').trim() || e.metadata?.outcome))
+  const written = (e) => !!e.metadata?.outcome || !AUTO_TEXT.test((e.label || '').trim())
+  const latest = notes.find(written) || notes[0]
   const textRef = useRef(null)
   const [expanded, setExpanded] = useState(false)
   const [clipped, setClipped] = useState(false)
@@ -86,8 +106,7 @@ function LatestRemark({ record, store }) {
 
   if (!latest) return null
   const who = latest.authorId ? agentName(store.state.agents, latest.authorId) : null
-  const raw = latest.metadata?.outcome
-  const outcome = raw ? (VISIT_OUTCOME_LABEL[raw] || raw) : ''
+  const outcome = outcomeLabel(latest.metadata?.outcome)
 
   // Two rows: what it is and when, then the note. No leading icon — a note
   // glyph beside text reads as an edit button, and this one does nothing. The
@@ -195,7 +214,13 @@ export function ModuleDetail({
   signals, primary = [], nba, railTop, beforeSheet, sections = [], actionCtx = {},
   phone,
 }) {
-  const { quick, manage } = buildActionTiers(def, store, record, actionCtx)
+  // `onRail` tells the definition which surface is asking. The rail below is
+  // desk-only, and its blocks (the appointment card, on a lead) carry actions
+  // of their own — so an action already sitting in a rail block drops out of
+  // Quick actions here, and stays in the phone's action button, which is the
+  // only route there.
+  const actionScope = { ...actionCtx, onRail: !phone }
+  const { quick, manage } = buildActionTiers(def, store, record, actionScope)
   const visibleSections = sections.filter(s => !s.when || s.when(record, store))
 
   // Module-generic header data, all from the definition.
@@ -238,7 +263,16 @@ export function ModuleDetail({
           <div className="rh-id">
             {avatar || <span className="rh-icon"><Icon name={def.icon || 'building'} size={20} /></span>}
             <div className="rh-idtext">
-              <div className="rh-title">{title || record.name || record.society || def.singularName}</div>
+              {/* A badge belongs BESIDE THE NAME, not in the facts strip. The
+                  facts strip is a wrapping row of small grey text and a pill
+                  dropped into it pushed the strip onto a second line, which
+                  pushed the action buttons onto a third — so a lead that had
+                  enquired twice cost the record its button row. Next to the
+                  name it is what it means: a fact about this person. */}
+              <div className="rh-title">
+                {title || record.name || record.society || def.singularName}
+                {def.titleBadge?.(record) || null}
+              </div>
               {facts.length > 0 && <div className="rh-facts">{facts.map((f, i) => <span key={i}>{f}</span>)}</div>}
             </div>
           </div>

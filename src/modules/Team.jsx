@@ -3,7 +3,7 @@ import { Avatar, Button, Field, Input, PhoneInput, SectionHead, PageHeader, Segm
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import { REJECTED_STATUS } from '../data/leadStatus.js'
+import { buildRoster, RosterRow } from '../components/roster.jsx'
 import { whenLabel } from '../lib/format.js'
 
 const ROLE_LABEL = { admin: 'Owner / Admin', owner: 'Owner', agent: 'Sales Advisor', manager: 'Sales Manager' }
@@ -24,56 +24,30 @@ export default function Team({ store, go, topBar }) {
   const inactive = (id) => state.inactiveAgentIds.includes(id)
   const toLeads = (leadFilter) => go && go('leads', { leadFilter, leadOpen: false, leadId: undefined })
 
-  // Real 30-day metrics from the backend, keyed by agent id. Fetched once on
-  // mount; the roster degrades to state-derived numbers if the call fails, so
-  // the desk still ranks correctly offline.
-  const [perf, setPerf] = useState({})
-  const [perfLoaded, setPerfLoaded] = useState(false)
-  useEffect(() => {
-    let live = true
-    setPerfLoaded(false)
-    Promise.all(state.agents.map(a =>
-      api.getAgentPerformance(a.id).then(r => [a.id, r?.metrics]).catch(() => [a.id, null])
-    )).then(pairs => {
-      if (!live) return
-      setPerf(Object.fromEntries(pairs.filter(([, m]) => m)))
-      setPerfLoaded(true)
-    })
-    return () => { live = false }
-  }, [state.agents.length])
-
-  // Per-agent workload, counted in SQL. The roster is a table of integers and
-  // it used to need every lead in the firm in memory to produce them.
+  // ONE read for the whole roster. This screen used to fire
+  // getAgentPerformance once PER AGENT on mount — nine requests for nine
+  // integers — while ALSO fetching the desk summary that could answer the same
+  // question in one. The per-agent 30-day call and visit counts now come back
+  // with the summary, and buildRoster is shared with the dashboard so the two
+  // screens cannot show different numbers for the same person (§3.3).
   const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null, '/workspace/desk-summary')
+  const perfLoaded = !!desk
   const perAgent = desk?.perAgent || {}
-  const roster = state.agents.map(a => {
-    const row = perAgent[a.id] || { open: 0, won: 0, overdue: 0, total: 0, byStage: {} }
-    const open = row.open
-    const won = row.won
-    const lost = row.byStage?.[REJECTED_STATUS] || 0
-    const overdue = row.overdue
-    const settled = won + lost
-    const stateWinRate = settled ? Math.round((won / settled) * 100) : null
-    const m = perf[a.id]
-    // Prefer the backend's real 30-day numbers; fall back to state-derived.
-    const calls = m?.total_outbound_calls ?? null
-    const visits = m?.site_visits_done ?? null
-    const winRate = m?.visit_conversion_rate_percentage != null ? Math.round(m.visit_conversion_rate_percentage) : stateWinRate
-    return { a, open, won, overdue, winRate, calls, visits, off: inactive(a.id) }
+  const built = buildRoster({
+    agents: state.agents, perAgent, perAgentCalls: desk?.perAgentCalls || {}, inactive,
   })
+  const roster = built.rows
 
   const activeCount = roster.filter(r => !r.off).length
   const openTotal = desk?.leads?.open || 0
   const unassigned = desk?.leads?.unassigned || 0
   const overdueTotal = desk?.leads?.overdue || 0
 
-  const evenShare = activeCount ? openTotal / activeCount : 0
-  const maxLoad = Math.max(1, ...roster.map(r => r.open))
-
-  // Rank: on-duty first, then most closed, then busiest — a real standings order.
-  const ranked = roster.slice().sort((x, y) =>
-    (x.off - y.off) || (y.won - x.won) || (y.open - x.open))
-  const leaderId = ranked.find(r => !r.off && r.won > 0)?.a.id
+  // Order and scale come from buildRoster, so the dashboard's top five are the
+  // same five people in the same sequence. Ranking by `won` put every agent on
+  // 0 in alphabetical order and called it standings.
+  const { evenShare, maxLoad } = built
+  const ranked = roster
 
   // Glance KPIs — same compact ph-stats row as Import and the other modules.
   const kpis = [
@@ -92,74 +66,24 @@ export default function Team({ store, go, topBar }) {
         <AccessPanel store={store} />
 
         {/* SECONDARY: how the desk is performing */}
-        <div className="acc-panel">
-          <SectionHead title="Team activity" right={<span className="u-muted acc-hint">Who's carrying the load and who's closing</span>} />
-          <div className="board">
-          {!perfLoaded ? ranked.map(({ a }) => (
-            <div key={a.id} className="bcard skel-card">
-              <div className="rank"><span className="skel skel-line" style={{ width: 14 }} /></div>
-              <div className="bwho">
-                <span className="skel skel-av" />
-                <div className="bid">
-                  <span className="skel skel-line" style={{ width: 110 }} />
-                  <span className="skel skel-line sm" style={{ width: 70, marginTop: 6 }} />
-                </div>
-              </div>
-              <div className="bload">
-                <span className="skel skel-line" style={{ width: 90 }} />
-                <div className="bmeter"><i style={{ width: '0%' }} /></div>
-              </div>
-              <div className="bstats">
-                {[0, 1, 2].map(i => <div key={i} className="bstat"><span className="skel skel-line" style={{ width: 22 }} /></div>)}
-              </div>
-            </div>
-          )) : ranked.map(({ a, open, won, overdue, winRate, calls, visits, off }, i) => {
-            const overloaded = !off && open > evenShare * 1.5 && open > 3
-            const isLeader = a.id === leaderId
-            const pct = Math.round((open / maxLoad) * 100)
-            const rank = i + 1
-            return (
-              <div key={a.id} className={'bcard' + (off ? ' off' : '') + (isLeader ? ' lead' : '')}>
-                <div className={'rank' + (off ? '' : rank <= 3 ? ' r' + rank : '')}>{off ? '–' : rank}</div>
-
-                <div className="bwho">
-                  <Avatar agent={a} size="lg" />
-                  <div className="bid">
-                    <div className="bname">
-                      {a.name}
-                      {off ? <span className="btag off">Off duty</span>
-                        : overloaded ? <span className="btag over">Overloaded</span>
-                        : isLeader ? <span className="btag top">Top closer</span> : null}
-                    </div>
-                    <div className="brole">{roleLabel(a.role)}</div>
-                  </div>
-                </div>
-
-                <div className="bload">
-                  <div className="bload-top">
-                    <span className="bload-n"><b>{open}</b> open</span>
-                    <span className={'bload-tag ' + (overdue ? 'warn' : 'ok')}>{overdue ? `${overdue} overdue` : 'On track'}</span>
-                  </div>
-                  <div className="bmeter"><i className={overloaded ? 'hot' : ''} style={{ width: pct + '%' }} /></div>
-                </div>
-
-                <div className="bstats">
-                  <div className="bstat"><div className="bv accent">{won}</div><div className="bl">Won</div></div>
-                  <div className="bstat"><div className="bv">{calls == null ? '—' : calls}</div><div className="bl">Calls · 30d</div></div>
-                  <div className="bstat"><div className="bv">{visits == null ? '—' : visits}</div><div className="bl">Visits</div></div>
-                </div>
-
-                {/* Duty toggling used to live here as an unlabeled icon,
-                    reading as a second "Reassign" beside the real one. It's
-                    gone — set from Settings → Routing instead. This board
-                    stays workload + the one action that's actually about it. */}
-                <div className="bactions">
-                  <Button size="sm" onClick={() => store.openModal({ kind: 'reassign', fromId: a.id })}>Reassign leads</Button>
-                </div>
-              </div>
-            )
-          })}
-          </div>
+        {/* `panel`, like the two either side of it. The old board carried its own
+            card styling per agent, so this wrapper never needed the class —
+            take the board away and the section lost its surface entirely and sat
+            bare on the page background. */}
+        <div className="panel acc-panel">
+          {/* No caption. It read "Who's carrying the load and who's closing" —
+              explanatory copy justifying the panel, which the rules forbid, and
+              it stopped being true when the columns changed. The rows say it. */}
+          <SectionHead title="Team activity" right={desk ? `${activeCount} on the desk` : undefined} />
+          {!perfLoaded
+            ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
+            : ranked.map(r => (
+              <RosterRow key={r.a.id} r={r} evenShare={evenShare} maxLoad={maxLoad}
+                onOpen={() => toLeads({ agent: [r.a.id] })}
+                actions={(row) => (
+                  <Button size="sm" onClick={() => store.openModal({ kind: 'reassign', fromId: row.a.id })}>Reassign</Button>
+                )} />
+            ))}
         </div>
 
         <SessionsPanel store={store} />
@@ -464,10 +388,25 @@ function SessionsPanel({ store }) {
             const current = s.id === data.current
             return (
               <div key={s.id} className="acc-sess-row">
-                <Icon name="monitor" size={16} className="ic acc-sess-ic" />
+                {/* A phone gets a phone. Two sessions from one handset were two
+                    identical monitor icons. */}
+                <Icon name={isHandheld(s.user_agent) ? 'phone' : 'monitor'} size={16} className="ic acc-sess-ic" />
                 <div className="acc-sess-meta">
                   <div className="acc-sess-ua">{prettyUA(s.user_agent)}{current && <span className="acc-youtag">This device</span>}</div>
-                  <div className="u-muted acc-sess-sub">{s.ip || 'unknown IP'} · active {timeAgo(s.last_seen_at)}</div>
+                  {/* WHEN IT STARTED, which is the only thing that separates two
+                      sessions on the SAME phone — same browser, same OS, same IP,
+                      and the row showed none of the three. created_at was already
+                      being returned by listSessions and thrown away here. */}
+                  {/* NO IP. It is captured and it belongs in the audit ledger,
+                      but on this screen it was the only thing telling two rows
+                      apart and it is the wrong tool for the job: a whole office
+                      shares one address, and a phone on mobile data changes its
+                      own between one sign-in and the next. Two sessions from one
+                      desk read as one place, two from one handset read as two.
+                      What actually separates two sessions is when each began. */}
+                  <div className="u-muted acc-sess-sub">
+                    signed in {timeAgo(s.created_at)} · active {timeAgo(s.last_seen_at)}
+                  </div>
                 </div>
                 {current
                   ? <span className="u-muted acc-noperm">Sign out from the menu</span>
@@ -481,12 +420,54 @@ function SessionsPanel({ store }) {
   )
 }
 
-// Turn a raw UA string into a short, human label.
+const isHandheld = (ua) => /iPhone|iPad|Android|Mobile/i.test(String(ua || ''))
+
+/**
+ * Name the device as precisely as the browser is willing to say — and no more.
+ *
+ * "Chrome on Windows" was every desk session in the firm, so seven rows read
+ * identically and the list could not do the one job it exists for. Everything
+ * below is squeezed out of the same user-agent string that was already stored:
+ * the browser's major version, the OS version, and — on Android only — the
+ * handset model, which is the one place a real device name is actually sent.
+ *
+ * What no header carries is the machine's own name. There is no "HP Victus" in
+ * a user-agent, in a Client Hint, or anywhere else a web page can reach: on
+ * Windows and macOS the model field is deliberately empty, because it would
+ * fingerprint the person. So two Chrome-on-Windows sessions are told apart by
+ * their browser version and their sign-in time, and if a firm needs more than
+ * that the honest answer is a name the user types, not one we guess.
+ */
 function prettyUA(ua) {
-  if (!ua) return 'Unknown device'
-  const os = /Windows/i.test(ua) ? 'Windows' : /iPhone|iOS/i.test(ua) ? 'iPhone' : /Android/i.test(ua) ? 'Android' : /Mac/i.test(ua) ? 'Mac' : /Linux/i.test(ua) ? 'Linux' : 'Device'
-  const br = /Edg/i.test(ua) ? 'Edge' : /Chrome/i.test(ua) ? 'Chrome' : /Firefox/i.test(ua) ? 'Firefox' : /Safari/i.test(ua) ? 'Safari' : 'Browser'
-  return `${br} on ${os}`
+  const s = String(ua || '')
+  if (!s) return 'Unknown device'
+
+  // Order matters: Edge and every Chromium browser also say "Chrome", and
+  // everything on iOS says "Safari" whatever it really is.
+  const br = /Edg\//i.test(s) ? ['Edge', /Edg\/(\d+)/i]
+    : /OPR\//i.test(s) ? ['Opera', /OPR\/(\d+)/i]
+      : /CriOS/i.test(s) ? ['Chrome', /CriOS\/(\d+)/i]
+        : /Firefox/i.test(s) ? ['Firefox', /Firefox\/(\d+)/i]
+          : /Chrome\//i.test(s) ? ['Chrome', /Chrome\/(\d+)/i]
+            : /Safari/i.test(s) ? ['Safari', /Version\/(\d+)/i]
+              : ['Browser', null]
+  const ver = br[1] ? (s.match(br[1]) || [])[1] : null
+  const browser = ver ? `${br[0]} ${ver}` : br[0]
+
+  // The Android model sits in the platform block: "(Linux; Android 14; SM-G991B)".
+  // A WebView appends " Build/…" to it, which is not part of the name.
+  const droid = s.match(/Android\s+([\d.]+)[;)]\s*([^);]*)/i)
+  if (droid) {
+    const model = (droid[2] || '').replace(/\s*Build\/.*$/i, '').replace(/\bwv\b/i, '').trim()
+    return [browser, `Android ${droid[1]}`, model && model !== 'K' ? model : null].filter(Boolean).join(' · ')
+  }
+  const ios = s.match(/(iPhone|iPad)[^)]*OS\s+([\d_]+)/i)
+  if (ios) return `${browser} · ${ios[1]} ${ios[2].replace(/_/g, '.')}`
+  // Windows 10 and 11 both report NT 10.0 — there is nothing to add.
+  const os = /Windows/i.test(s) ? 'Windows'
+    : /Mac OS X\s*([\d_.]+)/i.test(s) ? 'macOS ' + (s.match(/Mac OS X\s*([\d_.]+)/i)[1] || '').replace(/_/g, '.')
+      : /CrOS/i.test(s) ? 'ChromeOS' : /Linux/i.test(s) ? 'Linux' : null
+  return [browser, os].filter(Boolean).join(' · ')
 }
 
 function ResetPasswordModal({ store, user, onClose, onDone }) {

@@ -415,11 +415,17 @@ function reducer(state, action) {
 
     case 'FOLLOWUP': {
       // fu === null means "marked done" — clearing the appointment, not setting one.
+      //
+      // NO TIMELINE ENTRY. This wrote one into local React state and nowhere
+      // else, so it survived until the next server read and then vanished. Both
+      // directions already have a real, persisted record beside it: scheduling
+      // writes a remark naming the date and time, and completing a site visit
+      // writes the visit activity with its photo and GPS fix. The local entry
+      // was a second, thinner copy of the same fact — which is why logging a
+      // visit produced a bare "Appointment completed" sitting above the proof
+      // that had just been captured, and why it was gone after a refresh.
       const fu = action.followUp
-      return patchRecord(state, 'lead', action.leadId, l => ({
-        ...l, followUp: fu, overdue: false,
-        timeline: withEvent(l, 'follow', fu ? 'Follow-up set · ' + fu.action : 'Appointment completed'),
-      }))
+      return patchRecord(state, 'lead', action.leadId, l => ({ ...l, followUp: fu, overdue: false }))
     }
 
     case 'UPDATE_LEAD':
@@ -850,8 +856,18 @@ export function StoreProvider({ children }) {
   // It resolves synchronously; there is deliberately no artificial delay or
   // "composing" animation, which would imply AI authorship we don't do.
   const composeFor = useCallback((wa) => {
-    const prop = state.cache?.property?.[wa.propId] || null
     const lead = state.cache?.lead?.[wa.leadId] || null
+    // THE MESSAGE THE BUYER ACTUALLY RECEIVES depended on the browser's property
+    // cache. On a desk with paged inventory that cache does not hold the
+    // shortlist, so `prop` was null, the property branch below never ran, and
+    // every "Share Match" fell through to the generic follow-up — "We have
+    // several excellent options matching your preferences" — with no society, no
+    // configuration and no price. The listing message generator was fine; it was
+    // never handed a listing. Same defect as the record's inventory section and
+    // the composer's own picker; this is the copy that leaves the building.
+    const prop = state.cache?.property?.[wa.propId]
+      || (lead?.shortlistProps || []).find(p => p.id === wa.propId)
+      || null
     // The firm name MUST come from the signed-in tenant. Leaving it out fell
     // back to the bundled demo brand, so a client received another firm's
     // name at the bottom of the message.
@@ -1004,7 +1020,10 @@ export function StoreProvider({ children }) {
       return optimistic('Stage change',
         () => dispatch({ type: 'STAGE', leadId, stage }),
         () => { if (prev) dispatch({ type: 'STAGE', leadId, stage: prev }) },
-        () => apiClient.changeStage(leadId, stage, 'Stage updated via CRM view'),
+        // No note. This sent the literal "Stage updated via CRM view" to satisfy
+        // a mandatory-note rule, and it was then printed on every stage row in
+        // every lead's history — a sentence that says only "this app did it".
+        () => apiClient.changeStage(leadId, stage),
         'Stage → ' + stage)
     },
     // Optimistic for the same reason: this is a tick on a row the agent is
@@ -1061,15 +1080,23 @@ export function StoreProvider({ children }) {
         .catch(err => { console.warn('[Contact log API] error:', err.message); resolve(null) })
     }),
     // B4 — log a structured activity (site visit with proof, meeting, …) on a
-    // LEAD. Unlike the optimistic patterns above this reloads from the server
+    // LEAD. Unlike the optimistic patterns above this re-reads from the server
     // rather than patching local state: the row the client can build is not
     // the row the server returns (photo visibility is role-gated and
     // distance-to-property is computed server-side), so echoing a guess would
     // show the author something no one else can see.
+    //
+    // It called `loadServerState()` to do that, which is now the wrong request:
+    // bootstrap carries identity, the roster and the firm's settings — about
+    // 2KB — and has not carried a single lead since the desk went server-driven.
+    // So the visit was written, the screen re-read something that could not
+    // contain it, and the agent saw their own logged visit only after refreshing
+    // the browser. `settled()` bumps the token every list and record screen
+    // watches, which re-reads the lead itself.
     logActivity: (leadId, payload) => new Promise((resolve) => {
       apiClient.logActivity(leadId, payload)
         .then(res => {
-          if (res?.success) { loadServerState(); resolve(res) }
+          if (res?.success) { settled(); resolve(res) }
           else { toast('Could not log the visit', 'warn'); resolve(null) }
         })
         .catch(err => {

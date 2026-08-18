@@ -25,6 +25,9 @@ import {
   FURNISH, STATUS, labelOf,
   normaliseBhk, normaliseSubtype, normaliseTo,
 } from '../../../src/data/propertyFields.js';
+// backfillEnquiries replays stored payloads through the SAME reader the live
+// ingest uses, so a rebuilt session says what the push said.
+import { parsePayload } from './parser.js';
 
 /**
  * The tenant to scope the current request's queries to. Comes from the request
@@ -449,6 +452,9 @@ function rowToProperty(r: any): any {
 function clientEventType(dbType: string): string {
   if (dbType === 'remark' || dbType === 'call' || dbType === 'sms') return dbType;
   if (dbType === 'whatsapp') return 'wa';
+  // Its own channel, deliberately outside the editable set: a closed
+  // appointment is an observation, not a note somebody can rewrite.
+  if (dbType === 'follow_up') return 'followup';
   if (dbType === 'stage_change') return 'stage';
   if (dbType === 'creation') return 'note';
   return 'msg';
@@ -534,6 +540,11 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     followUp: r.follow_up || null,
     overdue: Boolean(r.overdue),
     importBatchId: r.import_batch_id || undefined,
+    // How many SESSIONS this person has enquired in — present only where the
+    // query asked for it, and undefined rather than 0 where it did not. A row
+    // that was never counted must not claim to have been counted and found
+    // nothing.
+    enquiryCount: r.enquiry_count == null ? undefined : Number(r.enquiry_count),
     // The real timestamp, not only the derived "how long ago". A desk asks
     // "when did this lead come in" and wants a date it can quote back to a
     // client or line up against a portal's own report; minsAgo answers a
@@ -638,6 +649,56 @@ export async function migrateLeadStatuses(): Promise<void> {
     await sql`UPDATE crm_settings SET value = ${sql.json({ ...v, stages: LEAD_STATUSES })}
                WHERE key = 'default' AND tenant_id = ${r.tenant_id}`;
   }
+}
+
+/**
+ * `metadata.outcome` held the option's LABEL. Move the existing rows onto the
+ * stable key so the wording above them can change without orphaning history.
+ *
+ * Every string below was read out of the live database, not guessed — the five
+ * long-form variants are the second, contradictory vocabulary that used to be
+ * hardcoded in components/primitives.jsx, so a row written from the timeline
+ * edit and a row written from the confirm modal could describe the same call in
+ * two different words. Both spellings map to one key.
+ *
+ * Anything not in this map is left exactly as it is. An unrecognised string is
+ * either a vocabulary nobody told us about or a person's own words, and the UI
+ * falls back to printing it verbatim — which is the right outcome for both.
+ */
+const OUTCOME_LABEL_TO_KEY: Record<string, string> = {
+  'No answer': 'no_answer',
+  'No Answer / Ringing': 'no_answer',
+  'Busy or switched off': 'unreachable',
+  'Number Busy / Switched Off': 'unreachable',
+  'Connected · discussed requirements': 'discussed',
+  'Connected & Discussed Requirements': 'discussed',
+  'Interested · scheduling a site visit': 'visit',
+  'Interested — Scheduling Site Visit': 'visit',
+  'Asked to call back': 'callback',
+  'Requested Callback Later': 'callback',
+  'Wrong number': 'wrong_number',
+  'Not interested': 'not_interested',
+};
+
+export async function migrateOutcomeLabelsToKeys(): Promise<void> {
+  let moved = 0;
+  for (const [label, key] of Object.entries(OUTCOME_LABEL_TO_KEY)) {
+    const res = await sql`
+      UPDATE crm_timeline_events
+         SET metadata = jsonb_set(metadata, '{outcome}', to_jsonb(${key}::text))
+       WHERE metadata->>'outcome' = ${label}`;
+    moved += res.count;
+  }
+  // Say what is left rather than assuming nothing is. A count of unmapped
+  // strings is the only way anyone finds out a sixth vocabulary existed.
+  const rest = await sql`
+    SELECT metadata->>'outcome' AS outcome, count(*)::int AS n
+      FROM crm_timeline_events
+     WHERE metadata->>'outcome' IS NOT NULL
+       AND metadata->>'outcome' !~ '^[a-z_]+$'
+     GROUP BY 1`;
+  console.log(`[migration] outcome labels → keys: ${moved} rewritten`
+    + (rest.length ? `, ${rest.length} unmapped left as written: ${rest.map((r: any) => `${r.outcome} (${r.n})`).join(', ')}` : ''));
 }
 
 export async function backfillShortlist(): Promise<void> {
@@ -1060,6 +1121,20 @@ seedDatabase()
   // stage — had every lead on it silently moved to "Follow-Up" on the next
   // restart.
   .then(() => runOnce('lead_statuses_2024_vocab', () => migrateLeadStatuses()))
+  // Also gated, and for the same reason as the one above: it rewrites rows by
+  // VALUE. Once an outcome is a key, "No answer" is no longer a string this
+  // system produces — but a firm could legitimately type it into a remark, and
+  // an ungated pass would keep reaching for it forever.
+  .then(() => runOnce('2026_08_18_outcome_keys', () => migrateOutcomeLabelsToKeys()))
+  // Builds the enquiry history from the pushes still on disk. Additive — it
+  // writes only to crm_lead_enquiries and touches no lead.
+  //
+  // `_v2`: the first pass read the payloads with a hardcoded guess at field
+  // names and so recorded 84 MagicBricks pushes as a bare locality when the
+  // push carried BHK, budget and project too. It rebuilds from scratch every
+  // time — the rows are derived from webhook_inbox and no human edits them —
+  // so a second ledger entry corrects the first rather than compounding it.
+  .then(() => runOnce('2026_08_18_enquiry_sessions_v2', () => backfillEnquiries()))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
@@ -1260,16 +1335,24 @@ export async function getDeskSummary(): Promise<any> {
   // a rolling `now() - 3 hours` while its list read "arrived today and still
   // untouched": at 2:20pm on bhumi the tile said 12, the list held 13, and 16
   // leads had actually arrived. Three numbers for one word.
-  const S = leadSegments(await deskConfigOf(t));
-  const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls] = await Promise.all([
+  const cfg = await deskConfigOf(t);
+  const S = leadSegments(cfg);
+  // The firm's midnight, not Postgres's. "Calls logged today" counted from
+  // 05:30 IST, so an agent who worked the phone before breakfast showed 0.
+  const today = dayStart(cfg.timezone);
+  const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls, perAgentLeadCalls, perAgentVisits] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
-               count(*) FILTER (WHERE overdue)::int AS overdue,
+               count(*) FILTER (WHERE ${FOLLOWUP_PAST_DUE})::int AS overdue,
                count(*) FILTER (WHERE follow_up IS NOT NULL)::int AS with_follow_up,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*) FILTER (WHERE ${S.today})::int AS new_today,
                count(*) FILTER (WHERE ${S.untouched_sla})::int AS untouched_sla,
                count(*) FILTER (WHERE ${S.noanswer_stale})::int AS noanswer_stale,
+               -- The sidebar's Leads badge. Same expression as the leads list's
+               -- "Never called" tab, so the badge and the pile it opens onto
+               -- cannot disagree.
+               count(*) FILTER (WHERE ${S.never_contacted})::int AS never_contacted,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine}`,
     sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
@@ -1278,7 +1361,7 @@ export async function getDeskSummary(): Promise<any> {
          WHERE tenant_id = ${t} AND ${mine} GROUP BY 1`,
     sql`SELECT agent_id AS k,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
-               count(*) FILTER (WHERE overdue)::int AS overdue,
+               count(*) FILTER (WHERE ${FOLLOWUP_PAST_DUE})::int AS overdue,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*)::int AS total
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine} AND agent_id IS NOT NULL GROUP BY 1`,
@@ -1305,10 +1388,25 @@ export async function getDeskSummary(): Promise<any> {
     sql`SELECT agent_id AS k,
                count(*)::int AS owners,
                count(*) FILTER (WHERE last_call_at IS NOT NULL)::int AS called,
-               count(*) FILTER (WHERE last_call_at >= date_trunc('day', NOW()))::int AS called_today,
+               count(*) FILTER (WHERE last_call_at >= ${today})::int AS called_today,
                count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
                count(*) FILTER (WHERE callback_at IS NOT NULL AND callback_at < NOW())::int AS late
           FROM crm_owners WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1`,
+    // Per-agent LEAD outreach (30d) and proven site visits. Here rather than in
+    // getAgentPerformance because the Team page called that endpoint once PER
+    // AGENT on mount — nine requests for nine integers, on a screen this summary
+    // was already fetching. One query, and the dashboard roster and the Team
+    // roster now read the same numbers instead of each deriving their own.
+    sql`SELECT author AS k, count(*)::int AS calls
+          FROM crm_timeline_events
+         WHERE tenant_id = ${t} AND type = 'call' AND author IS NOT NULL
+           AND timestamp >= now() - interval '30 days'
+         GROUP BY 1`,
+    sql`SELECT agent_id AS k, count(*)::int AS visits
+          FROM activities
+         WHERE tenant_id = ${t} AND type = 'site_visit' AND agent_id IS NOT NULL
+           AND at >= now() - interval '30 days'
+         GROUP BY 1`,
   ]);
   const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
   const stagesByAgent = new Map<string, Record<string, number>>();
@@ -1317,13 +1415,21 @@ export async function getDeskSummary(): Promise<any> {
     stagesByAgent.get(r.a)![r.s] = r.n;
   }
   return {
-    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, untouched_sla: 0, noanswer_stale: 0 },
+    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, untouched_sla: 0, noanswer_stale: 0, never_contacted: 0 },
     byStage: asMap(byStage),
     bySource: asMap(bySource),
-    perAgent: Object.fromEntries(perAgent.map(r => [r.k, {
-      open: r.open, overdue: r.overdue, won: r.won, total: r.total,
-      byStage: stagesByAgent.get(r.k) || {},
-    }])),
+    perAgent: (() => {
+      const calls = new Map((perAgentLeadCalls as any[]).map(r => [r.k, r.calls]));
+      const visits = new Map((perAgentVisits as any[]).map(r => [r.k, r.visits]));
+      return Object.fromEntries(perAgent.map(r => [r.k, {
+        open: r.open, overdue: r.overdue, won: r.won, total: r.total,
+        byStage: stagesByAgent.get(r.k) || {},
+        // 30-day, and named so. The roster's old "Calls · 30d" label sat over an
+        // all-time count from a different endpoint.
+        calls30d: calls.get(r.k) ?? 0,
+        visits30d: visits.get(r.k) ?? 0,
+      }]));
+    })(),
     properties: props[0] || { total: 0, available: 0 },
     owners: owners[0]?.n ?? 0,
     perAgentCalls: Object.fromEntries((perAgentCalls as any[]).map(r => [r.k, {
@@ -1605,11 +1711,50 @@ export async function getLeadById(id: string): Promise<any | undefined> {
     sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} AND tenant_id = ${t} ORDER BY timestamp DESC`,
     sql`SELECT * FROM lead_shortlist WHERE lead_id = ${id} AND tenant_id = ${t}`,
   ]);
+  // author and metadata are NOT optional here. This projection listed six
+  // fields and dropped both, so every event on a lead RECORD arrived with
+  // authorId null and metadata {} — while the same events fetched through
+  // getLeads (which passes rows straight through) carried them. Two shapes for
+  // one thing, and the detail screen got the poorer one.
+  //
+  // Load-bearing, not cosmetic: the remark block under the name renders "— who"
+  // from author, and reads metadata.outcome both to decide an event is worth
+  // showing and to print the outcome. Neither could ever arrive, so a site visit
+  // logged with an outcome showed as an unattributed bare line.
   const events = timelineRows.map(r => ({
     id: r.id, record_id: r.record_id, type: r.type, title: r.title,
-    description: r.description, timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp)
+    description: r.description, author: r.author, metadata: r.metadata,
+    timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp)
   }));
-  return rowToLead(rows[0], events, shortlistRows);
+  const lead = rowToLead(rows[0], events, shortlistRows);
+
+  // THE SHORTLISTED PROPERTIES THEMSELVES, not only their ids. The record screen
+  // resolved each id through the browser's property cache, which holds whatever
+  // the listings page happened to page in — so on a desk with 6,643 properties it
+  // held none of the shortlist, every row was dropped by a filter(Boolean), and a
+  // lead with four shortlisted flats rendered "No shortlisted or matching
+  // inventory yet". The attach had worked every time; only the reading of it was
+  // broken, so agents attached the same lead again and again. The WhatsApp
+  // composer read the same cache and offered "No property — message only".
+  const ids: string[] = lead.shortlist || [];
+  lead.shortlistProps = ids.length
+    ? (await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id IN ${sql(ids)}`).map(rowToProperty)
+    : [];
+
+  // Activities live in their own table and were never folded in, so a logged
+  // site visit existed only in the database — photo, GPS fix and outcome
+  // included. One history, newest first; which table a thing was written to is
+  // an implementation detail the agent should never have been able to feel.
+  // The enquiry history. Read alongside the timeline so the record can show
+  // what was asked for on each occasion rather than a prose note about it.
+  lead.enquiries = await getEnquiriesForLead(id).catch(() => []);
+  lead.enquiryCount = lead.enquiries.length;
+  const acts = await getActivitiesForLead(id);
+  if (acts.length) {
+    lead.timeline = [...(lead.timeline || []), ...acts]
+      .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }
+  return lead;
 }
 
 export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
@@ -1815,16 +1960,59 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     WHERE id = ${id} AND tenant_id = ${tid()};
   `;
 
+  // AN APPOINTMENT CLOSING IS AN EVENT, NOT PROSE.
+  //
+  // Marking a non-visit follow-up done used to have the BROWSER write
+  // "Appointment completed — Follow-up Call" through addRemark. That lands as a
+  // `remark`: tagged REMARK, carrying a pencil, fully editable — so the record
+  // of an appointment being closed was indistinguishable from a sentence an
+  // agent typed, and could be rewritten into one. A thing the system observed
+  // should not be able to masquerade as something a person said.
+  //
+  // Written here, once, by the side that owns the row, as its own type. A site
+  // visit is excluded: it closes with the visit activity — photo, GPS fix and
+  // outcome — and a second line saying it happened is the duplicate that used
+  // to sit on top of the proof.
+  const hadFollowUp = oldLead.followUp || (oldLead as any).follow_up || null;
+  if (hadFollowUp && !followUp) {
+    const action = String((hadFollowUp as any).action || 'Follow-up');
+    if (!/site\s*visit/i.test(action)) {
+      await addTimelineEvent({
+        record_id: id,
+        type: 'follow_up',
+        title: 'Follow-up completed',
+        description: action,
+        author: getContext()?.userId || null,
+      }).catch(() => {});
+    }
+  }
+
   if (patch.shortlist !== undefined || patch.feedback !== undefined) {
     await syncLeadShortlist(id, shortlist || [], feedback || {}, tid());
   }
 
   if (patch.stage && patch.stage !== oldLead.stage) {
+    // THE ONLY stage-change event. /actions/stage-change used to call this
+    // function AND then write a second one of its own, so every status change
+    // laid down two rows in the same second saying the same thing in two
+    // wordings — "Status Updated: Status changed from New to Interested." above
+    // "Stage Changed -> Interested: Stage updated via CRM view". The route now
+    // passes its note through instead of logging separately.
+    //
+    // title === description on purpose: mapEventForClient joins them as
+    // `title: description` whenever they differ, which is what produced the
+    // doubled reading above.
+    const note = String(patch.stageNote || '').trim() || rejectionReason || '';
+    const line = `${oldLead.stage} → ${patch.stage}${note ? ` — ${note}` : ''}`;
     await addTimelineEvent({
       record_id: id,
       type: 'stage_change',
-      title: 'Status Updated',
-      description: `Status changed from "${oldLead.stage}" to "${patch.stage}"${rejectionReason ? ` — ${rejectionReason}` : ''}.`,
+      title: line,
+      description: line,
+      // Attributed. This event carried no author at all, so the history could
+      // not say who moved the lead — the route's duplicate was the only one
+      // that named anybody.
+      author: ctx.actorId ?? getContext()?.userId ?? undefined,
     });
   }
 
@@ -2028,15 +2216,76 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
  *  buyer who missed a call at 11am is not owed another before lunch. */
 export const RETRY_DAYS = 3;
 
-function leadSegments({ arrivalStage, slaHours }: DeskConfig) {
+/**
+ * A follow-up whose moment has gone by.
+ *
+ * Exported because SIX queries read the dead `overdue` boolean and each one
+ * would otherwise grow its own copy of this CASE — which is how the column and
+ * the client's followUpOverdue() came to disagree in the first place.
+ *
+ * `[0-9]`, not `\d`: through this driver the backslash reaches Postgres
+ * literally, so the shorthand class silently matches nothing and every lead
+ * reads as not overdue — which is the bug this function exists to fix,
+ * reintroduced one layer down. Checked against a real row, not assumed.
+ */
+export const FOLLOWUP_PAST_DUE = sql`(CASE WHEN follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+                                          THEN (follow_up->>'at')::timestamptz < now() ELSE false END)`;
+
+
+/**
+ * NOBODY HAS REACHED OUT TO THIS PERSON — measured, not inferred.
+ *
+ * "Never contacted" used to be read off the stage: still on the arrival stage
+ * meant nobody had rung. That is not what the stage means, and the gap was not
+ * small. On bhumi the Past SLA tile read 4; the number of people nobody had
+ * called or messaged in over 48 hours was 60. The four were simply the leads
+ * whose agent had also forgotten to move the dropdown.
+ *
+ * Both places a contact is recorded are checked. Free-text calls and messages
+ * land in crm_timeline_events; calls and visits captured with an outcome land
+ * in `activities`. Asking only one of them calls a lead untouched because it
+ * was worked through the other screen.
+ */
+const NEVER_CONTACTED = sql`(
+  NOT EXISTS (SELECT 1 FROM crm_timeline_events e
+               WHERE e.record_id = crm_leads.id AND e.tenant_id = crm_leads.tenant_id
+                 AND e.type IN ('call', 'whatsapp', 'sms', 'email'))
+  AND NOT EXISTS (SELECT 1 FROM activities a
+                   WHERE a.lead_id = crm_leads.id AND a.tenant_id = crm_leads.tenant_id
+                     AND a.type IN ('call', 'meeting', 'site_visit'))
+)`;
+
+function leadSegments({ arrivalStage, slaHours, timezone }: DeskConfig) {
   const untouched = sql`stage = ${arrivalStage}`;
-  const newToday = sql`(created_at >= date_trunc('day', now()) AND ${untouched})`;
+  const today = dayStart(timezone);
+  // ARRIVED TODAY means arrived today. It used to also require the lead to be
+  // untouched, so working a lead deleted it from the count of leads that came
+  // in — on the morning 8 arrived, the tile said 1, because 7 had already been
+  // picked up. "How many came in today" and "how many are still unworked" are
+  // two questions and this is the first one; the second is `untouched_sla`.
+  const newToday = sql`created_at >= ${today}`;
   return {
-    overdue: sql`overdue = true`,
+    // OVERDUE MEANS A FOLLOW-UP WHOSE TIME HAS PASSED.
+    //
+    // It read `overdue = true`, a boolean column NOTHING in this codebase ever
+    // writes: false on all 232 bhumi leads and all 94 delpat ones, true only on
+    // seed rows in the demo tenants. So the tab, the tile and the filter that
+    // read it could only ever return nothing — while 5 bhumi leads had an
+    // appointment whose moment had gone by and no screen said so.
+    //
+    // The client already knew: followUpOverdue() in lib/format.js reads
+    // `follow_up.at`, the real instant the schedule modal writes. The server was
+    // reading a different field for the same question — one concept, two
+    // implementations, and the losing one decided what the desk saw.
+    //
+    // Guarded by a pattern test rather than a bare cast: rows saved before `at`
+    // existed hold a human-typed date ("This Sunday"), and casting that throws
+    // and takes the whole query with it.
+    overdue: FOLLOWUP_PAST_DUE,
     unassigned: sql`agent_id IS NULL`,
     open: OPEN,
     today: newToday,
-    month: sql`(created_at >= date_trunc('month', now()) AND NOT ${newToday})`,
+    month: sql`(created_at >= (date_trunc('month', now() AT TIME ZONE ${timezone}) AT TIME ZONE ${timezone}) AND NOT ${newToday})`,
     // The client asked for this one specifically, one click from the list — it is
     // the pile you work down at 6pm.
     noanswer: sql`stage = 'Call Not Received'`,
@@ -2051,10 +2300,24 @@ function leadSegments({ arrivalStage, slaHours }: DeskConfig) {
     // Past the SLA and still never contacted. Measured at 2x slaHours — the
     // point the sweep escalates to a manager — so the tile agrees with the
     // alert instead of quietly using a rounder number.
-    untouched_sla: sql`(${untouched} AND created_at <= now() - (${slaHours * 2}::text || ' hours')::interval)`,
+    //
+    // The first half was `stage = arrivalStage`, which is a fact about a
+    // dropdown. It now asks whether anyone actually reached out, which is what
+    // the tile has always claimed to count. See NEVER_CONTACTED above for what
+    // that swap was worth: 4 → 60 on the live desk.
+    untouched_sla: sql`(${NEVER_CONTACTED} AND created_at <= now() - (${slaHours * 2}::text || ' hours')::interval)`,
     // Rung, no answer, and nobody has been back since. This is the pile with no
     // exit rule: on the live desk it was a fifth of every lead in the system.
     noanswer_stale: sql`(stage = 'Call Not Received' AND updated_at <= now() - (${RETRY_DAYS}::text || ' days')::interval)`,
+    // The same question without the clock on it — for the leads filter, where
+    // "show me everyone we have never reached out to" is asked of the whole
+    // desk rather than of the overdue pile.
+    never_contacted: NEVER_CONTACTED,
+    // CAME BACK. Counted in sessions, so a man who clicked four listings in
+    // five minutes is not in it — 12 leads on the live desk, not the 25 a
+    // payload count would have claimed. They are the warmest people on it.
+    repeat_enquiry: sql`(SELECT count(*) FROM crm_lead_enquiries e
+                          WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) > 1`,
   };
 }
 
@@ -2069,8 +2332,33 @@ export type LeadSegment = keyof ReturnType<typeof leadSegments>;
 const arrivalStageCache = new Map<string, { v: DeskConfig; at: number }>();
 const ARRIVAL_TTL_MS = 60_000;
 
-/** The two settings every worklist question is asked against. */
-export type DeskConfig = { arrivalStage: string; slaHours: number };
+/** The settings every worklist question is asked against. */
+export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string };
+
+/**
+ * The firm's own timezone. Every desk on this system is in India today, but the
+ * default belongs in one place rather than in eleven `date_trunc` calls, and a
+ * white-label CRM sold outside IST needs exactly this switch.
+ */
+export const DEFAULT_TIMEZONE = 'Asia/Kolkata';
+
+/**
+ * The instant the firm's day started.
+ *
+ * `date_trunc('day', now())` truncates in UTC, which is **05:30 IST**. So from
+ * midnight until half five in the morning, every "today" on this system meant
+ * yesterday: a bhumi lead that arrived at 00:40 was counted, filed and shown as
+ * having arrived the previous day, and the Today screen an agent opens first
+ * thing was the one place it could not be found.
+ *
+ * Reading it back: `now() AT TIME ZONE tz` gives the local wall clock as a
+ * naive timestamp, truncating that gives local midnight, and the second
+ * `AT TIME ZONE tz` turns that wall-clock midnight back into the real instant
+ * it happened — which is what a timestamptz column can be compared against.
+ */
+export function dayStart(tz: string) {
+  return sql`(date_trunc('day', now() AT TIME ZONE ${tz}) AT TIME ZONE ${tz})`;
+}
 
 async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
   const hit = arrivalStageCache.get(tenantId);
@@ -2083,9 +2371,23 @@ async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
     // Same floor the SLA sweep applies, so an alert and the tile that counts
     // the same leads cannot be reading two different windows.
     slaHours: Math.max(Number(cfg.slaHours) || 24, 1),
+    timezone: typeof cfg.timezone === 'string' && cfg.timezone ? cfg.timezone : DEFAULT_TIMEZONE,
   };
   arrivalStageCache.set(tenantId, { v, at: Date.now() });
   return v;
+}
+
+/**
+ * The firm's timezone, for callers that don't already hold a DeskConfig.
+ *
+ * Deliberately returns the STRING, not the sql fragment. A postgres.js query is
+ * thenable, so an `async` function returning `sql\`…\`` has its fragment
+ * executed by the caller's own `await` — the caller gets a result array, splices
+ * that into the next query, and Postgres answers "syntax error at or near
+ * date_trunc". Handing back a plain string makes that impossible.
+ */
+export async function timezoneOf(tenantId: string): Promise<string> {
+  return (await deskConfigOf(tenantId)).timezone;
 }
 
 async function arrivalStageOf(tenantId: string): Promise<string> {
@@ -2205,7 +2507,14 @@ export async function listLeads(opts: {
 
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
   const [rows, countRows] = await Promise.all([
-    sql`SELECT * FROM crm_leads WHERE ${clause} ORDER BY ${col} ${dir} NULLS LAST LIMIT ${limit} OFFSET ${offset}`,
+    // The enquiry count rides along in the SAME query as the rows it labels.
+    // A separate request would be a second answer to one question, which is
+    // how a badge and the list under it come to disagree.
+    // NOT aliased. The segment predicates reference crm_leads.id by name
+    // (NEVER_CONTACTED does), and an alias makes every one of them invalid.
+    sql`SELECT crm_leads.*, (SELECT count(*)::int FROM crm_lead_enquiries e
+                              WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS enquiry_count
+           FROM crm_leads WHERE ${clause} ORDER BY ${col} ${dir} NULLS LAST LIMIT ${limit} OFFSET ${offset}`,
     sql`SELECT count(*)::int AS n FROM crm_leads WHERE ${clause}`,
   ]);
   return { rows: rows.map(r => rowToLead(r)), total: countRows[0]?.n ?? 0, page, limit };
@@ -2395,15 +2704,18 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
  * pill that says 104 opens a list of 104. Defined once, used by both.
  */
 const OWNER_OPEN = sql`coalesce(stage, 'New') NOT IN ('Not Interested', 'Do Not Call')`;
-const OWNER_SEGMENTS: Record<string, any> = {
+// Takes the firm's day boundary because "today" is a local question — see
+// dayStart(). As a module-level constant it could only ever ask Postgres for
+// UTC midnight, which is 05:30 in Pune.
+const ownerSegments = (d0: any): Record<string, any> => ({
   open: OWNER_OPEN,
   callbacks_overdue: sql`${OWNER_OPEN} AND callback_at IS NOT NULL AND callback_at < NOW()`,
-  callbacks_today: sql`${OWNER_OPEN} AND callback_at >= NOW() AND callback_at < date_trunc('day', NOW()) + interval '1 day'`,
+  callbacks_today: sql`${OWNER_OPEN} AND callback_at >= NOW() AND callback_at < ${d0} + interval '1 day'`,
   callbacks: sql`${OWNER_OPEN} AND callback_at IS NOT NULL`,
   to_call: sql`${OWNER_OPEN} AND callback_at IS NULL AND last_call_at IS NULL`,
   never_called: sql`${OWNER_OPEN} AND last_call_at IS NULL`,
   unassigned: sql`${OWNER_OPEN} AND agent_id IS NULL`,
-};
+});
 
 export async function listOwners(opts: {
   page?: number; limit?: number; q?: string; stage?: string; project?: string; agentId?: string;
@@ -2423,7 +2735,7 @@ export async function listOwners(opts: {
   }
   const stages = String(opts.stage || '').split(',').map(x => x.trim()).filter(Boolean);
   if (stages.length) where.push(sql`stage IN ${sql(stages)}`);
-  const seg = OWNER_SEGMENTS[String(opts.segment || '')];
+  const seg = ownerSegments(dayStart(await timezoneOf(t)))[String(opts.segment || '')];
   if (seg) where.push(seg);
   // '_none' is the "No project" bucket from listOwnerProjects — those rows
   // have project NULL or ''. Without this branch a click on that card sent
@@ -2661,6 +2973,7 @@ export async function noteOwnerContact(recordId: string, channel: string): Promi
 export async function getOwnerQueueCounts(mine?: boolean): Promise<any> {
   const t = tid();
   const scope = ownerScope(mine);
+  const today = dayStart(await timezoneOf(t));
   const open = sql`coalesce(stage, 'New') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}`;
   const rows = await sql`
     SELECT count(*)::int AS total,
@@ -2669,12 +2982,12 @@ export async function getOwnerQueueCounts(mine?: boolean): Promise<any> {
            count(*) FILTER (WHERE ${open} AND last_call_at IS NULL)::int AS never_called,
            count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL AND callback_at < NOW())::int AS callbacks_overdue,
            count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL AND callback_at >= NOW()
-                            AND callback_at < date_trunc('day', NOW()) + interval '1 day')::int AS callbacks_today,
+                            AND callback_at < ${today} + interval '1 day')::int AS callbacks_today,
            count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL
-                            AND callback_at >= date_trunc('day', NOW()) + interval '1 day')::int AS callbacks_upcoming,
+                            AND callback_at >= ${today} + interval '1 day')::int AS callbacks_upcoming,
            count(*) FILTER (WHERE ${open} AND callback_at IS NULL AND last_call_at IS NULL)::int AS to_call,
            count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
-           count(*) FILTER (WHERE last_call_at >= date_trunc('day', NOW()))::int AS called_today
+           count(*) FILTER (WHERE last_call_at >= ${today})::int AS called_today
       FROM crm_owners WHERE tenant_id = ${t} AND ${scope}`;
   const r: any = rows[0] || {};
   return {
@@ -2700,6 +3013,8 @@ export async function getOwnerQueueCounts(mine?: boolean): Promise<any> {
 export async function getOwnerTodayRows(perGroup = 6, mine?: boolean): Promise<any> {
   const t = tid();
   const scope = ownerScope(mine);
+  // NOT `today` — that name is taken below by the rows themselves.
+  const d0 = dayStart(await timezoneOf(t));
   const open = sql`coalesce(stage, 'New') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}`;
   const n = Math.min(Math.max(Number(perGroup) || 6, 1), 25);
   const [overdue, today, toCall] = await Promise.all([
@@ -2707,7 +3022,7 @@ export async function getOwnerTodayRows(perGroup = 6, mine?: boolean): Promise<a
           AND callback_at IS NOT NULL AND callback_at < NOW()
         ORDER BY callback_at ASC LIMIT ${n}`,
     sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${open}
-          AND callback_at >= NOW() AND callback_at < date_trunc('day', NOW()) + interval '1 day'
+          AND callback_at >= NOW() AND callback_at < ${d0} + interval '1 day'
         ORDER BY callback_at ASC LIMIT ${n}`,
     sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${open}
           AND callback_at IS NULL AND last_call_at IS NULL
@@ -2778,7 +3093,7 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
     sql`SELECT * FROM crm_leads
         WHERE tenant_id = ${t} ${scope}
           AND ${OPEN}
-          AND (overdue = true OR follow_up IS NOT NULL OR agent_id IS NULL
+          AND (${FOLLOWUP_PAST_DUE} OR follow_up IS NOT NULL OR agent_id IS NULL
                OR stage = 'New' OR created_at > now() - interval '14 days')
         ORDER BY created_at DESC LIMIT 200`,
     // A tenancy that has ended, or ends inside the 60-day window the renewal
@@ -2789,11 +3104,11 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
           AND (config->'tenancy'->>'end')::date <= (now() + interval '60 days')::date
         ORDER BY (config->'tenancy'->>'end')::date ASC LIMIT 50`,
     // The true size of each group, regardless of how many rows came back above.
-    sql`SELECT count(*) FILTER (WHERE overdue)::int AS overdue,
+    sql`SELECT count(*) FILTER (WHERE ${FOLLOWUP_PAST_DUE})::int AS overdue,
                count(*) FILTER (WHERE stage = 'New')::int AS fresh,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned,
-               count(*) FILTER (WHERE stage <> 'New' AND follow_up IS NULL AND NOT overdue)::int AS no_next,
-               count(*) FILTER (WHERE follow_up IS NOT NULL AND NOT overdue)::int AS scheduled
+               count(*) FILTER (WHERE stage <> 'New' AND follow_up IS NULL AND NOT ${FOLLOWUP_PAST_DUE})::int AS no_next,
+               count(*) FILTER (WHERE follow_up IS NOT NULL AND NOT ${FOLLOWUP_PAST_DUE})::int AS scheduled
           FROM crm_leads WHERE tenant_id = ${t} ${scope} AND ${OPEN}`,
     getOwnerQueueCounts(mine),
     getOwnerTodayRows(6, mine),
@@ -3872,6 +4187,388 @@ export async function updateTimelineEvent(id: string, tenantId: string, text: st
   };
 }
 
+
+// ============================================================================
+// 📨 ENQUIRY SESSIONS — docs/specs/repeat-enquiries.md, phase 1
+// ============================================================================
+// Records what was asked for and when. Changes NOTHING about the lead: the
+// requirement, the name, the stage and the routing are all left exactly as the
+// existing merge leaves them. That is the whole design of phase 1 — the counter
+// and the history are additive and cannot be wrong in a way that costs
+// anything, and the disagreements between this and the lead can be read on real
+// traffic before a single field is overwritten.
+
+/** How long a browsing session lasts. Six hours covers a lunchtime and an
+ *  evening browse while keeping yesterday and today always separate. It is a
+ *  guess, so it lives where it can be changed rather than inline. */
+export const ENQUIRY_SESSION_MS = 6 * 60 * 60 * 1000;
+
+export interface EnquiryInput {
+  leadId: string;
+  at?: Date | string | null;
+  source?: string | null;
+  integrationId?: string | null;
+  req?: any;
+  enquiryId?: string | null;
+  rawRef?: string | null;
+}
+
+/** Both ends of the budget a session was browsing. Four clicks at 24,999 /
+ *  25,000 / 29,999 / 29,999 is a range someone is looking at, not a sequence of
+ *  revisions — taking the last is how "latest wins" lands on whichever listing
+ *  they happened to open last. */
+function mergeSessionReq(prev: any, next: any): any {
+  const out = { ...(prev || {}) };
+  const n = next || {};
+  const nums = (v: any) => (v == null || v === '' ? null : Number(v));
+  const lo = nums(n.minBudget ?? n.budget), hi = nums(n.maxBudget ?? n.budget);
+  if (lo != null && isFinite(lo)) out.minBudget = out.minBudget == null ? lo : Math.min(Number(out.minBudget), lo);
+  if (hi != null && isFinite(hi)) out.maxBudget = out.maxBudget == null ? hi : Math.max(Number(out.maxBudget), hi);
+  // Accumulated, because someone comparing Green Vistas and VTP Township is
+  // telling you something and picking one of them discards it.
+  for (const k of ['locality', 'config', 'interest', 'subtype'] as const) {
+    const v = n[k];
+    if (!v) continue;
+    const cur = out[k];
+    const list = Array.isArray(cur) ? cur : (cur ? [cur] : []);
+    if (!list.includes(v)) list.push(v);
+    out[k] = list.length === 1 ? list[0] : list;
+  }
+  // Single-valued: never observed to differ inside a session.
+  for (const k of ['deal', 'category'] as const) if (n[k] && !out[k]) out[k] = n[k];
+  if (n.notes) out.notes = n.notes;
+  return out;
+}
+
+/**
+ * A name a portal filled in for somebody who did not give one.
+ *
+ * bhumi holds six leads called "USER", one "User" and one "MbUser" — the
+ * placeholder MagicBricks writes when the enquiry form is submitted without
+ * one. Whichever push happened to arrive first decides what an agent reads
+ * before dialling, so a repeat carrying the real name should win, and only in
+ * that direction.
+ *
+ * The list is EXPLICIT, not a heuristic about length. "Om", "M" and "Wr" are
+ * all real names on this desk; treating a short name as a placeholder would
+ * have let a portal overwrite three real people.
+ */
+const PLACEHOLDER_NAMES = /^(mb)?user\d*$|^guest$|^enquiry$|^lead$|^new inquiry$|^unknown$|^n\/?a$|^[0-9]+$/i;
+
+export function isPlaceholderName(name: any): boolean {
+  const s = String(name ?? '').trim();
+  return s === '' || PLACEHOLDER_NAMES.test(s);
+}
+
+/**
+ * The lead's owner, if there is still somebody there to own it.
+ *
+ * Returns null when the lead is unassigned, or when the person it names has
+ * left or been deactivated — the only two cases in which a repeat enquiry is
+ * allowed to route. Status is compared with ILIKE because onboarding writes
+ * 'ACTIVE' and the team screen writes 'active', and a `=` here would report
+ * every agent on a real tenant as departed and reassign the entire desk.
+ */
+export async function activeOwnerOf(agentId: string | null | undefined): Promise<string | null> {
+  if (!agentId) return null;
+  const rows = await sql`
+    SELECT id FROM users
+     WHERE id = ${agentId} AND tenant_id = ${tid()} AND status ILIKE 'active' LIMIT 1`;
+  return rows.length ? String(rows[0].id) : null;
+}
+
+/**
+ * WHAT A REPEAT ENQUIRY DOES TO THE LEAD'S REQUIREMENT (spec F5, phase 3).
+ *
+ * The rules below are read off bhumi's own traffic — 18 leads that enquired
+ * more than once, 317 sessions — not chosen in advance. What that data says:
+ *
+ *  • BUDGET IS NOT A STATEMENT, IT IS A PRICE TAG. Every `maxBudget` these
+ *    portals send is the asking price of the listing the person opened. It
+ *    disagreed with the stored value on 6 of the 10 leads that reported one,
+ *    and five of those six moved by under 8% — ₹25,000 → ₹25,999, ₹25,000 →
+ *    ₹24,999. That is browsing, not a change of mind. Taking the newest would
+ *    have narrowed one buyer from ₹40,000 to ₹32,000 and hidden every flat
+ *    between from her. So the budget WIDENS to cover everything they have
+ *    looked at, and never contracts.
+ *
+ *  • INTEREST ACCUMULATES. All 4 disagreements were a different project, and
+ *    one session already held two at once. Somebody comparing Green Cove and
+ *    Blue Waters is telling you something; picking the later one discards it.
+ *    Safe as a list — `interest` is read for display, never matched on.
+ *
+ *  • LOCALITY AND CONFIG ARE NOT OVERWRITTEN. Four of the five locality
+ *    disagreements arrived on a Housing.com push carrying nothing but a
+ *    locality — no BHK, no budget, no project — and Housing sends only four
+ *    distinct localities across 110 pushes, which is a list of the areas this
+ *    firm advertises in, not a buyer's preference. Matching compares locality
+ *    with `===`, so a wrong one does not soften a lead's results, it empties
+ *    them. An empty field is filled; a disagreement is reported to the agent
+ *    and left for a person to settle (see the caller).
+ *
+ *  • DEAL NEVER CONFLICTED — 10 of 10 agreed. Filled when empty, never moved.
+ *
+ * Returns the merged requirement AND the conflicts, so the caller can put the
+ * disagreements somewhere a human will see them instead of resolving them by
+ * arithmetic.
+ */
+export function mergeRepeatReq(stored: any, incoming: any): {
+  req: any; conflicts: Array<{ field: string; had: any; got: any }>;
+} {
+  const cur = { ...(stored || {}) };
+  const inc = incoming || {};
+  const conflicts: Array<{ field: string; had: any; got: any }> = [];
+  const num = (v: any) => (v == null || v === '' ? null : Number(v));
+
+  // A push that carries a requirement, as opposed to one that only says which
+  // page was open. Housing.com's three fields are the latter.
+  const rich = inc.config != null || inc.maxBudget != null || inc.minBudget != null;
+
+  const lo = num(inc.minBudget), hi = num(inc.maxBudget);
+  if (lo != null && isFinite(lo)) {
+    const had = num(cur.minBudget);
+    cur.minBudget = had == null ? lo : Math.min(had, lo);
+  }
+  if (hi != null && isFinite(hi)) {
+    const had = num(cur.maxBudget);
+    cur.maxBudget = had == null ? hi : Math.max(had, hi);
+  }
+  // NO SYNTHETIC FLOOR. An earlier draft of this set `minBudget` from the one
+  // figure a portal sends, which reads "they will not look below ₹32,000" —
+  // something nobody said. It also narrowed the very range it exists to widen:
+  // one buyer whose stored ceiling was ₹73L and whose next enquiry named ₹85L
+  // came out as 85–85L, with the 73L flats now below her floor. These payloads
+  // carry ONE number, the asking price of the listing that was opened, so the
+  // only thing it can honestly move is the ceiling. A minimum arrives only from
+  // a field that actually says minimum.
+
+  if (inc.interest) {
+    const list = Array.isArray(cur.interest) ? [...cur.interest] : (cur.interest ? [cur.interest] : []);
+    for (const v of (Array.isArray(inc.interest) ? inc.interest : [inc.interest])) {
+      if (v && !list.includes(v)) list.push(v);
+    }
+    cur.interest = list.length === 1 ? list[0] : list;
+  }
+
+  // Single-valued, and load-bearing for matching. Filled when unknown; a
+  // disagreement is reported, never applied.
+  for (const f of ['deal', 'locality', 'config', 'category', 'subtype'] as const) {
+    const got = (inc as any)[f];
+    if (got == null || got === '') continue;
+    const had = (cur as any)[f];
+    if (had == null || had === '') {
+      // A bare locality still fills an empty one — knowing the area beats
+      // knowing nothing. It just may not displace an answer already there.
+      (cur as any)[f] = got;
+    } else if (String(had).trim().toLowerCase() !== String(got).trim().toLowerCase()) {
+      // Only a push that stated a requirement gets to disagree about one.
+      if (rich || f === 'deal') conflicts.push({ field: f, had, got });
+    }
+  }
+
+  if (inc.notes) cur.notes = inc.notes;
+  return { req: cur, conflicts };
+}
+
+/**
+ * Record one payload against its session, creating the session if this is a
+ * new one. Idempotent on the portal's own enquiry id.
+ *
+ * Never throws into the caller: this is bookkeeping alongside ingestion, and a
+ * lead must not fail to arrive because its history row could not be written.
+ */
+/** What the caller needs to know: which session, and whether this payload
+ *  OPENED it. A repeat notification is one per session — the man who opened
+ *  four listings in five minutes is one enquiry, and four alerts on four
+ *  phones would have made the feature worse than silence. */
+export type EnquiryRecorded = { id: string; isNewSession: boolean };
+
+export async function recordEnquiry(input: EnquiryInput): Promise<EnquiryRecorded | null> {
+  try {
+    const t = tid();
+    const at = input.at ? new Date(input.at) : new Date();
+    const when = isNaN(at.getTime()) ? new Date() : at;
+
+    // ALREADY COUNTED? Two independent guards, because they catch different
+    // things and each one alone leaves a hole.
+    //
+    // The portal retrying one enquiry is not a second enquiry — one bhumi
+    // enquiry_id arrived three times. But not every payload carries an id, and
+    // for those the backfill replaying the same webhook_inbox row would raise
+    // payload_count again every time it ran: bhumi showed 589 payloads over 261
+    // pushes after two replays. The inbox row id is the payload's identity
+    // whether or not the portal gave it one.
+    if (input.rawRef) {
+      const seen = await sql`
+        SELECT 1 FROM crm_lead_enquiries
+         WHERE tenant_id = ${t} AND raw_refs @> ${sql.json([input.rawRef])} LIMIT 1`;
+      if (seen.length) return null;
+    }
+    if (input.enquiryId) {
+      const seen = await sql`
+        SELECT id, raw_refs FROM crm_lead_enquiries
+         WHERE tenant_id = ${t} AND enquiry_ids @> ${sql.json([input.enquiryId])} LIMIT 1`;
+      if (seen.length) {
+        // The delivery is still recorded, it just is not a second enquiry.
+        // Dropping the reference entirely left one bhumi push belonging to no
+        // session at all, so the table could not be reconciled against the
+        // inbox it was built from — and provenance is the reason raw_refs
+        // exists.
+        if (input.rawRef) {
+          const refs = seen[0].raw_refs || [];
+          if (!refs.includes(input.rawRef)) {
+            await sql`UPDATE crm_lead_enquiries SET raw_refs = ${sql.json([...refs, input.rawRef])}
+                       WHERE id = ${seen[0].id} AND tenant_id = ${t}`;
+          }
+        }
+        return null;
+      }
+    }
+
+    const open = await sql`
+      SELECT * FROM crm_lead_enquiries
+       WHERE tenant_id = ${t} AND lead_id = ${input.leadId}
+         AND last_at >= ${new Date(when.getTime() - ENQUIRY_SESSION_MS)}
+         AND first_at <= ${new Date(when.getTime() + ENQUIRY_SESSION_MS)}
+       ORDER BY last_at DESC LIMIT 1`;
+
+    if (open.length) {
+      const row = open[0];
+      await sql`
+        UPDATE crm_lead_enquiries SET
+          last_at = GREATEST(last_at, ${when}),
+          first_at = LEAST(first_at, ${when}),
+          payload_count = payload_count + 1,
+          req = ${sql.json(mergeSessionReq(row.req, input.req))},
+          enquiry_ids = ${sql.json([...(row.enquiry_ids || []), ...(input.enquiryId ? [input.enquiryId] : [])])},
+          raw_refs = ${sql.json([...(row.raw_refs || []), ...(input.rawRef ? [input.rawRef] : [])])}
+        WHERE id = ${row.id} AND tenant_id = ${t}`;
+      return { id: row.id, isNewSession: false };
+    }
+
+    const id = `enq_${when.getTime()}_${Math.random().toString(36).slice(2, 6)}`;
+    await sql`
+      INSERT INTO crm_lead_enquiries
+        (id, tenant_id, lead_id, integration_id, session_key, first_at, last_at,
+         payload_count, source, req, enquiry_ids, raw_refs)
+      VALUES (${id}, ${t}, ${input.leadId}, ${input.integrationId ?? null},
+              ${`${input.leadId}:${when.toISOString()}`}, ${when}, ${when},
+              1, ${input.source ?? null}, ${sql.json(mergeSessionReq({}, input.req))},
+              ${sql.json(input.enquiryId ? [input.enquiryId] : [])},
+              ${sql.json(input.rawRef ? [input.rawRef] : [])})
+      ON CONFLICT (tenant_id, session_key) DO NOTHING`;
+    return { id, isNewSession: true };
+  } catch (err: any) {
+    console.warn('[recordEnquiry]', err.message);
+    return null;
+  }
+}
+
+
+/**
+ * Build the enquiry history from the pushes that are still on disk.
+ *
+ * webhook_inbox keeps the original bodies, so the table can start full instead
+ * of empty — and it only gets cheaper the sooner it runs: data-lifecycle.md
+ * purges bodies at 30 days and what is gone is gone.
+ *
+ * It replays each payload through recordEnquiry, the SAME function live
+ * ingestion calls, rather than reimplementing the session rule. The first
+ * version of this kept its own in-memory map of open sessions and raced the
+ * boot chain: one lead ended up with two overlapping sessions 90 seconds apart,
+ * both claiming the same last payload. Two implementations of one rule is the
+ * mistake this codebase keeps making, and a migration is not exempt from it.
+ *
+ * Slower — a round trip per payload — and that is the correct trade for a
+ * one-time repair that has to agree with what happens tomorrow.
+ */
+export async function backfillEnquiries(): Promise<void> {
+  // A clean rebuild. The rows are derived entirely from webhook_inbox and no
+  // human has edited them, so starting over is safe and is the only way a
+  // half-finished earlier attempt gets corrected rather than compounded.
+  const wiped = await sql`DELETE FROM crm_lead_enquiries WHERE id LIKE 'enq_bf_%' OR id LIKE 'enq_%'`;
+
+  const rows = await sql`
+    SELECT id, tenant_id, integration_id, lead_id, received_at, raw_body
+      FROM webhook_inbox
+     WHERE lead_id IS NOT NULL AND raw_body IS NOT NULL
+     ORDER BY received_at ASC`;
+
+  // THE CONNECTION'S OWN MAPPING, not a guess at field names.
+  //
+  // This read `body.locality || body.location`, `body.property_type ||
+  // body.bhk`, `body.budget`, `body.message`, `body.project` — which are
+  // 99acres' field names. MagicBricks sends `BHK`, `Budget`, `Property` and
+  // `Buyer's message`, so of a rich payload carrying all four, exactly one key
+  // survived: `locality`, the only name the two providers happen to share. 84
+  // of bhumi's 249 sessions were recorded as "they asked about Mahalunge" when
+  // the payload said 3 BHK, ₹34,000, Godrej Green Vistas, Rent. The data was
+  // never missing; this function could not read it.
+  //
+  // Which is the whole point of the parser config: one place that knows what a
+  // provider's fields are called. A second reader of the same payload is a
+  // second vocabulary, and it disagreed with the first on three providers out
+  // of four.
+  const configs = new Map<string, any>();
+  for (const i of await sql`SELECT id, provider, parser_config FROM integrations`) {
+    configs.set(i.id, i);
+  }
+
+  const byTenant = new Map<string, number>();
+  for (const r of rows as any[]) {
+    let body: any = r.raw_body;
+    if (typeof body === 'string') { try { body = JSON.parse(body); } catch { continue; } }
+    if (!body || typeof body !== 'object') continue;
+    const when = new Date(r.received_at);
+    if (isNaN(when.getTime())) continue;
+    const integration = r.integration_id ? configs.get(r.integration_id) : null;
+    const parsed = parsePayload(body, integration?.parser_config || null);
+    // `lead.req` is what the live ingest hands recordEnquiry — same shape, same
+    // derivations (deal type, commercial subtype, the "0 BHK" clean-up).
+    const req = parsed.lead?.req || {};
+    // The provider IS the source. `body.source` is a field only Meta sends, so
+    // reading it left `source` null on all 249 bhumi sessions and 62 of
+    // delpat's 68 — a column that has never once said where an enquiry came
+    // from, on the table built to answer exactly that.
+    await runWithContext({ tenantId: r.tenant_id } as any, () => recordEnquiry({
+      leadId: r.lead_id,
+      at: when,
+      source: integration?.provider || body.source || null,
+      integrationId: r.integration_id || null,
+      enquiryId: parsed.lead?.external_id || body.enquiry_id || body.lead_id || null,
+      rawRef: r.id,
+      req,
+    }));
+    byTenant.set(r.tenant_id, (byTenant.get(r.tenant_id) || 0) + 1);
+  }
+
+  // Per tenant, out loud, and counted from the table rather than from what this
+  // function thinks it did. A repair that reports its own intentions instead of
+  // the result is how "65 unscoped reads" gets announced before one is opened.
+  const after = await sql`SELECT tenant_id, count(*)::int AS sessions,
+                                 count(DISTINCT lead_id)::int AS leads
+                            FROM crm_lead_enquiries GROUP BY 1 ORDER BY 1`;
+  console.log(`[migration] enquiry sessions rebuilt from ${rows.length} payloads`
+    + (wiped.count ? ` (cleared ${wiped.count} from an earlier attempt)` : '')
+    + ' — ' + (after as any[]).map(r => `${r.tenant_id}: ${r.sessions} sessions over ${r.leads} leads`).join(', '));
+}
+
+/** Every session on one lead, newest first. */
+export async function getEnquiriesForLead(leadId: string): Promise<any[]> {
+  const rows = await sql`
+    SELECT * FROM crm_lead_enquiries
+     WHERE tenant_id = ${tid()} AND lead_id = ${leadId}
+     ORDER BY first_at DESC`;
+  return rows.map(r => ({
+    id: r.id,
+    at: r.first_at instanceof Date ? r.first_at.toISOString() : String(r.first_at),
+    lastAt: r.last_at instanceof Date ? r.last_at.toISOString() : String(r.last_at),
+    listings: r.payload_count,
+    source: r.source,
+    req: r.req || {},
+  }));
+}
+
 // ============================================================================
 // 📍 ACTIVITIES (docs/specs/contacts-leads.md B4)
 // ============================================================================
@@ -3978,8 +4675,34 @@ export async function addActivity(input: ActivityInput): Promise<any> {
   // never-backwards / never-out-of-terminal guard.
   if (input.type === 'site_visit' && input.lead_id) {
     await maybeAutoAdvanceStage(input.lead_id, 'Site Visit', 'Site visit logged with proof');
+    await closeSiteVisitAppointment(input.lead_id);
   }
   return rows[0];
+}
+
+/**
+ * The visit that was booked has now happened, so the booking is over.
+ *
+ * The client used to do this itself — log the activity, then send a second
+ * request clearing `followUp`. Two writes, and the record screen re-read the
+ * lead between them: it saw the visit land, refetched, and got a lead whose
+ * appointment had not been cleared yet, so the appointment card came BACK a
+ * few seconds after disappearing. Measured on a real save: cleared at 3s,
+ * restored at 5s, cleared again at 9s.
+ *
+ * One write, on the side that owns the row. By the time the client is told the
+ * visit was logged, the appointment is already gone — there is no window in
+ * which a read can disagree.
+ *
+ * Only a SITE VISIT appointment is closed by a site visit. A lead with a
+ * callback booked for Thursday who happens to be shown a flat on Tuesday keeps
+ * the callback; the visit did not answer it.
+ */
+async function closeSiteVisitAppointment(leadId: string): Promise<void> {
+  await sql`
+    UPDATE crm_leads SET follow_up = NULL, updated_at = NOW()
+    WHERE id = ${leadId} AND tenant_id = ${tid()}
+      AND follow_up->>'action' ILIKE '%site%visit%'`;
 }
 
 /**
@@ -4017,6 +4740,24 @@ async function propCoordsFor(propertyIds: string[]): Promise<Map<string, { lat: 
   `;
   for (const r of rows) map.set(r.id, { lat: r.geo_lat, lng: r.geo_lng });
   return map;
+}
+
+/**
+ * One lead's activities, mapped for the client.
+ *
+ * THIS READ DID NOT EXIST. addActivity wrote site visits — photo, geo, outcome,
+ * the whole proof — into `activities`, and the only reader was
+ * getActivitiesByLead below, whose comment says "used by getState" and which had
+ * no callers at all. crm_timeline_events is a different table, so the record
+ * screen's timeline never showed them: on delpat, seven proven site visits,
+ * three of them on one lead, logged and then invisible. The agent's reasonable
+ * conclusion was that logging a visit does nothing.
+ */
+export async function getActivitiesForLead(leadId: string): Promise<any[]> {
+  const rows = await sql`
+    SELECT * FROM activities WHERE tenant_id = ${tid()} AND lead_id = ${leadId} ORDER BY at DESC`;
+  const coords = await propCoordsFor(rows.map((r: any) => r.property_id));
+  return rows.map((r: any) => mapActivityForClient(r, r.property_id ? coords.get(r.property_id) || null : null));
 }
 
 /** All activities for the tenant, mapped for the client and grouped by lead.
@@ -4111,15 +4852,35 @@ export async function releaseUnit(unitId: string) {
  * midpoint of min/max) across this agent's won leads — a real number derived
  * from captured data, not a flat ₹1.85Cr assumed per deal.
  */
+/**
+ * ALL THREE COUNTS WERE STRUCTURALLY ZERO. Not "quiet agent" zero — impossible.
+ *
+ *   visits  read `stage = 'Site Visit Done'`. No tenant has that stage; bhumi's
+ *           is 'Site Visit'. Also the wrong source: a visit is an activities row
+ *           with a photo and a GPS fix, not a stage someone may move away from
+ *           afterwards. Counted from `activities` now.
+ *   won     read `stage ILIKE '%won%'`. Every tenant's won stage is
+ *           'Deal Closed'. WON_STATUS has said so all along and is already
+ *           imported here — the query invented its own rule instead.
+ *   calls   was correct, but had NO date filter while the payload announced
+ *           `period: 'last_30_days'` and the UI labelled it "Calls · 30d".
+ *           A window in the label and none in the SQL.
+ *
+ * Verified against bhumi: Anil Dangi 55 calls, Binod 45 + 1 closed, Amit 8 + 1.
+ */
 export async function getAgentPerformance(userId: string) {
   const t = tid();
   const [callRows, visitRows, wonRows] = await Promise.all([
-    sql`SELECT count(*)::int as total_calls FROM crm_timeline_events WHERE author = ${userId} AND type = 'call' AND tenant_id = ${t}`,
-    sql`SELECT count(*)::int as site_visits FROM crm_leads WHERE agent_id = ${userId} AND stage = 'Site Visit Done' AND tenant_id = ${t}`,
+    sql`SELECT count(*)::int as total_calls FROM crm_timeline_events
+         WHERE author = ${userId} AND type = 'call' AND tenant_id = ${t}
+           AND timestamp >= now() - interval '30 days'`,
+    sql`SELECT count(*)::int as site_visits FROM activities
+         WHERE agent_id = ${userId} AND type = 'site_visit' AND tenant_id = ${t}
+           AND at >= now() - interval '30 days'`,
     sql`
       SELECT count(*)::int as closed_won,
              COALESCE(SUM(COALESCE(budget_max, budget_min, 0)), 0)::bigint as revenue
-      FROM crm_leads WHERE agent_id = ${userId} AND stage ILIKE '%won%' AND tenant_id = ${t}
+      FROM crm_leads WHERE agent_id = ${userId} AND stage = ${WON_STATUS} AND tenant_id = ${t}
     `,
     sql`SELECT count(*)::int as total_leads FROM crm_leads WHERE agent_id = ${userId} AND tenant_id = ${t}`,
   ]);
@@ -4130,7 +4891,13 @@ export async function getAgentPerformance(userId: string) {
   const conv = visits > 0 ? Number(((won / visits) * 100).toFixed(1)) : null;
   return {
     user_id: userId,
+    // Calls and visits ARE last-30-days. closed_won_deals is all-time: a stage
+    // has no date of its own, and a firm closing three deals a year would read 0
+    // on every 30-day window forever. Named so the client cannot print one
+    // window's label over the other's number — which is exactly what
+    // "Calls · 30d" over an unwindowed count was.
     period: 'last_30_days',
+    closed_won_period: 'all_time',
     total_outbound_calls: calls,
     site_visits_done: visits,
     closed_won_deals: won,

@@ -1,5 +1,5 @@
 import { isOpen } from '../data/leadStatus.js'
-import { budgetOf } from './format.js'
+import { budgetOf, facetFit } from './format.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import {
@@ -14,9 +14,19 @@ export function matchesForLead(lead, allProps = []) {
   const r = lead.req
   const UNAVAILABLE = ['Sold', 'Leased', 'Off-Market', 'Blocked', 'Closed', 'Let']
   return allProps
-    .filter(p => p.deal === r.deal && p.type === r.config && !UNAVAILABLE.includes(p.status))
+    // `p.type === r.config` was a HARD FILTER here: "2 BHK Apartment" against
+    // "2 BHK", which is never equal, so this list was almost always empty and
+    // the buyer suggestions on a lead have effectively never worked. Config is
+    // now compared through the shared vocabulary and — crucially — is a SCORE,
+    // not a gate. Showing a 3 BHK to someone who asked for 2 is a conversation
+    // an agent has every day; refusing to show it is not a feature.
+    // The one true disqualifier stays a filter: a shop is not a home.
+    .filter(p => p.deal === r.deal && !UNAVAILABLE.includes(p.status) && !facetFit(p, r).hard)
     .map(p => {
       let score = 0; const fit = []
+      const f = facetFit(p, r)
+      if (f.bhkMatch) { score += 3; fit.push(labelOf(BHK, f.want.bhk)) }
+      else if (f.subtypeMatch) { score += 2 }
       if (p.locality === r.locality) { score += 3; fit.push(r.locality) }
       // budgetOf() reads whichever spelling the record carries — see its note.
       // This compared against r.budgetMin, which no lead has, so `inBudget` was
@@ -40,9 +50,14 @@ export function matchesForLead(lead, allProps = []) {
 export function leadsForProperty(property, allLeads = []) {
   if (!property || !allLeads?.length) return []
   return allLeads
-    .filter(l => l.req && l.req.deal === property.deal && l.req.config === property.type && isOpen(l.stage))
+    // Same defect, mirrored: the buyers shown ON a listing were filtered by the
+    // same never-true string compare.
+    .filter(l => l.req && l.req.deal === property.deal && isOpen(l.stage) && !facetFit(property, l.req).hard)
     .map(l => {
       let score = 0; const fit = []
+      const f = facetFit(property, l.req)
+      if (f.bhkMatch) { score += 3; fit.push(labelOf(BHK, f.want.bhk)) }
+      else if (f.subtypeMatch) { score += 2 }
       if (l.req.locality === property.locality) { score += 3; fit.push(l.req.locality) }
       const { min: bMin, max: bMax } = budgetOf(l.req)
       const inBudget = property.price >= bMin * 0.95 && property.price <= bMax * 1.08
@@ -60,8 +75,10 @@ export function ownerUpdateMessage(property, allLeads = [], firmName = tenantFir
   const p = property
   const buyers = leadsForProperty(p, allLeads)
   const partyWord = p.deal === 'rent' ? 'tenants' : 'buyers'
+  // Third copy of the same never-true compare — this one decided a number sent
+  // to the OWNER in a WhatsApp message, so it reported 0 visits forever.
   const visits = allLeads.filter(l => l.stage === 'Site Visit' &&
-    l.req?.deal === p.deal && l.req?.config === p.type && l.req?.locality === p.locality).length
+    l.req?.deal === p.deal && l.req?.locality === p.locality && !facetFit(p, l.req).hard).length
   const L = []
   L.push(`Namaste ${p.owner || 'Sir/Ma\'am'} ji,`)
   L.push('')

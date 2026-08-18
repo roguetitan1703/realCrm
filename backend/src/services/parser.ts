@@ -61,6 +61,31 @@ function setPath(obj: any, path: string, value: any): void {
   cur[parts[parts.length - 1]] = value;
 }
 
+/**
+ * The commercial sub-type named in a portal's prose, in the SAME vocabulary a
+ * listing is stored under (src/data/propertyFields.js, SUBTYPES.commercial).
+ * One list, so a requirement and a listing can actually be compared — the whole
+ * reason a showroom enquiry could only ever land as "0 BHK".
+ *
+ * Ordered longest-first where words overlap: "co-working" contains "working"
+ * and "showroom" contains "room".
+ */
+const COMMERCIAL_SUBTYPES: Array<[RegExp, string]> = [
+  [/\bco[-\s]?working\b/i, 'coworking'],
+  [/\bshowrooms?\b/i, 'showroom'],
+  [/\bwarehouses?\b|\bgodowns?\b/i, 'warehouse'],
+  [/\bindustrial\b|\bfactory\b/i, 'industrial'],
+  [/\boffices?\b|\bcommercial\s+space\b/i, 'office'],
+  // Word-bounded, or "workshop" becomes a shop and "retailer" becomes retail.
+  [/\bshops?\b|\bretail\b/i, 'shop'],
+];
+
+export function commercialSubtype(text: string): string | null {
+  const s = String(text || '');
+  for (const [re, value] of COMMERCIAL_SUBTYPES) if (re.test(s)) return value;
+  return null;
+}
+
 const isEmpty = (v: any) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 
 // ---------------------------------------------------------------------------
@@ -112,6 +137,13 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
    * `null` (unrecognised text) and the default-if-still-empty stage below
    * fills the tenant's fallback, the same as any other field.
    */
+  /**
+   * The commercial sub-type a portal names in prose. One list, matching the
+   * `commercial` half of src/data/propertyFields.js SUBTYPES — the words a
+   * listing is already stored under, so a requirement and a listing can be
+   * compared. Returns null for anything residential, which is the common case.
+   */
+  commercial_subtype_in: (v) => commercialSubtype(String(v ?? '')),
   deal_in: (v) => {
     const s = String(v ?? '').toLowerCase();
     // 99acres sends the whole field as a single letter — "S" / "R" — which no
@@ -120,6 +152,14 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
     // Only an exact one-letter value counts; a stray "s" inside prose does not.
     if (s.trim() === 's') return 'sale';
     if (s.trim() === 'r') return 'rent';
+    // "L" is Lease, which is how 99acres sends COMMERCIAL renting — a showroom,
+    // an office, a warehouse. It was falling through to null, and the deal was
+    // then guessed from the budget: bhumi's one lease enquiry asked ₹2,25,000
+    // for a Mahalunge showroom, which the budget heuristic read as monthly and
+    // called rent. Right answer, wrong reason — the same enquiry quoted as an
+    // annual figure would have been filed as a sale. A portal that tells us the
+    // deal type should be believed rather than second-guessed.
+    if (s.trim() === 'l') return 'rent';
     if (/\brent(al)?\b|\blease\b|\btenant\b|\bletting\b/.test(s)) return 'rent';
     if (/\bsale\b|\bsell\b|\bresale\b|\bbuy(er)?\b|\bpurchase\b|\bnew\s*booking\b/.test(s)) return 'sale';
     return null;
@@ -167,6 +207,7 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
 const WRITABLE = new Set([
   'name', 'phone', 'email', 'source', 'notes',
   'req.deal', 'req.locality', 'req.config', 'req.purpose', 'req.notes',
+  'req.category', 'req.subtype',
   'req.timeline', 'req.budget',
   // BOTH spellings of the budget bounds, because both are real. createLead
   // reads `req.minBudget ?? req.budgetMin` and the record sheet writes the
@@ -318,6 +359,45 @@ export function parsePayload(payload: any, config: ParserConfig | null): ParseRe
     if (derived) {
       setPath(lead, 'req.deal', derived);
       trace.push({ target: 'req.deal', from: 'budget', raw: null, value: derived, via: 'derived' });
+    }
+  }
+
+  // COMMERCIAL, derived from what the portal already said.
+  //
+  // bhumi's showroom enquiry arrived as property_type "0 BHK" with the message
+  // "225000, Showrooms for Lease Mahalunge, Pune West". The lead was created
+  // reading `config: "0 BHK"` — nought bedrooms — and an agent rejected it,
+  // which is a fair response to a record that says a buyer wants no bedrooms.
+  //
+  // Every signal needed was in the payload. Properties have carried `category`
+  // and `subtype` for a long time (1,778 commercial listings on file); the lead
+  // requirement simply had no way to say the word, so a genuine ₹2.25 lakh a
+  // month lease looked like nonsense.
+  //
+  // Derived, never defaulted: a lead is commercial because the portal said a
+  // commercial word, not because nothing contradicted it.
+  if (isEmpty(getPath(lead, 'req.category'))) {
+    const said = [getPath(lead, 'req.config'), getPath(lead, 'req.notes'), getPath(lead, 'req.interest')]
+      .filter(Boolean).join(' ');
+    const sub = commercialSubtype(said);
+    // "0 BHK" alone is enough: no portal describes a flat that way.
+    // Bounded, or "10 BHK" would read as a building with no bedrooms in it.
+    if (sub || /\b0\s*bhk\b/i.test(said)) {
+      setPath(lead, 'req.category', 'commercial');
+      trace.push({ target: 'req.category', from: 'message', raw: said.slice(0, 60), value: 'commercial', via: 'derived' });
+      if (sub) {
+        setPath(lead, 'req.subtype', sub);
+        trace.push({ target: 'req.subtype', from: 'message', raw: said.slice(0, 60), value: sub, via: 'derived' });
+      }
+      // "0 BHK" as a config is worse than no config — it is a bedroom count on
+      // a building that has none, and it is what put a showroom beside studio
+      // flats in every match. The subtype now carries the meaning.
+      if (/^\s*0\s*bhk\s*$/i.test(String(getPath(lead, 'req.config') || ''))) {
+        setPath(lead, 'req.config', null);
+      }
+    } else if (!isEmpty(getPath(lead, 'req.config'))) {
+      setPath(lead, 'req.category', 'residential');
+      trace.push({ target: 'req.category', from: 'config', raw: null, value: 'residential', via: 'derived' });
     }
   }
 

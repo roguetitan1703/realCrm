@@ -223,6 +223,52 @@ shows it.
   connection card, not in a modal nobody opens.
 - **Dead-letter visibility.** A failed delivery currently exists only in a log.
 
+### E10 — One question, one control
+
+Two separate things, found together.
+
+**The phone's filter sheet is the better UI, and the desk does not have it.**
+One bottom sheet holds sort direction, sort key and every filter field as tap
+chips, with a live "Show 41 leads" on the button that closes it. The desk
+instead has a filter bar with nested popovers — add-filter, then pick a field,
+then pick a value — which is more clicks to reach the same query and never shows
+what the result will be before you commit to it. The sheet is the pattern worth
+keeping; the work is bringing it to the desk, not trimming the phone back to
+match.
+
+**Separately, the lead list asks one question from three places** — segment
+pills, two dropdowns, and the filter sheet — and the phone shows it most
+plainly because all three stack on one narrow screen.
+
+| pill | filter sheet | dropdown | |
+|---|---|---|---|
+| Unassigned | Unassigned | — | identical, two controls |
+| Today | Arrived today | — | identical, two names |
+| Call not received | No answer, not retried | Status → Call Not Received | **three controls, two different answers** |
+| Overdue | — | — | pill only |
+
+The exact duplicates are clutter. The third row is a defect: the pill and the
+dropdown both return every lead in the stage (36 on bhumi), while the sheet's
+chip returns only the ones nobody went back to (15). Two of the three agree and
+one quietly does not, and all three share the words "call"/"answer" — the thing
+`CLAUDE.md` §3.3 says must never happen, because a control that shares a word
+with a different question reads as the app contradicting itself.
+
+- **Delete the duplicated flags** from the sheet where a pill already asks it.
+- **Rename the survivor to what it returns** — "Not retried in 3 days", which
+  cannot be confused with the stage it filters within.
+- **Decide where a question lives**: a stage belongs to the Status dropdown, an
+  arrival window to the pills, a decay rule to the sheet. One home each.
+- **Then give the desk the sheet.** Same definition, same fields, same live
+  result count — the desk already reads `filterFields` from the module
+  definition, so this is a surface swap rather than a second filter system.
+
+Sizing check done at the same time, so it is not re-derived later: option lists
+are not the problem — bhumi has 10 localities and 8 agents, so the phone sheet
+does not need the desk picker's `>7 options` search box. It would need one on a
+desk tenant with a long source or locality list, which is an argument for
+carrying that search across with the sheet.
+
 ---
 
 ## 4. Sequencing
@@ -242,6 +288,8 @@ shows it.
 6. Time to first contact, measured and shown (E1).
 7. Attempts on the calling queue (E2).
 8. Rejection reasons (E6).
+9. **One question, one control** on the lead list (E10) — the no-answer
+   discrepancy first, since that one returns two different answers today.
 
 ### Later
 

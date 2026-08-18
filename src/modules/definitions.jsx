@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, budgetRange, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel } from '../lib/format.js'
+import { reqShort, reqConfigLabel, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -80,13 +80,29 @@ export const LEADS_DEF = {
   headerFacts: (l) => [
     l.phone,
     l.email || null,
-    l.req?.config || l.requirement || null,
+    reqConfigLabel(l.req) || l.requirement || null,
     (l.req?.locality || l.locality) ? <span className="rh-loc"><Icon name="mapPin" size={12} className="ic" />{l.req?.locality || l.locality}</span> : null,
     (l.req?.deal || l.deal) ? <span className={'rh-dealtag' + ((l.req?.deal || l.deal) === 'rent' ? ' rent' : '')}>{labelOf(DEAL_LEAD, l.req?.deal || l.deal)}</span> : null,
-    l.req ? budgetRange(l.req) : null,
+    // WHAT THEY ASKED ABOUT — "VTP Aethereus", "Blue Ridge". The list row showed
+    // this (reqShort carries it) and the record did not, so opening a lead lost
+    // a fact you could already see. It is the one thing that makes the call
+    // warm rather than cold, and it belongs on the screen the call is made from.
+    //
+    // It takes the slot the BUDGET used to hold. This strip is an identity line,
+    // not a summary, and two money-and-property facts fight each other in it —
+    // so it carries the one an agent reads before dialling. The budget is still
+    // on this screen, in the record sheet a few pixels below (req.minBudget /
+    // req.maxBudget), which is the single place every field is viewed.
+    l.req?.interest || null,
     l.req?.timeline || null,
     l.source ? `Via ${l.source}` : null,
   ].filter(Boolean),
+
+  // Beside the NAME, not among the facts — a pill in that wrapping grey row
+  // cost the record its action buttons a line below. Only above one: every
+  // lead has enquired once, and a badge on everything is a badge on nothing.
+  titleBadge: (l) => (l.enquiryCount > 1
+    ? <span className="rh-repeat">{l.enquiryCount} enquiries</span> : null),
 
   // Progression — a lead's status, not a pipeline position (see
   // src/data/leadStatus.js: the list is flat and unordered). `flat: true`
@@ -112,16 +128,18 @@ export const LEADS_DEF = {
   // status dropdowns above the pills (Leads.jsx) ask exactly these two
   // questions against the server. A third control asking the same thing here
   // would just be a second way to filter the same field.
+  // ATTRIBUTES, not worklists. The piles a desk works are the tab row above;
+  // this narrows within whichever one is open.
+  //
+  // "Needs attention" was here — six options, of which "Unassigned" also
+  // appeared on the tab row AND on the Sales Executive filter below,
+  // "Arrived today" was the Today tab, and the other four are now pills. Three
+  // controls answering one question is how a desk stops trusting any of them.
+  //
+  // `untouched_sla` survives as a SEGMENT without a control: the dashboard's
+  // Past SLA tile links through to it, and a flag reached by a link does not
+  // also need a dropdown entry competing with the "Never called" pill beside it.
   filterFields: (store) => [
-    // "Overdue" used to head this list. It read a boolean column nothing ever
-    // writes — 0 of 120 leads on a live desk — so it was a filter that could
-    // only ever return nothing. The two that replaced it are the piles the desk
-    // actually loses: never called, and called once then dropped.
-    { key: 'flag', label: 'Needs attention', icon: 'clock', options: [
-      { value: 'untouched_sla', label: 'Past SLA, never contacted' },
-      { value: 'noanswer_stale', label: 'No answer, not retried' },
-      { value: 'unassigned', label: 'Unassigned' }, { value: 'new', label: 'Arrived today' },
-    ] },
     { key: 'source', label: 'Source', icon: 'trend', options: opt(store.state.settings.sources) },
     { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
     { key: 'agent', label: 'Sales Executive', icon: 'person', options: [
@@ -211,19 +229,47 @@ export const LEADS_DEF = {
    * have I let slip" — not pipeline position, which is what the status
    * dropdown (Leads.jsx) answers instead.
    */
+  // THE TAB ROW IS THE WORKLIST. One control, one question per pill, and every
+  // pill a pile somebody actually clears.
+  //
+  // It was not. Three controls asked overlapping questions and the useful ones
+  // were the hardest to reach:
+  //
+  //   tabs     All · Today · This month · Call not received · Overdue · Unassigned
+  //   filter   Never called · Repeat · Past SLA never contacted · No answer not
+  //            retried · Unassigned · Arrived today
+  //   filter   Sales Executive → Unassigned
+  //
+  // "Unassigned" appeared three times. "Arrived today" and the Today tab are one
+  // thing. "Call not received" (a stage) sat beside "No answer, not retried"
+  // (that stage, gone stale) with nothing saying which was which. And the two
+  // biggest piles on the desk — 67 people nobody has ever rung and 46 rung once
+  // and dropped — were buried inside a dropdown called "Needs attention" while
+  // the tabs showed Overdue 0 and Unassigned 0, both permanently empty.
+  //
+  // What went, and why:
+  //   This month     232 of 232 on bhumi — the All tab wearing a date.
+  //   Unassigned     0, always: routing and pick-up mean a lead is never
+  //                  nobody's for long. Still on the Sales Executive filter,
+  //                  where it belongs, for the day it is not 0.
+  //   Call not received  a stage, and the stage dropdown above already asks it.
+  //                  Its useful half — rung and not rung again — is its own pill.
   segments: [
     { key: 'all', label: 'All' },
     // "Today", not "New today". This pill and the sidebar badge were both
     // called New and mean different things — the badge is a STAGE (88 leads
-    // sitting untouched, whenever they arrived) and this is an ARRIVAL WINDOW
-    // (nothing came in today). Side by side, "New 88" against "New today 0"
-    // reads as the app contradicting itself. Its neighbours already make the
-    // meaning plain: Today, then This month.
+    // sitting untouched, whenever they arrived) and this is an ARRIVAL WINDOW.
+    // Side by side, "New 88" against "New today 0" reads as the app
+    // contradicting itself.
     { key: 'today', label: 'Today' },
-    { key: 'month', label: 'This month' },
-    { key: 'noanswer', label: 'Call not received' },
-    { key: 'overdue', label: 'Overdue', tone: 'alert' },
-    { key: 'unassigned', label: 'Unassigned' },
+    // The two piles the desk loses money on, in the order it loses them.
+    { key: 'never_contacted', label: 'Never called' },
+    { key: 'noanswer_stale', label: 'No answer, not retried' },
+    // Real at last: a follow-up whose moment has gone by, read from the
+    // appointment rather than from a column nothing writes.
+    { key: 'overdue', label: 'Follow-up overdue', tone: 'alert' },
+    // The warmest people here — they came back on their own.
+    { key: 'repeat_enquiry', label: 'Came back' },
   ],
 
   // Trailing actions column (ModuleTable, driven off this definition).
@@ -247,16 +293,27 @@ export const LEADS_DEF = {
     // the moment it went, a phone had no way to schedule or close a follow-up at
     // all. So the intent belongs to the definition, where every surface gets it,
     // rather than to one bespoke card only the desk renders.
-    { id: 'schedule', tier: 'quick', icon: 'calendar',
+    //
+    // ON THE PHONE ONLY, though. The desk record draws the appointment card in
+    // its rail, a few pixels above Quick actions, and that card carries both of
+    // these — so a lead with a site visit booked showed "Reschedule appointment"
+    // twice and, worse, "Log visit" on the card beside "Log site visit" in the
+    // tiles: two labels, one modal, one action. `onRail` is set by the surface
+    // that draws the card, so neither list is guessing about the other.
+    { id: 'schedule', tier: 'quick', icon: 'calendar', when: (l, store, ctx) => !ctx?.onRail,
       label: (l) => (l.followUp ? 'Reschedule appointment' : 'Schedule appointment'),
       sub: (l) => (l.followUp ? followUpLabel(l.followUp) : null),
       run: (store, l) => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id }) },
     // A site visit closes with proof (B4); everything else is a plain done.
-    { id: 'followDone', tier: 'quick', icon: 'check', when: (l) => !!l.followUp,
+    { id: 'followDone', tier: 'quick', icon: 'check', when: (l, store, ctx) => !!l.followUp && !ctx?.onRail,
       label: (l) => (/site\s*visit/i.test(l.followUp?.action || '') ? 'Log site visit' : 'Mark follow-up done'),
       sub: (l) => l.followUp?.action,
       run: (store, l) => {
         if (/site\s*visit/i.test(l.followUp?.action || '')) return store.openModal({ kind: 'visitProof', leadId: l.id })
+        // The completion event is written by the SERVER now, inside updateLead,
+        // the instant follow_up clears — as its own type, not a remark somebody
+        // typed and could rewrite. See the doc comment on closeSiteVisitAppointment's
+        // sibling in store.ts.
         store.setFollowUp(l.id, null); store.toast('Appointment marked completed')
       } },
     // B4. Completing a scheduled Site Visit appointment also opens this, but
@@ -329,7 +386,13 @@ export const LEADS_DEF = {
     return (
       <div className="prow">
         <div className="prow-top">
-          <span className="prow-name">{l.name}</span>
+          {/* Name and badge together, so the badge does not take a row of its
+              own on a 390px card — the same reason it sits beside the name on
+              the record rather than in the facts strip. */}
+          <span className="prow-name">
+            {l.name}
+            {l.enquiryCount > 1 && <span className="prow-repeat">{l.enquiryCount}×</span>}
+          </span>
           <StageCell
             record={l} store={store}
             stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
@@ -338,7 +401,10 @@ export const LEADS_DEF = {
             onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
           />
         </div>
-        {reqShort(l.req) && <div className="prow-req">{reqShort(l.req)}</div>}
+        {/* Without the budget — it has its own slot on the meta line below.
+            This line is one row with an ellipsis, so every part it carries is
+            room taken from `interest`, which sits last and is cut first. */}
+        {reqShort(l.req, { budget: false }) && <div className="prow-req">{reqShort(l.req, { budget: false })}</div>}
         <div className="prow-foot">
           <div className="prow-meta">
             {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
@@ -351,6 +417,11 @@ export const LEADS_DEF = {
                 calling a fresh enquiry and calling one that has been sitting
                 three weeks, and the card had no way to tell them apart. */}
             {l.createdAt && <span className="prow-when">{arrivedOn(l.createdAt)}</span>}
+            {/* The figure, last and quiet. This line has the width — the call
+                and WhatsApp buttons sit to the right of it, not through it —
+                and money on a lead row is a fact you check, never the thing the
+                card is about. */}
+            {hasBudget(l.req) && <span className="prow-money">{budgetRange(l.req)}</span>}
           </div>
           {actions}
         </div>
@@ -879,7 +950,11 @@ export function buildActionTiers(def, store, record, ctx = {}) {
     tone: a.tone,
     onClick: () => a.run(store, record, ctx),
   })
-  const actions = (def.actions || []).filter(a => !a.when || a.when(record, store))
+  // `ctx` reaches `when` as well as `run`. It carries `onRail` — true only on
+  // a desk record, where the module's rail is drawn — so an action that the
+  // rail's own block is already offering can step aside there while staying on
+  // the phone, which has no rail and reaches everything through this list.
+  const actions = (def.actions || []).filter(a => !a.when || a.when(record, store, ctx))
   return {
     quick: actions.filter(a => a.tier === 'quick').map(resolve),
     manage: actions.filter(a => a.tier !== 'quick').map(resolve),

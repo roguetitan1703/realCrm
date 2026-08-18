@@ -16,8 +16,19 @@
 // and the phone so the two chromes can never disagree about where you are.
 
 // Every flag that makes a screen render something OTHER than its list.
+// Keys a navigation CLEARS unless it sets them itself. Anything left here
+// survives every later trip through the app, because `sel` is one object that
+// screens read on mount.
+//
+// The filter keys are on this list for that reason. A dashboard tile navigates
+// with `leadFilter: { flag: ['untouched_sla'] }`; the Leads screen seeds its
+// filter state from `sel.leadFilter` on mount. Without the clear, that filter
+// stayed in `sel` forever — so opening Leads from the sidebar an hour later
+// re-applied a tile someone tapped once, and the list quietly showed 13 leads
+// out of 94 with no filter chip on screen to explain it.
 export const TAKEOVER_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey',
+  'leadFilter', 'ownerSeg', 'ownerStage', 'agentFilter',
 ]
 
 /** Read screen + selection out of the current URL. */

@@ -16,7 +16,8 @@
 import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
-import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent } from './store';
+import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, REJECTED_STATUS } from './store';
+import { notify, notifyRoles } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
 
@@ -451,14 +452,26 @@ export async function processInboxRow(
         // corrected their budget outranks a portal repeating its own form.
         const r = lead.req || {};
         const cur = existing.req || {};
-        const merged: any = { ...cur };
-        for (const k of ['deal', 'config', 'locality', 'minBudget', 'maxBudget', 'purpose', 'timeline', 'interest'] as const) {
-          if ((cur as any)[k] == null && (r as any)[k] != null) merged[k] = (r as any)[k];
-        }
+        // Filling empties is only half of it. The other half is what to do when
+        // the new enquiry DISAGREES, which on bhumi's own traffic it does on 6
+        // of the 10 repeat leads that stated a budget — see mergeRepeatReq for
+        // what those disagreements actually turned out to be. In short: the
+        // budget widens to cover everything they have looked at, the projects
+        // accumulate, and a contradicted locality or configuration is reported
+        // rather than overwritten, because matching compares those with `===`
+        // and a wrong one empties a lead's results instead of loosening them.
+        const { req: merged, conflicts } = mergeRepeatReq(cur, r);
         // The newest enquiry's message is appended rather than merged: two
         // enquiries are two things the person said, and the second one is
         // often the one that names a property.
-        const extra = [r.notes, r.interest && `Interested in: ${r.interest}`].filter(Boolean).join(' — ');
+        const said = (v: any) => (Array.isArray(v) ? v.join(', ') : v);
+        // The disagreements go where a person reads them. "Says 3 BHK now (had
+        // 2 BHK)" is a sentence an agent can act on; silently writing 3 BHK
+        // over the top is a fact nobody can tell from one they established
+        // themselves.
+        const changed = conflicts.map(c => `Says ${said(c.got)} now (had ${said(c.had)})`).join(' — ');
+        const extra = [r.notes, r.interest && `Interested in: ${said(r.interest)}`, changed]
+          .filter(Boolean).join(' — ');
         // A portal that fires the same enquiry twice — 99acres sent one buyer
         // 0.4s apart under two different enquiry ids, which the idempotency
         // lock above keys on and therefore cannot catch — must not leave two
@@ -476,8 +489,33 @@ export async function processInboxRow(
         const notes = dupNote
           ? (existing.notes || [])
           : [extra ? `${note} ${extra}` : note, ...(existing.notes || [])];
+        // A BETTER NAME, NEVER A WORSE ONE. Portals send placeholders — bhumi
+        // holds six leads called "USER" and one called "MbUser" — and whichever
+        // enquiry happened to be first decides what an agent reads before they
+        // dial. So a real name replaces a placeholder, and nothing replaces a
+        // real name: a person who was "Nilay Nawghare" on Tuesday does not
+        // become "MbUser" on Friday because a form was filled in lazily.
+        const nameUpgrade = isPlaceholderName(existing.name) && lead.name && !isPlaceholderName(lead.name)
+          ? { name: lead.name } : {};
+
+        // THE OWNER DOES NOT CHANGE. Somebody has been working this person —
+        // they have the history, and the call they made yesterday is the reason
+        // this enquiry exists. Handing the lead to whoever is next in the
+        // round-robin because a form was submitted again would take a live
+        // conversation away from the person having it.
+        //
+        // Unless there is nobody to take it away from: a lead nobody owns, or
+        // one owned by someone who has left or been deactivated, is routed like
+        // a new arrival — otherwise a repeat enquiry lands on a desk no one
+        // reads. Every bhumi agent is currently active, so this is the case
+        // that has not happened yet rather than one that has.
+        const keeper = await activeOwnerOf(existing.agent_id);
+        const reassign = keeper ? {} : { agentId: await nextRoutedAgent() };
+
         await updateLead(existing.id, {
           notes, req: merged,
+          ...nameUpgrade,
+          ...reassign,
           ...(!existing.email && lead.email ? { email: lead.email } : {}),
         });
         // The timeline is where an agent reads a lead's history, and a repeat
@@ -496,6 +534,50 @@ export async function processInboxRow(
         // — it returns 'merged' below — and then wrote the same word to the
         // inbox as a push that created a lead, so the activity list said "Lead
         // created" three times for one buyer who exists once.
+        // The enquiry itself, recorded as history rather than only narrated in
+        // a note. Additive: it changes nothing above it. Sessions, not payloads
+        // — see docs/specs/repeat-enquiries.md.
+        const session = await recordEnquiry({
+          leadId: existing.id, at: (lead as any).receivedAt || undefined,
+          source: integration.provider, integrationId: integration.id,
+          req: lead.req, enquiryId: (lead as any).external_id || null, rawRef: inboxId,
+        });
+
+        // ONE ALERT PER SESSION, NEVER PER PAYLOAD. One man opened four
+        // listings between 18:05 and 18:10; that is one person coming back, and
+        // four buzzes would have taught the desk to ignore the fifth. A payload
+        // folded into a session already open says nothing new.
+        if (session?.isNewSession) {
+          const owner = (reassign as any).agentId || existing.agent_id;
+          const rejected = String(existing.stage || '') === REJECTED_STATUS;
+          if (rejected) {
+            // NEVER REOPENED AUTOMATICALLY. One of bhumi's rejected leads
+            // carries the remark "She said not interested don't call" — moving
+            // her back into the working list on the strength of a form
+            // submission would put an agent back on the phone to someone who
+            // asked them not to be. Somebody is told; nothing moves.
+            // ['owner','manager'] — the roles this product actually has.
+            // 'admin' is not one of them, so an earlier ['owner','admin'] here
+            // reached exactly the one owner and silently skipped every manager,
+            // which is the same shape as the ILIKE bug that dropped every
+            // desk-wide alert for months. Same pair every other desk alert uses.
+            await notifyRoles(['owner', 'manager'], {
+              type: 'lead_repeat_rejected',
+              data: { name: existing.name, source: integration.provider },
+              link: `/leads/${existing.id}`,
+            }).catch(() => {});
+          }
+          if (owner) {
+            await notify({
+              userId: owner, type: 'lead_repeat',
+              data: {
+                name: existing.name, source: integration.provider,
+                changed: conflicts.length, rejected,
+              },
+              link: `/leads/${existing.id}`,
+            }).catch(() => {});
+          }
+        }
         await markInbox(inboxId, 'merged', { leadId: existing.id });
         return { status: 'merged', leadId: existing.id };
       }
@@ -516,6 +598,16 @@ export async function processInboxRow(
         source: leadFields.source || integration.provider,
       } as any);
 
+      // The FIRST enquiry gets a row too, so the table is the whole history
+      // rather than "everything after the first one" — otherwise a lead that
+      // has enquired twice would show a count of one.
+      if (created?.id) {
+        await recordEnquiry({
+          leadId: created.id, at: (lead as any).receivedAt || undefined,
+          source: leadFields.source || integration.provider, integrationId: integration.id,
+          req: lead.req, enquiryId: external_id || null, rawRef: inboxId,
+        });
+      }
       await markInbox(inboxId, 'parsed', { leadId: created?.id || null });
       return { status: 'ingested', leadId: created?.id || null };
     },

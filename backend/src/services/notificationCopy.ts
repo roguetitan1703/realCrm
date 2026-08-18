@@ -71,6 +71,23 @@ export const COPY: Builders = {
 
   // Was "⚠️ SLA Warning: Untouched Lead". The agent is being told they have not
   // rung someone yet — which is what it now says.
+  // F5. A person who has enquired BEFORE is not a new lead, and reading like
+  // one is what made every repeat invisible — the desk saw "New lead captured"
+  // for somebody an agent spoke to on Tuesday. One of these per SESSION; the
+  // buyer who opened four listings in five minutes gets one, not four.
+  lead_repeat: (d) => ({
+    title: d.rejected ? 'Rejected lead enquired again' : 'Enquired again',
+    body: facts(d.name, d.source && `via ${d.source}`,
+      d.changed > 0 && `${plural(d.changed, 'detail')} changed`),
+  }),
+  // To the desk, not the agent: reopening a lead somebody rejected is a
+  // decision, and the remark on one of bhumi's reads "She said not interested
+  // don't call". Nothing moves on its own.
+  lead_repeat_rejected: (d) => ({
+    title: 'Rejected lead enquired again',
+    body: facts(d.name, d.source && `via ${d.source}`, 'left rejected'),
+  }),
+
   lead_untouched: (d) => ({
     title: `Not contacted for ${d.hours}h`,
     body: facts(d.name, 'assigned to you'),

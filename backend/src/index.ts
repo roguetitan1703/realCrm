@@ -31,6 +31,19 @@ import { getTenantForIngest, runRoutingSweeps } from './services/store';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// EVERY SESSION AND EVERY AUDIT ROW RECORDED THE PROXY'S ADDRESS. Without this,
+// Express's `req.ip` is the socket peer — which behind AWS is the load balancer,
+// so all 51 live sessions stored `::1` or `::ffff:127.0.0.1` and the Team
+// screen's device list could not tell one office from another continent.
+// `x-forwarded-host` and `x-forwarded-proto` were already being read a few
+// hundred lines below, so a proxy was assumed everywhere except here.
+//
+// A HOP COUNT, not `true`. X-Forwarded-For is client-supplied and trusting the
+// whole chain lets anyone claim any address — which then lands in the audit
+// ledger as fact. `1` means "the single proxy in front of us appended the last
+// entry"; raise it only if a second one is genuinely added, and never to `true`.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1));
+
 // CORS — open to all origins. The frontend (Vercel) and this API (AWS) are on
 // different origins, and an allowlist is one more thing that can silently break
 // a demo. Default cors() reflects the requested headers, so the custom
