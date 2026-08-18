@@ -7,7 +7,7 @@ import { createContext, useContext, useReducer, useCallback, useRef, useEffect }
 import { DEFAULT_SETTINGS, DEFAULT_BRAND, PROTECTED_STAGES } from '../data/theme.js'
 import { initials } from './format.js'
 import { generateMessage, followUpMessage } from './matching.js'
-import { api as apiClient, invalidateReads } from './api.js'
+import { api as apiClient, invalidateReads, currentTenant } from './api.js'
 import { applyBrandColor } from './brand.js'
 import { setTenantIdentity } from './tenant.js'
 import { applyPwaIdentity, slugFromLocation } from './pwa.js'
@@ -60,9 +60,9 @@ const withEvent = (record, type, label) =>
 // firm's real data (the service worker can't cache the cross-origin API in the
 // split-origin deploy). Keyed by tenant so switching firms never crosses data.
 function stateCacheKey() {
-  let t = 'unresolved'
-  try { t = window.localStorage?.getItem('crm_tenant_id') || t } catch (e) {}
-  return `crm_state_cache_${t}`
+  // Same resolver as everything else. Reading `crm_tenant_id` here meant the
+  // snapshot could be filed under a workspace this tab is not showing.
+  return `crm_state_cache_${currentTenant() || 'unresolved'}`
 }
 function writeStateCache(serverState) {
   try {
@@ -88,7 +88,7 @@ function lastBrandColor() {
 }
 function readStateCache() {
   try {
-    const t = window.localStorage?.getItem('crm_tenant_id') || ''
+    const t = currentTenant()
     // NO FALLBACK. This used to scan localStorage for any key starting with
     // `crm_state_cache_` and load the first one it found, whichever firm it
     // belonged to — three lines directly contradicting the "keyed by tenant so
@@ -111,18 +111,21 @@ function readStateCache() {
 function loadAuthSession() {
   if (typeof window === 'undefined' || !window.localStorage) return { loggedIn: false }
   try {
-    const raw = window.localStorage.getItem('crm_auth_session')
+    // ONE SESSION PER WORKSPACE. This was a single global `crm_auth_session`
+    // describing whichever firm signed in last, and the isolation it needed was
+    // bolted on as a comparison against `crm_tenant_id` — another global, which
+    // any workspace overwrites merely by being VISITED (selectWorkspace calls
+    // setTenantId before a password is even typed). So opening /delpat's sign-in
+    // screen and never signing in re-pointed bhumi's session, and /bhumi then
+    // alternated between signed-in and signed-out depending on which of the two
+    // globals had been written most recently — the reload-to-reload flapping.
+    //
+    // Keyed by workspace, the isolation is structural: /bhumi reads bhumi's
+    // session or none, and there is no comparison left to get wrong.
+    const raw = window.localStorage.getItem(sessionKey())
     const hasToken = Boolean(apiClient.getToken?.())
     if (raw) {
       const p = JSON.parse(raw)
-      const urlSlug = slugFromLocation()
-      const tokenTenant = window.localStorage.getItem('crm_tenant_id') || p.tenantSlug || ''
-      // Strict Tenant URL Isolation: if a specific tenant URL is requested (e.g. /bhumi)
-      // and the signed-in session belongs to a different tenant (e.g. delpat),
-      // do NOT auto-login to delpat on /bhumi. Present the login screen for /bhumi!
-      if (urlSlug && tokenTenant && urlSlug !== tokenTenant && urlSlug !== p.tenantSlug) {
-        return { loggedIn: false }
-      }
       return {
         loggedIn: Boolean(p.loggedIn) && hasToken,
         role: p.role || 'admin',
@@ -135,19 +138,31 @@ function loadAuthSession() {
   return { loggedIn: false }
 }
 
+/** Where this workspace's session lives. No workspace, no session. */
+function sessionKey() {
+  const t = currentTenant()
+  return t ? `crm_auth_session_${t}` : ''
+}
+
 function persistAuthSession(patch = {}) {
   if (typeof window === 'undefined' || !window.localStorage) return
+  const key = sessionKey()
+  if (!key) return
   try {
-    const existingRaw = window.localStorage.getItem('crm_auth_session')
+    const existingRaw = window.localStorage.getItem(key)
     const existing = existingRaw ? JSON.parse(existingRaw) : {}
     const updated = { ...existing, ...patch, timestamp: Date.now() }
-    window.localStorage.setItem('crm_auth_session', JSON.stringify(updated))
+    window.localStorage.setItem(key, JSON.stringify(updated))
   } catch (e) {}
 }
 
 function clearAuthSession() {
   if (typeof window === 'undefined' || !window.localStorage) return
+  const key = sessionKey()
   try {
+    if (key) window.localStorage.removeItem(key)
+    // The pre-per-workspace key, removed wherever it is still lying around so a
+    // browser upgraded mid-session does not keep answering from it.
     window.localStorage.removeItem('crm_auth_session')
   } catch (e) {}
 }

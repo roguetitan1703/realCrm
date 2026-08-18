@@ -173,6 +173,30 @@ function tokenTenant(token) {
   } catch { return ''; }
 }
 
+/**
+ * WHICH WORKSPACE THIS TAB IS, decided in ONE place.
+ *
+ * It was derived in four, each with its own fallback: getHeaders, api.getToken,
+ * pwa.slugFromLocation, and the store's session loader — and three of them fell
+ * back to `crm_tenant_id`, a single global key that any workspace overwrites
+ * just by being VISITED. Open /delpat, get its sign-in screen, never sign in,
+ * and bhumi's tab now believes it is delpat.
+ *
+ * The URL is the authority. An installed PWA is the one exception: it is locked
+ * to a single firm and its start_url may carry no slug, so it reads the stored
+ * value — which is its own, because an installed app only ever opens one firm.
+ */
+export function currentTenant() {
+  if (typeof window === 'undefined') return '';
+  const slug = pathSlug();
+  if (slug) return slug;
+  try {
+    const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches
+      || window.navigator?.standalone === true;
+    return standalone ? (window.localStorage?.getItem('crm_tenant_id') || '') : '';
+  } catch { return ''; }
+}
+
 /** The workspace slug in the path, or '' on the picker and /admin. */
 function pathSlug() {
   if (typeof window === 'undefined') return '';
@@ -226,19 +250,9 @@ function tokenFor(tenantId) {
 
 function getHeaders(customHeaders = {}) {
   const slug = typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '';
-  // THE URL DECIDES THE WORKSPACE. `crm_tenant_id` is a single global key that
-  // logout never cleared, so it survived from whichever workspace was opened
-  // last — and it used to win over the slug. Open bhumi, come back to /delpat,
-  // sign in with the right password, and the login POST carried bhumi's id:
-  // the server looked the account up in the wrong firm and answered "Invalid
-  // credentials". Nothing about the token was wrong, which is why re-logging-in
-  // never helped and it looked like the password had changed.
-  //
-  // Stored value is the fallback only — the workspace picker and /admin have no
-  // slug in the path.
-  const tenantId = typeof window !== 'undefined'
-    ? ((slug && slug !== 'admin' ? slug : '') || window.localStorage?.getItem('crm_tenant_id') || '')
-    : '';
+  // THE URL DECIDES THE WORKSPACE — see currentTenant(). Selecting one from the
+  // picker pushes /<slug> before anything is sent, so this resolves there too.
+  const tenantId = currentTenant();
   const base = {
     'X-Tenant-ID': tenantId,
     'Content-Type': 'application/json',
