@@ -1125,11 +1125,17 @@ export function StoreProvider({ children }) {
         () => apiClient.updateLead(leadId, { followUp }),
         'Follow-up set — added to calendar')
     },
-    // `addNote` and `logEvent` used to dispatch a timeline entry into local
-    // React state and toast "Call logged" — with no request behind either. The
-    // entry was gone on the next reload and no teammate ever saw it. Both now
-    // go through the same persisted remark thread everything else uses.
-    addNote: (leadId, text) => api.addRemark('lead', leadId, text),
+    // `logEvent` used to dispatch a timeline entry into local React state and
+    // toast "Call logged" — with no request behind it. The entry was gone on
+    // the next reload and no teammate ever saw it. It goes through the same
+    // persisted remark thread everything else uses.
+    //
+    // `addNote(leadId, text, type)` stood beside it until its last caller went.
+    // It took a type and threw it away — every caller's `'visit'` or `'call'`
+    // landed as a plain `remark`, editable and pencil-tagged, which is how the
+    // record of a booked appointment became a sentence anyone could rewrite.
+    // A parameter that is accepted and ignored is worse than one that is not
+    // offered, so it is not offered.
     logEvent: (id, kind, text) => api.addRemark(kind === 'property' ? 'property' : 'lead', id, text),
     merge: (leadId) => {
       const primaryId = api.lookup('lead', leadId)?.duplicateOf
