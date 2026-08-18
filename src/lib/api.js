@@ -201,8 +201,20 @@ function pathSlug() {
  *    closes that door too.
  */
 function tokenFor(tenantId) {
+  // NO WORKSPACE, NO CREDENTIAL. With neither a slug in the path nor a stored
+  // workspace there is nothing for a token to be scoped TO, so presenting one
+  // means presenting whichever firm was signed into last. That is how the bare
+  // root opened a desk instead of the workspace picker even after the picker
+  // itself stopped auto-entering: the app asks `getToken()` whether to boot,
+  // and a leftover global key kept answering yes.
+  if (!tenantId) return '';
+  // The workspace's own key first, whether it came from the path or from the
+  // stored selection — so two firms signed in on one browser both keep working
+  // rather than the last one in evicting the other. The global key is the
+  // last-resort fallback for a session that predates per-workspace keys, and
+  // the claim check below still has to pass.
   const slug = pathSlug();
-  const token = slug ? lsGet(`crm_auth_token_${slug}`) : lsGet(TOKEN_KEY);
+  const token = lsGet(`crm_auth_token_${slug || tenantId}`) || (slug ? '' : lsGet(TOKEN_KEY));
   if (!token) return '';
   const owner = tokenTenant(token);
   // A token whose claim we cannot read is presented as before rather than
