@@ -437,16 +437,45 @@ export async function changePassword(
 }
 
 /** Start a self-serve reset. Silent (no enumeration); only for verified emails. */
-export async function requestPasswordReset(tenantId: string, emailRaw: string, origin?: string): Promise<void> {
-  const email = String(emailRaw || '').trim().toLowerCase();
-  if (!isEmail(email) || !emailConfigured()) return;
-  const rows = await sql`
-    SELECT * FROM users
-    WHERE tenant_id = ${tenantId} AND lower(email) = ${email}
-      AND email_verified = TRUE AND deleted_at IS NULL AND status ILIKE 'active' LIMIT 1
-  `;
+/**
+ * Send a reset link for whatever the person types to sign in with.
+ *
+ * This accepted an EMAIL and nothing else — `if (!isEmail(handle)) return`,
+ * silently. But an agent signs in with a login id: on the client desk all eight
+ * users have one (`mukesh`, `ravish`, `binod`), and that is the credential they
+ * know. Typing it into "Forgot password" matched the email test, failed, and
+ * returned 200 with nothing sent, which is indistinguishable from a link that
+ * was sent and never arrived. Nobody could reset a password they had forgotten
+ * unless they also happened to remember an address they never sign in with.
+ *
+ * Either identifier now, resolved to the one account and mailed to the address
+ * ON FILE — never to whatever was typed, or the form would forward a reset for
+ * somebody else's account to an address the requester chose.
+ *
+ * Still silent on a miss, and still 200 at the route: whether an account exists
+ * is not a question this endpoint answers.
+ */
+export async function requestPasswordReset(tenantId: string, handleRaw: string, origin?: string): Promise<void> {
+  const handle = String(handleRaw || '').trim().toLowerCase();
+  if (!handle) return;
+  if (!emailConfigured()) {
+    // Loud on the server, silent to the caller. A deployment with no SMTP
+    // configured drops every reset on the floor, and the only way anyone found
+    // out was a client saying the mail never came.
+    console.warn('[Auth] password reset requested but no email transport is configured');
+    return;
+  }
+  const rows = isEmail(handle)
+    ? await sql`
+        SELECT * FROM users
+        WHERE tenant_id = ${tenantId} AND lower(email) = ${handle}
+          AND email_verified = TRUE AND deleted_at IS NULL AND status ILIKE 'active' LIMIT 1`
+    : await sql`
+        SELECT * FROM users
+        WHERE tenant_id = ${tenantId} AND lower(login_id) = ${handle}
+          AND email_verified = TRUE AND deleted_at IS NULL AND status ILIKE 'active' LIMIT 1`;
   const u = rows[0];
-  if (!u) return; // silent — don't reveal whether the email exists
+  if (!u) return; // silent — don't reveal whether the account exists
 
   const token = randomBytes(24).toString('base64url');
   const tokenHash = createHash('sha256').update(token).digest('hex');

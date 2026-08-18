@@ -562,7 +562,7 @@ export default function Login({ store }) {
                 </div>
                 <div style={{ textAlign: 'right', marginBottom: 18 }}>
                   <button type="button" className="btn-quiet"
-                    onClick={() => { setForgotEmail(handle.includes('@') ? handle : (savedUser?.handle || '')); setForgotSent(false); setPhase('forgot') }}
+                    onClick={() => { setForgotEmail(handle || savedUser?.login_id || savedUser?.handle || ''); setForgotSent(false); setPhase('forgot') }}
                     style={{ fontSize: 12, padding: 0, color: 'var(--accent)', fontWeight: 600 }}>Forgot password?</button>
                 </div>
                 <Button variant="primary" block type="submit" disabled={loading} style={{ ...BTN, cursor: loading ? 'wait' : 'pointer' }}>
@@ -596,14 +596,17 @@ export default function Login({ store }) {
                   </div>
                 ) : (
                   <form onSubmit={doForgot}>
-                    <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.5 }}>
-                      Enter your account email and we'll send a reset link. Agents: ask your admin to reset your password.
-                    </div>
+                    {/* THE SAME THING THEY SIGN IN WITH. This asked for an email
+                        and was type="email", so an agent — who signs in with an
+                        id, and on the client desk every one of them has one —
+                        could not even submit the form, and the caption told them
+                        to go and ask their admin. The link goes to the address on
+                        file either way; it is never sent to whatever is typed. */}
                     <div className="field" style={{ marginBottom: 18 }}>
-                      <label style={LBL}>Email</label>
+                      <label style={LBL}>User ID or email</label>
                       <div className="input-group">
-                        <input type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
-                          placeholder="you@firm.com" autoFocus disabled={loading}
+                        <input type="text" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
+                          autoFocus disabled={loading}
                           autoCapitalize="none" autoCorrect="off" spellCheck={false} style={{ fontWeight: 600, fontSize: 15 }} />
                       </div>
                     </div>

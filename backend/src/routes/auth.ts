@@ -123,12 +123,17 @@ authRouter.post('/password/change', async (req: Request, res: Response) => {
 // Always 200 (no account enumeration) whether or not the email maps to a user.
 authRouter.post('/password/forgot', async (req: Request, res: Response) => {
   try {
-    const { email } = req.body || {};
+    // `handle` is what the sign-in form calls it; `email` is what this endpoint
+    // used to be. Both accepted so an older deployed client keeps working —
+    // the frontend ships on push and the API by hand, so the two are routinely
+    // a few commits apart.
+    const { email, handle } = req.body || {};
+    const identifier = handle || email;
     // Build the reset link from where the request actually came from, so the
     // emailed link points back to THIS app — localhost in dev, the app origin in
     // the split-origin deploy (the browser's Origin is the app, not the API host).
     const origin = (req.headers.origin as string) || `${req.protocol}://${req.get('host')}`;
-    if (email) await requestPasswordReset(tenantFromHeader(req), email, origin);
+    if (identifier) await requestPasswordReset(tenantFromHeader(req), identifier, origin);
   } catch (err: any) {
     console.warn('[Auth] forgot-password error:', err.message);
   }

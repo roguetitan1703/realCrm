@@ -445,7 +445,10 @@ export const api = {
   },
   logout: () => request('/auth/logout', { method: 'POST' }).catch(() => {}),
   changePassword: (current, next) => request('/auth/password/change', { method: 'POST', body: JSON.stringify({ current, next }) }),
-  forgotPassword: (email) => request('/auth/password/forgot', { method: 'POST', body: JSON.stringify({ email }) }),
+  // Sends BOTH keys: `handle` is what the reset now accepts (an id or an
+  // email), `email` is what the deployed API may still be reading. The
+  // frontend ships on push and the API by hand, so they run apart for a while.
+  forgotPassword: (handle) => request('/auth/password/forgot', { method: 'POST', body: JSON.stringify({ handle, email: handle }) }),
   resetPassword: (token, next) => request('/auth/password/reset', { method: 'POST', body: JSON.stringify({ token, next }) }),
   getSessions: () => request('/auth/sessions'),
   revokeSession: (id) => request(`/auth/sessions/${encodeURIComponent(id)}/revoke`, { method: 'POST' }),
