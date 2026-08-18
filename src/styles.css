@@ -2422,6 +2422,10 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .cb-preset:hover{border-color:var(--line-strong,var(--line));background:var(--card-2)}
 .cb-preset.on{border-color:var(--accent);background:var(--accent-wash);color:var(--accent-ink)}
 .fu-when.is-late{color:var(--alert)}
+/* A booked follow-up whose moment has passed, in the phone record's fact
+   strip. Colour only — the strip wraps, and a pill in it pushes the action
+   buttons onto a line of their own. */
+.rh-facts .rh-late{color:var(--alert);font-weight:600}
 
 /* Assign picker — a real list of people with the load each is carrying, so
    "who should take these twenty" is answerable inside the modal. */

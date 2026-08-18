@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
-import { fitReasons, thumbTint, initials, unitLabel, budgetRange, whenLabel } from '../lib/format.js'
+import { fitReasons, thumbTint, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
@@ -295,7 +295,22 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
         <div className="fu-active">
           <div>
             <div className="fu-title">{l.followUp.action}</div>
-            <div className="fu-when">{l.followUp.date} · {l.followUp.time}</div>
+            {/* PAST DUE IS THE DATE'S OWN PROBLEM, not a separate badge. As a
+                word in the header signals it named no subject and pushed the
+                action row onto a second line to say it; here it sits on the
+                only line in the record that carries the moment it is about, and
+                costs no layout at all. Same treatment as the desk list's Next
+                follow-up column, and the same `.fu-when.is-late` the callback
+                card in Owners already uses — so one lead cannot look late on
+                one screen and fine on the other.
+
+                followUpLabel, not `date · time`: those two are what the person
+                typed and what a scheduler wrote months ago — "This Sunday" long
+                after that Sunday. The label reads the stored instant, which is
+                also the only thing followUpOverdue can judge. */}
+            <div className={'fu-when' + (followUpOverdue(l.followUp) ? ' is-late' : '')}>
+              {followUpLabel(l.followUp)}
+            </div>
           </div>
           {/* B4: a site visit closes with proof (live photo + location), not a
               bare click. Every other appointment type — calls, meetings, demos

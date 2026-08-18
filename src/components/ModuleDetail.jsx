@@ -224,7 +224,12 @@ export function ModuleDetail({
   const visibleSections = sections.filter(s => !s.when || s.when(record, store))
 
   // Module-generic header data, all from the definition.
-  const facts = def.headerFacts ? def.headerFacts(record, store).filter(Boolean) : []
+  // `phone` is passed because the rail — and everything a module puts in it —
+  // is desk-only. A fact that lives on a rail card on the desk has nowhere to
+  // be on a phone, and the alternative to telling the definition is a second
+  // phone-shaped record screen, which is the one thing this component exists
+  // to prevent.
+  const facts = def.headerFacts ? def.headerFacts(record, store, { phone }).filter(Boolean) : []
   const prog = def.progression
   const progStages = prog ? prog.stages(store) : null
   const progCurrent = prog ? prog.current(record) : null
