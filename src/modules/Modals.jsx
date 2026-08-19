@@ -12,10 +12,10 @@ import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { notifMeta, cleanTitle, isAssignment } from '../lib/notificationMeta.js'
 import { REJECTION_REASONS, REJECTED_STATUS } from '../data/leadStatus.js'
-import { getPosition, processImage, uploadMedia } from '../lib/media.js'
+import { getPosition, geoPermission, processImage, uploadMedia } from '../lib/media.js'
 import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES, STATUS } from '../data/propertyFields.js'
 import CameraCapture from '../components/CameraCapture.jsx'
-import { pushPermission, enablePush as subscribeToPush } from '../lib/push.js'
+import { pushStatus, enablePush as subscribeToPush } from '../lib/push.js'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities } from '../lib/suggest.js'
@@ -1445,6 +1445,8 @@ function VisitProofModal({ store, leadId, propId }) {
   const [step, setStep] = useState('geo')          // geo → shoot → confirm
   const [geo, setGeo] = useState(null)
   const [geoErr, setGeoErr] = useState('')
+  const [geoBusy, setGeoBusy] = useState(false)
+  const [geoPerm, setGeoPerm] = useState('unknown') // granted | prompt | denied | unknown
   const [shot, setShot] = useState(null)           // { blob, url }
   const [outcome, setOutcome] = useState('')
   const [remark, setRemark] = useState('')
@@ -1452,13 +1454,25 @@ function VisitProofModal({ store, leadId, propId }) {
   // Whichever unit the modal was opened from, if any. Not a control.
   const property = propId || ''
 
-  // Ask for location the moment the modal opens. Failing fast is the whole
-  // point: a denied permission ends the flow here, not after a photo.
+  // ASK ONLY WHEN THE BROWSER WILL ACTUALLY ASK.
+  //
+  // This fired getPosition() straight from the mount effect. On an installed
+  // Android PWA that request carries no user gesture, so a site Chrome has
+  // auto-blocked (what dismissing the prompt a couple of times does) is denied
+  // instantly and silently — no prompt, ever, and the modal said "turn it on in
+  // your browser settings" for a permission the agent had never been offered.
+  //
+  // So: read the permission first. Already granted, take the fix now. Still
+  // askable, put a button on screen and make the request inside that tap, which
+  // is the only reliable way to raise the prompt. Blocked, say so honestly —
+  // nothing this modal does can lift it.
   useEffect(() => {
     let alive = true
-    getPosition()
-      .then(p => { if (alive) { setGeo(p); setStep('shoot') } })
-      .catch(e => { if (alive) setGeoErr(e.message) })
+    geoPermission().then(st => {
+      if (!alive) return
+      setGeoPerm(st)
+      if (st === 'granted' || st === 'unknown') fetchGeo()
+    })
     return () => { alive = false }
   }, [])
 
@@ -1466,9 +1480,13 @@ function VisitProofModal({ store, leadId, propId }) {
   // it's replaced or the modal closes, or we leak the whole bitmap.
   useEffect(() => () => { if (shot?.url) URL.revokeObjectURL(shot.url) }, [shot])
 
-  const retryGeo = () => {
+  const fetchGeo = () => {
     setGeoErr('')
-    getPosition().then(p => { setGeo(p); setStep('shoot') }).catch(e => setGeoErr(e.message))
+    setGeoBusy(true)
+    getPosition()
+      .then(p => { setGeo(p); setStep('shoot') })
+      .catch(e => setGeoErr(e.message))
+      .finally(async () => { setGeoBusy(false); setGeoPerm(await geoPermission()) })
   }
 
   const onCapture = (blob) => {
@@ -1527,13 +1545,22 @@ function VisitProofModal({ store, leadId, propId }) {
               <Icon name="alert" size={26} />
               <p className="vp-gate-t">Location needed</p>
               <p className="vp-gate-s">{geoErr}</p>
-              <Button variant="primary" block onClick={retryGeo}>Try again</Button>
+              {geoPerm !== 'denied' && (
+                <Button variant="primary" block disabled={geoBusy} onClick={fetchGeo}>
+                  {geoBusy ? 'Getting location…' : 'Try again'}
+                </Button>
+              )}
+            </>
+          ) : geoBusy ? (
+            <>
+              <Icon name="mapPin" size={26} />
+              <p className="vp-gate-t">Getting your location…</p>
             </>
           ) : (
             <>
               <Icon name="mapPin" size={26} />
-              <p className="vp-gate-t">Getting your location…</p>
-              <p className="vp-gate-s">A site visit is logged with where it happened.</p>
+              <p className="vp-gate-t">Location needed</p>
+              <Button variant="primary" block onClick={fetchGeo}>Turn on location</Button>
             </>
           )}
         </div>
@@ -1824,9 +1851,10 @@ export function NotifModal({ store, go }) {
   // someone has more than a page of them.
   const unreadNotifs = store.state.notifUnread || 0
   const [filter, setFilter] = useState('all') // 'all' | 'unread' | 'assigned'
-  const [pushState, setPushState] = useState(() =>
-    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'denied'
-  )
+  // Same source as the phone settings row (src/lib/push.js): whether THIS
+  // workspace can actually be reached, not whether the origin once said yes.
+  const [push, setPush] = useState({ permission: 'default', subscribed: false, ok: false })
+  useEffect(() => { pushStatus().then(setPush) }, [])
 
   // Back is handled centrally in useNav now, for every overlay at once — this
   // drawer was the only one that had ever grown its own handler, which is why
@@ -1841,8 +1869,13 @@ export function NotifModal({ store, go }) {
   // reads the current permission. subscribeToPush() is what actually prompts
   // and registers the subscription.
   const enablePush = async () => {
-    await subscribeToPush()
-    setPushState(pushPermission())
+    const res = await subscribeToPush()
+    setPush(await pushStatus())
+    if (!res.ok) {
+      store.toast(res.reason === 'denied'
+        ? 'Alerts are blocked for this site in your browser settings'
+        : 'Could not turn on alerts on this device', 'warn')
+    }
   }
 
   const openNotif = (n) => {
@@ -1963,18 +1996,18 @@ export function NotifModal({ store, go }) {
         </div>
 
         <div className="notif-drawer-footer" style={{ padding: '14px 20px', borderTop: '1px solid var(--line)', background: 'var(--card-2)' }}>
-          {pushState === 'default' && (
+          {!push.ok && push.permission !== 'denied' && push.permission !== 'unsupported' && (
             <Button variant="primary" size="sm" style={{ width: '100%' }} onClick={enablePush}>
               <Icon name="bell" size={14} /> Enable Device Notifications
             </Button>
           )}
-          {pushState === 'denied' && (
+          {push.permission === 'denied' && (
             <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 8, lineHeight: 1.35 }}>
               <Icon name="bell" size={14} />
               <span>Push alerts blocked in browser settings. Tap the lock icon in address bar to allow notifications.</span>
             </div>
           )}
-          {pushState === 'granted' && (
+          {push.ok && (
             <div style={{ fontSize: 12, color: 'var(--accent-ink)', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
               <Icon name="check" size={14} /> Device notifications active
             </div>

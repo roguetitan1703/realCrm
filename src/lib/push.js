@@ -40,10 +40,14 @@ async function readyRegistration() {
   } catch (e) { return null; }
 }
 
-export async function isPushSubscribed() {
+async function currentSubscription() {
   const reg = await readyRegistration();
-  if (!reg) return false;
-  try { return !!(await reg.pushManager.getSubscription()); } catch (e) { return false; }
+  if (!reg) return null;
+  try { return await reg.pushManager.getSubscription(); } catch (e) { return null; }
+}
+
+export async function isPushSubscribed() {
+  return !!(await currentSubscription());
 }
 
 function urlBase64ToUint8Array(base64String) {
@@ -87,6 +91,29 @@ export async function enablePush() {
 }
 
 /**
+ * The state of alerts ON THIS WORKSPACE, which is not what `Notification.permission`
+ * answers.
+ *
+ * `Notification.permission` is per ORIGIN. Four workspaces on one phone share
+ * one answer, so the moment any of them was granted, all four reported "Active"
+ * — while a push only ever arrives if THIS workspace's service-worker
+ * registration holds a subscription AND the server still has a row for that
+ * endpoint. Those are three different facts and the settings row was reading
+ * the one that costs nothing to satisfy.
+ *
+ * Returns { permission, subscribed, ok }:
+ *   permission  granted | default | denied | unsupported
+ *   subscribed  this workspace's registration has a PushSubscription
+ *   ok          both — the only state worth calling active
+ */
+export async function pushStatus() {
+  if (!pushSupported()) return { permission: 'unsupported', subscribed: false, ok: false };
+  const permission = pushPermission();
+  const subscribed = permission === 'granted' ? await isPushSubscribed() : false;
+  return { permission, subscribed, ok: permission === 'granted' && subscribed };
+}
+
+/**
  * Alerts are on by default: there is no switch anywhere in the product, so this
  * runs once per signed-in device and subscribes.
  *
@@ -101,7 +128,19 @@ export function autoEnablePush() {
 
   const run = async () => {
     off();
-    if (await isPushSubscribed()) return;
+    // A BROWSER-SIDE SUBSCRIPTION IS NOT PROOF THE SERVER CAN REACH IT.
+    //
+    // This used to return here the moment the registration had a subscription,
+    // and that is exactly how a phone goes permanently silent while every
+    // screen says notifications are on. The endpoint rotates (FCM rotated one
+    // of these within an hour on a real device), the server prunes the row on
+    // the 410 that follows, and the browser object it left behind then answers
+    // "already subscribed" on every launch forever after.
+    //
+    // So re-register the endpoint we hold instead of trusting it. The insert is
+    // an upsert keyed on the endpoint, so re-sending the same one is free.
+    const sub = await currentSubscription();
+    if (sub) { await api.subscribePush(sub.toJSON()).catch(() => {}); return; }
     await enablePush();
   };
   const off = () => {

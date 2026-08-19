@@ -190,15 +190,47 @@ export async function uploadMedia(blob, kind = 'misc') {
 }
 
 /**
+ * What the browser will do if we ask for a location, WITHOUT asking.
+ *
+ * 'granted' | 'prompt' | 'denied' | 'unknown' — the Permissions API is absent
+ * on older Safari, hence the fourth. Two things depend on knowing this in
+ * advance: whether a prompt is still possible at all (once it is 'denied' no
+ * amount of retrying will ever raise one — only the browser's own site
+ * settings can), and whether the request has to be made inside a tap.
+ */
+export async function geoPermission() {
+  if (typeof navigator === 'undefined' || !navigator.permissions?.query) return 'unknown';
+  try {
+    const st = await navigator.permissions.query({ name: 'geolocation' });
+    return st.state;
+  } catch (e) { return 'unknown'; }
+}
+
+/**
  * Current position, as a promise. Rejects with a message worth showing a user:
  * for a site visit this is a hard requirement, so the copy has to explain what
  * to do rather than just report a failure.
+ *
+ * CALL THIS FROM A TAP. It used to run from the modal's mount effect, and the
+ * effect is a separate task from the tap that opened the modal — so the request
+ * carried no user gesture. Chrome on Android answers a gestureless request from
+ * a site it has auto-blocked (which is what repeatedly dismissing the prompt
+ * does) by denying it instantly, with no prompt shown; the agent then read
+ * "turn it on in your browser settings" for a permission they had never
+ * actually been asked for. Same shape as Notification.requestPermission on
+ * iOS — see autoEnablePush in lib/push.js.
  */
 export function getPosition({ timeout = 15000 } = {}) {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
-      reject(new Error('This device cannot provide a location, so a visit cannot be verified here.'))
-      return
+      reject(new Error('This device cannot provide a location, so a visit cannot be verified here.'));
+      return;
+    }
+    // Geolocation is unavailable outside a secure context, and the failure it
+    // produces is indistinguishable from a denial.
+    if (typeof window !== 'undefined' && window.isSecureContext === false) {
+      reject(new Error('Location needs a secure (https) connection. Open the app from its normal address.'));
+      return;
     }
     navigator.geolocation.getCurrentPosition(
       pos => resolve({
@@ -206,17 +238,24 @@ export function getPosition({ timeout = 15000 } = {}) {
         lng: pos.coords.longitude,
         accuracy: pos.coords.accuracy,
       }),
-      err => {
-        const msg = err.code === err.PERMISSION_DENIED
-          ? 'Location is off for this site. Turn it on in your browser settings to log a visit.'
-          : err.code === err.TIMEOUT
-            ? 'Could not get a location fix. Step outside or into the open and try again.'
-            : 'Location is unavailable right now. Try again in a moment.'
-        reject(new Error(msg))
+      async err => {
+        if (err.code === err.PERMISSION_DENIED) {
+          // "Denied" is two different situations with two different fixes: the
+          // browser is blocking the site (nothing on screen can change that),
+          // or the person dismissed the prompt (tapping again re-asks).
+          const st = await geoPermission();
+          reject(new Error(st === 'denied'
+            ? 'Location is blocked for this site. Allow it in your browser’s site settings, then try again.'
+            : 'Location was not allowed. Tap Try again and choose Allow.'));
+          return;
+        }
+        reject(new Error(err.code === err.TIMEOUT
+          ? 'Could not get a location fix. Step outside or into the open and try again.'
+          : 'Location is unavailable right now. Try again in a moment.'));
       },
       { enableHighAccuracy: true, timeout, maximumAge: 0 }
-    )
-  })
+    );
+  });
 }
 
 /** Human-readable distance for the soft "were they actually there" signal. */
