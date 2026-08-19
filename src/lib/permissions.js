@@ -33,6 +33,27 @@ export function isDeskRole(role) {
   return DESK_ROLES.includes(role) || role === 'superadmin'
 }
 
+// ── What a role is CALLED ───────────────────────────────────────────────────
+// One place, because the same person was reading "Sales Executive" on the web
+// top bar and "Field agent" on their phone, while the database said `agent` and
+// the firm says agent out loud. Three names for one job, none of them the one
+// people use.
+//
+// `owner` is the tenant's binding user — the account the workspace belongs to.
+// `admin` and `manager` are the same job and are labelled the same; the split
+// exists in the data, not in how any desk works.
+const ROLE_LABELS = {
+  owner: 'Owner',
+  admin: 'Manager',
+  manager: 'Manager',
+  agent: 'Agent',
+  superadmin: 'Delpat',
+}
+
+export function roleLabel(role) {
+  return ROLE_LABELS[String(role || '').toLowerCase()] || 'Agent'
+}
+
 // ── A sales executive's scope on one lead ───────────────────────────────────
 // Mirrors assertLeadWrite() in backend/src/lib/permissions.ts. The server is
 // what enforces this; these two decide what to render, so that an agent is not

@@ -218,7 +218,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
         title: 'Leads',
         // Bulk import is desk work and has no phone screen, so the phone chrome
         // must not offer a route to one.
-        actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import / Revert</Button>
+        actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import</Button>
       })}
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>

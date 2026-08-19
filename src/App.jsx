@@ -5,6 +5,8 @@ import { AppShell } from './layouts/layouts.jsx'
 import { TopBar, Toasts, StaleBanner } from './components/chrome.jsx'
 import { PLATFORM, tenantDocTitle } from './data/platform.js'
 import { autoEnablePush } from './lib/push.js'
+import { isDeskRole, roleLabel } from './lib/permissions.js'
+import PushRow from './components/PushRow.jsx'
 import { api } from './lib/api.js'
 import { useServerData } from './lib/useServerData.js'
 
@@ -206,14 +208,14 @@ export default function App() {
   const footer = {
     agent: me,
     name: me?.name || state.settings.firmName,
-    role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Executive',
+    role: roleLabel(state.role),
   }
 
   // Profile menu carries only real product actions. Role comes from the signed-in
   // user (real RBAC) — no dev toggle; workspace provisioning + data reset are
   // Delpat/superadmin operations and live in the /admin console, not here.
   const profileItems = []
-  if (state.role === 'admin') {
+  if (isDeskRole(state.role)) {
     profileItems.push(
       { icon: 'settings', label: 'Settings', onClick: () => go('settings') },
       { icon: 'team', label: 'Manage team', onClick: () => go('team') },
@@ -227,7 +229,7 @@ export default function App() {
   const profile = {
     agent: me,
     name: me?.name || state.settings.firmName,
-    role: state.role === 'admin' ? 'Owner · Admin' : 'Sales Executive',
+    role: roleLabel(state.role),
     items: profileItems,
   }
 
@@ -248,6 +250,8 @@ export default function App() {
 
   return (
     <div className="viewport">
+      {/* One mount for the whole app: an overlay, not a card in a screen. */}
+      <PushRow store={store} />
       {state.dataStale && <StaleBanner />}
       <AppShell nav={nav} active={effectiveScreen} activeSub={contactsTab} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
         <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.ownerId || ''}-${sel.propId || ''}`} {...ctx} />

@@ -6,11 +6,14 @@ import { currentTenant } from '../lib/api.js'
 // ============================================================================
 // 🔔 Alerts on this device — one component, two presentations
 // ============================================================================
-// `variant="prompt"` renders nothing when alerts are working; it exists to be
-// noticed by someone who does not know they are missing anything, so it sits on
-// Today and in the notification drawer. `variant="row"` always renders, because
-// on the settings screen "Active" is the answer to a question the person came
-// to ask.
+// `variant="prompt"` renders nothing when alerts are working. It exists to be
+// noticed by someone who does not know they are missing anything, so it is an
+// OVERLAY at the top of the app rather than a card in a screen's flow: inline,
+// it sat below whatever the person came to do and was scrolled past. Mounted
+// once, in App, so it is the same on the phone and the desk.
+//
+// `variant="row"` always renders and sits inline, because on a settings screen
+// "Active" is the answer to a question the person came to ask.
 //
 // WHY A CONTROL OF OUR OWN AT ALL. The browser's permission prompt is one-shot:
 // dismiss it twice and Chrome blocks the origin for good, and there is no API
@@ -41,7 +44,7 @@ export default function PushRow({ store, variant = 'prompt' }) {
 
   if (!push || hidden) return null
   // Nothing here can be acted on: no push support at all (iOS in the browser
-  // rather than the installed app, most often) — InstallRow is the thing that
+  // rather than the installed app, most often) — Install is the thing that
   // helps there, and two rows saying different things about one problem is how
   // people stop reading either.
   if (push.permission === 'unsupported') return null
@@ -67,7 +70,7 @@ export default function PushRow({ store, variant = 'prompt' }) {
   const blocked = push.permission === 'denied'
   const support = String(store?.state?.settings?.supportWhatsapp || '').replace(/\D/g, '')
 
-  return (
+  const row = (
     <div className="me-row push-row">
       <span className="install-row-ic">
         <Icon name="bell" size={15} />
@@ -95,4 +98,6 @@ export default function PushRow({ store, variant = 'prompt' }) {
       )}
     </div>
   )
+
+  return variant === 'prompt' ? <div className="push-overlay">{row}</div> : row
 }

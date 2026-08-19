@@ -4,6 +4,7 @@ import { Button, Pager } from '../components/primitives.jsx'
 import { api } from '../lib/api.js'
 import JsonView from '../components/JsonView.jsx'
 import { whenLabel } from '../lib/format.js'
+import { isDeskRole } from '../lib/permissions.js'
 
 // ============================================================================
 // 🔌 CONNECTIONS — where leads come from (spec: docs/specs/ingestion.md, D1)
@@ -587,7 +588,7 @@ export default function Connections({ store }) {
   const [copiedPack, copyPack] = useCopy(store)
 
   const role = store.state.role
-  const canManage = role === 'admin' || role === 'owner' || role === 'manager'
+  const canManage = isDeskRole(role)
 
   const load = useCallback(() => {
     api.getConnections()

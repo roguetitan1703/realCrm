@@ -1,20 +1,14 @@
 import { useState, useEffect } from 'react'
 import { Avatar, Button, Textarea } from '../../components/primitives.jsx'
 import PushRow from '../../components/PushRow.jsx'
-import { canInstall, onInstallAvailable, promptInstall, installEnv, isStandalone } from '../../lib/pwa.js'
-import InstallGuide from '../../components/InstallGuide.jsx'
+import Install from '../../components/Install.jsx'
 import Icon from '../../components/Icon.jsx'
-
-const ROLE_LABEL = { admin: 'Owner · Admin', manager: 'Manager', agent: 'Field agent' }
+import { isDeskRole, roleLabel } from '../../lib/permissions.js'
 
 export default function PhoneMe({ store, me, topBar }) {
   const { state } = store
-  const isAdmin = state.role === 'admin' || state.role === 'owner'
-  const [installable, setInstallable] = useState(canInstall())
-  const [guide, setGuide] = useState(false)
+  const isAdmin = isDeskRole(state.role)
   const [intro, setIntro] = useState(() => state.settings?.whatsappIntroTemplate || '')
-
-  useEffect(() => onInstallAvailable(setInstallable), [])
 
   // patchSettings, not updateSettings — the store has no `updateSettings`, so
   // the optional call `store.updateSettings?.(...)` silently swallowed every
@@ -42,7 +36,7 @@ export default function PhoneMe({ store, me, topBar }) {
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--ink)' }}>{me?.name || state.settings?.firmName || 'User Profile'}</div>
               <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>
-                {ROLE_LABEL[state.role] || 'Field agent'}
+                {roleLabel(state.role)}
                 {me?.phone ? ` · ${me.phone}` : ''}
               </div>
             </div>
@@ -63,26 +57,7 @@ export default function PhoneMe({ store, me, topBar }) {
           
           <PushRow store={store} variant="row" />
 
-          {/* Installation Status / Action */}
-          {!isStandalone() && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: 'var(--card-2)', padding: 12, borderRadius: 10, border: '1px solid var(--line)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
-                <Icon name="plus" size={16} style={{ color: 'var(--accent)' }} />
-                <div>
-                  <div style={{ fontWeight: 600 }}>App Installation</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
-                    {installEnv().ios
-                      ? (installEnv().canAddToHome ? 'Add to Home Screen' : 'Open in Safari to install')
-                      : installable ? 'Install standalone app window' : 'Use browser menu to install'}
-                  </div>
-                </div>
-              </div>
-              {installEnv().ios
-                ? <Button variant="primary" size="sm" onClick={() => setGuide(true)}>Install</Button>
-                : installable && <Button variant="primary" size="sm" onClick={promptInstall}>Install</Button>}
-            </div>
-          )}
-          {guide && <InstallGuide onClose={() => setGuide(false)} />}
+          <Install variant="row" />
         </div>
 
         {/* Single WhatsApp Intro Message Template Card */}

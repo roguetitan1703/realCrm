@@ -4,7 +4,8 @@ import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES, DEFAULT_WHATSAPP_INTRO } from '../data/theme.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import InstallPanel from '../components/InstallPanel.jsx'
+import Install from '../components/Install.jsx'
+import PushRow from '../components/PushRow.jsx'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 
 const NAV = [
@@ -14,7 +15,8 @@ const NAV = [
   { key: 'followup', label: 'Follow-up SLA', icon: 'clock' },
   { key: 'messages', label: 'Message templates', icon: 'wa' },
   // { key: 'audit', label: 'Audit ledger', icon: 'shield' },
-  { key: 'system', label: 'System & data', icon: 'settings' },
+  { key: 'alerts', label: 'Alerts', icon: 'bell' },
+  { key: 'system', label: 'This device', icon: 'settings' },
 ]
 
 export default function Settings({ store, topBar }) {
@@ -41,6 +43,7 @@ export default function Settings({ store, topBar }) {
               {section === 'followup' && <FollowUpSection store={store} settings={settings} />}
               {section === 'messages' && <MessagesSection store={store} settings={settings} />}
               {/* {section === 'audit' && <AuditSection />} */}
+              {section === 'alerts' && <AlertsSection store={store} />}
               {section === 'system' && <SystemSection store={store} />}
             </div>
           </div>
@@ -92,7 +95,7 @@ function BrandSection({ store, settings }) {
 
   return (
     <>
-      <SecHead title="Brand" sub="Your desk is white-labelled. This name, mark and colour appear on the login, top bar and every message your team sends." />
+      <SecHead title="Brand" />
       <Panel>
         <div className="brand-row">
           <div className="brand-badge" style={{ background: logoUrl ? '#fff' : color, color: '#fff' }}>
@@ -201,10 +204,7 @@ function PipelineSection({ store, settings }) {
 
   return (
     <>
-      <SecHead
-        title="Pipeline stages"
-        sub="Rename these to how your team actually talks. Every record on a renamed stage moves with it."
-      />
+      <SecHead title="Pipeline stages" />
 
       <div className="rt-switch" role="tablist">
         {[{ k: 'leads', l: 'Leads' }, { k: 'owners', l: 'Calling' }].map(t => (
@@ -217,11 +217,6 @@ function PipelineSection({ store, settings }) {
 
       <Panel>
         <SectionHead title={isLeads ? 'Lead stages' : 'Calling statuses'} right={`${stages.length}`} />
-        <div className="set-sec-sub">
-          {isLeads
-            ? 'The funnel a buyer moves down. Closed won and closed lost are fixed.'
-            : 'What a cold call can end in. Not interested and Do not call are fixed — the sweeps and every open count read them.'}
-        </div>
         <div className="chip-list">
           {stages.map((s, i) => {
             const isLocked = locked.includes(s)
@@ -277,7 +272,6 @@ function PipelineSection({ store, settings }) {
 const ROUTING_SIDES = {
   leads: {
     key: 'leads', label: 'Leads', noun: 'lead', arrival: 'When a new enquiry arrives',
-    arrivalSub: 'A lead landing from a portal, your website or a walk-in is assigned before your team even opens the app.',
     f: {
       strategy: 'strategy', rota: 'active_agent_ids',
       sweepOn: 'sweep_unassigned_enabled', sweepHours: 'sweep_unassigned_hours',
@@ -289,7 +283,6 @@ const ROUTING_SIDES = {
   },
   owners: {
     key: 'owners', label: 'Calling', noun: 'owner', arrival: 'When a new owner is imported',
-    arrivalSub: 'Owners usually arrive by the hundred from a sheet. This decides who they land on as each row imports.',
     f: {
       strategy: 'owner_strategy', rota: 'owner_active_agent_ids',
       sweepOn: 'owner_sweep_unassigned_enabled', sweepHours: 'owner_sweep_unassigned_hours',
@@ -325,7 +318,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
 
   return (
     <>
-      <SecHead title="Routing" sub="Who catches new work, and what happens to work nobody has picked up. This runs on the server, so it applies whether or not anyone has the app open." />
+      <SecHead title="Routing" />
 
       <div className="rt-switch" role="tablist">
         {Object.values(ROUTING_SIDES).map(s => (
@@ -340,7 +333,6 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
 
       <Panel>
         <SectionHead title={side.arrival} />
-        <div className="set-sec-sub">{side.arrivalSub}</div>
         <div className="opt-list">
           <button className={'opt' + (strategy === 'round_robin' ? ' on' : '')} onClick={() => setStrategy('round_robin')}>
             <span className="opt-radio" />
@@ -365,7 +357,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
               </button>
             }
           />
-          <div className="set-sec-sub">{rota.length} of {agents.length} receive auto-assigned {side.noun}s. Current open load is shown so you can balance the desk.</div>
+          <div className="set-sec-sub">{rota.length} of {agents.length} receive auto-assigned {side.noun}s</div>
           {/* A grid of chips, not a vertical checklist. Eleven agents was
               eleven full-width rows and half a screen of scrolling to answer
               "who is on". */}
@@ -393,7 +385,6 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
           panels made the page read as a list of unrelated settings. */}
       <Panel>
         <SectionHead title={`${side.label === 'Calling' ? 'Owners' : 'Leads'} already on the desk`} />
-        <div className="set-sec-sub">Separate from the routing above, which only ever looks at the {side.noun} that just arrived.</div>
 
         <div className="rt-rule">
           <div className="rt-rule-h">
@@ -439,7 +430,7 @@ function FollowUpSection({ store, settings }) {
   const setRemind = (v) => store.patchSettings({ reminderDays: Math.max(1, v) }, 'Reminder cadence updated')
   return (
     <>
-      <SecHead title="Follow-up SLA" sub="Set the pace your desk is held to. A lead with no logged activity past these windows is flagged overdue on the dashboard and the agent's Today list." />
+      <SecHead title="Follow-up SLA" />
       <Panel>
         <SectionHead title="First response" />
         <div className="set-sec-sub">A brand-new lead should hear back within…</div>
@@ -472,7 +463,7 @@ function MessagesSection({ store, settings }) {
 
   return (
     <>
-      <SecHead title="WhatsApp Intro Message" sub="The single introductory message sent to leads on WhatsApp. Customize the template below using placeholders." />
+      <SecHead title="WhatsApp intro message" />
       <Panel>
         <SectionHead title="Intro Template" />
         <div className="set-sec-sub" style={{ marginBottom: 8 }}>Available Placeholders:</div>
@@ -539,7 +530,7 @@ function AuditSection() {
 
   return (
     <>
-      <SecHead title="Audit ledger" sub="Every sign-in and record change, in an append-only, tamper-evident log. Read-only — entries can never be edited or deleted, and a broken chain is detected automatically." />
+      <SecHead title="Audit ledger" />
       <Panel>
         {st.chain && (
           <div className={`audit-chain ${chainOk ? 'ok' : 'bad'}`}>
@@ -575,14 +566,28 @@ function AuditSection() {
   )
 }
 
+// Alerts had no home on the web at all — the only control anywhere was a row
+// in the notification drawer's footer, which is not where anyone looks for a
+// setting. Same component as the phone, so "am I reachable" has one answer.
+function AlertsSection({ store }) {
+  return (
+    <>
+      <SecHead title="Alerts" />
+      <Panel>
+        <PushRow store={store} variant="row" />
+      </Panel>
+    </>
+  )
+}
+
 function SystemSection({ store }) {
   return (
     <>
-      <SecHead title="System & data" sub="Environment controls for this workspace. Your records live in a live PostgreSQL database — changes here affect real data." />
+      <SecHead title="This device" />
       {/* The desk had no install route at all: the prompt card only ever
           rendered on the phone's Today tab, so a browser on a laptop was never
           offered it. Renders nothing when already installed. */}
-      <InstallPanel />
+      <Install variant="row" />
       {/* <Panel>
         <SectionHead title="Database" />
         <div className="sys-row">

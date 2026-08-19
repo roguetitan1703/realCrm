@@ -133,7 +133,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit }) {
     page, onPage: paginated ? setPage : undefined, pageSize, onPageSize: paginated ? setPageSizeP : undefined,
     // Grid/list toggle only applies to the flat unit views, hide it in project view.
     showViewSwitch: view !== 'projects',
-    // No import button here: the top bar already carries Import / Revert on
+    // No import button here: the top bar already carries Import on
     // every screen, and two buttons for one action in one viewport is a
     // question ("are these different?") rather than a convenience.
     toolbarRight: <>
@@ -155,7 +155,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit }) {
     <>
       {topBar({
         title: 'Properties',
-        actions: (phone || !mayEdit) ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'properties' })}>Import / Revert</Button>
+        actions: (phone || !mayEdit) ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'properties' })}>Import</Button>
       })}
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>

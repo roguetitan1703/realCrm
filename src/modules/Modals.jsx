@@ -15,7 +15,6 @@ import { REJECTION_REASONS, REJECTED_STATUS } from '../data/leadStatus.js'
 import { getPosition, geoPermission, processImage, uploadMedia } from '../lib/media.js'
 import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES, STATUS } from '../data/propertyFields.js'
 import CameraCapture from '../components/CameraCapture.jsx'
-import PushRow from '../components/PushRow.jsx'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities } from '../lib/suggest.js'
@@ -1977,13 +1976,6 @@ export function NotifModal({ store, go }) {
           )}
         </div>
 
-        {/* One implementation of "alerts on this device", shared with the
-            phone's Today and settings screens — this footer used to carry its
-            own copy of the three states and its own idea of what "active"
-            meant. Renders nothing at all when alerts are working. */}
-        <div className="notif-drawer-footer" style={{ padding: '10px 14px', borderTop: '1px solid var(--line)', background: 'var(--card-2)' }}>
-          <PushRow store={store} />
-        </div>
       </div>
     </div>
   )

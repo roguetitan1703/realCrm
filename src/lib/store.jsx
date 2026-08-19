@@ -224,7 +224,7 @@ function freshState() {
     ? { ...clone(DEFAULT_SETTINGS), ...cs.settings }
     : { ...clone(DEFAULT_SETTINGS), firmName: session.tenantName || '', city: session.tenantCity || '' }
   return {
-    role: session.role || 'admin',                 // 'admin' (owner desktop) | 'agent' (mobile)
+    role: session.role || 'admin',                 // owner | admin | manager | agent, as the server said
     activeAgentId: session.activeAgentId || 'a1',           // who "I" am in agent view
     loggedIn: session.loggedIn || false,
     agents: Array.isArray(cs.agents) ? cs.agents : [],
@@ -390,11 +390,20 @@ function reducer(state, action) {
       }))
 
     case 'LOGIN': {
-      // The verified user drives role + identity. Backend roles are
-      // owner/manager/agent; the desk UI is admin/agent — anything that isn't a
-      // plain agent gets the full (admin) desk.
+      // THE SERVER'S WORD FOR THE ROLE, UNCHANGED.
+      //
+      // This used to collapse every non-agent to 'admin'. src/lib/permissions.js
+      // is written to tell owner, manager and admin apart — deleting a record is
+      // the owner's call — and it could never see any of them, because the role
+      // had already been flattened before it was asked. So the module that
+      // decides what renders was answering a question about a role nobody holds,
+      // and a manager got the owner's desk: Settings, Routing, delete.
+      //
+      // The server enforces the real rule independently, so nothing was open
+      // that should have been shut. But a screen that shows a button the API
+      // will refuse is its own kind of broken.
       const user = action.payload?.user
-      const role = user ? (user.role === 'agent' ? 'agent' : 'admin') : state.role
+      const role = user?.role || state.role
       const activeAgentId = user?.id || state.activeAgentId
       // The workspace name/city are known at sign-in — persist them so the next
       // boot paints the real firm in the sidebar/tab instead of flashing the
@@ -440,11 +449,12 @@ function reducer(state, action) {
 
     case 'ONBOARD_TENANT': {
       const { firmName, city, primaryColor, logoUrl } = action.config || {}
-      persistAuthSession({ loggedIn: true, role: 'admin', activeAgentId: state.activeAgentId })
+      // The person creating the workspace IS the tenant's binding user.
+      persistAuthSession({ loggedIn: true, role: 'owner', activeAgentId: state.activeAgentId })
       return {
         ...state,
         loggedIn: true,
-        role: 'admin',                    // the owner runs the full desk
+        role: 'owner',                    // the owner runs the full desk
         // A brand-new firm starts EMPTY — clear the demo collections so nothing
         // from the previous tenant bleeds through (hydrate then fills the owner).
         leads: [],
