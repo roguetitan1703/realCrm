@@ -112,3 +112,34 @@ through turning alerts on — so it belongs to superadmin, alongside the rest of
 the cross-tenant tooling, whenever that surface is built.
 
 Until then the script is the interface, and it is read-only and safe on `bhumi`.
+
+---
+
+## The audit ledger is hidden ON PURPOSE
+
+`AuditSection` in `src/modules/Settings.jsx` is written and working; its nav
+entry and its render are both commented out. **That is deliberate — the client
+is not to have it yet.** Do not "fix" the dead code or restore the nav item.
+
+---
+
+## Assignments tab: the count and the list disagree
+
+The tab counts by type (`isAssignment`, 6 types); the list it opens filters on
+the word "assign" appearing in the title or body. Measured 2026-08-20: bhumi's
+tab reads **276** and opens onto **290** rows — the 14 extras are all
+`lead_untouched` ("… · assigned to you"). delpat: 137 vs 139, the extras being
+one `lead_untouched` and one `lead_unrouted` ("Lead arrived **un**assigned").
+
+Fix is one line — filter by `isAssignment` — and it is parked only because the
+user asked for other work first.
+
+---
+
+## `reminderDays` is a control that changes nothing
+
+Settings → Follow-up SLA → "Ongoing follow-up" writes `settings.reminderDays`.
+Nothing reads it: the retry sweep uses the hardcoded `RETRY_DAYS = 3` in
+`services/store.ts`. Either wire the setting into the sweep (it is already
+per-tenant, and `RETRY_DAYS` is its only consumer) or remove the field. Wiring
+it is the better answer; the field is on a paying client's screen today.
