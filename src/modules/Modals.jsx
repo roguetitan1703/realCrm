@@ -15,7 +15,7 @@ import { REJECTION_REASONS, REJECTED_STATUS } from '../data/leadStatus.js'
 import { getPosition, geoPermission, processImage, uploadMedia } from '../lib/media.js'
 import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES, STATUS } from '../data/propertyFields.js'
 import CameraCapture from '../components/CameraCapture.jsx'
-import { pushStatus, enablePush as subscribeToPush } from '../lib/push.js'
+import PushRow from '../components/PushRow.jsx'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities } from '../lib/suggest.js'
@@ -1851,11 +1851,6 @@ export function NotifModal({ store, go }) {
   // someone has more than a page of them.
   const unreadNotifs = store.state.notifUnread || 0
   const [filter, setFilter] = useState('all') // 'all' | 'unread' | 'assigned'
-  // Same source as the phone settings row (src/lib/push.js): whether THIS
-  // workspace can actually be reached, not whether the origin once said yes.
-  const [push, setPush] = useState({ permission: 'default', subscribed: false, ok: false })
-  useEffect(() => { pushStatus().then(setPush) }, [])
-
   // Back is handled centrally in useNav now, for every overlay at once — this
   // drawer was the only one that had ever grown its own handler, which is why
   // back closed the alerts but left a half-typed lead form sitting there.
@@ -1864,19 +1859,6 @@ export function NotifModal({ store, go }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-
-  // Same no-op as PhoneMe had: pushPermission() takes no argument and only
-  // reads the current permission. subscribeToPush() is what actually prompts
-  // and registers the subscription.
-  const enablePush = async () => {
-    const res = await subscribeToPush()
-    setPush(await pushStatus())
-    if (!res.ok) {
-      store.toast(res.reason === 'denied'
-        ? 'Alerts are blocked for this site in your browser settings'
-        : 'Could not turn on alerts on this device', 'warn')
-    }
-  }
 
   const openNotif = (n) => {
     if (!n.read) store.markAllNotifsRead()
@@ -1995,23 +1977,12 @@ export function NotifModal({ store, go }) {
           )}
         </div>
 
-        <div className="notif-drawer-footer" style={{ padding: '14px 20px', borderTop: '1px solid var(--line)', background: 'var(--card-2)' }}>
-          {!push.ok && push.permission !== 'denied' && push.permission !== 'unsupported' && (
-            <Button variant="primary" size="sm" style={{ width: '100%' }} onClick={enablePush}>
-              <Icon name="bell" size={14} /> Enable Device Notifications
-            </Button>
-          )}
-          {push.permission === 'denied' && (
-            <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 8, lineHeight: 1.35 }}>
-              <Icon name="bell" size={14} />
-              <span>Push alerts blocked in browser settings. Tap the lock icon in address bar to allow notifications.</span>
-            </div>
-          )}
-          {push.ok && (
-            <div style={{ fontSize: 12, color: 'var(--accent-ink)', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
-              <Icon name="check" size={14} /> Device notifications active
-            </div>
-          )}
+        {/* One implementation of "alerts on this device", shared with the
+            phone's Today and settings screens — this footer used to carry its
+            own copy of the three states and its own idea of what "active"
+            meant. Renders nothing at all when alerts are working. */}
+        <div className="notif-drawer-footer" style={{ padding: '10px 14px', borderTop: '1px solid var(--line)', background: 'var(--card-2)' }}>
+          <PushRow store={store} />
         </div>
       </div>
     </div>

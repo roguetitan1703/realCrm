@@ -23,8 +23,11 @@ self.addEventListener('activate', (event) => {
     // Drop every cache the old fetch handler wrote. Without this, an existing
     // install keeps serving months-old responses from a worker that no longer
     // has any code to refresh them.
+    // Everything EXCEPT the push config. That cache is the only durable place
+    // this worker can keep where to report a receipt, and wiping it on every
+    // worker update would silently disable rotation recovery.
     const keys = await caches.keys();
-    await Promise.all(keys.map((k) => caches.delete(k)));
+    await Promise.all(keys.filter((k) => k !== CFG_CACHE).map((k) => caches.delete(k)));
     await self.clients.claim();
   })());
 });
@@ -53,14 +56,101 @@ self.addEventListener('push', (event) => {
     //
     // A real badge is a separate asset — one colour, transparent background,
     // drawn for 24dp. It is not the logo scaled down.
-    data: { url: data.url || '/' },
+    data: { url: data.url || '/', ack: data.ack || null },
     tag: data.tag || undefined,
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil((async () => {
+    await self.registration.showNotification(title, options);
+    // DELIVERY IS ONLY KNOWABLE FROM HERE.
+    //
+    // The server learns that a push service ACCEPTED a message; it never learns
+    // whether a screen showed it. The device is offline, the OS has frozen the
+    // browser, the payload failed to decrypt — all of those look identical to a
+    // success from the sending side. This worker is the only code that runs at
+    // the moment the notification actually appears, so it is the only thing
+    // that can say so.
+    //
+    // Same shape every push vendor ships (OneSignal call it "confirmed
+    // delivery"): report the opaque token that came inside the encrypted
+    // payload. The token IS the authentication — only the device holding this
+    // subscription's keys could have read it — which matters because a service
+    // worker cannot reach the signed-in session's token.
+    await reportPush(options.data.ack, 'displayed');
+    // Remember where to report, for the subscription-rotation handler below,
+    // which gets no payload of its own.
+    if (options.data.ack?.url) await rememberAckUrl(options.data.ack.url);
+  })());
+});
+
+/** Fire-and-forget receipt. A failed report must never cost the notification. */
+async function reportPush(ack, event) {
+  if (!ack?.url || !ack?.token) return;
+  try {
+    await fetch(ack.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: ack.token, event }),
+    });
+  } catch (e) { /* offline; the row stays at `sent`, which is the truth */ }
+}
+
+// The worker has no localStorage and no session, so the one durable place to
+// keep a scrap of config is the Cache API. Only the origin is kept — the token
+// is per-message and deliberately not stored.
+const CFG_CACHE = 'push-config';
+const CFG_KEY = '/__push_ack_origin';
+
+async function rememberAckUrl(url) {
+  try {
+    const origin = new URL(url).origin;
+    const cache = await caches.open(CFG_CACHE);
+    await cache.put(CFG_KEY, new Response(origin));
+  } catch (e) {}
+}
+
+async function ackOrigin() {
+  try {
+    const cache = await caches.open(CFG_CACHE);
+    const res = await cache.match(CFG_KEY);
+    return res ? await res.text() : '';
+  } catch (e) { return ''; }
+}
+
+// ── The endpoint rotated ─────────────────────────────────────────────────────
+// The spec's own event for it, and we did not handle it. A push service may
+// retire an endpoint at any time; until this ran, the device stayed silent
+// until someone next opened the app — and if the browser kept the stale
+// subscription object, `autoEnablePush` saw one and never replaced it, so the
+// silence was permanent.
+//
+// Re-subscribing needs the same application server key, which the old
+// subscription carries. The server rebinds by the OLD endpoint: a push endpoint
+// is a high-entropy secret URL, so possessing it is the proof — and no signed-in
+// session exists here to prove anything else with.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil((async () => {
+    const origin = await ackOrigin();
+    const oldSub = event.oldSubscription || null;
+    const key = oldSub?.options?.applicationServerKey;
+    if (!origin || !key) return;   // next app load re-registers; see lib/push.js
+    try {
+      const fresh = event.newSubscription || await self.registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: key,
+      });
+      await fetch(`${origin}/api/v1/notifications/resubscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldEndpoint: oldSub.endpoint, subscription: fresh.toJSON() }),
+      });
+    } catch (e) { /* the next signed-in load subscribes from scratch */ }
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  // Opened, not merely shown. Two different facts about one alert.
+  event.waitUntil(reportPush(event.notification.data && event.notification.data.ack, 'clicked'));
   const rawUrl = (event.notification.data && event.notification.data.url) || '/';
   const target = new URL(rawUrl, self.location.origin);
   // THE WORKSPACE IS THE FIRST PATH SEGMENT, and it decides which installed app

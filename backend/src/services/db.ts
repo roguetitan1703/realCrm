@@ -396,6 +396,14 @@ export async function initSchema(): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `;
+    // The receipt half. `sent` means a push service took the message; only the
+    // service worker can say a screen showed it, and it says so by returning
+    // this token — which travels inside the encrypted payload, so holding it is
+    // proof of being the device.
+    await sql`ALTER TABLE push_deliveries ADD COLUMN IF NOT EXISTS ack_token TEXT;`;
+    await sql`ALTER TABLE push_deliveries ADD COLUMN IF NOT EXISTS displayed_at TIMESTAMPTZ;`;
+    await sql`ALTER TABLE push_deliveries ADD COLUMN IF NOT EXISTS clicked_at TIMESTAMPTZ;`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_push_deliv_ack ON push_deliveries (ack_token) WHERE ack_token IS NOT NULL;`;
     await sql`CREATE INDEX IF NOT EXISTS idx_push_deliv_tenant ON push_deliveries (tenant_id, created_at DESC);`;
     await sql`CREATE INDEX IF NOT EXISTS idx_push_deliv_user ON push_deliveries (tenant_id, user_id, created_at DESC);`;
 

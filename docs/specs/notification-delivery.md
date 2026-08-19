@@ -64,8 +64,36 @@ never left the building** — the first two cases above produce no error, no log
 line and no trace anywhere, which is exactly how a day's alerts go nowhere
 without anyone noticing.
 
-`status` is one of: `sent` · `expired` (410/404, endpoint pruned) · `failed` ·
-`no_subscription` · `not_signed_in` · `push_disabled` (no VAPID keys).
+`status` is one of: `sent` · `displayed` · `expired` (410/404, endpoint pruned) ·
+`failed` · `no_subscription` · `not_signed_in` · `push_disabled` (no VAPID keys).
+
+**`sent` and `displayed` are different facts.** `sent` means a push service
+accepted the message — the last thing the server can observe on its own. Only
+the device's service worker runs at the moment a notification actually appears,
+so it reports back: an opaque token travels inside the encrypted payload, and
+the worker POSTs it to `/notifications/ack` after `showNotification()` resolves,
+and again on tap (`clicked_at`). The token is the authentication — it existed
+only inside a payload encrypted to one subscription's keys, which matters
+because a service worker cannot reach the signed-in session. This is the pattern
+every push vendor ships; OneSignal sell it as "confirmed delivery". RFC 8030
+does define real receipts from the push service itself, but neither FCM nor
+Apple implements them for web push.
+
+Requires `PUBLIC_API_URL`. Without it the payload carries no token, no device
+can report anything, and the log honestly stops at `sent`.
+
+**TTL is 6 hours.** Without one, FCM holds an undelivered message for four
+weeks; every alert we push is about something to do today, and one surfacing
+eleven days late is worse than one that never arrives, because the agent acts
+on it.
+
+**Rotation.** `pushsubscriptionchange` is the spec's own event for "your
+endpoint just changed", and the worker now handles it: it re-subscribes with the
+same application server key and POSTs to `/notifications/resubscribe`, which
+rebinds the row by the OLD endpoint. Possessing that endpoint is the proof —
+it is a high-entropy secret URL and there is no session to prove anything else
+with. If the worker cannot recover (no cached API origin, no old subscription),
+the next signed-in load re-registers from `autoEnablePush`.
 
 Read it two ways:
 
@@ -82,5 +110,30 @@ GET /api/v1/notifications/deliveries      owners and managers only
 
 `readiness` is the section that finds the problem: devices opted in, live
 sessions and last successful reach, per person.
+
+## Getting a device subscribed
+
+The browser permission prompt is one-shot: dismissed twice and Chrome blocks the
+origin permanently, with no API anywhere to undo it. So the app primes first —
+`PushRow` (`src/components/PushRow.jsx`), one component on the phone's Today
+screen, the phone settings screen and the notification drawer, which calls the
+browser only from a tap.
+
+Three states, and the third is why a firm needs a support number:
+
+| State | What is shown | Action |
+|---|---|---|
+| subscribed on this workspace | "Alerts on for this device" (settings only) | — |
+| permission not yet granted, or granted with no subscription | "Alerts off on this device" | **Turn on** |
+| permission `denied` | "Alerts blocked on this device" | **Get help** → the firm's `supportWhatsapp` |
+
+Nothing in the product can lift a block, and the people on a field desk are not
+going to find Chrome's site settings from written instructions — so that row
+routes to a human who can do it with them. The number is per firm
+(Settings → Brand → Support WhatsApp).
+
+The prompt is dismissible for 7 days, keyed **per workspace**
+(`crm_push_prompt_dismissed_<tenant>`), because one browser holds several firms
+and dismissing it on one is not an answer for the others.
 
 Rows are pruned at 90 days by the same sweep that fires the alerts.

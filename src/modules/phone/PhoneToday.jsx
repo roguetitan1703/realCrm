@@ -23,6 +23,7 @@ import { isTerminal } from '../../data/leadStatus.js'
 import { Overdue, StageTag, MoreRows, useCap } from '../../components/primitives.jsx'
 import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue } from '../../lib/format.js'
 import InstallPrompt from '../../components/InstallPrompt.jsx'
+import PushRow from '../../components/PushRow.jsx'
 import Icon from '../../components/Icon.jsx'
 
 const CLOSED = (l) => isTerminal(l.stage)
@@ -237,6 +238,7 @@ export default function PhoneToday({ store, me, go, topBar }) {
       {topBar({ title: 'Today' })}
       <div className="q-wrap">
         <InstallPrompt />
+        <PushRow store={store} />
         {groups.map(g => (
           // A group that can be worked through is a list. One that can only be
           // started is a line with a number on it.

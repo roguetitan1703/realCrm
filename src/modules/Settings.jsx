@@ -60,10 +60,20 @@ const COLOR_PRESETS = ['#1E6F52', '#1D4ED8', '#7C3AED', '#B45309', '#B91C1C', '#
 function BrandSection({ store, settings }) {
   const brand = store.state.brand || {}
   const [firm, setFirm] = useState(settings.firmName)
+  // Who an agent reaches when alerts are BLOCKED in their browser. Nothing in
+  // the app can lift that — the permission is one-shot and there is no API to
+  // reset it — so the only route left is a person who can talk them through
+  // their own browser settings. Per firm, because each desk is supported by
+  // whoever sold it to them.
+  const [support, setSupport] = useState(settings.supportWhatsapp || '')
 
   useEffect(() => {
     setFirm(settings.firmName)
   }, [settings.firmName])
+  useEffect(() => {
+    setSupport(settings.supportWhatsapp || '')
+  }, [settings.supportWhatsapp])
+  const supportDirty = support.trim() !== (settings.supportWhatsapp || '')
   const dirty = firm.trim() && firm.trim() !== settings.firmName
   const color = brand.primaryColor || '#1E6F52'
   const logoUrl = brand.logoUrl || ''
@@ -114,6 +124,16 @@ function BrandSection({ store, settings }) {
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => store.updateBrand({ logoUrl: '' }, 'Logo removed')}>Remove</button>
           )}
           <span className="u-muted" style={{ fontSize: 12 }}>PNG or SVG, under 512&nbsp;KB. Shown on the top bar and login.</span>
+        </div>
+
+        <div className="field-lbl" style={{ marginTop: 16 }}>Support WhatsApp</div>
+        <div className="brand-row">
+          <div className="brand-field">
+            <Input value={support} onChange={e => setSupport(e.target.value)} placeholder="919876543210"
+              onKeyDown={e => { if (e.key === 'Enter' && supportDirty) store.patchSettings({ supportWhatsapp: support.trim() }, 'Support number saved') }} />
+          </div>
+          <Button variant={supportDirty ? 'primary' : 'ghost'} disabled={!supportDirty}
+            onClick={() => store.patchSettings({ supportWhatsapp: support.trim() }, 'Support number saved')}>Save</Button>
         </div>
       </Panel>
     </>

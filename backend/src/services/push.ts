@@ -10,6 +10,7 @@
  */
 
 import webpush from 'web-push';
+import { randomBytes } from 'crypto';
 import { sql } from './db.js';
 
 const PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
@@ -30,6 +31,16 @@ if (PUBLIC && PRIVATE) {
 }
 
 export function pushEnabled(): boolean { return enabled; }
+
+// Where a device reports a receipt. Absolute, because a service worker has no
+// build-time config and cannot read the frontend's VITE_API_URL. Absent, pushes
+// simply carry no token and the log stops at `sent` — which is honest.
+const ACK_URL = process.env.PUBLIC_API_URL
+  ? `${process.env.PUBLIC_API_URL.replace(/\/+$/, '')}/api/v1/notifications/ack`
+  : '';
+
+// 6 hours. Every alert we push is about something to do TODAY.
+const TTL_SECONDS = 6 * 3600;
 export function vapidPublicKey(): string { return PUBLIC; }
 
 export async function saveSubscription(tenantId: string, userId: string, sub: any, userAgent?: string): Promise<void> {
@@ -57,14 +68,15 @@ export async function saveSubscription(tenantId: string, userId: string, sub: an
 async function logDelivery(row: {
   tenantId: string; userId: string; notificationId?: string | null; type?: string | null;
   endpoint?: string | null; status: string; statusCode?: number | null; error?: string | null;
+  ackToken?: string | null;
 }): Promise<void> {
   try {
     const id = `pdl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     await sql`
-      INSERT INTO push_deliveries (id, tenant_id, user_id, notification_id, type, endpoint, status, status_code, error)
+      INSERT INTO push_deliveries (id, tenant_id, user_id, notification_id, type, endpoint, status, status_code, error, ack_token)
       VALUES (${id}, ${row.tenantId}, ${row.userId}, ${row.notificationId ?? null}, ${row.type ?? null},
               ${row.endpoint ?? null}, ${row.status}, ${row.statusCode ?? null},
-              ${row.error ? String(row.error).slice(0, 300) : null})
+              ${row.error ? String(row.error).slice(0, 300) : null}, ${row.ackToken ?? null})
     `;
   } catch (e: any) {
     console.warn('[Push] delivery log write failed:', e?.message);
@@ -104,11 +116,26 @@ export async function sendPushToUser(
   if (!live?.n) { await log('not_signed_in'); return; }
   const subs = await sql`SELECT * FROM push_subscriptions WHERE tenant_id = ${tenantId} AND user_id = ${userId}`;
   if (!subs.length) { await log('no_subscription'); return; }
-  const body = JSON.stringify(payload);
   await Promise.all(subs.map(async (s: any) => {
+    // One token per DEVICE, not per alert: the same notification going to a
+    // phone and a laptop is two deliveries, and "it showed on one of them" is
+    // the answer that matters.
+    const ackToken = randomBytes(18).toString('base64url');
+    const body = JSON.stringify({
+      ...payload,
+      ...(ACK_URL ? { ack: { url: ACK_URL, token: ackToken } } : {}),
+    });
     try {
-      const res = await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body);
-      await log('sent', { endpoint: s.endpoint, statusCode: res?.statusCode ?? null });
+      // TTL: how long the push service may hold this if the device is offline.
+      // Without it FCM keeps a message for four weeks — and a "not contacted
+      // for 24h" alert surfacing eleven days late is worse than one that never
+      // arrives, because the agent acts on it.
+      const res = await webpush.sendNotification(
+        { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+        body,
+        { TTL: TTL_SECONDS },
+      );
+      await log('sent', { endpoint: s.endpoint, statusCode: res?.statusCode ?? null, ackToken });
       await sql`UPDATE push_subscriptions SET last_success_at = NOW() WHERE id = ${s.id}`;
     } catch (e: any) {
       // 404/410 = the browser dropped this subscription; prune it.
@@ -183,4 +210,42 @@ export async function deliveryReadiness(tenantId: string): Promise<any[]> {
     WHERE u.tenant_id = ${tenantId} AND u.status ILIKE 'active'
     ORDER BY u.role, u.name
   `;
+}
+
+/**
+ * A device reporting what it did with a push. Unauthenticated by necessity — a
+ * service worker cannot reach the signed-in session — and safe because the
+ * token is 144 bits that only ever existed inside a payload encrypted to one
+ * subscription's keys. Unknown token, nothing happens.
+ */
+export async function recordAck(token: string, event: string): Promise<boolean> {
+  if (!token) return false;
+  const rows = event === 'clicked'
+    ? await sql`
+        UPDATE push_deliveries SET clicked_at = NOW(),
+          displayed_at = COALESCE(displayed_at, NOW()),
+          status = CASE WHEN status = 'sent' THEN 'displayed' ELSE status END
+        WHERE ack_token = ${token} RETURNING id`
+    : await sql`
+        UPDATE push_deliveries SET displayed_at = COALESCE(displayed_at, NOW()),
+          status = CASE WHEN status = 'sent' THEN 'displayed' ELSE status END
+        WHERE ack_token = ${token} RETURNING id`;
+  return rows.length > 0;
+}
+
+/**
+ * The endpoint rotated and the worker re-subscribed. Rebind the row.
+ *
+ * Proof is possession of the OLD endpoint, which is a secret URL with far more
+ * entropy than a session token and is never transmitted anywhere else. It also
+ * carries the tenant and user, which is the point: without it a rotation would
+ * have to guess whose device this is.
+ */
+export async function rebindSubscription(oldEndpoint: string, sub: any): Promise<boolean> {
+  if (!oldEndpoint || !sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) return false;
+  const [row] = await sql`SELECT tenant_id, user_id, user_agent FROM push_subscriptions WHERE endpoint = ${oldEndpoint}`;
+  if (!row) return false;
+  await saveSubscription(row.tenant_id, row.user_id, sub, row.user_agent || undefined);
+  if (sub.endpoint !== oldEndpoint) await sql`DELETE FROM push_subscriptions WHERE endpoint = ${oldEndpoint}`;
+  return true;
 }

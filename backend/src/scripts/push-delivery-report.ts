@@ -10,6 +10,11 @@
  * answer to that question was "an alert was filed", and the cases that matter
  * most (recipient has no device, recipient is signed out) left no trace at all.
  *
+ * `sent` means a push service ACCEPTED the message. `shown`/`opened` come back
+ * from the device's own service worker and are the only proof a screen showed
+ * it — a handset that is offline, frozen by battery optimisation or muted at OS
+ * level looks identical to a success from the sending side.
+ *
  * Two sections, and the first is the one that finds the problem: REACHABILITY
  * says who on the desk can be reached by a push right now. An agent with zero
  * devices receives nothing no matter how correct the alert is.
@@ -67,7 +72,7 @@ async function main() {
   if (!has_log) { console.log(''); return; }
   console.log('\nDELIVERIES' + (since ? ` since ${since}` : ' (last 200)'));
   const rows = await sql`
-    SELECT d.created_at, d.type, d.status, d.status_code, u.name AS who
+    SELECT d.created_at, d.type, d.status, d.status_code, d.displayed_at, d.clicked_at, u.name AS who
     FROM push_deliveries d LEFT JOIN users u ON u.id = d.user_id
     WHERE d.tenant_id = ${t} ${since ? sql`AND d.created_at >= ${since}::timestamptz` : sql``}
     ORDER BY d.created_at DESC LIMIT 200`;
@@ -76,7 +81,8 @@ async function main() {
     console.log('  backend is running a build from before it existed.');
   }
   for (const r of rows) {
-    console.log(`  ${r.created_at.toISOString()}  ${pad(r.type, 26)}${pad(r.who, 22)}${pad(r.status, 16)}${r.status_code ?? ''}`);
+    const seen = r.clicked_at ? 'opened' : r.displayed_at ? 'shown' : '';
+    console.log(`  ${r.created_at.toISOString()}  ${pad(r.type, 26)}${pad(r.who, 22)}${pad(r.status, 12)}${pad(seen, 8)}${r.status_code ?? ''}`);
   }
 
   const tally = await sql`

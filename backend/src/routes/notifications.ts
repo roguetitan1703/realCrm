@@ -6,6 +6,8 @@
  *   POST /api/v1/notifications/:id/read   → mark one read
  *   POST /api/v1/notifications/read-all    → mark all read
  *   GET  /api/v1/notifications/deliveries  → what reached devices (owner/manager)
+ *   POST /api/v1/notifications/ack         → service worker: this was shown/opened (public)
+ *   POST /api/v1/notifications/resubscribe → service worker: my endpoint rotated (public)
  * The "current user" is the token's user (req.user.id, set by
  * withRequestContext); the store scopes everything to the request tenant.
  * ============================================================================
@@ -14,9 +16,38 @@
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { listNotifications, unreadCount, markRead, markAllRead } from '../services/notifications';
-import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription, listDeliveries, deliveryReadiness } from '../services/push';
+import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription, listDeliveries, deliveryReadiness, recordAck, rebindSubscription } from '../services/push';
 
 export const notificationsRouter = Router();
+
+// ── Public, and deliberately so ─────────────────────────────────────────────
+// DEFINED BEFORE requireTenantAuth, which is what keeps them unauthenticated.
+// Both are called by the SERVICE WORKER, which runs with no page, no session
+// and no access to the token in localStorage — there is nothing for it to
+// authenticate with. Each is instead authorised by possessing a secret it could
+// only have got by being the device: an ack token that existed solely inside a
+// payload encrypted to one subscription, or the subscription endpoint itself.
+// Neither reads anything back out, so a wrong guess learns nothing.
+notificationsRouter.post('/ack', async (req: Request, res: Response) => {
+  try {
+    // 204 either way. An unknown token is an expired or pruned delivery, not an
+    // error worth a retry loop on someone's handset.
+    await recordAck(String(req.body?.token || ''), String(req.body?.event || 'displayed'));
+    return res.status(204).end();
+  } catch (err: any) {
+    return res.status(204).end();
+  }
+});
+
+notificationsRouter.post('/resubscribe', async (req: Request, res: Response) => {
+  try {
+    const ok = await rebindSubscription(String(req.body?.oldEndpoint || ''), req.body?.subscription);
+    return res.status(ok ? 200 : 404).json({ success: ok });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to rebind subscription' });
+  }
+});
+
 notificationsRouter.use(requireTenantAuth);
 
 // ── Web Push ────────────────────────────────────────────────────────────────
