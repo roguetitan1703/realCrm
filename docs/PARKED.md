@@ -96,3 +96,19 @@ A backfill is possible and would move real leads on a live desk. It is inference
 from prose, so it needs the user's explicit go-ahead, a stated blast radius per
 tenant, and `runOnce`. Some strings are unambiguous ("Call not rec"); others are
 not ("Call Not Received but details Will Share").
+
+---
+
+## Push reachability list — superadmin, not the firm's admin
+
+Who on a desk can actually be reached by a push (devices opted in, live
+sessions, last successful reach) is answerable today from
+`backend/src/scripts/push-delivery-report.ts` and
+`GET /api/v1/notifications/deliveries`.
+
+It is **not** going on a firm admin's screen. It is a platform-operations view —
+the person who reads it is the one who then rings the agent and talks them
+through turning alerts on — so it belongs to superadmin, alongside the rest of
+the cross-tenant tooling, whenever that surface is built.
+
+Until then the script is the interface, and it is read-only and safe on `bhumi`.
