@@ -669,6 +669,7 @@ export const api = {
 
   // Notifications (per-user alert feed)
   getNotifications: () => request('/notifications'),
+  getNotifUnread: () => request('/notifications?count=1'),
   markNotificationRead: (id) => request(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }),
   markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
 

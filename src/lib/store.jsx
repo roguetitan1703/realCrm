@@ -354,7 +354,19 @@ function reducer(state, action) {
     // count of ALL of them. Both are kept because they answer different
     // questions — the list is what you read, the count is how many there are.
     // Counting the 30 rows instead put "30" on a bell that owed 102.
-    case 'SET_NOTIFICATIONS': return { ...state, notifications: action.notifications || [], notifUnread: action.unread ?? 0 }
+    // `notifications: null` means "the count only" — the bell's number without
+    // the rows behind it. Keep whatever rows we already had rather than
+    // blanking the drawer someone may have open.
+    case 'SET_NOTIFICATIONS': return {
+      ...state,
+      notifications: action.notifications ?? state.notifications ?? [],
+      // Whether the ROWS have ever been fetched, which is not the same as
+      // whether there are any. The drawer opens before its fetch lands, and an
+      // empty list under "No notifications found" is a statement we have not
+      // checked yet.
+      notifLoaded: action.notifications != null ? true : state.notifLoaded,
+      notifUnread: action.unread ?? 0,
+    }
     case 'MARK_NOTIFS_READ': return { ...state, notifications: (state.notifications || []).map(n => ({ ...n, read: true })), notifUnread: 0 }
 
     case 'PATCH_SETTINGS': return { ...state, settings: { ...state.settings, ...action.patch } }
@@ -760,6 +772,19 @@ export function StoreProvider({ children }) {
       })
       .catch(err => {
         if (background) return
+        // A REJECTED SESSION IS NOT AN OUTAGE.
+        //
+        // This used to treat every failure as "offline" and paint the cached
+        // snapshot, while a second request to /auth/me — same token, same API,
+        // same moment — existed for no other purpose than to notice the 401 and
+        // sign the person out. One round trip can answer both: an explicit
+        // 401/403 means the session is gone, and anything else (a network drop,
+        // a reload aborting the fetch, a 5xx) must never log anyone out.
+        if (err?.message && (err.message.includes('401') || err.message.includes('403'))) {
+          apiClient.clearToken?.()
+          dispatch({ type: 'LOGOUT' })
+          return
+        }
         console.error('[Store Hydration] Backend unreachable:', err.message)
         // Offline: fall back to the last cached snapshot so the desk is still
         // readable, flagged stale so the UI can show "as of <time>".
@@ -773,22 +798,10 @@ export function StoreProvider({ children }) {
   // tokenless fallback actor is gone), so firing this on the login screen would
   // 401 and make a signed-out app look like a backend outage.
   useEffect(() => {
-    if (apiClient.getToken?.()) loadServerState()
-
-    // Validate a stored token against the backend. Only drop session if the server
-    // explicitly rejects it with a 401/403 — network errors, page reload aborts,
-    // or temporary 5xx errors must NEVER log out the user.
-    if (apiClient.getToken?.()) {
-      apiClient.me()
-        .then(res => { if (!res?.success) throw new Error('invalid') })
-        .catch(err => {
-          if (err?.message && (err.message.includes('401') || err.message.includes('403'))) {
-            apiClient.clearToken?.();
-            dispatch({ type: 'LOGOUT' });
-          }
-        })
-      loadNotifications()
-    }
+    if (!apiClient.getToken?.()) return
+    loadServerState()
+    // The bell's NUMBER, not the pile behind it.
+    loadNotifUnread()
   }, [])
 
   // Paint the desk in the tenant's accent whenever it changes (hydrate, edit,
@@ -847,6 +860,16 @@ export function StoreProvider({ children }) {
       .catch(err => console.warn('[Notifications] load failed:', err.message))
   }, [])
 
+  // The bell's number, without the pile behind it. This is what boot and the
+  // pulse poll want: the drawer's rows are fetched when the drawer opens, and
+  // fetching them on every page load was the single biggest read on the desk.
+  const loadNotifUnread = useCallback(() => {
+    if (!apiClient.getToken?.()) return
+    apiClient.getNotifUnread()
+      .then(res => { if (res?.success) dispatch({ type: 'SET_NOTIFICATIONS', notifications: null, unread: res.unread }) })
+      .catch(err => console.warn('[Notifications] count failed:', err.message))
+  }, [])
+
   // ── Live refresh ──────────────────────────────────────────────────────────
   // The desk used to load once and then quietly go stale: a lead routed in by a
   // portal, or reassigned by a manager, only appeared if you reloaded the page.
@@ -896,7 +919,7 @@ export function StoreProvider({ children }) {
           pulseRef.current = token
           quiet = 0
           await loadServerState(true)
-          loadNotifications()
+          loadNotifUnread()
         } else {
           quiet++
         }
@@ -931,7 +954,7 @@ export function StoreProvider({ children }) {
       document.removeEventListener('visibilitychange', wake)
       window.removeEventListener('online', wake)
     }
-  }, [loadServerState, loadNotifications])
+  }, [loadServerState, loadNotifUnread])
 
 
   const toast = useCallback((text, tone) => {

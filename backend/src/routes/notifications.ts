@@ -104,6 +104,15 @@ notificationsRouter.get('/', async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(200).json({ success: true, notifications: [], unread: 0 });
+    // THE BELL IS A NUMBER. The drawer is the pile.
+    //
+    // Every page load fetched up to 100 rows — titles, bodies, links — 23.5 kB
+    // on a live desk, more than every other request on the dashboard combined,
+    // to render a badge that shows one integer. `?count=1` is what boot and the
+    // pulse poll ask for; the rows are fetched when the drawer opens.
+    if (req.query.count) {
+      return res.status(200).json({ success: true, notifications: null, unread: await unreadCount(userId) });
+    }
     const [notifications, unread] = await Promise.all([
       listNotifications(userId),
       unreadCount(userId),

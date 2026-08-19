@@ -1941,7 +1941,9 @@ export function NotifModal({ store, go }) {
         </div>
 
         <div className="notif-drawer-body" style={{ padding: 12, flex: 1, overflowY: 'auto' }}>
-          {filteredNotifs.length === 0 ? (
+          {!store.state.notifLoaded ? (
+            <div className="empty" style={{ margin: 'auto 0', padding: '60px 20px', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Loading…</div>
+          ) : filteredNotifs.length === 0 ? (
             <div className="empty" style={{ margin: 'auto 0', padding: '60px 20px', textAlign: 'center' }}>
               <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--card-2)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', color: 'var(--muted)' }}>
                 <Icon name="check" size={20} />
