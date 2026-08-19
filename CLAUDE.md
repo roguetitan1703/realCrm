@@ -126,6 +126,13 @@ diverge nobody is looking.
   nowhere else — broken five times, twice corrupting rows, now checked by
   `scripts/check-vocabulary.mjs`. Escape hatch: `// vocab-ok: <reason>`.
 
+**THE THIRD REPORT IN ONE AREA IS NOT A THIRD BUG. STOP PATCHING AND MODEL IT.**
+Follow-ups produced ten in a row — four names for one concept, a completion tick
+that stored nothing, an outcome dropdown that had never sent anything on any
+record, a display reading a dead column. Fixed one at a time over hours, each
+fix breaking the next, because the feature had no model, only accretions. Name
+the concept, its states, and who acts on it; then fix once.
+
 ### 3.3 A count and the rows it describes come from the same query
 
 - The sidebar badge ran on `tenant_id` alone while the list it labelled ran on
@@ -273,8 +280,18 @@ This is the part that matters most.
 5. **Drive the real UI for UI changes.** Playwright is installed; log in, click,
    assert. Phone viewport is `devices['iPhone 13']`. Measure geometry rather than
    eyeballing it — a nav bar assumed to be 63px is 72.
-6. **Clean up.** Probe rows, scratch scripts, screenshots. Say that you did.
-7. **Correct yourself in place**, in the code and to the user, the moment you
+   **Verify where the person uses it, not where you can see it.** "The server
+   received the flag" is not "the filter is visible" — a tile sent a flag the
+   API honoured and no control on screen reflected, and it was called done.
+6. **Say what the thing is FOR before you change it** — one line, who uses it
+   and why; reading what the code does is a different answer. Skipping this
+   made an outcome box unwritable while it was the only way to record an
+   outcome. If you cannot say, ask.
+7. **Clean up.** Probe rows, scratch scripts, screenshots. Say that you did.
+   **Read a row before you overwrite it** — a stage and a follow-up were each
+   replaced by a probe without being read first, and had to be recovered from
+   the record's own timeline.
+8. **Correct yourself in place**, in the code and to the user, the moment you
    find your own explanation was wrong. Never ship a comment asserting a bug
    that never existed.
 
@@ -286,8 +303,15 @@ This is the part that matters most.
   from before the fabrication was removed. Which were genuinely sales is knowable
   only from the stored payload:
   `backend/src/scripts/reprocess-inbox.ts --overwrite=deal`.
-- **`perAgentCalls` in `getDeskSummary` is unscoped** — every agent's browser
-  gets colleagues' calling throughput. The lead counts beside it are scoped.
+- **Three queries in `getDeskSummary` are unscoped** — `perAgentCalls`,
+  `perAgentLeadCalls`, `perAgentVisits`. Not rendered to an agent, but in the
+  JSON their browser gets. Detail in `docs/PARKED.md`.
+- **A lead's `Callback` status stores no time**, while Owners has stored a real
+  callback instant for months. Two halves of one desk disagreeing about a word.
+- **5 of bhumi's 10 booked site visits have no `follow_up.at`** — a typed string
+  only, so nothing can tell whether they have passed. 11 bhumi timeline rows are
+  still editable free-text "Scheduled …" remarks from before bookings became
+  system events.
 - **`bhumi` Housing.com carries `defaults:{req.deal:'sale'}`** on a three-field
   mapping, so every Housing enquiry is stamped a sale. Awaiting richer fields
   from them. `99acres` ×2 are unmapped — nothing has arrived yet, but the first
@@ -295,10 +319,9 @@ This is the part that matters most.
   leftover.
 - **9 accounts hold default passwords** as real hashes (5 `delpat`, 4
   `skyline-realty`; `bhumi` clean). Fix is `must_change_password = TRUE`.
-- **`followup_due` notifications are inert on purpose** — the query reads
-  `follow_up->>'due_at'` and nothing writes it; the model stores
-  `{date,time,action}` with `date` as a display string. Firing it means changing
-  the model, not the query.
+- **`followup_due` notifications are inert** — the query reads
+  `follow_up->>'due_at'`, which nothing writes. Now a one-line fix rather than a
+  model change: `at` is a real instant and `FOLLOWUP_PAST_DUE` already reads it.
 - **`/api/v1/ingest` has no rate limit.** Write-only key, but a leaked one fills
   a desk with junk faster than agents can reject it.
 - **`verifyAuditChain()` returns `ok:false` at seq 227** (a `delpat`
@@ -326,6 +349,10 @@ This file deliberately does not duplicate them.
   `properties.md`, `ingestion.md`, `enquiries.md`, `pwa.md`, `branding.md`,
   `data-lifecycle.md`
 - `docs/architecture/` — architecture declaration, schema plan
+- `docs/STATE.md` — **what is DEPLOYED (not merely committed), what is waiting
+  on the user, and what was last checked against the live database.** Rewritten
+  each session, never appended. Read it first; the frontend and backend deploy
+  separately and this is the only place that says where each one is.
 - `docs/ops/DEPLOY.md` — deploy runbook
 - `backend/API_SPECIFICATION.md` — API surface
 - `docs/planning/`, `docs/demo-archive/` — historical. When they conflict with
@@ -340,6 +367,9 @@ This file deliberately does not duplicate them.
 - **Lead with what you found, not what you did.** State numbers, not adjectives:
   "731 of 732 owners assigned, 0 notifications sent".
 - **Say plainly when you were wrong**, once, and move on.
+- **Use the user's word for a thing.** They named the quick action FAB; calling
+  it "the sheet" later cost a whole exchange. Same fault as 3.2, and worse in
+  conversation — there is no code to check the name against.
 - **No padding.** No recaps of your reasoning, no restating the task back, no
   cinematic framing of an ordinary fix. The user has said this explicitly.
 - Do not re-litigate a settled decision or ask permission for ordinary work.

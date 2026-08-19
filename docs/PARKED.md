@@ -56,11 +56,18 @@ Shop" or "0 BHK" behave correctly without their stored value being rewritten.
 
 ---
 
-## `perAgentCalls` in `getDeskSummary` is unscoped
+## Three queries in `getDeskSummary` are unscoped
 
-Every agent's browser receives every colleague's calling throughput. The lead
-counts beside it are correctly scoped; this one query is not. Carried over from
-`CLAUDE.md` §7 — recorded here so it is in one place with the rest.
+`perAgentCalls` (crm_owners), `perAgentLeadCalls` (timeline call events) and
+`perAgentVisits` (site-visit activities). Every lead query beside them carries
+`leadScope()`; these three carry only `tenant_id`.
+
+Nothing is rendered to an agent — the dashboard filters the roster to their own
+row and an agent navigating to Team is redirected away — so this is a payload
+leak, not a visible one. Every colleague's 30-day call count, site visits and
+owner-calling stats are in the JSON each agent's browser downloads.
+
+Same firm, not cross-tenant. Fix is the guard the lead queries already use.
 
 ---
 
