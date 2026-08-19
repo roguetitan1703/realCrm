@@ -5,6 +5,7 @@
  *   GET  /api/v1/notifications            → current user's feed + unread count
  *   POST /api/v1/notifications/:id/read   → mark one read
  *   POST /api/v1/notifications/read-all    → mark all read
+ *   GET  /api/v1/notifications/deliveries  → what reached devices (owner/manager)
  * The "current user" is the token's user (req.user.id, set by
  * withRequestContext); the store scopes everything to the request tenant.
  * ============================================================================
@@ -13,7 +14,7 @@
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { listNotifications, unreadCount, markRead, markAllRead } from '../services/notifications';
-import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../services/push';
+import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription, listDeliveries, deliveryReadiness } from '../services/push';
 
 export const notificationsRouter = Router();
 notificationsRouter.use(requireTenantAuth);
@@ -29,10 +30,33 @@ notificationsRouter.post('/subscribe', async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Not signed in' });
-    await saveSubscription(req.tenantId!, userId, req.body?.subscription);
+    await saveSubscription(req.tenantId!, userId, req.body?.subscription, req.get('user-agent') || undefined);
     return res.status(200).json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to subscribe', message: err.message });
+  }
+});
+
+// ── Delivery log ────────────────────────────────────────────────────────────
+// Owners and managers only: it names every recipient on the desk and when they
+// were last reachable, which is not an agent's business.
+notificationsRouter.get('/deliveries', async (req: Request, res: Response) => {
+  const role = String(req.user?.role || '').toLowerCase();
+  if (role !== 'owner' && role !== 'admin' && role !== 'manager') {
+    return res.status(403).json({ error: 'Not permitted' });
+  }
+  try {
+    const [deliveries, readiness] = await Promise.all([
+      listDeliveries(req.tenantId!, {
+        userId: req.query.user ? String(req.query.user) : undefined,
+        since: req.query.since ? String(req.query.since) : undefined,
+        limit: Number(req.query.limit) || 200,
+      }),
+      deliveryReadiness(req.tenantId!),
+    ]);
+    return res.status(200).json({ pushEnabled: pushEnabled(), deliveries, readiness });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to read delivery log', message: err.message });
   }
 });
 

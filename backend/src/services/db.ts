@@ -358,6 +358,46 @@ export async function initSchema(): Promise<void> {
       );
     `;
     await sql`CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions (tenant_id, user_id);`;
+    // WHICH DEVICE. Every endpoint on a live desk looked the same in the table
+    // — `fcm.googleapis.com` is Chrome on a phone AND Chrome on a desktop — so
+    // "the alert did not reach my laptop" was not a question the data could
+    // answer. Recorded at subscribe time from the request's User-Agent.
+    await sql`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS user_agent TEXT;`;
+    await sql`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ;`;
+
+    // ── Push delivery log ────────────────────────────────────────────────────
+    // WHY THIS EXISTS: for months the only evidence a push had been sent was
+    // that a row existed in `notifications`, which records the FEED entry and
+    // says nothing about the device. A desk asking "did my agents get told?"
+    // could be answered with "an alert was filed", never with "it reached four
+    // phones and two were dead" — and the silent cases (the user has no
+    // subscription at all; the user is signed out everywhere; push is off
+    // server-side) left no trace whatsoever, which is precisely how six of one
+    // day's fifteen alerts went nowhere without anyone noticing.
+    //
+    // One row per (notification, outcome). `status` covers the whole space:
+    //   sent            the push service accepted it (2xx)
+    //   expired         410/404 — the endpoint is dead and has been pruned
+    //   failed          any other error from the push service
+    //   no_subscription the recipient has no device opted in
+    //   not_signed_in   no live session, so we deliberately withhold
+    //   push_disabled   no VAPID keys configured on this server
+    await sql`
+      CREATE TABLE IF NOT EXISTS push_deliveries (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        notification_id TEXT,
+        type TEXT,
+        endpoint TEXT,
+        status TEXT NOT NULL,
+        status_code INT,
+        error TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_push_deliv_tenant ON push_deliveries (tenant_id, created_at DESC);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_push_deliv_user ON push_deliveries (tenant_id, user_id, created_at DESC);`;
 
     await migrateProperColumns();
     await createLedgerTables();

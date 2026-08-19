@@ -12,7 +12,7 @@
 
 import { sql, DEFAULT_TENANT_ID } from './db.js';
 import { getContext } from './context.js';
-import { sendPushToUser } from './push.js';
+import { sendPushToUser, pruneDeliveryLog } from './push.js';
 // The retry window is shared with the dashboard tile and the Leads filter that
 // count the same leads. Three definitions of "not retried" would drift.
 import { RETRY_DAYS } from './store.js';
@@ -90,7 +90,10 @@ export async function notify(n: NotifyInput): Promise<void> {
     // Qualify it with the tenant so the link stands on its own.
     url: n.link ? `/${t}${n.link}` : `/${t}`,
     icon: `/pwa/${t}/icon-192.png`,
-  }).catch(() => {});
+  // The delivery log ties an attempt back to the feed row it came from, so
+  // "this alert" is one thing whether you are looking at the drawer or at what
+  // reached a device.
+  }, { notificationId: id, type: n.type }).catch(() => {});
 }
 
 /** Fan out one alert to every ACTIVE user in the tenant holding one of the
@@ -153,6 +156,7 @@ export async function markAllRead(userId: string): Promise<void> {
 // does, it does not need doing hundreds of times a minute.
 const SCAN_INTERVAL_MS = 60_000;
 let lastScanAt = 0;
+let lastPruneAt = 0;
 
 /**
  * Run the sweep. With no argument it does what the scheduler needs — every
@@ -346,6 +350,15 @@ export async function processScheduledNotifications(
           WHERE id = ${l.id} AND tenant_id = ${t}
         `;
       }
+    }
+
+    // Trim the delivery log at most once a day. Inside the sweep because there
+    // is no other scheduler, and gated on its own clock because the sweep
+    // itself runs every five minutes.
+    if (Date.now() - lastPruneAt > 24 * 3600 * 1000) {
+      lastPruneAt = Date.now();
+      const gone = await pruneDeliveryLog().catch(() => 0);
+      if (gone) console.log(`[Push] delivery log: pruned ${gone} rows older than 90 days.`);
     }
   } catch (err: any) {
     console.warn('[ScheduledNotify] Scanner iteration failed:', err?.message);
