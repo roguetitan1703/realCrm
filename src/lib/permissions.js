@@ -39,17 +39,17 @@ export function isDeskRole(role) {
 // the firm says agent out loud. Three names for one job, none of them the one
 // people use.
 //
-// THE FIRM'S OWN HIERARCHY, not the database's spelling.
+// THE ROLE, CALLED WHAT THE DATA CALLS IT.
 //
-//   owner / admin   the account the workspace is created against — one per
-//                   firm, and the billing email. Called Admin by the desk;
-//                   stored as `owner` on every real tenant.
-//   manager         everything an admin can see and do, minus being the
-//                   billing account. Created by the firm, any number.
-//   agent           the field. Created by the firm.
+//   owner     the account the workspace is created against — one per firm, and
+//             the billing email. `admin` is a legacy alias that exists in the
+//             code and on no real tenant.
+//   manager   everything the owner can see and do, minus being the billing
+//             account. Created by the firm, any number.
+//   agent     the field. Created by the firm.
 const ROLE_LABELS = {
-  owner: 'Admin',
-  admin: 'Admin',
+  owner: 'Owner',
+  admin: 'Owner',
   manager: 'Manager',
   agent: 'Agent',
   superadmin: 'Delpat',
