@@ -173,6 +173,9 @@ export default function App() {
     return (
       <div className="viewport">
         {state.dataStale && <StaleBanner />}
+        {/* The phone chrome returns before the desk one, so this needs its own
+            mount — not a second implementation, the same component. */}
+        <PushRow store={store} />
         <Phone store={store} framed={false} screen={screen} sel={sel} setSel={setSel} go={go} />
         <Toasts toasts={state.toasts} onDismiss={(id) => store.dispatch({ type: 'UNTOAST', id })} />
       </div>

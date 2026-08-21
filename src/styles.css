@@ -2411,8 +2411,10 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .push-row-on{color:var(--accent);display:inline-flex;align-items:center}
 .push-row-x{width:24px;height:24px;flex-shrink:0;border:0;background:none;color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:6px}
 .push-row-x:hover{background:var(--card-2);color:var(--ink-2)}
-.push-overlay{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:90;width:min(520px,calc(100% - 20px));box-shadow:0 10px 30px rgba(0,0,0,.18);border-radius:var(--radius)}
-.push-overlay .push-row{background:var(--card)}
+.push-overlay{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:90;width:min(440px,calc(100% - 20px))}
+.push-overlay .install-card{margin-bottom:0;background:var(--card);box-shadow:0 8px 24px rgba(0,0,0,.16)}
+.push-x{width:22px;height:22px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--muted);border-radius:6px;cursor:pointer}
+.push-x:hover{background:var(--card-2);color:var(--ink-2)}
 
 /* ---- RowMenu (⋯) ---- */
 .rowmenu{position:relative;display:inline-flex}

@@ -50,13 +50,19 @@ export default function PushRow({ store, variant = 'prompt' }) {
   if (push.permission === 'unsupported') return null
   if (push.ok && variant === 'prompt') return null
 
+  // Blocked is the one state a button cannot fix, so it routes to a person: the
+  // agents on a real desk will not find Chrome's site settings from a written
+  // instruction, and support can do it with them in a minute.
+  const blocked = push.permission === 'denied'
+  const support = String(store?.state?.settings?.supportWhatsapp || '').replace(/\D/g, '')
+
   const turnOn = async () => {
     setBusy(true)
     const res = await enablePush()
     setPush(await pushStatus())
     setBusy(false)
     if (res.ok) store?.toast?.('Alerts on for this device')
-    else if (res.reason !== 'denied') store?.toast?.('Could not turn on alerts on this device', 'warn')
+    else if (res.reason === 'error') store?.toast?.('Could not turn on alerts on this device', 'warn')
   }
 
   const dismiss = () => {
@@ -64,40 +70,39 @@ export default function PushRow({ store, variant = 'prompt' }) {
     setHidden(true)
   }
 
-  // Blocked is the one state a button cannot fix, so it routes to a person.
-  // The agents on a real desk are not going to find Chrome's site settings from
-  // a written instruction, and support can do it with them in a minute.
-  const blocked = push.permission === 'denied'
-  const support = String(store?.state?.settings?.supportWhatsapp || '').replace(/\D/g, '')
+  // SAME CLASSES AS THE INSTALL CONTROL BESIDE IT. The prompt is `.install-card`
+  // (the product's existing nudge: one line, accent wash) and the settings line
+  // is `.install-row`. This carried `.me-row`, which is a COLUMN — so it
+  // rendered as a slab with the icon, the title and the button stacked down the
+  // middle of the screen.
+  const label = push.ok
+    ? 'Alerts on for this device'
+    : blocked ? 'Alerts blocked on this device' : 'Alerts off on this device'
 
-  const row = (
-    <div className="me-row push-row">
-      <span className="install-row-ic">
-        <Icon name="bell" size={15} />
-      </span>
-      <div className="install-row-body">
-        <div className="install-row-title">
-          {push.ok ? 'Alerts on for this device' : blocked ? 'Alerts blocked on this device' : 'Alerts off on this device'}
-        </div>
+  const action = push.ok
+    ? <Icon name="check" size={14} />
+    : blocked
+      ? (support && <a className="btn btn-primary btn-sm" href={`https://wa.me/${support}`} target="_blank" rel="noreferrer">Get help</a>)
+      : <button className="btn btn-primary btn-sm" disabled={busy} onClick={turnOn}>{busy ? '…' : 'Turn on'}</button>
+
+  if (variant === 'row') {
+    return (
+      <div className="install-row">
+        <span className="install-row-ic"><Icon name="bell" size={15} /></span>
+        <div className="install-row-body"><div className="install-row-title">{label}</div></div>
+        {action}
       </div>
-      {push.ok ? (
-        <span className="push-row-on"><Icon name="check" size={13} /></span>
-      ) : blocked ? (
-        support
-          ? <a className="btn btn-primary btn-sm" href={`https://wa.me/${support}`} target="_blank" rel="noreferrer">Get help</a>
-          : null
-      ) : (
-        <button className="btn btn-primary btn-sm" disabled={busy} onClick={turnOn}>
-          {busy ? '…' : 'Turn on'}
-        </button>
-      )}
-      {variant === 'prompt' && !push.ok && (
-        <button className="push-row-x" onClick={dismiss} aria-label="Dismiss">
-          <Icon name="x" size={13} />
-        </button>
-      )}
+    )
+  }
+
+  return (
+    <div className="push-overlay">
+      <div className="install-card">
+        <span className="install-card-icon"><Icon name="bell" size={15} /></span>
+        <div className="install-card-body"><div className="install-card-title">{label}</div></div>
+        {action}
+        <button className="push-x" onClick={dismiss} aria-label="Dismiss"><Icon name="x" size={13} /></button>
+      </div>
     </div>
   )
-
-  return variant === 'prompt' ? <div className="push-overlay">{row}</div> : row
 }

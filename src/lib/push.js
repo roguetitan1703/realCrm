@@ -108,8 +108,17 @@ export async function enablePush() {
  */
 export async function pushStatus() {
   if (!pushSupported()) return { permission: 'unsupported', subscribed: false, ok: false };
+  // THE APIS EXISTING IS NOT THE SAME AS PUSH BEING POSSIBLE.
+  //
+  // `serviceWorker` and `PushManager` are on `window` in every modern browser,
+  // including `vite dev` — where the worker is deliberately never registered.
+  // So the prompt offered a Turn on button that could only ever fail, and did,
+  // with a red "Could not turn on alerts on this device". No registration, no
+  // push: say nothing rather than offer something that cannot work.
+  const reg = await readyRegistration();
+  if (!reg) return { permission: 'unsupported', subscribed: false, ok: false };
   const permission = pushPermission();
-  const subscribed = permission === 'granted' ? await isPushSubscribed() : false;
+  const subscribed = permission === 'granted' ? !!(await reg.pushManager.getSubscription().catch(() => null)) : false;
   return { permission, subscribed, ok: permission === 'granted' && subscribed };
 }
 
