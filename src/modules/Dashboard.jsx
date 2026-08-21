@@ -72,7 +72,14 @@ export default function Dashboard({ store, go, topBar }) {
   const oStage = ownerSummary?.summary?.byStage || {}
   const hasCalling = !!oq && oq.total > 0
 
-  const toLeads = (leadFilter) => go('leads', { leadFilter, leadOpen: false, leadId: undefined })
+  // THE KEYS THE LIST ACTUALLY READS. This used to hand over `{ stage: [...] }`
+  // and `{ flag: [...] }` in a bag called `leadFilter` that the Leads screen
+  // seeded into a private useState and then forwarded to the API for exactly
+  // three of its keys — source, locality and agent. So a source tile worked, an
+  // agent tile did nothing, and clicking a STAGE on the distribution did
+  // nothing at all: no request changed, no chip appeared, the book just sat
+  // there. One shape now, and it is the URL's.
+  const toLeads = (leadFilters) => go('leads', { leadFilters, leadOpen: false, leadId: undefined })
   const toCalling = (ownerSeg, ownerStage) => go('calling', { ownerSeg, ownerStage, ownerOpen: false, ownerId: undefined })
 
   const { stages } = state.settings
@@ -151,15 +158,15 @@ export default function Dashboard({ store, go, topBar }) {
               had gone 48 hours without a call or a message. The segment behind
               it now asks whether anyone reached out. */}
           <Kpi icon="clock" label="Past SLA" value={n(totals.untouched_sla)} sub="never contacted"
-            alert={totals.untouched_sla > 0} onClick={() => toLeads({ flag: ['untouched_sla'] })} />
+            alert={totals.untouched_sla > 0} onClick={() => toLeads({ seg: 'untouched_sla' })} />
           <Kpi icon="phone" label="No answer" value={n(totals.noanswer_stale)} sub="not retried"
             alert={totals.noanswer_stale > 0}
-            onClick={() => go('leads', { leadSeg: 'noanswer_stale', leadOpen: false, leadId: undefined })} />
+            onClick={() => toLeads({ seg: 'noanswer_stale' })} />
           {hasCalling && (
             <Kpi icon="phone" label="Late callbacks" value={oq.callbacksOverdue} sub="owners waiting on a call"
               alert={oq.callbacksOverdue > 0} onClick={() => toCalling('callbacks_overdue')} />
           )}
-          <Kpi icon="plus" label="Arrived today" value={n(totals.new_today)} sub="fresh enquiries" onClick={() => go('leads', { leadSeg: 'today', leadOpen: false, leadId: undefined })} />
+          <Kpi icon="plus" label="Arrived today" value={n(totals.new_today)} sub="fresh enquiries" onClick={() => toLeads({ seg: 'today' })} />
           {hasCalling && (
             <Kpi icon="check" label="Calls logged today" value={oq.calledToday} sub="outbound, today" onClick={() => toCalling('never_called')} />
           )}
@@ -175,7 +182,7 @@ export default function Dashboard({ store, go, topBar }) {
                 Closed and Rejected, so it labelled 103 over bars summing to
                 120. Two populations, one panel, nothing saying so. */}
             <SectionHead title="Leads by stage" right={desk ? `${totals.total} total` : ''} />
-            <Distribution rows={stageCounts} onPick={(r) => toLeads({ stage: [r.name] })} />
+            <Distribution rows={stageCounts} onPick={(r) => toLeads({ stage: r.name })} />
           </Panel>
 
           <Panel>
@@ -278,7 +285,7 @@ export default function Dashboard({ store, go, topBar }) {
                 see the rest is the list it came from, not a longer panel that
                 outgrows whatever sits beside it. */}
             {atRiskTotal > atRisk.length && (
-              <button className="od-all" onClick={() => go('leads', { leadSeg: coldSeg, leadOpen: false, leadId: undefined })}>
+              <button className="od-all" onClick={() => toLeads({ seg: coldSeg })}>
                 See all {atRiskTotal}
               </button>
             )}
@@ -297,7 +304,7 @@ export default function Dashboard({ store, go, topBar }) {
           {myRows.map(r => (
             <RosterRow key={r.a.id} r={r} compact
               evenShare={roster.evenShare} maxLoad={roster.maxLoad}
-              onOpen={() => go('leads', { agentFilter: r.a.id })} />
+              onOpen={() => toLeads({ agent: [r.a.id] })} />
           ))}
         </Panel>
       </div>

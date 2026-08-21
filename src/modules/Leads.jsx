@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
@@ -46,43 +46,62 @@ export default function Leads(props) {
 
 function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
-  const [flt, setFlt] = useState(sel.leadFilter || {})
+
+  // ── ONE FILTER, IN THE URL ────────────────────────────────────────────────
+  // Segment, stage, intent, the panel's fields and the sort were five separate
+  // useStates on this component. That made every one of them invisible to the
+  // URL, to history, to a reload — and, because <Leads> swaps this whole
+  // component out for the record when a row is opened, to the trip into a lead
+  // and back. Filter the book, open a lead, come back: the list was unfiltered
+  // and nothing on screen said why.
+  //
+  // They live in `sel.leadFilters` now, which nav.js mirrors into the query
+  // string. Reloading keeps the view, back restores it, and the filtered list
+  // is a link somebody can send. `q`, the page and the selection stay local on
+  // purpose: a history entry per keystroke is not navigation.
+  const f = sel.leadFilters || {}
+  const seg = f.seg || 'all'
+  const intent = f.intent || 'all'
+  const stage = f.stage || 'all'
+  const sortKey = f.sortKey || 'activity'
+  const sortDir = f.sortDir || 'asc'
+  const flt = useMemo(() => {
+    const o = {}
+    for (const k of ['source', 'locality', 'agent', 'flag']) if (f[k]?.length) o[k] = f[k]
+    return o
+  }, [JSON.stringify(f)])
+
   const [q, setQ] = useState('')
-  const [sortKey, setSortKey] = useState('activity')
-  const [sortDir, setSortDir] = useState('asc')
   const [view, setView] = useState('list')
-  const [seg, setSeg] = useState('all')
-  const [intent, setIntent] = useState('all')
-  const [stage, setStage] = useState('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   // Which rows are checked, on the page currently shown. A Set of lead ids.
   const [selected, setSelected] = useState(new Set())
-  // A tile on the dashboard names the slice it opens, and it names a SEGMENT —
-  // the pill row — not one of the filter panel's fields. It used to arrive as
-  // `leadFilter: { flag: [...] }`, which the server honoured and no control on
-  // screen reflected: the right rows appeared under a pill row still reading
-  // All, with nothing saying why and nothing to click to undo it.
-  //
-  // An effect rather than a useState seed, matching ownerSeg on the calling
-  // screen: arriving from a tile while this list is already open has to move
-  // the pills too. Read once and cleared, so it seeds the screen rather than
-  // pinning it — the pills work normally the moment you land.
-  useEffect(() => {
-    if (!sel?.leadSeg) return
-    setSeg(sel.leadSeg)
+
+  // Any filter change is a new first page and drops a selection made against
+  // rows that are about to be replaced.
+  const patchFilters = (patch) => {
+    setSel(s => {
+      const next = { ...(s.leadFilters || {}), ...patch }
+      for (const k of Object.keys(next)) {
+        const v = next[k]
+        if (v === undefined || v === null || v === 'all' || (Array.isArray(v) && !v.length)) delete next[k]
+      }
+      return { ...s, leadFilters: Object.keys(next).length ? next : undefined }
+    })
     setPage(1)
     setSelected(new Set())
-    setSel(s => ({ ...s, leadSeg: undefined }))
-  }, [sel?.leadSeg])
+  }
 
-  const setFltP = (v) => { setFlt(v); setPage(1); setSelected(new Set()) }
+  const setFltP = (v) => patchFilters({
+    source: v?.source, locality: v?.locality, agent: v?.agent, flag: v?.flag,
+  })
   const setQP = (v) => { setQ(v); setPage(1); setSelected(new Set()) }
-  const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
-  const setSortDirP = (v) => { setSortDir(v); setPage(1) }
-  const setSegP = (v) => { setSeg(v); setPage(1); setSelected(new Set()) }
-  const setIntentP = (v) => { setIntent(v); setPage(1); setSelected(new Set()) }
-  const setStageP = (v) => { setStage(v); setPage(1); setSelected(new Set()) }
+  const setSortKeyP = (v) => patchFilters({ sortKey: v })
+  const setSortDirP = (v) => patchFilters({ sortDir: v })
+  const setSegP = (v) => patchFilters({ seg: v })
+  const setIntentP = (v) => patchFilters({ intent: v })
+  const setStageP = (v) => patchFilters({ stage: v })
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
   const setPageP = (v) => { setPage(v); setSelected(new Set()) }
 

@@ -22,7 +22,7 @@ const timeAgo = (ts) => (ts ? whenLabel(ts) : 'never')
 export default function Team({ store, go, topBar }) {
   const { state } = store
   const inactive = (id) => state.inactiveAgentIds.includes(id)
-  const toLeads = (leadFilter) => go && go('leads', { leadFilter, leadOpen: false, leadId: undefined })
+  const toLeads = (leadFilters) => go && go('leads', { leadFilters, leadOpen: false, leadId: undefined })
 
   // ONE read for the whole roster. This screen used to fire
   // getAgentPerformance once PER AGENT on mount — nine requests for nine

@@ -18,20 +18,50 @@
 // Every flag that makes a screen render something OTHER than its list.
 // Keys a navigation CLEARS unless it sets them itself. Anything left here
 // survives every later trip through the app, because `sel` is one object that
-// screens read on mount.
-//
-// The filter keys are on this list for that reason. A dashboard tile navigates
-// with `leadFilter: { flag: ['untouched_sla'] }`; the Leads screen seeds its
-// filter state from `sel.leadFilter` on mount. Without the clear, that filter
-// stayed in `sel` forever — so opening Leads from the sidebar an hour later
-// re-applied a tile someone tapped once, and the list quietly showed 13 leads
-// out of 94 with no filter chip on screen to explain it.
+// screens read on mount — so a tile tapped once would otherwise still be
+// filtering the book an hour later with no chip on screen to explain it.
 import { currentTenant } from './api.js'
 
 export const TAKEOVER_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey',
-  'leadFilter', 'leadSeg', 'ownerSeg', 'ownerStage', 'agentFilter',
+  'leadFilters', 'ownerSeg', 'ownerStage',
 ]
+
+// Opening a record is not leaving the screen.
+//
+// `go()` clears every takeover key a navigation does not set, which is right
+// for moving between screens and wrong for opening a row: the filter went with
+// it, and `<Leads>` swaps the whole list component out for the record, so the
+// list's own state was destroyed at the same moment. Come back and you had a
+// full unfiltered book. These are the keys that mean "a record took the screen
+// over", and a navigation made only of them keeps the filters underneath.
+export const RECORD_KEYS = [
+  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'projOpen', 'projKey',
+]
+
+// ── One filter bag, in the URL ──────────────────────────────────────────────
+// Every screen that filters had its own private useState for it, so a filter
+// was invisible to the URL, to history, to a reload and to the component the
+// moment it unmounted. Worse, the dashboard navigated with keys the list did
+// not read: `{ stage: [...] }` went into a bag nothing forwarded to the API and
+// no chip rendered, so clicking a stage on the dashboard did NOTHING. It is one
+// object now, and it lives in the query string, which is the only place that
+// survives all four.
+const FILTER_SCALARS = ['seg', 'intent', 'stage', 'sortKey', 'sortDir']
+const FILTER_LISTS = ['source', 'locality', 'agent', 'flag']
+
+function readFilters(p) {
+  const f = {}
+  for (const k of FILTER_SCALARS) { const v = p.get(k); if (v) f[k] = v }
+  for (const k of FILTER_LISTS) { const v = p.getAll(k); if (v.length) f[k] = v }
+  return Object.keys(f).length ? f : undefined
+}
+
+function writeFilters(p, f) {
+  if (!f) return
+  for (const k of FILTER_SCALARS) if (f[k] && f[k] !== 'all') p.set(k, f[k])
+  for (const k of FILTER_LISTS) for (const v of (f[k] || [])) p.append(k, v)
+}
 
 /** Read screen + selection out of the current URL. */
 export function parseUrl(search = window.location.search) {
@@ -49,6 +79,7 @@ export function parseUrl(search = window.location.search) {
       projKey: project || undefined, projOpen: !!project,
       propAdd: p.get('new') === 'property' || undefined,
       contactsTab: p.get('tab') || undefined,
+      leadFilters: readFilters(p),
     },
     // Not navigation, but they ride the same query string and must survive it.
     ws: p.get('ws') || null,
@@ -72,6 +103,7 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (sel.projOpen && sel.projKey) p.set('project', sel.projKey)
   if (sel.propAdd) p.set('new', 'property')
   if (sel.contactsTab) p.set('tab', sel.contactsTab)
+  writeFilters(p, sel.leadFilters)
   const q = p.toString()
   return q ? `?${q}` : window.location.pathname
 }

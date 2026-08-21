@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { parseUrl, bootNav, stampNavWorkspace, urlFor, isRoot, isStandaloneApp, TAKEOVER_KEYS } from './nav.js'
+import { parseUrl, bootNav, stampNavWorkspace, urlFor, isRoot, isStandaloneApp, TAKEOVER_KEYS, RECORD_KEYS } from './nav.js'
 
 // ============================================================================
 // useNav — screen + selection, mirrored to the URL, with a back-to-exit guard
@@ -61,13 +61,26 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled])
 
+  // Where we are, ignoring how the list under it is filtered. Changing a filter
+  // is not a navigation: pushing an entry for each one means back walks through
+  // six filter states before it leaves the screen, and on a phone — where back
+  // is a system gesture and the exit guard counts entries — that is the
+  // difference between one press and seven. Filters REPLACE the current entry,
+  // so the URL still carries them (reload and sharing keep working) without
+  // burying the screen you came from.
+  const placeRef = useRef(null)
   useEffect(() => {
     if (!enabled) return
     if (fromPop.current) { fromPop.current = false; return }
     const next = urlFor(screen, sel)
+    const place = JSON.stringify([screen, sel.leadId, sel.leadOpen, sel.ownerId, sel.ownerOpen,
+      sel.propId, sel.propOpen, sel.projKey, sel.projOpen, sel.propAdd, sel.contactsTab])
+    const samePlace = placeRef.current === place
+    placeRef.current = place
     stampNavWorkspace()
     if (next !== window.location.search) {
-      window.history.pushState({ nav: true }, '', next)
+      if (samePlace) window.history.replaceState({ nav: true }, '', next)
+      else window.history.pushState({ nav: true }, '', next)
     }
   }, [screen, sel, enabled])
 
@@ -122,10 +135,21 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
     // form that survives the trip is worse than one that closes, because it
     // then submits against whatever screen you landed on.
     overlayRef.current?.close()
+    // OPENING A ROW IS NOT LEAVING THE SCREEN. A navigation whose patch is made
+    // only of record keys — clicking a lead in a filtered list — keeps the
+    // filters it was standing on. Anything else (a sidebar item, a dashboard
+    // tile, a tab) is a fresh arrival and clears them, which is what stops a
+    // tile tapped an hour ago still silently filtering the book.
+    const recordOnly = Object.keys(patch).length > 0
+      && Object.keys(patch).every(k => RECORD_KEYS.includes(k))
     setScreenState(key)
     setSelState(s => {
       const next = { ...s }
-      for (const k of TAKEOVER_KEYS) if (patch[k] === undefined) next[k] = null
+      for (const k of TAKEOVER_KEYS) {
+        if (patch[k] !== undefined) continue
+        if (recordOnly && k === 'leadFilters') continue
+        next[k] = null
+      }
       return { ...next, ...patch }
     })
   }, [])

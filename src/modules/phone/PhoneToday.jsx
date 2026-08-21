@@ -193,7 +193,7 @@ export default function PhoneToday({ store, me, go, topBar }) {
   // leads list, which is wrong the moment a group is owners.
   const seeAll = (g) => (g.screen === 'calling'
     ? go('calling', { ownerSeg: g.segment })
-    : go('leads', { leadFilter: g.filter }))
+    : go('leads', { leadFilters: g.filter }))
 
   const renewals = feed.renewals
     .map(p => ({ p, signal: renewalSignal(p.tenancy) }))
@@ -222,7 +222,7 @@ export default function PhoneToday({ store, me, go, topBar }) {
     { key: 'cbLate', label: 'Late callbacks', kind: 'owner', rows: ownerRows.callbacksOverdue || [], count: oc.callbacksOverdue ?? 0, tone: 'overdue', screen: 'calling', segment: 'callbacks_overdue' },
     { key: 'today', label: 'Due today', rows: todayFu, count: todayFu.length },
     { key: 'cbToday', label: 'Callbacks today', kind: 'owner', rows: ownerRows.callbacksToday || [], count: oc.callbacksToday ?? 0, screen: 'calling', segment: 'callbacks_today' },
-    { key: 'fresh', label: 'Not yet contacted', rows: fresh, count: c.fresh ?? fresh.length, filter: { stage: ['New'] } },
+    { key: 'fresh', label: 'Not yet contacted', rows: fresh, count: c.fresh ?? fresh.length, filter: { stage: 'New' } },
     { key: 'toCall', label: 'Owners to call', kind: 'owner', rows: ownerRows.toCall || [], count: oc.toCall ?? 0, hint: 'Nobody has dialled these yet.', screen: 'calling', segment: 'to_call' },
     // Only the desk can hand work to someone, so only the desk is shown what
     // nobody owns.
