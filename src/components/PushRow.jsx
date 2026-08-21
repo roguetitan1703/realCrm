@@ -43,12 +43,12 @@ export default function PushRow({ store, variant = 'prompt' }) {
   useEffect(() => { pushStatus().then(setPush) }, [])
 
   if (!push || hidden) return null
-  // Nothing here can be acted on: no push support at all (iOS in the browser
-  // rather than the installed app, most often) — Install is the thing that
-  // helps there, and two rows saying different things about one problem is how
-  // people stop reading either.
-  if (push.permission === 'unsupported') return null
-  if (push.ok && variant === 'prompt') return null
+  // The PROMPT stays quiet when there is nothing to offer: no push support at
+  // all (iOS in the browser rather than the installed app, most often) — Install
+  // is what helps there, and two bars about one problem is how people stop
+  // reading either. The settings ROW must still answer, because someone opened
+  // Settings → Alerts to be told, and an empty panel tells them nothing.
+  if (variant === 'prompt' && (push.permission === 'unsupported' || push.ok)) return null
 
   // Blocked is the one state a button cannot fix, so it routes to a person: the
   // agents on a real desk will not find Chrome's site settings from a written
@@ -77,10 +77,13 @@ export default function PushRow({ store, variant = 'prompt' }) {
   // middle of the screen.
   const label = push.ok
     ? 'Alerts on for this device'
-    : blocked ? 'Alerts blocked on this device' : 'Alerts off on this device'
+    : blocked ? 'Alerts blocked on this device'
+    : push.permission === 'unsupported' ? 'Alerts are not available in this browser'
+    : 'Alerts off on this device'
 
   const action = push.ok
     ? <Icon name="check" size={14} />
+    : push.permission === 'unsupported' ? null
     : blocked
       ? (support && <a className="btn btn-primary btn-sm" href={`https://wa.me/${support}`} target="_blank" rel="noreferrer">Get help</a>)
       : <button className="btn btn-primary btn-sm" disabled={busy} onClick={turnOn}>{busy ? '…' : 'Turn on'}</button>

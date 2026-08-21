@@ -39,12 +39,17 @@ export function isDeskRole(role) {
 // the firm says agent out loud. Three names for one job, none of them the one
 // people use.
 //
-// `owner` is the tenant's binding user — the account the workspace belongs to.
-// `admin` and `manager` are the same job and are labelled the same; the split
-// exists in the data, not in how any desk works.
+// THE FIRM'S OWN HIERARCHY, not the database's spelling.
+//
+//   owner / admin   the account the workspace is created against — one per
+//                   firm, and the billing email. Called Admin by the desk;
+//                   stored as `owner` on every real tenant.
+//   manager         everything an admin can see and do, minus being the
+//                   billing account. Created by the firm, any number.
+//   agent           the field. Created by the firm.
 const ROLE_LABELS = {
-  owner: 'Owner',
-  admin: 'Manager',
+  owner: 'Admin',
+  admin: 'Admin',
   manager: 'Manager',
   agent: 'Agent',
   superadmin: 'Delpat',
