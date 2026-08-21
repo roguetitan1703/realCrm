@@ -158,7 +158,7 @@ export default function Dashboard({ store, go, topBar }) {
               had gone 48 hours without a call or a message. The segment behind
               it now asks whether anyone reached out. */}
           <Kpi icon="clock" label="Past SLA" value={n(totals.untouched_sla)} sub="never contacted"
-            alert={totals.untouched_sla > 0} onClick={() => toLeads({ seg: 'untouched_sla' })} />
+            alert={totals.untouched_sla > 0} onClick={() => toLeads({ flag: ['untouched_sla'] })} />
           <Kpi icon="phone" label="No answer" value={n(totals.noanswer_stale)} sub="not retried"
             alert={totals.noanswer_stale > 0}
             onClick={() => toLeads({ seg: 'noanswer_stale' })} />

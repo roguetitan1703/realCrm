@@ -54,7 +54,7 @@ export default function Team({ store, go, topBar }) {
     { label: 'On the desk', value: `${activeCount}/${state.agents.length}` },
     { label: 'Open leads', value: openTotal, onClick: () => toLeads({}) },
     { label: 'Unassigned', value: unassigned, tone: unassigned > 0 ? 'alert' : undefined, onClick: () => toLeads({ flag: ['unassigned'] }) },
-    { label: 'Overdue', value: overdueTotal, tone: overdueTotal > 0 ? 'alert' : undefined, onClick: () => toLeads({ flag: ['overdue'] }) },
+    { label: 'Overdue', value: overdueTotal, tone: overdueTotal > 0 ? 'alert' : undefined, onClick: () => toLeads({ seg: 'overdue' }) },
   ]
 
   return (

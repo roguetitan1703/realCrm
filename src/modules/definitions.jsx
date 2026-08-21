@@ -147,6 +147,18 @@ export const LEADS_DEF = {
     { key: 'agent', label: 'Sales Executive', icon: 'person', options: [
       { value: '_none', label: 'Unassigned' }, ...store.activeAgents().map(a => ({ value: a.id, label: a.first })),
     ] },
+    // EVERY WAY INTO THIS LIST HAS TO LAND ON A CONTROL YOU CAN SEE AND UNDO.
+    // The dashboard's Past-SLA tile and the Team page's Unassigned tile both
+    // filtered by a flag the server honours and no control on screen showed —
+    // right rows, no chip, nothing to click to get back. The two flags with no
+    // pill of their own live here; the ones that DO have a pill (overdue,
+    // no-answer, came-back) are not repeated, because two controls for one
+    // question is how the pills and the KPI strip ended up saying different
+    // things about the same leads.
+    { key: 'flag', label: 'Needs attention', icon: 'alert', options: [
+      { value: 'untouched_sla', label: 'Past SLA' },
+      { value: 'unassigned', label: 'Nobody assigned' },
+    ] },
   ],
 
   // Per-key filter logic (mirrors the module's normalized predicates).
@@ -492,6 +504,18 @@ export const OWNERS_DEF = {
     { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
     { key: 'agent', label: 'Sales Executive', icon: 'person', options: [
       { value: '_none', label: 'Unassigned' }, ...store.activeAgents().map(a => ({ value: a.id, label: a.first })),
+    ] },
+    // EVERY WAY INTO THIS LIST HAS TO LAND ON A CONTROL YOU CAN SEE AND UNDO.
+    // The dashboard's Past-SLA tile and the Team page's Unassigned tile both
+    // filtered by a flag the server honours and no control on screen showed —
+    // right rows, no chip, nothing to click to get back. The two flags with no
+    // pill of their own live here; the ones that DO have a pill (overdue,
+    // no-answer, came-back) are not repeated, because two controls for one
+    // question is how the pills and the KPI strip ended up saying different
+    // things about the same leads.
+    { key: 'flag', label: 'Needs attention', icon: 'alert', options: [
+      { value: 'untouched_sla', label: 'Past SLA' },
+      { value: 'unassigned', label: 'Nobody assigned' },
     ] },
   ],
 
