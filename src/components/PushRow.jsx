@@ -35,6 +35,8 @@ function dismissedRecently() {
   } catch (e) { return false }
 }
 
+const supportNumber = (store) => String(store?.state?.settings?.supportWhatsapp || '').replace(/\D/g, '')
+
 export default function PushRow({ store, variant = 'prompt' }) {
   const [push, setPush] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -49,12 +51,16 @@ export default function PushRow({ store, variant = 'prompt' }) {
   // reading either. The settings ROW must still answer, because someone opened
   // Settings → Alerts to be told, and an empty panel tells them nothing.
   if (variant === 'prompt' && (push.permission === 'unsupported' || push.ok)) return null
+  // Blocked with no support number configured leaves a bar with a label and no
+  // button — something to dismiss and nothing to do. The settings row still
+  // says it, because that is where someone goes to find out.
+  if (variant === 'prompt' && push.permission === 'denied' && !supportNumber(store)) return null
 
   // Blocked is the one state a button cannot fix, so it routes to a person: the
   // agents on a real desk will not find Chrome's site settings from a written
   // instruction, and support can do it with them in a minute.
   const blocked = push.permission === 'denied'
-  const support = String(store?.state?.settings?.supportWhatsapp || '').replace(/\D/g, '')
+  const support = supportNumber(store)
 
   const turnOn = async () => {
     setBusy(true)
