@@ -2056,6 +2056,12 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // PUSH: someone handed you a live client. You now own a conversation you
   // haven't read yet, so this can't wait for you to next open the app.
   // notify() drops it when you assigned it to yourself.
+  if (patch.agentId !== undefined && agentId !== oldLead.agentId) {
+    await recordAssignment({
+      recordId: id, prevAgentId: oldLead.agentId, agentId,
+      author: ctx.actorId ?? getContext()?.userId ?? null,
+    });
+  }
   if (patch.agentId !== undefined && agentId && agentId !== oldLead.agentId) {
     notify({ userId: agentId, type: 'lead_reassigned', data: { name }, link, push: true })
       .catch(err => console.warn('[Notify] lead_reassigned failed:', err?.message));
@@ -2445,7 +2451,7 @@ export function dayStart(tz: string) {
   return sql`(date_trunc('day', now() AT TIME ZONE ${tz}) AT TIME ZONE ${tz})`;
 }
 
-async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
+export async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
   const hit = arrivalStageCache.get(tenantId);
   if (hit && Date.now() - hit.at < ARRIVAL_TTL_MS) return hit.v;
   const rows = await sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${tenantId} LIMIT 1`;
@@ -2617,6 +2623,50 @@ export async function listLeads(opts: {
  * silently scoped to their own rows: a bulk action that quietly does less than
  * it says is worse than one that declines.
  */
+/**
+ * WHO HAS THIS RECORD NOW, AND WHY — on the record's own timeline.
+ *
+ * Assignment was the one movement the history did not carry. The two idle
+ * sweeps wrote their own event and nothing else did: a lead handed over by a
+ * manager, or moved in a bulk assign, changed owner silently. The audit ledger
+ * knew, but that is a compliance artefact nobody opens to answer "why is this
+ * mine?" — which is the question an agent actually asks, on the record, in
+ * front of the client.
+ *
+ * One implementation for all four paths, so the line reads the same however the
+ * lead moved. `reason` is the only thing that differs between a person doing it
+ * and a sweep doing it, and it is the part that matters.
+ */
+async function recordAssignment(opts: {
+  recordId: string;
+  prevAgentId?: string | null;
+  agentId?: string | null;
+  reason?: string;
+  author?: string | null;
+  metadata?: Record<string, any>;
+}): Promise<void> {
+  const { recordId, prevAgentId, agentId, reason } = opts;
+  if ((prevAgentId || null) === (agentId || null)) return;
+  const nameOf = async (id?: string | null) => {
+    if (!id) return null;
+    return (await sql`SELECT name FROM users WHERE id = ${id} LIMIT 1`)[0]?.name
+      ?? (await sql`SELECT name FROM crm_agents WHERE id = ${id} AND tenant_id = ${tid()} LIMIT 1`)[0]?.name
+      ?? null;
+  };
+  const [from, to] = await Promise.all([nameOf(prevAgentId), nameOf(agentId)]);
+  const title = !agentId ? 'Unassigned' : prevAgentId ? 'Reassigned' : 'Assigned';
+  const who = !agentId ? (from ? `Taken off ${from}` : 'Nobody assigned')
+    : from ? `${from} → ${to}` : `To ${to}`;
+  await addTimelineEvent({
+    record_id: recordId,
+    type: 'assignment',
+    title,
+    description: reason ? `${who} — ${reason}` : who,
+    author: opts.author ?? getContext()?.userId ?? null,
+    metadata: { agentId: agentId ?? null, previousAgentId: prevAgentId ?? null, ...(opts.metadata || {}) },
+  }).catch(() => {});
+}
+
 export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
   const who = getContext();
   if (who?.role === 'agent') throw new ForbiddenError('Assigning leads is done from the desk.');
@@ -2624,12 +2674,25 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
   if (clean.length === 0) return 0;
 
   const t = tid();
+  // WHO HELD THEM BEFORE, read before the update overwrites it — a timeline
+  // that cannot say where a lead came from is a timeline that cannot answer
+  // "why is this mine?".
+  const before = await sql`
+    SELECT id, agent_id FROM crm_leads
+    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
+      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
   const res = await sql`
     UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW()
     WHERE tenant_id = ${t} AND id IN ${sql(clean)}
       AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
   const n = res.count;
   if (n === 0) return 0;
+  for (const row of before) {
+    await recordAssignment({
+      recordId: row.id, prevAgentId: row.agent_id, agentId,
+      reason: 'bulk assignment', author: ctx.actorId ?? null,
+    });
+  }
 
   const name = agentId
     ? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name ?? 'a colleague'
@@ -3967,10 +4030,10 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
     if (!agentId || agentId === lead.agent_id) continue;
     await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${lead.id} AND tenant_id = ${tenantId}`;
     const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
-    await addTimelineEvent({
-      record_id: lead.id, type: 'assignment', title: 'Reassigned — idle',
-      description: `No activity from ${prevOwner} for ${hours}h — routed to ${name}`,
-      author: 'System', metadata: { agentId, previousAgentId: lead.agent_id, reason: 'sweep_idle', hours },
+    await recordAssignment({
+      recordId: lead.id, prevAgentId: lead.agent_id, agentId,
+      reason: `no activity for ${hours}h`,
+      author: 'System', metadata: { reason: 'sweep_idle', hours },
     });
     tally.set(agentId, (tally.get(agentId) || 0) + 1);
     lost.set(lead.agent_id, (lost.get(lead.agent_id) || 0) + 1);

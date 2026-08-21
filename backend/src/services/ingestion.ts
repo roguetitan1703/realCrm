@@ -16,7 +16,7 @@
 import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
-import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, REJECTED_STATUS } from './store';
+import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS } from './store';
 import { notify, notifyRoles } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
@@ -551,11 +551,48 @@ export async function processInboxRow(
           const owner = (reassign as any).agentId || existing.agent_id;
           const rejected = String(existing.stage || '') === REJECTED_STATUS;
           if (rejected) {
-            // NEVER REOPENED AUTOMATICALLY. One of bhumi's rejected leads
-            // carries the remark "She said not interested don't call" — moving
-            // her back into the working list on the strength of a form
+            // A PERSON WHO ENQUIRES AGAIN IS NOT A REJECTED LEAD.
+            //
+            // This used to leave them where they were and only tell the desk.
+            // The reasoning was one bhumi remark — "She said not interested
+            // don't call" — and reopening her on the strength of a form
             // submission would put an agent back on the phone to someone who
-            // asked them not to be. Somebody is told; nothing moves.
+            // asked them not to be. That risk is real, but it was being paid
+            // for by every OTHER rejection: on the live desk the reasons on
+            // re-enquired leads are "No Requirement" and "Already purchased /
+            // rented", and a fresh enquiry is that lead's own answer to both.
+            //
+            // So the rejection reason decides, not the rejection. Anything that
+            // reads as "do not contact this person" stays shut and the desk is
+            // told; everything else reopens onto the arrival stage, because a
+            // buyer who has come back is a buyer somebody should ring.
+            const reason = String((existing as any).rejection_reason || '');
+            const doNotContact = /do\s*not\s*call|don'?t\s*call|not\s*interested|dnd|do\s*not\s*disturb/i.test(reason);
+            if (doNotContact) {
+              await addTimelineEvent({
+                record_id: existing.id, type: 'stage_change',
+                title: 'Enquired again — left rejected',
+                description: `New enquiry via ${integration.provider}. Not reopened: rejected as "${reason}".`,
+                author: 'System',
+                metadata: { source: integration.provider, rejectionReason: reason },
+              }).catch(() => {});
+            } else {
+              const { arrivalStage } = await deskConfigOf(integration.tenant_id);
+              await sql`
+                UPDATE crm_leads
+                SET stage = ${arrivalStage}, rejection_reason = NULL, updated_at = NOW()
+                WHERE id = ${existing.id} AND tenant_id = ${integration.tenant_id}`;
+              // The reason it moved, on the record, in the words of what
+              // happened — an agent opening this lead has to be able to see why
+              // a rejected buyer is back in their list.
+              await addTimelineEvent({
+                record_id: existing.id, type: 'stage_change',
+                title: `${existing.stage} → ${arrivalStage}`,
+                description: `${existing.stage} → ${arrivalStage} — enquired again via ${integration.provider}${reason ? ` (was rejected: ${reason})` : ''}`,
+                author: 'System',
+                metadata: { source: integration.provider, reason: 'repeat_enquiry', previousStage: existing.stage, rejectionReason: reason || null },
+              }).catch(() => {});
+            }
             // ['owner','manager'] — the roles this product actually has.
             // 'admin' is not one of them, so an earlier ['owner','admin'] here
             // reached exactly the one owner and silently skipped every manager,
