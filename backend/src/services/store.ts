@@ -2647,6 +2647,10 @@ async function recordAssignment(opts: {
 }): Promise<void> {
   const { recordId, prevAgentId, agentId, reason } = opts;
   if ((prevAgentId || null) === (agentId || null)) return;
+  // BEST-EFFORT, ALWAYS. This is history about a write that has already
+  // happened; a name lookup that fails must never turn a saved reassignment
+  // into an error the person sees.
+  try {
   const nameOf = async (id?: string | null) => {
     if (!id) return null;
     return (await sql`SELECT name FROM users WHERE id = ${id} LIMIT 1`)[0]?.name
@@ -2665,6 +2669,9 @@ async function recordAssignment(opts: {
     author: opts.author ?? getContext()?.userId ?? null,
     metadata: { agentId: agentId ?? null, previousAgentId: prevAgentId ?? null, ...(opts.metadata || {}) },
   }).catch(() => {});
+  } catch (e: any) {
+    console.warn('[Timeline] assignment event failed:', e?.message);
+  }
 }
 
 export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
