@@ -9,7 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import postgres from 'postgres';
-import { databaseUrl, assertEnvMatchesDatabase } from './env';
+import { databaseUrl, assertEnvMatchesDatabase, assertRequiredConfig } from './env';
 
 // 1. Zero-dependency .env loader
 try {
@@ -45,6 +45,7 @@ try {
 // against; an unreachable staging database is a much better outcome than a
 // reachable live one.
 assertEnvMatchesDatabase();
+assertRequiredConfig();
 const dbUrl = databaseUrl();
 if (!dbUrl) {
   throw new Error('[DB Engine] DATABASE_URL is not set. Provide it via the environment or a local .env file.');

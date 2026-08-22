@@ -100,6 +100,54 @@ export function assertEnvMatchesDatabase(): void {
   }
 }
 
+/**
+ * Everything that has to be present for this process to be doing its job,
+ * checked at boot rather than discovered by a user.
+ *
+ * Split deliberately into two kinds. A FATAL one means the deployment is not
+ * the thing it claims to be — it would run, serve, and be wrong. A WARNING
+ * means a feature is off, which is a real state the product already handles
+ * honestly (no VAPID: push disabled and the alerts row says so; no R2: media
+ * upload is unavailable). Warning about the second kind is useful; dying for it
+ * would take a working desk down over a feature nobody was using.
+ */
+export function assertRequiredConfig(): void {
+  const env = appEnv();
+  const live = env === 'production' || env === 'staging';
+  const missing: string[] = [];
+
+  if (!databaseUrl()) missing.push('DATABASE_URL — there is no database to serve from');
+
+  // A DEFAULT JWT SECRET IS A PUBLIC ONE.
+  //
+  // This fell back to the literal 'dev-only-change-me', which is committed to
+  // the repository. A deploy that forgot the variable would sign and accept
+  // tokens anyone reading the source could mint — for any user, on any tenant.
+  // It is not an ops inconvenience, it is the whole authentication system
+  // turned off, silently, on a deployment that looks completely normal.
+  const secret = process.env.JWT_SECRET || '';
+  if (live && (!secret || secret === 'dev-only-change-me')) {
+    missing.push('JWT_SECRET — without it tokens are signed with a value published in the repo');
+  }
+
+  if (missing.length) {
+    const nl = String.fromCharCode(10);
+    throw new Error(
+      nl + nl + `Refusing to start (APP_ENV=${env}). Missing configuration:` + nl +
+      missing.map(m => `  • ${m}`).join(nl) + nl,
+    );
+  }
+
+  // Off, not broken — but say so, or a feature that was never configured looks
+  // like a feature that stopped working.
+  const off: string[] = [];
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) off.push('push notifications (VAPID keys)');
+  if (!process.env.PUBLIC_API_URL) off.push('push delivery receipts (PUBLIC_API_URL)');
+  if (!process.env.R2_BUCKET_NAME || !process.env.R2_ACCESS_KEY_ID) off.push('media upload (R2)');
+  if (!process.env.EMAIL_HOST) off.push('outbound email (EMAIL_HOST)');
+  if (off.length) console.warn(`[Config] Disabled, not configured: ${off.join(', ')}.`);
+}
+
 /** One line at boot saying what this process is and what it is holding. */
 export function envBanner(port: string | number): string {
   const env = appEnv();

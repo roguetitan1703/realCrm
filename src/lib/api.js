@@ -19,7 +19,15 @@ function resolveBaseUrl() {
   if (configured) {
     return /\/api\/v1$/.test(configured) ? configured : `${configured}/api/v1`;
   }
-  return env.DEV ? 'http://localhost:5000/api/v1' : '/api/v1';
+  // Dev proxies /api to the local backend, so same-origin is correct there.
+  // A PRODUCTION build has no proxy and nothing serving that path — it would
+  // 404 every request from its own origin and look like a broken backend. The
+  // build refuses to produce this (see vite.config.js); this is the second
+  // line, for a bundle built some other way.
+  if (!env.DEV) {
+    throw new Error('VITE_API_URL was not set at build time — this bundle has no API to call.');
+  }
+  return 'http://localhost:5000/api/v1';
 }
 
 const BASE_URL = resolveBaseUrl();
