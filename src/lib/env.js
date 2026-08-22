@@ -18,8 +18,8 @@ let current = null
 
 /** Record what the API told us. Called wherever a resolve response lands. */
 export function setServerEnv(env) {
-  if (env === 'production' || env === 'staging' || env === 'local') current = env
+  if (env === 'production' || env === 'development' || env === 'local') current = env
 }
 
-/** 'production' | 'staging' | 'local' | null — null until the API has answered. */
+/** 'production' | 'development' | 'local' | null — null until the API has answered. */
 export function serverEnv() { return current }

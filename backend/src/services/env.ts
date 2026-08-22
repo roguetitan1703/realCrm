@@ -19,6 +19,48 @@
  * ============================================================================
  */
 
+import fs from 'fs';
+import path from 'path';
+
+// LOADED HERE, NOT IN db.ts, because a script that reads configuration does not
+// necessarily open a database. The seeder imports this module and `postgres`
+// directly, never db.ts — so it started with no .env loaded at all and refused
+// itself with "DEV_DATABASE_URL is not set" while the value was sitting in the
+// file. Anything that imports the env module now has the environment.
+// TWO FILES, IN ORDER: `.env` carries what every environment shares — the
+// database credentials, the JWT secret, VAPID, R2, email — and
+// `.env.<APP_ENV>` carries the handful of values that differ, chiefly which API
+// URL to advertise. Real environment variables still win over both, because a
+// stale file on the server must never clobber what AWS actually injected.
+//
+// The per-environment file is read SECOND so it overrides the shared one, and
+// neither is committed: a repository that decides which API a deployment talks
+// to is the one thing that has to be set deliberately per deployment.
+function loadEnvFile(file: string, override: boolean) {
+  try {
+    const envPath = path.resolve(process.cwd(), file);
+    if (!fs.existsSync(envPath)) return;
+    for (const line of fs.readFileSync(envPath, 'utf-8').split(String.fromCharCode(10))) {
+      const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+      if (!match) continue;
+      let val = match[2] || '';
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      if (process.env[match[1]] === undefined) process.env[match[1]] = val;
+      else if (override && loadedFromFile.has(match[1])) process.env[match[1]] = val;
+      if (process.env[match[1]] === val) loadedFromFile.add(match[1]);
+    }
+  } catch (e) {
+    console.warn(`[Config] Could not load ${file}:`, e);
+  }
+}
+
+const loadedFromFile = new Set<string>();
+loadEnvFile('.env', false);
+loadEnvFile(`.env.${String(process.env.APP_ENV || 'local').toLowerCase()}`, true);
+
+
 export type AppEnv = 'production' | 'development' | 'local';
 
 /**

@@ -21,7 +21,7 @@ const requireApiUrl = (mode) => ({
       'VITE_API_URL is not set, and a production build has no other way to find the API.',
       'Without it the deployed site answers every request with a 404 from its own origin.',
       '',
-      '  Vercel preview : vercel deploy --build-env VITE_API_URL=<staging api url>',
+      '  Vercel preview : npm run deploy:dev   (or vercel deploy --build-env VITE_API_URL=<api url>)',
       '  Vercel prod    : set VITE_API_URL in the Production environment',
       '  Local build    : VITE_API_URL=http://localhost:5000 npm run build',
       '',

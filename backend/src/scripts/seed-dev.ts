@@ -2,8 +2,8 @@
  * Fill a DEVELOPMENT tenant with synthetic leads, so the filters, pills, sweeps and
  * dashboard can be exercised against realistic volume.
  *
- *   npm run dev:backend:development     (once, to build the schema + demo tenant)
- *   APP_ENV=development npm run seed:dev -- --tenant=skyline-realty --n=400
+ *   npm run start:api:dev            (once, to build the schema + demo tenant)
+ *   npm run seed:dev -- --tenant=skyline-realty --n=400
  *
  * WHY SYNTHETIC, NEVER A COPY OF PRODUCTION
  * -----------------------------------------
@@ -12,7 +12,7 @@
  * of places a real firm's contact list lives, for the sake of test data that
  * does not need to be true. Everything below is generated.
  *
- * REFUSES TO RUN ANYWHERE BUT STAGING. Not by a flag someone passes — a seeder
+ * REFUSES TO RUN ANYWHERE BUT DEVELOPMENT. Not by a flag someone passes — a seeder
  * is exactly the kind of script that gets run in the wrong shell at eleven at
  * night — but by requiring APP_ENV=development AND that the database it resolves to
  * is not the one DATABASE_URL names.
@@ -23,14 +23,21 @@ import { dbRef, databaseUrl, appEnv } from '../services/env';
 const arg = (k: string, d?: string) =>
   process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1] ?? d;
 
-// NO HARDCODED REF. Staging is whatever DEV_DATABASE_URL names; what makes
+// A script named seed-dev declares its own environment rather than requiring
+// the caller to remember a shell-specific prefix — `npm run seed:dev` has to be
+// the whole command. The guard that matters is not this line, which the script
+// sets itself; it is the one below, that the database resolved is NOT the one
+// DATABASE_URL names.
+process.env.APP_ENV = process.env.APP_ENV || 'development';
+
+// NO HARDCODED REF. Development is whatever DEV_DATABASE_URL names; what makes
 // it safe is that it must be DECLARED and must not be the same database the
 // production variable names.
 const url = databaseUrl();
 const ref = dbRef(url);
 if (appEnv() !== 'development') {
   console.error(`
-Refusing to seed: APP_ENV is "${appEnv()}". Run with APP_ENV=development.
+Refusing to seed: APP_ENV is "${appEnv()}", not development.
 `);
   process.exit(1);
 }
@@ -61,7 +68,31 @@ async function main() {
     process.exit(1);
   }
   const t = tenant.id;
-  const agents = await sql`SELECT id FROM users WHERE tenant_id = ${t} AND role = 'agent' AND status ILIKE 'active'`;
+  // A FRESH DATABASE HAS NO DESK. The auth seed creates the tenant and its
+  // owner; the agents come from the bundled demo dataset, which a new project
+  // never received. Without them every seeded lead lands unassigned, which
+  // exercises exactly one filter and none of the routing.
+  let agents = await sql`SELECT id FROM users WHERE tenant_id = ${t} AND role = 'agent' AND status ILIKE 'active'`;
+  if (!agents.length) {
+    const desk = [['Priya Raman', 'PR'], ['Arjun Shetty', 'AS'], ['Neha Kulkarni', 'NK'], ['Imran Sheikh', 'IS']];
+    for (const [name, initials] of desk) {
+      const id = `u_dev_${initials.toLowerCase()}`;
+      const first = name.split(' ')[0];
+      await sql`
+        INSERT INTO users (id, tenant_id, name, email, role, status, metadata)
+        VALUES (${id}, ${t}, ${name}, ${`${first.toLowerCase()}@example.invalid`}, 'agent', 'ACTIVE',
+                ${sql.json({ initials })})
+        ON CONFLICT (id) DO NOTHING`;
+      await sql`
+        INSERT INTO crm_agents (id, tenant_id, name, first, initials, avatar, role, duty_status)
+        VALUES (${id}, ${t}, ${name}, ${first}, ${initials}, '#1E6F52', 'agent', 'ACTIVE')
+        ON CONFLICT (id) DO NOTHING`;
+    }
+    // example.invalid is reserved by RFC 2606 and can never route mail, so a
+    // stray notification cannot reach a real person from test data.
+    console.log(`Created ${desk.length} development agents.`);
+    agents = await sql`SELECT id FROM users WHERE tenant_id = ${t} AND role = 'agent' AND status ILIKE 'active'`;
+  }
   const agentIds: (string | null)[] = agents.map((a: any) => a.id);
   // Some leads land with nobody on them — that is a real state the Unassigned
   // filter and the unrouted alert both exist for, and a seed where every row is

@@ -12,48 +12,16 @@ import postgres from 'postgres';
 import { databaseUrl, assertEnvMatchesDatabase, assertRequiredConfig } from './env';
 
 // 1. Zero-dependency .env loader
-// TWO FILES, IN ORDER: `.env` carries what every environment shares — the
-// database credentials, the JWT secret, VAPID, R2, email — and
-// `.env.<APP_ENV>` carries the handful of values that differ, chiefly which API
-// URL to advertise. Real environment variables still win over both, because a
-// stale file on the server must never clobber what AWS actually injected.
-//
-// The per-environment file is read SECOND so it overrides the shared one, and
-// neither is committed: a repository that decides which API a deployment talks
-// to is the one thing that has to be set deliberately per deployment.
-function loadEnvFile(file: string, override: boolean) {
-  try {
-    const envPath = path.resolve(process.cwd(), file);
-    if (!fs.existsSync(envPath)) return;
-    for (const line of fs.readFileSync(envPath, 'utf-8').split(String.fromCharCode(10))) {
-      const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
-      if (!match) continue;
-      let val = match[2] || '';
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-        val = val.slice(1, -1);
-      }
-      if (process.env[match[1]] === undefined) process.env[match[1]] = val;
-      else if (override && loadedFromFile.has(match[1])) process.env[match[1]] = val;
-      if (process.env[match[1]] === val) loadedFromFile.add(match[1]);
-    }
-  } catch (e) {
-    console.warn(`[Config] Could not load ${file}:`, e);
-  }
-}
-
-const loadedFromFile = new Set<string>();
-loadEnvFile('.env', false);
-loadEnvFile(`.env.${String(process.env.APP_ENV || 'local').toLowerCase()}`, true);
 
 // DATABASE_URL is required. It must come from the environment (AWS) or a local
 // .env — never a hardcoded default. A committed connection string is a leaked
 // production credential, so a missing one fails loudly instead of silently
 // connecting somewhere it shouldn't.
 //
-// Resolved through services/env, which is what makes APP_ENV=staging select the
-// staging project — and which refuses to fall back to production when the
-// staging URL is missing. Falling back is the whole thing we are guarding
-// against; an unreachable staging database is a much better outcome than a
+// Resolved through services/env, which is what makes APP_ENV=development select
+// the development project — and which refuses to fall back to production when
+// that URL is missing. Falling back is the whole thing we are guarding
+// against; an unreachable development database is a much better outcome than a
 // reachable live one.
 assertEnvMatchesDatabase();
 assertRequiredConfig();
@@ -175,6 +143,15 @@ export async function initSchema(): Promise<void> {
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS follow_up JSONB;`;
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS overdue BOOLEAN DEFAULT FALSE;`;
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS import_batch_id TEXT;`;
+    // A CHANGE STAMP THE DESK CAN POLL. It existed only in migrations/010, a
+    // .sql file nothing runs — so production had it (applied by hand) and every
+    // fresh database did not. Found by standing a second environment up and
+    // diffing the two: the idle sweep, the retry sweep and the "going cold"
+    // segments all read this column, so a new deployment would have had three
+    // silently broken features. Backfilled to created_at rather than NOW(), or
+    // every existing row reads as "just changed" the moment this lands.
+    await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;`;
+    await sql`UPDATE crm_leads SET updated_at = created_at WHERE updated_at IS NULL;`;
 
     // WHO CREATED THIS LEAD. A sales executive may fully edit a lead they
     // created and only the status/remarks on one merely assigned to them, so
