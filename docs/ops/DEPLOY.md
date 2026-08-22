@@ -23,11 +23,42 @@ the bundle at `https://api.re.delpat.in`.
 > must **rebuild/redeploy** — editing the variable alone does nothing to a built bundle.
 
 ### API (AWS)
+
+Runs under **PM2** as `re-api`, from `ecosystem.config.cjs` in the repo root.
+That file is the authority on the start command — read it rather than typing a
+`pm2 start` from memory, which is how production ended up running `tsx watch`
+for months (see `docs/STATE.md`, 2026-08-22).
+
+Routine deploy — this is what `deploy.sh` on the box does:
+
 ```bash
-git pull
+cd ~/realestate
+git pull origin main
 npm install
-START_SERVER=true npx tsx backend/src/index.ts
+pm2 restart re-api
 ```
+
+**Confirm the boot banner every time.** It names the environment and the
+database, and is the only thing that shows the process is what you think it is:
+
+```
+🟢 PRODUCTION · port 5000 · db zxdid…
+```
+
+If it says `local`, `APP_ENV` is not reaching the process and the
+wrong-database check is disarmed — stop and fix that before anything else.
+
+If the PM2 entry is ever lost or has to be rebuilt:
+
+```bash
+pm2 delete re-api
+pm2 start ecosystem.config.cjs
+pm2 save          # without this it does not survive a reboot
+```
+
+Never run the API through `npm run`, `tsx watch`, or `run-api.ts` in
+production. Each of those puts a process between PM2 and the server that
+outlives a crash, so PM2 reports `online` while the API is dead.
 
 Required env on the box (see `.env.example`):
 
@@ -182,3 +213,88 @@ hostname later is a one-line frontend change with no data migration.
 4. The lead timeline shows a **Site visit** entry with the watermarked photo.
 5. Sign in as another agent → the entry is visible but the photo is not
    ("Proof on file"). Owners and managers see every photo.
+
+---
+
+## The development backend, on the same EC2 box
+
+Production and development run side by side: two checkouts, two PM2 apps, two
+ports, two hostnames. Nothing is stopped to look at the other, and neither can
+be mistaken for the other because each names its environment in its own banner.
+
+| | production | development |
+|---|---|---|
+| checkout | `~/realestate` (`main`) | `~/realestate-dev` (`development`) |
+| PM2 app | `re-api` | `re-api-dev` |
+| port | 5000 | 5001 |
+| config | `ecosystem.config.cjs` | `ecosystem.development.config.cjs` |
+| database | `DATABASE_URL` | `DEV_DATABASE_URL` |
+| hostname | `api.re.delpat.in` | `api.dev.re.delpat.in` |
+
+**Why a second checkout and not a branch switch.** `git checkout development` in
+`~/realestate` would swing the LIVE API onto unreleased code the moment PM2
+restarted it. The two must be able to disagree.
+
+### One-time setup
+
+```bash
+# 1. Second checkout. A worktree shares .git, so one fetch updates both.
+cd ~/realestate
+git worktree add ~/realestate-dev development
+cd ~/realestate-dev
+npm install
+
+# 2. Config. .env* are NOT in git — copy them across, then point the
+#    development one at the development database.
+cp ~/realestate/.env ~/realestate-dev/.env
+# .env already carries DEV_DATABASE_URL; nothing else differs.
+
+# 3. Start it.
+pm2 start ecosystem.development.config.cjs
+pm2 save
+pm2 logs re-api-dev --lines 30     # must read: 🟡 DEVELOPMENT · port 5001 · db <dev ref>
+```
+
+### DNS + Caddy
+
+Add an A record for `api.dev.re.delpat.in` pointing at the same Elastic IP, then
+add this block to the Caddyfile — it is the production block with two numbers
+changed:
+
+```caddy
+api.dev.re.delpat.in {
+	reverse_proxy localhost:5001
+}
+```
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+curl -s https://api.dev.re.delpat.in/health
+```
+
+Caddy provisions the certificate on first request, so give it a few seconds.
+
+### Then, and only then, the Vercel preview
+
+`VITE_API_URL` is baked in at **build time**, and an HTTPS page cannot call an
+HTTP API, so a preview built against `http://localhost:5001` cannot work from
+Vercel — it is not a configuration you can fix after deploying.
+
+```bash
+# locally, in .env.development:
+VITE_API_URL=https://api.dev.re.delpat.in
+
+npm run deploy:dev        # build:dev + vercel deploy --prebuilt
+```
+
+Branch Tracking stays OFF; previews are deployed from the CLI on purpose, so a
+push never costs a build. Confirm the deployed preview's environment marker
+reads DEVELOPMENT before typing anything into it — the marker is read from the
+API, which is the only thing that knows which database it holds.
+
+### Updating development later
+
+```bash
+cd ~/realestate-dev && git pull && npm install && pm2 restart re-api-dev
+```
