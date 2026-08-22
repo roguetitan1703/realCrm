@@ -9,7 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import postgres from 'postgres';
-import { databaseUrl, assertEnvMatchesDatabase, assertRequiredConfig } from './env';
+import { databaseUrl, assertEnvMatchesDatabase, assertRequiredConfig, appEnv } from './env';
 
 // 1. Zero-dependency .env loader
 
@@ -30,9 +30,18 @@ if (!dbUrl) {
   throw new Error('[DB Engine] DATABASE_URL is not set. Provide it via the environment or a local .env file.');
 }
 
+// POOL SIZE IS PER ENVIRONMENT because the two databases are reached
+// differently. Production connects direct; development goes through Supabase's
+// session-mode pooler, which caps the whole PROJECT at 15 clients — shared with
+// every scratch script and every backend still holding sockets a killed process
+// has not released yet. Ten here plus one seeder is most of the budget, and the
+// symptom is a 500 reading `max clients reached in session mode`, not a
+// connection error, so it looks like a bug in the query.
+const POOL_MAX = appEnv() === 'development' ? 4 : 10;
+
 export const sql = postgres(dbUrl, {
   ssl: 'require',
-  max: 10,
+  max: POOL_MAX,
   idle_timeout: 20,
   connect_timeout: 15,
 });

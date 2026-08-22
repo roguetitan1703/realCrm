@@ -14,6 +14,7 @@ import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { audit } from './audit.js';
+import { buildLeadSegments, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
@@ -1350,7 +1351,8 @@ export async function getDeskSummary(): Promise<any> {
                count(*) FILTER (WHERE ${OPEN} AND follow_up IS NOT NULL)::int AS with_follow_up,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*) FILTER (WHERE ${S.today})::int AS new_today,
-               count(*) FILTER (WHERE ${S.untouched_sla})::int AS untouched_sla,
+               count(*) FILTER (WHERE ${S.never_contacted})::int AS never_contacted,
+               count(*) FILTER (WHERE ${S.going_cold})::int AS going_cold,
                count(*) FILTER (WHERE ${S.noanswer_stale})::int AS noanswer_stale,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine}`,
@@ -1414,7 +1416,7 @@ export async function getDeskSummary(): Promise<any> {
     stagesByAgent.get(r.a)![r.s] = r.n;
   }
   return {
-    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, untouched_sla: 0, noanswer_stale: 0 },
+    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, never_contacted: 0, going_cold: 0, noanswer_stale: 0 },
     byStage: asMap(byStage),
     bySource: asMap(bySource),
     perAgent: (() => {
@@ -2330,89 +2332,37 @@ export const FOLLOWUP_OVERDUE = sql`(${OPEN} AND ${FOLLOWUP_PAST_DUE})`;
  * in `activities`. Asking only one of them calls a lead untouched because it
  * was worked through the other screen.
  */
-const NEVER_CONTACTED = sql`(
-  NOT EXISTS (SELECT 1 FROM crm_timeline_events e
-               WHERE e.record_id = crm_leads.id AND e.tenant_id = crm_leads.tenant_id
-                 AND e.type IN ('call', 'whatsapp', 'sms', 'email'))
-  AND NOT EXISTS (SELECT 1 FROM activities a
-                   WHERE a.lead_id = crm_leads.id AND a.tenant_id = crm_leads.tenant_id
-                     AND a.type IN ('call', 'meeting', 'site_visit'))
-)`;
+// Moved to services/leadSegments.ts as CONTACTED, and widened: a remark or a
+// stage change is contact too, because an agent who moved a lead to Call Not
+// Received rang it. Measured on the live desk the day it changed — 83 leads
+// read as never contacted, 76 of which a person had demonstrably worked.
 
-function leadSegments({ arrivalStage, slaHours, timezone }: DeskConfig) {
-  const untouched = sql`stage = ${arrivalStage}`;
+function leadSegments({ arrivalStage, slaHours, timezone, coldDays }: DeskConfig) {
   const today = dayStart(timezone);
   // ARRIVED TODAY means arrived today. It used to also require the lead to be
   // untouched, so working a lead deleted it from the count of leads that came
   // in — on the morning 8 arrived, the tile said 1, because 7 had already been
   // picked up. "How many came in today" and "how many are still unworked" are
-  // two questions and this is the first one; the second is `untouched_sla`.
+  // two questions and this is the first one.
   const newToday = sql`created_at >= ${today}`;
-  return {
-    // OVERDUE MEANS A FOLLOW-UP WHOSE TIME HAS PASSED.
-    //
-    // It read `overdue = true`, a boolean column NOTHING in this codebase ever
-    // writes: false on all 232 bhumi leads and all 94 delpat ones, true only on
-    // seed rows in the demo tenants. So the tab, the tile and the filter that
-    // read it could only ever return nothing — while 5 bhumi leads had an
-    // appointment whose moment had gone by and no screen said so.
-    //
-    // The client already knew: followUpOverdue() in lib/format.js reads
-    // `follow_up.at`, the real instant the schedule modal writes. The server was
-    // reading a different field for the same question — one concept, two
-    // implementations, and the losing one decided what the desk saw.
-    //
-    // Guarded by a pattern test rather than a bare cast: rows saved before `at`
-    // existed hold a human-typed date ("This Sunday"), and casting that throws
-    // and takes the whole query with it.
-    overdue: FOLLOWUP_OVERDUE,
-    unassigned: sql`agent_id IS NULL`,
-    open: OPEN,
-    today: newToday,
-    month: sql`(created_at >= (date_trunc('month', now() AT TIME ZONE ${timezone}) AT TIME ZONE ${timezone}) AND NOT ${newToday})`,
-    // The client asked for this one specifically, one click from the list — it is
-    // the pile you work down at 6pm.
-    noanswer: sql`stage = 'Call Not Received'`,
-    closed: sql`NOT (${OPEN})`,
-    // The calendar shows leads with a next step booked, and only those.
-    //
-    // DELIBERATELY NOT open-only, unlike the overdue segment beside it. A slot
-    // that was booked still happened to the week: an agent looking at Thursday
-    // needs to see the visit that was arranged there, and whether it is now
-    // for a lead that has since been rejected is something the chip can say
-    // rather than something the grid should hide. Overdue is work still owed
-    // and a rejected lead owes none; the calendar is a record of the diary.
-    followup: sql`follow_up IS NOT NULL`,
-    // The two piles the desk actually loses money on, and the reason they are
-    // defined HERE: the dashboard tile and the list it opens then read one
-    // expression. Counting them separately is what put a 12 on a tile above a
-    // list of 13.
-    //
-    // Past the SLA and still never contacted. Measured at 2x slaHours — the
-    // point the sweep escalates to a manager — so the tile agrees with the
-    // alert instead of quietly using a rounder number.
-    //
-    // The first half was `stage = arrivalStage`, which is a fact about a
-    // dropdown. It now asks whether anyone actually reached out, which is what
-    // the tile has always claimed to count. See NEVER_CONTACTED above for what
-    // that swap was worth: 4 → 60 on the live desk.
-    untouched_sla: sql`(${NEVER_CONTACTED} AND created_at <= now() - (${slaHours * 2}::text || ' hours')::interval)`,
-    // Rung, no answer, and nobody has been back since. This is the pile with no
-    // exit rule: on the live desk it was a fifth of every lead in the system.
-    noanswer_stale: sql`(stage = 'Call Not Received' AND updated_at <= now() - (${RETRY_DAYS}::text || ' days')::interval)`,
-    // The same question without the clock on it — for the leads filter, where
-    // "show me everyone we have never reached out to" is asked of the whole
-    // desk rather than of the overdue pile.
-    never_contacted: NEVER_CONTACTED,
-    // CAME BACK. Counted in sessions, so a man who clicked four listings in
-    // five minutes is not in it — 12 leads on the live desk, not the 25 a
-    // payload count would have claimed. They are the warmest people on it.
-    repeat_enquiry: sql`(SELECT count(*) FROM crm_lead_enquiries e
-                          WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) > 1`,
-  };
+  // Every predicate, every label and every one-line description now live
+  // together in services/leadSegments.ts. `arrivalStage` and `slaHours` stay in
+  // the signature because DeskConfig is shared; neither decides a segment any
+  // more. `untouched_sla` — the same expression as never_contacted with a clock
+  // on it, labelled "Past SLA" on the dashboard and sitting beside "Never
+  // called" in the filters — is deleted rather than moved.
+  void arrivalStage; void slaHours;
+  return buildLeadSegments({
+    OPEN,
+    FOLLOWUP_OVERDUE,
+    newToday,
+    monthStart: sql`(created_at >= (date_trunc(${"month"}, now() AT TIME ZONE ${timezone}) AT TIME ZONE ${timezone}) AND NOT ${newToday})`,
+    retryDays: RETRY_DAYS,
+    coldDays,
+  });
 }
 
-export type LeadSegment = keyof ReturnType<typeof leadSegments>;
+export type { LeadSegment };
 
 /**
  * The stage a lead ARRIVES on — the tenant's first configured pipeline stage,
@@ -2424,7 +2374,7 @@ const arrivalStageCache = new Map<string, { v: DeskConfig; at: number }>();
 const ARRIVAL_TTL_MS = 60_000;
 
 /** The settings every worklist question is asked against. */
-export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string };
+export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string; coldDays: number };
 
 /**
  * The firm's own timezone. Every desk on this system is in India today, but the
@@ -2463,6 +2413,10 @@ export async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
     // the same leads cannot be reading two different windows.
     slaHours: Math.max(Number(cfg.slaHours) || 24, 1),
     timezone: typeof cfg.timezone === 'string' && cfg.timezone ? cfg.timezone : DEFAULT_TIMEZONE,
+    // `reminderDays` was a Settings control nothing read — it was written and
+    // never consumed anywhere in the codebase. It is the number behind Going
+    // cold now, so the control finally changes something.
+    coldDays: Math.max(Number(cfg.reminderDays) || 3, 1),
   };
   arrivalStageCache.set(tenantId, { v, at: Date.now() });
   return v;

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Kpi, Panel, SectionHead, Avatar, Segmented } from '../components/primitives.jsx'
+import { Kpi, Panel, SectionHead, Avatar } from '../components/primitives.jsx'
 import { buildRoster, RosterRow } from '../components/roster.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -44,14 +44,16 @@ export default function Dashboard({ store, go, topBar }) {
   // handed it a flag with no option behind it and the list opened with no
   // filter applied at all. These two ARE its options, by the names it uses —
   // one vocabulary, and the panel can hand the list something it understands.
-  const [coldMode, setColdMode] = useState('never')
-  const coldSeg = coldMode === 'never' ? 'never_contacted' : 'noanswer_stale'
+  // GOING COLD IS ONE THING NOW: open, and nothing recorded for the number of
+  // days set in Settings. It used to be a toggle between two OTHER segments
+  // under a third name, which is why its number never agreed with the pills.
+  const coldSeg = 'going_cold'
   const coldFlags = [coldSeg]
   const { data: atRiskPage } = useServerData(
     // Six, not eight. The panel sits beside the calling queue and grew taller
     // than it; the header count carries the total and "See all" carries the rest.
     () => api.listLeads({ flag: coldFlags, sortKey: 'activity', sortDir: 'asc', limit: 6 }),
-    [state.dataAsOf, coldMode], { data: [] })
+    [state.dataAsOf], { data: [] })
   const atRisk = atRiskPage?.data || []
   // The server's count for the same query, NOT atRisk.length — the list is
   // capped at 8, and reporting the rows you rendered as the total is how a
@@ -157,11 +159,17 @@ export default function Dashboard({ store, go, topBar }) {
               is a fact about a dropdown — it read 4 on bhumi while 60 people
               had gone 48 hours without a call or a message. The segment behind
               it now asks whether anyone reached out. */}
-          <Kpi icon="clock" label="Past SLA" value={n(totals.untouched_sla)} sub="never contacted"
-            alert={totals.untouched_sla > 0} onClick={() => toLeads({ flag: ['untouched_sla'] })} />
-          <Kpi icon="phone" label="No answer" value={n(totals.noanswer_stale)} sub="not retried"
+          {/* The tile and the pill it opens now read ONE expression and wear ONE
+              word. "Past SLA" was never_contacted with a clock on it and linked
+              through to a flag the Leads screen did not offer, so the list
+              opened unfiltered. */}
+          <Kpi icon="clock" label="Not contacted" value={n(totals.never_contacted)} sub="nobody has reached out"
+            alert={totals.never_contacted > 0} onClick={() => toLeads({ seg: 'never_contacted' })} />
+          <Kpi icon="phone" label="No reply" value={n(totals.noanswer_stale)} sub="rung, nothing back"
             alert={totals.noanswer_stale > 0}
             onClick={() => toLeads({ seg: 'noanswer_stale' })} />
+          <Kpi icon="clock" label="Going cold" value={n(totals.going_cold)} sub="open and gone quiet"
+            alert={totals.going_cold > 0} onClick={() => toLeads({ seg: 'going_cold' })} />
           {hasCalling && (
             <Kpi icon="phone" label="Late callbacks" value={oq.callbacksOverdue} sub="owners waiting on a call"
               alert={oq.callbacksOverdue > 0} onClick={() => toCalling('callbacks_overdue')} />
@@ -235,14 +243,7 @@ export default function Dashboard({ store, go, topBar }) {
               the leads that are actually at risk, longest-waiting first. */}
           <Panel>
             <SectionHead title="Going cold" right={
-              <span className="sh-tools">
-                <Segmented value={coldMode} onChange={setColdMode}
-                  options={[
-                    { value: 'never', label: 'Never called' },
-                    { value: 'noanswer', label: 'No answer, not retried' },
-                  ]} />
-                {atRiskTotal ? <span>{atRiskTotal}</span> : null}
-              </span>
+              atRiskTotal ? <span className="sh-tools"><span>{atRiskTotal}</span></span> : null
             } />
             {atRisk.length === 0 && <div className="detail-empty">Nothing going cold.</div>}
             <div className="od-list">
@@ -262,8 +263,14 @@ export default function Dashboard({ store, go, topBar }) {
                 // The claim is now measured rather than reworded — untouched_sla
                 // asks whether anyone reached out — so the two reasons below are
                 // both true, and the toggle above narrows to the first of them.
-                const noAnswer = l.stage === 'Call Not Received'
-                const reason = noAnswer ? 'No answer, not retried' : 'Never contacted'
+                // Why THIS row is cold, in the desk's words — the same three the
+                // pills use, so a row and the pill that would select it cannot
+                // describe the lead differently.
+                // Two reasons, because two are all the row can prove. Whether
+                // anybody ever reached out is a server-side question and the
+                // list payload does not carry the answer — asserting it here
+                // would be a label inventing a fact the row cannot see.
+                const reason = l.stage === 'Call Not Received' ? 'No reply' : 'Gone quiet'
                 const since = new Date(l.updatedAt || l.createdAt).getTime()
                 const days = Math.floor((Date.now() - since) / 86400000)
                 const wait = days >= 1 ? `${days} day${days === 1 ? '' : 's'}` : 'today'

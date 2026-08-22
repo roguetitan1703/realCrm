@@ -55,7 +55,10 @@ const REMARKS = [
   'Number switched off, messaged instead',
 ];
 const seed = (id: string) => parseInt(createHash('sha1').update(id).digest('hex').slice(0, 10), 16);
-const pick = <T,>(arr: T[], n: number) => arr[n % arr.length];
+// Math.abs, because `>>` coerces to a 32-bit SIGNED int and a hash seed this
+// wide goes negative — which indexed off the front of the array and rendered
+// "Pooja undefined" on the desk.
+const pick = <T,>(arr: T[], n: number) => arr[Math.abs(n) % arr.length];
 
 function surfaceFor(id: string, i: number) {
   const s = seed(id);

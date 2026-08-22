@@ -138,9 +138,9 @@ export const LEADS_DEF = {
   // "Arrived today" was the Today tab, and the other four are now pills. Three
   // controls answering one question is how a desk stops trusting any of them.
   //
-  // `untouched_sla` survives as a SEGMENT without a control: the dashboard's
-  // Past SLA tile links through to it, and a flag reached by a link does not
-  // also need a dropdown entry competing with the "Never called" pill beside it.
+  // `untouched_sla` is deleted. It was never_contacted with a clock on it,
+  // labelled "Past SLA" on the dashboard while the pill beside the same rows
+  // said "Never called" — one expression, two names, on two screens.
   filterFields: (store) => [
     { key: 'source', label: 'Source', icon: 'trend', options: opt(store.state.settings.sources) },
     { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
@@ -155,10 +155,11 @@ export const LEADS_DEF = {
     // no-answer, came-back) are not repeated, because two controls for one
     // question is how the pills and the KPI strip ended up saying different
     // things about the same leads.
-    { key: 'flag', label: 'Needs attention', icon: 'alert', options: [
-      { value: 'untouched_sla', label: 'Past SLA' },
-      { value: 'unassigned', label: 'Nobody assigned' },
-    ] },
+    // "Needs attention" is gone. It held two entries: Past SLA, which was
+    // never_contacted with a clock on it and is deleted, and Nobody assigned,
+    // which is the Sales Executive control's own Unassigned option. A dropdown
+    // with one entry duplicating another control is the third-way-to-ask-one-
+    // question fault, not a filter.
   ],
 
   // Per-key filter logic (mirrors the module's normalized predicates).
@@ -279,9 +280,16 @@ export const LEADS_DEF = {
     // Side by side, "New 88" against "New today 0" reads as the app
     // contradicting itself.
     { key: 'today', label: 'Today' },
-    // The two piles the desk loses money on, in the order it loses them.
-    { key: 'never_contacted', label: 'Never called' },
-    { key: 'noanswer_stale', label: 'No answer, not retried' },
+    // The piles the desk loses money on, in the order it loses them. Labels are
+    // the firm's own words and live in backend/src/services/leadSegments.ts
+    // beside the SQL that decides them — "called" is not what this desk says,
+    // and "not retried" was a claim about the agent the data could not support.
+    { key: 'never_contacted', label: 'Not contacted' },
+    { key: 'noanswer_stale', label: 'No reply' },
+    // Open, and silent for the number of days set in Settings → Response times.
+    // Replaces the dashboard's Going-cold toggle, which switched between two
+    // OTHER segments under a third name.
+    { key: 'going_cold', label: 'Going cold', tone: 'alert' },
     // Real at last: a follow-up whose moment has gone by, read from the
     // appointment rather than from a column nothing writes.
     { key: 'overdue', label: 'Follow-up overdue', tone: 'alert' },
@@ -513,10 +521,11 @@ export const OWNERS_DEF = {
     // no-answer, came-back) are not repeated, because two controls for one
     // question is how the pills and the KPI strip ended up saying different
     // things about the same leads.
-    { key: 'flag', label: 'Needs attention', icon: 'alert', options: [
-      { value: 'untouched_sla', label: 'Past SLA' },
-      { value: 'unassigned', label: 'Nobody assigned' },
-    ] },
+    // "Needs attention" is gone. It held two entries: Past SLA, which was
+    // never_contacted with a clock on it and is deleted, and Nobody assigned,
+    // which is the Sales Executive control's own Unassigned option. A dropdown
+    // with one entry duplicating another control is the third-way-to-ask-one-
+    // question fault, not a filter.
   ],
 
   headerFacts: (o) => {
