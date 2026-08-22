@@ -86,3 +86,9 @@ backups/
 .env.production
 .env.development
 .env.*.local
+
+.vercel
+# NOTE: `vercel link` also appended `.env*` here. Removed deliberately — the
+# rules above already ignore every real env file while making exceptions for
+# .env.example and .env.template, which are committed on purpose, and a blanket
+# pattern this far down the file silently overrides both.
