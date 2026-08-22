@@ -2765,3 +2765,9 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 /* Beside the record title, where it can wrap with the name rather than pushing
    the facts strip and the action buttons down a line each. */
 .rh-title .rh-repeat{margin-left:9px;vertical-align:middle;font-size:11px}
+
+/* Environment marker — small, fixed, never in the way of a control. */
+.env-mark{position:fixed;left:6px;bottom:6px;z-index:120;font-size:9.5px;font-weight:800;letter-spacing:.08em;
+  padding:2px 6px;border-radius:5px;pointer-events:none;opacity:.85}
+.env-staging{background:#8a5a00;color:#fff}
+.env-local{background:var(--line);color:var(--muted)}

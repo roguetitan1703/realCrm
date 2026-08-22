@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:backend": "tsx watch backend/src/index.ts",
+    "dev:backend:staging": "tsx backend/src/scripts/run-staging.ts",
     "build": "npm run check:vocab && vite build",
     "preview": "vite preview",
     "check:vocab": "node scripts/check-vocabulary.mjs",

@@ -7,6 +7,7 @@ import { PLATFORM, tenantDocTitle } from './data/platform.js'
 import { autoEnablePush } from './lib/push.js'
 import { isDeskRole, roleLabel } from './lib/permissions.js'
 import PushRow from './components/PushRow.jsx'
+import EnvMark from './components/EnvMark.jsx'
 import { api } from './lib/api.js'
 import { useServerData } from './lib/useServerData.js'
 
@@ -176,6 +177,7 @@ export default function App() {
         {/* The phone chrome returns before the desk one, so this needs its own
             mount — not a second implementation, the same component. */}
         <PushRow store={store} />
+        <EnvMark />
         <Phone store={store} framed={false} screen={screen} sel={sel} setSel={setSel} go={go} />
         <Toasts toasts={state.toasts} onDismiss={(id) => store.dispatch({ type: 'UNTOAST', id })} />
       </div>
@@ -255,6 +257,7 @@ export default function App() {
     <div className="viewport">
       {/* One mount for the whole app: an overlay, not a card in a screen. */}
       <PushRow store={store} />
+      <EnvMark />
       {state.dataStale && <StaleBanner />}
       <AppShell nav={nav} active={effectiveScreen} activeSub={contactsTab} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
         <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.ownerId || ''}-${sel.propId || ''}`} {...ctx} />

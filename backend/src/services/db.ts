@@ -9,6 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import postgres from 'postgres';
+import { databaseUrl, assertEnvMatchesDatabase } from './env';
 
 // 1. Zero-dependency .env loader
 try {
@@ -37,7 +38,14 @@ try {
 // .env — never a hardcoded default. A committed connection string is a leaked
 // production credential, so a missing one fails loudly instead of silently
 // connecting somewhere it shouldn't.
-const dbUrl = process.env.DATABASE_URL;
+//
+// Resolved through services/env, which is what makes APP_ENV=staging select the
+// staging project — and which refuses to fall back to production when the
+// staging URL is missing. Falling back is the whole thing we are guarding
+// against; an unreachable staging database is a much better outcome than a
+// reachable live one.
+assertEnvMatchesDatabase();
+const dbUrl = databaseUrl();
 if (!dbUrl) {
   throw new Error('[DB Engine] DATABASE_URL is not set. Provide it via the environment or a local .env file.');
 }

@@ -27,6 +27,12 @@ import { pwaRouter } from './routes/pwa';
 import { filesRouter, mediaRouter } from './routes/files';
 import { withRequestContext } from './middleware/auth';
 import { getTenantForIngest, runRoutingSweeps } from './services/store';
+import { assertEnvMatchesDatabase, envBanner, appEnv } from './services/env';
+
+// BEFORE ANYTHING OPENS A CONNECTION. A process pointed at the wrong database
+// looks completely normal while it runs; this is the only moment it can be
+// stopped for free.
+assertEnvMatchesDatabase();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -257,6 +263,7 @@ if (isMain || process.env.START_SERVER === 'true') {
   app.listen(PORT, () => {
     console.log(`============================================================================`);
     console.log(`🚀 Real Estate CRM Backend API Engine running on port ${PORT}`);
+    console.log(`   ${envBanner(PORT)}`);
     console.log(`🌐 Workspace Resolver: http://localhost:${PORT}/api/v1/workspace/resolve?slug=skyline-realty`);
     console.log(`============================================================================`);
   });
