@@ -51,19 +51,22 @@ npm run build:dev      # the same, against .env.development
 npm run seed:dev       # synthetic leads into the development db
 ```
 
-**Two environments, one variable.** `APP_ENV` is `production` or `development`;
-`development` selects `DEV_DATABASE_URL` and refuses to fall back. The process
-refuses to boot if the two URLs name the same database, or if `JWT_SECRET` is
-missing — it used to fall back to a value committed in this repo. A build with
-no `VITE_API_URL` fails rather than deploying a site that 404s every request.
-Config lives in `.env` (shared) plus `.env.<APP_ENV>`; none is committed.
-
 **`npx vite build` is not a build check.** It skips the vocabulary guard, passes
 happily, and the Vercel deploy then fails. You verify build errors before
 pushing, not the user.
 
 **Never push to `main`.** Vercel deploys on every commit to it, off a capped
-plan. Commit locally or on a branch; the user merges and deploys.
+plan. Commit locally or on the `development` branch; the user merges and
+deploys. Vercel Branch Tracking is OFF — previews are deployed from the CLI on
+purpose, so a push never costs a build.
+
+**Two databases, and the process refuses to guess.** `APP_ENV=development`
+selects `DEV_DATABASE_URL` and will not fall back to production; boot refuses if
+both URLs name the same project, or if `JWT_SECRET` is missing — it used to fall
+back to a value committed in this repo. `vite build` refuses without
+`VITE_API_URL`, because the fallback is same-origin `/api/v1`, which on Vercel
+404s every request while looking perfectly deployed. `.env`, `.env.production`
+and `.env.development` are **not committed**.
 
 **Frontend and backend deploy separately** — Vercel automatic, AWS by hand, so
 `main` silently runs ahead of the live API. When a field or route "does not
@@ -179,6 +182,14 @@ When you fix a generator, **check what it already produced** — `parser_config`
 `crm_settings`, `crm_routing_rules`, `brand_config`, and the columns any
 migration has touched.
 
+**`initSchema()` is the only migration runner. `migrations/*.sql` is
+documentation.** `crm_leads.updated_at` lived only in `010` and was applied to
+production by hand, so production had it and every fresh database did not —
+while the idle sweep, the retry sweep and the going-cold segments all read it. A
+new deployment would have shipped three silently broken features. Anything a
+column needs goes in `initSchema`, and a second environment is what makes the
+drift visible: diff the two before trusting either.
+
 ### 3.5 One global key cannot answer a per-workspace question
 
 Eight isolation bugs in two days, all this shape. The auth token, the session,
@@ -249,6 +260,19 @@ holding something that differs per firm.
   open tab.
 - **Overlays are dismissed centrally in `useNav`**, or back and tab-switch
   navigate out from under an open form.
+- **A filter lives in the URL, not in a screen's state.** `sel.leadFilters` is
+  one bag — segment, stage, intent, source, locality, agent, flag, sort — and
+  nav.js mirrors it into the query string. Component state cannot survive a
+  record opening (the list unmounts), a reload, back, or being sent to someone.
+  Opening a record keeps the filters underneath it; a tab or sidebar item is a
+  fresh arrival and clears them. Filter changes REPLACE the history entry.
+- **Every entry point must land on a control you can see.** A tile that filters
+  by something with no pill and no chip is the same fault as a tile that filters
+  nothing, wearing the opposite clothes — right rows, nothing naming why,
+  nothing to click to undo it.
+- **Assignment is history.** Any path that changes `agent_id` writes an
+  `assignment` timeline event through `recordAssignment()` — the audit ledger is
+  not what an agent opens to ask "why is this mine?".
 
 ---
 
@@ -332,6 +356,18 @@ This is the part that matters most.
 - **`followup_due` notifications are inert** — the query reads
   `follow_up->>'due_at'`, which nothing writes. Now a one-line fix rather than a
   model change: `at` is a real instant and `FOLLOWUP_PAST_DUE` already reads it.
+- **4 of bhumi's 7 agents have no push subscription**, so every phone alert
+  addressed to them is undeliverable before it is sent. The delivery log
+  (`push_deliveries`, `scripts/push-delivery-report.ts`) records that now, but
+  only once the backend is deployed.
+- **The "never contacted" metric overstates itself.** 74 on bhumi, 26 of them
+  carrying remarks that prove contact. Proposal and numbers in `docs/STATE.md`;
+  nothing changed yet.
+- **`reminderDays` is a Settings control nothing reads** and the Assignments tab
+  count disagrees with its own list. Both parked with numbers in
+  `docs/PARKED.md`.
+- **The audit ledger UI is hidden deliberately** — do not "fix" the commented-out
+  nav entry.
 - **`/api/v1/ingest` has no rate limit.** Write-only key, but a leaked one fills
   a desk with junk faster than agents can reject it.
 - **`verifyAuditChain()` returns `ok:false` at seq 227** (a `delpat`
@@ -357,7 +393,11 @@ This file deliberately does not duplicate them.
 - `docs/ROADMAP.md` — **the backlog. Source of truth for what to build next.**
 - `docs/specs/` — buildable plans: `auth.md`, `contacts-leads.md`,
   `properties.md`, `ingestion.md`, `enquiries.md`, `pwa.md`, `branding.md`,
-  `data-lifecycle.md`
+  `data-lifecycle.md`, `notifications.md` (how an alert reads),
+  `notification-delivery.md` (whether it arrives — the full matrix of what
+  pushes and what is feed-only, and the ladder of reasons one does not)
+- `docs/PARKED.md` — decided-not-to-do, with the numbers that were measured, so
+  a later session does not rediscover them or "fix" something deliberate
 - `docs/architecture/` — architecture declaration, schema plan
 - `docs/STATE.md` — **what is DEPLOYED (not merely committed), what is waiting
   on the user, and what was last checked against the live database.** Rewritten
