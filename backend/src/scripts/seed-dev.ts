@@ -76,7 +76,12 @@ async function main() {
   if (!agents.length) {
     const desk = [['Priya Raman', 'PR'], ['Arjun Shetty', 'AS'], ['Neha Kulkarni', 'NK'], ['Imran Sheikh', 'IS']];
     for (const [name, initials] of desk) {
-      const id = `u_dev_${initials.toLowerCase()}`;
+      // TENANT IN THE KEY. This was `u_dev_${initials}`, which is global — so
+      // seeding a SECOND tenant hit ON CONFLICT (id) DO NOTHING against the
+      // first tenant's rows, created nobody, and still printed "Created 4".
+      // Every lead then landed unassigned, which exercises one filter and no
+      // routing at all.
+      const id = `u_dev_${t}_${initials.toLowerCase()}`;
       const first = name.split(' ')[0];
       await sql`
         INSERT INTO users (id, tenant_id, name, email, role, status, metadata)
@@ -90,8 +95,10 @@ async function main() {
     }
     // example.invalid is reserved by RFC 2606 and can never route mail, so a
     // stray notification cannot reach a real person from test data.
-    console.log(`Created ${desk.length} development agents.`);
     agents = await sql`SELECT id FROM users WHERE tenant_id = ${t} AND role = 'agent' AND status ILIKE 'active'`;
+    // Report what the database HAS, not what the loop attempted — the old line
+    // printed the intended count unconditionally and hid the bug above.
+    console.log(`Created ${agents.length} development agents on ${t}.`);
   }
   const agentIds: (string | null)[] = agents.map((a: any) => a.id);
   // Some leads land with nobody on them — that is a real state the Unassigned
