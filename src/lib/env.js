@@ -1,23 +1,25 @@
 // ============================================================================
-// 🧭 Which deployment is this
+// 🧭 Which deployment am I writing to
 // ============================================================================
-// Read from the HOSTNAME, not from a build variable, and that is deliberate.
-// `VITE_*` values are baked in at build time, so a preview deployment that was
-// never given its own override builds with production's — which is exactly the
-// mistake worth catching, and a marker that depends on the same variable being
-// right would go quiet at precisely the wrong moment.
+// THE SERVER SAYS, AND NOTHING HERE GUESSES.
 //
-// The production host is one string. Everything else is not production, which
-// fails safe: a new preview URL nobody configured still says so.
+// An earlier version of this file matched the browser's hostname against a
+// production domain written into the source — a URL baked into the repo, which
+// is the thing that has to be configuration. Worse, it answered the wrong
+// question. "Which frontend build is this" does not matter; "which database am
+// I about to write a real client's name into" does, and the only thing that
+// knows is the API holding the connection.
+//
+// That also makes the Vercel trap visible instead of silent: a preview build
+// that was never given its own VITE_API_URL is talking to production, and this
+// will say PRODUCTION, because it is.
 
-const PRODUCTION_HOSTS = ['realestate.delpat.in']
+let current = null
 
-export function appEnv() {
-  if (typeof window === 'undefined') return 'production'
-  const h = window.location.hostname
-  if (PRODUCTION_HOSTS.includes(h)) return 'production'
-  if (h.endsWith('.vercel.app')) return 'staging'
-  return 'local'
+/** Record what the API told us. Called wherever a resolve response lands. */
+export function setServerEnv(env) {
+  if (env === 'production' || env === 'staging' || env === 'local') current = env
 }
 
-export const isProduction = () => appEnv() === 'production'
+/** 'production' | 'staging' | 'local' | null — null until the API has answered. */
+export function serverEnv() { return current }

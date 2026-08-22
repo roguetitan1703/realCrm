@@ -11,6 +11,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { appEnv } from '../services/env';
 import { requireTenantAuth } from '../middleware/auth';
 import { getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates, listContacts } from '../services/store';
 import { sql } from '../services/db';
@@ -66,7 +67,9 @@ workspaceRouter.get('/audit', async (req: Request, res: Response) => {
  */
 workspaceRouter.get('/bootstrap', requireTenantAuth, async (_req: Request, res: Response) => {
   try {
-    return res.status(200).json({ success: true, state: await getBootstrap() });
+    // `env` alongside the state, so the marker survives a reload that never
+    // touches the unauthenticated resolve.
+    return res.status(200).json({ success: true, env: appEnv(), state: await getBootstrap() });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to bootstrap', message: err.message });
   }
@@ -188,6 +191,14 @@ workspaceRouter.get('/resolve', async (req: Request, res: Response) => {
     return res.status(200).json({
       success: true,
       resolved: true,
+      // WHICH DATABASE THE ANSWER CAME FROM.
+      //
+      // The client cannot know this and must not guess it. A preview build that
+      // was never given its own VITE_API_URL is talking to PRODUCTION, and the
+      // one thing worth showing on screen is what is actually being written to
+      // — which only the server that holds the connection can say. Read here,
+      // on the unauthenticated resolve, so it is known before anyone signs in.
+      env: appEnv(),
       tenant: {
         id: t.id,
         name: t.name,

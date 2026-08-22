@@ -11,6 +11,7 @@
 //   • same-origin    → falls back to /api/v1 if no VITE_API_URL is configured
 // Accepts VITE_API_URL with or without a trailing /api/v1 so it can't be mis-set.
 import { enqueue, flushOutbox } from './outbox.js';
+import { setServerEnv } from './env.js';
 
 function resolveBaseUrl() {
   const env = import.meta.env || {};
@@ -371,6 +372,11 @@ async function request(endpoint, options = {}) {
       throw new Error(`API Error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
     }
     const data = await res.json();
+    // ONE PLACE, because the answer must not depend on which call happened to
+    // be made. Any response that names its environment records it — the
+    // unauthenticated workspace resolve does, so it is known before sign-in,
+    // and the boot read does, so it stays known after.
+    if (data?.env) setServerEnv(data.env);
     if (isWrite) invalidateReads();
     else reads.set(key, { at: Date.now(), data });
     return data;

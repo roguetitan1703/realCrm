@@ -12,24 +12,34 @@
  * of places a real firm's contact list lives, for the sake of test data that
  * does not need to be true. Everything below is generated.
  *
- * REFUSES TO RUN ANYWHERE BUT STAGING. The check is the Supabase project ref in
- * the connection string, not a flag someone passes — a seeder is exactly the
- * kind of script that gets run in the wrong shell at eleven at night.
+ * REFUSES TO RUN ANYWHERE BUT STAGING. Not by a flag someone passes — a seeder
+ * is exactly the kind of script that gets run in the wrong shell at eleven at
+ * night — but by requiring APP_ENV=staging AND that the database it resolves to
+ * is not the one DATABASE_URL names.
  */
 import postgres from 'postgres';
-import { dbRef, databaseUrl } from '../services/env';
+import { dbRef, databaseUrl, appEnv } from '../services/env';
 
 const arg = (k: string, d?: string) =>
   process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1] ?? d;
 
-const STAGING_REF = 'hziiyelgcfsgokdegicd';
+// NO HARDCODED REF. Staging is whatever STAGING_DATABASE_URL names; what makes
+// it safe is that it must be DECLARED and must not be the same database the
+// production variable names.
 const url = databaseUrl();
-if (dbRef(url) !== STAGING_REF) {
-  console.error(`\nRefusing to seed: DATABASE points at "${dbRef(url) || 'unknown'}", not the staging project.`);
-  console.error(`Run with APP_ENV=staging and STAGING_DATABASE_URL set.\n`);
+const ref = dbRef(url);
+if (appEnv() !== 'staging') {
+  console.error(`
+Refusing to seed: APP_ENV is "${appEnv()}". Run with APP_ENV=staging.
+`);
   process.exit(1);
 }
-
+if (!ref || ref === dbRef(process.env.DATABASE_URL)) {
+  console.error(`
+Refusing to seed: the staging URL names the same database as DATABASE_URL (${ref || 'unknown'}).
+`);
+  process.exit(1);
+}
 const slug = arg('tenant', 'skyline-realty')!;
 const count = Math.min(Number(arg('n', '200')), 2000);
 const sql = postgres(url, { max: 1, ssl: 'require' });

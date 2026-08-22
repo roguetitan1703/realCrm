@@ -27,13 +27,11 @@ import { pwaRouter } from './routes/pwa';
 import { filesRouter, mediaRouter } from './routes/files';
 import { withRequestContext } from './middleware/auth';
 import { getTenantForIngest, runRoutingSweeps } from './services/store';
-import { assertEnvMatchesDatabase, envBanner, appEnv } from './services/env';
+import { envBanner } from './services/env';
 
-// BEFORE ANYTHING OPENS A CONNECTION. A process pointed at the wrong database
-// looks completely normal while it runs; this is the only moment it can be
-// stopped for free.
-assertEnvMatchesDatabase();
-
+// The check itself lives in services/db, which is what actually opens the
+// connection and therefore cannot be bypassed by importing something else
+// first. This file only reports the answer.
 const app = express();
 const PORT = process.env.PORT || 5000;
 
