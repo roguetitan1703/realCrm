@@ -5,10 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:backend": "tsx watch backend/src/index.ts",
-    "dev:backend:staging": "tsx backend/src/scripts/run-staging.ts",
-    "build": "npm run check:vocab && vite build",
+    "dev:api": "tsx backend/src/scripts/run-api.ts --env=development --watch",
+    "dev:api:prod": "tsx backend/src/scripts/run-api.ts --env=production --port=5000 --watch",
+    "start:api": "tsx backend/src/scripts/run-api.ts --env=production",
+    "start:api:dev": "tsx backend/src/scripts/run-api.ts --env=development",
+    "build": "npm run check:vocab && vite build --mode production",
+    "build:dev": "npm run check:vocab && vite build --mode development",
     "preview": "vite preview",
+    "seed:dev": "tsx backend/src/scripts/seed-dev.ts",
+    "deploy:dev": "npm run build:dev && vercel deploy --prebuilt",
     "check:vocab": "node scripts/check-vocabulary.mjs",
     "test:ingest": "node scripts/ingest-conformance.mjs",
     "test:leadflows": "tsx scripts/ingest-lead-flows.mjs"

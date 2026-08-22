@@ -43,10 +43,20 @@ firm's data under the demo.
 ## 2. Commands and deploys
 
 ```bash
-npm run dev            # Vite on :5173, proxies /api and /pwa → localhost:5000
-npm run dev:backend    # tsx watch backend/src/index.ts
-npm run build          # check:vocab && vite build   ← THE ONLY VALID BUILD CHECK
+npm run dev            # Vite on :5173
+npm run dev:api        # backend → DEVELOPMENT db on :5001 (watch)
+npm run dev:api:prod   # backend → PRODUCTION db on :5000 (watch), deliberately
+npm run build          # check:vocab && vite build --mode production  ← THE ONLY VALID BUILD CHECK
+npm run build:dev      # the same, against .env.development
+npm run seed:dev       # synthetic leads into the development db
 ```
+
+**Two environments, one variable.** `APP_ENV` is `production` or `development`;
+`development` selects `DEV_DATABASE_URL` and refuses to fall back. The process
+refuses to boot if the two URLs name the same database, or if `JWT_SECRET` is
+missing — it used to fall back to a value committed in this repo. A build with
+no `VITE_API_URL` fails rather than deploying a site that 404s every request.
+Config lives in `.env` (shared) plus `.env.<APP_ENV>`; none is committed.
 
 **`npx vite build` is not a build check.** It skips the vocabulary guard, passes
 happily, and the Vercel deploy then fails. You verify build errors before

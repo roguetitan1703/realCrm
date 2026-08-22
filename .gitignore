@@ -71,3 +71,18 @@ scratch/
 
 # Local DB dumps — never commit tenant data
 backups/
+
+# Per-environment config. NOT committed.
+#
+# .env                 shared secrets (db, jwt, vapid, r2, email)
+# .env.production      production-only values
+# .env.development     development-only values
+#
+# .env.production used to be committed "because VITE_* values are public
+# anyway". They are — but committing it means the repository decides which API
+# a build talks to, which is the one thing that has to be set deliberately per
+# deployment. Vercel's own environment variables are the place for it.
+.env
+.env.production
+.env.development
+.env.*.local

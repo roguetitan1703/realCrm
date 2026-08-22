@@ -12,27 +12,38 @@ import postgres from 'postgres';
 import { databaseUrl, assertEnvMatchesDatabase, assertRequiredConfig } from './env';
 
 // 1. Zero-dependency .env loader
-try {
-  const envPath = path.resolve(process.cwd(), '.env');
-  if (fs.existsSync(envPath)) {
-    const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
-    for (const line of lines) {
+// TWO FILES, IN ORDER: `.env` carries what every environment shares — the
+// database credentials, the JWT secret, VAPID, R2, email — and
+// `.env.<APP_ENV>` carries the handful of values that differ, chiefly which API
+// URL to advertise. Real environment variables still win over both, because a
+// stale file on the server must never clobber what AWS actually injected.
+//
+// The per-environment file is read SECOND so it overrides the shared one, and
+// neither is committed: a repository that decides which API a deployment talks
+// to is the one thing that has to be set deliberately per deployment.
+function loadEnvFile(file: string, override: boolean) {
+  try {
+    const envPath = path.resolve(process.cwd(), file);
+    if (!fs.existsSync(envPath)) return;
+    for (const line of fs.readFileSync(envPath, 'utf-8').split(String.fromCharCode(10))) {
       const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
-      if (match) {
-        let val = match[2] || '';
-        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-          val = val.slice(1, -1);
-        }
-        // Real environment variables win — a .env file is only a fallback. This
-        // matches standard dotenv behaviour and stops a stale .env on the server
-        // from clobbering what the platform (AWS) actually injected.
-        if (process.env[match[1]] === undefined) process.env[match[1]] = val;
+      if (!match) continue;
+      let val = match[2] || '';
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
       }
+      if (process.env[match[1]] === undefined) process.env[match[1]] = val;
+      else if (override && loadedFromFile.has(match[1])) process.env[match[1]] = val;
+      if (process.env[match[1]] === val) loadedFromFile.add(match[1]);
     }
+  } catch (e) {
+    console.warn(`[Config] Could not load ${file}:`, e);
   }
-} catch (e) {
-  console.warn('[DB Engine] Could not load local .env file:', e);
 }
+
+const loadedFromFile = new Set<string>();
+loadEnvFile('.env', false);
+loadEnvFile(`.env.${String(process.env.APP_ENV || 'local').toLowerCase()}`, true);
 
 // DATABASE_URL is required. It must come from the environment (AWS) or a local
 // .env — never a hardcoded default. A committed connection string is a leaked

@@ -1,9 +1,9 @@
 /**
- * Fill a STAGING tenant with synthetic leads, so the filters, pills, sweeps and
+ * Fill a DEVELOPMENT tenant with synthetic leads, so the filters, pills, sweeps and
  * dashboard can be exercised against realistic volume.
  *
- *   npm run dev:backend:staging     (once, to build the schema + demo tenant)
- *   APP_ENV=staging npx tsx backend/src/scripts/seed-staging.ts --tenant=skyline-realty --n=400
+ *   npm run dev:backend:development     (once, to build the schema + demo tenant)
+ *   APP_ENV=development npm run seed:dev -- --tenant=skyline-realty --n=400
  *
  * WHY SYNTHETIC, NEVER A COPY OF PRODUCTION
  * -----------------------------------------
@@ -14,7 +14,7 @@
  *
  * REFUSES TO RUN ANYWHERE BUT STAGING. Not by a flag someone passes — a seeder
  * is exactly the kind of script that gets run in the wrong shell at eleven at
- * night — but by requiring APP_ENV=staging AND that the database it resolves to
+ * night — but by requiring APP_ENV=development AND that the database it resolves to
  * is not the one DATABASE_URL names.
  */
 import postgres from 'postgres';
@@ -23,20 +23,20 @@ import { dbRef, databaseUrl, appEnv } from '../services/env';
 const arg = (k: string, d?: string) =>
   process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1] ?? d;
 
-// NO HARDCODED REF. Staging is whatever STAGING_DATABASE_URL names; what makes
+// NO HARDCODED REF. Staging is whatever DEV_DATABASE_URL names; what makes
 // it safe is that it must be DECLARED and must not be the same database the
 // production variable names.
 const url = databaseUrl();
 const ref = dbRef(url);
-if (appEnv() !== 'staging') {
+if (appEnv() !== 'development') {
   console.error(`
-Refusing to seed: APP_ENV is "${appEnv()}". Run with APP_ENV=staging.
+Refusing to seed: APP_ENV is "${appEnv()}". Run with APP_ENV=development.
 `);
   process.exit(1);
 }
 if (!ref || ref === dbRef(process.env.DATABASE_URL)) {
   console.error(`
-Refusing to seed: the staging URL names the same database as DATABASE_URL (${ref || 'unknown'}).
+Refusing to seed: the development URL names the same database as DATABASE_URL (${ref || 'unknown'}).
 `);
   process.exit(1);
 }
@@ -57,7 +57,7 @@ const rand = (n: number) => Math.floor(Math.random() * n);
 async function main() {
   const [tenant] = await sql`SELECT id, name FROM tenants WHERE slug = ${slug} OR id = ${slug}`;
   if (!tenant) {
-    console.error(`No tenant "${slug}" in staging. Boot the backend against staging once to create the demo tenant.`);
+    console.error(`No tenant "${slug}" in development. Boot the backend against development once to create the demo tenant.`);
     process.exit(1);
   }
   const t = tenant.id;
