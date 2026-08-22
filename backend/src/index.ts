@@ -29,6 +29,61 @@ import { withRequestContext } from './middleware/auth';
 import { getTenantForIngest, runRoutingSweeps } from './services/store';
 import { envBanner } from './services/env';
 
+// ── A DROPPED DATABASE CONNECTION USED TO KILL THE WHOLE API ────────────────
+//
+// 2026-08-22, 06:45 UTC: Supabase terminated this pool's connections — 57P01,
+// "terminating connection due to administrator command", which is a maintenance
+// restart on their side, not anything this process did. The routing sweep's
+// query was caught and logged. Another one rejected with nothing listening, and
+// Node's default for an unhandled rejection is to throw and exit.
+//
+// The API stayed down for eight hours. Roughly eleven portal enquiries hit a
+// closed socket in that window and there is no record of any of them: a push
+// that never lands writes no webhook_inbox row, so the inbox-first guarantee
+// only covers requests that arrive. Nothing else noticed either.
+//
+// No try/catch at any call site could have caught it. The rejecting promise was
+// one postgres.js creates for ITSELF while reconnecting, not one of our
+// queries — its stack carried none of the origin frames that `queryError`
+// appends to a `sql` call site. A process-level handler is the only thing that
+// sees it.
+//
+// Staying up is the correct response to a connection this process did not
+// close: postgres.js reconnects on its own within seconds. Anything we cannot
+// recognise as a connection fault still exits, so a supervisor can restart a
+// genuinely broken process rather than leave a wedged one serving traffic.
+
+/** Postgres SQLSTATEs and socket errnos that mean "the link went away". */
+const TRANSIENT_CONNECTION = new Set([
+  '57P01', // admin terminated the backend (Supabase maintenance) — this crash
+  '57P02', // crash shutdown
+  '57P03', // cannot connect now, database is starting up
+  '08001', '08003', '08006', // connection rejected / does not exist / failure
+  'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED',
+  'CONNECTION_CLOSED', 'CONNECTION_ENDED', 'CONNECT_TIMEOUT', // postgres.js
+]);
+const isConnectionFault = (e: any): boolean => Boolean(e) && TRANSIENT_CONNECTION.has(e.code);
+
+process.on('unhandledRejection', (reason: any) => {
+  // Never exit. Before this handler existed, every one of these was fatal.
+  if (isConnectionFault(reason)) {
+    console.error(`[Unhandled Rejection] ${reason.code}: ${reason.message} — staying up, the pool reconnects.`);
+    return;
+  }
+  console.error('[Unhandled Rejection] Not a connection fault — this is a bug, and the stack is the only record of it:');
+  console.error(reason?.stack || reason);
+});
+
+process.on('uncaughtException', (err: any) => {
+  if (isConnectionFault(err)) {
+    console.error(`[Uncaught Exception] ${err.code}: ${err.message} — staying up, the pool reconnects.`);
+    return;
+  }
+  console.error('[Uncaught Exception] Exiting; process state is not trustworthy after this:');
+  console.error(err?.stack || err);
+  process.exit(1);
+});
+
 // The check itself lives in services/db, which is what actually opens the
 // connection and therefore cannot be bypassed by importing something else
 // first. This file only reports the answer.
