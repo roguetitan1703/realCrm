@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/pwa/:path*", "destination": "https://api.dev.re.delpat.in/pwa/:path*" },
+    { "source": "/:slug/sw.js", "destination": "/sw.js" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

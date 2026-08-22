@@ -13,7 +13,7 @@
     "build:dev": "npm run check:vocab && vite build --mode development",
     "preview": "vite preview",
     "seed:dev": "tsx backend/src/scripts/seed-dev.ts",
-    "deploy:dev": "npm run build:dev && vercel deploy --prebuilt",
+    "deploy:dev": "npx vercel deploy --local-config vercel.development.json --yes",
     "check:vocab": "node scripts/check-vocabulary.mjs",
     "test:ingest": "node scripts/ingest-conformance.mjs",
     "test:leadflows": "tsx scripts/ingest-lead-flows.mjs",
