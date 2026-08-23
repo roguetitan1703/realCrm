@@ -236,6 +236,11 @@ export async function processScheduledNotifications(
       const arrivalStage = (Array.isArray(cfg.stages) && cfg.stages[0]) || 'New';
       const agentHours = Math.max(Number(cfg.slaHours) || 24, 1);
       const mgrHours = agentHours * 2;
+      // The same number the No reply pile counts on — Settings → Response
+      // times. It was the hardcoded RETRY_DAYS while the pile it describes had
+      // become configurable, so a firm that widened the window would still have
+      // been paged on the old one.
+      const retryDays = Math.max(Number(cfg.reminderDays) || RETRY_DAYS, 1);
       // Only recent arrivals. Without this, turning the feature on notifies the
       // whole backlog at once — a real desk has months of leads parked on the
       // arrival stage that nobody needs paging about now. Scales with the SLA
@@ -328,8 +333,8 @@ export async function processScheduledNotifications(
         WHERE tenant_id = ${t}
           AND stage = 'Call Not Received'
           AND agent_id IS NOT NULL
-          AND updated_at <= NOW() - (${RETRY_DAYS}::text || ' days')::interval
-          AND updated_at >= NOW() - (${RETRY_DAYS * 5}::text || ' days')::interval
+          AND updated_at <= NOW() - (${retryDays}::text || ' days')::interval
+          AND updated_at >= NOW() - (${retryDays * 5}::text || ' days')::interval
           AND (metadata->>'retry_notified') IS NULL
         LIMIT 30
       `;

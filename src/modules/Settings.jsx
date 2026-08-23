@@ -463,10 +463,18 @@ function ResponseTimesSection({ store, settings }) {
   const cold = Number(settings.reminderDays ?? 3)
   const setSla = (v) => store.patchSettings({ slaHours: Math.max(1, v) }, 'First response time updated')
   const setCold = (v) => store.patchSettings({ reminderDays: Math.max(1, v) }, 'Going cold updated')
-  // The pile's name comes from the served catalogue, not a copy of it here, so
-  // this sentence cannot end up naming something the Leads screen no longer
+  // The piles' names come from the served catalogue, not a copy of them here,
+  // so this sentence cannot end up naming something the Leads screen no longer
   // calls that. See backend/src/services/leadSegments.ts.
-  const coldLabel = (store.state.leadSegments || []).find(s => s.key === 'going_cold')?.label || 'Going cold'
+  const segLabel = (key, fallback) =>
+    (store.state.leadSegments || []).find(s => s.key === key)?.label || fallback
+  const coldLabel = segLabel('going_cold', 'Going cold')
+  // ONE NUMBER, TWO PILES, AND THE CONTROL SAYS SO. Going cold and No reply are
+  // the same question — nothing recorded for N days — asked of the whole desk
+  // and of the leads that did not answer. They ran on two numbers, one settable
+  // and one hardcoded, so moving this moved one pile and left the other where
+  // it was with nothing on screen explaining the difference.
+  const replyLabel = segLabel('noanswer_stale', 'No reply')
   return (
     <>
       <SecHead title="Response times" />
@@ -477,7 +485,7 @@ function ResponseTimesSection({ store, settings }) {
       </Panel>
       <Panel>
         <SectionHead title="Treat a lead as gone cold after" />
-        <div className="set-sec-sub">Shows on the dashboard under {coldLabel}, and in the Leads filters.</div>
+        <div className="set-sec-sub">Sets {coldLabel} and {replyLabel}, on the dashboard and in the Leads filters.</div>
         <NumField value={cold} suffix="days" onChange={setCold} step={1} />
       </Panel>
     </>

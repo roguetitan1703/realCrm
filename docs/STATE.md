@@ -265,6 +265,23 @@ worker is production-only and `/<slug>/sw.js` is a Vercel rewrite, so nothing in
 push or install is live under `npm run dev`. Build with `npm run build:dev` and
 serve `dist/` with that one rewrite emulated.
 
+**A–H were read back against the decision document on 24 Aug** and three things
+came out of it. **Follow-up overdue is a KPI again** — it had been pulled when
+`overdue` counted a dead boolean and read 0 for ever, which stopped being true
+when the expression was fixed; it reads 8 / 9 / 14 on the dev tenants and the
+tile opens the pill showing the same rows. **No reply ran on a hardcoded 3 days**
+while Going cold ran on the firm's setting, so the control moved one pile and
+not the other; one number drives both now, and the retry alert reads it too —
+set to 7, No reply went 74 → 52 and Going cold 161 → 122 together. **`help` is
+no longer served** to a client that renders nothing; it stays in
+`leadSegments.ts` as the one written meaning.
+
+One deviation is kept on purpose: **the Source column shows the arrival source,
+not the latest.** The document derives it from the enquiry rows, but the Source
+facet and filter are computed from `crm_leads.source` — showing latest in the
+column would put a row under a portal whose own filter does not return it.
+Changing it means moving facet, filter and column together; not started.
+
 **Going cold still runs at the 3-day default on every desk** — no tenant has
 ever set `reminderDays` — which is 161 of bhumi's 217 open leads, three-quarters
 of the desk. At 7 days it is 122, at 14 it is 19. The control is now in front of

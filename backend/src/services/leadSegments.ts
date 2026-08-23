@@ -88,8 +88,14 @@ export const noPersonActivitySince = (days: number, table = 'crm_leads') => sql`
 
 /**
  * What the desk is told each pile is. `help` is one sentence in the firm's own
- * words — it is what the filter panel and the Settings copy both quote, so the
- * control and the thing it controls cannot describe themselves differently.
+ * words, written HERE beside the SQL that decides it so that a meaning has one
+ * home and a later reader can check a label against it.
+ *
+ * It is NOT sent to the client and nothing renders it. The product rule is
+ * labels and values only — a pile is named, never captioned — so a `help`
+ * string on screen would be explanatory UI copy. Serving it anyway would leave
+ * a field travelling to a client that reads nothing, which is how the next
+ * person picks it up and starts a second wording of the same meaning.
  *
  * `surface` says where a segment is allowed to appear. A segment with no pill
  * and no tile is reachable only by link, which is the fault that put the right
@@ -104,10 +110,10 @@ export interface SegmentDef {
   tone?: 'alert';
 }
 
-// Every `help` below is the sentence the desk is given for that pile. This is
-// the ONE place a segment's meaning is written, beside the SQL that decides it,
-// so a control and the thing it controls cannot describe themselves
-// differently. Change a meaning here or not at all.
+// Every `help` below is what that pile MEANS, in one sentence. This is the one
+// place a segment's meaning is written, beside the SQL that decides it. Change
+// a meaning here or not at all — and when a label or a Settings sentence has to
+// agree with a pile, this is what it is checked against.
 export const SEGMENT_CATALOGUE: SegmentDef[] = [
   { key: 'today', label: 'Today', help: 'Arrived today.', surface: ['pill', 'tile'] },
   {
@@ -153,10 +159,16 @@ export const SEGMENT_CATALOGUE: SegmentDef[] = [
   { key: 'followup', label: 'Has a next step', help: 'A follow-up is booked.', surface: ['internal'] },
 ];
 
-/** Labels for the client. The frontend renders these, it does not keep its own. */
+/**
+ * Labels for the client. The frontend renders these, it does not keep its own.
+ *
+ * `help` is deliberately not in here: nothing on screen renders a caption, and
+ * a field that travels to a client which never reads it is one the next person
+ * picks up.
+ */
 export const publicSegments = () =>
   SEGMENT_CATALOGUE.filter(s => !s.surface.includes('internal'))
-    .map(({ key, label, help, surface, tone }) => ({ key, label, help, surface, tone: tone ?? null }));
+    .map(({ key, label, surface, tone }) => ({ key, label, surface, tone: tone ?? null }));
 
 /**
  * The predicates, built against the shared expressions store.ts already holds.

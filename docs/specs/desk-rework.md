@@ -625,6 +625,45 @@ instead of printing braces, and Copy stays disabled until it can hand over the
 whole thing. Verified by starving the roster deliberately: the line reads
 "Hello, this is from Delpat…", no braces, Copy refused.
 
+**Audit against the decision document — 24 Aug 2026.** All eight letters read
+back line by line against the artifact the client walked through. Four things
+were not built or not true; three are fixed here and one is a deviation kept on
+purpose.
+
+- **Follow-up overdue was not a KPI.** A lists it as one. It had been pulled
+  from the strip when `overdue` counted a boolean column nothing wrote and read
+  0 for ever — a good reason that stopped being true when the expression was
+  fixed to `FOLLOWUP_OVERDUE`. It reads 8 on the dev clone, 9 and 14 on the
+  other tenants. Restored, and the tile opens the pill that shows the same rows
+  (`?screen=leads&seg=overdue`, pill selected, both reading 8).
+- **No reply ran on a hardcoded 3 days** while Going cold ran on the firm's
+  setting, though both are "nothing recorded for N days" and the build order
+  gives `reminderDays` to both. So moving the control moved one pile and not the
+  other, with nothing on screen saying why. One number now: set it to 7 through
+  the API and No reply went 74 → 52 while Going cold went 161 → 122, together.
+  The retry ALERT (`lead_retry_due`) reads it too, so the page and the pile
+  cannot describe different leads. Settings names both piles.
+- **`help` was served to a client that renders nothing.** The catalogue's own
+  comment claimed the filter panel and the Settings copy quote it; nothing does,
+  and nothing should — a pile is named, never captioned. It stays in the file as
+  the one place a meaning is written, and it stops travelling.
+- **Kept deliberately: the Source column shows the ARRIVAL source, not the
+  latest.** §2 of the decision document says the list's source derives from the
+  enquiry rows. It does not, and should not while the Source FACET and its
+  filter are computed from `crm_leads.source`: a row would sit under a portal
+  the filter for that portal does not return, which is the fault A exists to
+  remove. Details still shows every source a lead has come through. Doing it the
+  document's way means moving the facet, the filter and the column onto the
+  enquiry rows together — a real change, not an oversight, and not started.
+
+Checked and already correct, listed so the next audit does not re-derive them:
+the phone's tapped segment scrolls itself into view (`SegmentPills`, not the
+Leads module — it is easy to grep for in the wrong file); zero pills stay
+visible, dimmed and unclickable; the Agent control is top-level, searchable,
+height-capped, with Unassigned and Me; Source and Locality come from the data
+with counts; Needs attention is gone; the enquiry session pill says "N enquiries
+in this visit", not "N listings".
+
 ---
 
 ## Carried forward, unchanged

@@ -175,6 +175,14 @@ export default function Dashboard({ store, go, topBar }) {
           <Kpi icon="phone" label={segLabel('noanswer_stale', 'No reply')} value={n(totals.noanswer_stale)} sub="rung, nothing back"
             alert={totals.noanswer_stale > 0}
             onClick={() => toLeads({ seg: 'noanswer_stale' })} />
+          {/* BACK, because the reason it went is fixed. It was pulled when
+              `overdue` counted a boolean column nothing wrote and read 0 for
+              ever; it now runs FOLLOWUP_OVERDUE, the same expression as the
+              pill it opens — 8 leads on the dev clone of the live desk, 9 and
+              14 on the other two. desk-rework.md A lists it as a KPI, and it is
+              the tile Late callbacks beside it was always meant to pair with. */}
+          <Kpi icon="calendar" label={segLabel('overdue', 'Follow-up overdue')} value={n(totals.overdue)} sub="booked, time gone by"
+            alert={totals.overdue > 0} onClick={() => toLeads({ seg: 'overdue' })} />
           <Kpi icon="clock" label={segLabel('going_cold', 'Going cold')} value={n(totals.going_cold)} sub="open and gone quiet"
             alert={totals.going_cold > 0} onClick={() => toLeads({ seg: 'going_cold' })} />
           {hasCalling && (
