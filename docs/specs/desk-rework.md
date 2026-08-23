@@ -736,6 +736,17 @@ Two faults, and the first is mine, from step 5:
    running. The timer moved inside the callback and a second instance now says
    the port is taken and exits.
 
+**Watched on a live tick, not only in a query.** Armed on `skyline-realty` (11
+open leads, 3 in the rota, 4 days): tick one moved 6, tick two moved the other
+5, **tick three moved none** — and every record moved exactly once. The five
+that waited a tick were not held by the new guard; the round-robin handed back
+the agent who already held them, which the sweep passes on. The six moved at
+22:37 were still eligible on the person-activity test at 22:42, and were left
+alone: that is the guard. Under the old code all 11 would have moved again, and
+again. No `lead_reassign_loop` alert fired, correctly — nothing was handed on
+more than once, so nothing crossed the threshold. The tenant's routing was put
+back to what it was, and the 11 events and 12 notifications deleted.
+
 Development only: `bhumi` has both sweeps off, and production runs the 19 Aug
 backend, which has none of this. The dev desk was restored from the clone and
 the 272 notifications raised inside the window were deleted; 127 older ones of

@@ -306,6 +306,11 @@ lingered with a timer over every tenant and no banner to say it existed — four
 of them here. The timer is inside the callback now and a second instance exits
 saying the port is taken.
 
+Verified on a live tick, on `skyline-realty`: 6 moved, then the other 5, then
+**none** — each record exactly once, where the old code would have moved all 11
+again every five minutes. That tenant's routing was put back and the rows
+deleted.
+
 `bhumi` is unaffected: both sweeps off, and production runs the 19 Aug backend.
 The dev desk was re-cloned and the 272 notifications from the window deleted
 (127 older ones of the same types kept). **delpat's idle rule was turned OFF** —
