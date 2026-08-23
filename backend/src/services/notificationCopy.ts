@@ -68,6 +68,12 @@ export const COPY: Builders = {
     title: 'Lead assigned to you',
     body: facts(d.name),
   }),
+  // For a manager, not the agent who just got it. The count is the whole point
+  // — "reassigned" alone reads like the routine hand-off it individually is.
+  lead_reassign_loop: (d) => ({
+    title: `Reassigned ${d.n} times`,
+    body: facts(d.name, d.agent && `now with ${d.agent}`),
+  }),
 
   // Was "⚠️ SLA Warning: Untouched Lead". The agent is being told they have not
   // rung someone yet — which is what it now says.

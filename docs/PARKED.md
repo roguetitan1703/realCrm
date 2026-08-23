@@ -136,10 +136,11 @@ user asked for other work first.
 
 ---
 
-## `reminderDays` is a control that changes nothing
+## ~~`reminderDays` is a control that changes nothing~~ — DONE
 
-Settings → Follow-up SLA → "Ongoing follow-up" writes `settings.reminderDays`.
-Nothing reads it: the retry sweep uses the hardcoded `RETRY_DAYS = 3` in
-`services/store.ts`. Either wire the setting into the sweep (it is already
-per-tenant, and `RETRY_DAYS` is its only consumer) or remove the field. Wiring
-it is the better answer; the field is on a paying client's screen today.
+Was: Settings → Follow-up SLA → "Ongoing follow-up" wrote `settings.reminderDays`
+and nothing read it. Wired in step 1 of the desk rework — it is the number of
+days behind **Going cold** — and renamed in step 5: Settings → Response times,
+"Treat a lead as gone cold after [3] days". The stored key is unchanged, so no
+desk's number moved. No tenant has ever set one, so every desk runs at the
+3-day default.

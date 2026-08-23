@@ -363,9 +363,9 @@ This is the part that matters most.
 - **The "never contacted" metric overstates itself.** 74 on bhumi, 26 of them
   carrying remarks that prove contact. Proposal and numbers in `docs/STATE.md`;
   nothing changed yet.
-- **`reminderDays` is a Settings control nothing reads** and the Assignments tab
-  count disagrees with its own list. Both parked with numbers in
-  `docs/PARKED.md`.
+- **The Assignments tab count disagrees with its own list.** Parked with numbers
+  in `docs/PARKED.md`. (`reminderDays` is fixed: it drives Going cold, and
+  Settings → Response times now says so.)
 - **The audit ledger UI is hidden deliberately** — do not "fix" the commented-out
   nav entry.
 - **`/api/v1/ingest` has no rate limit.** Write-only key, but a leaked one fills

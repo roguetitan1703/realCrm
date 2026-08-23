@@ -66,10 +66,23 @@ export const CONTACTED = sql`(
                 AND a.type IN ${sql(CONTACT_ACTIVITY_TYPES)})
 )`;
 
-/** Nothing a person has done on this lead for `days` days. Drives Going cold. */
-export const noPersonActivitySince = (days: number) => sql`
+/**
+ * Nothing a person has done on this record for `days` days.
+ *
+ * Drives Going cold, and — since Settings → Assignment started asking the
+ * question in days — the idle reassignment sweep as well. Those two were
+ * different questions in different units: the pile said "nobody has recorded
+ * anything", the sweep said `updated_at` was old, which a portal push or any
+ * background stamp moves without a person having gone near the lead. A desk
+ * that is told a lead is going cold and a desk that takes it off its owner have
+ * to be answering the same question.
+ *
+ * `table` names the record's table, so the owner calling list can ask it too —
+ * owner timeline rows live in the same crm_timeline_events, keyed by record_id.
+ */
+export const noPersonActivitySince = (days: number, table = 'crm_leads') => sql`
   NOT EXISTS (SELECT 1 FROM crm_timeline_events e
-               WHERE e.record_id = crm_leads.id AND e.tenant_id = crm_leads.tenant_id
+               WHERE e.record_id = ${sql(table)}.id AND e.tenant_id = ${sql(table)}.tenant_id
                  AND coalesce(e.author, 'System') <> 'System'
                  AND e.timestamp > now() - (${days}::text || ' days')::interval)`;
 

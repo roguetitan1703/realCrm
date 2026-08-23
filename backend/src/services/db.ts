@@ -213,6 +213,25 @@ export async function initSchema(): Promise<void> {
     await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_sweep_unassigned_hours INT DEFAULT 4;`;
     await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_reassign_idle_enabled BOOLEAN DEFAULT false;`;
     await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_reassign_idle_hours INT DEFAULT 2;`;
+    // The idle rule is measured in DAYS, and against the same predicate the
+    // desk's Going-cold pile uses (services/leadSegments.ts) — not against
+    // `updated_at`, which a portal push or a background stamp moves without
+    // anybody having touched the lead. Hours were the wrong unit for the
+    // question: a desk that reassigns after two hours of quiet is reassigning
+    // over lunch. Both `*_idle_hours` columns above are dead — no code reads
+    // them and no screen writes them — kept only so a rollback to the previous
+    // backend finds its columns.
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS reassign_idle_days INT DEFAULT 3;`;
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_reassign_idle_days INT DEFAULT 3;`;
+    // How many times a lead may be handed on before a manager is told. It keeps
+    // being reassigned; somebody senior should know rather than watching it
+    // circle the desk. Counted from the record's own assignment history, so a
+    // manual hand-off counts the same as a sweep's.
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS reassign_alert_count INT DEFAULT 3;`;
+    // The unowned sweeps no longer take an hours field. Nothing ever sets
+    // agent_id back to NULL, so a record is unowned only at arrival, and a
+    // four-hour wait on a live enquiry was four hours of nobody owning it.
+    // `*_sweep_unassigned_hours` are dead for the same reason as above.
 
     // Owner cold-calling list — property owners a firm calls to ask if they
     // want to sell/rent, deliberately NOT linked to a crm_properties row (the

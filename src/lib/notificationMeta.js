@@ -16,6 +16,10 @@ const META = {
   lead_unrouted: { icon: 'alert', tone: 'urgent' },
   lead_reassigned: { icon: 'switch', tone: 'info' },
   lead_moved_away: { icon: 'switch', tone: 'info' },
+  // A manager's alert, not a hand-off notice — urgent, like the SLA escalation
+  // it sits beside. Deliberately not an Assignments-tab type below: nothing has
+  // been assigned to the person reading it.
+  lead_reassign_loop: { icon: 'alert', tone: 'urgent' },
   lead_untouched: { icon: 'clock', tone: 'attention' },
   lead_untouched_escalated: { icon: 'alert', tone: 'urgent' },
   lead_retry_due: { icon: 'phone', tone: 'attention' },

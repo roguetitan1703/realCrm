@@ -168,7 +168,7 @@ where any rejection reading as do-not-call stayed shut.
 | Control today | Stored | What it really does |
 |---|---|---|
 | First response | `slaHours` | Real — drives the escalation alert |
-| Ongoing follow-up | `reminderDays` | **Nothing.** Read only by the screen that writes it |
+| Ongoing follow-up | `reminderDays` | ~~Nothing~~ — step 1 wired it to Going cold |
 | Pick up unowned | `sweep_unassigned_hours` | Waits 4 hours to assign a live enquiry |
 | Reassign idle | `reassign_idle_hours` | Hours, default 2 |
 
@@ -259,7 +259,7 @@ Dependency order, not priority. Steps 2–5 all read what step 1 defines.
 | 2 | Facet counts + filter controls | 1 | B | **done** |
 | 3 | The enquiry model | — | C | **done** |
 | 4 | Timeline and reopening | 3 | D, E | **done** |
-| 5 | Settings | 1 | F | todo |
+| 5 | Settings | 1 | F | **done** |
 | 6 | WhatsApp templates | — | G | todo |
 | 7 | This device | — | H | todo |
 
@@ -446,6 +446,67 @@ are legacy mirrors renders 4. No console errors.
 Not covered, deliberately: the reopen writes through raw SQL and so leaves no
 `audit_log` row — the same as before this change, not a regression, but the
 ledger cannot answer "who reopened this" for a machine reopen.
+
+**Step 5 — F, 23 Aug 2026.** Settings speaks the desk's words, and two of its
+controls turned out to be lying about what they did.
+
+*Response times* (was "Follow-up SLA"). "A new lead should hear back within
+[24] hours" — `slaHours`, unchanged, already driving the escalation. "Treat a
+lead as gone cold after [3] days" — `reminderDays`, which step 1 wired to Going
+cold while the control still called itself "Ongoing follow-up" and claimed to
+nudge a lead "back to the top", which nothing does. The stored KEY stays
+`reminderDays`: it is what every tenant's settings JSON holds, and renaming it
+resets the number to 3 on any desk that had set one. The sentence names the
+pile using the label the server serves, so it cannot end up naming something the
+Leads screen no longer calls that.
+
+*Assignment.* The unowned hours field is gone — nothing in the product ever sets
+`agent_id` back to NULL, so the number was asking how long a live enquiry should
+sit with nobody on it. One minute of grace is left, hardcoded, and only so
+arrival-time routing wins the race and the timeline reads correctly.
+
+*The idle rule is in days and asks the §1 question.* It read `updated_at`, which
+a portal push or any background stamp moves without a person going near the
+lead — so a lead could be reported Going cold on the dashboard and count as
+active to the sweep at the same moment. Both now read
+`noPersonActivitySince()`. Off on every tenant, so nothing moved: at 3 days it
+would select delpat 161, urban 40, raipur 40, skyline-realty 11 — 161 being the
+same 161 the Going cold tile shows, which is the point. Owners: delpat 731,
+raipur 22, urban 22. **Turning either toggle on hands that many records over in
+one pass.**
+
+*Found on the way.* The idle sweep's own exclusion was
+`(follow_up->>'date')::date >= CURRENT_DATE`, an unguarded cast over a field
+holding whatever an agent typed — 20 leads across four tenants carry "This
+Sunday", "Today", "Yesterday". Every one raises 22007 and takes the sweep down
+with it. It has never fired because the rule is off everywhere; the day a firm
+turned it on it would have thrown instead of reassigning, silently. Now
+`FOLLOWUP_UPCOMING`, guarded the way `FOLLOWUP_PAST_DUE` already was.
+
+*Manager alert.* "Tell a manager if a lead is reassigned more than [3] times",
+`reassign_alert_count`, and every time after that. It lives in
+`recordAssignment()` — the one function every path that changes `agent_id` goes
+through — so a manual hand-off counts the same as a sweep's, and it is counted
+from the record's own history rather than a flag that would go quiet exactly as
+it started mattering. Hand-offs only: the arrival route and the unowned sweep
+write an `assignment` row with no previous agent, and nobody has passed that
+lead on. Leads only; owners are reassigned by the same sweep and carry the same
+history, but the control is offered on the Leads side alone and a threshold
+nobody can see is not a feature.
+
+Verified in a browser on the dev clone: nav reads Response times, both sentences
+render with their numbers, the unowned rule has no hours field, the idle rule
+reveals "3 days" when switched on (and was switched straight back — 0 assignment
+events before and after), the manager row shows "3 times", the Calling tab
+carries the days field and no manager row, no console errors. Through the real
+API: one lead handed back and forth five times produced NO alert at hand-offs
+1–3, then "Reassigned 4 times" and "Reassigned 5 times", one row each to the
+owner and both managers. Probe rows read, then deleted — 6 notifications, 5
+assignment events; the lead is back with its original agent.
+
+Not covered: bhumi's numbers. This machine cannot reach the production database
+(the sandbox refuses it), so every count above is the dev clone. Exactly one of
+production's seven tenants has any sweep enabled at all.
 
 ---
 

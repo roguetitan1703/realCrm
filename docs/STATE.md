@@ -24,7 +24,7 @@ rework steps 1–3. The live desk is running the 19th's code.
 
 ---
 
-## A migration ran against production this session. Read this first.
+## The prod watcher writes to production every time you edit the backend. Read this first.
 
 **`2026_08_23_enquiry_payloads_v3` was applied to the production database at
 01:00:49 UTC on 2026-08-23** — not deliberately. A backend started with
@@ -38,6 +38,15 @@ lessons, neither optional:
 - **The dev watcher and the prod watcher were both running**, so the same
   rebuild raced itself on development and left sessions claiming 8 payloads over
   6 lines. `runOnce` is not concurrency-safe across two processes.
+- **It happened again on step 5, and it is not going to stop happening.** The
+  `:5000` watcher was still up, so the three `ADD COLUMN IF NOT EXISTS`
+  statements F needs (`reassign_idle_days`, `owner_reassign_idle_days`,
+  `reassign_alert_count`) reached production the moment `db.ts` was saved.
+  Additive, defaulted, no row rewritten — but **it could not be verified from
+  here**: this machine's sandbox refuses a connection to the production database
+  URL outright. Confirm the three columns exist and every `crm_routing_rules`
+  toggle still reads what it did, or stop the `:5000` watcher before any session
+  that touches the backend.
 
 **What it did, measured read-only afterwards.** The rebuild only writes
 `crm_lead_enquiries`; no lead, timeline row or notification was touched.
@@ -68,7 +77,7 @@ so the live desk is unaffected until the merge.
 The client walked through eight areas line by line on 22–23 Aug. Every decision,
 and the order they have to be built in, is **`docs/specs/desk-rework.md`** — that
 file is the one to read before touching leads, and its ledger is what says where
-the build has got to. Four of seven steps are done, all on `development`, none
+the build has got to. Five of seven steps are done, all on `development`, none
 deployed.
 
 | # | Step | State |
@@ -77,8 +86,8 @@ deployed.
 | 2 | Facet counts + filter controls | done |
 | 3 | The enquiry model | done |
 | 4 | Timeline and reopening | done |
-| 5 | Settings | next |
-| 6 | WhatsApp templates | todo |
+| 5 | Settings | done |
+| 6 | WhatsApp templates | next |
 | 7 | This device | todo |
 
 **What changed on the desk so far.** "Past SLA" is deleted. Contact now means
@@ -125,6 +134,12 @@ sessions carry their payloads. Dev now mirrors production: 314 sessions, 331
 payloads, 21 leads that have enquired more than once, every count equal to its
 own list. Re-run it whenever a change touches what the desk counts or shows.
 
+Step 5's verification wrote to dev and was cleaned up: one lead (`l_shape_0303`)
+was handed back and forth five times through the real API to prove the manager
+alert fires at 4 and 5 and not before. Its 5 assignment events and the 6
+notifications they raised were read, then deleted; the lead is back with its
+original agent.
+
 Two things found while re-running it, both fixed: the scrubber rewrote **ISO
 instants** (`2026-08-22T…` matches its phone pattern) so every payload line lost
 its time; and the clone deletes and rewrites delpat's leads, which orphans the
@@ -160,12 +175,46 @@ per push plus a second row on reopen; rejected AND closed leads reopen whatever
 the reason; the reason is kept rather than nulled so the desk can see it, and is
 cleared only when a person moves the stage.
 
-**Going cold reads `reminderDays`, which no tenant has ever set**, so every desk
-runs at the 3-day default: 161 of bhumi's 217 open leads, three-quarters of the
-desk. At 7 days it is 122, at 14 it is 19. Worth settling in step 5 (F), which
-puts that number in front of the client as "Treat a lead as gone cold after
-[3] days" — and note the scale figure quoted when A was agreed ("7 days ≈ 53")
-was measured under the OLD expression; under this one 7 days is 122.
+**Step 5 (F) is built.** Settings → Follow-up SLA is Settings → **Response
+times**, and both its controls now say what they do: "A new lead should hear
+back within [24] hours" (`slaHours`, already driving the escalation) and "Treat
+a lead as gone cold after [3] days" (`reminderDays`, wired to Going cold in step
+1 while the control still called itself "Ongoing follow-up"). The stored keys
+are unchanged, so no desk's number moved.
+
+Three things about assignment, in the desk's words and in days:
+
+- **The unowned hours field is gone.** Nothing in the product sets `agent_id`
+  back to NULL, so a lead is unowned only at arrival; the field was asking how
+  long a live enquiry should sit with nobody on it. One minute of grace remains,
+  hardcoded, so arrival-time routing wins the race.
+- **The idle rule is in days and reads the §1 predicate.** It read `updated_at`,
+  which a portal push moves without a person going near the lead, so a lead
+  could be Going cold on the dashboard and active to the sweep at once.
+- **"Tell a manager if a lead is reassigned more than [3] times"**, and every
+  time after that — in `recordAssignment()`, so a manual hand-off counts like a
+  sweep's, counted from the record's own history. Hand-offs only, leads only.
+
+**Both idle toggles are OFF on every tenant and nothing moved.** What they would
+take on the dev clone at the 3-day default: leads — delpat 161, urban 40, raipur
+40, skyline-realty 11; owners — delpat 731, raipur 22, urban 22. **Turning one
+on hands that many records over in a single pass**, with one batched
+notification per agent. Say that number out loud before switching it on for a
+client.
+
+**A live landmine was found and defused.** The idle sweep excluded leads with a
+booked follow-up via `(follow_up->>'date')::date >= CURRENT_DATE` — an unguarded
+cast over free text. 20 leads across four dev tenants carry "This Sunday",
+"Today", "Yesterday"; each raises 22007 and takes the whole sweep down. The rule
+is off everywhere, so it has never fired — the day a firm turned it on it would
+have thrown instead of reassigning, silently. Now `FOLLOWUP_UPCOMING`, guarded
+the way `FOLLOWUP_PAST_DUE` already was.
+
+**Going cold still runs at the 3-day default on every desk** — no tenant has
+ever set `reminderDays` — which is 161 of bhumi's 217 open leads, three-quarters
+of the desk. At 7 days it is 122, at 14 it is 19. The control is now in front of
+the client under its own name; the number is theirs to choose. The figure quoted
+when A was agreed ("7 days ≈ 53") was measured under the OLD expression.
 
 ---
 

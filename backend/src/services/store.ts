@@ -14,7 +14,7 @@ import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { audit } from './audit.js';
-import { buildLeadSegments, publicSegments, type LeadSegment } from './leadSegments.js';
+import { buildLeadSegments, publicSegments, noPersonActivitySince, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
@@ -303,11 +303,16 @@ export interface RoutingRule {
   active_agent_ids: string[];
   last_assigned_index: number;
   // B — sweep leads nobody currently owns (never assigned, or the owner left).
+  // No hours: nothing ever sets agent_id back to NULL, so a lead is unowned
+  // only at arrival, and waiting on a live enquiry is the thing the sweep
+  // exists to stop. A short fixed grace is all that is left of the field.
   sweep_unassigned_enabled: boolean;
-  sweep_unassigned_hours: number;
-  // C — take a lead back from an assignee who hasn't acted on it.
+  // C — take a lead back from an assignee who hasn't acted on it. DAYS, and
+  // "acted on" is the §1 contact predicate, not `updated_at`.
   reassign_idle_enabled: boolean;
-  reassign_idle_hours: number;
+  reassign_idle_days: number;
+  // D — how many hand-offs before a manager is told. Every one after that.
+  reassign_alert_count: number;
   // Same three concerns again, for the owner cold-calling list — its own
   // pool, its own strategy, its own sweeps. Defaults to 'manual' (not
   // round_robin): owners usually arrive by the hundred via import, and
@@ -317,9 +322,8 @@ export interface RoutingRule {
   owner_active_agent_ids: string[];
   owner_last_assigned_index: number;
   owner_sweep_unassigned_enabled: boolean;
-  owner_sweep_unassigned_hours: number;
   owner_reassign_idle_enabled: boolean;
-  owner_reassign_idle_hours: number;
+  owner_reassign_idle_days: number;
 }
 
 export interface ServerState {
@@ -2382,6 +2386,33 @@ export const FOLLOWUP_PAST_DUE = sql`(CASE WHEN follow_up->>'at' ~ '^[0-9]{4}-[0
  */
 export const FOLLOWUP_OVERDUE = sql`(${OPEN} AND ${FOLLOWUP_PAST_DUE})`;
 
+/**
+ * A BOOKED NEXT STEP THAT HAS NOT HAPPENED YET.
+ *
+ * The other half of FOLLOWUP_PAST_DUE, and it exists because the idle
+ * reassignment sweep wrote its own: `(follow_up->>'date')::date >= CURRENT_DATE`,
+ * an unguarded cast over a field that holds whatever an agent typed. 20 leads
+ * across four tenants carry "This Sunday", "Today", "Yesterday" — every one of
+ * them raises 22007 and takes the whole sweep down with it. Off on every desk,
+ * so it has never fired; the day a firm turned it on it would have thrown
+ * instead of reassigning, and thrown silently.
+ *
+ * Guarded the same way FOLLOWUP_PAST_DUE is, reading `at` — the real instant —
+ * first, and falling back to a `date` only when it is actually a date.
+ *
+ * Unparseable text answers FALSE, i.e. it does not protect a lead from the
+ * sweep. Not because typing "This Sunday" means nothing, but because BOOKING is
+ * person-authored activity in its own right (`follow_up` is a contact type in
+ * leadSegments.ts), so a lead someone has just booked anything on is not idle
+ * anyway. Treating the text as a valid future booking would exempt it forever.
+ */
+export const FOLLOWUP_UPCOMING = sql`(CASE
+  WHEN follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+    THEN (follow_up->>'at')::timestamptz >= now()
+  WHEN follow_up->>'date' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+    THEN (follow_up->>'date')::date >= CURRENT_DATE
+  ELSE false END)`;
+
 
 /**
  * NOBODY HAS REACHED OUT TO THIS PERSON — measured, not inferred.
@@ -2738,9 +2769,51 @@ async function recordAssignment(opts: {
     author: opts.author ?? getContext()?.userId ?? null,
     metadata: { agentId: agentId ?? null, previousAgentId: prevAgentId ?? null, ...(opts.metadata || {}) },
   }).catch(() => {});
+  if (prevAgentId && agentId) await alertOnReassignLoop(recordId, to);
   } catch (e: any) {
     console.warn('[Timeline] assignment event failed:', e?.message);
   }
+}
+
+/**
+ * A LEAD THAT KEEPS BEING HANDED ON.
+ *
+ * Reassignment does not stop on its own — the idle sweep will move the same
+ * lead round the rota forever, and each individual hand-off looks reasonable.
+ * The pattern is the thing worth seeing, and only a manager can act on it.
+ *
+ * Here rather than in the sweep, because this is the one function every path
+ * that changes `agent_id` goes through — sweep, bulk assign, manual edit — and
+ * the fact is about the lead being passed around, not about who passed it.
+ * Counted from the record's own history, so it survives however it was moved.
+ *
+ * Told EVERY time past the threshold, not once: the fourth hand-off and the
+ * ninth are the same problem getting worse, and a one-shot alert on a metadata
+ * flag would go quiet exactly as it started mattering.
+ *
+ * Leads only. Owners are reassigned by the same sweep and carry the same
+ * history, but Settings offers the control on the Leads side alone (desk-rework
+ * §2, F) and a threshold nobody can see or change is not a feature.
+ */
+async function alertOnReassignLoop(recordId: string, toName: string | null): Promise<void> {
+  const t = tid();
+  const lead = (await sql`SELECT name FROM crm_leads WHERE id = ${recordId} AND tenant_id = ${t} LIMIT 1`)[0];
+  if (!lead) return;
+  const limit = Math.max(Number((await getRoutingRules()).reassign_alert_count) || 3, 1);
+  // Hand-offs, not assignments: the arrival-time route and the unowned sweep
+  // both write an `assignment` row with no previous agent, and a lead going
+  // from nobody to somebody has not been passed on by anyone.
+  const n = (await sql`
+    SELECT count(*)::int AS n FROM crm_timeline_events
+    WHERE record_id = ${recordId} AND tenant_id = ${t} AND type = 'assignment'
+      AND coalesce(metadata->>'previousAgentId', '') <> ''`)[0]?.n ?? 0;
+  if (n <= limit) return;
+  await notifyRoles(['owner', 'manager'], {
+    tenantId: t, type: 'lead_reassign_loop',
+    data: { name: lead.name, n, agent: toName },
+    link: `?screen=leads&lead=${recordId}`,
+    push: true, toSelf: true,
+  }).catch(err => console.warn('[Notify] lead_reassign_loop failed:', err?.message));
 }
 
 export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
@@ -4041,11 +4114,11 @@ export async function getRoutingRules(): Promise<RoutingRule> {
     // whenever this comes back empty, so an honest empty array is correct here.
     return {
       strategy: 'round_robin', active_agent_ids: [], last_assigned_index: -1,
-      sweep_unassigned_enabled: false, sweep_unassigned_hours: 4,
-      reassign_idle_enabled: false, reassign_idle_hours: 2,
+      sweep_unassigned_enabled: false,
+      reassign_idle_enabled: false, reassign_idle_days: 3, reassign_alert_count: 3,
       owner_strategy: 'manual', owner_active_agent_ids: [], owner_last_assigned_index: -1,
-      owner_sweep_unassigned_enabled: false, owner_sweep_unassigned_hours: 4,
-      owner_reassign_idle_enabled: false, owner_reassign_idle_hours: 2,
+      owner_sweep_unassigned_enabled: false,
+      owner_reassign_idle_enabled: false, owner_reassign_idle_days: 3,
     };
   }
   return {
@@ -4053,16 +4126,15 @@ export async function getRoutingRules(): Promise<RoutingRule> {
     active_agent_ids: rows[0].active_agent_ids || [],
     last_assigned_index: rows[0].last_assigned_index || -1,
     sweep_unassigned_enabled: rows[0].sweep_unassigned_enabled ?? false,
-    sweep_unassigned_hours: rows[0].sweep_unassigned_hours ?? 4,
     reassign_idle_enabled: rows[0].reassign_idle_enabled ?? false,
-    reassign_idle_hours: rows[0].reassign_idle_hours ?? 2,
+    reassign_idle_days: rows[0].reassign_idle_days ?? 3,
+    reassign_alert_count: rows[0].reassign_alert_count ?? 3,
     owner_strategy: rows[0].owner_strategy || 'manual',
     owner_active_agent_ids: rows[0].owner_active_agent_ids || [],
     owner_last_assigned_index: rows[0].owner_last_assigned_index ?? -1,
     owner_sweep_unassigned_enabled: rows[0].owner_sweep_unassigned_enabled ?? false,
-    owner_sweep_unassigned_hours: rows[0].owner_sweep_unassigned_hours ?? 4,
     owner_reassign_idle_enabled: rows[0].owner_reassign_idle_enabled ?? false,
-    owner_reassign_idle_hours: rows[0].owner_reassign_idle_hours ?? 2,
+    owner_reassign_idle_days: rows[0].owner_reassign_idle_days ?? 3,
   };
 }
 
@@ -4072,35 +4144,34 @@ export async function updateRoutingRules(patch: Partial<RoutingRule>): Promise<R
   await sql`
     INSERT INTO crm_routing_rules (
       strategy, active_agent_ids, last_assigned_index,
-      sweep_unassigned_enabled, sweep_unassigned_hours,
-      reassign_idle_enabled, reassign_idle_hours,
+      sweep_unassigned_enabled,
+      reassign_idle_enabled, reassign_idle_days, reassign_alert_count,
       owner_strategy, owner_active_agent_ids, owner_last_assigned_index,
-      owner_sweep_unassigned_enabled, owner_sweep_unassigned_hours,
-      owner_reassign_idle_enabled, owner_reassign_idle_hours, tenant_id
+      owner_sweep_unassigned_enabled,
+      owner_reassign_idle_enabled, owner_reassign_idle_days, tenant_id
     )
     VALUES (
       ${next.strategy}, ${sql.json(next.active_agent_ids)}, ${next.last_assigned_index},
-      ${next.sweep_unassigned_enabled}, ${next.sweep_unassigned_hours},
-      ${next.reassign_idle_enabled}, ${next.reassign_idle_hours},
+      ${next.sweep_unassigned_enabled},
+      ${next.reassign_idle_enabled}, ${next.reassign_idle_days}, ${next.reassign_alert_count},
       ${next.owner_strategy}, ${sql.json(next.owner_active_agent_ids)}, ${next.owner_last_assigned_index},
-      ${next.owner_sweep_unassigned_enabled}, ${next.owner_sweep_unassigned_hours},
-      ${next.owner_reassign_idle_enabled}, ${next.owner_reassign_idle_hours}, ${tid()}
+      ${next.owner_sweep_unassigned_enabled},
+      ${next.owner_reassign_idle_enabled}, ${next.owner_reassign_idle_days}, ${tid()}
     )
     ON CONFLICT (tenant_id) DO UPDATE SET
       strategy = EXCLUDED.strategy,
       active_agent_ids = EXCLUDED.active_agent_ids,
       last_assigned_index = EXCLUDED.last_assigned_index,
       sweep_unassigned_enabled = EXCLUDED.sweep_unassigned_enabled,
-      sweep_unassigned_hours = EXCLUDED.sweep_unassigned_hours,
       reassign_idle_enabled = EXCLUDED.reassign_idle_enabled,
-      reassign_idle_hours = EXCLUDED.reassign_idle_hours,
+      reassign_idle_days = EXCLUDED.reassign_idle_days,
+      reassign_alert_count = EXCLUDED.reassign_alert_count,
       owner_strategy = EXCLUDED.owner_strategy,
       owner_active_agent_ids = EXCLUDED.owner_active_agent_ids,
       owner_last_assigned_index = EXCLUDED.owner_last_assigned_index,
       owner_sweep_unassigned_enabled = EXCLUDED.owner_sweep_unassigned_enabled,
-      owner_sweep_unassigned_hours = EXCLUDED.owner_sweep_unassigned_hours,
       owner_reassign_idle_enabled = EXCLUDED.owner_reassign_idle_enabled,
-      owner_reassign_idle_hours = EXCLUDED.owner_reassign_idle_hours;
+      owner_reassign_idle_days = EXCLUDED.owner_reassign_idle_days;
   `;
   return next;
 }
@@ -4125,10 +4196,22 @@ export async function nextRoutedOwnerAgent(): Promise<string | null> {
  * pipeline — one for leads nobody owns, one for leads whose owner has gone
  * quiet — which arrival-time routing was never in a position to catch.
  */
+/**
+ * How long a record may sit with nobody on it before the sweep takes it.
+ *
+ * Was a Settings field, defaulting to four hours. Nothing in the product ever
+ * sets `agent_id` back to NULL, so a record is unowned only at arrival — which
+ * made the field "how long should a live enquiry go unanswered", and no firm
+ * means to answer that with a number bigger than zero. It is not zero only
+ * because arrival-time routing runs a moment later and should be allowed to
+ * win: a lead assigned by the rota, not by the sweep, reads correctly on the
+ * timeline.
+ */
+const UNOWNED_GRACE_MINUTES = 1;
+
 export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
   if (!rules.sweep_unassigned_enabled) return 0;
-  const hours = Math.max(Number(rules.sweep_unassigned_hours) || 4, 1);
   // "Unowned" includes an agent_id that no longer resolves to a live user —
   // the same orphaned state the desk sees as "Former owner" on the row.
   const rows = await sql`
@@ -4136,7 +4219,7 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
     LEFT JOIN users u ON u.id = l.agent_id AND u.tenant_id = l.tenant_id AND u.deleted_at IS NULL
     WHERE l.tenant_id = ${tenantId} AND ${OPEN}
       AND (l.agent_id IS NULL OR u.id IS NULL)
-      AND l.created_at < NOW() - (${hours}::text || ' hours')::interval
+      AND l.created_at < NOW() - (${UNOWNED_GRACE_MINUTES}::text || ' minutes')::interval
   `;
   let n = 0;
   const tally = new Map<string, number>();
@@ -4147,8 +4230,8 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
     const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
     await addTimelineEvent({
       record_id: lead.id, type: 'assignment', title: 'Auto-assigned',
-      description: `Unowned for ${hours}h — routed to ${name}`,
-      author: 'System', metadata: { agentId, reason: 'sweep_unassigned', hours },
+      description: `Nobody had picked it up — routed to ${name}`,
+      author: 'System', metadata: { agentId, reason: 'sweep_unassigned' },
     });
     tally.set(agentId, (tally.get(agentId) || 0) + 1);
     n++;
@@ -4166,15 +4249,20 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
 export async function sweepIdleLeads(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
   if (!rules.reassign_idle_enabled) return 0;
-  const hours = Math.max(Number(rules.reassign_idle_hours) || 2, 1);
+  const days = Math.max(Number(rules.reassign_idle_days) || 3, 1);
+  // "No activity" is the §1 predicate — something a PERSON did on the record —
+  // not `updated_at`, which a portal push, a sweep or any background stamp
+  // moves without anyone having gone near the lead. So a lead could be reported
+  // Going cold on the dashboard and simultaneously count as active here.
+  //
   // Excludes: terminal leads (nothing left to chase) and leads with a future
   // scheduled follow-up (the assignee has a plan; going quiet on the record
   // isn't the same as going quiet on the buyer).
   const rows = await sql`
     SELECT id, name, agent_id FROM crm_leads
     WHERE tenant_id = ${tenantId} AND ${OPEN} AND agent_id IS NOT NULL
-      AND updated_at < NOW() - (${hours}::text || ' hours')::interval
-      AND NOT (follow_up IS NOT NULL AND (follow_up->>'date')::date >= CURRENT_DATE)
+      AND ${noPersonActivitySince(days)}
+      AND NOT ${FOLLOWUP_UPCOMING}
   `;
   let n = 0;
   const tally = new Map<string, number>();
@@ -4187,8 +4275,8 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
     const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
     await recordAssignment({
       recordId: lead.id, prevAgentId: lead.agent_id, agentId,
-      reason: `no activity for ${hours}h`,
-      author: 'System', metadata: { reason: 'sweep_idle', hours },
+      reason: `no activity for ${days} days`,
+      author: 'System', metadata: { reason: 'sweep_idle', days },
     });
     tally.set(agentId, (tally.get(agentId) || 0) + 1);
     lost.set(lead.agent_id, (lost.get(lead.agent_id) || 0) + 1);
@@ -4196,7 +4284,7 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
   }
   await notifyAssignBatch(tenantId, tally, {
     type: 'lead_reassigned', noun: 'lead', verb: 'moved to you',
-    body: `Idle for over ${hours}h with their previous owner.`, link: '?screen=leads',
+    body: `Nothing recorded on them for ${days} days.`, link: '?screen=leads',
   });
   // The only place either module tells someone work has LEFT them. Losing a
   // lead to the idle rule is a thing they should hear from the app rather than
@@ -4219,13 +4307,12 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
 export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
   if (!rules.owner_sweep_unassigned_enabled) return 0;
-  const hours = Math.max(Number(rules.owner_sweep_unassigned_hours) || 4, 1);
   const rows = await sql`
     SELECT o.id FROM crm_owners o
     LEFT JOIN users u ON u.id = o.agent_id AND u.tenant_id = o.tenant_id AND u.deleted_at IS NULL
     WHERE o.tenant_id = ${tenantId} AND coalesce(o.stage, '') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}
       AND (o.agent_id IS NULL OR u.id IS NULL)
-      AND o.created_at < NOW() - (${hours}::text || ' hours')::interval
+      AND o.created_at < NOW() - (${UNOWNED_GRACE_MINUTES}::text || ' minutes')::interval
   `;
   let n = 0;
   const tally = new Map<string, number>();
@@ -4236,8 +4323,8 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
     const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
     await addTimelineEvent({
       record_id: owner.id, type: 'assignment', title: 'Auto-assigned',
-      description: `Unowned for ${hours}h — routed to ${name}`,
-      author: 'System', metadata: { agentId, reason: 'sweep_unassigned', hours },
+      description: `Nobody had picked it up — routed to ${name}`,
+      author: 'System', metadata: { agentId, reason: 'sweep_unassigned' },
     });
     tally.set(agentId, (tally.get(agentId) || 0) + 1);
     n++;
@@ -4285,11 +4372,12 @@ async function notifyOwnerBatch(tenantId: string, tally: Map<string, number>, ty
 export async function sweepIdleOwners(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
   if (!rules.owner_reassign_idle_enabled) return 0;
-  const hours = Math.max(Number(rules.owner_reassign_idle_hours) || 2, 1);
+  const days = Math.max(Number(rules.owner_reassign_idle_days) || 3, 1);
+  // Same predicate as the lead sweep, against the owner's own timeline.
   const rows = await sql`
     SELECT id, agent_id FROM crm_owners
     WHERE tenant_id = ${tenantId} AND coalesce(stage, '') NOT IN ${sql(OWNER_TERMINAL_STATUSES)} AND agent_id IS NOT NULL
-      AND updated_at < NOW() - (${hours}::text || ' hours')::interval
+      AND ${noPersonActivitySince(days, 'crm_owners')}
   `;
   let n = 0;
   const tally = new Map<string, number>();
@@ -4301,8 +4389,8 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
     const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
     await addTimelineEvent({
       record_id: owner.id, type: 'assignment', title: 'Reassigned — idle',
-      description: `No activity from ${prevOwner} for ${hours}h — routed to ${name}`,
-      author: 'System', metadata: { agentId, previousAgentId: owner.agent_id, reason: 'sweep_idle', hours },
+      description: `No activity from ${prevOwner} for ${days} days — routed to ${name}`,
+      author: 'System', metadata: { agentId, previousAgentId: owner.agent_id, reason: 'sweep_idle', days },
     });
     tally.set(agentId, (tally.get(agentId) || 0) + 1);
     n++;

@@ -12,7 +12,8 @@ const NAV = [
   { key: 'brand', label: 'Brand', icon: 'layers' },
   { key: 'pipeline', label: 'Pipeline', icon: 'leads' },
   { key: 'routing', label: 'Routing', icon: 'team' },
-  { key: 'followup', label: 'Follow-up SLA', icon: 'clock' },
+  // Key kept — it is in the URL of every Settings link anyone has sent.
+  { key: 'followup', label: 'Response times', icon: 'clock' },
   { key: 'messages', label: 'Message templates', icon: 'wa' },
   // { key: 'audit', label: 'Audit ledger', icon: 'shield' },
   { key: 'alerts', label: 'Alerts', icon: 'bell' },
@@ -40,7 +41,7 @@ export default function Settings({ store, topBar }) {
               {section === 'brand' && <BrandSection store={store} settings={settings} />}
               {section === 'pipeline' && <PipelineSection store={store} settings={settings} />}
               {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} />}
-              {section === 'followup' && <FollowUpSection store={store} settings={settings} />}
+              {section === 'followup' && <ResponseTimesSection store={store} settings={settings} />}
               {section === 'messages' && <MessagesSection store={store} settings={settings} />}
               {/* {section === 'audit' && <AuditSection />} */}
               {section === 'alerts' && <AlertsSection store={store} />}
@@ -274,23 +275,24 @@ const ROUTING_SIDES = {
     key: 'leads', label: 'Leads', noun: 'lead', arrival: 'When a new enquiry arrives',
     f: {
       strategy: 'strategy', rota: 'active_agent_ids',
-      sweepOn: 'sweep_unassigned_enabled', sweepHours: 'sweep_unassigned_hours',
-      idleOn: 'reassign_idle_enabled', idleHours: 'reassign_idle_hours',
+      sweepOn: 'sweep_unassigned_enabled',
+      idleOn: 'reassign_idle_enabled', idleDays: 'reassign_idle_days',
+      loopCount: 'reassign_alert_count',
     },
     autoSub: 'Distribute evenly across the agents in rotation. Fair, and no lead sits unclaimed.',
     manualSub: 'New leads land in a shared pool. A manager picks who takes each one.',
-    idleSub: 'A lead with no activity from its assignee for this long — and no upcoming scheduled visit — is handed to the next agent in rotation, and the record shows why.',
+    idleSub: 'Nobody has recorded anything on it for this long — and no visit is booked — so it goes to the next agent in rotation, and the record shows why.',
   },
   owners: {
     key: 'owners', label: 'Calling', noun: 'owner', arrival: 'When a new owner is imported',
     f: {
       strategy: 'owner_strategy', rota: 'owner_active_agent_ids',
-      sweepOn: 'owner_sweep_unassigned_enabled', sweepHours: 'owner_sweep_unassigned_hours',
-      idleOn: 'owner_reassign_idle_enabled', idleHours: 'owner_reassign_idle_hours',
+      sweepOn: 'owner_sweep_unassigned_enabled',
+      idleOn: 'owner_reassign_idle_enabled', idleDays: 'owner_reassign_idle_days',
     },
     autoSub: 'Distribute evenly across the callers in rotation as each row imports.',
     manualSub: 'Imported owners land in a shared pool. A manager picks who calls each one.',
-    idleSub: 'An owner with no activity from its assignee for this long is handed to the next caller in rotation, and the record shows why. Rows marked Not interested or Do not call are never swept.',
+    idleSub: 'Nobody has recorded anything on it for this long, so it goes to the next caller in rotation, and the record shows why. Rows marked Not interested or Do not call are never swept.',
   },
 }
 
@@ -389,23 +391,22 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
         <div className="rt-rule">
           <div className="rt-rule-h">
             <div>
-              <div className="rt-rule-t">Pick up unowned {side.noun}s</div>
+              <div className="rt-rule-t">Assign {side.noun}s that have no agent</div>
               <div className="rt-rule-s">Nobody on it — never assigned, or its owner left the firm.</div>
             </div>
             <Toggle on={!!routing?.[f.sweepOn]} onClick={() => set(
               { [f.sweepOn]: !routing?.[f.sweepOn] },
               routing?.[f.sweepOn] ? 'Unowned sweep turned off' : 'Unowned sweep turned on')} />
           </div>
-          {!!routing?.[f.sweepOn] && (
-            <NumField value={Number(routing?.[f.sweepHours] ?? 4)} suffix="hours unowned"
-              onChange={(v) => set({ [f.sweepHours]: Math.max(1, v) })} />
-          )}
+          {/* No hours field. Nothing ever sets agent_id back to NULL, so a
+              record is unowned only at arrival — the number was asking how long
+              a live enquiry should sit with nobody on it. */}
         </div>
 
         <div className="rt-rule">
           <div className="rt-rule-h">
             <div>
-              <div className="rt-rule-t">Reassign idle {side.noun}s</div>
+              <div className="rt-rule-t">Reassign a {side.noun} if no activity on it</div>
               <div className="rt-rule-s">{side.idleSub}</div>
             </div>
             <Toggle on={!!routing?.[f.idleOn]} onClick={() => set(
@@ -413,33 +414,61 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
               routing?.[f.idleOn] ? 'Idle reassignment turned off' : 'Idle reassignment turned on')} />
           </div>
           {!!routing?.[f.idleOn] && (
-            <NumField value={Number(routing?.[f.idleHours] ?? 2)} suffix="hours idle"
-              onChange={(v) => set({ [f.idleHours]: Math.max(1, v) })} />
+            <NumField value={Number(routing?.[f.idleDays] ?? 3)} suffix="days"
+              onChange={(v) => set({ [f.idleDays]: Math.max(1, v) })} />
           )}
         </div>
+
+        {/* Leads only — a threshold the desk cannot see is not a control, and
+            Settings offers this one on the Leads side. Counted from the lead's
+            own assignment history, so a manual hand-off counts too. */}
+        {!!f.loopCount && (
+          <div className="rt-rule">
+            <div className="rt-rule-h">
+              <div>
+                <div className="rt-rule-t">Tell a manager if a {side.noun} is reassigned too often</div>
+                <div className="rt-rule-s">It keeps being reassigned. The manager is told each time after that.</div>
+              </div>
+            </div>
+            <NumField value={Number(routing?.[f.loopCount] ?? 3)} suffix="times"
+              onChange={(v) => set({ [f.loopCount]: Math.max(1, v) })} />
+          </div>
+        )}
       </Panel>
     </>
   )
 }
 
-// ---- Follow-up SLA (real: persisted into settings JSON) -------------------
-function FollowUpSection({ store, settings }) {
+// ---- Response times -------------------------------------------------------
+// Was "Follow-up SLA". "SLA" is not a word this desk speaks, and the second
+// control was called "Ongoing follow-up" while what it actually sets is the
+// Going cold line — the pile on the dashboard and the pill on the Leads list.
+// A control has to be named after what it does, or nobody connects the two.
+//
+// `reminderDays` stays the stored key: it is what every tenant's settings JSON
+// already holds, and renaming it would silently reset the number to 3 on any
+// desk that had set one. The label is the part the desk reads.
+function ResponseTimesSection({ store, settings }) {
   const sla = Number(settings.slaHours ?? 24)
-  const remind = Number(settings.reminderDays ?? 3)
-  const setSla = (v) => store.patchSettings({ slaHours: Math.max(1, v) }, 'Follow-up SLA updated')
-  const setRemind = (v) => store.patchSettings({ reminderDays: Math.max(1, v) }, 'Reminder cadence updated')
+  const cold = Number(settings.reminderDays ?? 3)
+  const setSla = (v) => store.patchSettings({ slaHours: Math.max(1, v) }, 'First response time updated')
+  const setCold = (v) => store.patchSettings({ reminderDays: Math.max(1, v) }, 'Going cold updated')
+  // The pile's name comes from the served catalogue, not a copy of it here, so
+  // this sentence cannot end up naming something the Leads screen no longer
+  // calls that. See backend/src/services/leadSegments.ts.
+  const coldLabel = (store.state.leadSegments || []).find(s => s.key === 'going_cold')?.label || 'Going cold'
   return (
     <>
-      <SecHead title="Follow-up SLA" />
+      <SecHead title="Response times" />
       <Panel>
-        <SectionHead title="First response" />
-        <div className="set-sec-sub">A brand-new lead should hear back within…</div>
+        <SectionHead title="A new lead should hear back within" />
+        <div className="set-sec-sub">Alerts the assignee, then escalates to a manager.</div>
         <NumField value={sla} suffix="hours" onChange={setSla} step={1} />
       </Panel>
       <Panel>
-        <SectionHead title="Ongoing follow-up" />
-        <div className="set-sec-sub">An active lead with no touch for this many days is nudged back to the top.</div>
-        <NumField value={remind} suffix="days" onChange={setRemind} step={1} />
+        <SectionHead title="Treat a lead as gone cold after" />
+        <div className="set-sec-sub">Shows on the dashboard under {coldLabel}, and in the Leads filters.</div>
+        <NumField value={cold} suffix="days" onChange={setCold} step={1} />
       </Panel>
     </>
   )
