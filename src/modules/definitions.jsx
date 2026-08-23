@@ -124,8 +124,15 @@ export const LEADS_DEF = {
     // Same scope as the record's own edit permission for status: desk always,
     // an agent only on a lead they created or are assigned.
     canSet: (store, l) => canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l),
-    // Shown next to the status once the lead is closed out.
-    note: (l) => (l.stage === REJECTED_STATUS ? (l.rejectionReason || null) : null),
+    // Shown next to the status once the lead is closed out — and AFTER it
+    // reopens, which is the point. A lead that was rejected and enquired again
+    // comes back onto the arrival stage on its own; an agent picking it up has
+    // to be able to see that this person was turned down, and why, without
+    // reading down the timeline for it. The reason survives the reopen and is
+    // cleared the moment somebody moves the stage themselves.
+    note: (l) => (l.rejectionReason
+      ? (l.stage === REJECTED_STATUS ? l.rejectionReason : `Was rejected — ${l.rejectionReason}`)
+      : null),
     exit: { label: 'Mark as rejected', when: (l) => l.stage !== REJECTED_STATUS,
       run: (store, l) => store.openModal({ kind: 'rejectLead', leadId: l.id }) },
   },

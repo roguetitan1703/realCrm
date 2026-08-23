@@ -16,7 +16,7 @@
 import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
-import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS } from './store';
+import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS, WON_STATUS } from './store';
 import { notify, notifyRoles } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
@@ -518,18 +518,6 @@ export async function processInboxRow(
           ...reassign,
           ...(!existing.email && lead.email ? { email: lead.email } : {}),
         });
-        // The timeline is where an agent reads a lead's history, and a repeat
-        // enquiry never reached it — the record showed "New Lead Created" and
-        // nothing else while the buyer had come back twice asking about a
-        // bigger flat. Notes alone are not the history.
-        if (!dupNote) {
-          await addTimelineEvent({
-            record_id: existing.id,
-            type: 'lead',
-            title: `Enquired again via ${integration.provider}`,
-            description: extra || undefined,
-          }).catch(() => {});
-        }
         // 'merged', not 'parsed'. This function has always KNOWN the difference
         // — it returns 'merged' below — and then wrote the same word to the
         // inbox as a push that created a lead, so the activity list said "Lead
@@ -549,50 +537,52 @@ export async function processInboxRow(
         // folded into a session already open says nothing new.
         if (session?.isNewSession) {
           const owner = (reassign as any).agentId || existing.agent_id;
-          const rejected = String(existing.stage || '') === REJECTED_STATUS;
-          if (rejected) {
-            // A PERSON WHO ENQUIRES AGAIN IS NOT A REJECTED LEAD.
-            //
-            // This used to leave them where they were and only tell the desk.
-            // The reasoning was one bhumi remark — "She said not interested
-            // don't call" — and reopening her on the strength of a form
-            // submission would put an agent back on the phone to someone who
-            // asked them not to be. That risk is real, but it was being paid
-            // for by every OTHER rejection: on the live desk the reasons on
-            // re-enquired leads are "No Requirement" and "Already purchased /
-            // rented", and a fresh enquiry is that lead's own answer to both.
-            //
-            // So the rejection reason decides, not the rejection. Anything that
-            // reads as "do not contact this person" stays shut and the desk is
-            // told; everything else reopens onto the arrival stage, because a
-            // buyer who has come back is a buyer somebody should ring.
-            const reason = String((existing as any).rejection_reason || '');
-            const doNotContact = /do\s*not\s*call|don'?t\s*call|not\s*interested|dnd|do\s*not\s*disturb/i.test(reason);
-            if (doNotContact) {
-              await addTimelineEvent({
-                record_id: existing.id, type: 'stage_change',
-                title: 'Enquired again — left rejected',
-                description: `New enquiry via ${integration.provider}. Not reopened: rejected as "${reason}".`,
-                author: 'System',
-                metadata: { source: integration.provider, rejectionReason: reason },
-              }).catch(() => {});
-            } else {
-              const { arrivalStage } = await deskConfigOf(integration.tenant_id);
-              await sql`
-                UPDATE crm_leads
-                SET stage = ${arrivalStage}, rejection_reason = NULL, updated_at = NOW()
-                WHERE id = ${existing.id} AND tenant_id = ${integration.tenant_id}`;
-              // The reason it moved, on the record, in the words of what
-              // happened — an agent opening this lead has to be able to see why
-              // a rejected buyer is back in their list.
-              await addTimelineEvent({
-                record_id: existing.id, type: 'stage_change',
-                title: `${existing.stage} → ${arrivalStage}`,
-                description: `${existing.stage} → ${arrivalStage} — enquired again via ${integration.provider}${reason ? ` (was rejected: ${reason})` : ''}`,
-                author: 'System',
-                metadata: { source: integration.provider, reason: 'repeat_enquiry', previousStage: existing.stage, rejectionReason: reason || null },
-              }).catch(() => {});
-            }
+          // A LEAD WHO COMES BACK IS A LIVE LEAD, whatever it was closed as.
+          //
+          // This used to branch on the rejection REASON: anything reading as
+          // "do not call" stayed shut, everything else reopened. The client
+          // overrode that on 23 Aug — the reason is surfaced instead of acted
+          // on, so an agent can see this person was rejected, see why, and
+          // decide for themselves. Deal Closed reopens too: a buyer who has
+          // bought and is asking again is asking about something else, and
+          // leads stay leads until there is a Deals module for closed business.
+          const terminal = existing.stage === REJECTED_STATUS || existing.stage === WON_STATUS;
+          const reason = String((existing as any).rejection_reason || '');
+          const { arrivalStage } = await deskConfigOf(integration.tenant_id);
+
+          if (terminal) {
+            // The reason is KEPT, not cleared. It was set to NULL here, which
+            // erased the one fact E asks to be surfaced — "rejected for low
+            // budget, came back at ₹32,000" is only a question the desk can ask
+            // while the reason is still on the row.
+            await sql`
+              UPDATE crm_leads
+              SET stage = ${arrivalStage}, updated_at = NOW()
+              WHERE id = ${existing.id} AND tenant_id = ${integration.tenant_id}`;
+          }
+
+          // ONE EVENT, saying both things. The repeat used to write a `lead`
+          // row per PUSH — so the man who opened four listings in five minutes
+          // got four rows against a counter that said one — and a second
+          // `stage_change` row beside it when the lead reopened. One fact, one
+          // row, written once per session.
+          const moved = terminal ? `${existing.stage} → ${arrivalStage} — ` : '';
+          const line = `${moved}enquired again via ${integration.provider}`
+            + (terminal && reason ? ` (was rejected: ${reason})` : '')
+            + (extra ? ` · ${extra}` : '');
+          await addTimelineEvent({
+            record_id: existing.id,
+            type: terminal ? 'stage_change' : 'lead',
+            title: line,
+            description: line,
+            author: 'System',
+            metadata: {
+              source: integration.provider, reason: 'repeat_enquiry',
+              ...(terminal ? { previousStage: existing.stage, rejectionReason: reason || null } : {}),
+            },
+          }).catch(() => {});
+
+          if (terminal) {
             // ['owner','manager'] — the roles this product actually has.
             // 'admin' is not one of them, so an earlier ['owner','admin'] here
             // reached exactly the one owner and silently skipped every manager,
@@ -600,7 +590,10 @@ export async function processInboxRow(
             // desk-wide alert for months. Same pair every other desk alert uses.
             await notifyRoles(['owner', 'manager'], {
               type: 'lead_repeat_rejected',
-              data: { name: existing.name, source: integration.provider },
+              data: {
+                name: existing.name, source: integration.provider,
+                previousStage: existing.stage, reason: reason || null,
+              },
               link: `/leads/${existing.id}`,
             }).catch(() => {});
           }
@@ -609,7 +602,8 @@ export async function processInboxRow(
               userId: owner, type: 'lead_repeat',
               data: {
                 name: existing.name, source: integration.provider,
-                changed: conflicts.length, rejected,
+                changed: conflicts.length,
+                previousStage: terminal ? existing.stage : null,
               },
               link: `/leads/${existing.id}`,
             }).catch(() => {});

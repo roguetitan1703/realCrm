@@ -481,13 +481,40 @@ export function mapEventForClient(e: TimelineEvent) {
   };
 }
 
+/**
+ * ONE EVENT PER THING, on the way out.
+ *
+ * A stage change used to lay down two rows in the same second: the person's
+ * "Stage Changed -> Call Not Received" and the System's "Status Updated: Status
+ * changed from New to Call Not Received." The writer was fixed — the last pair
+ * on the live desk is 17 Aug — but 199 of them are already on bhumi's records,
+ * and an agent opening one of those leads still reads the same fact twice.
+ *
+ * So the mirror is dropped at read time, and ONLY where its twin exists: 64 of
+ * bhumi's 263 `Status Updated` rows have no person-authored partner, and every
+ * one of them is a rejection whose reason survives nowhere else. Deleting the
+ * lot would have taken those with it. Nothing is written or removed here; the
+ * ledger keeps what happened and the record stops saying it twice.
+ */
+const MIRROR_WINDOW_MS = 2000;
+function collapseStatusMirrors(events: TimelineEvent[]): TimelineEvent[] {
+  const byPerson = events.filter(e =>
+    e.type === 'stage_change' && (e.author || 'System') !== 'System');
+  if (!byPerson.length) return events;
+  return events.filter(e => {
+    if (e.type !== 'stage_change' || (e.author || 'System') !== 'System') return true;
+    if (String(e.title || '').trim() !== 'Status Updated') return true;
+    const at = new Date(e.timestamp).getTime();
+    return !byPerson.some(p => Math.abs(new Date(p.timestamp).getTime() - at) <= MIRROR_WINDOW_MS);
+  });
+}
+
 function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = []): any {
   const createdMs = r.created_at ? new Date(r.created_at).getTime() : Date.now();
   const minsAgo = Math.max(0, Math.floor((Date.now() - createdMs) / 60000));
 
   // Format timeline events for lead object
-  const leadEvents = events
-    .filter(e => e.record_id === r.id)
+  const leadEvents = collapseStatusMirrors(events.filter(e => e.record_id === r.id))
     .map(mapEventForClient);
 
   // Columns are source of truth; fall back to the req JSONB when a column is null.
@@ -1955,9 +1982,23 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // The reason belongs to the rejection. If the lead comes back off Rejected it
   // is dropped, because a live lead carrying "Budget Mismatch" reads as fact and
   // would go straight into the loss report.
-  const rejectionReason = stage !== REJECTED_STATUS
-    ? null
-    : (patch.rejectionReason ?? patch.rejection_reason ?? oldLead.rejectionReason ?? null);
+  // WHY IT WAS REJECTED IS HISTORY, and it outlives the rejection.
+  //
+  // This nulled the reason on any save where the stage was not Rejected, which
+  // was right while the only way off Rejected was a person deciding — and wrong
+  // the moment a repeat enquiry reopens a lead on its own. The desk is supposed
+  // to see that this person was rejected and came back (desk-rework E), and the
+  // very next edit to anything on the record would have erased the reason with
+  // no trace on screen.
+  //
+  // So it is cleared only when THIS patch moves the stage — somebody deciding
+  // the lead is no longer rejected — and kept otherwise. Measured before the
+  // change: no lead on any tenant carried a reason while not rejected, so the
+  // state this creates is always a reopen and never a leftover.
+  const movingStage = patch.stage !== undefined && patch.stage !== oldLead.stage;
+  const rejectionReason = stage === REJECTED_STATUS
+    ? (patch.rejectionReason ?? patch.rejection_reason ?? oldLead.rejectionReason ?? null)
+    : (movingStage ? null : (oldLead.rejectionReason ?? null));
 
   await sql`
     UPDATE crm_leads SET

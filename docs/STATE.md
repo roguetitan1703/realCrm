@@ -68,7 +68,7 @@ so the live desk is unaffected until the merge.
 The client walked through eight areas line by line on 22–23 Aug. Every decision,
 and the order they have to be built in, is **`docs/specs/desk-rework.md`** — that
 file is the one to read before touching leads, and its ledger is what says where
-the build has got to. Three of seven steps are done, all on `development`, none
+the build has got to. Four of seven steps are done, all on `development`, none
 deployed.
 
 | # | Step | State |
@@ -76,8 +76,8 @@ deployed.
 | 1 | Contact predicate + segment catalogue | done — `19287fb` |
 | 2 | Facet counts + filter controls | done |
 | 3 | The enquiry model | done |
-| 4 | Timeline and reopening | next |
-| 5 | Settings | todo |
+| 4 | Timeline and reopening | done |
+| 5 | Settings | next |
 | 6 | WhatsApp templates | todo |
 | 7 | This device | todo |
 
@@ -148,6 +148,24 @@ npm run seed:dev -- --tenant=delpat --n=200
 npm run build            # production mode      npm run build:dev
 npm run deploy:dev       # build:dev + vercel deploy --prebuilt
 ```
+
+---
+
+**Step 4 (D, E) is built.** The duplicate stage/status rows were already fixed
+at the writer — the last pair on the live desk is 17 Aug — so what shipped is
+the read-time collapse of the 199 paired mirrors already on bhumi's records,
+**paired-only** because the other 64 are rejections whose reason survives
+nowhere else. A repeat enquiry now writes one event per session instead of one
+per push plus a second row on reopen; rejected AND closed leads reopen whatever
+the reason; the reason is kept rather than nulled so the desk can see it, and is
+cleared only when a person moves the stage.
+
+**Going cold reads `reminderDays`, which no tenant has ever set**, so every desk
+runs at the 3-day default: 161 of bhumi's 217 open leads, three-quarters of the
+desk. At 7 days it is 122, at 14 it is 19. Worth settling in step 5 (F), which
+puts that number in front of the client as "Treat a lead as gone cold after
+[3] days" — and note the scale figure quoted when A was agreed ("7 days ≈ 53")
+was measured under the OLD expression; under this one 7 days is 122.
 
 ---
 

@@ -76,16 +76,24 @@ export const COPY: Builders = {
   // for somebody an agent spoke to on Tuesday. One of these per SESSION; the
   // buyer who opened four listings in five minutes gets one, not four.
   lead_repeat: (d) => ({
-    title: d.rejected ? 'Rejected lead enquired again' : 'Enquired again',
+    // NAMES THE STAGE IT CAME FROM, rather than calling everything rejected.
+    // This read "Rejected lead enquired again" off a boolean, so a buyer whose
+    // deal had CLOSED and who was asking about something else was announced as
+    // a rejection.
+    title: d.previousStage ? `Reopened — enquired again` : 'Enquired again',
     body: facts(d.name, d.source && `via ${d.source}`,
+      d.previousStage && `was ${d.previousStage}`,
       d.changed > 0 && `${plural(d.changed, 'detail')} changed`),
   }),
-  // To the desk, not the agent: reopening a lead somebody rejected is a
-  // decision, and the remark on one of bhumi's reads "She said not interested
-  // don't call". Nothing moves on its own.
+  // To the desk as well as the agent: a lead somebody closed has reopened on
+  // its own, and the people who run the desk are told which and why. The stage
+  // MOVED — this used to say "left rejected", which stopped being true on
+  // 23 Aug when the client overrode the reason-based conditional.
   lead_repeat_rejected: (d) => ({
-    title: 'Rejected lead enquired again',
-    body: facts(d.name, d.source && `via ${d.source}`, 'left rejected'),
+    title: 'Closed lead reopened',
+    body: facts(d.name, d.source && `via ${d.source}`,
+      d.previousStage && `was ${d.previousStage}`,
+      d.reason && `rejected: ${d.reason}`),
   }),
 
   lead_untouched: (d) => ({

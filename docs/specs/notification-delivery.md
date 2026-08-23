@@ -38,7 +38,7 @@ if this table and the code disagree, the code is right and this file is stale.
 | `followup_set` | you set a follow-up on your own lead ([store.ts:2082](../../backend/src/services/store.ts#L2082)) | yourself | ✓ | — |
 | `lead_moved_away` | the idle rule took a lead off you ([store.ts:3988](../../backend/src/services/store.ts#L3988)) | the previous agent | ✓ | — |
 | `lead_repeat` | a portal re-sends a lead already on the desk ([ingestion.ts:571](../../backend/src/services/ingestion.ts#L571)) | the lead's agent | ✓ | — |
-| `lead_repeat_rejected` | the same, with conflicting fields dropped ([ingestion.ts:564](../../backend/src/services/ingestion.ts#L564)) | the lead's agent | ✓ | — |
+| `lead_repeat_rejected` | a lead that was Rejected or Deal Closed reopens because the person enquired again | owner + managers | ✓ | — |
 
 Two rules apply to every row. `toSelf` is off by default, so an alert about
 something you did yourself is dropped — telling someone what they just did is

@@ -258,7 +258,7 @@ Dependency order, not priority. Steps 2–5 all read what step 1 defines.
 | 1 | Contact predicate + segment catalogue | — | §1, A | **done** `19287fb` |
 | 2 | Facet counts + filter controls | 1 | B | **done** |
 | 3 | The enquiry model | — | C | **done** |
-| 4 | Timeline and reopening | 3 | D, E | todo |
+| 4 | Timeline and reopening | 3 | D, E | **done** |
 | 5 | Settings | 1 | F | todo |
 | 6 | WhatsApp templates | — | G | todo |
 | 7 | This device | — | H | todo |
@@ -404,6 +404,48 @@ and the pill it opens cannot diverge for an agent either. "Past SLA",
 "Never called" and "Needs attention" survive only in comments explaining why
 they went — the "Never called" on the dashboard is the OWNER calling queue,
 where it is accurate.
+
+**Step 4 — 23 Aug 2026.** D and E, which are one write path.
+
+**The duplicate writer was already fixed** — the last `Status Updated` +
+`Stage Changed ->` pair on the live desk is 17 Aug. What remained was the
+history: 199 of bhumi's 263 mirrors sit beside a person-authored twin, and an
+agent opening one of those records still read the fact twice. They are dropped
+at READ time, paired-only, in `collapseStatusMirrors()`. That restriction is
+load-bearing: **64 of the 263 have no twin, and every one is a rejection whose
+reason survives nowhere else** — a blanket purge would have destroyed them.
+Nothing is written or deleted; the ledger keeps what happened.
+
+**A repeat enquiry writes one event, once per session.** It used to write a
+`lead` row per PUSH — four rows for the man who opened four listings in five
+minutes, against a counter reading one — plus a separate `stage_change` beside
+it when the lead reopened. Now: one row, saying both facts.
+
+**E, in full.** The reason-based conditional is gone: a rejected lead reopens
+whatever the reason, `Deal Closed` reopens too, the agent does not change, and
+the arrival stage is the first configured one. The rejection reason is **kept**
+rather than nulled — `updateLead` cleared it on every save where the stage was
+not Rejected, so the fact E asks to be surfaced would have vanished on the next
+unrelated edit. It is now cleared only when that patch moves the stage, i.e.
+when a person decides. Measured first: no lead on any tenant carried a reason
+while not rejected, so the state this creates is always a reopen.
+
+Both repeat alerts had stopped being true and were rewritten: `lead_repeat_rejected`
+said "left rejected" for a lead that now reopens, and `lead_repeat` called a
+closed deal a rejection off a boolean. They name the stage it came from.
+
+Verified by pushing twice at a rejected lead through the **real ingest
+endpoint** on the development API. Stage `Rejected → New`, `rejection_reason`
+"No Requirement" preserved, ONE System event —
+`Rejected → New — enquired again via MagicBricks (was rejected: No Requirement)` —
+and the second push added no event and folded into the same session
+(`payload_count` 2). In the browser the record's status line reads
+`New · Was rejected — No Requirement`, and a lead holding 7 raw rows of which 3
+are legacy mirrors renders 4. No console errors.
+
+Not covered, deliberately: the reopen writes through raw SQL and so leaves no
+`audit_log` row — the same as before this change, not a regression, but the
+ledger cannot answer "who reopened this" for a machine reopen.
 
 ---
 
