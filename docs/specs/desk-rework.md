@@ -260,7 +260,7 @@ Dependency order, not priority. Steps 2–5 all read what step 1 defines.
 | 3 | The enquiry model | — | C | **done** |
 | 4 | Timeline and reopening | 3 | D, E | **done** |
 | 5 | Settings | 1 | F | **done** |
-| 6 | WhatsApp templates | — | G | todo |
+| 6 | WhatsApp templates | — | G | **done** |
 | 7 | This device | — | H | todo |
 
 ### Ledger
@@ -507,6 +507,57 @@ assignment events; the lead is back with its original agent.
 Not covered: bhumi's numbers. This machine cannot reach the production database
 (the sandbox refuses it), so every count above is the dev clone. Exactly one of
 production's seven tenants has any sweep enabled at all.
+
+**Step 6 — G, 23 Aug 2026.** Two templates, one editor, and a permission that
+turned out not to exist.
+
+There was ONE stored template, `whatsappIntroTemplate`, holding the message
+filled in from a lead. It is now the **WhatsApp message**, and the second one —
+**Intro message**, `introMessage`, firm and agent name, no lead fields — is new.
+The old key is NOT renamed: it is what every tenant's settings JSON holds, and a
+rename hands a paying client the default in place of the sentence they wrote.
+Both defaults live in `src/data/theme.js` with the distinction written above
+them, because "intro" now names one of them and the key names the other.
+
+**Two editors became one.** Settings → Message templates and the phone's Me
+screen each had their own — one committing on blur with placeholder chips, one
+on a Save button with a placeholder legend, neither aware of the other, both
+over the same value. `components/MessageTemplates.jsx` is the only one now, and
+both screens render it.
+
+**The agent's view.** Intro only, resolved against the firm and their own name,
+read-only, with a Copy button and a line naming who can change it. `introText()`
+resolves it in one place because it goes to a CLIPBOARD — an agent pasting
+"{agentName}" into a client's chat has been handed that by us. No sign the
+WhatsApp template exists.
+
+**A desktop agent could not see it at all.** The phone/desk switch is screen
+size only, and Settings was refused to agents outright, so an agent on a monitor
+had no surface for a template the spec says everyone can read. Settings now
+filters its own nav by role: an agent sees Message templates, Alerts and This
+device, and lands on the first of them rather than on a blank Brand pane.
+
+**`POST /workspace/settings` had no role check.** Any signed-in agent could
+rewrite the firm's pipeline stages, source list, name and templates. Nothing was
+holding the rule — every screen that writes there was already behind a desk-role
+check, so it was true by luck. It mattered the moment the intro became something
+an agent is SHOWN: a template they may read but not change needs a server that
+says so, not a hidden textarea. Measured first: no agent-facing screen calls it.
+
+Verified in a browser on the dev clone. Owner: both editors, chips insert,
+Copy puts the RESOLVED sentence on the clipboard (read back), a save survives a
+reload, Reset returns the default and then disables itself, and the textarea
+holds the raw template while the preview holds the resolved one. Agent on an
+iPhone 13 viewport: intro only, resolved to "Kavish Deshmukh", Copy, the
+who-line, **0 textareas**, no mention of the WhatsApp template. Agent at 1400px:
+the same, reached through Settings, nav listing three sections. Through the API:
+an agent's `POST /workspace/settings` returns 403 and persists nothing; the
+owner's still saves. No console errors on any of it.
+
+Not covered: `{agentName}` resolves from `store.me()`, which is the roster row
+for the signed-in user. On a workspace where that lookup comes back empty the
+placeholder resolves to nothing and the sentence closes up — it does not render
+braces, but it does not name anybody either.
 
 ---
 

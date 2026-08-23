@@ -420,6 +420,25 @@ export function generateMessage(rawProperty, opts = {}) {
   return msg
 }
 
+// --- The standing intro (no lead attached) ----------------------------------
+// The other template, and the only one an agent can see. No lead fields: it is
+// the same sentence whoever it is sent to, which is what makes it pasteable.
+//
+// Resolved here rather than at each surface, because it is copied to a
+// clipboard — an agent who pastes "{agentName}" into a client's chat has been
+// handed the wrong thing by us. Placeholders that resolve to nothing are
+// dropped rather than left as braces.
+export function introText(template, { firmName, agentName } = {}) {
+  const tpl = String(template || '')
+  if (!tpl.trim()) return ''
+  return tpl
+    .replace(/\{agentName\}/gi, String(agentName || '').trim())
+    .replace(/\{firmName\}/gi, String(firmName || '').trim())
+    .replace(/\{firm\}/gi, String(firmName || '').trim())
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
 // --- Plain follow-up (no property attached) ---------------------------------
 // Sending a message without a listing is a normal thing to do, and it used to
 // have no template at all — the composer opened blank, then had exactly one

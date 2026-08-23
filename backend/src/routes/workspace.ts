@@ -16,6 +16,7 @@ import { requireTenantAuth } from '../middleware/auth';
 import { getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates, listContacts } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
+import { isDeskRole } from '../lib/permissions';
 import { listAudit, verifyAuditChain } from '../services/audit';
 
 export const workspaceRouter = Router();
@@ -242,8 +243,25 @@ workspaceRouter.get('/pulse', async (req: Request, res: Response) => {
 /**
  * POST /api/v1/workspace/settings
  * Updates workspace settings (firmName, stages, sources, etc.)
+ *
+ * DESK ROLES ONLY, and this is the enforcement — every screen that writes here
+ * was already behind a desk-role check, so the rule was true and nothing was
+ * holding it. Any signed-in agent could POST the firm's pipeline stages, source
+ * list, name and message templates. It mattered from the moment the intro
+ * message became something an agent can SEE: a template they are shown but may
+ * not change needs a server that says so, not a hidden textarea.
+ *
+ * Blast radius measured before adding it: no agent-facing screen calls this —
+ * the phone's Me screen only ever read it for a non-desk role.
  */
 workspaceRouter.post('/settings', async (req: Request, res: Response) => {
+  const role = getContext()?.role;
+  if (!isDeskRole(role)) {
+    return res.status(403).json({
+      error: 'FORBIDDEN',
+      message: 'Workspace settings are changed by an owner or a manager.',
+    });
+  }
   const patch = req.body;
   const updated = await updateSettings(patch);
   res.status(200).json({

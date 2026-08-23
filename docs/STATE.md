@@ -86,7 +86,7 @@ so the live desk is unaffected until the merge.
 The client walked through eight areas line by line on 22–23 Aug. Every decision,
 and the order they have to be built in, is **`docs/specs/desk-rework.md`** — that
 file is the one to read before touching leads, and its ledger is what says where
-the build has got to. Five of seven steps are done, all on `development`, none
+the build has got to. Six of seven steps are done, all on `development`, none
 deployed.
 
 | # | Step | State |
@@ -96,8 +96,8 @@ deployed.
 | 3 | The enquiry model | done |
 | 4 | Timeline and reopening | done |
 | 5 | Settings | done |
-| 6 | WhatsApp templates | next |
-| 7 | This device | todo |
+| 6 | WhatsApp templates | done |
+| 7 | This device | next |
 
 **What changed on the desk so far.** "Past SLA" is deleted. Contact now means
 anything a **person** did, which moves not-contacted from 83 to 7 on the live
@@ -218,6 +218,21 @@ cast over free text. 20 leads across four dev tenants carry "This Sunday",
 is off everywhere, so it has never fired — the day a firm turned it on it would
 have thrown instead of reassigning, silently. Now `FOLLOWUP_UPCOMING`, guarded
 the way `FOLLOWUP_PAST_DUE` already was.
+
+**Step 6 (G) is built, and it closed a hole.** There are two message templates
+now — the **WhatsApp message** (filled in from a lead, desk only) and the
+**Intro message** (a standing sentence, no lead fields, every agent can read and
+copy it). One editor component serves Settings and the phone's Me screen, which
+had grown two. An agent on a desktop could not see the intro at all, because the
+phone/desk switch is screen size only and Settings was refused to agents
+outright; Settings now filters its own nav by role.
+
+**`POST /api/v1/workspace/settings` had no role check** — any signed-in agent
+could rewrite the firm's stages, sources, name and templates. Nothing exploited
+it: every screen that writes there was already behind a desk-role check, so the
+rule was true by luck rather than by enforcement. It is enforced now (403,
+verified through the API), and it had to be before showing an agent a template
+they may read but not change.
 
 **Going cold still runs at the 3-day default on every desk** — no tenant has
 ever set `reminderDays` — which is 161 of bhumi's 217 open leads, three-quarters

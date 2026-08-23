@@ -1,28 +1,12 @@
-import { useState, useEffect } from 'react'
-import { Avatar, Button, Textarea } from '../../components/primitives.jsx'
+import { Avatar } from '../../components/primitives.jsx'
 import PushRow from '../../components/PushRow.jsx'
 import Install from '../../components/Install.jsx'
 import Icon from '../../components/Icon.jsx'
-import { isDeskRole, roleLabel } from '../../lib/permissions.js'
+import MessageTemplates from '../../components/MessageTemplates.jsx'
+import { roleLabel } from '../../lib/permissions.js'
 
 export default function PhoneMe({ store, me, topBar }) {
   const { state } = store
-  const isAdmin = isDeskRole(state.role)
-  const [intro, setIntro] = useState(() => state.settings?.whatsappIntroTemplate || '')
-
-  // patchSettings, not updateSettings — the store has no `updateSettings`, so
-  // the optional call `store.updateSettings?.(...)` silently swallowed every
-  // edit to this template and the text reverted on the next render.
-  //
-  // Committed on blur, not on change: saving per keystroke meant one API write
-  // and one toast per character typed.
-  const commitIntro = () => {
-    const val = intro.trim()
-    if (val === (state.settings?.whatsappIntroTemplate || '')) return
-    store.patchSettings({ whatsappIntroTemplate: val }, 'Intro message saved')
-  }
-
-  const insertToken = (t) => setIntro(prev => (prev ? prev + ' ' : '') + t)
 
   return (
     <>
@@ -60,46 +44,13 @@ export default function PhoneMe({ store, me, topBar }) {
           <Install variant="row" />
         </div>
 
-        {/* Single WhatsApp Intro Message Template Card */}
-        {isAdmin ? (
-          <div style={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink)' }}>WhatsApp Intro Message</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Sent when introducing your firm to a new lead.</div>
-            </div>
-
-            <Textarea
-              value={intro}
-              onChange={e => setIntro(e.target.value)}
-              onBlur={commitIntro}
-              placeholder="Hello {name}, I received your inquiry for a {requirement} in {locality} via {source}. I am reaching out from {firmName}. When would be a convenient time to connect?"
-              rows={4}
-              style={{ fontSize: 13, lineHeight: 1.5, borderRadius: 10 }}
-            />
-
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {['{name}', '{requirement}', '{locality}', '{source}', '{firmName}'].map(chip => (
-                <button
-                  key={chip}
-                  type="button"
-                  className="qchip"
-                  style={{ fontSize: 11, padding: '3px 8px' }}
-                  onClick={() => insertToken(chip)}
-                >
-                  + {chip}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div style={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 14, padding: 16 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink)' }}>WhatsApp Intro Message</div>
-            <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4, lineHeight: 1.4 }}>
-              "{intro || 'Hello {name}, I received your inquiry for a {requirement} in {locality} via {source}. I am reaching out from {firmName}. When would be a convenient time to connect?'}"
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 8 }}>Managed by workspace admins.</div>
-          </div>
-        )}
+        {/* The firm's message templates — the SAME component Settings →
+            Message templates renders. Two editors over one sentence do not
+            stay in agreement; this screen had its own, committing on blur,
+            while the desk's committed on a button. */}
+        <div className="msgt-wrap">
+          <MessageTemplates store={store} />
+        </div>
 
       </div>
     </>

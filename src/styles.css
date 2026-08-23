@@ -2040,6 +2040,20 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .lc-foot{display:flex;gap:9px;margin-top:16px}
 
 /* ---- Settings · message templates --------------------------------------- */
+/* Message templates. One component on two surfaces (Settings and the phone's
+   Me screen), so the card draws its own frame instead of borrowing the
+   desktop Panel — the phone has no Panel. */
+.msgt-wrap{display:flex;flex-direction:column;gap:14px}
+.msgt-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.msgt-wrap .msgt-card{margin-bottom:0}
+.msgt-h{font-weight:700;font-size:14px;color:var(--ink)}
+.msgt-s{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.45}
+.msgt-tok{border:1px solid var(--line);background:var(--wash);border-radius:6px;padding:3px 8px;font-family:var(--mono);font-size:11px;color:var(--ink-2);cursor:pointer}
+.msgt-tok:hover{border-color:var(--muted)}
+.msgt-prev{display:flex;align-items:flex-start;gap:10px;background:var(--wash);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-top:10px}
+.msgt-prev-t{flex:1;min-width:0;font-size:12.5px;line-height:1.5;color:var(--ink-2)}
+.msgt-copy{flex-shrink:0;font-size:12px;display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:8px}
+.msgt-who{font-size:11.5px;color:var(--faint);margin-top:9px}
 .msgt-ph{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 10px}
 .msgt-ph code{font-family:var(--mono);font-size:11px;background:var(--card-2,var(--wash));border:1px solid var(--line);border-radius:5px;padding:3px 7px;color:var(--ink-2)}
 .msgt-t{width:100%;margin-bottom:8px;font-size:13px;line-height:1.5}

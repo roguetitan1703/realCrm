@@ -185,7 +185,11 @@ export default function App() {
   }
 
   // RBAC Navigation filtering: Agent role hides system management & settings
-  const allowedKeys = state.role === 'agent' ? ['dashboard', 'leads', 'calling', 'properties', 'clients', 'calendar'] : null
+  // Settings is on the list because the intro message lives there and every
+  // agent is meant to be able to read it (desk-rework.md §2, G). What they get
+  // inside is one section — Settings.jsx filters its own nav by role, and the
+  // server refuses a settings write from an agent outright.
+  const allowedKeys = state.role === 'agent' ? ['dashboard', 'leads', 'calling', 'properties', 'clients', 'calendar', 'settings'] : null
   const contactsTab = sel.contactsTab || 'clients'
   const nav = NAV
     .filter(n => !allowedKeys || (n.key && allowedKeys.includes(n.key)) || (n.section && ['Workspace'].includes(n.section)))
@@ -250,7 +254,7 @@ export default function App() {
   }
 
   // Enforce RBAC on direct screen access
-  const effectiveScreen = (state.role === 'agent' && ['team', 'settings', 'integrations'].includes(screen)) ? 'dashboard' : screen
+  const effectiveScreen = (state.role === 'agent' && ['team', 'integrations'].includes(screen)) ? 'dashboard' : screen
   const Screen = SCREENS[effectiveScreen] || Dashboard
 
   return (

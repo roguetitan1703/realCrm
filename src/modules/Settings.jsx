@@ -1,28 +1,37 @@
 import { useState, useEffect } from 'react'
 import { Panel, SectionHead, StageTag, Button, Input, Segmented, Toggle, Avatar } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
-import { theme, PROTECTED_STAGES, DEFAULT_WHATSAPP_INTRO } from '../data/theme.js'
+import { theme, PROTECTED_STAGES } from '../data/theme.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import Install from '../components/Install.jsx'
+import MessageTemplates from '../components/MessageTemplates.jsx'
 import PushRow from '../components/PushRow.jsx'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
+import { isDeskRole } from '../lib/permissions.js'
 
+// `everyone: true` is a section an agent may open. The rest are the desk's.
+// An agent reaches this screen for one reason — the intro message they are
+// meant to be able to read and copy — plus the two rows about their own phone,
+// which are about the device in their hand and nobody else's.
 const NAV = [
   { key: 'brand', label: 'Brand', icon: 'layers' },
   { key: 'pipeline', label: 'Pipeline', icon: 'leads' },
   { key: 'routing', label: 'Routing', icon: 'team' },
   // Key kept — it is in the URL of every Settings link anyone has sent.
   { key: 'followup', label: 'Response times', icon: 'clock' },
-  { key: 'messages', label: 'Message templates', icon: 'wa' },
+  { key: 'messages', label: 'Message templates', icon: 'wa', everyone: true },
   // { key: 'audit', label: 'Audit ledger', icon: 'shield' },
-  { key: 'alerts', label: 'Alerts', icon: 'bell' },
-  { key: 'system', label: 'This device', icon: 'settings' },
+  { key: 'alerts', label: 'Alerts', icon: 'bell', everyone: true },
+  { key: 'system', label: 'This device', icon: 'settings', everyone: true },
 ]
 
 export default function Settings({ store, topBar }) {
   const { settings, agents, routing, inactiveAgentIds } = store.state
-  const [section, setSection] = useState('brand')
+  const nav = isDeskRole(store.state.role) ? NAV : NAV.filter(n => n.everyone)
+  // The first section they can actually open. Defaulting to 'brand' would land
+  // an agent on a blank pane beside a nav that does not list it.
+  const [section, setSection] = useState(nav[0].key)
 
   return (
     <>
@@ -31,7 +40,7 @@ export default function Settings({ store, topBar }) {
         <div className="pagewrap">
           <div className="set-shell">
             <nav className="set-nav">
-              {NAV.map(n => (
+              {nav.map(n => (
                 <button key={n.key} className={section === n.key ? 'on' : ''} onClick={() => setSection(n.key)}>
                   <Icon name={n.icon} size={16} className="sn-ic" />{n.label}
                 </button>
@@ -42,7 +51,7 @@ export default function Settings({ store, topBar }) {
               {section === 'pipeline' && <PipelineSection store={store} settings={settings} />}
               {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} />}
               {section === 'followup' && <ResponseTimesSection store={store} settings={settings} />}
-              {section === 'messages' && <MessagesSection store={store} settings={settings} />}
+              {section === 'messages' && <MessagesSection store={store} />}
               {/* {section === 'audit' && <AuditSection />} */}
               {section === 'alerts' && <AlertsSection store={store} />}
               {section === 'system' && <SystemSection store={store} />}
@@ -474,43 +483,15 @@ function ResponseTimesSection({ store, settings }) {
   )
 }
 
-// ---- Single WhatsApp Intro Message ---------------------------------------
-function MessagesSection({ store, settings }) {
-  const tpl = settings.whatsappIntroTemplate || DEFAULT_WHATSAPP_INTRO
-  const [draft, setDraft] = useState(tpl)
-
-  useEffect(() => {
-    setDraft(settings.whatsappIntroTemplate || DEFAULT_WHATSAPP_INTRO)
-  }, [settings.whatsappIntroTemplate])
-
-  const dirty = draft !== tpl
-  const save = () => store.patchSettings({ whatsappIntroTemplate: draft.trim() }, 'WhatsApp intro message saved')
-  const reset = () => {
-    setDraft(DEFAULT_WHATSAPP_INTRO)
-    store.patchSettings({ whatsappIntroTemplate: DEFAULT_WHATSAPP_INTRO }, 'Intro message reset to default')
-  }
-
+// ---- Message templates ----------------------------------------------------
+// The editors themselves are components/MessageTemplates.jsx, which the phone's
+// Me screen renders too. This screen contributes the heading and nothing else —
+// the moment it contributes a second textarea there are two editors again.
+function MessagesSection({ store }) {
   return (
     <>
-      <SecHead title="WhatsApp intro message" />
-      <Panel>
-        <SectionHead title="Intro Template" />
-        <div className="set-sec-sub" style={{ marginBottom: 8 }}>Available Placeholders:</div>
-        <div className="msgt-ph" style={{ marginBottom: 12 }}>
-          <code>{"{name}"}</code> <code>{"{firmName}"}</code> <code>{"{requirement}"}</code> <code>{"{locality}"}</code> <code>{"{source}"}</code>
-        </div>
-        <textarea
-          className="textarea msgt-t"
-          rows={3}
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          placeholder="Enter introductory message template..."
-        />
-        <div className="msgt-foot" style={{ marginTop: 14, display: 'flex', gap: 10 }}>
-          <Button variant="primary" disabled={!dirty} onClick={save}>Save Message</Button>
-          <Button variant="ghost" onClick={reset}>Reset to default</Button>
-        </div>
-      </Panel>
+      <SecHead title="Message templates" />
+      <MessageTemplates store={store} />
     </>
   )
 }

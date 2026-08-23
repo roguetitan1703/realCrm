@@ -33,7 +33,24 @@ export const theme = {
 
 export const FIRM = theme.brand.firmName
 
+// TWO TEMPLATES, AND THEY ARE NOT THE SAME KIND OF THING.
+//
+// `whatsappIntroTemplate` is the WHATSAPP MESSAGE: it is filled in from a lead
+// — name, requirement, locality, source — and sent to that one buyer when the
+// button is pressed. It cannot be used without a lead in front of it.
+//
+// `introMessage` is the INTRO MESSAGE: a standing sentence about the firm and
+// the person sending it, with no lead in it at all, for pasting anywhere. Every
+// agent can read it; only the desk can change it.
+//
+// The key name `whatsappIntroTemplate` is a leftover from when there was one
+// template called "intro" and it is NOT renamed here: it is what every tenant's
+// settings JSON already holds, and a rename would hand a paying client back the
+// default in place of the sentence they wrote. The label is the part the desk
+// reads. Same call, same reason, as `reminderDays` in Settings → Response times.
 export const DEFAULT_WHATSAPP_INTRO = 'Hello {name}, I received your inquiry for a {requirement} in {locality} via {source}. I am reaching out from {firmName}. We have several excellent options matching your preferences. When would be a convenient time to connect over a quick call?'
+
+export const DEFAULT_INTRO_MESSAGE = 'Hello, this is {agentName} from {firmName}. We work on residential property in the area — happy to help if you are looking to buy, sell or rent.'
 
 // Default editable settings — the store seeds from these, then owns them. Renaming
 // a stage / adding a source in Settings mutates state, never this object.
@@ -42,6 +59,7 @@ export const DEFAULT_SETTINGS = {
   stages: [...theme.stages],
   sources: [...theme.sources],
   whatsappIntroTemplate: DEFAULT_WHATSAPP_INTRO,
+  introMessage: DEFAULT_INTRO_MESSAGE,
 }
 
 // Tenant brand identity lives on the tenant row (tenants.brand_config), NOT in
