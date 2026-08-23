@@ -12,10 +12,15 @@ the rest stops being eight separate fixes.
 ## §1 One definition of contact — BUILT (step 1)
 
 Contact is **any timeline event authored by a real person** — call, whatsapp,
-sms, email, remark, note, stage change — **or** any activity of type call,
-meeting, site visit.
+sms, email, remark, note, stage change, **follow-up booked** — **or** any
+activity of type call, meeting, site visit.
 
-`author <> 'System'` is the whole guard. Lead creation, the status mirror and
+`author <> 'System'` is the whole guard, and the type list is still a list:
+`assignment`, `creation` and `lead` are System-written today and would start
+counting the day one of them carried a name. A lead is not contacted because
+somebody created it. `follow_up` was added on 23 Aug after the audit — booking a
+next step is work done on the lead — and it moved **one** lead, on `urban`;
+bhumi, delpat, raipur and skyline-realty did not change. Lead creation, the status mirror and
 the re-enquiry events are System-written; count those and every lead is
 contacted the moment it arrives.
 
@@ -50,7 +55,7 @@ rows instead.
 |---|---|---|
 | All | Everything in the current view | Filter row |
 | Today | Arrived today | Filter row, KPI |
-| Not contacted | Nobody has done anything on it, ever | Filter row, KPI |
+| Not contacted | Nobody has called, messaged, remarked, booked anything or moved it — ever | Filter row, KPI |
 | No reply | We reached out, nothing back, nothing logged for N days | Filter row, KPI |
 | Follow-up overdue | A booked follow-up whose time has passed | Filter row, KPI |
 | Going cold | Still open, nothing recorded for N days | Filter row, dashboard |

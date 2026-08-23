@@ -37,8 +37,23 @@ import { sql } from './db.js';
  * creation, the status mirror and the re-enquiry events are all written by
  * System; count those and every lead is contacted the moment it arrives, and
  * the segment stops meaning anything at all.
+ *
+ * STILL AN ALLOWLIST, and not "anything a person wrote", because the three
+ * types nobody should ever count — `assignment` (3,659 rows), `creation` (506)
+ * and `lead` (30) — are System-written today and would start counting the day
+ * one of them was stamped with a name. A lead is not contacted because somebody
+ * created it.
+ *
+ * Measured across both databases, a person has ever authored exactly seven
+ * types: note, call, stage_change, whatsapp, remark, follow_up and email. All
+ * seven are below; `sms` is here as a channel the product sends and nobody has
+ * logged yet. `follow_up` was the one genuinely missing — booking a next step
+ * is work done on the lead, and 16 leads on the live desk carry one. Adding it
+ * moved exactly ONE lead, on `urban`; bhumi, delpat, raipur and skyline-realty
+ * did not move at all, because none of their untouched leads had a follow-up
+ * booked and nothing else.
  */
-export const CONTACT_EVENT_TYPES = ['call', 'whatsapp', 'sms', 'email', 'remark', 'note', 'stage_change'];
+export const CONTACT_EVENT_TYPES = ['call', 'whatsapp', 'sms', 'email', 'remark', 'note', 'stage_change', 'follow_up'];
 export const CONTACT_ACTIVITY_TYPES = ['call', 'meeting', 'site_visit'];
 
 export const CONTACTED = sql`(
@@ -76,11 +91,18 @@ export interface SegmentDef {
   tone?: 'alert';
 }
 
+// Every `help` below is the sentence the desk is given for that pile. This is
+// the ONE place a segment's meaning is written, beside the SQL that decides it,
+// so a control and the thing it controls cannot describe themselves
+// differently. Change a meaning here or not at all.
 export const SEGMENT_CATALOGUE: SegmentDef[] = [
   { key: 'today', label: 'Today', help: 'Arrived today.', surface: ['pill', 'tile'] },
   {
     key: 'never_contacted', label: 'Not contacted',
-    help: 'Nobody has done anything on it, ever.',
+    // "Ever", and no clock — which is why this number moves only when somebody
+    // works a lead or an unworked one arrives, while No reply and Going cold
+    // move on their own overnight.
+    help: 'Nobody has called, messaged, remarked, booked anything or moved it — ever.',
     surface: ['pill', 'tile'], tone: 'alert',
   },
   {
@@ -89,12 +111,12 @@ export const SEGMENT_CATALOGUE: SegmentDef[] = [
     // and logged nothing looked like an agent who had not rung. The label now
     // claims only what the data holds.
     key: 'noanswer_stale', label: 'No reply',
-    help: 'We reached out, nothing came back, and nothing has been logged since.',
+    help: 'Sitting at Call Not Received, with nothing logged on it for days.',
     surface: ['pill', 'tile'],
   },
   {
     key: 'going_cold', label: 'Going cold',
-    help: 'Still open, and nothing recorded for a while.',
+    help: 'Still open, and nobody has recorded anything on it for days.',
     surface: ['pill', 'tile'], tone: 'alert',
   },
   {

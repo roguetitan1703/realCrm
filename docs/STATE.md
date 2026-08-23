@@ -249,6 +249,18 @@ Service workers are production-only, so the alerts prompt, the ack loop and
 
 Stated so it is not re-derived, and not trusted past its date.
 
+- **Not contacted is 7, checked with a second query** rather than by re-running
+  `leadSegments.ts` — bhumi 7 of 301, dev delpat 7 of 293. Every one sits on
+  stage New with a single System-written creation event and nothing else. The
+  same predicate a week ago would have read **95** on bhumi and 87 on dev, so
+  the number moves with work done, not with the clock: unlike No reply and Going
+  cold it carries no `now()` at all, which is why it held at 7 while those two
+  moved with the re-clone and the date. Two of bhumi's seven arrived on 10
+  August and nobody has touched them since — a fact for the desk, not a bug.
+- **Person-authored timeline types, both databases:** note, call, stage_change,
+  whatsapp, remark, follow_up, email. `assignment` (3,659), `creation` (506) and
+  `lead` (30) are System-written without exception.
+
 - The enquiry-table numbers in the production-migration section above, all
   measured read-only on 2026-08-23.
 - **21 bhumi leads have enquired more than once**, over 315 sessions and 332
