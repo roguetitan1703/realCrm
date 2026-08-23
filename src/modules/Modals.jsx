@@ -496,7 +496,7 @@ function AttachPropModal({ store, leadId }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '46vh', overflowY: 'auto' }}>
         {loading && cands.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '8px 0' }}>Searching inventory…</div>}
         {!loading && cands.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '8px 0' }}>{emptyLine}</div>}
-        {cands.map(({ p, score, reasons }) => {
+        {cands.map(({ p, reasons }) => {
           // The best true thing about this listing for this person, and NOT the
           // thing we filtered on. Suggested narrows by locality, so "Same
           // locality · Baner" was printed identically on all fifty rows — true,
@@ -519,7 +519,10 @@ function AttachPropModal({ store, leadId }) {
                 {/* Only when there IS a requirement to have matched. Against a
                     blank req every listing scores the same and a badge would be
                     decoration pretending to be a judgement. */}
-                {canSuggest && why && <div className="ap-why">{why.t}{score >= 60 ? ` · ${score}% fit` : ''}</div>}
+                {/* The reason, not a percentage. A "78% fit" is a number
+                    nobody can inspect or argue with; "Within budget" is a
+                    claim an agent can check against the row above it. */}
+                {canSuggest && why && <div className="ap-why">{why.t}</div>}
               </div>
               <Icon name="plus" size={17} style={{ color: 'var(--accent)', flexShrink: 0 }} />
             </button>

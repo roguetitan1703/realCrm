@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
-import { fitReasons, thumbTint, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
+import { asList, thumbTint, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
@@ -320,6 +320,38 @@ function useLeadMatches(lead) {
   return lead ? matchesForLead(lead, cands) : []
 }
 
+// WHEN A SITTING HAPPENED. One instant if it was one moment, its span if the
+// person kept clicking — "22 Aug, 10:27 – 11:28 pm". whenLabel is the one
+// answer to "when", so the opening is read through it and the close adds only
+// the time, or the row would say the date twice.
+function sessionSpan(e) {
+  const open = whenLabel(e.at)
+  if (!e.lastAt || e.lastAt === e.at) return open
+  const a = new Date(e.at), b = new Date(e.lastAt)
+  if (isNaN(a.getTime()) || isNaN(b.getTime()) || b.getTime() - a.getTime() < 60000) return open
+  return `${open} – ${b.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`
+}
+
+// The clock time of one payload inside its sitting. The date is on the session
+// header above it; repeating it on every line says nothing new.
+function payloadTime(iso) {
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
+}
+
+// What one payload said: what they wanted, for how much, and which project it
+// was on. Locality is deliberately absent — it is the same on every line of a
+// lead that has one, and a value repeated down a column is a column that reads
+// as noise. It is a Details field, where the whole set is shown once. Each
+// field may already be a list.
+function payloadLine(req) {
+  return [
+    asList(req?.config).join(' · '),
+    budgetRange(req),
+    asList(req?.interest).join(' · '),
+  ].filter(x => x && x !== '—').join('   ')
+}
+
 function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   // The lead this screen is showing — fetched on its own if we don't already
   // hold it. This used to be a find() over every lead in the firm, which meant
@@ -372,9 +404,13 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   // said "No shortlisted or matching inventory yet" over a lead that had four.
   const byId = (id) => (l.shortlistProps || []).find(p => p.id === id) || store.lookup('property', id)
   const fbMap = l.feedback || {}
+  // NO FIT SCORE. "90% match" was a number the desk could not inspect and
+  // could not argue with — an agent who disagreed with it had nothing to point
+  // at. Nothing replaces it: the row already says what the listing is, and the
+  // matcher's job is to decide which four appear, not to grade them.
   const propRows = [
-    ...shortlistIds.map(byId).filter(Boolean).map(p => ({ p, shortlisted: true, fit: fitReasons(p, l.req).score, line: quotedShort(p) })),
-    ...matches.filter(m => !shortlistIds.includes(m.id)).map(m => ({ p: m, shortlisted: false, fit: fitReasons(m, l.req).score, line: quotedShort(m) })),
+    ...shortlistIds.map(byId).filter(Boolean).map(p => ({ p, shortlisted: true, line: quotedShort(p) })),
+    ...matches.filter(m => !shortlistIds.includes(m.id)).map(m => ({ p: m, shortlisted: false, line: quotedShort(m) })),
   ].sort((a, b) => (fbMap[a.p.id]?.verdict === 'rejected' ? 1 : 0) - (fbMap[b.p.id]?.verdict === 'rejected' ? 1 : 0))
 
   const openEdit = () => store.openModal({ kind: 'editRecord', moduleId: 'leads', recordId: l.id })
@@ -452,9 +488,10 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     // any filter, match or report. This is the same history as data.
     //
     // Sessions, not payloads: on the live desk one man opened four listings
-    // between 18:05 and 18:10 and that is ONE enquiry, shown as "4 listings",
-    // not four visits. Counting the clicks would have said he enquired four
-    // times and taken his budget from whichever flat he opened last.
+    // between 18:05 and 18:10 and that is ONE enquiry — the count says one, and
+    // the four are the lines inside it. Counting the clicks would have said he
+    // enquired four times and taken his budget from whichever flat he opened
+    // last.
     //
     // The section only exists once there is more than one, because "1 enquiry"
     // is every lead and a panel saying so is a panel about nothing.
@@ -463,27 +500,39 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
       title: `${l.enquiries.length} enquiries`,
       render: () => (
         <div className="enq-list">
-          {l.enquiries.map((e, i) => {
-            const list = (v) => (Array.isArray(v) ? v.join(' · ') : v)
-            const facts = [
-              list(e.req?.config),
-              list(e.req?.locality),
-              budgetRange(e.req),
-              list(e.req?.interest),
-            ].filter(x => x && x !== '—')
-            return (
-              <div key={e.id} className={'enq-row' + (i ? ' relrow-div' : '')}>
-                <div className="enq-when">
-                  {whenLabel(e.at)}
-                  {/* How many listings they opened in that sitting. Only when it
-                      is more than one — otherwise it is noise on every row. */}
-                  {e.listings > 1 && <span className="enq-n">{e.listings} listings</span>}
-                </div>
-                <div className="enq-req">{facts.length ? facts.join(' · ') : 'No requirement sent'}</div>
-                {e.source && <div className="enq-src">via {e.source}</div>}
+          {l.enquiries.map((e, i) => (
+            <div key={e.id} className={'enq-sess' + (i ? ' relrow-div' : '')}>
+              <div className="enq-when">
+                <span>{sessionSpan(e)}</span>
+                {/* HOW MANY LISTINGS THIS SITTING WAS MADE OF, in the desk's
+                    own word for them. It read "4 listings", which is the
+                    inventory's word for a flat we hold — these are the
+                    enquiries the person sent, and the payload lines under this
+                    are what it is counting. */}
+                {e.payloadCount > 1 && <span className="enq-n">{e.payloadCount} enquiries in this visit</span>}
               </div>
-            )
-          })}
+              {/* One line per payload, each keeping its own time, portal and
+                  figures. The session's own requirement is the SPAN across
+                  them and cannot say which listing carried which budget —
+                  four clicks at ₹24,999 / ₹25,000 / ₹29,999 are a person
+                  looking around ₹25–30k, and flattening them loses both the
+                  range and the projects. */}
+              {e.payloads?.length ? e.payloads.map((pl, j) => (
+                <div key={e.id + ':' + j} className="enq-pl">
+                  <span className="enq-pl-when mono-num">{payloadTime(pl.at)}</span>
+                  {pl.source && <span className="enq-pl-src">{pl.source}</span>}
+                  <span className="enq-pl-req">{payloadLine(pl.req) || 'No requirement sent'}</span>
+                </div>
+              )) : (
+                // A session whose payloads have been purged (raw bodies are
+                // kept 30 days) still knows what was asked across it. Say that,
+                // rather than an empty sitting.
+                <div className="enq-pl">
+                  <span className="enq-pl-req">{payloadLine(e.req) || 'No requirement sent'}</span>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       ),
     }] : []),
@@ -507,9 +556,8 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                     {unitLabel(row.p) && <span className="unit-tag">{unitLabel(row.p)}</span>}
                     {fb?.verdict === 'liked' && <span className="fit ok fit-tight">👍 Liked</span>}
                     {rejected && <span className="fit no fit-tight">👎 {fb.reason}</span>}
-                    {!fb && (row.shortlisted
-                      ? <span className="fit ok fit-tight"><Icon name="check" size={11} />Shortlisted</span>
-                      : <span className="source">{row.fit}% match</span>)}
+                    {!fb && row.shortlisted &&
+                      <span className="fit ok fit-tight"><Icon name="check" size={11} />Shortlisted</span>}
                   </div>
                   {/* Joined, not templated. Hardcoding the separators printed a
                       trailing " · " whenever a property had no price, which on

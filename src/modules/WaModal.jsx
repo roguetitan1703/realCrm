@@ -3,7 +3,7 @@ import { api } from '../lib/api.js'
 import { WaCanvas } from '../components/chrome.jsx'
 import { Segmented } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
-import { thumbTint, fitReasons } from '../lib/format.js'
+import { thumbTint } from '../lib/format.js'
 import { whatsappLink, matchesForLead } from '../lib/matching.js'
 import { MESSAGE_LANGUAGES } from '../data/vocabLocale.js'
 import { WA_OUTCOMES } from '../data/callOutcomes.js'
@@ -73,7 +73,10 @@ export default function WaModal({ store }) {
     const matched = matchesForLead(l, cands).filter(m => !shortIds.has(m.id))
     return [
       ...short.map(x => ({ p: x, tag: 'Shortlisted' })),
-      ...matched.map(x => ({ p: x, tag: `${fitReasons(x, l.req).score}% match` })),
+      // "Matched", not "82% match". The tag says how the listing got into the
+      // list — put there by a person, or found by the matcher — and a score
+      // nobody can inspect is not a third thing worth saying.
+      ...matched.map(x => ({ p: x, tag: 'Matched' })),
     ]
   })()
 

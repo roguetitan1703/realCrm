@@ -549,6 +549,12 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     // that was never counted must not claim to have been counted and found
     // nothing.
     enquiryCount: r.enquiry_count == null ? undefined : Number(r.enquiry_count),
+    // WHEN THEY LAST ASKED, as against when they first arrived. The list shows
+    // this — a person who enquired again yesterday is not a three-week-old lead
+    // — and the record keeps both, because "first received" is what a portal's
+    // own report will be lined up against.
+    lastEnquiryAt: r.last_enquiry_at == null ? undefined
+      : (r.last_enquiry_at instanceof Date ? r.last_enquiry_at.toISOString() : String(r.last_enquiry_at)),
     // The real timestamp, not only the derived "how long ago". A desk asks
     // "when did this lead come in" and wants a date it can quote back to a
     // client or line up against a portal's own report; minsAgo answers a
@@ -1139,6 +1145,11 @@ seedDatabase()
   // time — the rows are derived from webhook_inbox and no human edits them —
   // so a second ledger entry corrects the first rather than compounding it.
   .then(() => runOnce('2026_08_18_enquiry_sessions_v2', () => backfillEnquiries()))
+  // `_v3`: the sessions kept a count of the payloads they were made of and not
+  // the payloads themselves, so the record could say "2 enquiries in this
+  // visit" and show nothing underneath. Same rebuild, same function; the rows
+  // now carry each payload.
+  .then(() => runOnce('2026_08_23_enquiry_payloads_v3', () => backfillEnquiries()))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
@@ -1750,6 +1761,11 @@ export async function getLeadById(id: string): Promise<any | undefined> {
   // what was asked for on each occasion rather than a prose note about it.
   lead.enquiries = await getEnquiriesForLead(id).catch(() => []);
   lead.enquiryCount = lead.enquiries.length;
+  // Everything they have ever asked for, in one shape. The sheet reads the
+  // sets off this, the header reads the latest and the count of the rest, and
+  // the matcher reads the span — so none of them can describe the person
+  // differently.
+  lead.enquiryRollup = enquiryRollup(lead.enquiries);
   const acts = await getActivitiesForLead(id);
   if (acts.length) {
     lead.timeline = [...(lead.timeline || []), ...acts]
@@ -2584,6 +2600,12 @@ export async function listLeads(opts: LeadFilterOpts & {
     // is not in this map is silently ignored, which shows a sort arrow that
     // reorders nothing.
     createdAt: sql`created_at`,
+    // The list's time column is the LAST enquiry, so its sort has to be the
+    // same expression the cell renders — coalesced to arrival for a lead whose
+    // enquiries predate the table, or the arrow would reorder rows by a value
+    // nobody can see.
+    lastEnquiry: sql`coalesce((SELECT max(e.last_at) FROM crm_lead_enquiries e
+                                WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id), created_at)`,
   };
   const col = SORTS[String(opts.sortKey || '')] || sql`created_at`;
   // "Last activity" ascending means most-recent-first; for a name it means A→Z.
@@ -2600,7 +2622,9 @@ export async function listLeads(opts: LeadFilterOpts & {
     // NOT aliased. The segment predicates reference crm_leads.id by name
     // (NEVER_CONTACTED does), and an alias makes every one of them invalid.
     sql`SELECT crm_leads.*, (SELECT count(*)::int FROM crm_lead_enquiries e
-                              WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS enquiry_count
+                              WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS enquiry_count,
+                            (SELECT max(e.last_at) FROM crm_lead_enquiries e
+                              WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS last_enquiry_at
            FROM crm_leads WHERE ${clause} ORDER BY ${col} ${dir} NULLS LAST LIMIT ${limit} OFFSET ${offset}`,
     sql`SELECT count(*)::int AS n FROM crm_leads WHERE ${clause}`,
   ]);
@@ -3339,6 +3363,15 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
   };
 }
 
+/** The ends of a budget span, over values that may be null, blank or text. A
+ *  missing end is not a zero — `Math.min` over a null reads it as one and
+ *  collapses the floor to nothing. */
+const numsOf = (vals: any[]) => vals
+  .map(v => (v == null || v === '' ? NaN : Number(v)))
+  .filter(n => isFinite(n));
+const lowestOf = (vals: any[]) => { const n = numsOf(vals); return n.length ? Math.min(...n) : null; };
+const highestOf = (vals: any[]) => { const n = numsOf(vals); return n.length ? Math.max(...n) : null; };
+
 /**
  * Candidate listings for a lead's requirement.
  *
@@ -3359,10 +3392,17 @@ export async function getLeadCandidates(leadId: string, limit = 100): Promise<an
   // like a working feature. When we do not know, do not narrow: show both and
   // let the scorer rank them.
   const deal = lead.deal || req.deal || null;
-  const locality = lead.locality || req.locality || null;
-  const config = lead.requirement || req.config || null;
-  const min = lead.budget_min != null ? Number(lead.budget_min) : (req.minBudget ?? null);
-  const max = lead.budget_max != null ? Number(lead.budget_max) : (req.maxBudget ?? null);
+  // THE ACCUMULATED SPAN, NOT THE LATEST POINT. A buyer who enquired at ₹68L
+  // and again at ₹95L is looking across that range, and narrowing to whichever
+  // listing they opened last hides every flat between. Same for locality: two
+  // sittings naming two areas are two areas, not a correction.
+  const span = await enquirySpanForLead(leadId);
+  const spanReq = span?.req || {};
+  const localities = [
+    ...new Set([lead.locality || req.locality || null, ...(spanReq.locality || [])].filter(Boolean)),
+  ] as string[];
+  const min = lowestOf([lead.budget_min, req.minBudget, spanReq.minBudget]);
+  const max = highestOf([lead.budget_max, req.maxBudget, spanReq.maxBudget]);
 
   const where: any[] = [
     sql`tenant_id = ${t}`,
@@ -3375,7 +3415,7 @@ export async function getLeadCandidates(leadId: string, limit = 100): Promise<an
   // An unpriced listing is not excluded by an upper bound — "price on request"
   // is common and the client's scorer can still rank it.
   if (max != null) where.push(sql`(${PRICE_NUM} IS NULL OR ${PRICE_NUM} <= ${Math.ceil(max * 1.25)})`);
-  if (locality) where.push(sql`locality = ${locality}`);
+  if (localities.length) where.push(sql`locality = ANY(${localities})`);
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
   const rows = await sql`SELECT * FROM crm_properties WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit}`;
   return rows.map(rowToProperty);
@@ -4668,16 +4708,39 @@ export async function recordEnquiry(input: EnquiryInput): Promise<EnquiryRecorde
          AND first_at <= ${new Date(when.getTime() + ENQUIRY_SESSION_MS)}
        ORDER BY last_at DESC LIMIT 1`;
 
+    // ONE PAYLOAD, AS IT ARRIVED. The session's `req` is the span across them
+    // and cannot say which listing carried which figure; the record shows the
+    // sitting and the clicks inside it, so each click keeps its own line.
+    const payload = {
+      at: when.toISOString(),
+      source: input.source ?? null,
+      req: input.req || {},
+      enquiryId: input.enquiryId ?? null,
+      rawRef: input.rawRef ?? null,
+    };
+
     if (open.length) {
       const row = open[0];
+      // ONE ENTRY PER DELIVERY, and the count read off the entries themselves.
+      // `payload_count + 1` was a second answer to "how many": a rebuild that
+      // overlapped itself — two backends replaying the same inbox rows, which
+      // is one `tsx watch` restart away — left a session claiming 8 payloads
+      // over 6 lines, and the record would have shown a number its own list
+      // disagreed with. The delivery reference is the identity; re-recording
+      // one replaces it rather than adding to it.
+      const nextPayloads = [
+        ...(row.payloads || []).filter((p: any) => !(payload.rawRef && p?.rawRef === payload.rawRef)),
+        payload,
+      ].sort((a: any, b: any) => new Date(a.at).getTime() - new Date(b.at).getTime());
       await sql`
         UPDATE crm_lead_enquiries SET
           last_at = GREATEST(last_at, ${when}),
           first_at = LEAST(first_at, ${when}),
-          payload_count = payload_count + 1,
+          payload_count = ${nextPayloads.length},
+          payloads = ${sql.json(nextPayloads)},
           req = ${sql.json(mergeSessionReq(row.req, input.req))},
-          enquiry_ids = ${sql.json([...(row.enquiry_ids || []), ...(input.enquiryId ? [input.enquiryId] : [])])},
-          raw_refs = ${sql.json([...(row.raw_refs || []), ...(input.rawRef ? [input.rawRef] : [])])}
+          enquiry_ids = ${sql.json([...new Set([...(row.enquiry_ids || []), ...(input.enquiryId ? [input.enquiryId] : [])])])},
+          raw_refs = ${sql.json([...new Set([...(row.raw_refs || []), ...(input.rawRef ? [input.rawRef] : [])])])}
         WHERE id = ${row.id} AND tenant_id = ${t}`;
       return { id: row.id, isNewSession: false };
     }
@@ -4686,10 +4749,11 @@ export async function recordEnquiry(input: EnquiryInput): Promise<EnquiryRecorde
     await sql`
       INSERT INTO crm_lead_enquiries
         (id, tenant_id, lead_id, integration_id, session_key, first_at, last_at,
-         payload_count, source, req, enquiry_ids, raw_refs)
+         payload_count, source, req, payloads, enquiry_ids, raw_refs)
       VALUES (${id}, ${t}, ${input.leadId}, ${input.integrationId ?? null},
               ${`${input.leadId}:${when.toISOString()}`}, ${when}, ${when},
               1, ${input.source ?? null}, ${sql.json(mergeSessionReq({}, input.req))},
+              ${sql.json([payload])},
               ${sql.json(input.enquiryId ? [input.enquiryId] : [])},
               ${sql.json(input.rawRef ? [input.rawRef] : [])})
       ON CONFLICT (tenant_id, session_key) DO NOTHING`;
@@ -4719,10 +4783,27 @@ export async function recordEnquiry(input: EnquiryInput): Promise<EnquiryRecorde
  * one-time repair that has to agree with what happens tomorrow.
  */
 export async function backfillEnquiries(): Promise<void> {
-  // A clean rebuild. The rows are derived entirely from webhook_inbox and no
-  // human has edited them, so starting over is safe and is the only way a
-  // half-finished earlier attempt gets corrected rather than compounded.
-  const wiped = await sql`DELETE FROM crm_lead_enquiries WHERE id LIKE 'enq_bf_%' OR id LIKE 'enq_%'`;
+  // A clean rebuild — but ONLY of what can actually be rebuilt. The rows are
+  // derived entirely from webhook_inbox and no human has edited them, so
+  // starting over corrects a half-finished earlier attempt rather than
+  // compounding it. This deleted every row unconditionally, which is safe only
+  // while every payload is still on disk: data-lifecycle.md purges raw bodies
+  // at 30 days, so a flat delete would have taken a session whose payload has
+  // aged out and never replaced it — silently shortening a person's history to
+  // make the newer ones prettier.
+  //
+  // So a session is cleared only when every payload it was built from is still
+  // replayable. One that mixes replayable and purged references is left exactly
+  // as it is: it keeps its count and its span, and the replay recognises its
+  // raw_refs as already recorded, so nothing is counted twice.
+  const wiped = await sql`
+    DELETE FROM crm_lead_enquiries e
+     WHERE jsonb_array_length(coalesce(e.raw_refs, '[]'::jsonb)) > 0
+       AND NOT EXISTS (
+         SELECT 1 FROM jsonb_array_elements_text(e.raw_refs) AS ref
+          WHERE NOT EXISTS (
+            SELECT 1 FROM webhook_inbox w WHERE w.id = ref AND w.raw_body IS NOT NULL))`;
+  const kept = await sql`SELECT count(*)::int AS n FROM crm_lead_enquiries`;
 
   const rows = await sql`
     SELECT id, tenant_id, integration_id, lead_id, received_at, raw_body
@@ -4785,24 +4866,106 @@ export async function backfillEnquiries(): Promise<void> {
                                  count(DISTINCT lead_id)::int AS leads
                             FROM crm_lead_enquiries GROUP BY 1 ORDER BY 1`;
   console.log(`[migration] enquiry sessions rebuilt from ${rows.length} payloads`
-    + (wiped.count ? ` (cleared ${wiped.count} from an earlier attempt)` : '')
+    + (wiped.count ? ` (cleared ${wiped.count} rebuildable from an earlier attempt)` : '')
+    + (kept[0]?.n ? `, ${kept[0].n} kept whose payloads have been purged` : '')
     + ' — ' + (after as any[]).map(r => `${r.tenant_id}: ${r.sessions} sessions over ${r.leads} leads`).join(', '));
 }
 
-/** Every session on one lead, newest first. */
+/** Every session on one lead, newest first, each carrying the payloads it was
+ *  made of — newest first inside the session too, so the record reads downwards
+ *  in one direction. */
 export async function getEnquiriesForLead(leadId: string): Promise<any[]> {
   const rows = await sql`
     SELECT * FROM crm_lead_enquiries
      WHERE tenant_id = ${tid()} AND lead_id = ${leadId}
      ORDER BY first_at DESC`;
-  return rows.map(r => ({
-    id: r.id,
-    at: r.first_at instanceof Date ? r.first_at.toISOString() : String(r.first_at),
-    lastAt: r.last_at instanceof Date ? r.last_at.toISOString() : String(r.last_at),
-    listings: r.payload_count,
-    source: r.source,
-    req: r.req || {},
-  }));
+  return rows.map(r => {
+    const payloads = (r.payloads || []).map((p: any) => ({
+      at: p.at, source: p.source || r.source || null, req: p.req || {},
+    })).sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime());
+    return {
+      id: r.id,
+      at: r.first_at instanceof Date ? r.first_at.toISOString() : String(r.first_at),
+      lastAt: r.last_at instanceof Date ? r.last_at.toISOString() : String(r.last_at),
+      // How many enquiries this sitting was made of. Counted from the payloads
+      // themselves where they exist, so the number and the lines under it come
+      // from one place; payload_count is the fallback for a session recorded
+      // before the payloads were kept.
+      payloadCount: payloads.length || Number(r.payload_count) || 1,
+      payloads,
+      source: r.source,
+      req: r.req || {},
+    };
+  });
+}
+
+/**
+ * THE WHOLE ASK, ACROSS EVERY ENQUIRY — one function, because the record sheet,
+ * the header, the candidate query and the scorer all have to be describing the
+ * same person. Derived at read time from the enquiry rows; nothing is stored,
+ * so it cannot drift from the history it is built out of.
+ *
+ * Replacing fields (deal) take the latest. Accumulating fields keep every
+ * distinct value, LATEST FIRST — the header shows the first of them and how
+ * many more there are, the sheet shows all of them. Budget is the span across
+ * everything ever asked, which is what matching runs on: someone who enquired
+ * at ₹68L and again at ₹95L is looking in that range, not at whichever listing
+ * they happened to open last.
+ *
+ * `sessions` is enquiries as a person would count them. `payloads` is how many
+ * listings those sittings were made of, and is never the enquiry count.
+ */
+export function enquiryRollup(enquiries: any[]): any | null {
+  if (!enquiries?.length) return null;
+  // Newest first, which is the order the caller already gets them in — restated
+  // here so the function does not depend on it.
+  const list = [...enquiries].sort((a, b) =>
+    new Date(b.lastAt || b.at).getTime() - new Date(a.lastAt || a.at).getTime());
+
+  const sets: Record<string, string[]> = { source: [], interest: [], config: [], locality: [], subtype: [] };
+  const push = (key: string, v: any) => {
+    for (const one of (Array.isArray(v) ? v : [v])) {
+      const s = one == null ? '' : String(one).trim();
+      if (s && !sets[key].includes(s)) sets[key].push(s);
+    }
+  };
+  let min: number | null = null, max: number | null = null;
+  let deal: string | null = null, category: string | null = null;
+
+  for (const e of list) {
+    push('source', e.source);
+    const r = e.req || {};
+    push('interest', r.interest); push('config', r.config);
+    push('locality', r.locality); push('subtype', r.subtype);
+    const lo = r.minBudget == null || r.minBudget === '' ? null : Number(r.minBudget);
+    const hi = r.maxBudget == null || r.maxBudget === '' ? null : Number(r.maxBudget);
+    if (lo != null && isFinite(lo)) min = min == null ? lo : Math.min(min, lo);
+    if (hi != null && isFinite(hi)) max = max == null ? hi : Math.max(max, hi);
+    if (!deal && r.deal) deal = r.deal;
+    if (!category && r.category) category = r.category;
+  }
+
+  const first = list[list.length - 1];
+  return {
+    sessions: list.length,
+    payloads: list.reduce((n, e) => n + (e.payloadCount || 1), 0),
+    firstAt: first.at,
+    lastAt: list[0].lastAt || list[0].at,
+    sources: sets.source,
+    // Req-shaped on purpose: everything that reads a requirement can read this
+    // instead without learning a second shape.
+    req: {
+      deal, category,
+      config: sets.config, locality: sets.locality,
+      interest: sets.interest, subtype: sets.subtype,
+      minBudget: min, maxBudget: max,
+    },
+  };
+}
+
+/** The accumulated ask for one lead, straight from its enquiry rows. */
+export async function enquirySpanForLead(leadId: string): Promise<any | null> {
+  return enquiryRollup(await getEnquiriesForLead(leadId).catch(() => []));
 }
 
 // ============================================================================

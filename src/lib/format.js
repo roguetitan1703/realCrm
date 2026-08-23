@@ -332,7 +332,10 @@ export function reqConfigLabel(req) {
   if (f.category === 'commercial') {
     return labelOf(SUBTYPES.commercial, f.subtype) || 'Commercial'
   }
-  return req.config || (f.bhk ? labelOf(BHK, f.bhk) : null)
+  // The current one, plainly. A requirement that has accumulated several is
+  // shown in full on the record sheet, never crammed into a line that has to
+  // stay one line.
+  return asList(req.config)[0] || (f.bhk ? labelOf(BHK, f.bhk) : null)
 }
 
 export function reqLine(req) {
@@ -398,7 +401,7 @@ export function fitReasons(p, req) {
   if (f.bhkMatch) { reasons.push({ ok: true, t: 'Config matches (' + configLabel(p) + ')' }); score += 25 }
   else if (f.subtypeMatch) { reasons.push({ ok: true, t: labelOf(SUBTYPES[propFacets(p).category] || SUBTYPES.residential, propFacets(p).subtype) + ' as asked' }); score += 15 }
   else if (f.categoryMatch && f.want.category === 'commercial') { score += 15 }
-  if (p.locality === req.locality) { reasons.push({ ok: true, t: 'Same locality · ' + req.locality }); score += 30 }
+  if (localityFit(p, req)) { reasons.push({ ok: true, t: 'Same locality · ' + p.locality }); score += 30 }
   else { reasons.push({ ok: false, t: 'Different area (' + p.locality + ')' }); score += 8 }
   // A BUDGET IS USUALLY ONE NUMBER. This tested `price >= min && price <= max`,
   // so a requirement with only a ceiling — which is how a budget is actually
@@ -448,23 +451,108 @@ export function fitReasons(p, req) {
 // using the same normalisers, so the two sides can finally be compared.
 const COMMERCIAL_WORDS = /\b(commercial|office|shop|showroom|warehouse|godown|industrial|coworking|co-working|retail)\b/i
 
+// ============================================================================
+// A FIELD THAT ACCUMULATES — one value or several, read the same way
+// ============================================================================
+// Someone who enquires twice about two projects has said two things, and the
+// requirement carries both. Every reader of those fields goes through these,
+// so a list cannot reach a screen as "Green VistasGreen Cove" — which is what
+// JSX does with an array, and what the record header was doing.
+
+/** Whatever a field holds, as a list of distinct values. Latest first, blanks
+ *  dropped, nested lists flattened — a caller assembling "the lead's own value
+ *  plus its history" hands us a list inside a list, and String() on that joins
+ *  it with a comma into one value nobody asked for. Deduplicated here, once, so
+ *  no caller has to remember that its two sources overlap: they always do, the
+ *  lead's current requirement having come from one of the enquiries. */
+export function asList(v) {
+  if (v == null || v === '') return []
+  const out = []
+  const walk = (x) => {
+    if (x == null || x === '') return
+    if (Array.isArray(x)) { x.forEach(walk); return }
+    const s = String(x).trim()
+    if (s && !out.includes(s)) out.push(s)
+  }
+  walk(v)
+  return out
+}
+
+/** The current answer and how many others there have been: "Green Vistas +2".
+ *  For a card, a row or the record header — anywhere the line has to stay one
+ *  line. The full set is on the record sheet. */
+export function latestPlus(v) {
+  const l = asList(v)
+  if (!l.length) return null
+  return l.length === 1 ? l[0] : `${l[0]} +${l.length - 1}`
+}
+
+/** Every value, for the sheet — the one place that shows all of them. */
+export function allOf(v) {
+  return asList(v).join(', ') || ''
+}
+
+/**
+ * EVERYTHING THIS PERSON HAS ASKED FOR — the lead's own requirement widened by
+ * their enquiry history, which the server rolls up in one place
+ * (`enquiryRollup`). Matching runs on this: a buyer who enquired at ₹68L and
+ * again at ₹95L is looking across that range, and scoring only the latest point
+ * hides every flat between.
+ *
+ * The lead's own value leads each list — it is the current ask, and where an
+ * agent has typed one it beats what a portal sent.
+ */
+export function askedFor(lead) {
+  const req = lead?.req || {}
+  const roll = lead?.enquiryRollup?.req
+  if (!roll) return req
+  const both = (a, b) => [...new Set([...asList(a), ...asList(b)])]
+  const nums = (...v) => v.map(x => parseBudgetNum(x)).filter(n => !isNaN(n) && n > 0)
+  const lo = nums(req.minBudget ?? req.budgetMin, roll.minBudget)
+  const hi = nums(req.maxBudget ?? req.budgetMax ?? req.budget, roll.maxBudget)
+  return {
+    ...req,
+    config: both(req.config, roll.config),
+    locality: both(req.locality, roll.locality),
+    interest: both(req.interest, roll.interest),
+    minBudget: lo.length ? Math.min(...lo) : undefined,
+    maxBudget: hi.length ? Math.max(...hi) : undefined,
+  }
+}
+
+/** Does the listing sit in an area this person has asked about — one area or
+ *  several. `p.locality === req.locality` is false against a list, which is how
+ *  a widened requirement would have scored worse than a narrow one. */
+export function localityFit(p, req) {
+  const want = asList(req?.locality).map(s => s.toLowerCase())
+  if (!want.length || !p?.locality) return false
+  return want.includes(String(p.locality).toLowerCase())
+}
+
 /** A requirement's category / bhk / subtype, from whatever it actually holds. */
 export function reqFacets(req) {
-  if (!req) return { category: null, bhk: null, subtype: null }
+  if (!req) return { category: null, bhk: null, subtype: null, bhks: [] }
   // Everything the person told us, in one string — the config field is where a
   // portal puts "Commercial Office", but the useful word is as often in the
-  // free-text interest or notes.
-  const text = [req.config, req.interest, req.notes].filter(Boolean).join(' ')
+  // free-text interest or notes. Each of the three may be a list.
+  const text = [...asList(req.config), ...asList(req.interest), ...asList(req.notes)].join(' ')
   const category = req.category
     // "0 BHK" is how 99acres describes a showroom: nought bedrooms is not a
     // small flat, it is a building with no bedrooms in it.
     || (COMMERCIAL_WORDS.test(text) || /\b0\s*bhk\b/i.test(text) ? 'commercial' : null)
     || (normaliseBhk(text) ? 'residential' : null)
+  // EVERY CONFIG ASKED FOR, not just one. Somebody who enquired about a 2 BHK
+  // and then a 3 BHK wants either, and reading only the first scores the other
+  // as a miss. `bhk` stays the current one, for the places that name a single
+  // config on a line; `bhks` is what a comparison uses.
+  const bhks = category === 'commercial' ? []
+    : [...new Set(asList(req.config).map(c => normaliseBhk(c)).filter(Boolean))]
   return {
     category,
     // A commercial requirement has no BHK, and reading "0" as one would file a
     // showroom next to studio flats.
-    bhk: category === 'commercial' ? null : normaliseBhk(text),
+    bhk: category === 'commercial' ? null : (bhks[0] || normaliseBhk(text)),
+    bhks: bhks.length ? bhks : (category === 'commercial' ? [] : [normaliseBhk(text)].filter(Boolean)),
     subtype: req.subtype || normaliseSubtype(text, category || 'residential'),
   }
 }
@@ -495,7 +583,8 @@ export function facetFit(p, req) {
   return {
     hard,
     categoryMatch: Boolean(a.category && b.category && a.category === b.category),
-    bhkMatch: Boolean(a.bhk && b.bhk && a.bhk === b.bhk),
+    // ANY config they have asked for, not only the latest one.
+    bhkMatch: Boolean(a.bhk && (b.bhks || []).includes(a.bhk)),
     subtypeMatch: Boolean(a.subtype && b.subtype && a.subtype === b.subtype),
     want: b,
   }

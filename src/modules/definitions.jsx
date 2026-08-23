@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, reqConfigLabel, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
+import { reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -81,7 +81,8 @@ export const LEADS_DEF = {
     l.phone,
     l.email || null,
     reqConfigLabel(l.req) || l.requirement || null,
-    (l.req?.locality || l.locality) ? <span className="rh-loc"><Icon name="mapPin" size={12} className="ic" />{l.req?.locality || l.locality}</span> : null,
+    latestPlus(l.req?.locality || l.locality)
+      ? <span className="rh-loc"><Icon name="mapPin" size={12} className="ic" />{latestPlus(l.req?.locality || l.locality)}</span> : null,
     (l.req?.deal || l.deal) ? <span className={'rh-dealtag' + ((l.req?.deal || l.deal) === 'rent' ? ' rent' : '')}>{labelOf(DEAL_LEAD, l.req?.deal || l.deal)}</span> : null,
     // WHAT THEY ASKED ABOUT — "VTP Aethereus", "Blue Ridge". The list row showed
     // this (reqShort carries it) and the record did not, so opening a lead lost
@@ -93,7 +94,12 @@ export const LEADS_DEF = {
     // so it carries the one an agent reads before dialling. The budget is still
     // on this screen, in the record sheet a few pixels below (req.minBudget /
     // req.maxBudget), which is the single place every field is viewed.
-    l.req?.interest || null,
+    // LATEST, AND HOW MANY MORE. `interest` accumulates — a person who
+    // enquired about two projects carries both — and rendering the array
+    // straight printed them with no separator at all ("Green VistasGreen
+    // Cove"), which reads as one project nobody can find. The full set is on
+    // the record sheet below.
+    latestPlus(l.req?.interest),
     l.req?.timeline || null,
     l.source ? `Via ${l.source}` : null,
   ].filter(Boolean),
@@ -190,7 +196,17 @@ export const LEADS_DEF = {
 
   columns: [
     { key: 'name', label: 'Name', sortable: true, render: (l) => (
-      <div><div className="name">{l.name}</div><div className="sub mono-num">{l.phone}</div></div>
+      <div>
+        <div className="name">
+          {l.name}
+          {/* CAME BACK, and how often. The phone card and the record header
+              have carried this since the sessions existed; the desk's own list
+              — the screen a manager works from — had no sign of it at all.
+              Only above one: every lead has enquired once. */}
+          {l.enquiryCount > 1 && <span className="prow-repeat">{l.enquiryCount}×</span>}
+        </div>
+        <div className="sub mono-num">{l.phone}</div>
+      </div>
     ) },
     { key: 'req', label: 'Requirement', render: (l) => reqShort(l.req) },
     { key: 'budget', label: 'Budget', sortable: true, render: (l) => <Money>{budgetRange(l.req)}</Money> },
@@ -225,10 +241,14 @@ export const LEADS_DEF = {
       const nf = fu ? followUpLabel(fu) : '—'
       return followUpOverdue(fu) ? <Overdue>{nf}</Overdue> : <span className="cell-quiet mono-num">{nf}</span>
     } },
-    // When it arrived. Sortable, because "show me this week's" is the question
-    // it exists to answer, and the server already orders on created_at.
-    { key: 'createdAt', label: 'Received', sortable: true,
-      render: (l) => <span className="cell-quiet">{arrivedOn(l.createdAt) || '—'}</span> },
+    // WHEN THEY LAST ASKED. Sortable, because "show me this week's" is the
+    // question it exists to answer — and a person who enquired again yesterday
+    // is not a three-week-old lead, which is what a column reading only the
+    // arrival date said about the warmest rows on the desk. Falls back to
+    // arrival for a lead whose enquiries predate the table, exactly as the
+    // server's sort does, so the arrow and the cell cannot disagree.
+    { key: 'lastEnquiry', label: 'Last enquiry', sortable: true,
+      render: (l) => <span className="cell-quiet">{arrivedOn(l.lastEnquiryAt || l.createdAt) || '—'}</span> },
   ],
 
   /**
@@ -448,10 +468,12 @@ export const LEADS_DEF = {
         <div className="prow-foot">
           <div className="prow-meta">
             {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
-            {/* When it came in. On a phone this is the difference between
+            {/* When they last asked. On a phone this is the difference between
                 calling a fresh enquiry and calling one that has been sitting
-                three weeks, and the card had no way to tell them apart. */}
-            {l.createdAt && <span className="prow-when">{arrivedOn(l.createdAt)}</span>}
+                three weeks, and the card had no way to tell them apart. Their
+                first arrival is on the record; what the card needs is whether
+                this person is warm now. */}
+            {(l.lastEnquiryAt || l.createdAt) && <span className="prow-when">{arrivedOn(l.lastEnquiryAt || l.createdAt)}</span>}
             {/* The figure, last and quiet. This line has the width — the call
                 and WhatsApp buttons sit to the right of it, not through it —
                 and money on a lead row is a fact you check, never the thing the

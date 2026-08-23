@@ -161,7 +161,21 @@ const outEnq = srcEnq.map((q: any, i: number) => ({
   id: `enq_shape_${String(i).padStart(5, '0')}`, tenant_id: TO_TENANT,
   lead_id: leadId.get(q.lead_id)!, integration_id: null,
   session_key: `${leadId.get(q.lead_id)}_${i}`,
-  first_at: q.first_at, last_at: q.last_at, payload_count: q.payload_count,
+  first_at: q.first_at, last_at: q.last_at,
+  // The payloads the sitting was made of, so the development record shows the
+  // same shape the live one does — a session, and the enquiries inside it.
+  // They carry no names or numbers, only what was asked for, and scrub() takes
+  // anything that slipped into a free-text field anyway. The count comes off
+  // the payloads wherever there are any, so a session on the development desk
+  // cannot claim more enquiries than it can show.
+  payload_count: (q.payloads || []).length || q.payload_count,
+  // Field by field, NOT scrub() over the whole entry: an ISO instant is ten
+  // digits with dashes in it, so the phone pattern rewrote "2026-08-22T…" to
+  // "99XXXXXXXXT…" and every payload line lost its time. Only what a person
+  // could have typed goes through the scrubber.
+  payloads: (q.payloads || []).map((p: any) => ({
+    at: p.at, source: p.source ?? null, req: scrub(p.req || {}),
+  })),
   source: q.source, req: scrub(q.req || {}), enquiry_ids: [], raw_refs: [],
 }));
 

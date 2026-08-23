@@ -777,6 +777,12 @@ async function createLedgerTables(): Promise<void> {
       payload_count INT NOT NULL DEFAULT 1,
       source TEXT,
       req JSONB DEFAULT '{}'::jsonb,
+      -- WHAT THEY OPENED, one entry each, newest last. The session is what a
+      -- human calls an enquiry; the payloads are what it was made of, and the
+      -- record shows them underneath it. Kept here rather than resolved from
+      -- webhook_inbox at read time because data-lifecycle.md purges those
+      -- bodies at 30 days and the history has to outlive them.
+      payloads JSONB DEFAULT '[]'::jsonb,
       -- The portal's own ids, so a retry of one enquiry is recognised as such.
       -- One bhumi enquiry_id was delivered three times.
       enquiry_ids JSONB DEFAULT '[]'::jsonb,
@@ -785,6 +791,10 @@ async function createLedgerTables(): Promise<void> {
       UNIQUE (tenant_id, session_key)
     );
   `;
+  // The table shipped before `payloads` existed, so a database that already
+  // has it needs the column added here — initSchema is the only migration
+  // runner, and migrations/*.sql is documentation.
+  await sql`ALTER TABLE crm_lead_enquiries ADD COLUMN IF NOT EXISTS payloads JSONB DEFAULT '[]'::jsonb;`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lead_enquiries_lead ON crm_lead_enquiries (tenant_id, lead_id, first_at DESC);`;
 
   await sql`CREATE INDEX IF NOT EXISTS idx_activities_agent ON activities (tenant_id, agent_id, type, at DESC);`;

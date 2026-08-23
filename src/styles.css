@@ -2758,13 +2758,27 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 
 /* ---- Enquiry history: what they asked for, each time (repeat-enquiries.md) ---- */
 .enq-list{display:flex;flex-direction:column}
-.enq-row{padding:11px 0}
+.enq-sess{padding:11px 0}
 .enq-when{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--ink)}
-/* How many listings they opened in one sitting — a session, not a visit count. */
+/* How many enquiries one sitting was made of — the lines below are what it
+   counts, so the two can never disagree. */
 .enq-n{font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
-  background:var(--line-2);color:var(--muted);border-radius:5px;padding:2px 6px}
-.enq-req{margin-top:3px;font-size:13px;color:var(--ink-2)}
-.enq-src{margin-top:2px;font-size:11.5px;color:var(--muted)}
+  background:var(--line-2);color:var(--muted);border-radius:5px;padding:2px 6px;white-space:nowrap}
+/* One payload: when, which portal, what it said. Indented under its session so
+   the sitting reads as the thing and the clicks as its parts. */
+.enq-pl{display:flex;align-items:baseline;gap:10px;margin-top:5px;padding-left:12px;
+  border-left:2px solid var(--line-2);font-size:12.5px;color:var(--ink-2)}
+.enq-pl-when{flex:0 0 auto;min-width:62px;color:var(--muted);font-size:11.5px}
+.enq-pl-src{flex:0 0 auto;color:var(--muted);font-size:11.5px}
+.enq-pl-req{min-width:0;flex:1}
+@media (max-width:560px){
+  /* On a phone the three parts stack rather than clip the requirement, which
+     is the half worth reading. The session header wraps as a whole — the count
+     pill pushed the closing time onto its own line beneath the date. */
+  .enq-when{flex-wrap:wrap;row-gap:4px}
+  .enq-pl{flex-wrap:wrap;gap:4px 10px}
+  .enq-pl-req{flex:1 0 100%}
+}
 
 /* Came back. Accent, because it is work waiting — and only ever rendered above
    one, so it never appears on a lead that simply exists. */

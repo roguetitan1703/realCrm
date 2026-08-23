@@ -1,5 +1,5 @@
 import { isOpen } from '../data/leadStatus.js'
-import { budgetOf, facetFit } from './format.js'
+import { askedFor, budgetOf, facetFit, localityFit } from './format.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import {
@@ -11,7 +11,11 @@ import {
 // --- matching ---------------------------------------------------------------
 export function matchesForLead(lead, allProps = []) {
   if (!lead?.req || !allProps?.length) return []
-  const r = lead.req
+  // EVERYTHING THEY HAVE ASKED FOR, not the latest point — 2–3 BHK and
+  // ₹68L–₹95L, where the record shows two enquiries at either end. askedFor()
+  // widens the lead's own requirement by its enquiry history, and it is the
+  // same span the server narrows the book on.
+  const r = askedFor(lead)
   const UNAVAILABLE = ['Sold', 'Leased', 'Off-Market', 'Blocked', 'Closed', 'Let']
   return allProps
     // `p.type === r.config` was a HARD FILTER here: "2 BHK Apartment" against
@@ -27,7 +31,7 @@ export function matchesForLead(lead, allProps = []) {
       const f = facetFit(p, r)
       if (f.bhkMatch) { score += 3; fit.push(labelOf(BHK, f.want.bhk)) }
       else if (f.subtypeMatch) { score += 2 }
-      if (p.locality === r.locality) { score += 3; fit.push(r.locality) }
+      if (localityFit(p, r)) { score += 3; fit.push(p.locality) }
       // budgetOf() reads whichever spelling the record carries — see its note.
       // This compared against r.budgetMin, which no lead has, so `inBudget` was
       // false for every property and the +3 it is worth was never awarded. With
@@ -58,7 +62,9 @@ export function leadsForProperty(property, allLeads = []) {
       const f = facetFit(property, l.req)
       if (f.bhkMatch) { score += 3; fit.push(labelOf(BHK, f.want.bhk)) }
       else if (f.subtypeMatch) { score += 2 }
-      if (l.req.locality === property.locality) { score += 3; fit.push(l.req.locality) }
+      // Through the same comparison as the other direction — a requirement
+      // that names two areas answers a listing in either.
+      if (localityFit(property, l.req)) { score += 3; fit.push(property.locality) }
       const { min: bMin, max: bMax } = budgetOf(l.req)
       const inBudget = property.price >= bMin * 0.95 && property.price <= bMax * 1.08
       if (inBudget) { score += 3; fit.push('budget fits') }

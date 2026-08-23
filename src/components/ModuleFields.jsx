@@ -11,7 +11,7 @@ import {
   BHK_FILTER,
   appliesTo, areaFieldsFor, labelOf, normaliseBhk, normaliseSubtype, optionsOf,
 } from '../data/propertyFields.js'
-import { configLabel, fmtMoney, money, arrivedOn } from '../lib/format.js'
+import { allOf, configLabel, fmtMoney, money, arrivedOn } from '../lib/format.js'
 
 // How soon the lead needs possession. A LEAD-side vocabulary (it describes the
 // buyer's urgency, not the property), so it lives with the lead schema — but
@@ -174,6 +174,18 @@ export function ModuleRecordSheet({ schema, record, store, phone }) {
   )
 }
 
+/** One end of the budget the person has ever asked across — their own stored
+ *  figure and every enquiry's, which is what `enquiryRollup` carries. A missing
+ *  end is not a zero, so nothing is read until it is a real number. */
+function spanEnd(v, rec, end) {
+  const roll = rec?.enquiryRollup?.req
+  const nums = [v, end === 'min' ? roll?.minBudget : roll?.maxBudget]
+    .map(x => (x == null || x === '' ? NaN : Number(x)))
+    .filter(n => isFinite(n) && n > 0)
+  if (!nums.length) return ''
+  return end === 'min' ? Math.min(...nums) : Math.max(...nums)
+}
+
 export const LEAD_MODULE_SCHEMA = {
   id: 'leads',
   moduleName: 'Lead Record',
@@ -188,15 +200,31 @@ export const LEAD_MODULE_SCHEMA = {
     // ever appear here, so they move to the "Details" section instead of a
     // now-empty "Overview" one.
     { key: 'email', label: 'Email Address', type: 'email', section: 'domain' },
-    // When the enquiry arrived. Read-only — a fact about the record, not a
-    // field anyone fills in — and shown with the time, because on the detail
-    // page the question is usually "how fast did we get to this one".
+    // WHEN THEY FIRST CAME, AND WHEN THEY LAST ASKED — two facts, and one row
+    // cannot hold both. The record is where "first received" has to survive:
+    // it is what a portal's own report gets lined up against, while every
+    // other surface now shows the latest enquiry. Read-only, both of them —
+    // facts about the record, not fields anyone fills in.
     {
-      key: 'createdAt', label: 'Received On', type: 'text', section: 'domain', readOnly: true,
+      key: 'createdAt', label: 'First received', type: 'text', section: 'domain', readOnly: true,
+      renderValue: (v) => (v ? arrivedOn(v, { withTime: true }) : ''),
+    },
+    {
+      key: 'enquiryRollup.lastAt', label: 'Last enquiry', type: 'text', section: 'domain', readOnly: true,
+      // Only where they have come back. On a lead that has enquired once this
+      // is the row above wearing a second name, and the sheet would be saying
+      // the same instant twice.
+      when: (rec) => (rec?.enquiryRollup?.sessions || 0) > 1,
       renderValue: (v) => (v ? arrivedOn(v, { withTime: true }) : ''),
     },
     {
       key: 'source', label: 'Attribution Source', type: 'select', section: 'domain',
+      // EVERY PORTAL THEY HAVE COME THROUGH. `source` on the lead is where it
+      // ARRIVED from and is never overwritten — that is the attribution. The
+      // sheet is the one place with room for all of them, so it names the rest
+      // too: a buyer who came through 99acres and then Property Circle is a
+      // fact the desk pays for twice and could not see once.
+      renderValue: (v, rec) => allOf([v, ...(rec?.enquiryRollup?.sources || [])]) || '',
       // The firm's own configured source list (Settings), not a fixed guess —
       // this used to be a hardcoded ['Website','99acres',...] that never
       // matched what Settings actually offered, AND had no entry for
@@ -259,13 +287,19 @@ export const LEAD_MODULE_SCHEMA = {
     // used the deal-blind formatter, so a rental lead's ₹45,00,000 read "₹45L"
     // here and "₹4500k/mo" in the list — the same number, two units, on one
     // screen. A rent figure without "/mo" is a different claim entirely.
+    // THE SPAN ACROSS EVERY ENQUIRY, not the last figure sent. Each number a
+    // portal delivers is the asking price of the listing that was opened —
+    // ₹24,999 then ₹25,000 then ₹29,999 is one person looking at ₹25–30k, and
+    // reading the newest as their budget lands on whichever flat they happened
+    // to open last. This is also the range the matcher runs on (askedFor), so
+    // the sheet and the suggestions describe the same person.
     {
       key: 'req.minBudget', label: 'Budget From', type: 'money', section: 'domain',
-      renderValue: (v, rec) => money(v, { perMonth: (rec?.req?.deal || rec?.deal) === 'rent' }),
+      renderValue: (v, rec) => money(spanEnd(v, rec, 'min'), { perMonth: (rec?.req?.deal || rec?.deal) === 'rent' }),
     },
     {
       key: 'req.maxBudget', label: 'Budget To', type: 'money', section: 'domain',
-      renderValue: (v, rec) => money(v, { perMonth: (rec?.req?.deal || rec?.deal) === 'rent' }),
+      renderValue: (v, rec) => money(spanEnd(v, rec, 'max'), { perMonth: (rec?.req?.deal || rec?.deal) === 'rent' }),
     },
     // WHAT KIND OF THING THEY WANT — the same two fields a listing carries.
     //
@@ -299,6 +333,9 @@ export const LEAD_MODULE_SCHEMA = {
     // first, then anything the live inventory actually holds.
     {
       key: 'req.config', label: 'Requirement Config', type: 'select', section: 'domain',
+      // Every configuration they have asked for. "2 BHK, 3 BHK" is a real
+      // answer, and it is the one the matcher scores against.
+      renderValue: (v, rec) => allOf([v, ...(rec?.enquiryRollup?.req?.config || [])]),
       options: (store) => {
         const fromStock = store?.state?.configs || []
         const canonical = BHK_FILTER.flatMap(b =>
@@ -310,6 +347,7 @@ export const LEAD_MODULE_SCHEMA = {
     },
     {
       key: 'req.locality', label: 'Preferred Locality', type: 'select', section: 'domain',
+      renderValue: (v, rec) => allOf([v, ...(rec?.enquiryRollup?.req?.locality || [])]),
       // The localities you actually hold stock in, plus the ones leads ask for.
       options: (store) => (store?.state?.localities || []).map(v => ({ value: v, label: v })),
     },
@@ -326,7 +364,13 @@ export const LEAD_MODULE_SCHEMA = {
     // the agent's. It is NOT a link to a listing: on an imported sheet there
     // usually is no matching listing, and a picker with nothing to pick drops
     // the information altogether. Attaching a real property is the shortlist.
-    { key: 'req.interest', label: 'Property Interested', type: 'textarea', section: 'domain' },
+    // EVERY PROJECT THEY HAVE ASKED ABOUT. Somebody comparing Green Vistas and
+    // Green Cove is telling you something, and one of the two names was being
+    // dropped — or worse, printed joined to the other with no separator.
+    {
+      key: 'req.interest', label: 'Property Interested', type: 'textarea', section: 'domain',
+      renderValue: (v, rec) => allOf([v, ...(rec?.enquiryRollup?.req?.interest || [])]),
+    },
     { key: 'req.notes', label: 'Requirement Notes & Purpose', type: 'textarea', section: 'domain' }
   ]
 }

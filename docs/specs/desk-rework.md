@@ -252,7 +252,7 @@ Dependency order, not priority. Steps 2–5 all read what step 1 defines.
 |---|---|---|---|---|
 | 1 | Contact predicate + segment catalogue | — | §1, A | **done** `19287fb` |
 | 2 | Facet counts + filter controls | 1 | B | **done** |
-| 3 | The enquiry model | — | C | todo |
+| 3 | The enquiry model | — | C | **done** |
 | 4 | Timeline and reopening | 3 | D, E | todo |
 | 5 | Settings | 1 | F | todo |
 | 6 | WhatsApp templates | — | G | todo |
@@ -288,6 +288,47 @@ with stage counts summing to 51; list total == summary total at every step; the
 Agent facet held its full counts while agent was selected; `source=Website` (3)
 left six zero pills on screen and disabled; the phone row scrolled 0→470 with the
 tapped pill fully visible; no console errors.
+
+**Step 3 — 23 Aug 2026.** `crm_lead_enquiries` gained `payloads`: the session
+kept a count of the enquiries it was made of and not the enquiries, so the
+record could say "2 enquiries in this visit" with nothing underneath it. The
+payloads are stored rather than resolved from `webhook_inbox` at read time,
+because data-lifecycle purges those bodies at 30 days and the history has to
+outlive them. `payload_count` is now written as the length of that list — it was
+`payload_count + 1`, a second answer to "how many", and two backends replaying
+the same inbox rows left a session claiming 8 payloads over 6 lines.
+
+`enquiryRollup()` is the one derivation of the whole ask — sets latest-first for
+source, config, locality and property interested; the budget span; first and
+last. The record sheet reads it, the header reads its first value and a `+N`,
+`getLeadCandidates` narrows on the span and `askedFor()` scores on it, so the
+suggestions and the sheet describe the same person. `facetFit` matches any
+config asked for rather than the latest, and locality compares through one
+helper that reads a value or a list.
+
+The rebuild deletes only what it can rebuild — a session with a purged payload
+keeps its count and its span rather than being replaced by nothing.
+
+Removed: the `N listings` pill, the `90% match` on the record, the `% fit` on
+Attach a property and the `82% match` tag in the WhatsApp composer. The record
+header printed two property values with no separator at all — an array rendered
+straight — and now reads `Godrej Green Vistas +1`, the set being on the sheet.
+The list's time column is `Last enquiry`, sorted on the same expression it
+renders.
+
+Verified in a browser (293-lead shape clone, 1440×900 + iPhone 13, `delpat` on
+development): a lead with 2 sessions over 5 payloads renders 2 sessions and 5
+lines, the badge says `2 enquiries`, Details reads Attribution Source `99acres,
+Property Circle` · Config `2 BHK, 3 BHK` · Property Interested `Godrej Green
+Vistas, Godrej Green Cove` · Budget To `₹95L` · First received `16 Aug, 10:17
+pm` · Last enquiry `Yesterday, 11:28 pm`. The Came back segment opened 20 rows
+each carrying a repeat badge. No `% match` or `N listings` anywhere on the list
+or the record. On the phone all 5 payload lines sit inside 390px and the body
+does not scroll sideways. No console errors.
+
+The dev desk was re-cloned so its sessions carry payloads
+(`shape-clone-to-dev.ts`), which also fixed the scrubber rewriting ISO instants:
+`2026-08-22T…` matched its phone pattern and every payload line lost its time.
 
 ---
 
