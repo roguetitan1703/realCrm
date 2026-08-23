@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { StageTag, StatusTag, Avatar, Button, KV } from '../components/primitives.jsx'
-import { initials, reqLine, budgetRange } from '../lib/format.js'
+import { allOf, initials, latestPlus, reqLine, budgetRange } from '../lib/format.js'
 import { CLIENTS_DEF } from './definitions.jsx'
 import { api } from '../lib/api.js'
 import { useServerList } from '../lib/serverList.js'
@@ -50,7 +50,11 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
   const rows = (source.rows || []).map(r => ({
     ...r,
     detail: r.kind === 'demand'
-      ? [r.rawLead?.req?.config, r.rawLead?.req?.locality, budgetRange(r.rawLead?.req)].filter(Boolean).join(' · ')
+      // latestPlus, not the raw field: a requirement that has accumulated
+      // renders as a comma-mashed run of values in a row that must stay one
+      // line. Same reading as the Leads list, so one person cannot be
+      // described two ways on two screens.
+      ? [latestPlus(r.rawLead?.req?.config), latestPlus(r.rawLead?.req?.locality), budgetRange(r.rawLead?.req)].filter(Boolean).join(' · ')
       : r.listings === 1
         ? `1 listing · ${r.firstTitle || ''}${r.firstType ? ` (${r.firstType})` : ''}`
         : `${r.listings} listings across ${(r.localities || []).join(', ')}`,
@@ -124,8 +128,8 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
               render: () => selClient.kind === 'demand' && selClient.rawLead ? (
                 <div className="cli-portfolio">
                   <KV items={[
-                    { k: 'Looking for', v: `${selClient.rawLead.req?.config || 'Any'} · ${selClient.rawLead.req?.deal || 'sale'}` },
-                    { k: 'Preferred locality', v: selClient.rawLead.req?.locality || '—' },
+                    { k: 'Looking for', v: `${allOf(selClient.rawLead.req?.config) || 'Any'} · ${selClient.rawLead.req?.deal || 'sale'}` },
+                    { k: 'Preferred locality', v: allOf(selClient.rawLead.req?.locality) || '—' },
                     { k: 'Current stage', v: selClient.rawLead.stage || 'New' },
                   ]} />
                   <Button variant="secondary" onClick={() => go('leads', { leadId: selClient.rawLeadId, leadOpen: true })}>

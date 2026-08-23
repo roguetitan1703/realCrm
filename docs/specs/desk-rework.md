@@ -330,6 +330,41 @@ The dev desk was re-cloned so its sessions carry payloads
 (`shape-clone-to-dev.ts`), which also fixed the scrubber rewriting ISO instants:
 `2026-08-22T…` matched its phone pattern and every payload line lost its time.
 
+**Step 3, second pass — the readers, not just the two the example named.**
+`latest +N` was applied to the record header and nowhere else, so the card and
+the desk list — which both go through `reqShort()` — still printed
+`Godrej Green VistasGodrej Green Cove`. Fixed there, and swept: Contacts' row
+and its detail, the interested-buyer rows on a listing and in the WhatsApp
+composer, the client-facing `followUpMessage` (which would have said "a 2
+BHK,3 BHK in Mahalunge,Wakad" to a buyer), the locality predicate in
+`rowMatch`, the locality that goes into the attach-property query, and the
+in-memory search in `routes/records.ts`, where an array would have been a 500
+rather than a missed match. The third raw locality compare — the one deciding a
+visit count sent to an owner — now goes through `localityFit` like the other
+two.
+
+**The order was wrong, and it was ours.** `mergeRepeatReq` appends, so the
+lead's list is oldest-first; the rollup was building its sets newest-first. One
+concept, two orders — `latest +N` was labelling the OLDEST project as the
+latest. Arrival order is now canonical in both, `latestOf()` is the single
+reader of "which one is it now", and the sheet prints the list in the order the
+person asked.
+
+**Editing a lead destroyed the accumulation.** `ModuleFormModal` put the array
+into a text box (`A,B,C`) and saved that string back as one value, so opening
+Edit and pressing Save flattened the history without anybody typing. A schema
+field can now declare `toForm`/`fromForm`; `req.interest` uses the one
+`listText`/`textList` pair, and so does the quick-add form.
+
+Verified in a browser on a lead carrying three projects: the list row reads
+`3 BHK · Buy · Mahalunge · Up to ₹95L · VTP Belair +2`, the header the same, the
+sheet all three in order, the edit box `Godrej Green Vistas, Godrej Green Cove,
+VTP Belair` — and after **Save changes** with nothing typed, the stored value is
+still the three-element list. Contacts reads the same. No console errors.
+
+`docs/specs/repeat-enquiries.md` is **deleted** — superseded by §2 and C here,
+and its §8b contradicted E. The code comments that cited it now cite this file.
+
 ---
 
 ## Carried forward, unchanged

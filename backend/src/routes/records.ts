@@ -52,7 +52,9 @@ recordsRouter.get('/', async (req: Request, res: Response) => {
         records = records.filter(l =>
           (l.name && l.name.toLowerCase().includes(s)) ||
           (l.phone && l.phone.includes(s)) ||
-          (l.req?.locality && l.req.locality.toLowerCase().includes(s))
+          // String(), because a requirement field can hold several values and
+          // calling toLowerCase on an array is a 500, not a missed match.
+          (l.req?.locality && String(l.req.locality).toLowerCase().includes(s))
         );
       }
     } else if (moduleKey === 'properties') {

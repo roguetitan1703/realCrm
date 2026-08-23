@@ -752,7 +752,7 @@ async function createLedgerTables(): Promise<void> {
   // Drives the derived "visits to this unit" view without scanning JSONB.
   await sql`CREATE INDEX IF NOT EXISTS idx_activities_property ON activities (tenant_id, property_id) WHERE property_id IS NOT NULL;`;
 
-  // 📨 ENQUIRY SESSIONS (docs/specs/repeat-enquiries.md)
+  // 📨 ENQUIRY SESSIONS (docs/specs/desk-rework.md §2, C)
   //
   // One row per SESSION, not per payload. A person clicking "contact" on four
   // listings in five minutes has enquired once — 8 of 33 consecutive gaps from

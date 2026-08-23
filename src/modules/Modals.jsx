@@ -6,7 +6,7 @@ import { theme } from '../data/theme.js'
 // every money field's onBlur and the lead form's save were one ReferenceError
 // waiting for someone to type a budget. Plain JSX, so the build never said a
 // word about it.
-import { budgetRange, reqLine, reqShort, hasBudget, initials, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho } from '../lib/format.js'
+import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink, followUpMessage } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -114,7 +114,18 @@ function ModuleFormModal({ store, moduleId, recordId }) {
   const record = moduleId === 'properties'
     ? store.lookup('property', recordId)
     : store.lookup('lead', recordId)
-  const [form, setForm] = useState(() => record ? JSON.parse(JSON.stringify(record)) : {})
+  // A field may hold a shape a text box cannot carry — `req.interest` is one or
+  // several projects — so the schema declares how it goes in (`toForm`) and how
+  // it comes back (`fromForm`). Applied here, once, rather than in each of the
+  // two editors.
+  const [form, setForm] = useState(() => {
+    if (!record) return {}
+    let f = JSON.parse(JSON.stringify(record))
+    for (const fd of (MODULE_DEFINITIONS[moduleId]?.schema?.fields || [])) {
+      if (fd.toForm) f = setNestedValue(f, fd.key, fd.toForm(getNestedValue(f, fd.key)))
+    }
+    return f
+  })
   if (!def || !record) return null
 
   // Honour the same applicability predicate the record sheet and the add form
@@ -140,7 +151,7 @@ function ModuleFormModal({ store, moduleId, recordId }) {
   const save = () => {
     const patch = {}
     for (const f of fields) {
-      const v = getNestedValue(form, f.key)
+      const v = f.fromForm ? f.fromForm(getNestedValue(form, f.key)) : getNestedValue(form, f.key)
       // rebuild nested patch (e.g. req.config) into nested shape
       if (f.key.includes('.')) {
         const [head, ...rest] = f.key.split('.')
@@ -418,7 +429,9 @@ function AttachPropModal({ store, leadId }) {
   const facets = reqFacets(req)
   const known = {
     deal: req.deal || undefined,
-    locality: req.locality || undefined,
+    // ONE value: this goes into a query parameter, and a list would reach the
+    // API as "Mahalunge,Wakad" and narrow the inventory to nothing.
+    locality: latestOf(req.locality) || undefined,
     category: facets.category || undefined,
     bhk: facets.bhk || undefined,
     subtype: facets.subtype || undefined,
@@ -614,7 +627,7 @@ function PickBuyerModal({ store, propId }) {
             <span className="av av-md" style={{ background: 'var(--chrome)' }}>{initials(b.lead.name)}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 13.5 }}>{b.lead.name}{i === 0 && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-wash)', borderRadius: 4, padding: '2px 6px', marginLeft: 7 }}>BEST FIT</span>}</div>
-              <div className="u-muted" style={{ fontSize: 12 }}>{b.lead.req.config} · {b.lead.req.locality} · {b.fitLine}</div>
+              <div className="u-muted" style={{ fontSize: 12 }}>{[latestPlus(b.lead.req.config), latestPlus(b.lead.req.locality), b.fitLine].filter(Boolean).join(' · ')}</div>
             </div>
             <Icon name="wa" size={18} style={{ color: 'var(--accent)', flexShrink: 0 }} />
           </button>
@@ -661,7 +674,12 @@ function NewLeadModal({ store, leadId }) {
     locality: edit.req?.locality || edit.locality || '',
     minBudget: edit.req?.minBudget ?? edit.req?.budgetMin ?? '',
     maxBudget: edit.req?.maxBudget ?? edit.req?.budgetMax ?? '',
-    interest: edit.req?.interest || '',
+    // A LIST HAS TO SURVIVE BEING EDITED. `interest` accumulates — a buyer who
+    // enquired about two projects carries both — and putting the array into a
+    // text input rendered "A,B" and saved it back as one value, so opening Edit
+    // and pressing Save destroyed the accumulation without anybody typing.
+    // Shown as "A, B" and read back through the same separator.
+    interest: listText(edit.req?.interest),
     timeline: edit.req?.timeline || 'Immediate',
     source: edit.source || 'Website',
     agentId: edit.agentId || null,
@@ -722,7 +740,7 @@ function NewLeadModal({ store, leadId }) {
           deal: f.deal,
           config: f.config,
           locality: f.locality,
-          interest: f.interest.trim() || undefined,
+          interest: textList(f.interest),
           timeline: f.timeline,
           purpose: f.notes.trim() || (f.deal === 'rent' ? 'Lease' : 'Self Use'),
           notes: f.notes.trim() || undefined,
@@ -749,7 +767,7 @@ function NewLeadModal({ store, leadId }) {
           deal: f.deal,
           config: f.config,
           locality: f.locality,
-          interest: f.interest.trim() || undefined,
+          interest: textList(f.interest),
           purpose: f.notes.trim() || (f.deal === 'rent' ? 'Lease' : 'Self Use'),
           notes: f.notes.trim() || undefined,
           timeline: f.timeline,

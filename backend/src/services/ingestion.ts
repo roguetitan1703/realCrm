@@ -536,7 +536,7 @@ export async function processInboxRow(
         // created" three times for one buyer who exists once.
         // The enquiry itself, recorded as history rather than only narrated in
         // a note. Additive: it changes nothing above it. Sessions, not payloads
-        // — see docs/specs/repeat-enquiries.md.
+        // — see docs/specs/desk-rework.md §2.
         const session = await recordEnquiry({
           leadId: existing.id, at: (lead as any).receivedAt || undefined,
           source: integration.provider, integrationId: integration.id,

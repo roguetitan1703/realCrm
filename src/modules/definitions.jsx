@@ -24,7 +24,7 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
+import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -175,8 +175,12 @@ export const LEADS_DEF = {
     if (key === 'locality') {
       return vals.some(loc => {
         const target = String(loc).toLowerCase().split('/')[0].trim()
-        const leadLoc = String(l.req?.locality || '').toLowerCase()
-        return leadLoc.includes(target) || target.includes(leadLoc)
+        // Every locality on record, not String() over a list — that renders
+        // "mahalunge,wakad", which contains neither name as a whole.
+        return asList(l.req?.locality).some(loc => {
+          const leadLoc = loc.toLowerCase()
+          return leadLoc.includes(target) || target.includes(leadLoc)
+        })
       })
     }
     if (key === 'flag') {

@@ -1,5 +1,5 @@
 import { isOpen } from '../data/leadStatus.js'
-import { askedFor, budgetOf, facetFit, localityFit } from './format.js'
+import { askedFor, budgetOf, facetFit, latestOf, localityFit } from './format.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import {
@@ -83,8 +83,10 @@ export function ownerUpdateMessage(property, allLeads = [], firmName = tenantFir
   const partyWord = p.deal === 'rent' ? 'tenants' : 'buyers'
   // Third copy of the same never-true compare — this one decided a number sent
   // to the OWNER in a WhatsApp message, so it reported 0 visits forever.
+  // Through localityFit like the other two — this was the last raw compare of
+  // the three, and it decides a number sent to the OWNER in a WhatsApp message.
   const visits = allLeads.filter(l => l.stage === 'Site Visit' &&
-    l.req?.deal === p.deal && l.req?.locality === p.locality && !facetFit(p, l.req).hard).length
+    l.req?.deal === p.deal && localityFit(p, l.req) && !facetFit(p, l.req).hard).length
   const L = []
   L.push(`Namaste ${p.owner || 'Sir/Ma\'am'} ji,`)
   L.push('')
@@ -431,10 +433,15 @@ export function followUpMessage(lead, firmName = tenantFirm(), opts = {}) {
     || 'Hello {name}, I received your inquiry for a {requirement} in {locality} via {source}. I am reaching out from {firmName}. We have several excellent options matching your preferences. When would be a convenient time to connect over a quick call?'
 
   const firstName = String(lead.name || 'there').trim().split(' ')[0]
-  const configLabel = labelOf(BHK, lead.req?.config) || lead.req?.config || ''
+  // ONE VALUE EACH, because this is a sentence sent to the buyer. An
+  // accumulating field rendered straight would say "a 2 BHK,3 BHK in
+  // Mahalunge,Wakad" to a client, and a "+1" is desk shorthand that means
+  // nothing to them — so the message names the current ask and no more.
+  const config = latestOf(lead.req?.config) || ''
+  const configLabel = labelOf(BHK, config) || config
   const dealLabel = lead.req?.deal ? (lead.req.deal === 'rent' ? 'Rent' : 'Sale') : ''
   const reqStr = [configLabel, dealLabel].filter(Boolean).join(' ') || 'property'
-  const locStr = lead.req?.locality || 'your preferred location'
+  const locStr = latestOf(lead.req?.locality) || 'your preferred location'
   const sourceStr = lead.source || 'our portal'
   const firm = firmName || 'our team'
 

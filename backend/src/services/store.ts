@@ -4465,7 +4465,7 @@ export async function updateTimelineEvent(
 
 
 // ============================================================================
-// 📨 ENQUIRY SESSIONS — docs/specs/repeat-enquiries.md, phase 1
+// 📨 ENQUIRY SESSIONS — docs/specs/desk-rework.md §2 and C
 // ============================================================================
 // Records what was asked for and when. Changes NOTHING about the lead: the
 // requirement, the name, the stage and the routing are all left exactly as the
@@ -4906,8 +4906,11 @@ export async function getEnquiriesForLead(leadId: string): Promise<any[]> {
  * so it cannot drift from the history it is built out of.
  *
  * Replacing fields (deal) take the latest. Accumulating fields keep every
- * distinct value, LATEST FIRST — the header shows the first of them and how
- * many more there are, the sheet shows all of them. Budget is the span across
+ * distinct value IN ARRIVAL ORDER, oldest first — the same order
+ * `mergeRepeatReq` writes into the lead's own requirement, so the two cannot
+ * disagree about which end is current. The client reads the last entry as the
+ * current one (`latestOf`) and prints the whole list in this order on the
+ * sheet, where it reads as the history it is. Budget is the span across
  * everything ever asked, which is what matching runs on: someone who enquired
  * at ₹68L and again at ₹95L is looking in that range, not at whichever listing
  * they happened to open last.
@@ -4917,10 +4920,12 @@ export async function getEnquiriesForLead(leadId: string): Promise<any[]> {
  */
 export function enquiryRollup(enquiries: any[]): any | null {
   if (!enquiries?.length) return null;
-  // Newest first, which is the order the caller already gets them in — restated
-  // here so the function does not depend on it.
+  // OLDEST FIRST, deliberately — the accumulating sets below are built by
+  // walking forwards in time, so their order is the order the person asked in
+  // and matches what mergeRepeatReq stores on the lead. `firstAt` and `lastAt`
+  // are read off the ends.
   const list = [...enquiries].sort((a, b) =>
-    new Date(b.lastAt || b.at).getTime() - new Date(a.lastAt || a.at).getTime());
+    new Date(a.lastAt || a.at).getTime() - new Date(b.lastAt || b.at).getTime());
 
   const sets: Record<string, string[]> = { source: [], interest: [], config: [], locality: [], subtype: [] };
   const push = (key: string, v: any) => {
@@ -4941,16 +4946,17 @@ export function enquiryRollup(enquiries: any[]): any | null {
     const hi = r.maxBudget == null || r.maxBudget === '' ? null : Number(r.maxBudget);
     if (lo != null && isFinite(lo)) min = min == null ? lo : Math.min(min, lo);
     if (hi != null && isFinite(hi)) max = max == null ? hi : Math.max(max, hi);
-    if (!deal && r.deal) deal = r.deal;
-    if (!category && r.category) category = r.category;
+    // Latest wins, and we are walking forwards, so the last one to speak sets it.
+    if (r.deal) deal = r.deal;
+    if (r.category) category = r.category;
   }
 
-  const first = list[list.length - 1];
+  const newest = list[list.length - 1];
   return {
     sessions: list.length,
     payloads: list.reduce((n, e) => n + (e.payloadCount || 1), 0),
-    firstAt: first.at,
-    lastAt: list[0].lastAt || list[0].at,
+    firstAt: list[0].at,
+    lastAt: newest.lastAt || newest.at,
     sources: sets.source,
     // Req-shaped on purpose: everything that reads a requirement can read this
     // instead without learning a second shape.

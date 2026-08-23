@@ -335,12 +335,12 @@ export function reqConfigLabel(req) {
   // The current one, plainly. A requirement that has accumulated several is
   // shown in full on the record sheet, never crammed into a line that has to
   // stay one line.
-  return asList(req.config)[0] || (f.bhk ? labelOf(BHK, f.bhk) : null)
+  return latestOf(req.config) || (f.bhk ? labelOf(BHK, f.bhk) : null)
 }
 
 export function reqLine(req) {
   if (!req) return 'General inquiry'
-  const parts = [reqConfigLabel(req), req.locality, budgetRange(req)].filter(x => x && x !== 'undefined' && x !== 'null')
+  const parts = [reqConfigLabel(req), latestPlus(req.locality), budgetRange(req)].filter(x => x && x !== 'undefined' && x !== 'null')
   return parts.join(' · ') || 'General inquiry'
 }
 
@@ -369,12 +369,16 @@ export function reqShort(req, { budget = true } = {}) {
   // ellipsis-clipped, so the duplicate costs `interest` (last in the join) the
   // room to render at all.
   const money = budget ? budgetRange(req) : null
+  // LATEST, AND HOW MANY MORE — this is a card and a list row, both of them one
+  // clipped line, and an accumulating field rendered straight joins its values
+  // with a comma into something that reads as one project nobody can find. The
+  // full set is on the record sheet.
   const parts = [
     reqConfigLabel(req),
     deal,
-    req.locality,
+    latestPlus(req.locality),
     money && money !== '—' ? money : null,
-    req.interest,
+    latestPlus(req.interest),
   ].filter(x => x && x !== 'undefined' && x !== 'null')
   return parts.join(' · ') || 'General inquiry'
 }
@@ -459,8 +463,10 @@ const COMMERCIAL_WORDS = /\b(commercial|office|shop|showroom|warehouse|godown|in
 // so a list cannot reach a screen as "Green VistasGreen Cove" — which is what
 // JSX does with an array, and what the record header was doing.
 
-/** Whatever a field holds, as a list of distinct values. Latest first, blanks
- *  dropped, nested lists flattened — a caller assembling "the lead's own value
+/** Whatever a field holds, as a list of distinct values, IN STORED ORDER —
+ *  which is oldest first: `mergeRepeatReq` appends each new value as it
+ *  arrives, so the last entry is the current one. Blanks dropped, nested lists
+ *  flattened — a caller assembling "the lead's own value
  *  plus its history" hands us a list inside a list, and String() on that joins
  *  it with a comma into one value nobody asked for. Deduplicated here, once, so
  *  no caller has to remember that its two sources overlap: they always do, the
@@ -478,18 +484,44 @@ export function asList(v) {
   return out
 }
 
-/** The current answer and how many others there have been: "Green Vistas +2".
+/** THE CURRENT VALUE of an accumulating field — the last one recorded, because
+ *  the list is written in arrival order. Every "which one is it now" reader
+ *  goes through this, so the header, the card, the list and a client-facing
+ *  message cannot each pick a different end of the same array. */
+export function latestOf(v) {
+  const l = asList(v)
+  return l.length ? l[l.length - 1] : null
+}
+
+/** The current answer and how many others there have been: "Green Cove +2".
  *  For a card, a row or the record header — anywhere the line has to stay one
- *  line. The full set is on the record sheet. */
+ *  line. The full set, in the order it was asked, is on the record sheet. */
 export function latestPlus(v) {
   const l = asList(v)
   if (!l.length) return null
-  return l.length === 1 ? l[0] : `${l[0]} +${l.length - 1}`
+  return l.length === 1 ? l[0] : `${l[l.length - 1]} +${l.length - 1}`
 }
 
 /** Every value, for the sheet — the one place that shows all of them. */
 export function allOf(v) {
   return asList(v).join(', ') || ''
+}
+
+/**
+ * AN ACCUMULATING FIELD IN AND OUT OF A TEXT BOX — one pair, because a form
+ * that reads a list one way and writes it back another destroys it.
+ *
+ * Putting the array straight into an input renders "A,B,C" and saves that back
+ * as a single value, so opening Edit and pressing Save flattened a buyer's
+ * whole enquiry history without anybody typing a character. Shown as "A, B, C"
+ * and read back through the same separator, so the field survives a round trip
+ * untouched and typing ", VTP Belair" adds a fourth rather than a sentence.
+ */
+export const listText = (v) => asList(v).join(', ')
+export function textList(s) {
+  const list = asList(String(s ?? '').split(','))
+  if (!list.length) return undefined
+  return list.length === 1 ? list[0] : list
 }
 
 /**

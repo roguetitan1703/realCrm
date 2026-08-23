@@ -11,7 +11,7 @@ import {
   BHK_FILTER,
   appliesTo, areaFieldsFor, labelOf, normaliseBhk, normaliseSubtype, optionsOf,
 } from '../data/propertyFields.js'
-import { allOf, configLabel, fmtMoney, money, arrivedOn } from '../lib/format.js'
+import { allOf, configLabel, fmtMoney, listText, money, textList, arrivedOn } from '../lib/format.js'
 
 // How soon the lead needs possession. A LEAD-side vocabulary (it describes the
 // buyer's urgency, not the property), so it lives with the lead schema — but
@@ -370,6 +370,11 @@ export const LEAD_MODULE_SCHEMA = {
     {
       key: 'req.interest', label: 'Property Interested', type: 'textarea', section: 'domain',
       renderValue: (v, rec) => allOf([v, ...(rec?.enquiryRollup?.req?.interest || [])]),
+      // This field can hold several projects, so the generic form has to be
+      // told how to put a list into a text box and take it back out. Without
+      // the pair the box showed "A,B,C" and saved that string as one value —
+      // Edit then Save, no typing, and the accumulation was gone.
+      toForm: listText, fromForm: textList,
     },
     { key: 'req.notes', label: 'Requirement Notes & Purpose', type: 'textarea', section: 'domain' }
   ]

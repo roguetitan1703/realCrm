@@ -93,11 +93,17 @@ configs, every project, the budget span, first received **and** last enquiry),
 the list's time column is Last enquiry, and the match percentage is gone from
 the record, the attach dialog and the WhatsApp composer.
 
-**One thing step 4 must settle.** `docs/specs/repeat-enquiries.md` §8b says a
-rejected lead is never reopened automatically; desk-rework **E** says rejected
-leads reopen whatever the reason, with the reason surfaced. **E is later and is
-the client's decision, so E wins** — repeat-enquiries is stale on that point and
-should be corrected when step 4 lands, not left as two documents disagreeing.
+**`docs/specs/repeat-enquiries.md` is deleted.** It was the older draft, and its
+§8b ("a rejected lead is never reopened automatically") contradicted desk-rework
+**E**, which is the client's later decision. `desk-rework.md` §2 and C carry
+everything still true, and the three code comments that cited the old file now
+cite this one.
+
+**Source is attribution.** `crm_leads.source` says where the lead arrived and is
+never overwritten; the enquiry rows carry every source it has since come through,
+and the record sheet shows the arrival plus the rest. The Source column and its
+filter both read the arrival column, so the count and the rows it opens cannot
+disagree. Settled with the user 23 Aug — do not reopen it.
 
 ---
 
@@ -177,10 +183,21 @@ npm run deploy:dev       # build:dev + vercel deploy --prebuilt
 
 ## Not verified, and it matters
 
-**Step 3 was driven in a browser** (2026-08-23, Playwright, `delpat` on the
-development database, the 293-lead shape clone, 1440×900 and iPhone 13). A lead
-with 2 sessions over 5 payloads rendered 2 sessions and 5 lines; the badge read
-`2 enquiries`; Details read Attribution Source `99acres, Property Circle` ·
+**Step 3 was driven in a browser twice** (2026-08-23, Playwright, `delpat` on
+the development database, the 293-lead shape clone, 1440×900 and iPhone 13).
+
+The second pass exists because the first was shallow: `latest +N` had been
+applied to the record header only, so the card and the desk list still printed
+two projects with no separator. On a lead carrying three, the list row now reads
+`3 BHK · Buy · Mahalunge · Up to ₹95L · VTP Belair +2`, the sheet all three in
+arrival order, and **Save changes with nothing typed leaves the stored
+three-element list intact** — it used to flatten to one string, which is the only
+data-losing defect found in this step. Only `req.interest` is ever a list on a
+lead row (3 leads on dev, the same shape on bhumi); config, locality and deal
+stay scalar by `mergeRepeatReq`'s design.
+
+First pass: a lead with 2 sessions over 5 payloads rendered 2 sessions and 5
+lines; the badge read `2 enquiries`; Details read Attribution Source `99acres, Property Circle` ·
 Config `2 BHK, 3 BHK` · Property Interested `Godrej Green Vistas, Godrej Green
 Cove` · Budget To `₹95L` · First received `16 Aug, 10:17 pm` · Last enquiry
 `Yesterday, 11:28 pm`. The Came back segment opened 20 rows, every one carrying

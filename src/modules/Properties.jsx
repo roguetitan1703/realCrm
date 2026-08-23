@@ -12,7 +12,7 @@ import { NbaBanner } from '../components/rail.jsx'
 import { leadsForProperty } from '../lib/matching.js'
 import { fileUrl } from '../lib/media.js'
 import Lightbox from '../components/Lightbox.jsx'
-import { quotedLine, unitLabel, fmtDate, renewalSignal, configLabel } from '../lib/format.js'
+import { latestPlus, quotedLine, unitLabel, fmtDate, renewalSignal, configLabel } from '../lib/format.js'
 import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
@@ -393,7 +393,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
             <div key={b.lead.id} className={'relrow' + (i ? ' relrow-div' : '')}>
               <button className="relrow-main" onClick={() => go('leads', { leadId: b.lead.id, leadOpen: true })}>
                 <div className="relrow-name">{b.lead.name}</div>
-                <div className="relrow-sub">{b.lead.req.config} · {b.lead.req.locality} · {b.fitLine}</div>
+                <div className="relrow-sub">{[latestPlus(b.lead.req.config), latestPlus(b.lead.req.locality), b.fitLine].filter(Boolean).join(' · ')}</div>
               </button>
               <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(p.id, b.lead.id)}>Share</Button>
             </div>
