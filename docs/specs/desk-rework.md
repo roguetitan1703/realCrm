@@ -730,11 +730,12 @@ Two faults, and the first is mine, from step 5:
 2. **A backend that could not take the port kept sweeping.** `setInterval` sat
    outside the `listen` callback and there was no `error` handler, so a process
    that lost `EADDRINUSE` lingered with no port, no banner, no requests — and
-   its own five-minute timer over every tenant. Four were alive on this machine,
-   which is why one lead collected two hand-offs in the same minute. On a server
-   that is every tenant swept N times per interval by processes nobody knows are
-   running. The timer moved inside the callback and a second instance now says
-   the port is taken and exits.
+   its own five-minute timer over every tenant. Several abandoned backends were
+   alive on this machine, which is how one lead collected two hand-offs in the
+   same minute. On a server that is every tenant swept N times per interval by
+   processes nobody knows are running. The timer moved inside the callback and a
+   second instance now says the port is taken and exits — checked by starting
+   one while another held :5001.
 
 **Watched on a live tick, not only in a query.** Armed on `skyline-realty` (11
 open leads, 3 in the rota, 4 days): tick one moved 6, tick two moved the other

@@ -46,16 +46,23 @@ lessons, neither optional:
   refuses a connection to the production database URL outright. Confirm the
   three columns exist and every `crm_routing_rules` toggle still reads what it
   did.
-- **`npx tsx watch backend/src/index.ts` IS A PRODUCTION WATCHER.** It sets no
-  `APP_ENV`, `appEnv()` falls through to `'local'`, and `databaseUrl()` returns
-  `DATABASE_URL` for anything that is not `development`. It is not
-  `dev:api:prod` — that one at least says `prod` in its name. 30 abandoned node
-  processes were found and killed on 23 Aug: **9** of those watcher trees, 8
-  `run-api --env=development --watch`, 4 vite, and a scratch script from a
-  session whose file had already been deleted. Each of the nine reruns
-  `initSchema()` and the whole `runOnce` chain against production on every
-  backend save, and holds Supabase connections while doing nothing. Use
-  `npm run dev:api`, and check `netstat` for strays before a backend session.
+- **`npx tsx watch backend/src/index.ts` carries no environment of its own** —
+  it inherits one. `run-api.ts` is a launcher: it puts `APP_ENV` and `PORT` into
+  `process.env` and spawns exactly that command, so one backend is a chain of
+  seven processes (`npm` → `cmd` → `tsx` → `run-api` → `cmd` → `npx` → `tsx` →
+  the server). Counting the inner halves as separate servers overcounts badly;
+  check which PID holds the port, and ask the server itself
+  (`/api/v1/workspace/resolve?slug=test-org` answers with `env`).
+  **Typed by hand in a shell with no `APP_ENV` it does point at production**:
+  `appEnv()` falls through to `'local'` and `databaseUrl()` returns
+  `DATABASE_URL` for anything that is not `development`. That is the case to
+  avoid, and it is the one nothing in the command's name warns you about.
+  30 abandoned node processes were found and killed on 23 Aug — roughly eight
+  abandoned backends and their launcher halves, plus vite and a scratch script
+  from a session whose file had already been deleted. Each abandoned backend
+  reruns `initSchema()` and the whole `runOnce` chain on every save against
+  whatever database it was launched with, and holds Supabase connections while
+  doing nothing. Use `npm run dev:api`, and check `netstat` before starting.
 
 **What it did, measured read-only afterwards.** The rebuild only writes
 `crm_lead_enquiries`; no lead, timeline row or notification was touched.
