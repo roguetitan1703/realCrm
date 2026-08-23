@@ -66,6 +66,13 @@ export default function Dashboard({ store, go, topBar }) {
   // false and alarming -- "you have no leads today" is a very different message
   // from "still loading". An em dash says the honest thing.
   const n = (v) => (desk ? v : '—')
+  // A TILE AND THE PILL IT OPENS WEAR THE SAME WORD. Both read the catalogue
+  // the SQL lives beside (backend/src/services/leadSegments.ts); the argument
+  // here is only what to say if the API is older than this build. "Past SLA" on
+  // this screen against "Never called" on the list — one expression, two names —
+  // is what a served label exists to prevent.
+  const segLabel = (key, fallback) =>
+    (state.leadSegments || []).find(s => s.key === key)?.label || fallback
   const byStage = desk?.byStage || {}
   const bySource = desk?.bySource || {}
   const perAgent = desk?.perAgent || {}
@@ -163,18 +170,18 @@ export default function Dashboard({ store, go, topBar }) {
               word. "Past SLA" was never_contacted with a clock on it and linked
               through to a flag the Leads screen did not offer, so the list
               opened unfiltered. */}
-          <Kpi icon="clock" label="Not contacted" value={n(totals.never_contacted)} sub="nobody has reached out"
+          <Kpi icon="clock" label={segLabel('never_contacted', 'Not contacted')} value={n(totals.never_contacted)} sub="nobody has reached out"
             alert={totals.never_contacted > 0} onClick={() => toLeads({ seg: 'never_contacted' })} />
-          <Kpi icon="phone" label="No reply" value={n(totals.noanswer_stale)} sub="rung, nothing back"
+          <Kpi icon="phone" label={segLabel('noanswer_stale', 'No reply')} value={n(totals.noanswer_stale)} sub="rung, nothing back"
             alert={totals.noanswer_stale > 0}
             onClick={() => toLeads({ seg: 'noanswer_stale' })} />
-          <Kpi icon="clock" label="Going cold" value={n(totals.going_cold)} sub="open and gone quiet"
+          <Kpi icon="clock" label={segLabel('going_cold', 'Going cold')} value={n(totals.going_cold)} sub="open and gone quiet"
             alert={totals.going_cold > 0} onClick={() => toLeads({ seg: 'going_cold' })} />
           {hasCalling && (
             <Kpi icon="phone" label="Late callbacks" value={oq.callbacksOverdue} sub="owners waiting on a call"
               alert={oq.callbacksOverdue > 0} onClick={() => toCalling('callbacks_overdue')} />
           )}
-          <Kpi icon="plus" label="Arrived today" value={n(totals.new_today)} sub="fresh enquiries" onClick={() => toLeads({ seg: 'today' })} />
+          <Kpi icon="plus" label={segLabel('today', 'Today')} value={n(totals.new_today)} sub="fresh enquiries" onClick={() => toLeads({ seg: 'today' })} />
           {hasCalling && (
             <Kpi icon="check" label="Calls logged today" value={oq.calledToday} sub="outbound, today" onClick={() => toCalling('never_called')} />
           )}

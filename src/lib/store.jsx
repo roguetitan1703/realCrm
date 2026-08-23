@@ -233,6 +233,11 @@ function freshState() {
     // picker suggest from. These were all derived by mapping the collections,
     // so they went silently EMPTY when the collections went away: no crash, no
     // error, just dropdowns with nothing in them.
+    // What each pile of leads is CALLED, from the server — see
+    // backend/src/services/leadSegments.ts. Empty until the boot payload lands,
+    // and the screens fall back to their own list so an API older than this
+    // build still renders pills.
+    leadSegments: Array.isArray(cs.leadSegments) ? cs.leadSegments : [],
     localities: Array.isArray(cs.localities) ? cs.localities : [],
     projects: Array.isArray(cs.projects) ? cs.projects : [],
     configs: Array.isArray(cs.configs) ? cs.configs : [],
@@ -297,6 +302,7 @@ function reducer(state, action) {
         // and duty-off agents reappeared in every picker.
         formerAgents: Array.isArray(s.formerAgents) ? s.formerAgents : state.formerAgents,
         inactiveAgentIds: Array.isArray(s.inactiveAgentIds) ? s.inactiveAgentIds : state.inactiveAgentIds,
+        leadSegments: Array.isArray(s.leadSegments) ? s.leadSegments : state.leadSegments,
         localities: Array.isArray(s.localities) ? s.localities : state.localities,
         projects: Array.isArray(s.projects) ? s.projects : state.projects,
         configs: Array.isArray(s.configs) ? s.configs : state.configs,
@@ -319,6 +325,7 @@ function reducer(state, action) {
         agents: Array.isArray(s.agents) ? s.agents : state.agents,
         formerAgents: Array.isArray(s.formerAgents) ? s.formerAgents : state.formerAgents,
         inactiveAgentIds: Array.isArray(s.inactiveAgentIds) ? s.inactiveAgentIds : state.inactiveAgentIds,
+        leadSegments: Array.isArray(s.leadSegments) ? s.leadSegments : state.leadSegments,
         localities: Array.isArray(s.localities) ? s.localities : state.localities,
         projects: Array.isArray(s.projects) ? s.projects : state.projects,
         configs: Array.isArray(s.configs) ? s.configs : state.configs,

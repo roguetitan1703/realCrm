@@ -205,10 +205,21 @@ its repeat badge. No `% match` and no `N listings` anywhere on the list or the
 record. On the phone all five payload lines sat inside 390px and the body did
 not scroll sideways. No console errors in any pass.
 
-**Steps 1 and 2 were driven in a browser** (2026-08-23). Unfiltered the pills
-read All 293 · Today 1 · Not contacted 7 · No reply 65 · Going cold 142 ·
-Follow-up overdue 8 · Came back 21, and the dashboard tiles read the same
-numbers from the same expressions. One agent (95 leads) moved every number with
+**Steps 1–3 were audited against the artifact and one deliverable was
+missing** (2026-08-23): §1's segment catalogue was never served. `publicSegments()`
+was dead code while `definitions.jsx` and `Dashboard.jsx` each kept their own
+copy of every label — the three copies the file existed to end — and they had
+already drifted on Not contacted's alert tone. It now ships in the bootstrap
+payload as `leadSegments`; both screens read it and keep an explicit fallback,
+because the frontend deploys on a push and the backend by hand.
+
+**Steps 1 and 2 were driven in a browser** (2026-08-23, re-checked after the
+audit). Unfiltered the pills read All 293 · Today 1 · Not contacted 7 · No reply
+72 · Going cold 161 · Follow-up overdue 8 · Came back 21, and the dashboard tiles
+read the same words and the same numbers from the same expressions under the
+same scope. (No reply and Going cold moved from 65 and 142 when the dev desk was
+re-cloned — the numbers follow the clone; the agreement between the two surfaces
+is the invariant.) One agent (95 leads) moved every number with
 it while the Agent control held its own full counts; adding `going_cold`
 narrowed the status counts to 51, which summed. List total and summary total
 agreed at every step.

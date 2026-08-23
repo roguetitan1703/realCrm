@@ -182,10 +182,16 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   // pile that is empty under the current filters is an answer, not an absence.
   // The one you are standing in never disables itself — you have to be able to
   // leave a segment that has just emptied.
-  const segs = (LEADS_DEF.segments || []).map(sg => ({
+  // Pills from the server's catalogue, which is the same file the SQL lives in;
+  // the module's own list is the fallback for an API older than this build. All
+  // is not a segment — it is the absence of one — so the screen adds it.
+  const catalogue = (state.leadSegments?.length
+    ? state.leadSegments.filter(sg => sg.surface?.includes('pill'))
+    : LEADS_DEF.fallbackSegments)
+  const segs = [{ key: 'all', label: 'All' }, ...catalogue].map(sg => ({
     key: sg.key,
     label: sg.label,
-    tone: sg.tone,
+    tone: sg.tone || undefined,
     on: seg === sg.key,
     count: counts[sg.key] ?? 0,
     disabled: (counts[sg.key] ?? 0) === 0 && seg !== sg.key,

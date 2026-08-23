@@ -365,6 +365,41 @@ still the three-element list. Contacts reads the same. No console errors.
 `docs/specs/repeat-enquiries.md` is **deleted** — superseded by §2 and C here,
 and its §8b contradicted E. The code comments that cited it now cite this file.
 
+**Audit of steps 1–3, 23 Aug 2026.** Checked against the artifact item by item
+before starting step 4. One deliverable was missing.
+
+**§1's segment catalogue was never actually served.** `publicSegments()` was
+exported and called from nowhere — dead code — while `definitions.jsx` kept its
+own copy of every pill label and `Dashboard.jsx` its own copy of every tile
+label. Three copies, which is what the file was created to end, and its own
+header comment claimed the labels were "served to the frontend (workspace
+bootstrap) rather than repeated there", which was not true. They had already
+drifted: the catalogue marks Not contacted `tone: 'alert'` and the pill was
+rendering without it.
+
+Now in the bootstrap payload as `leadSegments`. The Leads pills and the
+dashboard tiles both read it; each keeps an explicit fallback list, because the
+frontend deploys on a push and the backend by hand, so a browser can be a week
+ahead of the API it is talking to and a Leads screen with no pills is worse than
+a stale label. When the two disagree the server wins.
+
+Verified in a browser: pills read All 293 · Today 1 · Not contacted 7 · No reply
+72 · Going cold 161 · Follow-up overdue 8 · Came back 21, with the alert tone on
+the three the catalogue marks — proof they are the served list, since the old
+local copy did not mark Not contacted. The dashboard's tiles read the same words
+and the same numbers (7, 72, 161, 1). No console errors.
+
+What was checked and found correct: the Agent control's Unassigned entry, the
+whole roster including someone holding nothing, off-roster holders, the 280px
+cap with internal scroll and the search past 7 options; the zero-count options
+rendered dimmed and disabled; the filter panel down to Source and Locality from
+the data; `reminderDays` driving `coldDays`; and the dashboard reading the SAME
+`leadSegments()` expressions under the SAME `leadScope()` as the list, so a tile
+and the pill it opens cannot diverge for an agent either. "Past SLA",
+"Never called" and "Needs attention" survive only in comments explaining why
+they went — the "Never called" on the dashboard is the OWNER calling queue,
+where it is accurate.
+
 ---
 
 ## Carried forward, unchanged

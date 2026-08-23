@@ -14,7 +14,7 @@ import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { audit } from './audit.js';
-import { buildLeadSegments, type LeadSegment } from './leadSegments.js';
+import { buildLeadSegments, publicSegments, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
@@ -1285,6 +1285,14 @@ export async function getBootstrap(): Promise<any> {
     settings: { ...(settingsRows[0]?.value || {}), sources: sourceRows.map((r: any) => r.v) },
     routing_rules: routingRows[0] || null,
     brand,
+    // THE SEGMENT CATALOGUE, SERVED. Key, label, help and tone come from the
+    // one file that also holds the SQL deciding each pile, so a label cannot
+    // drift from the thing it names — which it had, three copies deep: the
+    // dashboard tile said "Past SLA" while the pill beside the same rows said
+    // "Never called". The client keeps a fallback list for an API older than
+    // its own build (the two deploy separately), and the server's list wins
+    // whenever it arrives.
+    leadSegments: publicSegments(),
     localities: localityRows.map((r: any) => r.v),
     projects: projectRows.map((r: any) => r.v),
     configs: configRows.map((r: any) => r.v),

@@ -296,30 +296,26 @@ export const LEADS_DEF = {
   //                  where it belongs, for the day it is not 0.
   //   Call not received  a stage, and the stage dropdown above already asks it.
   //                  Its useful half — rung and not rung again — is its own pill.
-  segments: [
-    { key: 'all', label: 'All' },
-    // "Today", not "New today". This pill and the sidebar badge were both
-    // called New and mean different things — the badge is a STAGE (88 leads
-    // sitting untouched, whenever they arrived) and this is an ARRIVAL WINDOW.
-    // Side by side, "New 88" against "New today 0" reads as the app
-    // contradicting itself.
+  // THE PILLS COME FROM THE SERVER — `state.leadSegments`, built from the one
+  // file that also holds the SQL deciding each pile
+  // (backend/src/services/leadSegments.ts). What is left here is the fallback
+  // for an API older than this build: the frontend deploys on a push and the
+  // backend by hand, so a browser can be a week ahead of the server it is
+  // talking to, and a Leads screen with no pills at all is worse than a stale
+  // label. `all` is not a segment — it is the absence of one — so it is added
+  // by the screen either way.
+  //
+  // A label that appears in both places is a label that can drift; when they
+  // disagree, the server is right.
+  fallbackSegments: [
     { key: 'today', label: 'Today' },
-    // The piles the desk loses money on, in the order it loses them. Labels are
-    // the firm's own words and live in backend/src/services/leadSegments.ts
-    // beside the SQL that decides them — "called" is not what this desk says,
-    // and "not retried" was a claim about the agent the data could not support.
-    { key: 'never_contacted', label: 'Not contacted' },
+    { key: 'never_contacted', label: 'Not contacted', tone: 'alert' },
     { key: 'noanswer_stale', label: 'No reply' },
-    // Open, and silent for the number of days set in Settings → Response times.
-    // Replaces the dashboard's Going-cold toggle, which switched between two
-    // OTHER segments under a third name.
     { key: 'going_cold', label: 'Going cold', tone: 'alert' },
-    // Real at last: a follow-up whose moment has gone by, read from the
-    // appointment rather than from a column nothing writes.
     { key: 'overdue', label: 'Follow-up overdue', tone: 'alert' },
-    // The warmest people here — they came back on their own.
     { key: 'repeat_enquiry', label: 'Came back' },
   ],
+
 
   // Trailing actions column (ModuleTable, driven off this definition).
   rowActions: null,
