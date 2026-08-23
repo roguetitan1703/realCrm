@@ -20,6 +20,7 @@ const META = {
   // it sits beside. Deliberately not an Assignments-tab type below: nothing has
   // been assigned to the person reading it.
   lead_reassign_loop: { icon: 'alert', tone: 'urgent' },
+  owner_reassign_loop: { icon: 'alert', tone: 'urgent' },
   lead_untouched: { icon: 'clock', tone: 'attention' },
   lead_untouched_escalated: { icon: 'alert', tone: 'urgent' },
   lead_retry_due: { icon: 'phone', tone: 'attention' },

@@ -230,7 +230,14 @@ export const LEADS_DEF = {
         onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
       />
     ) },
-    { key: 'source', label: 'Source', render: (l) => <Source>{l.source}</Source> },
+    // WHERE THEY ARRIVED, AND HOW MANY PORTALS SINCE. The column is attribution
+    // — the source a lead came in on, never overwritten — but a person who has
+    // since enquired through two more portals read as one who never came back.
+    // `+N` is the same shorthand the header and the phone card use for an
+    // accumulating field; the record sheet lists every one of them by name.
+    { key: 'source', label: 'Source', render: (l) => (
+      <Source>{l.source}{l.otherSourceCount > 0 ? ` +${l.otherSourceCount}` : ''}</Source>
+    ) },
     // WHO HAS THIS LEAD, and the way to change it — the same cell. It used to
     // render only a bare + button for anyone who could assign, so the column
     // headed "Sales Executive" never actually named one.

@@ -324,6 +324,7 @@ export interface RoutingRule {
   owner_sweep_unassigned_enabled: boolean;
   owner_reassign_idle_enabled: boolean;
   owner_reassign_idle_days: number;
+  owner_reassign_alert_count: number;
 }
 
 export interface ServerState {
@@ -586,6 +587,10 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     // own report will be lined up against.
     lastEnquiryAt: r.last_enquiry_at == null ? undefined
       : (r.last_enquiry_at instanceof Date ? r.last_enquiry_at.toISOString() : String(r.last_enquiry_at)),
+    // Portals they have come through SINCE the one on the row. Undefined where
+    // the query did not ask, never 0 — a row that was not counted must not
+    // claim to have been counted and found none.
+    otherSourceCount: r.other_source_count == null ? undefined : Number(r.other_source_count),
     // The real timestamp, not only the derived "how long ago". A desk asks
     // "when did this lead come in" and wants a date it can quote back to a
     // client or line up against a portal's own report; minsAgo answers a
@@ -1316,8 +1321,8 @@ export async function getBootstrap(): Promise<any> {
     settings: { ...(settingsRows[0]?.value || {}), sources: sourceRows.map((r: any) => r.v) },
     routing_rules: routingRows[0] || null,
     brand,
-    // THE SEGMENT CATALOGUE, SERVED. Key, label, help and tone come from the
-    // one file that also holds the SQL deciding each pile, so a label cannot
+    // THE SEGMENT CATALOGUE, SERVED. Key, label, surface and tone come from
+    // the one file that also holds the SQL deciding each pile, so a label cannot
     // drift from the thing it names — which it had, three copies deep: the
     // dashboard tile said "Past SLA" while the pill beside the same rows said
     // "Never called". The client keeps a fallback list for an API older than
@@ -2719,7 +2724,20 @@ export async function listLeads(opts: LeadFilterOpts & {
     sql`SELECT crm_leads.*, (SELECT count(*)::int FROM crm_lead_enquiries e
                               WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS enquiry_count,
                             (SELECT max(e.last_at) FROM crm_lead_enquiries e
-                              WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS last_enquiry_at
+                              WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS last_enquiry_at,
+                            -- HOW MANY OTHER PORTALS THIS PERSON HAS COME
+                            -- THROUGH. The source column is where they first
+                            -- arrived and is never overwritten -- that is the
+                            -- attribution the firm reports on -- but a lead who
+                            -- has since come in twice more through two other
+                            -- portals looked identical to one who never came
+                            -- back. Counted here, in the same query as the row
+                            -- it labels, so the cell and the record sheet can
+                            -- never disagree about how many there are.
+                            (SELECT count(DISTINCT e.source)::int FROM crm_lead_enquiries e
+                              WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id
+                                AND e.source IS NOT NULL AND e.source <> ''
+                                AND lower(e.source) <> lower(coalesce(crm_leads.source, ''))) AS other_source_count
            FROM crm_leads WHERE ${clause} ORDER BY ${col} ${dir} NULLS LAST LIMIT ${limit} OFFSET ${offset}`,
     sql`SELECT count(*)::int AS n FROM crm_leads WHERE ${clause}`,
   ]);
@@ -2806,15 +2824,20 @@ async function recordAssignment(opts: {
  * ninth are the same problem getting worse, and a one-shot alert on a metadata
  * flag would go quiet exactly as it started mattering.
  *
- * Leads only. Owners are reassigned by the same sweep and carry the same
- * history, but Settings offers the control on the Leads side alone (desk-rework
- * §2, F) and a threshold nobody can see or change is not a feature.
+ * BOTH SIDES OF THE DESK. An owner in the calling queue is reassigned by the
+ * same sweep and carries the same history, and being passed around is the same
+ * problem there — so Routing → Calling carries its own threshold, and this
+ * reads whichever side the record belongs to.
  */
 async function alertOnReassignLoop(recordId: string, toName: string | null): Promise<void> {
   const t = tid();
   const lead = (await sql`SELECT name FROM crm_leads WHERE id = ${recordId} AND tenant_id = ${t} LIMIT 1`)[0];
-  if (!lead) return;
-  const limit = Math.max(Number((await getRoutingRules()).reassign_alert_count) || 3, 1);
+  const owner = lead ? null
+    : (await sql`SELECT name FROM crm_owners WHERE id = ${recordId} AND tenant_id = ${t} LIMIT 1`)[0];
+  const rec = lead || owner;
+  if (!rec) return;
+  const rules = await getRoutingRules();
+  const limit = Math.max(Number(lead ? rules.reassign_alert_count : rules.owner_reassign_alert_count) || 3, 1);
   // Hand-offs, not assignments: the arrival-time route and the unowned sweep
   // both write an `assignment` row with no previous agent, and a lead going
   // from nobody to somebody has not been passed on by anyone.
@@ -2823,12 +2846,13 @@ async function alertOnReassignLoop(recordId: string, toName: string | null): Pro
     WHERE record_id = ${recordId} AND tenant_id = ${t} AND type = 'assignment'
       AND coalesce(metadata->>'previousAgentId', '') <> ''`)[0]?.n ?? 0;
   if (n <= limit) return;
+  const type = lead ? 'lead_reassign_loop' : 'owner_reassign_loop';
   await notifyRoles(['owner', 'manager'], {
-    tenantId: t, type: 'lead_reassign_loop',
-    data: { name: lead.name, n, agent: toName },
-    link: `?screen=leads&lead=${recordId}`,
+    tenantId: t, type,
+    data: { name: rec.name, n, agent: toName },
+    link: lead ? `?screen=leads&lead=${recordId}` : `?screen=calling&owner=${recordId}`,
     push: true, toSelf: true,
-  }).catch(err => console.warn('[Notify] lead_reassign_loop failed:', err?.message));
+  }).catch(err => console.warn(`[Notify] ${type} failed:`, err?.message));
 }
 
 export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
@@ -3220,12 +3244,26 @@ export async function bulkAssignOwners(ids: string[], agentId: string | null, ct
   const clean = [...new Set((ids || []).filter(Boolean))];
   if (clean.length === 0) return 0;
   const t = tid();
+  // WHO HELD THEM BEFORE, read before the update overwrites it — the same
+  // thing bulkAssignLeads does, and the owner side did not: an owner moved
+  // between callers changed hands with nothing on the record saying so, and
+  // nothing to count when asking whether one is being passed around.
+  const before = await sql`
+    SELECT id, agent_id FROM crm_owners
+    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
+      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
   const res = await sql`
     UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW()
     WHERE tenant_id = ${t} AND id IN ${sql(clean)}
       AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
   const n = res.count;
   if (n === 0) return 0;
+  for (const row of before) {
+    await recordAssignment({
+      recordId: row.id, prevAgentId: row.agent_id, agentId,
+      reason: 'bulk assignment', author: ctx.actorId ?? null,
+    });
+  }
   audit({
     tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'owner.bulk_assign', target_type: 'owner', target_id: null,
@@ -4133,7 +4171,7 @@ export async function getRoutingRules(): Promise<RoutingRule> {
       reassign_idle_enabled: false, reassign_idle_days: 3, reassign_alert_count: 3,
       owner_strategy: 'manual', owner_active_agent_ids: [], owner_last_assigned_index: -1,
       owner_sweep_unassigned_enabled: false,
-      owner_reassign_idle_enabled: false, owner_reassign_idle_days: 3,
+      owner_reassign_idle_enabled: false, owner_reassign_idle_days: 3, owner_reassign_alert_count: 3,
     };
   }
   return {
@@ -4150,6 +4188,7 @@ export async function getRoutingRules(): Promise<RoutingRule> {
     owner_sweep_unassigned_enabled: rows[0].owner_sweep_unassigned_enabled ?? false,
     owner_reassign_idle_enabled: rows[0].owner_reassign_idle_enabled ?? false,
     owner_reassign_idle_days: rows[0].owner_reassign_idle_days ?? 3,
+    owner_reassign_alert_count: rows[0].owner_reassign_alert_count ?? 3,
   };
 }
 
@@ -4163,7 +4202,7 @@ export async function updateRoutingRules(patch: Partial<RoutingRule>): Promise<R
       reassign_idle_enabled, reassign_idle_days, reassign_alert_count,
       owner_strategy, owner_active_agent_ids, owner_last_assigned_index,
       owner_sweep_unassigned_enabled,
-      owner_reassign_idle_enabled, owner_reassign_idle_days, tenant_id
+      owner_reassign_idle_enabled, owner_reassign_idle_days, owner_reassign_alert_count, tenant_id
     )
     VALUES (
       ${next.strategy}, ${sql.json(next.active_agent_ids)}, ${next.last_assigned_index},
@@ -4171,7 +4210,7 @@ export async function updateRoutingRules(patch: Partial<RoutingRule>): Promise<R
       ${next.reassign_idle_enabled}, ${next.reassign_idle_days}, ${next.reassign_alert_count},
       ${next.owner_strategy}, ${sql.json(next.owner_active_agent_ids)}, ${next.owner_last_assigned_index},
       ${next.owner_sweep_unassigned_enabled},
-      ${next.owner_reassign_idle_enabled}, ${next.owner_reassign_idle_days}, ${tid()}
+      ${next.owner_reassign_idle_enabled}, ${next.owner_reassign_idle_days}, ${next.owner_reassign_alert_count}, ${tid()}
     )
     ON CONFLICT (tenant_id) DO UPDATE SET
       strategy = EXCLUDED.strategy,
@@ -4186,7 +4225,8 @@ export async function updateRoutingRules(patch: Partial<RoutingRule>): Promise<R
       owner_last_assigned_index = EXCLUDED.owner_last_assigned_index,
       owner_sweep_unassigned_enabled = EXCLUDED.owner_sweep_unassigned_enabled,
       owner_reassign_idle_enabled = EXCLUDED.owner_reassign_idle_enabled,
-      owner_reassign_idle_days = EXCLUDED.owner_reassign_idle_days;
+      owner_reassign_idle_days = EXCLUDED.owner_reassign_idle_days,
+      owner_reassign_alert_count = EXCLUDED.owner_reassign_alert_count;
   `;
   return next;
 }
@@ -4335,11 +4375,10 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
     const agentId = await nextRoutedOwnerAgent();
     if (!agentId) break;
     await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${owner.id} AND tenant_id = ${tenantId}`;
-    const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
-    await addTimelineEvent({
-      record_id: owner.id, type: 'assignment', title: 'Auto-assigned',
-      description: `Nobody had picked it up — routed to ${name}`,
-      author: 'System', metadata: { agentId, reason: 'sweep_unassigned' },
+    await recordAssignment({
+      recordId: owner.id, prevAgentId: null, agentId,
+      reason: 'nobody had picked it up',
+      author: 'System', metadata: { reason: 'sweep_unassigned' },
     });
     tally.set(agentId, (tally.get(agentId) || 0) + 1);
     n++;
@@ -4401,11 +4440,17 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
     const agentId = await nextRoutedOwnerAgent();
     if (!agentId || agentId === owner.agent_id) continue;
     await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${owner.id} AND tenant_id = ${tenantId}`;
-    const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
-    await addTimelineEvent({
-      record_id: owner.id, type: 'assignment', title: 'Reassigned — idle',
-      description: `No activity from ${prevOwner} for ${days} days — routed to ${name}`,
-      author: 'System', metadata: { agentId, previousAgentId: owner.agent_id, reason: 'sweep_idle', days },
+    // recordAssignment, not a timeline row written here. This wrote its own,
+    // which is why the owner side had a different sentence for the same event —
+    // and why the manager alert, which lives in recordAssignment because that is
+    // the one function every agent_id change goes through, could never fire for
+    // an owner. The Calling tab offers that threshold; a control that cannot
+    // fire is not a control.
+    void prevOwner;
+    await recordAssignment({
+      recordId: owner.id, prevAgentId: owner.agent_id, agentId,
+      reason: `no activity for ${days} days`,
+      author: 'System', metadata: { reason: 'sweep_idle', days },
     });
     tally.set(agentId, (tally.get(agentId) || 0) + 1);
     n++;

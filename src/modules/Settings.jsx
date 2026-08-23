@@ -31,6 +31,9 @@ const NAV = [
 export default function Settings({ store, topBar }) {
   const { settings, agents, routing, inactiveAgentIds } = store.state
   const nav = isDeskRole(store.state.role) ? NAV : NAV.filter(n => n.everyone)
+  // Routing edits are held until Save, and held HERE — moving to another
+  // Settings section and back is not an answer about whether to keep them.
+  const [routingDraft, setRoutingDraft] = useState({})
   // The first section they can actually open. Defaulting to 'brand' would land
   // an agent on a blank pane beside a nav that does not list it.
   const [section, setSection] = useState(nav[0].key)
@@ -51,7 +54,7 @@ export default function Settings({ store, topBar }) {
             <div className="set-main">
               {section === 'brand' && <BrandSection store={store} settings={settings} />}
               {section === 'pipeline' && <PipelineSection store={store} settings={settings} />}
-              {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} />}
+              {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} draft={routingDraft} setDraft={setRoutingDraft} />}
               {section === 'followup' && <ResponseTimesSection store={store} settings={settings} />}
               {section === 'messages' && <MessagesSection store={store} />}
               {/* {section === 'audit' && <AuditSection />} */}
@@ -282,7 +285,7 @@ function PipelineSection({ store, settings }) {
 // below reads the pair of field names for whichever side is selected.
 const ROUTING_SIDES = {
   leads: {
-    key: 'leads', label: 'Leads', noun: 'lead', arrival: 'When a new enquiry arrives',
+    key: 'leads', label: 'Leads', noun: 'lead', article: 'a', arrival: 'When a new enquiry arrives',
     f: {
       strategy: 'strategy', rota: 'active_agent_ids',
       sweepOn: 'sweep_unassigned_enabled',
@@ -294,11 +297,12 @@ const ROUTING_SIDES = {
     idleSub: 'Nobody has recorded anything on it for this long — and no visit is booked — so it goes to the next agent in rotation, and the record shows why.',
   },
   owners: {
-    key: 'owners', label: 'Calling', noun: 'owner', arrival: 'When a new owner is imported',
+    key: 'owners', label: 'Calling', noun: 'owner', article: 'an', arrival: 'When a new owner is imported',
     f: {
       strategy: 'owner_strategy', rota: 'owner_active_agent_ids',
       sweepOn: 'owner_sweep_unassigned_enabled',
       idleOn: 'owner_reassign_idle_enabled', idleDays: 'owner_reassign_idle_days',
+      loopCount: 'owner_reassign_alert_count',
     },
     autoSub: 'Distribute evenly across the callers in rotation as each row imports.',
     manualSub: 'Imported owners land in a shared pool. A manager picks who calls each one.',
@@ -306,13 +310,45 @@ const ROUTING_SIDES = {
   },
 }
 
-function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
+function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDraft }) {
   const [sideKey, setSideKey] = useState('leads')
   const side = ROUTING_SIDES[sideKey]
   const f = side.f
 
-  const strategy = routing?.[f.strategy] || (sideKey === 'leads' ? 'round_robin' : 'manual')
-  const rota = routing?.[f.rota] || []
+  // NOTHING HERE WRITES UNTIL SAVE IS PRESSED.
+  //
+  // Every control on this screen used to POST on the click — a toggle, a name
+  // in the rota, a step on a number. Turning auto-assign on and then picking
+  // who is in the rotation is one decision, and it went to the server as five,
+  // each with its own toast, each of them live on a real desk the moment it
+  // landed. Changing your mind halfway meant a sweep had already run on the
+  // half-built rule.
+  //
+  // `draft` holds only the keys that differ, and it lives in the parent so
+  // moving between Settings sections does not silently drop it. The effective
+  // value of any field is the draft's if it has one, else the server's.
+  // HAS THE SERVER ANSWERED YET. `routing` starts as a shape with a strategy
+  // and an empty rota, so every sweep read as OFF with a default number for the
+  // moment before the workspace payload landed — a rule that is ON, shown as
+  // off, with a switch you could act on. Absence is not "off": until the row
+  // arrives the controls are inert.
+  const loaded = !!routing && 'sweep_unassigned_enabled' in routing
+  const val = (key, fallback) => (key in draft ? draft[key] : (routing?.[key] ?? fallback))
+  const set = (patch) => setDraft(d => {
+    const next = { ...d, ...patch }
+    // A value edited back to what the server holds is not a change. Without
+    // this, stepping a number up and down again leaves Save armed with nothing
+    // to write.
+    for (const k of Object.keys(next)) {
+      if (JSON.stringify(next[k]) === JSON.stringify(routing?.[k])) delete next[k]
+    }
+    return next
+  })
+  const dirty = Object.keys(draft).length
+  const save = () => { store.setRouting(draft, 'Routing saved'); setDraft({}) }
+
+  const strategy = val(f.strategy, sideKey === 'leads' ? 'round_robin' : 'manual')
+  const rota = val(f.rota, [])
 
   // How many open records each agent is carrying, counted in SQL. This read the
   // whole lead collection out of the store and filtered it per agent; when the
@@ -321,9 +357,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
   const { data: desk } = useServerData(() => api.getDeskSummary(), [], null, '/workspace/desk-summary')
   const openLoad = (id) => desk?.perAgent?.[id]?.open ?? 0
 
-  const set = (patch, msg) => store.setRouting(patch, msg)
-  const setStrategy = (s) => set({ [f.strategy]: s },
-    s === 'round_robin' ? `New ${side.noun}s auto-assign, round-robin` : `New ${side.noun}s land unassigned`)
+  const setStrategy = (v) => set({ [f.strategy]: v })
   const setRota = (next) => set({ [f.rota]: next })
   const toggleAgent = (id) => setRota(rota.includes(id) ? rota.filter(x => x !== id) : [...rota, id])
   const allOn = agents.length > 0 && rota.length === agents.length
@@ -332,13 +366,26 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
     <>
       <SecHead title="Routing" />
 
+      {/* The one place this screen writes from. It says how much is waiting so
+          that leaving with something unsaved is a visible fact, not a silence. */}
+      <div className="rt-save">
+        <span className="rt-save-n">{dirty ? `${dirty} unsaved change${dirty === 1 ? '' : 's'}` : 'No changes'}</span>
+        <Button variant="ghost" disabled={!dirty} onClick={() => setDraft({})}>Discard</Button>
+        <Button variant="primary" disabled={!dirty || !loaded} onClick={save}>Save changes</Button>
+      </div>
+
       <div className="rt-switch" role="tablist">
         {Object.values(ROUTING_SIDES).map(s => (
           <button key={s.key} role="tab" aria-selected={sideKey === s.key}
             className={'rt-tab' + (sideKey === s.key ? ' on' : '')}
             onClick={() => setSideKey(s.key)}>
             {s.label}
-            <span className={'rt-dot' + ((routing?.[s.f.strategy] || (s.key === 'leads' ? 'round_robin' : 'manual')) === 'round_robin' ? ' on' : '')} />
+            {/* The dot follows the DRAFT, like everything else here — a tab that
+                still showed the saved state while the panel under it showed the
+                edit would be two answers to one question. */}
+            <span className={'rt-dot' + ((s.key in draft || s.f.strategy in draft
+              ? draft[s.f.strategy] ?? routing?.[s.f.strategy]
+              : routing?.[s.f.strategy]) === 'round_robin' ? ' on' : '')} />
           </button>
         ))}
       </div>
@@ -404,46 +451,43 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds }) {
               <div className="rt-rule-t">Assign {side.noun}s that have no agent</div>
               <div className="rt-rule-s">Nobody on it — never assigned, or its owner left the firm.</div>
             </div>
-            <Toggle on={!!routing?.[f.sweepOn]} onClick={() => set(
-              { [f.sweepOn]: !routing?.[f.sweepOn] },
-              routing?.[f.sweepOn] ? 'Unowned sweep turned off' : 'Unowned sweep turned on')} />
+            {/* No hours field. Nothing ever sets agent_id back to NULL, so a
+                record is unowned only at arrival — the number was asking how
+                long a live enquiry should sit with nobody on it. */}
+            <Toggle on={!!val(f.sweepOn, false)} disabled={!loaded} onClick={() => set({ [f.sweepOn]: !val(f.sweepOn, false) })} />
           </div>
-          {/* No hours field. Nothing ever sets agent_id back to NULL, so a
-              record is unowned only at arrival — the number was asking how long
-              a live enquiry should sit with nobody on it. */}
         </div>
 
         <div className="rt-rule">
           <div className="rt-rule-h">
             <div>
-              <div className="rt-rule-t">Reassign a {side.noun} if no activity on it</div>
+              <div className="rt-rule-t">Reassign {side.article} {side.noun} if no activity on it</div>
               <div className="rt-rule-s">{side.idleSub}</div>
             </div>
-            <Toggle on={!!routing?.[f.idleOn]} onClick={() => set(
-              { [f.idleOn]: !routing?.[f.idleOn] },
-              routing?.[f.idleOn] ? 'Idle reassignment turned off' : 'Idle reassignment turned on')} />
-          </div>
-          {!!routing?.[f.idleOn] && (
-            <NumField value={Number(routing?.[f.idleDays] ?? 3)} suffix="days"
+            {/* THE NUMBER STAYS ON SCREEN WHEN THE RULE IS OFF, greyed. It is
+                what the rule WOULD do, and hiding it made the row jump and left
+                somebody deciding whether to switch a rule on with the one fact
+                they needed hidden behind the switch. */}
+            <NumField value={Number(val(f.idleDays, 3))} suffix="days" disabled={!loaded || !val(f.idleOn, false)}
               onChange={(v) => set({ [f.idleDays]: Math.max(1, v) })} />
-          )}
+            <Toggle on={!!val(f.idleOn, false)} disabled={!loaded} onClick={() => set({ [f.idleOn]: !val(f.idleOn, false) })} />
+          </div>
         </div>
 
-        {/* Leads only — a threshold the desk cannot see is not a control, and
-            Settings offers this one on the Leads side. Counted from the lead's
-            own assignment history, so a manual hand-off counts too. */}
-        {!!f.loopCount && (
-          <div className="rt-rule">
-            <div className="rt-rule-h">
-              <div>
-                <div className="rt-rule-t">Tell a manager if a {side.noun} is reassigned too often</div>
-                <div className="rt-rule-s">It keeps being reassigned. The manager is told each time after that.</div>
-              </div>
+        {/* Both sides. An owner in the calling queue is passed around by the
+            same sweep and it is the same problem — the threshold is the one
+            thing that differs, so each side carries its own. Counted from the
+            record's own assignment history, so a manual hand-off counts too. */}
+        <div className="rt-rule">
+          <div className="rt-rule-h">
+            <div>
+              <div className="rt-rule-t">Tell a manager if {side.article} {side.noun} is reassigned too often</div>
+              <div className="rt-rule-s">It keeps being reassigned. The manager is told each time after that.</div>
             </div>
-            <NumField value={Number(routing?.[f.loopCount] ?? 3)} suffix="times"
+            <NumField value={Number(val(f.loopCount, 3))} suffix="times" disabled={!loaded}
               onChange={(v) => set({ [f.loopCount]: Math.max(1, v) })} />
           </div>
-        )}
+        </div>
       </Panel>
     </>
   )
@@ -505,13 +549,13 @@ function MessagesSection({ store }) {
   )
 }
 
-function NumField({ value, suffix, onChange, step = 1 }) {
+function NumField({ value, suffix, onChange, step = 1, disabled = false }) {
   return (
-    <div className="numfield">
+    <div className={'numfield' + (disabled ? ' off' : '')}>
       <div className="numstep">
-        <button onClick={() => onChange(value - step)} aria-label="decrease">–</button>
+        <button disabled={disabled} onClick={() => onChange(value - step)} aria-label="decrease">–</button>
         <span className="numval">{value}</span>
-        <button onClick={() => onChange(value + step)} aria-label="increase">+</button>
+        <button disabled={disabled} onClick={() => onChange(value + step)} aria-label="increase">+</button>
       </div>
       <span className="numsuffix">{suffix}</span>
     </div>

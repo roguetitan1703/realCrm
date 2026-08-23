@@ -664,6 +664,44 @@ height-capped, with Unassigned and Me; Source and Locality come from the data
 with counts; Needs attention is gone; the enquiry session pill says "N enquiries
 in this visit", not "N listings".
 
+**F revisited — 24 Aug 2026, from the client's own reading of the screen.**
+
+- **Routing writes on Save, not on every click.** Each control POSTed as it was
+  touched: turning auto-assign on and then choosing who is in the rotation went
+  to the server as five separate writes, each live on a real desk the moment it
+  landed, each with its own toast. There is one draft for the section, a
+  "Save changes" / "Discard" bar under the heading that names how many changes
+  are waiting, and the draft lives in the Settings component so moving to
+  another section and back does not silently drop it. The server merges by key,
+  so a save only writes the fields that were edited.
+- **A rule's number sits beside it, and stays on screen when the rule is off** —
+  greyed, with its steppers disabled. It was below the row and hidden entirely
+  when the toggle was off, so the row jumped and the one fact you need in order
+  to decide whether to switch a rule on was behind the switch.
+- **The Calling side has the manager threshold too**, which the client asked for
+  and which the first pass had deliberately left out. That made three things
+  necessary, because the alert lives in `recordAssignment()` and the owner side
+  was not going through it: the owner idle sweep wrote its own timeline row, the
+  owner unowned sweep did too, and **`bulkAssignOwners` wrote no history at all**
+  — an owner moved between callers changed hands with nothing on the record
+  saying so. All three go through `recordAssignment` now, which is what makes
+  the new control able to fire at all. Verified through the real endpoint: four
+  hand-offs of one owner produced nothing at 1–3 and "Owner reassigned 4 times"
+  to the owner and both managers at the fourth; the fifth alerted again. Probe
+  rows read and deleted, the owner back with its original caller.
+- **The panel rendered every rule as OFF before the workspace payload landed.**
+  `routing` starts as a shape with a strategy and an empty rota, so for the
+  moment before the row arrives a rule that is ON read as off with a default
+  number, and the switch was live. Absence is not "off": the controls are inert
+  until the row is there.
+
+**Source keeps its attribution and stops hiding the rest.** The column is the
+portal a lead ARRIVED on and is never overwritten — that is what a firm reports
+on — but a person who has since come in through two more portals looked
+identical to one who never came back. The cell reads `99ACRES +1`, counted in
+the same query as the row it labels, and the record sheet still names every one
+of them. 9 of the first 12 repeat leads on the dev clone carry a +N.
+
 ---
 
 ## Carried forward, unchanged

@@ -74,6 +74,10 @@ export const COPY: Builders = {
     title: `Reassigned ${d.n} times`,
     body: facts(d.name, d.agent && `now with ${d.agent}`),
   }),
+  owner_reassign_loop: (d) => ({
+    title: `Owner reassigned ${d.n} times`,
+    body: facts(d.name, d.agent && `now with ${d.agent}`),
+  }),
 
   // Was "⚠️ SLA Warning: Untouched Lead". The agent is being told they have not
   // rung someone yet — which is what it now says.

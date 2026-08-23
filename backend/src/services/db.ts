@@ -228,6 +228,7 @@ export async function initSchema(): Promise<void> {
     // circle the desk. Counted from the record's own assignment history, so a
     // manual hand-off counts the same as a sweep's.
     await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS reassign_alert_count INT DEFAULT 3;`;
+    await sql`ALTER TABLE crm_routing_rules ADD COLUMN IF NOT EXISTS owner_reassign_alert_count INT DEFAULT 3;`;
     // The unowned sweeps no longer take an hours field. Nothing ever sets
     // agent_id back to NULL, so a record is unowned only at arrival, and a
     // four-hour wait on a live enquiry was four hours of nobody owning it.

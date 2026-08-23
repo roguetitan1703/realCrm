@@ -276,11 +276,25 @@ set to 7, No reply went 74 → 52 and Going cold 161 → 122 together. **`help` 
 no longer served** to a client that renders nothing; it stays in
 `leadSegments.ts` as the one written meaning.
 
-One deviation is kept on purpose: **the Source column shows the arrival source,
-not the latest.** The document derives it from the enquiry rows, but the Source
-facet and filter are computed from `crm_leads.source` — showing latest in the
+**The Source column keeps the arrival portal and now shows `+N`** for the ones
+they have come through since, counted in the same query as the row. The
+document derives the column from the enquiry rows; it does not, because the
+Source facet and filter are computed from `crm_leads.source` and a "latest"
 column would put a row under a portal whose own filter does not return it.
-Changing it means moving facet, filter and column together; not started.
+Attribution stays put, the rest is no longer invisible.
+
+**Routing writes on Save now, not on every click**, with the number beside each
+rule and greyed rather than hidden when the rule is off, and the Calling side
+carries the manager threshold. That last one forced three fixes: the two owner
+sweeps wrote their own timeline rows and `bulkAssignOwners` wrote **no history
+at all**, so an owner moved between callers changed hands silently and nothing
+could count the hand-offs. All three go through `recordAssignment()` now.
+
+**`delpat` on the development desk has the idle rule ON at 4 days and the
+unowned sweep ON** — set from the UI while reading the screen, not by a script.
+Nothing has fired yet (the backend has been restarting on every edit), but the
+first uninterrupted five-minute window will reassign roughly 150 dev leads and
+notify the rota. Turn it off in Settings → Routing, or re-clone.
 
 **Going cold still runs at the 3-day default on every desk** — no tenant has
 ever set `reminderDays` — which is 161 of bhumi's 217 open leads, three-quarters
