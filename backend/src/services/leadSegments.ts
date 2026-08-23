@@ -87,6 +87,33 @@ export const noPersonActivitySince = (days: number, table = 'crm_leads') => sql`
                  AND e.timestamp > now() - (${days}::text || ' days')::interval)`;
 
 /**
+ * NOT HANDED ON IN THE LAST `days` DAYS.
+ *
+ * The idle reassignment sweep's second condition, and it is not optional.
+ *
+ * The sweep asks "has anyone done anything on this for N days", and a
+ * reassignment is written by System — so it is not activity, so the lead is
+ * still eligible the moment it lands on somebody new. On a five-minute timer
+ * that is the same lead going round the rota every five minutes, for ever: one
+ * record on the dev desk collected four hand-offs in six minutes.
+ *
+ * The old expression could not do this either, but it hid the problem — it read
+ * `updated_at`, and the sweep's own UPDATE set `updated_at = NOW()`, so the
+ * clock reset as a side effect of the write. Moving to "what a person did"
+ * removed that accident and left the loop exposed.
+ *
+ * So the clock restarts on the hand-off itself: whoever has it now gets the
+ * same N days to act that the last person got. Reassignment still never stops —
+ * if nobody ever acts it moves again on the next window, which is what the desk
+ * asked for — but a window is a window.
+ */
+export const notHandedOnSince = (days: number, table = 'crm_leads') => sql`
+  NOT EXISTS (SELECT 1 FROM crm_timeline_events e
+               WHERE e.record_id = ${sql(table)}.id AND e.tenant_id = ${sql(table)}.tenant_id
+                 AND e.type = 'assignment'
+                 AND e.timestamp > now() - (${days}::text || ' days')::interval)`;
+
+/**
  * What the desk is told each pile is. `help` is one sentence in the firm's own
  * words, written HERE beside the SQL that decides it so that a meaning has one
  * home and a later reader can check a label against it.

@@ -197,7 +197,9 @@ Assignment
 - Reassignment **never changes the stage**. Ownership and progress are different
   facts.
 - Reassignment does not stop: if nobody ever acts it keeps reassigning, and the
-  manager is told **every time** past the third.
+  manager is told **every time** past the third. Once per WINDOW, not once per
+  tick — the clock restarts on the hand-off, or the same lead goes round the
+  rota every five minutes. It did; see the ledger entry for 24 Aug.
 
 ## G · Two WhatsApp templates, not one message
 
@@ -701,6 +703,43 @@ on — but a person who has since come in through two more portals looked
 identical to one who never came back. The cell reads `99ACRES +1`, counted in
 the same query as the row it labels, and the record sheet still names every one
 of them. 9 of the first 12 repeat leads on the dev clone carry a +N.
+
+**The idle sweep reassigned the same lead every five minutes. 24 Aug 2026.**
+
+Turned on for the first time on the development desk, it moved **480 times
+across 140 leads in nine minutes** — four hand-offs on some records — and raised
+297 notifications. One record's timeline read four "Reassigned … no activity for
+4 days" rows inside six minutes.
+
+Two faults, and the first is mine, from step 5:
+
+1. **A reassignment is written by System, so it is not activity** — and the
+   sweep's test is "has a PERSON done anything for N days". The lead was still
+   eligible the moment it landed on somebody new, so it went round the rota on
+   every tick. The old expression could not have done this either, but only by
+   accident: it read `updated_at`, and the sweep's own UPDATE set
+   `updated_at = NOW()`, so the clock reset as a side effect of the write.
+   Reading what a person did — which is right, and is what §1 asks for —
+   removed that accident and left the loop exposed. `notHandedOnSince(days)`
+   restarts the clock on the hand-off itself: whoever holds it now gets the same
+   N days the last person got. Reassignment still never stops, which is what the
+   desk asked for; a window is now a window. Measured on the churned desk: the
+   old predicate would have taken the same 140 leads again on the next tick, the
+   new one takes 0.
+
+2. **A backend that could not take the port kept sweeping.** `setInterval` sat
+   outside the `listen` callback and there was no `error` handler, so a process
+   that lost `EADDRINUSE` lingered with no port, no banner, no requests — and
+   its own five-minute timer over every tenant. Four were alive on this machine,
+   which is why one lead collected two hand-offs in the same minute. On a server
+   that is every tenant swept N times per interval by processes nobody knows are
+   running. The timer moved inside the callback and a second instance now says
+   the port is taken and exits.
+
+Development only: `bhumi` has both sweeps off, and production runs the 19 Aug
+backend, which has none of this. The dev desk was restored from the clone and
+the 272 notifications raised inside the window were deleted; 127 older ones of
+the same types were left alone.
 
 ---
 

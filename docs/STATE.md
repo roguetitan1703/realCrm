@@ -290,11 +290,27 @@ sweeps wrote their own timeline rows and `bulkAssignOwners` wrote **no history
 at all**, so an owner moved between callers changed hands silently and nothing
 could count the hand-offs. All three go through `recordAssignment()` now.
 
-**`delpat` on the development desk has the idle rule ON at 4 days and the
-unowned sweep ON** — set from the UI while reading the screen, not by a script.
-Nothing has fired yet (the backend has been restarting on every edit), but the
-first uninterrupted five-minute window will reassign roughly 150 dev leads and
-notify the rota. Turn it off in Settings → Routing, or re-clone.
+**THE IDLE SWEEP LOOPED.** Turned on for the first time on the dev desk it
+reassigned **480 times across 140 leads in nine minutes**, four hand-offs on
+some, 297 notifications. A reassignment is written by System, so it is not
+"activity", so the lead was eligible again the moment it landed on someone new —
+and the sweep runs every five minutes. The previous expression avoided this only
+by accident: it read `updated_at`, which the sweep's own UPDATE reset. The clock
+now restarts on the hand-off (`notHandedOnSince`), so whoever holds it gets the
+same N days the last person got; on the churned desk the old predicate would
+have taken the same 140 again and the new one takes 0.
+
+Underneath it: **a backend that lost the port kept sweeping.** `setInterval` was
+outside the `listen` callback with no error handler, so an `EADDRINUSE` process
+lingered with a timer over every tenant and no banner to say it existed — four
+of them here. The timer is inside the callback now and a second instance exits
+saying the port is taken.
+
+`bhumi` is unaffected: both sweeps off, and production runs the 19 Aug backend.
+The dev desk was re-cloned and the 272 notifications from the window deleted
+(127 older ones of the same types kept). **delpat's idle rule was turned OFF** —
+it would have churned the restored clone immediately; the 4 days it was set to
+are still stored, so it is one toggle to put back.
 
 **Going cold still runs at the 3-day default on every desk** — no tenant has
 ever set `reminderDays` — which is 161 of bhumi's 217 open leads, three-quarters

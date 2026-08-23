@@ -14,7 +14,7 @@ import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { audit } from './audit.js';
-import { buildLeadSegments, publicSegments, noPersonActivitySince, type LeadSegment } from './leadSegments.js';
+import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
@@ -4317,6 +4317,7 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
     SELECT id, name, agent_id FROM crm_leads
     WHERE tenant_id = ${tenantId} AND ${OPEN} AND agent_id IS NOT NULL
       AND ${noPersonActivitySince(days)}
+      AND ${notHandedOnSince(days)}
       AND NOT ${FOLLOWUP_UPCOMING}
   `;
   let n = 0;
@@ -4427,11 +4428,12 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
   if (!rules.owner_reassign_idle_enabled) return 0;
   const days = Math.max(Number(rules.owner_reassign_idle_days) || 3, 1);
-  // Same predicate as the lead sweep, against the owner's own timeline.
+  // Same two predicates as the lead sweep, against the owner's own timeline.
   const rows = await sql`
     SELECT id, agent_id FROM crm_owners
     WHERE tenant_id = ${tenantId} AND coalesce(stage, '') NOT IN ${sql(OWNER_TERMINAL_STATUSES)} AND agent_id IS NOT NULL
       AND ${noPersonActivitySince(days, 'crm_owners')}
+      AND ${notHandedOnSince(days, 'crm_owners')}
   `;
   let n = 0;
   const tally = new Map<string, number>();

@@ -313,17 +313,29 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 
 const isMain = process.argv[1] && (import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/')) || import.meta.url.includes(process.argv[1].replace(/\\/g, '/')));
 if (isMain || process.env.START_SERVER === 'true') {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`============================================================================`);
     console.log(`🚀 Real Estate CRM Backend API Engine running on port ${PORT}`);
     console.log(`   ${envBanner(PORT)}`);
     console.log(`🌐 Workspace Resolver: http://localhost:${PORT}/api/v1/workspace/resolve?slug=skyline-realty`);
     console.log(`============================================================================`);
+    // INSIDE the listen callback, and nowhere else.
+    //
+    // This ran unconditionally, so a process that lost the port went on
+    // sweeping every tenant on its own timer — invisibly, because it printed no
+    // banner and served no requests. Four of them were alive on this machine at
+    // once, which is how one lead collected two reassignments in the same
+    // minute. On a server that is every tenant swept N times per interval by
+    // processes nobody knows are running.
+    setInterval(() => { runRoutingSweeps().catch(err => console.warn('[Routing Sweep] run failed:', err?.message)); }, 5 * 60 * 1000);
   });
-  // Lead routing sweeps (unowned + idle) — both off per-tenant by default,
-  // configured in Settings → Lead routing. Runs on a timer because neither
-  // condition is triggered by a request; something has to check the clock.
-  setInterval(() => { runRoutingSweeps().catch(err => console.warn('[Routing Sweep] run failed:', err?.message)); }, 5 * 60 * 1000);
+  // And say so, rather than lingering as a process with no port and a timer.
+  server.on('error', (err: any) => {
+    console.error(err?.code === 'EADDRINUSE'
+      ? `\n✗ Port ${PORT} is already in use. Another backend is running — stop it first.\n`
+      : `\n✗ Server failed to start: ${err?.message}\n`);
+    process.exit(1);
+  });
 }
 
 export default app;
