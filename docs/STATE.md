@@ -38,15 +38,24 @@ lessons, neither optional:
 - **The dev watcher and the prod watcher were both running**, so the same
   rebuild raced itself on development and left sessions claiming 8 payloads over
   6 lines. `runOnce` is not concurrency-safe across two processes.
-- **It happened again on step 5, and it is not going to stop happening.** The
-  `:5000` watcher was still up, so the three `ADD COLUMN IF NOT EXISTS`
-  statements F needs (`reassign_idle_days`, `owner_reassign_idle_days`,
-  `reassign_alert_count`) reached production the moment `db.ts` was saved.
-  Additive, defaulted, no row rewritten — but **it could not be verified from
-  here**: this machine's sandbox refuses a connection to the production database
-  URL outright. Confirm the three columns exist and every `crm_routing_rules`
-  toggle still reads what it did, or stop the `:5000` watcher before any session
-  that touches the backend.
+- **It happened again on step 5, and there were NINE of them.** A watcher was
+  still up, so the three `ADD COLUMN IF NOT EXISTS` statements F needs
+  (`reassign_idle_days`, `owner_reassign_idle_days`, `reassign_alert_count`)
+  reached production the moment `db.ts` was saved. Additive, defaulted, no row
+  rewritten — but **it could not be verified from here**: this machine's sandbox
+  refuses a connection to the production database URL outright. Confirm the
+  three columns exist and every `crm_routing_rules` toggle still reads what it
+  did.
+- **`npx tsx watch backend/src/index.ts` IS A PRODUCTION WATCHER.** It sets no
+  `APP_ENV`, `appEnv()` falls through to `'local'`, and `databaseUrl()` returns
+  `DATABASE_URL` for anything that is not `development`. It is not
+  `dev:api:prod` — that one at least says `prod` in its name. 30 abandoned node
+  processes were found and killed on 23 Aug: **9** of those watcher trees, 8
+  `run-api --env=development --watch`, 4 vite, and a scratch script from a
+  session whose file had already been deleted. Each of the nine reruns
+  `initSchema()` and the whole `runOnce` chain against production on every
+  backend save, and holds Supabase connections while doing nothing. Use
+  `npm run dev:api`, and check `netstat` for strays before a backend session.
 
 **What it did, measured read-only afterwards.** The rebuild only writes
 `crm_lead_enquiries`; no lead, timeline row or notification was touched.
