@@ -86,7 +86,7 @@ so the live desk is unaffected until the merge.
 The client walked through eight areas line by line on 22–23 Aug. Every decision,
 and the order they have to be built in, is **`docs/specs/desk-rework.md`** — that
 file is the one to read before touching leads, and its ledger is what says where
-the build has got to. Six of seven steps are done, all on `development`, none
+the build has got to. **All seven steps are done**, all on `development`, none
 deployed.
 
 | # | Step | State |
@@ -97,7 +97,7 @@ deployed.
 | 4 | Timeline and reopening | done |
 | 5 | Settings | done |
 | 6 | WhatsApp templates | done |
-| 7 | This device | next |
+| 7 | This device | done |
 
 **What changed on the desk so far.** "Past SLA" is deleted. Contact now means
 anything a **person** did, which moves not-contacted from 83 to 7 on the live
@@ -233,6 +233,37 @@ it: every screen that writes there was already behind a desk-role check, so the
 rule was true by luck rather than by enforcement. It is enforced now (403,
 verified through the API), and it had to be before showing an agent a template
 they may read but not change.
+
+**Step 7 (H) is built.** One stopwatch was producing three symptoms: the false
+"alerts unavailable" on a cold load, the empty card in Settings, and the
+permission never being asked. `readyRegistration()` raced
+`serviceWorker.ready` against a 5-second timer and read a lost race as "this
+browser cannot do push". It asks `getRegistration()` now — `undefined` is a real
+answer, immediately — and waits on the registration's own state when there is
+one. Sign-out cannot wait at all any more, by construction. Alerts and install
+are two rows under one **This device** heading on both surfaces; there were
+three headings for two facts about one phone.
+
+`navigator.getInstalledRelatedApps()` exists in Chromium and answers (0 on a
+machine without the app). The manifest carries `related_applications` built from
+the forwarded host. **Whether it returns 1 for an installed app is unverified** —
+that needs a real install. If it never answers, the row goes on offering
+Install.
+
+**`store.me()` was returning the wrong person**, found while verifying the
+above. It ended `|| state.agents[0]` — not "unknown" but the first name on the
+roster — so a session whose user id matched no roster row wore a colleague's
+name and face, and step 6's intro message resolves `{agentName}` through it.
+Gone, along with `activeAgentId`'s invented `'a1'` default. It can now be nobody
+legitimately: briefly before the roster loads, and permanently for a user with
+no roster row — **`skyline-realty`'s owner Aarav Mehta is in that state today**.
+The sentence drops the placeholder rather than printing braces, and Copy is
+disabled until the name is known.
+
+**Verifying any of this needs the built bundle, not `vite dev`.** The service
+worker is production-only and `/<slug>/sw.js` is a Vercel rewrite, so nothing in
+push or install is live under `npm run dev`. Build with `npm run build:dev` and
+serve `dist/` with that one rewrite emulated.
 
 **Going cold still runs at the 3-day default on every desk** — no tenant has
 ever set `reminderDays` — which is 161 of bhumi's 217 open leads, three-quarters

@@ -24,9 +24,23 @@ import InstallGuide from './InstallGuide.jsx'
 export default function Install({ variant = 'prompt' }) {
   const [installable, setInstallable] = useState(canInstall())
   const [installed, setInstalled] = useState(isStandalone)
+  const [alreadyOnDevice, setAlreadyOnDevice] = useState(false)
   const [guide, setGuide] = useState(false)
 
   useEffect(() => onInstallAvailable(setInstallable), [])
+  // IS THIS APP ALREADY ON THE MACHINE, asked from a browser tab. Chromium
+  // only, and only for a manifest listed in its own `related_applications`
+  // (backend/src/routes/pwa.ts). Everywhere else it is absent or answers
+  // nothing, and the row goes on offering Install — which is what it did
+  // before and is not wrong. A tick that cannot LAUNCH the app is still worth
+  // more than a button that would install a second copy of it.
+  useEffect(() => {
+    let live = true
+    navigator.getInstalledRelatedApps?.()
+      .then(apps => { if (live && apps?.length) setAlreadyOnDevice(true) })
+      .catch(() => {})
+    return () => { live = false }
+  }, [])
   useEffect(() => {
     const done = () => setInstalled(true)
     window.addEventListener('appinstalled', done)
@@ -36,6 +50,19 @@ export default function Install({ variant = 'prompt' }) {
   }, [])
 
   if (installed) return null
+
+  // In a browser, with the app already installed. No button: a link that cannot
+  // open the installed app is worse than nothing, and Install here would offer a
+  // duplicate.
+  if (alreadyOnDevice) {
+    if (variant !== 'row') return null
+    return (
+      <div className="me-row install-row">
+        <span className="install-row-ic"><Icon name="check" size={15} /></span>
+        <div className="install-row-body"><div className="install-row-title">Installed</div></div>
+      </div>
+    )
+  }
 
   // An iPad reports itself as a Mac, so even the desk can be looking at one.
   // iPhone has no install API: the button opens the Share-sheet guide rather

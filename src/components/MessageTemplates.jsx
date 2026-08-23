@@ -35,7 +35,15 @@ export default function MessageTemplates({ store }) {
   // From the store, not a prop: this renders on a screen mounted from a shared
   // ctx that carries no user, and {agentName} resolving to nothing would be
   // pasted into a client's chat before anyone noticed.
-  const agentName = store.me?.()?.name || ''
+  //
+  // It CAN legitimately be nobody, in two ways, and neither is a crash: for the
+  // second or so before the roster arrives from the server, and permanently for
+  // a signed-in user with no roster row (one tenant has an owner in that state
+  // today). The sentence still reads — introText drops the placeholder rather
+  // than printing braces — but it does not name anyone, so Copy stays disabled
+  // until it can hand over the whole thing.
+  const who = store.me?.() || null
+  const agentName = who?.name || ''
   // `||`, not `??`: an empty stored template is not a template. It is also
   // what the consumer does — followUpMessage() falls back the same way — so a
   // blank box here and the message that actually goes out cannot disagree.
@@ -45,7 +53,7 @@ export default function MessageTemplates({ store }) {
     return (
       <section className="msgt-card">
         <div className="msgt-h">Intro message</div>
-        <IntroPreview text={introText(intro, { firmName, agentName })} />
+        <IntroPreview text={introText(intro, { firmName, agentName })} ready={!!who} />
         <div className="msgt-who">Your owner or manager can change this.</div>
       </section>
     )
@@ -71,12 +79,13 @@ export default function MessageTemplates({ store }) {
         onSave={(v) => store.patchSettings({ introMessage: v }, 'Intro message saved')}
         onReset={() => store.patchSettings({ introMessage: DEFAULT_INTRO_MESSAGE }, 'Intro message reset')}
         preview={introText(intro, { firmName, agentName })}
+        previewReady={!!who}
       />
     </>
   )
 }
 
-function TemplateEditor({ title, sub, value, fallback, tokens, onSave, onReset, preview }) {
+function TemplateEditor({ title, sub, value, fallback, tokens, onSave, onReset, preview, previewReady }) {
   const [draft, setDraft] = useState(value)
   // The stored value can change under an open editor — another tab saving, or
   // the desk state reloading after a save. Following it blindly would wipe what
@@ -107,7 +116,7 @@ function TemplateEditor({ title, sub, value, fallback, tokens, onSave, onReset, 
         value={draft}
         onChange={e => setDraft(e.target.value)}
       />
-      {preview !== undefined && <IntroPreview text={preview} />}
+      {preview !== undefined && <IntroPreview text={preview} ready={previewReady} />}
       <div className="msgt-foot">
         <Button variant="primary" disabled={!dirty} onClick={() => onSave(draft.trim())}>Save</Button>
         <Button variant="ghost" disabled={String(value || '').trim() === fallback.trim()} onClick={onReset}>
@@ -119,7 +128,7 @@ function TemplateEditor({ title, sub, value, fallback, tokens, onSave, onReset, 
 }
 
 /** The resolved sentence, and the button that puts exactly it on the clipboard. */
-function IntroPreview({ text }) {
+function IntroPreview({ text, ready = true }) {
   const [copied, setCopied] = useState(false)
   // Confirmed only once the write RESOLVES. A "Copied" that fires regardless is
   // how somebody pastes an old clipboard into a client's chat.
@@ -131,7 +140,7 @@ function IntroPreview({ text }) {
   return (
     <div className="msgt-prev">
       <div className="msgt-prev-t">{text}</div>
-      <button type="button" className="btn btn-quiet msgt-copy" onClick={copy} disabled={!text}>
+      <button type="button" className="btn btn-quiet msgt-copy" onClick={copy} disabled={!text || !ready}>
         <Icon name={copied ? 'check' : 'copy'} size={13} /> {copied ? 'Copied' : 'Copy'}
       </button>
     </div>

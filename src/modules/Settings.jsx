@@ -4,9 +4,8 @@ import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES } from '../data/theme.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import Install from '../components/Install.jsx'
+import ThisDevice from '../components/ThisDevice.jsx'
 import MessageTemplates from '../components/MessageTemplates.jsx'
-import PushRow from '../components/PushRow.jsx'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { isDeskRole } from '../lib/permissions.js'
 
@@ -22,7 +21,10 @@ const NAV = [
   { key: 'followup', label: 'Response times', icon: 'clock' },
   { key: 'messages', label: 'Message templates', icon: 'wa', everyone: true },
   // { key: 'audit', label: 'Audit ledger', icon: 'shield' },
-  { key: 'alerts', label: 'Alerts', icon: 'bell', everyone: true },
+  // Alerts used to be a section of its own, one row above the install row in a
+  // section called This device. Two headings for two facts about the same
+  // phone. `?screen=settings` carries no section, so nothing linked to the old
+  // key — it was component state.
   { key: 'system', label: 'This device', icon: 'settings', everyone: true },
 ]
 
@@ -53,7 +55,6 @@ export default function Settings({ store, topBar }) {
               {section === 'followup' && <ResponseTimesSection store={store} settings={settings} />}
               {section === 'messages' && <MessagesSection store={store} />}
               {/* {section === 'audit' && <AuditSection />} */}
-              {section === 'alerts' && <AlertsSection store={store} />}
               {section === 'system' && <SystemSection store={store} />}
             </div>
           </div>
@@ -579,25 +580,15 @@ function AuditSection() {
 // Alerts had no home on the web at all — the only control anywhere was a row
 // in the notification drawer's footer, which is not where anyone looks for a
 // setting. Same component as the phone, so "am I reachable" has one answer.
-function AlertsSection({ store }) {
-  return (
-    <>
-      <SecHead title="Alerts" />
-      <Panel>
-        <PushRow store={store} variant="row" />
-      </Panel>
-    </>
-  )
-}
-
 function SystemSection({ store }) {
   return (
     <>
       <SecHead title="This device" />
-      {/* The desk had no install route at all: the prompt card only ever
-          rendered on the phone's Today tab, so a browser on a laptop was never
-          offered it. Renders nothing when already installed. */}
-      <Install variant="row" />
+      {/* Alerts and install, the same two rows the phone's Me screen shows —
+          components/ThisDevice.jsx. The desk had no install route at all: the
+          prompt card only ever rendered on the phone's Today tab, so a browser
+          on a laptop was never offered it. */}
+      <ThisDevice store={store} />
       {/* <Panel>
         <SectionHead title="Database" />
         <div className="sys-row">

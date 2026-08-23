@@ -20,24 +20,62 @@ export function pushPermission() {
   return typeof Notification !== 'undefined' ? Notification.permission : 'denied';
 }
 
-async function readyRegistration() {
+/**
+ * THE REGISTRATION COVERING THIS DOCUMENT, OR NULL — answered, never guessed.
+ *
+ * No waiting at all. `getRegistration()` settles either way: `undefined` means
+ * there is genuinely none (a browser with no worker, or `vite dev`, where it is
+ * deliberately never registered), and that is a real answer available now.
+ *
+ * This is what sign-out uses. `disablePush` runs before the token is dropped,
+ * so it must not be able to hang — and an installing worker holds no
+ * subscription to remove, so there is nothing worth waiting for.
+ */
+async function registrationNow() {
   if (!pushSupported()) return null;
-  // `.ready` resolves for the registration whose SCOPE covers this document,
-  // and never resolves at all when nothing does. That is reachable now the
-  // worker is scoped to `/<slug>/`: a URL that missed the trailing-slash
-  // normalisation sits outside every scope, and this would hang forever —
-  // taking `autoEnablePush` and `disablePush` (which runs on sign-out, before
-  // the token is dropped) with it. Time it out and degrade instead.
   // Wait out registration first, or this subscribes against whichever worker
   // happens to control the page at the time — which on the first launch after
   // per-workspace scoping is the root one, about to be retired.
   await swReady();
   try {
-    return await Promise.race([
-      navigator.serviceWorker.ready,
-      new Promise((res) => setTimeout(() => res(null), 5000)),
-    ]);
+    return (await navigator.serviceWorker.getRegistration()) || null;
   } catch (e) { return null; }
+}
+
+/**
+ * The same registration, once it can actually take a subscription.
+ *
+ * WAS A STOPWATCH: `navigator.serviceWorker.ready` raced against a 5-second
+ * timer, and a cold load lost that race. The timeout then returned null and
+ * every caller read null as "this browser cannot do push" — so a browser that
+ * was simply still starting its worker was reported as one that would never
+ * work. Three symptoms came out of that one line: the false "alerts
+ * unavailable" on a first tab load, the empty card in Settings, and the
+ * permission never being asked at all, because `autoEnablePush` walked the same
+ * path.
+ *
+ * The timeout was guarding something real — `.ready` never resolves when no
+ * registration covers the document, which the per-workspace `/<slug>/` scope
+ * makes reachable — but a stopwatch cannot tell that from "still activating".
+ * `getRegistration()` can, so the two cases are now told apart by asking rather
+ * than by waiting: no registration answers immediately, and a registration that
+ * exists is waited on through ITS OWN state, not the clock.
+ */
+async function readyRegistration() {
+  const reg = await registrationNow();
+  if (!reg) return null;
+  if (reg.active) return reg;
+  const starting = reg.installing || reg.waiting;
+  if (!starting) return reg;
+  return await new Promise((resolve) => {
+    const done = () => {
+      if (starting.state === 'activated' || starting.state === 'redundant') {
+        starting.removeEventListener('statechange', done);
+        resolve(reg);
+      }
+    };
+    starting.addEventListener('statechange', done);
+  });
 }
 
 async function currentSubscription() {
@@ -163,7 +201,9 @@ export function autoEnablePush() {
 }
 
 export async function disablePush() {
-  const reg = await readyRegistration();
+  // registrationNow, not readyRegistration: this runs on sign-out and may not
+  // wait for anything. A worker that has not activated holds no subscription.
+  const reg = await registrationNow();
   if (!reg) return { ok: true };
   try {
     const sub = await reg.pushManager.getSubscription();

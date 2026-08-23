@@ -261,7 +261,7 @@ Dependency order, not priority. Steps 2–5 all read what step 1 defines.
 | 4 | Timeline and reopening | 3 | D, E | **done** |
 | 5 | Settings | 1 | F | **done** |
 | 6 | WhatsApp templates | — | G | **done** |
-| 7 | This device | — | H | todo |
+| 7 | This device | — | H | **done** |
 
 ### Ledger
 
@@ -558,6 +558,72 @@ Not covered: `{agentName}` resolves from `store.me()`, which is the roster row
 for the signed-in user. On a workspace where that lookup comes back empty the
 placeholder resolves to nothing and the sentence closes up — it does not render
 braces, but it does not name anybody either.
+
+**Step 7 — H, 23 Aug 2026.** One line was producing all three symptoms, and it
+was a stopwatch.
+
+`readyRegistration()` raced `navigator.serviceWorker.ready` against a 5-second
+timer and returned null when the timer won — which every caller read as "this
+browser cannot do push". A cold load loses that race, so a browser that was
+simply still starting its worker was reported as one that would never work.
+There are two functions now: `registrationNow()` asks `getRegistration()`, which
+settles either way — `undefined` is a real answer, available immediately — and
+`readyRegistration()` waits on the registration's OWN `statechange` when one
+exists. The timeout was guarding something real (`.ready` never resolves when no
+registration covers the document, which the `/<slug>/` scope makes reachable),
+but a stopwatch cannot tell that from "still activating". Sign-out uses
+`registrationNow()` and so cannot wait for anything at all: a worker that has
+not activated holds no subscription to remove.
+
+**"Checking…"** while it looks. The settings row returned null until the answer
+arrived, which is what left an empty card — a heading with nothing under it,
+which reads as broken rather than as busy. The prompt overlay stays silent while
+pending: it exists to interrupt, and interrupting to say "one moment" is worse.
+
+**One section.** Alerts and install are the same two rows under **This device**,
+on the desk and on the phone, from `components/ThisDevice.jsx`. There were three
+headings for two facts about one phone: a Settings section called Alerts, a
+Settings section called This device, and a card on the Me screen called "App &
+Push Alerts" with its own markup. The wrapper hides itself when both rows render
+nothing.
+
+**Installed, seen from a browser tab.** The open question is answered as far as
+it can be here: `navigator.getInstalledRelatedApps()` EXISTS in Chromium and
+answers — 0 for a machine without the app, measured. The manifest now carries
+`related_applications` pointing at its own URL, built from the forwarded host so
+it matches the URL the browser installed from rather than the API's own name.
+**Whether it returns 1 for an installed app is NOT verified** — that needs a
+real install, which a headless browser cannot do. If it never answers, the row
+goes on offering Install, which is what it did before and is not wrong.
+
+Verified on the built bundle served with the Vercel rewrites emulated
+(`/<slug>/sw.js`), because `vite dev` never registers a worker and every one of
+these paths is dead without one. The worker registers at scope
+`/delpat/`, active and controlling. The card was watched from its first paint
+and passes through exactly two states: `[Checking… | Install on this device]`
+then `[Alerts blocked on this device | Install on this device]` — "blocked"
+because headless Chromium denies notifications, which is itself the proof that
+the registration was FOUND rather than timed out. Settings lists one "This
+device" and no "Alerts". The phone's Me screen shows the same two rows under one
+heading. Sign-out reached the login screen in 3.0s. No page errors.
+
+Not covered: the granted-and-subscribed branch. `grantPermissions` does not make
+`Notification.permission` return granted in this Chromium, so "Alerts on for
+this device" and the subscribe path were not exercised — neither was changed.
+
+**Found while verifying: `store.me()` was returning the wrong person.** It ended
+`|| state.agents[0]`, which is not "unknown" — it is THE FIRST NAME ON THE
+ROSTER. A session whose user id did not match a roster row showed that
+colleague's name and face as your own, and the intro message added in step 6
+resolves `{agentName}` through it, so an agent could have copied a sentence
+introducing somebody else and sent it to a client. The fallback is gone, and
+`activeAgentId` no longer defaults to the invented id `'a1'`. Both callers
+already handled null. It can now legitimately be nobody — for the second before
+the roster arrives, and permanently for a user with no roster row, which
+`skyline-realty`'s owner is today — so the sentence drops the placeholder
+instead of printing braces, and Copy stays disabled until it can hand over the
+whole thing. Verified by starving the roster deliberately: the line reads
+"Hello, this is from Delpat…", no braces, Copy refused.
 
 ---
 

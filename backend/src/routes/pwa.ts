@@ -163,6 +163,18 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
     background_color: surface,
     theme_color: primary,
     icons,
+    // So a BROWSER TAB can find out whether this app is already installed on
+    // the machine, via navigator.getInstalledRelatedApps() — Chromium only, and
+    // it only ever answers for a manifest listed here. `prefer_related` stays
+    // false: this IS the app, there is nothing to prefer over it.
+    //
+    // Pointing at this manifest's own URL. Being wrong costs nothing — the API
+    // returns an empty list and the Install row goes on offering Install, which
+    // is what it does today.
+    prefer_related_applications: false,
+    related_applications: [
+      { platform: 'webapp', url: manifestUrl(req) },
+    ],
   });
 });
 
@@ -173,6 +185,22 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
  * least one tenant, in the one response that gates first paint. A browser
  * caches this; a data URI in JSON is re-sent on every load.
  */
+/**
+ * This manifest's URL AS THE BROWSER ASKED FOR IT.
+ *
+ * `related_applications` only matches when the URL is byte-for-byte the one the
+ * app was installed from, and the frontend reaches this route through a rewrite
+ * — so the Host header can be the API's own name rather than the one in the
+ * address bar. The forwarded headers carry what the browser actually used.
+ * Getting it wrong costs an empty answer from getInstalledRelatedApps(), not an
+ * error: the Install row goes on offering Install.
+ */
+function manifestUrl(req: Request): string {
+  const host = String(req.headers['x-forwarded-host'] || req.get('host') || '');
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
+  return `${proto}://${host}${req.originalUrl.split('?')[0]}`;
+}
+
 pwaRouter.get('/:slug/logo', async (req: Request, res: Response) => {
   const t = await getTenant(req.params.slug);
   const raw = String((t?.brand_config || {}).logoUrl || '');

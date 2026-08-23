@@ -1,6 +1,5 @@
 import { Avatar } from '../../components/primitives.jsx'
-import PushRow from '../../components/PushRow.jsx'
-import Install from '../../components/Install.jsx'
+import ThisDevice from '../../components/ThisDevice.jsx'
 import Icon from '../../components/Icon.jsx'
 import MessageTemplates from '../../components/MessageTemplates.jsx'
 import { roleLabel } from '../../lib/permissions.js'
@@ -35,13 +34,12 @@ export default function PhoneMe({ store, me, topBar }) {
           </button>
         </div>
 
-        {/* Unified App & Notifications Card */}
-        <div style={{ background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink)' }}>App & Push Alerts</div>
-          
-          <PushRow store={store} variant="row" />
-
-          <Install variant="row" />
+        {/* Alerts and install — the same component and the same two rows the
+            desk's Settings → This device renders. This screen had its own card
+            with its own heading over the same two facts. */}
+        <div className="msgt-card">
+          <div className="msgt-h">This device</div>
+          <ThisDevice store={store} />
         </div>
 
         {/* The firm's message templates — the SAME component Settings →

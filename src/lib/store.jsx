@@ -130,7 +130,10 @@ function loadAuthSession() {
       return {
         loggedIn: Boolean(p.loggedIn) && hasToken,
         role: p.role || 'admin',
-        activeAgentId: p.activeAgentId || 'a1',
+        // NOT 'a1'. That was an invented id matching nobody, which every
+        // permission check then compared against and every roster lookup
+        // missed. Absent means absent.
+        activeAgentId: p.activeAgentId || null,
         tenantName: p.tenantName || '',
         tenantCity: p.tenantCity || '',
       }
@@ -225,7 +228,7 @@ function freshState() {
     : { ...clone(DEFAULT_SETTINGS), firmName: session.tenantName || '', city: session.tenantCity || '' }
   return {
     role: session.role || 'admin',                 // owner | admin | manager | agent, as the server said
-    activeAgentId: session.activeAgentId || 'a1',           // who "I" am in agent view
+    activeAgentId: session.activeAgentId || null,           // who "I" am; null until the session says
     loggedIn: session.loggedIn || false,
     agents: Array.isArray(cs.agents) ? cs.agents : [],
     // The firm's own vocabulary, from the boot payload. Not records -- a few
@@ -1124,7 +1127,15 @@ export function StoreProvider({ children }) {
     // disagree with the rows underneath it.
     agentById: (id) => (id && (state.agents.find(a => a.id === id)
       || state.formerAgents.find(a => a.id === id))) || null,
-    me: () => state.agents.find(a => a.id === state.activeAgentId) || state.agents[0] || null,
+    // WHO IS SIGNED IN, or nobody. The `|| state.agents[0]` that used to sit
+    // here did not return "unknown" — it returned THE FIRST PERSON ON THE
+    // ROSTER, so a session that never carried a user id showed a colleague's
+    // name and face as your own. Harmless-looking until the intro message
+    // (Settings → Message templates) started resolving {agentName} through it:
+    // an agent would have copied a sentence introducing someone else and sent
+    // it to a client. Both callers already handle null — the footer and the
+    // phone header fall back to the firm's name.
+    me: () => state.agents.find(a => a.id === state.activeAgentId) || null,
     activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id)),
     
     // ── Records ───────────────────────────────────────────────────────────

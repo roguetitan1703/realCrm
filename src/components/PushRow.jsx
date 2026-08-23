@@ -44,7 +44,21 @@ export default function PushRow({ store, variant = 'prompt' }) {
 
   useEffect(() => { pushStatus().then(setPush) }, [])
 
-  if (!push || hidden) return null
+  if (hidden) return null
+  // STILL ASKING IS NOT AN ANSWER. `push` is null until the worker has been
+  // looked up, and returning null for that left the settings panel EMPTY on a
+  // cold load — a card with a heading and nothing in it, which reads as broken.
+  // The prompt overlay stays quiet while pending: it exists to interrupt, and
+  // interrupting to say "one moment" is worse than not interrupting.
+  if (!push) {
+    if (variant !== 'row') return null
+    return (
+      <div className="install-row">
+        <span className="install-row-ic"><Icon name="bell" size={15} /></span>
+        <div className="install-row-body"><div className="install-row-title">Checking…</div></div>
+      </div>
+    )
+  }
   // The PROMPT stays quiet when there is nothing to offer: no push support at
   // all (iOS in the browser rather than the installed app, most often) — Install
   // is what helps there, and two bars about one problem is how people stop
