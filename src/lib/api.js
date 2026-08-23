@@ -425,6 +425,17 @@ if (typeof window !== 'undefined') {
   window.addEventListener('online', () => { flushPending(); });
 }
 
+// A query string from a params bag, dropping anything unset. Shared by the
+// leads list and its counts so the two cannot serialise the same filters
+// differently — which is one keystroke away from a count that describes a
+// different question than the rows beneath it.
+const qs = (params = {}) => {
+  const p = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') p.set(k, String(v))
+  const s = p.toString()
+  return s ? `?${s}` : ''
+}
+
 export const api = {
   // Workspace & State Hydration
   /**
@@ -583,13 +594,11 @@ export const api = {
   // /records/:id/actions/* below are the separate actionsRouter endpoints.
   getLeads: () => request('/leads'),
   getLead: (id) => request(`/leads/${encodeURIComponent(id)}`),
-  listLeads: (params = {}) => {
-    const qs = new URLSearchParams()
-    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
-    const s = qs.toString()
-    return request(`/leads/page${s ? `?${s}` : ''}`)
-  },
-  getLeadsSummary: () => request('/leads/summary'),
+  listLeads: (params = {}) => request(`/leads/page${qs(params)}`),
+  // The same parameters as listLeads, on purpose: a count and the rows it
+  // describes come from the same question. Called with none, it counts the
+  // whole visible desk, which is what the phone's Me screen asks for.
+  getLeadsSummary: (params = {}) => request(`/leads/summary${qs(params)}`),
   // One request for the whole selection — see bulkAssignLeads() for why this is
   // not a loop of updateLead on the client.
   bulkAssignLeads: (ids, agentId) => request('/leads/bulk-assign', { method: 'POST', body: JSON.stringify({ ids, agentId }) }),

@@ -2439,59 +2439,51 @@ async function arrivalStageOf(tenantId: string): Promise<string> {
   return (await deskConfigOf(tenantId)).arrivalStage;
 }
 
-/**
- * One page of leads, filtered and counted in Postgres — the same treatment
- * listProperties got, for the same reason.
- */
-export async function listLeads(opts: {
-  page?: number; limit?: number; q?: string; stage?: string; agentId?: string;
+/** Everything the leads list can be narrowed by, from the query string. */
+export interface LeadFilterOpts {
+  q?: string; stage?: string; agentId?: string;
   segment?: string; intent?: string;
   source?: string; locality?: string; agent?: string; flag?: string;
-  sortKey?: string; sortDir?: string;
-} = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
-  const t = tid();
-  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
-  const page = Math.max(Number(opts.page) || 1, 1);
-  const offset = (page - 1) * limit;
+}
 
+/**
+ * ============================================================================
+ * ONE FILTER BUILDER, READ BY THE LIST AND BY THE COUNTS BESIDE IT
+ * ============================================================================
+ * Split by DIMENSION rather than returned as one clause, because the counts
+ * need to leave exactly one of them out.
+ *
+ * The rule the screen implements: **every facet counts under the other
+ * filters, but not under itself.** Pick agent Binod and the segment pills show
+ * Binod's numbers; then pick No reply and the status counts narrow again while
+ * the pills keep showing what switching would give you. A facet that counted
+ * under its own selection would read `No reply 63` beside `everything else 0`,
+ * which tells you nothing you did not already know.
+ *
+ * `base` is what every count carries regardless: the tenant, the agent's
+ * visibility scope, the search box, and any flag arriving from a link. It was
+ * one clause with the dimensions inlined, and `getLeadsSummary` took no
+ * arguments at all — so the list re-queried with your filters while every
+ * number beside it was still counting the whole desk. That is the same fault
+ * as the sidebar badge and the Today header, for the third time.
+ */
+function leadFilterParts(t: string, opts: LeadFilterOpts, SEGMENTS: Record<string, any>) {
   // An agent sees their own pipeline. Derived from the request context here,
   // NOT passed in by the route: the routes were reading `req.user.userId`, a
   // property that does not exist on req.user (it is `id`), so scopeAgentId
   // arrived undefined and every agent was served the entire firm's leads. A
   // permission that a caller has to remember to pass is a permission that will
   // eventually not be passed.
-  const where: any[] = [sql`tenant_id = ${t}`, leadScope()];
+  const base: any[] = [sql`tenant_id = ${t}`, leadScope()];
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
-    where.push(sql`(lower(name) LIKE ${like} OR phone LIKE ${like}
+    base.push(sql`(lower(name) LIKE ${like} OR phone LIKE ${like}
       OR lower(coalesce(email, '')) LIKE ${like} OR lower(coalesce(locality, '')) LIKE ${like})`);
   }
-  const many = (v?: string) => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
-  const stages = many(opts.stage);
-  if (stages.length) where.push(sql`stage IN ${sql(stages)}`);
-  if (opts.agentId) where.push(sql`agent_id = ${opts.agentId}`);
-  // Sale vs rent. This queried a column called `intent`, which crm_leads does
-  // not have and never had — the toggle at the top of the leads list returned
-  // a 500 on every click. The column is `deal`, written by createLead, and a
-  // lead whose purpose is "Lease" is a rental whatever `deal` says.
-  const RENT = sql`(lower(coalesce(deal, '')) IN ('rent', 'lease') OR lower(coalesce(purpose, '')) IN ('rent', 'lease'))`;
-  // `NOT RENT` is not "buy" — it is "not rent", which includes every lead
-  // nobody has asked yet. Filtering to Buy handed back all of them. Buy means
-  // the row says sale; a lead with no stated intent answers neither filter,
-  // which is the honest answer and makes the gap visible.
-  const SALE = sql`(lower(coalesce(deal, '')) = 'sale' OR lower(coalesce(purpose, '')) = 'sale')`;
-  if (opts.intent === 'buy' || opts.intent === 'sale') where.push(SALE);
-  else if (opts.intent === 'rent') where.push(RENT);
-  const SEGMENTS = leadSegments(await deskConfigOf(t));
-  const segment = SEGMENTS[opts.segment as LeadSegment];
-  if (segment) where.push(segment);
+  if (opts.agentId) base.push(sql`agent_id = ${opts.agentId}`);
 
-  // The filter panel's own fields. These were collected by the screen and then
-  // dropped on the floor: useServerList spreads them into the fetcher, but the
-  // fetcher forwarded only page/limit/q/segment/intent, so Source, Locality,
-  // Sales Executive and Needs-attention were four controls that visibly changed
-  // state and filtered nothing.
+  const many = (v?: string) => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
   // OR binds LOOSER than AND, so any group of alternatives has to carry its own
   // parentheses before it joins the AND chain. Without them a two-value filter
   // reads as `(tenant AND scope AND a) OR b` — the second alternative escapes
@@ -2499,36 +2491,86 @@ export async function listLeads(opts: {
   // other firms' rows. Every OR group below goes through this.
   const anyOf = (parts: any[]) => sql`(${parts.reduce((a, c) => sql`${a} OR ${c}`)})`;
 
-  const sources = many(opts.source);
-  if (sources.length) where.push(sql`lower(coalesce(source, '')) IN ${sql(sources.map(s => s.toLowerCase()))}`);
-
-  // Locality is matched loosely on purpose — the option list is derived from the
-  // firm's own records, where "Wakad" and "Wakad / Hinjewadi" are the same place
-  // typed twice.
-  const localities = many(opts.locality);
-  if (localities.length) {
-    where.push(anyOf(localities.map(l =>
-      sql`lower(coalesce(locality, '')) LIKE ${'%' + l.toLowerCase().split('/')[0].trim() + '%'}`)));
-  }
-
-  // '_none' is the Unassigned option, which is NULL rather than a value.
-  const agents = many(opts.agent);
-  if (agents.length) {
-    const named = agents.filter(a => a !== '_none');
-    const parts: any[] = [];
-    if (named.length) parts.push(sql`agent_id IN ${sql(named)}`);
-    if (agents.includes('_none')) parts.push(sql`agent_id IS NULL`);
-    if (parts.length) where.push(anyOf(parts));
-  }
-
-  // "Needs attention" reuses the segment predicates rather than restating them.
+  // "Needs attention" is gone from the panel, but a dashboard tile still links
+  // in with a flag. It belongs to no facet, so it narrows every count.
   const flags = many(opts.flag);
   if (flags.length) {
     const parts = flags
       .map(f => SEGMENTS[(f === 'new' ? 'today' : f) as LeadSegment])
       .filter(Boolean);
-    if (parts.length) where.push(anyOf(parts));
+    if (parts.length) base.push(anyOf(parts));
   }
+
+  // Sale vs rent. This queried a column called `intent`, which crm_leads does
+  // not have and never had — the toggle at the top of the leads list returned
+  // a 500 on every click. The column is `deal`, written by createLead, and a
+  // lead whose purpose is "Lease" is a rental whatever `deal` says.
+  // `NOT RENT` is not "buy" — it is "not rent", which includes every lead
+  // nobody has asked yet. Filtering to Buy handed back all of them. Buy means
+  // the row says sale; a lead with no stated intent answers neither filter,
+  // which is the honest answer and makes the gap visible.
+  const stages = many(opts.stage);
+  const sources = many(opts.source);
+  const localities = many(opts.locality);
+  const agents = many(opts.agent);
+
+  const dims: Record<string, any | null> = {
+    stage: stages.length ? sql`stage IN ${sql(stages)}` : null,
+    intent: opts.intent === 'buy' || opts.intent === 'sale' ? LEAD_SALE
+      : opts.intent === 'rent' ? LEAD_RENT : null,
+    segment: SEGMENTS[opts.segment as LeadSegment] ?? null,
+    source: sources.length
+      ? sql`lower(coalesce(source, '')) IN ${sql(sources.map(s => s.toLowerCase()))}` : null,
+    // Matched on the NORMALISED key, not loosely. It used to be a LIKE on the
+    // first path segment, so "Wakad" also matched "Wakad / Hinjewadi" — right
+    // for the desk, where the same place is typed two ways, but a count that
+    // GROUPs on the raw value can never agree with rows a LIKE selected. Both
+    // sides now reduce to the same key, so the option's number and the rows it
+    // opens are the same question asked once.
+    locality: localities.length
+      ? sql`${LOCALITY_KEY} IN ${sql(localities.map(localityKey))}` : null,
+    // '_none' is the Unassigned option, which is NULL rather than a value.
+    agent: agents.length ? (() => {
+      const named = agents.filter(a => a !== '_none');
+      const parts: any[] = [];
+      if (named.length) parts.push(sql`agent_id IN ${sql(named)}`);
+      if (agents.includes('_none')) parts.push(sql`agent_id IS NULL`);
+      return parts.length ? anyOf(parts) : null;
+    })() : null,
+  };
+
+  const and = (parts: any[]) => parts.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+  /** Every filter, including `except`'s own — what the LIST is showing. */
+  const whereAll = () => and([...base, ...Object.values(dims).filter(Boolean)]);
+  /** Every filter EXCEPT one dimension — what that dimension's facet counts. */
+  const whereExcept = (except: string) =>
+    and([...base, ...Object.entries(dims).filter(([k, v]) => v && k !== except).map(([, v]) => v)]);
+
+  return { whereAll, whereExcept };
+}
+
+// Sale vs rent, and the locality key, hoisted so the list, the counts and the
+// option lists cannot each grow their own version — 3.2.
+const LEAD_RENT = sql`(lower(coalesce(deal, '')) IN ('rent', 'lease') OR lower(coalesce(purpose, '')) IN ('rent', 'lease'))`;
+const LEAD_SALE = sql`(lower(coalesce(deal, '')) = 'sale' OR lower(coalesce(purpose, '')) = 'sale')`;
+const LOCALITY_KEY = sql`btrim(lower(split_part(coalesce(locality, ''), '/', 1)))`;
+const localityKey = (v: string) => String(v || '').toLowerCase().split('/')[0].trim();
+
+/**
+ * One page of leads, filtered and counted in Postgres — the same treatment
+ * listProperties got, for the same reason.
+ */
+export async function listLeads(opts: LeadFilterOpts & {
+  page?: number; limit?: number;
+  sortKey?: string; sortDir?: string;
+} = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
+  const t = tid();
+  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
+  const page = Math.max(Number(opts.page) || 1, 1);
+  const offset = (page - 1) * limit;
+
+  const SEGMENTS = leadSegments(await deskConfigOf(t));
+  const { whereAll } = leadFilterParts(t, opts, SEGMENTS);
 
   // Sorting, from a whitelist — a sort key is a column name arriving from the
   // browser, so it can never reach the query as text. This was not wired at all:
@@ -2550,7 +2592,7 @@ export async function listLeads(opts: {
     ? (asc ? sql`DESC` : sql`ASC`)
     : (asc ? sql`ASC` : sql`DESC`);
 
-  const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+  const clause = whereAll();
   const [rows, countRows] = await Promise.all([
     // The enquiry count rides along in the SAME query as the rows it labels.
     // A separate request would be a second answer to one question, which is
@@ -3155,28 +3197,91 @@ export async function getOwnerTodayRows(perGroup = 6, mine?: boolean): Promise<a
  * Also counts leads by status, which is what the status dropdown needs to say
  * how many are in each — one query rather than one per status.
  */
-export async function getLeadsSummary(): Promise<any> {
+export async function getLeadsSummary(opts: LeadFilterOpts = {}): Promise<any> {
   const t = tid();
-  const scope = leadScope();
-  const filters = Object.entries(leadSegments(await deskConfigOf(t)))
+  const SEGMENTS = leadSegments(await deskConfigOf(t));
+  const { whereAll, whereExcept } = leadFilterParts(t, opts, SEGMENTS);
+
+  const segmentCounts = Object.entries(SEGMENTS)
     .map(([key, pred]) => sql`count(*) FILTER (WHERE ${pred})::int AS ${sql(key)}`)
     .reduce((acc, f) => sql`${acc}, ${f}`);
-  const RENT = sql`(lower(coalesce(deal, '')) IN ('rent', 'lease') OR lower(coalesce(purpose, '')) IN ('rent', 'lease'))`;
-  const SALE = sql`(lower(coalesce(deal, '')) = 'sale' OR lower(coalesce(purpose, '')) = 'sale')`;
-  const [totals, byStage, byIntent] = await Promise.all([
-    sql`SELECT count(*)::int AS total, ${filters} FROM crm_leads WHERE tenant_id = ${t} AND ${scope}`,
+
+  const [totals, segs, byStage, byIntent, bySource, byLocality, byAgent, people] = await Promise.all([
+    // `total` is what the LIST is showing — every filter applied, including the
+    // segment. It is the number the pager and the header both quote, so it has
+    // to come from the same clause the rows do.
+    sql`SELECT count(*)::int AS total FROM crm_leads WHERE ${whereAll()}`,
+    sql`SELECT count(*)::int AS scoped, ${segmentCounts} FROM crm_leads WHERE ${whereExcept('segment')}`,
     sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
-        FROM crm_leads WHERE tenant_id = ${t} AND ${scope} GROUP BY 1`,
+        FROM crm_leads WHERE ${whereExcept('stage')} GROUP BY 1`,
     // buy + rent no longer has to equal the total. What is left over is the
     // leads whose intent nobody has established, and that gap is the point.
-    sql`SELECT count(*) FILTER (WHERE ${SALE})::int AS buy, count(*) FILTER (WHERE ${RENT})::int AS rent
-        FROM crm_leads WHERE tenant_id = ${t} AND ${scope}`,
+    sql`SELECT count(*) FILTER (WHERE ${LEAD_SALE})::int AS buy,
+               count(*) FILTER (WHERE ${LEAD_RENT})::int AS rent
+        FROM crm_leads WHERE ${whereExcept('intent')}`,
+    // THE OPTION LISTS COME FROM THE DATA, ordered by how many leads are in
+    // each. Source read the firm's CONFIGURED sources, so a portal that has
+    // never sent anything was offerable and picked an empty list; Locality read
+    // whatever the browser happened to be holding. Both now answer "what is
+    // actually in here", under every filter but their own.
+    sql`SELECT lower(coalesce(source, '')) AS value, min(source) AS label, count(*)::int AS n
+        FROM crm_leads WHERE ${whereExcept('source')} AND coalesce(source, '') <> ''
+        GROUP BY 1 ORDER BY 3 DESC, 1`,
+    sql`SELECT ${LOCALITY_KEY} AS value, min(locality) AS label, count(*)::int AS n
+        FROM crm_leads WHERE ${whereExcept('locality')} AND ${LOCALITY_KEY} <> ''
+        GROUP BY 1 ORDER BY 3 DESC, 1`,
+    // Named here rather than in the browser: a lead can sit with someone who
+    // has since been deactivated, and `activeAgents()` would render that
+    // person's count against a blank label.
+    // NO JOIN, and the names looked up separately. Joining `users` in here put
+    // a second `tenant_id`, `name`, `phone` and `email` in scope, and every
+    // unqualified column in the shared predicates — the tenant clause, the
+    // agent's visibility scope, the search box — became ambiguous. The filters
+    // are shared with queries that must NOT be aliased (the segment predicates
+    // reference `crm_leads.id` by name), so the join is the thing that goes.
+    sql`SELECT coalesce(agent_id, '_none') AS value, count(*)::int AS n
+        FROM crm_leads WHERE ${whereExcept('agent')} GROUP BY 1 ORDER BY 2 DESC`,
+    // THE WHOLE ROSTER, not just the people who happen to hold a lead. Grouping
+    // only ever produces rows that exist, so an agent with nothing would vanish
+    // from the control entirely — while every other facet shows its empty
+    // options dimmed and carrying a zero. "Binod has none right now" is an
+    // answer; a name that is missing is a question about whether they were ever
+    // there. Named here rather than in the browser because a lead can sit with
+    // someone since deactivated, whom `activeAgents()` would render blank.
+    sql`SELECT a.id, a.name FROM crm_agents a
+        LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
+        WHERE a.tenant_id = ${t} AND u.deleted_at IS NULL ORDER BY a.name`,
   ]);
+
+  const opts3 = (rows: any[]) => (rows as any[]).map(r => ({ value: r.value, label: r.label || r.value, count: r.n }));
+  // Counted first, then laid over the roster, so the order is busiest-first and
+  // nobody is dropped. Unassigned is always offered: it is the entry that
+  // replaced "Needs attention → Nobody assigned", and a desk with none right
+  // now still needs to be able to ask.
+  const held = new Map((byAgent as any[]).map(r => [r.value, r.n]));
+  const roster = (people as any[]).map(a => ({ value: a.id, label: a.name, count: held.get(a.id) ?? 0 }));
+  // Someone holding leads who is not on the roster any more — deactivated, or a
+  // legacy id. They are not offered a name that would be wrong, but their leads
+  // have to be reachable.
+  const offRoster = [...held.keys()]
+    .filter(id => id !== '_none' && !roster.some(r => r.value === id))
+    .map(id => ({ value: id, label: 'Former colleague', count: held.get(id)! }));
+  const agentFacet = [
+    { value: '_none', label: 'Unassigned', count: held.get('_none') ?? 0 },
+    ...[...roster, ...offRoster].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+  ];
+  const { scoped, ...segCounts } = (segs[0] || {}) as any;
   return {
-    ...(totals[0] || { total: 0 }),
-    all: totals[0]?.total ?? 0,
+    ...segCounts,
+    // "All" is the pill beside the segments, so it counts the way they do —
+    // under every other filter, but not under a segment. `total` is the list.
+    all: scoped ?? 0,
+    total: totals[0]?.total ?? 0,
     byStage: Object.fromEntries((byStage as any[]).map(r => [r.stage, r.n])),
     byIntent: byIntent[0] || { buy: 0, rent: 0 },
+    bySource: opts3(bySource),
+    byLocality: opts3(byLocality),
+    byAgent: agentFacet,
   };
 }
 

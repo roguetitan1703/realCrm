@@ -141,25 +141,25 @@ export const LEADS_DEF = {
   // `untouched_sla` is deleted. It was never_contacted with a clock on it,
   // labelled "Past SLA" on the dashboard while the pill beside the same rows
   // said "Never called" — one expression, two names, on two screens.
-  filterFields: (store) => [
-    { key: 'source', label: 'Source', icon: 'trend', options: opt(store.state.settings.sources) },
-    { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
-    { key: 'agent', label: 'Sales Executive', icon: 'person', options: [
-      { value: '_none', label: 'Unassigned' }, ...store.activeAgents().map(a => ({ value: a.id, label: a.first })),
-    ] },
-    // EVERY WAY INTO THIS LIST HAS TO LAND ON A CONTROL YOU CAN SEE AND UNDO.
-    // The dashboard's Past-SLA tile and the Team page's Unassigned tile both
-    // filtered by a flag the server honours and no control on screen showed —
-    // right rows, no chip, nothing to click to get back. The two flags with no
-    // pill of their own live here; the ones that DO have a pill (overdue,
-    // no-answer, came-back) are not repeated, because two controls for one
-    // question is how the pills and the KPI strip ended up saying different
-    // things about the same leads.
-    // "Needs attention" is gone. It held two entries: Past SLA, which was
-    // never_contacted with a clock on it and is deleted, and Nobody assigned,
-    // which is the Sales Executive control's own Unassigned option. A dropdown
-    // with one entry duplicating another control is the third-way-to-ask-one-
-    // question fault, not a filter.
+  // SOURCE AND LOCALITY ONLY, AND BOTH COME FROM THE DATA.
+  //
+  // Source listed the firm's CONFIGURED portals, so a connection that has never
+  // pushed anything was offerable and picked an empty list. Locality read
+  // whatever collection the browser happened to be holding, which on a server-
+  // paged list is one page of it. Both now arrive from /leads/summary with
+  // their counts, computed under every other active filter — see `facets` in
+  // Leads.jsx. `store` is unused here now and stays in the signature because
+  // the shared FilterBar calls every module's filterFields the same way.
+  //
+  // "Sales Executive" has moved OUT of this panel and up beside Type and
+  // Status. "Whose leads are these" is the first question a manager asks, and
+  // it was two clicks deep. It is not repeated here — two controls for one
+  // question is how the pills and the KPI strip ended up saying different
+  // things about the same leads. Its Unassigned entry covers what
+  // "Needs attention → Nobody assigned" used to.
+  filterFields: (store, facets) => [
+    { key: 'source', label: 'Source', icon: 'trend', options: facets?.bySource || [] },
+    { key: 'locality', label: 'Locality', icon: 'building', options: facets?.byLocality || [] },
   ],
 
   // Per-key filter logic (mirrors the module's normalized predicates).

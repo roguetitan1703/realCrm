@@ -351,6 +351,17 @@ export function PageHeader({ kpis = [], segments, leftAddon, right }) {
 
 // ---- SegmentPills: scope selector (All / Buyers / Tenants …) ----
 export function SegmentPills({ segments = [] }) {
+  // THE TAPPED PILL SCROLLS ITSELF INTO VIEW. On a phone the row scrolls
+  // sideways, so the pill a thumb reaches at the right-hand edge is tapped
+  // half off the screen and its neighbours — the piles you are choosing
+  // between — are not visible at all. Selecting one brings it back into the
+  // middle of the row, which is the only way to see what you just left.
+  // Harmless on the desktop, where the row does not overflow and there is
+  // nothing to scroll.
+  const onPick = (s) => (e) => {
+    e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    s.onClick?.()
+  }
   return (
     <div className="segpills">
       {segments.map(s => (
@@ -358,8 +369,12 @@ export function SegmentPills({ segments = [] }) {
         // overdue count reading the same as every other number is the one that
         // gets ignored. A zero count drops the tone: nothing overdue is not an
         // alert.
-        <button key={s.key} onClick={s.onClick}
-          className={'segpill' + (s.on ? ' on' : '') + (s.tone && s.count ? ' ' + s.tone : '')}>
+        //
+        // `disabled` is an empty pile under the current filters. It stays on
+        // screen carrying its zero rather than disappearing — a row that
+        // reflows on every filter touch moves the pill a thumb is aiming at.
+        <button key={s.key} onClick={onPick(s)} disabled={s.disabled && !s.on}
+          className={'segpill' + (s.on ? ' on' : '') + (s.tone && s.count ? ' ' + s.tone : '') + (s.disabled && !s.on ? ' dead' : '')}>
           {s.label}{s.count != null && <span className="segpill-c">{s.count}</span>}
         </button>
       ))}

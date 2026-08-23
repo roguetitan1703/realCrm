@@ -18,7 +18,7 @@ it.
 | Frontend — Vercel, automatic on push to `main` | `1aed7e2` | 2026-08-19 |
 | Backend — AWS, **by hand**, port 5000 | `1aed7e2` | 2026-08-19 |
 
-**Nothing from 2026-08-19→22 is deployed.** Twenty-two commits sit on the
+**Nothing from 2026-08-19 onwards is deployed.** Twenty-two commits sit on the
 `development` branch, unpushed, plus the two from the 22nd's outage below. The
 live desk is running the 19th's code.
 
@@ -86,8 +86,19 @@ is shared between the two environments — same VAPID, same SMTP, same R2 — so
 sweep running on the dev backend would otherwise push to real phones and mail
 real addresses. Do not restore them.
 
-Dev now holds: `delpat` 94 leads, `raipur` 46, `urban` 46, `skyline-realty` 12;
-26 of 28 tables matched production row-for-row before bhumi was removed.
+Dev now holds: **`delpat` 293 leads**, `raipur` 46, `urban` 46,
+`skyline-realty` 12; 26 of 28 tables matched production row-for-row before bhumi
+was removed.
+
+**delpat's leads are a SHAPE CLONE of the live desk** — `npx tsx
+backend/src/scripts/shape-clone-to-dev.ts --write`. It copies bhumi's stage
+distribution, timeline structure, enquiry sessions and follow-up clock under
+generated names, numbers and remarks, and every segment count comes out
+identical to production (not contacted 7, no reply 65, going cold 142, overdue
+8, came back 21, 90 at Call Not Received). Nobody's words or phone number leave
+production; the script reads production and writes only development, and refuses
+if the two URLs name the same project. Re-run it whenever a change touches what
+the desk counts.
 
 **The dump on disk still contains bhumi** — `backups/realcrm_prod_20260822_215649.sql.gz`.
 It is a real production backup and `backups/` is gitignored; delete it or keep
@@ -114,6 +125,36 @@ npm run deploy:dev       # build:dev + vercel deploy --prebuilt
 `APP_ENV` is `production` | `development`; `development` selects
 `DEV_DATABASE_URL` and refuses to fall back. Config is `.env` (shared secrets)
 plus `.env.<APP_ENV>`; **none of the three is committed any more.**
+
+---
+
+## The desk rework — A to H
+
+The client walked through eight areas line by line on 22–23 Aug. Every decision,
+and the order they have to be built in, is **`docs/specs/desk-rework.md`** — that
+file is the one to read before touching leads, and its ledger is what says where
+the build has got to. Two of seven steps are done, both committed on
+`development`, neither deployed.
+
+| # | Step | State |
+|---|---|---|
+| 1 | Contact predicate + segment catalogue | done — `19287fb` |
+| 2 | Facet counts + filter controls | done |
+| 3 | The enquiry model | next |
+| 4 | Timeline and reopening | todo |
+| 5 | Settings | todo |
+| 6 | WhatsApp templates | todo |
+| 7 | This device | todo |
+
+**What changed on the desk so far.** "Past SLA" is deleted — it was
+never-contacted with a clock on it, wearing a second name on a second screen and
+linking through to a flag the Leads list did not offer. Contact now means
+anything a **person** did, including a remark and a stage change: on the live
+desk that moves not-contacted from **83 to 7**, because 76 leads had
+demonstrably been worked. `reminderDays`, a Settings control nothing read, now
+drives Going cold. Every count beside the leads list is computed under the
+active filters, each facet excluding its own dimension, and Agent has moved out
+of the filter panel to sit beside Type and Status.
 
 ---
 
@@ -145,13 +186,6 @@ plus `.env.<APP_ENV>`; **none of the three is committed any more.**
   After this, `deploy.sh` works unchanged.
 - **`PUBLIC_API_URL` is not set locally** and the push delivery receipts need
   it. Without it the log stops at `sent` and never reaches `displayed`.
-- **The going-cold metric is undecided.** Measured on bhumi: "never contacted"
-  is 74, of which 26 carry remarks proving contact ("Visit done I will show
-  another options tomorrow"). Open + never contacted + past 48h is 38; of those
-  12 have no remark at all and 2 have nothing but a creation event. The proposal
-  is *going cold = open + nothing recorded for N days*, N being `reminderDays`
-  (today a control that changes nothing), which gives 53 at 7 days and 143 at
-  48h. Nothing has been changed.
 - **Manager deletes.** The user's model is that a manager is owner-equivalent
   minus billing; the server refuses manager deletes (`canDeleteRecord` is
   owner/admin/superadmin). The client now agrees with the server. Widening it is
@@ -163,7 +197,24 @@ plus `.env.<APP_ENV>`; **none of the three is committed any more.**
 
 ## Not verified, and it matters
 
-**The Leads filter refactor HAS now been driven in a browser** (2026-08-22,
+**Desk rework steps 1 and 2 were driven in a browser** (2026-08-23, Playwright,
+`delpat` on the development database, the 293-lead shape clone, 1440×900 and
+iPhone 13). Unfiltered the pills read All 293 · Today 1 · Not contacted 7 · No
+reply 65 · Going cold 142 · Follow-up overdue 8 · Came back 21, and the
+dashboard tiles read the same numbers from the same expressions.
+
+Picking one agent (95 leads) moved every number with it — not contacted 2, no
+reply 35, going cold 51 — while the Agent control's own options stayed at their
+full counts, which is the rule: a facet counts under the other filters and not
+under itself. Adding `going_cold` on top narrowed the status counts to 51, which
+summed exactly. The list total and the summary total agreed at every step (95/95,
+51/51), and a Source option's count matched the rows it opened (Housing.com 132,
+Mahalunge 199). Under `source=Website` — 3 leads — all six other pills went to
+zero, **stayed on screen** and became unclickable. On the phone, tapping a pill
+at the right-hand edge scrolled the row from 0 to 470 and left the pill fully
+inside the viewport. No console errors in any pass.
+
+**The Leads filter refactor was driven in a browser** (2026-08-22,
 Playwright, `delpat` on the development database, 200 seeded leads, 1440x900).
 All five stated invariants hold:
 
@@ -254,3 +305,9 @@ Stated so it is not re-derived, and not trusted past its date.
 - **Filters now live in the URL.** A filtered list is a link; back leaves the
   screen rather than walking through filter states; opening a record keeps the
   filter underneath it.
+- **`/api/v1/leads/summary` now takes the same query parameters as
+  `/leads/page`.** A caller that sends none still gets the whole visible desk,
+  so nothing that already called it changed behaviour.
+- **"Past SLA" is gone from the dashboard** and "Never called" from the Leads
+  pills. Anyone who had bookmarked `?screen=leads&seg=never_contacted` still
+  lands correctly — segment KEYS did not change, only labels.

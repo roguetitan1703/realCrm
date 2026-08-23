@@ -20,14 +20,28 @@ function isSiteVisit(followUp) {
   return /site\s*visit/i.test(followUp?.action || '')
 }
 
-// Segment pill counts, straight from the database.
-function useLeadsSummary(dataAsOf) {
+/**
+ * Every number beside the list, under the same filters the list is under.
+ *
+ * `params` is the filter bag, not just a refresh token. It took no arguments —
+ * so picking an agent moved the rows and left the pills, the status counts and
+ * the Type split all describing the whole desk. Each facet's own dimension is
+ * dropped server-side, so choosing "No reply" narrows the status counts while
+ * the segment pills keep showing what switching to another one would give you.
+ *
+ * The previous counts are kept while a new bag is in flight. Blanking them
+ * makes every pill flash to 0 on each keystroke, which reads as the filter
+ * having emptied the list.
+ */
+function useLeadsSummary(dataAsOf, params) {
   const [counts, setCounts] = useState({})
+  const key = JSON.stringify(params || {})
   useEffect(() => {
     let live = true
-    api.getLeadsSummary().then(r => { if (live && r?.success) setCounts(r.summary) }).catch(() => {})
+    api.getLeadsSummary(params).then(r => { if (live && r?.success) setCounts(r.summary) }).catch(() => {})
     return () => { live = false }
-  }, [dataAsOf])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataAsOf, key])
   return counts
 }
 
@@ -100,6 +114,10 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const setSortKeyP = (v) => patchFilters({ sortKey: v })
   const setSortDirP = (v) => patchFilters({ sortDir: v })
   const setSegP = (v) => patchFilters({ seg: v })
+  // The Agent control is single-value on screen and an array in the URL — the
+  // server has taken a comma list since the panel offered multi-select, and a
+  // link somebody sent with two agents in it still has to open.
+  const setAgentP = (v) => patchFilters({ agent: v === 'all' ? undefined : [v] })
   const setIntentP = (v) => patchFilters({ intent: v })
   const setStageP = (v) => patchFilters({ stage: v })
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
@@ -107,6 +125,9 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
 
   const role = state.role
   const canAssign = canAssignLead(role)
+  // Two agents in the URL is a link from before this was one control; it shows
+  // as All rather than silently claiming to be one of them.
+  const agentSel = (f.agent?.length === 1) ? f.agent[0] : 'all'
 
   // One page from the server. The agent's own-pipeline scope is applied in the
   // query, not by filtering an array here — a filter the client applies is a
@@ -132,6 +153,17 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     [state.dataAsOf, seg, intent, stage],
   )
 
+  // THE ONE BAG BOTH REQUESTS ARE BUILT FROM. The rows and the counts have to
+  // be the same question asked twice, and the only way to guarantee that is for
+  // neither to assemble its own parameters.
+  const filterParams = useMemo(() => ({
+    q: q || undefined,
+    segment: seg === 'all' ? undefined : seg,
+    intent: intent === 'all' ? undefined : intent,
+    stage: stage === 'all' ? undefined : stage,
+    source: flt.source, locality: flt.locality, agent: flt.agent, flag: flt.flag,
+  }), [q, seg, intent, stage, flt])
+
   const onOpen = (l) => go('leads', { leadId: l.id, leadOpen: true })
   // The KPI strip used to sit above these pills reading Total / Overdue /
   // Unassigned — the same three numbers the pills now carry, one row apart,
@@ -144,13 +176,19 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   // over every lead in the firm, which is the same number only while the whole
   // collection is in the browser. No `?? counts.total` fallback — a segment
   // with a real zero shows 0, not the grand total borrowed from another pill.
-  const counts = useLeadsSummary(state.dataAsOf)
+  const counts = useLeadsSummary(state.dataAsOf, filterParams)
+  // A ZERO PILL STAYS ON SCREEN, DIMMED AND UNCLICKABLE. Hiding it reflows the
+  // row on every filter touch, so the pill a thumb is reaching for moves; and a
+  // pile that is empty under the current filters is an answer, not an absence.
+  // The one you are standing in never disables itself — you have to be able to
+  // leave a segment that has just emptied.
   const segs = (LEADS_DEF.segments || []).map(sg => ({
     key: sg.key,
     label: sg.label,
     tone: sg.tone,
     on: seg === sg.key,
     count: counts[sg.key] ?? 0,
+    disabled: (counts[sg.key] ?? 0) === 0 && seg !== sg.key,
     onClick: () => setSegP(sg.key),
   }))
 
@@ -189,6 +227,9 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
 
   const { header, toolbar, body } = ModuleListView({
     def: LEADS_DEF, source, store, onOpen,
+    // Source and Locality come from the desk's own rows with their counts, not
+    // from the firm's configured list and not from whatever the browser holds.
+    facets: counts,
     filters: flt, onFilters: setFltP,
     search: q, onSearch: setQP,
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
@@ -222,6 +263,26 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
             ...LEAD_STATUSES.map(s => ({ value: s, label: s, count: counts.byStage?.[s] ?? 0 })),
           ]}
         />
+        {/* WHOSE LEADS — a top-level control, not a row inside the filter
+            panel. "Show me Binod's desk" is the question a manager asks before
+            any other, and it was two clicks deep beside Source and Locality.
+            The options and their counts come from the data (an agent who has
+            been deactivated still shows while they hold leads), searchable
+            because a firm can carry 25, and height-capped so a long list
+            scrolls inside the popover rather than off the screen. */}
+        {canAssign && (
+          <SelectDropdown
+            label="Agent" value={agentSel} onChange={setAgentP} searchable
+            options={[
+              { value: 'all', label: 'All' },
+              ...(counts.byAgent || []).map(a => ({
+                value: a.value,
+                label: a.value === state.activeAgentId ? 'Me' : a.label,
+                count: a.count,
+              })),
+            ]}
+          />
+        )}
       </div>
     ),
     cta: { label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) },

@@ -527,8 +527,19 @@ input,textarea,select{font-family:inherit}
 .seldd-btn .seldd-v{font-size:13px;font-weight:600;color:var(--ink)}
 .seldd-btn .seldd-cv{color:var(--muted);margin-left:1px;transition:transform .15s}
 .seldd-btn.open .seldd-cv{transform:rotate(180deg)}
-.seldd-pop{min-width:200px;max-height:340px;overflow-y:auto}
+/* The popover itself no longer scrolls — the search box has to stay put while
+   the list under it moves, or typing scrolls the field you are typing into off
+   the top. The cap is on the list. */
+.seldd-pop{min-width:200px}
+.seldd-list{max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:1px}
 .leads-dd-row{display:flex;align-items:center;gap:8px;margin-right:12px}
+
+/* AN OPTION WITH NOTHING BEHIND IT. Still legible, still carrying its zero —
+   it is the answer to "how many under these filters" — but not offerable.
+   `pointer-events:none` as well as `disabled`, so a stray tap on a phone does
+   not land on it either. */
+.p-item.dead,.segpill.dead{opacity:.38;cursor:default;pointer-events:none}
+.segpill.dead .segpill-c{background:transparent;box-shadow:inset 0 0 0 1px var(--line-2)}
 
 /* Row-level quick assign menu (table actions column) */
 .row-actions{display:inline-flex;align-items:center;gap:6px}

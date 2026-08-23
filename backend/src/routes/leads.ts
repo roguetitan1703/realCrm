@@ -62,10 +62,24 @@ leadsRouter.get('/page', async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/v1/leads/summary — counts for the segment pills. */
+/**
+ * GET /api/v1/leads/summary — every count beside the list, under the same
+ * filters the list is under.
+ *
+ * It takes the SAME query parameters as /page and forwards all of them. It used
+ * to take none, so picking an agent moved the rows and left every number
+ * describing the whole desk.
+ */
 leadsRouter.get('/summary', async (req: Request, res: Response) => {
   try {
-    return res.status(200).json({ success: true, summary: await getLeadsSummary() });
+    const q = req.query;
+    const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+    const summary = await getLeadsSummary({
+      q: str(q.q), stage: str(q.stage), agentId: str(q.agentId),
+      segment: str(q.segment), intent: str(q.intent),
+      source: str(q.source), locality: str(q.locality), agent: str(q.agent), flag: str(q.flag),
+    });
+    return res.status(200).json({ success: true, summary });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to summarise leads', message: err.message });
   }

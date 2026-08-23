@@ -83,7 +83,7 @@ export function ModuleListView({
   def, records, store, onOpen,
   filters, onFilters, search, onSearch, sortKey, onSortKey, sortDir, onSortDir,
   kpis, segments, leftAddon, view, onView, viewExtra, showViewSwitch = true, cta, toolbarRight, emptyTitle, emptyHint, renderTable, selection,
-  phone, page = 1, onPage, pageSize = 20, onPageSize, source,
+  phone, page = 1, onPage, pageSize = 20, onPageSize, source, facets,
 }) {
   // Two sources, one surface. `records` is the classic in-memory collection,
   // queried here. `source` is a page the SERVER already filtered, sorted and cut
@@ -100,7 +100,10 @@ export function ModuleListView({
   const cut = (from, to) => (server ? list : list.slice(from, to))
   const loading = server && source.loading
 
-  const fields = typeof def.filterFields === 'function' ? def.filterFields(store) : (def.filterFields || [])
+  // `facets` are the option lists the SERVER counted, under every other active
+  // filter. A module that has none still gets the second argument as undefined
+  // and falls back to whatever it derived itself, so nothing else had to change.
+  const fields = typeof def.filterFields === 'function' ? def.filterFields(store, facets) : (def.filterFields || [])
   const sortOptions = def.sortOptions.map(s => ({ value: s.key, label: s.label }))
 
   // Lean in-page header: module KPIs (left) + scope segments (right). NOT the breadcrumb.
@@ -429,8 +432,9 @@ export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort
 // ---- SelectDropdown: a labelled single-value dropdown (lead type, status…). ----
 // Same popover system as SortControl/FilterBar so a third control still reads
 // as the same toolbar language, not a bespoke widget.
-export function SelectDropdown({ value, options, onChange, label, align }) {
+export function SelectDropdown({ value, options, onChange, label, align, searchable }) {
   const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
   const ref = useRef(null)
   useEffect(() => {
     if (!open) return
@@ -438,6 +442,15 @@ export function SelectDropdown({ value, options, onChange, label, align }) {
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [open])
+  // Type-to-filter appears only when the list is long enough to need it — the
+  // same threshold FilterValuePicker uses, so a firm with four agents and a
+  // firm with twenty-five get the control each of them needs without either
+  // being configured.
+  const withSearch = searchable && (options?.length || 0) > 7
+  useEffect(() => { if (!open) setQ('') }, [open])
+  const shown = withSearch && q.trim()
+    ? options.filter(o => String(o.label ?? o.value).toLowerCase().includes(q.trim().toLowerCase()))
+    : options
   const active = options.find(o => o.value === value)
   return (
     <div className="seldd" ref={ref}>
@@ -448,13 +461,30 @@ export function SelectDropdown({ value, options, onChange, label, align }) {
       </button>
       {open && (
         <div className={'popover seldd-pop' + (align === 'right' ? ' right' : '')}>
-          {options.map(o => (
-            <button key={o.value} className={'p-item' + (o.value === value ? ' on' : '')} onClick={() => { onChange(o.value); setOpen(false) }}>
-              <span className="fvp-lbl">{o.label}</span>
-              {o.count != null && <span className="count-badge">{o.count}</span>}
-              {o.value === value && <Icon name="check" size={15} className="ic p-chk" />}
-            </button>
-          ))}
+          {withSearch && (
+            <div className="fvp-search">
+              <Icon name="search" size={13} />
+              <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={`Search ${String(label).toLowerCase()}…`} />
+            </div>
+          )}
+          <div className="seldd-list">
+            {shown.length === 0 && <div className="fvp-empty">No matches</div>}
+            {shown.map(o => {
+              // An option with nothing behind it is shown and not offered. It
+              // still says zero — which is the answer — but it cannot be picked
+              // into an empty list, and the row does not reflow as counts move.
+              const dead = o.count === 0 && o.value !== value
+              return (
+                <button key={o.value} disabled={dead}
+                  className={'p-item' + (o.value === value ? ' on' : '') + (dead ? ' dead' : '')}
+                  onClick={() => { onChange(o.value); setOpen(false) }}>
+                  <span className="fvp-lbl">{o.label}</span>
+                  {o.count != null && <span className="count-badge">{o.count}</span>}
+                  {o.value === value && <Icon name="check" size={15} className="ic p-chk" />}
+                </button>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -633,10 +663,17 @@ function FilterValuePicker({ f, align, selected, onToggle }) {
         {opts.length === 0 && <div className="fvp-empty">No matches</div>}
         {opts.map(o => {
           const on = selected.includes(o.value)
+          // Same rule as the segment pills and the top-level dropdowns: an
+          // option with nothing behind it under the other filters keeps its
+          // place and its zero, and cannot be picked into an empty list.
+          const dead = o.count === 0 && !on
           return (
-            <button key={o.value} className={'p-item fvp-item' + (on ? ' on' : '')} onClick={() => onToggle(o.value)}>
+            <button key={o.value} disabled={dead}
+              className={'p-item fvp-item' + (on ? ' on' : '') + (dead ? ' dead' : '')}
+              onClick={() => onToggle(o.value)}>
               <span className={'fvp-box' + (on ? ' on' : '')}>{on && <Icon name="check" size={12} />}</span>
               <span className="fvp-lbl">{o.label ?? o.value}</span>
+              {o.count != null && <span className="count-badge">{o.count}</span>}
             </button>
           )
         })}
