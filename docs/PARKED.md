@@ -144,3 +144,21 @@ days behind **Going cold** — and renamed in step 5: Settings → Response time
 "Treat a lead as gone cold after [3] days". The stored key is unchanged, so no
 desk's number moved. No tenant has ever set one, so every desk runs at the
 3-day default.
+
+---
+
+## Nothing pages a lead that has gone cold
+
+`lead_retry_due` — "No answer for N days" — was retired on 24 Aug with the No
+reply pile it belonged to. Going cold is the pile that replaced it, and no
+notification reads that predicate.
+
+Retargeting the retired query is a one-line change and the wrong one: Going
+cold is **161 of bhumi's 217 open leads** at the 3-day default (122 at 7 days,
+19 at 14). Paging that is how a desk turns alerts off for good. What has to be
+decided first is who hears it — the assignee, or a manager once a day — and how
+often, and whether it is a push at all rather than a number on the dashboard
+that is already there.
+
+Numbers measured on the dev clone of the live desk, 24 Aug 2026.
+

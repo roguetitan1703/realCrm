@@ -513,12 +513,6 @@ function ResponseTimesSection({ store, settings }) {
   const segLabel = (key, fallback) =>
     (store.state.leadSegments || []).find(s => s.key === key)?.label || fallback
   const coldLabel = segLabel('going_cold', 'Going cold')
-  // ONE NUMBER, TWO PILES, AND THE CONTROL SAYS SO. Going cold and No reply are
-  // the same question — nothing recorded for N days — asked of the whole desk
-  // and of the leads that did not answer. They ran on two numbers, one settable
-  // and one hardcoded, so moving this moved one pile and left the other where
-  // it was with nothing on screen explaining the difference.
-  const replyLabel = segLabel('noanswer_stale', 'No reply')
   return (
     <>
       <SecHead title="Response times" />
@@ -529,7 +523,7 @@ function ResponseTimesSection({ store, settings }) {
       </Panel>
       <Panel>
         <SectionHead title="Treat a lead as gone cold after" />
-        <div className="set-sec-sub">Sets {coldLabel} and {replyLabel}, on the dashboard and in the Leads filters.</div>
+        <div className="set-sec-sub">Sets {coldLabel}, on the dashboard and in the Leads filters.</div>
         <NumField value={cold} suffix="days" onChange={setCold} step={1} />
       </Panel>
     </>

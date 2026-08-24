@@ -32,21 +32,15 @@ export default function Dashboard({ store, go, topBar }) {
   // in an afternoon. It cannot be filtered out of the rows in the browser: the
   // panel holds six of fifty-one, so a client-side filter would hide five of six
   // rows and still print 51 in the header.
-  // TWO PILES, NOT A PILE AND A SUBSET OF ITSELF.
+  // GOING COLD IS THE ONE CLOCKED PILE: open, and nothing recorded on it for
+  // the number of days set in Settings → Response times.
   //
-  // The toggle was All / Never called, where All meant `untouched_sla` PLUS
-  // `noanswer_stale` and Never called meant the first of them. So switching
-  // narrowed a list that was already sorted longest-waiting-first, and the six
-  // rows on screen were usually the same six either way — the control looked
-  // broken because nothing moved.
-  //
-  // And `untouched_sla` is not a filter the Leads screen offers, so "See all"
-  // handed it a flag with no option behind it and the list opened with no
-  // filter applied at all. These two ARE its options, by the names it uses —
-  // one vocabulary, and the panel can hand the list something it understands.
-  // GOING COLD IS ONE THING NOW: open, and nothing recorded for the number of
-  // days set in Settings. It used to be a toggle between two OTHER segments
-  // under a third name, which is why its number never agreed with the pills.
+  // It was a toggle between two other segments under a third name, which is why
+  // its number never agreed with the pills. Then it was one of two clocked
+  // piles, beside "No reply" — leads at Call Not Received with nothing logged —
+  // which was 68 of this pile's own 161 on the live desk's shape plus 6 rows
+  // that were only in it because `updated_at` had moved. That pile is gone: one
+  // idea, one number the firm sets, one name.
   const coldSeg = 'going_cold'
   const coldFlags = [coldSeg]
   const { data: atRiskPage } = useServerData(
@@ -172,9 +166,6 @@ export default function Dashboard({ store, go, topBar }) {
               opened unfiltered. */}
           <Kpi icon="clock" label={segLabel('never_contacted', 'Not contacted')} value={n(totals.never_contacted)} sub="nobody has reached out"
             alert={totals.never_contacted > 0} onClick={() => toLeads({ seg: 'never_contacted' })} />
-          <Kpi icon="phone" label={segLabel('noanswer_stale', 'No reply')} value={n(totals.noanswer_stale)} sub="rung, nothing back"
-            alert={totals.noanswer_stale > 0}
-            onClick={() => toLeads({ seg: 'noanswer_stale' })} />
           {/* BACK, because the reason it went is fixed. It was pulled when
               `overdue` counted a boolean column nothing wrote and read 0 for
               ever; it now runs FOLLOWUP_OVERDUE, the same expression as the

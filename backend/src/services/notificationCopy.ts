@@ -116,6 +116,8 @@ export const COPY: Builders = {
     title: `Not contacted for ${d.hours}h`,
     body: facts(d.name, d.agent && `with ${d.agent}`),
   }),
+  // Retired with the No reply pile — nothing sends this any more. Kept because
+  // rows already delivered still have to render in somebody's drawer.
   lead_retry_due: (d) => ({
     title: `No answer for ${plural(d.days, 'day')}`,
     body: facts(d.name, d.when && `last tried ${d.when}`),

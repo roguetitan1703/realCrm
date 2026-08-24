@@ -15,7 +15,6 @@ import { getContext } from './context.js';
 import { sendPushToUser, pruneDeliveryLog } from './push.js';
 // The retry window is shared with the dashboard tile and the Leads filter that
 // count the same leads. Three definitions of "not retried" would drift.
-import { RETRY_DAYS } from './store.js';
 // Every word a notification says, keyed on its type.
 import { copyFor } from './notificationCopy.js';
 
@@ -236,11 +235,6 @@ export async function processScheduledNotifications(
       const arrivalStage = (Array.isArray(cfg.stages) && cfg.stages[0]) || 'New';
       const agentHours = Math.max(Number(cfg.slaHours) || 24, 1);
       const mgrHours = agentHours * 2;
-      // The same number the No reply pile counts on — Settings → Response
-      // times. It was the hardcoded RETRY_DAYS while the pile it describes had
-      // become configurable, so a firm that widened the window would still have
-      // been paged on the old one.
-      const retryDays = Math.max(Number(cfg.reminderDays) || RETRY_DAYS, 1);
       // Only recent arrivals. Without this, turning the feature on notifies the
       // whole backlog at once — a real desk has months of leads parked on the
       // arrival stage that nobody needs paging about now. Scales with the SLA
@@ -306,55 +300,16 @@ export async function processScheduledNotifications(
         }
       }
 
-      // Rung, no answer, and nobody has been back since.
+      // "No answer for N days" used to be paged from here — the alert half of
+      // the No reply pile. Both are gone. The pile was 68 of Going cold's own
+      // 161 plus 6 rows that were only in it because `updated_at` had moved,
+      // and the desk asked for ONE clocked idea it controls, not two.
       //
-      // The arrival sweep above only watches leads nobody has touched at all.
-      // The moment an agent logs one failed call the lead leaves that stage and
-      // every alert in the system goes quiet on it — permanently. On the live
-      // desk that was 26 leads, a fifth of everything in the system, 13 of them
-      // untouched for three days, with nothing anywhere telling a soul.
-      //
-      // Goes to the assigned agent, not a manager: the useful action is a second
-      // call, and the agent is who makes it. Once per lead, flagged like the
-      // others, and bounded by the same lookback so switching it on does not
-      // page anyone about the whole back catalogue.
-      const retryLeads = await sql`
-        SELECT id, name, agent_id, updated_at,
-               -- Aged in SQL, by the same clock the comparison below uses.
-               -- Computed as Date.now() minus this timestamp it read "3 days"
-               -- for a lead staged at exactly 4: the database clock runs a few
-               -- seconds ahead of the app server, so a whole-day age lands a
-               -- hair under the integer and floors down.
-               floor(EXTRACT(EPOCH FROM (NOW() - updated_at)) / 86400)::int AS age_days,
-               -- Rendered in the desk's own zone. An agent reads "last tried
-               -- 7 Aug", not a timestamp and not "4 days" twice over.
-               to_char(updated_at AT TIME ZONE 'Asia/Kolkata', 'FMDD Mon') AS last_tried
-        FROM crm_leads
-        WHERE tenant_id = ${t}
-          AND stage = 'Call Not Received'
-          AND agent_id IS NOT NULL
-          AND updated_at <= NOW() - (${retryDays}::text || ' days')::interval
-          AND updated_at >= NOW() - (${retryDays * 5}::text || ' days')::interval
-          AND (metadata->>'retry_notified') IS NULL
-        LIMIT 30
-      `;
-      for (const l of retryLeads) {
-        const days = l.age_days;
-        notify({
-          userId: l.agent_id,
-          tenantId: t,
-          type: 'lead_retry_due',
-          data: { name: l.name, days, when: l.last_tried },
-          link: `?screen=leads&lead=${l.id}`,
-          push: true,
-          toSelf: true
-        }).catch(() => {});
-        await sql`
-          UPDATE crm_leads
-          SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{retry_notified}', 'true')
-          WHERE id = ${l.id} AND tenant_id = ${t}
-        `;
-      }
+      // Nothing pages a going-cold lead today. That is a gap, deliberately left
+      // open rather than filled by pointing this query at a bigger predicate:
+      // Going cold is 161 of bhumi's 217 open leads at the default, and turning
+      // that into pushes without deciding who gets them and how often is how a
+      // desk mutes the app. See docs/PARKED.md.
     }
 
     // Trim the delivery log at most once a day. Inside the sweep because there

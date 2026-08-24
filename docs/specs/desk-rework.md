@@ -56,7 +56,6 @@ rows instead.
 | All | Everything in the current view | Filter row |
 | Today | Arrived today | Filter row, KPI |
 | Not contacted | Nobody has called, messaged, remarked, booked anything or moved it — ever | Filter row, KPI |
-| No reply | We reached out, nothing back, nothing logged for N days | Filter row, KPI |
 | Follow-up overdue | A booked follow-up whose time has passed | Filter row, KPI |
 | Going cold | Still open, nothing recorded for N days | Filter row, dashboard |
 | Came back | Enquired again | Filter row |
@@ -64,10 +63,17 @@ rows instead.
 - **− Past SLA** — never-contacted with a clock, wearing a second name on a
   second screen.
 - **− Never called** — "called" is not the desk's word, and the count was wrong.
-- **− No answer, not retried → No reply** — it never knew whether anyone
-  retried; it inferred that from `updated_at`.
-- **+ Going cold as one thing** — was a toggle between two other segments. Now
-  open and silent for N days, which gives `reminderDays` a job.
+- **− No answer, not retried → removed entirely.** It was renamed to "No reply"
+  first; the desk then said it did not want the pile at all, and A's job is to
+  reduce what has to be held in one head. Measured before removing: 68 of its
+  74 were already inside Going cold, and the other 6 were in it only because
+  `updated_at` had moved without a person doing anything. Its push
+  (`lead_retry_due`) went with it. **Call Not Received is still a status**, so
+  "who did not answer" is the Status control — where a question about a stage
+  belongs.
+- **+ Going cold as THE one clocked pile** — was a toggle between two other
+  segments. Now open and silent for N days, which gives `reminderDays` a job,
+  and it is the only thing that number moves.
 
 ## B · Filters that react to each other
 
@@ -752,6 +758,25 @@ Development only: `bhumi` has both sweeps off, and production runs the 19 Aug
 backend, which has none of this. The dev desk was restored from the clone and
 the 272 notifications raised inside the window were deleted; 127 older ones of
 the same types were left alone.
+
+**No reply removed, H finished properly — 24 Aug 2026.**
+
+- **The pile is gone**, with its tile, its pill and its push. What was left was
+  a subset of Going cold wearing a second name and a second clock. One clocked
+  idea now, one number the firm sets, and Settings names it: "Treat a lead as
+  gone cold after [3] days · Sets Going cold, on the dashboard and in the Leads
+  filters."
+- **Nothing pages a going-cold lead.** Deliberate, and it is a gap: pointing
+  the retired query at the bigger predicate would page 161 of bhumi's 217 open
+  leads at the default, which is how a desk mutes the app. Who gets it and how
+  often is a decision, not a rename. Parked.
+- **H's "identical rows" was not built.** The two lines under This device came
+  from one component each, and Install carried `me-row install-row` while alerts
+  carried `install-row` — `.me-row` is a bordered card with its own background,
+  so one line sat in a box and the other was bare text. They render from one
+  `DeviceRow` now: measured in the browser, same wrapper class, same border
+  (none), same background (transparent), same 30×30 icon tile. It cannot drift
+  again without changing both.
 
 ---
 

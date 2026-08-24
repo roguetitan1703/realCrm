@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
+import { DeviceRow } from './primitives.jsx'
 import { pushStatus, enablePush } from '../lib/push.js'
 import { currentTenant } from '../lib/api.js'
 
@@ -52,12 +53,7 @@ export default function PushRow({ store, variant = 'prompt' }) {
   // interrupting to say "one moment" is worse than not interrupting.
   if (!push) {
     if (variant !== 'row') return null
-    return (
-      <div className="install-row">
-        <span className="install-row-ic"><Icon name="bell" size={15} /></span>
-        <div className="install-row-body"><div className="install-row-title">Checking…</div></div>
-      </div>
-    )
+    return <DeviceRow icon="bell" title="Checking…" />
   }
   // The PROMPT stays quiet when there is nothing to offer: no push support at
   // all (iOS in the browser rather than the installed app, most often) — Install
@@ -108,15 +104,9 @@ export default function PushRow({ store, variant = 'prompt' }) {
       ? (support && <a className="btn btn-primary btn-sm" href={`https://wa.me/${support}`} target="_blank" rel="noreferrer">Get help</a>)
       : <button className="btn btn-primary btn-sm" disabled={busy} onClick={turnOn}>{busy ? '…' : 'Turn on'}</button>
 
-  if (variant === 'row') {
-    return (
-      <div className="install-row">
-        <span className="install-row-ic"><Icon name="bell" size={15} /></span>
-        <div className="install-row-body"><div className="install-row-title">{label}</div></div>
-        {action}
-      </div>
-    )
-  }
+  // The same row Install renders, from the same component. These two lines are
+  // the whole of "This device" and they have to read as one thing.
+  if (variant === 'row') return <DeviceRow icon="bell" title={label} action={action} />
 
   return (
     <div className="push-overlay">

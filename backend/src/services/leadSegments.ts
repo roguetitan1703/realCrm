@@ -152,15 +152,6 @@ export const SEGMENT_CATALOGUE: SegmentDef[] = [
     surface: ['pill', 'tile'], tone: 'alert',
   },
   {
-    // Was "No answer, not retried". It never knew whether anyone retried — it
-    // inferred that from updated_at, so an agent who rang from their own phone
-    // and logged nothing looked like an agent who had not rung. The label now
-    // claims only what the data holds.
-    key: 'noanswer_stale', label: 'No reply',
-    help: 'Sitting at Call Not Received, with nothing logged on it for days.',
-    surface: ['pill', 'tile'],
-  },
-  {
     key: 'going_cold', label: 'Going cold',
     help: 'Still open, and nobody has recorded anything on it for days.',
     surface: ['pill', 'tile'], tone: 'alert',
@@ -208,7 +199,6 @@ export interface SegmentInputs {
   FOLLOWUP_OVERDUE: any;
   newToday: any;
   monthStart: any;
-  retryDays: number;
   coldDays: number;
 }
 
@@ -229,15 +219,20 @@ export function buildLeadSegments(p: SegmentInputs) {
     // it is gone, and this is the only expression left asking the question.
     never_contacted: sql`NOT ${CONTACTED}`,
 
-    // NO REPLY. Rung, nothing back, and nothing logged since. The pile with no
-    // exit rule — a fifth of every lead on the live desk sits here.
-    noanswer_stale: sql`(stage = 'Call Not Received'
-                         AND updated_at <= now() - (${p.retryDays}::text || ' days')::interval)`,
-
     // GOING COLD. Open, and silent for the number of days the firm set in
-    // Settings → Response times. Distinct from Not contacted (never at all) and
-    // No reply (they did not answer): this one is about a conversation that
-    // started and then stopped.
+    // Settings → Response times. THE ONLY CLOCKED PILE, on purpose.
+    //
+    // There was a second one — "No reply", leads sitting at Call Not Received
+    // with nothing logged for N days — and it was 68 of Going cold's own 161 on
+    // the live desk's shape, plus 6 that were only in it because `updated_at`
+    // had moved without a person doing anything. Two piles asking one question,
+    // one of them lying about 6 rows. Removed: step A's job was to reduce what
+    // the desk has to hold in its head, and the desk asked for one number they
+    // control — "treat a lead as gone cold after N days" — not two.
+    //
+    // Call Not Received is still a STATUS, so "show me the ones nobody
+    // answered" is the Status control, which is where a question about a stage
+    // belongs.
     going_cold: sql`(${p.OPEN} AND ${noPersonActivitySince(p.coldDays)})`,
 
     // CAME BACK. Counted in sessions, so a man who clicked four listings in five

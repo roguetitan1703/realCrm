@@ -282,6 +282,31 @@ export function GlanceCard({ thumb, eyebrow, name, value, per, sub, meta, facts 
 
 // ---- Panel / section header / KV / progress ----
 export function Panel({ children, style }) { return <div className="panel" style={style}>{children}</div> }
+/**
+ * A ROW UNDER "THIS DEVICE" — alerts and install, the same shape.
+ *
+ * They were two shapes over one idea. Install rendered `me-row install-row`,
+ * and `.me-row` is a bordered card with its own background, so the install line
+ * sat in a box while the alerts line beside it was bare text with an icon. Two
+ * facts about the same phone, drawn as two different kinds of thing.
+ *
+ * One component, so they cannot drift again: icon, title, optional second line,
+ * and whatever the row can offer — a button, a tick, or nothing.
+ */
+export function DeviceRow({ icon, title, sub, action, children }) {
+  return (
+    <div className="devrow">
+      <span className="devrow-ic"><Icon name={icon} size={15} /></span>
+      <div className="devrow-body">
+        <div className="devrow-title">{title}</div>
+        {sub && <div className="devrow-sub">{sub}</div>}
+      </div>
+      {action}
+      {children}
+    </div>
+  )
+}
+
 export function SectionHead({ title, right }) {
   return <div className="sh"><span className="t">{title}</span>{right && <span className="r">{right}</span>}</div>
 }

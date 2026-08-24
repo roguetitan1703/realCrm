@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
+import { DeviceRow } from './primitives.jsx'
 import { canInstall, onInstallAvailable, promptInstall, installEnv, isStandalone } from '../lib/pwa.js'
 import InstallGuide from './InstallGuide.jsx'
 
@@ -56,12 +57,7 @@ export default function Install({ variant = 'prompt' }) {
   // duplicate.
   if (alreadyOnDevice) {
     if (variant !== 'row') return null
-    return (
-      <div className="me-row install-row">
-        <span className="install-row-ic"><Icon name="check" size={15} /></span>
-        <div className="install-row-body"><div className="install-row-title">Installed</div></div>
-      </div>
-    )
+    return <DeviceRow icon="check" title="Installed" />
   }
 
   // An iPad reports itself as a Mac, so even the desk can be looking at one.
@@ -80,17 +76,14 @@ export default function Install({ variant = 'prompt' }) {
     ? <button className="btn btn-primary btn-sm" onClick={() => setGuide(true)}>Install</button>
     : installable && <button className="btn btn-primary btn-sm" onClick={promptInstall}>Install</button>
 
+  // `me-row` used to be on this and not on the alerts row beside it — and
+  // `.me-row` is a bordered card, so one of the two lines under This device sat
+  // in a box and the other did not. Same component for both now.
   if (variant === 'row') {
     return (
-      <div className="me-row install-row">
-        <span className="install-row-ic"><Icon name="plus" size={15} /></span>
-        <div className="install-row-body">
-          <div className="install-row-title">Install on this device</div>
-          {hint && <div className="install-row-sub">{hint}</div>}
-        </div>
-        {button}
+      <DeviceRow icon="plus" title="Install on this device" sub={hint} action={button}>
         {guide && <InstallGuide onClose={() => setGuide(false)} />}
-      </div>
+      </DeviceRow>
     )
   }
 

@@ -28,7 +28,7 @@ if this table and the code disagree, the code is right and this file is stale.
 | `lead_untouched` | still on the arrival stage after `slaHours` (default 24) ([notifications.ts:272](../../backend/src/services/notifications.ts#L272)) | the assigned agent | ✓ | ✓ |
 | `lead_untouched_escalated` | still there after `2 × slaHours` (default 48) ([notifications.ts:289](../../backend/src/services/notifications.ts#L289)) | owners + managers | ✓ | ✓ |
 | `lead_reassign_loop` | a lead is handed on more than `reassign_alert_count` times (default 3), and every time after ([store.ts:2771](../../backend/src/services/store.ts#L2771)) | owners + managers | ✓ | ✓ |
-| `lead_retry_due` | rung, not answered, nobody back since ([notifications.ts:341](../../backend/src/services/notifications.ts#L341)) | the assigned agent | ✓ | ✓ |
+| ~~`lead_retry_due`~~ | **retired 24 Aug** with the No reply pile. Nothing sends it; delivered rows still render | — | — | — |
 | `followup_due` | a follow-up's `due_at` has passed ([notifications.ts:209](../../backend/src/services/notifications.ts#L209)) | the assigned agent | ✓ | ✓ |
 | `site_visit_reminder` | same, when the follow-up is a visit | the assigned agent | ✓ | ✓ |
 | `calendar_task_assigned` | someone else sets a follow-up on your lead ([store.ts:2074](../../backend/src/services/store.ts#L2074)) | the assigned agent | ✓ | ✓ |

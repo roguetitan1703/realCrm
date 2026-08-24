@@ -272,6 +272,27 @@ worker is production-only and `/<slug>/sw.js` is a Vercel rewrite, so nothing in
 push or install is live under `npm run dev`. Build with `npm run build:dev` and
 serve `dist/` with that one rewrite emulated.
 
+**No reply is gone** (24 Aug, at the desk's word): the pile, its tile, its pill
+and its push `lead_retry_due`. It was 68 of Going cold's own 161 plus 6 rows
+that were in it only because `updated_at` had moved. One clocked idea now, one
+number the firm sets. **Nothing pages a going-cold lead** — parked with numbers
+in `docs/PARKED.md`, because the honest version of that alert is 161 leads on
+bhumi and needs a decision about who hears it.
+
+**H's "identical rows" had not actually been built.** Install rendered
+`me-row install-row` and alerts rendered `install-row`; `.me-row` is a bordered
+card, so one line under This device sat in a box and the other was bare. Both
+come from one `DeviceRow` now — same class, same border, same background, same
+icon tile, measured in the browser.
+
+**`push_subscriptions` on dev was NOT empty** — 3 rows, added 22–23 Aug, which
+is how a dev sweep paged a real phone with 66 "No answer for N days" alerts at
+once (the re-clone had wiped `metadata.retry_notified`, so the whole backlog
+became un-notified and eligible in one pass). The rows are deleted and the
+table is empty again, as this file always said it was. **Re-cloning dev resets
+every once-per-lead notification flag** — expect a burst on the next sweep
+unless the flags are cleared with it.
+
 **A–H were read back against the decision document on 24 Aug** and three things
 came out of it. **Follow-up overdue is a KPI again** — it had been pulled when
 `overdue` counted a dead boolean and read 0 for ever, which stopped being true

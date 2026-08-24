@@ -1408,7 +1408,6 @@ export async function getDeskSummary(): Promise<any> {
                count(*) FILTER (WHERE ${S.today})::int AS new_today,
                count(*) FILTER (WHERE ${S.never_contacted})::int AS never_contacted,
                count(*) FILTER (WHERE ${S.going_cold})::int AS going_cold,
-               count(*) FILTER (WHERE ${S.noanswer_stale})::int AS noanswer_stale,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine}`,
     sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
@@ -1471,7 +1470,7 @@ export async function getDeskSummary(): Promise<any> {
     stagesByAgent.get(r.a)![r.s] = r.n;
   }
   return {
-    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, never_contacted: 0, going_cold: 0, noanswer_stale: 0 },
+    leads: totals[0] || { total: 0, open: 0, overdue: 0, with_follow_up: 0, won: 0, new_today: 0, unassigned: 0, never_contacted: 0, going_cold: 0 },
     byStage: asMap(byStage),
     bySource: asMap(bySource),
     perAgent: (() => {
@@ -2323,9 +2322,10 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
  * everything since the 1st that today is not claiming — rather than nesting.
  * Without the exclusion a worked lead from this morning would fall through both.
  */
-/** A lead rung once and not rung again is not being worked. Days, not hours: a
- *  buyer who missed a call at 11am is not owed another before lunch. */
-export const RETRY_DAYS = 3;
+/** How long a lead may go with nothing recorded on it before the desk calls it
+ *  cold, when the firm has not set a number. Days, not hours: a buyer who
+ *  missed a call at 11am is not owed another before lunch. */
+export const DEFAULT_QUIET_DAYS = 3;
 
 /**
  * A follow-up whose moment has gone by.
@@ -2438,7 +2438,7 @@ export const FOLLOWUP_UPCOMING = sql`(CASE
 // Received rang it. Measured on the live desk the day it changed — 83 leads
 // read as never contacted, 76 of which a person had demonstrably worked.
 
-function leadSegments({ arrivalStage, slaHours, timezone, coldDays, retryDays }: DeskConfig) {
+function leadSegments({ arrivalStage, slaHours, timezone, coldDays }: DeskConfig) {
   const today = dayStart(timezone);
   // ARRIVED TODAY means arrived today. It used to also require the lead to be
   // untouched, so working a lead deleted it from the count of leads that came
@@ -2458,7 +2458,6 @@ function leadSegments({ arrivalStage, slaHours, timezone, coldDays, retryDays }:
     FOLLOWUP_OVERDUE,
     newToday,
     monthStart: sql`(created_at >= (date_trunc(${"month"}, now() AT TIME ZONE ${timezone}) AT TIME ZONE ${timezone}) AND NOT ${newToday})`,
-    retryDays,
     coldDays,
   });
 }
@@ -2475,16 +2474,16 @@ const arrivalStageCache = new Map<string, { v: DeskConfig; at: number }>();
 const ARRIVAL_TTL_MS = 60_000;
 
 /** The settings every worklist question is asked against. */
-export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string; coldDays: number; retryDays: number };
+export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string; coldDays: number };
 
 /**
  * HOW LONG SILENCE IS ALLOWED TO LAST, in days, for this firm.
  *
- * One number, read by Going cold and by No reply, because they ask the same
- * thing of different piles. Settings → Response times is where it is set; no
- * tenant has ever set one, so every desk runs at RETRY_DAYS.
+ * ONE number and, since No reply was removed, one pile: Going cold. Set in
+ * Settings → Response times — "treat a lead as gone cold after N days". No
+ * tenant has ever set one, so every desk runs at the default.
  */
-const quietDays = (cfg: any) => Math.max(Number(cfg?.reminderDays) || RETRY_DAYS, 1);
+const quietDays = (cfg: any) => Math.max(Number(cfg?.reminderDays) || DEFAULT_QUIET_DAYS, 1);
 
 /**
  * The firm's own timezone. Every desk on this system is in India today, but the
@@ -2527,12 +2526,6 @@ export async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
     // never consumed anywhere in the codebase. It is the number behind Going
     // cold now, so the control finally changes something.
     coldDays: quietDays(cfg),
-    // AND behind No reply, which is the same question asked of a narrower pile:
-    // both are "nothing recorded on it for N days". They were two numbers — one
-    // in Settings driving Going cold, one hardcoded at 3 driving No reply — so a
-    // firm that moved the control moved one pile and not the other, with nothing
-    // on any screen saying why. desk-rework.md A gives both the same N.
-    retryDays: quietDays(cfg),
   };
   arrivalStageCache.set(tenantId, { v, at: Date.now() });
   return v;

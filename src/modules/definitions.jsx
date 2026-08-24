@@ -324,7 +324,6 @@ export const LEADS_DEF = {
   fallbackSegments: [
     { key: 'today', label: 'Today' },
     { key: 'never_contacted', label: 'Not contacted', tone: 'alert' },
-    { key: 'noanswer_stale', label: 'No reply' },
     { key: 'going_cold', label: 'Going cold', tone: 'alert' },
     { key: 'overdue', label: 'Follow-up overdue', tone: 'alert' },
     { key: 'repeat_enquiry', label: 'Came back' },
