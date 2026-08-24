@@ -153,12 +153,21 @@ desk's number moved. No tenant has ever set one, so every desk runs at the
 reply pile it belonged to. Going cold is the pile that replaced it, and no
 notification reads that predicate.
 
-Retargeting the retired query is a one-line change and the wrong one: Going
-cold is **161 of bhumi's 217 open leads** at the 3-day default (122 at 7 days,
-19 at 14). Paging that is how a desk turns alerts off for good. What has to be
-decided first is who hears it — the assignee, or a manager once a day — and how
-often, and whether it is a push at all rather than a number on the dashboard
-that is already there.
+**By design so far, not by omission.** The decision document gives the two
+Response-times controls different jobs, in its own words: the hours one "alerts
+the assignee, then escalates to a manager", the days one "shows on the dashboard
+under Going cold, and in the Leads filters". One pages, one paints.
 
-Numbers measured on the dev clone of the live desk, 24 Aug 2026.
+If it should page, the number that matters is not the pile. **It is how many
+cross the line in a day**: 19 on the dev clone at 3 days, 7 at 7 days — against
+a standing pile of 183 and 132. So a cold alert is buildable and small, PROVIDED
+it carries the same two guards the SLA sweep already has: a once-per-lead flag,
+and a lookback so switching it on does not page the whole back catalogue on the
+first tick. Without the lookback the first run is 183 pushes, which is how a
+desk mutes the app for good.
+
+Still to decide before building it: who hears it — the assignee, or a manager
+once a day — and whether a lead that goes cold twice should say so twice.
+
+Numbers measured on the dev clone of the live desk, 25 Aug 2026.
 
