@@ -7,7 +7,7 @@ a live database so the next session neither re-derives it nor assumes it.
 
 Open bugs go in `docs/KNOWN-ISSUES.md`, not here. Point at them.
 
-**Last session: 2026-08-26.**
+**Last session: 2026-08-27.**
 
 ---
 
@@ -17,6 +17,8 @@ Open bugs go in `docs/KNOWN-ISSUES.md`, not here. Point at them.
 |---|---|---|
 | Frontend — Vercel, automatic on push to `main` | `1aed7e2` | 2026-08-19 |
 | Backend — AWS, **by hand** | `1aed7e2` | 2026-08-19 |
+| **Dev** frontend — Vercel preview, CLI | `0081cda` | 2026-08-27 |
+| **Dev** backend — `re-api-dev`, EC2 | `0081cda` | 2026-08-27 |
 
 **Nothing from 2026-08-19 onwards is deployed.** The live desk is running the
 19th's code. `development` is ~25 commits ahead: the 22nd's outage fixes, the
@@ -24,6 +26,35 @@ Leads filter refactor, and desk rework steps 1–7 (A–H).
 
 Consequence to remember: **the deployed backend still sends `lead_retry_due`** —
 30 in the last 7 days on bhumi — from a pile that was deleted in `9a4abd3`.
+
+---
+
+## Notifications: tested end to end on dev, and they work
+
+All 14 live types fired on `delpat`, against the dev backend and the Vercel
+preview, on an installed PWA — as an agent first, then as the owner. Every one
+arrived at the right role, rendered a readable sentence, and opened the screen it
+names. **Verified by the user on 2026-08-27**, not inferred from code.
+
+Three things the testing found and fixed, in `0081cda` and `6349a85`:
+
+- **Tapping an alert with the app open reloaded it.** `client.navigate()` is a
+  full document navigation; the `position:fixed` tab bar then sat off the bottom
+  of the viewport until a resize. The worker posts the URL now and the router
+  handles it in place.
+- **An agent tapping a bulk-assign alert** landed on `?screen=leads&agent=<self>`
+  with no visible control — the Agent dropdown is gated on `canAssign`. Dropped
+  on read, since the same link is right for a manager.
+- **`lead_reassigned` and `owner_reassigned` rendered the same sentence** as
+  `lead_assigned` / `owner_assigned`. They say "moved" now.
+
+The harness is `backend/src/scripts/test-notifications.ts` — it walks the
+catalogue, so a type added there is covered automatically. Run it from the repo
+ROOT (`.env` is resolved against `process.cwd()`), with `APP_ENV=development`.
+
+**Two types are still unproven:** `owner_assigned` and `owner_reassigned` deliver
+and route, but `delpat` has no owners, so they open an empty calling screen.
+Nothing is known to be wrong with them.
 
 ---
 
