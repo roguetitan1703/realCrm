@@ -30,6 +30,11 @@
  * like one firm's book rather than noise.
  * ============================================================================
  */
+// FOR THE SIDE EFFECT: env.ts reads `.env` (and `.env.<APP_ENV>`) off the
+// current working directory at import time. Without it this script sees only
+// what the shell exported, so DEV_DATABASE_URL was unset and it refused to run
+// — from the repo root, where every other script works.
+import '../services/env.js';
 import postgres from 'postgres';
 import { createHash } from 'crypto';
 
@@ -116,11 +121,33 @@ const scrubWords = (s: string) => s.replace(TOKEN_RE, (m) => (
 
 const scrub = (s: string) => scrubWords(scrubDigits(s));
 
+/**
+ * ONE `req` REDACTOR, for leads AND enquiry sessions.
+ *
+ * Both tables carry the same shape and it was only being applied to one of
+ * them, which is how 390 of 390 enquiry rows kept their builder and project
+ * names while every lead read clean.
+ *
+ * `notes` is the raw portal blurb -- free prose naming a builder, a project and
+ * a price. Nothing in it is worth keeping for a demo, so it goes entirely
+ * rather than being pattern-matched: a regex that misses once has leaked.
+ */
+function redactReq(input: any): any {
+  const req = { ...(input || {}) } as any;
+  if (req.locality) req.locality = fakeLocality(req.locality);
+  if (req.project) req.project = fakeProject(req.project);
+  if (typeof req.interest === 'string') req.interest = fakeProject(req.interest);
+  else if (Array.isArray(req.interest)) req.interest = req.interest.map((x: any) => fakeProject(String(x)));
+  if (req.notes) delete req.notes;
+  return req;
+}
+
 async function main() {
   const [t] = await sql`SELECT id FROM tenants WHERE slug = ${TENANT}`;
   if (!t) { console.error(`No '${TENANT}' tenant in this database.`); process.exit(1); }
   const T = t.id;
-  console.log(`${WRITE ? 'WRITING' : 'DRY RUN'} · db ${ref(DEV)} · tenant ${TENANT}\n`);
+  console.log(`${WRITE ? 'WRITING' : 'DRY RUN'} · db ${ref(DEV)} · tenant ${TENANT}
+`);
 
   const leads = await sql`SELECT id, source, locality, req FROM crm_leads WHERE tenant_id = ${T}`;
   let changed = 0;
@@ -131,15 +158,7 @@ async function main() {
     if (l.source && src !== l.source) seenSrc.set(l.source, src);
     if (l.locality && loc !== l.locality) seenLoc.set(l.locality, loc);
 
-    const req = { ...(l.req || {}) } as any;
-    if (req.locality) req.locality = fakeLocality(req.locality);
-    if (req.project) req.project = fakeProject(req.project);
-    if (typeof req.interest === 'string') req.interest = fakeProject(req.interest);
-    else if (Array.isArray(req.interest)) req.interest = req.interest.map((x: any) => fakeProject(String(x)));
-    // The portal blurb is free prose naming a builder, a project and a price.
-    // There is nothing in it worth keeping for a demo, so it goes entirely
-    // rather than being pattern-matched — a regex that misses once has leaked.
-    if (req.notes) delete req.notes;
+    const req = redactReq(l.req);
 
     if (src !== l.source || loc !== l.locality || JSON.stringify(req) !== JSON.stringify(l.req || {})) {
       changed++;
@@ -169,6 +188,131 @@ async function main() {
   }
   console.log(`timeline events    ${events.length} carrying a real name, place or portal scrubbed`);
 
+  // ── crm_lead_enquiries ────────────────────────────────────────────────────
+  // 390 of 390 rows were leaking, and this is the table the RECORD SCREEN
+  // renders as enquiry history -- the thing a demo actually opens on camera.
+  // It carries its own `source` and its own `req`, neither of which the leads
+  // pass touches. Two copies of one idea, and only one of them was redacted.
+  const enq = await sql`SELECT id, source, req FROM crm_lead_enquiries WHERE tenant_id = ${T}`;
+  let enqChanged = 0;
+  for (const e of enq as any[]) {
+    const src = e.source ? fakeSource(e.source) : e.source;
+    const req = redactReq(e.req);
+    if (src === e.source && JSON.stringify(req) === JSON.stringify(e.req || {})) continue;
+    enqChanged++;
+    if (WRITE) {
+      await sql`UPDATE crm_lead_enquiries SET source = ${src}, req = ${sql.json(req)}
+                 WHERE id = ${e.id} AND tenant_id = ${T}`;
+    }
+  }
+  console.log(`enquiry sessions   ${enqChanged} of ${enq.length} rewritten`);
+
+  // ── JSON COLUMNS NOBODY THOUGHT TO NAME ───────────────────────────────────
+  //
+  // Three columns held the whole leak after every other pass reported clean:
+  //
+  //   crm_lead_enquiries.payloads  the RAW portal payload, kept per arrival --
+  //                                "looking for 2 BHK ... in Mahalunge, Pune"
+  //   crm_leads.follow_up          the appointment, whose `action` is prose
+  //   integrations.parser_config   the mapping rules, named in the working
+  //                                agreement as the exact thing a generator fix
+  //                                leaves behind, and missed anyway
+  //
+  // Walked as a tree rather than pattern-matched per key, because the shape of
+  // a stored payload is whatever the portal sent -- there is no schema to read.
+  // Every string gets the same scrub the timeline gets, and any value under a
+  // `source` key additionally goes through the portal map.
+  const deepScrub = (v: any, key?: string): any => {
+    if (typeof v === 'string') return key === 'source' ? fakeSource(v) : scrub(v);
+    if (Array.isArray(v)) return v.map(x => deepScrub(x));
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deepScrub(x, k)]));
+    }
+    return v;
+  };
+  const JSON_COLUMNS: Array<[string, string]> = [
+    ['crm_lead_enquiries', 'payloads'],
+    ['crm_leads', 'follow_up'],
+    ['integrations', 'parser_config'],
+  ];
+  for (const [table, col] of JSON_COLUMNS) {
+    const rows = await sql`SELECT id, ${sql(col)} AS v FROM ${sql(table)}
+                            WHERE tenant_id = ${T} AND ${sql(col)} IS NOT NULL`;
+    let n = 0;
+    for (const r of rows as any[]) {
+      const next = deepScrub(r.v);
+      if (JSON.stringify(next) === JSON.stringify(r.v)) continue;
+      n++;
+      if (WRITE) {
+        await sql`UPDATE ${sql(table)} SET ${sql(col)} = ${sql.json(next)}
+                   WHERE id = ${r.id} AND tenant_id = ${T}`;
+      }
+    }
+    console.log(`${(table + '.' + col).padEnd(30)} ${n} of ${rows.length} rewritten`);
+  }
+
+  // AN ID IS NOT REDACTABLE, so the row goes. `int_99acres_test` names a real
+  // portal in its primary key; rewriting a key breaks whatever points at it,
+  // and this is a test fixture nothing should be pointing at.
+  const named = await sql`SELECT id FROM integrations
+                           WHERE tenant_id = ${T} AND id ~* ${TOKEN_ALT}`;
+  for (const r of named as any[]) {
+    const [used] = await sql`SELECT count(*)::int n FROM crm_lead_enquiries
+                              WHERE tenant_id = ${T} AND integration_id = ${r.id}`;
+    if (used.n) { console.log(`⚠ ${r.id} names a portal but ${used.n} enquiries reference it — left alone`); continue; }
+    if (WRITE) await sql`DELETE FROM integrations WHERE id = ${r.id} AND tenant_id = ${T}`;
+    console.log(`integrations       ${r.id} deleted (portal name in its id, unreferenced)`);
+  }
+
+  // ── crm_settings ──────────────────────────────────────────────────────────
+  // THE ATTRIBUTION SOURCE LIST. This is the one the user actually saw: every
+  // lead read "Portal One" while Settings still offered "99acres, MagicBricks"
+  // in the dropdown that defines them. Redacting the rows and not the vocabulary
+  // that generates them is exactly the trap the working agreement names.
+  const [cfg] = await sql`SELECT value FROM crm_settings WHERE tenant_id = ${T} AND key = 'default'`;
+  if (cfg) {
+    const v = { ...(cfg.value || {}) } as any;
+    if (Array.isArray(v.sources)) v.sources = [...new Set(v.sources.map((x: any) => fakeSource(String(x))))];
+    if (v.city) v.city = 'Fairhaven';
+    const dirty = JSON.stringify(v) !== JSON.stringify(cfg.value);
+    console.log(`settings           ${dirty ? 'sources + city rewritten' : 'already clean'}`);
+    if (dirty && WRITE) {
+      await sql`UPDATE crm_settings SET value = ${sql.json(v)} WHERE tenant_id = ${T} AND key = 'default'`;
+    }
+  }
+
+  // ── integrations ──────────────────────────────────────────────────────────
+  // `provider` names the real portal the firm pays for, and it is rendered in
+  // Settings beside each connection.
+  const ints = await sql`SELECT id, provider FROM integrations WHERE tenant_id = ${T}`;
+  let intChanged = 0;
+  for (const i of ints as any[]) {
+    const prov = i.provider ? fakeSource(i.provider) : i.provider;
+    if (prov === i.provider) continue;
+    intChanged++;
+    if (WRITE) await sql`UPDATE integrations SET provider = ${prov} WHERE id = ${i.id} AND tenant_id = ${T}`;
+  }
+  console.log(`integrations       ${intChanged} of ${ints.length} rewritten`);
+
+  // ── audit_log, webhook_inbox ──────────────────────────────────────────────
+  // Operational logs: raw inbound portal payloads and an audit trail of who did
+  // what during testing. 1,584 audit rows and 35 inbox rows were carrying real
+  // portal names and real enquiry text. Nothing in a demo reads either, so they
+  // are emptied rather than rewritten -- there is no version of these worth
+  // keeping, and a scrub that misses one line has leaked.
+  if (WRITE) {
+    // RETURNING 1, not RETURNING id: audit_log has no `id` column.
+    const a = await sql`DELETE FROM audit_log WHERE tenant_id = ${T} RETURNING 1`;
+    const w = await sql`DELETE FROM webhook_inbox WHERE tenant_id = ${T} RETURNING 1`;
+    console.log(`audit_log          ${a.length} deleted`);
+    console.log(`webhook_inbox      ${w.length} deleted`);
+  } else {
+    const a = await sql`SELECT count(*)::int n FROM audit_log WHERE tenant_id = ${T}`;
+    const w = await sql`SELECT count(*)::int n FROM webhook_inbox WHERE tenant_id = ${T}`;
+    console.log(`audit_log          ${a[0].n} would be deleted`);
+    console.log(`webhook_inbox      ${w[0].n} would be deleted`);
+  }
+
   // OWNERS AND PROPERTIES ARE NOT REDACTED, THEY ARE REMOVED.
   //
   // Both arrived on this tenant as straight imports from the live desk: 732
@@ -193,8 +337,36 @@ async function main() {
     console.log('owners / properties  0 / 0 — nothing to leak');
   }
 
-  const owners = await sql`SELECT count(*)::int n FROM crm_owners WHERE tenant_id = ${T}`;
-  if (owners[0].n) console.log(`\n⚠ ${owners[0].n} owners on this tenant — imported from a real desk. Remove before sharing.`);
+  // ── THE CHECK THAT SHOULD HAVE EXISTED FROM THE START ─────────────────────
+  //
+  // This script reported "clean" twice while SIX tables were leaking, because
+  // the check only looked at the two tables the script happened to rewrite. A
+  // verification that can only see what you already thought of confirms your
+  // assumptions instead of testing them.
+  //
+  // So: enumerate EVERY table carrying a tenant_id, serialise each whole row to
+  // text, and match the real tokens against all of it. A new table, a new
+  // column or a new JSON key is covered without anyone remembering to add it.
+  const scoped = await sql`SELECT table_name FROM information_schema.columns
+                            WHERE column_name = 'tenant_id' AND table_schema = 'public'
+                            ORDER BY table_name`;
+  const leaks: string[] = [];
+  for (const { table_name: t } of scoped as any[]) {
+    try {
+      const [r] = await sql`SELECT count(*)::int n FROM ${sql(t)}
+                             WHERE tenant_id = ${T} AND to_jsonb(${sql(t)})::text ~* ${TOKEN_ALT}`;
+      if (r.n) leaks.push(`${t} (${r.n} rows)`);
+    } catch { /* a table with no straightforward row type is not a leak */ }
+  }
+  console.log(`
+LEAK CHECK · ${(scoped as any[]).length} tenant-scoped tables scanned whole`);
+  if (leaks.length) {
+    console.log(`✗ STILL LEAKING: ${leaks.join(', ')}`);
+    console.log('  Add the token to REAL_TOKENS, or teach the script that table.');
+    process.exitCode = 1;
+  } else {
+    console.log('✓ no real portal, place or project name anywhere on this tenant');
+  }
 
   if (!WRITE) console.log('\nNothing written. Re-run with --write.');
   await sql.end();
