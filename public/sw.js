@@ -153,10 +153,21 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(reportPush(event.notification.data && event.notification.data.ack, 'clicked'));
   const rawUrl = (event.notification.data && event.notification.data.url) || '/';
   const target = new URL(rawUrl, self.location.origin);
+  // NORMALISE `/<slug>` TO `/<slug>/` BEFORE ANYTHING ELSE.
+  //
+  // The manifest's scope is `/<slug>/`, so a URL of `/<slug>?screen=...` sits
+  // outside it: `openWindow` finds no installed app whose scope matches and
+  // falls back to a browser tab. That is why a click worked with the app open
+  // (the branch below focuses an existing window) and opened Chrome when it was
+  // closed. Fixed at the source too, but this stays: every push already
+  // delivered carries the old shape, and this file ships with the frontend
+  // while the sender ships with the backend, separately.
+  if (/^\/[^/]+$/.test(target.pathname)) target.pathname += '/';
   // THE WORKSPACE IS THE FIRST PATH SEGMENT, and it decides which installed app
-  // this alert belongs to. One worker is registered at the origin root, so it
-  // controls EVERY tenant's installed app on the device — `matchAll` returns
-  // all of them, and taking the first meant a Bhumi alert grabbed whichever
+  // this alert belongs to. `includeUncontrolled` returns windows this worker
+  // does not control, including other tenants' — and a device that installed
+  // two workspaces has a worker per slug — so taking the first match meant a
+  // Bhumi alert could grab whichever
   // window happened to be open, navigated it to Bhumi's URL and focused it.
   // The person watched a demo tenant's app put on another firm's colours and
   // then ask them to sign in. Only ever reuse a window already in the same
