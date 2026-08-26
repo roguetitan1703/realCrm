@@ -148,6 +148,42 @@ export function subscribeConnection(fn) {
 }
 export function getConnection() { return onlineState; }
 
+// ── A session that has stopped being one ─────────────────────────────────────
+// The only code that noticed an expired token was the boot read's catch, which
+// runs once, at mount. So a session that died while the app was open stayed
+// open: every list came back 401, each screen showed its own "could not load",
+// and the desk looked broken rather than signed out. It corrected itself on
+// reload, because reload is when the boot read happens again — which is exactly
+// the shape the person reported.
+//
+// Any request is now allowed to notice. Fired once per dead session (the flag
+// clears when a token is next set), because a screen with five reads in flight
+// would otherwise announce it five times.
+const authListeners = new Set();
+let sessionDead = false;
+
+export function subscribeAuthFailure(fn) {
+  authListeners.add(fn);
+  return () => authListeners.delete(fn);
+}
+
+/**
+ * 401/403 on a TENANT call means this token is finished. Deliberately not
+ * wired to the /admin console's token: the two identities are kept apart
+ * everywhere else, and signing out of one must not sign out of the other.
+ */
+function noteSessionExpired(endpoint) {
+  if (sessionDead) return;
+  // Sign-in and workspace resolution answer 401 as a normal outcome — a wrong
+  // password is not an expired session, and treating it as one would fire a
+  // "signed out" on the sign-in screen.
+  if (/^\/auth\/(login|otp|verify|refresh)/.test(endpoint) || endpoint.startsWith('/workspace/resolve')) return;
+  sessionDead = true;
+  authListeners.forEach(fn => { try { fn(); } catch (e) {} });
+}
+/** Called when a token is stored, so the next expiry is announced again. */
+function armSessionWatch() { sessionDead = false; }
+
 // Auth tokens live in localStorage. Two separate identities:
 //   • crm_auth_token  — the signed-in tenant user (owner/agent), sent on every
 //     tenant API call as `Authorization: Bearer`.
@@ -377,6 +413,9 @@ async function request(endpoint, options = {}) {
       // silently dropped its reason and showed a bare "400 Bad Request".
       let detail = '';
       try { const body = await res.clone().json(); detail = body?.message || body?.error || ''; } catch { /* not json */ }
+      // ANY call may be the one that discovers the session is over — not just
+      // the boot read. See noteSessionExpired().
+      if (res.status === 401 || res.status === 403) noteSessionExpired(endpoint);
       throw new Error(`API Error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
     }
     const data = await res.json();
@@ -473,6 +512,7 @@ export const api = {
     const s = slug || (typeof window !== 'undefined' ? (window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0] || '') : '');
     if (s && s !== 'admin') {
       lsSet(`crm_auth_token_${s}`, t);
+      armSessionWatch();   // a fresh token: the next expiry is worth announcing
     }
   },
   clearToken: (slug) => {
