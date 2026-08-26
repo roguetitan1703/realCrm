@@ -77,20 +77,10 @@ const COLOR_PRESETS = ['#1E6F52', '#1D4ED8', '#7C3AED', '#B45309', '#B91C1C', '#
 function BrandSection({ store, settings }) {
   const brand = store.state.brand || {}
   const [firm, setFirm] = useState(settings.firmName)
-  // Who an agent reaches when alerts are BLOCKED in their browser. Nothing in
-  // the app can lift that — the permission is one-shot and there is no API to
-  // reset it — so the only route left is a person who can talk them through
-  // their own browser settings. Per firm, because each desk is supported by
-  // whoever sold it to them.
-  const [support, setSupport] = useState(settings.supportWhatsapp || '')
 
   useEffect(() => {
     setFirm(settings.firmName)
   }, [settings.firmName])
-  useEffect(() => {
-    setSupport(settings.supportWhatsapp || '')
-  }, [settings.supportWhatsapp])
-  const supportDirty = support.trim() !== (settings.supportWhatsapp || '')
   const dirty = firm.trim() && firm.trim() !== settings.firmName
   const color = brand.primaryColor || '#1E6F52'
   const logoUrl = brand.logoUrl || ''
@@ -143,15 +133,6 @@ function BrandSection({ store, settings }) {
           <span className="u-muted" style={{ fontSize: 12 }}>PNG or SVG, under 512&nbsp;KB. Shown on the top bar and login.</span>
         </div>
 
-        <div className="field-lbl" style={{ marginTop: 16 }}>Support WhatsApp</div>
-        <div className="brand-row">
-          <div className="brand-field">
-            <Input value={support} onChange={e => setSupport(e.target.value)} placeholder="919876543210"
-              onKeyDown={e => { if (e.key === 'Enter' && supportDirty) store.patchSettings({ supportWhatsapp: support.trim() }, 'Support number saved') }} />
-          </div>
-          <Button variant={supportDirty ? 'primary' : 'ghost'} disabled={!supportDirty}
-            onClick={() => store.patchSettings({ supportWhatsapp: support.trim() }, 'Support number saved')}>Save</Button>
-        </div>
       </Panel>
     </>
   )
@@ -633,8 +614,18 @@ function SystemSection({ store }) {
       {/* Alerts and install, the same two rows the phone's Me screen shows —
           components/ThisDevice.jsx. The desk had no install route at all: the
           prompt card only ever rendered on the phone's Today tab, so a browser
-          on a laptop was never offered it. */}
-      <ThisDevice store={store} />
+          on a laptop was never offered it.
+
+          IN A PANEL, like every other section on this screen. It was the one
+          section rendering its rows straight onto the page background, so on
+          the web "This device" read as loose text beside six carded sections.
+          The phone already has its own container (PhoneMe's .msgt-card), which
+          is why it looked right there and wrong here.
+
+          The panel hides itself when both rows have nothing to say — see
+          `.panel:has(.devcard:empty)`. A heading over an empty card is the
+          exact fault this section shipped with. */}
+      <Panel><ThisDevice store={store} /></Panel>
       {/* <Panel>
         <SectionHead title="Database" />
         <div className="sys-row">

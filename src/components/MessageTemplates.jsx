@@ -54,7 +54,6 @@ export default function MessageTemplates({ store }) {
       <section className="msgt-card">
         <div className="msgt-h">Intro message</div>
         <IntroPreview text={introText(intro, { firmName, agentName })} ready={!!who} />
-        <div className="msgt-who">Your owner or manager can change this.</div>
       </section>
     )
   }
@@ -62,8 +61,7 @@ export default function MessageTemplates({ store }) {
   return (
     <>
       <TemplateEditor
-        title="WhatsApp message"
-        sub="Filled in from the lead when the WhatsApp button is pressed."
+        title="WhatsApp message template"
         value={state.settings?.whatsappIntroTemplate || DEFAULT_WHATSAPP_INTRO}
         fallback={DEFAULT_WHATSAPP_INTRO}
         tokens={['{name}', '{requirement}', '{locality}', '{source}', '{firmName}']}
@@ -71,8 +69,7 @@ export default function MessageTemplates({ store }) {
         onReset={() => store.patchSettings({ whatsappIntroTemplate: DEFAULT_WHATSAPP_INTRO }, 'WhatsApp message reset')}
       />
       <TemplateEditor
-        title="Intro message"
-        sub="Every agent can read this one and copy it. No lead fields."
+        title="Intro message template"
         value={intro}
         fallback={DEFAULT_INTRO_MESSAGE}
         tokens={['{agentName}', '{firmName}']}
@@ -85,7 +82,12 @@ export default function MessageTemplates({ store }) {
   )
 }
 
-function TemplateEditor({ title, sub, value, fallback, tokens, onSave, onReset, preview, previewReady }) {
+// NO `sub`. Each editor carried a sentence explaining itself -- "Filled in from
+// the lead when the WhatsApp button is pressed", "Every agent can read this one
+// and copy it" -- and the product's rule is labels and values only. The heading
+// now says "template" so it is not mistaken for the message itself, and the
+// token buttons under it show what gets filled in, which is the explanation.
+function TemplateEditor({ title, value, fallback, tokens, onSave, onReset, preview, previewReady }) {
   const [draft, setDraft] = useState(value)
   // The stored value can change under an open editor — another tab saving, or
   // the desk state reloading after a save. Following it blindly would wipe what
@@ -104,7 +106,6 @@ function TemplateEditor({ title, sub, value, fallback, tokens, onSave, onReset, 
   return (
     <section className="msgt-card">
       <div className="msgt-h">{title}</div>
-      <div className="msgt-s">{sub}</div>
       <div className="msgt-ph">
         {tokens.map(t => (
           <button key={t} type="button" className="msgt-tok" onClick={() => insert(t)}>+ {t}</button>

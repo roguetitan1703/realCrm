@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { WaCanvas } from '../components/chrome.jsx'
 import { Segmented } from '../components/primitives.jsx'
@@ -51,6 +51,28 @@ export default function WaModal({ store }) {
     return () => { live = false }
   }, [leadId])
 
+  // COMPOSE AGAIN ONCE THE LISTING IS ACTUALLY RESOLVABLE.
+  //
+  // `openWhatsApp` composes the moment the modal opens. For a MATCHED listing
+  // the property is not in the cache yet -- it arrives from getLeadMatches in
+  // the effect above -- so composeFor found nothing, fell through to the plain
+  // follow-up, and the agent was looking at an introductory message with no
+  // flat in it. Changing the language then produced the right text, because
+  // `recompose` re-runs composeFor and by then the row had landed. That is the
+  // whole bug: the composer took a one-shot snapshot of state that had not
+  // arrived.
+  //
+  // Once per propId, and never after the message has been edited by hand.
+  const composedFor = useRef(null)
+  const resolvedId = (wa?.propId && ((store.lookup('lead', wa.leadId)?.shortlistProps || []).some(x => x.id === wa.propId)
+    || store.lookup('property', wa.propId))) ? wa.propId : null
+  useEffect(() => {
+    if (!resolvedId || wa?.composing) return
+    if (composedFor.current === resolvedId) return
+    composedFor.current = resolvedId
+    store.recompose({})
+  }, [resolvedId, wa?.composing])
+
   if (!wa) return null
   const l = store.lookup('lead', wa.leadId)
   // The lead carries its shortlisted properties from the server. Reaching for
@@ -89,7 +111,17 @@ export default function WaModal({ store }) {
   // entry looked right until the next server read — and any other action that
   // reloads (logging a call does) replaced the timeline with the server's copy,
   // silently erasing the WhatsApp send that was never written anywhere.
-  const noteFor = () => (p ? `Sent ${p.society} (${p.priceLabel}) details on WhatsApp` : 'Sent a WhatsApp message')
+  // ONLY THE PARTS THAT EXIST. `priceLabel` is the optional "Quoted price"
+  // free-text field and most real listings have never had one typed into them,
+  // so this wrote "Sent Godrej Green (undefined) details on WhatsApp" into the
+  // record's own timeline -- a remark a colleague reads six weeks later, with
+  // the word undefined in it. `society` is optional too; a listing can carry a
+  // title instead.
+  const noteFor = () => {
+    if (!p) return 'Sent a WhatsApp message'
+    const what = [p.society || p.title || 'a listing', p.priceLabel || p.price || ''].filter(Boolean).join(' · ')
+    return `Sent ${what} details on WhatsApp`
+  }
   const send = () => {
     if (l) {
       const note = noteFor()
