@@ -179,8 +179,16 @@ function Group({ g, onOpen, store, onSeeAll }) {
 // the groups that are backlogs, both sides of the desk in a single request.
 function useTodayFeed(dataAsOf) {
   const [feed, setFeed] = useState({ leads: [], renewals: [], quiet: [], counts: {}, owners: { counts: {} } })
+  // LOADING IS NOT EMPTY. Without this the state before the answer and the
+  // state of having no work are the same object -- empty arrays -- so Today
+  // opened on "Nothing due", a definite and wrong answer, and then silently
+  // became a different screen when the request landed. On a phone, on a slow
+  // connection, that is indistinguishable from a broken screen: the one thing
+  // it says is the one thing that is not true.
+  const [loading, setLoading] = useState(true)
   useEffect(() => {
     let live = true
+    setLoading(true)
     // The phone is 'my day'. A manager on a desk still sees the firm.
     api.getToday(true)
       .then(r => {
@@ -191,9 +199,38 @@ function useTodayFeed(dataAsOf) {
         })
       })
       .catch(() => {})
+      // Settled, not succeeded. A failed request must still stop claiming to be
+      // loading, or a dropped connection spins for ever.
+      .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
   }, [dataAsOf])
-  return feed
+  return { ...feed, loading }
+}
+
+/**
+ * The shape of the answer, before the answer.
+ *
+ * Deliberately the same geometry as a real group -- a heading bar, then rows
+ * the height of a lead row -- so the screen does not resize under the thumb
+ * when the data lands. Two groups is enough to read as "a list is coming";
+ * filling the viewport with grey would overstate what is usually there.
+ */
+function TodaySkeleton() {
+  return (
+    <div className="q-wrap" aria-busy="true" aria-label="Loading your day">
+      {[0, 1].map(g => (
+        <div key={g} className="sk-group">
+          <div className="sk sk-head" />
+          {[0, 1, 2].map(r => (
+            <div key={r} className="sk-row">
+              <div className="sk sk-line sk-w1" />
+              <div className="sk sk-line sk-w2" />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 export default function PhoneToday({ store, me, go, topBar }) {
@@ -257,6 +294,7 @@ export default function PhoneToday({ store, me, go, topBar }) {
   return (
     <>
       {topBar({ title: 'Today' })}
+      {feed.loading ? <TodaySkeleton /> : (
       <div className="q-wrap">
         {groups.map(g => (
           // A group that can be worked through is a list. One that can only be
@@ -276,6 +314,7 @@ export default function PhoneToday({ store, me, go, topBar }) {
           </div>
         )}
       </div>
+      )}
     </>
   )
 }

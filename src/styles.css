@@ -2915,3 +2915,25 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .dt-v.up{color:var(--ink)}
 .dt-v.zero{color:var(--faint);cursor:default}
 .dt-v:focus-visible,.dt-who:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+/* ---- Skeleton -------------------------------------------------------------
+   THE SHAPE OF THE ANSWER, BEFORE THE ANSWER. Today rendered its empty state
+   while the request was still in flight, so the screen's first and most
+   confident statement -- "Nothing due" -- was the one thing that was not true,
+   and on a slow connection it was indistinguishable from a broken screen.
+   Same geometry as a real group, so nothing resizes under the thumb when the
+   rows arrive. */
+.sk-group{margin-bottom:18px}
+.sk-row{display:flex;flex-direction:column;gap:7px;padding:13px 14px;border-bottom:1px solid var(--line)}
+.sk{background:var(--line-2);border-radius:6px;position:relative;overflow:hidden}
+.sk-head{height:13px;width:38%;margin:0 14px 12px;border-radius:5px}
+.sk-line{height:12px}
+.sk-w1{width:52%}
+.sk-w2{width:76%;height:10px;opacity:.65}
+/* One sweep across the whole block, not a pulse per bar: a dozen elements
+   fading independently reads as a fault rather than as waiting. */
+.sk::after{content:'';position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--card) 65%,transparent),transparent);
+  animation:sk-sweep 1.25s ease-in-out infinite}
+@keyframes sk-sweep{100%{transform:translateX(100%)}}
+@media (prefers-reduced-motion:reduce){.sk::after{animation:none}}
