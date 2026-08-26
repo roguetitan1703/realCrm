@@ -316,14 +316,19 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
     ownerName: '',
     ownerEmail: '',
     ownerPhone: '',
-    ownerPassword: 'Bhumi@2026',
+    // BLANK, DELIBERATELY. This field pre-filled a client's name and the year
+    // -- shipped in the public bundle -- so every workspace Delpat provisioned
+    // got the same owner password, and the paying client's owner account was
+    // still on it. Left empty, provisionTenant() generates a random one per
+    // firm and returns it to this screen.
+    ownerPassword: '',
     mustChangePassword: true,
     primaryColor: '#1E6F52',
   })
 
   // Bulk team setup array
   const [team, setTeam] = useState([
-    { name: '', loginId: '', email: '', phone: '', role: 'agent', password: 'Bhumi@2026' }
+    { name: '', loginId: '', email: '', phone: '', role: 'agent', password: '' }
   ])
 
   const [busy, setBusy] = useState(false)
@@ -432,7 +437,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
   }
 
   const addTeamRow = () => {
-    setTeam(list => [...list, { name: '', loginId: '', email: '', phone: '', role: 'agent', password: 'Bhumi@2026' }])
+    setTeam(list => [...list, { name: '', loginId: '', email: '', phone: '', role: 'agent', password: '' }])
   }
 
   const removeTeamRow = (idx) => {
@@ -455,7 +460,10 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
         email: t.email.trim(),
         phone: t.phone.trim(),
         role: t.role,
-        password: t.password.trim() || form.ownerPassword.trim() || 'Bhumi@2026',
+        // No shared fallback. An empty password means the server generates one
+        // for THIS person; a constant here means every seat on every firm we
+        // ever onboard shares a login.
+        password: t.password.trim() || undefined,
       }))
 
     try {

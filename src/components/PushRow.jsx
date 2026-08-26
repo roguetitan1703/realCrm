@@ -36,7 +36,15 @@ function dismissedRecently() {
   } catch (e) { return false }
 }
 
-const supportNumber = (store) => String(store?.state?.settings?.supportWhatsapp || '').replace(/\D/g, '')
+// WHO TO ASK WHEN THE BROWSER HAS BLOCKED ALERTS. Delpat, not the firm -- this
+// is the number of the people who sold them the product, and it was a field in
+// Settings → Brand that every client could edit and none of them should. A firm
+// setting the support number is a firm changing who supports it.
+//
+// Build-time, from VITE_SUPPORT_WHATSAPP. Absent, the control is simply not
+// offered, which is what it already did with the field left blank.
+const SUPPORT_WHATSAPP = String(import.meta.env.VITE_SUPPORT_WHATSAPP || '').replace(/\D/g, '')
+const supportNumber = () => SUPPORT_WHATSAPP
 
 export default function PushRow({ store, variant = 'prompt' }) {
   const [push, setPush] = useState(null)
@@ -64,13 +72,13 @@ export default function PushRow({ store, variant = 'prompt' }) {
   // Blocked with no support number configured leaves a bar with a label and no
   // button — something to dismiss and nothing to do. The settings row still
   // says it, because that is where someone goes to find out.
-  if (variant === 'prompt' && push.permission === 'denied' && !supportNumber(store)) return null
+  if (variant === 'prompt' && push.permission === 'denied' && !supportNumber()) return null
 
   // Blocked is the one state a button cannot fix, so it routes to a person: the
   // agents on a real desk will not find Chrome's site settings from a written
   // instruction, and support can do it with them in a minute.
   const blocked = push.permission === 'denied'
-  const support = supportNumber(store)
+  const support = supportNumber()
 
   const turnOn = async () => {
     setBusy(true)
