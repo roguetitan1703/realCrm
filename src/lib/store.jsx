@@ -7,7 +7,7 @@ import { createContext, useContext, useReducer, useCallback, useRef, useEffect }
 import { DEFAULT_SETTINGS, DEFAULT_BRAND, PROTECTED_STAGES } from '../data/theme.js'
 import { initials } from './format.js'
 import { generateMessage, followUpMessage } from './matching.js'
-import { api as apiClient, invalidateReads, currentTenant } from './api.js'
+import { api as apiClient, invalidateReads, currentTenant, subscribeAuthFailure } from './api.js'
 import { applyBrandColor } from './brand.js'
 import { setTenantIdentity } from './tenant.js'
 import { applyPwaIdentity, slugFromLocation } from './pwa.js'
@@ -267,6 +267,19 @@ function freshState() {
     // a full reload of the workspace. See `settled()` below.
     mutationTick: 0,
     dataStale: false,    // true when we're showing a cached snapshot (offline read)
+    // HAS THE BOOT PAYLOAD LANDED YET?
+    //
+    // Every list above starts `[]` and `dealMix` starts `{sale:0, rent:0}`,
+    // which is indistinguishable from the server saying the firm has no
+    // agents, no localities, no sources, and neither sells nor lets. Screens
+    // reading them cannot tell "not asked yet" from "there are none", so a
+    // filter menu renders empty, a picker offers nobody, and the deal filters
+    // decide they are not worth showing at all -- on data that had not arrived.
+    // Then it all changes under the person a moment later.
+    //
+    // A cached snapshot counts as hydrated: it is real data this browser was
+    // given, which is the whole reason it is kept.
+    hydrated: !!cached,
     // Records fetched one at a time, keyed by kind then id. This is what
     // replaces "the store holds every lead and every property": a screen asks
     // for the record it is showing, and a miss is normal rather than a bug.
@@ -287,6 +300,9 @@ function reducer(state, action) {
   switch (action.type) {
     case 'HYDRATE_SERVER': {
       const s = action.state || {}
+      // Whatever else this payload carries, the question "have we asked?" is
+      // now answered — see `hydrated` in freshState().
+
       // Trust the server's arrays verbatim — including EMPTY ones. A freshly
       // onboarded tenant legitimately has no leads/properties; falling back to
       // the bundled demo dataset here was leaking Skyline's demo records (and
@@ -294,6 +310,7 @@ function reducer(state, action) {
       // omitted the key entirely (malformed/partial response).
       return {
         ...state,
+        hydrated: true,
         agents: Array.isArray(s.agents) ? s.agents : state.agents,
         // This was missing entirely — freshState() (the FIRST paint, from the
         // localStorage snapshot) reads formerAgents/inactiveAgentIds, but the
@@ -325,6 +342,10 @@ function reducer(state, action) {
       const s = action.state || {}
       return {
         ...state,
+        // Real data this browser was given, just not from this minute. The
+        // screens have something true to render, which is what `hydrated`
+        // is asked about.
+        hydrated: true,
         agents: Array.isArray(s.agents) ? s.agents : state.agents,
         formerAgents: Array.isArray(s.formerAgents) ? s.formerAgents : state.formerAgents,
         inactiveAgentIds: Array.isArray(s.inactiveAgentIds) ? s.inactiveAgentIds : state.inactiveAgentIds,
@@ -802,6 +823,23 @@ export function StoreProvider({ children }) {
         if (cached) dispatch({ type: 'HYDRATE_CACHE', state: cached.state, at: cached.at })
       })
   }, [])
+
+  // A SESSION CAN END WHILE THE APP IS OPEN.
+  //
+  // The 401 handling below lives in the boot read's catch, and the boot read
+  // happens once, at mount — so an expired token was noticed only on the next
+  // reload. Until then every screen kept asking, kept being refused, and showed
+  // its own load failure; the desk looked broken instead of signed out.
+  //
+  // api.js now reports it from wherever it is found, once per dead session.
+  // Same two actions the boot catch takes, so there is one definition of
+  // "this session is over" rather than two that can drift.
+  useEffect(() => subscribeAuthFailure(() => {
+    if (!apiClient.getToken?.()) return   // already signed out; nothing to end
+    apiClient.clearToken?.()
+    dispatch({ type: 'LOGOUT' })
+    toast('Signed out — your session expired', 'warn')
+  }), [])
 
   // Hydrate state from backend REST API on mount.
   // Only with a token: the API now rejects unauthenticated reads outright (the

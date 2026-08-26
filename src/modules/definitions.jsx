@@ -769,7 +769,13 @@ export const PROPERTIES_DEF = {
     // "Transaction", which can only ever return nothing. Counted on the server;
     // asking an in-memory array was only ever right while the array was the
     // whole book.
-    const hasSale = (store?.state?.dealMix?.sale ?? 1) > 0
+    //
+    // NOT ASKED YET IS NOT "NO SALE LISTINGS". The `?? 1` was written for
+    // exactly that, but freshState() seeds a concrete {sale:0, rent:0}, so the
+    // fallback could never fire: until the boot payload landed, every desk
+    // looked like a lettings-only desk and these two filters were missing from
+    // the panel. They then appeared on their own a moment later.
+    const hasSale = !store?.state?.hydrated || (store?.state?.dealMix?.sale ?? 1) > 0
     return [
       { key: 'project', label: 'Project', icon: 'building', group: 'Where', options: opt(projects) },
       { key: 'deal', label: 'Deal', icon: 'tag', multi: false, group: 'What', options: optionsOf(DEALS) },
