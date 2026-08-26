@@ -183,7 +183,31 @@ self.addEventListener('notificationclick', (event) => {
     const mine = all.filter((c) => slugOf(c.url) === want);
     for (const c of mine) {
       if ('focus' in c) {
-        c.navigate(target.href).catch(() => {});
+        // DO NOT RELOAD AN APP THAT IS ALREADY OPEN.
+        //
+        // c.navigate() is a full document navigation: the whole SPA is torn
+        // down and rebuilt to change a query string. On a phone that is a
+        // visible reload, and the tab bar is position:fixed, so it lands off
+        // the bottom of the viewport until something forces a resize -- which
+        // is why going to the home screen and back "fixed" it.
+        //
+        // Every alert target is the same document as the window we just found
+        // (same origin, same /<slug>/ path) with a different query, which is
+        // exactly what the client-side router already handles on popstate. So
+        // hand it the URL and let it route in place: no reload, no relayout,
+        // no dropped tab bar, and it lands instantly.
+        //
+        // navigate() stays for the case it is actually for -- a window on a
+        // DIFFERENT path within the workspace, where the document must change.
+        var sameDoc = false;
+        try {
+          var cur = new URL(c.url);
+          sameDoc = cur.origin === target.origin && cur.pathname === target.pathname;
+        } catch (e) { sameDoc = false; }
+        // The worker and the app bundle ship in the same deploy, so a worker
+        // with this branch is always paired with a client that listens for it.
+        if (sameDoc) c.postMessage({ type: 'notification-navigate', url: target.href });
+        else c.navigate(target.href).catch(() => {});
         return c.focus();
       }
     }

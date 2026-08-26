@@ -69,7 +69,7 @@ const DATA: Record<string, any> = {
   lead_assigned_bulk: { n: 4 },
   lead_unrouted: { name: 'Test Buyer', source: 'Portal Two' },
   lead_repeat: { name: 'Test Buyer', source: 'Portal Three', changed: 2, previousStage: null },
-  lead_reassigned: { n: 3 },
+  lead_reassigned: { name: 'Test Buyer' },
   owner_assigned: { n: 2 },
   owner_reassigned: { n: 2 },
   lead_reassign_loop: { name: 'Test Buyer', n: 4, to: 'Test Agent' },
@@ -81,11 +81,15 @@ const DATA: Record<string, any> = {
   remark_added: { name: 'Test Buyer', by: 'Test Agent', text: 'Asked for a evening viewing' },
 };
 
+// ONLY the types whose real call site sends a LIST link. `lead_reassigned` was
+// in here and is not one of them -- store.ts sends `?screen=leads&lead=<id>`,
+// the record -- so the harness was testing a link the product never sends, and
+// its empty body came from passing `{n}` where the real call passes `{name}`.
+// A test fixture that does not match its call site tests the fixture.
 const LINK: Record<string, string> = {
   lead_assigned_bulk: '?screen=leads&agent=',
   owner_assigned: '?screen=calling&agent=',
   owner_reassigned: '?screen=calling&agent=',
-  lead_reassigned: '?screen=leads&agent=',
 };
 
 async function main() {

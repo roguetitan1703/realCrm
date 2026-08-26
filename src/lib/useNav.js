@@ -126,6 +126,33 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
     return () => window.removeEventListener('popstate', onPop)
   }, [screen, sel, home, onExitWarning])
 
+  // TAPPING AN ALERT WHILE THE APP IS ALREADY OPEN.
+  //
+  // The service worker used to call client.navigate() on the window it found,
+  // which is a full document load to change a query string -- a visible reload
+  // on a phone, after which the position:fixed tab bar sat off the bottom of
+  // the viewport until a resize put it back. The worker now posts the URL
+  // instead (see the notificationclick handler in public/sw.js) and this routes
+  // it in place, the same way a back press is handled.
+  //
+  // pushState, not replaceState: the screen the person was looking at when the
+  // alert arrived is somewhere they should be able to press back to.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    const onMsg = (e) => {
+      if (e.data?.type !== 'notification-navigate' || !e.data.url) return
+      let at
+      // parseUrl takes a QUERY STRING, not a URL.
+      try { at = parseUrl(new URL(e.data.url, window.location.origin).search) } catch { return }
+      window.history.pushState({ nav: true }, '', e.data.url)
+      fromPop.current = true
+      setScreenState(at.screen || home)
+      setSelState(at.sel)
+    }
+    navigator.serviceWorker.addEventListener('message', onMsg)
+    return () => navigator.serviceWorker.removeEventListener('message', onMsg)
+  }, [home])
+
   // Same signature the modules already call: go('leads', { leadId, leadOpen }).
   // Every takeover flag is cleared unless this call sets it, so leaving the
   // add-property wizard and tapping Properties cannot re-open the wizard.

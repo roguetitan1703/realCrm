@@ -79,11 +79,27 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const stage = f.stage || 'all'
   const sortKey = f.sortKey || 'activity'
   const sortDir = f.sortDir || 'asc'
+  // AN AGENT FILTER NOBODY CAN SEE IS NOT A FILTER.
+  //
+  // The Agent control below is gated on canAssign, which is false for an agent.
+  // A bulk-assign alert links to `?screen=leads&agent=<their own id>`, so an
+  // agent tapping it landed on a filtered list with no control anywhere saying
+  // why -- and RBAC already scopes them to their own leads, so the filter was
+  // simultaneously invisible AND a no-op. For an agent, plain `?screen=leads`
+  // already means "my leads".
+  //
+  // Dropped on read rather than at the sender: the same link is correct for a
+  // manager, who can see the control and for whom the filter does something.
+  // Every entry point must land on a control you can see.
+  const canFilterByAgent = canAssignLead(state.role)
   const flt = useMemo(() => {
     const o = {}
-    for (const k of ['source', 'locality', 'agent', 'flag']) if (f[k]?.length) o[k] = f[k]
+    for (const k of ['source', 'locality', 'agent', 'flag']) {
+      if (k === 'agent' && !canFilterByAgent) continue
+      if (f[k]?.length) o[k] = f[k]
+    }
     return o
-  }, [JSON.stringify(f)])
+  }, [JSON.stringify(f), canFilterByAgent])
 
   const [q, setQ] = useState('')
   const [view, setView] = useState('list')
@@ -127,7 +143,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const canAssign = canAssignLead(role)
   // Two agents in the URL is a link from before this was one control; it shows
   // as All rather than silently claiming to be one of them.
-  const agentSel = (f.agent?.length === 1) ? f.agent[0] : 'all'
+  const agentSel = (canFilterByAgent && f.agent?.length === 1) ? f.agent[0] : 'all'
 
   // One page from the server. The agent's own-pipeline scope is applied in the
   // query, not by filtering an array here — a filter the client applies is a
