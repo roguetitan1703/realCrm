@@ -40,6 +40,12 @@ const FETCHERS = {
  */
 export function useRecord(store, kind, id) {
   const known = store.lookup(kind, id)
+  // A row a LIST put here carries the columns a list needs and not the
+  // timeline, shortlist or matches this screen renders. It is worth painting
+  // immediately — the name, stage and phone are all correct — but it does not
+  // answer the question, so it must not stop the fetch the way a full record
+  // does. See CACHE_RECORDS in store.jsx.
+  const full = !!known && !known.__partial
   const tick = store.state.mutationTick || 0
   const [state, setState] = useState({ loading: !known && !!id, error: null })
   // What we last fetched, and the write-counter we fetched it at. Adopting a
@@ -50,8 +56,8 @@ export function useRecord(store, kind, id) {
   useEffect(() => {
     if (!id) { setState({ loading: false, error: null }); return }
     const key = `${kind}:${id}`
-    if (seen.current.key !== key) seen.current = { key, tick: known ? tick : -1 }
-    if (known && seen.current.tick === tick) { setState({ loading: false, error: null }); return }
+    if (seen.current.key !== key) seen.current = { key, tick: full ? tick : -1 }
+    if (full && seen.current.tick === tick) { setState({ loading: false, error: null }); return }
     const fetcher = FETCHERS[kind]
     if (!fetcher) { setState({ loading: false, error: `No fetcher for ${kind}` }); return }
     seen.current = { key, tick }
@@ -75,7 +81,7 @@ export function useRecord(store, kind, id) {
       })
     return () => { live = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, id, tick])
+  }, [kind, id, tick, full])
 
   return { record: known, loading: state.loading, error: state.error }
 }

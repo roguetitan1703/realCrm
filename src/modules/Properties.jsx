@@ -115,6 +115,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit }) {
     (params) => api.listProperties(toQuery(params)),
     { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
     [state.dataAsOf],
+    { store, kind: 'property' },
   )
 
   // Shared query engine drives filter/search/sort; a custom renderTable keeps the

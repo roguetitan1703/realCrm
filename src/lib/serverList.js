@@ -69,7 +69,9 @@ export function useServerList(fetcher, query, deps = [], cache = null) {
       .then(res => {
         if (mine !== seq.current) return   // a newer query already answered
         const rows = res?.data || []
-        if (cacheRef.current && rows.length) cacheRef.current.store.cacheRecords(cacheRef.current.kind, rows)
+        // PARTIAL: these are list columns, not the whole record. See
+        // CACHE_RECORDS in store.jsx for why that has to be said out loud.
+        if (cacheRef.current && rows.length) cacheRef.current.store.cacheRecords(cacheRef.current.kind, rows, true)
         const merged = accumulate && page > 1 ? [...rowsRef.current, ...rows] : rows
         rowsRef.current = merged
         setState({ rows: merged, total: res?.total ?? merged.length, loading: false, error: null })
@@ -87,5 +89,36 @@ export function useServerList(fetcher, query, deps = [], cache = null) {
   // keep page 1 of the old filter under page 1 of the new one.
   useEffect(() => { rowsRef.current = [] }, [filterKey, debouncedSearch, sortKey, sortDir, pageSize])
 
-  return state
+  // ── The rows, as the record cache last knew them ───────────────────────────
+  //
+  // This hook WROTE every row it fetched into the record cache and never read
+  // one back, so a lead lived in two places and only one of them was ever
+  // patched. Every optimistic update in the store — a stage change, a
+  // follow-up, an assignment — patches `state.cache`, which is what the record
+  // screen reads, so the detail view moved under your thumb and the LIST behind
+  // it did not. The row only caught up on the next refetch, which is the delay
+  // that reads as "it did not save".
+  //
+  // Merged rather than substituted: the cached copy may be the fuller record a
+  // detail fetch returned, and the list row may carry list-only columns. Every
+  // key the cache holds wins, because it is the one that has just been written
+  // to; everything else stays as the page delivered it.
+  //
+  // Costs nothing when nothing has been patched — the fetch writes the same
+  // rows straight back into the cache, so `cached[r.id]` is the row itself.
+  // Identity is kept where nothing changed: a fresh array every render would
+  // re-run every consumer that has these rows in a dep array, which on this
+  // screen is the thing being made faster.
+  const patched = cache?.store?.state?.cache?.[cache.kind]
+  let changed = false
+  const rows = !patched ? state.rows : state.rows.map(r => {
+    const c = patched[r.id]
+    if (!c || c === r) return r
+    for (const k in c) {
+      if (c[k] !== r[k]) { changed = true; return { ...r, ...c } }
+    }
+    return r
+  })
+
+  return changed ? { ...state, rows } : state
 }

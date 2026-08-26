@@ -246,7 +246,12 @@ export const LEADS_DEF = {
         record={l} store={store} canAssign={canAssignLead(store.state.role)}
         onAssign={(agentId) => api.bulkAssignLeads([l.id], agentId)
           .then(res => {
-            if (res?.success) { store.toast(agentId ? 'Lead assigned' : 'Lead unassigned'); store.reloadServer?.() }
+            // settled(), not reloadServer(): the boot payload carries no
+            // leads, so re-reading it could not show this assignment. It
+            // refreshed the row only because HYDRATE_SERVER happens to move
+            // dataAsOf, which the list watches — a whole extra round trip to
+            // trigger a side effect of a request that answered nothing.
+            if (res?.success) { store.toast(agentId ? 'Lead assigned' : 'Lead unassigned'); store.settled?.() }
             else store.toast(res?.message || 'Could not assign', 'warn')
           })
           .catch(err => store.toast(err.message || 'Could not assign', 'warn'))}
@@ -619,7 +624,7 @@ export const OWNERS_DEF = {
         record={o} store={store} canAssign={canAssignLead(store.state.role)}
         onAssign={(agentId) => api.bulkAssignOwners([o.id], agentId)
           .then(res => {
-            if (res?.success) { store.toast(agentId ? 'Owner assigned' : 'Owner unassigned'); store.reloadServer?.() }
+            if (res?.success) { store.toast(agentId ? 'Owner assigned' : 'Owner unassigned'); store.settled?.() }
             else store.toast(res?.message || 'Could not assign', 'warn')
           })
           .catch(err => store.toast(err.message || 'Could not assign', 'warn'))}

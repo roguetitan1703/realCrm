@@ -224,6 +224,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     }),
     { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
     [state.dataAsOf, seg, stage, flt.project, phone],
+    { store, kind: 'owner' },
   )
 
   // On a phone the queue is MINE — the pills, the rows and the tab badge all

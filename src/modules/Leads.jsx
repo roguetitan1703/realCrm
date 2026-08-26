@@ -167,6 +167,10 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     }),
     { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
     [state.dataAsOf, seg, intent, stage],
+    // The rows this page shows, into the record cache -- see useServerList.
+    // Never passed, so opening a row always cost a fetch for a record the
+    // list had just delivered, and no optimistic update was ever visible here.
+    { store, kind: 'lead' },
   )
 
   // THE ONE BAG BOTH REQUESTS ARE BUILT FROM. The rows and the counts have to
@@ -238,7 +242,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
             ? `${res.deleted} deleted · ${res.skipped} skipped (not yours to delete)`
             : `${res.deleted} lead${res.deleted === 1 ? '' : 's'} deleted`,
           res.skipped ? 'warn' : 'ok')
-        store.reloadServer?.()
+        store.settled?.()
       } else {
         store.toast(res?.message || 'Could not delete', 'warn')
       }

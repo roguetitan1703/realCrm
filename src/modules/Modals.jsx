@@ -577,7 +577,7 @@ function LogCallModal({ store, leadId }) {
         return evtId ? api.editRemark(l.id, evtId, text.trim(), outcome) : null
       })
       .catch(err => console.warn('[Call log] error:', err.message))
-      .finally(() => { store.reloadServer?.(); store.toast(`Call logged · ${label}`); store.closeModal() })
+      .finally(() => { store.settled?.(); store.toast(`Call logged · ${label}`); store.closeModal() })
   }
 
   return (
@@ -1061,7 +1061,9 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
       .then(res => {
         if (res?.success) {
           store.toast(agentId ? `${res.assigned ?? n} ${noun}${n === 1 ? '' : 's'} assigned` : `${res.assigned ?? n} ${noun}${n === 1 ? '' : 's'} unassigned`)
-          store.reloadServer?.()
+          // The rows that changed are leads or owners; neither is in the
+          // boot payload this used to re-read.
+          store.settled?.()
           onDone?.()
           store.closeModal()
         } else {
@@ -1299,7 +1301,7 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
     // old stage until something else happened to reload: the automation worked
     // and looked as though it had not, which is the fastest way to teach a desk
     // to stop trusting it. The call-log modal already reloads; this one didn't.
-    store.reloadServer?.()
+    store.settled?.()
     store.closeModal()
   }
 

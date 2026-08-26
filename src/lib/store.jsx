@@ -283,7 +283,7 @@ function freshState() {
     // Records fetched one at a time, keyed by kind then id. This is what
     // replaces "the store holds every lead and every property": a screen asks
     // for the record it is showing, and a miss is normal rather than a bug.
-    cache: { lead: {}, property: {} },
+    cache: { lead: {}, property: {}, owner: {} },
     // modal/overlay state
     modal: null,
     waState: null,
@@ -373,7 +373,22 @@ function reducer(state, action) {
     case 'CACHE_RECORDS': {
       const kind = action.kind
       const next = { ...(state.cache?.[kind] || {}) }
-      for (const r of action.records || []) if (r?.id) { delete next[r.id]; next[r.id] = r }
+      // A LIST ROW IS NOT THE WHOLE RECORD. listLeads sends crm_leads.* and
+      // the counts beside it; getLeadById adds the timeline, the shortlist and
+      // the matched listings. Storing a page of rows over a record someone has
+      // open would silently empty its history, which is why lists never wrote
+      // to this cache at all — and why opening any row costs a fetch the cache
+      // exists to avoid. Marking them lets both be true: a partial is enough to
+      // paint the record instantly, and useRecord still goes for the rest.
+      for (const r of action.records || []) if (r?.id) {
+        const prev = next[r.id]
+        delete next[r.id]
+        next[r.id] = !action.partial ? r
+          // a list row refreshing a record we already hold in full: take its
+          // updated columns, keep the parts a list response cannot carry.
+          : (prev && !prev.__partial) ? { ...prev, ...r }
+          : { ...r, __partial: true }
+      }
       const keys = Object.keys(next)
       if (keys.length > CACHE_LIMIT) for (const k of keys.slice(0, keys.length - CACHE_LIMIT)) delete next[k]
       return { ...state, cache: { ...state.cache, [kind]: next } }
@@ -1182,7 +1197,7 @@ export function StoreProvider({ children }) {
     // request in the overwhelmingly common case. A miss is a normal outcome,
     // not an error: useRecord() fetches that one record by id.
     lookup: (kind, id) => (id && state.cache?.[kind]?.[id]) || null,
-    cacheRecords: (kind, records) => dispatch({ type: 'CACHE_RECORDS', kind, records }),
+    cacheRecords: (kind, records, partial) => dispatch({ type: 'CACHE_RECORDS', kind, records, partial }),
 
     assign: (leadId, agentId) => {
       const a = state.agents.find(x => x.id === agentId)
@@ -1563,9 +1578,15 @@ export function StoreProvider({ children }) {
       note),
     openModal: (modal) => dispatch({ type: 'SET', patch: { modal } }),
     closeModal: () => dispatch({ type: 'SET', patch: { modal: null } }),
-    // Re-pull the whole desk from the server (used after user-management edits so
-    // the roster reflects a suspend / delete / seat-swap immediately).
+    // Re-pull the whole desk from the server. ONLY for what the boot payload
+    // actually carries — the roster, the firm's settings, the brand. It holds
+    // no leads and no owners, so refreshing either of those with this costs a
+    // round trip and changes nothing about the rows. Use settled() for that.
     reloadServer: loadServerState,
+    // A confirmed write happened; every server-backed list and record screen
+    // should go and look again. See settled() above for why it is a counter
+    // rather than each screen's own dep array.
+    settled,
     openWhatsApp, recompose,
     closeWhatsApp: () => dispatch({ type: 'WA_CLOSE' }),
     setSearch: (v) => dispatch({ type: 'SET', patch: { searchOpen: v } }),
