@@ -2054,19 +2054,23 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .devrow-body{flex:1;min-width:0}
 .devrow-title{font-size:14px;font-weight:600;color:var(--ink)}
 .devrow-sub{font-size:12.5px;color:var(--muted);margin-top:2px}
-.devcard{display:flex;flex-direction:column;gap:12px;margin-top:10px}
+.devcard{display:flex;flex-direction:column;gap:12px}
 .devcard:empty{display:none}
+/* The panel goes with its contents. Settings wraps this in a Panel so the
+   section is carded like every other one; without this a device that can
+   neither install nor take alerts left a bordered box with a heading and
+   nothing in it -- which is the fault the section shipped with, rebuilt one
+   level up. */
+.panel:has(> .devcard:empty){display:none}
 .msgt-wrap{display:flex;flex-direction:column;gap:14px}
 .msgt-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
 .msgt-wrap .msgt-card{margin-bottom:0}
 .msgt-h{font-weight:700;font-size:14px;color:var(--ink)}
-.msgt-s{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.45}
 .msgt-tok{border:1px solid var(--line);background:var(--wash);border-radius:6px;padding:3px 8px;font-family:var(--mono);font-size:11px;color:var(--ink-2);cursor:pointer}
 .msgt-tok:hover{border-color:var(--muted)}
 .msgt-prev{display:flex;align-items:flex-start;gap:10px;background:var(--wash);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-top:10px}
 .msgt-prev-t{flex:1;min-width:0;font-size:12.5px;line-height:1.5;color:var(--ink-2)}
 .msgt-copy{flex-shrink:0;font-size:12px;display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:8px}
-.msgt-who{font-size:11.5px;color:var(--faint);margin-top:9px}
 .msgt-ph{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 10px}
 .msgt-ph code{font-family:var(--mono);font-size:11px;background:var(--card-2,var(--wash));border:1px solid var(--line);border-radius:5px;padding:3px 7px;color:var(--ink-2)}
 .msgt-t{width:100%;margin-bottom:8px;font-size:13px;line-height:1.5}
@@ -2188,7 +2192,7 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 /* ---- the work queue (Today) ---- */
 .q-wrap{padding:12px 12px 8px;display:flex;flex-direction:column;gap:16px}
 .q-group{display:flex;flex-direction:column;gap:7px}
-.q-head{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.q-head{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-2)}
 .q-head-alert{color:var(--alert)}
 .q-count{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--card-2);border:1px solid var(--line);color:var(--ink-2);font-size:10.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;letter-spacing:0}
 .q-head-alert .q-count{background:var(--alert);border-color:var(--alert);color:#fff}
@@ -2196,15 +2200,32 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
    queue carry a list that belongs on a list screen. */
 .q-seeall{margin-left:auto;border:none;background:transparent;color:var(--accent-ink,var(--accent));font:inherit;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;padding:2px 0}
 .q-hint{font-size:12px;color:var(--faint);margin:-2px 0 2px}
-.q-row{display:flex;align-items:center;gap:11px;padding:11px 12px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);cursor:pointer}
-.q-row:active{background:var(--card-2)}
+/* THE ROW IS TWO CONTROLS, not one div with a nested button. Open on the left,
+   call on the right, each its own tap target -- the phone icon used to be about
+   27x23px inside a 300px-wide tappable row, which is under half the 44px
+   minimum and cost a mis-tap every time an agent aimed for it in a hurry. */
+.q-row{display:flex;align-items:stretch;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.q-open{flex:1;min-width:0;display:flex;align-items:center;gap:11px;padding:10px 4px 10px 12px;
+  background:none;border:none;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.q-row-1{padding:10px 12px;align-items:center;gap:11px;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.q-open:active,.q-row-1:active,.q-row:has(.q-open:active){background:var(--card-2)}
+.q-open:focus-visible,.q-call:focus-visible,.q-row-1:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 /* Property rows on Today carry a building mark where a lead carries initials. */
 .q-ic{width:32px;height:32px;flex-shrink:0;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;background:var(--card-2);border:1px solid var(--line);color:var(--ink-2)}
-.q-main{flex:1;min-width:0}
-.q-name{font-weight:600;font-size:14px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.q-sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
-.q-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.q-call{padding:5px 9px}
+.q-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.q-name{font-weight:600;font-size:14.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* TWO LINES, not one ellipsis. This is the only context the agent gets before
+   opening the record -- "3 BHK · Buy · Mahalunge · Up to ₹95L" -- and on a
+   390px screen the middle column is about 190px, so a single nowrap line cut it
+   after three words. */
+.q-sub{font-size:12.5px;line-height:1.35;color:var(--muted);margin-top:1px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.q-right{display:flex;align-items:center;gap:8px;flex-shrink:0;padding-left:8px}
+/* A 44px square, the platform minimum, with its own divider so the two targets
+   read as two things. */
+.q-call{flex:none;width:44px;align-self:stretch;display:flex;align-items:center;justify-content:center;
+  background:none;border:none;border-left:1px solid var(--line);color:var(--ink-2);cursor:pointer}
+.q-call:active{background:var(--card-2);color:var(--accent)}
 
 /* ---- Me ---- */
 .me-band{display:flex;align-items:center;gap:13px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}
@@ -2398,17 +2419,33 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .cx-map-note{font-size:12.5px;color:#8a5a12;background:#FDF7EC;border:1px solid #EBD79A;border-radius:8px;padding:9px 12px}
 
 /* ---- Pager ---- */
-.pager{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;padding:14px 4px 2px;gap:16px}
-.pager-size{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);margin-right:auto}
-.pager-size select{font:inherit;font-size:12.5px;font-weight:600;color:var(--ink-2);background:var(--card-2);border:1px solid var(--line);border-radius:7px;padding:4px 8px;cursor:pointer}
-.pager-range{font-size:12px;color:var(--muted)}
-.pager-nav{display:flex;align-items:center;gap:3px}
-.pager-btn{width:28px;height:28px;border-radius:7px;border:1px solid var(--line);background:var(--card-2);color:var(--ink-2);display:flex;align-items:center;justify-content:center;cursor:pointer}
-.pager-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent-ink)}
-.pager-btn:disabled{opacity:.4;cursor:default}
-.pager-num{min-width:28px;height:28px;padding:0 6px;border-radius:7px;border:1px solid transparent;background:transparent;color:var(--ink-2);font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer}
-.pager-num:hover{background:var(--card-2)}
+/* ---- Pager ---------------------------------------------------------------
+   LESS BOX. Every element here was a bordered, filled rectangle: the rows-per-
+   page control was a boxed select inside a boxed label, the arrows were two
+   more boxes, and the page numbers were boxes that only showed their edges on
+   hover -- six outlines under a table that already draws its own. A pager is
+   the quietest thing on a screen and this one was competing with the data.
+   Now: no borders and no fills at rest, one accent pill on the current page,
+   and the size control reads as text with a caret until you touch it. */
+.pager{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;padding:14px 2px 2px;gap:18px}
+.pager-size{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);margin-right:auto}
+.pager-size select{font:inherit;font-size:12.5px;font-weight:600;color:var(--ink-2);background:transparent;
+  border:none;border-radius:6px;padding:3px 4px;cursor:pointer;appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-size:5px 5px,5px 5px;background-position:right 6px center,right 1px center;background-repeat:no-repeat;
+  padding-right:18px}
+.pager-size select:hover,.pager-size select:focus-visible{background-color:var(--card-2);color:var(--ink)}
+.pager-range{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pager-nav{display:flex;align-items:center;gap:2px}
+.pager-btn{width:30px;height:30px;border-radius:999px;border:none;background:transparent;color:var(--muted);
+  display:flex;align-items:center;justify-content:center;cursor:pointer}
+.pager-btn:hover:not(:disabled){background:var(--card-2);color:var(--ink)}
+.pager-btn:disabled{opacity:.3;cursor:default}
+.pager-num{min-width:30px;height:30px;padding:0 8px;border-radius:999px;border:none;background:transparent;
+  color:var(--muted);font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer}
+.pager-num:hover:not(.on){background:var(--card-2);color:var(--ink)}
 .pager-num.on{background:var(--accent);color:#fff}
+.pager-btn:focus-visible,.pager-num:focus-visible,.pager-size select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .pager-ellipsis{color:var(--faint);padding:0 2px;font-size:12.5px}
 
 /* Mobile's cumulative "Load more" — a big thumb target, not a page-jump control. */
@@ -2534,6 +2571,8 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
    from vs what's late, and who is doing it. The page used to be eight panels
    in one column with no stated relationship between them. */
 .dash{padding:20px 22px 44px;display:flex;flex-direction:column;gap:18px}
+/* FOUR tiles, and six on a desk that cold-calls -- the grid said three and
+   five, so the strip always wrapped one tile onto a row of its own. */
 .dash-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
 .dash-kpis.has-calling{grid-template-columns:repeat(5,1fr)}
 .dash-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
@@ -2550,14 +2589,27 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
    shape is the book"; the grid answers "how many, exactly", and is the part you
    click. Segment tints step through one hue so the bar reads as one quantity
    split up rather than six unrelated categories. */
+/* SIX HUES, NOT SIX DILUTIONS OF ONE. The bar and its key were the accent
+   at 100/78/60/45/32/20% -- so a six-segment chart was six shades of the same
+   colour, and the fourth and fifth are indistinguishable at 8px on a phone.
+   The point of a distribution is telling the segments apart. Chosen to sit
+   with charcoal/linen and to stay separable at dot size in both themes. */
+:root{
+  --dist-1: var(--accent);
+  --dist-2: #3E6F8E;
+  --dist-3: #6E8B5A;
+  --dist-4: #A8586B;
+  --dist-5: #7A6AA0;
+  --dist-6: #B0803A;
+}
 .dist-bar{display:flex;height:8px;border-radius:5px;overflow:hidden;background:var(--line-2);margin:2px 0 12px}
 .dist-bar i{display:block;height:100%;min-width:2px}
 .dist-bar i[data-i="0"]{background:var(--accent)}
-.dist-bar i[data-i="1"]{background:color-mix(in srgb, var(--accent) 78%, var(--card))}
-.dist-bar i[data-i="2"]{background:color-mix(in srgb, var(--accent) 60%, var(--card))}
-.dist-bar i[data-i="3"]{background:color-mix(in srgb, var(--accent) 45%, var(--card))}
-.dist-bar i[data-i="4"]{background:color-mix(in srgb, var(--accent) 32%, var(--card))}
-.dist-bar i[data-i="5"]{background:color-mix(in srgb, var(--accent) 20%, var(--card))}
+.dist-bar i[data-i="1"]{background:var(--dist-2)}
+.dist-bar i[data-i="2"]{background:var(--dist-3)}
+.dist-bar i[data-i="3"]{background:var(--dist-4)}
+.dist-bar i[data-i="4"]{background:var(--dist-5)}
+.dist-bar i[data-i="5"]{background:var(--dist-6)}
 .dist-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px 16px}
 .dist-row{display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;border-radius:7px;
   padding:6px 8px;margin:0 -8px;cursor:pointer;font-family:var(--sans);font-size:12.5px;color:var(--ink);text-align:left}
@@ -2566,11 +2618,11 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .dist-row.zero{color:var(--muted)}
 .dist-row.zero .dist-dot{background:var(--line)}
 .dist-dot{width:8px;height:8px;border-radius:3px;flex-shrink:0;background:var(--accent)}
-.dist-dot[data-i="1"]{background:color-mix(in srgb, var(--accent) 78%, var(--card))}
-.dist-dot[data-i="2"]{background:color-mix(in srgb, var(--accent) 60%, var(--card))}
-.dist-dot[data-i="3"]{background:color-mix(in srgb, var(--accent) 45%, var(--card))}
-.dist-dot[data-i="4"]{background:color-mix(in srgb, var(--accent) 32%, var(--card))}
-.dist-dot[data-i="5"]{background:color-mix(in srgb, var(--accent) 20%, var(--card))}
+.dist-dot[data-i="1"]{background:var(--dist-2)}
+.dist-dot[data-i="2"]{background:var(--dist-3)}
+.dist-dot[data-i="3"]{background:var(--dist-4)}
+.dist-dot[data-i="4"]{background:var(--dist-5)}
+.dist-dot[data-i="5"]{background:var(--dist-6)}
 .dist-k{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dist-n{color:var(--muted);font-variant-numeric:tabular-nums;flex-shrink:0}
 @media (max-width:640px){.dist-grid{grid-template-columns:1fr}}
@@ -2833,3 +2885,30 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
   padding:2px 6px;border-radius:5px;pointer-events:none;opacity:.85}
 .env-development{background:#8a5a00;color:#fff}
 .env-local{background:var(--line);color:var(--muted)}
+
+/* ---- The manager's per-agent table --------------------------------------
+   Replaces the load-bar roster and the duplicated Going-cold list. Every cell
+   is a control that opens that agent's filtered list; a zero is disabled
+   rather than hidden, so the row does not reflow as the day moves. Wide
+   content scrolls inside its own container -- the page never scrolls sideways. */
+.dt-wrap{overflow-x:auto}
+.dt{width:100%;border-collapse:collapse;font-size:13px}
+.dt th,.dt td{text-align:left;padding:0;border-bottom:1px solid var(--line)}
+.dt thead th{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);padding:0 10px 7px;white-space:nowrap}
+.dt tbody tr:last-child th,.dt tbody tr:last-child td{border-bottom:none}
+.dt tbody tr.off{opacity:.55}
+.dt-n{text-align:right}
+.dt thead .dt-n{text-align:right}
+.dt-who{display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;background:none;border:none;
+  font:inherit;font-weight:600;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
+.dt-who:hover{color:var(--accent-ink,var(--accent))}
+.dt-v{width:100%;padding:9px 10px;background:none;border:none;font:inherit;
+  font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink-2);cursor:pointer;text-align:right}
+.dt-v:hover:not(:disabled){color:var(--accent-ink,var(--accent))}
+/* Work waiting is accent; work done is not the same kind of fact and must not
+   wear the same colour. A zero is quiet and unclickable, never absent. */
+.dt-v.alert{color:var(--alert)}
+.dt-v.up{color:var(--ink)}
+.dt-v.zero{color:var(--faint);cursor:default}
+.dt-v:focus-visible,.dt-who:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}

@@ -14,7 +14,7 @@ import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { audit } from './audit.js';
-import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, type LeadSegment } from './leadSegments.js';
+import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, lastPersonActivity, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
@@ -591,6 +591,11 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     // the query did not ask, never 0 — a row that was not counted must not
     // claim to have been counted and found none.
     otherSourceCount: r.other_source_count == null ? undefined : Number(r.other_source_count),
+    // WHEN A PERSON LAST TOUCHED IT -- the same expression the going-cold pile
+    // is defined by, so a row cannot describe itself in one clock while the
+    // pile holding it counts another.
+    lastActivityAt: r.last_activity_at == null ? undefined
+      : (r.last_activity_at instanceof Date ? r.last_activity_at.toISOString() : String(r.last_activity_at)),
     // The real timestamp, not only the derived "how long ago". A desk asks
     // "when did this lead come in" and wants a date it can quote back to a
     // client or line up against a portal's own report; minsAgo answers a
@@ -1106,7 +1111,6 @@ export async function repairPropertyDisplayCasing(): Promise<void> {
 }
 
 export async function backfillPasswordAuth(): Promise<void> {
-  const DEMO_PW = process.env.DEMO_USER_PASSWORD || 'delpat-demo-1';
 
   const usersNoId = await sql`
     SELECT id, tenant_id, name FROM users
@@ -1121,15 +1125,26 @@ export async function backfillPasswordAuth(): Promise<void> {
     await sql`UPDATE users SET login_id = ${candidate} WHERE id = ${u.id}`;
   }
 
+  // ONE PASSWORD PER PERSON, AND THEY MUST CHANGE IT.
+  //
+  // This hashed a single constant -- `delpat-demo-1` -- onto EVERY passwordless
+  // user in EVERY tenant (no tenant filter, and it runs inside seedDatabase on
+  // a workspace reset as well as once at boot), and then set
+  // must_change_password = FALSE so nobody would ever be asked to move off it.
+  // Measured on production: 4 of skyline-realty's accounts and 2 of delpat's
+  // still carry it, none of them flagged.
+  //
+  // The rule this broke is not subtle -- "never add a universal credential,
+  // gated or not" -- and the login path that once ACCEPTED this string was
+  // fixed long ago. Nobody went back to the thing that plants it. The password
+  // is now generated per user and never logged; the only way onto the account
+  // is a reset, which is what should have been true from the start.
   const noPw = await sql`SELECT id, email FROM users WHERE (password_hash IS NULL OR password_hash = '') AND deleted_at IS NULL`;
-  if (noPw.length) {
-    const hash = await bcrypt.hash(DEMO_PW, 10);
-    for (const u of noPw) {
-      // Seeded/legacy users: usable immediately (no forced change) for the demo.
-      await sql`UPDATE users SET password_hash = ${hash}, must_change_password = FALSE, email_verified = ${!!u.email} WHERE id = ${u.id}`;
-    }
-    console.log(`[Auth] Cutover: backfilled ${noPw.length} user(s) with a temp password.`);
+  for (const u of noPw) {
+    const hash = await bcrypt.hash(suggestPassword(), 10);
+    await sql`UPDATE users SET password_hash = ${hash}, must_change_password = TRUE, email_verified = ${!!u.email} WHERE id = ${u.id}`;
   }
+  if (noPw.length) console.log(`[Auth] ${noPw.length} user(s) had no password; each given a unique one, all must change at next sign-in.`);
 }
 
 /**
@@ -1399,7 +1414,7 @@ export async function getDeskSummary(): Promise<any> {
   // The firm's midnight, not Postgres's. "Calls logged today" counted from
   // 05:30 IST, so an agent who worked the phone before breakfast showed 0.
   const today = dayStart(cfg.timezone);
-  const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls, perAgentLeadCalls, perAgentVisits] = await Promise.all([
+  const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls, perAgentLeadCalls, perAgentVisits, perAgentToday] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
                count(*) FILTER (WHERE ${FOLLOWUP_OVERDUE})::int AS overdue,
@@ -1408,15 +1423,29 @@ export async function getDeskSummary(): Promise<any> {
                count(*) FILTER (WHERE ${S.today})::int AS new_today,
                count(*) FILTER (WHERE ${S.never_contacted})::int AS never_contacted,
                count(*) FILTER (WHERE ${S.going_cold})::int AS going_cold,
+               -- HOW MANY CROSSED THE LINE TODAY. The standing pile is 177 of
+               -- bhumi's 246 open leads -- 72% of the book, growing, and nobody
+               -- works it. Six crossed yesterday. One of those two numbers is a
+               -- day's work and the other is wallpaper.
+               count(*) FILTER (WHERE ${S.going_cold} AND ${lastPersonActivity()}
+                                      >= now() - ((${cfg.coldDays} + 1)::text || ' days')::interval)::int AS cold_today,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine}`,
     sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
          WHERE tenant_id = ${t} AND ${mine} GROUP BY 1`,
     sql`SELECT coalesce(source, 'Website') AS k, count(*)::int AS n FROM crm_leads
          WHERE tenant_id = ${t} AND ${mine} GROUP BY 1`,
+    // THE MANAGER'S ROW. Every column here is the same expression as the pill
+    // it opens, so a cell and the list behind it cannot disagree -- and every
+    // one of them is something the manager can say to that agent today.
     sql`SELECT agent_id AS k,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
                count(*) FILTER (WHERE ${FOLLOWUP_OVERDUE})::int AS overdue,
+               count(*) FILTER (WHERE ${S.never_contacted} AND ${OPEN})::int AS never_contacted,
+               count(*) FILTER (WHERE ${S.no_next_step})::int AS no_next_step,
+               count(*) FILTER (WHERE ${S.going_cold})::int AS going_cold,
+               count(*) FILTER (WHERE ${S.going_cold} AND ${lastPersonActivity()}
+                                      >= now() - ((${cfg.coldDays} + 1)::text || ' days')::interval)::int AS cold_today,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*)::int AS total
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine} AND agent_id IS NOT NULL GROUP BY 1`,
@@ -1462,6 +1491,16 @@ export async function getDeskSummary(): Promise<any> {
          WHERE tenant_id = ${t} AND type = 'site_visit' AND agent_id IS NOT NULL
            AND at >= now() - interval '30 days'
          GROUP BY 1`,
+    // ACTIONS TAKEN TODAY, per person. The desk logs 37-162 person-authored
+    // events a day and no screen showed a single one of them, so a manager
+    // could not tell a quiet day from a busy one. `author` holds the agent id
+    // on every tenant measured; 'System' is excluded by the same guard the
+    // going-cold pile uses, or lead creation would count as work.
+    sql`SELECT author AS k, count(*)::int AS n
+          FROM crm_timeline_events
+         WHERE tenant_id = ${t} AND coalesce(author, 'System') <> 'System'
+           AND timestamp >= ${today}
+         GROUP BY 1`,
   ]);
   const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
   const stagesByAgent = new Map<string, Record<string, number>>();
@@ -1476,8 +1515,12 @@ export async function getDeskSummary(): Promise<any> {
     perAgent: (() => {
       const calls = new Map((perAgentLeadCalls as any[]).map(r => [r.k, r.calls]));
       const visits = new Map((perAgentVisits as any[]).map(r => [r.k, r.visits]));
+      const today_ = new Map((perAgentToday as any[]).map(r => [r.k, r.n]));
       return Object.fromEntries(perAgent.map(r => [r.k, {
         open: r.open, overdue: r.overdue, won: r.won, total: r.total,
+        neverContacted: r.never_contacted, noNextStep: r.no_next_step,
+        goingCold: r.going_cold, coldToday: r.cold_today,
+        workedToday: today_.get(r.k) ?? 0,
         byStage: stagesByAgent.get(r.k) || {},
         // 30-day, and named so. The roster's old "Calls · 30d" label sat over an
         // all-time count from a different endpoint.
@@ -1925,11 +1968,12 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
       ?? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name
       ?? 'an agent'
     : 'the queue';
-  // FEED ONLY: an owner wants to see the flow, but a desk taking 60 leads a day
-  // cannot have 60 phone buzzes — that is the volume at which people mute the
-  // app. The exception below is the one an owner genuinely must act on.
-  notifyRoles(['owner', 'manager'], { type: 'lead_new', data: { name, locality, agent: agentName }, link })
-    .catch(err => console.warn('[Notify] lead_new failed:', err?.message));
+  // NO lead_new. It fired on every arrival alongside lead_assigned -- 216 and
+  // 216 over the SAME 216 links on bhumi in 14 days -- so one lead landing cost
+  // two notifications, and the owner collected 233 in a fortnight. An owner
+  // watching the flow has the dashboard, which now says it per agent and does
+  // not buzz. The one arrival an owner must ACT on is the one below, where
+  // nobody took it.
   // PUSH: nobody was assigned, so this lead is sitting with no owner and no
   // one is coming for it. That is an exception, not a routine arrival.
   if (!agentId) {
@@ -2062,7 +2106,22 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   //
   // Written here, by the side that owns the row, as `follow_up` — outside the
   // editable set, like the completion it will eventually pair with.
-  if (followUp && JSON.stringify(followUp) !== JSON.stringify(hadFollowUp)) {
+  // WHAT MAKES TWO BOOKINGS THE SAME BOOKING -- named, not inferred from a
+  // stringify.
+  //
+  // This compared `JSON.stringify(followUp) !== JSON.stringify(hadFollowUp)`.
+  // The incoming object is built by the schedule form in its own key order;
+  // `hadFollowUp` came back out of a JSONB column, and Postgres normalises jsonb
+  // key order (by key length, then bytewise). So the two strings differ even
+  // when every value is identical -- THE GUARD NEVER MATCHED. Pressing Save on
+  // an appointment without changing anything wrote another 'Rescheduled' row,
+  // every time, and the record grew a stack of identical entries.
+  const sameBooking = (a: any, b: any) => !!a && !!b
+    && ['action', 'at', 'date', 'time', 'note'].every(k =>
+      String(a[k] ?? '') === String(b[k] ?? ''));
+  const bookingChanged = !!followUp && !sameBooking(followUp, hadFollowUp);
+
+  if (bookingChanged) {
     const fu: any = followUp;
     await addTimelineEvent({
       record_id: id,
@@ -2144,7 +2203,9 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // FEED ONLY: worth seeing when a manager schedules something on your lead;
   // never worth a buzz, and never at all when you scheduled it yourself — the
   // form already confirmed it on screen a second ago.
-  if (patch.followUp && agentId) {
+  // The same guard. Re-saving an unchanged appointment used to alert the
+  // assignee again about a booking that had not moved.
+  if (patch.followUp && agentId && bookingChanged) {
     const action = (patch.followUp.action || patch.followUp.label || 'Follow-up scheduled');
     const isVisit = /visit/i.test(action);
     // The appointment itself, not the words describing it. The catalogue turns
@@ -2159,10 +2220,11 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
         link,
         push: true
       }).catch(err => console.warn('[Notify] calendar_task_assigned failed:', err?.message));
-    } else {
-      notify({ userId: agentId, type: 'followup_set', data: { name, at }, link })
-        .catch(err => console.warn('[Notify] followup_set failed:', err?.message));
     }
+    // No `followup_set`. The assignee IS the person who just booked it, so this
+    // told someone what they had done a second earlier. The alert that matters
+    // is followup_due, which fires when it comes round -- and which had been
+    // reading a key nothing writes, so it had never fired at all.
   }
 
   if (patch.notes && Array.isArray(patch.notes) && patch.notes.length > (oldLead.notes?.length || 0)) {
@@ -2687,7 +2749,11 @@ export async function listLeads(opts: LeadFilterOpts & {
   // created_at ordering, because the ordering is done in SQL and nobody was
   // telling SQL about it.
   const SORTS: Record<string, any> = {
-    activity: sql`created_at`, name: sql`lower(name)`,
+    // ONE EXPRESSION FOR "LAST ACTIVITY", shared with the going-cold pile.
+    // This was `created_at`, under a menu item reading "Last activity" and as
+    // the list's DEFAULT order -- so every agent's leads were ordered by
+    // arrival, and a lead called an hour ago sat below one nobody had opened.
+    activity: lastPersonActivity(), name: sql`lower(name)`,
     budget: sql`budget_max`, stage: sql`stage`,
     // The Received column is sortable, so its key has to be here. A key that
     // is not in this map is silently ignored, which shows a sort arrow that
@@ -2730,7 +2796,10 @@ export async function listLeads(opts: LeadFilterOpts & {
                             (SELECT count(DISTINCT e.source)::int FROM crm_lead_enquiries e
                               WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id
                                 AND e.source IS NOT NULL AND e.source <> ''
-                                AND lower(e.source) <> lower(coalesce(crm_leads.source, ''))) AS other_source_count
+                                AND lower(e.source) <> lower(coalesce(crm_leads.source, ''))) AS other_source_count,
+                            -- The value the sort above orders by and the value
+                            -- the Going-cold panel prints, from one expression.
+                            ${lastPersonActivity()} AS last_activity_at
            FROM crm_leads WHERE ${clause} ORDER BY ${col} ${dir} NULLS LAST LIMIT ${limit} OFFSET ${offset}`,
     sql`SELECT count(*)::int AS n FROM crm_leads WHERE ${clause}`,
   ]);
@@ -2886,9 +2955,11 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
   });
   if (agentId) {
     notify({
-      userId: agentId, type: 'lead_assigned_bulk', push: true,
+      userId: agentId, type: 'lead_assigned_bulk',
       data: { n },
-      link: '?screen=leads',
+      // The recipient's own rows, not the whole desk's -- the alert says N
+      // leads are yours and the list it opened held everyone's.
+      link: `?screen=leads&agent=${encodeURIComponent(agentId)}`,
     }).catch(err => console.warn('[Notify] bulk assign failed:', err?.message));
   }
   return n;
@@ -2974,9 +3045,9 @@ function queueOwnerArrivalNotice(agentId: string): void {
     arrivalTally.delete(key);
     if (actorId === agentId) return;
     notify({
-      userId: agentId, tenantId, type: 'owner_assigned', push: true,
+      userId: agentId, tenantId, type: 'owner_assigned',
       data: { n },
-      link: '?screen=calling',
+      link: `?screen=calling&agent=${encodeURIComponent(agentId)}`,
       toSelf: true,   // the actor check above already ran, with real context
     }).catch(err => console.warn('[Notify] owner arrival failed:', err?.message));
   }, ARRIVAL_QUIET_MS);
@@ -3495,7 +3566,17 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
   // group was buried below a scroll with no bottom. The rows below are still
   // capped — Today only ever shows a handful per group — but the counts now
   // come from their own query, so a group can honestly say 1,000 and show six.
-  const [leads, renewals, leadCounts, ownerCounts, ownerRows] = await Promise.all([
+  // THE AGENT'S ACTUAL DAY. Measured on bhumi: 12 of 246 open leads carry a
+  // follow-up and 8 of those have a parseable time, so six of seven agents
+  // opened Today and saw nothing at all -- no overdue, nothing due, no
+  // callbacks (this desk has no owners), one or two new. The screen was built
+  // around what is booked, on a desk that books almost nothing, while every one
+  // of them was carrying thirty-odd open leads nobody had touched in days.
+  //
+  // So: their open leads with nothing scheduled, longest-silent first. The same
+  // expression the going-cold pile is defined by, which is why a lead can be in
+  // both and read the same number of days in each.
+  const [leads, renewals, leadCounts, ownerCounts, ownerRows, quiet] = await Promise.all([
     sql`SELECT * FROM crm_leads
         WHERE tenant_id = ${t} ${scope}
           AND ${OPEN}
@@ -3514,10 +3595,14 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
                count(*) FILTER (WHERE stage = 'New')::int AS fresh,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned,
                count(*) FILTER (WHERE stage <> 'New' AND follow_up IS NULL AND NOT ${FOLLOWUP_PAST_DUE})::int AS no_next,
-               count(*) FILTER (WHERE follow_up IS NOT NULL AND NOT ${FOLLOWUP_PAST_DUE})::int AS scheduled
+               count(*) FILTER (WHERE follow_up IS NOT NULL AND NOT ${FOLLOWUP_PAST_DUE})::int AS scheduled,
+               count(*) FILTER (WHERE follow_up IS NULL)::int AS quiet
           FROM crm_leads WHERE tenant_id = ${t} ${scope} AND ${OPEN}`,
     getOwnerQueueCounts(mine),
     getOwnerTodayRows(6, mine),
+    sql`SELECT * FROM crm_leads
+         WHERE tenant_id = ${t} ${scope} AND ${OPEN} AND follow_up IS NULL
+         ORDER BY ${lastPersonActivity()} ASC LIMIT 12`,
   ]);
   const lc: any = leadCounts[0] || {};
   return {
@@ -3526,7 +3611,9 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
     counts: {
       overdue: lc.overdue ?? 0, fresh: lc.fresh ?? 0, unassigned: lc.unassigned ?? 0,
       noNext: lc.no_next ?? 0, scheduled: lc.scheduled ?? 0,
+      quiet: lc.quiet ?? 0,
     },
+    quiet: quiet.map(r => rowToLead(r)),
     owners: { counts: ownerCounts, ...ownerRows },
   };
 }
@@ -4335,17 +4422,10 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
     type: 'lead_reassigned', noun: 'lead', verb: 'moved to you',
     body: `Nothing recorded on them for ${days} days.`, link: '?screen=leads',
   });
-  // The only place either module tells someone work has LEFT them. Losing a
-  // lead to the idle rule is a thing they should hear from the app rather than
-  // discover when a manager asks how the follow-up went — and unlike the
-  // arrival, it is not urgent, so it stays in the feed without a push.
-  for (const [agentId, count] of lost) {
-    notify({
-      userId: agentId, tenantId, type: 'lead_moved_away',
-      data: { n: count },
-      link: '?screen=leads', toSelf: true,
-    }).catch(err => console.warn('[Notify] lead idle-loss failed:', err?.message));
-  }
+  // No `lead_moved_away`. Losing a lead to the idle rule is on the record's own
+  // timeline as an assignment event, which is where somebody asking "why is this
+  // not mine any more" actually looks. A feed row saying "3 leads left your desk"
+  // names none of them and cannot be acted on.
   return n;
 }
 
@@ -4400,10 +4480,15 @@ async function notifyAssignBatch(tenantId: string, tally: Map<string, number>, c
       // argument to every sweep, and a notification landing in the wrong
       // workspace is invisible rather than noisy. Not worth leaving to a
       // caller's ambient state.
-      userId: agentId, tenantId, type: c.type, push: true,
+      userId: agentId, tenantId, type: c.type,
       title: `${count} ${c.noun}${count === 1 ? '' : 's'} ${c.verb}`,
       body: c.body,
-      link: c.link,
+      // THE RECIPIENT'S OWN LIST, not the whole desk's. Every one of these
+      // linked to a bare `?screen=leads`: an alert about specific records that
+      // opened an unfiltered list of everything, leaving the person to find
+      // which three were new. 27 of them went out on bhumi in a fortnight and
+      // exactly one was read.
+      link: `${c.link}&agent=${encodeURIComponent(agentId)}`,
       // A sweep has no human actor — its context carries userId: null — so
       // there is no "you did this yourself" case to suppress.
       toSelf: true,

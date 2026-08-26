@@ -329,7 +329,9 @@ export function Kpi({ icon, label, value, sub, alert, onClick }) {
   const inner = <>
     <div className="k-top"><span className="k-ic"><Icon name={icon} /></span><span className="k-l">{label}</span>{isClickable && <Icon name="arrowRight" size={15} className="ic k-go" />}</div>
     <div className="k-v">{value}</div>
-    <div className="k-s">{sub}</div>
+    {/* Only if a caller has one. An empty div still reserved its line height,
+        so every tile kept the gap where its caption used to be. */}
+    {sub ? <div className="k-s">{sub}</div> : null}
   </>
   return isClickable
     ? <button className={cls} onClick={onClick}>{inner}</button>

@@ -1,20 +1,34 @@
 import { useState } from 'react'
-import { Kpi, Panel, SectionHead, Avatar } from '../components/primitives.jsx'
-import { buildRoster, RosterRow } from '../components/roster.jsx'
+import { Kpi, Panel, SectionHead } from '../components/primitives.jsx'
+import { buildRoster, DeskTable } from '../components/roster.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import { whenLabel } from '../lib/format.js'
 
-// The first screen. It answers three questions in this order, and nothing else:
-// what needs doing right now, how each of the two pipelines is moving, and who
-// is doing the work. Everything on it is clickable and drills into the exact
-// filtered list behind the number.
+// THE MANAGER'S SCREEN. One question: is the team working the book, and who is
+// stuck. Tiles for what can be cleared today, then a row per agent with a
+// column per thing that can be said to them -- every cell opening that agent's
+// filtered list.
 //
-// It had grown by accretion — a KPI strip, then a leads block, then a calling
-// block bolted under it, then a roster — eight panels down one column with no
-// stated relationship between them. The structure below is the relationship:
-// the desk has TWO pipelines, inbound and outbound, and they sit side by side
-// at every level rather than stacked in the order they happened to be built.
+// It was a report about the book wearing a workspace's clothes: six desk-wide
+// totals, each with a caption explaining itself, over a stage chart, a source
+// chart, a queue panel, a duplicate of one of the tiles, and a load-bar roster.
+// Nothing on it was per-agent except the roster, at the bottom, and the roster
+// answered "who is busy" when the question is "who is stuck".
+//
+// THREE OF THE TILES WERE ONE PILE. On bhumi all 16 never-contacted leads sit
+// at stage New and 11 of them arrived today, so "Not contacted", "Today" and
+// the New bar in Leads-by-stage were the same rows described three times.
+//
+// NO CAPTIONS ON THE TILES. Every one of them carried a line explaining itself
+// -- "nobody has reached out", "booked, time gone by", "open and gone quiet",
+// "fresh enquiries" -- which is the one thing this product does not do: labels
+// and values only, the buttons are the message. If a label needs a sentence
+// under it, the label is wrong.
+// THREE TILES, NOT SIX. On bhumi all 16 never-contacted leads sit at stage New
+// and 11 of them arrived today, so "Not contacted", "Today" and the New bar in
+// Leads-by-stage were one pile counted three times on one screen. What is left
+// is disjoint and each of it can be cleared: nobody has reached out, a booked
+// time has passed, it crossed the firm's own quiet line today.
 export default function Dashboard({ store, go, topBar }) {
   const { state } = store
   // Every number on this screen is a count. Not one of them needs a lead row,
@@ -27,35 +41,14 @@ export default function Dashboard({ store, go, topBar }) {
   // of the same endpoint, so the panel and the tiles cannot disagree.
   // NEVER CALLED is its own question, so it is its own request.
   //
-  // A lead nobody has dialled and a lead dialled once and dropped need different
-  // work from different people, and the first pile is the one a desk can clear
-  // in an afternoon. It cannot be filtered out of the rows in the browser: the
-  // panel holds six of fifty-one, so a client-side filter would hide five of six
-  // rows and still print 51 in the header.
-  // GOING COLD IS THE ONE CLOCKED PILE: open, and nothing recorded on it for
-  // the number of days set in Settings → Response times.
-  //
-  // It was a toggle between two other segments under a third name, which is why
-  // its number never agreed with the pills. Then it was one of two clocked
-  // piles, beside "No reply" — leads at Call Not Received with nothing logged —
-  // which was 68 of this pile's own 161 on the live desk's shape plus 6 rows
-  // that were only in it because `updated_at` had moved. That pile is gone: one
-  // idea, one number the firm sets, one name.
-  const coldSeg = 'going_cold'
-  const coldFlags = [coldSeg]
-  const { data: atRiskPage } = useServerData(
-    // Six, not eight. The panel sits beside the calling queue and grew taller
-    // than it; the header count carries the total and "See all" carries the rest.
-    () => api.listLeads({ flag: coldFlags, sortKey: 'activity', sortDir: 'asc', limit: 6 }),
-    [state.dataAsOf], { data: [] })
-  const atRisk = atRiskPage?.data || []
-  // The server's count for the same query, NOT atRisk.length — the list is
-  // capped at 8, and reporting the rows you rendered as the total is how a
-  // header once claimed 200 of 1,000.
-  const atRiskTotal = atRiskPage?.total ?? 0
+  // The going-cold LIST is gone from this screen: it was the tile above printed
+  // a second time, six rows of it, and "who is this happening to" is a question
+  // the per-agent table answers for the whole desk in one row each.
   const { data: ownerSummary } = useServerData(() => api.getOwnersSummary(), [state.dataAsOf], null, '/owners/summary')
 
   const totals = desk?.leads || { total: 0, open: 0, overdue: 0, won: 0, new_today: 0, unassigned: 0 }
+  // The firm's own number from Settings -> Response times, not a literal 3.
+  const coldDays = store.state.settings?.reminderDays || 3
   // Until the counts arrive we do not know them, and rendering 0 says something
   // false and alarming -- "you have no leads today" is a very different message
   // from "still loading". An em dash says the honest thing.
@@ -67,7 +60,6 @@ export default function Dashboard({ store, go, topBar }) {
   // is what a served label exists to prevent.
   const segLabel = (key, fallback) =>
     (state.leadSegments || []).find(s => s.key === key)?.label || fallback
-  const byStage = desk?.byStage || {}
   const bySource = desk?.bySource || {}
   const perAgent = desk?.perAgent || {}
   const perAgentCalls = desk?.perAgentCalls || {}
@@ -85,12 +77,10 @@ export default function Dashboard({ store, go, topBar }) {
   const toLeads = (leadFilters) => go('leads', { leadFilters, leadOpen: false, leadId: undefined })
   const toCalling = (ownerSeg, ownerStage) => go('calling', { ownerSeg, ownerStage, ownerOpen: false, ownerId: undefined })
 
-  const { stages } = state.settings
   // Sources that have actually sent a lead, counted server-side. `bySource` is
   // the firm's real traffic, not settings.sources -- which a new Connections
   // integration never touches.
   const sources = Object.keys(bySource).sort((a, b) => bySource[b] - bySource[a])
-  const stageCounts = stages.map(s => ({ name: s, n: byStage[s] || 0 }))
 
   // Outreach outcomes, sorted by size — the same shape as the source list, so
   // "where they come from" and "where they end up" read as one pair.
@@ -104,7 +94,7 @@ export default function Dashboard({ store, go, topBar }) {
   // rest on the Team page rather than a second full table on the dashboard.
   const myRows = state.role === 'agent'
     ? roster.rows.filter(r => r.a.id === state.activeAgentId)
-    : roster.rows.slice(0, 5)
+    : roster.rows.slice(0, 8)
 
   // A DISTRIBUTION, not eight charts.
   //
@@ -164,7 +154,7 @@ export default function Dashboard({ store, go, topBar }) {
               word. "Past SLA" was never_contacted with a clock on it and linked
               through to a flag the Leads screen did not offer, so the list
               opened unfiltered. */}
-          <Kpi icon="clock" label={segLabel('never_contacted', 'Not contacted')} value={n(totals.never_contacted)} sub="nobody has reached out"
+          <Kpi icon="clock" label={segLabel('never_contacted', 'Not contacted')} value={n(totals.never_contacted)}
             alert={totals.never_contacted > 0} onClick={() => toLeads({ seg: 'never_contacted' })} />
           {/* BACK, because the reason it went is fixed. It was pulled when
               `overdue` counted a boolean column nothing wrote and read 0 for
@@ -172,33 +162,31 @@ export default function Dashboard({ store, go, topBar }) {
               pill it opens — 8 leads on the dev clone of the live desk, 9 and
               14 on the other two. desk-rework.md A lists it as a KPI, and it is
               the tile Late callbacks beside it was always meant to pair with. */}
-          <Kpi icon="calendar" label={segLabel('overdue', 'Follow-up overdue')} value={n(totals.overdue)} sub="booked, time gone by"
+          <Kpi icon="calendar" label={segLabel('overdue', 'Follow-up overdue')} value={n(totals.overdue)}
             alert={totals.overdue > 0} onClick={() => toLeads({ seg: 'overdue' })} />
-          <Kpi icon="clock" label={segLabel('going_cold', 'Going cold')} value={n(totals.going_cold)} sub="open and gone quiet"
-            alert={totals.going_cold > 0} onClick={() => toLeads({ seg: 'going_cold' })} />
+          {/* THE FLOW, NOT THE HEAP. This read the standing pile: 177 of
+              bhumi's 246 open leads, 72% of the book, growing, and no desk
+              works a number like that -- it teaches people to skip the strip it
+              sits in. Six crossed the line the firm set in the last day. The
+              pile is still one tap away, on the pill, where a backlog belongs. */}
+          <Kpi icon="clock" label="Went cold today" value={n(totals.cold_today)}
+            alert={totals.cold_today > 0} onClick={() => toLeads({ seg: 'going_cold' })} />
           {hasCalling && (
-            <Kpi icon="phone" label="Late callbacks" value={oq.callbacksOverdue} sub="owners waiting on a call"
+            <Kpi icon="phone" label="Late callbacks" value={oq.callbacksOverdue}
               alert={oq.callbacksOverdue > 0} onClick={() => toCalling('callbacks_overdue')} />
           )}
-          <Kpi icon="plus" label={segLabel('today', 'Today')} value={n(totals.new_today)} sub="fresh enquiries" onClick={() => toLeads({ seg: 'today' })} />
           {hasCalling && (
-            <Kpi icon="check" label="Calls logged today" value={oq.calledToday} sub="outbound, today" onClick={() => toCalling('never_called')} />
+            <Kpi icon="check" label="Calls logged today" value={oq.calledToday} onClick={() => toCalling('never_called')} />
           )}
         </div>
 
-        {/* The shape of the lead book: what stage it sits at, and where it came
-            from. Both are distributions of the same 140 rows read two ways, so
-            they belong on one row — stacked, they read as two unrelated
-            findings and burn a screen height between them. */}
-        <div className="dash-cols">
-          <Panel>
-            {/* The header counted OPEN while the bars below it include Deal
-                Closed and Rejected, so it labelled 103 over bars summing to
-                120. Two populations, one panel, nothing saying so. */}
-            <SectionHead title="Leads by stage" right={desk ? `${totals.total} total` : ''} />
-            <Distribution rows={stageCounts} onPick={(r) => toLeads({ stage: r.name })} />
-          </Panel>
-
+        {/* WHERE THE BOOK COMES FROM. One panel, not two.
+            "Leads by stage" went with it: the stage pills on the Leads screen
+            and the per-agent table below already answer it, and a bar chart of
+            a distribution changes nobody's afternoon. Source does not have
+            another home and it is a real question -- 150 of bhumi's 338 arrive
+            through one portal, which is a commercial fact about the firm. */}
+        <div className="dash-cols one">
           <Panel>
             <SectionHead title="Leads by source" right={desk ? `${sources.length} live` : ''} />
             {sources.length === 0
@@ -210,8 +198,8 @@ export default function Dashboard({ store, go, topBar }) {
 
         {/* What is waiting. Both halves are worklists rather than distributions,
             and the outbound one appears only on a desk that does cold-calling. */}
-        <div className={'dash-cols' + (hasCalling ? '' : ' one')}>
-          {hasCalling && (
+        {hasCalling && (
+          <div className="dash-cols one">
             <Panel>
               <SectionHead title="Calling queue" right={`${oq.open} open`} />
               {/* ONE ROW OF FIGURES, not a 2x2 tile grid with its own bar chart
@@ -240,85 +228,21 @@ export default function Dashboard({ store, go, topBar }) {
                 : <Distribution rows={outcomes.map(([name, n]) => ({ name, n }))}
                     onPick={(r) => toCalling('open', r.name)} />}
             </Panel>
-          )}
+          </div>
+        )}
 
-          {/* This panel ran the same dead `overdue` flag as the tile did, so it
-              printed "All caught up." to a desk holding 13 leads rung once and
-              dropped and 11 never contacted at all. False reassurance is worse
-              than a wrong number: nobody goes looking behind it. It now lists
-              the leads that are actually at risk, longest-waiting first. */}
-          <Panel>
-            <SectionHead title="Going cold" right={
-              atRiskTotal ? <span className="sh-tools"><span>{atRiskTotal}</span></span> : null
-            } />
-            {atRisk.length === 0 && <div className="detail-empty">Nothing going cold.</div>}
-            <div className="od-list">
-              {atRisk.map(l => {
-                const a = store.agentById(l.agentId)
-                // WHY this row is here. It read `l.stage` — so every row said
-                // "New", which is the least informative fact available and
-                // answers a question nobody asked.
-                //
-                // "Never contacted" was inferred from the lead sitting on the
-                // arrival stage, and on bhumi one of those rows had three
-                // WhatsApp messages and an unanswered call against it: the agent
-                // had typed "Call not received" into the remark box instead of
-                // choosing it from the dropdown, so the stage said nothing had
-                // happened while the timeline said four things had.
-                //
-                // The claim is now measured rather than reworded — untouched_sla
-                // asks whether anyone reached out — so the two reasons below are
-                // both true, and the toggle above narrows to the first of them.
-                // Why THIS row is cold, in the desk's words — the same three the
-                // pills use, so a row and the pill that would select it cannot
-                // describe the lead differently.
-                // Two reasons, because two are all the row can prove. Whether
-                // anybody ever reached out is a server-side question and the
-                // list payload does not carry the answer — asserting it here
-                // would be a label inventing a fact the row cannot see.
-                const reason = l.stage === 'Call Not Received' ? 'No reply' : 'Gone quiet'
-                const since = new Date(l.updatedAt || l.createdAt).getTime()
-                const days = Math.floor((Date.now() - since) / 86400000)
-                const wait = days >= 1 ? `${days} day${days === 1 ? '' : 's'}` : 'today'
-                return (
-                  <button key={l.id} className="od-row" onClick={() => go('leads', { leadId: l.id, leadOpen: true })}>
-                    <div className="od-main">
-                      <div className="od-name">{l.name}</div>
-                      <div className="od-sub">{reason} · {wait}</div>
-                    </div>
-                    <div className="od-right">
-                      <div className="od-when">{whenLabel(l.updatedAt || l.createdAt)}</div>
-                      {a && <Avatar agent={a} size="sm" />}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-            {/* The panel shows a handful and says how many there are; the way to
-                see the rest is the list it came from, not a longer panel that
-                outgrows whatever sits beside it. */}
-            {atRiskTotal > atRisk.length && (
-              <button className="od-all" onClick={() => toLeads({ seg: coldSeg })}>
-                See all {atRiskTotal}
-              </button>
-            )}
-          </Panel>
-        </div>
-
-        {/* Who is doing the work. The SAME rows the Team page renders, at the
-            compact density and capped — a full table of every agent belongs on
-            the screen that is about the team, not on the one that is about
-            today. "All N" goes there rather than growing this panel. */}
+        {/* THE MANAGER'S PAGE. One row per agent, one column per thing that can
+            be said to them today, every cell opening that agent's filtered
+            list. It replaces the load-bar roster -- which answered "who is
+            busy" when the question is "who is stuck" -- and the Going cold
+            panel, which was the tile above printed a second time. An agent sees
+            only their own row. */}
         <Panel>
-          <SectionHead title={state.role === 'agent' ? 'My performance' : 'Team'}
+          <SectionHead title={state.role === 'agent' ? 'My desk' : 'By agent'}
             right={state.role !== 'agent' && roster.rows.length > myRows.length
               ? <button className="od-all od-all-inline" onClick={() => go('team')}>All {roster.rows.length}</button>
               : undefined} />
-          {myRows.map(r => (
-            <RosterRow key={r.a.id} r={r} compact
-              evenShare={roster.evenShare} maxLoad={roster.maxLoad}
-              onOpen={() => toLeads({ agent: [r.a.id] })} />
-          ))}
+          <DeskTable rows={myRows} onCell={(r, seg) => toLeads(seg ? { agent: [r.a.id], seg } : { agent: [r.a.id] })} />
         </Panel>
       </div>
     </>

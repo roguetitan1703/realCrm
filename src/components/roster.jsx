@@ -45,6 +45,12 @@ export function buildRoster({ agents, perAgent = {}, perAgentCalls = {}, wonLabe
       visits30d: r.visits30d ?? 0,
       won: r.won ?? 0,
       overdue: r.overdue ?? 0,
+      // The manager's columns. Each is the same expression as the pill it opens.
+      neverContacted: r.neverContacted ?? 0,
+      noNextStep: r.noNextStep ?? 0,
+      goingCold: r.goingCold ?? 0,
+      coldToday: r.coldToday ?? 0,
+      workedToday: r.workedToday ?? 0,
       owners: c.owners ?? 0,
       calledToday: c.calledToday ?? 0,
       off: inactive(a.id),
@@ -129,6 +135,72 @@ export function RosterRow({ r, evenShare, maxLoad, wonLabel = 'Won', compact = f
       </div>
 
       {!compact && actions && <div className="rst-act">{actions(r)}</div>}
+    </div>
+  )
+}
+
+/**
+ * THE MANAGER'S TABLE.
+ *
+ * One row per agent, one column per thing the manager can say to them today.
+ * Every cell opens the leads list filtered to that agent AND that condition,
+ * counted by the same expression the pill behind it runs — so a cell and the
+ * list it opens cannot disagree.
+ *
+ * It replaces two panels rather than joining them: the load-bar roster (which
+ * answers "who is busy", not "who is stuck") and a Going-cold list that was the
+ * dashboard's own tile printed a second time.
+ *
+ * WHY THESE FIVE. Open is the plate. Not contacted and Nothing booked are the
+ * two ways work stalls, and they are different failures needing different
+ * conversations. Went cold today is the flow across the line the firm set —
+ * the standing pile is 72% of the book and nobody works a number like that.
+ * Worked today is the only column that goes UP, and without it a quiet day and
+ * a busy one look identical.
+ */
+export function DeskTable({ rows, onCell }) {
+  const cols = [
+    { key: 'open', label: 'Open', seg: null },
+    { key: 'neverContacted', label: 'Not contacted', seg: 'never_contacted', tone: 'alert' },
+    { key: 'noNextStep', label: 'Nothing booked', seg: 'no_next_step' },
+    { key: 'coldToday', label: 'Went cold today', seg: 'going_cold', tone: 'alert' },
+    { key: 'workedToday', label: 'Worked today', seg: null, up: true },
+  ]
+  return (
+    <div className="dt-wrap">
+      <table className="dt">
+        <thead>
+          <tr>
+            <th>Agent</th>
+            {cols.map(c => <th key={c.key} className="dt-n">{c.label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.a.id} className={r.off ? 'off' : ''}>
+              <th scope="row">
+                <button className="dt-who" onClick={() => onCell(r, null)}>
+                  <Avatar agent={r.a} size="sm" />
+                  <span>{r.a.first || r.a.name}</span>
+                  {r.off && <span className="rst-tag off">Off duty</span>}
+                </button>
+              </th>
+              {cols.map(c => {
+                const v = r[c.key] ?? 0
+                return (
+                  <td key={c.key} className="dt-n">
+                    <button
+                      className={'dt-v' + (v > 0 && c.tone === 'alert' ? ' alert' : '') + (v > 0 && c.up ? ' up' : '') + (v === 0 ? ' zero' : '')}
+                      disabled={v === 0}
+                      onClick={() => onCell(r, c.seg)}
+                    >{v}</button>
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

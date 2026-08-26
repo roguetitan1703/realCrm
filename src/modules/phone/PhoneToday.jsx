@@ -22,7 +22,6 @@ import { api } from '../../lib/api.js'
 import { isTerminal } from '../../data/leadStatus.js'
 import { Overdue, StageTag, MoreRows, useCap } from '../../components/primitives.jsx'
 import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue } from '../../lib/format.js'
-import Install from '../../components/Install.jsx'
 import Icon from '../../components/Icon.jsx'
 
 const CLOSED = (l) => isTerminal(l.stage)
@@ -42,27 +41,43 @@ function timeRank(t) {
   return h * 60 + Number(m[2] || 0)
 }
 
-function LeadRow({ l, onOpen, store, tone }) {
+// A row is a CONTROL, not a div with an onClick -- it is the primary way an
+// agent moves through their day and it had no focus state and no semantics.
+// The call button is a SIBLING of the opening button, never nested inside it:
+// a button inside a button is invalid, and the phone icon was a 27x23px target
+// sitting 8px from a 300px one, so a mis-tap opened the record instead of
+// dialling. Both are now full-height and separated.
+// How long since a person did anything on it. Days, not "3 hours ago" -- the
+// group exists because these have been sitting, and an hour is not sitting.
+function quietFor(l) {
+  const at = l.lastActivityAt || l.createdAt
+  if (!at) return null
+  const d = Math.floor((Date.now() - new Date(at).getTime()) / 86400000)
+  return d >= 1 ? `${d}d` : 'today'
+}
+
+function LeadRow({ l, onOpen, store, tone, quiet }) {
   return (
-    <div className="q-row" onClick={() => onOpen(l)}>
-      <span className="av av-md">{initials(l.name)}</span>
-      <div className="q-main">
-        <div className="q-name">{l.name}</div>
-        <div className="q-sub">{l.followUp ? l.followUp.action : reqShort(l.req)}</div>
-      </div>
-      <div className="q-right">
-        {tone === 'overdue'
-          ? <Overdue>{l.followUp?.time || 'Overdue'}</Overdue>
-          : l.followUp ? <span className="source">{l.followUp.time}</span> : <StageTag stage={l.stage} />}
-        <button
-          className="btn btn-secondary btn-sm q-call"
-          aria-label={`Call ${l.name}`}
-          onClick={(e) => {
-            e.stopPropagation()
-            store.openModal({ kind: 'contact', channel: 'call', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id })
-          }}
-        ><Icon name="phone" size={13} /></button>
-      </div>
+    <div className="q-row">
+      <button type="button" className="q-open" onClick={() => onOpen(l)}>
+        <span className="av av-md">{initials(l.name)}</span>
+        <span className="q-main">
+          <span className="q-name">{l.name}</span>
+          <span className="q-sub">{l.followUp ? l.followUp.action : reqShort(l.req)}</span>
+        </span>
+        <span className="q-right">
+          {tone === 'overdue'
+            ? <Overdue>{l.followUp?.time || 'Overdue'}</Overdue>
+            : quiet ? <span className="source mono-num">{quietFor(l)}</span>
+              : l.followUp ? <span className="source">{l.followUp.time}</span> : <StageTag stage={l.stage} />}
+        </span>
+      </button>
+      <button
+        type="button"
+        className="q-call"
+        aria-label={`Call ${l.name}`}
+        onClick={() => store.openModal({ kind: 'contact', channel: 'call', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id })}
+      ><Icon name="phone" size={17} /></button>
     </div>
   )
 }
@@ -73,25 +88,25 @@ function LeadRow({ l, onOpen, store, tone }) {
 function OwnerRow({ o, onOpen, store }) {
   const cb = callbackSignal(o.callbackAt)
   return (
-    <div className="q-row" onClick={() => onOpen(o)}>
-      <span className="av av-md av-supply">{initials(o.name || o.phone || '?')}</span>
-      <div className="q-main">
-        <div className="q-name">{o.name || 'Unnamed owner'}</div>
-        <div className="q-sub">{o.callbackNote || [o.project, o.unitRef].filter(Boolean).join(' · ') || o.locality || o.phone}</div>
-      </div>
-      <div className="q-right">
-        {cb
-          ? (cb.tone === 'overdue' ? <Overdue>{cb.label}</Overdue> : <span className="source">{cb.label}</span>)
-          : <span className="source">Not called</span>}
-        <button
-          className="btn btn-secondary btn-sm q-call"
-          aria-label={`Call ${o.name || 'owner'}`}
-          onClick={(e) => {
-            e.stopPropagation()
-            store.openModal({ kind: 'contact', channel: 'call', name: o.name, phone: o.phone, recordType: 'owner', recordId: o.id })
-          }}
-        ><Icon name="phone" size={13} /></button>
-      </div>
+    <div className="q-row">
+      <button type="button" className="q-open" onClick={() => onOpen(o)}>
+        <span className="av av-md av-supply">{initials(o.name || o.phone || '?')}</span>
+        <span className="q-main">
+          <span className="q-name">{o.name || 'Unnamed owner'}</span>
+          <span className="q-sub">{o.callbackNote || [o.project, o.unitRef].filter(Boolean).join(' · ') || o.locality || o.phone}</span>
+        </span>
+        <span className="q-right">
+          {cb
+            ? (cb.tone === 'overdue' ? <Overdue>{cb.label}</Overdue> : <span className="source">{cb.label}</span>)
+            : <span className="source">Not called</span>}
+        </span>
+      </button>
+      <button
+        type="button"
+        className="q-call"
+        aria-label={`Call ${o.name || 'owner'}`}
+        onClick={() => store.openModal({ kind: 'contact', channel: 'call', name: o.name, phone: o.phone, recordType: 'owner', recordId: o.id })}
+      ><Icon name="phone" size={17} /></button>
     </div>
   )
 }
@@ -100,16 +115,16 @@ function OwnerRow({ o, onOpen, store }) {
 // never show: a tenancy runs out whether or not anyone opened the record.
 function RenewalRow({ p, onOpen, signal }) {
   return (
-    <div className="q-row" onClick={() => onOpen(p)}>
+    <button type="button" className="q-row q-row-1" onClick={() => onOpen(p)}>
       <span className="q-ic"><Icon name="building" size={17} /></span>
-      <div className="q-main">
-        <div className="q-name">{p.society || p.title}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}</div>
-        <div className="q-sub">{p.tenancy?.tenant ? `${p.tenancy.tenant} · ${p.locality}` : p.locality}</div>
-      </div>
-      <div className="q-right">
+      <span className="q-main">
+        <span className="q-name">{p.society || p.title}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}</span>
+        <span className="q-sub">{p.tenancy?.tenant ? `${p.tenancy.tenant} · ${p.locality}` : p.locality}</span>
+      </span>
+      <span className="q-right">
         {signal.tone === 'overdue' ? <Overdue>{signal.label}</Overdue> : <span className="source">{signal.label}</span>}
-      </div>
-    </div>
+      </span>
+    </button>
   )
 }
 
@@ -122,7 +137,6 @@ function BulkRow({ g, onSeeAll }) {
       <span className="q-bulk-n">{g.count.toLocaleString('en-IN')}</span>
       <span className="q-bulk-t">
         <span className="q-bulk-l">{g.label}</span>
-        {g.hint && <span className="q-bulk-s">{g.hint}</span>}
       </span>
       <Icon name="chevRight" size={16} className="ic" />
     </button>
@@ -137,15 +151,18 @@ function Group({ g, onOpen, store, onSeeAll }) {
         {g.label}<span className="q-count">{g.count.toLocaleString('en-IN')}</span>
         {/* Only when the group holds more than it shows — a "See all" on six of
             six rows is a link back to the same six rows. */}
-        {g.count > g.rows.length && (
+        {/* Only when the group HAS somewhere to land. 'Due today',
+            'Upcoming' and 'Tenancies expiring' have no filter behind them, and
+            this called go('leads') with an undefined one -- a link out of a
+            named group into the unfiltered list. */}
+        {g.count > g.rows.length && (g.filter || g.screen) && (
           <button className="q-seeall" onClick={() => onSeeAll(g)}>See all</button>
         )}
       </div>
-      {g.hint && <div className="q-hint">{g.hint}</div>}
       {g.rows.slice(0, cap).map(r => (
         g.kind === 'renewal' ? <RenewalRow key={r.p.id} p={r.p} signal={r.signal} onOpen={onOpen} />
           : g.kind === 'owner' ? <OwnerRow key={r.id} o={r} onOpen={onOpen} store={store} />
-            : <LeadRow key={r.id} l={r} onOpen={onOpen} store={store} tone={g.tone} />
+            : <LeadRow key={r.id} l={r} onOpen={onOpen} store={store} tone={g.tone} quiet={g.quiet} />
       ))}
       {/* `more` straight from useCap, which already floors it at zero. This
           used to re-derive the remainder as `rows.length - cap` and take the
@@ -161,7 +178,7 @@ function Group({ g, onOpen, store, onSeeAll }) {
 // One read for the whole screen: rows for the groups that are lists, counts for
 // the groups that are backlogs, both sides of the desk in a single request.
 function useTodayFeed(dataAsOf) {
-  const [feed, setFeed] = useState({ leads: [], renewals: [], counts: {}, owners: { counts: {} } })
+  const [feed, setFeed] = useState({ leads: [], renewals: [], quiet: [], counts: {}, owners: { counts: {} } })
   useEffect(() => {
     let live = true
     // The phone is 'my day'. A manager on a desk still sees the firm.
@@ -169,7 +186,7 @@ function useTodayFeed(dataAsOf) {
       .then(r => {
         if (!live || !r?.success) return
         setFeed({
-          leads: r.leads || [], renewals: r.renewals || [],
+          leads: r.leads || [], renewals: r.renewals || [], quiet: r.quiet || [],
           counts: r.counts || {}, owners: r.owners || { counts: {} },
         })
       })
@@ -206,7 +223,6 @@ export default function PhoneToday({ store, me, go, topBar }) {
     .filter(l => l.followUp && !followUpOverdue(l.followUp) && l.followUp.date === 'Today')
     .sort((a, b) => timeRank(a.followUp.time) - timeRank(b.followUp.time))
   const fresh = open.filter(l => l.stage === 'New')
-  const noNext = open.filter(l => l.stage !== 'New' && !l.followUp)
   const unassigned = open.filter(l => !l.agentId)
   const upcoming = open.filter(l => l.followUp && !followUpOverdue(l.followUp) && l.followUp.date !== 'Today')
 
@@ -223,12 +239,18 @@ export default function PhoneToday({ store, me, go, topBar }) {
     { key: 'today', label: 'Due today', rows: todayFu, count: todayFu.length },
     { key: 'cbToday', label: 'Callbacks today', kind: 'owner', rows: ownerRows.callbacksToday || [], count: oc.callbacksToday ?? 0, screen: 'calling', segment: 'callbacks_today' },
     { key: 'fresh', label: 'Not yet contacted', rows: fresh, count: c.fresh ?? fresh.length, filter: { stage: 'New' } },
-    { key: 'toCall', label: 'Owners to call', kind: 'owner', rows: ownerRows.toCall || [], count: oc.toCall ?? 0, hint: 'Nobody has dialled these yet.', screen: 'calling', segment: 'to_call' },
+    { key: 'toCall', label: 'Owners to call', kind: 'owner', rows: ownerRows.toCall || [], count: oc.toCall ?? 0, screen: 'calling', segment: 'to_call' },
     // Only the desk can hand work to someone, so only the desk is shown what
     // nobody owns.
     ...(isDesk ? [{ key: 'unassigned', label: 'Nobody assigned', rows: unassigned, count: c.unassigned ?? unassigned.length, filter: { flag: ['unassigned'] } }] : []),
     { key: 'renewals', label: 'Tenancies expiring', rows: renewals, count: renewals.length, kind: 'renewal' },
-    { key: 'nonext', label: 'No next step', rows: noNext, count: c.noNext ?? noNext.length, hint: 'Being worked, with nothing scheduled after it.' },
+    // THE GROUP MOST AGENTS' DAY IS ACTUALLY MADE OF. Its rows come from their
+    // own query, ordered by longest-silent, rather than being filtered out of a
+    // 200-row feed selected by arrival date -- which could not contain a lead
+    // last touched five weeks ago, which is exactly the lead this group is for.
+    // It is not collapsed to a BulkRow: on this desk it is the work.
+    { key: 'quiet', label: 'Nothing booked', rows: feed.quiet || [], count: c.quiet ?? 0,
+      quiet: true, nocap: true, filter: { seg: 'no_next_step' } },
     { key: 'upcoming', label: 'Upcoming', rows: upcoming, count: upcoming.length },
   ].filter(g => g.count > 0)
 
@@ -236,11 +258,13 @@ export default function PhoneToday({ store, me, go, topBar }) {
     <>
       {topBar({ title: 'Today' })}
       <div className="q-wrap">
-        <Install />
         {groups.map(g => (
           // A group that can be worked through is a list. One that can only be
           // started is a line with a number on it.
-          g.count > BULK && (g.filter || g.screen)
+          // `nocap`: a group whose rows ARE the day does not collapse into a
+          // number, however large the count behind it. Everything else past
+          // BULK is a backlog and states itself in one line.
+          g.count > BULK && !g.nocap && (g.filter || g.screen)
             ? <BulkRow key={g.key} g={g} onSeeAll={seeAll} />
             : <Group key={g.key} g={g} store={store} onSeeAll={seeAll}
                 onOpen={g.kind === 'renewal' ? openProp : g.kind === 'owner' ? openOwner : openLead} />

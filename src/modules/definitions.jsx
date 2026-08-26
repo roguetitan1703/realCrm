@@ -199,7 +199,7 @@ export const LEADS_DEF = {
   },
 
   sortOptions: [
-    { key: 'activity', label: 'Last activity', value: (l) => l.minsAgo || 0 },
+    { key: 'activity', label: 'Last activity', value: (l) => l.lastActivityAt || l.createdAt },
     { key: 'budget', label: 'Budget', value: (l) => budgetOf(l.req).max || 0 },
     { key: 'name', label: 'Name', value: (l) => (l.name || '').toLowerCase() },
     { key: 'stage', label: 'Stage', value: (l, store) => (store.state.settings.stages || []).indexOf(l.stage) },
@@ -925,8 +925,13 @@ export const CLIENTS_DEF = {
     // The firm's own locality vocabulary, from the boot payload. This used to
     // be rebuilt by mapping every lead and every property on every render.
     const dyn = localities(store)
-    const list = dyn.length ? dyn : ['Hinjewadi Phase 3', 'Wakad', 'Baner', 'Kothrud']
-    return [{ key: 'locality', label: 'Locality', icon: 'building', options: opt(list) }]
+    // NO FALLBACK LIST. This offered four Pune neighbourhoods to any firm whose
+    // own vocabulary was still empty -- a filter naming places a firm in Nagpur
+    // has never heard of, every one of which matches zero rows. suggest.js
+    // deleted exactly these two lists for exactly this reason and this copy
+    // survived. A firm with no localities yet gets no locality filter.
+    if (!dyn.length) return []
+    return [{ key: 'locality', label: 'Locality', icon: 'building', options: opt(dyn) }]
   },
 
   rowMatch(r, key, vals) {

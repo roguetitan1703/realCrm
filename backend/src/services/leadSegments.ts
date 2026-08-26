@@ -87,6 +87,24 @@ export const noPersonActivitySince = (days: number, table = 'crm_leads') => sql`
                  AND e.timestamp > now() - (${days}::text || ' days')::interval)`;
 
 /**
+ * WHEN A PERSON LAST DID SOMETHING ON THIS RECORD.
+ *
+ * The same guard as `noPersonActivitySince`, read forwards instead of
+ * backwards, so "how long has this been quiet" and "is it going cold" cannot
+ * answer differently. The sort key called `activity` ordered by `created_at`,
+ * and the Going-cold panel labelled its rows from `updated_at` -- three names
+ * for one idea, and the two visible ones were arrival time and a column any
+ * background write touches. A lead worked this morning sorted as untouched.
+ *
+ * Falls back to arrival for a lead nobody has worked yet: it has been waiting
+ * since it landed, which is the true answer and the one that sorts it first.
+ */
+export const lastPersonActivity = (table = 'crm_leads') => sql`
+  coalesce((SELECT max(e.timestamp) FROM crm_timeline_events e
+             WHERE e.record_id = ${sql(table)}.id AND e.tenant_id = ${sql(table)}.tenant_id
+               AND coalesce(e.author, 'System') <> 'System'), ${sql(table)}.created_at)`;
+
+/**
  * NOT HANDED ON IN THE LAST `days` DAYS.
  *
  * The idle reassignment sweep's second condition, and it is not optional.
@@ -175,6 +193,11 @@ export const SEGMENT_CATALOGUE: SegmentDef[] = [
   { key: 'month', label: 'This month', help: 'Arrived this month, before today.', surface: ['internal'] },
   { key: 'noanswer', label: 'No answer', help: 'Sitting at Call Not Received.', surface: ['internal'] },
   { key: 'followup', label: 'Has a next step', help: 'A follow-up is booked.', surface: ['internal'] },
+  // A PILL, not internal. Two things now link to it -- the phone's biggest
+  // group and the manager's per-agent table -- and an entry point that lands on
+  // rows with no control naming why is the same fault as one that filters
+  // nothing, wearing the opposite clothes.
+  { key: 'no_next_step', label: 'Nothing booked', help: 'Open, with nothing booked after it.', surface: ['pill'] },
 ];
 
 /**
@@ -212,6 +235,12 @@ export function buildLeadSegments(p: SegmentInputs) {
     noanswer: sql`stage = 'Call Not Received'`,
     closed: sql`NOT (${p.OPEN})`,
     followup: sql`follow_up IS NOT NULL`,
+
+    // NOTHING BOOKED AFTER IT. The phone's biggest group by far -- 222 of
+    // bhumi's 246 open leads -- and it had no destination at all: its "See all"
+    // called go('leads') with an undefined filter, so the largest thing on an
+    // agent's screen opened the unfiltered list.
+    no_next_step: sql`(${p.OPEN} AND follow_up IS NULL)`,
 
     // NOT CONTACTED. No clock on it — "show me everyone nobody has reached out
     // to" is asked of the whole desk. The clocked version was `untouched_sla`,
