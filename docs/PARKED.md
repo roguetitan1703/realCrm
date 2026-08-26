@@ -171,3 +171,82 @@ once a day — and whether a lead that goes cold twice should say so twice.
 
 Numbers measured on the dev clone of the live desk, 25 Aug 2026.
 
+
+---
+
+## Not reviewed — coverage gaps, not decisions (26 Aug)
+
+A sweep on 26 Aug found a live owner password in the public JS bundle and stopped
+there. These areas were **never opened**. Nothing here has been measured, so
+nothing here is safe or unsafe — it is unknown, which is worse than either.
+
+Recorded so a later session does not mistake "not in KNOWN-ISSUES" for "checked".
+
+- **Ingestion** — `services/ingestion.ts`, `parser.ts`, the webhook path and
+  `/api/v1/ingest`. Known separately: no rate limit, and bhumi's Housing mapping
+  stamps every enquiry `deal='sale'`.
+- **The audit chain** — `verifyAuditChain()` fails at seq 227 and has not been
+  diagnosed. The ledger is sold to clients as tamper-evident.
+- **The notification matrix** — which types actually send, to whom, and whether
+  the recipient list is ever empty. `docs/specs/notification-delivery.md`
+  describes the intent; nobody has compared it to what production sent.
+- **Permissions beyond the password path** — RBAC on routes, what a manager can
+  reach that an agent cannot, and whether any route trusts a client-supplied
+  role or tenant.
+- **Sessions** — sliding expiry, the 8-device cap, revocation on password change.
+- **The import and revert path** — `revertImportBatch` is known to leave timeline
+  events and notification links behind; the rest of the flow is unread.
+
+
+---
+
+## Agreed, deferred — Settings review, 26 Aug
+
+Each of these was found, agreed as real, and deliberately deferred. They are not
+open questions; they are decided work with no slot yet.
+
+### Settings → Alerts (the missing gate)
+
+**Measured, bhumi, 14 days:** 606 notifications for 216 arriving leads — 2.8 per
+lead. The owner got 233 (16.6/day). **Four of seven agents have read zero of
+theirs** (Mohit 0/72, Mukesh 0/64, Vinod 0/57, Ravish 0/43).
+
+`notifications.ts` reads exactly ONE setting in the whole file: `slaHours`.
+**13 of the 21 alert types are ungated** — the firm cannot turn them down, off,
+or even see that they exist. That was 471 of the 606.
+
+The section should render `NOTIFICATIONS` from
+`backend/src/services/notificationCatalogue.ts` (built 26 Aug), which already
+carries the label, audience, trigger, push and gate for every type — so the
+screen lists what is really sent rather than a second hand-written list that
+drifts. Per firm first; per person later if asked.
+
+Two reductions that do not need the section and should land with it:
+
+- **`lead_new` and `lead_assigned` are one event.** 216 and 216 over the SAME
+  216 links: every arriving lead sends two alerts, one to the owner, one to the
+  agent. The owner's copy should be a daily digest.
+- **`lead_untouched`, `lead_untouched_escalated`, `lead_stale_sla` are three
+  types for one idea.** Fold to one. The 2× escalation window is hardcoded and
+  nobody sets it.
+
+### Pipeline section — draft-until-Save, and a real dialog
+
+Renaming a stage **moves every lead on it**, and the rename **commits on blur**.
+Click away by accident and the book migrates. Same fault CLAUDE.md records for
+the message templates, on a control with far worse consequences. Delete also
+uses `window.confirm` — a native browser dialog in a product with its own modal
+system — and a duplicate name fails silently with no feedback.
+
+Fix: the Routing section's draft-until-Save pattern, which already exists and
+works, plus the app's own confirm modal.
+
+### Brand section — one save pattern
+
+Four controls, two behaviours. Accent colour and logo POST on click; firm name
+and support number wait for a Save button. Also: the caption *"PNG or SVG, under
+512 KB…"* is explanatory copy and disagrees with its own input, which accepts
+`image/*`; and Support WhatsApp takes any string unvalidated, while being the
+number an agent contacts when alerts are blocked — a typo is a dead end nobody
+discovers.
+
