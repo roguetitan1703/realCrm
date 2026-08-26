@@ -616,16 +616,11 @@ function SystemSection({ store }) {
           prompt card only ever rendered on the phone's Today tab, so a browser
           on a laptop was never offered it.
 
-          IN A PANEL, like every other section on this screen. It was the one
-          section rendering its rows straight onto the page background, so on
-          the web "This device" read as loose text beside six carded sections.
-          The phone already has its own container (PhoneMe's .msgt-card), which
-          is why it looked right there and wrong here.
-
-          The panel hides itself when both rows have nothing to say — see
-          `.panel:has(.devcard:empty)`. A heading over an empty card is the
-          exact fault this section shipped with. */}
-      <Panel><ThisDevice store={store} /></Panel>
+          NOT IN A PANEL. Each row draws its own card, the way Message templates
+          renders two of them, so this section is carded like the rest of the
+          screen without putting a box inside a box. Both disappear together
+          when neither has anything to say (`.devcard:empty`). */}
+      <ThisDevice store={store} />
       {/* <Panel>
         <SectionHead title="Database" />
         <div className="sys-row">

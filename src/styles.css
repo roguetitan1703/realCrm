@@ -2054,21 +2054,17 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .devrow-body{flex:1;min-width:0}
 .devrow-title{font-size:14px;font-weight:600;color:var(--ink)}
 .devrow-sub{font-size:12.5px;color:var(--muted);margin-top:2px}
-/* A RULE BETWEEN THE ROWS. Alerts and install are two separate facts about the
-   device stacked with nothing but whitespace between them, so on the desk and
-   the phone they read as one paragraph that had been spaced out. Padding rather
-   than `gap`, so the line runs the full width of the card instead of stopping
-   short at each end -- and only BETWEEN rows, never above the first or below
-   the last, where it would read as the card growing an extra edge. */
-.devcard{display:flex;flex-direction:column}
-.devcard > * + *{border-top:1px solid var(--line);margin-top:13px;padding-top:13px}
+/* TWO THINGS, TWO CARDS. Alerts and install are separate facts about the device
+   and each is separately actionable, so each carries its own edge -- the same
+   shape the message templates beside them already use, two `.msgt-card`s rather
+   than one card with a divider down it. A separator inside a shared box says
+   "one thing, in parts"; a border says "two things".
+
+   Nothing wraps them: a card inside a card is the boxiness this screen was
+   already carrying too much of. */
+.devcard{display:flex;flex-direction:column;gap:12px}
+.devcard > *{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
 .devcard:empty{display:none}
-/* The panel goes with its contents. Settings wraps this in a Panel so the
-   section is carded like every other one; without this a device that can
-   neither install nor take alerts left a bordered box with a heading and
-   nothing in it -- which is the fault the section shipped with, rebuilt one
-   level up. */
-.panel:has(> .devcard:empty){display:none}
 .msgt-wrap{display:flex;flex-direction:column;gap:14px}
 .msgt-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
 .msgt-wrap .msgt-card{margin-bottom:0}

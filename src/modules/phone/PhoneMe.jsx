@@ -37,8 +37,8 @@ export default function PhoneMe({ store, me, topBar }) {
         {/* Alerts and install — the same component and the same two rows the
             desk's Settings → This device renders. This screen had its own card
             with its own heading over the same two facts. */}
-        <div className="msgt-card">
-          <div className="msgt-h">This device</div>
+        <div>
+          <div className="msgt-h" style={{ marginBottom: 10 }}>This device</div>
           <ThisDevice store={store} />
         </div>
 
