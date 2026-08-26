@@ -31,8 +31,14 @@ const META = {
   remark_added: { icon: 'note', tone: 'info' },
   owner_assigned: { icon: 'userPlus', tone: 'info' },
   owner_reassigned: { icon: 'switch', tone: 'info' },
-  // Retired: one type that carried both the agent's warning and the manager's
-  // escalation. Rows already sent keep it, so it keeps a face here.
+  // RETIRED TYPES KEEP THEIR FACE. Nothing sends these any more, but every row
+  // already in a drawer still carries the type, and a live desk should not see
+  // its history turn into a column of generic bells. Removed 26 Aug: lead_new
+  // (the same event as lead_assigned, 216 and 216 over one set of links),
+  // lead_untouched_escalated and lead_stale_sla (three types for one idea),
+  // lead_retry_due (the pile is gone), lead_moved_away and followup_set (told
+  // people what they had just done), lead_repeat_rejected (folded into
+  // lead_repeat, and its link went to a path this app does not have).
   lead_stale_sla: { icon: 'clock', tone: 'attention' },
 }
 

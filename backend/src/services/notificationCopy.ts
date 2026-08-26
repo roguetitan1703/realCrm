@@ -53,16 +53,9 @@ export const COPY: Builders = {
   lead_assigned_bulk: (d) => ({
     title: `${plural(d.n, 'lead')} assigned to you`,
   }),
-  lead_new: (d) => ({
-    title: 'New lead captured',
-    body: facts(d.name, d.locality, d.agent && `to ${d.agent}`),
-  }),
   lead_unrouted: (d) => ({
     title: 'Lead arrived unassigned',
     body: facts(d.name, d.source && `nobody is set to receive ${d.source}`),
-  }),
-  lead_moved_away: (d) => ({
-    title: `${plural(d.n, 'lead')} moved to another agent`,
   }),
   lead_reassigned: (d) => ({
     title: 'Lead assigned to you',
@@ -95,37 +88,9 @@ export const COPY: Builders = {
       d.previousStage && `was ${d.previousStage}`,
       d.changed > 0 && `${plural(d.changed, 'detail')} changed`),
   }),
-  // To the desk as well as the agent: a lead somebody closed has reopened on
-  // its own, and the people who run the desk are told which and why. The stage
-  // MOVED — this used to say "left rejected", which stopped being true on
-  // 23 Aug when the client overrode the reason-based conditional.
-  lead_repeat_rejected: (d) => ({
-    title: 'Closed lead reopened',
-    body: facts(d.name, d.source && `via ${d.source}`,
-      d.previousStage && `was ${d.previousStage}`,
-      d.reason && `rejected: ${d.reason}`),
-  }),
-
   lead_untouched: (d) => ({
     title: `Not contacted for ${d.hours}h`,
     body: facts(d.name, 'assigned to you'),
-  }),
-  // Was "🚨 SLA Escalation". Same fact, different reader: a manager needs to
-  // know whose it is, so the agent is named instead of "you".
-  lead_untouched_escalated: (d) => ({
-    title: `Not contacted for ${d.hours}h`,
-    body: facts(d.name, d.agent && `with ${d.agent}`),
-  }),
-  // Retired with the No reply pile — nothing sends this any more. Kept because
-  // rows already delivered still have to render in somebody's drawer.
-  lead_retry_due: (d) => ({
-    title: `No answer for ${plural(d.days, 'day')}`,
-    body: facts(d.name, d.when && `last tried ${d.when}`),
-  }),
-
-  followup_set: (d) => ({
-    title: 'Follow-up scheduled',
-    body: facts(d.name, whenLabel(d.at) || d.when),
   }),
   followup_due: (d) => ({
     title: 'Follow-up due now',

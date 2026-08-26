@@ -11,12 +11,13 @@
  */
 
 import { sql, DEFAULT_TENANT_ID } from './db.js';
+import { pushes, undeclared } from './notificationCatalogue.js';
 import { getContext } from './context.js';
 import { sendPushToUser, pruneDeliveryLog } from './push.js';
 // The retry window is shared with the dashboard tile and the Leads filter that
 // count the same leads. Three definitions of "not retried" would drift.
 // Every word a notification says, keyed on its type.
-import { copyFor } from './notificationCopy.js';
+import { copyFor, COPY } from './notificationCopy.js';
 
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
@@ -58,6 +59,16 @@ export interface NotifyInput {
 
 /** Insert one notification. Best-effort — callers fire-and-forget so a failed
  *  alert never breaks the mutation that triggered it. */
+// A TYPE NOBODY HAS DECLARED IS A TYPE NOBODY HAS DECIDED ABOUT. Twenty alert
+// types grew at their call sites with no list of them anywhere; this makes the
+// twenty-first impossible to add silently. It warns rather than throws -- the
+// catalogue is documentation of behaviour, and refusing to boot over a missing
+// row would take a desk down for a paperwork error.
+{
+  const missing = undeclared(Object.keys(COPY));
+  if (missing.length) console.warn(`[Notify] not in notificationCatalogue.ts: ${missing.join(', ')} -- these will NOT push until declared.`);
+}
+
 export async function notify(n: NotifyInput): Promise<void> {
   const t = n.tenantId || tid();
   if (!n.userId) return;
@@ -73,9 +84,13 @@ export async function notify(n: NotifyInput): Promise<void> {
     INSERT INTO notifications (id, tenant_id, user_id, type, title, body, link)
     VALUES (${id}, ${t}, ${n.userId}, ${n.type}, ${title}, ${body}, ${n.link ?? null});
   `;
-  // Fan the same alert out to the user's devices (best-effort; push being off or
-  // a device being unsubscribed never breaks the in-app feed).
-  if (!n.push) return;
+  // WHETHER THIS REACHES A POCKET IS A PROPERTY OF THE ALERT, NOT OF THE LINE
+  // THAT SENT IT. Every call site used to carry its own `push: true` -- 36 of
+  // them across three files -- so the answer to "does this buzz a phone" lived
+  // nowhere and could differ between two sites sending the same type. It is now
+  // one column in notificationCatalogue.ts. A caller may still pass `push:
+  // false` to suppress a normally-pushing alert; it can no longer promote one.
+  if (n.push === false || !pushes(n.type)) return;
   sendPushToUser(t, n.userId, {
     // The RENDERED text, not the raw input — a catalogue-driven call site
     // passes no title at all, and this would have pushed `undefined`.
@@ -87,7 +102,20 @@ export async function notify(n: NotifyInput): Promise<void> {
     // into `/?screen=…` — outside the installed app's tenant scope, so tapping an
     // alert dropped you onto the bare workspace prompt instead of the lead.
     // Qualify it with the tenant so the link stands on its own.
-    url: n.link ? `/${t}${n.link}` : `/${t}`,
+    // TRAILING SLASH, AND IT IS THE WHOLE BUG.
+    //
+    // The manifest sets `scope: "/<slug>/"` and the service worker registers at
+    // `/<slug>/`. This built `/<slug>?screen=...` -- no slash -- which is
+    // OUTSIDE that scope. With the app already open the click handler finds the
+    // window and focuses it, so it works; from a cold start there is no window,
+    // `clients.openWindow()` runs, the browser tries to match the URL against
+    // each installed manifest's scope, matches none, and opens a plain tab.
+    // Warm right, cold wrong, from one missing character.
+    //
+    // `routes/pwa.ts` states this exactly -- "a document at /<slug> would fall
+    // outside a /<slug>/ scope" -- and the push URL was built one file away
+    // without it.
+    url: `/${t}/${n.link ?? ''}`,
     icon: `/pwa/${t}/icon-192.png`,
   // The delivery log ties an attempt back to the feed row it came from, so
   // "this alert" is one thing whether you are looking at the drawer or at what
@@ -192,8 +220,14 @@ export async function processScheduledNotifications(
         FROM crm_leads
         WHERE tenant_id = ${t}
           AND follow_up IS NOT NULL
-          AND (follow_up->>'due_at') IS NOT NULL
-          AND (follow_up->>'due_at')::timestamptz <= NOW()
+          -- at, NOT due_at. This read a key nothing in the codebase has ever
+          -- written, so the alert a desk most obviously needs -- the one saying
+          -- the thing you booked is due now -- has fired zero times since it
+          -- was written. at is a real instant, FOLLOWUP_PAST_DUE already reads
+          -- it, and the regex guard is that one: a follow_up can hold a typed
+          -- string instead of a timestamp.
+          AND follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+          AND (follow_up->>'at')::timestamptz <= NOW()
           AND (follow_up->>'due_notified') IS NULL
         LIMIT 50
       `;
@@ -234,70 +268,45 @@ export async function processScheduledNotifications(
       // a literal, because Settings → Pipeline lets them rename it.
       const arrivalStage = (Array.isArray(cfg.stages) && cfg.stages[0]) || 'New';
       const agentHours = Math.max(Number(cfg.slaHours) || 24, 1);
-      const mgrHours = agentHours * 2;
-      // Only recent arrivals. Without this, turning the feature on notifies the
-      // whole backlog at once — a real desk has months of leads parked on the
-      // arrival stage that nobody needs paging about now. Scales with the SLA
-      // rather than being another hardcoded number.
-      const lookbackHours = mgrHours * 3;
+      // ONE ALERT, TO ONE PERSON, ONCE.
+      //
+      // This was two: the assignee at slaHours, then owners + managers at twice
+      // slaHours, over a lookback of six times it. NOBODY SETS EITHER MULTIPLE
+      // -- `agentHours * 2` and `mgrHours * 3` were invented in this file, and
+      // asked about, and no answer existed. A firm that types 24 into Settings
+      // has silently also agreed to 48 and 144.
+      //
+      // The escalation is gone rather than exposed. A manager finding out by
+      // push that one lead is late is the weakest possible version of that
+      // information; the per-agent table on the dashboard says which of their
+      // people has how many untouched, all day, without buzzing anyone.
+      const lookbackHours = agentHours * 6;
       const staleLeads = await sql`
-        SELECT l.id, l.name, l.agent_id, l.locality, l.created_at,
-          -- The manager's version names whose lead it is; without it an
-          -- escalation tells the desk something is late but not who to ask.
-          u.name AS agent_name,
-          COALESCE((l.metadata->>'sla_agent_notified')::boolean, false) AS agent_notified,
-          COALESCE((l.metadata->>'sla_mgr_notified')::boolean, false) AS mgr_notified
+        SELECT l.id, l.name, l.agent_id, l.locality, l.created_at
         FROM crm_leads l
-        LEFT JOIN users u ON u.id = l.agent_id
         WHERE l.tenant_id = ${t}
           AND l.stage = ${arrivalStage}
+          AND l.agent_id IS NOT NULL
           AND l.created_at <= NOW() - (${agentHours}::text || ' hours')::interval
           AND l.created_at >= NOW() - (${lookbackHours}::text || ' hours')::interval
-          AND (l.metadata->>'sla_mgr_notified') IS NULL
+          AND (l.metadata->>'sla_agent_notified') IS NULL
         LIMIT 30
       `;
 
       for (const l of staleLeads) {
-        const hoursAge = (Date.now() - new Date(l.created_at).getTime()) / (1000 * 3600);
-        const link = `?screen=leads&lead=${l.id}`;
-
-        if (hoursAge >= agentHours && !l.agent_notified && l.agent_id) {
-          notify({
-            userId: l.agent_id,
-            tenantId: t,
-            // Split from the single lead_stale_sla type, which carried both
-            // this and the manager escalation below — two readers, two
-            // urgencies, indistinguishable except by reading the string.
-            type: 'lead_untouched',
-            data: { name: l.name, hours: agentHours },
-            link,
-            push: true,
-            toSelf: true
-          }).catch(() => {});
-
-          await sql`
-            UPDATE crm_leads
-            SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{sla_agent_notified}', 'true')
-            WHERE id = ${l.id} AND tenant_id = ${t}
-          `;
-        }
-
-        if (hoursAge >= mgrHours && !l.mgr_notified) {
-          notifyRoles(['owner', 'manager'], {
-            tenantId: t,
-            type: 'lead_untouched_escalated',
-            data: { name: l.name, hours: mgrHours, agent: l.agent_name },
-            link,
-            push: true,
-            toSelf: true
-          }).catch(() => {});
-
-          await sql`
-            UPDATE crm_leads
-            SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{sla_mgr_notified}', 'true')
-            WHERE id = ${l.id} AND tenant_id = ${t}
-          `;
-        }
+        notify({
+          userId: l.agent_id,
+          tenantId: t,
+          type: 'lead_untouched',
+          data: { name: l.name, hours: agentHours },
+          link: `?screen=leads&lead=${l.id}`,
+          toSelf: true,
+        }).catch(() => {});
+        await sql`
+          UPDATE crm_leads
+          SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{sla_agent_notified}', 'true')
+          WHERE id = ${l.id} AND tenant_id = ${t}
+        `;
       }
 
       // "No answer for N days" used to be paged from here — the alert half of

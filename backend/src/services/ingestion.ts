@@ -550,53 +550,11 @@ export async function processInboxRow(
           const reason = String((existing as any).rejection_reason || '');
           const { arrivalStage } = await deskConfigOf(integration.tenant_id);
 
-          if (terminal) {
-            // The reason is KEPT, not cleared. It was set to NULL here, which
-            // erased the one fact E asks to be surfaced — "rejected for low
-            // budget, came back at ₹32,000" is only a question the desk can ask
-            // while the reason is still on the row.
-            await sql`
-              UPDATE crm_leads
-              SET stage = ${arrivalStage}, updated_at = NOW()
-              WHERE id = ${existing.id} AND tenant_id = ${integration.tenant_id}`;
-          }
-
-          // ONE EVENT, saying both things. The repeat used to write a `lead`
-          // row per PUSH — so the man who opened four listings in five minutes
-          // got four rows against a counter that said one — and a second
-          // `stage_change` row beside it when the lead reopened. One fact, one
-          // row, written once per session.
-          const moved = terminal ? `${existing.stage} → ${arrivalStage} — ` : '';
-          const line = `${moved}enquired again via ${integration.provider}`
-            + (terminal && reason ? ` (was rejected: ${reason})` : '')
-            + (extra ? ` · ${extra}` : '');
-          await addTimelineEvent({
-            record_id: existing.id,
-            type: terminal ? 'stage_change' : 'lead',
-            title: line,
-            description: line,
-            author: 'System',
-            metadata: {
-              source: integration.provider, reason: 'repeat_enquiry',
-              ...(terminal ? { previousStage: existing.stage, rejectionReason: reason || null } : {}),
-            },
-          }).catch(() => {});
-
-          if (terminal) {
-            // ['owner','manager'] — the roles this product actually has.
-            // 'admin' is not one of them, so an earlier ['owner','admin'] here
-            // reached exactly the one owner and silently skipped every manager,
-            // which is the same shape as the ILIKE bug that dropped every
-            // desk-wide alert for months. Same pair every other desk alert uses.
-            await notifyRoles(['owner', 'manager'], {
-              type: 'lead_repeat_rejected',
-              data: {
-                name: existing.name, source: integration.provider,
-                previousStage: existing.stage, reason: reason || null,
-              },
-              link: `/leads/${existing.id}`,
-            }).catch(() => {});
-          }
+          // No separate `lead_repeat_rejected`. It was a second alert about
+          // the same arrival, to a different audience, and its link was
+          // `/leads/<id>` -- a path this app does not have, so tapping it went
+          // nowhere. The rejection is carried as data on the repeat alert
+          // below, which the person holding the lead actually receives.
           if (owner) {
             await notify({
               userId: owner, type: 'lead_repeat',
@@ -605,7 +563,7 @@ export async function processInboxRow(
                 changed: conflicts.length,
                 previousStage: terminal ? existing.stage : null,
               },
-              link: `/leads/${existing.id}`,
+              link: `?screen=leads&lead=${existing.id}`,
             }).catch(() => {});
           }
         }
