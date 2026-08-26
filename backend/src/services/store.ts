@@ -1246,74 +1246,105 @@ export async function getPulse(): Promise<Record<string, any>> {
  */
 export async function getBootstrap(): Promise<any> {
   const t = tid();
-  const [agentsRows, formerRows, settingsRows, routingRows, brandRows, localityRows, projectRows, configRows, dealRows, sourceRows] = await Promise.all([
-    sql`SELECT a.* FROM crm_agents a
+  // ONE ROUND TRIP, NOT TEN.
+  //
+  // These were ten queries in a Promise.all, which reads as parallel and is
+  // not: postgres.js hands each one a separate connection, so the boot read
+  // demanded up to ten sockets from a pool of ten. On a warm pool that is ten
+  // round trips' worth of latency overlapped into one; on a cold one — and
+  // idle_timeout closes them after 20s, so a quiet desk is always cold — it is
+  // ten TLS handshakes, measured at ~1.3s against the dev database where a
+  // query on an open socket costs ~145ms. That is the boot stall, and it also
+  // meant one person signing in could hold the entire pool while doing it.
+  //
+  // None of the ten depended on another, so they are CTEs of one statement:
+  // one connection, one round trip, and the pool is free for everyone else.
+  // Each branch aggregates to a single json value so the shapes below are
+  // exactly what the ten queries returned.
+  const [row] = await sql`
+    WITH agents AS (
+      SELECT a.*, (u.deleted_at IS NOT NULL) AS departed FROM crm_agents a
         LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
-        WHERE a.tenant_id = ${t} AND u.deleted_at IS NULL`,
-    // People who have LEFT, sent separately so historical attribution resolves.
-    // The comment on getAgents() says the crm_agents row is kept "so historical
-    // lead attribution still resolves" — but the row was filtered out before it
-    // ever reached the browser, so agentById() returned null and every lead
-    // belonging to someone who left rendered as "Unassigned". That is a
-    // different fact: nobody has it versus the person who had it is gone.
-    // They go in their own list so pickers and the routing rota, which read
-    // `agents`, can never offer someone who no longer works here.
-    sql`SELECT a.* FROM crm_agents a
-        LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
-        WHERE a.tenant_id = ${t} AND u.deleted_at IS NOT NULL`,
-    sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}`,
-    sql`SELECT * FROM crm_routing_rules WHERE tenant_id = ${t}`,
-    sql`SELECT id, slug, name, brand_config FROM tenants WHERE id = ${t} OR slug = ${t} LIMIT 1`,
-    // The firm's own VOCABULARY -- localities, project names, configurations.
-    // Filter menus, the locality suggester and the requirement-config picker
-    // need these lists, not the records behind them, and every one of them was
-    // building the list by mapping a collection the browser had downloaded in
-    // full. Three DISTINCTs, a few dozen strings, no rows.
-    sql`SELECT DISTINCT v FROM (
-          SELECT locality AS v FROM crm_properties WHERE tenant_id = ${t}
-          UNION SELECT locality FROM crm_leads WHERE tenant_id = ${t}
-        ) x WHERE coalesce(v, '') <> '' ORDER BY 1`,
-    // Real project names only -- the `project` column, not PROJECT_KEY. The key
-    // falls back to the first segment of the title, which for imported rows is
-    // the OWNER's name, so a picker built on it offered "ASHA BHARAT KOTHARI"
-    // as a township. Ordered by size so the biggest developments come first.
-    sql`SELECT project AS v, count(*)::int AS n FROM crm_properties
-         WHERE tenant_id = ${t} AND coalesce(project, '') <> ''
-         GROUP BY 1 ORDER BY 2 DESC LIMIT 200`,
-    sql`SELECT DISTINCT v FROM (
-          SELECT type AS v FROM crm_properties WHERE tenant_id = ${t}
-          UNION SELECT requirement FROM crm_leads WHERE tenant_id = ${t}
-        ) x WHERE coalesce(v, '') <> '' ORDER BY 1`,
-    // Whether this desk sells, lets, or both. Two integers that decide which
-    // filters are worth offering at all.
-    // A listing counts as sale only if it SAYS sale. `coalesce(deal,'sale')`
-    // was harmless while the boot migration guaranteed no nulls; now that a
-    // row is allowed not to know, it would count every unknown as a sale.
-    sql`SELECT count(*) FILTER (WHERE deal = 'sale')::int AS sale,
-               count(*) FILTER (WHERE deal = 'rent')::int AS rent
-          FROM crm_properties WHERE tenant_id = ${t}`,
-    // Sources that have actually sent something, biggest first. This used to be
-    // a hand-curated list in settings that nothing kept in step with reality:
-    // a Connections integration or an import invented a source and never told
-    // it, so the filter menu offered five names while the dashboard's own
-    // breakdown showed seven. Derived, it cannot disagree with the data.
-    //
-    // Derived from the leads AND from what the connections say they will send.
-    // Leads alone meant a source only existed once one had arrived under it, so
-    // a connection configured this morning was unfilterable until its first
-    // enquiry — and the person who set it up is told to go and type the name
-    // into Settings, which is the hand-curated list this replaced. A connection
-    // declaring `defaults.source` is a statement that leads will carry it.
-    sql`SELECT v, sum(n)::int AS n FROM (
-          SELECT source AS v, count(*)::int AS n FROM crm_leads
-           WHERE tenant_id = ${t} AND coalesce(source, '') <> ''
-           GROUP BY 1
-          UNION ALL
-          SELECT parser_config->'defaults'->>'source' AS v, 0 AS n FROM integrations
-           WHERE tenant_id = ${t} AND active
-             AND coalesce(parser_config->'defaults'->>'source', '') <> ''
-        ) x GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 60`,
-  ]);
+       WHERE a.tenant_id = ${t}
+    ),
+    -- The firm's own VOCABULARY -- localities, project names, configurations.
+    -- Filter menus, the locality suggester and the requirement-config picker
+    -- need these lists, not the records behind them.
+    localities AS (
+      SELECT DISTINCT v FROM (
+        SELECT locality AS v FROM crm_properties WHERE tenant_id = ${t}
+        UNION SELECT locality FROM crm_leads WHERE tenant_id = ${t}
+      ) x WHERE coalesce(v, '') <> '' ORDER BY 1
+    ),
+    -- Real project names only -- the project column, not PROJECT_KEY. The key
+    -- falls back to the first segment of the title, which for imported rows is
+    -- the OWNER's name, so a picker built on it offered "ASHA BHARAT KOTHARI"
+    -- as a township. Ordered by size so the biggest developments come first.
+    projects AS (
+      SELECT project AS v FROM crm_properties
+       WHERE tenant_id = ${t} AND coalesce(project, '') <> ''
+       GROUP BY 1 ORDER BY count(*) DESC LIMIT 200
+    ),
+    configs AS (
+      SELECT DISTINCT v FROM (
+        SELECT type AS v FROM crm_properties WHERE tenant_id = ${t}
+        UNION SELECT requirement FROM crm_leads WHERE tenant_id = ${t}
+      ) x WHERE coalesce(v, '') <> '' ORDER BY 1
+    ),
+    -- Sources that have actually sent something, biggest first. This used to be
+    -- a hand-curated list in settings that nothing kept in step with reality: a
+    -- Connections integration or an import invented a source and never told it.
+    -- Derived from the leads AND from what the connections say they will send,
+    -- because a connection configured this morning is unfilterable until its
+    -- first enquiry otherwise.
+    sources AS (
+      SELECT v FROM (
+        SELECT source AS v, count(*)::int AS n FROM crm_leads
+         WHERE tenant_id = ${t} AND coalesce(source, '') <> '' GROUP BY 1
+        UNION ALL
+        SELECT parser_config->'defaults'->>'source' AS v, 0 AS n FROM integrations
+         WHERE tenant_id = ${t} AND active
+           AND coalesce(parser_config->'defaults'->>'source', '') <> ''
+      ) x GROUP BY 1 ORDER BY sum(n) DESC, 1 LIMIT 60
+    )
+    SELECT
+      (SELECT coalesce(json_agg(a ORDER BY a.name), '[]'::json) FROM agents a WHERE NOT a.departed) AS agents,
+      -- People who have LEFT, sent separately so historical attribution
+      -- resolves. The crm_agents row is kept for exactly that, but it was
+      -- filtered out before it reached the browser, so every lead belonging to
+      -- someone who left rendered as "Unassigned" -- a different fact from
+      -- nobody having it. Their own list, so pickers and the routing rota,
+      -- which read agents, can never offer someone who no longer works here.
+      (SELECT coalesce(json_agg(a ORDER BY a.name), '[]'::json) FROM agents a WHERE a.departed) AS former,
+      (SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}) AS settings,
+      (SELECT row_to_json(r) FROM crm_routing_rules r WHERE r.tenant_id = ${t} LIMIT 1) AS routing,
+      (SELECT row_to_json(x) FROM (
+         SELECT id, slug, name, brand_config FROM tenants
+          WHERE id = ${t} OR slug = ${t} LIMIT 1) x) AS tenant,
+      (SELECT coalesce(json_agg(v), '[]'::json) FROM localities) AS localities,
+      (SELECT coalesce(json_agg(v), '[]'::json) FROM projects) AS projects,
+      (SELECT coalesce(json_agg(v), '[]'::json) FROM configs) AS configs,
+      (SELECT coalesce(json_agg(v), '[]'::json) FROM sources) AS sources,
+      -- Whether this desk sells, lets, or both. Two integers that decide which
+      -- filters are worth offering at all. A listing counts as sale only if it
+      -- SAYS sale: coalesce(deal,'sale') would count every unknown as one.
+      (SELECT row_to_json(x) FROM (
+         SELECT count(*) FILTER (WHERE deal = 'sale')::int AS sale,
+                count(*) FILTER (WHERE deal = 'rent')::int AS rent
+           FROM crm_properties WHERE tenant_id = ${t}) x) AS deal_mix
+  `;
+
+  const agentsRows: any[] = row?.agents || [];
+  const formerRows: any[] = row?.former || [];
+  const settingsRows: any[] = row?.settings ? [{ value: row.settings }] : [];
+  const routingRows: any[] = row?.routing ? [row.routing] : [];
+  const brandRows: any[] = row?.tenant ? [row.tenant] : [];
+  const localityRows: any[] = (row?.localities || []).map((v: string) => ({ v }));
+  const projectRows: any[] = (row?.projects || []).map((v: string) => ({ v }));
+  const configRows: any[] = (row?.configs || []).map((v: string) => ({ v }));
+  const sourceRows: any[] = (row?.sources || []).map((v: string) => ({ v }));
+  const dealRows: any[] = row?.deal_mix ? [row.deal_mix] : [];
+
   const agents = agentsRows.map(rowToAgent);
   const brand = { ...(brandRows[0]?.brand_config || {}) };
   if (typeof brand.logoUrl === 'string' && brand.logoUrl.startsWith('data:')) {
@@ -2832,89 +2863,133 @@ export async function listLeads(opts: LeadFilterOpts & {
  * lead moved. `reason` is the only thing that differs between a person doing it
  * and a sweep doing it, and it is the part that matters.
  */
-async function recordAssignment(opts: {
+type AssignmentEntry = {
   recordId: string;
   prevAgentId?: string | null;
   agentId?: string | null;
   reason?: string;
   author?: string | null;
   metadata?: Record<string, any>;
-}): Promise<void> {
-  const { recordId, prevAgentId, agentId, reason } = opts;
-  if ((prevAgentId || null) === (agentId || null)) return;
-  // BEST-EFFORT, ALWAYS. This is history about a write that has already
+};
+
+/**
+ * ONE record, or a whole selection. Singular below is a wrapper on this, so
+ * there is one definition of what an assignment writes rather than a bulk copy
+ * that drifts from the single-record one.
+ *
+ * Set-based because bulk assign was not bulk after the UPDATE. The write itself
+ * is one statement, but the history behind it was a `for` loop of awaits, each
+ * iteration costing two name lookups, an insert and the reassign-loop check --
+ * six or so sequential round trips per row, ~145ms each against the pooled
+ * database. Fifty leads was measured in tens of seconds, all of it after the
+ * rows had already changed hands, with the person watching a spinner. The
+ * lookups are now one query for the whole set, the events one insert, and the
+ * loop check one count.
+ */
+async function recordAssignments(entries: AssignmentEntry[]): Promise<void> {
+  // A no-op move is not history. Same test as before, applied set-wise.
+  const list = entries.filter(e => (e.prevAgentId || null) !== (e.agentId || null));
+  if (!list.length) return;
+  const t = tid();
+  // BEST-EFFORT, ALWAYS. This is history about writes that have already
   // happened; a name lookup that fails must never turn a saved reassignment
   // into an error the person sees.
   try {
-  const nameOf = async (id?: string | null) => {
-    if (!id) return null;
-    return (await sql`SELECT name FROM users WHERE id = ${id} LIMIT 1`)[0]?.name
-      ?? (await sql`SELECT name FROM crm_agents WHERE id = ${id} AND tenant_id = ${tid()} LIMIT 1`)[0]?.name
-      ?? null;
-  };
-  const [from, to] = await Promise.all([nameOf(prevAgentId), nameOf(agentId)]);
-  const title = !agentId ? 'Unassigned' : prevAgentId ? 'Reassigned' : 'Assigned';
-  const who = !agentId ? (from ? `Taken off ${from}` : 'Nobody assigned')
-    : from ? `${from} → ${to}` : `To ${to}`;
-  await addTimelineEvent({
-    record_id: recordId,
-    type: 'assignment',
-    title,
-    description: reason ? `${who} — ${reason}` : who,
-    author: opts.author ?? getContext()?.userId ?? null,
-    metadata: { agentId: agentId ?? null, previousAgentId: prevAgentId ?? null, ...(opts.metadata || {}) },
-  }).catch(() => {});
-  if (prevAgentId && agentId) await alertOnReassignLoop(recordId, to);
+    // EVERY NAME THIS BATCH NEEDS, ONCE. A bulk assign points at one new agent
+    // and usually a handful of previous ones, so this is a couple of rows
+    // however long the selection is.
+    const ids = [...new Set(list.flatMap(e => [e.prevAgentId, e.agentId]).filter(Boolean))] as string[];
+    const names = new Map<string, string>();
+    if (ids.length) {
+      const rows = await sql`
+        SELECT id, name FROM users WHERE id IN ${sql(ids)}
+        UNION
+        SELECT id, name FROM crm_agents WHERE id IN ${sql(ids)} AND tenant_id = ${t}`;
+      // users wins where both carry the id -- same precedence as the two
+      // sequential lookups this replaces, which only consulted crm_agents when
+      // users had nothing.
+      for (const r of rows as any[]) if (!names.has(r.id) || r.name) names.set(r.id, r.name);
+    }
+    const nameOf = (id?: string | null) => (id ? names.get(id) ?? null : null);
+
+    const now = new Date().toISOString();
+    const rows = list.map((e, i) => {
+      const from = nameOf(e.prevAgentId);
+      const to = nameOf(e.agentId);
+      const title = !e.agentId ? 'Unassigned' : e.prevAgentId ? 'Reassigned' : 'Assigned';
+      const who = !e.agentId ? (from ? `Taken off ${from}` : 'Nobody assigned')
+        : from ? `${from} → ${to}` : `To ${to}`;
+      return {
+        id: `evt_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`,
+        record_id: e.recordId,
+        type: 'assignment',
+        title,
+        description: e.reason ? `${who} — ${e.reason}` : who,
+        author: e.author ?? getContext()?.userId ?? 'System',
+        timestamp: now,
+        metadata: sql.json({ agentId: e.agentId ?? null, previousAgentId: e.prevAgentId ?? null, ...(e.metadata || {}) }) as any,
+        tenant_id: t,
+      };
+    });
+    // One statement. addTimelineEvent is deliberately not reused here: it
+    // inserts a single row and carries the lead-remark notification, which an
+    // assignment must not send.
+    await sql`INSERT INTO crm_timeline_events ${sql(rows as any[],
+      'id', 'record_id', 'type', 'title', 'description', 'author', 'timestamp', 'metadata', 'tenant_id')}
+      ON CONFLICT (id) DO NOTHING`;
+
+    const moved = list.filter(e => e.prevAgentId && e.agentId);
+    if (moved.length) await alertOnReassignLoop(moved.map(e => ({ recordId: e.recordId, toName: nameOf(e.agentId) })));
   } catch (e: any) {
     console.warn('[Timeline] assignment event failed:', e?.message);
   }
 }
 
-/**
- * A LEAD THAT KEEPS BEING HANDED ON.
- *
- * Reassignment does not stop on its own — the idle sweep will move the same
- * lead round the rota forever, and each individual hand-off looks reasonable.
- * The pattern is the thing worth seeing, and only a manager can act on it.
- *
- * Here rather than in the sweep, because this is the one function every path
- * that changes `agent_id` goes through — sweep, bulk assign, manual edit — and
- * the fact is about the lead being passed around, not about who passed it.
- * Counted from the record's own history, so it survives however it was moved.
- *
- * Told EVERY time past the threshold, not once: the fourth hand-off and the
- * ninth are the same problem getting worse, and a one-shot alert on a metadata
- * flag would go quiet exactly as it started mattering.
- *
- * BOTH SIDES OF THE DESK. An owner in the calling queue is reassigned by the
- * same sweep and carries the same history, and being passed around is the same
- * problem there — so Routing → Calling carries its own threshold, and this
- * reads whichever side the record belongs to.
- */
-async function alertOnReassignLoop(recordId: string, toName: string | null): Promise<void> {
+/** One record. See recordAssignments() for what this actually does. */
+async function recordAssignment(opts: AssignmentEntry): Promise<void> {
+  return recordAssignments([opts]);
+}
+
+async function alertOnReassignLoop(batch: { recordId: string; toName: string | null }[]): Promise<void> {
+  if (!batch.length) return;
   const t = tid();
-  const lead = (await sql`SELECT name FROM crm_leads WHERE id = ${recordId} AND tenant_id = ${t} LIMIT 1`)[0];
-  const owner = lead ? null
-    : (await sql`SELECT name FROM crm_owners WHERE id = ${recordId} AND tenant_id = ${t} LIMIT 1`)[0];
-  const rec = lead || owner;
-  if (!rec) return;
-  const rules = await getRoutingRules();
-  const limit = Math.max(Number(lead ? rules.reassign_alert_count : rules.owner_reassign_alert_count) || 3, 1);
-  // Hand-offs, not assignments: the arrival-time route and the unowned sweep
-  // both write an `assignment` row with no previous agent, and a lead going
-  // from nobody to somebody has not been passed on by anyone.
-  const n = (await sql`
-    SELECT count(*)::int AS n FROM crm_timeline_events
-    WHERE record_id = ${recordId} AND tenant_id = ${t} AND type = 'assignment'
-      AND coalesce(metadata->>'previousAgentId', '') <> ''`)[0]?.n ?? 0;
-  if (n <= limit) return;
-  const type = lead ? 'lead_reassign_loop' : 'owner_reassign_loop';
-  await notifyRoles(['owner', 'manager'], {
-    tenantId: t, type,
-    data: { name: rec.name, n, agent: toName },
-    link: lead ? `?screen=leads&lead=${recordId}` : `?screen=calling&owner=${recordId}`,
-    push: true, toSelf: true,
-  }).catch(err => console.warn(`[Notify] ${type} failed:`, err?.message));
+  const ids = batch.map(b => b.recordId);
+  // Which side of the desk each record is, its name, and how many times it has
+  // been HANDED ON -- for the whole batch, in three queries rather than four
+  // per record. The counts especially: this is the check that decides whether a
+  // manager hears about a lead going round in circles, and it was running one
+  // count query per row inside a bulk assign.
+  const [leads, owners, counts, rules] = await Promise.all([
+    sql`SELECT id, name FROM crm_leads WHERE tenant_id = ${t} AND id IN ${sql(ids)}`,
+    sql`SELECT id, name FROM crm_owners WHERE tenant_id = ${t} AND id IN ${sql(ids)}`,
+    // Hand-offs, not assignments: the arrival-time route and the unowned sweep
+    // both write an assignment row with no previous agent, and a lead going
+    // from nobody to somebody has not been passed on by anyone.
+    sql`SELECT record_id, count(*)::int AS n FROM crm_timeline_events
+         WHERE tenant_id = ${t} AND type = 'assignment' AND record_id IN ${sql(ids)}
+           AND coalesce(metadata->>'previousAgentId', '') <> ''
+         GROUP BY 1`,
+    getRoutingRules(),
+  ]);
+  const leadName = new Map((leads as any[]).map(r => [r.id, r.name]));
+  const ownerName = new Map((owners as any[]).map(r => [r.id, r.name]));
+  const countOf = new Map((counts as any[]).map(r => [r.record_id, r.n]));
+
+  for (const { recordId, toName } of batch) {
+    const isLead = leadName.has(recordId);
+    const name = isLead ? leadName.get(recordId) : ownerName.get(recordId);
+    if (name == null) continue;                     // neither side has it any more
+    const limit = Math.max(Number(isLead ? rules.reassign_alert_count : rules.owner_reassign_alert_count) || 3, 1);
+    const n = countOf.get(recordId) ?? 0;
+    if (n <= limit) continue;
+    const type = isLead ? 'lead_reassign_loop' : 'owner_reassign_loop';
+    await notifyRoles(['owner', 'manager'], {
+      tenantId: t, type,
+      data: { name, n, agent: toName },
+      link: isLead ? `?screen=leads&lead=${recordId}` : `?screen=calling&owner=${recordId}`,
+      push: true, toSelf: true,
+    }).catch(err => console.warn(`[Notify] ${type} failed:`, err?.message));
+  }
 }
 
 export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
@@ -2937,12 +3012,11 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
       AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
   const n = res.count;
   if (n === 0) return 0;
-  for (const row of before) {
-    await recordAssignment({
-      recordId: row.id, prevAgentId: row.agent_id, agentId,
-      reason: 'bulk assignment', author: ctx.actorId ?? null,
-    });
-  }
+  // The whole selection's history in one go -- see recordAssignments().
+  await recordAssignments(before.map((row: any) => ({
+    recordId: row.id, prevAgentId: row.agent_id, agentId,
+    reason: 'bulk assignment', author: ctx.actorId ?? null,
+  })));
 
   const name = agentId
     ? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name ?? 'a colleague'
@@ -3322,12 +3396,11 @@ export async function bulkAssignOwners(ids: string[], agentId: string | null, ct
       AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
   const n = res.count;
   if (n === 0) return 0;
-  for (const row of before) {
-    await recordAssignment({
-      recordId: row.id, prevAgentId: row.agent_id, agentId,
-      reason: 'bulk assignment', author: ctx.actorId ?? null,
-    });
-  }
+  // The whole selection's history in one go -- see recordAssignments().
+  await recordAssignments(before.map((row: any) => ({
+    recordId: row.id, prevAgentId: row.agent_id, agentId,
+    reason: 'bulk assignment', author: ctx.actorId ?? null,
+  })));
   audit({
     tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'owner.bulk_assign', target_type: 'owner', target_id: null,
@@ -4650,7 +4723,20 @@ export async function addTimelineEvent(evt: Omit<TimelineEvent, 'id' | 'timestam
     ON CONFLICT (id) DO NOTHING;
   `;
 
-  if (evt.record_id && (evt.record_id.startsWith('l') || evt.type === 'note' || evt.type === 'remark')) {
+  // A REMARK, ON A LEAD. Both halves, and the type is not optional.
+  //
+  // This read `record_id.startsWith('l') || type === 'note' || type === 'remark'`.
+  // The first arm is a scope test — "is this a lead rather than an owner" — and
+  // OR-ing it with the type test does not narrow, it widens: EVERY event on a
+  // lead qualified. On the dev tenant that is 2,070 events of which 324 are
+  // remarks, each one paying a lead lookup to decide it had nothing to send,
+  // and each one a `remark_added` alert away from being sent about a stage
+  // change or an assignment. It stayed mostly invisible because the actor is
+  // usually the lead's own agent and self-alerts are dropped — but a manager
+  // acting on someone else's lead is exactly when it is not, which is a bulk
+  // assign, and one of those would have told the agent their leads had been
+  // "remarked on" once per row.
+  if (evt.record_id?.startsWith('l') && (evt.type === 'note' || evt.type === 'remark')) {
     sql`SELECT name, agent_id FROM crm_leads WHERE id = ${evt.record_id} AND tenant_id = ${t} LIMIT 1`
       .then(rows => {
         const lead = rows[0];
