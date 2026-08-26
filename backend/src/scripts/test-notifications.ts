@@ -124,6 +124,24 @@ async function main() {
     await sql.end(); return;
   }
 
+  // A REAL RECORD, BELONGING TO THE RECIPIENT.
+  //
+  // The link used to carry `l_test`, which opens the leads screen on a lead that
+  // does not exist -- fine for checking that copy renders, useless for the thing
+  // this is actually for: tapping the alert on a phone and seeing where it goes.
+  // It has to be one of THEIR leads too, or an agent taps through to a record
+  // their own scope hides and the app looks broken.
+  const [own] = await sql`SELECT id, name FROM crm_leads
+                           WHERE tenant_id = ${TENANT} AND agent_id = ${agent.id}
+                           ORDER BY created_at DESC LIMIT 1`;
+  if (!own) console.log(`
+⚠ ${agent.name} holds no leads — record links will have nothing to open.`);
+  else console.log(`record links open: ${own.name} (${own.id})`);
+
+  if (own) for (const key of Object.keys(DATA)) {
+    if ('name' in DATA[key] && DATA[key].name === 'Test Buyer') DATA[key].name = own.name;
+  }
+
   const kinds = NOTIFICATIONS.filter((k: NotifKind) => !k.deployedOnly && (!ONLY || k.key === ONLY));
   if (!kinds.length) { console.error(`\nNo such type: ${ONLY}`); process.exit(1); }
 
@@ -141,7 +159,9 @@ async function main() {
     if (!to.length) console.log(`${' '.repeat(43)}⚠ no recipient — this alert is unreachable on this tenant`);
 
     if (!WRITE) continue;
-    const link = `${LINK[k.key] ?? '?screen=leads&lead='}${LINK[k.key] ? agent.id : 'l_test'}`;
+    const link = LINK[k.key]
+      ? `${LINK[k.key]}${agent.id}`
+      : `?screen=leads&lead=${own?.id ?? 'l_test'}`;
     // Fired through the real notify(), inside a real request context, so the
     // catalogue's push gate, the copy module and the delivery log all run
     // exactly as they do in production.
