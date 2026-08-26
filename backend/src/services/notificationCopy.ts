@@ -57,8 +57,12 @@ export const COPY: Builders = {
     title: 'Lead arrived unassigned',
     body: facts(d.name, d.source && `nobody is set to receive ${d.source}`),
   }),
+  // MOVED, not assigned. This rendered the exact sentence `lead_assigned`
+  // renders, so an agent could not tell a fresh enquiry -- where minutes decide
+  // who wins it -- from a lead taken off a colleague who let it go quiet. Two
+  // different jobs arriving under one line. Two meanings must not share a word.
   lead_reassigned: (d) => ({
-    title: 'Lead assigned to you',
+    title: 'Lead moved to you',
     body: facts(d.name),
   }),
   // For a manager, not the agent who just got it. The count is the whole point
@@ -112,10 +116,11 @@ export const COPY: Builders = {
   owner_assigned: (d) => ({
     title: `${plural(d.n, 'owner')} assigned to you`,
   }),
+  // Same fault, same fix: identical to `owner_assigned` in both branches.
   owner_reassigned: (d) =>
     d.n != null
-      ? { title: `${plural(d.n, 'owner')} assigned to you` }
-      : { title: 'Owner assigned to you', body: facts(d.name) },
+      ? { title: `${plural(d.n, 'owner')} moved to you` }
+      : { title: 'Owner moved to you', body: facts(d.name) },
 };
 
 /**
