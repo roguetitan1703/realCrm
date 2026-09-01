@@ -12,7 +12,7 @@
 // that CHANGE a record's facts are gated.
 import { useState, useEffect } from 'react'
 import Icon from '../../components/Icon.jsx'
-import { canEditListing, canDeleteRecord, canEditLead } from '../../lib/permissions.js'
+import { canEditListing, canAddListing, canDeleteRecord, canEditLead } from '../../lib/permissions.js'
 import { buildActionTiers, LEADS_DEF, PROPERTIES_DEF, OWNERS_DEF } from '../definitions.jsx'
 
 export default function PhoneActions({ store, go, context = {} }) {
@@ -75,7 +75,9 @@ export default function PhoneActions({ store, go, context = {} }) {
     actions = [{ id: 'newOwner', icon: 'plus', label: 'New owner', onClick: () => store.openModal({ kind: 'newOwner' }) }]
   } else {
     actions = [{ id: 'newLead', icon: 'plus', label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) }]
-    if (canEditListing(role)) {
+    // The FAB is where an agent standing in a flat actually adds one, so this
+    // is the add rule, not the edit rule. See canAddListing().
+    if (canAddListing(role)) {
       actions.push({ id: 'addProp', icon: 'building', label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) })
     }
   }

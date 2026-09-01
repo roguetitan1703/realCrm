@@ -388,6 +388,10 @@ function rowToProperty(r: any): any {
     // The list's "Recently added" sort had nothing to sort ON, so it silently
     // fell back to whatever order the rows arrived in.
     createdAt: r.created_at || null,
+    // Null for everything that predates the column, and for anything an import
+    // or a webhook created. The screen renders that as blank -- see the Added
+    // by column -- not as a guess.
+    createdBy: r.created_by || null,
 
     // --- Block C canonical fields -------------------------------------------
     // `type` above is the legacy conflated string kept for existing views;
@@ -4074,12 +4078,19 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
     INSERT INTO crm_properties (
       id, title, status, type, locality, price, tower, unit, config, tenancy, timeline,
       project, wing, unit_no, deal, facing, furnishing, parking, possession, builder, rera_no,
-      owner_name, owner_phone, owner_email, floor, carpet_sqft, total_floors, age_years, price_amount, tenant_id
+      owner_name, owner_phone, owner_email, floor, carpet_sqft, total_floors, age_years, price_amount, tenant_id,
+      created_by
     )
     VALUES (
       ${newId}, ${title}, ${status}, ${type}, ${locality}, ${price}, ${tower}, ${unit}, ${sql.json(config)}, ${sql.json(tenancy)}, ${sql.json(timeline)},
       ${project}, ${wing}, ${unitNo}, ${deal}, ${facing}, ${furnishing}, ${parking}, ${possession}, ${builder}, ${reraNo},
-      ${ownerName}, ${ownerPhone}, ${ownerEmail}, ${floor}, ${carpetSqft}, ${totalFloors}, ${ageYears}, ${priceAmount}, ${tid()}
+      ${ownerName}, ${ownerPhone}, ${ownerEmail}, ${floor}, ${carpetSqft}, ${totalFloors}, ${ageYears}, ${priceAmount}, ${tid()},
+      -- WHO ADDED IT, from the session rather than from the form. A typed-in
+      -- name is a claim; this is the account that made the request, so it
+      -- cannot name a colleague and cannot be left blank by someone in a hurry.
+      -- An import or a webhook has no person behind it and correctly writes
+      -- NULL rather than inventing one.
+      ${ctx.actorId ?? getContext()?.userId ?? null}
     )
     RETURNING *;
   `;

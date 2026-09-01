@@ -16,7 +16,7 @@ import {
   getProperties, createProperty, updateProperty, deleteProperty,
   getTimelineEvents
 } from '../services/store';
-import { canEditListing, canDeleteRecord } from '../lib/permissions';
+import { canEditListing, canAddListing, canDeleteRecord } from '../lib/permissions';
 
 export const recordsRouter = Router({ mergeParams: true });
 
@@ -84,8 +84,11 @@ recordsRouter.post('/', async (req: Request, res: Response) => {
   const { moduleKey } = req.params;
   const payload = req.body;
 
-  if (moduleKey === 'properties' && !canEditListing(req.user?.role)) {
-    return res.status(403).json({ error: 'Forbidden', message: 'Only an owner or manager can add a listing.', code: 'ROLE_REQUIRED' });
+  // ADD, not edit. The update route below keeps canEditListing, because
+  // rewriting a live listing's price or status is the thing that reaches
+  // buyers — see canAddListing() for the distinction.
+  if (moduleKey === 'properties' && !canAddListing(req.user?.role)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Sign in to add a listing.', code: 'ROLE_REQUIRED' });
   }
 
   try {

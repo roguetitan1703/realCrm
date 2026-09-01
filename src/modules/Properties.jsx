@@ -17,7 +17,7 @@ import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
 import PropertyWizard from './PropertyWizard.jsx'
-import { canEditListing } from '../lib/permissions.js'
+import { canEditListing, canAddListing } from '../lib/permissions.js'
 
 // The filter bar speaks in arrays ({ status: ['Available','Blocked'] }) because
 // its controls are multi-select; the API speaks in comma-separated values. This
@@ -68,15 +68,21 @@ function usePropertiesSummary(dataAsOf) {
  */
 export default function Properties({ store, go, sel, setSel, topBar, phone }) {
   const mayEdit = canEditListing(store.state.role)
-  // A listing's facts are desk-owned. An agent reaching the wizard by any route
-  // — deep link, stale sel, a button we missed — lands back on the list.
-  if (sel.propAdd && mayEdit) return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} />
+  // Adding is open to every employee; rewriting a live listing is not. The
+  // wizard serves BOTH — openEdit() reopens it with the record's own id — so
+  // the rule depends on which one this is. A new listing follows mayAdd; the
+  // same screen carrying a propId is an edit and stays desk-only, or opening
+  // the add path would have handed every agent an edit path with it.
+  const mayAdd = canAddListing(store.state.role)
+  if (sel.propAdd && (sel.propId ? mayEdit : mayAdd)) {
+    return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} />
+  }
   if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} mayEdit={mayEdit} phone={phone} />
   if (sel.projOpen && sel.projKey) return <ProjectDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
-  return <PropertyList store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} mayEdit={mayEdit} />
+  return <PropertyList store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} mayEdit={mayEdit} mayAdd={mayAdd} />
 }
 
-function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit }) {
+function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }) {
   const { state } = store
   const [flt, setFlt] = useState({})
   const [q, setQ] = useState('')
@@ -143,7 +149,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit }) {
         <Icon name="building" size={14} />Group by project
       </button>
     </>,
-    cta: mayEdit ? { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) } : null,
+    cta: mayAdd ? { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) } : null,
     emptyHint: 'Try clearing a filter or search.',
     renderTable: (list, v) => v === 'projects'
       ? <ProjectGrid onOpen={openProject} />

@@ -472,6 +472,18 @@ export const PROPERTY_MODULE_SCHEMA = {
     tokenField('status', 'Status', STATUS, 'core'),
     { key: 'priceLabel', label: 'Quoted price', type: 'text', section: 'core' },
     { key: 'owner', label: 'Owner', type: 'text', section: 'core' },
+    // WHO PUT IT ON THE BOOK. readOnly because it is the account that made the
+    // request, not something anyone types — a name box here would be a claim
+    // rather than a record, and could name a colleague. Empty for every listing
+    // that predates the column and for anything imported: there is no honest
+    // answer for those, so the field renders blank rather than naming someone.
+    {
+      key: 'createdBy', label: 'Added by', type: 'text', section: 'core', readOnly: true,
+      renderValue: (v, _rec, store) => {
+        const who = v ? store?.agentById?.(v) : null
+        return who ? who.name : ''
+      },
+    },
 
     // ---- Details: the physical unit --------------------------------------
     { key: 'tower', label: 'Tower / wing', type: 'text', section: 'domain' },

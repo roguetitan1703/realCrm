@@ -17,6 +17,23 @@ export function canEditListing(role?: string | null): boolean {
   return !!role && DESK_ROLES.has(role);
 }
 
+/**
+ * ADDING a listing is not the same act as REWRITING one.
+ *
+ * The rule above exists because a wrong price or status on a live listing goes
+ * out to every buyer under the firm's name. Creating a row carries none of that
+ * risk: there is no existing figure to overwrite and nobody is quoting it yet.
+ * Blocking it cost the firm the thing it is paying for — an agent standing in a
+ * flat, with the owner in front of them, could not put it on the book, so it
+ * arrived later as a note to a manager or not at all.
+ *
+ * Every signed-in employee may add. Editing stays with the desk, and
+ * `created_by` records who added each one so the desk can go back and ask.
+ */
+export function canAddListing(role?: string | null): boolean {
+  return !!role;
+}
+
 export function canDeleteRecord(role?: string | null): boolean {
   return role === 'owner' || role === 'admin' || role === 'superadmin';
 }

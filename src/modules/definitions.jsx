@@ -871,6 +871,15 @@ export const PROPERTIES_DEF = {
     ) },
     { key: 'status', label: 'Status', render: (p) => <StatusTag status={p.status} /> },
     { key: 'quoted', label: 'Quoted', render: (p) => <Quoted q={quotedLine(p)} /> },
+    // WHO PUT THIS ON THE BOOK. Blank, not "Unknown" and not the desk's name,
+    // for every listing that predates the column and for anything an import
+    // brought in — there is no honest answer for those and inventing one makes
+    // a guess indistinguishable from a record. Resolves through agentById so
+    // someone who has since left still reads as their name.
+    { key: 'createdBy', label: 'Added by', render: (p, store) => {
+      const who = p.createdBy ? store.agentById(p.createdBy) : null
+      return <span className="cell-txt">{who ? who.name : '—'}</span>
+    } },
   ],
 
   actions: [

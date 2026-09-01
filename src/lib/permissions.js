@@ -16,6 +16,14 @@ export function canEditListing(role) {
   return DESK_ROLES.includes(role)
 }
 
+// ADDING is not REWRITING — mirrors canAddListing() in
+// backend/src/lib/permissions.ts, which is what actually enforces it. An agent
+// standing in the flat can put it on the book; changing a live listing's price
+// or status stays with the desk, and `createdBy` records who added it.
+export function canAddListing(role) {
+  return !!role
+}
+
 // Deleting or merging a record destroys history, so it is the owner's call —
 // mirrors canDeleteRecord() in backend/src/lib/permissions.ts.
 export function canDeleteRecord(role) {

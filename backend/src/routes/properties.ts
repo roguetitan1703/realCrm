@@ -15,7 +15,7 @@ import {
   listProperties, getPropertyById, getPropertiesSummary,
   listProjects, getProject, getPropertyBuyers,
 } from '../services/store';
-import { canEditListing } from '../lib/permissions';
+import { canEditListing, canAddListing } from '../lib/permissions';
 
 export const propertiesRouter = Router();
 propertiesRouter.use(requireTenantAuth);
@@ -139,8 +139,10 @@ propertiesRouter.get('/:id', async (req: Request, res: Response) => {
  * POST /api/v1/properties
  */
 propertiesRouter.post('/', async (req: Request, res: Response) => {
-  if (!canEditListing(req.user?.role)) {
-    return res.status(403).json({ error: 'Forbidden', message: 'Only an owner or manager can add a listing.', code: 'ROLE_REQUIRED' });
+  // Adding, not editing — see canAddListing(). Every signed-in employee may put
+  // a listing on the book; changing a live one stays with the desk.
+  if (!canAddListing(req.user?.role)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Sign in to add a listing.', code: 'ROLE_REQUIRED' });
   }
   try {
     const body = req.body || {};

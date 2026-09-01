@@ -529,6 +529,14 @@ export async function migrateProperColumns(): Promise<void> {
     ['owner_phone', 'TEXT'], ['owner_email', 'TEXT'], ['floor', 'TEXT'],
     ['carpet_sqft', 'INT'], ['total_floors', 'INT'], ['age_years', 'INT'],
     ['price_amount', 'BIGINT'], ['extra', "JSONB DEFAULT '{}'::jsonb"], ['updated_at', 'TIMESTAMPTZ DEFAULT NOW()'],
+    // WHO PUT THIS LISTING ON THE BOOK. Deliberately NOT backfilled: every row
+    // that exists today arrived before anyone was recording it, and most of
+    // them arrived by import, so the only name available would be whoever ran
+    // the import rather than whoever sourced the flat. leadScope() already
+    // carries the scar from doing exactly that -- the manager who ran a 732-row
+    // import became `created_by` on all of them. NULL means nobody knows, which
+    // is the truth, and the screen says so rather than naming someone.
+    ['created_by', 'TEXT'],
   ];
   for (const [c, t] of propCols) {
     await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS ${c} ${t}`);
