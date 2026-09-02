@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { useServerList } from '../lib/serverList.js'
 import { useRecord } from '../lib/useRecord.js'
@@ -27,6 +27,14 @@ import { canEditListing, canAddListing } from '../lib/permissions.js'
 // Facing, Possession, Ownership and Transaction were dropped on the floor.
 // While the browser held the whole book the client filtered them locally and
 // nobody noticed; once the list became a server page they did nothing at all.
+// The filter fields the panel offers, which are also the keys nav.js mirrors
+// into the query string. `type` is API-only (a legacy column nothing filters on
+// from the UI), so the two lists are near-identical but not the same thing.
+export const PROP_FILTER_KEYS = [
+  'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction',
+]
+
 const API_FILTERS = [
   'status', 'deal', 'type', 'locality', 'project',
   'category', 'bhk', 'subtype', 'furnishing', 'facing',
@@ -90,19 +98,53 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
 
 function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }) {
   const { state } = store
-  const [flt, setFlt] = useState({})
+  // THE FILTER LIVES IN THE URL, exactly as the Leads bag does — see nav.js.
+  // It was a private useState here, so filtering the book and opening a listing
+  // threw the filter away (<Properties> swaps the list component out for the
+  // record, destroying its state) and so did a reload. Measured before the
+  // change: 20 rows filtered to 14, open a listing, come back to 20 with no
+  // chip and nothing in the URL saying what had happened.
+  //
+  // `q`, the page, the view and the selection stay local, same as Leads: a
+  // history entry per keystroke is not navigation.
+  const bag = sel.propFilters || {}
+  const sortKey = bag.sortKey || 'recent'
+  const sortDir = bag.sortDir || 'asc'
+  const flt = useMemo(() => {
+    const o = {}
+    for (const k of PROP_FILTER_KEYS) if (bag[k]?.length) o[k] = bag[k]
+    return o
+  }, [JSON.stringify(bag)])
+
   const [q, setQ] = useState('')
   const [view, setView] = useState('list')
-  const [sortKey, setSortKey] = useState('recent')
-  const [sortDir, setSortDir] = useState('asc')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+
   // Any change to what's being asked for invalidates whatever page you were on —
   // page 3 of "3BHK in Baner" is a different page 3 once the filter changes.
-  const setFltP = (v) => { setFlt(v); setPage(1) }
+  // REPLACE rather than push: back should leave the screen, not walk back
+  // through six filter states.
+  const patchBag = (patch) => {
+    setSel(s => {
+      const next = { ...(s.propFilters || {}), ...patch }
+      for (const k of Object.keys(next)) {
+        const v = next[k]
+        if (v === undefined || v === null || v === 'all' || (Array.isArray(v) && !v.length)) delete next[k]
+      }
+      return { ...s, propFilters: Object.keys(next).length ? next : undefined }
+    })
+    setPage(1)
+  }
+  // The panel hands back the WHOLE bag, so replace the filter keys wholesale
+  // and keep the sort, which lives in the same bag but is not a filter.
+  const setFltP = (v) => {
+    const cleared = Object.fromEntries(PROP_FILTER_KEYS.map(k => [k, undefined]))
+    patchBag({ ...cleared, ...(v || {}) })
+  }
   const setQP = (v) => { setQ(v); setPage(1) }
-  const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
-  const setSortDirP = (v) => { setSortDir(v); setPage(1) }
+  const setSortKeyP = (v) => patchBag({ sortKey: v })
+  const setSortDirP = (v) => patchBag({ sortDir: v })
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
 
   const open = (id) => go('properties', { propId: id, propOpen: true })

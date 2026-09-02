@@ -24,7 +24,7 @@ import { currentTenant } from './api.js'
 
 export const TAKEOVER_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey',
-  'leadFilters', 'ownerSeg', 'ownerStage',
+  'leadFilters', 'propFilters', 'ownerSeg', 'ownerStage',
 ]
 
 // Opening a record is not leaving the screen.
@@ -50,18 +50,38 @@ export const RECORD_KEYS = [
 const FILTER_SCALARS = ['seg', 'intent', 'stage', 'sortKey', 'sortDir']
 const FILTER_LISTS = ['source', 'locality', 'agent', 'flag']
 
-function readFilters(p) {
+// THE SAME BAG, FOR THE OTHER LIST SCREEN. Properties kept its filters in a
+// private useState — the state the paragraph above describes — so filtering the
+// book and opening a listing lost the filter, and so did a reload: measured at
+// 14 rows back to 20, with the chip gone and the URL never carrying it.
+//
+// Sharing the parameter names with the lead bag is safe because go() clears
+// every TAKEOVER key on any navigation that is not record-only, so two list
+// screens are never filtered at once. It also keeps the URL readable —
+// ?screen=properties&status=Available rather than a prefixed dialect.
+const PROP_SCALARS = ['sortKey', 'sortDir']
+const PROP_LISTS = [
+  'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction',
+]
+
+function readBag(p, scalars, lists) {
   const f = {}
-  for (const k of FILTER_SCALARS) { const v = p.get(k); if (v) f[k] = v }
-  for (const k of FILTER_LISTS) { const v = p.getAll(k); if (v.length) f[k] = v }
+  for (const k of scalars) { const v = p.get(k); if (v) f[k] = v }
+  for (const k of lists) { const v = p.getAll(k); if (v.length) f[k] = v }
   return Object.keys(f).length ? f : undefined
 }
 
-function writeFilters(p, f) {
+function writeBag(p, f, scalars, lists) {
   if (!f) return
-  for (const k of FILTER_SCALARS) if (f[k] && f[k] !== 'all') p.set(k, f[k])
-  for (const k of FILTER_LISTS) for (const v of (f[k] || [])) p.append(k, v)
+  for (const k of scalars) if (f[k] && f[k] !== 'all') p.set(k, f[k])
+  for (const k of lists) for (const v of (f[k] || [])) p.append(k, v)
 }
+
+const readFilters = (p) => readBag(p, FILTER_SCALARS, FILTER_LISTS)
+const writeFilters = (p, f) => writeBag(p, f, FILTER_SCALARS, FILTER_LISTS)
+const readPropFilters = (p) => readBag(p, PROP_SCALARS, PROP_LISTS)
+const writePropFilters = (p, f) => writeBag(p, f, PROP_SCALARS, PROP_LISTS)
 
 /** Read screen + selection out of the current URL. */
 export function parseUrl(search = window.location.search) {
@@ -80,6 +100,7 @@ export function parseUrl(search = window.location.search) {
       propAdd: p.get('new') === 'property' || undefined,
       contactsTab: p.get('tab') || undefined,
       leadFilters: readFilters(p),
+      propFilters: readPropFilters(p),
     },
     // Not navigation, but they ride the same query string and must survive it.
     ws: p.get('ws') || null,
@@ -104,6 +125,7 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (sel.propAdd) p.set('new', 'property')
   if (sel.contactsTab) p.set('tab', sel.contactsTab)
   writeFilters(p, sel.leadFilters)
+  writePropFilters(p, sel.propFilters)
   const q = p.toString()
   return q ? `?${q}` : window.location.pathname
 }

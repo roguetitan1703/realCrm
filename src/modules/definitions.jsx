@@ -734,10 +734,12 @@ export const OWNERS_DEF = {
 // ---------------------------------------------------------------------------
 // PROPERTIES
 // ---------------------------------------------------------------------------
-// WHAT A LISTING CAN BE, in one place — the record's status control and the
-// list's both read it, so the two can never offer different words for the same
-// thing. Ordered the way a listing actually moves, not alphabetically.
-const PROPERTY_STATUSES = ['Available', 'Token Pending', 'Under Offer', 'Sold', 'Leased', 'Off-Market']
+// WHAT A LISTING CAN BE — from propertyFields.js, which is where this product's
+// property vocabulary lives. Writing the list out here made a second one that
+// was already wrong: it omitted Blocked, so the filter panel offered a status
+// the status control could not set, and a listing filtered into view could not
+// be moved out of it.
+const PROPERTY_STATUSES = STATUS.map(s => s.value)
 
 export const PROPERTIES_DEF = {
   id: 'properties',
