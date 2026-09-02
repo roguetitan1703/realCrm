@@ -456,25 +456,33 @@ function AttachPropModal({ store, leadId }) {
   const { data: page, loading } = useServerData(
     () => {
       if (!l) return Promise.resolve({ data: [] })
+      // ALL INVENTORY MEANS ALL INVENTORY.
+      //
+      // The lead's requirement narrowed this list in EVERY mode — deal always,
+      // and category even while browsing — so the tab that exists to attach
+      // something the requirement does not describe was still answering the
+      // requirement. On a rent lead every sale listing in the book was
+      // unreachable, including one the agent had just added and was hunting for
+      // by name; on a residential lead, every shop.
+      //
+      // The reasoning for keeping category was that a commercial requirement
+      // must never be answered with flats. That is a good rule for SUGGESTED,
+      // which is the tab making a claim about fit. It is the wrong rule for a
+      // person who has switched to All and is looking for a specific unit —
+      // they can see what they picked, and the requirement on file is often
+      // just wrong or out of date. Nothing derived from the lead narrows here.
+      //
+      // Search never narrows either: typing is the escape hatch and it searches
+      // everything, which is what its own comment above already promised.
       return api.listProperties({
         status: 'Available', limit: 50,
-        // DEAL NARROWS ONLY WHILE SUGGESTING. It was applied in every mode, so
-        // "All inventory" was not all inventory and neither was a search: on a
-        // rent lead every sale listing in the book was unreachable, including
-        // one the agent had just added and was hunting for by name. 110 of the
-        // demo desk's 359 leads are rent. The tab exists precisely to attach
-        // something the requirement does not describe, and a deal type is the
-        // most common thing a buyer turns out to be flexible about.
-        ...(suggesting ? { deal: known.deal } : {}),
         q: q.trim() || undefined,
-        // Category is the disqualifier and always narrows; locality and BHK are
-        // strong preferences. Subtype is deliberately NOT a filter — "penthouse"
-        // versus "apartment" is a preference people trade away, and filtering on
-        // it emptied the list. It still ranks, in fitReasons.
-        ...(suggesting ? { locality: known.locality, category: known.category, bhk: known.bhk } : {}),
-        // A commercial requirement must never be answered with flats, even when
-        // the agent is browsing everything.
-        ...(!suggesting && known.category ? { category: known.category } : {}),
+        // Subtype is deliberately NOT a filter even when suggesting —
+        // "penthouse" versus "apartment" is a preference people trade away, and
+        // filtering on it emptied the list. It still ranks, in fitReasons.
+        ...(suggesting
+          ? { deal: known.deal, locality: known.locality, category: known.category, bhk: known.bhk }
+          : {}),
       })
     },
     [leadId, known.deal, known.locality, known.category, known.bhk, suggesting, q.trim()],
