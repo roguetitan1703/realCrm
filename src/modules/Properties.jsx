@@ -79,9 +79,7 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
   // against that listing's author, or opening the add path would have handed
   // every agent an edit path with it.
   const editing = sel.propAdd && sel.propId
-  const mayEditThis = editing
-    ? canEditListing(store.state.role, store.state.activeAgentId, store.lookup('property', sel.propId))
-    : mayEditAny
+  const mayEditThis = mayEditAny
   if (sel.propAdd && (editing ? mayEditThis : mayAdd)) {
     return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} phone={phone} />
   }
@@ -246,10 +244,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
   // deep link, a notification, or page 40 of the list is no longer conditional
   // on the whole book being in memory.
   const { record: p, loading, error } = useRecord(store, 'property', sel.propId)
-  // Asked of THIS listing, not of the role alone: an agent may correct one they
-  // added themselves. Every Edit affordance on this page reads it, so a button
-  // the API would refuse is never drawn.
-  const mayEdit = canEditListing(store.state.role, store.state.activeAgentId, p)
+  const mayEdit = canEditListing(store.state.role)
   // The two things this page needs beyond the listing itself, each its own read:
   // the buyers it matches, and the other units in its project. Both used to be
   // array scans over collections held in memory for exactly this.

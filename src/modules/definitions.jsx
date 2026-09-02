@@ -734,6 +734,11 @@ export const OWNERS_DEF = {
 // ---------------------------------------------------------------------------
 // PROPERTIES
 // ---------------------------------------------------------------------------
+// WHAT A LISTING CAN BE, in one place — the record's status control and the
+// list's both read it, so the two can never offer different words for the same
+// thing. Ordered the way a listing actually moves, not alphabetically.
+const PROPERTY_STATUSES = ['Available', 'Token Pending', 'Under Offer', 'Sold', 'Leased', 'Off-Market']
+
 export const PROPERTIES_DEF = {
   id: 'properties',
   name: 'Properties',
@@ -762,7 +767,7 @@ export const PROPERTIES_DEF = {
     flat: true,
     // The real statuses, not a happy path. Off-Market was reachable only
     // through the exit button below and Leased could not be set at all.
-    stages: () => ['Available', 'Token Pending', 'Under Offer', 'Sold', 'Leased', 'Off-Market'],
+    stages: () => PROPERTY_STATUSES,
     current: (p) => p.status || 'Available',
     set: (store, p, status) => store.setPropStatus(p.id, status),
     // Desk always; an agent only on a listing they added. It rendered for
@@ -770,7 +775,7 @@ export const PROPERTIES_DEF = {
     // and got "only an owner or admin can do this", which is a control that
     // cannot fire. Off-Market is a status in the list above now, so the button
     // is not the only way to reach it.
-    canSet: (store, p) => canEditListing(store.state.role, store.state.activeAgentId, p),
+    canSet: (store) => canEditListing(store.state.role),
   },
 
   // `tower` and `unit` are here because "B-701" is how a broker refers to a
@@ -882,7 +887,19 @@ export const PROPERTIES_DEF = {
     { key: 'furnishing', label: 'Furnishing', render: (p) => (
       <span className="cell-txt">{labelOf(FURNISH, p.furnishType) || p.furnishing || '—'}</span>
     ) },
-    { key: 'status', label: 'Status', render: (p) => <StatusTag status={p.status} /> },
+    // TAPPABLE, like a lead's stage. This was a read-only StatusTag, so the one
+    // thing that changes about a listing day to day — it went under offer, it
+    // sold, take it off the market — could not be done from the list at all;
+    // you opened the record to change one word. Same control the Leads list
+    // uses, same popover, gated by the same rule the record page uses.
+    { key: 'status', label: 'Status', render: (p, store) => (
+      <StageCell
+        record={p} store={store} value={p.status} Tag={StatusTag}
+        stages={PROPERTY_STATUSES}
+        canSet={canEditListing(store.state.role)}
+        onSet={(status) => store.setPropStatus(p.id, status)}
+      />
+    ) },
     { key: 'quoted', label: 'Quoted', render: (p) => <Quoted q={quotedLine(p)} /> },
     // WHO PUT THIS ON THE BOOK. Blank, not "Unknown" and not the desk's name,
     // for every listing that predates the column and for anything an import

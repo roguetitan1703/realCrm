@@ -587,7 +587,19 @@ export function OwnerCell({ record, store, onAssign, canAssign }) {
  * one-field change. Read-only (a bare tag) for anyone `canSet` refuses,
  * matching the same gate the detail page's status dropdown already uses.
  */
-export function StageCell({ record, store, stages, canSet, onSet, onReject }) {
+/**
+ * ONE INLINE STATUS CONTROL, for whichever module is asking.
+ *
+ * It read `record.stage` throughout, which is the leads column — so the
+ * properties list had no way to use it and rendered a dead `StatusTag` instead:
+ * you could not change a listing's status without opening the record, while the
+ * lead beside it changed under one tap. `value` and `Tag` are what differ
+ * between the two modules; everything that makes this fiddly — the outside
+ * click, the popover edge measurement, the phone target — is the same problem
+ * twice and is not worth having twice.
+ */
+export function StageCell({ record, store, stages, canSet, onSet, onReject, value, Tag = StageTag }) {
+  const current = value !== undefined ? value : record.stage
   const [open, setOpen] = useState(false)
   // Which edge the menu hangs from. The popover is ~210px wide and was always
   // anchored left:0 to a button only as wide as its own label — so on a short
@@ -608,17 +620,17 @@ export function StageCell({ record, store, stages, canSet, onSet, onReject }) {
     // 210px is the popover's min-width; 12px keeps it off the viewport edge.
     setAlign(box.left + 210 + 12 > window.innerWidth ? 'right' : 'left')
   }, [open])
-  if (!canSet) return <StageTag stage={record.stage} />
+  if (!canSet) return <Tag stage={current} status={current} />
   return (
     <div className="stg-cell" ref={ref}>
       <button className={'stg-btn' + (open ? ' open' : '')} onClick={e => { e.stopPropagation(); setOpen(o => !o) }}>
-        <StageTag stage={record.stage} />
+        <Tag stage={current} status={current} />
         <Icon name="chevDown" size={12} className="stg-cv" />
       </button>
       {open && (
         <div className={'popover stg-pop' + (align === 'right' ? ' right' : '')} onClick={e => e.stopPropagation()}>
           {stages.map(s => (
-            <button key={s} className={'p-item' + (s === record.stage ? ' on' : '')} onClick={() => { onSet(s); setOpen(false) }}>
+            <button key={s} className={'p-item' + (s === current ? ' on' : '')} onClick={() => { onSet(s); setOpen(false) }}>
               {s}
             </button>
           ))}

@@ -14,19 +14,23 @@
 const DESK_ROLES = new Set(['owner', 'admin', 'manager', 'superadmin']);
 
 /**
- * CREATED grants authorship, exactly as it does on a lead — see
- * assertLeadWrite() below. An agent may correct a listing they put on the book
- * themselves; rewriting one somebody else sourced stays with the desk, because
- * that is the price and status buyers are already being quoted.
+ * EVERY EMPLOYEE MAINTAINS THE BOOK — the firm's decision, taken deliberately.
  *
- * `property` is optional so the callers that only ask the desk question still
- * can. Without it this is the old desk-only rule.
+ * This was desk-only, then desk-plus-author. The person who learns a flat has
+ * gone under offer is the agent who was showing it, and routing that through a
+ * manager left the book stale more often than it protected it. `created_by` is
+ * on every listing, so who changed what is answerable afterwards rather than
+ * prevented beforehand.
+ *
+ * The cost was stated and accepted: a mistyped price is live inventory quoted
+ * under the firm's name with no review step. The fix for that, if it is ever
+ * needed, is an approval trail on price — not closing the module again.
+ *
+ * Kept separate from canAddListing() on purpose: two questions that share an
+ * answer today, and changing one must not silently change the other.
  */
-export function canEditListing(role?: string | null, userId?: string | null, property?: any): boolean {
-  if (!!role && DESK_ROLES.has(role)) return true;
-  if (role !== 'agent' || !userId || !property) return false;
-  const author = property.created_by ?? property.createdBy ?? null;
-  return !!author && author === userId;
+export function canEditListing(role?: string | null): boolean {
+  return !!role;
 }
 
 /**

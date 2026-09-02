@@ -12,19 +12,24 @@
 
 const DESK_ROLES = ['admin', 'owner', 'manager']
 
-// CREATED IS WHAT GRANTS AUTHORSHIP — the same rule canEditLead() applies, and
-// for the same reason. A listing an agent put on the book themselves is theirs
-// to correct; they typed it, and refusing them the typo means it gets fixed by
-// a message to a manager or not at all. What stays desk-only is rewriting a
-// listing somebody ELSE sourced, where a wrong price goes out under the firm's
-// name to buyers already being quoted.
+// THE FIRM'S DECISION: every employee maintains the book.
 //
-// `property` is optional: called with the role alone this answers the desk
-// question, which is what the screens that have no record in hand still ask.
-export function canEditListing(role, userId, property) {
-  if (DESK_ROLES.includes(role)) return true
-  if (role !== 'agent' || !userId || !property) return false
-  return !!property.createdBy && property.createdBy === userId
+// This was desk-only, then desk-plus-author. Both were wrong for how this firm
+// works — the person who learns a flat has gone under offer is the agent who
+// was showing it, and routing that through a manager meant the book was stale
+// more often than it was protected. `created_by` is recorded on every listing,
+// so who changed what is answerable after the fact rather than prevented.
+//
+// The trade was stated and taken: an incorrect price is live inventory quoted
+// under the firm's name, with no review step. If that ever bites, the fix is an
+// approval trail on price specifically, not closing the whole module again.
+//
+// Still its own function rather than a call to canAddListing(). Adding and
+// rewriting are different questions that happen to share an answer today, and
+// the next person to change one should not silently change the other — the same
+// reason canLogActivity() exists below.
+export function canEditListing(role) {
+  return !!role
 }
 
 // ADDING is not REWRITING — mirrors canAddListing() in

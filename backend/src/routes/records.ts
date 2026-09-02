@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { requireTenantAuth } from '../middleware/auth';
 import {
   getLeads, getLeadById, createLead, updateLead, deleteLead,
-  getProperties, createProperty, updateProperty, deleteProperty, getPropertyById,
+  getProperties, createProperty, updateProperty, deleteProperty,
   getTimelineEvents
 } from '../services/store';
 import { canEditListing, canAddListing, canDeleteRecord } from '../lib/permissions';
@@ -157,18 +157,8 @@ const updateHandler = async (req: Request, res: Response) => {
   // Note this guards the RECORD, not the record's history — remarks, call logs
   // and visit logs go through /records/:id/actions/* and stay open to every
   // signed-in user.
-  if (moduleKey === 'properties') {
-    const existing = await getPropertyById(id);
-    if (!existing) {
-      return res.status(404).json({ error: 'Not Found', message: `Record ${id} not found.` });
-    }
-    if (!canEditListing(req.user?.role, req.user?.id, existing)) {
-      return res.status(403).json({
-        error: 'Forbidden',
-        message: 'Only the desk can change a listing somebody else added.',
-        code: 'ROLE_REQUIRED',
-      });
-    }
+  if (moduleKey === 'properties' && !canEditListing(req.user?.role)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Sign in to change a listing.', code: 'ROLE_REQUIRED' });
   }
 
   try {
