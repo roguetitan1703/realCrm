@@ -60,6 +60,17 @@ export default function Calendar({ store, go, topBar }) {
     return { lead: l, date, key: ymd(date), time: l.followUp.time, action: l.followUp.action, isVisit, overdue, agentId: l.agentId }
   }).filter(e => e.date)
 
+  // WHAT IS STILL AHEAD, soonest first.
+  //
+  // The panel below is headed "All upcoming appointments" and was handed
+  // `events` — every booked follow-up the desk holds, past ones included, in
+  // whatever order the API returned them. So an appointment from three weeks
+  // ago sat under the word upcoming, above one due tomorrow, and the count
+  // beside the heading was the size of the whole book rather than of the work
+  // ahead. `overdue` is the same expression the KPI and the row badge use, so
+  // a row cannot be late in one place and upcoming in another.
+  const upcoming = events.filter(e => !e.overdue).sort((a, b) => a.date - b.date)
+
   const byDay = {}
   events.forEach(e => { (byDay[e.key] = byDay[e.key] || []).push(e) })
   Object.values(byDay).forEach(list => list.sort((a, b) => (a.time > b.time ? 1 : -1)))
@@ -132,11 +143,11 @@ export default function Calendar({ store, go, topBar }) {
               ? (
                 <div className="cd-pad">
                   <div className="cd-empty cd-empty-bordered">No follow-ups scheduled on this specific day.</div>
-                  {events.length > 0 && (
+                  {upcoming.length > 0 && (
                     <div className="cd-upcoming">
-                      <div className="cd-upcoming-h">All upcoming appointments ({events.length})</div>
+                      <div className="cd-upcoming-h">All upcoming appointments ({upcoming.length})</div>
                       <div className="cd-list">
-                        {events.map(e => {
+                        {upcoming.map(e => {
                           const a = store.agentById(e.agentId)
                           return (
                             <button key={e.lead.id + e.key + e.time} className="cd-row" onClick={() => go('leads', { leadId: e.lead.id, leadOpen: true })}>
