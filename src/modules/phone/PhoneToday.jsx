@@ -49,6 +49,11 @@ function timeRank(t) {
 // dialling. Both are now full-height and separated.
 // How long since a person did anything on it. Days, not "3 hours ago" -- the
 // group exists because these have been sitting, and an hour is not sitting.
+// Whether Today shows the "Nothing booked" pile. Off for now; the read that
+// builds it is unchanged, so this is the only line between here and it coming
+// back.
+const SHOW_QUIET = false
+
 function quietFor(l) {
   const at = l.lastActivityAt || l.createdAt
   if (!at) return null
@@ -286,8 +291,13 @@ export default function PhoneToday({ store, me, go, topBar }) {
     // 200-row feed selected by arrival date -- which could not contain a lead
     // last touched five weeks ago, which is exactly the lead this group is for.
     // It is not collapsed to a BulkRow: on this desk it is the work.
-    { key: 'quiet', label: 'Nothing booked', rows: feed.quiet || [], count: c.quiet ?? 0,
-      quiet: true, nocap: true, filter: { seg: 'no_next_step' } },
+    // HIDDEN FOR NOW, at the user's request — not deleted. The group is the one
+    // most agents' day is actually made of (161 of bhumi's 217 open leads), and
+    // the server still computes and sends it, so putting it back is this line.
+    // Kept here rather than removed so the next person reads a decision instead
+    // of wondering why the feed carries a `quiet` array nothing renders.
+    ...(SHOW_QUIET ? [{ key: 'quiet', label: 'Nothing booked', rows: feed.quiet || [], count: c.quiet ?? 0,
+      quiet: true, nocap: true, filter: { seg: 'no_next_step' } }] : []),
     { key: 'upcoming', label: 'Upcoming', rows: upcoming, count: upcoming.length },
   ].filter(g => g.count > 0)
 

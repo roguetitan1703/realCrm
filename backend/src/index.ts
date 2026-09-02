@@ -107,7 +107,13 @@ app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1));
 // different origins, and an allowlist is one more thing that can silently break
 // a demo. Default cors() reflects the requested headers, so the custom
 // X-Tenant-ID header passes preflight without extra config.
-app.use(cors());
+// maxAge, because without it the browser re-asks permission constantly. A
+// preflight is a whole extra round trip to Mumbai before the real request, and
+// Chrome's default cache for one is FIVE SECONDS — so the waterfall is a 204
+// in front of very nearly every 200. Both custom headers this API needs
+// (Authorization, X-Tenant-ID) are what force the preflight in the first place,
+// and none of that answer changes for a day.
+app.use(cors({ maxAge: 86400 }));
 // `verify` keeps the raw bytes so a body that fails to parse is still readable
 // (see the ingest recovery below). It costs one string per request and is the
 // only way to see what a misconfigured provider actually sent.
