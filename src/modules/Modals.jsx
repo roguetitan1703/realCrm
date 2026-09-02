@@ -458,7 +458,14 @@ function AttachPropModal({ store, leadId }) {
       if (!l) return Promise.resolve({ data: [] })
       return api.listProperties({
         status: 'Available', limit: 50,
-        deal: known.deal,
+        // DEAL NARROWS ONLY WHILE SUGGESTING. It was applied in every mode, so
+        // "All inventory" was not all inventory and neither was a search: on a
+        // rent lead every sale listing in the book was unreachable, including
+        // one the agent had just added and was hunting for by name. 110 of the
+        // demo desk's 359 leads are rent. The tab exists precisely to attach
+        // something the requirement does not describe, and a deal type is the
+        // most common thing a buyer turns out to be flexible about.
+        ...(suggesting ? { deal: known.deal } : {}),
         q: q.trim() || undefined,
         // Category is the disqualifier and always narrows; locality and BHK are
         // strong preferences. Subtype is deliberately NOT a filter — "penthouse"

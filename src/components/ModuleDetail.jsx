@@ -360,7 +360,11 @@ const facts = def.headerFacts ? def.headerFacts(record, store).filter(Boolean) :
             {prog.note && prog.note(record, store) && (
               <span className="rh-prog-note">{prog.note(record, store)}</span>
             )}
-            {prog.exit && (!prog.exit.when || prog.exit.when(record, store)) && (
+            {/* Gated on canSet, like the control above it. An exit is the most
+                destructive thing on the record and it was drawn for everyone —
+                an agent pressed "Take off-market" and was told only an owner
+                may. A control that cannot fire is not a control. */}
+            {canSetProg && prog.exit && (!prog.exit.when || prog.exit.when(record, store)) && (
               // A real button, in the danger tone. This was muted grey text
               // that only turned red on hover, sitting beside a dropdown — so
               // the one irreversible action on the record read as a caption and

@@ -12,8 +12,19 @@
 
 const DESK_ROLES = ['admin', 'owner', 'manager']
 
-export function canEditListing(role) {
-  return DESK_ROLES.includes(role)
+// CREATED IS WHAT GRANTS AUTHORSHIP — the same rule canEditLead() applies, and
+// for the same reason. A listing an agent put on the book themselves is theirs
+// to correct; they typed it, and refusing them the typo means it gets fixed by
+// a message to a manager or not at all. What stays desk-only is rewriting a
+// listing somebody ELSE sourced, where a wrong price goes out under the firm's
+// name to buyers already being quoted.
+//
+// `property` is optional: called with the role alone this answers the desk
+// question, which is what the screens that have no record in hand still ask.
+export function canEditListing(role, userId, property) {
+  if (DESK_ROLES.includes(role)) return true
+  if (role !== 'agent' || !userId || !property) return false
+  return !!property.createdBy && property.createdBy === userId
 }
 
 // ADDING is not REWRITING — mirrors canAddListing() in

@@ -13,8 +13,20 @@
 
 const DESK_ROLES = new Set(['owner', 'admin', 'manager', 'superadmin']);
 
-export function canEditListing(role?: string | null): boolean {
-  return !!role && DESK_ROLES.has(role);
+/**
+ * CREATED grants authorship, exactly as it does on a lead — see
+ * assertLeadWrite() below. An agent may correct a listing they put on the book
+ * themselves; rewriting one somebody else sourced stays with the desk, because
+ * that is the price and status buyers are already being quoted.
+ *
+ * `property` is optional so the callers that only ask the desk question still
+ * can. Without it this is the old desk-only rule.
+ */
+export function canEditListing(role?: string | null, userId?: string | null, property?: any): boolean {
+  if (!!role && DESK_ROLES.has(role)) return true;
+  if (role !== 'agent' || !userId || !property) return false;
+  const author = property.created_by ?? property.createdBy ?? null;
+  return !!author && author === userId;
 }
 
 /**

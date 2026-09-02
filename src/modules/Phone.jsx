@@ -120,7 +120,12 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
       framed={framed}
       tabs={tabs}
       onRefresh={() => store.loadServerState?.()}
-      fab={<PhoneActions store={store} go={go} context={actionCtx} />}
+      // A FULL-SCREEN FORM IS NOT A SCREEN WITH A BUTTON ON IT.
+      // The property wizard fills the viewport and carries its own footer;
+      // the FAB floated over it, covering the form and offering "Add
+      // property" to someone already adding one. Anything that takes over
+      // the screen suppresses it.
+      fab={sel.propAdd ? null : <PhoneActions store={store} go={go} context={actionCtx} />}
       modals={<>{state.waState && <WaModal store={store} />}<Modals store={store} go={go} /></>}
     >
       {body}

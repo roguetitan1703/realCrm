@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { requireTenantAuth } from '../middleware/auth';
 import {
   getLeads, getLeadById, createLead, updateLead, deleteLead,
-  getProperties, createProperty, updateProperty, deleteProperty,
+  getProperties, createProperty, updateProperty, deleteProperty, getPropertyById,
   getTimelineEvents
 } from '../services/store';
 import { canEditListing, canAddListing, canDeleteRecord } from '../lib/permissions';
@@ -151,11 +151,24 @@ const updateHandler = async (req: Request, res: Response) => {
   const { moduleKey, id } = req.params;
   const updates = req.body;
 
-  // A listing's facts are desk-owned. Note this guards the RECORD, not the
-  // record's history — remarks, call logs and visit logs go through
-  // /records/:id/actions/* and stay open to every signed-in user.
-  if (moduleKey === 'properties' && !canEditListing(req.user?.role)) {
-    return res.status(403).json({ error: 'Forbidden', message: 'Only an owner or manager can change a listing.', code: 'ROLE_REQUIRED' });
+  // A listing somebody ELSE sourced is desk-owned; one this agent added is
+  // theirs to correct. That needs the row, because authorship is a fact about
+  // the record rather than about the role — same shape as assertLeadWrite().
+  // Note this guards the RECORD, not the record's history — remarks, call logs
+  // and visit logs go through /records/:id/actions/* and stay open to every
+  // signed-in user.
+  if (moduleKey === 'properties') {
+    const existing = await getPropertyById(id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Not Found', message: `Record ${id} not found.` });
+    }
+    if (!canEditListing(req.user?.role, req.user?.id, existing)) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Only the desk can change a listing somebody else added.',
+        code: 'ROLE_REQUIRED',
+      });
+    }
   }
 
   try {

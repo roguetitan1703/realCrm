@@ -67,19 +67,27 @@ function usePropertiesSummary(dataAsOf) {
  * list.
  */
 export default function Properties({ store, go, sel, setSel, topBar, phone }) {
-  const mayEdit = canEditListing(store.state.role)
-  // Adding is open to every employee; rewriting a live listing is not. The
-  // wizard serves BOTH — openEdit() reopens it with the record's own id — so
-  // the rule depends on which one this is. A new listing follows mayAdd; the
-  // same screen carrying a propId is an edit and stays desk-only, or opening
-  // the add path would have handed every agent an edit path with it.
+  // THE DESK QUESTION, asked without a record in hand: may this role edit
+  // listings in general. Enough for the list toolbar; NOT enough for a specific
+  // listing, because an agent may edit the ones they added — see
+  // canEditListing(). Anything holding a record asks again with it.
+  const mayEditAny = canEditListing(store.state.role)
   const mayAdd = canAddListing(store.state.role)
-  if (sel.propAdd && (sel.propId ? mayEdit : mayAdd)) {
-    return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} />
+  // The wizard serves BOTH adding and editing — openEdit() reopens it with the
+  // record's own id — so the rule depends on which one this is. A new listing
+  // follows mayAdd; the same screen carrying a propId is an edit and is judged
+  // against that listing's author, or opening the add path would have handed
+  // every agent an edit path with it.
+  const editing = sel.propAdd && sel.propId
+  const mayEditThis = editing
+    ? canEditListing(store.state.role, store.state.activeAgentId, store.lookup('property', sel.propId))
+    : mayEditAny
+  if (sel.propAdd && (editing ? mayEditThis : mayAdd)) {
+    return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} phone={phone} />
   }
-  if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} mayEdit={mayEdit} phone={phone} />
+  if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} />
   if (sel.projOpen && sel.projKey) return <ProjectDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
-  return <PropertyList store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} mayEdit={mayEdit} mayAdd={mayAdd} />
+  return <PropertyList store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} mayEdit={mayEditAny} mayAdd={mayAdd} />
 }
 
 function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }) {
@@ -232,12 +240,16 @@ function PropTable({ def, list, store, onOpen }) {
 // ---------------------------------------------------------------------------
 // PropertyDetail — thin wrapper: supplies the property's UNIQUE sections to the
 // standard ModuleDetail. Field viewing/editing + action rail are standardized.
-function PropertyDetail({ store, go, sel, setSel, topBar, mayEdit, phone }) {
+function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
   const [gallery, setGallery] = useState(null)
   // Fetched on its own when we don't already hold it — a listing opened from a
   // deep link, a notification, or page 40 of the list is no longer conditional
   // on the whole book being in memory.
   const { record: p, loading, error } = useRecord(store, 'property', sel.propId)
+  // Asked of THIS listing, not of the role alone: an agent may correct one they
+  // added themselves. Every Edit affordance on this page reads it, so a button
+  // the API would refuse is never drawn.
+  const mayEdit = canEditListing(store.state.role, store.state.activeAgentId, p)
   // The two things this page needs beyond the listing itself, each its own read:
   // the buyers it matches, and the other units in its project. Both used to be
   // array scans over collections held in memory for exactly this.

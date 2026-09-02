@@ -369,7 +369,7 @@ function MediaPicker({ media = [], firmName, onChange, onError }) {
   )
 }
 
-export default function PropertyWizard({ store, go, sel, topBar }) {
+export default function PropertyWizard({ store, go, sel, topBar, phone }) {
   const editing = store.lookup('property', sel?.propId)
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
@@ -838,7 +838,12 @@ export default function PropertyWizard({ store, go, sel, topBar }) {
                 {/* Savable from step ② onward — ①+② are what matching reads,
                     so there is no reason to hold the listing hostage to
                     furnishing details the broker doesn't have yet. */}
-                {step >= 1 && !editing && (
+                {/* Not on a phone. It is a desk affordance for typing a
+                    builder's sheet in one sitting; an agent standing in a flat
+                    is adding that flat. Three actions do not fit a phone
+                    footer, and the one that would have been squeezed out is
+                    the primary. */}
+                {step >= 1 && !editing && !phone && (
                   <Button variant="ghost" disabled={saving || missing.length > 0} onClick={() => save(true)}>
                     Save &amp; add another
                   </Button>
@@ -850,7 +855,10 @@ export default function PropertyWizard({ store, go, sel, topBar }) {
                 )}
                 {step < STEPS.length - 1 && (
                   <Button variant={step === 0 ? 'primary' : 'secondary'} onClick={() => setStep(s => s + 1)}>
-                    Next: {STEPS[step + 1].label}
+                    {/* The step's name is already on the rail above, and
+                        "Next: Location & pricing" is wider than a phone's half
+                        of the footer. */}
+                    {phone ? 'Next' : `Next: ${STEPS[step + 1].label}`}
                   </Button>
                 )}
               </div>

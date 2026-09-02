@@ -30,7 +30,7 @@ import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
 import { OWNER_STATUSES } from '../data/ownerStatus.js'
 
-import { canAssignLead, canEditLead, canUpdateLeadStatus } from '../lib/permissions.js'
+import { canAssignLead, canEditLead, canUpdateLeadStatus, canEditListing } from '../lib/permissions.js'
 import { api } from '../lib/api.js'
 import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
@@ -753,11 +753,24 @@ export const PROPERTIES_DEF = {
 
   // A listing moves through a sale/lease lifecycle. Rendered as the same stepper.
   progression: {
-    stages: () => ['Available', 'Token Pending', 'Under Offer', 'Sold'],
-    current: (p) => ['Available', 'Token Pending', 'Under Offer'].includes(p.status) ? p.status : (['Sold', 'Leased', 'Closed'].includes(p.status) ? 'Sold' : 'Available'),
+    // FLAT, like a lead's. These do not happen in order -- a listing goes
+    // Available to Off-Market and back, and Leased is not a later Sold -- so
+    // drawing them as a walkable track implied a funnel that does not exist and
+    // made the common change (set the status) the hard one. It is the same
+    // dropdown the Leads record uses, on the web desk and the phone both, since
+    // ModuleDetail renders one control for every module.
+    flat: true,
+    // The real statuses, not a happy path. Off-Market was reachable only
+    // through the exit button below and Leased could not be set at all.
+    stages: () => ['Available', 'Token Pending', 'Under Offer', 'Sold', 'Leased', 'Off-Market'],
+    current: (p) => p.status || 'Available',
     set: (store, p, status) => store.setPropStatus(p.id, status),
-    exit: { label: 'Take off-market', when: (p) => p.status !== 'Off-Market',
-      run: (store, p) => store.setPropStatus(p.id, 'Off-Market') },
+    // Desk always; an agent only on a listing they added. It rendered for
+    // everyone and the server refused it -- an agent pressed Take off-market
+    // and got "only an owner or admin can do this", which is a control that
+    // cannot fire. Off-Market is a status in the list above now, so the button
+    // is not the only way to reach it.
+    canSet: (store, p) => canEditListing(store.state.role, store.state.activeAgentId, p),
   },
 
   // `tower` and `unit` are here because "B-701" is how a broker refers to a

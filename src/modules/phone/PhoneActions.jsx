@@ -44,8 +44,10 @@ export default function PhoneActions({ store, go, context = {} }) {
     if (record) {
       const { quick, manage } = buildActionTiers(def, store, record, context.actionCtx || {})
       actions = [...quick, ...manage]
-      // Listing facts are desk-owned; an agent keeps everything that appends.
-      if (!isLead && !canEditListing(role)) {
+      // Listing facts are desk-owned unless this agent added the listing —
+      // asked of the record, not of the role. An agent keeps everything that
+      // appends either way.
+      if (!isLead && !canEditListing(role, store.state.activeAgentId, record)) {
         actions = actions.filter(a => !EDITS_A_LISTING.has(a.id))
       }
       // Destroying history is the owner's call, on either module.

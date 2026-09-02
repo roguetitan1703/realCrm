@@ -15,7 +15,7 @@ import {
   listProperties, getPropertyById, getPropertiesSummary,
   listProjects, getProject, getPropertyBuyers,
 } from '../services/store';
-import { canEditListing, canAddListing } from '../lib/permissions';
+import { canAddListing } from '../lib/permissions';
 
 export const propertiesRouter = Router();
 propertiesRouter.use(requireTenantAuth);
