@@ -353,6 +353,22 @@ export async function initSchema(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS ${sql('idx_' + t + '_tenant')} ON ${sql(t)} (tenant_id);`;
     }
 
+    // THE RECORD'S OWN EVENTS, reachable without reading the tenant's.
+    //
+    // lastPersonActivity() is a correlated subquery — "when did a person last
+    // touch this lead" — and it is everywhere: the going-cold pile, the desk
+    // summary's four cold counts, the leads list's default sort, Today's quiet
+    // group, both idle sweeps. With only a tenant_id index, `record_id` fell
+    // into the FILTER, so each lead scanned that tenant's WHOLE timeline:
+    // measured on the dev copy at 359 loops, 2,066 rows discarded per loop,
+    // 24,053 buffer hits and 166ms for ONE count, on a table of 2,621 rows.
+    // It grows with the square of a desk's history, and bhumi's is far larger.
+    //
+    // timestamp in the index makes the max() an index-only scan rather than a
+    // heap lookup per match.
+    await sql`CREATE INDEX IF NOT EXISTS idx_crm_timeline_record
+              ON crm_timeline_events (tenant_id, record_id, timestamp DESC);`;
+
     // Widen the singleton config tables (settings / integrations / routing) from
     // ONE global row to one row PER TENANT. They were built single-workspace with
     // a scalar primary key (key, or id=1) that physically allowed only one row —

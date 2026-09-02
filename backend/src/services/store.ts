@@ -1449,8 +1449,23 @@ export async function getDeskSummary(): Promise<any> {
   // The firm's midnight, not Postgres's. "Calls logged today" counted from
   // 05:30 IST, so an agent who worked the phone before breakfast showed 0.
   const today = dayStart(cfg.timezone);
-  const [totals, byStage, bySource, perAgent, perAgentStage, props, owners, perAgentCalls, perAgentLeadCalls, perAgentVisits, perAgentToday] = await Promise.all([
-    sql`SELECT count(*)::int AS total,
+  // ONE ROUND TRIP, NOT ELEVEN.
+  //
+  // Same shape getBootstrap() carried: eleven queries in a Promise.all, which
+  // reads as parallel and is not. postgres.js gives each one its own
+  // connection, so the dashboard's first paint demanded eleven of them from a
+  // pool of four -- three waves -- and idle_timeout closes sockets after 20s,
+  // so a quiet desk pays to OPEN them. Measured against the dev database, where
+  // one warm query costs ~139ms because the API is in Mumbai and the database
+  // is in Tokyo: this endpoint took 2085ms, about fifteen sequential round
+  // trips, and it is the slowest thing on the dashboard.
+  //
+  // None of the eleven depended on another and every one is unchanged below --
+  // they are the same statements, moved into CTEs of one query. The rows come
+  // back as json so the destructuring beneath is exactly what it was.
+  const [deskRow] = await sql`
+    WITH
+    totals AS (SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
                count(*) FILTER (WHERE ${FOLLOWUP_OVERDUE})::int AS overdue,
                count(*) FILTER (WHERE ${OPEN} AND follow_up IS NOT NULL)::int AS with_follow_up,
@@ -1465,15 +1480,12 @@ export async function getDeskSummary(): Promise<any> {
                count(*) FILTER (WHERE ${S.going_cold} AND ${lastPersonActivity()}
                                       >= now() - ((${cfg.coldDays} + 1)::text || ' days')::interval)::int AS cold_today,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned
-          FROM crm_leads WHERE tenant_id = ${t} AND ${mine}`,
-    sql`SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
-         WHERE tenant_id = ${t} AND ${mine} GROUP BY 1`,
-    sql`SELECT coalesce(source, 'Website') AS k, count(*)::int AS n FROM crm_leads
-         WHERE tenant_id = ${t} AND ${mine} GROUP BY 1`,
-    // THE MANAGER'S ROW. Every column here is the same expression as the pill
-    // it opens, so a cell and the list behind it cannot disagree -- and every
-    // one of them is something the manager can say to that agent today.
-    sql`SELECT agent_id AS k,
+          FROM crm_leads WHERE tenant_id = ${t} AND ${mine}),
+    by_stage AS (SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
+         WHERE tenant_id = ${t} AND ${mine} GROUP BY 1),
+    by_source AS (SELECT coalesce(source, 'Website') AS k, count(*)::int AS n FROM crm_leads
+         WHERE tenant_id = ${t} AND ${mine} GROUP BY 1),
+    per_agent AS (SELECT agent_id AS k,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
                count(*) FILTER (WHERE ${FOLLOWUP_OVERDUE})::int AS overdue,
                count(*) FILTER (WHERE ${S.never_contacted} AND ${OPEN})::int AS never_contacted,
@@ -1483,60 +1495,61 @@ export async function getDeskSummary(): Promise<any> {
                                       >= now() - ((${cfg.coldDays} + 1)::text || ' days')::interval)::int AS cold_today,
                count(*) FILTER (WHERE stage = ${WON_STATUS})::int AS won,
                count(*)::int AS total
-          FROM crm_leads WHERE tenant_id = ${t} AND ${mine} AND agent_id IS NOT NULL GROUP BY 1`,
-    // Per-agent stage breakdown. Which stages count as "contacted" or "visited"
-    // depends on the firm's own configured stage order, which lives in settings
-    // on the client — so the counts come back per stage and the client applies
-    // its own meaning rather than this query hardcoding stage names.
-    sql`SELECT agent_id AS a, coalesce(stage, 'New') AS s, count(*)::int AS n
-          FROM crm_leads WHERE tenant_id = ${t} AND ${mine} AND agent_id IS NOT NULL GROUP BY 1, 2`,
-    sql`SELECT count(*)::int AS total,
+          FROM crm_leads WHERE tenant_id = ${t} AND ${mine} AND agent_id IS NOT NULL GROUP BY 1),
+    per_agent_stage AS (SELECT agent_id AS a, coalesce(stage, 'New') AS s, count(*)::int AS n
+          FROM crm_leads WHERE tenant_id = ${t} AND ${mine} AND agent_id IS NOT NULL GROUP BY 1, 2),
+    props AS (SELECT count(*)::int AS total,
                count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available
-          FROM crm_properties WHERE tenant_id = ${t}`,
-    // The Contacts directory's "Listing owners" count — distinct people named
-    // on the listings this firm holds. NOT crm_owners: that is the cold-calling
-    // queue, it has its own top-level screen and its own counts, and pointing
-    // this at it made the directory's subnav claim 732 rows it does not show.
-    sql`SELECT count(DISTINCT owner_name)::int AS n FROM crm_properties
-         WHERE tenant_id = ${t} AND coalesce(owner_name, '') <> ''`,
-    // Per-agent CALLING throughput. The roster used to derive "contacted" from
-    // the lead stage order — everything past index 0 — which is a guess, not a
-    // measurement, and it said nothing at all about the outbound half of the
-    // day. These are counted, not inferred: rows carried, rows actually
-    // dialled, dialled today, and how many said yes.
-    sql`SELECT agent_id AS k,
+          FROM crm_properties WHERE tenant_id = ${t}),
+    owners AS (SELECT count(DISTINCT owner_name)::int AS n FROM crm_properties
+         WHERE tenant_id = ${t} AND coalesce(owner_name, '') <> ''),
+    per_agent_calls AS (SELECT agent_id AS k,
                count(*)::int AS owners,
                count(*) FILTER (WHERE last_call_at IS NOT NULL)::int AS called,
                count(*) FILTER (WHERE last_call_at >= ${today})::int AS called_today,
                count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
                count(*) FILTER (WHERE callback_at IS NOT NULL AND callback_at < NOW())::int AS late
-          FROM crm_owners WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1`,
-    // Per-agent LEAD outreach (30d) and proven site visits. Here rather than in
-    // getAgentPerformance because the Team page called that endpoint once PER
-    // AGENT on mount — nine requests for nine integers, on a screen this summary
-    // was already fetching. One query, and the dashboard roster and the Team
-    // roster now read the same numbers instead of each deriving their own.
-    sql`SELECT author AS k, count(*)::int AS calls
+          FROM crm_owners WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1),
+    per_agent_lead_calls AS (SELECT author AS k, count(*)::int AS calls
           FROM crm_timeline_events
          WHERE tenant_id = ${t} AND type = 'call' AND author IS NOT NULL
            AND timestamp >= now() - interval '30 days'
-         GROUP BY 1`,
-    sql`SELECT agent_id AS k, count(*)::int AS visits
+         GROUP BY 1),
+    per_agent_visits AS (SELECT agent_id AS k, count(*)::int AS visits
           FROM activities
          WHERE tenant_id = ${t} AND type = 'site_visit' AND agent_id IS NOT NULL
            AND at >= now() - interval '30 days'
-         GROUP BY 1`,
-    // ACTIONS TAKEN TODAY, per person. The desk logs 37-162 person-authored
-    // events a day and no screen showed a single one of them, so a manager
-    // could not tell a quiet day from a busy one. `author` holds the agent id
-    // on every tenant measured; 'System' is excluded by the same guard the
-    // going-cold pile uses, or lead creation would count as work.
-    sql`SELECT author AS k, count(*)::int AS n
+         GROUP BY 1),
+    per_agent_today AS (SELECT author AS k, count(*)::int AS n
           FROM crm_timeline_events
          WHERE tenant_id = ${t} AND coalesce(author, 'System') <> 'System'
            AND timestamp >= ${today}
-         GROUP BY 1`,
-  ]);
+         GROUP BY 1)
+    SELECT
+      (SELECT row_to_json(x) FROM totals x) AS totals,
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM by_stage x) AS by_stage,
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM by_source x) AS by_source,
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM per_agent x) AS per_agent,
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM per_agent_stage x) AS per_agent_stage,
+      (SELECT row_to_json(x) FROM props x) AS props,
+      (SELECT row_to_json(x) FROM owners x) AS owners,
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM per_agent_calls x) AS per_agent_calls,
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM per_agent_lead_calls x) AS per_agent_lead_calls,
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM per_agent_visits x) AS per_agent_visits,
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM per_agent_today x) AS per_agent_today
+  `;
+  const totals: any[] = deskRow?.totals ? [deskRow.totals] : [];
+  const byStage: any[] = deskRow?.by_stage || [];
+  const bySource: any[] = deskRow?.by_source || [];
+  const perAgent: any[] = deskRow?.per_agent || [];
+  const perAgentStage: any[] = deskRow?.per_agent_stage || [];
+  const props: any[] = deskRow?.props ? [deskRow.props] : [];
+  const owners: any[] = deskRow?.owners ? [deskRow.owners] : [];
+  const perAgentCalls: any[] = deskRow?.per_agent_calls || [];
+  const perAgentLeadCalls: any[] = deskRow?.per_agent_lead_calls || [];
+  const perAgentVisits: any[] = deskRow?.per_agent_visits || [];
+  const perAgentToday: any[] = deskRow?.per_agent_today || [];
+
   const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
   const stagesByAgent = new Map<string, Record<string, number>>();
   for (const r of perAgentStage as any[]) {
@@ -3546,52 +3559,55 @@ export async function getLeadsSummary(opts: LeadFilterOpts = {}): Promise<any> {
     .map(([key, pred]) => sql`count(*) FILTER (WHERE ${pred})::int AS ${sql(key)}`)
     .reduce((acc, f) => sql`${acc}, ${f}`);
 
-  const [totals, segs, byStage, byIntent, bySource, byLocality, byAgent, people] = await Promise.all([
-    // `total` is what the LIST is showing — every filter applied, including the
-    // segment. It is the number the pager and the header both quote, so it has
-    // to come from the same clause the rows do.
-    sql`SELECT count(*)::int AS total FROM crm_leads WHERE ${whereAll()}`,
-    sql`SELECT count(*)::int AS scoped, ${segmentCounts} FROM crm_leads WHERE ${whereExcept('segment')}`,
-    sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
-        FROM crm_leads WHERE ${whereExcept('stage')} GROUP BY 1`,
-    // buy + rent no longer has to equal the total. What is left over is the
-    // leads whose intent nobody has established, and that gap is the point.
-    sql`SELECT count(*) FILTER (WHERE ${LEAD_SALE})::int AS buy,
+  // ONE ROUND TRIP, NOT EIGHT. Same shape as getBootstrap() and
+  // getDeskSummary(): a Promise.all over independent queries is not parallel
+  // when each one takes its own connection out of a small pool, and every
+  // connection is a cross-region handshake. Measured at 790ms, about six
+  // sequential round trips, on the request that renders the pills beside the
+  // leads list -- so the counts arrived well after the rows they label.
+  //
+  // Every statement below is unchanged; they are CTEs of one query now. The
+  // ordered facets keep their ORDER BY through a row_number(), because json_agg
+  // over a CTE does not otherwise promise to preserve it, and these lists are
+  // ordered busiest-first on purpose.
+  const [sumRow] = await sql`
+    WITH
+    totals AS (SELECT count(*)::int AS total FROM crm_leads WHERE ${whereAll()}),
+    segs AS (SELECT count(*)::int AS scoped, ${segmentCounts} FROM crm_leads WHERE ${whereExcept('segment')}),
+    by_stage AS (SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
+        FROM crm_leads WHERE ${whereExcept('stage')} GROUP BY 1),
+    by_intent AS (SELECT count(*) FILTER (WHERE ${LEAD_SALE})::int AS buy,
                count(*) FILTER (WHERE ${LEAD_RENT})::int AS rent
-        FROM crm_leads WHERE ${whereExcept('intent')}`,
-    // THE OPTION LISTS COME FROM THE DATA, ordered by how many leads are in
-    // each. Source read the firm's CONFIGURED sources, so a portal that has
-    // never sent anything was offerable and picked an empty list; Locality read
-    // whatever the browser happened to be holding. Both now answer "what is
-    // actually in here", under every filter but their own.
-    sql`SELECT lower(coalesce(source, '')) AS value, min(source) AS label, count(*)::int AS n
+        FROM crm_leads WHERE ${whereExcept('intent')}),
+    by_source AS (SELECT lower(coalesce(source, '')) AS value, min(source) AS label, count(*)::int AS n
         FROM crm_leads WHERE ${whereExcept('source')} AND coalesce(source, '') <> ''
-        GROUP BY 1 ORDER BY 3 DESC, 1`,
-    sql`SELECT ${LOCALITY_KEY} AS value, min(locality) AS label, count(*)::int AS n
+        GROUP BY 1 ORDER BY 3 DESC, 1),
+    by_locality AS (SELECT ${LOCALITY_KEY} AS value, min(locality) AS label, count(*)::int AS n
         FROM crm_leads WHERE ${whereExcept('locality')} AND ${LOCALITY_KEY} <> ''
-        GROUP BY 1 ORDER BY 3 DESC, 1`,
-    // Named here rather than in the browser: a lead can sit with someone who
-    // has since been deactivated, and `activeAgents()` would render that
-    // person's count against a blank label.
-    // NO JOIN, and the names looked up separately. Joining `users` in here put
-    // a second `tenant_id`, `name`, `phone` and `email` in scope, and every
-    // unqualified column in the shared predicates — the tenant clause, the
-    // agent's visibility scope, the search box — became ambiguous. The filters
-    // are shared with queries that must NOT be aliased (the segment predicates
-    // reference `crm_leads.id` by name), so the join is the thing that goes.
-    sql`SELECT coalesce(agent_id, '_none') AS value, count(*)::int AS n
-        FROM crm_leads WHERE ${whereExcept('agent')} GROUP BY 1 ORDER BY 2 DESC`,
-    // THE WHOLE ROSTER, not just the people who happen to hold a lead. Grouping
-    // only ever produces rows that exist, so an agent with nothing would vanish
-    // from the control entirely — while every other facet shows its empty
-    // options dimmed and carrying a zero. "Binod has none right now" is an
-    // answer; a name that is missing is a question about whether they were ever
-    // there. Named here rather than in the browser because a lead can sit with
-    // someone since deactivated, whom `activeAgents()` would render blank.
-    sql`SELECT a.id, a.name FROM crm_agents a
+        GROUP BY 1 ORDER BY 3 DESC, 1),
+    by_agent AS (SELECT coalesce(agent_id, '_none') AS value, count(*)::int AS n
+        FROM crm_leads WHERE ${whereExcept('agent')} GROUP BY 1 ORDER BY 2 DESC),
+    people AS (SELECT a.id, a.name FROM crm_agents a
         LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
-        WHERE a.tenant_id = ${t} AND u.deleted_at IS NULL ORDER BY a.name`,
-  ]);
+        WHERE a.tenant_id = ${t} AND u.deleted_at IS NULL ORDER BY a.name)
+    SELECT
+      (SELECT row_to_json(x) FROM totals x) AS totals,
+      (SELECT row_to_json(x) FROM segs x) AS segs,
+      (SELECT coalesce(json_agg(x ORDER BY x_ord), '[]'::json) FROM (SELECT x.*, row_number() OVER () AS x_ord FROM by_stage x) x) AS by_stage,
+      (SELECT row_to_json(x) FROM by_intent x) AS by_intent,
+      (SELECT coalesce(json_agg(x ORDER BY x_ord), '[]'::json) FROM (SELECT x.*, row_number() OVER () AS x_ord FROM by_source x) x) AS by_source,
+      (SELECT coalesce(json_agg(x ORDER BY x_ord), '[]'::json) FROM (SELECT x.*, row_number() OVER () AS x_ord FROM by_locality x) x) AS by_locality,
+      (SELECT coalesce(json_agg(x ORDER BY x_ord), '[]'::json) FROM (SELECT x.*, row_number() OVER () AS x_ord FROM by_agent x) x) AS by_agent,
+      (SELECT coalesce(json_agg(x ORDER BY x_ord), '[]'::json) FROM (SELECT x.*, row_number() OVER () AS x_ord FROM people x) x) AS people
+  `;
+  const totals: any[] = sumRow?.totals ? [sumRow.totals] : [];
+  const segs: any[] = sumRow?.segs ? [sumRow.segs] : [];
+  const byStage: any[] = sumRow?.by_stage || [];
+  const byIntent: any[] = sumRow?.by_intent ? [sumRow.by_intent] : [];
+  const bySource: any[] = sumRow?.by_source || [];
+  const byLocality: any[] = sumRow?.by_locality || [];
+  const byAgent: any[] = sumRow?.by_agent || [];
+  const people: any[] = sumRow?.people || [];
 
   const opts3 = (rows: any[]) => (rows as any[]).map(r => ({ value: r.value, label: r.label || r.value, count: r.n }));
   // Counted first, then laid over the roster, so the order is busiest-first and
