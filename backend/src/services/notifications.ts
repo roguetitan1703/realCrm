@@ -170,13 +170,12 @@ export async function markAllRead(userId: string): Promise<void> {
  *
  * lead_stale_sla is LIVE (see the block below for what it now reads).
  *
- * followup_due is still inert and is left that way on purpose: it reads
- * `follow_up->>'due_at'`, and nothing in the codebase writes that key — the
- * follow-up model stores {date, time, action}, where `date` is a display string
- * like 'Today'. Making it fire means deciding how to turn that into a real
- * timestamp, which is a change to the follow-up model rather than to this
- * query, and the desk already surfaces the same fact through `overdue` on
- * Today and the dashboard.
+ * followup_due is LIVE TOO, and this comment said the opposite for a while
+ * after it stopped being true — it was made to read `at` rather than the
+ * never-written `due_at`. Both it and site_visit_reminder are bounded at both
+ * ends: due already, and due within the last 24 hours. A comment claiming an
+ * alert is inert is worse than none, because the next person reads it instead
+ * of the query and ships a deploy expecting silence.
  */
 // It ran a multi-query scan across every tenant on EVERY /pulse — which every
 // open tab polls every few seconds — to find nothing. Whatever it eventually
@@ -228,6 +227,23 @@ export async function processScheduledNotifications(
           -- string instead of a timestamp.
           AND follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
           AND (follow_up->>'at')::timestamptz <= NOW()
+          -- A LOWER BOUND, for the reason lead_stale_sla below already has one:
+          -- the day this starts matching, it walks the desk's ENTIRE history.
+          --
+          -- It read due_at, a key nothing has ever written, so it has fired
+          -- zero times and NO lead anywhere carries due_notified. Deploying
+          -- the fix makes every past-due follow-up ever booked eligible at
+          -- once, 50 per tenant per scan, every one of them a push. That is the
+          -- lead_retry_due incident again: a once-per-lead gate that has never
+          -- been set is not a gate, it is a backlog with a fuse.
+          --
+          -- 24 hours, and it is not only a deploy guard. This alert says the
+          -- thing you booked is due NOW; one arriving three days late is worse
+          -- than none, because the agent acts on it — the same reasoning that
+          -- put a six-hour TTL on the push. Older than that is backlog, and the
+          -- desk already carries it as overdue on Today and the dashboard,
+          -- where nobody gets buzzed.
+          AND (follow_up->>'at')::timestamptz >= NOW() - interval '24 hours'
           AND (follow_up->>'due_notified') IS NULL
         LIMIT 50
       `;
