@@ -162,7 +162,12 @@ export function DeskTable({ rows, onCell }) {
   const cols = [
     { key: 'open', label: 'Open', seg: null },
     { key: 'neverContacted', label: 'Not contacted', seg: 'never_contacted', tone: 'alert' },
-    { key: 'noNextStep', label: 'Nothing booked', seg: 'no_next_step' },
+    // A NUMBER, NOT A LINK. The pile it opened has no pill on the Leads list
+    // any more, so clicking through would land a manager on filtered rows with
+    // nothing on screen naming why. The count is still worth showing — it is
+    // one of the two ways work stalls — so the column stays and the navigation
+    // goes, the same as Open and Worked today beside it.
+    { key: 'noNextStep', label: 'Nothing booked', seg: null },
     { key: 'coldToday', label: 'Went cold today', seg: 'going_cold', tone: 'alert' },
     { key: 'workedToday', label: 'Worked today', seg: null, up: true },
   ]

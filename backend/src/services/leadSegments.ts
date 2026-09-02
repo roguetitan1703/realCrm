@@ -193,11 +193,17 @@ export const SEGMENT_CATALOGUE: SegmentDef[] = [
   { key: 'month', label: 'This month', help: 'Arrived this month, before today.', surface: ['internal'] },
   { key: 'noanswer', label: 'No answer', help: 'Sitting at Call Not Received.', surface: ['internal'] },
   { key: 'followup', label: 'Has a next step', help: 'A follow-up is booked.', surface: ['internal'] },
-  // A PILL, not internal. Two things now link to it -- the phone's biggest
-  // group and the manager's per-agent table -- and an entry point that lands on
-  // rows with no control naming why is the same fault as one that filters
-  // nothing, wearing the opposite clothes.
-  { key: 'no_next_step', label: 'Nothing booked', help: 'Open, with nothing booked after it.', surface: ['pill'] },
+  // INTERNAL AGAIN, at the firm's request: no pill on the Leads list. The
+  // predicate stays — the desk table still counts with it, and ?seg=no_next_step
+  // still filters if something links to it — but nothing offers it as a pill.
+  //
+  // It was made a pill because two things linked to it and an entry point that
+  // lands on rows with no control naming why is the same fault as one that
+  // filters nothing. Both of those entry points went with it rather than being
+  // left pointing at a filter the screen can no longer show: Today's group is
+  // behind SHOW_QUIET, and the desk table's column is a number rather than a
+  // link. Put the pill back and those become live again.
+  { key: 'no_next_step', label: 'Nothing booked', help: 'Open, with nothing booked after it.', surface: ['internal'] },
 ];
 
 /**
