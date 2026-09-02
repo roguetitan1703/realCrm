@@ -285,8 +285,14 @@ Vercel — it is not a configuration you can fix after deploying.
 # locally, in .env.development:
 VITE_API_URL=https://api.dev.re.delpat.in
 
-npm run deploy:dev        # build:dev + vercel deploy --prebuilt
+npm run deploy:dev        # vercel builds it remotely, from the Preview env
 ```
+
+`--prebuilt` is deliberately NOT used: it deploys `.vercel/output`, which only
+`vercel build` produces, and this repo's build writes `dist`. The build happens
+on Vercel instead, so `VITE_API_URL` comes from the project's **Preview**
+environment variable rather than from a local file — one place, and a laptop
+with a stale `.env.development` cannot ship a preview pointed at production.
 
 Branch Tracking stays OFF; previews are deployed from the CLI on purpose, so a
 push never costs a build. Confirm the deployed preview's environment marker
