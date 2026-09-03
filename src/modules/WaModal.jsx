@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { WaCanvas } from '../components/chrome.jsx'
-import { Segmented } from '../components/primitives.jsx'
+import { CountBadge, QuickChip, Segmented } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { thumbTint } from '../lib/format.js'
 import { whatsappLink, matchesForLead } from '../lib/matching.js'
@@ -235,14 +235,14 @@ export default function WaModal({ store }) {
             {/* Only offered when there is one to add. A dead toggle on every
                 listing that has no description teaches people to ignore it. */}
             {p.description && wa.tone !== 'Short' && (
-              <button type="button"
-                className={'wa-desc' + (wa.withDescription ? ' on' : '')}
+              <QuickChip
+                on={!!wa.withDescription}
                 aria-pressed={!!wa.withDescription}
                 onClick={() => store.recompose({ withDescription: !wa.withDescription })}>
                 <Icon name={wa.withDescription ? 'check' : 'plus'} size={13} />
                 Description
-                <span className="wa-desc-n">{p.description.trim().length}</span>
-              </button>
+                <CountBadge n={p.description.trim().length} />
+              </QuickChip>
             )}
           </div>
         )}

@@ -2068,7 +2068,13 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .wa-chip-th{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.7);flex-shrink:0}
 .wa-chip button{border:none;background:none;color:var(--on-chrome-mut);cursor:pointer;display:flex;padding:0}
 .wa-chip button:hover{color:#fff}
-.wa-ctl{display:flex;align-items:center;gap:9px;padding:0 16px 12px}
+/* WRAPS. Three controls at 470px do not fit on one line, and the third was
+   pushed off the right edge of the sheet where it could not be read or
+   pressed. Same rule the phone already had. */
+.wa-ctl{display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:0 16px 12px}
+/* One row, one control height: .seg carries 3px of its own padding around a
+   7px button, .qchip does not. */
+.wa-ctl .qchip{min-height:37px}
 .wa-var{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#fff;border-radius:8px;padding:7px 9px;cursor:pointer;display:flex;flex-shrink:0}
 /* The outcome step. The sheet is dark chrome, so the shared chip and input
    styles — written for a linen page — are re-skinned here rather than a second
@@ -2408,6 +2414,11 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .app-mobile .wa-ctl{flex-wrap:wrap;padding:0 14px 10px}
 .app-mobile .wa-ctl .seg{flex:1;min-width:0;display:flex}
 .app-mobile .wa-ctl .seg button{flex:1;padding:7px 8px;font-size:12.5px;white-space:nowrap}
+/* Its own row on a phone. The two Segmented controls are flex:1 here, so a
+   third control on the line squeezed them until "Marathi" and "Short" were cut
+   off mid-word -- and the labels are the whole of what those controls say.
+   Full width also makes it a thumb target rather than a 158px pill. */
+.app-mobile .wa-ctl .qchip{flex-basis:100%;justify-content:center}
 .app-mobile .wa-var{padding:9px 11px}
 .app-mobile .wa-foot{flex-direction:column-reverse;gap:8px;padding:10px 14px calc(10px + env(safe-area-inset-bottom))}
 .app-mobile .wa-send,.app-mobile .wa-alt{flex:none;width:100%;padding:12px}
@@ -2829,16 +2840,11 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .rt-rule-t{font-size:13.5px;font-weight:600}
 .rt-rule-s{font-size:12px;color:var(--muted);margin-top:3px;max-width:60ch}
 
-/* Description opt-in in the WhatsApp composer. Shows the character count
-   because that is the decision — a 1,500-character paragraph is a different
-   message from a six-line one, and the sender should see which they're about
-   to send before they send it. */
-.wa-desc{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.18);background:transparent;
-  border-radius:999px;padding:5px 11px;font:inherit;font-size:12px;font-weight:600;color:var(--on-chrome-mut);cursor:pointer;
-  transition:background .12s,border-color .12s,color .12s}
-.wa-desc:hover{border-color:rgba(255,255,255,.34);color:#fff}
-.wa-desc.on{background:#15803D;border-color:#15803D;color:#fff}
-.wa-desc-n{font-variant-numeric:tabular-nums;opacity:.7;font-weight:500}
+/* The description opt-in used to be a hand-rolled pill here: its own border,
+   its own hover, its own hardcoded green and its own count badge, sitting in a
+   row beside two shared Segmented controls it matched nothing about. It is a
+   QuickChip and a CountBadge now — the on/off chip and the count this app
+   already has — so there is one of each, not two. */
 
 /* ── Install guide ──────────────────────────────────────────────────────────
    Reuses the phone sheet chrome (.sheet / .sheet-back). Fixed rather than
