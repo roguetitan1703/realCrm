@@ -1058,7 +1058,7 @@ export function StoreProvider({ children }) {
     // name at the bottom of the message.
     if (prop) {
       return generateMessage(prop, {
-        lang: wa.lang, tone: wa.tone, variant: wa.variant,
+        lang: wa.lang, tone: wa.tone,
         firmName: state.settings.firmName,
         // Off unless the sender asks. The description is the client's own copy
         // and can run to a page — see descriptionBlock() in matching.js.
@@ -1067,9 +1067,9 @@ export function StoreProvider({ children }) {
     }
     // No property attached is a normal case — a plain follow-up. Returning ''
     // here left the composer blank with a dead Send button.
-    // Language, tone and wording-variant belong to the WhatsApp feature, not to
-    // the property branch of it — a follow-up with no listing attached is still
-    // being sent in Marathi if that is what the agent chose.
+    // Language and tone belong to the WhatsApp feature, not to the property
+    // branch of it — a follow-up with no listing attached is still being sent in
+    // Marathi if that is what the agent chose.
     return lead ? followUpMessage(lead, state.settings.firmName, {
       whatsappIntroTemplate: state.settings.whatsappIntroTemplate,
     }) : ''
@@ -1079,7 +1079,7 @@ export function StoreProvider({ children }) {
     // The composer opens in the language this person writes in, not a fixed one.
     // An agent who works in Marathi shouldn't re-pick it on every message.
     const wa = {
-      propId, leadId, variant: 0,
+      propId, leadId,
       lang: getPref('msgLang', 'Hinglish'),
       tone: getPref('msgTone', 'Standard'),
     }

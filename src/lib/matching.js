@@ -144,7 +144,14 @@ export function describeProperty(p = {}, lang = 'English') {
   const areaVal = p.carpet || p.builtup || p.superBuiltup || p.plotArea
   const area = areaVal ? `${areaVal} ${unit}` : ''
 
-  const furnish = localLabel(lang, 'furnish', p.furnishType, labelOf(FURNISH, p.furnishType)) || p.furnishing || ''
+  // NORMALISE THE FALLBACK, like facing and possession on the next two lines.
+  // This read `furnishType` only and fell through to the raw `furnishing`
+  // column, which stores a TOKEN -- so a listing saved before furnishType
+  // existed sent a client the word "semi" instead of "Semi-furnished". The
+  // list column already does this (`p.furnishType ?? normaliseTo(...)`); the
+  // message a buyer receives was the one place that did not.
+  const furnishTok = p.furnishType ?? normaliseTo(FURNISH, p.furnishing)
+  const furnish = localLabel(lang, 'furnish', furnishTok, labelOf(FURNISH, furnishTok)) || p.furnishing || ''
   const facingTok = normaliseTo(FACING, p.facing)
   const facing = localLabel(lang, 'facing', facingTok, labelOf(FACING, facingTok)) || p.facing || ''
   const possTok = normaliseTo(POSSESSION, p.possession)
@@ -207,7 +214,7 @@ function descriptionBlock(p, t) {
   return ['', `${E.info} *${t.about}*`, text]
 }
 
-function buildSale(p, t, opener, closer, firmName, lang, opts) {
+function buildSale(p, t, closer, firmName, lang, opts) {
   const d = describeProperty(p, lang)
   const L = []
   // Headline carries what it IS and where. The society used to sit on its own
@@ -216,9 +223,10 @@ function buildSale(p, t, opener, closer, firmName, lang, opts) {
   push(L, d.society ? `*${d.society}*` : null)
   push(L, d.locality ? `${E.pin} ${d.locality}` : null)
   L.push('')
-  // The openers were three canned sentences that asserted nothing checkable
-  // ("prime location", "best price in the market") and pushed the actual facts
-  // a line further down. A buyer scanning ten forwards reads the specs.
+  // No opener sentence. Three canned ones used to sit here asserting nothing
+  // checkable ("prime location", "best price in the market") and pushing the
+  // actual facts a line further down. A buyer scanning ten forwards reads the
+  // specs.
   push(L, facts(L, d, p, t))
   push(L, bullet([
     d.bathrooms ? `${d.bathrooms} ${t.bath}` : null,
@@ -249,7 +257,7 @@ function buildSale(p, t, opener, closer, firmName, lang, opts) {
   return L.join('\n')
 }
 
-function buildRent(p, t, opener, closer, firmName, lang, opts) {
+function buildRent(p, t, closer, firmName, lang, opts) {
   const d = describeProperty(p, lang)
   const L = []
   L.push(`${E.home} *${d.headline}${d.furnish ? ' ' + d.furnish : ''} — ${t.onRent}*`)
@@ -326,12 +334,25 @@ function paperwork(p, t, lang) {
 const fmtArea = (v, unit) => `${v} ${unit === 'sqm' ? 'sq.m' : 'sq.ft'}`
 const push2 = (L, lines) => { if (lines) lines.forEach(x => L.push(x)) }
 
-// Each pack carries BOTH the sentence variants and the structural labels, so
-// switching language changes the whole message — not just the first and last line.
+// Each pack carries the closing line and the structural labels, so switching
+// language changes the whole message - not just the first and last line.
+//
+// IT USED TO CARRY THREE OF EACH, picked by `variant`, AND NOTHING EVER SET
+// `variant`. store.openWhatsApp() hardcodes 0 and no control changes it, so
+// every listing this desk has ever sent ended on the same sentence -- and that
+// sentence claimed "weekend slots open hain", a promise about the firm's own
+// diary that nobody here ever made. The three `openers` were deader still:
+// buildSale/buildRent stopped using the value and the strings stayed, reading
+// like a feature. Six unreachable strings per language is not a choice an
+// agent has; it is a choice nobody has.
+//
+// So: ONE closing line per language, and it asserts only what we can stand
+// behind. Wording the firm actually controls is a settings template -- the
+// third of its kind after the WhatsApp intro and the follow-up -- and belongs
+// with those, not scattered as constants nobody can reach.
 const PACKS = {
   Hinglish: {
-    openers: ['Bahut hi prime location mein available:', 'Shifting-ready flat, seedha owner se:', 'Genuine deal, market se best price:'],
-    closers: ['Site visit ke liye reply karein — weekend slots open hain.', 'Interested ho toh reply karein, aaj hi visit fix kar dete hain.', 'Details ya visit ke liye message karein, turant arrange ho jayega.'],
+    closer: 'Site visit ke liye reply karein.',
     forSale: 'For Sale', onRent: 'On Rent', carpet: 'carpet', floor: 'floor', floorSuffix: ord,
     facing: 'facing', yrsOld: 'yrs old', possession: 'possession', highlights: 'Highlights:',
     bath: 'bath', balcony: 'balcony',
@@ -340,8 +361,7 @@ const PACKS = {
     superBuiltUp: 'super built-up', of: 'of', about: 'Project ke baare mein', builtUp: 'built-up',  // vocab-ok: display prose
   },
   English: {
-    openers: ['Available in a prime location:', 'Move-in ready, directly from owner:', 'Genuine deal at the best market price:'],
-    closers: ['Reply to book a site visit — weekend slots open.', "Interested? Reply and we'll fix a visit today.", 'Message for details or a visit, arranged right away.'],
+    closer: 'Reply to book a site visit.',
     forSale: 'For Sale', onRent: 'On Rent', carpet: 'carpet', floor: 'floor', floorSuffix: ord,
     facing: 'facing', yrsOld: 'years old', possession: 'possession', highlights: 'Highlights:',
     bath: 'bath', balcony: 'balcony',
@@ -350,8 +370,7 @@ const PACKS = {
     superBuiltUp: 'super built-up', of: 'of', about: 'About the project', builtUp: 'built-up',  // vocab-ok: display prose
   },
   Marathi: {
-    openers: ['अतिशय उत्तम ठिकाणी उपलब्ध:', 'राहायला तयार फ्लॅट, थेट मालकाकडून:', 'प्रामाणिक व्यवहार, बाजारातील सर्वोत्तम किंमत:'],
-    closers: ['साइट व्हिजिटसाठी रिप्लाय करा — वीकेंड स्लॉट उपलब्ध.', 'इच्छुक असाल तर रिप्लाय करा, आजच व्हिजिट ठरवू.', 'अधिक माहिती किंवा व्हिजिटसाठी मेसेज करा.'],
+    closer: 'साइट व्हिजिटसाठी रिप्लाय करा.',
     forSale: 'विक्रीसाठी', onRent: 'भाड्याने', carpet: 'कार्पेट', floor: 'मजला', floorSuffix: () => 'वा',
     facing: 'दिशा', yrsOld: 'वर्षे जुने', possession: 'ताबा', highlights: 'ठळक वैशिष्ट्ये:',
     bath: 'बाथरूम', balcony: 'बाल्कनी',
@@ -400,13 +419,12 @@ export function generateMessage(rawProperty, opts = {}) {
   const property = shareSafeProperty(rawProperty)
   if (!property) return ''
   const firmName = opts.firmName || tenantFirm()
-  const lang = opts.lang || 'Hinglish', tone = opts.tone || 'Standard', variant = opts.variant || 0
+  const lang = opts.lang || 'Hinglish', tone = opts.tone || 'Standard'
   const pack = PACKS[lang] || PACKS.Hinglish
-  const i = ((variant % 3) + 3) % 3
-  const opener = pack.openers[i], closer = pack.closers[i]
+  const closer = pack.closer
   let msg = property.deal === 'rent'
-    ? buildRent(property, pack, opener, closer, firmName, lang, opts)
-    : buildSale(property, pack, opener, closer, firmName, lang, opts)
+    ? buildRent(property, pack, closer, firmName, lang, opts)
+    : buildSale(property, pack, closer, firmName, lang, opts)
   if (tone === 'Short') {
     // Identity, price, one call to action. The price line is found by its
     // marker rather than by an English prefix — the old version looked for
