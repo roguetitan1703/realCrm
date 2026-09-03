@@ -428,7 +428,7 @@ function facts(L, d, p, t) {
   push(L, bullet(areas, E.area))
   // Tower and floor, not the flat number — the tower is enough for a client to
   // picture where in the project it sits, and the door number is what lets
-  // them knock and deal direct (see OWNER_IDENTITY_FIELDS).
+  // them knock and deal direct (see NEVER_SHARED_FIELDS).
   return bullet([
     p.tower || null,
     d.floor ? `${d.floor}${t.floorSuffix(d.floor)} ${t.floor}${p.totalFloors ? ` ${t.of} ${p.totalFloors}` : ''}` : null,
@@ -539,28 +539,49 @@ export function whatsappLink(message, phone) {
   return digits ? `https://wa.me/${digits}?text=${text}` : `https://wa.me/?text=${text}`
 }
 
-// Fields that identify the owner. The shared listing must never carry them
-// (spec C: "owner is internal, never in the listing") — the property links to
-// an internal Owner contact, and that link is how the firm gets back to them.
-const OWNER_IDENTITY_FIELDS = [
+// EVERYTHING A CLIENT MUST NEVER RECEIVE, in one list.
+//
+// Three kinds, and they are all the same rule: this object gets handed to a
+// message template, so anything on it can end up in a buyer's chat.
+//
+//   1. Owner identity. Spec C — "owner is internal, never in the listing".
+//      The property links to an internal Owner contact, and that link is how
+//      the firm gets back to them.
+//   2. WHAT WE CHARGE. `consultingOption` / `consultingPercent` is the firm's
+//      brokerage: negotiated per client, usually mid-conversation, and never a
+//      number that goes out on a forward. It is not a fact about the flat.
+//   3. How to get in. Key location, and who put the row on the book.
+//
+// Removed rather than merely not-interpolated, because a template edited a
+// year from now cannot leak what is not in the object it was handed. That is
+// the whole point of the list; adding to it is cheaper than auditing every
+// line of every build function again.
+const NEVER_SHARED_FIELDS = [
+  // 1. Who owns it
   'owner', 'ownerPhone', 'ownerEmail',
   'owner_name', 'owner_phone', 'owner_email', 'ownerContactId',
   // The flat number identifies the exact door as surely as the owner's phone
   // number does. A shared listing that carries it lets a buyer knock and deal
   // direct — the tower and floor are enough for a client to picture the place.
   'unit', 'flat',
+  // 2. What we charge
+  'consultingOption', 'consultingPercent',
+  // 3. How to get in, and who is working it
+  'keyAccess', 'key_access', 'createdBy', 'created_by',
+  // The desk's own working record, if a caller ever hands us a fuller row than
+  // it meant to: remarks, the event history, and whether the listing is
+  // blocked or off-market are all things the firm says to itself.
+  'timeline', 'notes', 'remarks', 'tenancy', 'completeness',
 ]
 
 /**
- * Strip owner identity before a property is turned into anything a client
- * sees. Enforced by REMOVING the fields rather than by trusting every message
- * template not to interpolate them — a template edited a year from now cannot
- * leak what isn't in the object it was handed.
+ * The only way a property reaches a client-facing template. Every build
+ * function below is handed the result of this, never the row itself.
  */
 export function shareSafeProperty(property) {
   if (!property) return property
   const clean = { ...property }
-  for (const f of OWNER_IDENTITY_FIELDS) delete clean[f]
+  for (const f of NEVER_SHARED_FIELDS) delete clean[f]
   return clean
 }
 
