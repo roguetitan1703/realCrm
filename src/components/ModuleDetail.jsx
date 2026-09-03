@@ -278,7 +278,10 @@ const facts = def.headerFacts ? def.headerFacts(record, store).filter(Boolean) :
                   enquired twice cost the record its button row. Next to the
                   name it is what it means: a fact about this person. */}
               <div className="rh-title">
-                {title || record.name || record.society || def.singularName}
+                {/* A lead can arrive with no name -- portals send empty ones
+                    -- and the record header then read "Lead", which names
+                    nobody. The number is what we know about them. */}
+                {title || record.name || record.society || record.phone || def.singularName}
                 {def.titleBadge?.(record) || null}
               </div>
               {facts.length > 0 && <div className="rh-facts">{facts.map((f, i) => <span key={i}>{f}</span>)}</div>}

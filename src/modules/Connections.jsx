@@ -287,8 +287,13 @@ function Activity({ connectionId, refreshKey, store }) {
 // Field mapping
 // ---------------------------------------------------------------------------
 
+// `required` must agree with REQUIRED in backend/src/services/parser.ts -- it
+// is the same rule stated twice, and the mapper is where somebody finds out.
+// Name was marked required here and enforced there, and portals do send empty
+// names: every such enquiry was rejected outright. Only a number makes a lead
+// contactable, so only a number is required.
 const TARGETS = [
-  { key: 'name', label: 'Name', required: true },
+  { key: 'name', label: 'Name' },
   { key: 'phone', label: 'Phone', required: true },
   { key: 'email', label: 'Email' },
   // Unmapped, this silently defaults to Sale for every enquiry — map it

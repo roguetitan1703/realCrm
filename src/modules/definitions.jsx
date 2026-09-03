@@ -24,7 +24,8 @@ import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
+import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
+import { getPref } from '../lib/prefs.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -201,7 +202,7 @@ export const LEADS_DEF = {
   sortOptions: [
     { key: 'activity', label: 'Last activity', value: (l) => l.lastActivityAt || l.createdAt },
     { key: 'budget', label: 'Budget', value: (l) => budgetOf(l.req).max || 0 },
-    { key: 'name', label: 'Name', value: (l) => (l.name || '').toLowerCase() },
+    { key: 'name', label: 'Name', value: (l) => personLabel(l).toLowerCase() },
     { key: 'stage', label: 'Stage', value: (l, store) => (store.state.settings.stages || []).indexOf(l.stage) },
   ],
 
@@ -209,14 +210,16 @@ export const LEADS_DEF = {
     { key: 'name', label: 'Name', sortable: true, render: (l) => (
       <div>
         <div className="name">
-          {l.name}
+          {personLabel(l)}
           {/* CAME BACK, and how often. The phone card and the record header
               have carried this since the sessions existed; the desk's own list
               — the screen a manager works from — had no sign of it at all.
               Only above one: every lead has enquired once. */}
           {l.enquiryCount > 1 && <span className="prow-repeat">{l.enquiryCount}×</span>}
         </div>
-        <div className="sub mono-num">{l.phone}</div>
+        {/* Not twice. With no name on the lead the title above IS the phone
+            number, and this line repeated it under itself. */}
+        {l.name ? <div className="sub mono-num">{l.phone}</div> : null}
       </div>
     ) },
     { key: 'req', label: 'Requirement', render: (l) => reqShort(l.req) },
@@ -458,7 +461,7 @@ export const LEADS_DEF = {
               own on a 390px card — the same reason it sits beside the name on
               the record rather than in the facts strip. */}
           <span className="prow-name">
-            {l.name}
+            {personLabel(l)}
             {l.enquiryCount > 1 && <span className="prow-repeat">{l.enquiryCount}×</span>}
           </span>
           {/* WHAT is overdue, next to WHO it is about. This was a bare date on
@@ -510,7 +513,7 @@ export const LEADS_DEF = {
     return (
       <>
         <div className="rc-top">
-          <div className="rc-title">{l.name}</div>
+          <div className="rc-title">{personLabel(l)}</div>
           <StageCell
             record={l} store={store}
             stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
@@ -941,7 +944,15 @@ export const PROPERTIES_DEF = {
     // share flow sends, and only claims success once the write resolves.
     { id: 'copy', tier: 'manage', icon: 'copy', label: 'Copy listing details',
       run: (store, p) => {
-        const text = generateMessage(p, { firmName: store.state.settings.firmName })
+        // The agent's own language, the same preference the composer opens in.
+        // This passed none, so it defaulted to Hinglish: an agent who writes to
+        // clients in Marathi got a Marathi message from Share and a Hinglish
+        // one from Copy, for the same listing.
+        const text = generateMessage(p, {
+          firmName: store.state.settings.firmName,
+          lang: getPref('msgLang', 'Hinglish'),
+          tone: getPref('msgTone', 'Standard'),
+        })
         navigator.clipboard?.writeText(text)
           .then(() => store.toast('Listing details copied'))
           .catch(() => store.toast('Could not copy — your browser blocked it', 'warn'))

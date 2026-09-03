@@ -383,6 +383,25 @@ export function reqShort(req, { budget = true } = {}) {
   return parts.join(' · ') || 'General inquiry'
 }
 
+// WHAT TO CALL SOMEBODY WHO DID NOT GIVE A NAME.
+//
+// Portals do not all send one. A MagicBricks push carries phone, budget,
+// locality and the message and an EMPTY name field, and the parser used to
+// reject the whole enquiry over it - a real buyer with a real number, dropped.
+// It is accepted now, which means every screen that printed `lead.name` had a
+// blank where the person goes: a row with no title, unclickable-looking, and
+// nothing to search for.
+//
+// The phone number is what we actually know about them, so that is the label.
+// Never a made-up name like "Unknown Buyer" - nobody could then tell a lead
+// that gave no name from one actually called that.
+export function personLabel(p) {
+  if (!p) return '—'
+  const n = String(p.name || '').trim()
+  if (n) return n
+  return String(p.phone || '').trim() || '—'
+}
+
 export function initials(name) {
   if (!name) return '??';
   return String(name).trim().split(/\s+/).slice(0, 2).map(w => w?.[0] || '').join('').toUpperCase()

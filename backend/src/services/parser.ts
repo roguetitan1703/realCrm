@@ -232,8 +232,23 @@ const WRITABLE = new Set([
   'external_id',
 ]);
 
-/** A lead is worth creating only if it can be contacted. */
-const REQUIRED = ['name', 'phone'];
+/**
+ * A lead is worth creating only if it can be CONTACTED. That is the phone
+ * number, and only the phone number.
+ *
+ * Name was required too, and portals do not all send one. MagicBricks posts
+ * an empty name alongside a real number, a budget, a locality and the buyer's
+ * own message; every one of those enquiries was marked `failed` with "Payload
+ * is missing name" and never became a lead. A named nobody is not more
+ * reachable than a number, and the number is the thing an agent actually
+ * dials - so a missing name is a blank field on a real lead, not a reason to
+ * throw the person away.
+ *
+ * Nothing invents a name to fill the gap: absence is information, and a lead
+ * called "Unknown" is indistinguishable from one whose name is on record.
+ * `personLabel()` shows the phone number where a name would go.
+ */
+const REQUIRED = ['phone'];
 
 /**
  * Collapse the two historical spellings of the budget bounds onto the one the

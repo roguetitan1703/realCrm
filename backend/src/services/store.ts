@@ -1919,7 +1919,17 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
     agentId = await nextRoutedAgent();
   }
 
-  const name = leadData.name || 'New Inquiry';
+  // NO INVENTED NAME. This defaulted to 'New Inquiry', which is a fact about
+  // the payload dressed up as the person's name: it sorted under N, it was
+  // what an agent read before dialling, and it was indistinguishable from a
+  // name somebody actually gave. Portals do send empty names -- MagicBricks
+  // posts one alongside a real number -- and those enquiries are accepted now
+  // (see REQUIRED in services/parser.ts), so this default would have fired on
+  // every one of them. Null is the honest answer; `personLabel()` on the
+  // client shows the phone number where the name would go, and
+  // `isPlaceholderName('')` is already true, so a repeat push carrying the
+  // real name still upgrades it.
+  const name = leadData.name || null;
   // Null, not a placeholder number. This defaulted to '+910000000000', which
   // the screens read as "this lead has a phone" — so Call and WhatsApp rendered
   // and dialled it. A lead with no number shows no way to ring one.
@@ -2000,14 +2010,18 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   audit({
     tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'lead.create', target_type: 'lead', target_id: newId,
-    summary: `Lead "${name}" created (source: ${source})`, metadata: { after: created },
+    summary: `Lead "${name || phone || 'unnamed'}" created (source: ${source})`, metadata: { after: created },
     ip: ctx.ip, user_agent: ctx.userAgent,
   });
   // Alert the assigned agent, and give owners/managers team-wide visibility.
   const link = `?screen=leads&lead=${newId}`;
   // PUSH: speed-to-lead decides who wins the deal. A lead sitting unseen for
   // twenty minutes is usually a lead someone else has already called.
-  notify({ userId: agentId, type: 'lead_assigned', data: { name, locality, source }, link, push: true })
+  // The phone number stands in for a missing name, the same substitution the
+  // client makes -- otherwise an alert about a nameless enquiry reads
+  // "Mahalunge - via MagicBricks" and names nobody at all.
+  const notifName = name || phone || undefined;
+  notify({ userId: agentId, type: 'lead_assigned', data: { name: notifName, locality, source }, link, push: true })
     .catch(err => console.warn('[Notify] lead_assigned failed:', err?.message));
   // Name the agent, not their primary key. This read "routed to u_ms6oqbda",
   // which tells the person reading it nothing and looks broken besides.
@@ -2026,7 +2040,7 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // one is coming for it. That is an exception, not a routine arrival.
   if (!agentId) {
     notifyRoles(['owner', 'manager'], {
-      type: 'lead_unrouted', data: { name, source }, link, push: true,
+      type: 'lead_unrouted', data: { name: notifName, source }, link, push: true,
     }).catch(err => console.warn('[Notify] lead_unrouted failed:', err?.message));
   }
   return created;

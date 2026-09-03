@@ -559,7 +559,7 @@ export async function processInboxRow(
             await notify({
               userId: owner, type: 'lead_repeat',
               data: {
-                name: existing.name, source: integration.provider,
+                name: existing.name || existing.phone, source: integration.provider,
                 changed: conflicts.length,
                 previousStage: terminal ? existing.stage : null,
               },
