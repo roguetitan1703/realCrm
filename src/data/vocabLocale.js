@@ -40,6 +40,21 @@ export const LOCALE_LABELS = {
       freehold: 'फ्रीहोल्ड', leasehold: 'लीजहोल्ड',
       power_of_attorney: 'कुलमुखत्यारपत्र', cooperative: 'सहकारी सोसायटी',
     },
+    counted: {
+      fan: 'पंखा', light: 'लाइट', ac: 'एसी', wardrobe: 'कपाट',
+      tv: 'टीव्ही', bed: 'बेड', geyser: 'गीझर',
+    },
+    fixture: {
+      dining_table: 'डायनिंग टेबल', washing_machine: 'वॉशिंग मशीन',
+      cupboard: 'कपाट', sofa: 'सोफा', microwave: 'मायक्रोवेव्ह',
+      stove: 'शेगडी', fridge: 'फ्रिज', water_purifier: 'वॉटर प्युरिफायर',
+      gas_pipeline: 'गॅस पाइपलाईन', chimney: 'चिमनी',
+      modular_kitchen: 'मॉड्यूलर किचन',
+    },
+    bachelor: { both: 'दोघांसाठी खुले', men: 'फक्त पुरुष', women: 'फक्त महिला' },
+    // Lock-in and painting share a shape -- none / 1 month / 6 months / custom
+    // -- so they share one table rather than two copies of the same words.
+    span: { '1mo': '1 महिना', '6mo': '6 महिने', as_per_cost: 'खर्चाप्रमाणे' },
     transaction: { new: 'नवीन', resale: 'रीसेल' },
     tenant: { family: 'कुटुंब', bachelors: 'बॅचलर्स', company: 'कंपनी' },
     // The Marathi pack already prints "ताबा" as the label, so the VALUE must not
@@ -58,7 +73,7 @@ export const LOCALE_LABELS = {
 /**
  * The label for `token` in `lang`, falling back to the English label.
  * `group` is one of the keys above (subtype · furnish · facing · possession ·
- * amenity · ownership · transaction).
+ * amenity · ownership · transaction · tenant · bachelor · counted · fixture · span).
  */
 export function localLabel(lang, group, token, englishLabel) {
   if (!token) return englishLabel || ''

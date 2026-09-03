@@ -4,7 +4,8 @@ import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import {
   AREA_UNITS, BHK, COUNTED_ITEMS, FACING, FIXTURES, FURNISH, OWNERSHIP,
-  POSSESSION, SOCIETY_AMENITIES, SUBTYPES, TENANT_TYPES, TRANSACTION,
+  LOCKIN_OPTIONS, PAINTING_CHARGES, POSSESSION, SOCIETY_AMENITIES, SUBTYPES,
+  TENANT_TYPES, TRANSACTION, BACHELOR_PREF,
   labelOf, normaliseBhk, normaliseSubtype, normaliseTo,
 } from '../data/propertyFields.js'
 
@@ -174,7 +175,8 @@ export function describeProperty(p = {}, lang = 'English') {
   // Amenities are stored as tokens; a client should read "Gym, Lift, Power
   // Backup", not "gym, lift, power_backup".
   const amenities = (p.societyAmenities || [])
-    .map(a => localLabel(lang, 'amenity', a, labelOf(SOCIETY_AMENITIES, a))).filter(Boolean)
+    .filter(a => SOCIETY_AMENITIES.some(x => x.value === a))
+    .map(a => localLabel(lang, 'amenity', a, labelOf(SOCIETY_AMENITIES, a)))
 
   // priceLabel is what a broker typed; price is the number. Prefer the typed
   // one, format the number when there isn't one, and never print an empty
@@ -283,7 +285,43 @@ export function waMarkup(raw) {
 // line is the whole signature.
 const signOff = (firmName) => firmName || null
 
-function buildSale(p, t, closer, firmName, lang, opts) {
+/**
+ * THE REST OF WHAT IT COSTS.
+ *
+ * The price line was the whole of it, and everything beside it was captured on
+ * the form and never sent: booking amount and other charges on a sale, and on
+ * a let the maintenance, the lock-in and the painting charge at exit. This
+ * message goes to somebody already spoken to, who is deciding — the next thing
+ * they ask is what else they pay, and every one of those answers was sitting
+ * in the record while an agent typed it out by hand.
+ *
+ * Not the consulting fee. That is OUR charge, negotiated per client and
+ * usually per conversation, and publishing it on every forward decides
+ * something the person sending it has not decided.
+ */
+function terms(p, t, lang) {
+  if (p.deal === 'rent') {
+    const maint = p.maintenanceMode === 'included' ? t.maintenanceIncluded
+      : p.maintenanceMode === 'separate'
+        ? `${t.maintenance} ${money(p.maintenanceAmount) || t.separate}`
+        : null
+    const lock = p.lockinOption === 'custom'
+      ? (p.lockinMonths ? `${t.lockIn} ${p.lockinMonths} ${t.months}` : null)
+      : (p.lockinOption && p.lockinOption !== 'none'
+        ? `${t.lockIn} ${localLabel(lang, 'span', p.lockinOption, labelOf(LOCKIN_OPTIONS, p.lockinOption))}` : null)
+    const paint = p.paintingCharges === 'custom'
+      ? (p.paintingAmount ? `${t.painting} ${money(p.paintingAmount)}` : null)
+      : (p.paintingCharges && p.paintingCharges !== 'none'
+        ? `${t.painting} ${localLabel(lang, 'span', p.paintingCharges, labelOf(PAINTING_CHARGES, p.paintingCharges))}` : null)
+    return bullet([maint, lock, paint], E.money)
+  }
+  return bullet([
+    money(p.bookingAmount) ? `${t.booking} ${money(p.bookingAmount)}` : null,
+    money(p.otherCharges) ? `${t.otherCharges} ${money(p.otherCharges)}` : null,
+  ], E.money)
+}
+
+function buildSale(p, t, firmName, lang, opts) {
   const d = describeProperty(p, lang)
   const L = []
   // Headline carries what it IS and where. The society used to sit on its own
@@ -301,12 +339,20 @@ function buildSale(p, t, closer, firmName, lang, opts) {
     d.bathrooms ? `${d.bathrooms} ${t.bath}` : null,
     d.balconies ? `${d.balconies} ${t.balcony}` : null,
     d.parking || null,
+    // Recorded on the form, never sent, and it is a room.
+    p.servantRoom === true ? t.servantRoom : null,
   ], E.bath))
   push(L, bullet([
     d.possession || null,
     d.furnish || null,
     d.age ? `${d.age} ${t.yrsOld}` : null,
   ], E.key))
+  // Fittings, when there ARE fittings. Cut from the sale build as brochure
+  // noise, which was right for an unfurnished resale and wrong for the case
+  // that matters: the 🔑 line above says "Semi Furnished" and the next thing
+  // the buyer asks is what that means. We hold the answer. Gated on the
+  // furnishing the owner recorded, so it cannot pad an empty flat.
+  if (furnished(p)) push(L, bullet(contents(p, lang), E.sofa))
   push(L, paperwork(p, t, lang))
   // Amenities on ONE line, separated. Six ✓ lines for "Lift, Power Backup"
   // spent a third of the message on the least distinguishing facts in it.
@@ -318,14 +364,14 @@ function buildSale(p, t, closer, firmName, lang, opts) {
   // position the sender did not choose is not this template's call. Negotiable
   // still prints, because that one is a fact someone ticked.
   if (d.price) L.push(`${E.money} *${d.price}*${p.negotiable ? ` ${t.negotiable}` : ''}`)
+  push(L, terms(p, t, lang))
   if (opts?.includeDescription) push2(L, descriptionBlock(p, t))
   L.push('')
-  L.push(`${E.call} ${closer}`)
   push(L, signOff(firmName))
   return L.join('\n')
 }
 
-function buildRent(p, t, closer, firmName, lang, opts) {
+function buildRent(p, t, firmName, lang, opts) {
   const d = describeProperty(p, lang)
   const L = []
   L.push(`${E.home} *${d.headline}${d.furnish ? ' ' + d.furnish : ''} — ${t.onRent}*`)
@@ -336,6 +382,7 @@ function buildRent(p, t, closer, firmName, lang, opts) {
   push(L, bullet([
     d.bathrooms ? `${d.bathrooms} ${t.bath}` : null,
     d.parking || null,
+    p.servantRoom === true ? t.servantRoom : null,
   ], E.bath))
   // A FIELD NOTHING WRITES. This read `p.tenants`, which is not a property
   // field -- the form stores `preferredTenants`, a chip list of tokens -- so
@@ -347,18 +394,21 @@ function buildRent(p, t, closer, firmName, lang, opts) {
   // form and never sent; possession is the fallback for rows without one.
   push(L, bullet([
     d.tenants || null,
+    // Decisive for the person reading it, and only asked once "Bachelors" is
+    // picked -- so when it is there it was answered deliberately.
+    p.bachelorPref ? localLabel(lang, 'bachelor', p.bachelorPref, labelOf(BACHELOR_PREF, p.bachelorPref)) : null,
     p.availableFrom ? `${t.availableFrom} ${p.availableFrom}` : d.possession || null,
   ], E.key))
-  push(L, bullet(contents(p, lang), E.sofa))
+  if (furnished(p)) push(L, bullet(contents(p, lang), E.sofa))
   push(L, paperwork(p, t, lang, { deed: false }))
   const feats = (p.features || p.highlights || d.amenities)
   if (feats && feats.length) { L.push(''); L.push(`${E.star} ${feats.slice(0, 8).join(' · ')}`) }
   if (p.billsByOwner) { L.push(''); L.push(t.billsByOwner) }
   L.push('')
   if (d.price) L.push(`${E.money} *${d.price}*` + (d.deposit ? ` · ${t.deposit} *${d.deposit}*` : ''))
+  push(L, terms(p, t, lang))
   if (opts?.includeDescription) push2(L, descriptionBlock(p, t))
   L.push('')
-  L.push(`${E.call} ${closer}`)
   push(L, signOff(firmName))
   return L.join('\n')
 }
@@ -394,11 +444,17 @@ function facts(L, d, p, t) {
 // fittings that will not be there and would not decide it if they were. On a
 // rent it is the question the tenant is actually asking: what comes with it.
 function contents(p, lang) {
+  // KNOWN TOKENS ONLY. labelOf() returns the raw value when it does not
+  // recognise it, so a token from an older vocabulary -- or a typo in an
+  // import -- was printed to a client verbatim, in lower case with its
+  // underscores. A word we cannot say properly is one we do not say.
+  const known = (list, k) => list.some(x => x.value === k)
   const counted = Object.entries(p.countedItems || {})
-    .filter(([, n]) => Number(n) > 0)
-    .map(([k, n]) => `${n} ${localLabel(lang, 'counted', k, labelOf(COUNTED_ITEMS, k)) || k}`)
+    .filter(([k, n]) => Number(n) > 0 && known(COUNTED_ITEMS, k))
+    .map(([k, n]) => `${n} ${localLabel(lang, 'counted', k, labelOf(COUNTED_ITEMS, k))}`)
   const fixtures = (p.fixtures || [])
-    .map(f => localLabel(lang, 'fixture', f, labelOf(FIXTURES, f))).filter(Boolean)
+    .filter(f => known(FIXTURES, f))
+    .map(f => localLabel(lang, 'fixture', f, labelOf(FIXTURES, f)))
   return [...counted, ...fixtures]
 }
 
@@ -418,6 +474,12 @@ function paperwork(p, t, lang, { deed = true } = {}) {
     // an advertisement is expected to carry.
     p.rera ? `${t.rera} ${p.rera}` : null,
   ], E.doc)
+}
+// Did the owner say this flat comes with anything? `none` is an answer, and it
+// is the answer that means there is nothing to list.
+const furnished = (p) => {
+  const tok = p.furnishType ?? normaliseTo(FURNISH, p.furnishing)
+  return !!tok && tok !== 'none'
 }
 const fmtArea = (v, unit) => `${v} ${unit === 'sqm' ? 'sq.m' : 'sq.ft'}`
 const push2 = (L, lines) => { if (lines) lines.forEach(x => L.push(x)) }
@@ -440,24 +502,28 @@ const push2 = (L, lines) => { if (lines) lines.forEach(x => L.push(x)) }
 // with those, not scattered as constants nobody can reach.
 const PACKS = {
   English: {
-    closer: 'Reply to book a site visit.',
     forSale: 'For Sale', onRent: 'On Rent', carpet: 'carpet', floor: 'floor', floorSuffix: ord,
     facing: 'facing', yrsOld: 'years old', possession: 'possession', highlights: 'Highlights:',
     bath: 'bath', balcony: 'balcony',
     price: 'Price', rent: 'Rent', deposit: 'Deposit', negotiable: '(negotiable)',
     covered: 'covered', open: 'open', parking: 'parking',
-    rera: 'RERA', availableFrom: 'Available from',
+    rera: 'RERA', availableFrom: 'Available from', servantRoom: 'Servant room',
+    booking: 'Booking', otherCharges: 'Other charges', months: 'months',
+    maintenance: 'Maintenance', maintenanceIncluded: 'Maintenance included',
+    separate: 'separate', lockIn: 'Lock-in', painting: 'Painting',
     billsByOwner: 'Electricity & gas bills paid by owner.',
     superBuiltUp: 'super built-up', of: 'of', about: 'About the project', builtUp: 'built-up',  // vocab-ok: display prose
   },
   Marathi: {
-    closer: 'साइट व्हिजिटसाठी रिप्लाय करा.',
     forSale: 'विक्रीसाठी', onRent: 'भाड्याने', carpet: 'कार्पेट', floor: 'मजला', floorSuffix: () => 'वा',
     facing: 'दिशा', yrsOld: 'वर्षे जुने', possession: 'ताबा', highlights: 'ठळक वैशिष्ट्ये:',
     bath: 'बाथरूम', balcony: 'बाल्कनी',
     price: 'किंमत', rent: 'भाडे', deposit: 'डिपॉझिट', negotiable: '(वाटाघाटीस वाव)',
     covered: 'कव्हर्ड', open: 'ओपन', parking: 'पार्किंग',
-    rera: 'RERA', availableFrom: 'उपलब्ध',
+    rera: 'RERA', availableFrom: 'उपलब्ध', servantRoom: 'सर्व्हंट रूम',
+    booking: 'बुकिंग', otherCharges: 'इतर शुल्क', months: 'महिने',
+    maintenance: 'मेंटेनन्स', maintenanceIncluded: 'मेंटेनन्स भाड्यात समाविष्ट',
+    separate: 'स्वतंत्र', lockIn: 'लॉक-इन', painting: 'रंगकाम',
     billsByOwner: 'वीज व गॅस बिल मालक भरेल.',
     superBuiltUp: 'सुपर बिल्ट-अप', of: 'पैकी', about: 'प्रकल्पाविषयी', builtUp: 'बिल्ट-अप',
   },
@@ -507,10 +573,9 @@ export function generateMessage(rawProperty, opts = {}) {
   // pack that no longer exists -- a missing pack would have thrown on their
   // next message.
   const pack = PACKS[lang] || PACKS.English
-  const closer = pack.closer
   let msg = property.deal === 'rent'
-    ? buildRent(property, pack, closer, firmName, lang, opts)
-    : buildSale(property, pack, closer, firmName, lang, opts)
+    ? buildRent(property, pack, firmName, lang, opts)
+    : buildSale(property, pack, firmName, lang, opts)
   if (tone === 'Short') {
     // Identity, price, one call to action. The price line is found by its
     // marker rather than by an English prefix — the old version looked for
@@ -518,7 +583,7 @@ export function generateMessage(rawProperty, opts = {}) {
     const rows = msg.split('\n')
     const head = rows.slice(0, 3).filter(Boolean)
     const priceLine = rows.find(x => x.startsWith(E.money))
-    msg = [...head, '', priceLine, `${E.call} ${closer}`, signOff(firmName)]
+    msg = [...head, '', priceLine, signOff(firmName)]
       .filter(Boolean).join('\n')
   }
   return msg
