@@ -3,7 +3,7 @@ import { Empty, PageHeader } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import { followUpOverdue} from '../lib/format.js'
+import { followUpOverdue, personLabel } from '../lib/format.js'
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -63,13 +63,21 @@ export default function Calendar({ store, go, topBar }) {
   // WHAT IS STILL AHEAD, soonest first.
   //
   // The panel below is headed "All upcoming appointments" and was handed
-  // `events` — every booked follow-up the desk holds, past ones included, in
+  // `events` - every booked follow-up the desk holds, past ones included, in
   // whatever order the API returned them. So an appointment from three weeks
   // ago sat under the word upcoming, above one due tomorrow, and the count
   // beside the heading was the size of the whole book rather than of the work
-  // ahead. `overdue` is the same expression the KPI and the row badge use, so
-  // a row cannot be late in one place and upcoming in another.
-  const upcoming = events.filter(e => !e.overdue).sort((a, b) => a.date - b.date)
+  // ahead.
+  //
+  // Ahead means FROM THE START OF TODAY, not "not yet late". Filtering on
+  // `overdue` dropped an appointment the moment its hour passed, so a 10am
+  // visit vanished off the day it is on - the one day the person is most
+  // likely to be looking at this screen. The day still has to be worked; late
+  // is a colour on the row, not a reason to hide it.
+  const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const upcoming = events
+    .filter(e => e.date >= dayStart)
+    .sort((a, b) => (a.date - b.date) || (a.time > b.time ? 1 : -1))
 
   const byDay = {}
   events.forEach(e => { (byDay[e.key] = byDay[e.key] || []).push(e) })
@@ -123,7 +131,7 @@ export default function Calendar({ store, go, topBar }) {
                       <button key={j} className={'ev-chip' + (e.overdue ? ' overdue' : e.isVisit ? ' visit' : '')}
                         onClick={(ev) => { ev.stopPropagation(); go('leads', { leadId: e.lead.id, leadOpen: true }) }}>
                         <span className="ev-t">{e.time.replace(/ ?[ap]m/i, '')}</span>
-                        <span className="ev-n">{e.lead.name}</span>
+                        <span className="ev-n">{personLabel(e.lead)}</span>
                       </button>
                     ))}
                     {list.length > 2 && <span className="ev-more" onClick={(ev) => { ev.stopPropagation(); setPicked(key) }}>+{list.length - 2} more</span>}
@@ -143,29 +151,6 @@ export default function Calendar({ store, go, topBar }) {
               ? (
                 <div className="cd-pad">
                   <div className="cd-empty cd-empty-bordered">No follow-ups scheduled on this specific day.</div>
-                  {upcoming.length > 0 && (
-                    <div className="cd-upcoming">
-                      <div className="cd-upcoming-h">All upcoming appointments ({upcoming.length})</div>
-                      <div className="cd-list">
-                        {upcoming.map(e => {
-                          const a = store.agentById(e.agentId)
-                          return (
-                            <button key={e.lead.id + e.key + e.time} className="cd-row" onClick={() => go('leads', { leadId: e.lead.id, leadOpen: true })}>
-                              <div className="cd-when cd-when-wide">
-                                <div className="cd-date">{e.key}</div>
-                                <div className="cd-time">{e.time}</div>
-                              </div>
-                              <div className="cd-b">
-                                <div className="cd-n">{e.lead.name}</div>
-                                <div className="cd-a">{e.action}</div>
-                                {a && <div className="cd-agent"><span className={`av av-sm ${a.avatar} cd-av`}>{a.initials}</span><span>{a.name}</span></div>}
-                              </div>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
                 </div>
               )
               : (
@@ -176,7 +161,7 @@ export default function Calendar({ store, go, topBar }) {
                       <button key={e.lead.id + e.time} className="cd-row" onClick={() => go('leads', { leadId: e.lead.id, leadOpen: true })}>
                         <div className="cd-when"><div className="cd-time cd-time-lg">{e.time}</div></div>
                         <div className="cd-b">
-                          <div className="cd-n cd-n-lg">{e.lead.name}</div>
+                          <div className="cd-n cd-n-lg">{personLabel(e.lead)}</div>
                           <div className="cd-a">{e.action}</div>
                           {a && <div className="cd-agent"><span className={`av av-sm ${a.avatar} cd-av`}>{a.initials}</span><span>Assigned: <strong>{a.name}</strong></span></div>}
                         </div>
@@ -185,6 +170,34 @@ export default function Calendar({ store, go, topBar }) {
                   })}
                 </div>
               )}
+            {/* The whole run ahead, every day of it, under whichever day is
+                picked. It used to render ONLY when the picked day was empty,
+                so on any day that had something booked there was no way to see
+                what was coming after it - and picking today, the default, hid
+                it by definition. */}
+            {upcoming.length > 0 && (
+              <div className="cd-pad cd-upcoming">
+                <div className="cd-upcoming-h">All upcoming appointments ({upcoming.length})</div>
+                <div className="cd-list">
+                  {upcoming.map(e => {
+                    const a = store.agentById(e.agentId)
+                    return (
+                      <button key={e.lead.id + e.key + e.time} className="cd-row" onClick={() => go('leads', { leadId: e.lead.id, leadOpen: true })}>
+                        <div className="cd-when cd-when-wide">
+                          <div className="cd-date">{e.key === todayKey ? 'Today' : e.key}</div>
+                          <div className="cd-time">{e.time}</div>
+                        </div>
+                        <div className="cd-b">
+                          <div className="cd-n">{personLabel(e.lead)}</div>
+                          <div className="cd-a">{e.action}</div>
+                          {a && <div className="cd-agent"><span className={`av av-sm ${a.avatar} cd-av`}>{a.initials}</span><span>{a.name}</span></div>}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
         {events.length === 0 && <div style={{ maxWidth: 400, marginTop: 16 }}><Empty title="Nothing scheduled" sub="Set a follow-up from any lead." /></div>}
