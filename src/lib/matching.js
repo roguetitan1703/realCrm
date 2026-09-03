@@ -277,6 +277,12 @@ export function waMarkup(raw) {
     .trim()
 }
 
+// WHO IT IS FROM. The em dash is gone: it is a typographer's attribution mark
+// in a chat window, and on the phone keyboards these clients read the message
+// on it renders as a stray line before the firm's name. The name on its own
+// line is the whole signature.
+const signOff = (firmName) => firmName || null
+
 function buildSale(p, t, closer, firmName, lang, opts) {
   const d = describeProperty(p, lang)
   const L = []
@@ -315,7 +321,7 @@ function buildSale(p, t, closer, firmName, lang, opts) {
   if (opts?.includeDescription) push2(L, descriptionBlock(p, t))
   L.push('')
   L.push(`${E.call} ${closer}`)
-  if (firmName) L.push(`— ${firmName}`)
+  push(L, signOff(firmName))
   return L.join('\n')
 }
 
@@ -353,7 +359,7 @@ function buildRent(p, t, closer, firmName, lang, opts) {
   if (opts?.includeDescription) push2(L, descriptionBlock(p, t))
   L.push('')
   L.push(`${E.call} ${closer}`)
-  if (firmName) L.push(`— ${firmName}`)
+  push(L, signOff(firmName))
   return L.join('\n')
 }
 
@@ -512,7 +518,7 @@ export function generateMessage(rawProperty, opts = {}) {
     const rows = msg.split('\n')
     const head = rows.slice(0, 3).filter(Boolean)
     const priceLine = rows.find(x => x.startsWith(E.money))
-    msg = [...head, '', priceLine, `${E.call} ${closer}`, firmName && '— ' + firmName]
+    msg = [...head, '', priceLine, `${E.call} ${closer}`, signOff(firmName)]
       .filter(Boolean).join('\n')
   }
   return msg
