@@ -1,7 +1,7 @@
 // Formatting + derived-data helpers (ported from legacy app.js).
 import { isTerminal } from '../data/leadStatus.js'
 import {
-  AREA_UNITS, BHK, DEAL_LEAD, SUBTYPES, isPlot, labelOf, normaliseBhk, normaliseSubtype,
+  AREA_UNITS, BHK, DEAL_LEAD, SUBTYPES, TENANT_TYPES, isPlot, labelOf, normaliseBhk, normaliseSubtype,
 } from '../data/propertyFields.js'
 
 /**
@@ -693,7 +693,10 @@ export function propFacts(p) {
     return [
       ...common,
       { k: 'Furnishing', v: p.furnishing, mut: true },
-      { k: 'Tenants', v: p.tenants || 'Any', mut: true },
+      // `p.tenants` is not a property field -- the form stores
+      // `preferredTenants` -- so this strip has always read "Any" whatever the
+      // owner said. Same phantom the WhatsApp template read.
+      { k: 'Tenants', v: (p.preferredTenants || []).map(x => labelOf(TENANT_TYPES, x)).join(' / ') || null, mut: true },
       { k: 'Available', v: p.possession, mut: true },
     ]
   }

@@ -22,11 +22,6 @@ export const PLACEHOLDERS = [
 ]
 
 export const DEFAULT_FOLLOWUPS = {
-  Hinglish: [
-    'Namaste {name}, aapki {config} requirement {locality} mein — kuch achhe options aaye hain. Bhej doon?',
-    'Hi {name}, {locality} mein naye listings aaye hain aapke budget ke aas paas. Dekhna chahenge?',
-    'Namaste {name}, follow-up kar raha hoon aapki property search par. Is weekend visit fix karein?',
-  ],
   English: [
     'Hello {name}, a few options have come up for your {config} requirement in {locality}. Shall I send them across?',
     'Hi {name}, some new listings in {locality} are close to your budget. Would you like to see them?',

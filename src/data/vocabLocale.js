@@ -10,9 +10,10 @@
 // stored token, exactly like the vocabulary itself — never on the English
 // label, which is display text and moves.
 //
-// Hinglish deliberately keeps English nouns: that is what Hinglish is, and a
-// broker writing "पूर्व-मुखी" in an otherwise Roman-script message would read
-// as a machine translation, which is precisely the impression to avoid.
+// Hinglish is gone. It was the default, so it is what nearly every message
+// this desk has sent was written in -- Roman-script Hindi with English nouns,
+// which reads as a broker typing fast rather than as a firm writing to a
+// client. Two languages that are actually languages.
 //
 // Anything missing here falls back to the English label. A missing translation
 // must never surface a raw token to a client.
@@ -32,6 +33,15 @@ export const LOCALE_LABELS = {
       north: 'उत्तर', east: 'पूर्व', west: 'पश्चिम', south: 'दक्षिण',
       north_east: 'ईशान्य', north_west: 'वायव्य', south_east: 'आग्नेय', south_west: 'नैऋत्य',
     },
+    // Paperwork was the one group with no table, so a Marathi message printed
+    // "Freehold · Resale" in Roman script between two Devanagari lines -- and
+    // ownership is exactly the field a buyer reads carefully.
+    ownership: {
+      freehold: 'फ्रीहोल्ड', leasehold: 'लीजहोल्ड',
+      power_of_attorney: 'कुलमुखत्यारपत्र', cooperative: 'सहकारी सोसायटी',
+    },
+    transaction: { new: 'नवीन', resale: 'रीसेल' },
+    tenant: { family: 'कुटुंब', bachelors: 'बॅचलर्स', company: 'कंपनी' },
     // The Marathi pack already prints "ताबा" as the label, so the VALUE must not
     // repeat it — it read "ताबा ताबा तयार".
     possession: { ready: 'तयार आहे', under_construction: 'बांधकाम सुरू' },
@@ -47,12 +57,26 @@ export const LOCALE_LABELS = {
 
 /**
  * The label for `token` in `lang`, falling back to the English label.
- * `group` is one of the keys above (subtype · furnish · facing · possession · amenity).
+ * `group` is one of the keys above (subtype · furnish · facing · possession ·
+ * amenity · ownership · transaction).
  */
 export function localLabel(lang, group, token, englishLabel) {
   if (!token) return englishLabel || ''
   return LOCALE_LABELS[lang]?.[group]?.[token] || englishLabel || ''
 }
 
-/** Languages the composer offers. English and Hinglish need no value table. */
-export const MESSAGE_LANGUAGES = ['Hinglish', 'English', 'Marathi']
+/** Languages the composer offers. English needs no value table. */
+export const MESSAGE_LANGUAGES = ['English', 'Marathi']
+
+/**
+ * A stored language preference, or English.
+ *
+ * Devices carry 'Hinglish' from before it was dropped. Handed straight to the
+ * composer that value matches no segment, so the control renders with nothing
+ * selected while the message quietly comes out in English — the screen and the
+ * text disagreeing about what is being sent. Read every preference through
+ * here and a retired language cannot outlive the pack behind it.
+ */
+export function messageLang(v) {
+  return MESSAGE_LANGUAGES.includes(v) ? v : 'English'
+}

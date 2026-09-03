@@ -11,7 +11,8 @@ import { api as apiClient, invalidateReads, currentTenant, subscribeAuthFailure 
 import { applyBrandColor } from './brand.js'
 import { setTenantIdentity } from './tenant.js'
 import { applyPwaIdentity, slugFromLocation } from './pwa.js'
-import { getPref } from './prefs.js'
+import { getPref, setPref } from './prefs.js'
+import { messageLang } from '../data/vocabLocale.js'
 import { disablePush } from './push.js'
 import { isOpen } from '../data/leadStatus.js'
 
@@ -1080,7 +1081,7 @@ export function StoreProvider({ children }) {
     // An agent who works in Marathi shouldn't re-pick it on every message.
     const wa = {
       propId, leadId,
-      lang: getPref('msgLang', 'Hinglish'),
+      lang: messageLang(getPref('msgLang')),
       tone: getPref('msgTone', 'Standard'),
     }
     dispatch({ type: 'WA_OPEN', wa })
@@ -1089,6 +1090,12 @@ export function StoreProvider({ children }) {
 
   const recompose = useCallback((patch) => {
     const wa = { ...state.waState, ...patch }
+    // REMEMBER IT. openWhatsApp() has always said it opens in the language this
+    // person writes in, and setPref had no callers anywhere in the app — so the
+    // choice lasted exactly as long as the sheet was open and an agent who
+    // writes to clients in Marathi re-picked it on every single message.
+    if (patch.lang) setPref('msgLang', patch.lang)
+    if (patch.tone) setPref('msgTone', patch.tone)
     dispatch({ type: 'WA_SET', patch: { ...patch, composing: false, message: composeFor(wa) } })
   }, [state.waState, composeFor])
 

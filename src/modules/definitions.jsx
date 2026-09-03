@@ -26,6 +26,7 @@ import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
 import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
 import { getPref } from '../lib/prefs.js'
+import { messageLang } from '../data/vocabLocale.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
@@ -945,12 +946,12 @@ export const PROPERTIES_DEF = {
     { id: 'copy', tier: 'manage', icon: 'copy', label: 'Copy listing details',
       run: (store, p) => {
         // The agent's own language, the same preference the composer opens in.
-        // This passed none, so it defaulted to Hinglish: an agent who writes to
-        // clients in Marathi got a Marathi message from Share and a Hinglish
-        // one from Copy, for the same listing.
+        // This passed none, so it defaulted to the pack's own default: an
+        // agent who writes to clients in Marathi got a Marathi message from
+        // Share and an English one from Copy, for the same listing.
         const text = generateMessage(p, {
           firmName: store.state.settings.firmName,
-          lang: getPref('msgLang', 'Hinglish'),
+          lang: messageLang(getPref('msgLang')),
           tone: getPref('msgTone', 'Standard'),
         })
         navigator.clipboard?.writeText(text)

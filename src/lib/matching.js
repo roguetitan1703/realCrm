@@ -4,7 +4,7 @@ import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import {
   AREA_UNITS, BHK, COUNTED_ITEMS, FACING, FIXTURES, FURNISH, OWNERSHIP,
-  POSSESSION, SOCIETY_AMENITIES, SUBTYPES, TRANSACTION,
+  POSSESSION, SOCIETY_AMENITIES, SUBTYPES, TENANT_TYPES, TRANSACTION,
   labelOf, normaliseBhk, normaliseSubtype, normaliseTo,
 } from '../data/propertyFields.js'
 
@@ -106,7 +106,17 @@ export function ownerUpdateMessage(property, allLeads = [], firmName = tenantFir
 }
 
 // --- WhatsApp message generation -------------------------------------------
-function ord(n) { return n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th' }
+// The floor is stored as TEXT, so `n === 1` was false for every listing on the
+// desk and a client read "1th floor of 1". Coerce, and give 11-13 the suffix
+// English actually gives them.
+function ord(n) {
+  const v = Number(n)
+  if (!Number.isFinite(v)) return 'th'
+  const t = v % 100
+  if (t >= 11 && t <= 13) return 'th'
+  const u = v % 10
+  return u === 1 ? 'st' : u === 2 ? 'nd' : u === 3 ? 'rd' : 'th'
+}
 
 // ---------------------------------------------------------------------------
 // Reading a property FOR A HUMAN
@@ -129,6 +139,10 @@ const money = (n) => {
 }
 
 export function describeProperty(p = {}, lang = 'English') {
+  // The pack, for the handful of words that belong to a VALUE rather than to
+  // the line around it — "covered parking" is part of the fact, not a label
+  // the builder puts in front of it.
+  const t = PACKS[lang] || PACKS.English
   const category = p.category || 'residential'
   const bhk = p.bhk || normaliseBhk(p.type)
   const subtype = p.subtype || normaliseSubtype(p.type, category)
@@ -171,13 +185,25 @@ export function describeProperty(p = {}, lang = 'English') {
       : p.depositOption === '1mo' ? money(p.price)
         : p.depositOption === '2mo' ? money(Number(p.price) * 2) : '')
 
+  // Tokens -> the words the owner picked, in the client's language where we
+  // have one. An empty list stays empty: no preference recorded is no
+  // preference, not "Any".
+  const tenants = (p.preferredTenants || [])
+    .map(x => localLabel(lang, 'tenant', x, labelOf(TENANT_TYPES, x))).filter(Boolean).join(' / ')
+
   return {
-    headline, area, furnish, facing, possession, amenities, price, deposit,
+    headline, area, furnish, facing, possession, amenities, price, deposit, tenants,
     locality: p.locality || '', society: p.society || p.project || '',
     floor: p.floor || '', age: p.age || '',
     bathrooms: p.bathrooms || '', balconies: p.balconies || '',
-    parking: [p.coveredParking ? `${p.coveredParking} covered` : '',
-      p.openParking ? `${p.openParking} open` : ''].filter(Boolean).join(' + ') || p.parking || '',
+    // "1 covered" alone, on a line beside baths and balconies, names nothing.
+    // The word carries it.
+    // The word "parking" once, at the end -- "1 covered parking + 1 open
+    // parking" spends half the line saying it twice.
+    parking: (p.coveredParking || p.openParking)
+      ? [p.coveredParking ? `${p.coveredParking} ${t.covered}` : '',
+        p.openParking ? `${p.openParking} ${t.open}` : ''].filter(Boolean).join(' + ') + ` ${t.parking}`
+      : (p.parking ? `${p.parking} ${t.parking}` : ''),
   }
 }
 
@@ -209,9 +235,46 @@ const E = {
 // long — pasting 1,500 characters into a chat reads as a forwarded brochure,
 // not as a broker talking to someone — so the sender decides per message.
 function descriptionBlock(p, t) {
-  const text = String(p.description || '').trim()
+  const text = waMarkup(p.description)
   if (!text) return null
   return ['', `${E.info} *${t.about}*`, text]
+}
+
+/**
+ * WHATSAPP IS NOT MARKDOWN, and the description is pasted in from wherever the
+ * client wrote it.
+ *
+ * WhatsApp's bold is ONE asterisk. Text written in a markdown editor uses two,
+ * and WhatsApp renders neither the bold nor the asterisks away — a real Bhumi
+ * listing went out reading `**Godrej Green Cove - Mahalunge, Pune**` with the
+ * stars visible, four more times down the page. Headings (`## `) and markdown
+ * bullets (`- `, `* `) have the same problem: they are markup a chat window
+ * shows as punctuation.
+ *
+ * So the paragraph is translated into what WhatsApp actually understands
+ * rather than stripped: `**bold**` becomes `*bold*`, `__x__` becomes `_x_`,
+ * heading markers are dropped and every bullet marker is normalised to one
+ * character. Nothing rewrites the client's words.
+ */
+export function waMarkup(raw) {
+  const t = String(raw || '').replace(/\r\n?/g, '\n')
+  if (!t.trim()) return ''
+  return t
+    .split('\n')
+    .map(line => line
+      // ## Heading / ### Heading — the marker is not the heading.
+      .replace(/^\s{0,3}#{1,6}\s+/, '')
+      // A markdown bullet, and the dash a lot of people type instead. Only at
+      // the start of a line, so "3 - 4 BHK" mid-sentence is untouched.
+      .replace(/^\s*[-*+]\s+/, '• '))
+    .join('\n')
+    // Runs of asterisks collapse to the one WhatsApp reads as bold. Done after
+    // the bullet pass so a "* item" line is a bullet, not an unclosed bold.
+    .replace(/\*{2,}/g, '*')
+    .replace(/_{2,}/g, '_')
+    // Three blank lines in a chat bubble is a scroll, not a paragraph break.
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 function buildSale(p, t, closer, firmName, lang, opts) {
@@ -239,7 +302,6 @@ function buildSale(p, t, closer, firmName, lang, opts) {
     d.age ? `${d.age} ${t.yrsOld}` : null,
   ], E.key))
   push(L, paperwork(p, t, lang))
-  push(L, bullet(contents(p, lang), E.sofa))
   // Amenities on ONE line, separated. Six ✓ lines for "Lift, Power Backup"
   // spent a third of the message on the least distinguishing facts in it.
   const feats = (p.features || p.highlights || d.amenities)
@@ -269,11 +331,20 @@ function buildRent(p, t, closer, firmName, lang, opts) {
     d.bathrooms ? `${d.bathrooms} ${t.bath}` : null,
     d.parking || null,
   ], E.bath))
+  // A FIELD NOTHING WRITES. This read `p.tenants`, which is not a property
+  // field -- the form stores `preferredTenants`, a chip list of tokens -- so
+  // the value was always undefined and `|| t.family` was the only thing that
+  // ever printed. Every let this desk has sent said "Family", a restriction
+  // the owner never gave us, stated to a tenant as though they had. The
+  // fallback is gone with it: unknown is not a preference.
+  // `availableFrom` is the first thing a tenant asks and was captured on the
+  // form and never sent; possession is the fallback for rows without one.
   push(L, bullet([
-    p.tenants || t.family,
-    d.possession || null,
+    d.tenants || null,
+    p.availableFrom ? `${t.availableFrom} ${p.availableFrom}` : d.possession || null,
   ], E.key))
   push(L, bullet(contents(p, lang), E.sofa))
+  push(L, paperwork(p, t, lang, { deed: false }))
   const feats = (p.features || p.highlights || d.amenities)
   if (feats && feats.length) { L.push(''); L.push(`${E.star} ${feats.slice(0, 8).join(' · ')}`) }
   if (p.billsByOwner) { L.push(''); L.push(t.billsByOwner) }
@@ -286,17 +357,16 @@ function buildRent(p, t, closer, firmName, lang, opts) {
   return L.join('\n')
 }
 
-// Size and position — the first thing anyone checks. Carpet was the only area
-// printed, so a listing that recorded all three showed the smallest of them
-// and nothing else; an Indian buyer asks for super built-up by name.
+// Size and position — the first thing anyone checks.
 function facts(L, d, p, t) {
-  // All three areas when the listing records all three. Only carpet used to
-  // print, so a record that captured built-up and super built-up showed the
-  // smallest of the three and nothing else — and super built-up is the one an
-  // Indian buyer asks for by name.
+  // TWO areas, not three. A buyer compares carpet against carpet and asks for
+  // super built-up by name; built-up is the middle figure nobody quotes and
+  // printing all three turned the most-read line in the message into a
+  // spreadsheet row. If a listing records only built-up it is the only thing
+  // we know, so it prints -- a fact we hold beats a blank line.
   const areas = [
     d.area ? `${d.area} ${t.carpet}` : null,
-    p.builtup ? `${fmtArea(p.builtup, p.areaUnit)} ${t.builtUp}` : null,
+    (!p.carpet && p.builtup) ? `${fmtArea(p.builtup, p.areaUnit)} ${t.builtUp}` : null,
     p.superBuiltup ? `${fmtArea(p.superBuiltup, p.areaUnit)} ${t.superBuiltUp}` : null,
   ].filter(Boolean)
   push(L, bullet(areas, E.area))
@@ -311,8 +381,12 @@ function facts(L, d, p, t) {
 }
 
 // What's inside the flat, when it is furnished enough for there to be anything
-// to list. `countedItems` is stored as {token: n}, `fixtures` as tokens — both
-// were recorded on the form and neither ever reached a client.
+// to list. `countedItems` is stored as {token: n}, `fixtures` as tokens.
+//
+// A LET ONLY. On a sale this listed the seller's fans and geysers to somebody
+// deciding whether to spend 76 lakh, between the paperwork and the amenities —
+// fittings that will not be there and would not decide it if they were. On a
+// rent it is the question the tenant is actually asking: what comes with it.
 function contents(p, lang) {
   const counted = Object.entries(p.countedItems || {})
     .filter(([, n]) => Number(n) > 0)
@@ -322,13 +396,21 @@ function contents(p, lang) {
   return [...counted, ...fixtures]
 }
 
-// Paper facts a buyer asks before a visit, both already on the form and
-// neither ever sent. Freehold-vs-leasehold and new-vs-resale decide whether
+// Paper facts a buyer asks before a visit, all three already on the form and
+// none ever sent. Freehold-vs-leasehold and new-vs-resale decide whether
 // someone is interested at all.
-function paperwork(p, t, lang) {
+// `deed` is false on a let: freehold-vs-leasehold and new-vs-resale decide
+// whether somebody buys, and say nothing to a person renting for eleven
+// months. RERA still prints -- the project is registered either way.
+function paperwork(p, t, lang, { deed = true } = {}) {
   return bullet([
-    p.ownership ? localLabel(lang, 'ownership', p.ownership, labelOf(OWNERSHIP, p.ownership)) : null,
-    p.transactionType ? localLabel(lang, 'transaction', p.transactionType, labelOf(TRANSACTION, p.transactionType)) : null,
+    deed && p.ownership ? localLabel(lang, 'ownership', p.ownership, labelOf(OWNERSHIP, p.ownership)) : null,
+    deed && p.transactionType ? localLabel(lang, 'transaction', p.transactionType, labelOf(TRANSACTION, p.transactionType)) : null,
+    // RERA belongs on this line, not on a second one under the same marker.
+    // Captured on the form since the form existed and never sent -- and in
+    // Maharashtra it is the number a buyer checks the project by, and the one
+    // an advertisement is expected to carry.
+    p.rera ? `${t.rera} ${p.rera}` : null,
   ], E.doc)
 }
 const fmtArea = (v, unit) => `${v} ${unit === 'sqm' ? 'sq.m' : 'sq.ft'}`
@@ -351,22 +433,15 @@ const push2 = (L, lines) => { if (lines) lines.forEach(x => L.push(x)) }
 // third of its kind after the WhatsApp intro and the follow-up -- and belongs
 // with those, not scattered as constants nobody can reach.
 const PACKS = {
-  Hinglish: {
-    closer: 'Site visit ke liye reply karein.',
-    forSale: 'For Sale', onRent: 'On Rent', carpet: 'carpet', floor: 'floor', floorSuffix: ord,
-    facing: 'facing', yrsOld: 'yrs old', possession: 'possession', highlights: 'Highlights:',
-    bath: 'bath', balcony: 'balcony',
-    price: 'Price', rent: 'Rent', deposit: 'Deposit', negotiable: '(thoda negotiable)', fixed: 'fixed',
-    family: 'Family', billsByOwner: 'Owner electricity & gas bill pay karega.',
-    superBuiltUp: 'super built-up', of: 'of', about: 'Project ke baare mein', builtUp: 'built-up',  // vocab-ok: display prose
-  },
   English: {
     closer: 'Reply to book a site visit.',
     forSale: 'For Sale', onRent: 'On Rent', carpet: 'carpet', floor: 'floor', floorSuffix: ord,
     facing: 'facing', yrsOld: 'years old', possession: 'possession', highlights: 'Highlights:',
     bath: 'bath', balcony: 'balcony',
-    price: 'Price', rent: 'Rent', deposit: 'Deposit', negotiable: '(negotiable)', fixed: 'fixed',
-    family: 'Family', billsByOwner: 'Electricity & gas bills paid by owner.',
+    price: 'Price', rent: 'Rent', deposit: 'Deposit', negotiable: '(negotiable)',
+    covered: 'covered', open: 'open', parking: 'parking',
+    rera: 'RERA', availableFrom: 'Available from',
+    billsByOwner: 'Electricity & gas bills paid by owner.',
     superBuiltUp: 'super built-up', of: 'of', about: 'About the project', builtUp: 'built-up',  // vocab-ok: display prose
   },
   Marathi: {
@@ -374,8 +449,10 @@ const PACKS = {
     forSale: 'विक्रीसाठी', onRent: 'भाड्याने', carpet: 'कार्पेट', floor: 'मजला', floorSuffix: () => 'वा',
     facing: 'दिशा', yrsOld: 'वर्षे जुने', possession: 'ताबा', highlights: 'ठळक वैशिष्ट्ये:',
     bath: 'बाथरूम', balcony: 'बाल्कनी',
-    price: 'किंमत', rent: 'भाडे', deposit: 'डिपॉझिट', negotiable: '(वाटाघाटीस वाव)', fixed: 'निश्चित',
-    family: 'कुटुंब', billsByOwner: 'वीज व गॅस बिल मालक भरेल.',
+    price: 'किंमत', rent: 'भाडे', deposit: 'डिपॉझिट', negotiable: '(वाटाघाटीस वाव)',
+    covered: 'कव्हर्ड', open: 'ओपन', parking: 'पार्किंग',
+    rera: 'RERA', availableFrom: 'उपलब्ध',
+    billsByOwner: 'वीज व गॅस बिल मालक भरेल.',
     superBuiltUp: 'सुपर बिल्ट-अप', of: 'पैकी', about: 'प्रकल्पाविषयी', builtUp: 'बिल्ट-अप',
   },
 }
@@ -419,8 +496,11 @@ export function generateMessage(rawProperty, opts = {}) {
   const property = shareSafeProperty(rawProperty)
   if (!property) return ''
   const firmName = opts.firmName || tenantFirm()
-  const lang = opts.lang || 'Hinglish', tone = opts.tone || 'Standard'
-  const pack = PACKS[lang] || PACKS.Hinglish
+  const lang = opts.lang || 'English', tone = opts.tone || 'Standard'
+  // An agent whose stored preference is Hinglish falls to English, not to a
+  // pack that no longer exists -- a missing pack would have thrown on their
+  // next message.
+  const pack = PACKS[lang] || PACKS.English
   const closer = pack.closer
   let msg = property.deal === 'rent'
     ? buildRent(property, pack, closer, firmName, lang, opts)
