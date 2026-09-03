@@ -1199,7 +1199,7 @@ function AddAgentModal({ store }) {
     const guardedClose = () => { if (!locked) store.closeModal() }
     const copyCreds = () => {
       const text = `${store.state.settings.firmName || 'Workspace'} sign-in\n${idLabel}: ${done.handle}\nTemporary password: ${done.initialPassword}`
-      navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => {})
+      copyText(text).then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500) } })
     }
     return (
       <Modal title="Teammate added" onClose={guardedClose} width={400}>

@@ -39,9 +39,10 @@ function stateOf(c) {
 function useCopy(store) {
   const [copied, setCopied] = useState('')
   const copy = (text, tag) => {
-    navigator.clipboard?.writeText(text)
-      .then(() => { setCopied(tag); setTimeout(() => setCopied(''), 1600) })
-      .catch(() => store.toast('Could not copy — select it and copy manually', 'warn'))
+    copyText(text).then(ok => {
+      if (!ok) return store.toast('Could not copy — select it and copy manually', 'warn')
+      setCopied(tag); setTimeout(() => setCopied(''), 1600)
+    })
   }
   return [copied, copy]
 }

@@ -26,6 +26,7 @@ import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
 import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
 import { getPref } from '../lib/prefs.js'
+import { copyText } from '../lib/clipboard.js'
 import { messageLang } from '../data/vocabLocale.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
@@ -954,9 +955,9 @@ export const PROPERTIES_DEF = {
           lang: messageLang(getPref('msgLang')),
           tone: getPref('msgTone', 'Standard'),
         })
-        navigator.clipboard?.writeText(text)
-          .then(() => store.toast('Listing details copied'))
-          .catch(() => store.toast('Could not copy — your browser blocked it', 'warn'))
+        copyText(text).then(ok => store.toast(
+          ok ? 'Listing details copied' : 'Could not copy — your browser blocked it',
+          ok ? undefined : 'warn'))
       } },
     { id: 'tenancy', tier: 'manage', icon: 'people', when: (p) => p.deal === 'rent',
       label: (p) => p.tenancy ? 'Update tenancy' : 'Record tenancy', sub: (p) => p.tenancy ? p.tenancy.tenant : 'Mark as let / deposit',

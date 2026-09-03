@@ -10,6 +10,7 @@
 
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api.js'
+import { copyText } from '../lib/clipboard.js'
 import { PLATFORM } from '../data/platform.js'
 import { AppShell } from '../layouts/layouts.jsx'
 import { Button, Field, Input, PageHeader, RowMenu, Pager } from '../components/primitives.jsx'
@@ -693,10 +694,11 @@ Owner Credentials:
 ${managers.length > 0 ? `Managers Credentials:\n${managers.map(t => `- ${t.name}: User ID: ${t.loginId || t.email} | Password: ${t.password}`).join('\n')}\n\n` : ''}${agents.length > 0 ? `Sales Executives Credentials:\n${agents.map(t => `- ${t.name}: User ID: ${t.loginId || t.email} | Password: ${t.password}`).join('\n')}\n\n` : ''}Installed PWA:
 Open https://${window.location.host}/${tenant.slug} on your phone browser and tap "Add to Home Screen".`
 
+  // This flipped to "Copied" on the very next line, whatever the write did --
+  // on a sheet of workspace credentials, where believing you have them and
+  // pasting the previous contents of your clipboard is the expensive mistake.
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(formattedText)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    copyText(formattedText).then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000) } })
   }
 
   return (

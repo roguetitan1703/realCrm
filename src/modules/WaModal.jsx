@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { WaCanvas } from '../components/chrome.jsx'
-import { CountBadge, QuickChip, Segmented } from '../components/primitives.jsx'
+import { QuickChip, Segmented } from '../components/primitives.jsx'
+import { copyText } from '../lib/clipboard.js'
 import Icon from '../components/Icon.jsx'
 import { thumbTint } from '../lib/format.js'
 import { whatsappLink, matchesForLead } from '../lib/matching.js'
@@ -103,9 +104,9 @@ export default function WaModal({ store }) {
   })()
 
   const copy = () => {
-    navigator.clipboard?.writeText(wa.message || '')
-      .then(() => store.toast('Message copied'))
-      .catch(() => store.toast('Could not copy — select the text and copy it', 'warn'))
+    copyText(wa.message).then(ok => store.toast(
+      ok ? 'Message copied' : 'Could not copy — select the text and copy it',
+      ok ? undefined : 'warn'))
   }
   // PERSIST it. store.logEvent() only dispatches into local React state, so the
   // entry looked right until the next server read — and any other action that
@@ -239,9 +240,13 @@ export default function WaModal({ store }) {
                 on={!!wa.withDescription}
                 aria-pressed={!!wa.withDescription}
                 onClick={() => store.recompose({ withDescription: !wa.withDescription })}>
+                {/* NO CHARACTER COUNT. It read "123" beside the word and
+                    nobody could tell what 123 was -- and even knowing, the
+                    number decides nothing an agent can act on. The message
+                    itself is on the screen directly below this chip: turn it
+                    on and you can see how long it got. */}
                 <Icon name={wa.withDescription ? 'check' : 'plus'} size={13} />
                 Description
-                <CountBadge n={p.description.trim().length} />
               </QuickChip>
             )}
           </div>

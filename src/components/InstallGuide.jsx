@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
 import { installEnv } from '../lib/pwa.js'
+import { copyText } from '../lib/clipboard.js'
 
 // ============================================================================
 // 📲 Install guide — the sheet iPhone needs and Android doesn't
@@ -30,11 +31,9 @@ export default function InstallGuide({ onClose }) {
   }, [onClose])
 
   const copyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(window.location.href)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2200)
-    } catch (e) { setCopied(false) }
+    if (!await copyText(window.location.href)) return setCopied(false)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2200)
   }
 
   // Safari puts Share in the bottom bar; Chrome and Edge on iOS put it in the

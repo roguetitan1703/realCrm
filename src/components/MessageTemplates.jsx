@@ -3,6 +3,7 @@ import { Button } from './primitives.jsx'
 import Icon from './Icon.jsx'
 import { isDeskRole } from '../lib/permissions.js'
 import { introText } from '../lib/matching.js'
+import { copyText } from '../lib/clipboard.js'
 import { DEFAULT_WHATSAPP_INTRO, DEFAULT_INTRO_MESSAGE } from '../data/theme.js'
 
 /**
@@ -134,9 +135,7 @@ function IntroPreview({ text, ready = true }) {
   // Confirmed only once the write RESOLVES. A "Copied" that fires regardless is
   // how somebody pastes an old clipboard into a client's chat.
   const copy = () => {
-    navigator.clipboard?.writeText(text)
-      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) })
-      .catch(() => {})
+    copyText(text).then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500) } })
   }
   return (
     <div className="msgt-prev">

@@ -253,7 +253,7 @@ function RevealCard({ data, store, onClose }) {
   const copy = () => {
     const firm = store.state.settings?.firmName || 'Workspace'
     const text = `${firm} sign-in\n${idLabel}: ${data.handle}\nTemporary password: ${data.password}`
-    navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => {})
+    copyText(text).then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500) } })
   }
   return (
     <div className="overlay" onClick={tryClose}>
