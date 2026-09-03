@@ -475,12 +475,14 @@ function paperwork(p, t, lang, { deed = true } = {}) {
     p.rera ? `${t.rera} ${p.rera}` : null,
   ], E.doc)
 }
-// Did the owner say this flat comes with anything? `none` is an answer, and it
-// is the answer that means there is nothing to list.
-const furnished = (p) => {
-  const tok = p.furnishType ?? normaliseTo(FURNISH, p.furnishing)
-  return !!tok && tok !== 'none'
-}
+// Did the owner say this flat comes with anything?
+//
+// Only 'none' hides the fittings. This required a POSITIVE furnishing token,
+// which meant a listing with four fixtures ticked and the furnishing dropdown
+// left blank -- a normal way to fill a form -- had them dropped from the
+// message. Real recorded facts, hidden because a different field was empty.
+// Unknown is not "unfurnished"; only "Unfurnished" is.
+const furnished = (p) => (p.furnishType ?? normaliseTo(FURNISH, p.furnishing)) !== 'none'
 const fmtArea = (v, unit) => `${v} ${unit === 'sqm' ? 'sq.m' : 'sq.ft'}`
 const push2 = (L, lines) => { if (lines) lines.forEach(x => L.push(x)) }
 
@@ -607,7 +609,10 @@ export function generateMessage(rawProperty, opts = {}) {
     msg = [...head, '', priceLine, signOff(firmName)]
       .filter(Boolean).join('\n')
   }
-  return msg
+  // A workspace with no firm name set left a blank line hanging off the end,
+  // because the sign-off is the last thing pushed and the blank before it is
+  // unconditional.
+  return msg.replace(/\s+$/, '')
 }
 
 // --- The standing intro (no lead attached) ----------------------------------

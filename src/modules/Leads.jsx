@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
-import { asList, thumbTint, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
+import { asList, thumbTint, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
@@ -443,7 +443,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   // One way to open any channel, so the record screen and the list rows reach
   // the client through the same confirm-and-log flow.
   const contact = (channel) => store.openModal({
-    kind: 'contact', channel, name: l.name, phone: l.phone, email: l.email,
+    kind: 'contact', channel, name: personLabel(l), phone: l.phone, email: l.email,
     recordType: 'lead', recordId: l.id,
   })
   // Rail: the follow-up card, which is the only thing that changes per lead.
@@ -605,7 +605,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
 
   return (
     <>
-      {topBar({ eyebrow: 'Leads', title: l.name, onBack: back })}
+      {topBar({ eyebrow: 'Leads', title: personLabel(l), onBack: back })}
       <div className="app-body">
         <ModuleDetail
           // On a phone Edit is carried by the action button (PhoneActions), so
@@ -614,7 +614,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
           // came to do. On the desk it stays in the header where it always was.
           def={LEADS_DEF} record={l} store={store} phone={phone}
           onEdit={(!phone && editable) ? openEdit : undefined}
-          avatar={<Avatar agent={{ initials: initials(l.name), avatar: '' }} size="lg" />}
+          avatar={<Avatar agent={{ initials: initials(personLabel(l)), avatar: '' }} size="lg" />}
           // NO OVERDUE FLAG HERE. A word on its own said nothing about what
           // was overdue, and on a phone it wrapped the header's action row onto
           // a second line to say it. The follow-up card in the record carries
@@ -671,7 +671,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
 function followFrom(f, l) {
   const type = f.action === 'site' ? 'Site visit' : f.action === 'meeting' ? 'Meeting' : 'Call'
   const dateLabel = f.quick === 'today' ? 'Today' : f.quick === 'tomorrow' ? 'Tomorrow' : f.quick === 'weekend' ? 'This weekend' : (f.date || 'Scheduled')
-  return { action: `${type} — ${l.name}`, date: dateLabel, time: f.time || '11:00 am' }
+  return { action: `${type} — ${personLabel(l)}`, date: dateLabel, time: f.time || '11:00 am' }
 }
 
 // compact, quiet money string for a property row (deal-aware)

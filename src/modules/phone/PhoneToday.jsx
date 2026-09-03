@@ -21,7 +21,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../../lib/api.js'
 import { isTerminal } from '../../data/leadStatus.js'
 import { Overdue, StageTag, MoreRows, useCap } from '../../components/primitives.jsx'
-import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue } from '../../lib/format.js'
+import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue, personLabel } from '../../lib/format.js'
 import Icon from '../../components/Icon.jsx'
 
 const CLOSED = (l) => isTerminal(l.stage)
@@ -65,9 +65,9 @@ function LeadRow({ l, onOpen, store, tone, quiet }) {
   return (
     <div className="q-row">
       <button type="button" className="q-open" onClick={() => onOpen(l)}>
-        <span className="av av-md">{initials(l.name)}</span>
+        <span className="av av-md">{initials(personLabel(l))}</span>
         <span className="q-main">
-          <span className="q-name">{l.name}</span>
+          <span className="q-name">{personLabel(l)}</span>
           <span className="q-sub">{l.followUp ? l.followUp.action : reqShort(l.req)}</span>
         </span>
         <span className="q-right">
@@ -80,7 +80,7 @@ function LeadRow({ l, onOpen, store, tone, quiet }) {
       <button
         type="button"
         className="q-call"
-        aria-label={`Call ${l.name}`}
+        aria-label={`Call ${personLabel(l)}`}
         onClick={() => store.openModal({ kind: 'contact', channel: 'call', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id })}
       ><Icon name="phone" size={17} /></button>
     </div>

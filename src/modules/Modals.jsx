@@ -6,7 +6,7 @@ import { theme } from '../data/theme.js'
 // every money field's onBlur and the lead form's save were one ReferenceError
 // waiting for someone to type a budget. Plain JSX, so the build never said a
 // word about it.
-import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho } from '../lib/format.js'
+import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho, personLabel } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink, followUpMessage } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -506,7 +506,7 @@ function AttachPropModal({ store, leadId }) {
           the three fields raw and printed "undefined · undefined · undefined"
           on any lead nobody had filled in. */}
       <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
-        <b style={{ color: 'var(--ink)' }}>{l.name}</b>{reqShort(req) ? ` · ${reqShort(req)}` : ' · no requirement on record'}
+        <b style={{ color: 'var(--ink)' }}>{personLabel(l)}</b>{reqShort(req) ? ` · ${reqShort(req)}` : ' · no requirement on record'}
       </div>
 
       {canSuggest && (
@@ -639,9 +639,9 @@ function PickBuyerModal({ store, propId }) {
         {buyers.map((b, i) => (
           <button key={b.lead.id} onClick={() => send(b.lead.id)}
             style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-            <span className="av av-md" style={{ background: 'var(--chrome)' }}>{initials(b.lead.name)}</span>
+            <span className="av av-md" style={{ background: 'var(--chrome)' }}>{initials(personLabel(b.lead))}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 13.5 }}>{b.lead.name}{i === 0 && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-wash)', borderRadius: 4, padding: '2px 6px', marginLeft: 7 }}>BEST FIT</span>}</div>
+              <div style={{ fontWeight: 600, fontSize: 13.5 }}>{personLabel(b.lead)}{i === 0 && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-wash)', borderRadius: 4, padding: '2px 6px', marginLeft: 7 }}>BEST FIT</span>}</div>
               <div className="u-muted" style={{ fontSize: 12 }}>{[latestPlus(b.lead.req.config), latestPlus(b.lead.req.locality), b.fitLine].filter(Boolean).join(' · ')}</div>
             </div>
             <Icon name="wa" size={18} style={{ color: 'var(--accent)', flexShrink: 0 }} />
@@ -1574,7 +1574,7 @@ function VisitProofModal({ store, leadId, propId }) {
   if (!l) return null
 
   return (
-    <Modal title={`Log site visit — ${l.name}`} onClose={busy ? () => {} : store.closeModal} width={460}>
+    <Modal title={`Log site visit — ${personLabel(l)}`} onClose={busy ? () => {} : store.closeModal} width={460}>
       {step === 'geo' && (
         <div className="vp-gate">
           {geoErr ? (
@@ -1795,7 +1795,7 @@ function VisitFeedbackModal({ store, leadId, propId }) {
   const save = () => { store.visitFeedback(leadId, propId, verdict, verdict === 'rejected' ? reason : null, p.society); store.closeModal() }
   return (
     <Modal title="Log site-visit outcome" onClose={store.closeModal} width={420}>
-      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 14 }}><b style={{ color: 'var(--ink)' }}>{l.name}</b> visited <b style={{ color: 'var(--ink)' }}>{p.society}</b> ({p.type} · {p.locality})</div>
+      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 14 }}><b style={{ color: 'var(--ink)' }}>{personLabel(l)}</b> visited <b style={{ color: 'var(--ink)' }}>{p.society}</b> ({p.type} · {p.locality})</div>
       <Segmented block value={verdict} onChange={setVerdict}
         options={[{ value: 'liked', label: '👍 Liked' }, { value: 'rejected', label: '👎 Rejected' }]} />
       {verdict === 'rejected' && (
@@ -1862,7 +1862,7 @@ function SearchModal({ store, go }) {
           {leads.length > 0 && <div style={{ fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700, padding: '10px 10px 5px' }}>Leads</div>}
           {leads.map(l => (
             <button key={l.id} type="button" onClick={() => goTo(() => go('leads', { leadId: l.id, leadOpen: true }))} style={{ textAlign: 'left', width: '100%', background: 'transparent', border: 'none', borderRadius: 8, padding: '9px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 9, fontFamily: 'inherit' }}>
-              <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{l.name}</div><div className="u-muted" style={{ fontSize: 12 }}>{[l.phone, l.locality].filter(Boolean).join(' · ')}</div></div>
+              <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600 }}>{personLabel(l)}</div><div className="u-muted" style={{ fontSize: 12 }}>{[l.phone, l.locality].filter(Boolean).join(' · ')}</div></div>
               <StageTag stage={l.stage} />
             </button>
           ))}
@@ -2079,7 +2079,7 @@ function ScheduleFollowUpModal({ store, leadId }) {
   const saveAppointment = () => {
     const finalDate = useCustomDate ? customDate : day
     const finalTime = useCustomTime ? customTime : time
-    const fullAction = `${action} — ${l.name}`
+    const fullAction = `${action} — ${personLabel(l)}`
     store.setFollowUp(l.id, {
       action: fullAction,
       // `at` is the appointment. date/time are kept only so the three rows
@@ -2102,7 +2102,7 @@ function ScheduleFollowUpModal({ store, leadId }) {
   )
 
   return (
-    <Modal title={`Schedule follow-up — ${l.name}`} onClose={store.closeModal} width={480}>
+    <Modal title={`Schedule follow-up — ${personLabel(l)}`} onClose={store.closeModal} width={480}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className="field">
           <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Activity Type</label>
