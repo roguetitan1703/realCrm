@@ -47,7 +47,7 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 - **Open:** reproduce on `iPhone 13` in standalone geometry, measure the
   scroll container.
 
-### 1.2 ⬜ The owners import lost two-thirds of the rows and broke unit numbers
+### 1.2 ✅ The owners import lost two-thirds of the rows and broke unit numbers — `4479591`
 - **Said:** imported 4k+ owner records with unit numbers etc., got only **1,380**,
   and the units came out wrong afterwards. How does the server handle a big import?
 - **Know (22 Sep, earlier pass):** the owner import flattens tower / unit / BHK /
@@ -91,6 +91,16 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
      → write in batches of 500 with a per-row outcome → download of every row
      that did not land → resumable, browser can be closed.
   8. Undo moves to the server, survives a reload, and is audited.
+- **Shipped 23 Sep (`4479591`).** Verified on dev: 4,119 rows → 4,000 added, 119
+  skipped with reasons, 0 failed, 21s (was 95s for 500 before the rota fix);
+  undo removed exactly 4,000. Through the real screen: 1,237 → 1,215 added, 22
+  skipped, skipped-rows CSV carries each reason, undo works, no page errors.
+  Blank check: names "NULL"/"N/A" stored empty; one phone on two flats made two
+  rows.
+- **Still to do here:** the delpat rows written before this carry the old
+  `unit_ref` text and no tower/unit columns (712 rows). They display through
+  `unitLabel`, which falls back to the old line, so nothing is broken — but a
+  tower filter (4.4) will not see them until they are split.
 
 ### 1.3 ⬜ Every action is logged as the assigned agent, not as the person who did it
 - **Said:** "the person who is assigned directly logs the action — even if I call
@@ -109,7 +119,7 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 - **Open:** WHICH SCREEN shows "Zahir" — the lead timeline, or the last-activity
   line at the top of the lead. Waiting on a screenshot.
 
-### 1.4 ⬜ Status dropdown clipped in the properties list
+### 1.4 ✅ Status dropdown clipped in the properties list — `a44afd3`
 - **Said:** in list view with a single row, the status dropdown opens inside a
   container too short for it and is cut off.
 - **Fix shape:** the menu renders outside the table's overflow (a portal, or
@@ -127,7 +137,7 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   demo and redistributed the leads by hand. Nothing to fix. (Onboarding still
   leaves new agents out of routing by default. That is covered in 2.5.)
 
-### 1.7 ⬜ iPhone alerts failing with no reason recorded
+### 1.7 🔨 iPhone alerts failing with no reason recorded — step 1 shipped `a44afd3`
 - **Know (22 Sep):** last 3 days, deliveries to `web.push.apple.com` show
   `failed` **27 × bhumi, 16 × mahalaxmi**, with **no status code and no error
   text**. In the same period 42 and 28 alerts reached a screen.
