@@ -5,6 +5,7 @@ import { api } from '../lib/api.js'
 import JsonView from '../components/JsonView.jsx'
 import { whenLabel } from '../lib/format.js'
 import { isDeskRole } from '../lib/permissions.js'
+import { copyText } from '../lib/clipboard.js'
 
 // ============================================================================
 // 🔌 CONNECTIONS — where leads come from (spec: docs/specs/ingestion.md, D1)

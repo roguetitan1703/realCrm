@@ -5,6 +5,7 @@ import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { buildRoster, RosterRow } from '../components/roster.jsx'
 import { whenLabel } from '../lib/format.js'
+import { copyText } from '../lib/clipboard.js'
 
 const ROLE_LABEL = { admin: 'Owner / Admin', owner: 'Owner', agent: 'Sales Advisor', manager: 'Sales Manager' }
 const roleLabel = (r) => ROLE_LABEL[r] || (r ? r[0].toUpperCase() + r.slice(1) : 'Sales Advisor')
