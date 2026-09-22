@@ -3100,7 +3100,16 @@ function rowToOwner(r: any): any {
     phone: r.phone || '',
     email: r.email || null,
     project: r.project || null,
+    // The unit as columns, and the old free-text line beside it. `unitRef` is
+    // what rows written before the import rebuild carry; `unitLabel` is what a
+    // screen should show, so no screen has to know which era a row is from.
+    tower: r.tower || null,
+    unitNo: r.unit_no || null,
+    config: r.config || null,
+    carpetArea: r.carpet_area !== null && r.carpet_area !== undefined ? Number(r.carpet_area) : null,
+    saleableArea: r.saleable_area !== null && r.saleable_area !== undefined ? Number(r.saleable_area) : null,
     unitRef: r.unit_ref || null,
+    unitLabel: [r.tower, r.unit_no].filter(Boolean).join('-') || r.unit_ref || null,
     locality: r.locality || null,
     stage: r.stage || 'New',
     source: r.source || 'Import',
@@ -3178,9 +3187,12 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
     }
   }
   const rows = await sql`
-    INSERT INTO crm_owners (id, tenant_id, name, phone, email, project, unit_ref, locality, stage, source, agent_id, created_by, import_batch_id)
+    INSERT INTO crm_owners (id, tenant_id, name, phone, email, project, tower, unit_no, config,
+      carpet_area, saleable_area, unit_ref, locality, stage, source, agent_id, created_by, import_batch_id)
     VALUES (${id}, ${t}, ${data.name || null}, ${data.phone || null}, ${data.email || null},
-      ${data.project || null}, ${data.unitRef || null}, ${data.locality || null},
+      ${data.project || null}, ${data.tower || null}, ${data.unitNo || null}, ${data.config || null},
+      ${data.carpetArea ?? null}, ${data.saleableArea ?? null},
+      ${data.unitRef || null}, ${data.locality || null},
       ${data.stage || 'New'}, ${data.source || 'Import'}, ${agentId},
       ${createdBy}, ${data.importBatchId || null})
     RETURNING *;
@@ -3202,6 +3214,91 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
     summary: `Owner "${created.name || created.phone}" added`, metadata: { after: created }, ip: ctx.ip, user_agent: ctx.userAgent,
   });
   return created;
+}
+
+/**
+ * A WHOLE BATCH OF OWNERS, IN ONE STATEMENT — what an import writes.
+ *
+ * createOwner above is the single-record path: one INSERT, one routing lookup,
+ * one audit row. An import of 4,108 rows through it is 4,108 of each, and that
+ * is exactly how a live import ended up as 1,380 rows and 1,380 audit entries
+ * with no record of the ones that never made it.
+ *
+ * Here the rows go in together, routing is resolved once per row against the
+ * same rules, the arrival notice is the same debounced one (so an import is one
+ * alert per agent, not one per row), and the AUDIT IS THE JOB, written by the
+ * caller with its counts — not a line per owner.
+ *
+ * Returns the created rows in the order they were given, so the caller can
+ * record which sheet row became which record.
+ */
+export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX): Promise<any[]> {
+  if (!list.length) return [];
+  const t = tid();
+  const createdBy = ctx.actorId ?? getContext()?.userId ?? null;
+  const rules = await getRoutingRules();
+  const routing = rules.owner_strategy === 'round_robin';
+
+  // The rota is claimed ONCE for the whole batch (see nextRoutedOwnerAgents):
+  // the same rotation, one round trip instead of one per row.
+  const needRota = routing ? list.filter(d => !d.agentId).length : 0;
+  const rota = needRota ? await nextRoutedOwnerAgents(needRota) : [];
+  let rotaAt = 0;
+
+  const rows: any[] = [];
+  for (const [i, data] of list.entries()) {
+    let agentId = data.agentId || null;
+    if (!agentId && routing) agentId = rota[rotaAt++] ?? null;
+    rows.push({
+      id: data.id || `own_${Date.now()}_${i}_${randomBytes(3).toString('hex')}`,
+      tenant_id: t,
+      name: data.name || null,
+      phone: data.phone || null,
+      email: data.email || null,
+      project: data.project || null,
+      tower: data.tower || null,
+      unit_no: data.unitNo || null,
+      config: data.config || null,
+      carpet_area: data.carpetArea ?? null,
+      saleable_area: data.saleableArea ?? null,
+      unit_ref: data.unitRef || null,
+      locality: data.locality || null,
+      stage: data.stage || 'New',
+      source: data.source || 'Import',
+      agent_id: agentId,
+      created_by: createdBy,
+      import_batch_id: data.importBatchId || null,
+    });
+  }
+
+  const saved = await sql`
+    INSERT INTO crm_owners ${sql(rows, 'id', 'tenant_id', 'name', 'phone', 'email', 'project', 'tower',
+      'unit_no', 'config', 'carpet_area', 'saleable_area', 'unit_ref', 'locality', 'stage', 'source',
+      'agent_id', 'created_by', 'import_batch_id')}
+    RETURNING *`;
+
+  // One notice per agent however many rows they got — the debounce in
+  // queueOwnerArrivalNotice collapses the batch, and it is the same path a
+  // single arrival takes, so the alert reads the same either way.
+  for (const r of rows) if (r.agent_id) queueOwnerArrivalNotice(r.agent_id);
+
+  // Notes as timeline entries, in one statement rather than one per row.
+  const notes = list
+    .map((d, i) => ({ d, id: rows[i].id }))
+    .filter(x => x.d.notes)
+    .map((x, i) => ({
+      id: `evt_imp_${Date.now()}_${i}_${randomBytes(3).toString('hex')}`,
+      record_id: x.id, type: 'note', title: 'Note', description: String(x.d.notes),
+      author: 'Import', timestamp: new Date().toISOString(), metadata: sql.json({}) as any, tenant_id: t,
+    }));
+  if (notes.length) {
+    await sql`INSERT INTO crm_timeline_events ${sql(notes as any[],
+      'id', 'record_id', 'type', 'title', 'description', 'author', 'timestamp', 'metadata', 'tenant_id')}
+      ON CONFLICT (id) DO NOTHING`;
+  }
+
+  const byId = new Map((saved as any[]).map(r => [r.id, rowToOwner(r)]));
+  return rows.map(r => byId.get(r.id)).filter(Boolean);
 }
 
 /**
@@ -3348,6 +3445,14 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
     email: patch.email !== undefined ? patch.email : existing.email,
     project: patch.project !== undefined ? patch.project : existing.project,
     unit_ref: patch.unitRef !== undefined ? patch.unitRef : existing.unitRef,
+    // The unit as columns — what the import writes and what a tower filter and
+    // the Contacts list read. `unit_ref` above is the free-text line the rows
+    // written before that carry.
+    tower: patch.tower !== undefined ? patch.tower : existing.tower,
+    unit_no: patch.unitNo !== undefined ? patch.unitNo : existing.unitNo,
+    config: patch.config !== undefined ? patch.config : existing.config,
+    carpet_area: patch.carpetArea !== undefined ? patch.carpetArea : existing.carpetArea,
+    saleable_area: patch.saleableArea !== undefined ? patch.saleableArea : existing.saleableArea,
     locality: patch.locality !== undefined ? patch.locality : existing.locality,
     stage: patch.stage !== undefined ? patch.stage : existing.stage,
     agent_id: patch.agentId !== undefined ? patch.agentId : existing.agentId,
@@ -4436,6 +4541,33 @@ export async function nextRoutedOwnerAgent(): Promise<string | null> {
   `;
   if (rows.length && rows[0].agent_id) return String(rows[0].agent_id).replace(/^"|"$/g, '');
   return null;
+}
+
+/**
+ * The next N owners' agents, in one statement.
+ *
+ * nextRoutedOwnerAgent() above is one row: one UPDATE per owner. An import
+ * calling it four thousand times is four thousand sequential round trips — a
+ * 500-row batch took 95 seconds in testing, all of it waiting. Advancing the
+ * rota by N once and dealing the names out in order gives the same rotation for
+ * the same cost as a single arrival.
+ */
+export async function nextRoutedOwnerAgents(n: number): Promise<(string | null)[]> {
+  if (n <= 0) return [];
+  const rows = await sql`
+    UPDATE crm_routing_rules
+    SET owner_last_assigned_index = (owner_last_assigned_index + ${n}) % GREATEST(jsonb_array_length(owner_active_agent_ids), 1)
+    WHERE tenant_id = ${tid()} AND jsonb_array_length(owner_active_agent_ids) > 0
+    RETURNING owner_active_agent_ids, owner_last_assigned_index AS after
+  `;
+  if (!rows.length) return new Array(n).fill(null);
+  const pool = (rows[0].owner_active_agent_ids as any[]).map(String);
+  if (!pool.length) return new Array(n).fill(null);
+  // Where the rota stood BEFORE this claim, recovered from where it now stands,
+  // so the sequence handed back is exactly the one those N steps cover.
+  const after = Number(rows[0].after);
+  const start = ((after - n) % pool.length + pool.length) % pool.length;
+  return Array.from({ length: n }, (_, i) => pool[(start + i + 1) % pool.length]);
 }
 
 /**

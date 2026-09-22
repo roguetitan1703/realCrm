@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Icon from '../components/Icon.jsx'
 import { Button, Panel, PageHeader } from '../components/primitives.jsx'
 import { ListLayout } from '../layouts/layouts.jsx'
@@ -6,12 +6,24 @@ import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import {
   PROPERTY_FIELDS, LEAD_FIELDS, OWNER_FIELDS, GROUP_LABEL,
-  parseSpreadsheet, guessMapping, readField,
-  normPhone, splitUnit, moneyLabel, parseMoney,
+  parseSpreadsheet, guessMapping, EXAMPLE_SHEETS, exampleSheetCsv,
 } from '../lib/importSchema.js'
 
-// Guided import wizard: Choose → Upload → Map → Review → Done. The parsing,
-// dedup and revert logic is unchanged; the flow is a proper stepped experience.
+// ============================================================================
+// 📥 IMPORT — Choose → Upload → Map → Review → Done
+// ============================================================================
+// THE BROWSER NO LONGER SAVES THE FILE. It used to build a record per row and
+// fire one request per row, all at once: a client's 4,108-row owner list put
+// 1,380 rows in the database and the report for the rest was a number in a
+// toast. The file is now uploaded once and written by a server-side job
+// (backend/services/imports.ts) that records an outcome and a reason for every
+// row, can be watched while it runs, and can be undone from any device.
+//
+// So this screen's job is the three things a person actually decides: which
+// sheet, which column is which, and whether the counts look right. Every count
+// it shows comes from the server, over the whole file — not from a sample the
+// browser happened to hold.
+
 const STEPS = ['Choose', 'Upload', 'Map', 'Review', 'Done']
 
 function WizardSteps({ step }) {
@@ -31,411 +43,201 @@ function WizardSteps({ step }) {
   )
 }
 
+const KIND_LABEL = { clients: 'Leads & contacts', owners: 'Owners', properties: 'Properties' }
+const FIELDS_FOR = { clients: LEAD_FIELDS, owners: OWNER_FIELDS, properties: PROPERTY_FIELDS }
+
+/** Rows are uploaded in chunks: a 4,000-row sheet is megabytes, and one body
+ *  should not have to carry it. */
+const UPLOAD_CHUNK = 1000
+
+function download(name, text, type = 'text/csv;charset=utf-8') {
+  const url = URL.createObjectURL(new Blob([text], { type }))
+  const a = document.createElement('a')
+  a.href = url; a.download = name; a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 export default function ImportPage({ store, go, sel, topBar }) {
-  const [tab, setTab] = useState('import') // 'import' | 'history'
-  const [kind, setKind] = useState(sel?.kind || null) // null until chosen | 'clients' | 'properties' | 'owners'
-  const [step, setStep] = useState('choose') // choose | upload | map | review | done
+  const [tab, setTab] = useState('import')          // 'import' | 'history'
+  const [kind, setKind] = useState(sel?.kind || null)
+  const [step, setStep] = useState('choose')        // choose | upload | map | review | done
+  const [file, setFile] = useState(null)            // the File itself, for re-reading another sheet
   const [fileMeta, setFileMeta] = useState(null)
-  const [parsedRows, setParsedRows] = useState([])
+  const [sheetNames, setSheetNames] = useState([])
   const [headers, setHeaders] = useState([])
+  const [rowCount, setRowCount] = useState(0)
+  const [samples, setSamples] = useState({})        // column → first non-empty value
   const [mapping, setMapping] = useState({})
   const [showAllFields, setShowAllFields] = useState(false)
+  const [job, setJob] = useState(null)              // the server's job row
+  const [preview, setPreview] = useState(null)      // { counts, reasons, sample }
+  const [checking, setChecking] = useState(false)
+  const [busy, setBusy] = useState(null)            // 'uploading' | 'running' | null
+  const [uploaded, setUploaded] = useState(0)
   const [filterStatus, setFilterStatus] = useState('all')
-  const [importProject, setImportProject] = useState('') // properties: land the whole file under one project
   const [error, setError] = useState(null)
-  const [importing, setImporting] = useState(false)
-  const [lastBatchId, setLastBatchId] = useState(null)
-  const [importStats, setImportStats] = useState(null)
+  const poll = useRef(null)
 
   useEffect(() => {
     if (sel?.kind === 'clients' || sel?.kind === 'properties' || sel?.kind === 'owners') { setKind(sel.kind); setStep('upload') }
   }, [sel?.kind])
 
-  const chooseKind = (k) => { setKind(k); setStep('upload'); setError(null) }
-  const restart = () => { setKind(null); setStep('choose'); setParsedRows([]); setHeaders([]); setFileMeta(null); setError(null); setImportStats(null) }
+  // Imports run on the server, so the history is the same on every device and
+  // survives a reload — the previous list lived in this tab's memory, which is
+  // why an undo disappeared the moment anyone refreshed.
+  const [historyAt, setHistoryAt] = useState(0)
+  const reloadHistory = () => setHistoryAt(n => n + 1)
+  const { data: history } = useServerData(() => api.listImports().then(r => r?.imports || []), [historyAt], [])
 
-  const FIELDS = kind === 'clients' ? LEAD_FIELDS : kind === 'owners' ? OWNER_FIELDS : PROPERTY_FIELDS
-  const kindLabel = kind === 'clients' ? 'Leads & contacts' : kind === 'owners' ? 'Owners' : 'Properties'
+  useEffect(() => () => clearInterval(poll.current), [])
+
+  const FIELDS = FIELDS_FOR[kind] || PROPERTY_FIELDS
+  const kindLabel = KIND_LABEL[kind] || 'Records'
+
+  const chooseKind = (k) => { setKind(k); setStep('upload'); setError(null) }
+  const restart = () => {
+    clearInterval(poll.current)
+    setKind(null); setStep('choose'); setFile(null); setFileMeta(null); setSheetNames([]); setHeaders([])
+    setRowCount(0); setSamples({}); setMapping({}); setJob(null); setPreview(null); setError(null); setBusy(null); setUploaded(0)
+  }
+
+  // ---- Upload: read the file here, hand the rows to the server ------------
+  const readFile = async (f, sheet) => {
+    setBusy('uploading'); setError(null); setUploaded(0)
+    try {
+      const { headers: cols, rows, sheetName, sheetNames: names } = await parseSpreadsheet(f, sheet)
+      if (!rows.length) { setError('That sheet has headers but no data rows.'); setBusy(null); return }
+      const guess = guessMapping(cols, FIELDS)
+      setHeaders(cols); setMapping(guess); setRowCount(rows.length)
+      setSheetNames(names || []); setFileMeta({ name: f.name, size: Math.round(f.size / 1024) + ' KB', sheetName })
+      // One example value per column, kept so the mapping screen can show what
+      // it is about to do without holding four thousand rows in memory.
+      const s = {}
+      for (const c of cols) { const hit = rows.find(r => String(r[c] ?? '').trim() !== ''); if (hit) s[c] = String(hit[c]).slice(0, 28) }
+      setSamples(s)
+
+      const created = await api.createImport({
+        kind, headers: cols, fileName: f.name, sheetName, sheetNames: names || [], mapping: guess, rows: [],
+      })
+      const j = created?.import
+      if (!j?.id) throw new Error('The server did not start the import')
+      for (let i = 0; i < rows.length; i += UPLOAD_CHUNK) {
+        await api.appendImportRows(j.id, rows.slice(i, i + UPLOAD_CHUNK))
+        setUploaded(Math.min(i + UPLOAD_CHUNK, rows.length))
+      }
+      setJob(j); setBusy(null); setShowAllFields(false); setStep('map')
+    } catch (err) {
+      setError('Could not read this file: ' + (err.message || err)); setBusy(null)
+    }
+  }
 
   const handleFile = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setFileMeta({ name: file.name, size: Math.round(file.size / 1024) + ' KB' })
-    setError(null)
+    const f = e.target.files?.[0]
+    if (!f) return
+    setFile(f)
+    await readFile(f)
+  }
+
+  // Another sheet of the same workbook. The rows already uploaded belong to the
+  // sheet they came from, so this starts a new job rather than mixing two.
+  const switchSheet = async (name) => { if (file) await readFile(file, name) }
+
+  // ---- Map → Review: the server checks the WHOLE file ---------------------
+  const runCheck = async () => {
+    if (!job) return
+    setChecking(true); setError(null)
     try {
-      const { headers: cols, rows, sheetName, sheetCount } = await parseSpreadsheet(file)
-      if (!rows.length) { setError('That file has headers but no data rows.'); return }
-      setHeaders(cols)
-      setMapping(guessMapping(cols, FIELDS))
-      setParsedRows(rows)
-      setShowAllFields(false)
-      if (sheetName) setFileMeta(f => ({ ...f, sheetName, sheetCount }))
-      setStep('map')
+      const out = await api.previewImport(job.id, mapping)
+      setPreview(out); setFilterStatus('all'); setStep('review')
     } catch (err) {
-      setError('Could not read this file: ' + err.message)
+      setError('Could not check the file: ' + (err.message || err))
     }
+    setChecking(false)
   }
 
-  const intoProject = importProject.trim()
-
-  // Read every mapped field, then shape it into the record the app really
-  // stores — so a rich sheet lands rich, instead of collapsing to four columns.
-  // Duplicate detection for the whole file, in one request. It used to compare
-  // each row against the collections the browser held, so it could only ever
-  // see part of the book -- and would see none of it once those went away.
-  const dupProbe = parsedRows.map(row => {
-    const v = {}
-    FIELDS.forEach(f => { const got = readField(row, mapping, f); if (got !== null) v[f.key] = got })
-    if (kind === 'clients') return { phone: v.phone || null, name: v.name || null }
-    if (kind === 'owners') return { phone: v.phone || null }
-    let unitRaw = v.title
-    if (!unitRaw && headers.length) unitRaw = String(row[headers[0]] || '').trim()
-    if (!unitRaw) return {}
-    const project = intoProject || v.project || unitRaw
-    const parsed = splitUnit(unitRaw)
-    const wing = v.wing || parsed.wing || undefined
-    const flat = parsed.flat || unitRaw
-    return { title: [project, wing && `Wing ${wing}`, flat !== project ? flat : null].filter(Boolean).join(' - ') }
-  })
-  const dupKey = JSON.stringify(dupProbe)
-  const { data: dupes } = useServerData(
-    () => parsedRows.length
-      ? api.checkDuplicates({
-          phones: dupProbe.map(r => r.phone).filter(Boolean),
-          names: dupProbe.map(r => r.name).filter(Boolean),
-          titles: dupProbe.map(r => r.title).filter(Boolean),
-        })
-      : Promise.resolve({ leads: {}, properties: {}, owners: {} }),
-    [dupKey], { leads: {}, properties: {}, owners: {} })
-
-  // The project names already on the books, for the "import into project" box.
-  const { data: summary } = useServerData(() => api.getPropertiesSummary().then(r => r?.summary || null), [], null)
-  const projectNames = (summary?.projects || []).map(p => p.name)
-
-  // Memoised, and not for tidiness. This walks every row of the file and
-  // rebuilds every record — on a 2,000-row sheet that ran again on every
-  // keystroke in the project box, every filter chip, every re-render, and the
-  // Review step visibly locked up. It only depends on the file, the mapping
-  // and the dedupe answer, so it recomputes when one of those changes.
-  const previewRows = useMemo(() => {
-    // Phones already claimed by an EARLIER row of this same file. Rebuilt on
-    // each pass, inside the memo, because it is state that belongs to one walk
-    // of the file — leaked across passes it would mark row 1 a duplicate of
-    // itself the second time through.
-    //
-    // Dedupe used to ask only one question — "is this person already in the
-    // database?" — which says nothing about a file that lists the same person
-    // twice. Real sheets do, constantly: the client's own 247-row file held
-    // just 179 people, so 68 rows duplicated a line further up and every one
-    // was created as a new lead, spread across agents by round-robin.
-    const seenInFile = new Map()
-    return parsedRows.map((row) => {
-    const v = {}
-    FIELDS.forEach(f => { const got = readField(row, mapping, f); if (got !== null) v[f.key] = got })
-
-    if (kind === 'owners') {
-      if (!v.phone) return { status: 'invalid', reason: 'Phone is missing or too short', row, values: v }
-      const name = (v.name || 'Owner').trim()
-      // Any column nobody mapped still isn't lost — a sheet with a "Binod" /
-      // "Vinod" / "Disha" column per past caller is call history, not noise.
-      // Folded into the opening note, each tagged with its own header, so
-      // the outreach history survives even though there's no per-agent field.
-      const mappedCols = new Set(Object.values(mapping).filter(Boolean))
-      const extra = headers
-        .filter(h => !mappedCols.has(h))
-        .map(h => [h, String(row[h] ?? '').trim()])
-        .filter(([, val]) => val)
-        .map(([h, val]) => `${h}: ${val}`)
-      const notes = [v.notes, ...extra].filter(Boolean).join('; ') || undefined
-      // The sheet hands over unit number / tower / config / two areas as
-      // separate columns, not one pre-built "Unit" field — composed here into
-      // the one free-text reference the owner record actually stores.
-      const areaPart = v.carpet && v.saleable ? `${v.carpet}/${v.saleable} sqft`
-        : v.carpet ? `${v.carpet} sqft carpet`
-        : v.saleable ? `${v.saleable} sqft saleable`
-        : null
-      const unitRef = [v.wing, v.config, v.unitNo, areaPart].filter(Boolean).join(' · ') || undefined
-      const record = {
-        name, phone: v.phone, email: v.email || undefined,
-        project: importProject.trim() || v.project || undefined,
-        unitRef,
-        locality: v.locality || undefined,
-        source: v.source || 'Spreadsheet import',
-        notes,
-      }
-      // An owner already on file, matched by phone — this is what makes
-      // re-running an import that stopped partway through safe: rows already
-      // saved before the browser closed come back "duplicate" and are
-      // skipped, not saved a second time. There's no merge step for owners
-      // (unlike leads) — an existing owner has nothing worth combining, it's
-      // just already there.
-      // Same two questions as leads, and for the same reasons: the stored
-      // number is normalised while the sheet's is not, and a calling list
-      // routinely names one owner on several unit rows.
-      const key10 = normPhone(v.phone)
-      const selfHit = seenInFile.get(key10) || null
-      const dupHit = selfHit || dupes?.owners?.[key10] || dupes?.owners?.[v.phone] || null
-      if (key10 && !dupHit) seenInFile.set(key10, { id: null, name, selfRow: true })
-      return {
-        status: dupHit ? 'duplicate' : 'new',
-        selfDup: Boolean(selfHit),
-        dupTarget: dupHit?.name || null, dupId: dupHit?.id || null,
-        record, label: name, sub: v.phone, locality: v.locality || '—', values: v,
-      }
-    }
-
-    if (kind === 'clients') {
-      if (!v.name && !v.phone) return { status: 'invalid', reason: 'No name and no phone', row, values: v }
-      const name = (v.name || 'Imported lead').replace(/^[*(]+/, '').trim()
-      const phone = v.phone
-      if (!phone) return { status: 'invalid', reason: 'Phone is missing or too short', row, name, values: v }
-      // normPhone FIRST. The server keys its answer by the normalised number
-      // because that is the only form a spreadsheet cell reliably produces —
-      // looking up the raw cell first would miss every stored "+91…" row,
-      // which is exactly how a re-import used to duplicate the whole file.
-      // Name is the last resort: two people share a name far more readily than
-      // a number, so it only decides when there is no phone match at all.
-      const key10 = normPhone(phone)
-      // An earlier line of THIS file wins over the database: if the sheet
-      // lists someone twice, the second line is a duplicate of the first even
-      // on a completely empty workspace.
-      const selfHit = seenInFile.get(key10) || null
-      const dupHit = selfHit
-        || dupes?.leads?.[key10]
-        || dupes?.leads?.[phone]
-        || dupes?.leads?.[String(name || '').toLowerCase()]
-        || null
-      const record = {
-        name, phone, email: v.email || undefined,
-        source: v.source || 'Spreadsheet import',
-        stage: v.stage || 'New',
-        req: {
-          // `undefined`, not 'sale'. A sheet with no buy/rent column told us
-          // nothing, and writing 'sale' anyway turned "we don't know" into a
-          // confident wrong answer on every row — which then matched rent
-          // seekers against sale stock. Blank prompts someone to ask; wrong
-          // does not. The deal type is inferred from the budget where there
-          // is one (see dealFromBudget), and left empty where there isn't.
-          deal: v.deal || undefined,
-          locality: v.locality || '',
-          config: v.config || '',
-          minBudget: v.minBudget || undefined,
-          maxBudget: v.maxBudget || undefined,
-          budget: [moneyLabel(v.minBudget), moneyLabel(v.maxBudget)].filter(Boolean).join(' - ') || '',
-          interest: v.interest || undefined,
-          purpose: v.purpose || undefined,
-          timeline: v.timeline || undefined,
-          notes: v.notes || undefined,
-        },
-      }
-      // Claim this number for the rest of the file. Only the FIRST occurrence
-      // claims it — later ones resolve to this same entry, so five lines for
-      // one person collapse to one lead rather than a chain of merges.
-      // `selfDup` (no dupId yet, since the record it duplicates is not saved)
-      // tells the accept step to fold it into the row that IS being created.
-      if (key10 && !dupHit) seenInFile.set(key10, { id: null, name, selfRow: true })
-      return {
-        status: dupHit ? 'duplicate' : 'new',
-        selfDup: Boolean(selfHit),
-        dupTarget: dupHit?.name || null,
-        dupId: dupHit?.id || null,
-        record, label: name, sub: phone, locality: v.locality || '—', values: v,
-      }
-    }
-
-    // Properties. A row is a unit; the project can come from a column or from
-    // the "import into project" box applied to the whole file.
-    let unitRaw = v.title
-    if (!unitRaw && headers.length) unitRaw = String(row[headers[0]] || '').trim()
-    if (!unitRaw) return { status: 'invalid', reason: 'No unit / listing name', row, values: v }
-
-    const project = intoProject || v.project || unitRaw
-    const parsed = splitUnit(unitRaw)
-    const wing = v.wing || parsed.wing || undefined
-    const flat = parsed.flat || unitRaw
-    const title = [project, wing && `Wing ${wing}`, flat !== project ? flat : null].filter(Boolean).join(' - ')
-
-    // Dedup on the thing that is actually unique: a unit inside a project. The
-    // comparison runs in the database (one request for the whole file) rather
-    // than against whatever listings the browser happened to be holding — which
-    // is what it used to do, and why it missed real duplicates.
-    const dupHit = dupes?.properties?.[title.toLowerCase()] || null
-
-    const record = {
-      title,
-      society: project, project,
-      wing, tower: wing, flat, unit: flat,
-      type: v.type || '2 BHK Apartment',
-      deal: v.deal || 'sale',
-      locality: v.locality || '',
-      price: v.price || undefined,
-      priceLabel: moneyLabel(v.price) || undefined,
-      status: v.status || 'Available',
-      carpet: v.carpet || undefined,
-      area: v.carpet || undefined,
-      sqftLabel: v.carpet ? `${Number(v.carpet).toLocaleString('en-IN')} sqft carpet` : undefined,
-      floor: v.floor || undefined,
-      totalFloors: v.totalFloors || undefined,
-      facing: v.facing || undefined,
-      furnishing: v.furnishing || undefined,
-      parking: v.parking || undefined,
-      possession: v.possession || undefined,
-      age: v.age !== undefined ? v.age : undefined,
-      builder: v.builder || undefined,
-      rera: v.rera || undefined,
-      owner: v.owner || undefined,
-      ownerPhone: v.ownerPhone || undefined,
-      ownerEmail: v.ownerEmail || undefined,
-      highlights: v.notes ? [v.notes] : undefined,
-    }
-    return {
-      status: dupHit ? 'duplicate' : 'new',
-      dupTarget: dupHit?.name || null,
-      dupId: dupHit?.id || null,
-      record, label: title, sub: moneyLabel(v.price) || '—', locality: v.locality || '—', values: v,
-      }
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsedRows, mapping, kind, headers, intoProject, dupes])
-
-  // How much of each row actually survived the mapping — the honest answer to
-  // "is my data coming across, or just the name?"
-  const mappedCount = new Set(Object.values(mapping).filter(Boolean)).size
-  const unmappedHeaders = headers.filter(h => !Object.values(mapping).includes(h))
-  // The Review table's own columns — every field that was actually mapped to
-  // a column, in schema order. Not "core fields", not a fixed guess: whatever
-  // you pointed at a column is what you get to check before confirming.
-  const reviewCols = FIELDS.filter(f => mapping[f.key])
-
-  const newCount = previewRows.filter(r => r.status === 'new').length
-  const dupCount = previewRows.filter(r => r.status === 'duplicate').length
-  // Rows that duplicate an EARLIER LINE of the same file rather than something
-  // already saved. They are skipped outright: the first line creates the lead
-  // and the rest are the same person written down again, so there is no record
-  // to merge into and nothing to gain from creating a second one.
-  const selfDupCount = previewRows.filter(r => r.selfDup).length
-  const invalidCount = previewRows.filter(r => r.status === 'invalid').length
-  const filteredRows = useMemo(
-    () => previewRows.filter(r => filterStatus === 'all' || r.status === filterStatus),
-    [previewRows, filterStatus])
-  // The review table is a SAMPLE to check the mapping against, not a viewer for
-  // the whole file. Rendering every row put 2,000 <tr> with a cell each per
-  // mapped column into the DOM at once and the step stopped responding — and
-  // nobody reads two thousand rows to decide whether "Locality" landed in the
-  // right column. The counts above are the complete answer; this shows enough
-  // to trust them, and grows on request.
-  const REVIEW_PAGE = 50
-  const [reviewCap, setReviewCap] = useState(REVIEW_PAGE)
-  useEffect(() => { setReviewCap(REVIEW_PAGE) }, [filterStatus, previewRows])
-  const shownRows = filteredRows.slice(0, reviewCap)
-  // Owners have no merge step — a duplicate is skipped, not sent to the
-  // server at all, so it shouldn't be counted as something about to be saved.
-  const dupWord = kind === 'owners' ? 'already on file' : 'to merge'
-  const dupBadge = kind === 'owners' ? 'Skip' : 'Merge'
-  const sendCount = newCount + (kind === 'owners' ? 0 : dupCount - selfDupCount)
-
-  // One row at a time, awaited before the next one started, was N sequential
-  // round trips for one file — a 200-row township sheet took as long as 200
-  // separate saves. Every row's create request now fires together
-  // (Promise.allSettled starts them all before waiting on any of them); a
-  // duplicate's merge still has to happen after ITS create succeeds (there's
-  // nothing to merge into until the row exists), but those also all run
-  // together rather than one merge blocking the next row's create.
-  const CREATE_BY_KIND = { clients: api.createLead, owners: api.createOwner, properties: api.createProperty }
-  const CACHE_KIND = { clients: 'lead', owners: 'owner', properties: 'property' }
-
-  const handleConfirm = async () => {
-    if (!parsedRows.length) return
-    setImporting(true)
-    const batchId = 'imp_' + Date.now()
-    // Explicit id per row: the optimistic record and the stored row must share
-    // one, or Undo can't find what it created. It also keeps rows created
-    // inside the same millisecond from colliding.
-    let n = 0
-    // Owners have no merge step (unlike leads) — a duplicate owner isn't
-    // created at all, just skipped, which is also what makes re-running an
-    // import that stopped partway through safe.
-    const toCreate = previewRows
-      .filter(pr => pr.status !== 'invalid'
-        && !(kind === 'owners' && pr.status === 'duplicate')
-        // Never create a row for a line the file itself already listed.
-        && !pr.selfDup)
-      .map(pr => {
-        const recId = `${kind === 'clients' ? 'l' : kind === 'owners' ? 'own' : 'p'}_${batchId}_${n++}`
-        const rec = { ...pr.record, id: recId, importBatchId: batchId }
-        if (kind === 'clients' && pr.status === 'duplicate' && pr.dupId) rec.duplicateOf = pr.dupId
-        return { pr, rec }
-      })
-
+  // ---- Run: start it, then watch it --------------------------------------
+  const start = async () => {
+    if (!job) return
+    setBusy('running'); setError(null); setStep('done')
     try {
-      const creator = CREATE_BY_KIND[kind]
-      const results = await Promise.allSettled(toCreate.map(({ rec }) => creator(rec)))
-
-      const created = []
-      const toMerge = []
-      let added = 0, merged = 0, failed = 0
-      const mergedDetails = []
-      if (kind === 'owners') {
-        previewRows.forEach(pr => {
-          if (pr.status !== 'duplicate') return
-          merged++
-          mergedDetails.push(`${pr.label} already on file — skipped (${pr.dupTarget})`)
-        })
-      }
-      results.forEach((res, i) => {
-        const { pr, rec } = toCreate[i]
-        const body = res.status === 'fulfilled' ? res.value : null
-        const savedRec = body?.data || body?.owner || body?.property || body?.lead || null
-        if (!savedRec?.id) { failed++; return }
-        created.push(savedRec)
-        if (pr.status === 'duplicate') {
-          merged++
-          mergedDetails.push(`${pr.label} merged into existing record — ${pr.dupTarget}`)
-          if (kind === 'clients' && pr.dupId) toMerge.push(savedRec.id)
-        } else {
-          added++
-        }
-      })
-
-      if (created.length) store.cacheRecords(CACHE_KIND[kind], created)
-      // Each merge needs its row already in cache (store.merge reads
-      // duplicateOf off the cached record) — safe now that the create above
-      // has resolved and been cached, and these can also all run together.
-      if (toMerge.length) await Promise.allSettled(toMerge.map(id => store.merge(id)))
-
-      store.logImportBatch({ batchId, timestamp: Date.now(), fileName: fileMeta?.name || 'import', module: kindLabel, addedCount: added, mergedCount: merged, mergedDetails, reverted: false })
-      if (failed) store.toast(`${failed} row${failed === 1 ? '' : 's'} failed to save`, 'warn')
-      setLastBatchId(batchId); setImportStats({ added, merged, invalid: invalidCount, mergedDetails }); setStep('done'); setImporting(false)
-    } catch (err) { setError('Import failed while saving: ' + err.message); setImporting(false) }
+      // The answer carries the job as RUNNING. Without it the screen kept
+      // rendering the job as it was at upload — status "uploaded", 0 of 0 —
+      // which reads as "import complete, nothing saved" for the second before
+      // the first poll lands.
+      const { import: started } = await api.runImport(job.id)
+      if (started) setJob(started)
+      clearInterval(poll.current)
+      poll.current = setInterval(async () => {
+        try {
+          const { import: j } = await api.getImport(job.id)
+          setJob(j)
+          if (j.status === 'done' || j.status === 'failed' || j.status === 'reverted') {
+            clearInterval(poll.current); setBusy(null); reloadHistory()
+            if (j.status === 'done') store.toast(`Imported ${j.added} of ${j.total}`)
+          }
+        } catch (e) { /* a dropped poll is not a failed import; the next one answers */ }
+      }, 1200)
+    } catch (err) {
+      setError('Could not start the import: ' + (err.message || err)); setBusy(null)
+    }
   }
 
-  const handleRevert = (id) => { if (id) store.revertImportBatch(id) }
-  const importLogs = store.state.importLogs || []
+  const undo = async (id, added) => {
+    if (!window.confirm(`Undo this import? The ${added} record${added === 1 ? '' : 's'} it created will be removed.`)) return
+    try {
+      const out = await api.revertImport(id)
+      store.toast(`Removed ${out.deleted} record${out.deleted === 1 ? '' : 's'}`)
+      if (job?.id === id) setJob(out.import)
+      reloadHistory()
+    } catch (err) {
+      store.toast('Could not undo that import', 'warn')
+    }
+  }
+
+  /** Every row that did not become a record, with its reason — fix these and
+   *  re-import just them. */
+  const downloadSkipped = async (id) => {
+    try {
+      const { rows } = await api.getImportRows(id)
+      const bad = (rows || []).filter(r => r.status !== 'added')
+      if (!bad.length) { store.toast('Every row was imported'); return }
+      const cols = Object.keys(bad[0].raw || {})
+      const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s }
+      const csv = [['Row', 'Why it was not imported', ...cols].join(',')]
+      for (const r of bad) csv.push([r.rowNo, esc(r.reason || r.status), ...cols.map(c => esc(r.raw?.[c]))].join(','))
+      download(`not-imported-${id}.csv`, csv.join('\r\n'))
+    } catch (err) {
+      store.toast('Could not build that file', 'warn')
+    }
+  }
+
+  const getExample = (k) => {
+    download(`${k}-example.csv`, exampleSheetCsv(k))
+  }
+
+  // ---- Derived for the screens -------------------------------------------
+  const mappedCols = Object.values(mapping).filter(Boolean)
+  const unmappedHeaders = headers.filter(h => !mappedCols.includes(h))
+  const missingRequired = FIELDS.filter(f => f.required && !mapping[f.key])
+  const counts = preview?.counts
+  const shown = (preview?.sample || []).filter(r => filterStatus === 'all' || r.status === filterStatus)
+  const reviewCols = FIELDS.filter(f => mapping[f.key])
+  const done = job && (job.status === 'done' || job.status === 'reverted')
 
   const kpis = [
-    { label: 'Imports run', value: importLogs.length },
-    { label: 'Active batches', value: importLogs.filter(l => !l.reverted).length, tone: 'accent' },
+    { label: 'Imports run', value: (history || []).length },
+    { label: 'Not undone', value: (history || []).filter(l => l.status === 'done').length, tone: 'accent' },
   ]
 
   const toolbar = (
     <div className="imp-tabs">
       <button className={'imp-tab' + (tab === 'import' ? ' on' : '')} onClick={() => setTab('import')}>New import</button>
-      <button className={'imp-tab' + (tab === 'history' ? ' on' : '')} onClick={() => setTab('history')}>History{importLogs.length ? ` · ${importLogs.length}` : ''}</button>
+      <button className={'imp-tab' + (tab === 'history' ? ' on' : '')} onClick={() => setTab('history')}>History{(history || []).length ? ` · ${history.length}` : ''}</button>
     </div>
   )
 
-  // Core fields always show; the rest collapse so the required mapping isn't
-  // buried under twenty selects — but they're one click away, not absent.
   const visibleFields = showAllFields ? FIELDS : FIELDS.filter(f => f.group === 'key')
-  const groups = visibleFields.reduce((acc, f) => {
-    (acc[f.group] = acc[f.group] || []).push(f)
-    return acc
-  }, {})
-  const sampleOf = (col) => {
-    if (!col) return null
-    const hit = parsedRows.find(r => String(r[col] ?? '').trim() !== '')
-    return hit ? String(hit[col]).slice(0, 28) : null
-  }
+  const groups = visibleFields.reduce((acc, f) => { (acc[f.group] = acc[f.group] || []).push(f); return acc }, {})
 
   return (
     <>
@@ -446,79 +248,91 @@ export default function ImportPage({ store, go, sel, topBar }) {
           <div className="imp-wrap">
             <Panel><WizardSteps step={{ choose: 'Choose', upload: 'Upload', map: 'Map', review: 'Review', done: 'Done' }[step]} /></Panel>
 
-            {/* STEP 1 — choose what to import */}
+            {/* STEP 1 — what are we importing */}
             {step === 'choose' && (
               <Panel>
                 <div className="imp-choose-head">What are you importing?</div>
-                <div className="imp-choose-sub">Pick the record type. We'll match your columns and flag duplicates before anything is saved.</div>
+                <div className="imp-choose-sub">Pick the record type. Your columns are matched to fields, and nothing is saved until you confirm.</div>
                 <div className="imp-choose-grid">
                   <button className="imp-choice" onClick={() => chooseKind('clients')}>
                     <span className="imp-choice-ic"><Icon name="leads" size={24} /></span>
                     <span className="imp-choice-t">Leads & contacts</span>
-                    <span className="imp-choice-d">Buyers, tenants and enquiries — with budget, locality and requirement. Deduplicated by phone.</span>
+                    <span className="imp-choice-d">Buyers and tenants, with budget, locality and requirement. One person per phone number.</span>
                   </button>
                   <button className="imp-choice" onClick={() => chooseKind('properties')}>
                     <span className="imp-choice-ic"><Icon name="building" size={24} /></span>
                     <span className="imp-choice-t">Properties</span>
-                    <span className="imp-choice-d">Units and listings — carpet, floor, facing, owner, price. Deduplicated per unit inside a project.</span>
+                    <span className="imp-choice-d">Units and listings, with carpet, floor, price and owner. One listing per flat.</span>
                   </button>
                   <button className="imp-choice" onClick={() => chooseKind('owners')}>
                     <span className="imp-choice-ic"><Icon name="home" size={24} /></span>
                     <span className="imp-choice-t">Owners</span>
-                    <span className="imp-choice-d">A cold-calling list — property owners to ask about selling or renting. Not linked to a listing, grouped by project.</span>
+                    <span className="imp-choice-d">A calling list of flat owners, grouped by project. One row per flat, so an owner of three flats is three calls.</span>
                   </button>
                 </div>
               </Panel>
             )}
 
-            {/* STEP 2 — upload */}
+            {/* STEP 2 — the file */}
             {step === 'upload' && (
               <Panel>
                 <div className="imp-bar">
                   <div className="imp-step-title">Upload your file <span className="imp-target">{kindLabel}</span></div>
-                  <button className="btn btn-quiet btn-sm" onClick={restart}>Change type</button>
+                  <div className="imp-bar-actions">
+                    <button className="btn btn-quiet btn-sm" onClick={() => getExample(kind)}><Icon name="share" size={13} />Example sheet</button>
+                    <button className="btn btn-quiet btn-sm" onClick={restart}>Change type</button>
+                  </div>
                 </div>
                 {error && <div className="imp-error">{error}</div>}
+                {/* The columns we ask for, said plainly, so the example sheet is
+                    a choice rather than a download nobody opens. */}
+                {EXAMPLE_SHEETS[kind] && (
+                  <div className="imp-unmapped">
+                    Needs: {EXAMPLE_SHEETS[kind].required.join(', ')}. Any other column in the example is optional.
+                  </div>
+                )}
                 <label className="imp-drop">
-                  <input type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls,.ods" onChange={handleFile} className="imp-file" />
+                  <input type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls,.ods" onChange={handleFile} className="imp-file" disabled={busy === 'uploading'} />
                   <span className="imp-drop-ic"><Icon name="layers" size={26} /></span>
-                  <span className="imp-drop-t">Drop your Excel or CSV here, or click to browse</span>
-                  <span className="imp-drop-d">.xlsx, .xls, .csv or tab-separated. Columns are matched for you, duplicates are flagged, and nothing saves until you confirm.</span>
+                  <span className="imp-drop-t">{busy === 'uploading' ? `Reading your file… ${uploaded || ''}` : 'Drop your Excel or CSV here, or click to browse'}</span>
+                  <span className="imp-drop-d">.xlsx, .xls, .csv or tab-separated. Your file is uploaded once and checked before anything is saved.</span>
                 </label>
               </Panel>
             )}
 
-            {/* STEP 3 — map columns */}
+            {/* STEP 3 — columns */}
             {step === 'map' && (
               <Panel>
                 <div className="imp-bar">
                   <div className="imp-step-title">Match your columns <span className="imp-target">
-                    {parsedRows.length} rows · {headers.length} columns · {fileMeta?.name}
+                    {rowCount} rows · {headers.length} columns · {fileMeta?.name}
                     {fileMeta?.sheetName ? ` · sheet "${fileMeta.sheetName}"` : ''}
                   </span></div>
                   <div className="imp-bar-actions">
                     <Button variant="secondary" size="sm" onClick={() => setStep('upload')}>Back</Button>
-                    <Button variant="primary" size="sm" disabled={newCount + dupCount === 0} onClick={() => setStep('review')}>Continue to review</Button>
+                    <Button variant="primary" size="sm" disabled={checking || missingRequired.length > 0} onClick={runCheck}>
+                      {checking ? 'Checking…' : 'Check the file'}
+                    </Button>
                   </div>
                 </div>
-                {(kind === 'properties' || kind === 'owners') && (
+
+                {/* A workbook with several sheets used to import the first one
+                    without saying which. */}
+                {sheetNames.length > 1 && (
                   <div className="imp-project">
-                    <label className="imp-map-label">Import into project <span className="imp-map-hint">optional — groups every row under one township/society{kind === 'owners' ? ' in the Owners project view' : ''}</span></label>
-                    <input className="input" value={importProject} onChange={e => setImportProject(e.target.value)}
-                      placeholder="e.g. Godrej Riverside — leave blank to import as independent listings" list="imp-proj-list" />
-                    <datalist id="imp-proj-list">
-                      {(projectNames || []).map(n => <option key={n} value={n} />)}
-                    </datalist>
+                    <label className="imp-map-label">Sheet <span className="imp-map-hint">this workbook has {sheetNames.length}</span></label>
+                    <select className="input" value={fileMeta?.sheetName || ''} onChange={e => switchSheet(e.target.value)} disabled={busy === 'uploading'}>
+                      {sheetNames.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
                   </div>
                 )}
+
                 <div className="imp-map-groups">
-                {Object.keys(groups).map(g => (
-                  <div key={g}>
-                    {showAllFields && <div className="imp-map-group">{GROUP_LABEL[g]}</div>}
-                    <div className="imp-map-grid">
-                      {groups[g].map(f => {
-                        const sample = sampleOf(mapping[f.key])
-                        return (
+                  {Object.keys(groups).map(g => (
+                    <div key={g}>
+                      {showAllFields && <div className="imp-map-group">{GROUP_LABEL[g]}</div>}
+                      <div className="imp-map-grid">
+                        {groups[g].map(f => (
                           <div key={f.key} className="imp-map-field">
                             <label className="imp-map-label">
                               {f.label} <span className="imp-map-hint">{f.required ? '— required' : '— optional'}</span>
@@ -527,13 +341,12 @@ export default function ImportPage({ store, go, sel, topBar }) {
                               <option value="">— Not mapped —</option>
                               {headers.map(h => <option key={h} value={h}>{h}</option>)}
                             </select>
-                            <span className="imp-map-sample">{sample ? `e.g. ${sample}` : 'No column matched'}</span>
+                            <span className="imp-map-sample">{mapping[f.key] ? (samples[mapping[f.key]] ? `e.g. ${samples[mapping[f.key]]}` : 'Column is empty') : 'No column matched'}</span>
                           </div>
-                        )
-                      })}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
                 </div>
 
                 <button className="btn btn-quiet btn-sm imp-more-fields" onClick={() => setShowAllFields(v => !v)}>
@@ -543,113 +356,113 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     : `Map ${FIELDS.length - FIELDS.filter(f => f.group === 'key').length} more fields — carpet area, floor, facing, owner…`}
                 </button>
 
-                <div className="imp-counts">
-                  <span className="imp-count new">{newCount} new</span>
-                  <span className="imp-count dup">{dupCount} duplicate{dupCount === 1 ? '' : 's'} {dupWord}</span>
-                  {/* Stated separately because it is a different fact about a
-                      different thing: not "already in your CRM" but "this file
-                      lists this person more than once". Without it, a sheet
-                      that repeats 68 rows reads as 68 merges into records the
-                      user knows they never had. */}
-                  {selfDupCount > 0 && (
-                    <span className="imp-count dup">{selfDupCount} repeated in this file</span>
-                  )}
-                  <span className="imp-count skip">{invalidCount} will be skipped</span>
-                  <span className="imp-count" style={{ marginLeft: 'auto' }}>{mappedCount} of {headers.length} columns mapped</span>
-                </div>
+                {missingRequired.length > 0 && (
+                  <div className="imp-error">Still to match: {missingRequired.map(f => f.label).join(', ')}.</div>
+                )}
+                {/* NOT KEPT, not "kept quietly somewhere". An unmapped column
+                    used to be folded into the record's notes, and mapped
+                    columns nobody had chosen were glued into the unit field. */}
                 {unmappedHeaders.length > 0 && (
                   <div className="imp-unmapped">
                     Not imported: {unmappedHeaders.join(', ')}. Map them above if they matter.
                   </div>
                 )}
+                {error && <div className="imp-error">{error}</div>}
               </Panel>
             )}
 
-            {/* STEP 4 — review */}
-            {step === 'review' && (
+            {/* STEP 4 — what will happen, counted over the whole file */}
+            {step === 'review' && counts && (
               <Panel>
                 <div className="imp-bar">
-                  <div className="imp-step-title">Review & confirm</div>
+                  <div className="imp-step-title">Review & confirm <span className="imp-target">{counts.total} rows checked</span></div>
                   <div className="imp-bar-actions">
                     <Button variant="secondary" size="sm" onClick={() => setStep('map')}>Back</Button>
-                    <Button variant="primary" size="sm" disabled={importing || sendCount === 0} onClick={handleConfirm}>
-                      {importing ? 'Importing…' : `Import ${sendCount} record${sendCount === 1 ? '' : 's'}`}
+                    <Button variant="primary" size="sm" disabled={counts.new === 0} onClick={start}>
+                      Import {counts.new} record{counts.new === 1 ? '' : 's'}
                     </Button>
                   </div>
                 </div>
+                <div className="imp-counts">
+                  <span className="imp-count new">{counts.new} new</span>
+                  <span className="imp-count dup">{counts.alreadyOnFile} already on file</span>
+                  <span className="imp-count dup">{counts.repeatedInFile} repeated in this file</span>
+                  <span className="imp-count skip">{counts.unusable} cannot be imported</span>
+                  <span className="imp-count" style={{ marginLeft: 'auto' }}>{mappedCols.length} of {headers.length} columns mapped</span>
+                </div>
+                {/* WHY, not just how many. "19 rows have no phone number" is
+                    something a person can go and fix. */}
+                {preview.reasons && Object.keys(preview.reasons).length > 0 && (
+                  <div className="imp-unmapped">
+                    {Object.entries(preview.reasons).map(([why, n]) => `${n} × ${why}`).join(' · ')}
+                  </div>
+                )}
                 <div className="imp-review-filters">
-                  {[['all', `All ${previewRows.length}`], ['new', `New ${newCount}`], ['duplicate', `${dupBadge} ${dupCount}`], ['invalid', `Skip ${invalidCount}`]].map(([k, label]) => (
+                  {[['all', `All ${Math.min(counts.total, 50)} shown`], ['new', 'New'], ['alreadyOnFile', 'Already on file'], ['repeatedInFile', 'Repeated'], ['unusable', 'Cannot import']].map(([k, label]) => (
                     <button key={k} className={'imp-fchip ' + k + (filterStatus === k ? ' on' : '')} onClick={() => setFilterStatus(k)}>{label}</button>
                   ))}
                 </div>
-                {/* Every field YOU mapped, not a fixed guess at what matters — a
-                    hardcoded Name/Phone/Locality triple hid exactly the fields
-                    (project, unit, tower, config…) someone most needed to check
-                    before confirming, and any field not in that fixed set never
-                    appeared here even though it was mapped and about to be saved. */}
                 <div className="tbl-scroll imp-review-tbl">
                   <table className="tbl">
                     <thead>
                       <tr>
-                        <th>Status</th>
+                        <th>Row</th><th>Status</th>
                         {reviewCols.map(f => <th key={f.key}>{f.label}</th>)}
-                        <th>Action</th>
+                        <th>What happens</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {shownRows.map((pr, i) => (
-                        <tr key={i}>
+                      {shown.map(r => (
+                        <tr key={r.rowNo}>
+                          <td className="cell-quiet mono-num">{r.rowNo}</td>
                           <td>
-                            {pr.status === 'new' && <span className="imp-badge new">New</span>}
-                            {pr.status === 'duplicate' && (
-                              <span className="imp-badge dup">{pr.selfDup ? 'Repeat' : dupBadge}</span>
-                            )}
-                            {pr.status === 'invalid' && <span className="imp-badge skip">Skip</span>}
+                            {r.status === 'new' && <span className="imp-badge new">New</span>}
+                            {r.status === 'alreadyOnFile' && <span className="imp-badge dup">On file</span>}
+                            {r.status === 'repeatedInFile' && <span className="imp-badge dup">Repeat</span>}
+                            {r.status === 'unusable' && <span className="imp-badge skip">Skip</span>}
                           </td>
-                          {reviewCols.map(f => {
-                            const raw = pr.values?.[f.key]
-                            // A money field's real value is a bare rupee integer
-                            // (parseMoney's job) — shown as-is that reads as a
-                            // broken price, not the ₹85L the sheet actually said.
-                            const shown = raw == null ? '—' : f.parse === parseMoney ? (moneyLabel(raw) || raw) : raw
-                            return <td key={f.key} className={f.key === 'phone' ? 'mono-num' : undefined}>{shown}</td>
-                          })}
-                          <td className="cell-quiet">
-                            {pr.dupTarget
-                              ? (kind === 'owners' ? `Already on file — ${pr.dupTarget}` : `Merges into ${pr.dupTarget}`)
-                              : pr.status === 'invalid' ? (pr.reason || 'Skipped') : 'Create new'}
-                          </td>
+                          {reviewCols.map(f => <td key={f.key} className={f.key === 'phone' ? 'mono-num' : undefined}>{String(r.raw?.[mapping[f.key]] ?? '—') || '—'}</td>)}
+                          <td className="cell-quiet">{r.status === 'new' ? 'Create new' : (r.reason || 'Skipped')}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {filteredRows.length > shownRows.length && (
-                  <button className="cx-more-btn" onClick={() => setReviewCap(c => c + REVIEW_PAGE)}>
-                    Show {Math.min(REVIEW_PAGE, filteredRows.length - shownRows.length)} more
-                    <span className="cx-more-of">{shownRows.length} of {filteredRows.length}</span>
-                  </button>
-                )}
+                {counts.total > 50 && <div className="imp-unmapped">Showing the first 50 rows. The counts above cover all {counts.total}.</div>}
               </Panel>
             )}
 
-            {/* STEP 5 — done */}
-            {step === 'done' && (
+            {/* STEP 5 — the run, and what it did */}
+            {step === 'done' && job && (
               <Panel>
                 <div className="imp-done">
-                  <span className="imp-done-ic"><Icon name="check" size={26} /></span>
-                  <div className="imp-done-t">Import complete</div>
-                  <div className="imp-done-d">Created <b>{importStats?.added || 0}</b> new record{importStats?.added === 1 ? '' : 's'} and merged <b>{importStats?.merged || 0}</b>.</div>
-                  {importStats?.mergedDetails?.length > 0 && (
-                    <div className="imp-merge-log">
-                      <div className="imp-merge-h">Merged records</div>
-                      {importStats.mergedDetails.map((m, i) => <div key={i} className="imp-merge-row">{m}</div>)}
-                    </div>
+                  <span className="imp-done-ic">
+                    {done ? <Icon name="check" size={26} /> : <Icon name="refresh" size={26} />}
+                  </span>
+                  <div className="imp-done-t">
+                    {job.status === 'done' ? 'Import complete'
+                      : job.status === 'failed' ? 'The import stopped'
+                        : job.status === 'reverted' ? 'Import undone'
+                          : 'Importing…'}
+                  </div>
+                  <div className="imp-done-d">
+                    <b>{job.added}</b> of {job.total} saved
+                    {job.skipped ? <> · <b>{job.skipped}</b> skipped</> : null}
+                    {job.failed ? <> · <b>{job.failed}</b> failed</> : null}
+                  </div>
+                  {job.status === 'running' && (
+                    <div className="imp-counts"><span className="imp-count new">You can close this page — it keeps going</span></div>
                   )}
+                  {job.error && <div className="imp-error">{job.error}</div>}
                   <div className="imp-done-actions">
-                    <Button variant="secondary" size="sm" onClick={() => handleRevert(lastBatchId)}>Undo this import</Button>
+                    {(job.skipped > 0 || job.failed > 0) && (
+                      <Button variant="secondary" size="sm" onClick={() => downloadSkipped(job.id)}>Download the rows that did not import</Button>
+                    )}
+                    {job.status === 'done' && (
+                      <Button variant="secondary" size="sm" onClick={() => undo(job.id, job.added)}>Undo this import</Button>
+                    )}
                     <Button variant="secondary" size="sm" onClick={restart}>Import another file</Button>
-                    <Button variant="primary" size="sm" onClick={() => setTab('history')}>View history</Button>
+                    <Button variant="primary" size="sm" onClick={() => { reloadHistory(); setTab('history') }}>View history</Button>
                   </div>
                 </div>
               </Panel>
@@ -657,36 +470,39 @@ export default function ImportPage({ store, go, sel, topBar }) {
           </div>
         )}
 
-        {/* HISTORY tab */}
+        {/* HISTORY — from the server, so it is the same on every device */}
         {tab === 'history' && (
           <div className="imp-wrap">
-            {importLogs.length === 0 ? (
+            {(history || []).length === 0 ? (
               <div className="empty">
                 <div className="e-t">No imports yet</div>
-                <div className="e-s">Run an import to see the log and revert options here.</div>
+                <div className="e-s">Run an import to see what it did, and to undo it.</div>
                 <Button variant="primary" size="sm" onClick={() => { restart(); setTab('import') }}>Start an import</Button>
               </div>
-            ) : importLogs.map(log => (
-              <Panel key={log.batchId}>
+            ) : history.map(log => (
+              <Panel key={log.id}>
                 <div className="imp-log-head">
                   <div>
-                    <div className="imp-log-title">{log.fileName} <span className="imp-log-mod">{log.module}</span></div>
-                    <div className="imp-log-meta">Imported {new Date(log.timestamp).toLocaleString()}</div>
+                    <div className="imp-log-title">{log.fileName || 'Spreadsheet'} <span className="imp-log-mod">{KIND_LABEL[log.kind] || log.kind}</span></div>
+                    <div className="imp-log-meta">
+                      {new Date(log.createdAt).toLocaleString()}
+                      {log.sheetName ? ` · sheet "${log.sheetName}"` : ''}
+                    </div>
                   </div>
-                  {!log.reverted ? (
-                    <button className="btn btn-ghost btn-sm imp-revert" onClick={() => { if (window.confirm(`Undo this import? All ${log.addedCount} records added from "${log.fileName}" will be removed.`)) handleRevert(log.batchId) }}><Icon name="refresh" size={13} />Undo import</button>
-                  ) : <span className="imp-reverted">Undone</span>}
+                  {log.status === 'done' ? (
+                    <button className="btn btn-ghost btn-sm imp-revert" onClick={() => undo(log.id, log.added)}><Icon name="refresh" size={13} />Undo import</button>
+                  ) : log.status === 'reverted' ? <span className="imp-reverted">Undone</span>
+                    : <span className="imp-reverted">{log.status}</span>}
                 </div>
                 <div className="imp-log-stats">
-                  <span className="imp-count new">+{log.addedCount} created</span>
-                  <span className="imp-count dup">{log.mergedCount} merged</span>
+                  <span className="imp-count new">+{log.added} created</span>
+                  {log.skipped > 0 && <span className="imp-count dup">{log.skipped} skipped</span>}
+                  {log.failed > 0 && <span className="imp-count skip">{log.failed} failed</span>}
+                  {(log.skipped > 0 || log.failed > 0) && (
+                    <button className="btn btn-quiet btn-sm" onClick={() => downloadSkipped(log.id)}>Download those rows</button>
+                  )}
                 </div>
-                {log.mergedDetails?.length > 0 && (
-                  <div className="imp-merge-log">
-                    <div className="imp-merge-h">Merge audit — {log.mergedDetails.length} record{log.mergedDetails.length === 1 ? '' : 's'}</div>
-                    {log.mergedDetails.map((m, i) => <div key={i} className="imp-merge-row">{m}</div>)}
-                  </div>
-                )}
+                {log.error && <div className="imp-error">{log.error}</div>}
               </Panel>
             ))}
           </div>

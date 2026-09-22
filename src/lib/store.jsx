@@ -247,7 +247,6 @@ function freshState() {
     configs: Array.isArray(cs.configs) ? cs.configs : [],
     dealMix: cs.dealMix || { sale: 0, rent: 0 },
     tenant: cs.tenant || null,
-    importLogs: [],
     inactiveAgentIds: Array.isArray(cs.inactiveAgentIds) ? cs.inactiveAgentIds : [],
     // People who have left. Kept apart from `agents` so they resolve for
     // display but can never be picked — see getBootstrap().
@@ -518,7 +517,6 @@ function reducer(state, action) {
         // from the previous tenant bleeds through (hydrate then fills the owner).
         leads: [],
         properties: [],
-        importLogs: [],
         notifications: [],
         settings: {
           ...state.settings,
@@ -666,21 +664,17 @@ function reducer(state, action) {
     case 'DELETE_PROPERTIES':
       return dropRecords(state, 'property', Array.isArray(action.ids) ? action.ids : [action.ids])
 
-    case 'LOG_IMPORT_BATCH': {
-      const logs = state.importLogs || []
-      return { ...state, importLogs: [action.logEntry, ...logs] }
-    }
-
+    // The import history used to be kept HERE, in this tab's memory, which is
+    // why an undo vanished on a reload. It lives on the server now (Import →
+    // History), so the only thing left to do locally is forget the records an
+    // undo removed.
     case 'REVERT_IMPORT_BATCH': {
       // The server deleted the rows. Drop whatever copies the cache holds so a
       // stale one can't be opened from a screen still on the page.
       const { batchId } = action
       const gone = (kind) => Object.values(state.cache?.[kind] || {})
         .filter(r => r.importBatchId === batchId).map(r => r.id)
-      return {
-        ...dropRecords(dropRecords(dropRecords(state, 'lead', gone('lead')), 'property', gone('property')), 'owner', gone('owner')),
-        importLogs: (state.importLogs || []).map(log => log.batchId === batchId ? { ...log, reverted: true } : log),
-      }
+      return dropRecords(dropRecords(dropRecords(state, 'lead', gone('lead')), 'property', gone('property')), 'owner', gone('owner'))
     }
 
     case 'PROP_STATUS':
@@ -1402,9 +1396,9 @@ export function StoreProvider({ children }) {
     }),
     // Bulk-add many units at once — one revertable batch, logged to Import history.
     // Bulk-add many units at once. Only the rows the server actually accepted
-    // are added to the batch, so the Import-history entry says how many units
-    // exist rather than how many were attempted — and a partial failure is
-    // stated instead of hidden behind a "24 units added" toast.
+    // are counted, so a partial failure is stated instead of hidden behind a
+    // "24 units added" toast. (Adding a tower is not a spreadsheet import: it
+    // does not appear in Import → History, which lists uploaded files.)
     addProperties: (properties) => {
       if (!properties?.length) return Promise.resolve([])
       return Promise.allSettled(properties.map(p => apiClient.createProperty(p).then(res => {
@@ -1416,14 +1410,6 @@ export function StoreProvider({ children }) {
           const made = results.filter(r => r.status === 'fulfilled').map(r => r.value)
           const lost = results.length - made.length
           if (made.length) dispatch({ type: 'ADD_PROPERTIES', properties: made })
-          const batchId = properties[0]?.importBatchId
-          if (batchId && made.length) {
-            const project = properties[0].project || properties[0].society || 'Project'
-            dispatch({ type: 'LOG_IMPORT_BATCH', logEntry: {
-              batchId, timestamp: Date.now(), fileName: `Added ${made.length} unit(s) to ${project}`,
-              module: 'Properties', addedCount: made.length, mergedCount: 0, mergedDetails: [], reverted: false,
-            } })
-          }
           if (lost) toast(`${made.length} of ${results.length} units added — ${lost} failed`, 'warn')
           else toast(`${made.length} unit${made.length > 1 ? 's' : ''} added`)
           return made
@@ -1492,9 +1478,6 @@ export function StoreProvider({ children }) {
       () => apiClient.revertImportBatch(batchId),
       () => dispatch({ type: 'REVERT_IMPORT_BATCH', batchId }),
       'Import batch reverted — imported records removed'),
-    logImportBatch: (logEntry) => {
-      dispatch({ type: 'LOG_IMPORT_BATCH', logEntry })
-    },
     // OPTIMISTIC, like a lead's stage. This went through write(), so the patch
     // landed only after the server answered — measured at 1.2s from a tap,
     // against 48ms for the identical control one module over. It is the same

@@ -392,7 +392,13 @@ export const OWNER_MODULE_SCHEMA = {
     { key: 'phone', label: 'Primary Phone', type: 'text', section: 'core', required: true, hideInSheet: true },
     { key: 'email', label: 'Email Address', type: 'email', section: 'domain' },
     { key: 'project', label: 'Project / Society', type: 'text', section: 'domain' },
-    { key: 'unitRef', label: 'Unit reference', type: 'text', section: 'domain' },
+    // The flat in its own fields — project + tower + unit is what makes two
+    // rows the same calling row. `unitRef` stays for the records written before
+    // these columns existed, and is shown only when it holds something.
+    { key: 'tower', label: 'Tower', type: 'text', section: 'domain' },
+    { key: 'unitNo', label: 'Unit no.', type: 'text', section: 'domain' },
+    { key: 'config', label: 'Configuration', type: 'text', section: 'domain' },
+    { key: 'unitRef', label: 'Unit reference (old)', type: 'text', section: 'domain' },
     { key: 'locality', label: 'Locality', type: 'text', section: 'domain' },
     { key: 'source', label: 'Source', type: 'text', section: 'domain' },
     {

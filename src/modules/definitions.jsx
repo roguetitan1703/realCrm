@@ -579,7 +579,7 @@ export const OWNERS_DEF = {
       o.phone,
       o.email || null,
       o.project ? <span className="rh-loc"><Icon name="building" size={12} className="ic" />{o.project}</span> : null,
-      o.unitRef || null,
+      o.unitLabel || o.unitRef || null,
       o.locality || null,
       // The one fact a caller opens this record to check. Overdue reads as
       // overdue here for the same reason it does in the queue.
@@ -611,7 +611,10 @@ export const OWNERS_DEF = {
       <div><div className="name">{o.name || '—'}</div><div className="sub mono-num">{o.phone}</div></div>
     ) },
     { key: 'project', label: 'Project', render: (o) => o.project || '—' },
-    { key: 'unitRef', label: 'Unit', render: (o) => <span className="cell-quiet">{o.unitRef || '—'}</span> },
+    // Tower + flat, from the columns the import now writes — falling back to
+    // the free-text line for rows that predate them. "Which flat" is the first
+    // thing a caller needs and it used to be visible only inside the record.
+    { key: 'unitRef', label: 'Unit', render: (o) => <span className="cell-quiet">{o.unitLabel || o.unitRef || '—'}</span> },
     { key: 'callback', label: 'Callback', sortable: true, render: (o) => {
       const cb = callbackSignal(o.callbackAt)
       if (!cb) return <span className="cell-quiet">{o.lastCallAt ? 'No callback' : 'Not called'}</span>
@@ -662,7 +665,7 @@ export const OWNERS_DEF = {
         />
       </div>
       <div className="rc-sub mono-num">{o.phone}</div>
-      <div className="rc-facts"><span>{[o.project, o.unitRef].filter(Boolean).join(' · ') || '—'}</span></div>
+      <div className="rc-facts"><span>{[o.project, o.unitLabel || o.unitRef].filter(Boolean).join(' · ') || '—'}</span></div>
       <div className="rc-foot">
         {(() => { const a = store.agentById(o.agentId); return a ? <span className="rc-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned /> })()}
       </div>
@@ -721,7 +724,7 @@ export const OWNERS_DEF = {
             onSet={(stage) => store.setOwnerStage(o.id, stage)}
           />
         </div>
-        {(o.project || o.unitRef) && <div className="prow-req">{[o.project, o.unitRef].filter(Boolean).join(' · ')}</div>}
+        {(o.project || o.unitLabel || o.unitRef) && <div className="prow-req">{[o.project, o.unitLabel || o.unitRef].filter(Boolean).join(' · ')}</div>}
         <div className="prow-foot">
           <div className="prow-meta">
             {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}

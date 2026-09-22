@@ -278,6 +278,82 @@ export async function initSchema(): Promise<void> {
     // the timeline for every row on a 700-row queue.
     await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS last_call_at TIMESTAMPTZ;`;
     await sql`CREATE INDEX IF NOT EXISTS idx_crm_owners_callback ON crm_owners (tenant_id, callback_at) WHERE callback_at IS NOT NULL;`;
+    // WHERE THE UNIT IS, AS COLUMNS. `unit_ref` is one free-text line, and the
+    // import composed it out of whatever it could find — tower, configuration,
+    // both areas and the unit number glued together, from columns the person
+    // had never mapped. A 4,108-row list came back reading
+    // "VTP LEONARA - BUILDING B · 2 BHK Apartment · 1603 · 658.54/1087.97 sqft"
+    // in the unit field. It is also why a tower filter could not exist and why
+    // Contacts cannot show a flat number at a glance: nothing knew which part
+    // of that sentence was the flat.
+    //
+    // THE UNIT IS THE IDENTITY of a calling row: one owner with three flats is
+    // three rows, keyed tower + unit inside a project. unit_ref stays for the
+    // rows written before this and for anything a sheet cannot break apart.
+    await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS tower TEXT;`;
+    await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS unit_no TEXT;`;
+    await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS config TEXT;`;
+    await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS carpet_area NUMERIC;`;
+    await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS saleable_area NUMERIC;`;
+    // Not a UNIQUE constraint: the rows that exist predate these columns and
+    // carry nothing to be unique on, and a firm may legitimately hold two rows
+    // for one flat from two lists. Identity is enforced where it belongs — the
+    // import, which reports a repeat rather than silently overwriting one.
+    await sql`CREATE INDEX IF NOT EXISTS idx_crm_owners_unit ON crm_owners (tenant_id, lower(project), lower(tower), lower(unit_no));`;
+
+    // ── Spreadsheet imports, as a job the server owns ───────────────────────
+    // WHY THIS EXISTS: the import used to run entirely in the browser — one
+    // HTTP request per row, all fired at once. A 4,108-row owner list for a
+    // paying client put 1,380 rows in the database and lost the rest, and the
+    // only trace was a number in a toast: no list of what failed, nothing to
+    // retry, and nothing to read afterwards. The undo lived in that tab's
+    // memory, so a reload took it away too.
+    //
+    // The file is uploaded once and parsed here. Every row is stored before
+    // anything is written, then worked in batches, and each row ends with an
+    // outcome and a reason. That is what makes the run reportable ("these 47
+    // rows had no phone"), resumable after a closed laptop, and reversible from
+    // any device.
+    await sql`
+      CREATE TABLE IF NOT EXISTS crm_import_jobs (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        file_name TEXT,
+        sheet_name TEXT,
+        sheet_names JSONB DEFAULT '[]'::jsonb,
+        headers JSONB DEFAULT '[]'::jsonb,
+        mapping JSONB DEFAULT '{}'::jsonb,
+        options JSONB DEFAULT '{}'::jsonb,
+        status TEXT NOT NULL DEFAULT 'uploaded',
+        total INT DEFAULT 0,
+        added INT DEFAULT 0,
+        skipped INT DEFAULT 0,
+        failed INT DEFAULT 0,
+        error TEXT,
+        created_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        reverted_at TIMESTAMPTZ,
+        reverted_by TEXT
+      );
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_import_jobs_tenant ON crm_import_jobs (tenant_id, created_at DESC);`;
+    // The file itself, row by row, exactly as it was read. Kept so a run can be
+    // re-checked, resumed or explained without asking for the file again.
+    await sql`
+      CREATE TABLE IF NOT EXISTS crm_import_rows (
+        job_id TEXT NOT NULL,
+        row_no INT NOT NULL,
+        raw JSONB NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        reason TEXT,
+        record_id TEXT,
+        PRIMARY KEY (job_id, row_no)
+      );
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_import_rows_status ON crm_import_rows (job_id, status);`;
     await sql`CREATE INDEX IF NOT EXISTS idx_crm_owners_agent ON crm_owners (tenant_id, agent_id);`;
 
     await sql`

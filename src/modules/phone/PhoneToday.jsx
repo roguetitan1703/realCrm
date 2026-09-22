@@ -98,7 +98,7 @@ function OwnerRow({ o, onOpen, store }) {
         <span className="av av-md av-supply">{initials(o.name || o.phone || '?')}</span>
         <span className="q-main">
           <span className="q-name">{o.name || 'Unnamed owner'}</span>
-          <span className="q-sub">{o.callbackNote || [o.project, o.unitRef].filter(Boolean).join(' · ') || o.locality || o.phone}</span>
+          <span className="q-sub">{o.callbackNote || [o.project, o.unitLabel || o.unitRef].filter(Boolean).join(' · ') || o.locality || o.phone}</span>
         </span>
         <span className="q-right">
           {cb

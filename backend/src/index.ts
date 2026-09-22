@@ -15,6 +15,7 @@ import { modulesRouter } from './routes/modules';
 import { recordsRouter } from './routes/records';
 import { leadsRouter } from './routes/leads';
 import { ownersRouter } from './routes/owners';
+import { importsRouter } from './routes/imports';
 import { propertiesRouter } from './routes/properties';
 import { teamRouter } from './routes/team';
 import { actionsRouter } from './routes/actions';
@@ -198,6 +199,8 @@ app.use('/api/v1/modules/:moduleKey/records', recordsRouter);
 app.use('/api/v1/leads', leadsRouter);
 app.use('/api/v1/owners', ownersRouter);
 app.use('/api/v1/properties', propertiesRouter);
+// Spreadsheet imports run as a server-side job — see routes/imports.ts.
+app.use('/api/v1/imports', importsRouter);
 app.use('/api/v1/team', teamRouter);
 
 // 5. Universal Record Actions (Bridge, WABA, Stage Change, Merge)

@@ -897,10 +897,11 @@ function NewOwnerModal({ store, ownerId }) {
   const edit = ownerId ? store.lookup('owner', ownerId) : null
   const [f, setF] = useState(edit ? {
     name: edit.name || '', phone: edit.phone || '', email: edit.email || '',
-    project: edit.project || '', unitRef: edit.unitRef || '', locality: edit.locality || '',
+    project: edit.project || '', tower: edit.tower || '', unitNo: edit.unitNo || '',
+    config: edit.config || '', locality: edit.locality || '',
     agentId: edit.agentId || null,
   } : {
-    name: '', phone: '', email: '', project: '', unitRef: '', locality: '',
+    name: '', phone: '', email: '', project: '', tower: '', unitNo: '', config: '', locality: '',
     agentId: null,
   })
   const set = (k, v) => setF(s => ({ ...s, [k]: v }))
@@ -910,14 +911,16 @@ function NewOwnerModal({ store, ownerId }) {
     if (edit) {
       store.updateOwner(edit.id, {
         name: f.name.trim() || undefined, phone: f.phone.trim(), email: f.email.trim() || undefined,
-        project: f.project.trim() || undefined, unitRef: f.unitRef.trim() || undefined,
+        project: f.project.trim() || undefined, tower: f.tower.trim() || undefined,
+        unitNo: f.unitNo.trim() || undefined, config: f.config.trim() || undefined,
         locality: f.locality.trim() || undefined, agentId: f.agentId || null,
       })
       store.toast('Owner updated')
     } else {
       store.addOwner({
         name: f.name.trim() || undefined, phone: f.phone.trim(), email: f.email.trim() || undefined,
-        project: f.project.trim() || undefined, unitRef: f.unitRef.trim() || undefined,
+        project: f.project.trim() || undefined, tower: f.tower.trim() || undefined,
+        unitNo: f.unitNo.trim() || undefined, config: f.config.trim() || undefined,
         locality: f.locality.trim() || undefined, agentId: f.agentId || undefined, source: 'Manual entry',
       })
       store.toast('Owner added')
@@ -933,10 +936,19 @@ function NewOwnerModal({ store, ownerId }) {
           <Field label="Phone *"><Input value={f.phone} onChange={e => set('phone', e.target.value)} placeholder="+91 98xxx xxxxx" /></Field>
         </div>
         <Field label="Email"><Input value={f.email} onChange={e => set('email', e.target.value)} placeholder="Optional" /></Field>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {/* THE FLAT, IN ITS OWN BOXES. This was one free-text "unit reference"
+            line, which is why the list could not show a flat number and a tower
+            could not be filtered — nothing knew which part of the sentence was
+            which. Identity is project + tower + unit. */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr .6fr .8fr .8fr', gap: 12 }}>
           <Field label="Project / Society"><Input value={f.project} onChange={e => set('project', e.target.value)} placeholder="e.g. Godrej Green Vistas" /></Field>
-          <Field label="Unit reference"><Input value={f.unitRef} onChange={e => set('unitRef', e.target.value)} placeholder="e.g. T1 · 2 BHK · GGVT10402" /></Field>
+          <Field label="Tower"><Input value={f.tower} onChange={e => set('tower', e.target.value)} placeholder="B" /></Field>
+          <Field label="Unit no."><Input value={f.unitNo} onChange={e => set('unitNo', e.target.value)} placeholder="1603" /></Field>
+          <Field label="Configuration"><Input value={f.config} onChange={e => set('config', e.target.value)} placeholder="2 BHK" /></Field>
         </div>
+        {edit?.unitRef && !edit?.unitNo && (
+          <div className="imp-unmapped">On file as: {edit.unitRef}</div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="field">
             <label>Locality</label>

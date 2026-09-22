@@ -109,7 +109,7 @@ export const PROPERTY_FIELDS = [
   { key: 'project', label: 'Project / society', group: 'key', syn: ['project', 'society', 'building', 'tower name', 'scheme', 'complex'] },
   { key: 'wing', label: 'Wing / tower', group: 'key', syn: ['wing', 'tower', 'block'] },
   { key: 'type', label: 'Configuration', group: 'key', parse: parseConfig, syn: ['config', 'bhk', 'type', 'configuration', 'unit type'] },
-  { key: 'deal', label: 'Sale or rent', group: 'key', parse: parseDeal, syn: ['deal', 'sale/rent', 'for', 'transaction', 'listing type'] },
+  { key: 'deal', label: 'Sale or rent', group: 'key', parse: parseDeal, syn: ['deal', 'sale/rent', 'sale or rent', 'for', 'transaction', 'listing type'] },
   { key: 'price', label: 'Price', group: 'key', parse: parseMoney, syn: ['price', 'cost', 'rate', 'amount', 'expected price', 'asking', 'rent'] },
   { key: 'locality', label: 'Locality', group: 'key', syn: ['locality', 'area', 'location', 'address', 'city', 'sector'] },
   { key: 'status', label: 'Status', group: 'key', syn: ['status', 'availability', 'available'] },
@@ -138,7 +138,7 @@ export const LEAD_FIELDS = [
   { key: 'source', label: 'Source', group: 'key', syn: ['source', 'portal', 'channel', 'lead source', 'from'] },
   { key: 'stage', label: 'Stage', group: 'key', syn: ['stage', 'status', 'pipeline'] },
 
-  { key: 'deal', label: 'Buy or rent', group: 'detail', parse: parseDeal, syn: ['deal', 'buy/rent', 'requirement type', 'purpose type'] },
+  { key: 'deal', label: 'Buy or rent', group: 'detail', parse: parseDeal, syn: ['deal', 'buy/rent', 'buy or rent', 'requirement type', 'purpose type'] },
   { key: 'config', label: 'Configuration wanted', group: 'detail', parse: parseConfig, syn: ['config', 'bhk', 'requirement', 'type', 'looking for'] },
   { key: 'locality', label: 'Preferred locality', group: 'detail', syn: ['locality', 'area', 'location', 'preferred area', 'city'] },
   { key: 'minBudget', label: 'Budget from', group: 'detail', parse: parseMoney, syn: ['min budget', 'budget from', 'budget min', 'from'] },
@@ -221,11 +221,24 @@ export function guessMapping(headers, fields) {
 }
 
 /** Pull a field's value out of a row, applying that field's parser. */
+// A CELL THAT SAYS NOTHING, however it says it. Exports from other systems
+// write the word NULL, or N/A, or a dash, and a 4,108-row owner list arrived
+// with owners literally named "NULL". Treated as a value, it is a fact nobody
+// can tell from a real one (CLAUDE.md §3.1); treated as blank, the field is
+// simply empty and stays that way.
+const BLANKS = new Set(['null', 'n/a', 'na', '-', '--', 'nil', 'none', '#n/a', 'undefined'])
+
+export function isBlankCell(raw) {
+  if (raw === null || raw === undefined) return true
+  const v = String(raw).trim()
+  return v === '' || BLANKS.has(v.toLowerCase())
+}
+
 export function readField(row, mapping, field) {
   const col = mapping[field.key]
   if (!col) return null
   const raw = row[col]
-  if (raw === null || raw === undefined || String(raw).trim() === '') return null
+  if (isBlankCell(raw)) return null
   return field.parse ? field.parse(raw) : String(raw).trim()
 }
 
@@ -272,16 +285,19 @@ function parseDelimited(text) {
  * Parse any spreadsheet into `{ headers, rows }`. Excel is loaded on demand so
  * the parser only costs bandwidth for the people who actually drop an .xlsx.
  */
-export async function parseSpreadsheet(file) {
+export async function parseSpreadsheet(file, wanted) {
   const isExcel = /\.(xlsx|xlsm|xlsb|xls|ods)$/i.test(file.name)
   if (!isExcel) {
     const text = await file.text()
-    return parseDelimited(text)
+    return { ...parseDelimited(text), sheetNames: [] }
   }
   const XLSX = await import('xlsx')
   const buf = await file.arrayBuffer()
   const wb = XLSX.read(buf, { type: 'array', cellDates: true })
-  const sheetName = wb.SheetNames[0]
+  // WHICH SHEET. A workbook routinely carries several — the list, last year's
+  // list, and a pivot — and this used to take the first one without saying so,
+  // so importing the wrong half of a file looked like importing the file.
+  const sheetName = wanted && wb.SheetNames.includes(wanted) ? wanted : wb.SheetNames[0]
   const sheet = wb.Sheets[sheetName]
   if (!sheet) throw new Error('That workbook has no readable sheet.')
   // header:1 gives raw arrays, so blank/duplicate headings can be repaired
@@ -301,5 +317,61 @@ export async function parseSpreadsheet(file) {
       headers.forEach((h, i) => { obj[h] = r[i] ?? '' })
       return obj
     })
-  return { headers, rows, sheetName, sheetCount: wb.SheetNames.length }
+  return { headers, rows, sheetName, sheetNames: wb.SheetNames, sheetCount: wb.SheetNames.length }
+}
+
+// ---------------------------------------------------------------------------
+// The example sheet
+// ---------------------------------------------------------------------------
+
+/**
+ * THE FILE WE ASK FOR, rather than a mapping screen asked to guess.
+ *
+ * Mapping stays — real lists arrive in whatever shape a builder's office
+ * exported — but a firm starting from nothing should be able to fill in the
+ * sheet we actually want. The required columns are the ones a record cannot
+ * work without: a calling row needs a number and a flat to call about, a
+ * listing needs to say whether it is for sale or for rent.
+ *
+ * The sample rows are ignored on import (they carry no phone/unit of yours),
+ * and are there so the format of a cell is obvious.
+ */
+export const EXAMPLE_SHEETS = {
+  owners: {
+    title: 'Owners — calling list',
+    required: ['Project', 'Tower', 'Unit no.', 'Phone'],
+    columns: ['Project', 'Tower', 'Unit no.', 'Owner name', 'Phone', 'Configuration', 'Carpet area', 'Saleable area', 'Email', 'Locality', 'Notes'],
+    rows: [
+      ['VTP Leonara', 'B', '1603', 'Shivani Rajput', '9876543210', '2 BHK', '658', '1088', '', 'Kharadi', 'called Jan, not selling'],
+      ['VTP Leonara', 'B', '901', '', '9876500011', '3 BHK', '850', '1290', '', 'Kharadi', ''],
+    ],
+  },
+  properties: {
+    title: 'Properties — inventory',
+    required: ['Project', 'Unit no.', 'Sale or rent'],
+    columns: ['Project', 'Tower', 'Unit no.', 'Sale or rent', 'Configuration', 'Price', 'Carpet area', 'Floor', 'Locality', 'Status', 'Facing', 'Furnishing', 'Parking', 'Possession', 'Builder', 'RERA', 'Owner name', 'Owner phone', 'Notes'],
+    rows: [
+      ['VTP Leonara', 'B', '1603', 'Sale', '2 BHK', '8500000', '658', '16', 'Kharadi', 'Available', 'East', 'Semi furnished', '1 covered', 'Ready', 'VTP Realty', '', 'Shivani Rajput', '9876543210', 'corner flat, park facing'],
+      ['Godrej Vistas', 'A', '204', 'Rent', '1 BHK', '22000', '430', '2', 'Wagholi', 'Available', 'West', 'Unfurnished', '', 'Ready', 'Godrej', '', '', '', ''],
+    ],
+  },
+  clients: {
+    title: 'Leads & contacts',
+    required: ['Phone'],
+    columns: ['Name', 'Phone', 'Email', 'Source', 'Buy or rent', 'Configuration wanted', 'Preferred locality', 'Budget from', 'Budget to', 'Property interested', 'Stage', 'Notes'],
+    rows: [
+      ['Nikhil Joshi', '9876543210', '', '99acres', 'Buy', '2 BHK', 'Kharadi', '7000000', '9000000', 'VTP Leonara B-1603', 'New', 'wants possession by Dec'],
+      ['', '9876500022', '', 'Website', 'Rent', '1 BHK', 'Wagholi', '18000', '25000', '', 'New', ''],
+    ],
+  },
+}
+
+/** The example as a CSV the browser can hand over. CSV, not .xlsx: it opens in
+ *  Excel and in Sheets, and it is a few lines rather than a library. */
+export function exampleSheetCsv(kind) {
+  const spec = EXAMPLE_SHEETS[kind]
+  if (!spec) return ''
+  const needsQuotes = new RegExp('["\n,]')
+  const cell = (v) => (needsQuotes.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v))
+  return [spec.columns, ...spec.rows].map(r => r.map(cell).join(',')).join(String.fromCharCode(13, 10))
 }

@@ -355,7 +355,11 @@ export function peekRead(endpoint) {
 }
 
 async function request(endpoint, options = {}) {
-  const { queueable, ...fetchOptions } = options;
+  // `fresh: true` — ask the server, do not answer from the 30-second read
+  // cache. For a read whose whole point is that the answer CHANGES while you
+  // watch it: an import job's progress polled every second returned the same
+  // cached row every time, so a run that had finished still read "0 of 0".
+  const { queueable, fresh, ...fetchOptions } = options;
   const isWrite = !!fetchOptions.method && fetchOptions.method.toUpperCase() !== 'GET';
   // KEYED BY WORKSPACE AS WELL AS URL. The tenant travels in a header, not the
   // path, so `/leads?page=1` names a different set of rows per firm and the two
@@ -366,9 +370,9 @@ async function request(endpoint, options = {}) {
   // workspace change that does not reload. Cheap to make it structural.
   const key = `${currentTenant()}|${endpoint}`;
 
-  if (!isWrite) {
-    const fresh = reads.get(key);
-    if (fresh && Date.now() - fresh.at < FRESH_MS) return fresh.data;
+  if (!isWrite && !fresh) {
+    const cached = reads.get(key);
+    if (cached && Date.now() - cached.at < FRESH_MS) return cached.data;
     const pending = inflight.get(key);
     if (pending) return pending;
   }
@@ -601,8 +605,22 @@ export const api = {
   getDeskSummary: () => request('/workspace/desk-summary'),
   // One request for a whole file's worth of duplicate checks.
   checkDuplicates: (body) => request('/workspace/dedupe-check', { method: 'POST', body: JSON.stringify(body) }),
-  // Every record created by one import, deleted where it lives.
+  // Every record created by one import, deleted where it lives. Kept for the
+  // batches written by the old browser-side import, whose ids are not jobs.
   revertImportBatch: (batchId) => request(`/workspace/import-batches/${encodeURIComponent(batchId)}`, { method: 'DELETE' }),
+
+  // ---- Imports, as a job the server runs (services/imports.ts) -------------
+  // The file is uploaded once and the rows are written HERE, not by the browser
+  // firing one request per row — see the service header for what that cost.
+  listImports: () => request('/imports', { fresh: true }),
+  createImport: (body) => request('/imports', { method: 'POST', body: JSON.stringify(body) }),
+  appendImportRows: (id, rows) => request(`/imports/${encodeURIComponent(id)}/rows`, { method: 'POST', body: JSON.stringify({ rows }) }),
+  previewImport: (id, mapping) => request(`/imports/${encodeURIComponent(id)}/preview`, { method: 'POST', body: JSON.stringify({ mapping }) }),
+  runImport: (id) => request(`/imports/${encodeURIComponent(id)}/run`, { method: 'POST', body: JSON.stringify({}) }),
+  // Polled while the job runs, so it must never come from the read cache.
+  getImport: (id) => request(`/imports/${encodeURIComponent(id)}`, { fresh: true }),
+  getImportRows: (id, status) => request(`/imports/${encodeURIComponent(id)}/rows${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  revertImport: (id) => request(`/imports/${encodeURIComponent(id)}/revert`, { method: 'POST', body: JSON.stringify({}) }),
   hasPendingWrites,
   resetDatabase: () => request('/workspace/reset', { method: 'POST' }),
 
