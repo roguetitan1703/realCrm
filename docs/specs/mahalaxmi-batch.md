@@ -29,7 +29,16 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 
 ## Part 1 — Broken today on a paying client (fix first)
 
-### 1.1 ⬜ Today screen does not scroll on iPhone (installed app)
+### 1.1 ⏸ Today screen does not scroll on iPhone (installed app) — PARKED
+- **23 Sep:** "it's not that simple, we will talk about it later." Parked at the
+  user's request; the diagnosis below stands for when it comes back.
+- **Know (23 Sep):** the user describes the app being drawn TALLER than the
+  screen — the part below the fold has no scroll to reach it and the whole page
+  rubber-bands. In WebKit at iPhone 13 size (Safari, not standalone) Today
+  scrolls correctly: `.m-body` 919px of content in 664px, last card clears the
+  tab bar. So it is standalone-only: `100vh` / `100dvh` is not the visible
+  height in the installed app. Fix shape: set the app height from the real
+  viewport (`visualViewport`) and follow its changes, instead of the CSS unit.
 - **Said:** in the PWA on iPhone, everything after "Show 1 more" is cut off and
   cannot be scrolled to. Fine in the browser.
 - **Know:** nothing yet. Standalone iOS has its own viewport height and
@@ -45,10 +54,36 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   area into one `unit_ref` string and invents the name **"Owner"** when a name
   is missing. Why rows went missing is **not measured yet**: dedupe by phone?
   request size or time limit? rows skipped with no report?
-- **Open:** which firm and when. Count the rows that landed, then find where the
-  others went. The import must report *every* row it skipped, with the reason.
-  Any repair to the imported rows is a write to a paying firm, so it gets named
-  here first.
+- **Answered:** **mahalaxmi**, and the user **undid** the import after seeing
+  the damage. So there is nothing to repair; the job is to find out why it
+  happened before they import again.
+- **Know (23 Sep, from the user's review screen):** the file offered **4,108
+  rows ready**, ~100 "duplicate", ~19 null. **1,380 landed.** So ~2,700 rows
+  were SENT AND LOST, not filtered: the browser fires one request per row, all
+  at once, and the only trace is a count in a toast.
+- **Know (23 Sep, cause of the mangled unit):** `guessMapping` silently claims
+  columns the person never mapped (Tower, Configuration, Carpet, Saleable — and
+  `Building` matches the Project synonyms), then `previewRows` GLUES them into
+  one `unitRef` string. The user mapped Unit no. only and got
+  `VTP LEONARA - BUILDING B · 2 BHK Apartment · 1603 · 658.54/1087.97 sqft`.
+- **Know:** the import history lives in browser state only (`store.jsx`
+  `importLogs`), so Undo is gone after a reload. Undo is not audited.
+- **DECIDED (23 Sep) — rebuild, not a patch:**
+  1. Real columns on the owner record: project, tower, unit no., config, carpet,
+     saleable. No composed text. This is what makes 4.4 and 6.1 possible, so
+     5.3 folds in here.
+  2. **Uniqueness is the UNIT, not the person** — key is project + tower + unit.
+     One owner with three flats is three calling rows; the same flat twice in a
+     file is the duplicate.
+  3. Example sheet per import type. For owners the sheet is **name, phone,
+     tower/building, unit, project**. Everything else is optional, recognised if
+     present, never required.
+  4. **A column that is not shown as mapped is never used.** Guesses are
+     pre-filled but visible and clearable.
+  5. Server-side job: upload → list sheets (5.2) → map → server-computed counts
+     → write in batches of 500 with a per-row outcome → download of every row
+     that did not land → resumable, browser can be closed.
+  6. Undo moves to the server, survives a reload, and is audited.
 
 ### 1.3 ⬜ Every action is logged as the assigned agent, not as the person who did it
 - **Said:** "the person who is assigned directly logs the action — even if I call
@@ -57,9 +92,15 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   `agent_id` instead of the signed-in user.
 - **Why it matters:** this corrupts the "who is working the book" view for the
   manager (§1 of CLAUDE.md), and it corrupts the EOD report in Part 8.
-- **Open:** find every write that stamps an actor, decide one `actor()` source,
-  then decide whether the rows already written can be corrected (likely not,
-  since the true actor was never stored).
+- **Know (22 Sep, mahalaxmi):** the STORE is right. Calls from the owner's
+  account are recorded against `owner_mahalaxmi`, not the assignee. Two real
+  faults nearby: owner stage changes are authored `'System'`
+  (`ctx.actorLabel` is always null because `req.user` carries no name), and the
+  audit log therefore has no actor names at all.
+- **Said (23 Sep):** a call made from the owner's desk must read as the owner
+  (or System), never as the assigned agent.
+- **Open:** WHICH SCREEN shows "Zahir" — the lead timeline, or the last-activity
+  line at the top of the lead. Waiting on a screenshot.
 
 ### 1.4 ⬜ Status dropdown clipped in the properties list
 - **Said:** in list view with a single row, the status dropdown opens inside a
@@ -74,19 +115,26 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   with a made-up value (CLAUDE.md §3.1).
 - **Open:** show the user the exact screen, then remove it.
 
-### 1.6 ⬜ Mahalaxmi: only the owner is in lead rotation
-- **Know (22 Sep):** 4 active agents, **1 of them in routing** (the owner).
-  Onboarding never adds agents to routing (see 2.5). Every new portal lead goes
-  to the owner.
-- **Decided for now:** the user adds the agents in Settings → Routing. The code
-  fix is 2.5.
+### 1.6 ✅ Mahalaxmi: only the owner is in lead rotation — not a bug
+- **Answered 22 Sep:** a deliberate setting. The team met Mahalaxmi, gave the
+  demo and redistributed the leads by hand. Nothing to fix. (Onboarding still
+  leaves new agents out of routing by default. That is covered in 2.5.)
 
 ### 1.7 ⬜ iPhone alerts failing with no reason recorded
 - **Know (22 Sep):** last 3 days, deliveries to `web.push.apple.com` show
   `failed` **27 × bhumi, 16 × mahalaxmi**, with **no status code and no error
   text**. In the same period 42 and 28 alerts reached a screen.
-- **Open:** store the error first, then diagnose. A failure with no reason can't
-  be worked.
+- **DECIDED (23 Sep), two steps:**
+  1. **Record the whole reason** (ships with Part 1): status code, response
+     body, message, `code`, `cause.code`, every nested `errors[].code`, the
+     error type, and which push service. An empty status code means the request
+     never got an HTTP answer — DNS, TCP or TLS — and none of that is stored
+     today.
+  2. **Then fix what it names.** Candidates: EC2 resolving Apple over
+     unroutable IPv6, a wrong VAPID `sub`, or firewall timeouts. Not guessed
+     between while the log is blank.
+- **Open:** `getent ahosts web.push.apple.com` and a curl to it, from EC2, may
+  answer today.
 
 ---
 
@@ -143,7 +191,7 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 
 ## Part 3 — A lead that comes back
 
-### 3.1 ⬜ A repeat enquiry reopens the lead as New and shows in Today
+### 3.1 🟡 A repeat enquiry reopens the lead as New and shows in Today
 - **Said:** if a lead enquires again it should be new again, and should come back
   in Today. Keep the Came back section, but a lead that came back must also be in
   Today.
@@ -154,8 +202,10 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 - **Decided:** Rejected / Deal Closed → **New** (written as a stage change, with
   history). Open leads keep their stage but appear in Today as came-back.
   "Came back" becomes recent-only (window to set).
-- **Open:** the window length (7 days?). Reassign on reopen, or keep the
-  previous agent?
+- **Answered:** "Came back" has **no time window**. It simply means the lead has
+  enquired more than once. Its place in **Today** is what makes it actionable.
+  (Replaces the "recent-only" line above.)
+- **Open:** on reopen, reassign or keep the previous agent?
 
 ---
 
@@ -180,11 +230,12 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 - **Said:** needed for calling (owners) and properties.
 - **Depends on:** 5.3. Tower must be a real column, not buried in `unit_ref`.
 
-### 4.5 ⬜ "Key received" owner stage
-- **Said:** "Key received" should be an owner-calling stage, **in place of
-  Deal Closed**.
-- **Open:** confirm: replace Deal Closed, or add it and keep both? What happens
-  to owners already on Deal Closed (count them first)?
+### 4.5 🟡 "Key received" replaces Deal Closed in the owner funnel
+- **Said:** owners have their own funnel. It is about **getting a property to
+  manage**, and "Deal Closed" makes no sense there. **Key received** replaces it.
+- **Open:** owners already on Deal Closed. Count them per firm, then move them to
+  Key received through a gated migration (writes bhumi/mahalaxmi rows, named
+  first). The lead funnel keeps Deal Closed.
 
 ### 4.6 ⬜ Project names ignore case and spacing
 - **Said:** "Sai Heights" and "sai heights" split into two groups, in both
