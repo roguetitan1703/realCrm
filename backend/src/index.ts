@@ -27,7 +27,7 @@ import { pwaRouter } from './routes/pwa';
 import { filesRouter, mediaRouter } from './routes/files';
 import { withRequestContext } from './middleware/auth';
 import { getTenantForIngest, runRoutingSweeps } from './services/store';
-import { envBanner, appEnv } from './services/env';
+import { envBanner, appEnv, runningCode } from './services/env';
 import { checkIntegrationKeys } from './services/ingestion';
 
 // ── A DROPPED DATABASE CONNECTION USED TO KILL THE WHOLE API ────────────────
@@ -155,7 +155,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'OK', service: 'Real Estate CRM API Engine', timestamp: new Date() });
+  res.status(200).json({ status: 'OK', service: 'Real Estate CRM API Engine', commit: runningCode().commit, timestamp: new Date() });
 });
 
 // Per-tenant PWA manifest + icons, served at the site origin (not under /api).

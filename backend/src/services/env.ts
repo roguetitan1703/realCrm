@@ -20,6 +20,7 @@
  */
 
 import fs from 'fs';
+import { execSync } from 'child_process';
 import path from 'path';
 
 // LOADED HERE, NOT IN db.ts, because a script that reads configuration does not
@@ -194,5 +195,24 @@ export function assertRequiredConfig(): void {
 export function envBanner(port: string | number): string {
   const env = appEnv();
   const mark = env === 'production' ? '🔴 PRODUCTION' : env === 'development' ? '🟡 DEVELOPMENT' : '⚪ LOCAL';
-  return `${mark} · port ${port} · db ${dbRef(databaseUrl()) || 'unknown'}`;
+  return `${mark} · port ${port} · db ${dbRef(databaseUrl()) || 'unknown'} · ${runningCode().label}`;
+}
+
+/**
+ * The code this process loaded: branch and commit, read ONCE at boot. A
+ * `git pull` changes the folder, not the running process, so reading it later
+ * would report code that is not running. Production sat on a stale branch
+ * whose `git pull` fetched main and applied nothing, and every screen looked
+ * current until a new script was missing — the banner and /health now say
+ * which commit is live instead of it being inferred.
+ */
+let _code: { branch: string; commit: string; label: string } | null = null;
+export function runningCode() {
+  if (_code) return _code;
+  const git = (a: string) => { try { return execSync(`git ${a}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return ''; } };
+  const branch = git('branch --show-current') || 'detached';
+  const commit = git('rev-parse --short HEAD') || 'unknown';
+  const dirty = git('status --porcelain --untracked-files=no') ? ' +local edits' : '';
+  _code = { branch, commit, label: `${branch}@${commit}${dirty}` };
+  return _code;
 }

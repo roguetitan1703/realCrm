@@ -29,21 +29,29 @@ That file is the authority on the start command — read it rather than typing a
 `pm2 start` from memory, which is how production ended up running `tsx watch`
 for months (see `docs/STATE.md`, 2026-08-22).
 
-Routine deploy — this is what `deploy.sh` on the box does:
+Routine deploy:
 
 ```bash
 cd ~/realestate
-git pull origin main
-npm install
-pm2 restart re-api
+./scripts/deploy-api.sh
 ```
 
-**Confirm the boot banner every time.** It names the environment and the
-database, and is the only thing that shows the process is what you think it is:
+It refuses unless the folder is on a clean `main`, fast-forwards to
+`origin/main`, runs `npm install` only if the lockfile moved, restarts `re-api`
+and prints the boot banner. **Never deploy with a bare `git pull`**: it pulls
+whatever branch is checked out. Until 2026-09-22 this folder was on the stale
+`stabilization-prod-prep`; `git pull origin main` hid that, and the first bare
+`git pull` fetched main and applied nothing.
+
+**Confirm the boot banner every time.** It names the environment, the database
+and the commit that loaded — the only thing that shows the process is what you
+think it is. `GET /health` returns the same `commit`.
 
 ```
-🟢 PRODUCTION · port 5000 · db zxdid…
+🔴 PRODUCTION · port 5000 · db zxdid… · main@35c88e7
 ```
+
+`+local edits` after the commit means tracked files on the box differ from git.
 
 If it says `local`, `APP_ENV` is not reaching the process and the
 wrong-database check is disarmed — stop and fix that before anything else.
