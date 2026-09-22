@@ -1,0 +1,387 @@
+# The Mahalaxmi batch — every open concern, in parts
+
+**Opened 2026-09-22**, the week Mahalaxmi (second paying client) started using
+calling and imports for real. This is the one list. We go **one part at a
+time**: discuss → build → check → push → deploy to prod → tick it off here.
+
+Rules for this file:
+- Every raw note the user gave is in the **coverage table** at the bottom, mapped
+  to an item. Nothing gets dropped without a line saying why.
+- Each item holds: **what was said**, **what we know** (measured, with the date),
+  **decided**, **open**. A "we know" line is a database or code fact, not a guess.
+- `bhumi` and `mahalaxmi` are paying — any write to their data is named in the
+  item and confirmed first.
+
+Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commit)
+
+---
+
+## Part 0 — Already done (2026-09-22)
+
+| | Item | Result |
+|---|---|---|
+| ✅ | **410 on connection keys** ("This key predates key storage — rotate it") | Nothing was lost. Keys were locked under the old `.env.example` JWT placeholder (Bhumi, Delpat) or the built-in (Urban, Raipur). Re-locked on prod with `keys:check --apply`: **19 of 20 open, 1 is Delpat's `int_99acres_test` fixture which never had a copy.** No portal touched. `54a0d4c`, `35c88e7` |
+| ✅ | **Copy confirmation** — Copy on keys / teammate added / password reset threw `copyText is not defined` | Missing imports. `01c6bbb` |
+| ✅ | **EC2 was on a stale branch** (`stabilization-prod-prep`) | Now on `main`; `scripts/deploy-api.sh` refuses anything else; boot banner and `/health` show the running commit. `bea3994` |
+| ✅ | **Alerts "Turn on" did nothing** | Brave's "Use Google services for push messaging" was off. Not our code. |
+
+---
+
+## Part 1 — Broken today on a paying client (fix first)
+
+### 1.1 ⬜ Today screen does not scroll on iPhone (installed app)
+- **Said:** in the PWA on iPhone, everything after "Show 1 more" is cut off and
+  cannot be scrolled to. Fine in the browser.
+- **Know:** nothing yet. Standalone iOS has its own viewport height and
+  safe-area; a fixed-height container with `overflow: hidden` fits Safari and
+  clips in standalone.
+- **Open:** reproduce on `iPhone 13` in standalone geometry, measure the
+  scroll container.
+
+### 1.2 ⬜ The owners import lost two-thirds of the rows and broke unit numbers
+- **Said:** imported 4k+ owner records with unit numbers etc., got only **1,380**,
+  and the units came out wrong afterwards. How does the server handle a big import?
+- **Know (22 Sep, earlier pass):** the owner import flattens tower / unit / BHK /
+  area into one `unit_ref` string and invents the name **"Owner"** when a name
+  is missing. Why rows went missing is **not measured yet**: dedupe by phone?
+  request size or time limit? rows skipped with no report?
+- **Open:** which firm and when. Count the rows that landed, then find where the
+  others went. The import must report *every* row it skipped, with the reason.
+  Any repair to the imported rows is a write to a paying firm, so it gets named
+  here first.
+
+### 1.3 ⬜ Every action is logged as the assigned agent, not as the person who did it
+- **Said:** "the person who is assigned directly logs the action — even if I call
+  from admin it says Zahir".
+- **Know:** not measured. Suspect: timeline / call log writes use the lead's
+  `agent_id` instead of the signed-in user.
+- **Why it matters:** this corrupts the "who is working the book" view for the
+  manager (§1 of CLAUDE.md), and it corrupts the EOD report in Part 8.
+- **Open:** find every write that stamps an actor, decide one `actor()` source,
+  then decide whether the rows already written can be corrected (likely not,
+  since the true actor was never stored).
+
+### 1.4 ⬜ Status dropdown clipped in the properties list
+- **Said:** in list view with a single row, the status dropdown opens inside a
+  container too short for it and is cut off.
+- **Fix shape:** the menu renders outside the table's overflow (a portal, or
+  flips upward). One component, used by every list, not a per-screen patch.
+
+### 1.5 ⬜ "Owner abc" — placeholder owner naming when adding an owner in a property
+- **Said:** the naming when adding an owner inside a property is "still like
+  this".
+- **Know:** same shape as the invented "Owner" in 1.2: unknown is being filled
+  with a made-up value (CLAUDE.md §3.1).
+- **Open:** show the user the exact screen, then remove it.
+
+### 1.6 ⬜ Mahalaxmi: only the owner is in lead rotation
+- **Know (22 Sep):** 4 active agents, **1 of them in routing** (the owner).
+  Onboarding never adds agents to routing (see 2.5). Every new portal lead goes
+  to the owner.
+- **Decided for now:** the user adds the agents in Settings → Routing. The code
+  fix is 2.5.
+
+### 1.7 ⬜ iPhone alerts failing with no reason recorded
+- **Know (22 Sep):** last 3 days, deliveries to `web.push.apple.com` show
+  `failed` **27 × bhumi, 16 × mahalaxmi**, with **no status code and no error
+  text**. In the same period 42 and 28 alerts reached a screen.
+- **Open:** store the error first, then diagnose. A failure with no reason can't
+  be worked.
+
+---
+
+## Part 2 — People, seats, suspend, reassign
+
+### 2.1 ⬜ Login ID must be changeable when a seat goes to someone else
+- **Said:** when a seat is reassigned, the login ID stays the old person's name
+  and we're stuck with it.
+- **Know:** the user id doubles as the login id. Changing it rewrites every
+  row's `agent_id`.
+- **Direction:** keep the internal id stable and make `login_id` a separate,
+  editable, per-tenant-unique field. Sessions are revoked on change.
+- **Open:** does the reassigned seat keep the previous person's history under
+  the new name? Probably no: history belongs to the person, the seat is just a
+  licence.
+
+### 2.2 ⬜ What happens today when an agent with open leads is suspended
+- **Know (22 Sep):** suspending revokes sessions, so push stops. **The leads stay
+  on the suspended agent**: nobody works them and nothing flags them. Suspended
+  people can still be **picked as assignees** (`activeAgents` excludes only
+  OFF_DUTY). Un-suspending changes nothing, because the leads never left.
+  (Answers "leads came back?": they never went anywhere.)
+- **Direction:** suspending shows the person's open work (leads, owners,
+  follow-ups) and offers **distribute** (2.3) in the same step. Suspended people
+  can't be chosen anywhere (UI and server both check).
+- **Open:** is suspending allowed without distributing? Proposal: yes, but the
+  held leads then show on the manager's desk as unowned work.
+
+### 2.3 ⬜ Reassign becomes "distribute" — to several people
+- **Said:** select multiple people and split the leads between them, not just one.
+- **Know (22 Sep):** the reassign-leads route **has no permission check**, moves
+  closed and rejected leads too, writes **no assignment history** (breaks the
+  invariant "assignment is history"), has a single target, and the modal says
+  "done" before the server answers.
+- **Direction:** owner/manager only; open leads only; pick N people → round-robin
+  or by count; `recordAssignment()` per lead; covers owners (calling) as well as
+  leads; the result comes from the server.
+
+### 2.4 ⬜ Super admin: bulk user creation
+- **Said:** users are created one at a time, setting each password by hand.
+- **Direction:** paste or enter N users (name, phone, role, login id), with
+  passwords generated per person.
+
+### 2.5 ⬜ Handover summary is missing the team's credentials, and onboarding bugs
+- **Said:** the handover summary has no user list (login id + password) to copy.
+- **Know (22 Sep):** `provisionTenant` builds `createdTeam` but **never returns
+  it**, so the summary shows the owner only. Agents created without a password
+  **get the owner's password**. Onboarded agents are **not put into routing**
+  (cause of 1.6).
+- **Direction:** return the team; generate a password per person; add them to
+  routing; the summary lists everyone with Copy.
+
+---
+
+## Part 3 — A lead that comes back
+
+### 3.1 ⬜ A repeat enquiry reopens the lead as New and shows in Today
+- **Said:** if a lead enquires again it should be new again, and should come back
+  in Today. Keep the Came back section, but a lead that came back must also be in
+  Today.
+- **Know (22 Sep):** a repeat enquiry **never changes the stage**
+  (`arrivalStage` unused). In 30 days **9 bhumi leads came back still Rejected,
+  1 still Deal Closed**. The "Came back" pill counts **all-time**: a number that
+  only grows.
+- **Decided:** Rejected / Deal Closed → **New** (written as a stage change, with
+  history). Open leads keep their stage but appear in Today as came-back.
+  "Came back" becomes recent-only (window to set).
+- **Open:** the window length (7 days?). Reassign on reopen, or keep the
+  previous agent?
+
+---
+
+## Part 4 — Calling organised by project
+
+### 4.1 ⬜ Project group view with "Assign project"
+- **Said:** they assign a whole project to one person, so give bulk assign on the
+  project group.
+- **Direction:** an assign action on the project card assigns every open owner
+  in the project, through distribute (2.3).
+
+### 4.2 ⬜ Inside a project: a calling list with bulk assign
+- **Said:** opening a project shows a lead-list-like view for calling, with bulk
+  assign there too.
+
+### 4.3 ⬜ The project card shows who holds it
+- **Decided:** after assigning the project and then moving a few inside it, the
+  card reads e.g. **"Rupali 40 · Aniket 8 · Unassigned 5"**. Count and names come
+  from one query (CLAUDE.md §3.3).
+
+### 4.4 ⬜ Tower filter
+- **Said:** needed for calling (owners) and properties.
+- **Depends on:** 5.3. Tower must be a real column, not buried in `unit_ref`.
+
+### 4.5 ⬜ "Key received" owner stage
+- **Said:** "Key received" should be an owner-calling stage, **in place of
+  Deal Closed**.
+- **Open:** confirm: replace Deal Closed, or add it and keep both? What happens
+  to owners already on Deal Closed (count them first)?
+
+### 4.6 ⬜ Project names ignore case and spacing
+- **Said:** "Sai Heights" and "sai heights" split into two groups, in both
+  properties and calling.
+- **Know (22 Sep):** case-sensitive today. Only **2 splits exist, both delpat**.
+- **Direction:** group by a normalised key and display the most common spelling.
+  No data rewrite needed.
+
+---
+
+## Part 5 — Imports (owners, leads, properties)
+
+### 5.1 ⬜ Downloadable example sheet per import type
+- **Said:** first "the mapping is also good, just make sure it works"; later
+  "better to give out the sheet example instead of mapping it".
+- **Direction:** both. A **Download example** for owners, leads and properties,
+  with exact headers. A file with those headers skips mapping; any other file
+  still maps.
+- **Open:** confirm mapping stays as the fallback.
+
+### 5.2 ⬜ Multi-sheet Excel: choose the sheet
+- **Said:** there's no sheet selection when the uploaded Excel has several sheets.
+- **Know:** not checked. Probably reads only the first sheet, silently.
+
+### 5.3 ⬜ Owner import keeps its real columns
+- **Decided:** tower, unit, configuration (BHK) and area become real fields, not
+  flattened into `unit_ref`. A missing name stays empty (never "Owner").
+- **Asked:** what happens to Bhumi's existing properties? **Answered:**
+  unaffected; this changes the import path only.
+- **Open:** backfill delpat's 732 existing flattened rows (safe tenant). Does
+  Mahalaxmi's import (1.2) need a repair? It's a paying-client write, so named first.
+
+### 5.4 ⬜ Large imports
+- **Said:** how does the server handle 4k+ rows?
+- **Direction:** chunked, idempotent, with a per-row result (added / updated /
+  skipped + reason) and a final count that equals the rows in the file.
+
+---
+
+## Part 6 — Contacts rethink (clients / owners)
+
+The user will lead this discussion. It's important now, so nothing here gets
+built before that conversation.
+
+### 6.1 ⬜ Unit number not visible at a glance in Contacts → Owners
+- **Said:** the owners created while adding properties show other information,
+  and the unit number only appears after opening the record.
+
+### 6.2 ⬜ Hardcoded values in the owners list
+- **Know (22 Sep, `store.ts listContacts` ~1759–1781):** grouped by
+  **owner_name** (two different people with one name merge into one row),
+  `phone: r.phone || '+91 —'` (invents a phone), `minsAgo: 120` hardcoded (a fake
+  "last activity"). All three break "no fake features".
+- **Fold into 6.x.** Don't patch these separately.
+
+---
+
+## Part 7 — Properties
+
+### 7.1 ⬜ Verification visit, separate from stage
+- **Said:** when they add a property they visit it to confirm everything, and
+  need a checkmark for that.
+- **Direction:** `verified_at` / `verified_by`, a toggle on the record, and a
+  filter. Not a stage.
+
+### 7.2 ⬜ "Added by" in property detail
+- **Know (22 Sep):** the column exists from 11 Sep. **bhumi: 2 of 7** recent
+  properties stamped; the rest are blank.
+- **Open:** backfill from the audit log where it's provable. A bhumi write, so
+  it needs an OK.
+
+### 7.3 ⬜ Property timeline records what happened to it
+- **Said:** the timeline should record activity and status changes, starting
+  with "added by whom".
+- **Depends on:** 1.3 (right actor) and 7.2.
+
+### 7.4 ⬜ Duplicate property
+- **Said:** give an option; decide what gets duplicated and what doesn't.
+- **Proposal:** copy project, tower, location, configuration, area, amenities,
+  price fields and type. **Don't copy** unit number, owner, photos and videos,
+  stage, verification, timeline, created-by, or shares.
+- **Open:** confirm the list.
+
+### 7.5 ⬜ Shareable photo / video gallery link
+- **Said:** photos and videos are uploaded, but can't be shared in one tap on
+  WhatsApp. Wanted: a link that opens a plain viewer with the firm's name and
+  branding, included in Share on WhatsApp (and any share message), and copyable
+  from the page.
+- **Know (22 Sep):** bhumi has **15 media items on 4 listings**. The `/files`
+  proxy is unauthenticated by design (`<img>` can't send a token).
+- **Direction:** a per-property unguessable token, a public read-only gallery
+  page, and a way to revoke the link. Internal fields never appear (same
+  `NEVER_SHARED_FIELDS` rule as the message).
+
+### 7.6 ⬜ "Attach property" needs a real review
+- **Said:** attach property needs a serious review and a check of how it's
+  actually used.
+- **Open:** measure use first (how many attaches per firm, from where), then
+  review the flow with the user.
+
+---
+
+## Part 8 — Reports
+
+### 8.1 ⬜ End-of-day work report, for the agent and for the manager
+- **Said:** a self work report at end of day for agents, and one for the manager.
+- **Depends on:** 1.3. With the wrong actor, the report is wrong.
+- **Open:** what's in it (calls made, outcomes, visits, follow-ups done or
+  missed, new leads touched), where it lives (screen, push, WhatsApp), and when.
+
+---
+
+## Part 9 — Platform
+
+### 9.1 ⬜ Audit ledger per tenant, and the "broken" chain
+- **Know (22 Sep):** a single global hash chain. It reports broken because Date
+  values hash as `{}` when written and as ISO strings after reading back:
+  **1,489 rows** (property.create 754, owner.create 735), **0 link breaks,
+  0 forks**. First break at seq 227 (1 Aug). The verify loads all **7,620 rows**
+  (3.7 s).
+- **Decided:** per-tenant chains, a hashing fix, a legacy verifier for the old
+  rows, and incremental verification.
+
+### 9.2 ⬜ Portal setup email per connection ("emails for sources")
+- **Said:** a generated email per portal connection, like the 99acres one sent
+  for Mahalaxmi (endpoint + key + format).
+- **Direction:** "Email setup" on each connection builds that text with Copy.
+  The key is included only through the owner-only reveal path.
+
+### 9.3 ⬜ Build catches undefined identifiers
+- **Why:** the Copy break (Part 0) shipped because `vite build` doesn't catch a
+  missing import in JSX. Add an eslint `no-undef` step to `npm run build`.
+
+### 9.4 ⬜ env loader and CRLF
+- **Know:** `.env` lines split on `\n` only. Harmless unless the file has CRLF.
+  Check `grep -c $'\r' .env` on EC2 before touching it.
+
+---
+
+## Suggested order
+
+1 → 3 → 2 → 5 → 4 → 7 → 6 (when the user is ready) → 8 → 9.
+Part 1 hurts paying clients today. 3 and 2 are small and remove silent loss of
+leads. 5 has to come before 4.4 (towers). 8 comes after 1.3.
+
+---
+
+## Coverage — every raw note → item
+
+| Raw note (22 Sep) | Item |
+|---|---|
+| User id change when a seat is reassigned | 2.1 |
+| Suspend ke baad reassign | 2.2, 2.3 |
+| 410 reassign key | Part 0 (keys) |
+| New enquiry should become new; come back in Today | 3.1 |
+| Tower filter | 4.4 |
+| Import owners for calling; also leads, maybe properties | 5.x |
+| Example sheet to download; mapping also good | 5.1 |
+| Calling organised by project; assign a project to someone; bulk assign on the group | 4.1 |
+| Open a project → lead-list view, bulk assign there too | 4.2 |
+| KEY RECEIVED as an owner calling stage; "in place of Deal Closed" | 4.5 |
+| Flat/unit no. not visible in Contacts → Owners | 6.1 |
+| Super admin: one-by-one user creation and passwords | 2.4 |
+| User list not in the handover summary | 2.5 |
+| Photo/video shareable gallery link, in WhatsApp share, copyable, branded viewer | 7.5 |
+| Case-sensitive project names | 4.6 |
+| Duplicate property: what copies, what doesn't | 7.4 |
+| Suspended → leads reassigned → brought back, do leads come back? | 2.2 |
+| If a person leaves they're suspended first: what happens to their leads | 2.2 |
+| Distribute to multiple people, not one | 2.3 |
+| Verification visit checkmark, separate from stage | 7.1 |
+| Who added the property, in details | 7.2 |
+| Copy confirmation | Part 0 |
+| Admin onboarding: login id + password missing from summary | 2.5 |
+| Emails for sources | 9.2 |
+| Audit ledger is broken; per tenant | 9.1 |
+| Photo sharing | 7.5 |
+| Property added by? | 7.2 |
+| Property unit verification visit | 7.1 |
+| Duplicate copy for property | 7.4 |
+| Bhumi's existing properties after the import change | 5.3 |
+| Project card shows the names of people assigned | 4.3 |
+| Hardcoded stuff in contacts; rethink client/owners | 6.2, Part 6 |
+| What happens if I suspend an agent with active leads today | 2.2 |
+| Came back section + must also be in Today, becomes New | 3.1 |
+| Attach property: serious review and usage check | 7.6 |
+| Self work report EOD for agents and for manager | 8.1 |
+| Import: no sheet selection for multi-sheet Excel | 5.2 |
+| Imported 4k owners, got 1,380, units messed up | 1.2 |
+| How does the server handle a big import | 5.4 |
+| Better to give an example sheet than mapping | 5.1 |
+| "Owner abc" naming when adding an owner in a property | 1.5 |
+| Status dropdown in properties list cut off | 1.4 |
+| Property timeline: activity, status changes, starting with added by | 7.3 |
+| Assigned person logs the action even when admin calls ("says Zahir") | 1.3 |
+| Today screen not scrollable on iPhone PWA after "show 1 more" | 1.1 |
+| *(found while checking)* Mahalaxmi agents not in routing | 1.6 |
+| *(found while checking)* iPhone pushes failing with no reason | 1.7 |
+| *(found while checking)* Copy break slipped past the build | 9.3 |
+| *(found while checking)* env CRLF | 9.4 |

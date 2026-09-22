@@ -1,5 +1,7 @@
 # RealEstate by Delpat — Product Roadmap
 
+> **Now (2026-09-22): [specs/mahalaxmi-batch.md](./specs/mahalaxmi-batch.md)** — the working list, worked one part at a time.
+
 > ## ⚠️ Status correction — 2026-08-07
 >
 > **The backlog below is out of date and misled a session into planning work
