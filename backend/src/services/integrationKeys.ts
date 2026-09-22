@@ -24,22 +24,23 @@
  *
  * THE RULES NOW:
  *
- *  1. The key lock is its own secret, INGEST_KEY_SECRET. Changing JWT_SECRET to
- *     sign everyone out must never touch a stored key again.
- *  2. Opening tries EVERY secret a key could have been locked with — the
- *     current lock, the previous one, JWT_SECRET, the built-in — and a key only
- *     counts as opened if it hashes to the stored hash. A lock is never
- *     "guessed"; either the portal's own key comes out, or nothing does.
- *  3. New keys are locked with INGEST_KEY_SECRET, or JWT_SECRET until that is
- *     set (so deploying this changes nothing by itself), and never with the
- *     built-in outside local development.
+ *  1. The lock is JWT_SECRET — a deliberate choice, made knowing the coupling.
+ *     So CHANGING JWT_SECRET IS ALSO A KEY OPERATION: put the old value in
+ *     JWT_SECRET_PREVIOUS, restart, run scripts/integration-keys.ts --apply,
+ *     then remove PREVIOUS. Skip that and every key goes unreadable again —
+ *     the feeds keep working, the boot log says UNREADABLE, and nothing is lost
+ *     for good as long as the old value still exists somewhere.
+ *     (INGEST_KEY_SECRET, if it is ever set, takes over as the lock and ends
+ *     the coupling. It is optional and unset today.)
+ *  2. Opening tries EVERY secret a key could have been locked with — the lock,
+ *     its PREVIOUS, the built-in — and a key only counts as opened if it hashes
+ *     to the stored hash. A lock is never "guessed"; either the portal's own
+ *     key comes out, or nothing does.
+ *  3. Never lock with the built-in outside local development. It is published
+ *     in this repository: a key under it is readable by anyone with the database.
  *  4. Moving a key to the current lock is a deliberate step, never a side
- *     effect of reading one: see scripts/integration-keys.ts. A laptop running
- *     against production with its own secrets must not be able to re-lock a
- *     live key under a secret the server does not hold.
- *  5. Changing INGEST_KEY_SECRET later: put the old value in
- *     INGEST_KEY_SECRET_PREVIOUS, the new one in INGEST_KEY_SECRET, run the
- *     script with --apply, then remove PREVIOUS. No portal is ever involved.
+ *     effect of reading one: see scripts/integration-keys.ts. It only runs
+ *     where the machine provably holds the live server's lock.
  * ============================================================================
  */
 import crypto from 'crypto';
@@ -53,7 +54,7 @@ export const hashKey = (key: string) => crypto.createHash('sha256').update(Strin
  *  only so keys written under it can still be opened and moved off it. */
 const BUILT_IN = 'dev-only-change-me';
 
-export type SecretLabel = 'INGEST_KEY_SECRET' | 'INGEST_KEY_SECRET_PREVIOUS' | 'JWT_SECRET' | 'built-in default';
+export type SecretLabel = 'INGEST_KEY_SECRET' | 'INGEST_KEY_SECRET_PREVIOUS' | 'JWT_SECRET' | 'JWT_SECRET_PREVIOUS' | 'built-in default';
 
 type Slot = { label: SecretLabel; key: Buffer };
 
@@ -80,11 +81,13 @@ function keyring(): Slot[] {
   add('INGEST_KEY_SECRET', process.env.INGEST_KEY_SECRET);
   add('INGEST_KEY_SECRET_PREVIOUS', process.env.INGEST_KEY_SECRET_PREVIOUS);
   add('JWT_SECRET', process.env.JWT_SECRET);
+  add('JWT_SECRET_PREVIOUS', process.env.JWT_SECRET_PREVIOUS);
   add('built-in default', BUILT_IN);
   return out;
 }
 
-/** The lock new keys go under. Never PREVIOUS, never the built-in off a laptop. */
+/** The lock new keys go under: INGEST_KEY_SECRET if set, else JWT_SECRET. Never
+ *  a PREVIOUS, never the built-in off a laptop. */
 export function currentLock(): SecretLabel {
   return lockSlot().label;
 }

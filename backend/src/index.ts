@@ -27,7 +27,7 @@ import { pwaRouter } from './routes/pwa';
 import { filesRouter, mediaRouter } from './routes/files';
 import { withRequestContext } from './middleware/auth';
 import { getTenantForIngest, runRoutingSweeps } from './services/store';
-import { envBanner, isProduction, appEnv } from './services/env';
+import { envBanner, appEnv } from './services/env';
 import { checkIntegrationKeys } from './services/ingestion';
 
 // ── A DROPPED DATABASE CONNECTION USED TO KILL THE WHOLE API ────────────────
@@ -343,9 +343,7 @@ if (isMain || process.env.START_SERVER === 'true') {
     // now, every boot. Read-only, and it never prints a key.
     checkIntegrationKeys().then(k => {
       console.log(`🔐 Connection keys: ${k.total} stored — ${k.current} on ${k.lock}, ${k.oldLock} on an older lock, ${k.unreadable.length} unreadable`);
-      if (isProduction() && k.lock !== 'INGEST_KEY_SECRET') {
-        console.warn(`   ⚠ INGEST_KEY_SECRET is not set, so keys are locked with JWT_SECRET — changing it would lock them again. Set it, then: npm run keys:check -- --env=${appEnv()} --apply`);
-      } else if (k.oldLock > 0) {
+      if (k.oldLock > 0) {
         console.warn(`   ⚠ ${k.oldLock} key(s) on an older lock. Move them: npm run keys:check -- --env=${appEnv()} --apply`);
       }
       for (const u of k.unreadable) console.error(`   ✗ UNREADABLE: ${u.tenant} / ${u.provider} — no secret on this server opens it (its feed still works)`);

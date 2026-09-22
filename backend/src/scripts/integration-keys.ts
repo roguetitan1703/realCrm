@@ -6,8 +6,9 @@
  * and says which lock each one is on. Never prints a key: tenant, portal, the
  * last four characters (already on screen in the app) and a status.
  *
- * With --apply it re-locks every key that opens under an OLDER secret onto
- * INGEST_KEY_SECRET. Only the stored copy changes. The hash every incoming
+ * With --apply it re-locks every key that opens under an OLDER secret onto the
+ * current lock — JWT_SECRET, or INGEST_KEY_SECRET if one is ever set. Only the
+ * stored copy changes. The hash every incoming
  * enquiry is matched on is not touched, so no portal notices and no portal has
  * to be told anything. Each re-locked key is proven to open and to hash to the
  * portal's key BEFORE it is written, and the write only lands if the row still
@@ -19,8 +20,8 @@
  * running API never re-locks anything by itself.
  *
  * When to run:
- *   • once, after INGEST_KEY_SECRET is first set                 → --apply
- *   • after changing INGEST_KEY_SECRET (old value in _PREVIOUS)  → --apply
+ *   • once, to move the pre-August keys off the built-in lock    → --apply
+ *   • after changing JWT_SECRET (old value in JWT_SECRET_PREVIOUS) → --apply
  *   • whenever the boot log reports an older lock or UNREADABLE  → check
  *
  * Usage:
@@ -78,20 +79,29 @@ console.log(`\n  ${rows.length} keys: ${Object.entries(tally).map(([k, n]) => `$
 
 if (!apply) {
   const old = tally['old-lock'] || 0;
-  if (old && lock !== 'INGEST_KEY_SECRET') console.log('\n  Set INGEST_KEY_SECRET in .env, restart the API, then run again with --apply.');
-  else if (old) console.log('\n  Run again with --apply to move them onto INGEST_KEY_SECRET.');
+  if (old) console.log(`\n  Run again with --apply to move them onto ${lock}.`);
   await sql.end();
   process.exit((tally.unreadable || tally.mismatch) ? 2 : 0);
 }
 
-// Re-locking under JWT_SECRET would only re-create the coupling that broke
-// these keys: the next JWT change would lock them out again.
-if (lock !== 'INGEST_KEY_SECRET') {
-  console.error('\n  Refusing --apply: INGEST_KEY_SECRET is not set. Keys must move to their own\n' +
-    '  secret, not back onto JWT_SECRET. Add it to .env, restart the API, then run this.\n');
+// PROVE THIS MACHINE HOLDS THE LIVE LOCK before writing anything.
+//
+// The danger is running this from a laptop against production: if the laptop's
+// JWT_SECRET is not the server's, every key would be re-locked under a secret
+// the live API does not have, and the server would lose them — the exact
+// failure this script exists to undo. The keys the live server wrote itself are
+// the proof: if this machine's lock opens at least one of them (and it hashes
+// to that portal's key), it IS the server's lock. Checked across every tenant,
+// not just --tenant, because one firm may have nothing current yet.
+const everyRow = await sql`SELECT api_key_enc, api_key_hash FROM integrations WHERE api_key_enc IS NOT NULL`;
+const provenOn = everyRow.filter(r => keyState(r).status === 'current').length;
+if (provenOn === 0) {
+  console.error(`\n  Refusing --apply: ${lock} on this machine opens none of the keys the live server wrote,\n` +
+    `  so it is probably not the server's secret. Run this on the server, from the repo folder.\n`);
   await sql.end();
   process.exit(1);
 }
+console.log(`\n  ${lock} here opens ${provenOn} key(s) the server wrote — same lock as the live API.\n`);
 
 let moved = 0, skipped = 0;
 for (const r of rows) {
@@ -105,7 +115,7 @@ for (const r of rows) {
     UPDATE integrations SET api_key_enc = ${fresh}
      WHERE id = ${r.id} AND tenant_id = ${r.tenant_id} AND api_key_enc = ${r.api_key_enc}
      RETURNING id`;
-  if (done.length) { moved++; console.log(`  → ${r.tenant_id}/${r.provider} …${r.api_key_last4}: ${st.lock} → INGEST_KEY_SECRET`); }
+  if (done.length) { moved++; console.log(`  → ${r.tenant_id}/${r.provider} …${r.api_key_last4}: ${st.lock} → ${lock}`); }
   else { skipped++; console.log(`  – ${r.tenant_id}/${r.provider}: changed while this ran — left for the next run`); }
 }
 

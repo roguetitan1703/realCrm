@@ -67,16 +67,21 @@ Required env on the box (see `.env.example`):
 | `DATABASE_URL` | Supabase connection string |
 | `PORT` | `5000` |
 | `START_SERVER` | `true` |
-| `JWT_SECRET` | long random string — signs logins. Changing it signs everyone out, and that is all it does |
-| `INGEST_KEY_SECRET` | long random string, **different** from `JWT_SECRET` — locks the portals' API keys at rest |
+| `JWT_SECRET` | long random string — signs logins **and locks the portals' stored API keys**. See below before ever changing it |
 
 **Connection keys.** Every boot logs a `🔐 Connection keys:` line: how many stored
 keys this server can open and on which lock. Anything `UNREADABLE` means the server
 no longer holds the secret that key was locked with — the portal's feed still works
 (it matches on a hash), but the key can't be shown to send a portal. **Never rotate
 a working key to fix that.** `npm run keys:check -- --env=production` reports every
-key, never printing one; `--apply` moves keys on an older lock onto
-`INGEST_KEY_SECRET`, one firm at a time with `--tenant=<slug>`.
+key, never printing one; `--apply` moves keys on an older lock onto the current
+one, one firm at a time with `--tenant=<slug>`. Run it **on the server** — it
+refuses to write unless this machine's secret opens keys the live server wrote.
+
+**Changing `JWT_SECRET`** re-locks nothing by itself, so every stored key goes
+unreadable. Do it in this order: old value into `JWT_SECRET_PREVIOUS`, new value
+into `JWT_SECRET`, `pm2 restart re-api`, `npm run keys:check -- --env=production --apply`,
+then delete `JWT_SECRET_PREVIOUS`.
 
 Serve over **HTTPS**. An https Vercel page calling an http API is blocked by the
 browser as mixed content — the most common "works locally, not deployed" cause.
