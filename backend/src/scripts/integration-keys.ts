@@ -20,7 +20,8 @@
  * running API never re-locks anything by itself.
  *
  * When to run:
- *   • once, to move the pre-August keys off the built-in lock    → --apply
+ *   • once, to move keys off a retired lock (old secret supplied as
+ *     JWT_SECRET_PREVIOUS on the command line, not in .env)       → --apply
  *   • after changing JWT_SECRET (old value in JWT_SECRET_PREVIOUS) → --apply
  *   • whenever the boot log reports an older lock or UNREADABLE  → check
  *

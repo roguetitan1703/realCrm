@@ -14,11 +14,14 @@
  *
  * WHAT HAPPENED. The lock was `INGEST_KEY_SECRET || JWT_SECRET || built-in`,
  * resolved once, and INGEST_KEY_SECRET was never set. So the key lock was
- * silently THE LOGIN SECRET. Before August production had no JWT_SECRET at all
- * and both fell back to the built-in string; when a real JWT_SECRET went in,
- * logins moved to it — and so did the key lock, with no way left to open any
- * key written before. Bhumi's four portals (2–4 Aug) and every Delpat key
- * returned "predates key storage"; Mahalaxmi's, written after, opened fine.
+ * silently THE LOGIN SECRET. Until late August production's JWT_SECRET was the
+ * placeholder copied from .env.example; when a real one went in, logins moved
+ * to it — and so did the key lock, with no way left to open any key written
+ * before. Bhumi's four portals (2–4 Aug) and every Delpat key returned
+ * "predates key storage"; Mahalaxmi's, written after, opened fine. (The demo
+ * firms' keys were on the built-in string: written where no secret was set.)
+ * The old placeholder was supplied once, as JWT_SECRET_PREVIOUS on the command
+ * line, to move those keys; it is deliberately not in the keyring below.
  * Nothing about the keys had changed. Their lock had been replaced underneath
  * them by a change made for a different reason.
  *
