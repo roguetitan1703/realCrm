@@ -1,5 +1,6 @@
 // Collection components: Toolbar (the ONE filter/sort bar), Table, ListRow, Card grid.
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, NewTag, Quoted, PageHeader, ViewSwitch, Pager, Button } from './primitives.jsx'
 import { quotedLine, unitLabel } from '../lib/format.js'
@@ -491,20 +492,92 @@ export function SelectDropdown({ value, options, onChange, label, align, searcha
   )
 }
 
+/**
+ * ============================================================================
+ * A ROW'S POPOVER, DRAWN OUTSIDE THE THING IT SITS IN
+ * ============================================================================
+ * Every one of these menus lives in a table cell, and a table scrolls its own
+ * body. An absolutely positioned menu is clipped by the nearest ancestor that
+ * scrolls or hides its overflow, so on a SHORT list — a table one row tall is
+ * the worst case — the status menu opened straight into the container's own
+ * bottom edge and was cut in half. Nothing was wrong with the menu; it simply
+ * cannot be a child of the box it has to escape.
+ *
+ * So it is rendered into <body> and positioned against its button in viewport
+ * coordinates: left-aligned, right-aligned when it would run off the side, and
+ * ABOVE the button when there is more room there than below. Measured from the
+ * real element rather than a guessed width — the previous fix hard-coded 210px
+ * and every menu that was not 210px wide got the wrong answer.
+ *
+ * It follows its button while anything scrolls (capture phase catches the
+ * table's own scroller, not just the page) and closes on a click outside BOTH
+ * the button and the menu, which are no longer parent and child.
+ */
+export function AnchoredPopover({ anchorRef, open, onClose, className = '', children }) {
+  const popRef = useRef(null)
+  const [pos, setPos] = useState(null)
+
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return }
+    const place = () => {
+      const a = anchorRef.current?.getBoundingClientRect()
+      const el = popRef.current
+      if (!a || !el) return
+      const GAP = 7, EDGE = 12
+      const w = el.offsetWidth, h = el.offsetHeight
+      const left = a.left + w + EDGE > window.innerWidth ? Math.max(EDGE, a.right - w) : Math.max(EDGE, a.left)
+      const below = window.innerHeight - a.bottom
+      const above = a.top
+      const flip = h > below - EDGE && above > below
+      setPos({ left, top: flip ? Math.max(EDGE, a.top - h - GAP) : a.bottom + GAP, max: Math.max(120, (flip ? above : below) - GAP - EDGE) })
+    }
+    place()
+    // The menu is measured before it is placed, so the first pass runs against
+    // its real height rather than zero.
+    const raf = requestAnimationFrame(place)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true) }
+  }, [open, anchorRef])
+
+  useEffect(() => {
+    if (!open) return
+    const h = (e) => {
+      if (popRef.current?.contains(e.target) || anchorRef.current?.contains(e.target)) return
+      onClose()
+    }
+    const esc = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', h)
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', esc) }
+  }, [open, onClose, anchorRef])
+
+  if (!open || typeof document === 'undefined') return null
+  return createPortal(
+    <div
+      ref={popRef}
+      className={'popover pop-anchored ' + className}
+      // Hidden only for the first paint, while it is being measured — placed
+      // wrong for one frame reads as a jump.
+      style={pos
+        ? { position: 'fixed', top: pos.top, left: pos.left, right: 'auto', maxHeight: pos.max, overflowY: 'auto' }
+        : { position: 'fixed', top: 0, left: 0, visibility: 'hidden' }}
+      onClick={e => e.stopPropagation()}
+    >
+      {children}
+    </div>,
+    document.body,
+  )
+}
+
 // ---- QuickAssignMenu: assign/unassign one record from a row, no modal. ----
 // Reuses bulkAssignLeads with a single id — one code path for one row and for
 // a whole selection, rather than a separate single-assign endpoint.
 export function QuickAssignMenu({ agents, currentId, onAssign, children, className, title }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
-  useEffect(() => {
-    if (!open) return
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [open])
   return (
-    <div className="qam" ref={ref}>
+    <div className="qam">
       {/* `children` makes the trigger the caller's own content — the owner cell
           passes the person's name and avatar, so the thing you click to change
           the owner IS the owner, rather than an unlabelled + button parked in a
@@ -515,27 +588,25 @@ export function QuickAssignMenu({ agents, currentId, onAssign, children, classNa
           no such wrapper, meant a click here also reached the <td>'s own
           onClick and opened the record — so clicking "Reassign" navigated
           away before the popover was ever visible. */}
-      <button className={(className || 'qam-btn') + (open ? ' open' : '')}
+      <button ref={ref} className={(className || 'qam-btn') + (open ? ' open' : '')}
         title={title || 'Change owner'}
         onClick={e => { e.stopPropagation(); setOpen(o => !o) }}>
         {children || <Icon name="userPlus" size={14} />}
       </button>
-      {open && (
-        // Same reason as the trigger — this sits inside the same table cell,
-        // so a click on any item here would otherwise also open the record.
-        <div className="popover qam-pop right" onClick={e => e.stopPropagation()}>
-          {agents.map(a => (
-            <button key={a.id} className={'p-item' + (currentId === a.id ? ' on' : '')} onClick={() => { onAssign(a.id); setOpen(false) }}>
-              {a.first}
-            </button>
-          ))}
-          {currentId && (
-            <button className="p-item danger" onClick={() => { onAssign(null); setOpen(false) }}>
-              Unassign
-            </button>
-          )}
-        </div>
-      )}
+      {/* Drawn outside the table (see AnchoredPopover) — a cell cannot contain
+          a menu taller than the row it is in. */}
+      <AnchoredPopover anchorRef={ref} open={open} onClose={() => setOpen(false)} className="qam-pop">
+        {agents.map(a => (
+          <button key={a.id} className={'p-item' + (currentId === a.id ? ' on' : '')} onClick={() => { onAssign(a.id); setOpen(false) }}>
+            {a.first}
+          </button>
+        ))}
+        {currentId && (
+          <button className="p-item danger" onClick={() => { onAssign(null); setOpen(false) }}>
+            Unassign
+          </button>
+        )}
+      </AnchoredPopover>
     </div>
   )
 }
@@ -601,55 +672,39 @@ export function OwnerCell({ record, store, onAssign, canAssign }) {
 export function StageCell({ record, store, stages, canSet, onSet, onReject, value, Tag = StageTag }) {
   const current = value !== undefined ? value : record.stage
   const [open, setOpen] = useState(false)
-  // Which edge the menu hangs from. The popover is ~210px wide and was always
-  // anchored left:0 to a button only as wide as its own label — so on a short
-  // status like "New", in the right-hand status column, it ran off the screen.
-  // A longer label pushed the button left and hid the bug. Measured rather than
-  // assumed, because the same cell renders on a phone card too.
-  const [align, setAlign] = useState('left')
+  // Which edge it hangs from, and whether it opens upward, is now measured by
+  // AnchoredPopover against the real menu — this used to guess a 210px width
+  // here, and could only ever fix the horizontal half of the problem while the
+  // table clipped the vertical one.
   const ref = useRef(null)
-  useEffect(() => {
-    if (!open) return
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [open])
-  useEffect(() => {
-    if (!open || !ref.current) return
-    const box = ref.current.getBoundingClientRect()
-    // 210px is the popover's min-width; 12px keeps it off the viewport edge.
-    setAlign(box.left + 210 + 12 > window.innerWidth ? 'right' : 'left')
-  }, [open])
   if (!canSet) return <Tag stage={current} status={current} />
   return (
-    <div className="stg-cell" ref={ref}>
-      <button className={'stg-btn' + (open ? ' open' : '')} onClick={e => { e.stopPropagation(); setOpen(o => !o) }}>
+    <div className="stg-cell">
+      <button ref={ref} className={'stg-btn' + (open ? ' open' : '')} onClick={e => { e.stopPropagation(); setOpen(o => !o) }}>
         <Tag stage={current} status={current} />
         <Icon name="chevDown" size={12} className="stg-cv" />
       </button>
-      {open && (
-        <div className={'popover stg-pop' + (align === 'right' ? ' right' : '')} onClick={e => e.stopPropagation()}>
-          {stages.map(s => (
-            <button key={s} className={'p-item' + (s === current ? ' on' : '')} onClick={() => { onSet(s); setOpen(false) }}>
-              {s}
+      <AnchoredPopover anchorRef={ref} open={open} onClose={() => setOpen(false)} className="stg-pop">
+        {stages.map(s => (
+          <button key={s} className={'p-item' + (s === current ? ' on' : '')} onClick={() => { onSet(s); setOpen(false) }}>
+            {s}
+          </button>
+        ))}
+        {/* Rejecting is a status change like any other, so it belongs in the
+            status menu — it was reachable only from the detail rail, which
+            meant working down a list you had to open each dead lead to close
+            it. Separated and toned because it is the one entry that asks a
+            question back (the reason) instead of just setting a value. */}
+        {onReject && (
+          <>
+            <div className="p-sep" />
+            <button className="p-item danger" onClick={() => { setOpen(false); onReject(record) }}>
+              <span className="p-ic"><Icon name="x" size={14} /></span>
+              Mark as rejected
             </button>
-          ))}
-          {/* Rejecting is a status change like any other, so it belongs in the
-              status menu — it was reachable only from the detail rail, which
-              meant working down a list you had to open each dead lead to close
-              it. Separated and toned because it is the one entry that asks a
-              question back (the reason) instead of just setting a value. */}
-          {onReject && (
-            <>
-              <div className="p-sep" />
-              <button className="p-item danger" onClick={() => { setOpen(false); onReject(record) }}>
-                <span className="p-ic"><Icon name="x" size={14} /></span>
-                Mark as rejected
-              </button>
-            </>
-          )}
-        </div>
-      )}
+          </>
+        )}
+      </AnchoredPopover>
     </div>
   )
 }

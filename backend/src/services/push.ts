@@ -83,6 +83,46 @@ async function logDelivery(row: {
   }
 }
 
+/**
+ * WHY A DELIVERY FAILED, IN ONE STRING — and never an empty one.
+ *
+ * 43 failures to iPhones in three days were logged with no status code and no
+ * error text, because this recorded `e.body || e.message` alone. A push that
+ * Apple or Google REFUSED always carries a status code; one that never got that
+ * far — DNS, TCP, TLS — fails below HTTP, where Node's message is routinely
+ * empty and the reason lives in `code`, in `cause.code`, or in one of the
+ * `errors` of an AggregateError (every address tried, all failed). None of that
+ * was stored, so the log could not tell "they refused it" from "we never
+ * reached them" — which are opposite problems with opposite fixes.
+ *
+ * The push service is in the string too: `web.push.apple.com` and
+ * `fcm.googleapis.com` fail differently and the endpoint column is a URL nobody
+ * reads at a glance.
+ */
+function failureReason(e: any, endpoint: string): string {
+  const parts: string[] = [];
+  // From the subscription, not the error: a network-level failure carries no
+  // endpoint of its own, and that is exactly the case this exists for.
+  const host = (() => { try { return new URL(String(endpoint || '')).host; } catch { return ''; } })();
+  if (host) parts.push(host);
+  if (e?.statusCode) parts.push(`HTTP ${e.statusCode}`);
+  const body = typeof e?.body === 'string' ? e.body.trim() : '';
+  if (body) parts.push(body);
+  const msg = typeof e?.message === 'string' ? e.message.trim() : '';
+  if (msg) parts.push(msg);
+  // Network-level codes, in the three places Node puts them.
+  const codes = [e?.code, e?.cause?.code, ...(Array.isArray(e?.errors) ? e.errors.map((x: any) => x?.code) : [])]
+    .filter(Boolean).map(String);
+  if (codes.length) parts.push([...new Set(codes)].join('/'));
+  // Nothing readable at all still has a name — an AggregateError with an empty
+  // message is itself the clue, and a blank row is not.
+  if (!parts.length || (!body && !msg && !codes.length && !e?.statusCode)) {
+    const kind = e?.name || e?.constructor?.name;
+    parts.push(kind && kind !== 'Object' ? kind : 'unknown error');
+  }
+  return parts.join(' · ');
+}
+
 export async function removeSubscription(endpoint: string): Promise<void> {
   if (endpoint) await sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint}`;
 }
@@ -143,8 +183,9 @@ export async function sendPushToUser(
         await sql`DELETE FROM push_subscriptions WHERE id = ${s.id}`;
         await log('expired', { endpoint: s.endpoint, statusCode: e.statusCode });
       } else {
-        console.warn('[Push] send failed:', e?.statusCode, e?.message);
-        await log('failed', { endpoint: s.endpoint, statusCode: e?.statusCode ?? null, error: e?.body || e?.message });
+        const why = failureReason(e, s.endpoint);
+        console.warn('[Push] send failed:', e?.statusCode, why);
+        await log('failed', { endpoint: s.endpoint, statusCode: e?.statusCode ?? null, error: why });
       }
     }
   }));

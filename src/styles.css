@@ -459,6 +459,10 @@ input,textarea,select{font-family:inherit}
 /* popover for choosing field, then value */
 .popover{position:absolute;top:calc(100% + 7px);left:0;z-index:40;min-width:210px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);box-shadow:var(--shadow-pop);padding:6px;animation:riseIn .14s ease both}
 .popover.right{left:auto;right:0}
+/* Drawn into <body> by AnchoredPopover, so it escapes the table that clips it.
+   Position comes from JS (viewport coordinates); this only has to sit above the
+   app chrome and stop the sticky table header from covering it. */
+.popover.pop-anchored{z-index:9500}
 .popover .p-head{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:7px 9px 5px}
 .popover .p-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:none;background:transparent;padding:8px 9px;border-radius:7px;font-family:var(--sans);font-size:13.5px;font-weight:500;color:var(--ink);cursor:pointer}
 .popover .p-item:hover{background:var(--card-2)}
