@@ -67,6 +67,16 @@ Required env on the box (see `.env.example`):
 | `DATABASE_URL` | Supabase connection string |
 | `PORT` | `5000` |
 | `START_SERVER` | `true` |
+| `JWT_SECRET` | long random string — signs logins. Changing it signs everyone out, and that is all it does |
+| `INGEST_KEY_SECRET` | long random string, **different** from `JWT_SECRET` — locks the portals' API keys at rest |
+
+**Connection keys.** Every boot logs a `🔐 Connection keys:` line: how many stored
+keys this server can open and on which lock. Anything `UNREADABLE` means the server
+no longer holds the secret that key was locked with — the portal's feed still works
+(it matches on a hash), but the key can't be shown to send a portal. **Never rotate
+a working key to fix that.** `npm run keys:check -- --env=production` reports every
+key, never printing one; `--apply` moves keys on an older lock onto
+`INGEST_KEY_SECRET`, one firm at a time with `--tenant=<slug>`.
 
 Serve over **HTTPS**. An https Vercel page calling an http API is blocked by the
 browser as mixed content — the most common "works locally, not deployed" cause.

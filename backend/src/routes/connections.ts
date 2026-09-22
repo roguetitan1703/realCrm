@@ -120,8 +120,11 @@ connectionsRouter.post('/', async (req: Request, res: Response) => {
  * Read the key back. Audited: looking at a credential is an event, and this is
  * the only trace that it happened.
  *
- * A connection created before keys were stored encrypted has nothing to
- * decrypt, and the honest answer is to rotate rather than to pretend.
+ * The old message here told the owner to ROTATE — which breaks a feed that is
+ * working, because incoming enquiries match on the hash and never needed the
+ * stored copy. Every "predates key storage" on the live site was in fact a key
+ * locked with a secret the server no longer held (see integrationKeys.ts), and
+ * rotating any of them would have cost a portal re-integration for nothing.
  */
 connectionsRouter.get('/:id/key', async (req: Request, res: Response) => {
   const tenant = requireTenant(req, res); if (!tenant) return;
@@ -130,7 +133,7 @@ connectionsRouter.get('/:id/key', async (req: Request, res: Response) => {
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 
   const apiKey = await revealKey(tenant, req.params.id);
-  if (!apiKey) return res.status(410).json({ error: 'unrecoverable', message: 'This key predates key storage. Rotate it to get a readable one.' });
+  if (!apiKey) return res.status(410).json({ error: 'unreadable', message: "This key can't be shown — this server can't open its stored copy. The portal's feed still works; do not rotate it." });
 
   audit({
     tenant_id: tenant, actor_type: 'user', actor_id: userOf(req), actor_label: (req as any).user?.name ?? null,

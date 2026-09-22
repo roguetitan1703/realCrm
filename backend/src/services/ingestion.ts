@@ -20,6 +20,7 @@ import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEv
 import { notify, notifyRoles } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
+import { hashKey, lockKey, keyState, currentLock } from './integrationKeys';
 
 export type Integration = {
   id: string;
@@ -47,7 +48,8 @@ const rid = (p: string) => `${p}_${Date.now().toString(36)}${crypto.randomBytes(
  * for every inbound push. SHA-256 is deterministic, so the key resolves through
  * a unique index in one hop, which is what lets the endpoint ack fast.
  */
-const hashKey = (key: string) => crypto.createHash('sha256').update(key.trim()).digest('hex');
+// hashKey lives in integrationKeys.ts now, beside the lock it is the ground
+// truth for. Same function, byte for byte — the stored hashes still match.
 
 /** `sk_live_` + 32 bytes. The prefix makes a leaked key obvious in a log or a
  *  git diff, and secret scanners key off exactly this shape. */
@@ -56,51 +58,43 @@ function mintKey(): string {
 }
 
 /**
- * The key is ALSO kept encrypted, alongside the hash.
- *
- * Hash-only is the stricter posture, and it is the right one for a password.
- * It is the wrong one here: this key lives in someone else's system — a portal's
- * webhook config — and "we can't tell you what we gave you" means the only
- * recovery is a rotation, which breaks the live feed until the portal is
- * re-briefed. That is a real outage caused by a property we gained nothing from.
- *
- * So: encrypted at rest with a server-held secret, readable only through an
- * authenticated, audited endpoint. A stolen database dump is still useless
- * without the secret, and the inbound lookup keeps using the hash.
+ * The key is ALSO kept encrypted, alongside the hash, so an owner can read it
+ * back to send a portal. How it is locked and opened — and why the old lock
+ * stopped opening every key written before August — is integrationKeys.ts.
  */
-const encSecret = crypto.createHash('sha256')
-  .update(process.env.INGEST_KEY_SECRET || process.env.JWT_SECRET || 'dev-only-change-me')
-  .digest();
-
-function encryptKey(key: string): string {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', encSecret, iv);
-  const enc = Buffer.concat([cipher.update(key, 'utf8'), cipher.final()]);
-  return `v1.${iv.toString('base64')}.${cipher.getAuthTag().toString('base64')}.${enc.toString('base64')}`;
-}
-
-function decryptKey(blob: string | null): string | null {
-  if (!blob) return null;
-  const [v, iv, tag, data] = String(blob).split('.');
-  if (v !== 'v1' || !iv || !tag || !data) return null;
-  try {
-    const d = crypto.createDecipheriv('aes-256-gcm', encSecret, Buffer.from(iv, 'base64'));
-    d.setAuthTag(Buffer.from(tag, 'base64'));
-    return Buffer.concat([d.update(Buffer.from(data, 'base64')), d.final()]).toString('utf8');
-  } catch {
-    // Wrong secret, or a tampered row. Either way there is no key to show, and
-    // guessing is not an option — the caller offers a rotation instead.
-    return null;
-  }
-}
 
 /** The plaintext key for a connection. Callers must have checked the role and
  *  must write an audit entry — reading a credential is an event. */
 export async function revealKey(tenantId: string, id: string): Promise<string | null> {
   const rows = await sql`
-    SELECT api_key_enc FROM integrations WHERE id = ${id} AND tenant_id = ${tenantId} LIMIT 1
+    SELECT api_key_enc, api_key_hash FROM integrations WHERE id = ${id} AND tenant_id = ${tenantId} LIMIT 1
   `;
-  return rows.length ? decryptKey(rows[0].api_key_enc) : null;
+  if (!rows.length) return null;
+  const st = keyState(rows[0]);
+  return st.status === 'current' || st.status === 'old-lock' ? st.plain : null;
+}
+
+/**
+ * Where every stored connection key stands, for the boot log. Read-only, and
+ * across all tenants: the lock is one server secret, so whether it opens the
+ * keys is one question about the server, not one per firm.
+ */
+export async function checkIntegrationKeys(): Promise<{
+  total: number; current: number; oldLock: number;
+  unreadable: Array<{ tenant: string; provider: string }>;
+  mismatch: Array<{ tenant: string; provider: string }>;
+  lock: string;
+}> {
+  const rows = await sql`SELECT tenant_id, provider, api_key_enc, api_key_hash FROM integrations WHERE api_key_enc IS NOT NULL`;
+  const out = { total: rows.length, current: 0, oldLock: 0, unreadable: [] as any[], mismatch: [] as any[], lock: currentLock() as string };
+  for (const r of rows) {
+    const st = keyState(r);
+    if (st.status === 'current') out.current++;
+    else if (st.status === 'old-lock') out.oldLock++;
+    else if (st.status === 'unreadable') out.unreadable.push({ tenant: r.tenant_id, provider: r.provider });
+    else if (st.status === 'mismatch') out.mismatch.push({ tenant: r.tenant_id, provider: r.provider });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +112,7 @@ export async function createIntegration(
   const apiKey = mintKey();
   const rows = await sql`
     INSERT INTO integrations (id, tenant_id, provider, api_key_hash, api_key_enc, api_key_last4, active, created_by)
-    VALUES (${id}, ${tenantId}, ${provider}, ${hashKey(apiKey)}, ${encryptKey(apiKey)}, ${apiKey.slice(-4)}, TRUE, ${createdBy})
+    VALUES (${id}, ${tenantId}, ${provider}, ${hashKey(apiKey)}, ${lockKey(apiKey)}, ${apiKey.slice(-4)}, TRUE, ${createdBy})
     RETURNING id, tenant_id, provider, api_key_last4, parser_config, active, created_at, created_by, last_received_at
   `;
   return { integration: rows[0] as Integration, apiKey };
@@ -128,7 +122,7 @@ export async function createIntegration(
 export async function rotateIntegrationKey(tenantId: string, id: string): Promise<string | null> {
   const apiKey = mintKey();
   const rows = await sql`
-    UPDATE integrations SET api_key_hash = ${hashKey(apiKey)}, api_key_enc = ${encryptKey(apiKey)},
+    UPDATE integrations SET api_key_hash = ${hashKey(apiKey)}, api_key_enc = ${lockKey(apiKey)},
            api_key_last4 = ${apiKey.slice(-4)}
     WHERE id = ${id} AND tenant_id = ${tenantId}
     RETURNING id

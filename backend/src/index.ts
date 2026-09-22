@@ -27,7 +27,8 @@ import { pwaRouter } from './routes/pwa';
 import { filesRouter, mediaRouter } from './routes/files';
 import { withRequestContext } from './middleware/auth';
 import { getTenantForIngest, runRoutingSweeps } from './services/store';
-import { envBanner } from './services/env';
+import { envBanner, isProduction, appEnv } from './services/env';
+import { checkIntegrationKeys } from './services/ingestion';
 
 // ── A DROPPED DATABASE CONNECTION USED TO KILL THE WHOLE API ────────────────
 //
@@ -334,6 +335,22 @@ if (isMain || process.env.START_SERVER === 'true') {
     // minute. On a server that is every tenant swept N times per interval by
     // processes nobody knows are running.
     setInterval(() => { runRoutingSweeps().catch(err => console.warn('[Routing Sweep] run failed:', err?.message)); }, 5 * 60 * 1000);
+    // CAN THIS SERVER STILL OPEN THE PORTALS' KEYS?
+    //
+    // Replacing the demo JWT_SECRET in August silently replaced the lock on
+    // every connection key written before it, and nothing said so for weeks —
+    // it surfaced when an owner opened a key to email a portal. Said at boot
+    // now, every boot. Read-only, and it never prints a key.
+    checkIntegrationKeys().then(k => {
+      console.log(`🔐 Connection keys: ${k.total} stored — ${k.current} on ${k.lock}, ${k.oldLock} on an older lock, ${k.unreadable.length} unreadable`);
+      if (isProduction() && k.lock !== 'INGEST_KEY_SECRET') {
+        console.warn(`   ⚠ INGEST_KEY_SECRET is not set, so keys are locked with JWT_SECRET — changing it would lock them again. Set it, then: npm run keys:check -- --env=${appEnv()} --apply`);
+      } else if (k.oldLock > 0) {
+        console.warn(`   ⚠ ${k.oldLock} key(s) on an older lock. Move them: npm run keys:check -- --env=${appEnv()} --apply`);
+      }
+      for (const u of k.unreadable) console.error(`   ✗ UNREADABLE: ${u.tenant} / ${u.provider} — no secret on this server opens it (its feed still works)`);
+      for (const m of k.mismatch) console.error(`   ✗ MISMATCH: ${m.tenant} / ${m.provider} — stored copy is not the key the portal sends`);
+    }).catch(err => console.warn('[Keys] check failed:', err?.message));
   });
   // And say so, rather than lingering as a process with no port and a timer.
   server.on('error', (err: any) => {
