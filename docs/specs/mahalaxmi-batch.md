@@ -78,12 +78,19 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   3. Example sheet per import type. For owners the sheet is **name, phone,
      tower/building, unit, project**. Everything else is optional, recognised if
      present, never required.
-  4. **A column that is not shown as mapped is never used.** Guesses are
-     pre-filled but visible and clearable.
-  5. Server-side job: upload → list sheets (5.2) → map → server-computed counts
+  4. **A column that is not mapped is not used AND NOT KEPT** (23 Sep). The
+     current import folds every unmapped column into the notes; that stops.
+     Anything worth keeping is mapped to a field — Notes included. Guesses are
+     pre-filled but visible and clearable, and nothing runs off a guess the
+     person did not see.
+  5. **Identity is tower + unit within a project**, for owner rows and for
+     properties alike (23 Sep). A project with no towers keys on project + unit.
+  6. Empty means empty: `NULL`, `N/A`, `-` are blank, never a value. No invented
+     names.
+  7. Server-side job: upload → list sheets (5.2) → map → server-computed counts
      → write in batches of 500 with a per-row outcome → download of every row
      that did not land → resumable, browser can be closed.
-  6. Undo moves to the server, survives a reload, and is audited.
+  8. Undo moves to the server, survives a reload, and is audited.
 
 ### 1.3 ⬜ Every action is logged as the assigned agent, not as the person who did it
 - **Said:** "the person who is assigned directly logs the action — even if I call
