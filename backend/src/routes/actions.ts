@@ -49,7 +49,8 @@ actionsRouter.post('/:id/actions/remark', async (req: Request, res: Response) =>
     });
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,
-      actor_label: authorId || 'system', action: 'remark.added',
+      // Left null on purpose: audit() resolves the name from the id.
+      actor_label: null, action: 'remark.added',
       target_type: 'record', target_id: recordId, summary: 'Remark added', metadata: {},
     });
     return res.status(201).json({
@@ -134,7 +135,7 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
     }
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,
-      actor_label: authorId, action: existing.type === 'remark' ? 'remark.updated' : 'contact_action.updated',
+      actor_label: null, action: existing.type === 'remark' ? 'remark.updated' : 'contact_action.updated',
       target_type: 'record', target_id: existing.record_id, summary: 'Entry edited', metadata: { outcome },
     });
     // THE SAME MAPPER THE LIST USES, not a hand-built copy of it.
@@ -188,7 +189,8 @@ actionsRouter.post('/:id/actions/contact-log', async (req: Request, res: Respons
     await noteOwnerContact(recordId, channel);
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,
-      actor_label: authorId || 'system', action: 'contact_action.logged',
+      // Left null on purpose: audit() resolves the name from the id.
+      actor_label: null, action: 'contact_action.logged',
       target_type: 'record', target_id: recordId, summary: `${title} logged`, metadata: { channel },
     });
     return res.status(201).json({
@@ -391,7 +393,7 @@ actionsRouter.post('/:id/actions/activity', async (req: Request, res: Response) 
 
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: agentId,
-      actor_label: agentId || 'system', action: 'activity.added',
+      actor_label: null, action: 'activity.added',
       target_type: 'lead', target_id: leadId,
       summary: `${type} logged`,
       metadata: { type, outcome, propertyId, hasPhoto: Boolean(photoKey), hasGeo },

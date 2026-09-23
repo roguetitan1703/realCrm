@@ -3465,7 +3465,11 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
   };
   await sql`UPDATE crm_owners SET ${sql(next)}, updated_at = NOW() WHERE id = ${id} AND tenant_id = ${t}`;
   if (patch.stage !== undefined && patch.stage !== existing.stage) {
-    await addTimelineEvent({ record_id: id, type: 'stage_change', title: `Stage → ${patch.stage}`, description: `Marked ${patch.stage}`, author: ctx.actorLabel || 'System' });
+    // The PERSON, by id — the same thing every other timeline write stores, and
+    // what the screen resolves to a name. This read ctx.actorLabel, which no
+    // route ever fills (a token carries no name), so every owner stage change
+    // an agent made was filed as "System".
+    await addTimelineEvent({ record_id: id, type: 'stage_change', title: `Stage → ${patch.stage}`, description: `Marked ${patch.stage}`, author: ctx.actorId ?? getContext()?.userId ?? 'System' });
   }
   if (patch.callbackAt !== undefined && patch.callbackAt !== existing.callbackAt) {
     await addTimelineEvent({
@@ -3474,7 +3478,8 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
       description: patch.callbackAt
         ? `${new Date(patch.callbackAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}${patch.callbackNote ? ` — ${patch.callbackNote}` : ''}`
         : 'No callback scheduled',
-      author: ctx.actorLabel || 'System',
+      // By id, like every other timeline write — see the stage change above.
+      author: ctx.actorId ?? getContext()?.userId ?? 'System',
     });
   }
   const updated = await getOwnerById(id);

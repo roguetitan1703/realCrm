@@ -76,8 +76,43 @@ function canonical(entry: AuditEntry, tenantId: string | null): string {
   });
 }
 
+/**
+ * WHO DID IT, BY NAME — resolved here, once, instead of at fifty call sites.
+ *
+ * Every route passes `req.user?.name`, and a token carries no name, so that was
+ * `undefined` on every write: 1,380 owners imported for a client on 22 Sep and
+ * an actor label on none of them. The id was always right, which is what makes
+ * this recoverable — the name is looked up from it and cached, because a ledger
+ * read by a person needs a person's name in it, not `usr_mahalaxmi_178973…`.
+ *
+ * Cached for five minutes: an audit write must not cost a query per row during
+ * an import, and a renamed user shows up on the next entry after that.
+ */
+const nameCache = new Map<string, { name: string | null; at: number }>();
+const NAME_TTL_MS = 5 * 60_000;
+
+async function actorName(id: string | null | undefined): Promise<string | null> {
+  if (!id) return null;
+  const hit = nameCache.get(id);
+  if (hit && Date.now() - hit.at < NAME_TTL_MS) return hit.name;
+  try {
+    const [row] = await sql`
+      SELECT name FROM users WHERE id = ${id}
+      UNION ALL SELECT name FROM superadmins WHERE id = ${id}
+      LIMIT 1`;
+    const name = row?.name || null;
+    nameCache.set(id, { name, at: Date.now() });
+    return name;
+  } catch {
+    // A ledger entry with no name is worse than one with a stale name, but both
+    // are better than a mutation that failed because of its own audit trail.
+    return null;
+  }
+}
+
 async function appendAudit(entry: AuditEntry): Promise<void> {
   const tenantId = entry.tenant_id ?? null;
+  if (!entry.actor_label && entry.actor_id) entry.actor_label = await actorName(entry.actor_id);
   const last = await sql`SELECT hash FROM audit_log ORDER BY seq DESC LIMIT 1`;
   const prevHash: string | null = last[0]?.hash || null;
   const hash = crypto.createHash('sha256').update(canonical(entry, tenantId) + (prevHash || '')).digest('hex');
