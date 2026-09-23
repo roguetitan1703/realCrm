@@ -209,10 +209,14 @@ crm_leads     crm_owners          crm_properties
 
 ## Phases
 
-- **A — stop the fiction (small, ships with Part 1).** Adding an owner on a
-  property creates/links a real `crm_owners` row with project/tower/unit;
-  Contacts → Owners reads real rows (unit, stage, agent, real last activity);
-  `minsAgo: 120` and `'+91 —'` are gone.
+- **A — stop the fiction. SHIPPED 2026-09-23 (`ce1020c`).** Adding an owner on a
+  property creates/links a real `crm_owners` row keyed project + tower + unit
+  and links it both ways; Contacts → Owners reads those records (unit, stage,
+  agent, real last activity, listings by link); `minsAgo: 120` and `'+91 —'` are
+  gone; a new "No listing yet" pill covers owners with no listing of ours, which
+  for both paying clients is all of them. `npm run link:owners -- --env=… 
+  --tenant=… [--apply]` does the same for listings written before this, report
+  first. **Not yet run on production** — 2 listings for bhumi, 1 for mahalaxmi.
 - **B — the identity.** `crm_contacts` + backfill from existing phones + the
   person page + cross-links + one do-not-call.
 - **C — housekeeping.** Merging two contacts, and what a shared family or office

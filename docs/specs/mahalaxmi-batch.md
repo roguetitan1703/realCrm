@@ -102,7 +102,7 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   `unitLabel`, which falls back to the old line, so nothing is broken — but a
   tower filter (4.4) will not see them until they are split.
 
-### 1.3 ⬜ Every action is logged as the assigned agent, not as the person who did it
+### 1.3 ✅ Every action is logged as the assigned agent — it was not — `bb24b1a`
 - **Said:** "the person who is assigned directly logs the action — even if I call
   from admin it says Zahir".
 - **Know:** not measured. Suspect: timeline / call log writes use the lead's
@@ -116,8 +116,18 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   audit log therefore has no actor names at all.
 - **Said (23 Sep):** a call made from the owner's desk must read as the owner
   (or System), never as the assigned agent.
-- **Open:** WHICH SCREEN shows "Zahir" — the lead timeline, or the last-activity
-  line at the top of the lead. Waiting on a screenshot.
+- **ANSWERED 23 Sep — the app was right.** Every action from the owner account
+  on 22 Sep is stored against Madhukar Gunjal. Exactly two carry Zahir (a call
+  at 12:28, a WhatsApp at 12:35) and **Zahir's iPhone held a live session from
+  the office IP 163.223.138.27 at that moment** — the same network as the
+  owner's desktop. Reproduced on dev: a lead assigned to one agent, called from
+  the owner's desk, reads "Akash", the caller, not the assignee.
+- **Fixed anyway (`bb24b1a`):** owner stage changes and callbacks were filed as
+  "System" and the audit ledger had **no actor names at all** (routes pass
+  `req.user?.name`; a token carries no name), while three call sites wrote the
+  raw user id into the name column. The name is resolved from the id once in
+  `audit()`, cached 5 minutes; owner events store the person's id like every
+  other timeline write.
 
 ### 1.4 ✅ Status dropdown clipped in the properties list — `a44afd3`
 - **Said:** in list view with a single row, the status dropdown opens inside a
@@ -125,12 +135,12 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 - **Fix shape:** the menu renders outside the table's overflow (a portal, or
   flips upward). One component, used by every list, not a per-screen patch.
 
-### 1.5 ⬜ "Owner abc" — placeholder owner naming when adding an owner in a property
-- **Said:** the naming when adding an owner inside a property is "still like
-  this".
-- **Know:** same shape as the invented "Owner" in 1.2: unknown is being filled
-  with a made-up value (CLAUDE.md §3.1).
-- **Open:** show the user the exact screen, then remove it.
+### 1.5 ✅ "Owner abc" — adding an owner on a property created no owner at all — `ce1020c`
+- **Found 23 Sep:** mahalaxmi's one property carries `owner_name = "abc"` and a
+  phone; their owners table was **empty**. Adding an owner on a property wrote
+  two text fields on the listing and created no record, and Contacts → Owners
+  grouped that text into a contact. See Part 6 / the Contacts spec.
+- **Shipped:** the listing's owner is now a real owner record with its flat.
 
 ### 1.6 ✅ Mahalaxmi: only the owner is in lead rotation — not a bug
 - **Answered 22 Sep:** a deliberate setting. The team met Mahalaxmi, gave the
