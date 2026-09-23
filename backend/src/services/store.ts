@@ -3017,6 +3017,14 @@ async function alertOnReassignLoop(batch: { recordId: string; toName: string | n
   const ownerName = new Map((owners as any[]).map(r => [r.id, r.name]));
   const countOf = new Map((counts as any[]).map(r => [r.record_id, r.n]));
 
+  // ONE ALERT FOR THE BATCH, NOT ONE PER RECORD.
+  //
+  // This looped and pushed inside the loop. Handing a 726-row project to
+  // somebody — one deliberate action — put 726 identical "Owner reassigned 4
+  // times" notifications on every desk phone in the firm, which is how a desk
+  // learns to ignore the one that matters. A bulk move is a single event; the
+  // alert says how many records it touched and points at the list.
+  const hits: { recordId: string; name: string; toName: string | null; n: number; isLead: boolean }[] = [];
   for (const { recordId, toName } of batch) {
     const isLead = leadName.has(recordId);
     const name = isLead ? leadName.get(recordId) : ownerName.get(recordId);
@@ -3024,11 +3032,25 @@ async function alertOnReassignLoop(batch: { recordId: string; toName: string | n
     const limit = Math.max(Number(isLead ? rules.reassign_alert_count : rules.owner_reassign_alert_count) || 3, 1);
     const n = countOf.get(recordId) ?? 0;
     if (n <= limit) continue;
+    hits.push({ recordId, name, toName, n, isLead });
+  }
+  if (!hits.length) return;
+
+  for (const isLead of [true, false]) {
+    const side = hits.filter(h => h.isLead === isLead);
+    if (!side.length) continue;
     const type = isLead ? 'lead_reassign_loop' : 'owner_reassign_loop';
+    const first = side[0];
     await notifyRoles(['owner', 'manager'], {
       tenantId: t, type,
-      data: { name, n, agent: toName },
-      link: isLead ? `?screen=leads&lead=${recordId}` : `?screen=calling&owner=${recordId}`,
+      // One record keeps its name; a batch says how many and links to the list,
+      // because "and 725 others" is not something anyone can open.
+      data: side.length === 1
+        ? { name: first.name, n: first.n, agent: first.toName }
+        : { name: `${side.length} records`, n: Math.max(...side.map(h => h.n)), agent: first.toName, count: side.length },
+      link: side.length === 1
+        ? (isLead ? `?screen=leads&lead=${first.recordId}` : `?screen=calling&owner=${first.recordId}`)
+        : (isLead ? '?screen=leads' : '?screen=calling'),
       push: true, toSelf: true,
     }).catch(err => console.warn(`[Notify] ${type} failed:`, err?.message));
   }
@@ -3406,10 +3428,23 @@ export async function listOwners(opts: {
 export async function getOwnersSummary(mine?: boolean): Promise<any> {
   const t = tid();
   const scope = ownerScope(mine);
-  const [totals, byStage] = await Promise.all([
+  const [totals, byStage, byAgent] = await Promise.all([
     sql`SELECT count(*)::int AS total FROM crm_owners WHERE tenant_id = ${t} AND ${scope}`,
     sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
         FROM crm_owners WHERE tenant_id = ${t} AND ${scope} GROUP BY 1`,
+    // WHOSE CALLING LIST — the same question the Leads toolbar answers with its
+    // Agent control, and the calling screen could only answer two clicks deep
+    // inside the filter panel. Counted here so the control and the list cannot
+    // disagree, and it includes people who have left while they still hold
+    // rows: a name that holds work has to be selectable to get the work back.
+    sql`SELECT coalesce(o.agent_id, '_none') AS value,
+               coalesce(u.name, a.name, 'Unassigned') AS label,
+               count(*)::int AS count
+          FROM crm_owners o
+          LEFT JOIN users u ON u.id = o.agent_id AND u.tenant_id = o.tenant_id
+          LEFT JOIN crm_agents a ON a.id = o.agent_id AND a.tenant_id = o.tenant_id
+         WHERE o.tenant_id = ${t} AND ${scope}
+         GROUP BY 1, 2 ORDER BY 3 DESC`,
   ]);
   // Queue counts ride along with the stage counts because every caller of this
   // wants both — the status pills AND "how many are actually waiting to be
@@ -3418,6 +3453,7 @@ export async function getOwnersSummary(mine?: boolean): Promise<any> {
   return {
     total: totals[0]?.total ?? 0,
     byStage: Object.fromEntries((byStage as any[]).map(r => [r.stage, r.n])),
+    byAgent: (byAgent as any[]).map(r => ({ value: r.value, label: r.label, count: r.count })),
     queue,
   };
 }
@@ -3427,21 +3463,115 @@ export async function getOwnersSummary(mine?: boolean): Promise<any> {
 export async function listOwnerProjects(): Promise<{ rows: any[]; total: number }> {
   const t = tid();
   const scope = ownerScope();
-  const rows = await sql`
+  const [rows, holders] = await Promise.all([
+    sql`
     SELECT coalesce(nullif(project, ''), 'No project') AS key,
            count(*)::int AS total,
            count(*) FILTER (WHERE coalesce(stage, 'New') = 'New')::int AS "new",
            count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
+           count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned,
            mode() WITHIN GROUP (ORDER BY locality) AS locality
       FROM crm_owners WHERE tenant_id = ${t} AND ${scope}
-     GROUP BY 1 ORDER BY 2 DESC`;
+     GROUP BY 1 ORDER BY 2 DESC`,
+    // WHO IS ON THIS PROJECT, by name. A firm assigns a township to somebody,
+    // then moves a handful of its flats to two other callers — and the card
+    // could only say "728 owners", which answers a question nobody asked. One
+    // query for every project, so a card and its own list cannot disagree.
+    sql`
+    SELECT coalesce(nullif(o.project, ''), 'No project') AS key,
+           o.agent_id AS id,
+           coalesce(u.name, a.name) AS name,
+           count(*)::int AS n
+      FROM crm_owners o
+      LEFT JOIN users u ON u.id = o.agent_id AND u.tenant_id = o.tenant_id
+      LEFT JOIN crm_agents a ON a.id = o.agent_id AND a.tenant_id = o.tenant_id
+     WHERE o.tenant_id = ${t} AND ${scope} AND o.agent_id IS NOT NULL
+     GROUP BY 1, 2, 3 ORDER BY 4 DESC`,
+  ]);
+  const byProject = new Map<string, { id: string; name: string; n: number }[]>();
+  for (const h of holders as any[]) {
+    const list = byProject.get(h.key) || [];
+    list.push({ id: h.id, name: h.name || h.id, n: h.n });
+    byProject.set(h.key, list);
+  }
   return {
     rows: rows.map((r: any) => ({
       key: r.key, name: r.key, locality: r.locality || null,
-      counts: { total: r.total, new: r.new, interested: r.interested },
+      counts: { total: r.total, new: r.new, interested: r.interested, unassigned: r.unassigned },
+      holders: byProject.get(r.key) || [],
     })),
     total: rows.length,
   };
+}
+
+/**
+ * ASSIGN A WHOLE PROJECT — to one caller, or split between several.
+ *
+ * A firm takes on a township and hands it to somebody; later they move part of
+ * it to two more callers. Both are this, with a different number of names
+ * picked. Open rows only (a "Do not call" is not work to hand out), and
+ * `onlyUnassigned` is how you top somebody up without disturbing the flats
+ * people are already working.
+ *
+ * The move itself goes through bulkAssignOwners, so every row gets its
+ * assignment event and each caller is told once — see distributeWork(), which
+ * is the same idea from a person rather than from a project.
+ */
+export async function assignProjectOwners(opts: {
+  project: string; targets: string[]; onlyUnassigned?: boolean;
+}, ctx: ActorCtx = SYSTEM_CTX): Promise<{ assigned: number; perTarget: { id: string; name: string | null; n: number }[] }> {
+  // `assigned` is how many rows CHANGED HANDS; each perTarget.n is how many that
+  // person holds in the project afterwards.
+  const who = getContext();
+  if (who?.role === 'agent') throw new ForbiddenError('Assigning a project is done from the desk.');
+  const t = tid();
+  const live = await sql`
+    SELECT id, name FROM users
+     WHERE tenant_id = ${t} AND id IN ${sql([...new Set((opts.targets || []).filter(Boolean))])}
+       AND deleted_at IS NULL AND lower(coalesce(status, 'active')) = 'active'`;
+  if (!live.length) throw new ForbiddenError('Pick at least one active person.');
+  const targets = (opts.targets || []).filter(id => live.some((u: any) => u.id === id));
+
+  const project = String(opts.project || '');
+  const isNone = !project || project === 'No project' || project === '_none';
+  const rows = await sql`
+    SELECT id FROM crm_owners
+     WHERE tenant_id = ${t} AND ${OWNER_OPEN}
+       AND ${isNone ? sql`coalesce(project, '') = ''` : sql`project = ${project}`}
+       ${opts.onlyUnassigned ? sql`AND agent_id IS NULL` : sql``}
+     ORDER BY tower NULLS LAST, unit_no, created_at`;
+
+  const perTarget = targets.map(id => ({ id, name: (live.find((u: any) => u.id === id) as any)?.name ?? null, n: 0 }));
+  let assigned = 0;
+  // Dealt one each in turn, in unit order, so a tower does not land entirely on
+  // one caller by accident of insertion order.
+  const share = new Map<string, string[]>(targets.map(id => [id, []]));
+  (rows as any[]).forEach((r, i) => share.get(targets[i % targets.length])!.push(r.id));
+  for (const [target, ids] of share) {
+    if (!ids.length) continue;
+    // Rows already on that person are a no-op — bulkAssignOwners does not
+    // rewrite history for a move that is not one — so this counts what MOVED.
+    assigned += await bulkAssignOwners(ids, target, ctx);
+  }
+  // …and what each person now HOLDS in this project, which is the number the
+  // screen should say. "Aniket 0" after splitting a project he already had half
+  // of is true about the moves and wrong about the world.
+  const after = await sql`
+    SELECT agent_id AS id, count(*)::int AS n FROM crm_owners
+     WHERE tenant_id = ${t} AND ${OWNER_OPEN}
+       AND ${isNone ? sql`coalesce(project, '') = ''` : sql`project = ${project}`}
+       AND agent_id IN ${sql(targets)}
+     GROUP BY 1`;
+  for (const row of after as any[]) {
+    const slot = perTarget.find(p => p.id === row.id); if (slot) slot.n = row.n;
+  }
+  audit({
+    tenant_id: t, actor_type: ctx.actorType || 'user', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'owner.project_assigned', target_type: 'owner', target_id: null,
+    summary: `${assigned} owner(s) in ${isNone ? 'no project' : project} assigned to ${perTarget.length} person(s)`,
+    metadata: { project, onlyUnassigned: !!opts.onlyUnassigned, perTarget }, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return { assigned, perTarget };
 }
 
 export async function getOwnerById(id: string): Promise<any | null> {

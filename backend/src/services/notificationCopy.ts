@@ -67,13 +67,21 @@ export const COPY: Builders = {
   }),
   // For a manager, not the agent who just got it. The count is the whole point
   // — "reassigned" alone reads like the routine hand-off it individually is.
+  // `count` is set when one bulk move tripped this for several records at once
+  // — a project handed over, a desk cleared. One alert for the batch (see
+  // alertOnReassignLoop); saying "726 records" is the honest version of sending
+  // 726 notifications.
   lead_reassign_loop: (d) => ({
-    title: `Reassigned ${d.n} times`,
-    body: facts(d.name, d.agent && `now with ${d.agent}`),
+    title: d.count ? `${d.count} leads passed around` : `Reassigned ${d.n} times`,
+    body: d.count
+      ? facts(`each moved ${d.n}+ times`, d.agent && `now with ${d.agent}`)
+      : facts(d.name, d.agent && `now with ${d.agent}`),
   }),
   owner_reassign_loop: (d) => ({
-    title: `Owner reassigned ${d.n} times`,
-    body: facts(d.name, d.agent && `now with ${d.agent}`),
+    title: d.count ? `${d.count} owners passed around` : `Owner reassigned ${d.n} times`,
+    body: d.count
+      ? facts(`each moved ${d.n}+ times`, d.agent && `now with ${d.agent}`)
+      : facts(d.name, d.agent && `now with ${d.agent}`),
   }),
 
   // Was "⚠️ SLA Warning: Untouched Lead". The agent is being told they have not

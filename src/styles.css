@@ -964,6 +964,20 @@ button.btn-ghost.fu-done{color:var(--accent)}
 .projcard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);cursor:pointer;transition:border-color .12s,box-shadow .12s;text-align:left;width:100%;padding:16px 17px;display:flex;flex-direction:column;gap:14px}
 .projcard:hover{border-color:var(--muted);box-shadow:var(--shadow)}
 .projcard.indep{border-style:dashed}
+/* The card became a container with its own Assign control, so the part that
+   opens the project is the button INSIDE it — a button in a button is invalid
+   and swallows the inner click. */
+.projcard{padding:0}
+.pj-open{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:14px;padding:16px 17px 12px;width:100%;box-sizing:border-box}
+.pj-assign{display:flex;align-items:center;gap:6px;margin:0 17px 14px;padding:7px 11px;border:1px solid var(--line);
+  background:var(--card-2);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;align-self:flex-start}
+.pj-assign:hover{border-color:var(--accent);color:var(--accent-ink)}
+/* Who is on this project, by first name and count. Wraps rather than truncates:
+   four callers on a township is normal and the fourth matters as much. */
+.pj-who{display:flex;flex-wrap:wrap;gap:6px}
+.pj-who-one{font-size:11.5px;font-weight:600;color:var(--ink-2);background:var(--card-2);border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+.pj-who-one b{font-weight:700;color:var(--ink)}
+.pj-who-none{color:var(--muted)}
 .pj-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .pj-name{font-family:var(--disp);font-weight:600;font-size:16.5px;letter-spacing:-.01em;line-height:1.2}
 .pj-sub{font-size:12.5px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:4px}

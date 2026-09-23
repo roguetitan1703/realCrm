@@ -12,7 +12,7 @@ import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import {
   createOwner, listOwners, getOwnersSummary, listOwnerProjects,
-  getOwnerById, updateOwner, deleteOwner, bulkAssignOwners, OWNER_STATUSES,
+  getOwnerById, updateOwner, deleteOwner, bulkAssignOwners, assignProjectOwners, OWNER_STATUSES,
 } from '../services/store';
 
 export const ownersRouter = Router();
@@ -71,6 +71,28 @@ ownersRouter.post('/bulk-assign', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (err?.status === 403) return res.status(403).json({ success: false, error: 'Forbidden', message: err.message });
     return res.status(500).json({ error: 'Bulk assign failed', message: err.message });
+  }
+});
+
+/**
+ * ASSIGN A WHOLE PROJECT
+ * POST /api/v1/owners/assign-project { project, targets: string[], onlyUnassigned?: boolean }
+ * One caller or several — see assignProjectOwners for how it splits and why
+ * only open rows move.
+ */
+ownersRouter.post('/assign-project', async (req: Request, res: Response) => {
+  try {
+    const project = String(req.body?.project ?? '');
+    const targets: string[] = Array.isArray(req.body?.targets) ? req.body.targets.map(String) : [];
+    if (!targets.length) return res.status(400).json({ error: 'Pick at least one person.' });
+    const out = await assignProjectOwners({ project, targets, onlyUnassigned: !!req.body?.onlyUnassigned }, {
+      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: null,
+      ip: req.ip, userAgent: req.get('user-agent') ?? undefined,
+    });
+    return res.status(200).json({ success: true, ...out });
+  } catch (err: any) {
+    const code = err?.name === 'ForbiddenError' || err?.status === 403 ? 403 : 500;
+    return res.status(code).json({ error: 'Could not assign the project', message: err.message });
   }
 });
 

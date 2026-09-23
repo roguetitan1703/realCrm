@@ -43,31 +43,48 @@ const QUEUE_SEGMENTS = [
 // project rather than opening a separate page: assigning/status-changing an
 // owner is the same row-level UI either way, so there is nothing a dedicated
 // project-detail screen would add.
-function OwnerProjectGrid({ onOpen }) {
+function OwnerProjectGrid({ onOpen, onAssign, canAssign, refreshAt }) {
   const [rows, setRows] = useState(null)
   useEffect(() => {
     let live = true
     api.listOwnerProjects().then(r => { if (live) setRows(r?.data || []) }).catch(() => { if (live) setRows([]) })
     return () => { live = false }
-  }, [])
+  }, [refreshAt])
   if (rows === null) return <div className="list-spin" role="status" aria-label="Loading"><span /></div>
   if (!rows.length) return <div className="detail-missing">No owners yet — import a list to get started.</div>
   return (
     <div className="grid-cards">
       {rows.map(pj => (
-        <button key={pj.key} className="projcard" onClick={() => onOpen(pj.key)}>
-          <div className="pj-head">
-            <div className="pj-id">
-              <div className="pj-name">{pj.name}</div>
-              {pj.locality && <div className="pj-sub"><Icon name="pin" size={13} className="ic" />{pj.locality}</div>}
+        <div key={pj.key} className="projcard">
+          <button className="pj-open" onClick={() => onOpen(pj.key)}>
+            <div className="pj-head">
+              <div className="pj-id">
+                <div className="pj-name">{pj.name}</div>
+                {pj.locality && <div className="pj-sub"><Icon name="pin" size={13} className="ic" />{pj.locality}</div>}
+              </div>
+              <span className="pj-count"><b>{pj.counts.total}</b> owner{pj.counts.total !== 1 ? 's' : ''}</span>
             </div>
-            <span className="pj-count"><b>{pj.counts.total}</b> owner{pj.counts.total !== 1 ? 's' : ''}</span>
-          </div>
-          <div className="pj-legend">
-            <span className="pj-dot avail">{pj.counts.new} to call</span>
-            {pj.counts.interested > 0 && <span className="pj-dot sold">{pj.counts.interested} interested</span>}
-          </div>
-        </button>
+            <div className="pj-legend">
+              <span className="pj-dot avail">{pj.counts.new} to call</span>
+              {pj.counts.interested > 0 && <span className="pj-dot sold">{pj.counts.interested} interested</span>}
+            </div>
+            {/* WHO IS ON IT. A township handed to one caller and then partly
+                shared out reads as "728 owners" and nothing else — this is the
+                question a manager opens the screen with. */}
+            <div className="pj-who">
+              {(pj.holders || []).slice(0, 4).map(h => (
+                <span key={h.id} className="pj-who-one">{String(h.name).split(' ')[0]} <b>{h.n}</b></span>
+              ))}
+              {(pj.holders || []).length > 4 && <span className="pj-who-one">+{pj.holders.length - 4} more</span>}
+              {pj.counts.unassigned > 0 && <span className="pj-who-one pj-who-none">Unassigned <b>{pj.counts.unassigned}</b></span>}
+            </div>
+          </button>
+          {canAssign && (
+            <button className="pj-assign" onClick={() => onAssign(pj)}>
+              <Icon name="userPlus" size={13} />Assign
+            </button>
+          )}
+        </div>
       ))}
     </div>
   )
@@ -177,6 +194,10 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // "Interested" means both, which is a question a caller actually asks.
   const [seg, setSeg] = useState('all')
   const [stage, setStage] = useState('all')
+  // WHOSE CALLING LIST. The same top-level control Leads has: "show me Zahir's
+  // queue" is the question a manager asks before any other, and here it was
+  // two clicks deep inside the filter panel beside Locality.
+  const [agentSel, setAgentSel] = useState('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selected, setSelected] = useState(new Set())
@@ -191,6 +212,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
 
   const setSegP = (v) => { setSeg(v); setView('list'); setPage(1); setSelected(new Set()) }
   const setStageP = (v) => { setStage(v); setView('list'); setPage(1); setSelected(new Set()) }
+  const setAgentP = (v) => { setAgentSel(v); setView('list'); setPage(1); setSelected(new Set()) }
   const setPageP = (v) => { setPage(v); setSelected(new Set()) }
 
   // A checked row belongs to the list it was checked in. Switching to the
@@ -217,13 +239,16 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
       mine: phone ? 1 : undefined,
       stage: stage === 'all' ? undefined : stage,
       project: flt.project || undefined,
+      // The dropdown wins over the filter panel's own Sales Executive row when
+      // it is set — one question, and the control you last touched answers it.
+      ...(agentSel !== 'all' ? { agent: agentSel } : {}),
       // The filter panel's own fields — same names the backend already reads
       // for listLeads, so Locality and Sales Executive behave identically.
       locality: params.locality, agent: params.agent,
       sortKey: params.sortKey, sortDir: params.sortDir,
     }),
     { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
-    [state.dataAsOf, seg, stage, flt.project, phone],
+    [state.dataAsOf, seg, stage, agentSel, flt.project, phone],
     { store, kind: 'owner' },
   )
 
@@ -273,6 +298,19 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     leftAddon: (
       <div className="leads-dd-row">
         <SelectDropdown label="Status" value={stage} onChange={setStageP} options={stageOptions} />
+        {canAssign && (
+          <SelectDropdown
+            label="Agent" value={agentSel} onChange={setAgentP} searchable
+            options={[
+              { value: 'all', label: 'All' },
+              ...(counts.byAgent || []).map(a => ({
+                value: a.value,
+                label: a.value === state.activeAgentId ? 'Me' : a.label,
+                count: a.count,
+              })),
+            ]}
+          />
+        )}
       </div>
     ),
     // The toolbar IS the selection bar — see FilterBar. No second band.
@@ -301,7 +339,11 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     cta: { label: 'New owner', onClick: () => store.openModal({ kind: 'newOwner' }) },
     emptyTitle: 'No owners match', emptyHint: 'Adjust the filter or search, or import a list.',
     renderTable: (list, v) => v === 'projects'
-      ? <OwnerProjectGrid onOpen={(key) => { setFlt({ ...flt, project: key === 'No project' ? '_none' : key }); setView('list') }} />
+      ? <OwnerProjectGrid
+          refreshAt={state.dataAsOf}
+          canAssign={canAssign}
+          onAssign={(pj) => store.openModal({ kind: 'assignProject', project: pj })}
+          onOpen={(key) => { setFlt({ ...flt, project: key === 'No project' ? '_none' : key }); setView('list') }} />
       : v === 'grid'
         ? <ModuleCards def={OWNERS_DEF} rows={list} store={store} onOpen={open} phone={phone} />
         : <ModuleTable def={OWNERS_DEF} rows={list} store={store} onOpen={open} sortKey={sortKey} sortDir={sortDir} onSort={(v) => { setSortKey(v); setPage(1) }}

@@ -88,6 +88,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'editRecord' && <ModuleFormModal store={store} moduleId={m.moduleId} recordId={m.recordId} />}
       {m?.kind === 'assign' && <AssignModal store={store} leadId={m.leadId} />}
       {m?.kind === 'bulkAssign' && <BulkAssignModal store={store} leadIds={m.leadIds} isOwner={m.isOwner} onDone={m.onDone} />}
+      {m?.kind === 'assignProject' && <AssignProjectModal store={store} project={m.project} />}
       {m?.kind === 'reassign' && <ReassignModal store={store} fromId={m.fromId} />}
       {m?.kind === 'addAgent' && <AddAgentModal store={store} />}
       {m?.kind === 'contact' && <ContactConfirmModal store={store} channel={m.channel} name={m.name} phone={m.phone} email={m.email} waText={m.waText} recordType={m.recordType} recordId={m.recordId} />}
@@ -1183,6 +1184,90 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
       <button className="pick-unassign" disabled={busy} onClick={() => assign(null)}>
         Leave unassigned
       </button>
+    </Modal>
+  )
+}
+
+/**
+ * ASSIGN A WHOLE PROJECT — to one caller, or split between several.
+ *
+ * How a township actually gets worked: it goes to somebody, and later part of
+ * it is shared out. Both are this screen. "Only the ones nobody is on" is the
+ * version that tops a caller up without disturbing the flats other people are
+ * already working — the same list handed out twice was how a project ended up
+ * being called twice.
+ */
+function AssignProjectModal({ store, project }) {
+  const people = store.activeAgents()
+  const [picked, setPicked] = useState([])
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  const total = onlyUnassigned ? (project?.counts?.unassigned ?? 0) : (project?.counts?.total ?? 0)
+  const toggle = (id) => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))
+  const share = (id) => {
+    const i = picked.indexOf(id)
+    if (i < 0 || !picked.length) return null
+    return Math.floor(total / picked.length) + (i < total % picked.length ? 1 : 0)
+  }
+  const go = async () => {
+    setBusy(true)
+    try {
+      const res = await api.assignOwnerProject(project.key, picked, onlyUnassigned)
+      setResult(res)
+      store.settled?.()
+    } catch (err) {
+      store.toast(err.message || 'Could not assign the project', 'warn')
+    }
+    setBusy(false)
+  }
+  return (
+    <Modal title={`Assign ${project?.name || 'project'}`} onClose={store.closeModal} width={440}>
+      {result ? (
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: 52, height: 52, margin: '0 auto 12px', borderRadius: '50%', background: 'var(--accent-wash)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="check" size={26} style={{ color: 'var(--accent)' }} /></div>
+          <div style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 16 }}>{result.assigned} owner{result.assigned === 1 ? '' : 's'} moved</div>
+          <div className="u-muted" style={{ fontSize: 12.5, marginTop: 6, marginBottom: 14 }}>
+            {/* What each of them holds here now, not what moved — after a split
+                the person who already had half moves nothing and still has it. */}
+            {result.perTarget.filter(p => p.n).map(p => `${p.name} now has ${p.n}`).join(' · ')}
+          </div>
+          <Button variant="primary" block onClick={store.closeModal}>Done</Button>
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 12 }}>
+            {project?.counts?.total} owner{project?.counts?.total === 1 ? '' : 's'} in this project
+            {project?.counts?.unassigned ? `, ${project.counts.unassigned} with nobody on them` : ''}. Closed rows stay where they are.
+          </div>
+          <button onClick={() => setOnlyUnassigned(v => !v)}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 11px', marginBottom: 14,
+              border: '1px solid ' + (onlyUnassigned ? 'var(--accent)' : 'var(--line)'), background: onlyUnassigned ? 'var(--accent-wash)' : '#fff',
+              borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600 }}>
+            <span style={{ flex: 1, textAlign: 'left' }}>Only the ones nobody is on</span>
+            {onlyUnassigned && <Icon name="check" style={{ color: 'var(--accent)' }} />}
+          </button>
+          <div className="imp-map-label" style={{ marginBottom: 6 }}>Share between</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14, maxHeight: 260, overflowY: 'auto' }}>
+            {people.map(a => {
+              const on = picked.includes(a.id)
+              return (
+                <button key={a.id} onClick={() => toggle(a.id)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--line)'), background: on ? 'var(--accent-wash)' : '#fff', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  <Avatar agent={a} size="sm" />
+                  <span style={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: 13.5 }}>{a.name || a.first}</span>
+                  {on && <span className="u-muted" style={{ fontSize: 12, fontWeight: 600 }}>{share(a.id)}</span>}
+                  {on && <Icon name="check" style={{ color: 'var(--accent)' }} />}
+                </button>
+              )
+            })}
+            {!people.length && <div className="detail-empty">Nobody active to assign to.</div>}
+          </div>
+          <Button variant="primary" block disabled={busy || !picked.length || !total} onClick={go}>
+            {busy ? 'Assigning…' : total ? `Assign ${total} owner${total === 1 ? '' : 's'}` : 'Nothing to assign'}
+          </Button>
+        </>
+      )}
     </Modal>
   )
 }

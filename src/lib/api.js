@@ -681,6 +681,10 @@ export const api = {
     return request(`/owners${s ? `?${s}` : ''}`)
   },
   getOwnersSummary: (mine) => request('/owners/summary' + (mine ? '?mine=1' : '')),
+  // A whole project to one caller, or split between several.
+  assignOwnerProject: (project, targets, onlyUnassigned) => request('/owners/assign-project', {
+    method: 'POST', body: JSON.stringify({ project, targets, onlyUnassigned }),
+  }),
   listOwnerProjects: () => request('/owners/projects'),
   getOwner: (id) => request(`/owners/${encodeURIComponent(id)}`),
   createOwner: (owner) => request('/owners', { method: 'POST', body: JSON.stringify(owner) }),
