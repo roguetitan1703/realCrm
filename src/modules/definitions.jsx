@@ -48,9 +48,14 @@ import {
 // configured. Read through a helper rather than importing the constant at every
 // call site, so renaming a status in Settings reaches the stage cells, the
 // dropdowns and the record's progression at once.
-const ownerStages = (store) => store?.state?.settings?.ownerStages?.length
+// THE WALK FORWARD, which is not the whole vocabulary. The two endings (Not
+// Interested, Do Not Call) are reached through Reject with a reason — they are
+// not steps, and offering them as the next one invited a caller to close a
+// record without saying why. They stay in the settings list because that is the
+// firm's vocabulary: filters, counts and tags all read it.
+const ownerStages = (store) => (store?.state?.settings?.ownerStages?.length
   ? store.state.settings.ownerStages
-  : OWNER_STATUSES
+  : OWNER_STATUSES).filter(s => !OWNER_TERMINAL_STATUSES.includes(s))
 
 
 // Localities are DERIVED from the firm's own records, never listed here. There

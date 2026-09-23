@@ -257,12 +257,22 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 - **Said:** needed for calling (owners) and properties.
 - **Depends on:** 5.3. Tower must be a real column, not buried in `unit_ref`.
 
-### 4.5 🟡 "Key received" replaces Deal Closed in the owner funnel
+### 4.5 ✅ "Key Received" ends the calling walk, and Reject closes a record — `ce40bd1`
 - **Said:** owners have their own funnel. It is about **getting a property to
   manage**, and "Deal Closed" makes no sense there. **Key received** replaces it.
-- **Open:** owners already on Deal Closed. Count them per firm, then move them to
-  Key received through a gated migration (writes bhumi/mahalaxmi rows, named
-  first). The lead funnel keeps Deal Closed.
+- **Shipped 23 Sep.** The walk is **New → Contacted → Interested → Key
+  Received**. The two endings (Not Interested, Do Not Call) left the walk and
+  are set through **Mark as rejected** with a reason, which also clears any
+  pending callback and is remembered on the record. **Callback left the list**:
+  it is a time (`callback_at`, its own pill and sort), and as a status it said
+  nothing and could sit on a record with no callback.
+- **Across every firm (user asked, 23 Sep):**
+  `npm run stages:calling -- --env=production [--apply]` rewrites each firm's
+  stored list and moves records off a dropped status (Callback → Contacted,
+  keeping the callback time). Run on dev: 3 firms updated, 12 records moved,
+  every callback time kept. **Production expectation:** bhumi has no stored list
+  (nothing to write), mahalaxmi's list loses Callback, delpat 1 record moves,
+  urban and raipur 6 each, both paying clients 0 records.
 
 ### 4.6 ⬜ Project names ignore case and spacing
 - **Said:** "Sai Heights" and "sai heights" split into two groups, in both
