@@ -97,8 +97,18 @@ export function prepareRow(kind: ImportKind, raw: Record<string, any>, mapping: 
     if (got !== null) v[f.key] = got;
   }
 
+  // WHY it could not be read, when the cell held something. "No phone number"
+  // about a cell containing "9881204471 / 9822703786" sends somebody hunting
+  // through a spreadsheet for a blank that is not there.
+  const unreadablePhone = (col?: string) => {
+    const cell = col ? String(raw[col] ?? '').trim() : '';
+    return cell.replace(/\D/g, '').length
+      ? `Phone number could not be read ("${cell.slice(0, 24)}")`
+      : 'No phone number';
+  };
+
   if (kind === 'owners') {
-    if (!v.phone) return { ok: false, reason: 'No phone number' };
+    if (!v.phone) return { ok: false, reason: unreadablePhone(mapping.phone) };
     if (!v.project) return { ok: false, reason: 'No project' };
     if (!v.unitNo) return { ok: false, reason: 'No unit number' };
     return {
@@ -125,7 +135,7 @@ export function prepareRow(kind: ImportKind, raw: Record<string, any>, mapping: 
   if (kind === 'clients') {
     // A lead with no name is ordinary — every portal sends them. A lead with no
     // number cannot be called, which is the whole job.
-    if (!v.phone) return { ok: false, reason: 'No phone number' };
+    if (!v.phone) return { ok: false, reason: unreadablePhone(mapping.phone) };
     return {
       ok: true,
       key: normPhone(v.phone) || null,

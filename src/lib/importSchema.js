@@ -41,12 +41,41 @@ export function parseNum(raw) {
   return isNaN(n) ? null : n
 }
 
-/** "9881204471" | "+91 98812 04471" | 9881204471 → "+919881204471" */
+/**
+ * A NUMBER SOMEBODY CAN ACTUALLY RING.
+ *
+ * "9881204471" | "+91 98812 04471" | 9881204471 → "+919881204471"
+ * "971526377771" (Dubai) → "+971526377771", NOT "+911526377771".
+ *
+ * IT USED TO TAKE THE LAST TEN DIGITS AND STAMP +91 ON THEM. On a real owner
+ * list — Bhumi's 746-row Godrej Green Vistas sheet — that mangled 73 numbers:
+ * every NRI owner's UAE, Dutch or UK number became an Indian one that dials
+ * nowhere, and nothing in the import said a word about it. A wrong number is
+ * worse than a missing one: nobody questions a filled-in field.
+ *
+ * The rules, in the order they are asked:
+ *   • a leading 00 is the old way of writing + (00971… is +971…). Dropped first,
+ *     then everything below applies to what is left.
+ *   • 10 digits → Indian, +91.
+ *   • 11 digits starting 0 → Indian with the trunk 0 (STD dialling), +91.
+ *   • 12 digits starting 91 → Indian with its country code, +91.
+ *   • anything else 11–15 digits → it already carries a country code that is
+ *     not India's. Kept whole, with a +, because that is what it is.
+ *   • anything else — 11 digits starting 91 (an Indian number with a digit
+ *     missing), or longer than E.164 allows because two numbers share one cell
+ *     — is NOT a number anyone can ring. Null, and the import reports the row
+ *     with the cell's own text so it can be fixed and re-imported. A stored
+ *     number that dials nowhere is worse than a reported blank.
+ */
 export function parsePhone(raw) {
-  const digits = String(raw ?? '').replace(/\D/g, '')
+  let digits = String(raw ?? '').replace(/\D/g, '')
+  if (digits.startsWith('00')) digits = digits.slice(2)
   if (digits.length < 10) return null
-  const ten = digits.slice(-10)
-  return `+91${ten}`
+  if (digits.length === 10) return `+91${digits}`
+  if (digits.length === 11 && digits.startsWith('0')) return `+91${digits.slice(1)}`
+  if (digits.length === 12 && digits.startsWith('91')) return `+91${digits.slice(2)}`
+  if (digits.length > 15 || digits.startsWith('91')) return null
+  return `+${digits}`
 }
 
 export function normPhone(raw) {
