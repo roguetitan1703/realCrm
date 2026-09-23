@@ -167,18 +167,18 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 
 ## Part 2 — People, seats, suspend, reassign
 
-### 2.1 ⬜ Login ID must be changeable when a seat goes to someone else
+### 2.1 ✅ Login ID must be changeable when a seat goes to someone else — `613b536`
 - **Said:** when a seat is reassigned, the login ID stays the old person's name
   and we're stuck with it.
 - **Know:** the user id doubles as the login id. Changing it rewrites every
   row's `agent_id`.
 - **Direction:** keep the internal id stable and make `login_id` a separate,
   editable, per-tenant-unique field. Sessions are revoked on change.
-- **Open:** does the reassigned seat keep the previous person's history under
-  the new name? Probably no: history belongs to the person, the seat is just a
-  licence.
+- **Shipped 23 Sep.** The login id is editable on the person, unique per firm,
+  at least 3 characters; changing it moves no data (records point at the
+  internal id) and drops their sessions. **And the seat answer is no**: see 2.2.
 
-### 2.2 ⬜ What happens today when an agent with open leads is suspended
+### 2.2 ✅ Suspend, and what happens to the work — `b753c1c`, `fae0c3f`
 - **Know (22 Sep):** suspending revokes sessions, so push stops. **The leads stay
   on the suspended agent**: nobody works them and nothing flags them. Suspended
   people can still be **picked as assignees** (`activeAgents` excludes only
@@ -187,18 +187,28 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 - **Direction:** suspending shows the person's open work (leads, owners,
   follow-ups) and offers **distribute** (2.3) in the same step. Suspended people
   can't be chosen anywhere (UI and server both check).
-- **Open:** is suspending allowed without distributing? Proposal: yes, but the
-  held leads then show on the manager's desk as unowned work.
+- **Shipped 23 Sep.** Suspending states what they still hold (server numbers)
+  and offers to hand it over; going ahead without is allowed and labelled
+  "Suspend and leave the work with them". **Reassign seat keeps its name** (the
+  user's call — people understand it) and now does three honest things: the new
+  person gets their own account and login id, the leaver's OPEN work moves to
+  them, the leaver is suspended and keeps authorship of their own history. Seat
+  count unchanged.
+- **Still open:** bhumi's suspended agent holds 63 open leads. The user will
+  deal with it; nothing was moved.
 
-### 2.3 ⬜ Reassign becomes "distribute" — to several people
+### 2.3 ✅ Reassign work — to several people, and you choose what moves — `cbdd26c`
 - **Said:** select multiple people and split the leads between them, not just one.
 - **Know (22 Sep):** the reassign-leads route **has no permission check**, moves
   closed and rejected leads too, writes **no assignment history** (breaks the
   invariant "assignment is history"), has a single target, and the modal says
   "done" before the server answers.
-- **Direction:** owner/manager only; open leads only; pick N people → round-robin
-  or by count; `recordAssignment()` per lead; covers owners (calling) as well as
-  leads; the result comes from the server.
+- **Shipped 23 Sep.** Owner/manager only (server-enforced); **open work only**;
+  the person picks WHAT moves — leads, the calling list or both, each with its
+  real count; several people share it one record each in turn, with the split
+  shown before confirming; every move writes its assignment event and notifies
+  the receiver; the numbers afterwards are the server's. Suspended people cannot
+  receive work — hidden in the picker AND refused by the server.
 
 ### 2.4 ⬜ Super admin: bulk user creation
 - **Said:** users are created one at a time, setting each password by hand.
