@@ -12,6 +12,7 @@ import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { notifMeta, cleanTitle, isAssignment } from '../lib/notificationMeta.js'
 import { REJECTION_REASONS, REJECTED_STATUS } from '../data/leadStatus.js'
+import { OWNER_REJECTION_REASONS } from '../data/ownerStatus.js'
 import { getPosition, geoPermission, processImage, uploadMedia } from '../lib/media.js'
 import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES, STATUS } from '../data/propertyFields.js'
 import CameraCapture from '../components/CameraCapture.jsx'
@@ -95,6 +96,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'rejectLead' && <RejectLeadModal store={store} leadId={m.leadId} />}
+      {m?.kind === 'rejectOwner' && <RejectOwnerModal store={store} ownerId={m.ownerId} />}
       {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} only={m.only} />}
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
@@ -1032,6 +1034,59 @@ function RejectLeadModal({ store, leadId }) {
               background: reason === r ? 'var(--accent-wash)' : '#fff', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600 }}>
             <span style={{ flex: 1 }}>{r}</span>
             {reason === r && <Icon name="check" style={{ color: 'var(--accent)' }} />}
+          </button>
+        ))}
+      </div>
+      <Field label="Anything to add (optional)">
+        <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Context for whoever picks this up later" />
+      </Field>
+      <div className="lc-foot">
+        <Button onClick={store.closeModal}>Cancel</Button>
+        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} disabled={busy} onClick={save}>
+          {busy ? 'Saving…' : 'Mark as rejected'}
+        </Button>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * END A CALLING RECORD — the owner's half of "Mark as rejected".
+ *
+ * The calling list could only be walked forward, so a number that had said no
+ * stayed in the queue and was rung again. The reason decides WHICH ending: "do
+ * not call again" and a wrong number are Do Not Call, the rest are Not
+ * Interested — a distinction the caller should not have to make twice.
+ */
+function RejectOwnerModal({ store, ownerId }) {
+  const o = store.lookup('owner', ownerId)
+  const [pick, setPick] = useState(OWNER_REJECTION_REASONS[0])
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const save = async () => {
+    setBusy(true)
+    const text = note.trim() ? `${pick.reason} — ${note.trim()}` : pick.reason
+    await store.updateOwner(ownerId, { stage: pick.status, rejectionReason: pick.reason, callbackAt: null })
+    await store.addRemark('owner', ownerId, `Closed: ${text}`)
+    setBusy(false)
+    store.closeModal()
+  }
+
+  return (
+    <Modal title="Mark as rejected" onClose={store.closeModal} width={420}>
+      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
+        Why are we not taking <b style={{ color: 'var(--ink)' }}>{o?.name || o?.phone || 'this flat'}</b> further?
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 12 }}>
+        {OWNER_REJECTION_REASONS.map(r => (
+          <button key={r.reason} onClick={() => setPick(r)}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', textAlign: 'left',
+              border: '1px solid ' + (pick.reason === r.reason ? 'var(--accent)' : 'var(--line)'),
+              background: pick.reason === r.reason ? 'var(--accent-wash)' : '#fff', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600 }}>
+            <span style={{ flex: 1 }}>{r.reason}</span>
+            <span className="u-muted" style={{ fontSize: 11.5, fontWeight: 600 }}>{r.status}</span>
+            {pick.reason === r.reason && <Icon name="check" style={{ color: 'var(--accent)' }} />}
           </button>
         ))}
       </div>

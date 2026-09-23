@@ -294,6 +294,10 @@ export async function initSchema(): Promise<void> {
     await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS unit_no TEXT;`;
     await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS config TEXT;`;
     await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS carpet_area NUMERIC;`;
+    // WHY THE CALLING STOPPED. A lead has carried this since B2; an owner had
+    // no way to be closed at all, so "not selling" lived in a remark if anyone
+    // wrote one, and the record stayed in the queue to be rung again.
+    await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS rejection_reason TEXT;`;
     await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS saleable_area NUMERIC;`;
     // Not a UNIQUE constraint: the rows that exist predate these columns and
     // carry nothing to be unique on, and a firm may legitimately hold two rows

@@ -31,7 +31,7 @@ import { messageLang } from '../data/vocabLocale.js'
 import { generateMessage } from '../lib/matching.js'
 import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
-import { OWNER_STATUSES } from '../data/ownerStatus.js'
+import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 
 import { canAssignLead, canEditLead, canUpdateLeadStatus, canEditListing } from '../lib/permissions.js'
 import { api } from '../lib/api.js'
@@ -596,6 +596,16 @@ export const OWNERS_DEF = {
     current: (o) => o.stage,
     set: (store, o, stage) => store.setOwnerStage(o.id, stage),
     canSet: (store, o) => canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o),
+    // Why it ended, beside what it ended as — the same as a lead's.
+    note: (o) => (o.rejectionReason
+      ? (OWNER_TERMINAL_STATUSES.includes(o.stage) ? o.rejectionReason : `Was rejected — ${o.rejectionReason}`)
+      : null),
+    // Ending the call is a status change like any other and belongs in the same
+    // control. A calling list had no way to close a record at all: a number that
+    // had said no could only be walked forward, so it stayed in the queue and
+    // was rung again.
+    exit: { label: 'Mark as rejected', when: (o) => !OWNER_TERMINAL_STATUSES.includes(o.stage),
+      run: (store, o) => store.openModal({ kind: 'rejectOwner', ownerId: o.id }) },
   },
 
   sortOptions: [
@@ -625,6 +635,7 @@ export const OWNERS_DEF = {
         record={o} store={store} stages={ownerStages(store)}
         canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o)}
         onSet={(stage) => store.setOwnerStage(o.id, stage)}
+        onReject={(rec) => store.openModal({ kind: 'rejectOwner', ownerId: rec.id })}
       />
     ) },
     { key: 'agent', label: 'Sales Executive', render: (o, store) => (
@@ -662,6 +673,7 @@ export const OWNERS_DEF = {
           record={o} store={store} stages={ownerStages(store)}
           canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o)}
           onSet={(stage) => store.setOwnerStage(o.id, stage)}
+          onReject={(rec) => store.openModal({ kind: 'rejectOwner', ownerId: rec.id })}
         />
       </div>
       <div className="rc-sub mono-num">{o.phone}</div>

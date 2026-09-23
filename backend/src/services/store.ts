@@ -3074,8 +3074,12 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
 // often doesn't have (or need) a listing for what's being called about;
 // `project` is a free-text grouping key, same spirit as crm_properties.project.
 
-export const OWNER_STATUSES = ['New', 'Contacted', 'Callback', 'Interested', 'Not Interested', 'Do Not Call'];
+// Mirrors src/data/ownerStatus.js — see there for why Callback is not a status
+// and why the walk ends at Key Received. 'Callback' stays in the vocabulary so
+// the records written under it remain valid and filterable.
+export const OWNER_STAGES = ['New', 'Contacted', 'Interested', 'Key Received'];
 export const OWNER_TERMINAL_STATUSES = ['Not Interested', 'Do Not Call'];
+export const OWNER_STATUSES = [...OWNER_STAGES, 'Callback', ...OWNER_TERMINAL_STATUSES];
 
 /** Same rule as leadScope, over crm_owners: an agent sees what's assigned to
  *  or created by them; everyone else sees the tenant. */
@@ -3108,6 +3112,7 @@ function rowToOwner(r: any): any {
     agentId: r.agent_id || null,
     createdBy: r.created_by || null,
     importBatchId: r.import_batch_id || null,
+    rejectionReason: r.rejection_reason || null,
     callbackAt: r.callback_at || null,
     callbackNote: r.callback_note || null,
     lastCallAt: r.last_call_at || null,
@@ -3454,6 +3459,11 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
       ? (patch.callbackAt ? new Date(patch.callbackAt) : null)
       : (existing.callbackAt ? new Date(existing.callbackAt) : null),
     callback_note: patch.callbackNote !== undefined ? patch.callbackNote : existing.callbackNote,
+    // Cleared the moment someone walks the record forward again — the same rule
+    // the lead's reason follows, so a reopened record does not carry the old
+    // "not selling" next to a live status.
+    rejection_reason: patch.rejectionReason !== undefined ? patch.rejectionReason
+      : (patch.stage !== undefined && !OWNER_TERMINAL_STATUSES.includes(patch.stage) ? null : existing.rejectionReason),
   };
   await sql`UPDATE crm_owners SET ${sql(next)}, updated_at = NOW() WHERE id = ${id} AND tenant_id = ${t}`;
   if (patch.stage !== undefined && patch.stage !== existing.stage) {
