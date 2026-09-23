@@ -130,9 +130,18 @@ function AccessPanel({ store }) {
       .catch(err => store.toast(cleanErr(err), 'warn'))
       .finally(() => setBusy(''))
   }
-  const toggleSuspend = (u) => act(u.id,
-    () => api.setUserStatus(u.id, isSuspended(u) ? 'active' : 'suspended'),
-    isSuspended(u) ? `${u.name} reactivated` : `${u.name} suspended — signed out and paused from routing`)
+  // SUSPENDING DOES NOT MOVE THEIR WORK, and for a long time nothing said so:
+  // bhumi has a suspended agent holding 63 open leads nobody is working. So the
+  // question is asked before it happens — how much are they holding, and who
+  // should take it — rather than discovered weeks later.
+  const [suspending, setSuspending] = useState(null)
+  const toggleSuspend = (u) => {
+    if (isSuspended(u)) return act(u.id, () => api.setUserStatus(u.id, 'active'), `${u.name} reactivated`)
+    setSuspending(u)
+  }
+  const doSuspend = (u) => act(u.id,
+    () => api.setUserStatus(u.id, 'suspended'),
+    `${u.name} suspended — signed out and paused from routing`)
   const forceLogout = (u) => act(u.id, () => api.forceLogout(u.id), `Signed ${u.name} out on every device`)
   const del = (u) => {
     if (!window.confirm(`Delete ${u.name}? Their past deals stay for attribution, but they can no longer sign in. This can't be undone from here.`)) return
@@ -233,6 +242,10 @@ function AccessPanel({ store }) {
       {resetTarget && <ResetPasswordModal store={store} user={resetTarget} onClose={() => setResetTarget(null)}
         onDone={(res) => { const u = resetTarget; setResetTarget(null); store.reloadServer?.(); load(); setReveal({ title: 'Password reset', name: u.name, handle: u.login_id || u.email, byId: !!u.login_id, password: res.password }) }} />}
       {reveal && <RevealCard data={reveal} store={store} onClose={() => setReveal(null)} />}
+      {suspending && <SuspendModal store={store} user={suspending}
+        onClose={() => setSuspending(null)}
+        onHandOver={(u) => { setSuspending(null); store.openModal({ kind: 'reassign', fromId: u.id }) }}
+        onConfirm={(u) => { setSuspending(null); doSuspend(u) }} />}
       {seat && <SeatModal store={store} user={seat} onClose={() => setSeat(null)}
         onDone={(res) => {
           setSeat(null); store.reloadServer?.(); load()
@@ -247,6 +260,51 @@ function AccessPanel({ store }) {
               .filter(Boolean).join(' and ') || null,
           })
         }} />}
+    </div>
+  )
+}
+
+/**
+ * Before suspending: what are they still holding, and who takes it.
+ *
+ * Suspending revokes their sessions and pauses their place in the rotation. It
+ * has never moved a single record, which is correct — the leads are still
+ * somebody's work — but nothing said so, so they simply stopped being worked.
+ * Handing over is offered here, and going ahead without it is allowed and
+ * stated plainly rather than implied.
+ */
+function SuspendModal({ store, user, onClose, onHandOver, onConfirm }) {
+  const { data: held } = useServerData(() => api.workloadOf(user.id), [user.id], null)
+  const leads = held?.leads ?? 0
+  const owners = held?.owners ?? 0
+  const total = leads + owners
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
+        <div className="m-head"><h3>Suspend {user.name}</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
+        <div className="m-content">
+          <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+            They are signed out everywhere and stop receiving new work. Their history stays theirs, and this can be undone.
+          </div>
+          {held == null ? (
+            <div className="u-muted" style={{ fontSize: 13 }}>Checking what they hold…</div>
+          ) : total ? (
+            <>
+              <div style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: '12px 14px', marginBottom: 14, fontSize: 13 }}>
+                <b>{user.name} still holds {leads ? `${leads} open lead${leads === 1 ? '' : 's'}` : ''}{leads && owners ? ' and ' : ''}{owners ? `${owners} calling record${owners === 1 ? '' : 's'}` : ''}.</b>
+                <div className="u-muted" style={{ marginTop: 4 }}>Suspending does not move them. Nobody will be working them.</div>
+              </div>
+              <Button variant="primary" block onClick={() => onHandOver(user)}>Hand the work over first</Button>
+              <Button block style={{ marginTop: 8 }} onClick={() => onConfirm(user)}>Suspend and leave the work with them</Button>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, marginBottom: 14 }}>They hold no open work.</div>
+              <Button variant="primary" block onClick={() => onConfirm(user)}>Suspend {user.name}</Button>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
