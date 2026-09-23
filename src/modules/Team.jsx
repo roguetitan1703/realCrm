@@ -234,7 +234,19 @@ function AccessPanel({ store }) {
         onDone={(res) => { const u = resetTarget; setResetTarget(null); store.reloadServer?.(); load(); setReveal({ title: 'Password reset', name: u.name, handle: u.login_id || u.email, byId: !!u.login_id, password: res.password }) }} />}
       {reveal && <RevealCard data={reveal} store={store} onClose={() => setReveal(null)} />}
       {seat && <SeatModal store={store} user={seat} onClose={() => setSeat(null)}
-        onDone={(res) => { setSeat(null); store.reloadServer?.(); load(); setReveal({ title: 'Seat reassigned', name: res.name, handle: res.loginId || res.handle, byId: !!res.loginId, password: res.initialPassword }) }} />}
+        onDone={(res) => {
+          setSeat(null); store.reloadServer?.(); load()
+          setReveal({
+            title: 'Seat reassigned', name: res.name, handle: res.loginId || res.handle,
+            byId: !!res.loginId, password: res.initialPassword,
+            // What actually moved, from the server — a hand-over that says
+            // nothing about the work is the reason nobody knew 63 leads were
+            // sitting with a suspended agent.
+            note: [res.movedLeads ? `${res.movedLeads} lead${res.movedLeads === 1 ? '' : 's'}` : null,
+                   res.movedOwners ? `${res.movedOwners} calling record${res.movedOwners === 1 ? '' : 's'}` : null]
+              .filter(Boolean).join(' and ') || null,
+          })
+        }} />}
     </div>
   )
 }
@@ -264,6 +276,8 @@ function RevealCard({ data, store, onClose }) {
         </div>
         <div className="m-content">
           <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Give these to <b style={{ color: 'var(--ink)' }}>{data.name}</b>. The password <b style={{ color: 'var(--ink)' }}>won't be shown again</b> — copy it now. They set their own on first sign-in.</div>
+          {/* What moved with the seat, stated — not left to be discovered. */}
+          {data.note && <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{data.note} moved across.</div>}
           <div style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, padding: '4px 0' }}><span className="u-muted">{idLabel}</span><span className="mono-num" style={{ fontWeight: 600, wordBreak: 'break-all' }}>{data.handle}</span></div>
           </div>
@@ -282,8 +296,11 @@ function RevealCard({ data, store, onClose }) {
   )
 }
 
-// Hand a seat (its login_id + all its leads) to a new person. Backend keeps the
-// row, swaps identity, forces a password change and kicks the old sessions.
+// Hand a seat to a new person. The new person gets their OWN account and login
+// id, the leaver's OPEN work moves across, and the leaver is suspended — three
+// things you can see afterwards, instead of their name being written over the
+// old row (which left the new person signing in as the old one and holding
+// their history).
 function SeatModal({ store, user, onClose, onDone }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -295,7 +312,10 @@ function SeatModal({ store, user, onClose, onDone }) {
     if (needsEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { store.toast('An owner/manager seat needs a valid email', 'warn'); return }
     setSaving(true)
     api.reassignSeat(user.id, { name: name.trim(), email: email.trim(), phone: phone.trim() })
-      .then(res => onDone({ name: name.trim(), handle: email.trim() || res.loginId, loginId: res.loginId, initialPassword: res.initialPassword }))
+      .then(res => onDone({
+        name: name.trim(), handle: email.trim() || res.loginId, loginId: res.loginId,
+        initialPassword: res.initialPassword, movedLeads: res.movedLeads, movedOwners: res.movedOwners,
+      }))
       .catch(err => { store.toast(cleanErr(err), 'warn'); setSaving(false) })
   }
   return (
@@ -304,7 +324,7 @@ function SeatModal({ store, user, onClose, onDone }) {
         <div className="m-head"><h3>Reassign seat</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
         <div className="m-content">
           <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
-            Hands <b style={{ color: 'var(--ink)' }}>{user.login_id || user.email}</b>’s seat — and every lead on it — to a new person. {user.name} loses access immediately.
+            Gives the new person their own sign-in, moves <b style={{ color: 'var(--ink)' }}>{user.name}</b>’s open work across, and suspends {user.name}. Their past work stays theirs.
           </div>
           <Field label="New person’s full name"><Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Sneha Kulkarni" autoFocus /></Field>
           <Field label={needsEmail ? 'Email' : 'Email (optional)'}><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@firm.com" type="email" /></Field>

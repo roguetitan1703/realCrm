@@ -274,16 +274,38 @@ teamRouter.post('/users/:id/status', async (req: Request, res: Response) => {
   }
 });
 
-/** Reassign the seat to a new person: keep login_id + all leads, swap identity,
- *  force a password change, kick old sessions. (A1a) */
+/**
+ * ============================================================================
+ * REASSIGN SEAT — this desk now belongs to somebody else
+ * ============================================================================
+ * WHAT IT USED TO DO: keep the same user row and write the new person's name,
+ * email and phone over the old one. So the login stayed the person-before's
+ * (bhumi signs a woman called Siddhi in as `binod`), and every call, remark and
+ * visit the previous holder had logged silently became the new person's work —
+ * the record said Siddhi rang someone she has never spoken to.
+ *
+ * WHAT IT DOES NOW, in three steps you can see afterwards:
+ *   1. the new person gets their OWN account, with their own login id and a
+ *      password to hand over;
+ *   2. the leaver's OPEN work moves to them — that is what handing over a seat
+ *      means, and closed records stay closed;
+ *   3. the leaver is suspended: signed out, out of the rotation, unpickable,
+ *      and still the author of everything they did.
+ *
+ * The seat count does not change: one active account before, one after.
+ * ============================================================================
+ */
 teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) => {
   try {
     const u = await loadUser(req.tenantId!, req.params.id);
     if (!u) return res.status(404).json({ error: 'User not found' });
     const perm = canManageRole(u.role);
     if (!perm.ok) return res.status(403).json({ error: perm.msg });
+    if (u.role === 'owner' && await isLastActiveOwner(req.tenantId!, u.id)) {
+      return res.status(400).json({ error: 'This is the last active owner — add another owner first.' });
+    }
 
-    const { name, phone, email, password } = req.body || {};
+    const { name, phone, email, password, loginId } = req.body || {};
     const cleanName = String(name || '').trim();
     if (!cleanName) return res.status(400).json({ error: 'New person name is required' });
     const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
@@ -295,30 +317,53 @@ teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) 
     if (normEmail && await emailTaken(req.tenantId!, normEmail, u.id)) {
       return res.status(409).json({ error: 'Someone on this team already uses that email.' });
     }
-    const initials = cleanName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
-    const meta = { initials, avatar: '', phone: normPhone, email: normEmail };
+    const wantedLogin = String(loginId || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    if (wantedLogin && wantedLogin.length < 3) return res.status(400).json({ error: 'A user ID needs at least 3 characters.' });
+    if (wantedLogin && (await sql`SELECT 1 FROM users WHERE tenant_id = ${req.tenantId} AND login_id = ${wantedLogin} LIMIT 1`).length) {
+      return res.status(409).json({ error: 'Someone on this team already signs in with that ID.' });
+    }
     const initial = String(password || '').trim() || suggestPassword();
     const issue = passwordIssue(initial);
     if (issue) return res.status(400).json({ error: issue });
 
+    // 1. THE NEW PERSON — their own row, their own login.
+    const newId = `u_${Date.now().toString(36)}`;
+    const newLogin = u.login_id ? (wantedLogin || await deriveLoginId(req.tenantId!, cleanName)) : null;
+    const initials = cleanName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
+    const meta = { initials, avatar: '', phone: normPhone, email: normEmail };
     await sql`
-      UPDATE users SET name = ${cleanName}, phone = ${normPhone}, email = ${normEmail},
-        email_verified = ${!!normEmail}, status = 'active', metadata = ${sql.json(meta)}
-      WHERE id = ${u.id} AND tenant_id = ${req.tenantId}
+      INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, email_verified, metadata)
+      VALUES (${newId}, ${req.tenantId}, ${cleanName}, ${newLogin}, ${normPhone}, ${normEmail}, ${u.role}, 'active', ${!!normEmail}, ${sql.json(meta)})
     `;
-    await sql`UPDATE crm_agents SET name = ${cleanName}, first = ${cleanName.split(' ')[0]}, initials = ${initials}, metadata = ${sql.json(meta)} WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
-    const mustChangeSeat = req.body?.mustChangePassword !== false;
-    await adminSetPassword(req.tenantId!, u.id, initial, mustChangeSeat);   // revokes sessions
-    // The status update above always sets 'active' — a seat handed to someone
-    // new is a working seat again, even if the previous holder was suspended
-    // (and so removed from routing) at the time.
-    await addToRouting(req.tenantId!, u.id);
+    await sql`
+      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
+      VALUES (${newId}, ${cleanName}, ${cleanName.split(' ')[0]}, ${initials}, '', ${u.role}, 'ACTIVE', ${sql.json(meta)}, ${req.tenantId})
+    `;
+    await adminSetPassword(req.tenantId!, newId, initial, req.body?.mustChangePassword !== false);
+
+    // 2. THE WORK — open records only, all of it to the person taking the seat.
+    const moved = await distributeWork({ fromUserId: u.id, targets: [newId] }, {
+      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: null,
+      ip: req.ip, userAgent: req.get('user-agent') ?? undefined,
+    } as any);
+
+    // 3. THE LEAVER — out, but still the author of their own history.
+    await sql`UPDATE users SET status = 'suspended' WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
+    await revokeUserSessions(u.id);
+    await removeFromRouting(req.tenantId!, u.id);
+    await addToRouting(req.tenantId!, newId);
+
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
-      actor_label: getContext()?.userId ?? 'admin', action: 'user.seat_reassigned',
-      target_type: 'user', target_id: u.id, summary: `Seat ${u.login_id || u.id} reassigned to ${cleanName}`, metadata: {},
+      actor_label: null, action: 'user.seat_reassigned',
+      target_type: 'user', target_id: u.id,
+      summary: `${u.name}'s seat handed to ${cleanName} — ${moved.leads} lead(s), ${moved.owners} calling record(s) moved`,
+      metadata: { from: u.id, to: newId, loginId: newLogin, ...moved },
     });
-    return res.status(200).json({ success: true, loginId: u.login_id, initialPassword: initial, agents: await getAgents() });
+    return res.status(200).json({
+      success: true, userId: newId, loginId: newLogin, initialPassword: initial,
+      movedLeads: moved.leads, movedOwners: moved.owners, agents: await getAgents(),
+    });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to reassign seat', message: err.message });
   }
