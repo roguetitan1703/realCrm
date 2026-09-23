@@ -232,8 +232,10 @@ export function repeatMark(lead) {
     const now = new Date()
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
   })()
-  if (today) return { today: true, label: 'Came back', title: n > 1 ? `Enquired again today — ${n} enquiries in all` : 'Enquired again today' }
-  if (n > 1) return { today: false, label: `${n}×`, title: `${n} enquiries` }
+  // A MARK, NOT A SENTENCE. The count is the mark — "3×" reads at a glance and
+  // costs no room on a 390px row — and the day it happens the same chip is
+  // filled in, so two rows in nine stand out without a word being added.
+  if (n > 1) return { today, label: `${n}×`, title: today ? `Enquired again today — ${n} in all` : `${n} enquiries` }
   return null
 }
 

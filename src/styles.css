@@ -2941,7 +2941,9 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
    the reason to pick this row out of nine. Still a chip — it sits inside the
    name line on a 390px phone and inside a table cell on a desk, and must not
    push either around. */
-.prow-repeat.is-today{letter-spacing:.02em;white-space:nowrap}
+/* Came back TODAY: the same count, filled in. The mark is the colour — a word
+   would cost a line on a phone row and say what the count already says. */
+.prow-repeat.is-today{color:#fff;background:var(--accent);white-space:nowrap}
 .name .prow-repeat,.q-name .prow-repeat{margin-left:6px;font-size:10.5px;padding:1px 6px;vertical-align:middle}
 /* Beside the record title, where it can wrap with the name rather than pushing
    the facts strip and the action buttons down a line each. */
