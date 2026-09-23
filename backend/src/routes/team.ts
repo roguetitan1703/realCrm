@@ -180,7 +180,7 @@ teamRouter.patch('/users/:id', async (req: Request, res: Response) => {
     let perm = canManageRole(u.role);
     if (!perm.ok) return res.status(403).json({ error: perm.msg });
 
-    const { name, phone, email, role } = req.body || {};
+    const { name, phone, email, role, loginId } = req.body || {};
     const newRole = role && ['owner', 'manager', 'agent'].includes(role) ? role : u.role;
     if (newRole !== u.role) {
       perm = canManageRole(newRole);
@@ -198,19 +198,47 @@ teamRouter.patch('/users/:id', async (req: Request, res: Response) => {
     if (normEmail && await emailTaken(req.tenantId!, normEmail, u.id)) {
       return res.status(409).json({ error: 'Someone on this team already uses that email.' });
     }
+    // THE LOGIN ID IS EDITABLE, and it is only a login.
+    //
+    // It was derived from the name when the account was made and then fixed
+    // forever, so when a seat changed hands the new person signed in as the
+    // person before them — bhumi's `binod` belongs to someone called Siddhi.
+    // Nothing else moves when it changes: every record points at the internal
+    // user id, which does not change, so history stays with whoever did the
+    // work. Their live sessions are dropped, because the handle they signed in
+    // with no longer exists.
+    let nextLogin = u.login_id;
+    if (loginId !== undefined && u.login_id) {
+      const wanted = String(loginId || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+      if (!wanted) return res.status(400).json({ error: 'A user ID cannot be empty.' });
+      if (wanted.length < 3) return res.status(400).json({ error: 'A user ID needs at least 3 characters.' });
+      if (wanted !== u.login_id) {
+        const taken = await sql`SELECT 1 FROM users WHERE tenant_id = ${req.tenantId} AND login_id = ${wanted} AND id <> ${u.id} LIMIT 1`;
+        if (taken.length) return res.status(409).json({ error: 'Someone on this team already signs in with that ID.' });
+        nextLogin = wanted;
+      }
+    }
     const meta = { ...(u.metadata || {}), phone: normPhone, email: normEmail };
     await sql`
       UPDATE users SET name = ${cleanName}, phone = ${normPhone}, email = ${normEmail}, role = ${newRole},
-        email_verified = ${!!normEmail}, metadata = ${sql.json(meta)}
+        login_id = ${nextLogin}, email_verified = ${!!normEmail}, metadata = ${sql.json(meta)}
       WHERE id = ${u.id} AND tenant_id = ${req.tenantId}
     `;
+    if (nextLogin !== u.login_id) {
+      await revokeUserSessions(u.id);
+      audit({
+        tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
+        actor_label: null, action: 'user.login_id_changed', target_type: 'user', target_id: u.id,
+        summary: `User ID ${u.login_id} → ${nextLogin}`, metadata: { from: u.login_id, to: nextLogin },
+      });
+    }
     await sql`UPDATE crm_agents SET name = ${cleanName}, role = ${newRole}, metadata = ${sql.json(meta)} WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
-      actor_label: getContext()?.userId ?? 'admin', action: 'user.updated',
+      actor_label: null, action: 'user.updated',
       target_type: 'user', target_id: u.id, summary: `Updated ${cleanName}`, metadata: { role: newRole },
     });
-    return res.status(200).json({ success: true, agents: await getAgents() });
+    return res.status(200).json({ success: true, loginId: nextLogin, agents: await getAgents() });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to update user', message: err.message });
   }

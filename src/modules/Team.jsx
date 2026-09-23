@@ -317,9 +317,14 @@ function SeatModal({ store, user, onClose, onDone }) {
 }
 
 // Edit a person's details / access level. Login handle (login_id / seat) is not
-// changed here — that's the seat-reassign flow; this is name / contact / role.
+// changed here — it was fixed at creation, so a seat that changed hands left the
+// new person signing in as the person before them (bhumi's `binod` belongs to
+// someone called Siddhi). Changing it moves no data: every record points at the
+// internal user id. It does sign them out, because the handle they signed in
+// with no longer exists.
 function EditUserModal({ store, user, canManage, onClose, onDone }) {
   const [name, setName] = useState(user.name || '')
+  const [loginId, setLoginId] = useState(user.login_id || '')
   const [email, setEmail] = useState(user.email || '')
   const [phone, setPhone] = useState(String(user.phone || '').replace(/^\+91/, ''))
   const [role, setRole] = useState(user.role === 'owner' ? 'owner' : user.role)
@@ -330,8 +335,15 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
     if (!name.trim()) { store.toast('Name is required', 'warn'); return }
     if (needsEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { store.toast('An owner or manager needs a valid email', 'warn'); return }
     setSaving(true)
-    api.updateUser(user.id, { name: name.trim(), email: email.trim(), phone: phone.trim(), role })
-      .then(() => { store.toast(`${name.trim()} updated`); onDone() })
+    const nextId = loginId.trim().toLowerCase()
+    if (user.login_id && nextId.length < 3) { store.toast('A user ID needs at least 3 characters', 'warn'); return }
+    api.updateUser(user.id, { name: name.trim(), email: email.trim(), phone: phone.trim(), role, ...(user.login_id ? { loginId: nextId } : {}) })
+      .then(() => {
+        store.toast(user.login_id && nextId !== user.login_id
+          ? `${name.trim()} updated — they sign in as ${nextId} now`
+          : `${name.trim()} updated`)
+        onDone()
+      })
       .catch(err => { store.toast(cleanErr(err), 'warn'); setSaving(false) })
   }
   return (
@@ -339,9 +351,13 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
       <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
         <div className="m-head"><h3>Edit {user.name}</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
         <div className="m-content">
-          <Field label="User ID (used to sign in — fixed)">
-            <Input value={user.login_id || '—'} disabled readOnly />
-          </Field>
+          {user.login_id ? (
+            <Field label="User ID (used to sign in)" hint="Changing it signs them out; nothing else moves.">
+              <Input value={loginId} onChange={e => setLoginId(e.target.value)} placeholder="e.g. siddhi" />
+            </Field>
+          ) : (
+            <Field label="Signs in with"><Input value={user.email || '—'} disabled readOnly /></Field>
+          )}
           <Field label="Full name"><Input value={name} onChange={e => setName(e.target.value)} autoFocus /></Field>
           <Field label={needsEmail ? 'Email' : 'Email (optional)'}><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@firm.com" type="email" /></Field>
           <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
