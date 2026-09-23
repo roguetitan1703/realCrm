@@ -218,7 +218,7 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 
 ## Part 3 — A lead that comes back
 
-### 3.1 🟡 A repeat enquiry reopens the lead as New and shows in Today
+### 3.1 ✅ A repeat enquiry reopens the lead as New and shows in Today — `acd34da`
 - **Said:** if a lead enquires again it should be new again, and should come back
   in Today. Keep the Came back section, but a lead that came back must also be in
   Today.
@@ -232,7 +232,19 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 - **Answered:** "Came back" has **no time window**. It simply means the lead has
   enquired more than once. Its place in **Today** is what makes it actionable.
   (Replaces the "recent-only" line above.)
-- **Open:** on reopen, reassign or keep the previous agent?
+- **Answered by the code, unchanged:** the agent KEEPS the lead. Someone has
+  been working this person and yesterday's call is why the enquiry exists;
+  it is routed afresh only when nobody owns it or the owner has left.
+- **Shipped 23 Sep.** Rejected / Deal Closed → the firm's arrival stage on a new
+  enquiry session, written through updateLead so the timeline and the ledger
+  record it, with the rejection reason kept so the record reads "Was rejected —
+  <why>" beside a live status. Today carries a came-back-today flag, its own
+  group at the top of the phone screen, and Not yet contacted no longer counts
+  the same person twice. The "Came back" pill stays all-time, as the user asked.
+- **Open (paying clients, needs an OK):** bhumi's 9 leads that came back inside
+  30 days and one at Deal Closed are still closed — this fixes arrivals from
+  now on, not the backlog. A one-off reopen of those 10 is a write to their
+  data and has not been run.
 
 ---
 
