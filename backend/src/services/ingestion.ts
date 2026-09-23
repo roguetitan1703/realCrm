@@ -544,6 +544,26 @@ export async function processInboxRow(
           const reason = String((existing as any).rejection_reason || '');
           const { arrivalStage } = await deskConfigOf(integration.tenant_id);
 
+          // AND IT IS REOPENED, not merely described as live.
+          //
+          // `terminal` and `arrivalStage` were both computed here and neither
+          // was ever applied: the alert said "came back", the lead stayed
+          // Rejected, and every pile that keys off OPEN — Today, Not contacted,
+          // Going cold, the agent's own list — went on ignoring it. On bhumi,
+          // 9 leads that enquired again in 30 days were still sitting at
+          // Rejected and one at Deal Closed.
+          //
+          // Through updateLead so it is a stage change like any other: the
+          // timeline records it and the ledger records it. The rejection reason
+          // is deliberately kept — the record then reads "Was rejected —
+          // <why>" beside a live status, which is the thing an agent needs
+          // before they ring back.
+          if (terminal && existing.stage !== arrivalStage) {
+            await updateLead(existing.id, { stage: arrivalStage, preserveRejectionReason: true }, {
+              actorType: 'system', actorId: null, actorLabel: `${integration.provider} enquiry`,
+            } as any);
+          }
+
           // No separate `lead_repeat_rejected`. It was a second alert about
           // the same arrival, to a different audience, and its link was
           // `/leads/<id>` -- a path this app does not have, so tapping it went

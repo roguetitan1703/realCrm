@@ -589,6 +589,10 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     // this — a person who enquired again yesterday is not a three-week-old lead
     // — and the record keeps both, because "first received" is what a portal's
     // own report will be lined up against.
+    // "They enquired again today" — the feed sets it; elsewhere it is absent,
+    // which is not the same as false and is why this is undefined rather than
+    // a default (CLAUDE.md §3.1).
+    cameBackToday: r.came_back_today == null ? undefined : Boolean(r.came_back_today),
     lastEnquiryAt: r.last_enquiry_at == null ? undefined
       : (r.last_enquiry_at instanceof Date ? r.last_enquiry_at.toISOString() : String(r.last_enquiry_at)),
     // Portals they have come through SINCE the one on the row. Undefined where
@@ -2102,9 +2106,15 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // change: no lead on any tenant carried a reason while not rejected, so the
   // state this creates is always a reopen and never a leftover.
   const movingStage = patch.stage !== undefined && patch.stage !== oldLead.stage;
+  // `preserveRejectionReason` — for the one stage move nobody decided: a
+  // rejected lead that enquires AGAIN is reopened by the arrival itself (see
+  // ingestion.ts), and the first thing the agent ringing back needs is why it
+  // was closed the last time. Clearing it there would answer "came back" with
+  // "came back from where?".
+  const keepReason = patch.preserveRejectionReason === true;
   const rejectionReason = stage === REJECTED_STATUS
     ? (patch.rejectionReason ?? patch.rejection_reason ?? oldLead.rejectionReason ?? null)
-    : (movingStage ? null : (oldLead.rejectionReason ?? null));
+    : (movingStage && !keepReason ? null : (oldLead.rejectionReason ?? null));
 
   await sql`
     UPDATE crm_leads SET
@@ -3779,6 +3789,17 @@ export async function getLeadsSummary(opts: LeadFilterOpts = {}): Promise<any> {
 export async function getTodayFeed(mine?: boolean): Promise<any> {
   const t = tid();
   const scope = sql`AND ${leadScope(mine)}`;
+  // CAME BACK TODAY. Someone who enquired again since local midnight is the
+  // warmest row on the desk, and Today could not show them: the feed selects on
+  // stage, follow-ups and arrival date, and a lead that first arrived in July
+  // matches none of those however many times it comes back. The "Came back"
+  // pill on the Leads list counts them for all time, which answers a different
+  // question ("has this person ever repeated") and puts nothing in anyone's day.
+  const d0 = dayStart(await timezoneOf(t));
+  const CAME_BACK_TODAY = sql`EXISTS (SELECT 1 FROM crm_lead_enquiries e
+                                       WHERE e.tenant_id = crm_leads.tenant_id
+                                         AND e.lead_id = crm_leads.id
+                                         AND coalesce(e.last_at, e.created_at) >= ${d0})`;
   // LIMIT 200 over every open lead was the whole feed. Import a thousand and
   // "Not yet contacted" held the first two hundred of them, the group header
   // counted the rows it had rather than the rows that exist, and every other
@@ -3796,11 +3817,18 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
   // expression the going-cold pile is defined by, which is why a lead can be in
   // both and read the same number of days in each.
   const [leads, renewals, leadCounts, ownerCounts, ownerRows, quiet] = await Promise.all([
-    sql`SELECT * FROM crm_leads
+    sql`SELECT crm_leads.*,
+               (SELECT count(*)::int FROM crm_lead_enquiries e
+                 WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS enquiry_count,
+               (SELECT max(coalesce(e.last_at, e.created_at)) FROM crm_lead_enquiries e
+                 WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS last_enquiry_at,
+               ${CAME_BACK_TODAY} AS came_back_today
+          FROM crm_leads
         WHERE tenant_id = ${t} ${scope}
           AND ${OPEN}
           AND (${FOLLOWUP_PAST_DUE} OR follow_up IS NOT NULL OR agent_id IS NULL
-               OR stage = 'New' OR created_at > now() - interval '14 days')
+               OR stage = 'New' OR created_at > now() - interval '14 days'
+               OR ${CAME_BACK_TODAY})
         ORDER BY created_at DESC LIMIT 200`,
     // A tenancy that has ended, or ends inside the 60-day window the renewal
     // signal treats as due. Anything further out is not today's problem.
@@ -3811,7 +3839,11 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
         ORDER BY (config->'tenancy'->>'end')::date ASC LIMIT 50`,
     // The true size of each group, regardless of how many rows came back above.
     sql`SELECT count(*) FILTER (WHERE ${FOLLOWUP_PAST_DUE})::int AS overdue,
-               count(*) FILTER (WHERE stage = 'New')::int AS fresh,
+               count(*) FILTER (WHERE ${CAME_BACK_TODAY})::int AS came_back,
+               -- MINUS the ones that came back today, because the screen shows
+               -- those in their own group. A lead counted in two groups is two
+               -- groups disagreeing about one person (CLAUDE.md §3.3).
+               count(*) FILTER (WHERE stage = 'New' AND NOT ${CAME_BACK_TODAY})::int AS fresh,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned,
                count(*) FILTER (WHERE stage <> 'New' AND follow_up IS NULL AND NOT ${FOLLOWUP_PAST_DUE})::int AS no_next,
                count(*) FILTER (WHERE follow_up IS NOT NULL AND NOT ${FOLLOWUP_PAST_DUE})::int AS scheduled,
@@ -3828,7 +3860,7 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
     leads: leads.map(r => rowToLead(r)),
     renewals: renewals.map(rowToProperty),
     counts: {
-      overdue: lc.overdue ?? 0, fresh: lc.fresh ?? 0, unassigned: lc.unassigned ?? 0,
+      overdue: lc.overdue ?? 0, cameBack: lc.came_back ?? 0, fresh: lc.fresh ?? 0, unassigned: lc.unassigned ?? 0,
       noNext: lc.no_next ?? 0, scheduled: lc.scheduled ?? 0,
       quiet: lc.quiet ?? 0,
     },

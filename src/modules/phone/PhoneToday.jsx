@@ -264,7 +264,14 @@ export default function PhoneToday({ store, me, go, topBar }) {
   const todayFu = open
     .filter(l => l.followUp && !followUpOverdue(l.followUp) && l.followUp.date === 'Today')
     .sort((a, b) => timeRank(a.followUp.time) - timeRank(b.followUp.time))
-  const fresh = open.filter(l => l.stage === 'New')
+  // THEY ASKED AGAIN TODAY. The warmest rows on the desk, and Today could not
+  // show them: a lead that first arrived in July matches none of the feed's
+  // other reasons however many times it comes back. Kept out of the groups
+  // below so one person is in one place — a repeat enquiry that also happens to
+  // be New belongs here, where the row says so.
+  const cameBack = open.filter(l => l.cameBackToday)
+  const back = new Set(cameBack.map(l => l.id))
+  const fresh = open.filter(l => l.stage === 'New' && !back.has(l.id))
   const unassigned = open.filter(l => !l.agentId)
   const upcoming = open.filter(l => l.followUp && !followUpOverdue(l.followUp) && l.followUp.date !== 'Today')
 
@@ -280,6 +287,7 @@ export default function PhoneToday({ store, me, go, topBar }) {
     { key: 'cbLate', label: 'Late callbacks', kind: 'owner', rows: ownerRows.callbacksOverdue || [], count: oc.callbacksOverdue ?? 0, tone: 'overdue', screen: 'calling', segment: 'callbacks_overdue' },
     { key: 'today', label: 'Due today', rows: todayFu, count: todayFu.length },
     { key: 'cbToday', label: 'Callbacks today', kind: 'owner', rows: ownerRows.callbacksToday || [], count: oc.callbacksToday ?? 0, screen: 'calling', segment: 'callbacks_today' },
+    { key: 'cameBack', label: 'Came back today', rows: cameBack, count: c.cameBack ?? cameBack.length, filter: { seg: 'repeat_enquiry' } },
     { key: 'fresh', label: 'Not yet contacted', rows: fresh, count: c.fresh ?? fresh.length, filter: { stage: 'New' } },
     { key: 'toCall', label: 'Owners to call', kind: 'owner', rows: ownerRows.toCall || [], count: oc.toCall ?? 0, screen: 'calling', segment: 'to_call' },
     // Only the desk can hand work to someone, so only the desk is shown what
