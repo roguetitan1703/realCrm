@@ -584,6 +584,14 @@ export const PROPERTY_MODULE_SCHEMA = {
 
     // ---- Internal --------------------------------------------------------
     { key: 'unit', label: 'Unit / flat no.', type: 'text', section: 'internal' },
+    // THE OWNER'S NUMBER IS A FIELD. It was stored, editable in the Add owner
+    // modal, and absent from the record's own schema — so the one thing that
+    // makes the owner a person you can ring, and the thing the owner record is
+    // created from, could not be seen or corrected where every other fact about
+    // the flat is. Internal, and in NEVER_SHARED_FIELDS (lib/matching.js): a
+    // shared listing must never carry it.
+    { key: 'ownerPhone', label: 'Owner phone', type: 'text', section: 'internal' },
+    { key: 'ownerEmail', label: 'Owner email', type: 'text', section: 'internal' },
     { key: 'keyAccess', label: 'Key / access', type: 'text', section: 'internal' },
     // ---- Listing copy ----------------------------------------------------
     // The one thing no template can write: the client's own paragraph about
