@@ -2980,8 +2980,13 @@ async function recordAssignments(entries: AssignmentEntry[]): Promise<void> {
       'id', 'record_id', 'type', 'title', 'description', 'author', 'timestamp', 'metadata', 'tenant_id')}
       ON CONFLICT (id) DO NOTHING`;
 
-    const moved = list.filter(e => e.prevAgentId && e.agentId);
-    if (moved.length) await alertOnReassignLoop(moved.map(e => ({ recordId: e.recordId, toName: nameOf(e.agentId) })));
+    // NO LOOP CHECK HERE ANY MORE. It used to fire off every assignment, so a
+    // manager handing a project to a colleague, a seat changing hands or a
+    // leaver's queue being shared out all counted as the record "being passed
+    // around" — and each one pushed. The alert is about the ROTA bouncing a
+    // record nobody works, so it is raised by the idle sweep alone (see
+    // alertOnReassignLoop, called from sweepIdleLeads / sweepIdleOwners).
+    void nameOf;
   } catch (e: any) {
     console.warn('[Timeline] assignment event failed:', e?.message);
   }
@@ -3004,12 +3009,16 @@ async function alertOnReassignLoop(batch: { recordId: string; toName: string | n
   const [leads, owners, counts, rules] = await Promise.all([
     sql`SELECT id, name FROM crm_leads WHERE tenant_id = ${t} AND id IN ${sql(ids)}`,
     sql`SELECT id, name FROM crm_owners WHERE tenant_id = ${t} AND id IN ${sql(ids)}`,
-    // Hand-offs, not assignments: the arrival-time route and the unowned sweep
-    // both write an assignment row with no previous agent, and a lead going
-    // from nobody to somebody has not been passed on by anyone.
+    // AUTOMATIC HAND-OFFS ONLY — the ones the idle rule made itself
+    // (metadata.reason = 'sweep_idle'). A person moving a record is a decision,
+    // and counting decisions meant a firm reorganising — a project handed on, a
+    // seat reassigned, a leaver's queue shared out — read as records going in
+    // circles. What this alert is for is the rota moving the same record again
+    // and again because nobody works it.
     sql`SELECT record_id, count(*)::int AS n FROM crm_timeline_events
          WHERE tenant_id = ${t} AND type = 'assignment' AND record_id IN ${sql(ids)}
            AND coalesce(metadata->>'previousAgentId', '') <> ''
+           AND metadata->>'reason' = 'sweep_idle'
          GROUP BY 1`,
     getRoutingRules(),
   ]);
@@ -5044,6 +5053,8 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
   let n = 0;
   const tally = new Map<string, number>();
   const lost = new Map<string, number>();
+  /** What the rota moved on this pass, for the loop check below. */
+  const movedNow: { recordId: string; toName: string | null }[] = [];
   for (const lead of rows) {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${lead.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
     const agentId = await nextRoutedAgent();
@@ -5057,12 +5068,17 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
     });
     tally.set(agentId, (tally.get(agentId) || 0) + 1);
     lost.set(lead.agent_id, (lost.get(lead.agent_id) || 0) + 1);
+    movedNow.push({ recordId: lead.id, toName: name });
     n++;
   }
   await notifyAssignBatch(tenantId, tally, {
     type: 'lead_reassigned', noun: 'lead', verb: 'moved to you',
     body: `Nothing recorded on them for ${days} days.`, link: '?screen=leads',
   });
+  // The rota has now moved these. If it has done so to the same lead more times
+  // than the firm allows, that is the alert — raised here, where the automatic
+  // move happens, rather than off every assignment in the product.
+  if (movedNow.length) await alertOnReassignLoop(movedNow);
   // No `lead_moved_away`. Losing a lead to the idle rule is on the record's own
   // timeline as an assignment event, which is where somebody asking "why is this
   // not mine any more" actually looks. A feed row saying "3 leads left your desk"
@@ -5086,6 +5102,7 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
   `;
   let n = 0;
   const tally = new Map<string, number>();
+  const movedNow: { recordId: string; toName: string | null }[] = [];
   for (const owner of rows) {
     const agentId = await nextRoutedOwnerAgent();
     if (!agentId) break;
@@ -5174,9 +5191,11 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
       author: 'System', metadata: { reason: 'sweep_idle', days },
     });
     tally.set(agentId, (tally.get(agentId) || 0) + 1);
+    movedNow.push({ recordId: owner.id, toName: null });
     n++;
   }
   await notifyOwnerBatch(tenantId, tally, 'owner_reassigned', 'moved to you');
+  if (movedNow.length) await alertOnReassignLoop(movedNow);
   return n;
 }
 
