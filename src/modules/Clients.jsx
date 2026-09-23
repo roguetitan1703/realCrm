@@ -55,10 +55,18 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
       // line. Same reading as the Leads list, so one person cannot be
       // described two ways on two screens.
       ? [latestPlus(r.rawLead?.req?.config), latestPlus(r.rawLead?.req?.locality), budgetRange(r.rawLead?.req)].filter(Boolean).join(' · ')
-      : r.listings === 1
-        ? `1 listing · ${r.firstTitle || ''}${r.firstType ? ` (${r.firstType})` : ''}`
-        : `${r.listings} listings across ${(r.localities || []).join(', ')}`,
-    signal: r.kind === 'demand' ? <StageTag stage={r.stage} /> : <StatusTag status="Active owner" />,
+      // WHICH FLAT, first. An owner is someone to ring about a specific unit,
+      // and until now this line could only say how many listings they had —
+      // the flat number lived inside the record and nowhere else.
+      : [
+          [r.project, r.unit].filter(Boolean).join(' · '),
+          r.listings === 1
+            ? `1 listing · ${r.firstTitle || ''}${r.firstType ? ` (${r.firstType})` : ''}`
+            : r.listings > 1 ? `${r.listings} listings` : null,
+        ].filter(Boolean).join(' — ') || r.locality || '',
+    // Their real stage in the calling queue, not a fixed "Active owner" tag
+    // that said the same thing about everybody.
+    signal: r.kind === 'demand' ? <StageTag stage={r.stage} /> : <StageTag stage={r.stage || 'New'} />,
     onClick: () => setSelClient(r),
   }))
   const counts = source.counts || {}
@@ -66,9 +74,12 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
   // An owner's portfolio, fetched when one is opened. Owners are derived from
   // the listings, so "their properties" is a query on owner name -- it was an
   // array the row carried only because every property was already in memory.
+  // Their listings, by the link on the listing — not by searching their name,
+  // which returned every property that merely mentioned it and nothing at all
+  // for an owner whose name we do not hold.
   const { data: portfolio } = useServerData(
-    () => (selClient?.kind === 'supply' && selClient.name)
-      ? api.listProperties({ q: selClient.name, limit: 50 }).then(r => r?.data || [])
+    () => (selClient?.kind === 'supply' && selClient.ownerId)
+      ? api.listProperties({ ownerId: selClient.ownerId, limit: 50 }).then(r => r?.data || [])
       : Promise.resolve([]),
     [selClient?.id], [])
 
@@ -80,7 +91,9 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
   // Seller/Landlord under Owners. Not a flat 5-way mix of both stores.
   const roleOptions = tab === 'clients'
     ? [{ key: 'all', label: 'All' }, { key: 'Buyer', label: 'Buyers' }, { key: 'Tenant', label: 'Tenants' }]
-    : [{ key: 'all', label: 'All' }, { key: 'Seller', label: 'Sellers' }, { key: 'Landlord', label: 'Landlords' }]
+    // "Owner" is someone on the calling list with no listing of ours yet, which
+    // for a firm that has just imported its first list is all of them.
+    : [{ key: 'all', label: 'All' }, { key: 'Owner', label: 'No listing yet' }, { key: 'Seller', label: 'Sellers' }, { key: 'Landlord', label: 'Landlords' }]
   const segs = roleOptions.map(o => ({
     ...o, on: seg === o.key, count: counts[o.key] ?? 0, onClick: () => setSegP(o.key),
   }))

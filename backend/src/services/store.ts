@@ -1755,32 +1755,56 @@ export async function listContacts(opts: {
     };
   }
 
-  // Owners: one row per distinct owner name across the listings.
-  const where: any[] = [sql`tenant_id = ${t}`, sql`coalesce(owner_name, '') <> ''`];
-  if (q) where.push(sql`(lower(owner_name) LIKE ${like} OR coalesce(owner_phone, '') LIKE ${like})`);
+  // ── Owners: the RECORDS, not a GROUP BY over typed-in text ───────────────
+  //
+  // This used to group crm_properties by `owner_name`: two people with one name
+  // merged into a single contact, one person spelled two ways became two, the
+  // phone fell back to the literal '+91 —' when a listing had none, and every
+  // row claimed activity 2 hours ago from a hardcoded `minsAgo: 120`. It also
+  // could not show which flat, which is the first thing a caller needs.
+  //
+  // Owners are rows in crm_owners now — the same records the Calling queue
+  // works, carrying the flat, the stage, the agent and a real last activity —
+  // and a listing's owner becomes one of them when it is entered
+  // (linkListingOwner). One person per record; their listings are counted
+  // through the link.
+  const where: any[] = [sql`o.tenant_id = ${t}`];
+  if (q) where.push(sql`(lower(coalesce(o.name, '')) LIKE ${like} OR coalesce(o.phone, '') LIKE ${like} OR lower(coalesce(o.project, '')) LIKE ${like} OR lower(coalesce(o.unit_no, '')) LIKE ${like})`);
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
 
   const grouped = await sql`
-    SELECT owner_name AS name,
-           max(owner_phone) AS phone,
-           max(owner_email) AS email,
-           max(locality) AS locality,
-           count(*)::int AS listings,
-           count(*) FILTER (WHERE deal = 'sale')::int AS sale,
-           count(*) FILTER (WHERE deal = 'rent')::int AS rent,
-           array_remove(array_agg(DISTINCT locality), NULL) AS localities,
-           (array_agg(title ORDER BY created_at DESC))[1] AS first_title,
-           (array_agg(type ORDER BY created_at DESC))[1] AS first_type
-      FROM crm_properties WHERE ${clause}
-     GROUP BY owner_name ORDER BY 5 DESC`;
-
-  const roleOf = (r: any) => (r.sale > 0 && r.rent > 0) ? 'Seller / Landlord' : (r.rent > 0 ? 'Landlord' : 'Seller');
-  const all = grouped.map((r: any) => ({
-    id: 'owner-' + String(r.name).replace(/\s+/g, '-'), kind: 'supply',
-    role: roleOf(r), name: r.name, phone: r.phone || '+91 —', email: r.email || '',
-    locality: r.locality || '', minsAgo: 120, listings: r.listings,
-    localities: r.localities || [], firstTitle: r.first_title, firstType: r.first_type,
-  }));
+    SELECT o.*,
+           count(p.id)::int AS listings,
+           count(p.id) FILTER (WHERE p.deal = 'sale')::int AS sale,
+           count(p.id) FILTER (WHERE p.deal = 'rent')::int AS rent,
+           (array_agg(p.title ORDER BY p.created_at DESC))[1] AS first_title,
+           (array_agg(p.type ORDER BY p.created_at DESC))[1] AS first_type
+      FROM crm_owners o
+      LEFT JOIN crm_properties p ON p.owner_contact_id = o.id AND p.tenant_id = o.tenant_id
+     WHERE ${clause}
+     GROUP BY o.id
+     ORDER BY count(p.id) DESC, o.updated_at DESC`;
+  // A role is a fact about their listings. With none on file yet — the calling
+  // list a firm imports before it has taken a single flat on — "Seller" is a
+  // claim nobody made, so the role stays Owner until a listing says otherwise.
+  const roleOf = (r: any) => (r.sale > 0 && r.rent > 0) ? 'Seller / Landlord'
+    : r.rent > 0 ? 'Landlord' : r.sale > 0 ? 'Seller' : 'Owner';
+  const all = grouped.map((r: any) => {
+    const owner = rowToOwner(r);
+    // WHEN SOMETHING LAST HAPPENED, from the record — the call, the callback
+    // that was set, or the day it arrived. It was hardcoded to two hours.
+    const last = r.last_call_at || r.updated_at || r.created_at;
+    return {
+      id: 'owner-' + owner.id, kind: 'supply', ownerId: owner.id,
+      role: roleOf(r), name: owner.name, phone: owner.phone, email: owner.email || '',
+      project: owner.project || '', unit: owner.unitLabel || '', stage: owner.stage,
+      agentId: owner.agentId, callbackAt: owner.callbackAt, lastCallAt: owner.lastCallAt,
+      locality: owner.locality || '',
+      minsAgo: last ? Math.max(0, Math.round((Date.now() - new Date(last).getTime()) / 60000)) : null,
+      listings: r.listings, localities: owner.locality ? [owner.locality] : [],
+      firstTitle: r.first_title, firstType: r.first_type,
+    };
+  });
   const matchesRole = (rRole: string) => role === 'all'
     || (role === 'Seller' ? (rRole === 'Seller' || rRole === 'Seller / Landlord')
       : role === 'Landlord' ? (rRole === 'Landlord' || rRole === 'Seller / Landlord')
@@ -1793,6 +1817,10 @@ export async function listContacts(opts: {
       all: all.length,
       Seller: all.filter(r => r.role === 'Seller' || r.role === 'Seller / Landlord').length,
       Landlord: all.filter(r => r.role === 'Landlord' || r.role === 'Seller / Landlord').length,
+      // People on the calling list with no listing of ours yet — for both
+      // paying clients that is every owner they hold, so it cannot be a state
+      // with no pill (CLAUDE.md §4: every entry point lands on a visible control).
+      Owner: all.filter(r => r.role === 'Owner').length,
     },
     page, limit,
   };
@@ -3926,7 +3954,7 @@ export async function getProperties(): Promise<any[]> {
  * because a pager needs to know how many pages there are without fetching them.
  */
 export async function listProperties(opts: {
-  page?: number; limit?: number; q?: string;
+  page?: number; limit?: number; q?: string; ownerId?: string;
   status?: string; deal?: string; type?: string; locality?: string; project?: string;
   // The canonical facets. The filter bar has always offered these; while the
   // browser held every listing it filtered them itself, so they were never
@@ -3955,6 +3983,10 @@ export async function listProperties(opts: {
   // The filter UI is multi-select — "Available or Blocked" is one filter, not
   // two — so every value filter accepts a comma-separated list and matches any
   // of them. A single value is just a list of one.
+  // Whose listings — by the owner RECORD, not by their name. Searching the name
+  // was the only way to answer "their properties" while an owner was a string,
+  // and it returned every listing that merely mentioned it.
+  if (opts.ownerId) where.push(sql`owner_contact_id = ${String(opts.ownerId)}`);
   const many = (v?: string) => String(v || '').split(',').map(s => s.trim()).filter(Boolean);
   const status = many(opts.status), deal = many(opts.deal);
   const type = many(opts.type), locality = many(opts.locality);
@@ -4235,6 +4267,11 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
     RETURNING *;
   `;
   await applyC4Fields(newId, propData);
+  // The owner on the form becomes a real owner record, linked to this flat.
+  const ownerRecordId = await linkListingOwner(newId, {
+    ownerName, ownerPhone, ownerEmail, project, tower: wing, unitNo, config: type,
+  }, ctx);
+  if (ownerRecordId) await sql`UPDATE crm_properties SET owner_contact_id = ${ownerRecordId} WHERE id = ${newId} AND tenant_id = ${tid()}`;
   const refreshed = await sql`SELECT * FROM crm_properties WHERE id = ${newId} AND tenant_id = ${tid()}`;
   const created = rowToProperty(refreshed[0] || rows[0]);
   audit({
@@ -4243,6 +4280,91 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
     summary: `Property "${title}" created`, metadata: { after: created }, ip: ctx.ip, user_agent: ctx.userAgent,
   });
   return created;
+}
+
+/**
+ * THE OWNER OF A LISTING IS A PERSON, NOT TWO TEXT BOXES.
+ *
+ * Adding an owner on a property wrote `owner_name` and `owner_phone` onto the
+ * listing and stopped there. So the "owner" never reached Calling, had no unit,
+ * no stage, no history and no agent — and Contacts → Owners built its rows by
+ * grouping that text, which is how a client's single listing showed up as a
+ * contact called "abc" with a made-up "2h ago". Measured 2026-09-23: bhumi had
+ * 2 listings carrying an owner name and 0 owner records; mahalaxmi 1 and 0.
+ *
+ * Now the listing's owner IS an owner record, matched on the flat it is about
+ * (project + tower + unit — the same identity the import uses), falling back to
+ * the phone number when the listing does not say which flat. An existing record
+ * is linked, never overwritten: the calling queue's stage, callback and agent
+ * belong to whoever has been working it, and a listing edit must not reset them.
+ * The only field filled in is one that is empty.
+ *
+ * Returns the owner record's id, which the listing keeps in `owner_contact_id`.
+ */
+export async function linkListingOwner(propertyId: string, data: {
+  ownerName?: string | null; ownerPhone?: string | null; ownerEmail?: string | null;
+  project?: string | null; tower?: string | null; unitNo?: string | null; config?: string | null;
+  /** what this listing said the owner was called before this edit, if anything */
+  prevName?: string | null;
+}, ctx: ActorCtx): Promise<string | null> {
+  const phone = String(data.ownerPhone || '').trim();
+  const name = String(data.ownerName || '').trim();
+  // Nothing to link. A name with no number is not a person anyone can call, and
+  // inventing a record for it is what filled Contacts with rows nobody could use.
+  if (!phone) return null;
+  const t = tid();
+  const ten = phone.replace(/\D/g, '').slice(-10);
+
+  const [byUnit] = data.unitNo
+    ? await sql`SELECT id FROM crm_owners
+         WHERE tenant_id = ${t} AND lower(coalesce(project, '')) = lower(${data.project || ''})
+           AND lower(coalesce(tower, '')) = lower(${data.tower || ''})
+           AND lower(coalesce(unit_no, '')) = lower(${data.unitNo})
+         LIMIT 1`
+    : [];
+  // THE FLAT IS THE IDENTITY, exactly as it is in the import: one owner with
+  // three flats is three calling rows, because a call is about a unit. So the
+  // phone is only asked when the listing does not say which flat — matching on
+  // it while a unit is known would fold this listing's owner into the row for
+  // their OTHER flat, and a call about 1802 would be logged against 1603.
+  // (One person still appearing as several rows is what Phase B of the
+  // Contacts rethink resolves — see docs/specs/contacts-leads.md.)
+  const [byPhone] = (byUnit || data.unitNo) ? [] : await sql`
+    SELECT id FROM crm_owners
+     WHERE tenant_id = ${t} AND right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) = ${ten}
+       AND coalesce(unit_no, '') = ''
+     ORDER BY created_at LIMIT 1`;
+  const existing = byUnit || byPhone;
+
+  if (existing) {
+    // Fill the blanks only. COALESCE on the stored value, so a record someone
+    // has been working keeps every word of what they put in it.
+    // A CORRECTION FOLLOWS ITS SOURCE, an edit elsewhere does not. If the
+    // record still holds the name this listing gave it, fixing the spelling on
+    // the listing fixes it here too; if someone has since put a different name
+    // on the calling record, that is the person who spoke to them and it wins.
+    const correcting = Boolean(name && data.prevName && data.prevName.trim());
+    await sql`
+      UPDATE crm_owners SET
+        name = CASE WHEN ${correcting} AND lower(coalesce(name, '')) = lower(${(data.prevName || '').trim()})
+                    THEN ${name}
+                    ELSE coalesce(nullif(name, ''), ${name || null}) END,
+        email = coalesce(email, ${data.ownerEmail || null}),
+        project = coalesce(nullif(project, ''), ${data.project || null}),
+        tower = coalesce(nullif(tower, ''), ${data.tower || null}),
+        unit_no = coalesce(nullif(unit_no, ''), ${data.unitNo || null}),
+        config = coalesce(nullif(config, ''), ${data.config || null}),
+        updated_at = NOW()
+      WHERE id = ${existing.id} AND tenant_id = ${t}`;
+    return existing.id;
+  }
+
+  const [made] = await createOwnersBatch([{
+    name: name || null, phone, email: data.ownerEmail || null,
+    project: data.project || null, tower: data.tower || null, unitNo: data.unitNo || null,
+    config: data.config || null, source: 'Property record',
+  }], ctx);
+  return made?.id || null;
 }
 
 // First-class columns on crm_properties. Anything else in a patch is a config (JSONB) field.
@@ -4376,6 +4498,16 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
     WHERE id = ${id} AND tenant_id = ${tid()} RETURNING *;
   `;
   await applyC4Fields(id, patch);
+  // Same as the create path: an owner typed onto a listing is a person to call.
+  // Only when the owner fields actually changed — a price edit must not touch
+  // the calling queue.
+  if (ownerName !== before.owner || ownerPhone !== before.ownerPhone) {
+    const ownerRecordId = await linkListingOwner(id, {
+      ownerName, ownerPhone, ownerEmail, project, tower: wing, unitNo, config: type,
+      prevName: before.owner || null,
+    }, ctx);
+    if (ownerRecordId) await sql`UPDATE crm_properties SET owner_contact_id = ${ownerRecordId} WHERE id = ${id} AND tenant_id = ${tid()}`;
+  }
   const refreshed = await sql`SELECT * FROM crm_properties WHERE id = ${id} AND tenant_id = ${tid()}`;
   const updated = rowToProperty(refreshed[0] || rows[0]);
   audit({

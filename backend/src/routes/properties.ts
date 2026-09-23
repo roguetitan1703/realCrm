@@ -50,6 +50,8 @@ propertiesRouter.get('/', async (req: Request, res: Response) => {
       ownership: str(q.ownership),
       transaction: str(q.transaction),
       excludeId: str(q.excludeId),
+      // Whose listings, by owner record — see listProperties.
+      ownerId: str(q.ownerId),
     });
     return res.status(200).json({
       success: true, data: rows, total, page, limit,

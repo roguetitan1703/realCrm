@@ -18,7 +18,8 @@
     "test:ingest": "node scripts/ingest-conformance.mjs",
     "test:leadflows": "tsx scripts/ingest-lead-flows.mjs",
     "seed:dev:login": "tsx backend/src/scripts/seed-dev-login.ts",
-    "keys:check": "tsx backend/src/scripts/integration-keys.ts"
+    "keys:check": "tsx backend/src/scripts/integration-keys.ts",
+    "link:owners": "tsx backend/src/scripts/link-listing-owners.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1098.0",
