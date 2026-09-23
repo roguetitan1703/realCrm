@@ -129,3 +129,101 @@ follow_up · note), `at`, `agent`, `remark`, `outcome?`, `photo_url?`,
 
 ## Remaining confirmations
 _None — sealed._
+
+---
+
+# 2026-09-23 — the rethink
+
+Reopened by the user ("it's also the time to rethink the contacts — client /
+owners… it needs importance now"). **This revisits Q3 above, which was answered
+"no cross-linking, keep them separate" in July.** That answer is quoted here so
+the change is a decision and not a drift.
+
+## What Contacts actually is today
+
+| | Where it comes from |
+|---|---|
+| Contacts → **Clients** | `crm_leads`, one row per lead |
+| Contacts → **Owners** | a `GROUP BY owner_name` over `crm_properties` — **text on a listing, not a record** |
+| **Calling** (the owner queue) | `crm_owners`, a third table, linked to neither |
+
+So "owner" means two unrelated things: a name typed on a listing, and a row in
+the calling list. Nothing joins them, and nothing joins either to the lead who
+is the same human being.
+
+### Measured, production, 2026-09-23
+
+| | bhumi | mahalaxmi | delpat (test) |
+|---|---|---|---|
+| leads | 671 | 28 | 94 |
+| calling rows (`crm_owners`) | **0** | **0** | 732 |
+| listings carrying an owner name | **2** | **1** | 5,896 (5 distinct names) |
+| people who are both a lead and a listing's owner | 0 | 0 | 3 |
+
+**Both paying clients have an Owners tab built on 2 and 1 rows of typed text.**
+Mahalaxmi's single one is the "abc" the user reported: adding an owner on a
+property writes two text fields on that listing and creates **no owner record at
+all**, so it never reaches Calling, has no unit, no stage and no history.
+
+### What the Owners tab invents (store.ts `listContacts`)
+
+- `phone: r.phone || '+91 —'` — a phone number that does not exist
+- `minsAgo: 120` — **hardcoded**; every row claims activity two hours ago
+- grouped by `owner_name`, so two people with one name merge into one row and
+  one person spelled two ways becomes two
+- no unit, which is the first thing a caller needs (1.5 / 6.1)
+
+## The model
+
+**A person is one identity per firm, keyed by phone.** Everything else points at
+it. Nothing is copied.
+
+```
+crm_contacts   id, tenant_id, phone_norm (unique per tenant), phone, name,
+               email, do_not_call, created_at, updated_at
+      ▲            ▲                    ▲
+crm_leads     crm_owners          crm_properties
+.contact_id   .contact_id         .owner_contact_id   ← column already exists
+```
+
+- **Roles are derived, never stored.** Has open leads → buyer/tenant. Owns
+  listings or calling rows → seller/landlord. Both → both. A role is a fact
+  about their records, and storing it is how it goes stale.
+- **The three work surfaces do not change.** Leads stays the demand queue,
+  Calling stays the supply queue, and **Contacts becomes the directory**: search
+  any number, see the whole person. It is a desk screen; the agent on a phone
+  works Today, Leads and Calling and does not browse.
+- **Adding an owner on a property creates a real owner record** carrying the
+  listing's project, tower and unit, linked both ways.
+
+### What it buys, in order of what it is worth
+
+1. **"Who is this calling me?"** — one lookup answers "owner of B-1603, and he
+   enquired about a 2 BHK in June".
+2. **A portal lead from a number we already own** is flagged at arrival. A firm
+   whose business is getting flats to manage needs to know the enquiry is from
+   an owner they are already calling.
+3. **Do not call is honoured once**, for every row that person has. Today it is
+   set on a calling row and a lead follow-up still goes out.
+4. **The Owners tab stops inventing** phones and activity times.
+
+## Phases
+
+- **A — stop the fiction (small, ships with Part 1).** Adding an owner on a
+  property creates/links a real `crm_owners` row with project/tower/unit;
+  Contacts → Owners reads real rows (unit, stage, agent, real last activity);
+  `minsAgo: 120` and `'+91 —'` are gone.
+- **B — the identity.** `crm_contacts` + backfill from existing phones + the
+  person page + cross-links + one do-not-call.
+- **C — housekeeping.** Merging two contacts, and what a shared family or office
+  number means.
+
+## Open, for the user
+
+1. **Does the identity change** from July's "two separate records" to one person
+   with derived roles? Everything above assumes yes.
+2. **Is a contact a phone number?** A family or an office sharing one number
+   becomes one contact. The alternative is name + phone, which splits the same
+   person whenever a spelling differs.
+3. **Does Contacts stay a directory** (search and read), or does it need work
+   actions of its own? Today it half-does both.

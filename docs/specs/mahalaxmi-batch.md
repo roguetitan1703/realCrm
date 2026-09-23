@@ -294,8 +294,10 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 
 ## Part 6 — Contacts rethink (clients / owners)
 
-The user will lead this discussion. It's important now, so nothing here gets
-built before that conversation.
+**The thinking is written up: [contacts-leads.md](./contacts-leads.md#2026-09-23--the-rethink)**
+— what Contacts is today, what it invents, the measured numbers for both paying
+clients, the proposed one-person identity, and the three questions for the user.
+Phase A ships with Part 1; B and C wait on answer 1.
 
 ### 6.1 ⬜ Unit number not visible at a glance in Contacts → Owners
 - **Said:** the owners created while adding properties show other information,
