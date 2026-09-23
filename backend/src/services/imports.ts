@@ -275,6 +275,9 @@ export async function previewImport(id: string, mapping: Record<string, string>)
   const counts = { total: rows.length, new: 0, repeatedInFile: 0, alreadyOnFile: 0, unusable: 0 };
   const reasons: Record<string, number> = {};
   const sample: any[] = [];
+  /** How many rows of each group the review table gets to show. */
+  const PER_STATUS = 50;
+  const perStatus = new Map<string, number>();
   for (const r of rows as any[]) {
     const p = prepareRow(kind, r.raw, mapping);
     let status: string, reason: string | null = null;
@@ -282,8 +285,18 @@ export async function previewImport(id: string, mapping: Record<string, string>)
     else if (p.key && seen.has(p.key)) { status = 'repeatedInFile'; reason = 'Same unit earlier in this file'; counts.repeatedInFile++; }
     else if (p.key && onFile.has(p.key)) { status = 'alreadyOnFile'; reason = 'Already on file'; counts.alreadyOnFile++; }
     else { status = 'new'; counts.new++; if (p.key) seen.add(p.key); }
-    if (sample.length < 50) sample.push({ rowNo: r.row_no, status, reason, record: p.ok ? p.record : null, raw: r.raw });
+    // A SAMPLE OF EACH GROUP, not the first 50 rows of the file. The review
+    // table filters by status, and taking the head of the file meant the
+    // "cannot import" tab showed 3 rows under a count of 20 — the other 17 were
+    // further down the sheet. Per group, so every tab has something in it and
+    // the counts above are still the whole file's.
+    const room = perStatus.get(status) || 0;
+    if (room < PER_STATUS) {
+      perStatus.set(status, room + 1);
+      sample.push({ rowNo: r.row_no, status, reason, record: p.ok ? p.record : null, raw: r.raw });
+    }
   }
+  sample.sort((a, b) => a.rowNo - b.rowNo);
   await sql`UPDATE crm_import_jobs SET mapping = ${sql.json(mapping)} WHERE id = ${id} AND tenant_id = ${t}`;
   return { counts, reasons, sample };
 }

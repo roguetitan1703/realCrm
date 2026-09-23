@@ -398,7 +398,11 @@ export default function ImportPage({ store, go, sel, topBar }) {
                   </div>
                 )}
                 <div className="imp-review-filters">
-                  {[['all', `All ${Math.min(counts.total, 50)} shown`], ['new', 'New'], ['alreadyOnFile', 'Already on file'], ['repeatedInFile', 'Repeated'], ['unusable', 'Cannot import']].map(([k, label]) => (
+                  {/* The counts are the WHOLE file; the table below is a sample
+                      of each group (see previewImport). Saying so on the chip is
+                      what stops "20 cannot import" reading as a lie when four
+                      are listed. */}
+                  {[['all', 'All'], ['new', `New ${counts.new}`], ['alreadyOnFile', `Already on file ${counts.alreadyOnFile}`], ['repeatedInFile', `Repeated ${counts.repeatedInFile}`], ['unusable', `Cannot import ${counts.unusable}`]].map(([k, label]) => (
                     <button key={k} className={'imp-fchip ' + k + (filterStatus === k ? ' on' : '')} onClick={() => setFilterStatus(k)}>{label}</button>
                   ))}
                 </div>
@@ -428,7 +432,18 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     </tbody>
                   </table>
                 </div>
-                {counts.total > 50 && <div className="imp-unmapped">Showing the first 50 rows. The counts above cover all {counts.total}.</div>}
+                {/* What this table is: a sample, and of what. */}
+                <div className="imp-unmapped">
+                  {(() => {
+                    const inGroup = filterStatus === 'all' ? counts.total
+                      : filterStatus === 'new' ? counts.new
+                      : filterStatus === 'alreadyOnFile' ? counts.alreadyOnFile
+                      : filterStatus === 'repeatedInFile' ? counts.repeatedInFile : counts.unusable
+                    return shown.length < inGroup
+                      ? `Showing ${shown.length} of ${inGroup}. Every row is checked — the counts above cover the whole file, and after the import you can download every row that did not land.`
+                      : `Showing all ${inGroup}.`
+                  })()}
+                </div>
               </Panel>
             )}
 
