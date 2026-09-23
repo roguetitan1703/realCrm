@@ -348,6 +348,11 @@ function rowToAgent(r: any): any {
     avatar: r.avatar,
     role: r.role || 'agent',
     dutyStatus: r.duty_status || 'ACTIVE',
+    // SUSPENDED IS NOT OFF DUTY. Off duty is "not today"; suspended is "no
+    // longer working here", and the pickers were excluding only the first — so
+    // a suspended person could still be handed a lead they can never open.
+    // Comes from users.status, which is where suspension is decided.
+    suspended: String(r.user_status || '').toLowerCase() === 'suspended',
     ...(r.metadata || {}),
   };
 }
@@ -3528,6 +3533,108 @@ export async function deleteOwner(id: string, ctx: ActorCtx = SYSTEM_CTX): Promi
   return res.count > 0;
 }
 
+/**
+ * ============================================================================
+ * DISTRIBUTE — hand one person's open work to several people at once
+ * ============================================================================
+ * WHAT THIS REPLACES. `POST /team/users/:id/reassign-leads` was one UPDATE with
+ * no permission check (any signed-in user could call it), no filter (it moved
+ * rejected and closed leads along with the live ones), no history (a lead
+ * changed hands with nothing on its timeline), and one target. Meanwhile
+ * suspending somebody moved nothing at all: bhumi has a suspended agent holding
+ * 63 open leads that nobody is working and nothing flags.
+ *
+ * The rules:
+ *   • OPEN WORK ONLY. A rejected lead does not need a new owner, and moving one
+ *     would put closed business back in somebody's queue.
+ *   • The person picks WHAT moves — leads, the calling list, or both. They are
+ *     different jobs and a firm may want only one of them handed over.
+ *   • Several targets, split in rotation, in a stable order, so the same call
+ *     twice gives the same answer.
+ *   • Every move goes through bulkAssignLeads / bulkAssignOwners, which record
+ *     the assignment on each record and tell the person who received it. This
+ *     function decides WHO GETS WHAT and nothing else.
+ *   • Suspended and departed people cannot receive work. Checked here, on the
+ *     server, because a picker that hides them is a convenience, not a rule.
+ * ============================================================================
+ */
+export async function distributeWork(opts: {
+  fromUserId: string;
+  targets: string[];
+  kinds?: ('leads' | 'owners')[];
+}, ctx: ActorCtx = SYSTEM_CTX): Promise<{
+  leads: number; owners: number; perTarget: { id: string; name: string | null; leads: number; owners: number }[];
+}> {
+  const who = getContext();
+  if (who?.role === 'agent') throw new ForbiddenError('Handing work over is done from the desk.');
+  const t = tid();
+  const kinds = opts.kinds?.length ? opts.kinds : ['leads', 'owners'];
+
+  const live = await sql`
+    SELECT id, name FROM users
+     WHERE tenant_id = ${t} AND id IN ${sql([...new Set(opts.targets.filter(Boolean))])}
+       AND deleted_at IS NULL AND lower(coalesce(status, 'active')) = 'active'`;
+  if (!live.length) throw new ForbiddenError('Pick at least one active person to hand the work to.');
+  // The order the caller gave, keeping only the people who may hold work — so
+  // the split is predictable and a suspended name silently dropped cannot
+  // change who gets what.
+  const targets = opts.targets.filter(id => live.some((u: any) => u.id === id));
+
+  const perTarget = targets.map(id => ({
+    id, name: (live.find((u: any) => u.id === id) as any)?.name ?? null, leads: 0, owners: 0,
+  }));
+
+  /** Deal the ids out one each, in turn. */
+  const deal = (ids: string[]) => {
+    const out = new Map<string, string[]>(targets.map(id => [id, []]));
+    ids.forEach((recordId, i) => out.get(targets[i % targets.length])!.push(recordId));
+    return out;
+  };
+
+  let leads = 0, owners = 0;
+  if (kinds.includes('leads')) {
+    const rows = await sql`
+      SELECT id FROM crm_leads
+       WHERE tenant_id = ${t} AND agent_id = ${opts.fromUserId} AND ${OPEN}
+       ORDER BY created_at`;
+    for (const [target, ids] of deal(rows.map((r: any) => r.id))) {
+      if (!ids.length) continue;
+      const n = await bulkAssignLeads(ids, target, ctx);
+      leads += n;
+      const slot = perTarget.find(p => p.id === target); if (slot) slot.leads = n;
+    }
+  }
+  if (kinds.includes('owners')) {
+    const rows = await sql`
+      SELECT id FROM crm_owners
+       WHERE tenant_id = ${t} AND agent_id = ${opts.fromUserId} AND ${OWNER_OPEN}
+       ORDER BY created_at`;
+    for (const [target, ids] of deal(rows.map((r: any) => r.id))) {
+      if (!ids.length) continue;
+      const n = await bulkAssignOwners(ids, target, ctx);
+      owners += n;
+      const slot = perTarget.find(p => p.id === target); if (slot) slot.owners = n;
+    }
+  }
+
+  audit({
+    tenant_id: t, actor_type: ctx.actorType || 'user', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'work.distributed', target_type: 'user', target_id: opts.fromUserId,
+    summary: `${leads} lead(s) and ${owners} calling record(s) handed to ${perTarget.length} person(s)`,
+    metadata: { kinds, targets, perTarget }, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return { leads, owners, perTarget };
+}
+
+/** What one person is still holding — the question the suspend and hand-over
+ *  screens have to answer before they can offer to move anything. */
+export async function heldWork(userId: string): Promise<{ leads: number; owners: number }> {
+  const t = tid();
+  const [l] = await sql`SELECT count(*)::int AS n FROM crm_leads WHERE tenant_id = ${t} AND agent_id = ${userId} AND ${OPEN}`;
+  const [o] = await sql`SELECT count(*)::int AS n FROM crm_owners WHERE tenant_id = ${t} AND agent_id = ${userId} AND ${OWNER_OPEN}`;
+  return { leads: l?.n ?? 0, owners: o?.n ?? 0 };
+}
+
 /** Same shape as bulkAssignLeads: one UPDATE, notify the new owner-caller. */
 export async function bulkAssignOwners(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
   const who = getContext();
@@ -3564,7 +3671,9 @@ export async function bulkAssignOwners(ids: string[], agentId: string | null, ct
     notify({
       userId: agentId, type: 'owner_reassigned', push: true,
       data: { n },
-      link: '?screen=clients&tab=owners',
+      // Calling, not Contacts: Contacts is the people whose property we manage,
+      // and a calling record handed over is work in the queue.
+      link: '?screen=calling',
     }).catch(err => console.warn('[Notify] owner bulk assign failed:', err?.message));
   }
   return n;
@@ -4603,7 +4712,7 @@ export async function getAgents(): Promise<any[]> {
   // crm_agents row is kept so historical lead attribution still resolves. A
   // LEFT JOIN keeps any legacy agent that has no users row at all.
   const rows = await sql`
-    SELECT a.* FROM crm_agents a
+    SELECT a.*, u.status AS user_status FROM crm_agents a
     LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
     WHERE a.tenant_id = ${tid()} AND u.deleted_at IS NULL
   `;

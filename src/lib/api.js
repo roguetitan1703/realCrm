@@ -727,7 +727,12 @@ export const api = {
   getRouting: () => request('/team/routing'),
   updateRouting: (config) => request('/team/routing', { method: 'PUT', body: JSON.stringify(config) }),
   updateAgentStatus: (id, status) => request(`/team/users/${id}/duty-status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
-  reassignLeads: (fromId, toId) => request(`/team/users/${fromId}/reassign-leads`, { method: 'POST', body: JSON.stringify({ to_user_id: toId }) }),
+  // What this person is still holding, before anything is moved.
+  workloadOf: (userId) => request(`/team/users/${encodeURIComponent(userId)}/workload`, { fresh: true }),
+  // Hand their OPEN work to several people at once — see distributeWork().
+  distributeWork: (fromId, targets, kinds) => request(`/team/users/${encodeURIComponent(fromId)}/distribute`, {
+    method: 'POST', body: JSON.stringify({ targets, kinds }),
+  }),
 
   // Settings & Branding
   updateSettings: (patch) => request('/workspace/settings', { method: 'POST', body: JSON.stringify(patch) }),

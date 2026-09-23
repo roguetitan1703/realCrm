@@ -9,7 +9,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getAgents, getRoutingRules, updateRoutingRules, getAgentPerformance } from '../services/store';
+import { getAgents, getRoutingRules, updateRoutingRules, getAgentPerformance, distributeWork, heldWork } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { audit } from '../services/audit';
@@ -511,25 +511,48 @@ teamRouter.get('/users/:id/performance', async (req: Request, res: Response) => 
 });
 
 /**
- * 3. BULK REASSIGN OPEN LEADS ACTION
- * POST /api/v1/team/users/:id/reassign-leads
+ * WHAT ONE PERSON IS STILL HOLDING
+ * GET /api/v1/team/users/:id/workload
+ * Asked before suspending or handing a seat over, so the screen can say "63
+ * open leads and 12 calling records" instead of moving work nobody counted.
  */
-teamRouter.post('/users/:id/reassign-leads', async (req: Request, res: Response) => {
+teamRouter.get('/users/:id/workload', async (req: Request, res: Response) => {
   try {
-    const fromUserId = req.params.id;
-    const { to_user_id } = req.body;
-
-    const resSql = await sql`UPDATE crm_leads SET agent_id = ${to_user_id} WHERE agent_id = ${fromUserId} AND tenant_id = ${req.tenantId} RETURNING id`;
-    const count = resSql.length;
-
-    return res.status(200).json({
-      success: true,
-      message: 'Successfully reassigned open leads to new sales agent.',
-      from_user_id: fromUserId,
-      to_user_id,
-      reassigned_count: count,
-    });
+    const perm = canManageRole('agent');
+    if (!perm.ok) return res.status(403).json({ error: perm.msg });
+    return res.status(200).json({ success: true, ...(await heldWork(req.params.id)) });
   } catch (err: any) {
-    return res.status(500).json({ error: 'Bulk Reassignment Failed', message: err.message });
+    return res.status(500).json({ error: 'Failed to read their workload', message: err.message });
+  }
+});
+
+/**
+ * HAND ONE PERSON'S OPEN WORK TO SEVERAL PEOPLE
+ * POST /api/v1/team/users/:id/distribute  { targets: string[], kinds?: ['leads','owners'] }
+ *
+ * Replaces POST /users/:id/reassign-leads, which had no permission check, moved
+ * closed leads too, wrote no history and took a single target. See
+ * distributeWork() for the rules; the numbers come back from the server so the
+ * screen states what happened rather than what it hoped.
+ */
+teamRouter.post('/users/:id/distribute', async (req: Request, res: Response) => {
+  try {
+    const perm = canManageRole('agent');
+    if (!perm.ok) return res.status(403).json({ error: perm.msg });
+    const targets: string[] = Array.isArray(req.body?.targets) ? req.body.targets.map(String) : [];
+    if (!targets.length) return res.status(400).json({ error: 'Pick at least one person to hand the work to.' });
+    if (targets.includes(req.params.id)) return res.status(400).json({ error: 'That is the person the work is coming from.' });
+    const kinds = Array.isArray(req.body?.kinds)
+      ? req.body.kinds.filter((k: string) => k === 'leads' || k === 'owners')
+      : undefined;
+    if (kinds && !kinds.length) return res.status(400).json({ error: 'Choose leads, the calling list, or both.' });
+    const out = await distributeWork({ fromUserId: req.params.id, targets, kinds }, {
+      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: null,
+      ip: req.ip, userAgent: req.get('user-agent') ?? undefined,
+    } as any);
+    return res.status(200).json({ success: true, ...out, agents: await getAgents() });
+  } catch (err: any) {
+    const code = err?.name === 'ForbiddenError' ? 403 : 500;
+    return res.status(code).json({ error: 'Failed to hand the work over', message: err.message });
   }
 });

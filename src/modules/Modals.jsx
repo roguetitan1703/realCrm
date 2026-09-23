@@ -1187,38 +1187,100 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
   )
 }
 
-// ---- Reassign all of an agent's leads ----
+// ---- Reassign: hand one person's open work to several people ----
+//
+// WAS a single-target "move all N leads to X", which moved closed leads too,
+// recorded nothing on any record, and announced success before the server had
+// answered. Three things it now gets right: WHAT moves is chosen (leads, the
+// calling list, or both, each with its real count), WHO receives it can be
+// several people, and the numbers shown afterwards are the server's.
 function ReassignModal({ store, fromId }) {
   const from = store.agentById(fromId)
   const others = store.activeAgents().filter(a => a.id !== fromId)
-  const [to, setTo] = useState(others[0]?.id)
-  const [done, setDone] = useState(false)
-  const { data: desk } = useServerData(() => api.getDeskSummary(), [], null, '/workspace/desk-summary')
-  const count = desk?.perAgent?.[fromId]?.open ?? 0
-  const doIt = () => { store.reassignAll(fromId, to); setDone(true) }
-  const toName = store.agentById(to)?.first
+  const [picked, setPicked] = useState([])
+  const [kinds, setKinds] = useState(['leads', 'owners'])
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  // Their real open work, from the server — not the desk summary, which counts
+  // leads only and would offer to move a calling queue it cannot see.
+  const { data: held } = useServerData(() => api.workloadOf(fromId), [fromId], null)
+  const leadN = held?.leads ?? 0
+  const ownerN = held?.owners ?? 0
+  const movingN = (kinds.includes('leads') ? leadN : 0) + (kinds.includes('owners') ? ownerN : 0)
+
+  const toggle = (list, v) => (list.includes(v) ? list.filter(x => x !== v) : [...list, v])
+  const share = (total) => {
+    if (!picked.length || !total) return []
+    // The same deal the server does: one each, in turn.
+    return picked.map((id, i) => ({ id, n: Math.floor(total / picked.length) + (i < total % picked.length ? 1 : 0) }))
+  }
+
+  const doIt = async () => {
+    setBusy(true)
+    const res = await store.distributeWork(fromId, picked, kinds)
+    setBusy(false)
+    if (res) setResult(res)
+  }
+
+  const WORK = [
+    { key: 'leads', label: 'Leads', n: leadN },
+    { key: 'owners', label: 'Calling list', n: ownerN },
+  ]
+
   return (
-    <Modal title="Reassign leads" onClose={store.closeModal} width={420}>
-      {done ? (
+    <Modal title="Reassign work" onClose={store.closeModal} width={460}>
+      {result ? (
         <div style={{ textAlign: 'center' }}>
           <div style={{ width: 52, height: 52, margin: '0 auto 12px', borderRadius: '50%', background: 'var(--accent-wash)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="check" size={26} style={{ color: 'var(--accent)' }} /></div>
-          <div style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 16 }}>Moved {count} leads to {toName}</div>
-          <div className="u-muted" style={{ fontSize: 12.5, marginTop: 5, marginBottom: 14 }}>Their pipeline is safe — no clients lost.</div>
+          <div style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 16 }}>
+            Moved {result.leads} lead{result.leads === 1 ? '' : 's'}{result.owners ? ` and ${result.owners} calling record${result.owners === 1 ? '' : 's'}` : ''}
+          </div>
+          <div className="u-muted" style={{ fontSize: 12.5, marginTop: 6, marginBottom: 14 }}>
+            {result.perTarget.filter(p => p.leads || p.owners).map(p => `${p.name}: ${[p.leads && `${p.leads} leads`, p.owners && `${p.owners} calls`].filter(Boolean).join(', ')}`).join(' · ')}
+          </div>
           <Button variant="primary" block onClick={store.closeModal}>Done</Button>
         </div>
       ) : (
         <>
-          <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 14 }}>Move <b>{from?.first}</b>'s <b>{count}</b> active leads to:</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-            {others.map(a => (
-              <button key={a.id} onClick={() => setTo(a.id)}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', border: '1px solid ' + (to === a.id ? 'var(--accent)' : 'var(--line)'), background: to === a.id ? 'var(--accent-wash)' : '#fff', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit' }}>
-                <Avatar agent={a} size="sm" /><span style={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: 13.5 }}>{a.first}</span>
-                {to === a.id && <Icon name="check" style={{ color: 'var(--accent)' }} />}
+          <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 12 }}>
+            Hand <b>{from?.first || from?.name}</b>&rsquo;s open work to the team. Closed and rejected records stay where they are.
+          </div>
+
+          {/* WHAT MOVES. Two different jobs; a firm may want only one handed on. */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            {WORK.map(w => (
+              <button key={w.key} disabled={!w.n} onClick={() => setKinds(k => toggle(k, w.key))}
+                style={{ flex: 1, padding: '10px 12px', textAlign: 'left', borderRadius: 9, cursor: w.n ? 'pointer' : 'default',
+                  border: '1px solid ' + (kinds.includes(w.key) && w.n ? 'var(--accent)' : 'var(--line)'),
+                  background: kinds.includes(w.key) && w.n ? 'var(--accent-wash)' : '#fff', opacity: w.n ? 1 : .5, fontFamily: 'inherit' }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{w.label}</div>
+                <div className="u-muted" style={{ fontSize: 12 }}>{w.n} open</div>
               </button>
             ))}
           </div>
-          <Button variant="primary" block onClick={doIt}>Reassign {count} leads</Button>
+
+          <div className="imp-map-label" style={{ marginBottom: 6 }}>Share between</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14, maxHeight: 260, overflowY: 'auto' }}>
+            {others.map(a => {
+              const on = picked.includes(a.id)
+              const mine = share(movingN).find(x => x.id === a.id)
+              return (
+                <button key={a.id} onClick={() => setPicked(p => toggle(p, a.id))}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--line)'), background: on ? 'var(--accent-wash)' : '#fff', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  <Avatar agent={a} size="sm" />
+                  <span style={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: 13.5 }}>{a.name || a.first}</span>
+                  {/* What this person would get, before anything is moved. */}
+                  {on && mine && <span className="u-muted" style={{ fontSize: 12, fontWeight: 600 }}>{mine.n}</span>}
+                  {on && <Icon name="check" style={{ color: 'var(--accent)' }} />}
+                </button>
+              )
+            })}
+            {!others.length && <div className="detail-empty">Nobody else is active to take it.</div>}
+          </div>
+
+          <Button variant="primary" block disabled={busy || !picked.length || !movingN} onClick={doIt}>
+            {busy ? 'Moving…' : movingN ? `Reassign ${movingN} record${movingN === 1 ? '' : 's'}` : 'Nothing to move'}
+          </Button>
         </>
       )}
     </Modal>

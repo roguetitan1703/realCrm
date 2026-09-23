@@ -1190,7 +1190,10 @@ export function StoreProvider({ children }) {
     // it to a client. Both callers already handle null — the footer and the
     // phone header fall back to the firm's name.
     me: () => state.agents.find(a => a.id === state.activeAgentId) || null,
-    activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id)),
+    // Who may be given work: on duty AND still employed. It excluded only the
+    // off-duty ones, so a suspended person stayed pickable everywhere — and
+    // the server took it, because a hidden option was the only guard.
+    activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id) && !a.suspended),
     
     // ── Records ───────────────────────────────────────────────────────────
     // Look a record up. The cache holds what the app has already shown — every
@@ -1505,9 +1508,12 @@ export function StoreProvider({ children }) {
         () => apiClient.updateAgentStatus(agentId, isOff ? 'OFF_DUTY' : 'ACTIVE'),
         () => dispatch({ type: 'TOGGLE_AGENT', agentId }))
     },
-    reassignAll: (fromId, toId) => write('Reassign',
-      () => apiClient.reassignLeads(fromId, toId),
-      () => dispatch({ type: 'REASSIGN_ALL', fromId, toId })),
+    // Hand one person's OPEN work to several people. The server decides the
+    // split and returns what it actually moved (see distributeWork), so this
+    // resolves with the numbers rather than assuming them.
+    distributeWork: (fromId, targets, kinds) => apiClient.distributeWork(fromId, targets, kinds)
+      .then(res => { dispatch({ type: 'REASSIGN_ALL', fromId, toId: targets[0] }); settled(); return res })
+      .catch(err => { toast(err.message || 'Could not hand the work over', 'warn'); return null }),
     // Real teammate creation — the server makes a login-capable user, so we take
     // the server's roster as truth rather than an optimistic local guess.
     // Create a login-capable teammate (password auth). Resolves to the API
