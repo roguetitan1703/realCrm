@@ -278,21 +278,22 @@ teamRouter.post('/users/:id/status', async (req: Request, res: Response) => {
  * ============================================================================
  * REASSIGN SEAT — this desk now belongs to somebody else
  * ============================================================================
- * WHAT IT USED TO DO: keep the same user row and write the new person's name,
- * email and phone over the old one. So the login stayed the person-before's
- * (bhumi signs a woman called Siddhi in as `binod`), and every call, remark and
- * visit the previous holder had logged silently became the new person's work —
- * the record said Siddhi rang someone she has never spoken to.
+ * ONE ACCOUNT, EDITED. The seat keeps its row: the new person's name, contact
+ * details and — new — their own USER ID go onto it, the leads and calling
+ * records stay exactly where they are, the password is replaced and the old
+ * sessions are killed. No account is deleted, none is created, and nothing has
+ * to be handed over afterwards, because nothing moved.
  *
- * WHAT IT DOES NOW, in three steps you can see afterwards:
- *   1. the new person gets their OWN account, with their own login id and a
- *      password to hand over;
- *   2. the leaver's OPEN work moves to them — that is what handing over a seat
- *      means, and closed records stay closed;
- *   3. the leaver is suspended: signed out, out of the rotation, unpickable,
- *      and still the author of everything they did.
+ * WHAT USED TO BREAK, and what now stops it. An event stores WHO as a user id
+ * and the screen resolves that against today's roster — so the moment the row
+ * became a new person, every call and remark the previous holder had logged
+ * read as the new person's work. Before the details are overwritten, the
+ * leaver's name is STAMPED onto their own events (crm_timeline_events
+ * .author_name). Their history keeps their name; the seat carries on.
  *
- * The seat count does not change: one active account before, one after.
+ * The user ID is theirs to choose here: the old one was slugged from the
+ * previous person's name and could not be changed, so bhumi signs a woman
+ * called Siddhi in as "binod".
  * ============================================================================
  */
 teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) => {
@@ -301,9 +302,6 @@ teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) 
     if (!u) return res.status(404).json({ error: 'User not found' });
     const perm = canManageRole(u.role);
     if (!perm.ok) return res.status(403).json({ error: perm.msg });
-    if (u.role === 'owner' && await isLastActiveOwner(req.tenantId!, u.id)) {
-      return res.status(400).json({ error: 'This is the last active owner — add another owner first.' });
-    }
 
     const { name, phone, email, password, loginId } = req.body || {};
     const cleanName = String(name || '').trim();
@@ -317,52 +315,59 @@ teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) 
     if (normEmail && await emailTaken(req.tenantId!, normEmail, u.id)) {
       return res.status(409).json({ error: 'Someone on this team already uses that email.' });
     }
-    const wantedLogin = String(loginId || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
-    if (wantedLogin && wantedLogin.length < 3) return res.status(400).json({ error: 'A user ID needs at least 3 characters.' });
-    if (wantedLogin && (await sql`SELECT 1 FROM users WHERE tenant_id = ${req.tenantId} AND login_id = ${wantedLogin} LIMIT 1`).length) {
-      return res.status(409).json({ error: 'Someone on this team already signs in with that ID.' });
+
+    // The new person's user ID. Defaults to one made from their name, because
+    // leaving the previous holder's is the complaint this fixes.
+    let nextLogin = u.login_id;
+    if (u.login_id) {
+      const wanted = String(loginId || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+      if (wanted && wanted.length < 3) return res.status(400).json({ error: 'A user ID needs at least 3 characters.' });
+      if (wanted && wanted !== u.login_id) {
+        const taken = await sql`SELECT 1 FROM users WHERE tenant_id = ${req.tenantId} AND login_id = ${wanted} AND id <> ${u.id} LIMIT 1`;
+        if (taken.length) return res.status(409).json({ error: 'Someone on this team already signs in with that ID.' });
+      }
+      nextLogin = wanted || await deriveLoginId(req.tenantId!, cleanName);
     }
+
     const initial = String(password || '').trim() || suggestPassword();
     const issue = passwordIssue(initial);
     if (issue) return res.status(400).json({ error: issue });
 
-    // 1. THE NEW PERSON — their own row, their own login.
-    const newId = `u_${Date.now().toString(36)}`;
-    const newLogin = u.login_id ? (wantedLogin || await deriveLoginId(req.tenantId!, cleanName)) : null;
+    // FIRST, while the row still says who they were: keep the leaver's name on
+    // the work they did. Only their own events, only where nothing is stamped
+    // yet, so re-running this never rewrites somebody else's history.
+    const stamped = await sql`
+      UPDATE crm_timeline_events SET author_name = ${u.name}
+       WHERE tenant_id = ${req.tenantId} AND author = ${u.id} AND author_name IS NULL
+       RETURNING id`;
+
     const initials = cleanName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
     const meta = { initials, avatar: '', phone: normPhone, email: normEmail };
     await sql`
-      INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, email_verified, metadata)
-      VALUES (${newId}, ${req.tenantId}, ${cleanName}, ${newLogin}, ${normPhone}, ${normEmail}, ${u.role}, 'active', ${!!normEmail}, ${sql.json(meta)})
+      UPDATE users SET name = ${cleanName}, phone = ${normPhone}, email = ${normEmail},
+        login_id = ${nextLogin}, email_verified = ${!!normEmail}, status = 'active', metadata = ${sql.json(meta)}
+      WHERE id = ${u.id} AND tenant_id = ${req.tenantId}
     `;
-    await sql`
-      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
-      VALUES (${newId}, ${cleanName}, ${cleanName.split(' ')[0]}, ${initials}, '', ${u.role}, 'ACTIVE', ${sql.json(meta)}, ${req.tenantId})
-    `;
-    await adminSetPassword(req.tenantId!, newId, initial, req.body?.mustChangePassword !== false);
+    await sql`UPDATE crm_agents SET name = ${cleanName}, first = ${cleanName.split(' ')[0]}, initials = ${initials}, metadata = ${sql.json(meta)} WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
+    const mustChangeSeat = req.body?.mustChangePassword !== false;
+    await adminSetPassword(req.tenantId!, u.id, initial, mustChangeSeat);   // revokes sessions
+    // A seat handed to someone new is a working seat again, even if the
+    // previous holder was suspended (and so out of the rotation) at the time.
+    await addToRouting(req.tenantId!, u.id);
 
-    // 2. THE WORK — open records only, all of it to the person taking the seat.
-    const moved = await distributeWork({ fromUserId: u.id, targets: [newId] }, {
-      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: null,
-      ip: req.ip, userAgent: req.get('user-agent') ?? undefined,
-    } as any);
-
-    // 3. THE LEAVER — out, but still the author of their own history.
-    await sql`UPDATE users SET status = 'suspended' WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
-    await revokeUserSessions(u.id);
-    await removeFromRouting(req.tenantId!, u.id);
-    await addToRouting(req.tenantId!, newId);
-
+    const held = await heldWork(u.id);
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
       actor_label: null, action: 'user.seat_reassigned',
       target_type: 'user', target_id: u.id,
-      summary: `${u.name}'s seat handed to ${cleanName} — ${moved.leads} lead(s), ${moved.owners} calling record(s) moved`,
-      metadata: { from: u.id, to: newId, loginId: newLogin, ...moved },
+      summary: `Seat ${u.login_id || u.id} reassigned from ${u.name} to ${cleanName}${nextLogin !== u.login_id ? ` (now ${nextLogin})` : ''}`,
+      metadata: { previousName: u.name, previousLoginId: u.login_id, loginId: nextLogin, stampedEvents: stamped.length, held },
     });
     return res.status(200).json({
-      success: true, userId: newId, loginId: newLogin, initialPassword: initial,
-      movedLeads: moved.leads, movedOwners: moved.owners, agents: await getAgents(),
+      success: true, loginId: nextLogin, initialPassword: initial,
+      // What they inherit, stated — it stays on the seat, so the person taking
+      // it over should know what is waiting.
+      keptLeads: held.leads, keptOwners: held.owners, agents: await getAgents(),
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to reassign seat', message: err.message });

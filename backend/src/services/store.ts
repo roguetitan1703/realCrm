@@ -490,6 +490,10 @@ export function mapEventForClient(e: TimelineEvent) {
     type: ct,
     label: tagged ? e.description : (e.title && e.title !== e.description ? `${e.title}: ${e.description}` : e.description),
     authorId: e.author || null,
+    // The name the author had when this happened, when their seat has since
+    // gone to somebody else. Absent normally, and the screen then asks the
+    // roster — see crm_timeline_events.author_name.
+    authorName: (e as any).author_name || null,
     timestamp: e.timestamp,
     metadata: e.metadata || {},
   };

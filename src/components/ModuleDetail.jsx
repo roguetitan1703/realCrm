@@ -113,7 +113,7 @@ function LatestRemark({ record, store }) {
   }, [key])
 
   if (!latest) return null
-  const who = latest.authorId ? agentName(store.state.agents, latest.authorId) : null
+  const who = latest.authorName || (latest.authorId ? agentName(store.state.agents, latest.authorId) : null)
   const outcome = outcomeLabel(latest.metadata?.outcome)
 
   // Two rows: what it is and when, then the note. No leading icon — a note

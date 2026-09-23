@@ -621,7 +621,9 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel,
   // The moment, not the elapsed time. An agent has to be able to say "you
   // called him Tuesday evening"; "2d ago" cannot be turned into that.
   const ago = e.timestamp ? whenLabel(e.timestamp) : (e.ago || '')
-  const author = e.authorId ? agentName(agents, e.authorId) : null
+  // The stamped name wins: a seat that has changed hands must not re-label
+  // the previous holder's work as the new person's (see author_name).
+  const author = e.authorName || (e.authorId ? agentName(agents, e.authorId) : null)
   const outcomeText = outcomeLabel(e.metadata?.outcome)
   const save = () => {
     const body = locked ? note : text

@@ -372,6 +372,16 @@ export async function initSchema(): Promise<void> {
         metadata JSONB DEFAULT '{}'::jsonb
       );
     `;
+    // WHOSE NAME WAS ON IT AT THE TIME.
+    //
+    // An event stores WHO as a user id, and the screen resolves that against
+    // today's roster. Right until a seat changes hands: the row stays, the
+    // person on it changes, and every call the previous holder logged starts
+    // reading as the new person's work. Stamped at hand-over for the leaver's
+    // own events (see /users/:id/reassign-seat), so their history keeps their
+    // name while the seat carries on. Null everywhere else, which means "ask
+    // the roster" — the normal case.
+    await sql`ALTER TABLE crm_timeline_events ADD COLUMN IF NOT EXISTS author_name TEXT;`;
 
     // ------------------------------------------------------------------------
     // Phase 0 — real auth + tenant identity (foundation for true multi-tenancy)
