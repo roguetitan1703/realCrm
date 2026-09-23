@@ -433,7 +433,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
                   </Button>
                 </>
               )}
-              <Button size="sm" variant="ghost" onClick={() => go('clients', { contactsTab: 'owners' })}>
+              <Button size="sm" variant="ghost" onClick={() => go('clients')}>
                 All owners →
               </Button>
             </div>

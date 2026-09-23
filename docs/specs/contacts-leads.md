@@ -173,39 +173,36 @@ all**, so it never reaches Calling, has no unit, no stage and no history.
   one person spelled two ways becomes two
 - no unit, which is the first thing a caller needs (1.5 / 6.1)
 
-## The model
+## The model — as the user defined it, 2026-09-23
 
-**A person is one identity per firm, keyed by phone.** Everything else points at
-it. Nothing is copied.
+Three populations, three screens, and **they are not the same people**:
 
-```
-crm_contacts   id, tenant_id, phone_norm (unique per tenant), phone, name,
-               email, do_not_call, created_at, updated_at
-      ▲            ▲                    ▲
-crm_leads     crm_owners          crm_properties
-.contact_id   .contact_id         .owner_contact_id   ← column already exists
-```
+| Screen | Who | How they get there |
+|---|---|---|
+| **Leads** | buyers and tenants | a portal enquiry, or added by hand |
+| **Calling** | people we ring **to win a property to manage** — prospects | imported list, or added to the queue |
+| **Contacts** | **owners whose property we manage** | **a property is added**; nothing else creates one |
 
-- **Roles are derived, never stored.** Has open leads → buyer/tenant. Owns
-  listings or calling rows → seller/landlord. Both → both. A role is a fact
-  about their records, and storing it is how it goes stale.
-- **The three work surfaces do not change.** Leads stays the demand queue,
-  Calling stays the supply queue, and **Contacts becomes the directory**: search
-  any number, see the whole person. It is a desk screen; the agent on a phone
-  works Today, Leads and Calling and does not browse.
-- **Adding an owner on a property creates a real owner record** carrying the
-  listing's project, tower and unit, linked both ways.
+The user's words: *"the leads for calling owners to acquire their property
+correctly sits in the calling sector… properties are not meant to be created
+from that, owners are not meant to be created from that. Once a person approves
+— okay, please manage my property for me — they add the property as well, and
+that is the owners database of the properties they manage. Leads being in
+Contacts is a wrong thing."*
 
-### What it buys, in order of what it is worth
+So:
 
-1. **"Who is this calling me?"** — one lookup answers "owner of B-1603, and he
-   enquired about a 2 BHK in June".
-2. **A portal lead from a number we already own** is flagged at arrival. A firm
-   whose business is getting flats to manage needs to know the enquiry is from
-   an owner they are already calling.
-3. **Do not call is honoured once**, for every row that person has. Today it is
-   set on a calling row and a lead follow-up still goes out.
-4. **The Owners tab stops inventing** phones and activity times.
+- **Contacts has one list and no sub-nav.** The Clients tab (the leads table
+  under another name) is gone: it put one person on two screens under two names.
+- **A contact is created by adding a property**, never on the Contacts screen.
+  The CTA there is Add property.
+- **Calling stays a pipeline.** Nothing in it creates a property or a contact.
+- **Conversion is by hand today** — the agent adds the property when the owner
+  agrees. The user wants a real conversion step later; it is not built now.
+- The calling record and the managed owner are **the same row** when they are
+  about the same flat (project + tower + unit), so a person who agrees keeps
+  their call history. Contacts is "has a listing linked", Calling is the queue.
+- **Roles stay derived** from what they have given us: Seller, Landlord, or both.
 
 ## Phases
 
@@ -217,17 +214,21 @@ crm_leads     crm_owners          crm_properties
   for both paying clients is all of them. `npm run link:owners -- --env=… 
   --tenant=… [--apply]` does the same for listings written before this, report
   first. **Not yet run on production** — 2 listings for bhumi, 1 for mahalaxmi.
-- **B — the identity.** `crm_contacts` + backfill from existing phones + the
-  person page + cross-links + one do-not-call.
+- **B — the conversion.** "They agreed" as one action from a calling record:
+  add the property, carry the person and the history over, leave the queue.
+  (This replaces the earlier plan of a `crm_contacts` identity table across
+  leads and owners — the user's model says leads are not contacts at all.)
 - **C — housekeeping.** Merging two contacts, and what a shared family or office
   number means.
 
 ## Open, for the user
 
-1. **Does the identity change** from July's "two separate records" to one person
-   with derived roles? Everything above assumes yes.
-2. **Is a contact a phone number?** A family or an office sharing one number
-   becomes one contact. The alternative is name + phone, which splits the same
-   person whenever a spelling differs.
-3. **Does Contacts stay a directory** (search and read), or does it need work
-   actions of its own? Today it half-does both.
+1. **The conversion step.** Today: the owner agrees, the agent adds the
+   property by hand, and the calling record becomes the contact only if the flat
+   matches. A real "they said yes → take the property" action would carry the
+   unit, the owner and the call history across in one move. Wanted, not built.
+2. **Does a portal lead from someone whose property we manage get flagged?**
+   The two are separate records by July's decision, reaffirmed today for the
+   directory. Flagging the overlap at arrival is a smaller, different question.
+3. **Is a contact a phone number** when the same owner gives us two flats? Today
+   that is two rows, one per unit, because a call is about a unit.

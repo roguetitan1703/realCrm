@@ -1501,8 +1501,12 @@ export async function getDeskSummary(): Promise<any> {
     props AS (SELECT count(*)::int AS total,
                count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available
           FROM crm_properties WHERE tenant_id = ${t}),
-    owners AS (SELECT count(DISTINCT owner_name)::int AS n FROM crm_properties
-         WHERE tenant_id = ${t} AND coalesce(owner_name, '') <> ''),
+    -- WHOSE PROPERTY WE MANAGE — owner records with a listing linked to them,
+    -- not distinct strings typed into a listing's owner box. The calling list
+    -- is a different thing entirely (people we are asking for a property), and
+    -- counting the two together said a firm had a directory it did not have.
+    owners AS (SELECT count(DISTINCT owner_contact_id)::int AS n FROM crm_properties
+         WHERE tenant_id = ${t} AND owner_contact_id IS NOT NULL),
     per_agent_calls AS (SELECT agent_id AS k,
                count(*)::int AS owners,
                count(*) FILTER (WHERE last_call_at IS NOT NULL)::int AS called,
@@ -1715,46 +1719,6 @@ export async function listContacts(opts: {
   const like = `%${q}%`;
   const role = String(opts.role || 'all');
 
-  if (opts.tab !== 'owners') {
-    const where: any[] = [sql`tenant_id = ${t}`];
-    if (q) where.push(sql`(lower(name) LIKE ${like} OR phone LIKE ${like} OR lower(coalesce(email, '')) LIKE ${like})`);
-    // No 'sale' tail: someone we have never established an intent for is not
-    // a buyer, and filing them as one is how a rent enquiry gets called back
-    // about flats to buy. They fall under neither pill.
-    const dealOf = sql`coalesce(deal, req->>'deal')`;
-    if (role === 'Buyer') where.push(sql`${dealOf} = 'sale'`);
-    else if (role === 'Tenant') where.push(sql`${dealOf} = 'rent'`);
-    // The pill counts must ignore the pill itself -- "Buyers 40 / Tenants 12"
-    // has to keep showing both while one of them is selected.
-    const base = q
-      ? sql`tenant_id = ${t} AND (lower(name) LIKE ${like} OR phone LIKE ${like} OR lower(coalesce(email, '')) LIKE ${like})`
-      : sql`tenant_id = ${t}`;
-    const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
-
-    const [rows, countRows] = await Promise.all([
-      sql`SELECT * FROM crm_leads WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
-      sql`SELECT count(*)::int AS total,
-                 count(*) FILTER (WHERE ${dealOf} = 'sale')::int AS buyer,
-                 count(*) FILTER (WHERE ${dealOf} = 'rent')::int AS tenant
-            FROM crm_leads WHERE ${base}`,
-    ]);
-    const c = countRows[0] || { total: 0, buyer: 0, tenant: 0 };
-    const total = role === 'Buyer' ? c.buyer : role === 'Tenant' ? c.tenant : c.total;
-    return {
-      rows: rows.map(r => {
-        const lead = rowToLead(r);
-        return {
-          id: 'lead-' + lead.id, kind: 'demand',
-          role: (lead.req?.deal === 'rent') ? 'Tenant' : 'Buyer',
-          name: lead.name, phone: lead.phone, email: lead.email || '',
-          locality: lead.req?.locality || '', minsAgo: lead.minsAgo,
-          rawLeadId: lead.id, rawLead: lead, stage: lead.stage,
-        };
-      }),
-      total, counts: { all: c.total, Buyer: c.buyer, Tenant: c.tenant }, page, limit,
-    };
-  }
-
   // ── Owners: the RECORDS, not a GROUP BY over typed-in text ───────────────
   //
   // This used to group crm_properties by `owner_name`: two people with one name
@@ -1772,6 +1736,11 @@ export async function listContacts(opts: {
   if (q) where.push(sql`(lower(coalesce(o.name, '')) LIKE ${like} OR coalesce(o.phone, '') LIKE ${like} OR lower(coalesce(o.project, '')) LIKE ${like} OR lower(coalesce(o.unit_no, '')) LIKE ${like})`);
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
 
+  // AN INNER JOIN, DELIBERATELY. A contact here is someone whose property this
+  // firm manages — which is created by adding the property, not by calling
+  // anyone. People being called to WIN a property are a pipeline, and they live
+  // in Calling with a stage and a queue. The two were one list for a while and
+  // it read as a directory of four thousand strangers.
   const grouped = await sql`
     SELECT o.*,
            count(p.id)::int AS listings,
@@ -1780,15 +1749,14 @@ export async function listContacts(opts: {
            (array_agg(p.title ORDER BY p.created_at DESC))[1] AS first_title,
            (array_agg(p.type ORDER BY p.created_at DESC))[1] AS first_type
       FROM crm_owners o
-      LEFT JOIN crm_properties p ON p.owner_contact_id = o.id AND p.tenant_id = o.tenant_id
+      JOIN crm_properties p ON p.owner_contact_id = o.id AND p.tenant_id = o.tenant_id
      WHERE ${clause}
      GROUP BY o.id
      ORDER BY count(p.id) DESC, o.updated_at DESC`;
-  // A role is a fact about their listings. With none on file yet — the calling
-  // list a firm imports before it has taken a single flat on — "Seller" is a
-  // claim nobody made, so the role stays Owner until a listing says otherwise.
+  // A role is a fact about their listings: what they have given us to sell or
+  // to let. Every row here has at least one, so there is no roleless case.
   const roleOf = (r: any) => (r.sale > 0 && r.rent > 0) ? 'Seller / Landlord'
-    : r.rent > 0 ? 'Landlord' : r.sale > 0 ? 'Seller' : 'Owner';
+    : r.rent > 0 ? 'Landlord' : 'Seller';
   const all = grouped.map((r: any) => {
     const owner = rowToOwner(r);
     // WHEN SOMETHING LAST HAPPENED, from the record — the call, the callback
@@ -1817,10 +1785,6 @@ export async function listContacts(opts: {
       all: all.length,
       Seller: all.filter(r => r.role === 'Seller' || r.role === 'Seller / Landlord').length,
       Landlord: all.filter(r => r.role === 'Landlord' || r.role === 'Seller / Landlord').length,
-      // People on the calling list with no listing of ours yet — for both
-      // paying clients that is every owner they hold, so it cannot be a state
-      // with no pill (CLAUDE.md §4: every entry point lands on a visible control).
-      Owner: all.filter(r => r.role === 'Owner').length,
     },
     page, limit,
   };

@@ -37,11 +37,11 @@ const NAV = [
   // dashboard, the phone tabs) had nowhere to hang it while it was a sub-item.
   { key: 'calling', label: 'Calling', icon: 'phone' },
   { key: 'properties', label: 'Properties', icon: 'building' },
-  // Contacts is the directory of people, both sides of the desk: Clients
-  // (derived from leads) and Listing owners (derived from the listings we
-  // hold). Both are views over records that already exist — nothing here is
-  // created or assigned, which is exactly what separates it from Calling.
-  { key: 'clients', label: 'Contacts', icon: 'people', subKey: 'contactsTab' },
+  // Contacts is the people whose property this firm manages — created by adding
+  // a property, never here. It had a second tab reading the leads table, which
+  // put one person on two screens under two names; leads are Leads, and people
+  // being rung to win a property are Calling.
+  { key: 'clients', label: 'Contacts', icon: 'people' },
   { key: 'calendar', label: 'Calendar', icon: 'calendar' },
   { section: 'Manage' },
   { key: 'import', label: 'Import', icon: 'layers' },
@@ -190,7 +190,6 @@ export default function App() {
   // inside is one section — Settings.jsx filters its own nav by role, and the
   // server refuses a settings write from an agent outright.
   const allowedKeys = state.role === 'agent' ? ['dashboard', 'leads', 'calling', 'properties', 'clients', 'calendar', 'settings'] : null
-  const contactsTab = sel.contactsTab || 'clients'
   const nav = NAV
     .filter(n => !allowedKeys || (n.key && allowedKeys.includes(n.key)) || (n.section && ['Workspace'].includes(n.section)))
     .map(n => {
@@ -198,13 +197,6 @@ export default function App() {
       // The badge is what is waiting to be dialled, not the size of the list.
       // 732 next to Calling forever is not a number anyone acts on.
       if (n.key === 'calling') return { ...n, badge: callQueue?.callbacksOverdue || 0 }
-      if (n.key === 'clients') return {
-        ...n,
-        children: [
-          { sub: 'clients', label: 'Clients', count: desk ? totals.total : undefined },
-          { sub: 'owners', label: 'Listing owners', count: desk ? desk.owners : undefined },
-        ],
-      }
       return n
     })
 
@@ -263,7 +255,7 @@ export default function App() {
       <PushRow store={store} />
       <EnvMark />
       {state.dataStale && <StaleBanner />}
-      <AppShell nav={nav} active={effectiveScreen} activeSub={contactsTab} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
+      <AppShell nav={nav} active={effectiveScreen} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
         <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.ownerId || ''}-${sel.propId || ''}`} {...ctx} />
       </AppShell>
       {state.waState && <WaModal store={store} />}

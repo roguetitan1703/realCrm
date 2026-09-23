@@ -74,7 +74,7 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
     if (fromPop.current) { fromPop.current = false; return }
     const next = urlFor(screen, sel)
     const place = JSON.stringify([screen, sel.leadId, sel.leadOpen, sel.ownerId, sel.ownerOpen,
-      sel.propId, sel.propOpen, sel.projKey, sel.projOpen, sel.propAdd, sel.contactsTab])
+      sel.propId, sel.propOpen, sel.projKey, sel.projOpen, sel.propAdd])
     const samePlace = placeRef.current === place
     placeRef.current = place
     stampNavWorkspace()

@@ -2,21 +2,27 @@ import { useEffect, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
-import { StageTag, StatusTag, Avatar, Button, KV } from '../components/primitives.jsx'
-import { allOf, initials, latestPlus, reqLine, budgetRange } from '../lib/format.js'
+import { StatusTag, Avatar, Button } from '../components/primitives.jsx'
+import { initials, reqLine } from '../lib/format.js'
 import { CLIENTS_DEF } from './definitions.jsx'
 import { api } from '../lib/api.js'
 import { useServerList } from '../lib/serverList.js'
 import { useServerData } from '../lib/useServerData.js'
 
-// Contacts is the directory: people this firm already has a relationship with,
-// derived from the leads and the listings. The cold-calling list used to live
-// here as a second subnav, which was the wrong shelf — it is a pipeline with
-// statuses, routing, a queue and callbacks, and it now has its own top-level
-// screen (Calling → src/modules/Owners.jsx). Contacts is a directory again.
+// ============================================================================
+// 👤 CONTACTS — the people whose property this firm manages
+// ============================================================================
+// WHAT IT IS NOT, because it has twice been both: it is not the calling list
+// (people being rung to WIN a property — a pipeline with stages, a queue and
+// callbacks, which lives in Calling), and it is not the leads (buyers and
+// tenants, which live in Leads). A contact comes into being when a property is
+// added: the owner of a flat on our books.
+//
+// So there is one list here and no sub-nav. It had a Clients tab reading the
+// leads table, which put the same person on two screens under two names and
+// made "Contacts" mean nothing in particular.
 export default function Clients({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
-  const tab = sel?.contactsTab === 'owners' ? 'owners' : 'clients'
   const [seg, setSeg] = useState('all')
   const [flt, setFlt] = useState({})
   const [q, setQ] = useState('')
@@ -33,40 +39,29 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
   const setSegP = (v) => { setSeg(v); setPage(1) }
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
 
-  // Clicking Clients/Owners in the sub-nav while a contact was open did
-  // nothing visible: the sub-nav changed `sel.contactsTab`, but the open
-  // contact is LOCAL state and kept rendering over the list. Navigation has to
-  // win over a selection — so changing tab closes the record.
-  useEffect(() => { setSelClient(null); setPage(1) }, [tab])
+  // Arriving at Contacts is a fresh arrival: an open record must not survive it
+  // (the record is LOCAL state and would render over the list).
+  useEffect(() => { setSelClient(null); setPage(1) }, [state.dataAsOf])
 
   // The directory is two derived views over the leads and the listings, and
   // both are paged and counted in SQL. Building them in the browser is what
   // made a few hundred contacts require every lead and every property.
   const source = useServerList(
-    (params) => api.listContacts({ ...params, tab, role: seg === 'all' ? undefined : seg }),
+    (params) => api.listContacts({ ...params, tab: 'owners', role: seg === 'all' ? undefined : seg }),
     { search: q, sortKey, sortDir, page, pageSize },
-    [tab, seg, state.dataAsOf],
+    [seg, state.dataAsOf],
   )
   const rows = (source.rows || []).map(r => ({
     ...r,
-    detail: r.kind === 'demand'
-      // latestPlus, not the raw field: a requirement that has accumulated
-      // renders as a comma-mashed run of values in a row that must stay one
-      // line. Same reading as the Leads list, so one person cannot be
-      // described two ways on two screens.
-      ? [latestPlus(r.rawLead?.req?.config), latestPlus(r.rawLead?.req?.locality), budgetRange(r.rawLead?.req)].filter(Boolean).join(' · ')
-      // WHICH FLAT, first. An owner is someone to ring about a specific unit,
-      // and until now this line could only say how many listings they had —
-      // the flat number lived inside the record and nowhere else.
-      : [
-          [r.project, r.unit].filter(Boolean).join(' · '),
-          r.listings === 1
-            ? `1 listing · ${r.firstTitle || ''}${r.firstType ? ` (${r.firstType})` : ''}`
-            : r.listings > 1 ? `${r.listings} listings` : null,
-        ].filter(Boolean).join(' — ') || r.locality || '',
-    // Their real stage in the calling queue, not a fixed "Active owner" tag
-    // that said the same thing about everybody.
-    signal: r.kind === 'demand' ? <StageTag stage={r.stage} /> : <StageTag stage={r.stage || 'New'} />,
+    // WHICH FLAT, first. This is a person you ring about a specific unit, and
+    // the flat number used to live inside the record and nowhere else.
+    detail: [
+      [r.project, r.unit].filter(Boolean).join(' · '),
+      r.listings === 1
+        ? `1 listing · ${r.firstTitle || ''}${r.firstType ? ` (${r.firstType})` : ''}`
+        : r.listings > 1 ? `${r.listings} listings` : null,
+    ].filter(Boolean).join(' — ') || r.locality || '',
+    signal: <StatusTag status={r.role} />,
     onClick: () => setSelClient(r),
   }))
   const counts = source.counts || {}
@@ -83,23 +78,14 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
       : Promise.resolve([]),
     [selClient?.id], [])
 
-  // A role pill from the other store (e.g. "Landlord") would silently zero out
-  // this list, so reset to All whenever the sub-nav switches stores.
-  useEffect(() => { setSeg('all') }, [tab])
-
-  // Role pills WITHIN the active store — Buyer/Tenant under Clients,
-  // Seller/Landlord under Owners. Not a flat 5-way mix of both stores.
-  const roleOptions = tab === 'clients'
-    ? [{ key: 'all', label: 'All' }, { key: 'Buyer', label: 'Buyers' }, { key: 'Tenant', label: 'Tenants' }]
-    // "Owner" is someone on the calling list with no listing of ours yet, which
-    // for a firm that has just imported its first list is all of them.
-    : [{ key: 'all', label: 'All' }, { key: 'Owner', label: 'No listing yet' }, { key: 'Seller', label: 'Sellers' }, { key: 'Landlord', label: 'Landlords' }]
+  // What they have given us: a flat to sell, a flat to let, or both.
+  const roleOptions = [{ key: 'all', label: 'All' }, { key: 'Seller', label: 'Sellers' }, { key: 'Landlord', label: 'Landlords' }]
   const segs = roleOptions.map(o => ({
     ...o, on: seg === o.key, count: counts[o.key] ?? 0, onClick: () => setSegP(o.key),
   }))
 
   const kpis = roleOptions.map(o => ({
-    label: o.key === 'all' ? (tab === 'clients' ? 'Clients' : 'Listing owners') : o.label,
+    label: o.key === 'all' ? 'Owners' : o.label,
     value: counts[o.key] ?? 0,
     onClick: () => setSegP(o.key),
   }))
@@ -115,10 +101,11 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
     // A listing owner is not created here — they exist because a listing names
     // them, so the CTA that adds one is adding the property. Someone you want
     // to cold-call and don't hold a listing for belongs in Calling instead.
-    cta: tab === 'clients'
-      ? { label: 'New client', onClick: () => store.openModal({ kind: 'newLead' }) }
-      : { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) },
-    emptyTitle: tab === 'clients' ? 'No clients match' : 'No listing owners match',
+    // An owner is not created here. They exist because a property of theirs is
+    // on our books, so the control that adds one adds the property. Someone we
+    // are still trying to win a property from belongs in Calling.
+    cta: { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) },
+    emptyTitle: 'No owners match',
     emptyHint: 'Adjust the role, filter or search.',
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} />
@@ -133,35 +120,31 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
         <div className="app-body">
           <ModuleDetail
             def={CLIENTS_DEF} record={selClient} store={store}
-            avatar={<span className={'av av-lg ' + (selClient.kind === 'supply' ? 'av-supply' : 'av-demand')}>{initials(selClient.name)}</span>}
+            avatar={<span className="av av-lg av-supply">{initials(selClient.name)}</span>}
             actionCtx={{ onClose: () => setSelClient(null) }}
             sections={[{
               id: 'portfolio',
-              title: selClient.kind === 'demand' ? 'Associated requirement & lead' : 'Listed properties portfolio',
-              render: () => selClient.kind === 'demand' && selClient.rawLead ? (
-                <div className="cli-portfolio">
-                  <KV items={[
-                    { k: 'Looking for', v: `${allOf(selClient.rawLead.req?.config) || 'Any'} · ${selClient.rawLead.req?.deal || 'sale'}` },
-                    { k: 'Preferred locality', v: allOf(selClient.rawLead.req?.locality) || '—' },
-                    { k: 'Current stage', v: selClient.rawLead.stage || 'New' },
-                  ]} />
-                  <Button variant="secondary" onClick={() => go('leads', { leadId: selClient.rawLeadId, leadOpen: true })}>
-                    Open full lead workflow & timeline →
-                  </Button>
-                </div>
-              ) : selClient.kind === 'supply' ? (
+              title: 'Their properties',
+              render: () => (
                 <div className="cli-portfolio">
                   {(portfolio || []).map(p => (
                     <div key={p.id} className="cli-prop">
                       <div>
-                        <div className="cli-prop-t">{p.society} <span className="u-muted cli-prop-meta">({p.type} · {p.locality})</span></div>
+                        <div className="cli-prop-t">{p.society || p.title} <span className="u-muted cli-prop-meta">({p.type} · {p.locality})</span></div>
                         <div className="relrow-sub">{p.carpet ? p.carpet + ' sqft · ' : ''}{p.deal === 'rent' ? 'For Rent' : 'For Sale'}</div>
                       </div>
                       <Button size="sm" variant="secondary" onClick={() => go('properties', { propId: p.id, propOpen: true })}>View property →</Button>
                     </div>
                   ))}
+                  {/* The calling record is the same row: one place for the
+                      history of every conversation with this person. */}
+                  {selClient.ownerId && (
+                    <Button variant="secondary" onClick={() => go('calling', { ownerId: selClient.ownerId, ownerOpen: true })}>
+                      Open their calling record →
+                    </Button>
+                  )}
                 </div>
-              ) : null,
+              ),
             }]}
           />
         </div>
@@ -173,7 +156,7 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
     <>
       {topBar({
         title: 'Contacts',
-        actions: <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import</Button>
+        actions: <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'properties' })}>Import</Button>
       })}
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>

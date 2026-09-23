@@ -98,7 +98,6 @@ export function parseUrl(search = window.location.search) {
       propId: prop || undefined, propOpen: !!prop,
       projKey: project || undefined, projOpen: !!project,
       propAdd: p.get('new') === 'property' || undefined,
-      contactsTab: p.get('tab') || undefined,
       leadFilters: readFilters(p),
       propFilters: readPropFilters(p),
     },
@@ -123,7 +122,6 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (sel.propOpen && sel.propId) p.set('prop', sel.propId)
   if (sel.projOpen && sel.projKey) p.set('project', sel.projKey)
   if (sel.propAdd) p.set('new', 'property')
-  if (sel.contactsTab) p.set('tab', sel.contactsTab)
   writeFilters(p, sel.leadFilters)
   writePropFilters(p, sel.propFilters)
   const q = p.toString()
