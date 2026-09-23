@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
-import { whenLabel, agentName } from '../lib/format.js'
+import { whenLabel, agentName, repeatMark } from '../lib/format.js'
 import { fileUrl, formatDistance } from '../lib/media.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 
@@ -225,6 +225,21 @@ export function StatusTag({ status }) {
   return <span className={'pill ' + cls}><span className="dot" />{status}</span>
 }
 export function Source({ children }) { return <span className="source">{children}</span> }
+/**
+ * The came-back chip. Small, quiet, and the same on a phone card, a desk table
+ * row and Today — a manager scanning nine rows can see which two asked again
+ * without opening anything. `repeatMark` decides what it says.
+ */
+export function RepeatTag({ lead, className = '' }) {
+  const mark = repeatMark(lead)
+  if (!mark) return null
+  return (
+    <span className={'prow-repeat' + (mark.today ? ' is-today' : '') + (className ? ' ' + className : '')} title={mark.title}>
+      {mark.label}
+    </span>
+  )
+}
+
 export function Overdue({ children }) { return <span className="overdue"><span className="dot" />{children}</span> }
 export function Unassigned() { return <span className="unassigned-tag">Unassigned</span> }
 export function CountBadge({ n, tone }) { return <span className={'count-badge' + (tone ? ' ' + tone : '')}>{n}</span> }

@@ -21,7 +21,7 @@
 
 import React from 'react'
 import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER_MODULE_SCHEMA } from '../components/ModuleFields.jsx'
-import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button } from '../components/primitives.jsx'
+import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button, RepeatTag } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { getNestedValue } from '../components/ModuleFields.jsx'
 import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
@@ -115,8 +115,7 @@ export const LEADS_DEF = {
   // Beside the NAME, not among the facts — a pill in that wrapping grey row
   // cost the record its action buttons a line below. Only above one: every
   // lead has enquired once, and a badge on everything is a badge on nothing.
-  titleBadge: (l) => (l.enquiryCount > 1
-    ? <span className="rh-repeat">{l.enquiryCount} enquiries</span> : null),
+  titleBadge: (l) => <RepeatTag lead={l} className="rh-repeat" />,
 
   // Progression — a lead's status, not a pipeline position (see
   // src/data/leadStatus.js: the list is flat and unordered). `flat: true`
@@ -218,11 +217,10 @@ export const LEADS_DEF = {
       <div>
         <div className="name">
           {personLabel(l)}
-          {/* CAME BACK, and how often. The phone card and the record header
-              have carried this since the sessions existed; the desk's own list
-              — the screen a manager works from — had no sign of it at all.
-              Only above one: every lead has enquired once. */}
-          {l.enquiryCount > 1 && <span className="prow-repeat">{l.enquiryCount}×</span>}
+          {/* CAME BACK, and how often — and "Came back" in words on the day it
+              happens, which is the one a manager scanning nine rows needs to
+              pick out the two. Same chip, same rule, on every surface. */}
+          <RepeatTag lead={l} />
         </div>
         {/* Not twice. With no name on the lead the title above IS the phone
             number, and this line repeated it under itself. */}
@@ -469,7 +467,7 @@ export const LEADS_DEF = {
               the record rather than in the facts strip. */}
           <span className="prow-name">
             {personLabel(l)}
-            {l.enquiryCount > 1 && <span className="prow-repeat">{l.enquiryCount}×</span>}
+            <RepeatTag lead={l} />
           </span>
           {/* WHAT is overdue, next to WHO it is about. This was a bare date on
               the meta line below — "Yesterday", "Tomorrow" — which named no

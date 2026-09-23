@@ -207,6 +207,36 @@ export function arrivedOn(iso, { withTime = false } = {}) {
     : { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+/**
+ * CAME BACK — one definition, for every screen that shows it.
+ *
+ * A lead has "come back" when it has more than one enquiry. It came back TODAY
+ * when its latest enquiry is today, which is the version worth a mark on a row:
+ * the Leads list, the phone card and Today all ask the same question and must
+ * not answer it three ways. The Today feed also computes it in SQL (the group
+ * it heads), and the two agree because both mean "latest enquiry, since
+ * midnight".
+ *
+ * Returns null when there is nothing to say, so a caller renders nothing rather
+ * than an empty chip.
+ */
+export function repeatMark(lead) {
+  if (!lead) return null
+  const n = Number(lead.enquiryCount || 0)
+  const last = lead.lastEnquiryAt
+  const today = (() => {
+    if (lead.cameBackToday !== undefined) return Boolean(lead.cameBackToday)
+    if (!last || n <= 1) return false
+    const d = new Date(last)
+    if (isNaN(d.getTime())) return false
+    const now = new Date()
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+  })()
+  if (today) return { today: true, label: 'Came back', title: n > 1 ? `Enquired again today — ${n} enquiries in all` : 'Enquired again today' }
+  if (n > 1) return { today: false, label: `${n}×`, title: `${n} enquiries` }
+  return null
+}
+
 // Resolve a user/agent id (as stored on a timeline event's author) to a
 // display name, from the live roster — not a hardcoded id->name map.
 export function agentName(agents, id) {

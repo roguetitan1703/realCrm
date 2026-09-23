@@ -20,7 +20,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../lib/api.js'
 import { isTerminal } from '../../data/leadStatus.js'
-import { Overdue, StageTag, MoreRows, useCap } from '../../components/primitives.jsx'
+import { Overdue, StageTag, MoreRows, useCap, RepeatTag } from '../../components/primitives.jsx'
 import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue, personLabel } from '../../lib/format.js'
 import Icon from '../../components/Icon.jsx'
 
@@ -67,7 +67,7 @@ function LeadRow({ l, onOpen, store, tone, quiet }) {
       <button type="button" className="q-open" onClick={() => onOpen(l)}>
         <span className="av av-md">{initials(personLabel(l))}</span>
         <span className="q-main">
-          <span className="q-name">{personLabel(l)}</span>
+          <span className="q-name">{personLabel(l)}<RepeatTag lead={l} /></span>
           <span className="q-sub">{l.followUp ? l.followUp.action : reqShort(l.req)}</span>
         </span>
         <span className="q-right">

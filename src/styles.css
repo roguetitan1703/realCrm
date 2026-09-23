@@ -2937,6 +2937,12 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 /* Inline with the name on a card: a count, not a sentence. "2×" reads at a
    glance and costs no row. */
 .prow-name .prow-repeat{margin-left:6px;font-size:10.5px;padding:1px 5px;vertical-align:middle}
+/* Came back TODAY: the same chip, in words, because on the day it happens it is
+   the reason to pick this row out of nine. Still a chip — it sits inside the
+   name line on a 390px phone and inside a table cell on a desk, and must not
+   push either around. */
+.prow-repeat.is-today{letter-spacing:.02em;white-space:nowrap}
+.name .prow-repeat,.q-name .prow-repeat{margin-left:6px;font-size:10.5px;padding:1px 6px;vertical-align:middle}
 /* Beside the record title, where it can wrap with the name rather than pushing
    the facts strip and the action buttons down a line each. */
 .rh-title .rh-repeat{margin-left:9px;vertical-align:middle;font-size:11px}

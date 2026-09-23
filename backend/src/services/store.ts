@@ -3796,10 +3796,19 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
   // pill on the Leads list counts them for all time, which answers a different
   // question ("has this person ever repeated") and puts nothing in anyone's day.
   const d0 = dayStart(await timezoneOf(t));
-  const CAME_BACK_TODAY = sql`EXISTS (SELECT 1 FROM crm_lead_enquiries e
-                                       WHERE e.tenant_id = crm_leads.tenant_id
-                                         AND e.lead_id = crm_leads.id
-                                         AND coalesce(e.last_at, e.created_at) >= ${d0})`;
+  // MORE THAN ONE, and the latest one today. Without the count this said "came
+  // back" about a lead that had just arrived for the first time — every new
+  // enquiry is an enquiry today — which is the opposite of what the group
+  // means. Sessions, not payloads: four listings opened in five minutes is one
+  // visit (ENQUIRY_SESSION_MS), so this cannot be tripped by a portal firing
+  // the same form twice.
+  const CAME_BACK_TODAY = sql`(SELECT count(*) FROM crm_lead_enquiries e
+                                WHERE e.tenant_id = crm_leads.tenant_id
+                                  AND e.lead_id = crm_leads.id) > 1
+                              AND EXISTS (SELECT 1 FROM crm_lead_enquiries e
+                                           WHERE e.tenant_id = crm_leads.tenant_id
+                                             AND e.lead_id = crm_leads.id
+                                             AND coalesce(e.last_at, e.created_at) >= ${d0})`;
   // LIMIT 200 over every open lead was the whole feed. Import a thousand and
   // "Not yet contacted" held the first two hundred of them, the group header
   // counted the rows it had rather than the rows that exist, and every other
@@ -3822,13 +3831,13 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
                  WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS enquiry_count,
                (SELECT max(coalesce(e.last_at, e.created_at)) FROM crm_lead_enquiries e
                  WHERE e.tenant_id = crm_leads.tenant_id AND e.lead_id = crm_leads.id) AS last_enquiry_at,
-               ${CAME_BACK_TODAY} AS came_back_today
+               (${CAME_BACK_TODAY}) AS came_back_today
           FROM crm_leads
         WHERE tenant_id = ${t} ${scope}
           AND ${OPEN}
           AND (${FOLLOWUP_PAST_DUE} OR follow_up IS NOT NULL OR agent_id IS NULL
                OR stage = 'New' OR created_at > now() - interval '14 days'
-               OR ${CAME_BACK_TODAY})
+               OR (${CAME_BACK_TODAY}))
         ORDER BY created_at DESC LIMIT 200`,
     // A tenancy that has ended, or ends inside the 60-day window the renewal
     // signal treats as due. Anything further out is not today's problem.
@@ -3839,11 +3848,11 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
         ORDER BY (config->'tenancy'->>'end')::date ASC LIMIT 50`,
     // The true size of each group, regardless of how many rows came back above.
     sql`SELECT count(*) FILTER (WHERE ${FOLLOWUP_PAST_DUE})::int AS overdue,
-               count(*) FILTER (WHERE ${CAME_BACK_TODAY})::int AS came_back,
+               count(*) FILTER (WHERE (${CAME_BACK_TODAY}))::int AS came_back,
                -- MINUS the ones that came back today, because the screen shows
                -- those in their own group. A lead counted in two groups is two
                -- groups disagreeing about one person (CLAUDE.md §3.3).
-               count(*) FILTER (WHERE stage = 'New' AND NOT ${CAME_BACK_TODAY})::int AS fresh,
+               count(*) FILTER (WHERE stage = 'New' AND NOT (${CAME_BACK_TODAY}))::int AS fresh,
                count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned,
                count(*) FILTER (WHERE stage <> 'New' AND follow_up IS NULL AND NOT ${FOLLOWUP_PAST_DUE})::int AS no_next,
                count(*) FILTER (WHERE follow_up IS NOT NULL AND NOT ${FOLLOWUP_PAST_DUE})::int AS scheduled,
