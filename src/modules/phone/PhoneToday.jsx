@@ -1,6 +1,15 @@
-// The agent's work queue. Not a dashboard: no counters, no greeting, no chart.
-// Every row here is a thing that has to be done today, and tapping it opens the
-// record.
+// TODAY — the same page on the phone and at a desk (decided 25 Sep).
+//
+// Two halves, never stacked into one long scroll: TO DO, the work queue, and
+// MY WORK, how the day and the last two weeks have gone (components/AgentWork).
+// On a phone they are tabs; on a desk they sit side by side. An owner or a
+// manager on a phone also has TEAM, the Performance board, and a card opens
+// that person's page. Today used to be My day stacked on top of every group,
+// one thing after another, and read as a pile rather than a page.
+//
+// The To do half is the agent's work queue. Not a dashboard: no counters, no
+// greeting, no chart. Every row here is a thing that has to be done today, and
+// tapping it opens the record.
 //
 // Two things were wrong with the version this replaces.
 //
@@ -19,11 +28,13 @@
 // with seven hundred owners to ring opened Today and saw nothing about them.
 import { useEffect, useState } from 'react'
 import { api } from '../../lib/api.js'
+import { useServerData } from '../../lib/useServerData.js'
 import { isTerminal } from '../../data/leadStatus.js'
 import { Overdue, StageTag, MoreRows, useCap, RepeatTag } from '../../components/primitives.jsx'
 import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue, followUpAction, personLabel } from '../../lib/format.js'
 import Icon from '../../components/Icon.jsx'
-import { MyDay } from '../../components/ActivityDay.jsx'
+import { AgentWork, TeamBoard } from '../../components/AgentWork.jsx'
+import { Segmented } from '../../components/primitives.jsx'
 
 const CLOSED = (l) => isTerminal(l.stage)
 
@@ -241,9 +252,9 @@ function TodaySkeleton() {
   )
 }
 
-export default function PhoneToday({ store, me, go, topBar }) {
+/** The work queue: every group of things to do today. */
+function TodoList({ store, go, feed }) {
   const { state } = store
-  const feed = useTodayFeed(state.dataAsOf)
   const scoped = feed.leads
   const c = feed.counts || {}
   const oc = feed.owners?.counts || {}
@@ -283,8 +294,6 @@ export default function PhoneToday({ store, me, go, topBar }) {
   const upcoming = open.filter(l => l.followUp && !followUpOverdue(l.followUp) && l.followUp.date !== 'Today')
 
   const isDesk = state.role !== 'agent'
-  // The firm cold-calls if there is any calling work on this desk at all.
-  const hasCalling = Object.values(oc).some(v => Number(v) > 0)
   const ownerRows = feed.owners || {}
 
   // Ordered by how much the day depends on them, and interleaved rather than
@@ -318,33 +327,116 @@ export default function PhoneToday({ store, me, go, topBar }) {
     { key: 'upcoming', label: 'Upcoming', rows: upcoming, count: upcoming.length },
   ].filter(g => g.count > 0)
 
+  if (feed.loading) return <TodaySkeleton />
+  return (
+    <div className="q-wrap">
+      {groups.map(g => (
+        // A group that can be worked through is a list. One that can only be
+        // started is a line with a number on it.
+        // `nocap`: a group whose rows ARE the day does not collapse into a
+        // number, however large the count behind it. Everything else past
+        // BULK is a backlog and states itself in one line.
+        g.count > BULK && !g.nocap && (g.filter || g.screen)
+          ? <BulkRow key={g.key} g={g} onSeeAll={seeAll} />
+          : <Group key={g.key} g={g} store={store} onSeeAll={seeAll}
+              onOpen={g.kind === 'renewal' ? openAgreement : g.kind === 'owner' ? openOwner : openLead} />
+      ))}
+      {!groups.length && (
+        <div className="empty">
+          <div className="e-t">Nothing due</div>
+          <div className="e-s">Follow-ups, callbacks and new enquiries show up here.</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The page. `phone` decides the layout, not what is on it.
+ * sel.todayView: 'todo' (default) | 'work' | 'team'; sel.person: a teammate
+ * opened from Team, whose page replaces the board until Back.
+ */
+export default function Today({ store, go, topBar, sel = {}, phone = true }) {
+  const { state } = store
+  const feed = useTodayFeed(state.dataAsOf)
+  const oc = feed.owners?.counts || {}
+  const isDesk = state.role !== 'agent'
+  // Whether there is a calling side to switch to. An agent: if they have
+  // calling work. The desk: if the firm has a calling list at all, since an
+  // owner's own queue is usually empty while the team's is not.
+  const { data: firmOwners, loading: firmLoading } = useServerData(
+    () => (isDesk ? api.getOwnersSummary() : Promise.resolve(null)), [isDesk, state.dataAsOf], null, isDesk ? '/owners/summary' : null)
+  const hasCalling = isDesk
+    ? (firmOwners?.summary?.queue?.total || 0) > 0
+    : Object.values(oc).some(v => Number(v) > 0)
+  // What they hold now, for My work's "Holds now". Scoped by the server.
+  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null, '/workspace/desk-summary')
+  const settling = feed.loading || (isDesk && firmLoading && !firmOwners)
+  const me = state.activeAgentId || state.session?.userId || null
+  const startSide = hasCalling && !feed.leads.length ? 'calling' : 'leads'
+  const view = ['work', 'team'].includes(sel.todayView) && (sel.todayView !== 'team' || isDesk) ? sel.todayView : 'todo'
+  const setView = (v) => go('today', { todayView: v === 'todo' ? undefined : v, person: undefined })
+
+  // A teammate's page, opened from the Team tab.
+  if (phone && view === 'team' && sel.person) {
+    const who = (state.agents || []).find(a => a.id === sel.person)
+    return (
+      <>
+        {topBar({ title: who?.name || 'Teammate', eyebrow: 'Team', onBack: () => go('today', { todayView: 'team', person: undefined }) })}
+        <div className="q-wrap">
+          {settling ? <div className="ad-wait tall" aria-busy="true" /> : (
+            <AgentWork store={store} person={sel.person} title={who?.name || 'Teammate'} heading={false} hasCalling={hasCalling}
+              actions={<button type="button" className="aw-link" onClick={() => go('leads', { leadFilters: { agent: [sel.person] } })}>Their leads<Icon name="chevRight" size={14} /></button>} />
+          )}
+        </div>
+      </>
+    )
+  }
+
+  // Not mounted until the queue has answered: whether this desk calls owners
+  // decides the Leads | Calling switch and the side it starts on.
+  const wait = <div className="ad-wait tall" aria-busy="true" />
+  const work = settling ? wait
+    : <AgentWork store={store} person={me} title="My work" hasCalling={hasCalling} defaultSide={startSide}
+        book={desk?.perAgent?.[me] || {}} ownerBook={desk?.perAgentCalls?.[me] || {}}
+        onBook={(seg) => go('leads', { leadFilters: seg ? { agent: [me], seg } : { agent: [me] } })} />
+
+  if (!phone) {
+    // A desk has the room to show both halves at once.
+    return (
+      <>
+        {topBar({ title: 'Today' })}
+        <div className="app-body today-desk">
+          <section className="today-col">
+            <div className="aw-top"><h2 className="aw-title">To do</h2></div>
+            <TodoList store={store} go={go} feed={feed} />
+          </section>
+          <section className="today-col">{work}</section>
+        </div>
+      </>
+    )
+  }
+
+  const tabs = [
+    { value: 'todo', label: 'To do' },
+    { value: 'work', label: 'My work' },
+    ...(isDesk ? [{ value: 'team', label: 'Team' }] : []),
+  ]
   return (
     <>
       {topBar({ title: 'Today' })}
-      {feed.loading ? <TodaySkeleton /> : (
-      <div className="q-wrap">
-        {/* What I have done today, above what I still have to do. Starts on
-            Calling for somebody whose work is the calling list and no leads. */}
-        <MyDay store={store} hasCalling={hasCalling}
-          defaultSide={hasCalling && !scoped.length ? 'calling' : 'leads'} />
-        {groups.map(g => (
-          // A group that can be worked through is a list. One that can only be
-          // started is a line with a number on it.
-          // `nocap`: a group whose rows ARE the day does not collapse into a
-          // number, however large the count behind it. Everything else past
-          // BULK is a backlog and states itself in one line.
-          g.count > BULK && !g.nocap && (g.filter || g.screen)
-            ? <BulkRow key={g.key} g={g} onSeeAll={seeAll} />
-            : <Group key={g.key} g={g} store={store} onSeeAll={seeAll}
-                onOpen={g.kind === 'renewal' ? openAgreement : g.kind === 'owner' ? openOwner : openLead} />
-        ))}
-        {!groups.length && (
-          <div className="empty">
-            <div className="e-t">Nothing due</div>
-            <div className="e-s">Follow-ups, callbacks and new enquiries show up here.</div>
-          </div>
-        )}
-      </div>
+      <div className="today-tabs"><Segmented block options={tabs} value={view} onChange={setView} /></div>
+      {view === 'todo' && <TodoList store={store} go={go} feed={feed} />}
+      {view === 'work' && <div className="q-wrap">{settling ? wait : (
+        <AgentWork store={store} person={me} title="My work" heading={false} hasCalling={hasCalling} defaultSide={startSide}
+          book={desk?.perAgent?.[me] || {}} ownerBook={desk?.perAgentCalls?.[me] || {}}
+          onBook={(seg) => go('leads', { leadFilters: seg ? { agent: [me], seg } : { agent: [me] } })} />
+      )}</div>}
+      {view === 'team' && (
+        <div className="q-wrap">
+          {settling ? wait : <TeamBoard store={store} hasCalling={hasCalling} heading={false}
+            onOpenPerson={(c) => go('today', { todayView: 'team', person: c.id })} />}
+        </div>
       )}
     </>
   )

@@ -864,3 +864,62 @@ it. Project names (4.6) go in first.
   then 0; probe rows deleted (owners, properties, leads, agreements, events,
   notifications). Nothing run against production.
 
+---
+
+## E — 25 Sep: Today, My work, Performance (as built) and the superadmin plan
+
+### Today, My work, Performance — `development`
+- **Who:** the agent (phone or desk) wants what to do next and how their day
+  is going; the owner wants who needs a word, and one person's work when asked.
+- **Today** is one page on phone and desk (`modules/phone/PhoneToday.jsx`):
+  *To do* (the work queue) and *My work* (`components/AgentWork.jsx`). Tabs on
+  a phone, side by side on a desk. An agent's desk lands on Today; the
+  Dashboard is the desk's. Owners and managers on a phone get a third tab,
+  *Team*.
+- **My work:** the day (tiles, what moved, every count, what they hold now,
+  each number opening its records), a day stepper, and the last 14 days as a
+  bar a day (picked up drawn inside). Tapping a bar reads that day.
+- **Performance** (desk, owner and managers): a card per person for today, 7
+  or 30 days (calls, % picked up, a small chart, site visits, deals closed,
+  follow-ups done, and today's fair red: missed follow-ups, new leads not
+  called, no calls after noon). A card opens that person's page, the same page
+  as their My work, with Their leads and Reassign.
+- **Team** is people management only. The dashboard's Team today stays at the
+  bottom; a row opens that person on Performance.
+- **API:** `GET /activity/range?side&days=7|14|30[&person]`, the same facts as
+  the day report over a stretch, and calls per day. An agent gets their own.
+  Dev: 0.7–1.1 s warm.
+
+### Superadmin — decided 25 Sep, not built
+- **Getting into a firm's desk:** a support session, **read-only**, **always
+  allowed** (no opt-in by the firm). A session row marked with the superadmin,
+  two hours, not sliding; opened in a new tab with its own sessionStorage key so
+  the operator's own login is untouched; a banner with the end time and Exit;
+  start and end written to the firm's own ledger. The raw superadmin-token path
+  into firm routes (`middleware/auth.ts`) goes, with the `'superadmin'` role
+  checks it left behind.
+- **Firm page** `/admin/firms/<slug>`: team (role, login id, status, last
+  login, locked, still on the password it was handed), live sessions with Sign
+  out, logins and failures, leads in and the last lead per source, who worked
+  in the last 7 days, storage use (E7). Actions: reset the owner's password,
+  sign a person out, open desk.
+- **Ledger per firm:** 9.1 (hashing fix, per-firm chains, legacy verifier,
+  incremental check) and `GET /admin/firms/:id/audit`, paged and filtered on
+  the server. The firm's Settings view stops verifying every firm's rows.
+- **Superadmin session:** a session row, 12 hours, real logout, lockout.
+- **Onboarding (2.4, 2.5):** branch `claude/super-admin-capabilities-plg7uc`
+  merges cleanly and is mostly right (one `planRoster`, refusal before the firm
+  row, team returned and routed, Bhumi staff details out of the public bundle).
+  Before taking it: **enforce `must_change_password` on the server** (nothing
+  does today; with `vijay@123` any teammate can sign in as any other), check
+  **duplicate phones** in the plan (`(tenant_id, phone)` is unique), and wrap
+  provisioning in one transaction.
+- **Also in this area:** 9.2 portal setup email; the ten live default passwords
+  (KNOWN-ISSUES); E2 rotating secrets (the user's, by hand).
+- **Order:** the branch with its fixes → superadmin session → support session
+  → firm page → 9.1 and the ledger.
+
+### Still open elsewhere
+- Part 7, Properties (7.1 verification visit, 7.5 gallery link, 7.2–7.4, 7.6):
+  set aside by the user, not started.
+

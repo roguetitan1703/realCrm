@@ -25,6 +25,9 @@ import { currentTenant } from './api.js'
 export const TAKEOVER_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'propFromOwner', 'projOpen', 'projKey',
   'leadFilters', 'propFilters', 'ownerSeg', 'ownerStage', 'contactsTab',
+  // Today's half (To do / My work / Team) and a teammate opened from Team or
+  // the Performance page.
+  'todayView', 'person',
 ]
 
 // Opening a record is not leaving the screen.
@@ -37,6 +40,7 @@ export const TAKEOVER_KEYS = [
 // over", and a navigation made only of them keeps the filters underneath.
 export const RECORD_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propFromOwner', 'projOpen', 'projKey',
+  'person',
 ]
 
 // ── One filter bag, in the URL ──────────────────────────────────────────────
@@ -102,6 +106,8 @@ export function parseUrl(search = window.location.search) {
       propFromOwner: (p.get('new') === 'property' && p.get('from-owner')) || undefined,
       // Contacts' tab — Owners / Tenants / Buyers — so a reload stays on it.
       contactsTab: ['tenants', 'buyers'].includes(p.get('tab')) ? p.get('tab') : undefined,
+      todayView: ['work', 'team'].includes(p.get('view')) ? p.get('view') : undefined,
+      person: p.get('person') || undefined,
       leadFilters: readFilters(p),
       propFilters: readPropFilters(p),
     },
@@ -128,6 +134,8 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (sel.propAdd) p.set('new', 'property')
   if (sel.propAdd && sel.propFromOwner) p.set('from-owner', sel.propFromOwner)
   if (screen === 'clients' && sel.contactsTab && sel.contactsTab !== 'owners') p.set('tab', sel.contactsTab)
+  if (screen === 'today' && sel.todayView) p.set('view', sel.todayView)
+  if ((screen === 'today' || screen === 'performance') && sel.person) p.set('person', sel.person)
   writeFilters(p, sel.leadFilters)
   writePropFilters(p, sel.propFilters)
   const q = p.toString()

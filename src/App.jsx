@@ -25,10 +25,17 @@ import ImportPage from './modules/ImportPage.jsx'
 import WaModal from './modules/WaModal.jsx'
 import Modals from './modules/Modals.jsx'
 import Phone from './modules/Phone.jsx'
+import PhoneToday from './modules/phone/PhoneToday.jsx'
+import Performance from './modules/Performance.jsx'
 
 const NAV = [
   { section: 'Workspace' },
+  // An agent's home is Today, the same page as on the phone; the desk's is the
+  // Dashboard. Each role sees one of the two (see allowedKeys below).
+  { key: 'today', label: 'Today', icon: 'home' },
   { key: 'dashboard', label: 'Dashboard', icon: 'grid' },
+  // How each person's work is going: the team board, then one person's page.
+  { key: 'performance', label: 'Performance', icon: 'trend' },
   { key: 'leads', label: 'Leads', icon: 'leads' },
   // The outbound half of the desk. It sat under Contacts as a child, which is
   // where it broke: Contacts is a directory of people you already have a
@@ -57,6 +64,7 @@ const NAV = [
 const SCREENS = {
   dashboard: Dashboard, leads: Leads, calling: Owners, properties: Properties, clients: Clients,
   calendar: Calendar, import: ImportPage, team: Team, settings: Settings, integrations: Integrations,
+  today: (props) => <PhoneToday {...props} phone={false} />, performance: Performance,
 }
 
 // Deep-link parsing lives in lib/nav.js now — it is the same parser the URL
@@ -99,7 +107,7 @@ export default function App() {
     },
   }), [store])
   const { screen, setScreen, sel, setSel, go, boot } = useNav({
-    home: isPhone ? 'today' : 'dashboard',
+    home: isPhone || state.role === 'agent' ? 'today' : 'dashboard',
     onExitWarning: warnExit,
     overlay,
     // The URL mirrors where you are on the DESK. Before sign-in there is no
@@ -193,8 +201,9 @@ export default function App() {
   // agent is meant to be able to read it (desk-rework.md §2, G). What they get
   // inside is one section — Settings.jsx filters its own nav by role, and the
   // server refuses a settings write from an agent outright.
-  const allowedKeys = state.role === 'agent' ? ['dashboard', 'leads', 'calling', 'properties', 'clients', 'calendar', 'settings'] : null
+  const allowedKeys = state.role === 'agent' ? ['today', 'leads', 'calling', 'properties', 'clients', 'calendar', 'settings'] : null
   const nav = NAV
+    .filter(n => n.key !== 'today' || state.role === 'agent')
     .filter(n => !allowedKeys || (n.key && allowedKeys.includes(n.key)) || (n.section && ['Workspace'].includes(n.section)))
     .map(n => {
       if (n.key === 'leads') return { ...n, badge: newCount }
@@ -250,7 +259,8 @@ export default function App() {
   }
 
   // Enforce RBAC on direct screen access
-  const effectiveScreen = (state.role === 'agent' && ['team', 'integrations'].includes(screen)) ? 'dashboard' : screen
+  // An agent's desk has Today where the Dashboard is, and no team pages.
+  const effectiveScreen = (state.role === 'agent' && ['team', 'integrations', 'performance', 'dashboard'].includes(screen)) ? 'today' : screen
   const Screen = SCREENS[effectiveScreen] || Dashboard
 
   return (

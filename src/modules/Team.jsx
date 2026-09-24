@@ -4,7 +4,6 @@ import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { buildRoster } from '../components/roster.jsx'
-import { TeamToday } from '../components/ActivityDay.jsx'
 import { whenLabel } from '../lib/format.js'
 import { copyText } from '../lib/clipboard.js'
 
@@ -33,10 +32,6 @@ export default function Team({ store, go, topBar }) {
   // with the summary, and buildRoster is shared with the dashboard so the two
   // screens cannot show different numbers for the same person (§3.3).
   const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null, '/workspace/desk-summary')
-  // Whether this desk cold-calls, for the Leads | Calling switch — the same
-  // read and the same test the dashboard uses.
-  const { data: ownerSummary } = useServerData(() => api.getOwnersSummary(), [state.dataAsOf], null, '/owners/summary')
-  const hasCalling = (ownerSummary?.summary?.queue?.total || 0) > 0
   const perAgent = desk?.perAgent || {}
   const built = buildRoster({
     agents: state.agents, perAgent, perAgentCalls: desk?.perAgentCalls || {}, inactive,
@@ -64,19 +59,8 @@ export default function Team({ store, go, topBar }) {
         {/* PRIMARY: who can sign in + admin controls */}
         <AccessPanel store={store} />
 
-        {/* WHAT THE TEAM DID — the full Team today. The dashboard carries the
-            compact one and sends people here; this is where the day is worked
-            from: every number opens its people, and a row can be handed on.
-            It replaced a load-bar roster ("Team activity") whose Calls · 30d
-            was a second call count with its own rules beside this one. */}
-        <div className="panel acc-panel">
-          <TeamToday store={store} hasCalling={hasCalling}
-            book={perAgent} ownerBook={desk?.perAgentCalls || {}}
-            onBook={(id, side, seg) => toLeads(seg ? { agent: [id], seg } : { agent: [id] })}
-            actions={(r) => (r.role === 'agent' || r.role === 'manager') && (
-              <Button size="sm" onClick={() => store.openModal({ kind: 'reassign', fromId: r.id })}>Reassign</Button>
-            )} />
-        </div>
+        {/* How the work is going lives on the Performance page (25 Sep).
+            This page is for the people: who can sign in, and their sessions. */}
 
         <SessionsPanel store={store} />
       </div>

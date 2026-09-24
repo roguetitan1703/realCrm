@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { Kpi, Panel, SectionHead } from '../components/primitives.jsx'
-import { buildRoster, DeskTable } from '../components/roster.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import { MyDay, TeamToday } from '../components/ActivityDay.jsx'
+import { TeamToday } from '../components/ActivityDay.jsx'
 
 // THE MANAGER'S SCREEN. One question: is the team working the book, and who is
 // stuck. Tiles for what can be cleared today, then a row per agent with a
@@ -68,8 +67,6 @@ export default function Dashboard({ store, go, topBar }) {
   const segLabel = (key, fallback) =>
     (state.leadSegments || []).find(s => s.key === key)?.label || fallback
   const bySource = desk?.bySource || {}
-  const perAgent = desk?.perAgent || {}
-  const perAgentCalls = desk?.perAgentCalls || {}
   const oq = ownerSummary?.summary?.queue || null
   const oStage = ownerSummary?.summary?.byStage || {}
   const hasCalling = !!oq && oq.total > 0
@@ -93,15 +90,6 @@ export default function Dashboard({ store, go, topBar }) {
   // "where they come from" and "where they end up" read as one pair.
   const outcomes = Object.entries(oStage).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
 
-  // The roster, built by the SAME function the Team page uses — this screen used
-  // to derive its own "contacted" by counting every stage past index 0, which is
-  // a guess about what a stage means rather than a measurement.
-  const roster = buildRoster({ agents: state.agents, perAgent, perAgentCalls })
-  // An agent sees only themselves; the desk sees everyone, top few here and the
-  // rest on the Team page rather than a second full table on the dashboard.
-  const myRows = state.role === 'agent'
-    ? roster.rows.filter(r => r.a.id === state.activeAgentId)
-    : roster.rows.slice(0, 8)
 
   // A DISTRIBUTION, not eight charts.
   //
@@ -253,23 +241,12 @@ export default function Dashboard({ store, go, topBar }) {
           </div>
         )}
 
-        {/* An agent's own book, as it stands. For the desk this table was
-            "By agent" — a second per-person table beside Team today; its facts
-            (open, not contacted, went cold today) are the Holds line in each
-            person's row on the Team page now. */}
-        {state.role === 'agent' && (
-          <Panel>
-            <SectionHead title="My desk" />
-            <DeskTable rows={myRows} onCell={(r, seg) => toLeads(seg ? { agent: [r.a.id], seg } : { agent: [r.a.id] })} />
-          </Panel>
-        )}
-
         {/* WHAT PEOPLE DID TODAY, at the bottom of the page (decided 25 Sep):
             the tiles above are what to do now; this is how the day went, one
-            row per person, and it opens the Team page. An agent sees their own. */}
-        {state.role === 'agent'
-          ? <Panel><MyDay store={store} hasCalling={hasCalling} variant="panel" /></Panel>
-          : <Panel><TeamToday store={store} hasCalling={hasCalling} compact onOpenFull={() => go('team')} /></Panel>}
+            row per person; a row opens that person on Performance. An agent's
+            desk has Today instead of this page. */}
+        <Panel><TeamToday store={store} hasCalling={hasCalling}
+          onOpen={(r) => go('performance', r ? { person: r.id } : {})} /></Panel>
       </div>
     </>
   )

@@ -113,7 +113,7 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
     ? <Screen key={`${tab}-${sel.leadId || ''}-${sel.propId || ''}`} {...ctx} />
     : tab === 'me'
       ? <PhoneMe store={store} me={me} topBar={topBar} />
-      : <PhoneToday store={store} me={me} go={go} topBar={topBar} />
+      : <PhoneToday store={store} go={go} topBar={topBar} sel={sel} phone />
 
   return (
     <MobileShell

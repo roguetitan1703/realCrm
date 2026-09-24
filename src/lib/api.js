@@ -749,6 +749,8 @@ export const api = {
   // asking fresh on every render fired the same report three times on one
   // dashboard load.
   getActivity: (q) => request(`/activity?${new URLSearchParams(Object.entries(q).filter(([, v]) => v))}`),
+  // The same counts over the last 7, 14 or 30 days, and calls per day.
+  getActivityRange: (q) => request(`/activity/range?${new URLSearchParams(Object.entries(q).filter(([, v]) => v))}`),
   getActivityRecords: (q) => request(`/activity/records?${new URLSearchParams(Object.entries(q).filter(([, v]) => v))}`, { fresh: true }),
   // Open records per person, on ONE side — the number an assign screen should
   // show is the one for the work it is handing out.

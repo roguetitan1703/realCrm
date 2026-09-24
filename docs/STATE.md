@@ -6,9 +6,9 @@ opposed to committed), what is waiting on the user, and what was checked against
 a live database so the next session neither re-derives it nor assumes it.
 
 Open bugs go in `docs/KNOWN-ISSUES.md`, not here. Point at them. The working
-plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md`.
+plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md` (latest: part E).
 
-**Last session: 2026-09-24.**
+**Last session: 2026-09-25.**
 
 ---
 
@@ -19,11 +19,17 @@ plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md`.
 | Backend — AWS EC2, **by hand** | `f03dcd1` when last read (24 Sep, `/health`) | `scripts/deploy-api.sh` on the box — refuses a dirty tree or a branch other than `main` |
 | Frontend — Vercel | not recorded | **Branch Tracking is OFF** — a push to `main` does not deploy; the user deploys by hand |
 | `main` | `a3b51c0` | |
-| `development` | 3–4 commits ahead of `main`: the Status column at import, the activity report | |
+| `development` | about 16 commits ahead of `main` | agreements and conversion (D), the activity report, contacts tabs, the copy sweep, Today / My work / Performance |
 
-**Deploy order: API first, then frontend.** The frontend reads fields and
-routes the old API does not have (Contacts showed "47 clients", empty, on
-production for exactly this reason — new frontend, old API).
+**Deploy order: API first, then frontend.** The new frontend calls
+`/activity/range`, `/agreements` and fields the old API does not have.
+
+What the API deploy runs on production, once:
+- additive schema: `crm_agreements` and its columns, and the index
+  `idx_crm_timeline_day (tenant_id, timestamp)`;
+- `runOnce 2026_09_25_agreement_party_copy`: fills an agreement's own tenant or
+  buyer name and phone from its lead where empty. Production had one agreement
+  (urban, a demo firm) with the name already set; nothing on bhumi or mahalaxmi.
 
 After the API deploy: `npm run link:owners -- --env=production` (report, then
 `--apply`) to join listing owners to calling rows — not yet run on production.
@@ -32,49 +38,44 @@ After the API deploy: `npm run link:owners -- --env=production` (report, then
 
 ## Waiting on the user
 
-- **Merge `development` → `main` and deploy** (API, then frontend). The API
-  deploy runs the additive schema (crm_agreements, two columns) and one
-  runOnce that writes ONE agreement on the demo firm `urban` from its old
-  tenancy; nothing on bhumi or mahalaxmi.
-- **Conversion and agreements (D) — review on dev.** See the plan, "D, as
-  built". Leads' fixed stages rename by their shown name, not their value.
-- **Activity report — Mahalaxmi's owner to see it.** The words ("calls",
-  "answered", "no outcome written", "Now") are the spec's guess at how he
-  talks; his answer is the real check. Open: an end-of-day push, and whether
-  "today" plus the day stepper is enough.
-- **The Status column at import** stays (`d381de2`) unless the user says it
-  makes the import too heavy; the back-fill for rows already in was declined —
-  PARKED.md.
+- **Review on dev, merge `development` → `main`, deploy** (API, then frontend).
+- **Superadmin work** is planned, not built: mahalaxmi-batch.md part E. Support
+  access decided read-only and always allowed.
+- **Properties Part 7** (verification visit, gallery link and the rest): set
+  aside by the user.
+- **Production timing of the dashboard** after the deploy: the only number is
+  from before (Bhumi's leads report 2 s). A read-only check was blocked by the
+  permission tool; ask before retrying.
 
 ---
 
-## Checked against production this session (read-only)
+## Checked this session
 
-- Mahalaxmi: 3,731 owners, all New; 0 person calls on the calling list today
-  (24 Sep, 18:00 IST). Agents hold 627–789 each.
-- Bhumi activity, 23 Sep, report vs an independent query: Siddhi 34 calls —
-  9 answered, 16 not received, 2 busy/off, 7 no outcome; exact match.
-- Only 24% of bhumi's calls carry an outcome (114 of 485, 30 days). The report
-  shows the rest as "no outcome written" on purpose.
-
-**Incident, no data changed.** A scratch script that imported
-`services/store.ts` ran `initSchema()` against production (importing the store
-starts the boot). It got through five `CREATE TABLE IF NOT EXISTS` and three
-`ADD COLUMN IF NOT EXISTS`, all already present, before the connection closed —
-no seed or `runOnce` reached. Read-only scripts now set `CRM_NO_BOOT=1` before
-importing the store, which skips the boot.
+- **Dev only.** Today / My work / Performance driven in Chromium, desk 1440 and
+  iPhone 13: agent desk lands on Today, no horizontal scroll on the phone, Back
+  from a teammate returns to the Team tab, a dashboard row opens that person,
+  picking a bar reads that day. No page errors.
+- `/activity/range` on dev: 0.7–1.1 s warm for 7, 14 and 30 days.
+- The copy sweep: 98 on-screen strings; what still has an em dash is server
+  logs, the API client's internal error separator, and SQL reading old titles.
 
 ---
 
 ## Do not repeat
 
-- Dev has demo activity on `delpat` (`npm run seed:dev:activity`, 24 Sep):
-  three days of calls, notes, status changes and callbacks by its agents, and
-  five enquiries this morning. `-- --clear` removes it and puts every moved
-  record back.
-
-- Playwright's WebKit build is not downloaded for the installed version
-  (1.61.1); phone checks this session ran in Chromium with the iPhone 13
-  descriptor. `npx playwright install webkit` if a real WebKit pass is needed.
+- Dev has demo data on `delpat`:
+  - `npm run seed:dev:activity` (rerun 25 Sep): three days of agent work.
+    `-- --clear` removes it and restores what it moved.
+  - `npm run seed:dev:inventory`: 19 flats (`p_demo_`), 22 owners (`own_demo_`),
+    4 agreements, 2 leads. `-- --clear` removes them.
+- The dev activity seed writes call events but not `crm_owners.last_call_at`,
+  so on dev the dashboard's "People called today" reads 0 beside Team today's
+  calls. A real logged call sets both.
+- Left in place on dev because the user converted it: the calling row "zeta
+  probe heights" (`own_1790258291624_0_7945dd`) and the flat made from it.
+- Playwright's WebKit build is not downloaded; phone checks ran in Chromium with
+  the iPhone 13 descriptor.
 - The dev database is shared with the user's own preview testing. Delete only
   your own probe rows, by id.
+- Read-only scripts that import `services/store.ts` must set `CRM_NO_BOOT=1`,
+  or importing the store runs `initSchema()` against whatever database it names.
