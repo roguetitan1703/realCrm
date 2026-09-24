@@ -77,7 +77,13 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const seg = f.seg || 'all'
   const intent = f.intent || 'all'
   const stage = f.stage || 'all'
-  const sortKey = f.sortKey || 'activity'
+  // A-TO-Z BY DEFAULT, because a list an agent works through has to hold
+  // still. Sorted by last activity, the lead you had just worked became the
+  // most recent thing on the desk and went to the top — so an agent who had
+  // learnt where each person sat lost them every time they did their job, and
+  // had to search for somebody they had touched a minute earlier. A name never
+  // changes when you call someone. Last activity is still one tap away.
+  const sortKey = f.sortKey || 'name'
   const sortDir = f.sortDir || 'asc'
   // AN AGENT FILTER NOBODY CAN SEE IS NOT A FILTER.
   //

@@ -2834,7 +2834,10 @@ export async function listLeads(opts: LeadFilterOpts & {
     // This was `created_at`, under a menu item reading "Last activity" and as
     // the list's DEFAULT order -- so every agent's leads were ordered by
     // arrival, and a lead called an hour ago sat below one nobody had opened.
-    activity: lastPersonActivity(), name: sql`lower(name)`,
+    // A nameless lead sorts by its number rather than all piling up at the end
+    // in no order — portals send plenty without a name, and the row shows the
+    // number where the name would be.
+    activity: lastPersonActivity(), name: sql`lower(coalesce(nullif(name, ''), phone))`,
     budget: sql`budget_max`, stage: sql`stage`,
     // The Received column is sortable, so its key has to be here. A key that
     // is not in this map is silently ignored, which shows a sort arrow that
@@ -2881,7 +2884,7 @@ export async function listLeads(opts: LeadFilterOpts & {
                             -- The value the sort above orders by and the value
                             -- the Going-cold panel prints, from one expression.
                             ${lastPersonActivity()} AS last_activity_at
-           FROM crm_leads WHERE ${clause} ORDER BY ${col} ${dir} NULLS LAST LIMIT ${limit} OFFSET ${offset}`,
+           FROM crm_leads WHERE ${clause} ORDER BY ${col} ${dir} NULLS LAST, id LIMIT ${limit} OFFSET ${offset}`,
     sql`SELECT count(*)::int AS n FROM crm_leads WHERE ${clause}`,
   ]);
   return { rows: rows.map(r => rowToLead(r)), total: countRows[0]?.n ?? 0, page, limit };
