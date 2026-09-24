@@ -13,7 +13,7 @@
  * A row that already carries a login id and password comes out unchanged, so
  * what the screen showed is what gets created.
  */
-import { suggestPassword, passwordIssue } from './auth.js';
+import { suggestPassword, passwordIssue, firstNameHandle } from './auth.js';
 
 export interface RosterRow {
   name?: string;
@@ -40,9 +40,9 @@ export function cleanLoginId(raw: string): string {
   return String(raw || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
 }
 
-/** The login id a name gets when nobody chose one. */
+/** The login id a name gets when nobody chose one: the first name — `vijay`. */
 export function loginIdFromName(name: string, fallback = 'agent'): string {
-  return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || fallback;
+  return firstNameHandle(name).slice(0, 16) || fallback;
 }
 
 export function normalizePhone(raw: string | null | undefined): string | null {
@@ -74,7 +74,7 @@ export function planRoster(input: { ownerName?: string; ownerEmail?: string; own
   const taken = new Set<string>();
   const issues: string[] = [];
 
-  const ownerPassword = String(input.ownerPassword || '').trim() || suggestPassword();
+  const ownerPassword = String(input.ownerPassword || '').trim() || suggestPassword(input.ownerName || 'owner');
   const ownerIssue = passwordIssue(ownerPassword);
   if (ownerIssue) issues.push(`Owner: ${ownerIssue}`);
   const owner = { loginId: claim(loginIdFromName(input.ownerName || '', 'owner'), taken), password: ownerPassword };
@@ -93,7 +93,7 @@ export function planRoster(input: { ownerName?: string; ownerEmail?: string; own
     const email = String(row.email || '').trim().toLowerCase() || null;
     if (email && !EMAIL_RE.test(email)) issues.push(`${name}: "${email}" is not an email.`);
 
-    const password = String(row.password || '').trim() || suggestPassword();
+    const password = String(row.password || '').trim() || suggestPassword(name);
     const pwIssue = passwordIssue(password);
     if (pwIssue) issues.push(`${name}: ${pwIssue}`);
 

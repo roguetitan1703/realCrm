@@ -217,8 +217,14 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   Role, optional Email / User ID / Password; comma or Excel columns). Every row
   shows its user ID and password **as it appears**, planned by the server
   (`services/roster.ts` `planRoster`, `POST /admin/onboard/preview`) and sent
-  back unchanged, so the handover matches what was shown. The console used to
-  invent `firstname123` passwords while parsing; gone. A roster with a short
+  back unchanged, so the handover matches what was shown.
+- **Decided (24 Sep, the user):** the user ID is the first name and the password
+  is first name `@123` — Vijay is `vijay` / `vijay@123`; a second Vijay is
+  `vijay2`; a short name takes more digits (`raj@1234`) to reach 8 characters.
+  Same rule for a seat added, reassigned or reset from the Team screen
+  (`suggestPassword(name)` in `services/auth.ts`). `must_change_password` stays
+  on by default because these are guessable from the team list. An account with
+  no password at all still gets a random one — nobody is handed that one. A roster with a short
   password, a duplicate ID or a shared email is refused before the tenant row
   is written.
 
