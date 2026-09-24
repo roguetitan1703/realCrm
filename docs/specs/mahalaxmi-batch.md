@@ -210,12 +210,19 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   the receiver; the numbers afterwards are the server's. Suspended people cannot
   receive work — hidden in the picker AND refused by the server.
 
-### 2.4 ⬜ Super admin: bulk user creation
-- **Said:** users are created one at a time, setting each password by hand.
-- **Direction:** paste or enter N users (name, phone, role, login id), with
-  passwords generated per person.
+### 2.4 ✅ Super admin: bulk user creation
+- **Said:** users are created one at a time, setting each password by hand; the
+  paste box exists but nothing says what to paste.
+- **Done:** the paste box states its format (one person per line — Name, Phone,
+  Role, optional Email / User ID / Password; comma or Excel columns). Every row
+  shows its user ID and password **as it appears**, planned by the server
+  (`services/roster.ts` `planRoster`, `POST /admin/onboard/preview`) and sent
+  back unchanged, so the handover matches what was shown. The console used to
+  invent `firstname123` passwords while parsing; gone. A roster with a short
+  password, a duplicate ID or a shared email is refused before the tenant row
+  is written.
 
-### 2.5 ⬜ Handover summary is missing the team's credentials, and onboarding bugs
+### 2.5 ✅ Handover summary is missing the team's credentials, and onboarding bugs
 - **Said:** the handover summary has no user list (login id + password) to copy.
 - **Know (22 Sep):** `provisionTenant` builds `createdTeam` but **never returns
   it**, so the summary shows the owner only. Agents created without a password
@@ -223,6 +230,13 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   (cause of 1.6).
 - **Direction:** return the team; generate a password per person; add them to
   routing; the summary lists everyone with Copy.
+- **Done:** `provisionTenant` returns the team and the owner's login id; a blank
+  password is generated per person (never the owner's); the whole team goes into
+  the round-robin with the owner; team phones stored as `+91…` like every other
+  writer. The onboarding placeholders carried Bhumi staff names, emails, phones
+  and passwords in the public bundle — replaced with invented ones.
+- **Not checked against a database** — no DB in that session. Verified by
+  driving the form in a browser with the admin API answered by `planRoster`.
 
 ---
 

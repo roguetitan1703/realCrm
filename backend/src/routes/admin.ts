@@ -14,6 +14,7 @@ import { verifyToken } from '../services/auth.js';
 import { verifyAuditChain, audit } from '../services/audit.js';
 import { sql } from '../services/db.js';
 import { provisionTenant } from '../services/store.js';
+import { planRoster } from '../services/roster.js';
 
 export const adminRouter = Router();
 
@@ -63,6 +64,16 @@ adminRouter.get('/overview', async (_req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/v1/admin/onboard/preview — the login ids and passwords this roster
+ * would be created with, so the console can show them while it is being typed.
+ * Writes nothing. Rows that already carry an id and password come back as sent.
+ */
+adminRouter.post('/onboard/preview', (req: Request, res: Response) => {
+  const { ownerName, ownerEmail, ownerPassword, team } = req.body || {};
+  return res.json({ success: true, ...planRoster({ ownerName, ownerEmail, ownerPassword, team }) });
+});
+
+/**
  * POST /api/v1/admin/onboard — provision a new consultancy workspace.
  * Superadmin-only (guarded by adminRouter.use above). This is the ONE place a
  * workspace is created; the public /workspace/onboard route was removed so a
@@ -96,7 +107,7 @@ adminRouter.post('/onboard', async (req: Request, res: Response) => {
     return res.status(201).json({ success: true, message: `Workspace '${result.tenant.name}' provisioned.`, ...result });
   } catch (err: any) {
     const msg = err?.message || 'Provisioning failed';
-    const isValidation = /required|email/i.test(msg);
+    const isValidation = /required|email|Roster is not valid/i.test(msg);
     return res.status(isValidation ? 400 : 500).json({ success: false, error: isValidation ? 'Invalid workspace details' : 'Provisioning failed', message: msg });
   }
 });
