@@ -497,6 +497,10 @@ leads. 5 has to come before 4.4 (towers). 8 comes after 1.3.
 | *(found while checking)* iPhone pushes failing with no reason | 1.7 |
 | *(found while checking)* Copy break slipped past the build | 9.3 |
 | *(found while checking)* env CRLF | 9.4 |
+| Superadmin: get into a firm's desk without the owner's password (24 Sep) | 11.1 |
+| Superadmin: each firm's audit ledger (24 Sep) | 11.2, 9.1 |
+| Superadmin: a real details page per firm — team, logins, sessions, activity (24 Sep) | 11.3 |
+| Onboarding credentials — review the plg7uc branch (24 Sep) | 11.4, 2.4, 2.5 |
 
 ---
 
@@ -713,3 +717,194 @@ people behind it. Above it, sentences — only the ones that are true today:
 - **Monthly agent performance.** After the daily report has run long enough to
   have data, and outcomes are being logged.
 
+
+---
+
+## Part 11 — The superadmin console (`/admin`) — PLAN ONLY, nothing built
+
+**Rule for this Part: no code until the user says "build".** Discuss → build →
+check → push, one item at a time. A session that picks this up reads the open
+questions below and asks them; it does not start on a guess.
+
+**Who it is for:** Delpat, at a desk, looking after firms. Four jobs: see what a
+client sees without asking for their password, see who did what in a firm, see
+whether a firm is actually using the product and who to call about it, and hand
+a new firm its logins.
+
+**What exists (code, `development` at `5a605dd`, 24 Sep):**
+
+| Piece | What it does today |
+|---|---|
+| `routes/admin.ts` | Three routes. `GET /overview` — every firm with all-time counts, the last 12 ledger rows across **all** firms, and a full-table chain verify on every load. `POST /onboard`. Guarded by a superadmin JWT |
+| `modules/Admin.jsx` | Login, a firm table, a ledger list, the onboarding wizard, a handover sheet, an "inspect" modal. "Open Desk" is `window.open('/<slug>')` — the firm's sign-in screen |
+| Superadmin token | Email + password → **30-day JWT with no `jti`**: no sessions row, no revoke, no expiry short of rotating `JWT_SECRET` (which signs out every user of every firm) |
+| Superadmin on tenant routes | Already half there: `withRequestContext` accepts a superadmin token on any tenant route and takes the firm from `X-Tenant-ID`; `permissions.ts`, `team.ts`, `imports.ts`, `connections.ts` treat role `superadmin` as desk. **No header → `DEFAULT_TENANT_ID`** (skyline) — mistake 1/5 |
+| Audit ledger | One global hash chain (`audit.ts`). Tenant read `/workspace/audit` exists; its Settings section is commented out (why is not recoverable — history is squashed at `904c991`) |
+
+**Not measured (24 Sep):** the dev database did not answer from this session —
+the Supabase pooler timed out on 5432 and 6543. Every "know" line below is a code
+fact. The numbers to take before building are listed under each item.
+
+### 11.1 ⬜ Get into a firm's desk without the owner's password
+- **Said:** from superadmin, get into a firm's desk without knowing the owner's
+  password.
+- **Know (code):**
+  - The desk cannot use the superadmin token. `tokenFor()` presents only
+    `crm_auth_token_<slug>` whose `tenant_id` claim matches the URL; the admin
+    token lives under `crm_admin_token` and has no `tenant_id`. `/auth/me`
+    answers `kind: superadmin` with no user, and the desk renders from a user
+    (role, id, name — Today's "mine", permissions, the FAB).
+  - Three tenant routes refuse a superadmin (owner/manager only):
+    `workspace.ts:38` (ledger), `workspace.ts:288` (branding),
+    `notifications.ts:76` (delivery log).
+  - Writes are attributed to `req.user.id`. A superadmin id is not in `users`,
+    so the screen cannot name it; `audit()` can (it looks up `superadmins`).
+    `crm_timeline_events.author_name` exists and the screen prefers it — an entry
+    can say who really did it without a fake user row.
+- **Two shapes:**
+  - **A — Enter as a person.** Pick the owner (or any seat); the server mints an
+    ordinary tenant session for that user — real `sessions` row, real `jti` —
+    carrying `via: <superadmin id>`, short and non-sliding, kept in
+    `sessionStorage` so it dies with the tab and never overwrites anyone's
+    stored login. The desk is exactly what that person sees, which is the reason
+    to go in.
+  - **B — Enter as Delpat.** The superadmin identity inside the desk with a desk
+    role and no person. Every screen that reads the signed-in user needs a
+    branch, and it is not what the client sees.
+- **Recommend A.** Guardrails that come with it: a bar on every screen
+  ("Delpat · as Madhukar · End"); entry and exit written to that firm's ledger
+  as `actor_type = superadmin`; every write inside carries the real actor;
+  the person's password, `must_change_password`, lockout counter and own
+  sessions are untouched; subscribing to push is refused in such a session, or
+  the Delpat browser receives that agent's alerts.
+- **Open:**
+  1. A or B?
+  2. Full access, or read-only? On `bhumi` / `mahalaxmi` a write from here is a
+     write to a paying client's data.
+  3. Does the firm see it — a row in their ledger only, or also an alert to the
+     owner?
+  4. What the timeline says for a call or remark made from inside:
+     "Delpat support", "Delpat (as Madhukar)", or the person's name with the
+     truth only in the ledger? (1.3 says the actor must be right.)
+  5. How long a session lasts (proposal: 60 minutes, no extension).
+  6. Should it replace resetting an owner's password to get in — i.e. does the
+     console stop offering that route at all?
+
+### 11.2 ⬜ Each firm's audit ledger, from superadmin
+- **Said:** each firm's audit ledger visible from superadmin.
+- **Know (code):**
+  - `audit_log` carries `tenant_id` with an index on `(tenant_id, created_at)`,
+    so a per-firm paged read is cheap. Nothing reads it that way from `/admin`.
+  - The console's ledger shows `tenant_id` raw and a hash chip from
+    `log.prev_hash` — which `/overview` does not select, so **every row reads
+    "GENESIS"**. A value on screen that came from nowhere.
+  - `verifyAuditChain()` loads the whole table on every `/overview` and every
+    tenant `/workspace/audit` (7,620 rows / 3.7 s on 22 Sep, 9.1). The chain is
+    global, so a firm's ledger reports another firm's row as its own break.
+  - Actor names are right from `bb24b1a`; older rows have none (1.3).
+  - **Login history exists only in the ledger.** `createSession()` hard-deletes
+    a user's revoked and expired sessions on their next sign-in, so `sessions`
+    holds live devices only; `auth.login` / `auth.login_failed` rows are the
+    record.
+- **Depends on 9.1** (per-tenant chains, hashing fix, incremental verify).
+  Without it, every firm with a property or owner created before the fix shows
+  "Broken".
+- **Proposal:** `/admin/<slug>` → Ledger: paged server-side, newest first; one
+  row = when · who · what · the record it touched; filters by kind (sign-ins,
+  team, data, imports, settings) and by person.
+- **Open:**
+  1. 9.1 first (recommended), or ship the list without a chain status and add
+     it after?
+  2. Which filters you actually reach for.
+- **Measure before building:** rows per firm; rows with null `actor_label` per
+  firm; `auth.*` rows in the last 30 days per firm.
+
+### 11.3 ⬜ A real details page per firm
+- **Said:** a real details page per firm — team, logins, sessions, activity.
+- **Know (code):** the "inspect" modal and roster invent or mislabel:
+  - Plan falls back to **"PRO"** and status to **"ACTIVE"** when the column is
+    null.
+  - "Total Users" counts suspended and deleted seats; **"Active Leads" is every
+    lead ever** — one word, two meanings (mistake 3).
+  - `brand_config` is not selected, so every firm's badge is the purple
+    fallback.
+- **Available to build from:** `users` (role, status, login id,
+  `must_change_password`, `failed_logins`, `locked_until`), live `sessions`
+  (created, last seen, IP, device), the ledger (sign-ins, failures, password and
+  team changes), `crm_timeline_events` by author (what each person did),
+  push subscriptions and delivery outcomes (1.7), connections and last enquiry
+  per source, import batches.
+- **Proposal — one page, `/admin/<slug>`, a real URL:**
+  1. **Header** — name, slug, created, owner, status. Action: Enter desk (11.1).
+  2. **Team** — one row per person: role, login id, status, last sign-in, live
+     devices, password state (must change / locked / still on a known default —
+     KNOWN-ISSUES), actions today. Every number opens the rows behind it.
+  3. **Is the firm working** — last 14 days, per day: person actions, sign-ins,
+     enquiries arrived. For Delpat the action is "call the firm".
+  4. **Pipes** — connections and the last enquiry per source; push failures.
+  5. **Ledger** — 11.2.
+- **Open:**
+  1. Which of 3 and 4 you want; anything missing.
+  2. Per-person actions here (reset password, sign out everywhere), or only
+     from inside the desk?
+  3. Suspending a whole firm — in scope?
+  4. The firm table: which columns earn their place (proposal: last person
+     action, sign-ins in 7 days, people active today — not all-time counts).
+
+### 11.4 🟡 Onboarding credentials — review of `claude/super-admin-capabilities-plg7uc`
+Three commits on `05f5799` (`93b7869`, `7f02434`, `023fe5f`); merges into
+`development` without conflict. Reviewed, not redone. It closes 2.4 and 2.5 on
+paper, but is **not merged** and was **never run against a database** (its own
+note says so; this session could not either).
+
+- **Right, keep:** `provisionTenant` returns the team and the owner's login id;
+  the handover lists everyone; a blank teammate no longer gets the owner's
+  password; the team goes into the rota; phones stored `+91…`; the roster is
+  checked before the tenant row exists, so a bad one leaves no half-made firm;
+  the Bhumi staff names, emails, phones and passwords in the paste placeholder
+  are gone; the `firstname123` parser is gone; `023fe5f` correctly took the
+  first-name rule back out of the Team screen.
+- **Wrong, must fix before merge:**
+  1. **Every firm's owner gets `owner@123`.** The modal plans on open, before an
+     owner name is typed; `planRoster({})` returns `owner@123`
+     (**confirmed by running it**); the form fills the password field with it
+     and only ever refills a *blank* field. Unless the operator retypes it,
+     every firm is created with the same owner password — the `Bhumi@2026`
+     shape STATE.md #6 closed.
+  2. **`must_change_password` is enforced only by the login screen.**
+     `/auth/login` returns a working token first; `Login.jsx` then asks for the
+     change. The API accepts that token for everything. "Guessable by design,
+     but forced to change" is true in the UI only. A must-change session should
+     reach `/auth/password/change`, `/auth/me` and `/auth/logout` and nothing
+     else.
+  3. **A false "used twice".** An id the planner filled in is sent back as if
+     typed; if the owner's name later claims it, the teammate is flagged
+     `user ID "vijay" is used twice` for an id nobody typed (confirmed by
+     running it).
+- **Decide:**
+  4. The first-name rule (`vijay` / `vijay@123`) — was that meant for the
+     **owner** too? The owner is the seat that holds connection keys and can
+     delete; the firm's name is public.
+  5. Two people with one first name get **the same password** (`vijay@123` for
+     both; ids `vijay` / `vijay2`). Acceptable?
+  6. **Managers go into the rota** with the agents. Is a manager meant to
+     receive leads?
+  7. The checkbox says "Force owner to change password" but applies to the
+     whole team — relabel, or two settings?
+
+---
+
+### Part 11 — questions for the user, in one place
+1. 11.1: enter **as a person** (A, recommended) or **as Delpat** (B)?
+2. 11.1: full access or read-only, especially on bhumi and mahalaxmi?
+3. 11.1: does the firm see that Delpat went in — ledger only, or an alert?
+4. 11.1: what a timeline entry made from inside says.
+5. 11.1: session length (proposal 60 min, no extension).
+6. 11.2: build 9.1 (per-tenant chain) first?
+7. 11.3: which sections of the firm page, and are per-person actions and
+   suspending a firm in scope?
+8. 11.4: first-name password for the owner too? Same password for two Vijays?
+   Managers in the rota?
+9. Order: proposed **11.4 fixes → 9.1 → 11.2 → 11.3 → 11.1**; the entry route
+   last, because it is the one that can write to a paying client and its bar
+   and ledger rows need 11.2 to be visible.
