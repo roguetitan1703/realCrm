@@ -3,7 +3,8 @@ import { Avatar, Button, Field, Input, PhoneInput, SectionHead, PageHeader, Segm
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import { buildRoster, RosterRow } from '../components/roster.jsx'
+import { buildRoster } from '../components/roster.jsx'
+import { TeamToday } from '../components/ActivityDay.jsx'
 import { whenLabel } from '../lib/format.js'
 import { copyText } from '../lib/clipboard.js'
 
@@ -32,7 +33,10 @@ export default function Team({ store, go, topBar }) {
   // with the summary, and buildRoster is shared with the dashboard so the two
   // screens cannot show different numbers for the same person (§3.3).
   const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null, '/workspace/desk-summary')
-  const perfLoaded = !!desk
+  // Whether this desk cold-calls, for the Leads | Calling switch — the same
+  // read and the same test the dashboard uses.
+  const { data: ownerSummary } = useServerData(() => api.getOwnersSummary(), [state.dataAsOf], null, '/owners/summary')
+  const hasCalling = (ownerSummary?.summary?.queue?.total || 0) > 0
   const perAgent = desk?.perAgent || {}
   const built = buildRoster({
     agents: state.agents, perAgent, perAgentCalls: desk?.perAgentCalls || {}, inactive,
@@ -43,12 +47,6 @@ export default function Team({ store, go, topBar }) {
   const openTotal = desk?.leads?.open || 0
   const unassigned = desk?.leads?.unassigned || 0
   const overdueTotal = desk?.leads?.overdue || 0
-
-  // Order and scale come from buildRoster, so the dashboard's top five are the
-  // same five people in the same sequence. Ranking by `won` put every agent on
-  // 0 in alphabetical order and called it standings.
-  const { evenShare, maxLoad } = built
-  const ranked = roster
 
   // Glance KPIs — same compact ph-stats row as Import and the other modules.
   const kpis = [
@@ -66,25 +64,18 @@ export default function Team({ store, go, topBar }) {
         {/* PRIMARY: who can sign in + admin controls */}
         <AccessPanel store={store} />
 
-        {/* SECONDARY: how the desk is performing */}
-        {/* `panel`, like the two either side of it. The old board carried its own
-            card styling per agent, so this wrapper never needed the class —
-            take the board away and the section lost its surface entirely and sat
-            bare on the page background. */}
+        {/* WHAT THE TEAM DID — the full Team today. The dashboard carries the
+            compact one and sends people here; this is where the day is worked
+            from: every number opens its people, and a row can be handed on.
+            It replaced a load-bar roster ("Team activity") whose Calls · 30d
+            was a second call count with its own rules beside this one. */}
         <div className="panel acc-panel">
-          {/* No caption. It read "Who's carrying the load and who's closing" —
-              explanatory copy justifying the panel, which the rules forbid, and
-              it stopped being true when the columns changed. The rows say it. */}
-          <SectionHead title="Team activity" right={desk ? `${activeCount} on the desk` : undefined} />
-          {!perfLoaded
-            ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
-            : ranked.map(r => (
-              <RosterRow key={r.a.id} r={r} evenShare={evenShare} maxLoad={maxLoad}
-                onOpen={() => toLeads({ agent: [r.a.id] })}
-                actions={(row) => (
-                  <Button size="sm" onClick={() => store.openModal({ kind: 'reassign', fromId: row.a.id })}>Reassign</Button>
-                )} />
-            ))}
+          <TeamToday store={store} hasCalling={hasCalling}
+            book={perAgent} ownerBook={desk?.perAgentCalls || {}}
+            onBook={(id, side, seg) => toLeads(seg ? { agent: [id], seg } : { agent: [id] })}
+            actions={(r) => (r.role === 'agent' || r.role === 'manager') && (
+              <Button size="sm" onClick={() => store.openModal({ kind: 'reassign', fromId: r.id })}>Reassign</Button>
+            )} />
         </div>
 
         <SessionsPanel store={store} />

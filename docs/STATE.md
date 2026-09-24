@@ -63,6 +63,11 @@ importing the store, which skips the boot.
 
 ## Do not repeat
 
+- Dev has demo activity on `delpat` (`npm run seed:dev:activity`, 24 Sep):
+  three days of calls, notes, status changes and callbacks by its agents, and
+  five enquiries this morning. `-- --clear` removes it and puts every moved
+  record back.
+
 - Playwright's WebKit build is not downloaded for the installed version
   (1.61.1); phone checks this session ran in Chromium with the iPhone 13
   descriptor. `npx playwright install webkit` if a real WebKit pass is needed.

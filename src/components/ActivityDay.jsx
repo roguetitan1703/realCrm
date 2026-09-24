@@ -79,11 +79,11 @@ function DayStepper({ day, today, onDay }) {
 }
 
 /** A number and its word, opening the people behind it. Zero is not a link. */
-function Num({ n, children, onOpen, tone }) {
+function Num({ n, children, onOpen, tone, pre, joined }) {
   if (!n) return null
   return (
-    <button type="button" className={'ad-num' + (tone ? ` ${tone}` : '')} onClick={onOpen}>
-      <b>{n.toLocaleString('en-IN')}</b> {children}
+    <button type="button" className={'ad-num' + (tone ? ` ${tone}` : '') + (joined ? ' joined' : '')} onClick={onOpen}>
+      {pre && `${pre} `}<b>{n.toLocaleString('en-IN')}</b> {children}
     </button>
   )
 }
@@ -102,23 +102,23 @@ function Line({ head, children }) {
 }
 
 // ── The day, for one person ─────────────────────────────────────────────────
-function DayLines({ person, side, isToday, open }) {
+function DayLines({ person, side, isToday, open, hideCalls }) {
   const { n, statuses } = tally(person)
   const calls = n('call')
   return (
     <>
-      <Line head="Calls">
+      {!hideCalls && <Line head="Calls">
         {calls
           ? <button key="c" type="button" className="ad-num" onClick={() => open('call')}><b>{calls}</b> {calls === 1 ? 'call' : 'calls'}</button>
           : <span key="c0" className="ad-zero">0 calls</span>}
         {calls > 0 && person.people > 0 && (
-          <Num key="p" n={person.people} onOpen={() => open('people')}>{person.people === 1 ? 'person' : 'people'}</Num>
+          <Num key="p" n={person.people} pre="to" joined onOpen={() => open('people')}>{person.people === 1 ? 'person' : 'people'}</Num>
         )}
         {REACH_WORDS.map(([k, one, many]) => (
           <Num key={k} n={n('call', k)} tone={k === 'no_outcome' ? 'quiet' : ''}
             onOpen={() => open('call', k)}>{n('call', k) === 1 ? one : many}</Num>
         ))}
-      </Line>
+      </Line>}
       <Line head="Also">
         <Num key="w" n={n('whatsapp')} onOpen={() => open('whatsapp')}>{n('whatsapp') === 1 ? 'WhatsApp' : 'WhatsApps'}</Num>
         <Num key="n" n={n('note')} onOpen={() => open('note')}>{n('note') === 1 ? 'note' : 'notes'}</Num>
@@ -185,25 +185,29 @@ export function MyDay({ store, hasCalling, defaultSide = 'leads', variant }) {
 }
 
 // ── The desk ────────────────────────────────────────────────────────────────
+const joinNames = (names) => names.length <= 1 ? names.join('')
+  : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+
 /**
  * Sentences that are TRUE today, and only those. Each names somebody a manager
  * can go and talk to; a warning that is not true is noise, and noise teaches
- * people to skip the panel.
+ * people to skip the panel. People with the same finding share one sentence —
+ * four red lines saying one thing about four names was a wall, not a warning.
  */
 function warnings(rows, data, side) {
   const out = []
   const isToday = data.day === data.today
-  // Before noon "hasn't made a call" is true of everyone and says nothing.
+  // Before noon "hasn't called" is true of everyone and says nothing.
   const lateEnough = !isToday || data.hour >= 12
-  const agents = rows.filter(r => r.role === 'agent' && !r.gone && r.duty !== 'OFF_DUTY' && r.holding > 0)
   if (lateEnough) {
-    for (const r of agents) {
-      if (!r.t.n('call') && !r.t.n('whatsapp')) {
-        // Named for the side it is about. "Hasn't made a call" on the Calling
-        // side was false for somebody who had spent the day ringing leads.
-        const what = side === 'calling' ? 'anyone on the calling list' : 'a lead'
-        out.push({ key: `idle-${r.id}`, text: isToday ? `${r.name} hasn't called ${what} today.` : `${r.name} didn't call ${what}.` })
-      }
+    const idle = rows.filter(r => r.role === 'agent' && !r.gone && r.duty !== 'OFF_DUTY' && r.holding > 0
+      && !r.t.n('call') && !r.t.n('whatsapp'))
+    if (idle.length) {
+      // Named for the side it is about: somebody who spent the day ringing
+      // leads has called people, just not these.
+      const what = side === 'calling' ? 'anyone on the calling list' : 'a lead'
+      const verb = !isToday ? "didn't" : idle.length === 1 ? "hasn't" : "haven't"
+      out.push({ key: 'idle', text: `${joinNames(idle.map(r => r.name))} ${verb} called ${what}${isToday ? ' today' : ''}.` })
     }
   }
   if (side === 'leads') {
@@ -211,106 +215,152 @@ function warnings(rows, data, side) {
     const total = waiting.reduce((s, x) => s + x.k, 0)
     if (total) {
       const who = waiting.slice(0, 2).map(x => `${x.k} with ${x.r.name || 'someone who has left'}`).join(', ')
-      out.push({ key: 'waiting', text: `${plural(total, 'enquiry', 'enquiries')} that came in ${isToday ? 'today' : 'that day'} ${total === 1 ? "hasn't" : "haven't"} been called — ${who}.` })
+      const verb = total === 1 ? "hasn't" : "haven't"
+      out.push({ key: 'waiting', text: `${plural(total, 'enquiry', 'enquiries')} that came in ${isToday ? 'today' : 'that day'} ${verb} been called — ${who}.` })
     }
   }
   if (isToday) {
-    for (const r of rows) {
-      const late = r.t.n('followup_late')
-      if (late >= 3) out.push({ key: `late-${r.id}`, text: `${r.name || 'Someone who has left'} has ${plural(late, side === 'calling' ? 'callback' : 'follow-up', side === 'calling' ? 'callbacks' : 'follow-ups')} late.` })
+    const late = rows.map(r => ({ r, k: r.t.n('followup_late') })).filter(x => x.k >= 3).sort((a, b) => b.k - a.k)
+    if (late.length) {
+      const noun = side === 'calling' ? 'Callbacks' : 'Follow-ups'
+      out.push({ key: 'late', text: `${noun} late — ${late.map(x => `${x.r.name || 'someone who has left'} ${x.k}`).join(', ')}.` })
     }
   }
   return out
 }
 
-/** "Team today" — one row per person on the desk, the same words in columns. */
-export function TeamToday({ store, hasCalling }) {
+/**
+ * What a person HOLDS, beside what they did — the facts the dashboard's "By
+ * agent" table carried: open, never contacted, went cold today. That was a
+ * second per-person table next to this one; one person, one row, both halves.
+ * Counted by the desk summary, and each opens that person's list on that pile.
+ */
+function Holds({ side, book, onBook }) {
+  if (!book) return null
+  if (side === 'calling') {
+    return (
+      // Not a link: the calling list's Agent filter is screen state, not the
+      // URL, so it would land on everybody's rows with nothing saying whose.
+      book.owners > 0 && (
+        <div className="ad-line"><span className="ad-head">Holds</span>
+          <span className="ad-items"><span className="ad-num" style={{ cursor: 'default' }}><b>{book.owners.toLocaleString('en-IN')}</b> on the calling list</span></span></div>
+      )
+    )
+  }
+  return (
+    <Line head="Holds">
+      <Num key="o" n={book.open} onOpen={() => onBook?.(null)}>open</Num>
+      <Num key="n" n={book.neverContacted} tone="alert" onOpen={() => onBook?.('never_contacted')}>not contacted</Num>
+      <Num key="c" n={book.coldToday} tone="alert" onOpen={() => onBook?.('going_cold')}>went cold today</Num>
+    </Line>
+  )
+}
+
+/** The day in one line, for the dashboard. */
+function Summary({ r, side, isToday }) {
+  const { n, statuses } = r.t
+  const bits = []
+  const calls = n('call')
+  if (calls) bits.push(`${plural(calls, 'call', 'calls')} to ${plural(r.people, 'person', 'people')}`)
+  if (n('call', 'answered')) bits.push(`${n('call', 'answered')} answered`)
+  if (statuses.length) bits.push(statuses.slice(0, 3).map(s => `${s.n} ${s.detail}`).join(' · '))
+  if (n('whatsapp')) bits.push(plural(n('whatsapp'), 'WhatsApp', 'WhatsApps'))
+  const late = isToday ? n('followup_late') : 0
+  const waiting = side === 'leads' ? n('came_in', 'not_called') : 0
+  return (
+    <span className="ad-sum">
+      <span className={bits.length ? '' : 'ad-zero'}>{bits.length ? bits.join(' · ') : (isToday ? 'Nothing yet today' : 'Nothing that day')}</span>
+      {late > 0 && <span className="ad-sum-flag">{late} late</span>}
+      {waiting > 0 && <span className="ad-sum-flag">{waiting} new not called</span>}
+    </span>
+  )
+}
+
+/**
+ * "Team today" — a row per person, in the same words as My day.
+ *
+ * Two densities, one component. The Team page is the full version: each
+ * person's day line by line, every number opening its people, what they hold,
+ * and the row's own action (Reassign). The dashboard's is `compact`: the true
+ * sentences, then one line per person, and anything on it opens the Team page.
+ *
+ * It was a ten-column grid of numbers — built from what the report counts, not
+ * from how it was agreed to read — which on a quiet morning was a sheet of
+ * zeroes under a stack of red lines.
+ */
+export function TeamToday({ store, hasCalling, compact = false, onOpenFull, actions, book = {}, ownerBook = {}, onBook }) {
   const { state } = store
   const [side, setSide] = useSide('leads')
   const [date, setDate] = useState(null)
   const eff = hasCalling ? side : 'leads'
   const { data } = useDay({ side: eff, date, person: null, dataAsOf: state.dataAsOf })
-  const [sort, setSort] = useState({ key: 'call', dir: -1 })
 
   const isToday = !data || data.day === data.today
+  const effort = (r) => r.t.n('call') + r.t.n('whatsapp') + r.t.n('note') + r.t.n('status') + r.t.n('visit')
+    + r.t.n('followup_set') + r.t.n('followup_done')
   const rows = (data?.people || [])
     .map(withPeople)
     .map(p => ({ ...p, t: tally(p) }))
-    // The owner and managers only appear on a day they did something; an
-    // agent always does, because a row of zeroes is the finding.
-    .filter(p => p.role === 'agent' || (p.counts || []).length)
+    // Agents always have a row — an empty one is the finding. The owner and
+    // managers appear on a day they did something themselves.
+    .filter(p => p.role === 'agent' || effort(p) > 0)
+  // Who did most first; nobody-yet at the bottom, by name.
+  const sorted = [...rows].sort((a, b) => effort(b) - effort(a) || String(a.name).localeCompare(String(b.name)))
 
-  const cols = [
-    { key: 'call', label: 'Calls', v: r => r.t.n('call') },
-    { key: 'people', label: 'People', v: r => r.people || 0, measure: 'people' },
-    { key: 'answered', label: 'Answered', v: r => r.t.n('call', 'answered'), measure: 'call', detail: 'answered' },
-    { key: 'no_outcome', label: 'No outcome', v: r => r.t.n('call', 'no_outcome'), measure: 'call', detail: 'no_outcome' },
-    { key: 'whatsapp', label: 'WhatsApps', v: r => r.t.n('whatsapp') },
-    { key: 'note', label: 'Notes', v: r => r.t.n('note') },
-    ...(eff === 'leads' ? [{ key: 'visit', label: 'Site visits', v: r => r.t.n('visit') }] : []),
-    { key: 'status', label: 'Now', v: r => r.t.n('status') },
-    ...(isToday ? [{ key: 'followup_late', label: 'Late', v: r => r.t.n('followup_late'), tone: 'alert' }] : []),
-    ...(eff === 'leads' ? [{ key: 'not_called', label: 'New, not called', v: r => r.t.n('came_in', 'not_called'), measure: 'came_in', detail: 'not_called', tone: 'alert' }] : []),
-  ]
-  const col = cols.find(c => c.key === sort.key) || cols[0]
-  const sorted = [...rows].sort((a, b) => (col.v(a) - col.v(b)) * sort.dir || String(a.name).localeCompare(String(b.name)))
-
-  const open = (r, c, detail) => {
-    const measure = c.measure || c.key
-    const d = detail ?? c.detail
+  const openFor = (r) => (measure, detail) => {
+    if (compact) { onOpenFull?.(); return }
     store.openModal({
-      kind: 'activityRecords', side: eff, date: data?.day, person: r.id, measure, detail: d,
-      title: [r.name, dayName(data?.day, data?.today), MEASURE_TITLE[measure], DETAIL_TITLE[d] || (measure === 'status' ? d : '')].filter(Boolean).join(' · '),
+      kind: 'activityRecords', side: eff, date: data?.day, person: r.id, measure, detail,
+      title: [r.name, dayName(data?.day, data?.today), MEASURE_TITLE[measure], DETAIL_TITLE[detail] || (measure === 'status' ? detail : '')].filter(Boolean).join(' · '),
     })
   }
+  const ws = data ? warnings(rows, data, eff) : []
 
   return (
-    <section className="ad ad-team">
+    <section className={'ad ad-team' + (compact ? ' ad-compact' : '')}>
       <div className="ad-top">
         <span className="ad-title">{isToday ? 'Team today' : 'Team'}</span>
         <DayStepper day={data?.day} today={data?.today} onDay={(d) => setDate(d === data?.today ? null : d)} />
         {hasCalling && <Segmented options={[{ value: 'leads', label: 'Leads' }, { value: 'calling', label: 'Calling' }]} value={side} onChange={setSide} />}
+        {compact && onOpenFull && <button type="button" className="ad-open" onClick={onOpenFull}>Open<Icon name="chevRight" size={14} /></button>}
       </div>
-      {data && warnings(rows, data, eff).map(w => <div key={w.key} className="ad-warn">{w.text}</div>)}
-      <div className="dt-wrap">
-        <table className="dt ad-table">
-          <thead>
-            <tr>
-              <th>Person</th>
-              {cols.map(c => (
-                <th key={c.key} className="dt-n">
-                  <button type="button" className={'ad-sort' + (sort.key === c.key ? ' on' : '')}
-                    onClick={() => setSort(s => ({ key: c.key, dir: s.key === c.key ? -s.dir : -1 }))}>{c.label}</button>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map(r => (
-              <tr key={r.id} className={r.gone || r.duty === 'OFF_DUTY' ? 'off' : ''}>
-                <th scope="row"><span className="ad-who">{r.name || 'Someone who has left'}</span></th>
-                {cols.map(c => {
-                  const v = c.v(r)
-                  return (
-                    <td key={c.key} className="dt-n">
-                      {c.key === 'status' && v > 0
-                        ? <span className="ad-now">{r.t.statuses.map(s => (
-                            <button key={s.detail} type="button" className="ad-num" onClick={() => open(r, c, s.detail)}><b>{s.n}</b> {s.detail}</button>
-                          ))}</span>
-                        : <button type="button" disabled={!v}
-                            className={'dt-v' + (v > 0 && c.tone === 'alert' ? ' alert' : '') + (v === 0 ? ' zero' : '')}
-                            onClick={() => open(r, c)}>{v}</button>}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-            {data && !sorted.length && (
-              <tr><td colSpan={cols.length + 1} className="detail-empty">Nobody on this side.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {ws.length > 0 && (
+        <ul className="ad-warns">
+          {ws.map(w => <li key={w.key}>{w.text}</li>)}
+        </ul>
+      )}
+      {!data ? <div className="ad-line ad-wait" aria-busy="true" /> : (
+        <div className="ad-people">
+          {sorted.map(r => (
+            compact ? (
+              <button key={r.id} type="button" className="ad-person ad-person-c" onClick={onOpenFull}>
+                <span className="ad-pname">{r.name || 'Someone who has left'}</span>
+                <Summary r={r} side={eff} isToday={isToday} />
+              </button>
+            ) : (
+              <div key={r.id} className={'ad-person' + (r.gone || r.duty === 'OFF_DUTY' ? ' off' : '')}>
+                <div className="ad-pside">
+                  <span className="ad-pname">{r.name || 'Someone who has left'}</span>
+                  {r.duty === 'OFF_DUTY' && <span className="rst-tag off">Off duty</span>}
+                  {actions && !r.gone && <span className="ad-pact">{actions(r)}</span>}
+                </div>
+                <div className="ad-plines">
+                  {effort(r) === 0 && (
+                    <div className="ad-line"><span className="ad-head">Today</span>
+                      <span className="ad-zero">{isToday ? 'Nothing yet today' : 'Nothing that day'}</span></div>
+                  )}
+                  {effort(r) > 0
+                    ? <DayLines person={r} side={eff} isToday={isToday} open={openFor(r)} />
+                    : <DayLines person={{ ...r, counts: (r.counts || []).filter(c => ['followup_late', 'followup_tomorrow', 'came_in'].includes(c.measure)) }}
+                        side={eff} isToday={isToday} open={openFor(r)} hideCalls />}
+                  <Holds side={eff} book={eff === 'calling' ? ownerBook[r.id] : book[r.id]} onBook={(seg) => onBook?.(r.id, eff, seg)} />
+                </div>
+              </div>
+            )
+          ))}
+          {!sorted.length && <div className="detail-empty">Nobody on this side.</div>}
+        </div>
+      )}
     </section>
   )
 }

@@ -83,7 +83,7 @@ function ListSpinner() {
 export function ModuleListView({
   def, records, store, onOpen,
   filters, onFilters, search, onSearch, sortKey, onSortKey, sortDir, onSortDir,
-  kpis, segments, leftAddon, view, onView, viewExtra, showViewSwitch = true, cta, toolbarRight, emptyTitle, emptyHint, renderTable, selection,
+  kpis, segments, leftAddon, view, onView, viewExtra, showViewSwitch = true, cta, toolbarLeft, toolbarRight, emptyTitle, emptyHint, renderTable, selection,
   phone, page = 1, onPage, pageSize = 20, onPageSize, source, facets,
 }) {
   // Two sources, one surface. `records` is the classic in-memory collection,
@@ -166,6 +166,7 @@ export function ModuleListView({
       value={filters}
       onChange={onFilters}
       selection={selection}
+      left={toolbarLeft}
       search={{ value: search, onChange: onSearch, placeholder: `Search ${def.name.toLowerCase()}…` }}
       right={<>
         <SortControl
@@ -775,7 +776,7 @@ function groupFields(fields) {
 // list — so changing a filter silently left ids selected that were no longer on
 // screen. Taking the controls away while a selection is live states the rule
 // instead of documenting it: finish the selection, or clear it and re-filter.
-export function FilterBar({ fields = [], value = {}, onChange, search, right, cta, selection }) {
+export function FilterBar({ fields = [], value = {}, onChange, search, left, right, cta, selection }) {
   const [open, setOpen] = useState(null)   // null | 'add' | fieldKey (value picker)
   const barRef = useRef(null)
   useEffect(() => {
@@ -822,6 +823,9 @@ export function FilterBar({ fields = [], value = {}, onChange, search, right, ct
 
   return (
     <div className="fbar" ref={barRef}>
+      {/* A view toggle that changes WHAT the list is (Calling's Group by
+          project) sits before search, where the eye starts. */}
+      {left}
       {search && (
         <SearchField className="f-search" value={search.value} onChange={search.onChange} placeholder={search.placeholder || 'Search…'} iconSize={15} />
       )}

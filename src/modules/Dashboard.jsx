@@ -187,7 +187,7 @@ export default function Dashboard({ store, go, topBar }) {
             An agent at a desk sees their own. */}
         {state.role === 'agent'
           ? <Panel><MyDay store={store} hasCalling={hasCalling} variant="panel" /></Panel>
-          : <Panel><TeamToday store={store} hasCalling={hasCalling} /></Panel>}
+          : <Panel><TeamToday store={store} hasCalling={hasCalling} compact onOpenFull={() => go('team')} /></Panel>}
 
         {/* WHERE THE BOOK COMES FROM. One panel, not two.
             "Leads by stage" went with it: the stage pills on the Leads screen
@@ -240,19 +240,16 @@ export default function Dashboard({ store, go, topBar }) {
           </div>
         )}
 
-        {/* THE MANAGER'S PAGE. One row per agent, one column per thing that can
-            be said to them today, every cell opening that agent's filtered
-            list. It replaces the load-bar roster -- which answered "who is
-            busy" when the question is "who is stuck" -- and the Going cold
-            panel, which was the tile above printed a second time. An agent sees
-            only their own row. */}
-        <Panel>
-          <SectionHead title={state.role === 'agent' ? 'My desk' : 'By agent'}
-            right={state.role !== 'agent' && roster.rows.length > myRows.length
-              ? <button className="od-all od-all-inline" onClick={() => go('team')}>All {roster.rows.length}</button>
-              : undefined} />
-          <DeskTable rows={myRows} onCell={(r, seg) => toLeads(seg ? { agent: [r.a.id], seg } : { agent: [r.a.id] })} />
-        </Panel>
+        {/* An agent's own book, as it stands. For the desk this table was
+            "By agent" — a second per-person table beside Team today; its facts
+            (open, not contacted, went cold today) are the Holds line in each
+            person's row on the Team page now. */}
+        {state.role === 'agent' && (
+          <Panel>
+            <SectionHead title="My desk" />
+            <DeskTable rows={myRows} onCell={(r, seg) => toLeads(seg ? { agent: [r.a.id], seg } : { agent: [r.a.id] })} />
+          </Panel>
+        )}
       </div>
     </>
   )

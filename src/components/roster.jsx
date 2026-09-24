@@ -9,10 +9,9 @@ import { Avatar } from './primitives.jsx'
 // everything past stage index 0 (a guess) while Team read a per-agent
 // performance endpoint once per agent (nine requests for nine integers).
 //
-// Now: `buildRoster` decides what an agent's numbers ARE, `RosterRow` decides
-// what they look like, and `compact` decides how much of it a screen shows.
-// The dashboard shows the top few and links here; this page shows all of them
-// with the actions. Same rows, same order, same figures.
+// Now: `buildRoster` decides what an agent's numbers ARE and `DeskTable` draws
+// them on the dashboard. The Team page's card roster (RosterRow) is gone: that
+// page shows what people DID — the full Team today, components/ActivityDay.jsx.
 //
 // Every metric below is COUNTED in SQL by getDeskSummary — none is derived from
 // a collection the browser happens to hold.
@@ -76,66 +75,6 @@ export function buildRoster({ agents, perAgent = {}, perAgentCalls = {}, wonLabe
   const evenShare = onDuty ? rows.reduce((s, r) => s + r.assigned, 0) / onDuty : 0
   const maxLoad = Math.max(1, ...rows.map(r => r.assigned))
   return { rows, evenShare, maxLoad, wonLabel }
-}
-
-/**
- * One person. `compact` is the dashboard: identity, the load bar, two figures.
- * Full adds the rest and whatever actions the screen passes in.
- *
- * The load bar is the point of the row. A number cannot show that one agent
- * holds 72 of 94 leads; a bar against the even share can, at a glance, without
- * anybody having to do the division.
- */
-export function RosterRow({ r, evenShare, maxLoad, wonLabel = 'Won', compact = false, onOpen, actions }) {
-  const overloaded = !r.off && r.assigned > evenShare * 1.5 && r.assigned > 3
-  const pct = Math.round((r.assigned / maxLoad) * 100)
-  return (
-    <div className={'rst' + (compact ? ' rst-c' : '') + (r.off ? ' off' : '')}>
-      <button className="rst-who" onClick={() => onOpen?.(r)} disabled={!onOpen}>
-        <Avatar agent={r.a} size={compact ? 'sm' : 'lg'} />
-        <span className="rst-id">
-          <span className="rst-name">
-            {compact ? (r.a.first || r.a.name) : r.a.name}
-            {r.off && <span className="rst-tag off">Off duty</span>}
-            {!r.off && overloaded && <span className="rst-tag over">Overloaded</span>}
-          </span>
-          {!compact && <span className="rst-role">{r.a.role || ''}</span>}
-        </span>
-      </button>
-
-      <div className="rst-load">
-        <div className="rst-load-t">
-          <span><b>{r.assigned}</b> leads</span>
-          {/* Untouched, not "overdue" — overdue reads a boolean column nothing
-              writes and was 0 on every agent forever. */}
-          <span className={'rst-load-tag ' + (r.untouched ? 'warn' : 'ok')}>
-            {r.untouched ? `${r.untouched} untouched` : 'All touched'}
-          </span>
-        </div>
-        <div className="rst-meter"><i className={overloaded ? 'hot' : ''} style={{ width: pct + '%' }} /></div>
-      </div>
-
-      {/* TWO figures: how much they dialled, and how much of their plate they
-          have actually turned over. Everything else that used to sit here was
-          removed for the same reason each time — it could not be compared.
-
-          `Won` read 0 for every agent on both live tenants, and what a firm
-          means by "closed" is not settled: agents use it for "closed off" as
-          often as "deal secured", so the column asserted something nobody had
-          agreed. `Owners` and `Visits · 30d` are both real counts, but a bare
-          count of one pipeline standing beside metrics of another invites a
-          comparison it cannot support — 5 visits against 6 calls says nothing
-          about either. They come back with their own full set of numbers behind
-          the leads/owners switch, not as orphans in this row. */}
-      <div className="rst-stats">
-        <span className="rst-stat"><b>{r.calls30d}</b><small>Calls · 30d</small></span>
-        {/* A percentage of nothing is not 0%, it is nothing. */}
-        <span className="rst-stat"><b>{r.workedPct == null ? '—' : r.workedPct + '%'}</b><small>Worked</small></span>
-      </div>
-
-      {!compact && actions && <div className="rst-act">{actions(r)}</div>}
-    </div>
-  )
 }
 
 /**

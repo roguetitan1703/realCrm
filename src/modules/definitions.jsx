@@ -556,13 +556,18 @@ export const OWNERS_DEF = {
   // Same two fields as the lead filter bar (minus Source/Needs-attention,
   // which don't have an owner-side equivalent yet) — same shape, same
   // options source, so the two toolbars behave identically.
-  filterFields: () => [
-    // EMPTY ON PURPOSE. It held two rows: Locality, whose options came from a
-    // list of localities that has nothing to do with a firm's calling data
-    // (only one of Mahalaxmi's eight projects even carries a locality), and
-    // Sales Executive, which duplicated the Agent dropdown on the left — two
-    // controls for one question is how they end up disagreeing. Project,
-    // Tower, Status and Agent are the controls on the left of the toolbar.
+  // PROJECT AND TOWER, in the Filter menu with the other "which rows" chips —
+  // not as dropdowns beside the pills. Locality and Sales Executive were here
+  // once and went: Locality's options had nothing to do with a firm's calling
+  // data, and Sales Executive duplicated the Agent dropdown. Status and Agent
+  // stay on the left. `facets` is what the screen read from the server: the
+  // firm's projects with counts, and the chosen project's towers.
+  filterFields: (store, facets) => [
+    { key: 'project', label: 'Project', icon: 'building', multi: false, options: facets?.projects || [] },
+    // Only inside a project: a tower name means nothing across eight of them.
+    ...(facets?.towers?.length
+      ? [{ key: 'tower', label: 'Tower', icon: 'layers', multi: false, options: facets.towers }]
+      : []),
   ],
 
   headerFacts: (o) => {

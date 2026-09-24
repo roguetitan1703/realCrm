@@ -205,8 +205,10 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const [agentSel, setAgentSel] = useState('all')
   // TOWER — only meaningful inside a project, so it resets whenever the
   // project does and is not offered until one is chosen.
-  const [towerSel, setTowerSel] = useState('all')
-  useEffect(() => { setTowerSel('all') }, [flt.project])
+  // Project and Tower are Filter-menu chips (OWNERS_DEF.filterFields), one
+  // value each, held in the same bag the FilterBar edits.
+  const projectSel = flt.project?.[0]
+  const towerSel = flt.tower?.[0]
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selected, setSelected] = useState(new Set())
@@ -222,22 +224,21 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const setSegP = (v) => { setSeg(v); setView('list'); setPage(1); setSelected(new Set()) }
   const setStageP = (v) => { setStage(v); setView('list'); setPage(1); setSelected(new Set()) }
   const setAgentP = (v) => { setAgentSel(v); setView('list'); setPage(1); setSelected(new Set()) }
-  const setTowerP = (v) => { setTowerSel(v); setView('list'); setPage(1); setSelected(new Set()) }
-  // PROJECT, ON THE LEFT, with the other "which rows" controls. It lived on the
-  // right as a chip that only appeared once you had opened a card — and people
-  // read a toolbar from the left, so they never found the way back out of a
-  // project or into another. Choosing "All projects" returns to the full list.
-  const setProjectP = (v) => {
-    setFlt({ ...flt, project: v === 'all' ? undefined : v })
-    setView('list'); setPage(1); setSelected(new Set())
+  // A tower belongs to one project, so changing the project drops it; any
+  // filter change shows the list, not the project grid.
+  const onFilters = (v) => {
+    const next = { ...v }
+    if ((next.project?.[0]) !== projectSel) delete next.tower
+    setFlt(next); setView('list'); setPage(1); setSelected(new Set())
   }
+  const toProject = (key) => onFilters(key ? { ...flt, project: [key] } : { ...flt, project: [] })
   const setPageP = (v) => { setPage(v); setSelected(new Set()) }
 
   // A checked row belongs to the list it was checked in. Switching to the
   // project grid, picking a different project, or leaving one all change
   // which rows are even on screen — the selection has to clear with them, not
   // silently carry an id from Godrej into a bulk-assign run on the full list.
-  useEffect(() => { setSelected(new Set()) }, [view, flt.project])
+  useEffect(() => { setSelected(new Set()) }, [view, projectSel])
 
   // A tile on the dashboard or a group on Today names the slice it opens. Read
   // once and cleared, so it seeds the screen rather than pinning it — the pills
@@ -256,8 +257,8 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
       segment: seg === 'all' ? undefined : seg,
       mine: phone ? 1 : undefined,
       stage: stage === 'all' ? undefined : stage,
-      project: flt.project || undefined,
-      tower: towerSel === 'all' ? undefined : towerSel,
+      project: projectSel || undefined,
+      tower: towerSel || undefined,
       // WHOSE LIST. This spread used to sit ABOVE `agent: params.agent`, which
       // then overwrote it with the filter panel's empty value — so the Agent
       // dropdown changed its label and filtered nothing. It is the only agent
@@ -267,8 +268,8 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     }),
     // Same as Leads: a row you just called keeps its place in the queue.
     { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone,
-      holdOrder: true, viewDeps: [seg, stage, agentSel, flt.project, towerSel, phone] },
-    [state.dataAsOf, seg, stage, agentSel, flt.project, towerSel, phone],
+      holdOrder: true, viewDeps: [seg, stage, agentSel, projectSel, towerSel, phone] },
+    [state.dataAsOf, seg, stage, agentSel, projectSel, towerSel, phone],
     { store, kind: 'owner' },
   )
 
@@ -278,7 +279,11 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const counts = useOwnersSummary(state.dataAsOf, !!phone)
   const { data: projectList } = useServerData(
     () => api.listOwnerProjects().then(r => r?.data || []), [state.dataAsOf], [])
-  const currentProject = (projectList || []).find(p => (p.key === 'No project' ? '_none' : p.key) === flt.project)
+  const currentProject = (projectList || []).find(p => (p.key === 'No project' ? '_none' : p.key) === projectSel)
+  const facets = {
+    projects: (projectList || []).map(p => ({ value: p.key === 'No project' ? '_none' : p.key, label: p.name, count: p.counts.total })),
+    towers: (currentProject?.towers || []).map(t => ({ value: t, label: t })),
+  }
   const queue = counts.queue || {}
   const segs = [
     { key: 'all', label: 'Everyone', on: seg === 'all', count: counts.total ?? 0, onClick: () => setSegP('all') },
@@ -313,26 +318,13 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
 
   const { header, toolbar, body } = ModuleListView({
     def: OWNERS_DEF, source, store, onOpen: open,
-    filters: flt, onFilters: (v) => { setFlt(v); setPage(1) },
+    filters: flt, onFilters, facets,
     search: q, onSearch: (v) => { setQ(v); setPage(1) },
     sortKey, onSortKey: (v) => { setSortKey(v); setPage(1) }, sortDir, onSortDir: (v) => { setSortDir(v); setPage(1) },
     segments: segs, view, onView: setView,
     phone,
     leftAddon: (
       <div className="leads-dd-row">
-        <SelectDropdown
-          label="Project" value={flt.project || 'all'} onChange={setProjectP} searchable
-          options={[
-            { value: 'all', label: 'All projects' },
-            ...(projectList || []).map(p => ({ value: p.key === 'No project' ? '_none' : p.key, label: p.name, count: p.counts.total })),
-          ]}
-        />
-        {currentProject?.towers?.length > 0 && (
-          <SelectDropdown
-            label="Tower" value={towerSel} onChange={setTowerP}
-            options={[{ value: 'all', label: 'All towers' }, ...currentProject.towers.map(t => ({ value: t, label: t }))]}
-          />
-        )}
         <SelectDropdown label="Status" value={stage} onChange={setStageP} options={stageOptions} />
         {canAssign && (
           <SelectDropdown
@@ -361,9 +353,11 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     // chip itself is the way back (× returns to the grid, same as clicking
     // "Group by project" used to try to do) — showing both together read as
     // two disconnected buttons, and neither obviously undid the other.
-    toolbarRight: (
+    // GROUP BY PROJECT, first in the bar, before search: it changes what the
+    // list IS (cards of projects, or the rows), so it is the first choice.
+    toolbarLeft: (
       <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
-        onClick={() => { if (view !== 'projects') setFlt({ ...flt, project: undefined }); setView(view === 'projects' ? 'list' : 'projects') }}>
+        onClick={() => { if (view !== 'projects') setFlt({ ...flt, project: [], tower: [] }); setView(view === 'projects' ? 'list' : 'projects') }}>
         <Icon name="building" size={14} />Group by project
       </button>
     ),
@@ -374,7 +368,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
           refreshAt={state.dataAsOf}
           canAssign={canAssign}
           onAssign={(pj) => store.openModal({ kind: 'assignProject', project: pj })}
-          onOpen={(key) => { setFlt({ ...flt, project: key === 'No project' ? '_none' : key }); setView('list') }} />
+          onOpen={(key) => toProject(key === 'No project' ? '_none' : key)} />
       : v === 'grid'
         ? <ModuleCards def={OWNERS_DEF} rows={list} store={store} onOpen={open} phone={phone} />
         : <ModuleTable def={OWNERS_DEF} rows={list} store={store} onOpen={open} sortKey={sortKey} sortDir={sortDir} onSort={(v) => { setSortKey(v); setPage(1) }}

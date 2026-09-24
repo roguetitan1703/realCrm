@@ -742,8 +742,17 @@ day; (5) phone and desk, no page errors.
 ## C, as built (24 Sep)
 
 **Where.** "My day" at the top of Today on the phone (and the Dashboard panel
-for an agent at a desk); "Team today" on the Dashboard straight under the
-tiles, for the owner and managers. Both have the Leads | Calling switch and a
+for an agent at a desk). "Team today" in full on the Team page (it replaced
+the "Team activity" roster): a row per person in the same words as My day,
+what they hold, and Reassign. The Dashboard carries a compact one — the true
+sentences and one line per person — and everything on it opens the Team page.
+The Dashboard's "By agent" table is gone for the desk: its facts are each
+person's Holds line.
+
+The first build was a ten-column grid of numbers with a red sentence per
+person above it. That is not what was agreed ("a row per person in the same
+words") and was rebuilt; the check that missed it verified the numbers, not
+the screen against this text. Both have the Leads | Calling switch and a
 ‹ day › stepper. Every number opens the people behind it; a row opens the record.
 Code: `backend/src/services/activityReport.ts` (what counts — one list of
 facts, the counts and the lists read the same query), `routes/activity.ts`,
