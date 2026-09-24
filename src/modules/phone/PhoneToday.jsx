@@ -21,7 +21,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../../lib/api.js'
 import { isTerminal } from '../../data/leadStatus.js'
 import { Overdue, StageTag, MoreRows, useCap, RepeatTag } from '../../components/primitives.jsx'
-import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue, personLabel } from '../../lib/format.js'
+import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue, followUpAction, personLabel } from '../../lib/format.js'
 import Icon from '../../components/Icon.jsx'
 import { MyDay } from '../../components/ActivityDay.jsx'
 
@@ -69,7 +69,7 @@ function LeadRow({ l, onOpen, store, tone, quiet }) {
         <span className="av av-md">{initials(personLabel(l))}</span>
         <span className="q-main">
           <span className="q-name">{personLabel(l)}<RepeatTag lead={l} /></span>
-          <span className="q-sub">{l.followUp ? l.followUp.action : reqShort(l.req)}</span>
+          <span className="q-sub">{l.followUp ? followUpAction(l.followUp) : reqShort(l.req)}</span>
         </span>
         <span className="q-right">
           {tone === 'overdue'

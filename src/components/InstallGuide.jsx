@@ -44,7 +44,7 @@ export default function InstallGuide({ onClose }) {
 
   const steps = env.canAddToHome
     ? [
-        { k: 'share', text: <>Tap the <b>Share</b> button — {shareWhere}.</>, glyph: 'share' },
+        { k: 'share', text: <>Tap the <b>Share</b> button ({shareWhere}).</>, glyph: 'share' },
         { k: 'scroll', text: <>Scroll down the list and tap <b>Add to Home Screen</b>.</>, glyph: 'plus' },
         { k: 'add', text: <>Tap <b>Add</b>, top right. The app appears on your home screen.</>, glyph: 'check' },
       ]

@@ -501,7 +501,7 @@ export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ de
   audit({
     tenant_id: t, actor_type: ctx.actorType || 'user', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'import.revert', target_type: 'import', target_id: id,
-    summary: `Undid the import of "${job.file_name || 'a spreadsheet'}" — ${gone.length} ${job.kind} removed`,
+    summary: `Undid the import of "${job.file_name || 'a spreadsheet'}": ${gone.length} ${job.kind} removed`,
     metadata: { kind: job.kind, deleted: gone.length }, ip: ctx.ip, user_agent: ctx.userAgent,
   });
   return { deleted: gone.length };

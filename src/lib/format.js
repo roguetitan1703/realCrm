@@ -119,7 +119,8 @@ export function whenLabel(iso) {
 /**
  * WHAT THE FOLLOW-UP IS — the type, without the person it is with.
  *
- * The schedule modal saves `action` as "<type> — <lead name>", so every surface
+ * Until 25 Sep the schedule modal saved `action` as "<type> — <lead name>"; it
+ * now saves the type alone, but older rows still carry the name. Every surface
  * that printed the field raw said the person's own name back to them on their
  * own record: a button reading "Mark follow-up done / Site Visit — Pooja
  * Sharma", above a header already reading "Pooja Sharma". The name was never
@@ -131,7 +132,7 @@ export function whenLabel(iso) {
 export function followUpAction(fu) {
   const raw = (fu?.action || '').trim()
   if (!raw) return ''
-  // An em dash with spaces is what the modal writes, and nothing else uses one.
+  // An em dash with spaces is what the modal used to write, and nothing else uses one.
   const cut = raw.split(/\s+—\s+/)[0].trim()
   return cut || raw
 }
@@ -253,7 +254,7 @@ export function repeatMark(lead) {
   // A MARK, NOT A SENTENCE. The count is the mark — "3×" reads at a glance and
   // costs no room on a 390px row — and the day it happens the same chip is
   // filled in, so two rows in nine stand out without a word being added.
-  if (n > 1) return { today, label: `${n}×`, title: today ? `Enquired again today — ${n} in all` : `${n} enquiries` }
+  if (n > 1) return { today, label: `${n}×`, title: today ? `Enquired again today (${n} in all)` : `${n} enquiries` }
   return null
 }
 
@@ -468,7 +469,7 @@ export function fitReasons(p, req) {
     // A shop against someone who wants a flat. Nothing else about the listing
     // can make this a match, and letting locality and budget carry it to a
     // respectable score is how a showroom ends up suggested to a family.
-    reasons.push({ ok: false, t: f.want.category === 'commercial' ? 'Residential — they want commercial' : 'Commercial — they want residential' })
+    reasons.push({ ok: false, t: f.want.category === 'commercial' ? 'Residential, but they want commercial' : 'Commercial, but they want residential' })
     return { reasons, score: 0 }
   }
   if (f.bhkMatch) { reasons.push({ ok: true, t: 'Config matches (' + configLabel(p) + ')' }); score += 25 }
@@ -495,7 +496,7 @@ export function fitReasons(p, req) {
   } else if ((hasMin ? overMin : true) && (hasMax ? underMax : true)) {
     reasons.push({ ok: true, t: 'Within budget' }); score += 30
   } else if (hasMin && p.price < bMin) {
-    reasons.push({ ok: true, t: 'Under budget — room to negotiate' }); score += 18
+    reasons.push({ ok: true, t: 'Under budget, room to negotiate' }); score += 18
   } else {
     reasons.push({ ok: false, t: 'Above budget' }); score += 5
   }

@@ -623,7 +623,7 @@ function reducer(state, action) {
       const { leadId, propId, verdict, reason, society } = action
       const label = verdict === 'liked'
         ? 'Liked ' + society + ' on site visit'
-        : 'Rejected ' + society + ' — ' + reason
+        : 'Rejected ' + society + ': ' + reason
       return patchRecord(state, 'lead', leadId, l => ({
         ...l,
         feedback: { ...(l.feedback || {}), [propId]: { verdict, reason } },
@@ -830,7 +830,7 @@ export function StoreProvider({ children }) {
     if (!apiClient.getToken?.()) return   // already signed out; nothing to end
     apiClient.clearToken?.()
     dispatch({ type: 'LOGOUT' })
-    toast('Signed out — your session expired', 'warn')
+    toast('Signed out. Your session expired.', 'warn')
   }), [])
 
   // Hydrate state from backend REST API on mount.
@@ -1102,7 +1102,7 @@ export function StoreProvider({ children }) {
   }
   const failed = useCallback((err, what) => {
     console.warn(`[${what}]`, err?.message || err)
-    toast(cleanErrMsg(err) || `Could not save — ${what} failed`, 'warn')
+    toast(cleanErrMsg(err) || `Could not save. ${what} failed.`, 'warn')
   }, [toast])
 
   // A 200 carrying `success: false` is still a refusal. Treat it as one.
@@ -1236,7 +1236,7 @@ export function StoreProvider({ children }) {
         () => dispatch({ type: 'FOLLOWUP', leadId, followUp }),
         () => dispatch({ type: 'FOLLOWUP', leadId, followUp: prev }),
         () => apiClient.updateLead(leadId, { followUp }).then(adopt('lead')),
-        'Follow-up set — added to calendar')
+        'Follow-up set and added to the calendar')
     },
     // `logEvent` used to dispatch a timeline entry into local React state and
     // toast "Call logged" — with no request behind it. The entry was gone on
@@ -1266,7 +1266,7 @@ export function StoreProvider({ children }) {
           if (res?.success && res.timeline_event) { dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event }); toast('Remark added') }
           else toast('Could not save the remark', 'warn')
         })
-        .catch(err => { console.warn('[Remark API] error:', err.message); toast('Could not save the remark — try again', 'warn') })
+        .catch(err => { console.warn('[Remark API] error:', err.message); toast('Could not save the remark. Try again.', 'warn') })
     },
     // THE SERVER'S EVENT, WHOLE. This rebuilt the row from the two values it
     // had sent — so a locked row (a booking) took the agent's note as its
@@ -1278,7 +1278,7 @@ export function StoreProvider({ children }) {
           if (res?.success) { dispatch({ type: 'EDIT_TIMELINE_EVENT', kind, id, eventId, event: res.timeline_event }); toast('Saved') }
           else toast('Could not save the edit', 'warn')
         })
-        .catch(err => { console.warn('[Remark edit API] error:', err.message); toast('Could not save the edit — try again', 'warn') })
+        .catch(err => { console.warn('[Remark edit API] error:', err.message); toast('Could not save the edit. Try again.', 'warn') })
     },
     // B5 — confirm-then-log a call/message on any record. Returns the created
     // event so the caller can immediately offer "add outcome & remark" (via
@@ -1313,7 +1313,7 @@ export function StoreProvider({ children }) {
         })
         .catch(err => {
           console.warn('[Activity API] error:', err.message)
-          toast(err.message || 'Could not log the visit — try again', 'warn')
+          toast(err.message || 'Could not save the visit. Try again.', 'warn')
           resolve(null)
         })
     }),
@@ -1347,7 +1347,7 @@ export function StoreProvider({ children }) {
       return write('Visit feedback',
         () => apiClient.updateLead(leadId, { feedback, shortlist: cur.includes(propId) ? cur : [...cur, propId] }),
         () => dispatch({ type: 'VISIT_FEEDBACK', leadId, propId, verdict, reason, society }),
-        verdict === 'liked' ? 'Marked as liked' : 'Rejection logged — refines matches')
+        verdict === 'liked' ? 'Marked as liked' : 'Rejection saved')
     },
     // Same reason `addProperty` below resolves the server's row: the form data
     // carries no id (the server mints it), so an optimistic prepend produced an
@@ -1358,7 +1358,7 @@ export function StoreProvider({ children }) {
         const created = res?.data || res?.lead || res?.record || null
         dispatch({ type: 'ADD_LEAD', lead: created?.id ? created : lead })
       },
-      'Lead saved — routed'),
+      'Lead saved and assigned'),
     // Resolves the SERVER's record, not the payload we sent. The old version
     // optimistically prepended the raw form data, which carries no id — the
     // server mints it — so the card was unclickable (open(undefined)) and
@@ -1370,7 +1370,7 @@ export function StoreProvider({ children }) {
           const created = res?.data || res?.property || null
           if (created?.id) {
             dispatch({ type: 'ADD_PROPERTY', property: created })
-            toast('Property added — now matching against your leads')
+            toast('Property added. Checking it against your leads.')
             resolve(created)
           } else {
             toast('Could not save the property', 'warn')
@@ -1379,7 +1379,7 @@ export function StoreProvider({ children }) {
         })
         .catch(err => {
           console.warn('[AddProp API] Backend error:', err.message)
-          toast(err.message || 'Could not save the property — try again', 'warn')
+          toast(err.message || 'Could not save the property. Try again.', 'warn')
           resolve(null)
         })
     }),
@@ -1399,7 +1399,7 @@ export function StoreProvider({ children }) {
           const made = results.filter(r => r.status === 'fulfilled').map(r => r.value)
           const lost = results.length - made.length
           if (made.length) dispatch({ type: 'ADD_PROPERTIES', properties: made })
-          if (lost) toast(`${made.length} of ${results.length} units added — ${lost} failed`, 'warn')
+          if (lost) toast(`${made.length} of ${results.length} units added. ${lost} failed.`, 'warn')
           else toast(`${made.length} unit${made.length > 1 ? 's' : ''} added`)
           return made
         })
@@ -1466,7 +1466,7 @@ export function StoreProvider({ children }) {
     revertImportBatch: (batchId) => write('Revert import',
       () => apiClient.revertImportBatch(batchId),
       () => dispatch({ type: 'REVERT_IMPORT_BATCH', batchId }),
-      'Import batch reverted — imported records removed'),
+      'Import undone. Its records are removed.'),
     // OPTIMISTIC, like a lead's stage. This went through write(), so the patch
     // landed only after the server answered — measured at 1.2s from a tap,
     // against 48ms for the identical control one module over. It is the same
@@ -1520,7 +1520,7 @@ export function StoreProvider({ children }) {
     renameStage: (from, to) => write('Rename stage',
       () => apiClient.updateSettings({ stages: state.settings.stages.map(s => s === from ? to : s), renameStage: { from, to } }),
       () => dispatch({ type: 'RENAME_STAGE', from, to }),
-      'Stage renamed — leads moved'),
+      'Renamed. Leads moved to the new name.'),
     removeStage: (name) => write('Remove stage',
       () => apiClient.updateSettings({ stages: state.settings.stages.filter(s => s !== name) }),
       () => dispatch({ type: 'REMOVE_STAGE', name }),
@@ -1557,7 +1557,7 @@ export function StoreProvider({ children }) {
       () => dispatch({ type: 'SET_BRAND', patch }),
       note),
     // Lead routing — backend round-robins new leads across active_agent_ids.
-    setRouting: (patch, note) => write('Routing',
+    setRouting: (patch, note) => write('Assigning',
       () => apiClient.updateRouting(patch),
       () => dispatch({ type: 'SET_ROUTING', patch }),
       note),

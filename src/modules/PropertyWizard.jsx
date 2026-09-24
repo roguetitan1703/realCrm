@@ -268,7 +268,7 @@ function MediaPicker({ media = [], firmName, onChange, onError }) {
       const kind = file.type.startsWith('video/') ? 'video' : file.type.startsWith('image/') ? 'photo' : null
       if (!kind) { onError?.(`${file.name} is not a photo or a video`); continue }
       if (kind === 'video' && file.size > MAX_VIDEO_MB * 1024 * 1024) {
-        onError?.(`${file.name} is over ${MAX_VIDEO_MB}MB — trim it or send it as a link`)
+        onError?.(`${file.name} is over ${MAX_VIDEO_MB}MB. Make it shorter or send it as a link.`)
         continue
       }
       items.push({ id: `m${++seq.current}`, file, kind, status: 'queued', preview: URL.createObjectURL(file) })
@@ -860,7 +860,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                       empty owner is worse than none, because it becomes a
                       contact nobody can call. */}
                   <div className="pw-row">
-                    <Field label="Owner name" hint="Optional — you can add this later from the property.">
+                    <Field label="Owner name" hint="Optional. You can add this later from the property.">
                       <Input value={form.owner || ''} onChange={e => set('owner', e.target.value)} placeholder="Sneha Rane" />
                     </Field>
                     <Field label="Owner phone">

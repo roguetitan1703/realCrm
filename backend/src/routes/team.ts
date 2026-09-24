@@ -186,7 +186,7 @@ teamRouter.patch('/users/:id', async (req: Request, res: Response) => {
       perm = canManageRole(newRole);
       if (!perm.ok) return res.status(403).json({ error: perm.msg });
       if (u.role === 'owner' && await isLastActiveOwner(req.tenantId!, u.id)) {
-        return res.status(400).json({ error: 'This is the last active owner — assign another owner first.' });
+        return res.status(400).json({ error: 'This is the last active owner. Make someone else an owner first.' });
       }
     }
     const cleanName = name != null ? String(name).trim() : u.name;
@@ -477,7 +477,7 @@ teamRouter.post('/roster', async (req: Request, res: Response) => {
     const normPhone = cleanPhone ? `+91${cleanPhone.slice(-10)}` : null;
     const normEmail = email ? String(email).trim().toLowerCase() : null;
     if (!normEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normEmail)) {
-      return res.status(400).json({ error: 'A valid email is required — sign-in codes are sent by email.' });
+      return res.status(400).json({ error: 'A valid email is needed. Sign-in codes are sent by email.' });
     }
     const teamRole = role === 'manager' ? 'manager' : 'agent';
     const id = `u_${Date.now().toString(36)}`;

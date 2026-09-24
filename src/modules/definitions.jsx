@@ -140,7 +140,7 @@ export const LEADS_DEF = {
     // reading down the timeline for it. The reason survives the reopen and is
     // cleared the moment somebody moves the stage themselves.
     note: (l) => (l.rejectionReason
-      ? (l.stage === REJECTED_STATUS ? l.rejectionReason : `Was rejected — ${l.rejectionReason}`)
+      ? (l.stage === REJECTED_STATUS ? l.rejectionReason : `Was rejected: ${l.rejectionReason}`)
       : null),
     // Not on a closed deal either: a lead with a signed agreement is not
     // "rejected", and the status dropdown still reopens it if it has to be.
@@ -604,7 +604,7 @@ export const OWNERS_DEF = {
     canSet: (store, o) => canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o),
     // Why it ended, beside what it ended as — the same as a lead's.
     note: (o) => (o.rejectionReason
-      ? (OWNER_TERMINAL_STATUSES.includes(o.stage) ? o.rejectionReason : `Was rejected — ${o.rejectionReason}`)
+      ? (OWNER_TERMINAL_STATUSES.includes(o.stage) ? o.rejectionReason : `Was rejected: ${o.rejectionReason}`)
       : null),
     // Ending the call is a status change like any other and belongs in the same
     // control. A calling list had no way to close a record at all: a number that
@@ -982,7 +982,7 @@ export const PROPERTIES_DEF = {
           tone: getPref('msgTone', 'Standard'),
         })
         copyText(text).then(ok => store.toast(
-          ok ? 'Listing details copied' : 'Could not copy — your browser blocked it',
+          ok ? 'Listing details copied' : 'Could not copy. Your browser blocked it.',
           ok ? undefined : 'warn'))
       } },
     // "Record tenancy" and "Mark deposit returned" were here, writing the

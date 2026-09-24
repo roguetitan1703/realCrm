@@ -91,7 +91,7 @@ export async function sendPasswordResetEmail(to: string, link: string, firmName?
   const text =
     `We got a request to reset your ${firm} password.\n\n` +
     `Open this link to set a new one (expires in 30 minutes):\n${link}\n\n` +
-    `If you didn't request this, you can ignore this email — your password won't change.`;
+    `If you didn't request this, you can ignore this email. Your password won't change.`;
   const html = `
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:440px;margin:0 auto;padding:8px">
       <p style="color:#23231f;font-size:13px;font-weight:700;letter-spacing:0.4px;margin:0 0 14px">${firm}</p>
@@ -99,7 +99,7 @@ export async function sendPasswordResetEmail(to: string, link: string, firmName?
       <p style="color:#77756e;font-size:13px;line-height:1.5;margin:0 0 18px">Click the button to set a new password. This link expires in 30 minutes.</p>
       <a href="${link}" style="display:inline-block;background:${accent};color:${onAccent};text-decoration:none;font-size:14px;font-weight:700;border-radius:9px;padding:12px 22px;margin:0 0 18px">Set a new password</a>
       <p style="color:#77756e;font-size:12px;line-height:1.5;margin:0 0 18px;word-break:break-all">Or paste this link:<br>${link}</p>
-      <p style="color:#9a988f;font-size:11px;margin:0;border-top:1px solid #eee;padding-top:12px">If you didn't request this, ignore this email — your password won't change.<br>Real Estate by Delpat</p>
+      <p style="color:#9a988f;font-size:11px;margin:0;border-top:1px solid #eee;padding-top:12px">If you didn't request this, ignore this email. Your password won't change.<br>Real Estate by Delpat</p>
     </div>`;
   await sendMail({ to, subject, html, text });
 }

@@ -498,7 +498,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, borderBottom: '1px solid var(--line)', paddingBottom: 14 }}>
           <div>
             <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--ink)' }}>Onboard Workspace</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Step {step} of 2 — {step === 1 ? 'Firm & Owner Credentials' : 'Bulk Team Setup'}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Step {step} of 2: {step === 1 ? 'Firm & Owner Credentials' : 'Bulk Team Setup'}</div>
           </div>
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)' }}>✕</button>
         </div>

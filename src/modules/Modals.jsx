@@ -465,7 +465,7 @@ function AttachPropModal({ store, leadId }) {
   const attach = (p) => { store.attachProp(leadId, p.id, p.society); store.closeModal() }
 
   const emptyLine = searching ? 'Nothing matches that search.'
-    : suggesting ? 'No available listing fits this requirement — try All inventory.'
+    : suggesting ? 'No available listing fits this requirement. Try All inventory.'
       : 'No available inventory to attach.'
 
   return (
@@ -600,9 +600,9 @@ function PickBuyerModal({ store, propId }) {
   return (
     <Modal title="Send this listing on WhatsApp" onClose={store.closeModal} width={440}>
       <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
-        Interested {p.deal === 'rent' ? 'tenants' : 'buyers'} for <b style={{ color: 'var(--ink)' }}>{p.society}</b> — matched by the system. Or send with no recipient.
+        Interested {p.deal === 'rent' ? 'tenants' : 'buyers'} for <b style={{ color: 'var(--ink)' }}>{p.society}</b>, found by matching. Or send it to nobody in particular.
       </div>
-      {buyers.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '4px 0 12px' }}>No matching contacts yet — you can still generate the message.</div>}
+      {buyers.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '4px 0 12px' }}>No matching contacts yet. You can still write the message.</div>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
         {buyers.map((b, i) => (
           <button key={b.lead.id} onClick={() => send(b.lead.id)}
@@ -776,7 +776,7 @@ function NewLeadModal({ store, leadId }) {
   )
 
   return (
-    <Modal title={edit ? `Edit Lead — ${edit.name}` : 'New Lead Record'} onClose={store.closeModal} width={520}>
+    <Modal title={edit ? `Edit lead: ${edit.name}` : 'New Lead Record'} onClose={store.closeModal} width={520}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
           <Field label="Full Name *"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Client Name" autoFocus /></Field>
@@ -896,7 +896,7 @@ function NewOwnerModal({ store, ownerId }) {
   }
 
   return (
-    <Modal title={edit ? `Edit Owner — ${edit.name || edit.phone}` : 'New Owner'} onClose={store.closeModal} width={480}>
+    <Modal title={edit ? `Edit owner: ${edit.name || edit.phone}` : 'New Owner'} onClose={store.closeModal} width={480}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
           <Field label="Owner Name"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Optional" autoFocus /></Field>
@@ -979,7 +979,7 @@ function RejectLeadModal({ store, leadId }) {
 
   const save = async () => {
     setBusy(true)
-    const text = note.trim() ? `${reason} — ${note.trim()}` : reason
+    const text = note.trim() ? `${reason}: ${note.trim()}` : reason
     // The reason and the note ride on the status change itself. They were a
     // second entry — a remark saying "Rejected: …" a second after the status
     // line said the same — which the record showed twice and the activity
@@ -1034,7 +1034,7 @@ function RejectOwnerModal({ store, ownerId }) {
 
   const save = async () => {
     setBusy(true)
-    const text = note.trim() ? `${pick.reason} — ${note.trim()}` : pick.reason
+    const text = note.trim() ? `${pick.reason}: ${note.trim()}` : pick.reason
     await store.updateOwner(ownerId, { stage: pick.status, rejectionReason: pick.reason, callbackAt: null })
     await store.addRemark('owner', ownerId, `Closed: ${text}`)
     setBusy(false)
@@ -1132,7 +1132,7 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
         if (res?.success) {
           const moved = res.assigned ?? res.updated ?? n
           store.toast(res.perTarget?.length > 1
-            ? `${moved} shared — ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
+            ? `${moved} shared: ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
             : (agentIds || single ? `${moved} ${noun}${moved === 1 ? '' : 's'} assigned` : `${moved} ${noun}${moved === 1 ? '' : 's'} unassigned`))
           store.settled?.()
           onDone?.()
@@ -1422,7 +1422,7 @@ function AddAgentModal({ store }) {
     }
     return (
       <Modal title="Teammate added" onClose={guardedClose} width={400}>
-        <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Give these to {name.trim() || 'them'}. The password <b style={{ color: 'var(--ink)' }}>won't be shown again</b> — copy it now. They set their own on first sign-in.</div>
+        <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Give these to {name.trim() || 'them'}. The password <b style={{ color: 'var(--ink)' }}>won't be shown again</b>. Copy it now. They set their own on first sign-in.</div>
         <div style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, padding: '4px 0' }}><span className="u-muted">{idLabel}</span><span className="mono-num" style={{ fontWeight: 600, wordBreak: 'break-all' }}>{done.handle}</span></div>
         </div>
@@ -1446,7 +1446,7 @@ function AddAgentModal({ store }) {
       </Field>
       {role === 'agent' ? (
         <>
-          <Field label="Login ID (optional — auto-created from the name)"><Input value={loginId} onChange={e => setLoginId(e.target.value.replace(/@/g, ''))} placeholder="e.g. kiran" /></Field>
+          <Field label="Login ID (optional, made from the name if left empty)"><Input value={loginId} onChange={e => setLoginId(e.target.value.replace(/@/g, ''))} placeholder="e.g. kiran" /></Field>
           <div className="u-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 4 }}>
             Signs in as <b className="mono-num" style={{ color: 'var(--ink)' }}>{derivedId || '—'}</b>
           </div>
@@ -1542,7 +1542,7 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
   if (step === 'outcome') {
     return (
       <Modal title={`${ch.title} logged`} onClose={store.closeModal} width={400}>
-        <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>Optional — how did it go with {first}?</div>
+        <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>Optional. How did it go with {first}?</div>
         {/* The dropdown was gated to `call`, so a WhatsApp landed here with a
             free-text box and nothing else — which is why bhumi has 219 WhatsApp
             events and not one of them carries an outcome, against 186 calls that
@@ -1793,7 +1793,7 @@ function VisitProofModal({ store, leadId, propId }) {
   if (!l) return null
 
   return (
-    <Modal title={`Log site visit — ${personLabel(l)}`} onClose={busy ? () => {} : store.closeModal} width={460}>
+    <Modal title={`Log site visit: ${personLabel(l)}`} onClose={busy ? () => {} : store.closeModal} width={460}>
       {step === 'geo' && (
         <div className="vp-gate">
           {geoErr ? (
@@ -2019,7 +2019,7 @@ function VisitFeedbackModal({ store, leadId, propId }) {
         options={[{ value: 'liked', label: '👍 Liked' }, { value: 'rejected', label: '👎 Rejected' }]} />
       {verdict === 'rejected' && (
         <>
-          <div style={{ fontSize: 11, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600, margin: '16px 0 8px' }}>Reason — refines future matches</div>
+          <div style={{ fontSize: 11, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600, margin: '16px 0 8px' }}>Reason</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
             {REJECT_REASONS.map(r => <button key={r} className={'qchip' + (reason === r ? ' on' : '')} onClick={() => setReason(r)}>{r}</button>)}
           </div>
@@ -2298,7 +2298,7 @@ function ScheduleFollowUpModal({ store, leadId }) {
   const saveAppointment = () => {
     const finalDate = useCustomDate ? customDate : day
     const finalTime = useCustomTime ? customTime : time
-    const fullAction = `${action} — ${personLabel(l)}`
+    const fullAction = action
     store.setFollowUp(l.id, {
       action: fullAction,
       // `at` is the appointment. date/time are kept only so the three rows
@@ -2321,7 +2321,7 @@ function ScheduleFollowUpModal({ store, leadId }) {
   )
 
   return (
-    <Modal title={`Schedule follow-up — ${personLabel(l)}`} onClose={store.closeModal} width={480}>
+    <Modal title={`Schedule follow-up: ${personLabel(l)}`} onClose={store.closeModal} width={480}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className="field">
           <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Activity Type</label>

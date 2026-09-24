@@ -938,7 +938,7 @@ export function SortControl({ value, options, dir, onSort, onDir }) {
       </button>
       <button
         className="sortc-dir"
-        title={dir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
+        title={dir === 'asc' ? 'Ascending. Click for descending' : 'Descending. Click for ascending'}
         onClick={onDir}
       >
         <Icon name={dir === 'asc' ? 'sortAsc' : 'sortDesc'} size={14} />

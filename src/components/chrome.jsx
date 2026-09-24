@@ -139,7 +139,7 @@ export function ConnectionBadge() {
   if (conn.ok) return null
   return (
     <span className="conn-badge" title="Changes are not being saved to the server. Reconnect before continuing.">
-      <Icon name="zap" size={13} />Offline — not saving
+      <Icon name="zap" size={13} />Offline. Not saving
     </span>
   )
 }
@@ -163,7 +163,7 @@ export function StaleBanner() {
   return (
     <div className="stale-banner" role="status">
       <Icon name="zap" size={13} />
-      <span>Can’t reach the server — lists and records won’t load until you reconnect.</span>
+      <span>Can’t reach the server. Lists and records won’t load until you reconnect.</span>
     </div>
   )
 }

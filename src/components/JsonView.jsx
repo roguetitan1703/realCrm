@@ -81,7 +81,7 @@ function Node({ k, path, value, depth, picked, onPick, defaultOpen }) {
  *            worth burying)
  */
 export default function JsonView({ data, onPick, picked, depth = 6 }) {
-  if (data === null || data === undefined) return <div className="jv-empty">No payload</div>
+  if (data === null || data === undefined) return <div className="jv-empty">No data</div>
   const entries = typeof data === 'object' && !Array.isArray(data) ? Object.entries(data) : [['', data]]
   return (
     <div className="jv">

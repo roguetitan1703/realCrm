@@ -95,7 +95,7 @@ export const COPY: Builders = {
     // This read "Rejected lead enquired again" off a boolean, so a buyer whose
     // deal had CLOSED and who was asking about something else was announced as
     // a rejection.
-    title: d.previousStage ? `Reopened — enquired again` : 'Enquired again',
+    title: d.previousStage ? `Enquired again, reopened` : 'Enquired again',
     body: facts(d.name, d.source && `via ${d.source}`,
       d.previousStage && `was ${d.previousStage}`,
       d.changed > 0 && `${plural(d.changed, 'detail')} changed`),

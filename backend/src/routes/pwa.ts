@@ -155,7 +155,7 @@ pwaRouter.get('/:slug/manifest.webmanifest', async (req: Request, res: Response)
     id: appId,
     name,
     short_name: shortNameOf(name, brand.shortName),
-    description: `${name} — real estate desk`,
+    description: `${name}, real estate desk`,
     start_url: startUrl,
     scope: startUrl,
     display: 'standalone',

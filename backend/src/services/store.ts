@@ -19,6 +19,7 @@ import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSi
 import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
+import { followUpKind } from './followUp.js';
 import { assertLeadWrite, ForbiddenError } from '../lib/permissions.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
@@ -109,7 +110,7 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   // The owner signs in by OTP, delivered ONLY by email (no SMS channel), so the
   // owner's email is required — a phone-only owner could never receive a code.
   const ownerEmail = input.ownerEmail ? String(input.ownerEmail).trim().toLowerCase() : '';
-  if (!EMAIL_RE.test(ownerEmail)) throw new Error("The owner's email is required — sign-in codes are sent by email.");
+  if (!EMAIL_RE.test(ownerEmail)) throw new Error("The owner's email is needed. Sign-in codes are sent by email.");
   const ownerPhoneRaw = input.ownerPhone ? String(input.ownerPhone).replace(/\D/g, '') : '';
   const ownerPhone = ownerPhoneRaw ? `+91${ownerPhoneRaw.slice(-10)}` : null;
 
@@ -2231,7 +2232,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       // The chip says what kind of entry this is; the title says what happened
       // to it; the description says which follow-up. Three jobs, one word each.
       title: hadFollowUp ? 'Rescheduled' : 'Scheduled',
-      description: [followUpKind(fu), followUpWhen(fu)].filter(Boolean).join(' — '),
+      description: [followUpKind(fu), followUpWhen(fu)].filter(Boolean).join(', '),
       author: getContext()?.userId || null,
     }).catch(() => {});
   }
@@ -2269,7 +2270,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     // "Site Visit → Booked" in the history. metadata carries the stored value,
     // which is what the activity report and every count read.
     const shown = await getSettings();
-    const line = `${stageLabelIn(shown, oldLead.stage)} → ${stageLabelIn(shown, patch.stage)}${note ? ` — ${note}` : ''}`;
+    const line = `${stageLabelIn(shown, oldLead.stage)} → ${stageLabelIn(shown, patch.stage)}${note ? `: ${note}` : ''}`;
     await addTimelineEvent({
       record_id: id,
       type: 'stage_change',
@@ -2524,9 +2525,8 @@ export const DEFAULT_QUIET_DAYS = 3;
 /**
  * WHAT a follow-up is, and WHEN it is due, as a person reads them.
  *
- * The schedule modal stores `action` as "<type> — <lead name>", so a timeline
- * line built from it straight said the person's own name back to them on their
- * own record. And `at` is a UTC instant: printed raw it read
+ * followUpKind (services/followUp.ts) strips the name older rows carry. And
+ * `at` is a UTC instant: printed raw it read
  * "2026-08-18T19:12:14.930Z" on a desk in Pune, which is not a time anybody
  * can repeat to a client.
  *
@@ -2534,11 +2534,6 @@ export const DEFAULT_QUIET_DAYS = 3;
  * exists on the client: this fact is written from three places and the same
  * appointment must not be phrased three ways.
  */
-function followUpKind(fu: any): string {
-  const raw = String(fu?.action || '').trim();
-  if (!raw) return 'Follow-up';
-  return raw.split(/\s+—\s+/)[0].trim() || raw;
-}
 
 function followUpWhen(fu: any): string {
   if (fu?.at) {
@@ -3016,7 +3011,7 @@ async function recordAssignments(entries: AssignmentEntry[]): Promise<void> {
         record_id: e.recordId,
         type: 'assignment',
         title,
-        description: e.reason ? `${who} — ${e.reason}` : who,
+        description: e.reason ? `${who}: ${e.reason}` : who,
         author: e.author ?? getContext()?.userId ?? 'System',
         timestamp: now,
         metadata: sql.json({ agentId: e.agentId ?? null, previousAgentId: e.prevAgentId ?? null, ...(e.metadata || {}) }) as any,
@@ -3738,7 +3733,7 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
       record_id: id, type: patch.callbackAt ? 'follow_up' : 'note',
       title: patch.callbackAt ? 'Callback scheduled' : 'Callback cleared',
       description: patch.callbackAt
-        ? `${new Date(patch.callbackAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}${patch.callbackNote ? ` — ${patch.callbackNote}` : ''}`
+        ? `${new Date(patch.callbackAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}${patch.callbackNote ? `: ${patch.callbackNote}` : ''}`
         : 'No callback scheduled',
       // By id, like every other timeline write — see the stage change above.
       author: ctx.actorId ?? getContext()?.userId ?? 'System',
@@ -3987,7 +3982,7 @@ export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SY
     if (!agent) return;
     byTarget.set(agent, [...(byTarget.get(agent) || []), id]);
   });
-  if (!byTarget.size) throw new ForbiddenError('Nobody is in the rotation — add people in Settings → Routing.');
+  if (!byTarget.size) throw new ForbiddenError('Nobody is taking turns for new leads. Add people in Settings → Assigning.');
 
   const names = await sql`SELECT id, name FROM users WHERE tenant_id = ${t} AND id IN ${sql([...byTarget.keys()])}`;
   const perTarget: { id: string; name: string | null; n: number }[] = [];
@@ -5278,7 +5273,7 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
     const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
     await addTimelineEvent({
       record_id: lead.id, type: 'assignment', title: 'Auto-assigned',
-      description: `Nobody had picked it up — routed to ${name}`,
+      description: `Nobody had picked it up, so it went to ${name}`,
       author: 'System', metadata: { agentId, reason: 'sweep_unassigned' },
     });
     tally.set(agentId, (tally.get(agentId) || 0) + 1);

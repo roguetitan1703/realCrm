@@ -133,7 +133,7 @@ connectionsRouter.get('/:id/key', async (req: Request, res: Response) => {
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 
   const apiKey = await revealKey(tenant, req.params.id);
-  if (!apiKey) return res.status(410).json({ error: 'unreadable', message: "This key can't be shown — this server can't open its stored copy. The portal's feed still works; do not rotate it." });
+  if (!apiKey) return res.status(410).json({ error: 'unreadable', message: "This key can't be shown. This server can't open its stored copy. The portal's feed still works; do not rotate it." });
 
   audit({
     tenant_id: tenant, actor_type: 'user', actor_id: userOf(req), actor_label: (req as any).user?.name ?? null,
@@ -250,7 +250,7 @@ connectionsRouter.post('/:id/preview', async (req: Request, res: Response) => {
   if (!payload) {
     return res.status(400).json({
       error: 'Nothing to test against',
-      message: 'This connection has not received a payload yet. Ask the provider to send one, then map it.',
+      message: 'This connection has not received anything yet. Ask the portal to send one enquiry, then match its fields.',
     });
   }
   const result = parsePayload(payload, req.body?.config ?? null);
@@ -270,7 +270,7 @@ connectionsRouter.put('/:id/parser', async (req: Request, res: Response) => {
     const { payload } = await bestPayload(tenant, req.params.id);
     if (!payload) {
       return res.status(400).json({
-        error: 'No payload to verify against',
+        error: 'Nothing received yet to check against',
         message: 'A mapping can only be saved once this connection has received real data.',
       });
     }

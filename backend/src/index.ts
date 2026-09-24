@@ -236,7 +236,7 @@ app.get('/docs/:tenantSlug', async (req: Request, res: Response) => {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>${escapeHtml(firmName)} — Inbound Webhook Integration</title>
+<title>${escapeHtml(firmName)}: Lead connection</title>
 <style>
 :root{color-scheme:light dark;--ink:#1a1d1a;--muted:#6b7570;--line:#e2e5e1;--card:#fff;--wash:#f6f5f2;--accent:#1e6f52}
 @media(prefers-color-scheme:dark){:root{--ink:#eef0ec;--muted:#9aa39c;--line:#2c322d;--card:#1a1d1a;--wash:#14161380;--accent:#4fae86}}

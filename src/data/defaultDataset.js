@@ -249,7 +249,7 @@ export const defaultProperties = [
     owner: 'Milind Joshi',
     ownerPhone: '+91 98905 21140',
     ownerEmail: 'milind.joshi@rediffmail.com',
-    highlights: ['Higher floor, full hills view', 'Fully furnished — owner leaving all fittings', 'Two covered parkings, rare in this tower'],
+    highlights: ['Higher floor, full hills view', 'Fully furnished, owner leaving all fittings', 'Two covered parkings, rare in this tower'],
     tenancy: null,
     timeline: [
       { type: 'note', label: 'Owner shifting to Bengaluru, wants closure before Diwali', ago: '2d ago' },
@@ -328,7 +328,7 @@ export const defaultLeads = [
     duplicateOf: null,
     minsAgo: 2,
     timeline: [
-      { type: 'note', label: 'Enquiry received from 99acres — 3 BHK, Marunji / Hinjewadi', ago: 'just now' }
+      { type: 'note', label: 'Enquiry received from 99acres: 3 BHK, Marunji / Hinjewadi', ago: 'just now' }
     ]
   },
   {
@@ -627,7 +627,7 @@ export const defaultLeads = [
       notes: 'First-time investor, comparing entry-level 2 BHKs across Hinjewadi township projects.',
       timeline: 'Within 90 days'
     },
-    notes: ['Investor — rental yield is the deciding factor'],
+    notes: ['Investor. Rental yield is the deciding factor'],
     shortlist: ['p8'],
     feedback: {},
     followUp: { action: 'Share expected rental yield working for R10-402', date: 'Tomorrow', time: '4:00 pm' },

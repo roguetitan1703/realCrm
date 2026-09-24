@@ -18,6 +18,7 @@ import { sendPushToUser, pruneDeliveryLog } from './push.js';
 // count the same leads. Three definitions of "not retried" would drift.
 // Every word a notification says, keyed on its type.
 import { copyFor, COPY } from './notificationCopy.js';
+import { followUpKind } from './followUp.js';
 
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
@@ -256,7 +257,7 @@ export async function processScheduledNotifications(
             userId: l.agent_id,
             tenantId: t,
             type: isVisit ? 'site_visit_reminder' : 'followup_due',
-            data: { name: l.name, locality: l.locality, action, when: l.follow_up?.time },
+            data: { name: l.name, locality: l.locality, action: followUpKind(l.follow_up), when: l.follow_up?.time },
             link: `?screen=leads&lead=${l.id}`,
             push: true,
             toSelf: true

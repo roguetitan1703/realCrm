@@ -373,7 +373,7 @@ export async function parseSpreadsheet(file, wanted) {
  */
 export const EXAMPLE_SHEETS = {
   owners: {
-    title: 'Owners — calling list',
+    title: 'Owners to call',
     required: ['Project', 'Tower', 'Unit no.', 'Phone'],
     columns: ['Project', 'Tower', 'Unit no.', 'Owner name', 'Phone', 'Configuration', 'Carpet area', 'Saleable area', 'Email', 'Locality', 'Notes'],
     rows: [
@@ -382,7 +382,7 @@ export const EXAMPLE_SHEETS = {
     ],
   },
   properties: {
-    title: 'Properties — inventory',
+    title: 'Properties',
     required: ['Project', 'Unit no.', 'Sale or rent'],
     columns: ['Project', 'Tower', 'Unit no.', 'Sale or rent', 'Configuration', 'Price', 'Carpet area', 'Floor', 'Locality', 'Status', 'Facing', 'Furnishing', 'Parking', 'Possession', 'Builder', 'RERA', 'Owner name', 'Owner phone', 'Notes'],
     rows: [

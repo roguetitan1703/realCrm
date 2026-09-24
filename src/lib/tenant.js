@@ -24,10 +24,9 @@ export function setTenantIdentity(next = {}) {
 export function firmName() { return current.firmName || '' }
 export function city() { return current.city || '' }
 
-/** `" — Bhumi Propcity"` or `''`. For signing off a message without leaving a
- *  dangling dash when no firm is resolved yet. */
+/** `"Bhumi Propcity"` or `''`. For signing off a message. */
 export function signOff() {
-  return current.firmName ? `— ${current.firmName}` : ''
+  return current.firmName || ''
 }
 
 /** Joins the parts of a phrase that has optional pieces, e.g. a locality that

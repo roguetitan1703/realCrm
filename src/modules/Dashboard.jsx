@@ -119,7 +119,7 @@ export default function Dashboard({ store, go, topBar }) {
       <>
         <div className="dist-bar">
           {live.map((r, i) => (
-            <i key={r.name} title={`${r.name} — ${r.n}`} data-i={i % 6}
+            <i key={r.name} title={`${r.name}: ${r.n}`} data-i={i % 6}
               style={{ width: (r.n / total * 100) + '%' }} />
           ))}
         </div>

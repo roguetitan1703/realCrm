@@ -93,16 +93,16 @@ export function ownerUpdateMessage(property, allLeads = [], firmName = tenantFir
   L.push('')
   const d = describeProperty(p)
   L.push(`Update on your ${d.headline} at ${[d.society, d.locality].filter(Boolean).join(', ')}:`)
-  L.push(`• ${buyers.length} matching ${partyWord} in our pipeline`)
+  L.push(`• ${buyers.length} matching ${partyWord} on our list`)
   if (visits) L.push(`• ${visits} site visit${visits > 1 ? 's' : ''} lined up / done`)
   if (d.price) L.push(`• Currently quoted at ${d.price}${p.negotiable ? ' (negotiable)' : ''}`)
   L.push('')
   if (buyers.length === 0) {
     L.push('Response is a bit slow at the current ask. If you can consider a small adjustment, I can push harder. Let me know.')
   } else {
-    L.push('Genuine interest hai. Main follow-up kar raha hoon — koi decision aate hi aapko update karunga.')
+    L.push('Genuine interest hai. Main follow-up kar raha hoon, koi decision aate hi aapko update karunga.')
   }
-  if (firmName) L.push('— ' + firmName)
+  if (firmName) L.push(firmName)
   return L.join('\n')
 }
 
@@ -326,7 +326,7 @@ function buildSale(p, t, firmName, lang, opts) {
   const L = []
   // Headline carries what it IS and where. The society used to sit on its own
   // line under it, which cost a line to say one word.
-  L.push(`${E.home} *${d.headline} — ${t.forSale}*`)
+  L.push(`${E.home} *${d.headline} · ${t.forSale}*`)
   push(L, d.society ? `*${d.society}*` : null)
   push(L, d.locality ? `${E.pin} ${d.locality}` : null)
   L.push('')
@@ -374,7 +374,7 @@ function buildSale(p, t, firmName, lang, opts) {
 function buildRent(p, t, firmName, lang, opts) {
   const d = describeProperty(p, lang)
   const L = []
-  L.push(`${E.home} *${d.headline}${d.furnish ? ' ' + d.furnish : ''} — ${t.onRent}*`)
+  L.push(`${E.home} *${d.headline}${d.furnish ? ' ' + d.furnish : ''} · ${t.onRent}*`)
   push(L, d.society ? `*${d.society}*` : null)
   push(L, d.locality ? `${E.pin} ${d.locality}` : null)
   L.push('')

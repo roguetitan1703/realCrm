@@ -132,7 +132,7 @@ function AccessPanel({ store }) {
   }
   const doSuspend = (u) => act(u.id,
     () => api.setUserStatus(u.id, 'suspended'),
-    `${u.name} suspended — signed out and paused from routing`)
+    `${u.name} suspended. Signed out, and gets no new leads.`)
   const forceLogout = (u) => act(u.id, () => api.forceLogout(u.id), `Signed ${u.name} out on every device`)
   const del = (u) => {
     if (!window.confirm(`Delete ${u.name}? Their past deals stay for attribution, but they can no longer sign in. This can't be undone from here.`)) return
@@ -324,7 +324,7 @@ function RevealCard({ data, store, onClose }) {
           <button className="btn btn-icon btn-quiet" onClick={tryClose} disabled={locked} style={locked ? { opacity: .4, cursor: 'default' } : undefined}><Icon name="x" /></button>
         </div>
         <div className="m-content">
-          <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Give these to <b style={{ color: 'var(--ink)' }}>{data.name}</b>. The password <b style={{ color: 'var(--ink)' }}>won't be shown again</b> — copy it now. They set their own on first sign-in.</div>
+          <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Give these to <b style={{ color: 'var(--ink)' }}>{data.name}</b>. The password <b style={{ color: 'var(--ink)' }}>won't be shown again</b>. Copy it now. They set their own on first sign-in.</div>
           {/* What moved with the seat, stated — not left to be discovered. */}
           {data.note && <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>They take over {data.note}.</div>}
           <div style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
@@ -376,7 +376,7 @@ function SeatModal({ store, user, onClose, onDone }) {
         <div className="m-head"><h3>Reassign seat</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
         <div className="m-content">
           <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
-            The seat keeps its work{held && (held.leads || held.owners) ? ` — ${[held.leads && `${held.leads} open lead${held.leads === 1 ? '' : 's'}`, held.owners && `${held.owners} calling record${held.owners === 1 ? '' : 's'}`].filter(Boolean).join(' and ')}` : ''}. <b style={{ color: 'var(--ink)' }}>{user.name}</b> is signed out, and what they logged stays under their name.
+            The seat keeps its work{held && (held.leads || held.owners) ? `: ${[held.leads && `${held.leads} open lead${held.leads === 1 ? '' : 's'}`, held.owners && `${held.owners} calling record${held.owners === 1 ? '' : 's'}`].filter(Boolean).join(' and ')}` : ''}. <b style={{ color: 'var(--ink)' }}>{user.name}</b> is signed out, and what they logged stays under their name.
           </div>
           <Field label="New person’s full name"><Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Sneha Kulkarni" autoFocus /></Field>
           {user.login_id && (
@@ -417,7 +417,7 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
     api.updateUser(user.id, { name: name.trim(), email: email.trim(), phone: phone.trim(), role, ...(user.login_id ? { loginId: nextId } : {}) })
       .then(() => {
         store.toast(user.login_id && nextId !== user.login_id
-          ? `${name.trim()} updated — they sign in as ${nextId} now`
+          ? `${name.trim()} updated. They sign in as ${nextId} now.`
           : `${name.trim()} updated`)
         onDone()
       })
@@ -582,7 +582,7 @@ function ResetPasswordModal({ store, user, onClose, onDone }) {
     <div className="overlay" onClick={onClose}>
       <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
         <div className="m-head">
-          <h3>Reset Password — {user.name}</h3>
+          <h3>Reset password: {user.name}</h3>
           <button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button>
         </div>
         <div className="m-content">

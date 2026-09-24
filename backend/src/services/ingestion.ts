@@ -463,9 +463,9 @@ export async function processInboxRow(
         // 2 BHK)" is a sentence an agent can act on; silently writing 3 BHK
         // over the top is a fact nobody can tell from one they established
         // themselves.
-        const changed = conflicts.map(c => `Says ${said(c.got)} now (had ${said(c.had)})`).join(' — ');
+        const changed = conflicts.map(c => `Says ${said(c.got)} now (had ${said(c.had)})`).join(' · ');
         const extra = [r.notes, r.interest && `Interested in: ${said(r.interest)}`, changed]
-          .filter(Boolean).join(' — ');
+          .filter(Boolean).join(' · ');
         // A portal that fires the same enquiry twice — 99acres sent one buyer
         // 0.4s apart under two different enquiry ids, which the idempotency
         // lock above keys on and therefore cannot catch — must not leave two

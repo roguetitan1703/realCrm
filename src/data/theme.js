@@ -50,7 +50,7 @@ export const FIRM = theme.brand.firmName
 // reads. Same call, same reason, as `reminderDays` in Settings → Response times.
 export const DEFAULT_WHATSAPP_INTRO = 'Hello {name}, I received your inquiry for a {requirement} in {locality} via {source}. I am reaching out from {firmName}. We have several excellent options matching your preferences. When would be a convenient time to connect over a quick call?'
 
-export const DEFAULT_INTRO_MESSAGE = 'Hello, this is {agentName} from {firmName}. We work on residential property in the area — happy to help if you are looking to buy, sell or rent.'
+export const DEFAULT_INTRO_MESSAGE = 'Hello, this is {agentName} from {firmName}. We work on residential property in the area and are happy to help if you are looking to buy, sell or rent.'
 
 // Default editable settings — the store seeds from these, then owns them. Renaming
 // a stage / adding a source in Settings mutates state, never this object.

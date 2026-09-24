@@ -41,7 +41,7 @@ function useCopy(store) {
   const [copied, setCopied] = useState('')
   const copy = (text, tag) => {
     copyText(text).then(ok => {
-      if (!ok) return store.toast('Could not copy — select it and copy manually', 'warn')
+      if (!ok) return store.toast('Could not copy. Select it and copy it by hand.', 'warn')
       setCopied(tag); setTimeout(() => setCopied(''), 1600)
     })
   }
@@ -166,13 +166,13 @@ function Push({ push, store }) {
         {push.source_ip && <span>{push.source_ip}</span>}
         {push.headers?.['content-type'] && <span>{push.headers['content-type']}</span>}
         {push.lead_id && <span>{push.lead_id}</span>}
-        <button className="cx-icb" title="Copy payload" onClick={() => copy(text, push.id)}>
+        <button className="cx-icb" title="Copy the data" onClick={() => copy(text, push.id)}>
           <Icon name={copied === push.id ? 'check' : 'copy'} size={14} />
         </button>
       </div>
       {push.error && <div className="cx-push-e">{push.error}</div>}
       {push.body_purged_at
-        ? <div className="cx-act-empty">Payload purged {relativeTime(push.body_purged_at)}</div>
+        ? <div className="cx-act-empty">Data deleted {relativeTime(push.body_purged_at)}</div>
         : body && typeof body === 'object'
           ? <div className="cx-push-b jv-surface"><JsonView data={body} /></div>
           : <pre className="cx-push-b">{text || '(empty body)'}</pre>}
@@ -393,7 +393,7 @@ function Mapper({ connection, store, onClose, onSaved }) {
     setPreview(null)
     setConfig(data.suggestion)
     setArmed(TARGETS.find(t => !data.suggestion.map?.[t.key])?.key || null)
-    store.toast(`${Object.keys(data.suggestion.map || {}).length} fields detected — test before saving`)
+    store.toast(`${Object.keys(data.suggestion.map || {}).length} fields found. Test before saving.`)
   }
 
   const runPreview = () => {
@@ -460,8 +460,8 @@ function Mapper({ connection, store, onClose, onSaved }) {
           {payloadKeys.length === 0
             ? 'The last push had no fields in it. Send a real enquiry, then reopen this to map it.'
             : armedField
-              ? <>Click the field in <b>{connection.provider}'s payload</b> that holds <b>{armedField.label}</b>{armedField.required ? <i className="req">*</i> : null}.</>
-              : 'All fields mapped — pick a row to remap it.'}
+              ? <>Click the field in <b>{connection.provider}'s data</b> that holds <b>{armedField.label}</b>{armedField.required ? <i className="req">*</i> : null}.</>
+              : 'All fields matched. Pick a row to change it.'}
         </div>
         <div className="cx-map-grid">
           {TARGETS.map(t => {
@@ -497,7 +497,7 @@ function Mapper({ connection, store, onClose, onSaved }) {
         <div className="cx-map-payload-h">{connection.provider} sent this</div>
         <div className="cx-map-payload-b jv-surface">
           {payloadKeys.length === 0
-            ? <div className="jv-empty">Empty body — nothing to click here.</div>
+            ? <div className="jv-empty">Nothing was sent in this request.</div>
             : <JsonView data={data.payload} onPick={pick} picked={armed ? config?.map?.[armed] : null} />}
         </div>
         {mappedPaths.size > 0 && (

@@ -690,7 +690,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
 function followFrom(f, l) {
   const type = f.action === 'site' ? 'Site visit' : f.action === 'meeting' ? 'Meeting' : 'Call'
   const dateLabel = f.quick === 'today' ? 'Today' : f.quick === 'tomorrow' ? 'Tomorrow' : f.quick === 'weekend' ? 'This weekend' : (f.date || 'Scheduled')
-  return { action: `${type} — ${personLabel(l)}`, date: dateLabel, time: f.time || '11:00 am' }
+  return { action: type, date: dateLabel, time: f.time || '11:00 am' }
 }
 
 // compact, quiet money string for a property row (deal-aware)

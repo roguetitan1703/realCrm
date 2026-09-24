@@ -25,7 +25,7 @@ function resolveBaseUrl() {
   // build refuses to produce this (see vite.config.js); this is the second
   // line, for a bundle built some other way.
   if (!env.DEV) {
-    throw new Error('VITE_API_URL was not set at build time — this bundle has no API to call.');
+    throw new Error('VITE_API_URL was not set at build time, so this bundle has no API to call.');
   }
   return 'http://localhost:5000/api/v1';
 }

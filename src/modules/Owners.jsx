@@ -51,7 +51,7 @@ function OwnerProjectGrid({ onOpen, onAssign, canAssign, refreshAt }) {
     return () => { live = false }
   }, [refreshAt])
   if (rows === null) return <div className="list-spin" role="status" aria-label="Loading"><span /></div>
-  if (!rows.length) return <div className="detail-missing">No owners yet — import a list to get started.</div>
+  if (!rows.length) return <div className="detail-missing">No owners yet. Import a list to start.</div>
   return (
     <div className="grid-cards">
       {rows.map(pj => (

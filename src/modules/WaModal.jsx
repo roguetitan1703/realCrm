@@ -80,7 +80,7 @@ export default function WaModal({ store }) {
   // the browser's property cache FIRST is what broke this: that cache holds
   // whatever the listings page paged in, which on a desk with thousands of
   // rows is none of the shortlist — so tapping "Share Match" on a shortlisted
-  // flat opened a composer reading "No property — message only" with zero
+  // flat opened a composer reading "No property, message only" with zero
   // options, on a lead that had four. Same defect as the record's inventory
   // section; this is the client-facing half of it, and it decided what a
   // buyer actually received.
@@ -105,7 +105,7 @@ export default function WaModal({ store }) {
 
   const copy = () => {
     copyText(wa.message).then(ok => store.toast(
-      ok ? 'Message copied' : 'Could not copy — select the text and copy it',
+      ok ? 'Message copied' : 'Could not copy. Select the text and copy it.',
       ok ? undefined : 'warn'))
   }
   // PERSIST it. store.logEvent() only dispatches into local React state, so the
@@ -197,7 +197,7 @@ export default function WaModal({ store }) {
             <div className="wa-sel-w">
               <select className="wa-sel" value={p?.id || ''}
                 onChange={e => store.recompose({ propId: e.target.value || null })}>
-                <option value="">No property — message only</option>
+                <option value="">No property, message only</option>
                 {options.length > 0 && (
                   <optgroup label="Shortlisted">
                     {options.filter(o => o.tag === 'Shortlisted').map(({ p: op }) => (

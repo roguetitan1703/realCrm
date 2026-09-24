@@ -331,7 +331,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                   <div className="imp-project">
                     <label className="imp-map-label">
                       Import into project
-                      <span className="imp-map-hint"> — this sheet has no project column, so every row lands here</span>
+                      <span className="imp-map-hint"> (this sheet has no project column, so every row goes here)</span>
                     </label>
                     <input className="input" value={intoProject} onChange={e => setIntoProject(e.target.value)}
                       placeholder="e.g. VTP Leonara" />
@@ -357,10 +357,10 @@ export default function ImportPage({ store, go, sel, topBar }) {
                         {groups[g].map(f => (
                           <div key={f.key} className="imp-map-field">
                             <label className="imp-map-label">
-                              {f.label} <span className="imp-map-hint">{f.required ? '— required' : '— optional'}</span>
+                              {f.label} <span className="imp-map-hint">{f.required ? '(required)' : '(optional)'}</span>
                             </label>
                             <select className="input" value={mapping[f.key] || ''} onChange={e => setMapping({ ...mapping, [f.key]: e.target.value })}>
-                              <option value="">— Not mapped —</option>
+                              <option value="">Not used</option>
                               {headers.map(h => <option key={h} value={h}>{h}</option>)}
                             </select>
                             <span className="imp-map-sample">{mapping[f.key] ? (samples[mapping[f.key]] ? `e.g. ${samples[mapping[f.key]]}` : 'Column is empty') : 'No column matched'}</span>
@@ -375,7 +375,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                   <Icon name={showAllFields ? 'chevUp' : 'chevDown'} size={13} />
                   {showAllFields
                     ? 'Show core fields only'
-                    : `Map ${FIELDS.length - FIELDS.filter(f => f.group === 'key').length} more fields — carpet area, floor, facing, owner…`}
+                    : `Map ${FIELDS.length - FIELDS.filter(f => f.group === 'key').length} more fields: carpet area, floor, facing, owner…`}
                 </button>
 
                 {missingRequired.length > 0 && (
@@ -474,7 +474,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                       : filterStatus === 'alreadyOnFile' ? counts.alreadyOnFile
                       : filterStatus === 'repeatedInFile' ? counts.repeatedInFile : counts.unusable
                     return shown.length < inGroup
-                      ? `Showing ${shown.length} of ${inGroup}. Every row is checked — the counts above cover the whole file, and after the import you can download every row that did not land.`
+                      ? `Showing ${shown.length} of ${inGroup}. Every row is checked. The counts above cover the whole file, and after the import you can download every row that was not added.`
                       : `Showing all ${inGroup}.`
                   })()}
                 </div>
@@ -500,7 +500,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     {job.failed ? <> · <b>{job.failed}</b> failed</> : null}
                   </div>
                   {job.status === 'running' && (
-                    <div className="imp-counts"><span className="imp-count new">You can close this page — it keeps going</span></div>
+                    <div className="imp-counts"><span className="imp-count new">You can close this page. It keeps going.</span></div>
                   )}
                   {job.error && <div className="imp-error">{job.error}</div>}
                   <div className="imp-done-actions">

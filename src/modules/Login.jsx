@@ -218,7 +218,7 @@ export default function Login({ store }) {
       if (r?.error) throw new Error(r.error)
       const res = await api.login(handle.trim(), newPw)    // clean re-login with the new password
       if (!res?.token) throw new Error('login failed')
-      store.toast('Password updated — welcome.', 'ok')
+      store.toast('Password updated. Welcome.', 'ok')
       store.login({ token: res.token, user: res.user, tenant: { firmName: ws?.firmName, city: ws?.city } })
     } catch (err) {
       store.toast(err.message || 'Could not update the password.', 'warn')
@@ -243,7 +243,7 @@ export default function Login({ store }) {
     try {
       const r = await api.resetPassword(resetToken, newPw)
       if (r?.error) throw new Error(r.error)
-      store.toast('Password reset — sign in with your new password.', 'ok')
+      store.toast('Password reset. Sign in with your new password.', 'ok')
       setPhase('creds'); setPassword(''); setNewPw(''); setNewPw2('')
       try { window.history.replaceState({}, '', ws?.tenantId ? `/${ws.tenantId}/` : '/') } catch (e2) {}
     } catch (err) {
@@ -353,8 +353,8 @@ export default function Login({ store }) {
             fontWeight: 400
           }}>
             {ws
-              ? `Pipelines, contacts and inventory for ${ws.firmName}${ws.city ? `, ${ws.city}` : ''}.`
-              : 'Pipelines, contacts and inventory for your firm. Open your workspace to begin.'}
+              ? `Leads, contacts and properties for ${ws.firmName}${ws.city ? `, ${ws.city}` : ''}.`
+              : 'Leads, contacts and properties for your firm. Open your workspace to begin.'}
           </p>
         </div>
 
@@ -598,7 +598,7 @@ export default function Login({ store }) {
               <div>
                 {forgotSent ? (
                   <div style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.55 }}>
-                    If an account with that email exists, a reset link is on its way. Check your inbox — the link expires in 30 minutes.
+                    If an account with that email exists, a reset link is on its way. Check your inbox. The link expires in 30 minutes.
                   </div>
                 ) : (
                   <form onSubmit={doForgot}>

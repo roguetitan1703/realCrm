@@ -3,7 +3,7 @@ import { Empty, PageHeader } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import { followUpOverdue, personLabel } from '../lib/format.js'
+import { followUpOverdue, followUpAction, personLabel } from '../lib/format.js'
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -57,7 +57,7 @@ export default function Calendar({ store, go, topBar }) {
     // has ever been marked late. A follow-up is late when its own moment has
     // passed, which is only knowable now that one is stored.
     const overdue = followUpOverdue(l.followUp)
-    return { lead: l, date, key: ymd(date), time: l.followUp.time, action: l.followUp.action, isVisit, overdue, agentId: l.agentId }
+    return { lead: l, date, key: ymd(date), time: l.followUp.time, action: followUpAction(l.followUp), isVisit, overdue, agentId: l.agentId }
   }).filter(e => e.date)
 
   // WHAT IS STILL AHEAD, soonest first.

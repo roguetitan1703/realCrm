@@ -16,8 +16,8 @@ import { isDeskRole } from '../lib/permissions.js'
 // which are about the device in their hand and nobody else's.
 const NAV = [
   { key: 'brand', label: 'Brand', icon: 'layers' },
-  { key: 'pipeline', label: 'Pipeline', icon: 'leads' },
-  { key: 'routing', label: 'Routing', icon: 'team' },
+  { key: 'pipeline', label: 'Stages', icon: 'leads' },
+  { key: 'routing', label: 'Assigning', icon: 'team' },
   // Key kept — it is in the URL of every Settings link anyone has sent.
   { key: 'followup', label: 'Response times', icon: 'clock' },
   { key: 'messages', label: 'Message templates', icon: 'wa', everyone: true },
@@ -190,7 +190,7 @@ function PipelineSection({ store, settings }) {
       }
     } else if (to && to !== editing && !stages.includes(to)) {
       if (isLeads) store.renameStage(editing, to)
-      else writeOwner(stages.map(s => (s === editing ? to : s)), 'Status renamed — owners moved', { from: editing, to })
+      else writeOwner(stages.map(s => (s === editing ? to : s)), 'Renamed. Owners moved to the new name.', { from: editing, to })
     }
     setEditing(null); setDraft('')
   }
@@ -219,7 +219,7 @@ function PipelineSection({ store, settings }) {
 
   return (
     <>
-      <SecHead title="Pipeline stages" />
+      <SecHead title="Stages" />
 
       <div className="rt-switch" role="tablist">
         {[{ k: 'leads', l: 'Leads' }, { k: 'owners', l: 'Calling' }].map(t => (
@@ -302,9 +302,9 @@ const ROUTING_SIDES = {
       idleOn: 'reassign_idle_enabled', idleDays: 'reassign_idle_days',
       loopCount: 'reassign_alert_count',
     },
-    autoSub: 'Distribute evenly across the agents in rotation. Fair, and no lead sits unclaimed.',
+    autoSub: 'Share new leads evenly, one agent at a time.',
     manualSub: 'New leads land in a shared pool. A manager picks who takes each one.',
-    idleSub: 'Nobody has recorded anything on it for this long — and no visit is booked — so it goes to the next agent in rotation, and the record shows why.',
+    idleSub: 'Nobody has recorded anything on it for this long and no visit is booked, so it goes to the next agent in turn. The record shows why.',
   },
   owners: {
     key: 'owners', label: 'Calling', noun: 'owner', article: 'an', arrival: 'When a new owner is imported',
@@ -314,9 +314,9 @@ const ROUTING_SIDES = {
       idleOn: 'owner_reassign_idle_enabled', idleDays: 'owner_reassign_idle_days',
       loopCount: 'owner_reassign_alert_count',
     },
-    autoSub: 'Distribute evenly across the callers in rotation as each row imports.',
+    autoSub: 'Share them evenly, one caller at a time, as each row is imported.',
     manualSub: 'Imported owners land in a shared pool. A manager picks who calls each one.',
-    idleSub: 'Nobody has recorded anything on it for this long, so it goes to the next caller in rotation, and the record shows why. Rows marked Not interested or Do not call are never swept.',
+    idleSub: 'Nobody has recorded anything on it for this long, so it goes to the next caller in turn. The record shows why. Rows marked Not interested or Do not call are never moved.',
   },
 }
 
@@ -355,7 +355,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
     return next
   })
   const dirty = Object.keys(draft).length
-  const save = () => { store.setRouting(draft, 'Routing saved'); setDraft({}) }
+  const save = () => { store.setRouting(draft, 'Saved'); setDraft({}) }
 
   const strategy = val(f.strategy, sideKey === 'leads' ? 'round_robin' : 'manual')
   const rota = val(f.rota, [])
@@ -380,7 +380,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
     try {
       const res = await api.assignUnowned(sideKey)
       store.toast(res.assigned
-        ? `${res.assigned} handed out — ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
+        ? `${res.assigned} handed out: ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
         : 'Nothing to hand out')
       setBacklogAt(n => n + 1)
       store.settled?.()
@@ -397,7 +397,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
 
   return (
     <>
-      <SecHead title="Routing" />
+      <SecHead title="Assigning" />
 
       {/* The one place this screen writes from. It says how much is waiting so
           that leaving with something unsaved is a visible fact, not a silence. */}
@@ -415,7 +415,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
         <div className="rt-backlog">
           <div className="rt-backlog-t">
             {waiting} {side.noun}{waiting === 1 ? '' : 's'} {waiting === 1 ? 'has' : 'have'} nobody on {waiting === 1 ? 'it' : 'them'}
-            <span className="rt-backlog-s">Rotation only applies to new arrivals — these were here before it was switched on.</span>
+            <span className="rt-backlog-s">Taking turns only applies to new leads. These were here before it was switched on.</span>
           </div>
           <Button variant="primary" size="sm" disabled={handing || !!dirty} onClick={handOut}>
             {handing ? 'Handing out…' : `Hand out ${waiting}`}
@@ -457,7 +457,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
       {strategy === 'round_robin' && (
         <Panel>
           <SectionHead
-            title="In rotation"
+            title="Taking turns"
             right={
               // Ticking eleven names one at a time to say "everyone" is the
               // common case, and it was the slowest thing on this screen.
@@ -499,7 +499,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
           <div className="rt-rule-h">
             <div>
               <div className="rt-rule-t">Assign {side.noun}s that have no agent</div>
-              <div className="rt-rule-s">Nobody on it — never assigned, or its owner left the firm.</div>
+              <div className="rt-rule-s">Nobody on it. Never assigned, or the person on it left the firm.</div>
             </div>
             {/* No hours field. Nothing ever sets agent_id back to NULL, so a
                 record is unowned only at arrival — the number was asking how
@@ -642,7 +642,7 @@ function AuditSection() {
         {st.chain && (
           <div className={`audit-chain ${chainOk ? 'ok' : 'bad'}`}>
             <Icon name={chainOk ? 'check' : 'x'} size={15} />
-            <span>{chainOk ? 'Chain verified — no entry has been altered or removed.' : `Chain broken at entry #${st.chain.brokenAtSeq}.`}</span>
+            <span>{chainOk ? 'Checked. No entry has been changed or removed.' : `Chain broken at entry #${st.chain.brokenAtSeq}.`}</span>
           </div>
         )}
         {st.loading ? (
