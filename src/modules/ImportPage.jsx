@@ -412,6 +412,18 @@ export default function ImportPage({ store, go, sel, topBar }) {
                   <span className="imp-count skip">{counts.unusable} cannot be imported</span>
                   <span className="imp-count" style={{ marginLeft: 'auto' }}>{mappedCols.length} of {headers.length} columns mapped</span>
                 </div>
+                {/* WHAT THE STATUS COLUMN WILL DO, before it does it. A sheet
+                    that says "not intrested" on 281 rows is 281 people who must
+                    not be rung again — this is where that is confirmed, not
+                    discovered on the calling screen tomorrow. */}
+                {preview.statuses && (Object.keys(preview.statuses).length > 0 || preview.statusUnknown > 0) && (
+                  <div className="imp-unmapped">
+                    Status from the sheet: {Object.entries(preview.statuses)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([st, n]) => `${n} ${st}`).join(' · ')}
+                    {preview.statusUnknown > 0 ? ` · ${preview.statusUnknown} not recognised (kept as a note, left as New)` : ''}
+                  </div>
+                )}
                 {/* WHY, not just how many. "19 rows have no phone number" is
                     something a person can go and fix. */}
                 {preview.reasons && Object.keys(preview.reasons).length > 0 && (

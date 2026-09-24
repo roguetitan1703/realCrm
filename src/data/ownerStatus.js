@@ -38,3 +38,38 @@ export const OWNER_REJECTION_REASONS = [
 ]
 
 export const isOwnerOpen = (s) => !OWNER_TERMINAL_STATUSES.includes(String(s || ''))
+
+/**
+ * WHAT A SPREADSHEET'S "CALL STATUS" MEANS, in our statuses.
+ *
+ * Written against the words a real client's sheets actually use — Mahalaxmi's
+ * Call Status and Feedback columns, 1,204 rows, read 24 Sep — typos included,
+ * because "not intrested" (281 rows) and "intrested" (39) ARE the data:
+ *
+ *   wrong no · invalid                               → Do Not Call  (Wrong number)
+ *   not intrested · already flat on rent             → Not Interested
+ *   intrested · intrested they will call when …      → Interested
+ *   not received · received · call cut · busy ·
+ *   incoming not avilable · switch off · voice note ·
+ *   not available · cnc (not connected) · cnr        → Contacted
+ *
+ * Anything else — "possession after 2/3 months", "reapet no.", a note about
+ * where the key is — is NOT guessed at. It returns null, the row keeps its
+ * status, and the words go onto the record as a note, so nothing a caller
+ * wrote is lost or turned into a claim it did not make.
+ *
+ * Order matters: "not interested" must be tried before "interested", and
+ * "wrong" before everything, since a wrong number is the end of it.
+ */
+export function statusFromSheet(text) {
+  const w = String(text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!w) return null
+  if (/\bwrong\b|\binvalid\b/.test(w)) return { status: 'Do Not Call', reason: 'Wrong number' }
+  if (/\bnot int[a-z]*st/.test(w)) return { status: 'Not Interested', reason: 'Said not interested (from the sheet)' }
+  if (/\balready\b.*\b(rent|rented|sold)\b/.test(w)) return { status: 'Not Interested', reason: 'Already rented or sold (from the sheet)' }
+  if (/^int[a-z]*st/.test(w)) return { status: 'Interested', reason: null }
+  if (/\b(not )?received\b|\bcall cut\b|\bbusy\b|\bincoming\b|\bswitch(ed)? ?off\b|\bvoice note\b|\bnot a[a-z]*ble\b|^cn[cr]$|\bnot reachable\b|\bunreachable\b|\bno answer\b|\bringing\b/.test(w)) {
+    return { status: 'Contacted', reason: null }
+  }
+  return null
+}

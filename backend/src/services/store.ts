@@ -3322,6 +3322,7 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
       unit_ref: data.unitRef || null,
       locality: data.locality || null,
       stage: data.stage || 'New',
+      rejection_reason: data.rejectionReason || null,
       source: data.source || 'Import',
       agent_id: agentId,
       created_by: createdBy,
@@ -3331,8 +3332,8 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
 
   const saved = await sql`
     INSERT INTO crm_owners ${sql(rows, 'id', 'tenant_id', 'name', 'phone', 'email', 'project', 'tower',
-      'unit_no', 'config', 'carpet_area', 'saleable_area', 'unit_ref', 'locality', 'stage', 'source',
-      'agent_id', 'created_by', 'import_batch_id')}
+      'unit_no', 'config', 'carpet_area', 'saleable_area', 'unit_ref', 'locality', 'stage', 'rejection_reason',
+      'source', 'agent_id', 'created_by', 'import_batch_id')}
     RETURNING *`;
 
   // One notice per agent however many rows they got — the debounce in
@@ -3341,14 +3342,36 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
   for (const r of rows) if (r.agent_id) queueOwnerArrivalNotice(r.agent_id);
 
   // Notes as timeline entries, in one statement rather than one per row.
+  //
+  // WHAT THE SHEET SAID ABOUT EARLIER CALLS goes on the record too: "Imported
+  // as Not Interested — sheet said: not intrested". Authored "Import", which is
+  // not a person, so none of it counts as anybody's activity — these calls were
+  // made before the list reached us. Words the translation did not know are
+  // kept the same way, as what the sheet said, with the status left alone.
+  const stamp = Date.now();
   const notes = list
     .map((d, i) => ({ d, id: rows[i].id }))
-    .filter(x => x.d.notes)
-    .map((x, i) => ({
-      id: `evt_imp_${Date.now()}_${i}_${randomBytes(3).toString('hex')}`,
-      record_id: x.id, type: 'note', title: 'Note', description: String(x.d.notes),
-      author: 'Import', timestamp: new Date().toISOString(), metadata: sql.json({}) as any, tenant_id: t,
-    }));
+    .flatMap((x, i) => {
+      const out: any[] = [];
+      if (x.d.sheetStatus) {
+        out.push({
+          id: `evt_imps_${stamp}_${i}_${randomBytes(3).toString('hex')}`,
+          record_id: x.id, type: 'note',
+          title: x.d.sheetStatusKnown ? `Imported as ${x.d.stage}` : 'From the imported sheet',
+          description: `Sheet said: ${String(x.d.sheetStatus)}`,
+          author: 'Import', timestamp: new Date().toISOString(),
+          metadata: sql.json({ source: 'import', sheetStatus: String(x.d.sheetStatus), stage: x.d.stage || null }) as any, tenant_id: t,
+        });
+      }
+      if (x.d.notes) {
+        out.push({
+          id: `evt_imp_${stamp}_${i}_${randomBytes(3).toString('hex')}`,
+          record_id: x.id, type: 'note', title: 'Note', description: String(x.d.notes),
+          author: 'Import', timestamp: new Date().toISOString(), metadata: sql.json({}) as any, tenant_id: t,
+        });
+      }
+      return out;
+    });
   if (notes.length) {
     await sql`INSERT INTO crm_timeline_events ${sql(notes as any[],
       'id', 'record_id', 'type', 'title', 'description', 'author', 'timestamp', 'metadata', 'tenant_id')}

@@ -39,6 +39,7 @@ import { createOwnersBatch, createLead, createProperty, type ActorCtx } from './
 import {
   OWNER_FIELDS, LEAD_FIELDS, PROPERTY_FIELDS, readField, normPhone,
 } from '../../../src/lib/importSchema.js';
+import { statusFromSheet } from '../../../src/data/ownerStatus.js';
 
 export type ImportKind = 'owners' | 'clients' | 'properties';
 
@@ -126,6 +127,11 @@ export function prepareRow(
     // record rather than guessed.
     if (!v.phone) return { ok: false, reason: unreadablePhone(mapping.phone) };
     const project = v.project || (opts.project ? String(opts.project).trim() : '') || null;
+    // The sheet's own status, translated where the words are known. Unknown
+    // words leave the row at New and travel as a note (see createOwnersBatch),
+    // so a caller's wording is never lost or turned into a claim.
+    const sheetStatus = v.status ? String(v.status).trim() : null;
+    const translated = sheetStatus ? statusFromSheet(sheetStatus) : null;
     return {
       ok: true,
       // IDENTITY FOLLOWS WHAT THE ROW HAS. With a flat, the flat is the record
@@ -146,6 +152,10 @@ export function prepareRow(
         locality: v.locality || null,
         source: v.source || 'Spreadsheet import',
         notes: v.notes || null,
+        stage: translated?.status || undefined,
+        rejectionReason: translated?.reason || undefined,
+        sheetStatus: sheetStatus || undefined,
+        sheetStatusKnown: Boolean(translated),
       },
     };
   }
@@ -306,6 +316,10 @@ export async function previewImport(id: string, mapping: Record<string, string>,
   const seen = new Set<string>();
   const counts = { total: rows.length, new: 0, repeatedInFile: 0, alreadyOnFile: 0, unusable: 0 };
   const reasons: Record<string, number> = {};
+  // What the Status column will set, among the rows that will be imported —
+  // shown on the review step BEFORE anything is written.
+  const statuses: Record<string, number> = {};
+  let statusUnknown = 0;
   const sample: any[] = [];
   /** How many rows of each group the review table gets to show. */
   const PER_STATUS = 50;
@@ -316,7 +330,11 @@ export async function previewImport(id: string, mapping: Record<string, string>,
     if (!p.ok) { status = 'unusable'; reason = p.reason || 'Unusable row'; counts.unusable++; reasons[reason] = (reasons[reason] || 0) + 1; }
     else if (p.key && seen.has(p.key)) { status = 'repeatedInFile'; reason = 'Same unit earlier in this file'; counts.repeatedInFile++; }
     else if (p.key && onFile.has(p.key)) { status = 'alreadyOnFile'; reason = 'Already on file'; counts.alreadyOnFile++; }
-    else { status = 'new'; counts.new++; if (p.key) seen.add(p.key); }
+    else {
+      status = 'new'; counts.new++; if (p.key) seen.add(p.key);
+      if (p.record?.stage) statuses[p.record.stage] = (statuses[p.record.stage] || 0) + 1;
+      else if (p.record?.sheetStatus) statusUnknown++;
+    }
     // A SAMPLE OF EACH GROUP, not the first 50 rows of the file. The review
     // table filters by status, and taking the head of the file meant the
     // "cannot import" tab showed 3 rows under a count of 20 — the other 17 were
@@ -331,7 +349,7 @@ export async function previewImport(id: string, mapping: Record<string, string>,
   sample.sort((a, b) => a.rowNo - b.rowNo);
   // Kept with the job, so the run writes what the review counted.
   await sql`UPDATE crm_import_jobs SET mapping = ${sql.json(mapping)}, options = ${sql.json(options || {})} WHERE id = ${id} AND tenant_id = ${t}`;
-  return { counts, reasons, sample };
+  return { counts, reasons, sample, statuses, statusUnknown };
 }
 
 /**

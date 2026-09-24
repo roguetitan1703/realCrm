@@ -210,6 +210,12 @@ export const OWNER_FIELDS = [
   { key: 'config', label: 'Configuration', group: 'key', parse: parseConfig, syn: ['config', 'bhk', 'type', 'configuration', 'unit type'] },
   { key: 'name', label: 'Owner name', group: 'key', syn: ['owner', 'owner name', 'name', 'contact person'] },
   { key: 'phone', label: 'Phone', group: 'key', required: true, parse: parsePhone, syn: ['phone', 'mobile', 'contact', 'cell', 'whatsapp', 'owner phone', 'owner mobile', 'number'] },
+  // What happened when the firm called them BEFORE this list reached us. A
+  // sheet that says "not intrested" on 281 rows imported without it put every
+  // one of those people back in the queue to be rung again. Translated by
+  // statusFromSheet (src/data/ownerStatus.js); words it does not recognise are
+  // kept as a note rather than guessed at.
+  { key: 'status', label: 'Status', group: 'key', syn: ['call status', 'status', 'feedback', 'call feedback', 'outcome', 'disposition', 'call result'] },
 
   { key: 'carpet', label: 'Carpet area (sqft)', group: 'detail', parse: parseNum, syn: ['carpet', 'carpet area'] },
   { key: 'saleable', label: 'Saleable / built-up area (sqft)', group: 'detail', parse: parseNum, syn: ['saleable', 'saleable area', 'built up', 'builtup', 'super built up'] },
