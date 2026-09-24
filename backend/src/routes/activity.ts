@@ -6,12 +6,10 @@
  *       one row per person, every count; an agent only ever gets their own
  *   GET /activity/records?side=&date=&person=&measure=&detail=
  *       the people behind one of those numbers, from the same query
- *   GET /activity/range?side=&days=7|14|30[&person=id]
- *       the same counts over the last N days, and calls per day
  */
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { activityDay, activityRecords, activityRange, type Side } from '../services/activityReport';
+import { activityDay, activityRecords, type Side } from '../services/activityReport';
 
 export const activityRouter = Router();
 activityRouter.use(requireTenantAuth);
@@ -24,14 +22,6 @@ activityRouter.get('/', async (req: Request, res: Response) => {
     res.json(await activityDay({ side: sideOf(req.query.side), date: str(req.query.date), person: str(req.query.person) }));
   } catch (err: any) {
     res.status(500).json({ error: 'Could not read the day', message: err.message });
-  }
-});
-
-activityRouter.get('/range', async (req: Request, res: Response) => {
-  try {
-    res.json(await activityRange({ side: sideOf(req.query.side), days: Number(req.query.days) || 14, person: str(req.query.person) }));
-  } catch (err: any) {
-    res.status(500).json({ error: 'Could not read the days', message: err.message });
   }
 });
 

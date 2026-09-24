@@ -111,79 +111,6 @@ export function Head({ title, hasCalling, side, onSide, data, onDay, right }) {
 /** The follow-up word for this side. */
 export const fuWord = (side, n) => side === 'calling' ? word(n, 'callback', 'callbacks') : word(n, 'follow-up', 'follow-ups')
 
-// ── The detail: everything counted, in small blocks, zeros left out ─────────
-function Stat({ n, label, tone, onOpen }) {
-  if (!n) return null
-  return (
-    <button type="button" className={'ad-stat' + (tone ? ` ${tone}` : '')} onClick={onOpen}>
-      <b>{fmt(n)}</b><span>{label}</span>
-    </button>
-  )
-}
-
-function Block({ title, children }) {
-  const shown = [children].flat(2).filter(el => el && el.props?.n > 0)
-  if (!shown.length) return null
-  return (
-    <div className="ad-block">
-      <div className="ad-block-t">{title}</div>
-      <div className="ad-block-s">{shown}</div>
-    </div>
-  )
-}
-
-export function Detail({ t, side, isToday, open, book, onBook, hideMoved }) {
-  const { n } = t
-  const fu = side === 'calling' ? 'Callbacks' : 'Follow-ups'
-  return (
-    <div className="ad-detail">
-      <Block title="Calls">
-        <Stat key="all" n={t.calls} label={word(t.calls, 'call', 'calls')} onOpen={() => open('call')} />
-        <Stat key="ppl" n={t.people} label={word(t.people, 'person called', 'people called')} onOpen={() => open('people')} />
-        {REACH.map(([k, one, many]) => (
-          <Stat key={k} n={n('call', k)} label={n('call', k) === 1 ? one : many} tone={k === 'no_outcome' ? 'quiet' : ''} onOpen={() => open('call', k)} />
-        ))}
-      </Block>
-      {!hideMoved && <Block title="Moved to">
-        {t.statuses.map(s => <Stat key={s.detail} n={s.n} label={stageLabel(s.detail)} onOpen={() => open('status', s.detail)} />)}
-      </Block>}
-      <Block title="Other work">
-        <Stat key="w" n={n('whatsapp')} label={word(n('whatsapp'), 'WhatsApp', 'WhatsApps')} onOpen={() => open('whatsapp')} />
-        <Stat key="n" n={n('note')} label={word(n('note'), 'note', 'notes')} onOpen={() => open('note')} />
-        {side === 'leads' && <Stat key="v" n={n('visit')} label={word(n('visit'), 'site visit', 'site visits')} onOpen={() => open('visit')} />}
-      </Block>
-      <Block title={fu}>
-        <Stat key="s" n={n('followup_set')} label="booked" onOpen={() => open('followup_set')} />
-        {side === 'leads' && <Stat key="d" n={n('followup_done')} label="done" onOpen={() => open('followup_done')} />}
-        {isToday && <Stat key="t" n={t.dueToday} label="due today" onOpen={() => open('followup_today')} />}
-        {isToday && <Stat key="m" n={t.missed} label="missed" tone="alert" onOpen={() => open('followup_missed')} />}
-        {isToday && <Stat key="x" n={n('followup_tomorrow')} label="due tomorrow" onOpen={() => open('followup_tomorrow')} />}
-      </Block>
-      {side === 'leads' && (
-        <Block title="New leads">
-          <Stat key="i" n={n('came_in')} label="came in" onOpen={() => open('came_in')} />
-          <Stat key="c" n={n('came_in', 'called')} label="called" onOpen={() => open('came_in', 'called')} />
-          <Stat key="j" n={n('came_in', 'just_in')} label="just came in" onOpen={() => open('came_in', 'just_in')} />
-          <Stat key="x" n={t.notCalled} label="not called" tone="alert" onOpen={() => open('came_in', 'not_called')} />
-        </Block>
-      )}
-      {book && side === 'leads' && (
-        <Block title="Holds now">
-          <Stat key="o" n={book.open} label="open leads" onOpen={() => onBook?.(null)} />
-          <Stat key="n" n={book.neverContacted} label="never contacted" tone="alert" onOpen={() => onBook?.('never_contacted')} />
-          <Stat key="c" n={book.coldToday} label="went cold today" tone="alert" onOpen={() => onBook?.('going_cold')} />
-        </Block>
-      )}
-      {book && side === 'calling' && book.owners > 0 && (
-        <div className="ad-block">
-          <div className="ad-block-t">Holds now</div>
-          <div className="ad-block-s"><span className="ad-stat static"><b>{fmt(book.owners)}</b><span>on the calling list</span></span></div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 /** Titles for the list a number opens. */
 export const MEASURE_TITLE = {
   call: 'Calls', people: 'People called', whatsapp: 'WhatsApps', note: 'Notes', visit: 'Site visits',
@@ -306,7 +233,7 @@ export function ActivityRecords({ store, go, side, date, person, measure, detail
     else go('leads', { leadId: r.id, leadOpen: true })
   }
   const what = (r) => {
-    if (r.measure === 'call') return REACH_LABEL[r.detail] || ''
+    if (r.measure === 'call' || r.measure === 'contact') return REACH_LABEL[r.detail] || ''
     if (r.measure === 'status') return stageLabel(r.detail)
     if (r.measure === 'came_in') return DETAIL_TITLE[r.detail] || ''
     return ''

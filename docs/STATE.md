@@ -22,7 +22,8 @@ plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md` (latest: part E)
 | `development` | about 17 commits ahead of `main` | agreements and conversion (D), the activity report, contacts tabs, the copy sweep, Today / My work / Performance, Properties Part 7 |
 
 **Deploy order: API first, then frontend.** The new frontend calls
-`/activity/range`, `/agreements` and fields the old API does not have.
+`/agreements`, `/public/gallery`, the `contact` counts and fields the old API
+does not have.
 
 What the API deploy runs on production, once:
 - additive schema: `crm_agreements` and its columns, the index
@@ -59,7 +60,9 @@ After the API deploy: `npm run link:owners -- --env=production` (report, then
   iPhone 13: agent desk lands on Today, no horizontal scroll on the phone, Back
   from a teammate returns to the Team tab, a dashboard row opens that person,
   picking a bar reads that day. No page errors.
-- `/activity/range` on dev: 0.7–1.1 s warm for 7, 14 and 30 days.
+- Performance restructured (mahalaxmi-batch.md part E): on dev, yesterday's
+  team slices summed to people contacted (61) and "picked up" opened 19 people,
+  matching the summary; desk and iPhone 13, no errors.
 - The copy sweep: 98 on-screen strings; what still has an em dash is server
   logs, the API client's internal error separator, and SQL reading old titles.
 - Part 7 driven on dev (desk and iPhone 13, the photo page signed out): verify,

@@ -31,7 +31,7 @@ export default function Performance({ store, go, sel, topBar }) {
         {topBar({ eyebrow: 'Performance', title: name, onBack: () => go('performance', { person: undefined }) })}
         <div className="app-body pagewrap perf">
           {!settled ? <div className="ad-wait tall" aria-busy="true" /> : (
-            <AgentWork store={store} person={person} title={name} heading={false} hasCalling={hasCalling}
+            <AgentWork store={store} person={person} title={name} heading={false} mode="drill" hasCalling={hasCalling}
               book={desk?.perAgent?.[person]} ownerBook={desk?.perAgentCalls?.[person]}
               onBook={(seg) => toLeads(seg ? { agent: [person], seg } : { agent: [person] })}
               actions={<>
@@ -49,7 +49,8 @@ export default function Performance({ store, go, sel, topBar }) {
       {topBar({ title: 'Performance' })}
       <div className="app-body pagewrap perf">
         {!settled ? <div className="ad-wait tall" aria-busy="true" /> : (
-          <TeamBoard store={store} hasCalling={hasCalling} onOpenPerson={(c) => go('performance', { person: c.id })} />
+          <TeamBoard store={store} hasCalling={hasCalling} onOpenPerson={(c) => go('performance', { person: c.id })}
+            books={desk?.perAgent || {}} onBook={(id, seg) => toLeads({ agent: [id], seg })} />
         )}
       </div>
     </>

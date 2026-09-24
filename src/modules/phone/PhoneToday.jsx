@@ -385,7 +385,9 @@ export default function Today({ store, go, topBar, sel = {}, phone = true }) {
         {topBar({ title: who?.name || 'Teammate', eyebrow: 'Team', onBack: () => go('today', { todayView: 'team', person: undefined }) })}
         <div className="q-wrap">
           {settling ? <div className="ad-wait tall" aria-busy="true" /> : (
-            <AgentWork store={store} person={sel.person} title={who?.name || 'Teammate'} heading={false} hasCalling={hasCalling}
+            <AgentWork store={store} person={sel.person} title={who?.name || 'Teammate'} heading={false} mode="drill" hasCalling={hasCalling}
+              book={desk?.perAgent?.[sel.person] || {}} ownerBook={desk?.perAgentCalls?.[sel.person] || {}}
+              onBook={(seg) => go('leads', { leadFilters: seg ? { agent: [sel.person], seg } : { agent: [sel.person] } })}
               actions={<button type="button" className="aw-link" onClick={() => go('leads', { leadFilters: { agent: [sel.person] } })}>Their leads<Icon name="chevRight" size={14} /></button>} />
           )}
         </div>
@@ -435,6 +437,7 @@ export default function Today({ store, go, topBar, sel = {}, phone = true }) {
       {view === 'team' && (
         <div className="q-wrap">
           {settling ? wait : <TeamBoard store={store} hasCalling={hasCalling} heading={false}
+            books={desk?.perAgent || {}} onBook={(id, seg) => go('leads', { leadFilters: { agent: [id], seg } })}
             onOpenPerson={(c) => go('today', { todayView: 'team', person: c.id })} />}
         </div>
       )}

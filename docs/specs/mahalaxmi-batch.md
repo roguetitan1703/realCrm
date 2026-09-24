@@ -923,9 +923,19 @@ it. Project names (4.6) go in first.
   as their My work, with Their leads and Reassign.
 - **Team** is people management only. The dashboard's Team today stays at the
   bottom; a row opens that person on Performance.
-- **API:** `GET /activity/range?side&days=7|14|30[&person]`, the same facts as
-  the day report over a stretch, and calls per day. An agent gets their own.
-  Dev: 0.7–1.1 s warm.
+- **Restructured the same day (the user's direction, 25 Sep):** one story in
+  fixed order: people contacted → how the calls went → what came of it → the
+  rest → what is still open. Manager overview: team summary (people contacted
+  leads, calls beside it), a donut of contact status per PERSON (picked up if
+  any call that day was answered, else the last call; `contactOf` in
+  activityReport.ts, so the slices add up to people contacted), outcomes as
+  bars, an agent table to open, and a tinted Needs attention with who each item
+  sits with. Drill-down: the same for one agent plus other activity and pending
+  work. Self view (My work): my performance, my activity, my pending work.
+  Every number opens its people. Not picking up is a contact status; it becomes
+  "people to try again" only on the agent's own list.
+- **Removed:** the 7/30-day cards, the 14-day chart and `/activity/range`; the
+  direction was one day, told as a story, not more data.
 
 ### Superadmin — decided 25 Sep, not built
 - **Getting into a firm's desk:** a support session, **read-only**, **always

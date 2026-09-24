@@ -3128,65 +3128,117 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
   .tt-attn{flex-direction:row;flex-wrap:wrap;gap:2px 12px}
 }
 
-/* ── Today, My work and Performance (PhoneToday.jsx, AgentWork.jsx) ─────────
-   One person's page: a title row, the day, then the last two weeks. The team
-   board: a card per person. Same tiles and detail blocks as Team today, so the
-   three read as one family. */
+/* ── Performance: the team, one agent, an agent's own day (AgentWork.jsx) ───
+   One story in fixed order: people contacted, how the calls went, what came of
+   it, the rest, what is still open. Report sections are plain panels; what is
+   still open is tinted so it never reads as more reporting. */
 .ad-wait.tall{height:150px}
-.aw,.tb{display:flex;flex-direction:column;gap:14px;min-width:0}
 .aw-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:34px}
 .aw-title{margin:0;font-family:var(--disp);font-size:18px;font-weight:600;letter-spacing:-.01em;color:var(--ink)}
-.aw-top .seg button{padding:5px 12px;font-size:12.5px}
-.aw-actions{margin-left:auto;display:inline-flex;align-items:center;gap:8px}
 .aw-link{display:inline-flex;align-items:center;gap:2px;border:none;background:none;padding:0;font:inherit;font-size:13px;font-weight:600;color:var(--accent-ink,var(--accent));cursor:pointer}
-.aw-panel{display:flex;flex-direction:column;gap:12px}
-.aw-sub{display:flex;align-items:center;gap:8px;min-height:28px}
-.aw-sub-t{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-.aw-today{margin-left:auto;border:none;background:none;padding:0;font:inherit;font-size:12.5px;font-weight:600;color:var(--accent-ink,var(--accent));cursor:pointer}
-.aw-panel .ad-detail{padding:4px 0 0;border-top:1px solid var(--line-2);padding-top:12px}
-.aw-panel .ad-tile{min-height:92px}
-.aw-totals{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--ink-2);border-top:1px solid var(--line-2);padding-top:12px}
-.aw-totals b{color:var(--ink);font-variant-numeric:tabular-nums}
+.pv{display:flex;flex-direction:column;gap:14px;min-width:0}
+.pv-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:34px}
+.pv-head .seg button{padding:5px 12px;font-size:12.5px}
+.pv-head-r{margin-left:auto;display:inline-flex;align-items:center;gap:8px}
+.pv-day{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:0 2px}
+.pv-sec{display:flex;flex-direction:column;gap:12px;min-width:0}
+.pv-sec-t{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.pv-pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
 
-/* The chart. Grey is every call, the darker part inside is picked up. */
-.cb{display:flex;flex-direction:column;gap:6px}
-.cb-bars{display:grid;grid-template-columns:repeat(var(--cb-n),minmax(0,1fr));gap:4px;align-items:end;height:96px}
-.cb-col{height:100%;display:flex;align-items:flex-end;justify-content:center;border:none;background:none;padding:0 1px;border-radius:4px;cursor:pointer;min-width:0}
-span.cb-col{cursor:default}
-button.cb-col:hover{background:var(--card-2)}
-.cb-bar{position:relative;display:block;width:100%;max-width:26px;background:var(--line);border-radius:3px 3px 1px 1px;overflow:hidden}
-.cb-in{position:absolute;left:0;right:0;bottom:0;background:var(--ink-2)}
-.cb-bar.zero{height:2px;background:var(--line-2)}
-/* The day being read above: its bar in the accent and its date in bold, no
-   block behind it, which on an empty day read as a bar of its own. */
-.cb-col.on .cb-bar{background:color-mix(in srgb,var(--accent) 35%,var(--line))}
-.cb-col.on .cb-bar.zero{background:var(--accent)}
-.cb-col.on .cb-in{background:var(--accent)}
-.cb-days{display:grid;grid-template-columns:repeat(var(--cb-n),minmax(0,1fr));gap:4px}
-.cb-days span{font-size:10.5px;color:var(--faint);text-align:center;white-space:nowrap;overflow:hidden}
-.cb-days span.on{color:var(--accent-ink,var(--accent));font-weight:700}
-.cb-key{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted)}
-.cb-key i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-left:6px}
-.cb-key .k-all{background:var(--line)}
-.cb-key .k-in{background:var(--ink-2)}
-.cb-small .cb-bars{height:34px;gap:2px}
-.cb-small .cb-bar{max-width:14px}
+/* 1. Summary: the hero is people; the rest sit beside it, smaller */
+.pv-sum{display:flex;align-items:stretch;gap:18px;flex-wrap:wrap}
+.pv-hero{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:2px;padding:4px 22px 4px 0;border:none;border-right:1px solid var(--line-2);background:none;font:inherit;text-align:left;cursor:pointer;color:var(--ink)}
+.pv-hero b{font-family:var(--disp);font-size:40px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.pv-hero span{font-size:13.5px;color:var(--ink-2)}
+.pv-hero:hover span{color:var(--accent-ink,var(--accent))}
+.pv-figs{display:flex;align-items:center;gap:6px 26px;flex-wrap:wrap}
+.pv-fig{display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:none;background:none;padding:0;font:inherit;text-align:left;cursor:pointer;color:var(--ink-2)}
+.pv-fig b{font-family:var(--disp);font-size:22px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.pv-fig span{font-size:12.5px}
+.pv-fig:hover span{color:var(--accent-ink,var(--accent))}
+.pv-moved{display:flex;flex-wrap:wrap;gap:6px;padding-top:10px;border-top:1px solid var(--line-2)}
+.pv-moved button{border:1px solid var(--line);background:var(--card-2);border-radius:6px;padding:3px 9px;font:inherit;font-size:12.5px;color:var(--ink-2);cursor:pointer}
+.pv-moved button b{color:var(--ink)}
 
-/* The team board */
-.tb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
-.tb-card{display:flex;flex-direction:column;gap:10px;padding:14px 15px;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--card);font:inherit;text-align:left;color:var(--ink-2);cursor:pointer;min-width:0;transition:border-color .12s,box-shadow .12s}
-.tb-card:hover{border-color:var(--muted);box-shadow:var(--shadow)}
-.tb-card.off{opacity:.6}
-.tb-wait{height:150px;background:var(--line-2);border:none;cursor:default}
-.tb-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
-.tb-name{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-weight:700;font-size:14.5px;color:var(--ink);min-width:0;padding-top:3px}
-.tb-calls{display:flex;flex-direction:column;align-items:flex-end;flex:none;font-size:13px;line-height:1.3}
-.tb-calls b{font-family:var(--disp);font-size:22px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
-.tb-calls em{font-style:normal;font-size:12px;color:var(--muted)}
-.tb-facts{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px}
-.tb-facts b{color:var(--ink);font-variant-numeric:tabular-nums}
-.tb-attn{display:flex;flex-direction:column;gap:2px;padding-top:9px;border-top:1px solid var(--line-2);font-size:12.5px;font-weight:600;color:var(--alert)}
-.tb-attn.ok{color:var(--muted);font-weight:500}
+/* 2. How the calls went: the donut and its legend */
+.pv-donut{display:flex;align-items:center;gap:20px}
+.pv-donut-svg{width:132px;height:132px;flex:none}
+.pv-donut-n{font-family:var(--disp);font-size:22px;font-weight:600;fill:var(--ink)}
+.pv-donut-l{font-size:10.5px;fill:var(--muted)}
+.pv-legend{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.pv-leg{display:grid;grid-template-columns:10px 1fr auto 40px;align-items:center;gap:8px;padding:5px 6px;border:none;border-radius:6px;background:none;font:inherit;font-size:13px;text-align:left;cursor:pointer;color:var(--ink-2)}
+.pv-leg:hover{background:var(--card-2)}
+.pv-leg i{width:10px;height:10px;border-radius:3px}
+.pv-leg-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-leg b{color:var(--ink);font-variant-numeric:tabular-nums}
+.pv-leg em{font-style:normal;font-size:12px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+
+/* 3. What came of it: a bar per status */
+.pv-out{display:flex;flex-direction:column;gap:2px}
+.pv-out-r{display:grid;grid-template-columns:minmax(90px,.9fr) 1.4fr 34px;align-items:center;gap:10px;padding:6px;border:none;border-radius:6px;background:none;font:inherit;font-size:13px;text-align:left;cursor:pointer;color:var(--ink-2)}
+.pv-out-r:hover{background:var(--card-2)}
+.pv-out-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-out-bar{height:8px;border-radius:4px;background:var(--line-2);overflow:hidden}
+.pv-out-bar i{display:block;height:100%;border-radius:4px;background:var(--ink-2)}
+.pv-out-r b{color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
+
+/* 4. Other activity */
+.pv-other{display:flex;flex-wrap:wrap;gap:8px}
+.pv-other-i{display:inline-flex;align-items:baseline;gap:6px;padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card-2);font:inherit;font-size:13px;color:var(--ink-2);cursor:pointer}
+.pv-other-i b{font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums}
+.pv-other-i.zero{cursor:default;opacity:.55}
+.pv-other-i:not(.zero):hover{border-color:var(--ink-2)}
+
+/* Agents: one row each, opens the agent */
+.pv-agents{display:flex;flex-direction:column}
+.pv-ag{display:grid;grid-template-columns:minmax(130px,1.3fr) 70px 60px 80px minmax(160px,2.2fr) 18px;align-items:center;gap:12px;padding:10px 8px;border:none;border-top:1px solid var(--line-2);background:none;font:inherit;font-size:13.5px;text-align:left;cursor:pointer;color:var(--ink-2)}
+.pv-ag:hover{background:var(--card-2)}
+.pv-ag.off{opacity:.6}
+.pv-ag-head{cursor:default;border-top:none;padding-top:0;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.pv-ag-head:hover{background:none}
+.pv-ag-name{display:flex;align-items:center;gap:6px;font-weight:700;color:var(--ink);min-width:0}
+.pv-ag-n{font-variant-numeric:tabular-nums}
+.pv-ag-n b{color:var(--ink)}
+.pv-ag-out{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;min-width:0}
+.pv-chip{font-size:12px;border:1px solid var(--line);background:var(--card-2);border-radius:5px;padding:1px 7px;color:var(--ink-2);white-space:nowrap}
+.pv-go{color:var(--faint)}
+
+/* 5. Needs attention / pending: tinted, a list of things to do */
+.pv-attn{background:color-mix(in srgb,var(--alert) 4%,var(--card));border-color:color-mix(in srgb,var(--alert) 22%,var(--line));border-left:3px solid color-mix(in srgb,var(--alert) 55%,var(--line))}
+.pv-attn .pv-sec-t{color:color-mix(in srgb,var(--alert) 70%,var(--muted))}
+.pv-pend{display:flex;flex-direction:column;gap:2px}
+.pv-pend-r{display:grid;grid-template-columns:44px 1fr 18px;align-items:center;gap:8px;padding:8px 6px;border:none;border-radius:6px;background:none;font:inherit;font-size:13.5px;text-align:left;cursor:pointer;color:var(--ink-2)}
+.pv-pend-r:hover{background:color-mix(in srgb,var(--alert) 7%,transparent)}
+.pv-pend-r b{font-family:var(--disp);font-size:18px;color:var(--ink);font-variant-numeric:tabular-nums}
+.pv-pend-r.alert b{color:var(--alert)}
+.pv-attn-r{display:grid;grid-template-columns:minmax(220px,1fr) 2fr;align-items:center;gap:12px;padding:8px 6px;border-top:1px solid color-mix(in srgb,var(--alert) 12%,var(--line-2))}
+.pv-attn-r:first-child{border-top:none}
+.pv-attn-l{display:flex;align-items:baseline;gap:10px;font-size:13.5px;color:var(--ink-2)}
+.pv-attn-l b{min-width:34px;font-family:var(--disp);font-size:18px;color:var(--ink);font-variant-numeric:tabular-nums}
+.pv-attn-r.alert .pv-attn-l b{color:var(--alert)}
+.pv-attn-who{display:flex;flex-wrap:wrap;gap:6px}
+.pv-who{border:1px solid var(--line);background:var(--card);border-radius:6px;padding:3px 9px;font:inherit;font-size:12.5px;color:var(--ink-2);cursor:pointer}
+.pv-who b{color:var(--ink)}
+.pv-who:hover{border-color:var(--ink-2)}
+.pv-clear{display:flex;align-items:center;gap:6px;font-size:13.5px;color:#1f6b45}
+
+@media (max-width:900px){
+  .pv-pair{grid-template-columns:1fr}
+  .pv-ag-head{display:none}
+  .pv-ag{grid-template-columns:1fr 18px;gap:4px 10px}
+  .pv-ag-name{grid-column:1}
+  .pv-ag .pv-go{grid-column:2;grid-row:1}
+  .pv-ag-n{display:inline;grid-column:1}
+  .pv-ag-n::after{content:" " attr(data-l)}
+  .pv-ag-out{grid-column:1}
+  .pv-attn-r{grid-template-columns:1fr}
+}
+.app-mobile .pv-sec{padding:14px}
+.app-mobile .pv-hero b{font-size:34px}
+.app-mobile .pv-sum{flex-direction:column;gap:12px}
+.app-mobile .pv-hero{border-right:none;border-bottom:1px solid var(--line-2);padding:0 0 12px;width:100%}
+.app-mobile .pv-donut{flex-direction:column;align-items:stretch}
+.app-mobile .pv-donut-svg{align-self:center}
 
 /* Today: tabs on a phone, two columns at a desk */
 .today-tabs{padding:10px 12px 0}
@@ -3196,10 +3248,6 @@ button.cb-col:hover{background:var(--card-2)}
 .today-desk .q-wrap{padding:0}
 @media (max-width:1100px){.today-desk{grid-template-columns:1fr}}
 .perf{display:flex;flex-direction:column;gap:14px}
-.app-mobile .aw-panel{padding:14px}
-.app-mobile .aw-panel .ad-tile{min-height:0}
-.app-mobile .aw-top .seg button{padding:5px 10px}
-.app-mobile .tb-grid{grid-template-columns:1fr}
 
 /* The list a number opens */
 .ad-list{display:flex;flex-direction:column;max-height:60vh;overflow-y:auto;margin:0 -4px}

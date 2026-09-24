@@ -109,20 +109,17 @@ function dayBounds(tz: string, date: string | null): Bounds {
   };
 }
 
+
 /**
- * The last `days` days up to and including today, as one [start, end). The
- * things that are only true NOW (missed, due today, due tomorrow) are left out:
- * `isToday` is false, the same as a past day.
+ * WHAT HAPPENED WHEN SOMEBODY WAS CALLED, once per person (the Performance
+ * page's contact-status breakdown). A person rung three times is one person:
+ * picked up if any call to them was answered that day, otherwise how the last
+ * call went. The same calls as `call`, so the slices add up to "people called".
  */
-function rangeBounds(tz: string, days: number): Bounds {
-  const today = sql`(now() AT TIME ZONE ${tz})::date`;
-  return {
-    d0: sql`(((${today}) - ${days - 1}::int)::timestamp AT TIME ZONE ${tz})`,
-    d1: sql`(((${today}) + 1)::timestamp AT TIME ZONE ${tz})`,
-    d2: sql`(((${today}) + 2)::timestamp AT TIME ZONE ${tz})`,
-    isToday: sql`false`,
-  };
-}
+const contactOf = (f: any) => sql`
+  SELECT DISTINCT ON (person, record_id) person, record_id, at, 'contact' AS measure, detail
+    FROM (${f}) c WHERE measure = 'call'
+   ORDER BY person, record_id, (detail = 'answered') DESC, at DESC`;
 
 /**
  * Every fact for one side of the desk on one day. The single source of every
@@ -268,7 +265,10 @@ export async function activityDay(opts: { side: Side; date?: string | null; pers
       FROM f GROUP BY 1, 2, 3
     UNION ALL
     SELECT person, 'people', NULL, count(DISTINCT record_id)::int, count(DISTINCT record_id)::int
-      FROM f WHERE measure = 'call' GROUP BY 1`;
+      FROM f WHERE measure = 'call' GROUP BY 1
+    UNION ALL
+    SELECT person, measure, detail, count(*)::int, count(*)::int
+      FROM (${contactOf(sql`SELECT * FROM f`)}) k GROUP BY 1, 2, 3`;
 
   // Who is on the desk: every active member (so a person with nothing today
   // still has a row — that is the thing the owner is looking for), plus anybody
@@ -323,12 +323,17 @@ export async function activityRecords(opts: { side: Side; date?: string | null; 
   const person = allowedPerson(opts.person ?? null);
   const f = facts(opts.side, t, tz, dayBounds(tz, validDate(opts.date)));
   const table = opts.side === 'leads' ? sql`crm_leads` : sql`crm_owners`;
+  // A person's contact status is derived from their calls, not a fact of its own.
+  const src = opts.measure === 'contact' ? contactOf(f) : f;
   const rows = await sql`
     SELECT f.record_id AS id, f.person, f.measure, f.detail, f.at, r.name, r.phone, r.stage,
            ${opts.side === 'calling' ? sql`r.project, r.tower, r.unit_no` : sql`NULL AS project, NULL AS tower, NULL AS unit_no`}
-      FROM (${f}) f JOIN ${table} r ON r.id = f.record_id AND r.tenant_id = ${t}
+      FROM (${src}) f JOIN ${table} r ON r.id = f.record_id AND r.tenant_id = ${t}
      WHERE f.measure = ${opts.measure}
-       ${opts.detail ? sql`AND f.detail = ${opts.detail}` : sql``}
+       ${opts.detail === 'retry'
+          // People to try again: rung, and nobody answered.
+          ? sql`AND f.detail IN ('no_answer', 'unreachable')`
+          : opts.detail ? sql`AND f.detail = ${opts.detail}` : sql``}
        ${person ? sql`AND f.person = ${person}` : sql`AND f.person IS NOT NULL`}
      ORDER BY f.at DESC NULLS LAST
      LIMIT 500`;
@@ -337,66 +342,4 @@ export async function activityRecords(opts: { side: Side; date?: string | null; 
     name: r.name, phone: r.phone, stage: r.stage,
     unit: [r.project, [r.tower, r.unit_no].filter(Boolean).join(' ')].filter(Boolean).join(' · ') || null,
   }));
-}
-
-/**
- * A STRETCH OF DAYS — the Performance page and "My work".
- *
- * The same facts as a day, over the last 7, 14 or 30 days: totals per person,
- * and calls per day for the small chart. A status is counted once per record
- * per person over the stretch (what it ended up as), the same rule as a day.
- * Nothing here is "now": missed and due are the day report's, for today.
- */
-export const RANGE_DAYS = [7, 14, 30];
-
-export async function activityRange(opts: { side: Side; days?: number; person?: string | null }) {
-  const t = getContext()!.tenantId;
-  const tz = await timezoneOf(t);
-  const days = RANGE_DAYS.includes(Number(opts.days)) ? Number(opts.days) : 14;
-  const person = allowedPerson(opts.person ?? null);
-  const f = facts(opts.side, t, tz, rangeBounds(tz, days));
-  const mine = person ? sql`AND person = ${person}` : sql``;
-
-  const countsQ = sql`
-    WITH f AS (SELECT * FROM (${f}) x WHERE person IS NOT NULL ${mine})
-    SELECT person, measure, detail, count(*)::int AS n, count(DISTINCT record_id)::int AS records
-      FROM f GROUP BY 1, 2, 3
-    UNION ALL
-    SELECT person, 'people', NULL, count(DISTINCT record_id)::int, count(DISTINCT record_id)::int
-      FROM f WHERE measure = 'call' GROUP BY 1`;
-  // Calls per day, for the chart. The firm's own calendar day.
-  const dailyQ = sql`
-    WITH f AS (SELECT * FROM (${f}) x WHERE person IS NOT NULL AND measure = 'call' ${mine})
-    SELECT person, to_char((at AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') AS day,
-           count(*)::int AS calls, count(*) FILTER (WHERE detail = 'answered')::int AS picked_up
-      FROM f GROUP BY 1, 2`;
-  const peopleQ = sql`
-    SELECT u.id, u.name, u.role, coalesce(a.duty_status, 'ACTIVE') AS duty
-      FROM users u LEFT JOIN crm_agents a ON a.id = u.id AND a.tenant_id = u.tenant_id
-     WHERE u.tenant_id = ${t} AND u.deleted_at IS NULL AND lower(u.status) <> 'suspended'
-       ${person ? sql`AND u.id = ${person}` : sql``}`;
-  const clockQ = sql`
-    SELECT to_char((now() AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') AS today,
-           to_char((now() AT TIME ZONE ${tz})::date - ${days - 1}::int, 'YYYY-MM-DD') AS "from"`;
-
-  const [counts, daily, people, [clock]] = await Promise.all([countsQ, dailyQ, peopleQ, clockQ]) as any[];
-
-  const byPerson = new Map<string, any>();
-  for (const p of people as any[]) byPerson.set(p.id, { id: p.id, name: p.name, role: p.role, duty: p.duty, counts: [], daily: [] });
-  const strangers = [...new Set((counts as any[]).map(c => c.person).filter(id => !byPerson.has(id)))];
-  const known = strangers.length ? await sql`
-    SELECT coalesce(u.id, a.id) AS id, coalesce(u.name, a.name) AS name, u.role
-      FROM users u FULL JOIN crm_agents a ON a.id = u.id AND a.tenant_id = u.tenant_id
-     WHERE coalesce(u.id, a.id) IN ${sql(strangers)} AND coalesce(u.tenant_id, a.tenant_id) = ${t}` : [];
-  const nameOf = new Map((known as any[]).map(k => [k.id, k]));
-  const row = (id: string) => {
-    if (!byPerson.has(id)) {
-      const k: any = nameOf.get(id);
-      byPerson.set(id, { id, name: k?.name || null, role: k?.role || null, duty: null, gone: true, counts: [], daily: [] });
-    }
-    return byPerson.get(id);
-  };
-  for (const c of counts as any[]) row(c.person).counts.push({ measure: c.measure, detail: c.detail, n: c.n, records: c.records });
-  for (const d of daily as any[]) if (byPerson.has(d.person)) byPerson.get(d.person).daily.push({ day: d.day, calls: d.calls, pickedUp: d.picked_up });
-  return { side: opts.side, days, from: clock.from, today: clock.today, timezone: tz, people: [...byPerson.values()] };
 }
