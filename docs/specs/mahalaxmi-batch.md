@@ -741,8 +741,9 @@ a new firm its logins.
 | Superadmin on tenant routes | Already half there: `withRequestContext` accepts a superadmin token on any tenant route and takes the firm from `X-Tenant-ID`; `permissions.ts`, `team.ts`, `imports.ts`, `connections.ts` treat role `superadmin` as desk. **No header → `DEFAULT_TENANT_ID`** (skyline) — mistake 1/5 |
 | Audit ledger | One global hash chain (`audit.ts`). Tenant read `/workspace/audit` exists; its Settings section is commented out (why is not recoverable — history is squashed at `904c991`) |
 
-**Not measured (24 Sep):** the dev database did not answer from this session —
-the Supabase pooler timed out on 5432 and 6543. Every "know" line below is a code
+**Not measured (24 Sep):** the dev database cannot be reached from this
+container — direct TCP to the Supabase pooler is blocked even with the host
+allowed; only HTTP-proxy traffic leaves. Every "know" line below is a code
 fact. The numbers to take before building are listed under each item.
 
 ### 11.1 ⬜ Get into a firm's desk without the owner's password
@@ -864,29 +865,43 @@ note says so; this session could not either).
   the Bhumi staff names, emails, phones and passwords in the paste placeholder
   are gone; the `firstname123` parser is gone; `023fe5f` correctly took the
   first-name rule back out of the Team screen.
+- **How onboarding works today (`development`, read in full 24 Sep):**
+  - **Owner password: the operator types it, by convention `Firmname@year`.**
+    `Bhumi@2026` in the field was the example of that convention (and the
+    Team screen's reset pre-fills `Firm@2026` the same way). Left blank,
+    `provisionTenant` falls back to a random `suggestPassword()`.
+  - **Owner login id:** the owner's whole name run together (`bhumipropcity`).
+  - **Teammate left blank:** gets the **owner's** password — the real bug, 2.5.
+  - **Teammate login id:** the whole name run together (`vijaypatil`); a clash
+    within the firm gets `2`, `3`… IDs are always unique per firm.
+- **What the branch changes that nobody asked for:**
+  1. **The owner is moved onto the first-name rule too.** The field loses the
+     `Firmname@year` example and is pre-filled from `planRoster`, and the owner's
+     login id becomes the owner's first name (`bhumi` instead of
+     `bhumipropcity`). The first-name rule was asked for the team.
+  2. **The pre-fill happens before there is a name.** The modal plans on open;
+     `planRoster({})` returns `owner@123` (confirmed by running it), and the
+     field is only ever refilled when blank — so if the operator does not type
+     over it, the owner is created with `owner@123`. With the owner on the firm
+     convention this goes away: the default is derived from the firm name, which
+     the operator has typed by then.
 - **Wrong, must fix before merge:**
-  1. **Every firm's owner gets `owner@123`.** The modal plans on open, before an
-     owner name is typed; `planRoster({})` returns `owner@123`
-     (**confirmed by running it**); the form fills the password field with it
-     and only ever refills a *blank* field. Unless the operator retypes it,
-     every firm is created with the same owner password — the `Bhumi@2026`
-     shape STATE.md #6 closed.
-  2. **`must_change_password` is enforced only by the login screen.**
+  3. **`must_change_password` is enforced only by the login screen.**
      `/auth/login` returns a working token first; `Login.jsx` then asks for the
-     change. The API accepts that token for everything. "Guessable by design,
-     but forced to change" is true in the UI only. A must-change session should
-     reach `/auth/password/change`, `/auth/me` and `/auth/logout` and nothing
-     else.
-  3. **A false "used twice".** An id the planner filled in is sent back as if
-     typed; if the owner's name later claims it, the teammate is flagged
-     `user ID "vijay" is used twice` for an id nobody typed (confirmed by
-     running it).
+     change. The API accepts that token for everything, so a first-name@123
+     password is usable until someone changes it on screen. A must-change
+     session should reach `/auth/password/change`, `/auth/me` and
+     `/auth/logout` and nothing else.
+  4. **A false "used twice".** An id the planner filled in is sent back as if
+     typed; if another row (or the owner) later takes that first name, the row
+     is flagged `user ID "vijay" is used twice` for an id nobody typed
+     (confirmed by running it). The planner should keep suffixing ids it
+     generated and only refuse ids a person typed.
+- **Settled (24 Sep):** two people named Vijay are `vijay` / `vijay2` — IDs never
+  collide, so a shared `vijay@123` is not a problem.
 - **Decide:**
-  4. The first-name rule (`vijay` / `vijay@123`) — was that meant for the
-     **owner** too? The owner is the seat that holds connection keys and can
-     delete; the firm's name is public.
-  5. Two people with one first name get **the same password** (`vijay@123` for
-     both; ids `vijay` / `vijay2`). Acceptable?
+  5. Owner default = `Firmname@year` from the firm name (`Bhumi PropCity` →
+     `Bhumi@2026`), and the owner's login id stays as today?
   6. **Managers go into the rota** with the agents. Is a manager meant to
      receive leads?
   7. The checkbox says "Force owner to change password" but applies to the
@@ -903,8 +918,8 @@ note says so; this session could not either).
 6. 11.2: build 9.1 (per-tenant chain) first?
 7. 11.3: which sections of the firm page, and are per-person actions and
    suspending a firm in scope?
-8. 11.4: first-name password for the owner too? Same password for two Vijays?
-   Managers in the rota?
+8. 11.4: owner default `Firmname@year` and login id unchanged? Managers in
+   the rota?
 9. Order: proposed **11.4 fixes → 9.1 → 11.2 → 11.3 → 11.1**; the entry route
    last, because it is the one that can write to a paying client and its bar
    and ledger rows need 11.2 to be visible.
