@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Panel, SectionHead, StageTag, Button, Input, Segmented, Toggle, Avatar } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES } from '../data/theme.js'
-import { finalStageOf, finalIsEditable } from '../data/pipelineRoles.js'
+import { finalStageOf, finalIsEditable, LABELLED_LEAD_STAGES, stageLabel } from '../data/pipelineRoles.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import ThisDevice from '../components/ThisDevice.jsx'
@@ -176,9 +176,19 @@ function PipelineSection({ store, settings }) {
   // on a renamed stage). Calling statuses go through one generic writer.
   const writeOwner = (next, note, rename) => store.setOwnerStages(next, note, rename)
 
+  // A fixed lead stage (Deal Closed, Rejected) keeps its stored value — every
+  // "open" count keys off it — and the firm renames what is SHOWN.
+  const labelled = (s) => isLeads && LABELLED_LEAD_STAGES.includes(s)
   const commitRename = () => {
     const to = draft.trim()
-    if (to && to !== editing && !stages.includes(to)) {
+    if (to && editing && labelled(editing)) {
+      const shownElsewhere = stages.some(x => x !== editing && stageLabel(x).toLowerCase() === to.toLowerCase())
+      if (!shownElsewhere && to !== stageLabel(editing)) {
+        const next = { ...(settings.stageLabels || {}) }
+        if (to === editing) delete next[editing]; else next[editing] = to
+        store.patchSettings({ stageLabels: next }, `Now shown as "${to}"`)
+      }
+    } else if (to && to !== editing && !stages.includes(to)) {
       if (isLeads) store.renameStage(editing, to)
       else writeOwner(stages.map(s => (s === editing ? to : s)), 'Status renamed — owners moved', { from: editing, to })
     }
@@ -243,6 +253,9 @@ function PipelineSection({ store, settings }) {
                   <span className="chip-grow"><StageTag stage={s} /></span>
                 )}
                 {s === finalName && <span className="chip-final">Final</span>}
+                {isLocked && labelled(s) && !isEditing && (
+                  <button className="icon-mini" onClick={() => { setEditing(s); setDraft(stageLabel(s)) }} title="Rename"><Icon name="edit" size={13} /></button>
+                )}
                 {!isLocked && !isEditing && (
                   <>
                     {finalMovable && s !== finalName && (
@@ -254,7 +267,7 @@ function PipelineSection({ store, settings }) {
                     )}
                   </>
                 )}
-                {isLocked && s !== finalName && <span className="chip-lock">locked</span>}
+                {isLocked && s !== finalName && !labelled(s) && <span className="chip-lock">locked</span>}
               </div>
             )
           })}

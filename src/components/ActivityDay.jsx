@@ -17,6 +17,7 @@ import { useServerData } from '../lib/useServerData.js'
 import { dayLabel, whenLabel } from '../lib/format.js'
 import { Segmented } from './primitives.jsx'
 import Icon from './Icon.jsx'
+import { stageLabel } from '../data/pipelineRoles.js'
 
 // ── Words ───────────────────────────────────────────────────────────────────
 const plural = (n, one, many) => `${n.toLocaleString('en-IN')} ${n === 1 ? one : many}`
@@ -126,7 +127,7 @@ function DayLines({ person, side, isToday, open, hideCalls }) {
       </Line>
       <Line head="Now">
         {statuses.map(s => (
-          <Num key={s.detail} n={s.n} onOpen={() => open('status', s.detail)}>{s.detail}</Num>
+          <Num key={s.detail} n={s.n} onOpen={() => open('status', s.detail)}>{stageLabel(s.detail)}</Num>
         ))}
       </Line>
       <Line head={side === 'calling' ? 'Callbacks' : 'Follow-ups'}>
@@ -263,7 +264,7 @@ function Summary({ r, side, isToday }) {
   const calls = n('call')
   if (calls) bits.push(`${plural(calls, 'call', 'calls')} to ${plural(r.people, 'person', 'people')}`)
   if (n('call', 'answered')) bits.push(`${n('call', 'answered')} answered`)
-  if (statuses.length) bits.push(statuses.slice(0, 3).map(s => `${s.n} ${s.detail}`).join(' · '))
+  if (statuses.length) bits.push(statuses.slice(0, 3).map(s => `${s.n} ${stageLabel(s.detail)}`).join(' · '))
   if (n('whatsapp')) bits.push(plural(n('whatsapp'), 'WhatsApp', 'WhatsApps'))
   const late = isToday ? n('followup_late') : 0
   const waiting = side === 'leads' ? n('came_in', 'not_called') : 0
@@ -394,7 +395,7 @@ export function ActivityRecords({ store, go, side, date, person, measure, detail
   }
   const what = (r) => {
     if (r.measure === 'call') return REACH_LABEL[r.detail] || ''
-    if (r.measure === 'status') return r.detail
+    if (r.measure === 'status') return stageLabel(r.detail)
     if (r.measure === 'came_in') return DETAIL_TITLE[r.detail] || ''
     return ''
   }

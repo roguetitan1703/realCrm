@@ -6,6 +6,7 @@ import { theme, stageClassFor } from '../data/theme.js'
 import { whenLabel, agentName, repeatMark } from '../lib/format.js'
 import { fileUrl, formatDistance } from '../lib/media.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
+import { stageLabel } from '../data/pipelineRoles.js'
 
 // ---- Button ----
 export function Button({ variant = 'ghost', size, block, icon, children, className, ...rest }) {
@@ -217,7 +218,9 @@ export function Toggle({ on, ...rest }) { return <button className={'toggle' + (
 // ---- Signals (contained) ----
 export function StageTag({ stage }) {
   const cls = stageClassFor(stage)
-  const label = stage
+  // The firm's own name for a fixed stage ("Booked" for Deal Closed) — the
+  // class still keys off the stored value.
+  const label = stageLabel(stage)
   return <span className={'stage ' + cls}><span className="dot" />{label}</span>
 }
 export function StatusTag({ status }) {

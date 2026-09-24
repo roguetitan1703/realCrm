@@ -13,7 +13,7 @@ import { randomBytes } from 'crypto';
 import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_IDS, migrateProperColumns } from './db.js';
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
-import { finalStageOf } from '../../../src/data/pipelineRoles.js';
+import { finalStageOf, stageLabelIn, LABELLED_LEAD_STAGES } from '../../../src/data/pipelineRoles.js';
 import { audit } from './audit.js';
 import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, lastPersonActivity, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
@@ -2255,7 +2255,11 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     // `title: description` whenever they differ, which is what produced the
     // doubled reading above.
     const note = String(patch.stageNote || '').trim() || rejectionReason || '';
-    const line = `${oldLead.stage} → ${patch.stage}${note ? ` — ${note}` : ''}`;
+    // In the firm's words: a firm that calls Deal Closed "Booked" reads
+    // "Site Visit → Booked" in the history. metadata carries the stored value,
+    // which is what the activity report and every count read.
+    const shown = await getSettings();
+    const line = `${stageLabelIn(shown, oldLead.stage)} → ${stageLabelIn(shown, patch.stage)}${note ? ` — ${note}` : ''}`;
     await addTimelineEvent({
       record_id: id,
       type: 'stage_change',
@@ -5470,6 +5474,22 @@ export async function updateSettings(patch: any): Promise<any> {
     if (!list.includes(patch.finalStages.calling) || OWNER_TERMINAL_STATUSES.includes(patch.finalStages.calling)) {
       throw new Error(`"${patch.finalStages.calling}" cannot be the final status.`);
     }
+  }
+  // The names shown for the fixed lead stages (pipelineRoles.js). Only those
+  // two may carry one, a name may not be one another stage already shows, and
+  // a blank name is no name — the stage reads as itself again.
+  if (patch.stageLabels !== undefined) {
+    const stages: string[] = (Array.isArray(patch.stages) ? patch.stages : before.stages) || LEAD_STATUSES;
+    const clean: Record<string, string> = {};
+    for (const [k, v] of Object.entries(patch.stageLabels || {})) {
+      const name = String(v || '').trim();
+      if (!LABELLED_LEAD_STAGES.includes(k) || !name || name === k) continue;
+      const clash = stages.some(s => s !== k && s.toLowerCase() === name.toLowerCase())
+        || Object.entries(clean).some(([ok, ov]) => ok !== k && ov.toLowerCase() === name.toLowerCase());
+      if (clash) throw new Error(`"${name}" is already a stage.`);
+      clean[k] = name;
+    }
+    patch.stageLabels = clean;
   }
   // …and cannot be removed: a list without it has nowhere for a conversion.
   if (Array.isArray(patch.ownerStages)) {

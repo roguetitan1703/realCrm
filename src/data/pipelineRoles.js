@@ -11,11 +11,11 @@
 // Absent is the default, not a missing answer: no firm has set this, and each
 // one's final stage is today's name. Nothing is written to make that true.
 //
-// LEADS are narrower, on purpose, for now. "Deal Closed" is also what every
-// "open" count in SQL excludes (TERMINAL_STATUSES in services/store.ts, ~78
-// reads), so renaming it per firm means threading the firm's list through all
-// of them. Until that is done the leads' final stage is fixed and the editor
-// does not offer to rename or move it.
+// LEADS are different. "Deal Closed" and "Rejected" are also what every "open"
+// count in SQL excludes (TERMINAL_STATUSES in services/store.ts, ~70 reads),
+// so their STORED value stays fixed. What a firm renames is the NAME SHOWN
+// (`stageLabels: { 'Deal Closed': 'Booked' }`) — every tag, picker and history
+// line reads it, and no query has to know. "Make final" is Calling only.
 // ============================================================================
 
 export const DEFAULT_FINAL = { leads: 'Deal Closed', calling: 'Key Received' }
@@ -33,3 +33,16 @@ export function finalStageOf(settings, side) {
 
 /** Can this side's final stage be renamed or moved in the editor? */
 export const finalIsEditable = (side) => side === 'calling'
+
+/** Lead stages whose stored value is fixed; the firm may rename what is shown. */
+export const LABELLED_LEAD_STAGES = ['Deal Closed', 'Rejected']
+
+// The shown names for this tab's workspace. One workspace per tab (the URL is
+// the authority), so one table per page is enough; the store sets it whenever
+// the firm's settings arrive or change.
+let LABELS = {}
+export function setStageLabels(map) { LABELS = map && typeof map === 'object' ? { ...map } : {} }
+/** What a stage is called on screen: the firm's name for it, or the stage. */
+export const stageLabel = (name) => (name && LABELS[name]) || name
+/** The same, from a settings object — for code that holds one (the server). */
+export const stageLabelIn = (settings, name) => (name && settings?.stageLabels?.[name]) || name

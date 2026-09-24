@@ -25,6 +25,7 @@
 //   actionCtx    extra ctx passed to definition actions' run() (e.g. onClose)
 // ============================================================================
 
+import { stageLabel } from '../data/pipelineRoles.js'
 import { useState, useRef, useEffect } from 'react'
 import { ModuleRecordSheet } from './ModuleFields.jsx'
 import { Panel, SectionHead, Button, Stepper, StageTag, TYPE_TAG, outcomeLabel } from './primitives.jsx'
@@ -344,7 +345,7 @@ const facts = def.headerFacts ? def.headerFacts(record, store).filter(Boolean) :
                   value={progCurrent || progStages[0]}
                   onChange={(v) => prog.set(store, record, v)}
                   options={(progOnPath || !progCurrent ? progStages : [progCurrent, ...progStages])
-                    .map(s => ({ value: s, label: s }))}
+                    .map(s => ({ value: s, label: stageLabel(s) }))}
                 />
               ) : (
                 <StageTag stage={progCurrent} />

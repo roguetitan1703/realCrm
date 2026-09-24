@@ -1,4 +1,5 @@
 // Collection components: Toolbar (the ONE filter/sort bar), Table, ListRow, Card grid.
+import { stageLabel } from '../data/pipelineRoles.js'
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
@@ -688,7 +689,7 @@ export function StageCell({ record, store, stages, canSet, onSet, onReject, valu
       <AnchoredPopover anchorRef={ref} open={open} onClose={() => setOpen(false)} className="stg-pop">
         {stages.map(s => (
           <button key={s} className={'p-item' + (s === current ? ' on' : '')} onClick={() => { onSet(s); setOpen(false) }}>
-            {s}
+            {stageLabel(s)}
           </button>
         ))}
         {/* Rejecting is a status change like any other, so it belongs in the

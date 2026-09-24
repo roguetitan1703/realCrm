@@ -13,7 +13,7 @@ import { api } from '../lib/api.js'
 import Icon from '../components/Icon.jsx'
 import { LEADS_DEF } from './definitions.jsx'
 import { AgreementList } from '../components/Agreements.jsx'
-import { finalStageOf } from '../data/pipelineRoles.js'
+import { finalStageOf, stageLabel } from '../data/pipelineRoles.js'
 
 // A scheduled appointment's action reads like "Site Visit — Anita Rao", so the
 // type is a prefix rather than its own field. Matched loosely because the
@@ -298,7 +298,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
           label="Status" value={stage} onChange={setStageP}
           options={[
             { value: 'all', label: 'All' },
-            ...LEAD_STATUSES.map(s => ({ value: s, label: s, count: counts.byStage?.[s] ?? 0 })),
+            ...LEAD_STATUSES.map(s => ({ value: s, label: stageLabel(s), count: counts.byStage?.[s] ?? 0 })),
           ]}
         />
         {/* WHOSE LEADS — a top-level control, not a row inside the filter

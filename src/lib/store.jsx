@@ -3,6 +3,7 @@
 // Durable data (agents/properties/leads/settings) is hydrated from server and
 // mutated via Express backend endpoints. Transient UI is managed in React state.
 // ============================================================================
+import { setStageLabels } from '../data/pipelineRoles.js'
 import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react'
 import { DEFAULT_SETTINGS, DEFAULT_BRAND, PROTECTED_STAGES } from '../data/theme.js'
 import { initials } from './format.js'
@@ -765,6 +766,10 @@ function reducer(state, action) {
 
 export function StoreProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initial)
+  // The firm's names for its fixed lead stages (pipelineRoles.js), set during
+  // render rather than in an effect: every tag drawn in this same render must
+  // already say "Booked", not flash "Deal Closed" first.
+  setStageLabels(state.settings?.stageLabels)
   const timers = useRef({})
 
   // Pull the authoritative, tenant-scoped state from the backend. Called on

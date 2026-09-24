@@ -837,10 +837,12 @@ it. Project names (4.6) go in first.
   dev: four spellings → one card of 4; any spelling filters to all.
 - **D1** `src/data/pipelineRoles.js`. Calling: the final status is a role —
   rename carries it, removal refused (400), "Make final" moves it, an ending
-  cannot be final. **Leads: not done as agreed.** "Deal Closed" shows the
-  Final tag but cannot be renamed or moved: it is also what every "open" count
-  in SQL excludes (TERMINAL_STATUSES, ~78 reads). Making it per-firm means
-  threading the firm's list through all of them — a separate piece of work.
+  cannot be final. **Leads:** "Deal Closed" and "Rejected" are also what every
+  "open" count in SQL excludes (~70 reads), so their stored value stays and the
+  firm renames the NAME SHOWN (`stageLabels`): every tag, picker, the activity
+  report and new history lines say "Booked"; the record still stores Deal
+  Closed. A name another stage already shows is refused. "Make final" is
+  Calling only — nothing on the leads side needs the final stage moved.
 - **D2/D3** `services/agreements.ts`, `routes/agreements.ts`,
   `POST /owners/:id/convert`, `components/Agreements.jsx`, and a `finish` slot
   in the shared record header (ModuleDetail ← progression.finish). A second
