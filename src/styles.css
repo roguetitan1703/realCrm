@@ -969,7 +969,7 @@ button.btn-ghost.fu-done{color:var(--accent)}
    opens the project is the button INSIDE it — a button in a button is invalid
    and swallows the inner click. */
 .projcard{padding:0}
-.pj-open{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:14px;padding:16px 17px 12px;width:100%;box-sizing:border-box}
+.pj-open{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:14px;padding:16px 17px 12px;width:100%;box-sizing:border-box;flex:1}
 .pj-assign{display:flex;align-items:center;gap:6px;margin:0 17px 14px;padding:7px 11px;border:1px solid var(--line);
   background:var(--card-2);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;align-self:flex-start}
 .pj-assign:hover{border-color:var(--accent);color:var(--accent-ink)}
@@ -3029,28 +3029,85 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 @keyframes sk-sweep{100%{transform:translateX(100%)}}
 @media (prefers-reduced-motion:reduce){.sk::after{animation:none}}
 
-/* ── Activity: My day / Team today (components/ActivityDay.jsx) ───────────── */
-.ad{display:flex;flex-direction:column;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px}
+/* ── Activity: My day / Team today (components/ActivityDay.jsx) ─────────────
+   One row per person, three answers in fixed columns; the detail in small
+   blocks under a click. Numbers in tabular figures so columns line up. */
+.ad{display:flex;flex-direction:column;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
 .ad-panel,.ad-team{border:none;padding:0;background:none}
 .ad-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.ad-title{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-2);margin-right:auto}
-.ad-top .seg button{padding:5px 11px;font-size:12.5px}
+.ad-title{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-2)}
+.ad-top .seg button{padding:4px 11px;font-size:12.5px}
+.ad-top-r{margin-left:auto;display:inline-flex;align-items:center;gap:8px}
 .ad-day{display:inline-flex;align-items:center;gap:2px;font-size:12.5px;font-weight:600;color:var(--ink-2)}
 .ad-day button{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:none;background:none;color:var(--muted);border-radius:6px;cursor:pointer}
 .ad-day button:hover:not(:disabled){background:var(--line-2);color:var(--ink)}
 .ad-day button:disabled{opacity:.35;cursor:default}
-.ad-day-l{min-width:62px;text-align:center}
-.ad-line{display:flex;gap:10px;align-items:baseline;min-height:24px}
-.ad-head{flex:0 0 84px;white-space:nowrap;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
-.ad-items{display:flex;flex-wrap:wrap;gap:2px 12px;min-width:0}
-.ad-num{border:none;background:none;padding:2px 0;font:inherit;font-size:13.5px;color:var(--ink-2);cursor:pointer;text-align:left}
-.ad-num b{font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
-.ad-num:hover{color:var(--accent-ink,var(--accent))}
-.ad-num.alert,.ad-num.alert b{color:var(--alert)}
-.ad-num.quiet{color:var(--muted)}
-.ad-num.quiet b{color:var(--muted)}
-.ad-zero{font-size:13.5px;color:var(--faint)}
+.ad-day-l{min-width:66px;text-align:center}
+.ad-open{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);background:var(--card);border-radius:6px;padding:4px 8px 4px 10px;font:inherit;font-size:12.5px;font-weight:600;color:var(--ink-2);cursor:pointer}
+.ad-open:hover{color:var(--ink);border-color:var(--ink-2)}
 .ad-wait{height:44px;border-radius:6px;background:var(--line-2)}
+.ad-quiet{color:var(--faint)}
+
+/* My day: four tiles, then what moved */
+.ad-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.ad-tile{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--radius);background:var(--card-2);font:inherit;text-align:left;cursor:pointer;min-width:0}
+.ad-tile:hover{border-color:var(--line)}
+.ad-tile b{font-size:22px;font-weight:700;line-height:1.15;color:var(--ink);font-variant-numeric:tabular-nums}
+.ad-tile span{font-size:12.5px;color:var(--ink-2)}
+.ad-tile em{font-style:normal;font-size:12px;color:var(--muted)}
+.ad-tile.alert b,.ad-tile.alert span{color:var(--alert)}
+.ad-moved{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;font-size:13.5px;color:var(--ink-2)}
+.ad-moved-t{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
+.ad-moved button{border:none;background:none;padding:0;font:inherit;color:var(--ink-2);cursor:pointer}
+.ad-moved button b{color:var(--ink);font-variant-numeric:tabular-nums}
+.ad-moved button:hover{color:var(--accent-ink,var(--accent))}
+.ad-moved .ad-more{margin-left:auto;display:inline-flex;align-items:center;gap:3px;font-size:12.5px;font-weight:600;color:var(--muted)}
+@media (max-width:620px){.ad-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.ad-tile b{font-size:20px}}
+
+/* Team today: the rows */
+.tt{display:flex;flex-direction:column}
+.tt-head,.tt-main{display:grid;grid-template-columns:minmax(130px,1.1fr) minmax(170px,1.3fr) minmax(150px,1.4fr) minmax(150px,1.3fr);gap:14px;align-items:center}
+.tt-head{padding:0 10px 6px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.tt-row{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line-2)}
+.tt-row.off{opacity:.6}
+.tt-main{flex:1;min-width:0;padding:10px;border:none;background:none;font:inherit;font-size:13.5px;color:var(--ink-2);text-align:left;cursor:pointer;border-radius:6px}
+.tt-main:hover{background:var(--card-2)}
+.tt-row.open .tt-main{background:var(--card-2)}
+.tt-name{font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px;min-width:0}
+.tt-tag{font-size:10.5px;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.tt-calls{display:flex;flex-direction:column;gap:4px;min-width:0}
+.tt-calls b{color:var(--ink);font-variant-numeric:tabular-nums}
+.tt-sub{color:var(--muted)}
+.tt-bar{display:block;height:4px;border-radius:2px;background:var(--line-2);max-width:160px;overflow:hidden}
+/* Neutral, not the accent: a share of calls picked up is not good or bad news on its own. */
+.tt-bar i{display:block;height:100%;background:color-mix(in srgb,var(--ink) 45%,transparent);border-radius:2px}
+.tt-moved{min-width:0}
+.tt-attn{display:flex;flex-direction:column;gap:2px;color:var(--alert);font-weight:600;font-size:13px}
+.tt-alert{color:var(--alert);font-weight:600}
+.tt-act{flex:none;width:96px;display:flex;justify-content:flex-end;padding-right:6px}
+.ad-compact .tt-main{padding:8px 10px}
+
+/* The detail under an opened row, and under My day's "Everything" */
+.ad-detail{display:flex;flex-wrap:wrap;gap:10px 28px;padding:10px 10px 14px}
+.tt .ad-detail{padding-left:calc(10px + 14px)}
+.ad-block{display:flex;flex-direction:column;gap:5px;min-width:0}
+.ad-block-t{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.ad-block-s{display:flex;flex-wrap:wrap;gap:4px 14px}
+.ad-stat{display:inline-flex;align-items:baseline;gap:5px;border:none;background:none;padding:2px 0;font:inherit;font-size:13px;color:var(--ink-2);cursor:pointer}
+.ad-stat b{font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+.ad-stat:hover span{color:var(--accent-ink,var(--accent))}
+.ad-stat.alert,.ad-stat.alert b{color:var(--alert)}
+.ad-stat.quiet,.ad-stat.quiet b{color:var(--muted)}
+.ad-stat.static{cursor:default}
+
+/* A phone, or a narrow panel: each row stacks, name first */
+@media (max-width:760px){
+  .tt-head{display:none}
+  .tt-main{grid-template-columns:1fr;gap:4px}
+  .tt-attn{flex-direction:row;flex-wrap:wrap;gap:2px 12px}
+}
+
+/* The list a number opens */
 .ad-list{display:flex;flex-direction:column;max-height:60vh;overflow-y:auto;margin:0 -4px}
 .ad-row{display:flex;align-items:center;gap:10px;width:100%;padding:9px 4px;border:none;border-bottom:1px solid var(--line-2);background:none;font:inherit;text-align:left;cursor:pointer;color:var(--ink)}
 .ad-row:hover{background:var(--card-2)}
@@ -3058,25 +3115,6 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .ad-row-name{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ad-row-sub{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ad-row-at{flex:none;font-size:12px;color:var(--faint);white-space:nowrap}
-@media (max-width:520px){.ad-head{flex-basis:78px;font-size:10.5px;letter-spacing:.03em}.ad-num{font-size:13px}}
-/* Team today — a row per person, in words (ActivityDay.jsx TeamToday) */
-.ad-items > * + *:not(.joined)::before{content:'·';margin-right:12px;margin-left:-6px;color:var(--faint);font-weight:400}
-.ad-warns{list-style:none;margin:2px 0 4px;padding:9px 12px;border-left:3px solid var(--alert);background:var(--alert-wash);border-radius:0 6px 6px 0;display:flex;flex-direction:column;gap:4px}
-.ad-warns li{font-size:13px;color:var(--ink)}
-.ad-people{display:flex;flex-direction:column}
-.ad-person{display:grid;grid-template-columns:200px 1fr;gap:6px 18px;padding:12px 0;border-top:1px solid var(--line-2)}
-.ad-person.off{opacity:.55}
-.ad-pside{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
-.ad-pname{font-size:14px;font-weight:700;color:var(--ink)}
-.ad-plines{display:flex;flex-direction:column;gap:3px;min-width:0}
-.ad-person-c{grid-template-columns:170px 1fr;align-items:baseline;width:100%;padding:9px 0;border:none;border-top:1px solid var(--line-2);background:none;font:inherit;text-align:left;cursor:pointer}
-.ad-person-c:hover .ad-pname{color:var(--accent-ink,var(--accent))}
-.ad-sum{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:13.5px;color:var(--ink-2)}
-.ad-sum-flag{color:var(--alert);font-weight:600}
-@media (max-width:720px){.ad-person,.ad-person-c{grid-template-columns:1fr}.ad-pside{flex-direction:row;align-items:center;justify-content:space-between}}
-.ad-num.joined{margin-left:-7px}
-.ad-open{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);background:var(--card);border-radius:6px;padding:4px 8px 4px 10px;font:inherit;font-size:12.5px;font-weight:600;color:var(--ink-2);cursor:pointer}
-.ad-open:hover{color:var(--ink);border-color:var(--ink-2)}
 
 /* Agreements (components/Agreements.jsx) */
 .u-alert{color:var(--alert)}
@@ -3100,7 +3138,12 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .cd-picked{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius);font-size:13.5px}
 .cd-picked span{flex:1;min-width:0}
 .cd-picked button,.cd-switch{border:none;background:none;font:inherit;font-size:12.5px;color:var(--accent-ink,var(--accent));cursor:pointer;padding:0}
-.cd-switch{margin-top:6px}
+.cd-switch{margin-top:6px;align-self:flex-start;text-align:left}
+.cd-form{display:flex;flex-direction:column;gap:14px}
+.cd-outside{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card-2)}
+.cd-file{display:inline-flex;align-items:center;gap:7px;align-self:flex-start;padding:8px 12px;border:1px dashed var(--line);border-radius:var(--radius);font-size:13px;color:var(--ink-2);cursor:pointer}
+.cd-file:hover{border-color:var(--accent);color:var(--accent-ink)}
+.cd-file input{display:none}
 .cd-opts{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius);margin:6px 0;max-height:190px;overflow-y:auto}
 .cd-opts button{display:flex;justify-content:space-between;gap:10px;padding:8px 11px;border:none;border-bottom:1px solid var(--line-2);background:none;font:inherit;font-size:13px;text-align:left;cursor:pointer;color:var(--ink)}
 .cd-opts button:hover{background:var(--card-2)}

@@ -101,7 +101,10 @@ export function useServerList(fetcher, query, deps = [], cache = null) {
         lastViewRef.current = viewKey
         const merged = accumulate && page > 1 ? [...rowsRef.current, ...rows] : rows
         rowsRef.current = merged
-        setState({ rows: merged, total: res?.total ?? merged.length, loading: false, error: null })
+        // `counts` rides along when the server sends them (Contacts' Owners,
+        // Tenants and Buyers): the numbers beside a filter's options. They were
+        // dropped here, so every one of those read 0.
+        setState({ rows: merged, total: res?.total ?? merged.length, counts: res?.counts, loading: false, error: null })
       })
       .catch(err => {
         if (mine !== seq.current) return

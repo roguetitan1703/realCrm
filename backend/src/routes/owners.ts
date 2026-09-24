@@ -171,6 +171,7 @@ ownersRouter.delete('/:id', async (req: Request, res: Response) => {
     if (!ok) return res.status(404).json({ success: false, error: 'Not found' });
     return res.status(200).json({ success: true });
   } catch (err: any) {
+    if (err?.status === 422) return res.status(422).json({ success: false, error: 'Refused', message: err.message });
     return res.status(500).json({ error: 'Failed to delete owner', message: err.message });
   }
 });

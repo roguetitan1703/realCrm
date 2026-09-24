@@ -48,7 +48,7 @@ export function sendError(res: Response, err: any) {
 agreementsRouter.get('/', async (req: Request, res: Response) => {
   try {
     const q = req.query as any;
-    res.json(await listAgreements({ kind: q.kind, status: q.status, leadId: q.leadId, propertyId: q.propertyId, ownerId: q.ownerId, q: q.q, page: q.page, limit: q.limit }));
+    res.json(await listAgreements({ kind: q.kind, status: q.status, leadId: q.leadId, propertyId: q.propertyId, ownerId: q.ownerId, agentId: q.agentId, q: q.q, sort: q.sort, dir: q.dir, page: q.page, limit: q.limit }));
   } catch (err) { sendError(res, err); }
 });
 

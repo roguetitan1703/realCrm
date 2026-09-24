@@ -19,6 +19,7 @@
     "test:leadflows": "tsx scripts/ingest-lead-flows.mjs",
     "seed:dev:login": "tsx backend/src/scripts/seed-dev-login.ts",
     "seed:dev:activity": "tsx backend/src/scripts/seed-dev-activity.ts",
+    "seed:dev:inventory": "tsx backend/src/scripts/seed-dev-inventory.ts",
     "keys:check": "tsx backend/src/scripts/integration-keys.ts",
     "link:owners": "tsx backend/src/scripts/link-listing-owners.ts",
     "stages:calling": "tsx backend/src/scripts/calling-stages.ts"

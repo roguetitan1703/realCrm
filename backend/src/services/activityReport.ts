@@ -28,9 +28,25 @@
  * started the day — a status flipped and flipped back counts 0.
  *
  * THE DAY is the firm's, midnight to midnight in its own timezone (dayStart).
- * Things that are only true NOW — a follow-up already late, one due tomorrow —
- * are answered for today only; a past day's report does not pretend to know
- * what was late on it.
+ * Things that are only true NOW (a follow-up missed, one due today or
+ * tomorrow) are answered for today only; a past day's report does not pretend
+ * to know what was missed on it.
+ *
+ * WHEN A NUMBER COUNTS AGAINST SOMEBODY. A red number on the owner's screen
+ * is a person being told off, so each one has to be fair on its face:
+ *
+ *   MISSED FOLLOW-UP (a callback, on the calling side). Still open, and its
+ *     day has ENDED. One due at 3pm today is "due today" at 3:05, not missed.
+ *     A follow-up that came to somebody in a reassignment after its time is
+ *     theirs from the day they got it: due that day, missed from the next.
+ *     (Without that it was either blamed on them the minute it arrived, or
+ *     never counted against anybody at all.) Done means the work happened
+ *     (closeFollowUpFor clears it) or they ticked it.
+ *   NEW, NOT CALLED. Came in more than an hour ago (or on a past day) and
+ *     nobody has called, WhatsApped or written to it since. A lead that
+ *     arrived ten minutes ago is not a failure yet.
+ *   NO CALLS. Said on screen only after noon, only of agents who hold records
+ *     on that side and are on duty (components/ActivityDay.jsx).
  * ============================================================================
  */
 import { sql } from './db.js';
@@ -69,6 +85,16 @@ const STAGE_TO = sql`coalesce(nullif(e.metadata->>'to', ''),
   END)`;
 const STAGE_FROM = sql`coalesce(nullif(e.metadata->>'from', ''),
   CASE WHEN e.title LIKE '%→%' AND e.title NOT LIKE 'Stage →%' THEN trim(split_part(e.title, '→', 1)) END)`;
+
+/** A follow-up's time, or NULL when what is stored is not a date (old rows hold typed words). */
+const LEAD_DUE = sql`(CASE WHEN r.follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN (r.follow_up->>'at')::timestamptz END)`;
+
+/**
+ * When a follow-up became THIS holder's to do: when it was due, or when the
+ * record was last handed to them, whichever is later. See the header.
+ */
+const dueForHolder = (t: string, at: any) => sql`greatest(${at}, coalesce((SELECT max(x.timestamp) FROM crm_timeline_events x
+  WHERE x.tenant_id = ${t} AND x.record_id = r.id AND x.type = 'assignment'), ${at}))`;
 
 /** The day asked for, as the firm's [start, end). `date` is YYYY-MM-DD or null for today. */
 function dayBounds(tz: string, date: string | null) {
@@ -129,9 +155,15 @@ function facts(side: Side, t: string, tz: string, date: string | null) {
       ${events}
       UNION ALL ${statuses}
       UNION ALL
-      SELECT r.agent_id, r.id, r.callback_at, 'followup_late', NULL FROM crm_owners r
+      SELECT r.agent_id, r.id, r.callback_at, 'followup_missed', NULL FROM crm_owners r
        WHERE r.tenant_id = ${t} AND r.agent_id IS NOT NULL AND ${isToday}
-         AND ${OWNER_OPEN} AND r.callback_at IS NOT NULL AND r.callback_at < now()
+         AND ${OWNER_OPEN} AND r.callback_at IS NOT NULL AND r.callback_at < ${d0}
+         AND ${dueForHolder(t, sql`r.callback_at`)} < ${d0}
+      UNION ALL
+      SELECT r.agent_id, r.id, r.callback_at, 'followup_today', NULL FROM crm_owners r
+       WHERE r.tenant_id = ${t} AND r.agent_id IS NOT NULL AND ${isToday}
+         AND ${OWNER_OPEN} AND r.callback_at IS NOT NULL AND r.callback_at < ${d1}
+         AND ${dueForHolder(t, sql`r.callback_at`)} >= ${d0}
       UNION ALL
       SELECT r.agent_id, r.id, r.callback_at, 'followup_tomorrow', NULL FROM crm_owners r
        WHERE r.tenant_id = ${t} AND r.agent_id IS NOT NULL AND ${isToday}
@@ -155,23 +187,38 @@ function facts(side: Side, t: string, tz: string, date: string | null) {
     -- Came in on this day, and whether a person reached out after it did, before
     -- the day was out. Held by whoever holds the lead: an enquiry nobody has
     -- called is a question for its owner, not for whoever last touched it.
+    -- 'just_in': arrived under an hour ago and not called yet. Not counted
+    -- against anybody (see the header).
     SELECT agent_id, id, came, 'came_in',
            CASE WHEN EXISTS (SELECT 1 FROM crm_timeline_events e
                               WHERE e.tenant_id = ${t} AND e.record_id = x.id
                                 AND ${BY_PERSON} AND e.type IN ${sql(CONTACT_EVENT_TYPES)}
                                 AND e.timestamp >= x.came AND e.timestamp < ${d1})
-                THEN 'called' ELSE 'not_called' END
+                THEN 'called'
+                WHEN x.came > now() - interval '1 hour' THEN 'just_in'
+                ELSE 'not_called' END
       FROM (SELECT r.id, r.agent_id, ${arrived} AS came FROM crm_leads r
-             WHERE r.tenant_id = ${t} AND r.agent_id IS NOT NULL AND r.created_at < ${d1}) x
+             WHERE r.tenant_id = ${t} AND r.agent_id IS NOT NULL AND r.created_at < ${d1}
+               -- Only leads that could have come in that day: made that day, or
+               -- enquired again that day. Without this every lead the firm has
+               -- was read to find the few that arrived.
+               AND r.id IN (SELECT id FROM crm_leads WHERE tenant_id = ${t} AND created_at >= ${d0} AND created_at < ${d1}
+                            UNION
+                            SELECT lead_id FROM crm_lead_enquiries WHERE tenant_id = ${t}
+                               AND coalesce(last_at, created_at) >= ${d0} AND coalesce(last_at, created_at) < ${d1})) x
      WHERE came >= ${d0} AND came < ${d1}
     UNION ALL
-    SELECT r.agent_id, r.id, (r.follow_up->>'at')::timestamptz, 'followup_late', NULL FROM crm_leads r
+    SELECT r.agent_id, r.id, ${LEAD_DUE}, 'followup_missed', NULL FROM crm_leads r
      WHERE r.tenant_id = ${t} AND r.agent_id IS NOT NULL AND ${isToday} AND ${FOLLOWUP_OVERDUE}
+       AND ${LEAD_DUE} < ${d0} AND ${dueForHolder(t, LEAD_DUE)} < ${d0}
     UNION ALL
-    SELECT r.agent_id, r.id, (r.follow_up->>'at')::timestamptz, 'followup_tomorrow', NULL FROM crm_leads r
+    SELECT r.agent_id, r.id, ${LEAD_DUE}, 'followup_today', NULL FROM crm_leads r
      WHERE r.tenant_id = ${t} AND r.agent_id IS NOT NULL AND ${isToday} AND ${OPEN}
-       AND r.follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
-       AND (r.follow_up->>'at')::timestamptz >= ${d1} AND (r.follow_up->>'at')::timestamptz < ${d2}`;
+       AND ${LEAD_DUE} < ${d1} AND ${dueForHolder(t, LEAD_DUE)} >= ${d0}
+    UNION ALL
+    SELECT r.agent_id, r.id, ${LEAD_DUE}, 'followup_tomorrow', NULL FROM crm_leads r
+     WHERE r.tenant_id = ${t} AND r.agent_id IS NOT NULL AND ${isToday} AND ${OPEN}
+       AND ${LEAD_DUE} >= ${d1} AND ${LEAD_DUE} < ${d2}`;
 }
 
 /** An agent reads their own day; the desk reads anybody's. */
@@ -198,7 +245,7 @@ export async function activityDay(opts: { side: Side; date?: string | null; pers
   // `people` is the calls again, counted by person rather than by tap: five
   // calls to one number is five calls and one person. Summing the per-outcome
   // rows would count somebody twice, so it is its own row of the same facts.
-  const counts = await sql`
+  const countsQ = sql`
     WITH f AS (SELECT * FROM (${f}) x WHERE person IS NOT NULL ${person ? sql`AND person = ${person}` : sql``})
     SELECT person, measure, detail, count(*)::int AS n, count(DISTINCT record_id)::int AS records
       FROM f GROUP BY 1, 2, 3
@@ -209,7 +256,7 @@ export async function activityDay(opts: { side: Side; date?: string | null; pers
   // Who is on the desk: every active member (so a person with nothing today
   // still has a row — that is the thing the owner is looking for), plus anybody
   // else who did something.
-  const people = await sql`
+  const peopleQ = sql`
     SELECT u.id, u.name, u.role, coalesce(a.duty_status, 'ACTIVE') AS duty,
            (SELECT count(*)::int FROM ${opts.side === 'leads' ? sql`crm_leads` : sql`crm_owners`} r
              WHERE r.tenant_id = ${t} AND r.agent_id = u.id) AS holding
@@ -217,10 +264,14 @@ export async function activityDay(opts: { side: Side; date?: string | null; pers
      WHERE u.tenant_id = ${t} AND u.deleted_at IS NULL AND lower(u.status) <> 'suspended'
        ${person ? sql`AND u.id = ${person}` : sql``}`;
 
-  const [clock] = await sql`
+  const clockQ = sql`
     SELECT to_char(${date ? sql`${date}::date` : sql`(now() AT TIME ZONE ${tz})::date`}, 'YYYY-MM-DD') AS day,
            to_char((now() AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') AS today,
            extract(hour FROM now() AT TIME ZONE ${tz})::int AS hour`;
+
+  // Three independent reads, sent together: the report is on the dashboard,
+  // and each one waited for the last to come back before it set out.
+  const [counts, people, [clock]] = await Promise.all([countsQ, peopleQ, clockQ]) as any[];
 
   const byPerson = new Map<string, any>();
   for (const p of people as any[]) {

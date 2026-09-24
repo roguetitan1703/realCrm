@@ -506,6 +506,11 @@ export async function initSchema(): Promise<void> {
     // heap lookup per match.
     await sql`CREATE INDEX IF NOT EXISTS idx_crm_timeline_record
               ON crm_timeline_events (tenant_id, record_id, timestamp DESC);`;
+    // A firm's events for one day: the activity report (services/
+    // activityReport.ts) on the dashboard. The index above is by record, so a
+    // day's events meant reading the firm's whole history.
+    await sql`CREATE INDEX IF NOT EXISTS idx_crm_timeline_day
+              ON crm_timeline_events (tenant_id, timestamp);`;
 
     // Widen the singleton config tables (settings / integrations / routing) from
     // ONE global row to one row PER TENANT. They were built single-workspace with

@@ -29,37 +29,57 @@ export default function Clients(props) {
   return <Owners {...props} />
 }
 
-/** Tenants or buyers: the people an agreement names, one row per agreement. */
-function Parties({ store, go, topBar, kind }) {
+/**
+ * Tenants or buyers: the people an agreement names, one row per agreement.
+ * A row opens the FLAT, which is where the agreement lives (renew, end, the
+ * file). The lead they came from is linked on it; it is not the tenant.
+ */
+function Parties({ store, go, topBar, phone, kind }) {
   const { state } = store
   const def = partiesDef(kind)
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const [status, setStatus] = useState('active')
+  const [flt, setFlt] = useState({ status: ['active'] })
+  const [sortKey, setSortKey] = useState('ends')
+  const [sortDir, setSortDir] = useState('asc')
+  const status = flt.status?.[0] || 'all'
   const source = useServerList(
-    (params) => api.listAgreements({ kind, status: status === 'all' ? undefined : status, q: params.q, page: params.page, limit: params.limit })
-      .then(r => ({ data: r?.rows || [], total: r?.total ?? 0 })),
+    (params) => api.listAgreements({
+      kind, status, q: params.q, page: params.page, limit: params.limit,
+      sort: sortKey, dir: sortDir,
+    }).then(r => ({ data: r?.rows || [], total: r?.total ?? 0, counts: r?.counts || {} })),
     { search: q, page, pageSize },
-    [kind, status, state.dataAsOf],
+    [kind, status, sortKey, sortDir, state.dataAsOf],
   )
-  const open = (a) => (a.leadId
-    ? go('leads', { leadId: a.leadId, leadOpen: true })
-    : a.propertyId ? go('properties', { propId: a.propertyId, propOpen: true }) : null)
-  const segs = [
-    { key: 'active', label: kind === 'rent' ? 'Renting now' : 'All sales', on: status === 'active', onClick: () => { setStatus('active'); setPage(1) } },
-    { key: 'all', label: kind === 'rent' ? 'All, with past' : 'With ended', on: status === 'all', onClick: () => { setStatus('all'); setPage(1) } },
-  ]
+  const c = source.counts || {}
+  const facets = {
+    status: kind === 'rent'
+      ? [
+          { value: 'active', label: 'Renting now', count: c.active ?? 0 },
+          { value: 'ending', label: 'Ending in 30 days', count: c.ending ?? 0 },
+          { value: 'past', label: 'Moved out or renewed', count: c.past ?? 0 },
+        ]
+      : [
+          { value: 'active', label: 'Current', count: c.active ?? 0 },
+          { value: 'past', label: 'Ended', count: c.past ?? 0 },
+        ],
+  }
+  const open = (a) => (a.propertyId
+    ? go('properties', { propId: a.propertyId, propOpen: true })
+    : a.leadId ? go('leads', { leadId: a.leadId, leadOpen: true }) : null)
   const { header, toolbar, body } = ModuleListView({
-    def, source, store, onOpen: open,
-    filters: {}, onFilters: () => {},
+    def, source, store, onOpen: open, phone,
+    filters: flt, onFilters: (v) => { setFlt(v); setPage(1) }, facets,
     search: q, onSearch: (v) => { setQ(v); setPage(1) },
-    sortKey: 'ends', onSortKey: () => {}, sortDir: 'asc', onSortDir: () => {},
-    segments: segs, view: 'list', showViewSwitch: false,
+    sortKey, onSortKey: (v) => { setSortKey(v); setPage(1) }, sortDir, onSortDir: (v) => { setSortDir(v); setPage(1) },
+    view: 'list', showViewSwitch: false,
     page, onPage: setPage, pageSize, onPageSize: (v) => { setPageSize(v); setPage(1) },
-    emptyTitle: kind === 'rent' ? 'No tenants yet' : 'No buyers yet',
-    emptyHint: 'A deal closed on a lead lands here.',
-    renderTable: (list) => <ModuleTable def={def} rows={list} store={store} onOpen={open} />,
+    emptyTitle: kind === 'rent' ? 'No tenants here' : 'No buyers here',
+    emptyHint: 'Clear the filter or search.',
+    renderTable: (list, v) => v === 'grid'
+      ? <ModuleCards def={def} rows={list} store={store} onOpen={open} phone={phone} />
+      : <ModuleTable def={def} rows={list} store={store} onOpen={open} />,
   })
   return (
     <>
@@ -72,8 +92,10 @@ function Parties({ store, go, topBar, kind }) {
 
 function Owners({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
-  const [seg, setSeg] = useState('all')
-  const [flt, setFlt] = useState({})
+  // WHAT THEY GAVE US, as a filter: Landlords first, because a flat to let is
+  // the work that comes back every eleven months. Clearing it shows everyone.
+  const [flt, setFlt] = useState({ role: ['Landlord'] })
+  const seg = flt.role?.[0] || 'all'
   const [q, setQ] = useState('')
   const [sortKey, setSortKey] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
@@ -85,7 +107,6 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
   const setQP = (v) => { setQ(v); setPage(1) }
   const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
   const setSortDirP = (v) => { setSortDir(v); setPage(1) }
-  const setSegP = (v) => { setSeg(v); setPage(1) }
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
 
   // Arriving at Contacts is a fresh arrival: an open record must not survive it
@@ -109,7 +130,7 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
       r.listings === 1
         ? `1 listing · ${r.firstTitle || ''}${r.firstType ? ` (${r.firstType})` : ''}`
         : r.listings > 1 ? `${r.listings} listings` : null,
-    ].filter(Boolean).join(' — ') || r.locality || '',
+    ].filter(Boolean).join(' · ') || r.locality || '',
     signal: <StatusTag status={r.role} />,
     onClick: () => setSelClient(r),
   }))
@@ -127,11 +148,13 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
       : Promise.resolve([]),
     [selClient?.id], [])
 
-  // What they have given us: a flat to sell, a flat to let, or both.
-  const roleOptions = [{ key: 'all', label: 'All' }, { key: 'Seller', label: 'Sellers' }, { key: 'Landlord', label: 'Landlords' }]
-  const segs = roleOptions.map(o => ({
-    ...o, on: seg === o.key, count: counts[o.key] ?? 0, onClick: () => setSegP(o.key),
-  }))
+  // What they have given us: a flat to let, a flat to sell, or both.
+  const facets = {
+    roles: [
+      { value: 'Landlord', label: 'Landlords', count: counts.Landlord ?? 0 },
+      { value: 'Seller', label: 'Sellers', count: counts.Seller ?? 0 },
+    ],
+  }
 
   // No KPI strip. It repeated the pills directly under it — "0 Owners · 0
   // Sellers · 0 Landlords" above "All 0 · Sellers 0 · Landlords 0" — the same
@@ -140,10 +163,10 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
   const { header, toolbar, body } = ModuleListView({
     def: CLIENTS_DEF, source: { ...source, rows }, store,
     onOpen: (r) => setSelClient(r),
-    filters: flt, onFilters: setFltP,
+    filters: flt, onFilters: setFltP, facets,
     search: q, onSearch: setQP,
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
-    segments: segs, view, onView: setView,
+    view, onView: setView,
     page, onPage: setPage, pageSize, onPageSize: setPageSizeP,
     // A listing owner is not created here — they exist because a listing names
     // them, so the CTA that adds one is adding the property. Someone you want

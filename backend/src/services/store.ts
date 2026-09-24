@@ -1243,6 +1243,16 @@ if (process.env.CRM_NO_BOOT !== '1') seedDatabase()
     const n = await (await import('./agreements.js')).migrateTenancyBlobs();
     console.log(`[Agreements] moved ${n} tenancy record(s) into agreements`);
   }))
+  // An agreement now keeps its own copy of who signed. Rows made before that
+  // read the name from the lead; this copies it once, so a later edit or delete
+  // of the lead cannot change them. Only fills blanks.
+  .then(() => runOnce('2026_09_25_agreement_party_copy', async () => {
+    const r = await sql`
+      UPDATE crm_agreements a SET party_name = coalesce(a.party_name, l.name), party_phone = coalesce(a.party_phone, l.phone)
+        FROM crm_leads l
+       WHERE l.id = a.lead_id AND l.tenant_id = a.tenant_id AND (a.party_name IS NULL OR a.party_phone IS NULL)`;
+    console.log(`[Agreements] copied the party onto ${r.count} agreement(s)`);
+  }))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
@@ -2341,6 +2351,17 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   return updated;
 }
 
+/**
+ * A deleted lead's agreements stay: they are the firm's record of a deal, and
+ * they carry their own copy of who signed (services/agreements.ts). Only the
+ * link goes, so nothing points at a lead that is not there.
+ */
+async function detachAgreementsFromLeads(ids: string[]) {
+  if (!ids.length) return;
+  await sql`UPDATE crm_agreements SET lead_id = NULL, updated_at = NOW()
+             WHERE tenant_id = ${tid()} AND lead_id IN ${sql(ids)}`;
+}
+
 export async function deleteLead(id: string, ctx: ActorCtx = SYSTEM_CTX): Promise<boolean> {
   const existing = await getLeadById(id);
   if (!existing) return false;
@@ -2351,6 +2372,7 @@ export async function deleteLead(id: string, ctx: ActorCtx = SYSTEM_CTX): Promis
   assertLeadWrite(who?.role, who?.userId, existing, { delete: true });
   const res = await sql`DELETE FROM crm_leads WHERE id = ${id} AND tenant_id = ${tid()}`;
   const ok = res.count > 0;
+  if (ok) await detachAgreementsFromLeads([id]);
   if (ok) {
     audit({
       tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
@@ -2390,6 +2412,7 @@ export async function bulkDeleteLeads(ids: string[], ctx: ActorCtx = SYSTEM_CTX)
   if (!allowed.length) return { deleted: 0, skipped };
 
   const res = await sql`DELETE FROM crm_leads WHERE tenant_id = ${t} AND id IN ${sql(allowed)}`;
+  await detachAgreementsFromLeads(allowed);
   audit({
     tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'lead.bulk_delete', target_type: 'lead', target_id: null,
@@ -3744,6 +3767,15 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
 export async function deleteOwner(id: string, ctx: ActorCtx = SYSTEM_CTX): Promise<boolean> {
   const t = tid();
   const existing = await getOwnerById(id);
+  // THE CALLING ROW IS THE OWNER'S CONTACT. Once a flat of theirs is in
+  // Properties, this row is who the flat belongs to, so deleting it would
+  // leave the flat with an owner that is not there. Refused, with the reason.
+  const [flat] = await sql`SELECT id FROM crm_properties WHERE tenant_id = ${t} AND owner_contact_id = ${id} LIMIT 1`;
+  if (flat) {
+    const e: any = new Error('This owner has a flat in Properties. Take them off the flat first, then delete.');
+    e.status = 422;
+    throw e;
+  }
   const res = await sql`DELETE FROM crm_owners WHERE id = ${id} AND tenant_id = ${t}`;
   if (res.count > 0) {
     audit({
@@ -4671,6 +4703,32 @@ export async function getPropertyBuyers(propertyId: string, limit = 50): Promise
   const shortlistRows = await sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(rows.map(r => r.id).length ? rows.map(r => r.id) : [''])}`;
   const byLead = groupShortlistByLead(shortlistRows);
   return rows.map(r => rowToLead(r, [], byLead.get(r.id) || []));
+}
+
+/**
+ * What the property form sends, made ready for createProperty. `type` is the
+ * LEGACY conflated field ("3 BHK Apartment") that block C split into bhk +
+ * subtype; the form does not send it, so a display string is derived from the
+ * canonical fields — several list views still render p.type verbatim. A title
+ * is optional too: the society/project plus the unit is what a broker calls a
+ * listing. Used by the property form's route AND by the two conversions
+ * (services/agreements.ts), so a flat made either way reads the same.
+ */
+export function prepareListing(body: any): any {
+  if (!body.type && (body.bhk || body.subtype)) {
+    const bhkLabel = body.bhk === '1rk' ? '1 RK'
+      : body.bhk === '5plus' ? '5+ BHK'
+      : body.bhk ? `${body.bhk} BHK` : '';
+    const subLabel = body.subtype
+      ? String(body.subtype).split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+      : '';
+    body.type = [bhkLabel, subLabel].filter(Boolean).join(' ').trim();
+  }
+  if (!body.title) {
+    body.title = [body.society || body.project, body.unit || body.flat].filter(Boolean).join(' - ')
+      || body.type || 'Untitled property';
+  }
+  return body;
 }
 
 export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {

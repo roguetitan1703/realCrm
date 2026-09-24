@@ -10,7 +10,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import {
+import { prepareListing,
   createProperty, getUnits, blockUnit, releaseUnit,
   listProperties, getPropertyById, getPropertiesSummary,
   listProjects, getProject, getPropertyBuyers,
@@ -149,25 +149,7 @@ propertiesRouter.post('/', async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
 
-    // `type` is the LEGACY conflated field ("3 BHK Apartment") that block C
-    // split into bhk + subtype. The new form doesn't send it, so derive a
-    // display string from the canonical fields instead of demanding a value we
-    // are retiring — several list views still render p.type verbatim.
-    if (!body.type && (body.bhk || body.subtype)) {
-      const bhkLabel = body.bhk === '1rk' ? '1 RK'
-        : body.bhk === '5plus' ? '5+ BHK'
-        : body.bhk ? `${body.bhk} BHK` : '';
-      const subLabel = body.subtype
-        ? String(body.subtype).split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-        : '';
-      body.type = [bhkLabel, subLabel].filter(Boolean).join(' ').trim();
-    }
-    // A title is likewise optional now — the society/project plus the unit is
-    // what a broker actually calls a listing.
-    if (!body.title) {
-      body.title = [body.society || body.project, body.unit || body.flat].filter(Boolean).join(' - ')
-        || body.type || 'Untitled property';
-    }
+    prepareListing(body);
     if (!body.type) {
       return res.status(400).json({ error: 'Validation Error', message: 'A property type or configuration is required' });
     }

@@ -181,14 +181,6 @@ export default function Dashboard({ store, go, topBar }) {
           )}
         </div>
 
-        {/* WHAT PEOPLE DID TODAY — the owner's first question, so it sits
-            straight under the tiles. The table at the bottom is the book by
-            agent (what is stuck); this is the day by person (what got done).
-            An agent at a desk sees their own. */}
-        {state.role === 'agent'
-          ? <Panel><MyDay store={store} hasCalling={hasCalling} variant="panel" /></Panel>
-          : <Panel><TeamToday store={store} hasCalling={hasCalling} compact onOpenFull={() => go('team')} /></Panel>}
-
         {/* WHERE THE BOOK COMES FROM. One panel, not two.
             "Leads by stage" went with it: the stage pills on the Leads screen
             and the per-agent table below already answer it, and a bar chart of
@@ -250,6 +242,13 @@ export default function Dashboard({ store, go, topBar }) {
             <DeskTable rows={myRows} onCell={(r, seg) => toLeads(seg ? { agent: [r.a.id], seg } : { agent: [r.a.id] })} />
           </Panel>
         )}
+
+        {/* WHAT PEOPLE DID TODAY, at the bottom of the page (decided 25 Sep):
+            the tiles above are what to do now; this is how the day went, one
+            row per person, and it opens the Team page. An agent sees their own. */}
+        {state.role === 'agent'
+          ? <Panel><MyDay store={store} hasCalling={hasCalling} variant="panel" /></Panel>
+          : <Panel><TeamToday store={store} hasCalling={hasCalling} compact onOpenFull={() => go('team')} /></Panel>}
       </div>
     </>
   )

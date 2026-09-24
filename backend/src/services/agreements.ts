@@ -28,7 +28,7 @@ import { sql } from './db.js';
 import { getContext } from './context.js';
 import { audit } from './audit.js';
 import {
-  createProperty, updateLead, getLeadById, addTimelineEvent, getSettings, projectNorm,
+  createProperty, prepareListing, updateLead, getLeadById, addTimelineEvent, getSettings, projectNorm,
   type ActorCtx,
 } from './store.js';
 import { finalStageOf } from '../../../src/data/pipelineRoles.js';
@@ -64,7 +64,7 @@ function flatLabel(p: any, fallback?: string | null): string {
 const SELECT = sql`
   SELECT a.*, to_char(a.start_date, 'YYYY-MM-DD') AS start_ymd, to_char(a.end_date, 'YYYY-MM-DD') AS end_ymd,
          p.title AS p_title, p.project AS p_project, p.wing AS p_wing, p.unit_no AS p_unit, p.status AS p_status,
-         l.name AS l_name, l.phone AS l_phone,
+         l.id AS l_id, l.name AS l_name, l.phone AS l_phone,
          o.name AS o_name, o.phone AS o_phone,
          (a.end_date - (now() AT TIME ZONE 'Asia/Kolkata')::date) AS days_left
     FROM crm_agreements a
@@ -81,9 +81,16 @@ export function rowToAgreement(r: any) {
     propertyId: r.property_id || null, property,
     flat: flatLabel(property ? { project: r.p_project, wing: r.p_wing, unit_no: r.p_unit, title: r.p_title } : null, r.property_label),
     propertyLabel: r.property_label || null,
-    leadId: r.lead_id || null,
-    // The tenant or buyer: the lead who closed, or a name recorded without one.
-    party: { name: r.l_name || r.party_name || null, phone: r.l_phone || r.party_phone || null },
+    // The lead they came from, while it exists. Only a link: deleting the lead
+    // or editing it does not change who signed.
+    leadId: r.l_id || null,
+    lead: r.l_id ? { id: r.l_id, name: r.l_name || null, phone: r.l_phone || null } : null,
+    // THE TENANT OR BUYER, as the agreement names them. Copied from the lead
+    // when the deal closed (createAgreement) and edited here, never read live
+    // from the lead: a lead can be renamed, reopened or deleted, and none of
+    // that changes who signed. The lead is the fallback only for a row saved
+    // before the copy existed.
+    party: { name: r.party_name || r.l_name || null, phone: r.party_phone || r.l_phone || null },
     ownerId: r.owner_id || null,
     owner: r.owner_id ? { name: r.o_name || null, phone: r.o_phone || null } : null,
     agentId: r.agent_id || null,
@@ -97,38 +104,70 @@ export function rowToAgreement(r: any) {
   };
 }
 
+/** "Ending soon": a live rent ending within this many days, or already past its end. */
+export const ENDING_SOON_DAYS = 30;
+const TODAY_IST = sql`(now() AT TIME ZONE 'Asia/Kolkata')::date`;
+
 export async function listAgreements(opts: {
-  kind?: string; status?: string; leadId?: string; propertyId?: string; ownerId?: string;
-  q?: string; page?: number; limit?: number;
+  kind?: string; status?: string; leadId?: string; propertyId?: string; ownerId?: string; agentId?: string;
+  q?: string; sort?: string; dir?: string; page?: number; limit?: number;
 } = {}) {
   const t = tid();
   const limit = Math.min(Math.max(Number(opts.limit) || 25, 1), 200);
   const page = Math.max(Number(opts.page) || 1, 1);
   const where: any[] = [sql`a.tenant_id = ${t}`];
   if (opts.kind === 'rent' || opts.kind === 'sale') where.push(sql`a.kind = ${opts.kind}`);
-  if (opts.status) where.push(sql`a.status = ${opts.status}`);
+  // `status` is what the Tenants and Buyers lists filter by. "ending" is the
+  // renewal work: a live rent that ends within ENDING_SOON_DAYS or is past its
+  // end with nobody having renewed or ended it. "past" is ended or renewed.
+  if (opts.status === 'ending') {
+    where.push(sql`a.kind = 'rent' AND a.status = 'active' AND a.end_date IS NOT NULL AND a.end_date <= ${TODAY_IST} + ${ENDING_SOON_DAYS}::int`);
+  } else if (opts.status === 'past') {
+    where.push(sql`a.status IN ('ended', 'renewed')`);
+  } else if (opts.status && opts.status !== 'all') {
+    where.push(sql`a.status = ${opts.status}`);
+  }
+  if (opts.agentId) where.push(opts.agentId === '_none' ? sql`a.agent_id IS NULL` : sql`a.agent_id = ${opts.agentId}`);
   if (opts.leadId) where.push(sql`a.lead_id = ${opts.leadId}`);
   if (opts.propertyId) where.push(sql`a.property_id = ${opts.propertyId}`);
   if (opts.ownerId) where.push(sql`a.owner_id = ${opts.ownerId}`);
   const q = String(opts.q || '').trim().toLowerCase();
   if (q) {
     const like = `%${q}%`;
-    where.push(sql`(lower(coalesce(l.name, a.party_name, '')) LIKE ${like} OR coalesce(l.phone, a.party_phone, '') LIKE ${like}
+    where.push(sql`(lower(coalesce(a.party_name, l.name, '')) LIKE ${like} OR coalesce(a.party_phone, l.phone, '') LIKE ${like}
       OR lower(coalesce(p.project, a.property_label, '')) LIKE ${like} OR lower(coalesce(p.unit_no, '')) LIKE ${like})`);
   }
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
-  // Live rents by how soon they end — the order a desk works renewals in —
-  // then everything else newest first.
+  // Default: live rents by how soon they end (the order a desk works renewals
+  // in), then everything else newest first.
+  const dir = opts.dir === 'desc' ? sql`DESC` : sql`ASC`;
+  const order = opts.sort === 'name' ? sql`lower(coalesce(a.party_name, l.name, '')) ${dir}, a.created_at DESC`
+    : opts.sort === 'start' ? sql`a.start_date ${dir} NULLS LAST, a.created_at DESC`
+    : opts.sort === 'amount' ? sql`a.amount ${dir} NULLS LAST, a.created_at DESC`
+    : sql`(a.kind = 'rent' AND a.status = 'active') DESC, a.end_date ${dir} NULLS LAST, a.created_at DESC`;
   const rows = await sql`
     ${SELECT} WHERE ${clause}
-    ORDER BY (a.kind = 'rent' AND a.status = 'active') DESC, a.end_date ASC NULLS LAST, a.created_at DESC
+    ORDER BY ${order}
     LIMIT ${limit} OFFSET ${(page - 1) * limit}`;
   const [{ n }] = await sql`
     SELECT count(*)::int AS n FROM crm_agreements a
       LEFT JOIN crm_properties p ON p.id = a.property_id AND p.tenant_id = a.tenant_id
       LEFT JOIN crm_leads l ON l.id = a.lead_id AND l.tenant_id = a.tenant_id
      WHERE ${clause}`;
-  return { rows: rows.map(rowToAgreement), total: n, page, limit };
+  // The counts beside the status filter, for one kind. Same table, same kind,
+  // none of the other filters: they say how many of each there are.
+  let counts: Record<string, number> | undefined;
+  if (opts.kind === 'rent' || opts.kind === 'sale') {
+    const [c] = await sql`
+      SELECT count(*) FILTER (WHERE status = 'active')::int AS active,
+             count(*) FILTER (WHERE kind = 'rent' AND status = 'active' AND end_date IS NOT NULL
+                                AND end_date <= ${TODAY_IST} + ${ENDING_SOON_DAYS}::int)::int AS ending,
+             count(*) FILTER (WHERE status IN ('ended', 'renewed'))::int AS past,
+             count(*)::int AS "all"
+        FROM crm_agreements WHERE tenant_id = ${t} AND kind = ${opts.kind}`;
+    counts = c as any;
+  }
+  return { rows: rows.map(rowToAgreement), total: n, page, limit, counts };
 }
 
 export async function getAgreement(id: string) {
@@ -162,15 +201,30 @@ export async function createAgreement(input: any, ctx: ActorCtx = {}, opts: { re
     const [live] = await sql`SELECT id FROM crm_agreements WHERE tenant_id = ${t} AND lead_id = ${lead.id} AND status = 'active' LIMIT 1`;
     if (live) throw new AgreementError('This deal is already recorded.', 409, live.id);
   }
-  const partyName = lead ? null : (String(input.partyName || '').trim() || null);
-  if (!lead && !partyName) throw new AgreementError(`Add the ${kind === 'rent' ? 'tenant' : 'buyer'}'s name.`);
+  // Who signed, copied onto the agreement — see rowToAgreement. The form fills
+  // it from the lead and the person may correct it.
+  const partyName = String(input.partyName ?? '').trim() || lead?.name || null;
+  const partyPhone = String(input.partyPhone ?? '').trim() || lead?.phone || null;
+  if (!partyName && !partyPhone) throw new AgreementError(`Add the ${kind === 'rent' ? 'tenant' : 'buyer'}'s name.`);
 
-  const [property] = input.propertyId
+  let [property] = input.propertyId
     ? await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id = ${input.propertyId}`
     : [null];
   if (input.propertyId && !property) throw new AgreementError('That flat is not in this workspace.', 404);
+  // NOT ONE OF OUR FLATS: the form sends the flat's details and it becomes a
+  // property record, let or sold from the start. The firm did the deal, so the
+  // flat is now one it knows, and a renewal or a resale has somewhere to live.
+  if (!property && input.newProperty && typeof input.newProperty === 'object') {
+    const np = { ...input.newProperty };
+    if (!String(np.locality || '').trim()) throw new AgreementError('Add the locality of the flat.');
+    if (!np.bhk && !np.subtype && !np.type) throw new AgreementError('Add what kind of flat it is.');
+    const created = await createProperty(prepareListing({
+      ...np, deal: kind, status: kind === 'rent' ? 'Leased' : 'Sold', price: amount, source: 'Agreement',
+    }), ctx);
+    [property] = await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id = ${created.id}`;
+  }
   const label = property ? null : (String(input.propertyLabel || '').trim() || null);
-  if (!property && !label) throw new AgreementError('Pick the flat, or describe it if it is not one of ours.');
+  if (!property && !label) throw new AgreementError('Pick the flat, or add its details if it is not one of ours.');
 
   const id = `agr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const actor = actorOf(ctx);
@@ -178,7 +232,7 @@ export async function createAgreement(input: any, ctx: ActorCtx = {}, opts: { re
     INSERT INTO crm_agreements (id, tenant_id, kind, status, property_id, property_label, owner_id, lead_id,
       party_name, party_phone, agent_id, amount, deposit, start_date, end_date, file_key, file_name, renews_id, notes, created_by)
     VALUES (${id}, ${t}, ${kind}, 'active', ${property?.id ?? null}, ${label}, ${property?.owner_contact_id ?? input.ownerId ?? null},
-      ${lead?.id ?? null}, ${partyName}, ${lead ? null : (String(input.partyPhone || '').trim() || null)},
+      ${lead?.id ?? null}, ${partyName}, ${partyPhone},
       ${lead?.agentId ?? input.agentId ?? actor}, ${amount}, ${money(input.deposit)},
       ${start}::date,
       -- Eleven months is the leave-and-licence term nearly every Pune rent is
@@ -209,7 +263,7 @@ export async function createAgreement(input: any, ctx: ActorCtx = {}, opts: { re
   }
   if (property) {
     await addTimelineEvent({ record_id: property.id, type: 'agreement', title: kind === 'rent' ? 'Let' : 'Sold',
-      description: `${what} — ${saved!.party.name || 'the ' + (kind === 'rent' ? 'tenant' : 'buyer')}`,
+      description: `${what}, to ${saved!.party.name || 'the ' + (kind === 'rent' ? 'tenant' : 'buyer')}`,
       author: actor || 'System', metadata: { agreementId: id, kind } });
   }
   audit({
@@ -233,6 +287,12 @@ export async function updateAgreement(id: string, patch: any, ctx: ActorCtx = {}
   if (patch.endDate !== undefined) next.end_date = before.kind === 'rent' ? ymd(patch.endDate) : null;
   if (patch.fileKey !== undefined) { next.file_key = patch.fileKey || null; next.file_name = patch.fileName || null; }
   if (patch.notes !== undefined) next.notes = String(patch.notes || '').trim() || null;
+  if (patch.partyName !== undefined) {
+    const n = String(patch.partyName || '').trim();
+    if (!n) throw new AgreementError('The name cannot be empty.');
+    next.party_name = n;
+  }
+  if (patch.partyPhone !== undefined) next.party_phone = String(patch.partyPhone || '').trim() || null;
   if (!Object.keys(next).length) return before;
   const start = next.start_date ?? before.startDate;
   const end = next.end_date !== undefined ? next.end_date : before.endDate;
@@ -264,7 +324,7 @@ export async function renewAgreement(id: string, input: any, ctx: ActorCtx = {})
   try {
     return await createAgreement({
       kind: 'rent', leadId: old.leadId, propertyId: old.propertyId, propertyLabel: old.propertyLabel,
-      partyName: old.leadId ? null : old.party.name, partyPhone: old.leadId ? null : old.party.phone,
+      partyName: old.party.name, partyPhone: old.party.phone,
       ownerId: old.ownerId, agentId: old.agentId,
       amount: input.amount ?? old.amount, deposit: input.deposit ?? old.deposit,
       startDate: start, endDate: input.endDate, fileKey: input.fileKey, fileName: input.fileName, notes: input.notes,
@@ -319,15 +379,18 @@ export async function convertOwner(ownerId: string, input: any, ctx: ActorCtx = 
     const [p] = await sql`SELECT id FROM crm_properties WHERE tenant_id = ${t} AND id = ${o.converted_property_id}`;
     if (p) throw new AgreementError('Already in Properties.', 409, p.id);
   }
-  const deal = input.deal === 'rent' || input.deal === 'sale' ? input.deal : null;
+  // THE PROPERTY FORM'S OWN FIELDS (PropertyWizard, opened from the calling
+  // row and filled in from it), so a converted flat is described exactly as a
+  // hand-added one: property type and BHK from the catalogue, not a typed
+  // "1 BHK Independent House".
+  const f = { ...(input.property || input) };
+  const deal = f.deal === 'rent' || f.deal === 'sale' ? f.deal : null;
   if (!deal) throw new AgreementError('Say whether the owner wants to rent it out or sell it.');
-  const type = String(input.type || o.config || '').trim();
-  if (!type) throw new AgreementError('Add the configuration — 2 BHK, 3 BHK, shop…');
-  const locality = String(input.locality || o.locality || '').trim();
-  if (!locality) throw new AgreementError('Add the locality.');
-  const project = String(input.project ?? o.project ?? '').trim() || null;
-  const tower = String(input.tower ?? o.tower ?? '').trim() || null;
-  const unitNo = String(input.unitNo ?? o.unit_no ?? '').trim() || null;
+  if (!String(f.locality || '').trim()) throw new AgreementError('Add the locality.');
+  if (!f.bhk && !f.subtype && !f.type) throw new AgreementError('Add the property type.');
+  const project = String(f.society ?? f.project ?? o.project ?? '').trim() || null;
+  const tower = String(f.tower ?? f.wing ?? o.tower ?? '').trim() || null;
+  const unitNo = String(f.unit ?? f.unitNo ?? o.unit_no ?? '').trim() || null;
 
   // THE SAME FLAT, if we already list it.
   const [same] = unitNo ? await sql`
@@ -339,7 +402,7 @@ export async function convertOwner(ownerId: string, input: any, ctx: ActorCtx = 
      LIMIT 1` : [];
 
   const actor = actorOf(ctx);
-  const keyNote = `Key with us — received from ${o.name || 'the owner'}`;
+  const keyNote = `Key with us, received from ${o.name || 'the owner'}`;
   let propertyId: string;
   let attached = false;
   if (same) {
@@ -352,18 +415,17 @@ export async function convertOwner(ownerId: string, input: any, ctx: ActorCtx = 
         key_access = coalesce(nullif(key_access, ''), ${keyNote})
        WHERE tenant_id = ${t} AND id = ${propertyId}`;
   } else {
-    const created = await createProperty({
-      title: [project, [tower, unitNo].filter(Boolean).join('-')].filter(Boolean).join(' - ') || undefined,
-      project, wing: tower || undefined, unitNo: unitNo || undefined, unit_no: unitNo || undefined,
-      type, locality, deal,
-      price: money(input.price) ?? '',
-      furnishing: input.furnishing || null,
-      availableFrom: ymd(input.availableFrom) || undefined,
-      carpet: o.carpet_area ?? undefined,
+    const created = await createProperty(prepareListing({
+      ...f,
+      society: project || undefined, project: project || undefined,
+      tower: tower || undefined, wing: tower || undefined,
+      unit: unitNo || undefined, unit_no: unitNo || undefined,
+      deal, status: 'Available',
+      carpet: f.carpet ?? o.carpet_area ?? undefined,
       owner: o.name || null, ownerPhone: o.phone || null, ownerEmail: o.email || null,
-      keyAccess: keyNote,
+      keyAccess: f.keyAccess || keyNote,
       source: 'Calling',
-    }, ctx);
+    }), ctx);
     propertyId = created.id;
     // createProperty links the owner it finds by flat; this row IS the owner,
     // said explicitly so a near-miss in that lookup cannot pick someone else.
@@ -380,7 +442,7 @@ export async function convertOwner(ownerId: string, input: any, ctx: ActorCtx = 
     description: `${o.name || 'The owner'} handed over the key`, author: actor || 'System', metadata: { ownerId: o.id } });
   audit({ tenant_id: t, actor_type: ctx.actorType || 'user', actor_id: actor, actor_label: ctx.actorLabel ?? null,
     action: 'owner.convert', target_type: 'owner', target_id: o.id,
-    summary: `${o.name || 'Owner'} converted — ${flat}${attached ? ' (linked to the existing listing)' : ''}`,
+    summary: `${o.name || 'Owner'} converted: ${flat}${attached ? ' (linked to the existing listing)' : ''}`,
     metadata: { propertyId, attached } });
   return { propertyId, attached, flat };
 }

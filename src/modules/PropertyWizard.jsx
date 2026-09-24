@@ -8,8 +8,9 @@ import {
   CONSULTING_DAYS, CONSULTING_PERCENT, COUNT_0_3, DEALS, DEPOSIT_OPTIONS, FACING,
   LOCKIN_OPTIONS, MAINTENANCE_MODE, OPEN_SIDES, OWNERSHIP, PAINTING_CHARGES,
   POSSESSION, PRICE_INCLUDES, SUBTYPES, TENANT_TYPES, TRANSACTION,
-  appliesTo, areaFieldsFor, countsFor, isPlot,
+  appliesTo, areaFieldsFor, countsFor, isPlot, normaliseBhk, normaliseSubtype,
 } from '../data/propertyFields.js'
+import { api } from '../lib/api.js'
 
 // ============================================================================
 // 🏗️ PropertyWizard — the stepped add/edit PAGE (spec: properties.md C-add)
@@ -369,12 +370,36 @@ function MediaPicker({ media = [], firmName, onChange, onError }) {
   )
 }
 
+/**
+ * CONVERT TO PROPERTY starts from the calling row: the same form a listing is
+ * added with, filled in from what the caller already knows, so the flat is
+ * described in the catalogue's words (type, BHK) and not typed as a phrase.
+ */
+function fromOwner(o) {
+  if (!o) return null
+  const config = o.config || ''
+  return {
+    ...blank(),
+    // The calling row does not say whether the owner is selling or letting,
+    // and "sale" in its place would be a guess saved as a fact. Asked.
+    deal: '',
+    society: o.project || '', tower: o.tower || '', unit: o.unitNo || '',
+    locality: o.locality || '',
+    bhk: normaliseBhk(config) || '',
+    subtype: normaliseSubtype(config) || 'apartment',
+    carpet: o.carpetArea || '',
+  }
+}
+
 export default function PropertyWizard({ store, go, sel, topBar, phone }) {
   const editing = store.lookup('property', sel?.propId)
+  const ownerId = !editing ? sel?.propFromOwner : null
+  const owner = ownerId ? store.lookup('owner', ownerId) : null
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(() => {
     if (editing) return { ...blank(), ...editing }
+    if (ownerId) return fromOwner(owner) || blank()
     // Arriving from a project's page: start inside that project.
     if (sel?.propProject) return { ...blank(), society: sel.propProject, project: sel.propProject }
     // A half-typed listing survives a refresh or an accidental navigation —
@@ -400,10 +425,17 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
     }
   }, [editing?.id])
 
+  // A reload on a conversion lands here with no calling row cached yet.
+  useEffect(() => {
+    if (!ownerId || owner) return
+    api.getOwner(ownerId).then(r => { if (r?.owner) { store.cacheRecords('owner', [r.owner]); setForm(fromOwner(r.owner)) } }).catch(() => {})
+  }, [ownerId])
+
   // Persist the draft on every change — but never for an edit, or a half-made
   // change to an existing listing would resurface as a "new property" draft.
+  // Nor for a conversion: that form belongs to one calling row.
   useEffect(() => {
-    if (editing) return
+    if (editing || ownerId) return
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(form)) } catch { /* quota */ }
   }, [form, editing])
 
@@ -422,6 +454,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
   // The minimum that makes a listing matchable at all.
   const missing = useMemo(() => {
     const m = []
+    if (!form.deal) m.push('rent or sell')
     if (!form.locality) m.push('locality')
     if (!form.subtype) m.push('property type')
     if (applies.bhk && !form.bhk) m.push('configuration')
@@ -429,7 +462,9 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
     return m
   }, [form, applies.bhk])
 
-  const close = () => go('properties', { propAdd: false, propId: null })
+  const close = () => (ownerId
+    ? go('calling', { ownerId, ownerOpen: true })
+    : go('properties', { propAdd: false, propId: null }))
 
   const save = async (again = false) => {
     if (missing.length) { store.toast(`Add the ${missing[0]} first`, 'warn'); return }
@@ -440,6 +475,17 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
         store.updateProp(editing.id, payload)
         store.toast('Property updated')
         close()
+        return
+      }
+      if (ownerId) {
+        try {
+          const r = await api.convertOwner(ownerId, { property: payload })
+          store.toast(r?.attached ? 'Linked to the flat already in Properties' : 'Added to Properties')
+          store.touched()
+          close()
+        } catch (e) {
+          store.toast(String(e?.message || e).replace(/^API Error: \d+ [^—]*— ?/, '') || 'Could not save.', 'warn')
+        }
         return
       }
       // Only clear the draft and leave the page once the server has actually
@@ -467,6 +513,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
   }
 
   const discard = () => {
+    if (ownerId) { close(); return }
     if (!editing && !window.confirm('Discard this draft?')) return
     if (!editing) { try { localStorage.removeItem(DRAFT_KEY) } catch { /* nothing to clear */ } }
     close()
@@ -487,8 +534,8 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
   return (
     <>
       {topBar({
-        eyebrow: editing ? 'Edit property' : 'New property',
-        title: form.society || form.project || (editing ? editing.society : 'Add a property'),
+        eyebrow: editing ? 'Edit property' : ownerId ? 'Convert to property' : 'New property',
+        title: form.society || form.project || (editing ? editing.society : ownerId ? (owner?.name || 'Owner') : 'Add a property'),
         onBack: close,
       })}
       {/* NOT another `.app-body` — the shell already renders one around this,
@@ -505,8 +552,8 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
           {/* ---- rail ---- */}
           <aside className="pw-rail">
             <div className="pw-rail-head">
-              <div className="pw-rail-t">{editing ? 'Edit listing' : 'Add a property'}</div>
-              <div className="pw-rail-s">{editing ? 'Changes save when you finish' : 'Saved as you go'}</div>
+              <div className="pw-rail-t">{editing ? 'Edit listing' : ownerId ? 'Convert to property' : 'Add a property'}</div>
+              <div className="pw-rail-s">{editing ? 'Changes save when you finish' : ownerId ? `From ${owner?.name || 'the calling list'}` : 'Saved as you go'}</div>
             </div>
             {/* Quiet by spec: an internal indicator, not a "complete your
                 profile" nag. A hairline and a muted line — no per-step "+20%"
@@ -536,7 +583,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
             </ol>
             <div className="pw-rail-foot">
               <button type="button" className="pw-discard" onClick={discard}>
-                {editing ? 'Cancel' : 'Discard draft'}
+                {editing || ownerId ? 'Cancel' : 'Discard draft'}
               </button>
             </div>
           </aside>
@@ -843,14 +890,14 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                     is adding that flat. Three actions do not fit a phone
                     footer, and the one that would have been squeezed out is
                     the primary. */}
-                {step >= 1 && !editing && !phone && (
+                {step >= 1 && !editing && !ownerId && !phone && (
                   <Button variant="ghost" disabled={saving || missing.length > 0} onClick={() => save(true)}>
                     Save &amp; add another
                   </Button>
                 )}
                 {step >= 1 && (
                   <Button variant="primary" disabled={saving || missing.length > 0} onClick={() => save(false)}>
-                    {saving ? 'Saving…' : editing ? 'Save changes' : 'Save property'}
+                    {saving ? 'Saving…' : editing ? 'Save changes' : ownerId ? 'Add to Properties' : 'Save property'}
                   </Button>
                 )}
                 {step < STEPS.length - 1 && (

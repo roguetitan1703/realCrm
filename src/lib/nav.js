@@ -23,7 +23,7 @@
 import { currentTenant } from './api.js'
 
 export const TAKEOVER_KEYS = [
-  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'projOpen', 'projKey',
+  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'propFromOwner', 'projOpen', 'projKey',
   'leadFilters', 'propFilters', 'ownerSeg', 'ownerStage', 'contactsTab',
 ]
 
@@ -36,7 +36,7 @@ export const TAKEOVER_KEYS = [
 // full unfiltered book. These are the keys that mean "a record took the screen
 // over", and a navigation made only of them keeps the filters underneath.
 export const RECORD_KEYS = [
-  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'projOpen', 'projKey',
+  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propFromOwner', 'projOpen', 'projKey',
 ]
 
 // ── One filter bag, in the URL ──────────────────────────────────────────────
@@ -98,6 +98,8 @@ export function parseUrl(search = window.location.search) {
       propId: prop || undefined, propOpen: !!prop,
       projKey: project || undefined, projOpen: !!project,
       propAdd: p.get('new') === 'property' || undefined,
+      // Convert to property: the property form, filled in from this calling row.
+      propFromOwner: (p.get('new') === 'property' && p.get('from-owner')) || undefined,
       // Contacts' tab — Owners / Tenants / Buyers — so a reload stays on it.
       contactsTab: ['tenants', 'buyers'].includes(p.get('tab')) ? p.get('tab') : undefined,
       leadFilters: readFilters(p),
@@ -124,6 +126,7 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (sel.propOpen && sel.propId) p.set('prop', sel.propId)
   if (sel.projOpen && sel.projKey) p.set('project', sel.projKey)
   if (sel.propAdd) p.set('new', 'property')
+  if (sel.propAdd && sel.propFromOwner) p.set('from-owner', sel.propFromOwner)
   if (screen === 'clients' && sel.contactsTab && sel.contactsTab !== 'owners') p.set('tab', sel.contactsTab)
   writeFilters(p, sel.leadFilters)
   writePropFilters(p, sel.propFilters)

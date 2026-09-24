@@ -2,15 +2,27 @@
 // WHAT SOMEBODY DID — "My day" for an agent, "Team today" for the desk
 // ============================================================================
 // Every number is counted by services/activityReport.ts from actions a person
-// took, and every number opens the people behind it from the same query. The
-// rules for the words are in docs/specs/mahalaxmi-batch.md ("Agent activity —
-// the business first"); the ones that shape this file:
+// took, and every number opens the people behind it from the same query.
 //
-//   • broker's verbs, never product words — "calls", "notes", "site visits";
-//   • a call is a tap, so "answered" only ever comes from a written outcome,
-//     and calls with none are counted out loud;
-//   • a status change reads as what the customer now is — "4 Interested";
-//   • Leads | Calling is a switch, never both on one screen.
+// WHO READS IT, and so what is on the first line:
+//   • the owner, at a desk: who needs a word today. Each person is ONE row of
+//     three answers (how much calling, what it moved, what is left undone)
+//     and the rest waits behind a click. It was every count on one screen,
+//     a sheet of numbers nobody could read in the time they had;
+//   • the agent, on a phone: how my day is going and what I still owe.
+//
+// THE WORDS are a broker's and a school English reader's: "calls", "picked
+// up", "missed follow-ups". No dashes, no product words. A call is a tap, so
+// "picked up" only ever comes from an outcome somebody wrote down.
+//
+// A NUMBER IN RED IS SOMEBODY BEING TOLD OFF, so each has a fair rule, written
+// once in the report's header: a follow-up is missed only once its day has
+// ended, counted from the day it became theirs; a new lead counts as not
+// called after an hour; "no calls" shows after noon, for agents on duty who
+// hold records on that side.
+//
+// Leads | Calling is a switch beside the title, never both on one screen, and
+// each side is its own set of facts: calls to leads, or calls to owners.
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -19,36 +31,35 @@ import { Segmented } from './primitives.jsx'
 import Icon from './Icon.jsx'
 import { stageLabel } from '../data/pipelineRoles.js'
 
-// ── Words ───────────────────────────────────────────────────────────────────
-const plural = (n, one, many) => `${n.toLocaleString('en-IN')} ${n === 1 ? one : many}`
+// ── Reading one person's counts ─────────────────────────────────────────────
+const fmt = (n) => Number(n || 0).toLocaleString('en-IN')
+const word = (n, one, many) => (n === 1 ? one : many)
 
 /** What a call's written outcome says about whether anybody picked up. */
-const REACH_WORDS = [
-  ['answered', 'answered', 'answered'],
-  ['no_answer', 'not received', 'not received'],
-  ['unreachable', 'busy or off', 'busy or off'],
+const REACH = [
+  ['answered', 'picked up', 'picked up'],
+  ['no_answer', 'did not pick up', 'did not pick up'],
+  ['unreachable', 'busy or switched off', 'busy or switched off'],
   ['wrong_number', 'wrong number', 'wrong numbers'],
-  ['no_outcome', 'no outcome written', 'no outcome written'],
+  ['no_outcome', 'result not written', 'result not written'],
 ]
+const REACH_LABEL = Object.fromEntries(REACH.map(([k, one]) => [k, one]))
 
-/** Title for the list a number opens. */
-const MEASURE_TITLE = {
-  call: 'Calls', people: 'People called', whatsapp: 'WhatsApps', note: 'Notes', visit: 'Site visits',
-  status: 'Now', followup_set: 'Booked', followup_done: 'Done', followup_late: 'Late', followup_tomorrow: 'Due tomorrow',
-  came_in: 'Came in',
-}
-const DETAIL_TITLE = {
-  answered: 'answered', no_answer: 'not received', unreachable: 'busy or off', wrong_number: 'wrong number',
-  no_outcome: 'no outcome written', called: 'called', not_called: 'not called yet',
-}
-
-// ── Reading one person's counts ─────────────────────────────────────────────
 function tally(person) {
   const c = person?.counts || []
   const n = (measure, detail) => c.filter(x => x.measure === measure && (detail === undefined || x.detail === detail))
     .reduce((s, x) => s + x.n, 0)
   const statuses = c.filter(x => x.measure === 'status').sort((a, b) => b.n - a.n)
-  return { n, statuses }
+  return {
+    n, statuses,
+    calls: n('call'),
+    pickedUp: n('call', 'answered'),
+    people: c.find(x => x.measure === 'people')?.n || 0,
+    missed: n('followup_missed'),
+    dueToday: n('followup_today'),
+    notCalled: n('came_in', 'not_called'),
+    effort: n('call') + n('whatsapp') + n('note') + n('status') + n('visit') + n('followup_set') + n('followup_done'),
+  }
 }
 
 const shiftDay = (ymd, by) => {
@@ -58,7 +69,7 @@ const shiftDay = (ymd, by) => {
 }
 const dayName = (day, today) => day === today ? 'Today' : day === shiftDay(today, -1) ? 'Yesterday' : dayLabel(day)
 
-/** The side a person starts on — per viewer, per workspace, and only a convenience. */
+/** The side a person starts on: per viewer, per workspace, and only a convenience. */
 function useSide(defaultSide) {
   const key = `crm_activity_side_${window.location.pathname.split('/')[1] || ''}`
   const [side, setSide] = useState(() => {
@@ -68,298 +79,284 @@ function useSide(defaultSide) {
   return [side, pick]
 }
 
-function DayStepper({ day, today, onDay }) {
-  if (!day) return null
-  return (
-    <span className="ad-day">
-      <button type="button" aria-label="Day before" onClick={() => onDay(shiftDay(day, -1))}><Icon name="chevLeft" size={15} /></button>
-      <span className="ad-day-l">{dayName(day, today)}</span>
-      <button type="button" aria-label="Day after" disabled={day >= today} onClick={() => onDay(shiftDay(day, 1))}><Icon name="chevRight" size={15} /></button>
-    </span>
-  )
-}
-
-/** A number and its word, opening the people behind it. Zero is not a link. */
-function Num({ n, children, onOpen, tone, pre, joined }) {
-  if (!n) return null
-  return (
-    <button type="button" className={'ad-num' + (tone ? ` ${tone}` : '') + (joined ? ' joined' : '')} onClick={onOpen}>
-      {pre && `${pre} `}<b>{n.toLocaleString('en-IN')}</b> {children}
-    </button>
-  )
-}
-
-function Line({ head, children }) {
-  // A Num with nothing to count renders nothing, but its element is still
-  // truthy — so a line of zeroes kept its heading. Counted by what shows.
-  const items = [children].flat(3).filter(el => el && (el.type !== Num || el.props.n > 0))
-  if (!items.length) return null
-  return (
-    <div className="ad-line">
-      <span className="ad-head">{head}</span>
-      <span className="ad-items">{items}</span>
-    </div>
-  )
-}
-
-// ── The day, for one person ─────────────────────────────────────────────────
-function DayLines({ person, side, isToday, open, hideCalls }) {
-  const { n, statuses } = tally(person)
-  const calls = n('call')
-  return (
-    <>
-      {!hideCalls && <Line head="Calls">
-        {calls
-          ? <button key="c" type="button" className="ad-num" onClick={() => open('call')}><b>{calls}</b> {calls === 1 ? 'call' : 'calls'}</button>
-          : <span key="c0" className="ad-zero">0 calls</span>}
-        {calls > 0 && person.people > 0 && (
-          <Num key="p" n={person.people} pre="to" joined onOpen={() => open('people')}>{person.people === 1 ? 'person' : 'people'}</Num>
-        )}
-        {REACH_WORDS.map(([k, one, many]) => (
-          <Num key={k} n={n('call', k)} tone={k === 'no_outcome' ? 'quiet' : ''}
-            onOpen={() => open('call', k)}>{n('call', k) === 1 ? one : many}</Num>
-        ))}
-      </Line>}
-      <Line head="Also">
-        <Num key="w" n={n('whatsapp')} onOpen={() => open('whatsapp')}>{n('whatsapp') === 1 ? 'WhatsApp' : 'WhatsApps'}</Num>
-        <Num key="n" n={n('note')} onOpen={() => open('note')}>{n('note') === 1 ? 'note' : 'notes'}</Num>
-        {side === 'leads' && <Num key="v" n={n('visit')} onOpen={() => open('visit')}>{n('visit') === 1 ? 'site visit' : 'site visits'}</Num>}
-      </Line>
-      <Line head="Now">
-        {statuses.map(s => (
-          <Num key={s.detail} n={s.n} onOpen={() => open('status', s.detail)}>{stageLabel(s.detail)}</Num>
-        ))}
-      </Line>
-      <Line head={side === 'calling' ? 'Callbacks' : 'Follow-ups'}>
-        <Num key="s" n={n('followup_set')} onOpen={() => open('followup_set')}>booked</Num>
-        {side === 'leads' && <Num key="d" n={n('followup_done')} onOpen={() => open('followup_done')}>done</Num>}
-        {isToday && <Num key="l" n={n('followup_late')} tone="alert" onOpen={() => open('followup_late')}>late</Num>}
-        {isToday && <Num key="t" n={n('followup_tomorrow')} onOpen={() => open('followup_tomorrow')}>due tomorrow</Num>}
-      </Line>
-      {side === 'leads' && (
-        <Line head="New">
-          <Num key="i" n={n('came_in')} onOpen={() => open('came_in')}>came in</Num>
-          <Num key="c" n={n('came_in', 'called')} onOpen={() => open('came_in', 'called')}>called</Num>
-          <Num key="x" n={n('came_in', 'not_called')} tone="alert" onOpen={() => open('came_in', 'not_called')}>not called yet</Num>
-        </Line>
-      )}
-    </>
-  )
-}
-
-/** People called: the server's own count of distinct records behind the calls. */
-function withPeople(p) {
-  if (!p) return p
-  return { ...p, people: (p.counts || []).find(x => x.measure === 'people')?.n || 0 }
-}
-
 function useDay({ side, date, person, dataAsOf }) {
   return useServerData(() => api.getActivity({ side, date, person }), [side, date, person, dataAsOf], null)
 }
 
+// ── The head: title and switch together, the day on the right ───────────────
+function Head({ title, hasCalling, side, onSide, data, onDay, right }) {
+  const day = data?.day
+  return (
+    <div className="ad-top">
+      <span className="ad-title">{title}</span>
+      {hasCalling && (
+        <Segmented options={[{ value: 'leads', label: 'Leads' }, { value: 'calling', label: 'Calling' }]} value={side} onChange={onSide} />
+      )}
+      <span className="ad-top-r">
+        {day && (
+          <span className="ad-day">
+            <button type="button" aria-label="Day before" onClick={() => onDay(shiftDay(day, -1))}><Icon name="chevLeft" size={15} /></button>
+            <span className="ad-day-l">{dayName(day, data.today)}</span>
+            <button type="button" aria-label="Day after" disabled={day >= data.today} onClick={() => onDay(shiftDay(day, 1))}><Icon name="chevRight" size={15} /></button>
+          </span>
+        )}
+        {right}
+      </span>
+    </div>
+  )
+}
+
+/** The follow-up word for this side. */
+const fuWord = (side, n) => side === 'calling' ? word(n, 'callback', 'callbacks') : word(n, 'follow-up', 'follow-ups')
+
+// ── The detail: everything counted, in small blocks, zeros left out ─────────
+function Stat({ n, label, tone, onOpen }) {
+  if (!n) return null
+  return (
+    <button type="button" className={'ad-stat' + (tone ? ` ${tone}` : '')} onClick={onOpen}>
+      <b>{fmt(n)}</b><span>{label}</span>
+    </button>
+  )
+}
+
+function Block({ title, children }) {
+  const shown = [children].flat(2).filter(el => el && el.props?.n > 0)
+  if (!shown.length) return null
+  return (
+    <div className="ad-block">
+      <div className="ad-block-t">{title}</div>
+      <div className="ad-block-s">{shown}</div>
+    </div>
+  )
+}
+
+function Detail({ t, side, isToday, open, book, onBook, hideMoved }) {
+  const { n } = t
+  const fu = side === 'calling' ? 'Callbacks' : 'Follow-ups'
+  return (
+    <div className="ad-detail">
+      <Block title="Calls">
+        <Stat key="all" n={t.calls} label={word(t.calls, 'call', 'calls')} onOpen={() => open('call')} />
+        <Stat key="ppl" n={t.people} label={word(t.people, 'person called', 'people called')} onOpen={() => open('people')} />
+        {REACH.map(([k, one, many]) => (
+          <Stat key={k} n={n('call', k)} label={n('call', k) === 1 ? one : many} tone={k === 'no_outcome' ? 'quiet' : ''} onOpen={() => open('call', k)} />
+        ))}
+      </Block>
+      {!hideMoved && <Block title="Moved to">
+        {t.statuses.map(s => <Stat key={s.detail} n={s.n} label={stageLabel(s.detail)} onOpen={() => open('status', s.detail)} />)}
+      </Block>}
+      <Block title="Other work">
+        <Stat key="w" n={n('whatsapp')} label={word(n('whatsapp'), 'WhatsApp', 'WhatsApps')} onOpen={() => open('whatsapp')} />
+        <Stat key="n" n={n('note')} label={word(n('note'), 'note', 'notes')} onOpen={() => open('note')} />
+        {side === 'leads' && <Stat key="v" n={n('visit')} label={word(n('visit'), 'site visit', 'site visits')} onOpen={() => open('visit')} />}
+      </Block>
+      <Block title={fu}>
+        <Stat key="s" n={n('followup_set')} label="booked" onOpen={() => open('followup_set')} />
+        {side === 'leads' && <Stat key="d" n={n('followup_done')} label="done" onOpen={() => open('followup_done')} />}
+        {isToday && <Stat key="t" n={t.dueToday} label="due today" onOpen={() => open('followup_today')} />}
+        {isToday && <Stat key="m" n={t.missed} label="missed" tone="alert" onOpen={() => open('followup_missed')} />}
+        {isToday && <Stat key="x" n={n('followup_tomorrow')} label="due tomorrow" onOpen={() => open('followup_tomorrow')} />}
+      </Block>
+      {side === 'leads' && (
+        <Block title="New leads">
+          <Stat key="i" n={n('came_in')} label="came in" onOpen={() => open('came_in')} />
+          <Stat key="c" n={n('came_in', 'called')} label="called" onOpen={() => open('came_in', 'called')} />
+          <Stat key="j" n={n('came_in', 'just_in')} label="just came in" onOpen={() => open('came_in', 'just_in')} />
+          <Stat key="x" n={t.notCalled} label="not called" tone="alert" onOpen={() => open('came_in', 'not_called')} />
+        </Block>
+      )}
+      {book && side === 'leads' && (
+        <Block title="Holds now">
+          <Stat key="o" n={book.open} label="open leads" onOpen={() => onBook?.(null)} />
+          <Stat key="n" n={book.neverContacted} label="never contacted" tone="alert" onOpen={() => onBook?.('never_contacted')} />
+          <Stat key="c" n={book.coldToday} label="went cold today" tone="alert" onOpen={() => onBook?.('going_cold')} />
+        </Block>
+      )}
+      {book && side === 'calling' && book.owners > 0 && (
+        <div className="ad-block">
+          <div className="ad-block-t">Holds now</div>
+          <div className="ad-block-s"><span className="ad-stat static"><b>{fmt(book.owners)}</b><span>on the calling list</span></span></div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Titles for the list a number opens. */
+const MEASURE_TITLE = {
+  call: 'Calls', people: 'People called', whatsapp: 'WhatsApps', note: 'Notes', visit: 'Site visits',
+  status: 'Moved to', followup_set: 'Booked', followup_done: 'Done', followup_missed: 'Missed',
+  followup_today: 'Due today', followup_tomorrow: 'Due tomorrow', came_in: 'New leads',
+}
+const DETAIL_TITLE = {
+  ...REACH_LABEL, called: 'called', not_called: 'not called', just_in: 'just came in',
+}
+const titleOf = (parts) => parts.filter(Boolean).join(', ')
+
+// ── My day ──────────────────────────────────────────────────────────────────
 /**
- * "My day" — the person's own work. Phone first, top of Today; also the
- * dashboard's panel for an agent at a desk.
+ * "My day": the person's own work. Phone first, top of Today; also the
+ * dashboard's panel for an agent at a desk. Four tiles answer "how is it
+ * going and what do I still owe"; the rest opens under "Everything".
  */
 export function MyDay({ store, hasCalling, defaultSide = 'leads', variant }) {
   const { state } = store
   const [side, setSide] = useSide(hasCalling ? defaultSide : 'leads')
   const [date, setDate] = useState(null)
+  const [more, setMore] = useState(false)
+  const eff = hasCalling ? side : 'leads'
   const me = state.activeAgentId || state.session?.userId || null
-  const { data } = useDay({ side: hasCalling ? side : 'leads', date, person: me, dataAsOf: state.dataAsOf })
-  const person = withPeople((data?.people || []).find(p => p.id === me))
+  const { data } = useDay({ side: eff, date, person: me, dataAsOf: state.dataAsOf })
+  const t = tally((data?.people || []).find(p => p.id === me))
   const isToday = !data || data.day === data.today
   const open = (measure, detail) => store.openModal({
-    kind: 'activityRecords', side, date: data?.day, person: me, measure, detail,
-    title: [dayName(data?.day, data?.today), MEASURE_TITLE[measure], DETAIL_TITLE[detail] || (measure === 'status' ? detail : '')].filter(Boolean).join(' · '),
+    kind: 'activityRecords', side: eff, date: data?.day, person: me, measure, detail,
+    title: titleOf([dayName(data?.day, data?.today), MEASURE_TITLE[measure], DETAIL_TITLE[detail] || (measure === 'status' ? stageLabel(detail) : '')]),
   })
+  const moved = t.statuses.slice(0, 3)
   return (
-    <section className={'ad' + (variant ? ` ad-${variant}` : '')}>
-      <div className="ad-top">
-        <span className="ad-title">My day</span>
-        <DayStepper day={data?.day} today={data?.today} onDay={(d) => setDate(d === data?.today ? null : d)} />
-        {hasCalling && <Segmented options={[{ value: 'leads', label: 'Leads' }, { value: 'calling', label: 'Calling' }]} value={side} onChange={setSide} />}
-      </div>
-      {!data ? <div className="ad-line ad-wait" aria-busy="true" /> : <DayLines person={person} side={side} isToday={isToday} open={open} />}
+    <section className={'ad ad-me' + (variant ? ` ad-${variant}` : '')}>
+      <Head title="My day" hasCalling={hasCalling} side={side} onSide={setSide} data={data}
+        onDay={(d) => setDate(d === data?.today ? null : d)} />
+      {!data ? <div className="ad-wait" aria-busy="true" /> : (
+        <>
+          <div className="ad-tiles">
+            <button type="button" className="ad-tile" onClick={() => open('call')}>
+              <b>{fmt(t.calls)}</b><span>{word(t.calls, 'call', 'calls')}</span>
+              {t.calls > 0 && <em>{fmt(t.pickedUp)} picked up</em>}
+            </button>
+            {isToday && (
+              <button type="button" className="ad-tile" onClick={() => open('followup_today')}>
+                <b>{fmt(t.dueToday)}</b><span>{fuWord(eff, t.dueToday)} due today</span>
+              </button>
+            )}
+            {isToday && (
+              <button type="button" className={'ad-tile' + (t.missed ? ' alert' : '')} onClick={() => open('followup_missed')}>
+                <b>{fmt(t.missed)}</b><span>missed {fuWord(eff, t.missed)}</span>
+              </button>
+            )}
+            {eff === 'leads' && (
+              <button type="button" className={'ad-tile' + (t.notCalled ? ' alert' : '')} onClick={() => open('came_in', 'not_called')}>
+                <b>{fmt(t.notCalled)}</b><span>new {word(t.notCalled, 'lead', 'leads')} not called</span>
+              </button>
+            )}
+          </div>
+          <div className="ad-moved">
+            <span className="ad-moved-t">Moved to</span>
+            {moved.length
+              ? moved.map(s => <button key={s.detail} type="button" onClick={() => open('status', s.detail)}><b>{s.n}</b> {stageLabel(s.detail)}</button>)
+              : <span className="ad-quiet">No change yet</span>}
+            <button type="button" className="ad-more" onClick={() => setMore(m => !m)}>
+              {more ? 'Less' : 'Everything'}<Icon name={more ? 'chevUp' : 'chevDown'} size={13} />
+            </button>
+          </div>
+          {more && <Detail t={t} side={eff} isToday={isToday} open={open} hideMoved />}
+        </>
+      )}
     </section>
   )
 }
 
-// ── The desk ────────────────────────────────────────────────────────────────
-const joinNames = (names) => names.length <= 1 ? names.join('')
-  : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
-
-/**
- * Sentences that are TRUE today, and only those. Each names somebody a manager
- * can go and talk to; a warning that is not true is noise, and noise teaches
- * people to skip the panel. People with the same finding share one sentence —
- * four red lines saying one thing about four names was a wall, not a warning.
- */
-function warnings(rows, data, side) {
-  const out = []
-  const isToday = data.day === data.today
-  // Before noon "hasn't called" is true of everyone and says nothing.
-  const lateEnough = !isToday || data.hour >= 12
-  if (lateEnough) {
-    const idle = rows.filter(r => r.role === 'agent' && !r.gone && r.duty !== 'OFF_DUTY' && r.holding > 0
-      && !r.t.n('call') && !r.t.n('whatsapp'))
-    if (idle.length) {
-      // Named for the side it is about: somebody who spent the day ringing
-      // leads has called people, just not these.
-      const what = side === 'calling' ? 'anyone on the calling list' : 'a lead'
-      const verb = !isToday ? "didn't" : idle.length === 1 ? "hasn't" : "haven't"
-      out.push({ key: 'idle', text: `${joinNames(idle.map(r => r.name))} ${verb} called ${what}${isToday ? ' today' : ''}.` })
-    }
-  }
-  if (side === 'leads') {
-    const waiting = rows.map(r => ({ r, k: r.t.n('came_in', 'not_called') })).filter(x => x.k > 0).sort((a, b) => b.k - a.k)
-    const total = waiting.reduce((s, x) => s + x.k, 0)
-    if (total) {
-      const who = waiting.slice(0, 2).map(x => `${x.k} with ${x.r.name || 'someone who has left'}`).join(', ')
-      const verb = total === 1 ? "hasn't" : "haven't"
-      out.push({ key: 'waiting', text: `${plural(total, 'enquiry', 'enquiries')} that came in ${isToday ? 'today' : 'that day'} ${verb} been called — ${who}.` })
-    }
-  }
-  if (isToday) {
-    const late = rows.map(r => ({ r, k: r.t.n('followup_late') })).filter(x => x.k >= 3).sort((a, b) => b.k - a.k)
-    if (late.length) {
-      const noun = side === 'calling' ? 'Callbacks' : 'Follow-ups'
-      out.push({ key: 'late', text: `${noun} late — ${late.map(x => `${x.r.name || 'someone who has left'} ${x.k}`).join(', ')}.` })
-    }
-  }
-  return out
-}
-
-/**
- * What a person HOLDS, beside what they did — the facts the dashboard's "By
- * agent" table carried: open, never contacted, went cold today. That was a
- * second per-person table next to this one; one person, one row, both halves.
- * Counted by the desk summary, and each opens that person's list on that pile.
- */
-function Holds({ side, book, onBook }) {
-  if (!book) return null
-  if (side === 'calling') {
-    return (
-      // Not a link: the calling list's Agent filter is screen state, not the
-      // URL, so it would land on everybody's rows with nothing saying whose.
-      book.owners > 0 && (
-        <div className="ad-line"><span className="ad-head">Holds</span>
-          <span className="ad-items"><span className="ad-num" style={{ cursor: 'default' }}><b>{book.owners.toLocaleString('en-IN')}</b> on the calling list</span></span></div>
-      )
-    )
-  }
+// ── Team today ──────────────────────────────────────────────────────────────
+/** One person's row: calls, what moved, what is left undone. */
+function TeamRow({ r, side, isToday, lateEnough, onClick, expanded, actions }) {
+  const t = r.t
+  // "No calls" is only said out loud when it is fair to: an agent on duty who
+  // holds records on this side, after noon (or on a past day).
+  const quietFair = lateEnough && r.role === 'agent' && !r.gone && r.duty !== 'OFF_DUTY' && r.holding > 0
+  const moved = t.statuses.slice(0, 2)
+  const movedMore = t.statuses.length - moved.length
+  const attn = []
+  if (isToday && t.missed) attn.push(`${fmt(t.missed)} missed ${fuWord(side, t.missed)}`)
+  if (side === 'leads' && t.notCalled) attn.push(`${fmt(t.notCalled)} new ${word(t.notCalled, 'lead', 'leads')} not called`)
+  const share = t.calls ? Math.round((t.pickedUp / t.calls) * 100) : 0
   return (
-    <Line head="Holds">
-      <Num key="o" n={book.open} onOpen={() => onBook?.(null)}>open</Num>
-      <Num key="n" n={book.neverContacted} tone="alert" onOpen={() => onBook?.('never_contacted')}>not contacted</Num>
-      <Num key="c" n={book.coldToday} tone="alert" onOpen={() => onBook?.('going_cold')}>went cold today</Num>
-    </Line>
-  )
-}
-
-/** The day in one line, for the dashboard. */
-function Summary({ r, side, isToday }) {
-  const { n, statuses } = r.t
-  const bits = []
-  const calls = n('call')
-  if (calls) bits.push(`${plural(calls, 'call', 'calls')} to ${plural(r.people, 'person', 'people')}`)
-  if (n('call', 'answered')) bits.push(`${n('call', 'answered')} answered`)
-  if (statuses.length) bits.push(statuses.slice(0, 3).map(s => `${s.n} ${stageLabel(s.detail)}`).join(' · '))
-  if (n('whatsapp')) bits.push(plural(n('whatsapp'), 'WhatsApp', 'WhatsApps'))
-  const late = isToday ? n('followup_late') : 0
-  const waiting = side === 'leads' ? n('came_in', 'not_called') : 0
-  return (
-    <span className="ad-sum">
-      <span className={bits.length ? '' : 'ad-zero'}>{bits.length ? bits.join(' · ') : (isToday ? 'Nothing yet today' : 'Nothing that day')}</span>
-      {late > 0 && <span className="ad-sum-flag">{late} late</span>}
-      {waiting > 0 && <span className="ad-sum-flag">{waiting} new not called</span>}
-    </span>
+    <div className={'tt-row' + (expanded ? ' open' : '') + (r.gone || r.duty === 'OFF_DUTY' ? ' off' : '')}>
+      <button type="button" className="tt-main" onClick={onClick} aria-expanded={expanded}>
+        <span className="tt-name">
+          {r.name || 'Someone who has left'}
+          {r.duty === 'OFF_DUTY' && <span className="tt-tag">Off duty</span>}
+        </span>
+        <span className="tt-calls">
+          {t.calls ? (
+            <>
+              <span><b>{fmt(t.calls)}</b> {word(t.calls, 'call', 'calls')}<span className="tt-sub"> · {fmt(t.pickedUp)} picked up</span></span>
+              <span className="tt-bar" aria-hidden="true"><i style={{ width: `${share}%` }} /></span>
+            </>
+          ) : <span className={quietFair && !t.n('whatsapp') ? 'tt-alert' : 'ad-quiet'}>{isToday ? 'No calls yet' : 'No calls'}</span>}
+        </span>
+        <span className="tt-moved">
+          {moved.length
+            ? <>{moved.map(s => `${s.n} ${stageLabel(s.detail)}`).join(', ')}{movedMore > 0 && <span className="ad-quiet"> +{movedMore} more</span>}</>
+            : <span className="ad-quiet">No change</span>}
+        </span>
+        <span className="tt-attn">
+          {attn.map(a => <span key={a}>{a}</span>)}
+        </span>
+      </button>
+      {/* The slot is there on every row that could have an action, so the
+          columns line up whether or not this person has one. */}
+      {actions && <span className="tt-act">{!r.gone && actions(r)}</span>}
+    </div>
   )
 }
 
 /**
- * "Team today" — a row per person, in the same words as My day.
- *
- * Two densities, one component. The Team page is the full version: each
- * person's day line by line, every number opening its people, what they hold,
- * and the row's own action (Reassign). The dashboard's is `compact`: the true
- * sentences, then one line per person, and anything on it opens the Team page.
- *
- * It was a ten-column grid of numbers — built from what the report counts, not
- * from how it was agreed to read — which on a quiet morning was a sheet of
- * zeroes under a stack of red lines.
+ * "Team today": one row per person, the same rows on the dashboard and on the
+ * Team page. The Team page's rows open to the detail (every count, each
+ * opening its people) and carry Reassign; the dashboard's open the Team page.
  */
 export function TeamToday({ store, hasCalling, compact = false, onOpenFull, actions, book = {}, ownerBook = {}, onBook }) {
   const { state } = store
   const [side, setSide] = useSide('leads')
   const [date, setDate] = useState(null)
+  const [openId, setOpenId] = useState(null)
   const eff = hasCalling ? side : 'leads'
   const { data } = useDay({ side: eff, date, person: null, dataAsOf: state.dataAsOf })
 
   const isToday = !data || data.day === data.today
-  const effort = (r) => r.t.n('call') + r.t.n('whatsapp') + r.t.n('note') + r.t.n('status') + r.t.n('visit')
-    + r.t.n('followup_set') + r.t.n('followup_done')
+  const lateEnough = !!data && (!isToday || data.hour >= 12)
   const rows = (data?.people || [])
-    .map(withPeople)
     .map(p => ({ ...p, t: tally(p) }))
-    // Agents always have a row — an empty one is the finding. The owner and
+    // Agents always have a row: an empty one is the finding. The owner and
     // managers appear on a day they did something themselves.
-    .filter(p => p.role === 'agent' || effort(p) > 0)
-  // Who did most first; nobody-yet at the bottom, by name.
-  const sorted = [...rows].sort((a, b) => effort(b) - effort(a) || String(a.name).localeCompare(String(b.name)))
+    .filter(p => p.role === 'agent' || p.t.effort > 0)
+    // By name, so a person is in the same place every day; off duty and
+    // people who have left go last.
+    .sort((a, b) => ((a.gone || a.duty === 'OFF_DUTY') - (b.gone || b.duty === 'OFF_DUTY'))
+      || String(a.name || '~').localeCompare(String(b.name || '~')))
 
-  const openFor = (r) => (measure, detail) => {
-    if (compact) { onOpenFull?.(); return }
-    store.openModal({
-      kind: 'activityRecords', side: eff, date: data?.day, person: r.id, measure, detail,
-      title: [r.name, dayName(data?.day, data?.today), MEASURE_TITLE[measure], DETAIL_TITLE[detail] || (measure === 'status' ? detail : '')].filter(Boolean).join(' · '),
-    })
-  }
-  const ws = data ? warnings(rows, data, eff) : []
+  const openFor = (r) => (measure, detail) => store.openModal({
+    kind: 'activityRecords', side: eff, date: data?.day, person: r.id, measure, detail,
+    title: titleOf([r.name, dayName(data?.day, data?.today), MEASURE_TITLE[measure], DETAIL_TITLE[detail] || (measure === 'status' ? stageLabel(detail) : '')]),
+  })
 
   return (
     <section className={'ad ad-team' + (compact ? ' ad-compact' : '')}>
-      <div className="ad-top">
-        <span className="ad-title">{isToday ? 'Team today' : 'Team'}</span>
-        <DayStepper day={data?.day} today={data?.today} onDay={(d) => setDate(d === data?.today ? null : d)} />
-        {hasCalling && <Segmented options={[{ value: 'leads', label: 'Leads' }, { value: 'calling', label: 'Calling' }]} value={side} onChange={setSide} />}
-        {compact && onOpenFull && <button type="button" className="ad-open" onClick={onOpenFull}>Open<Icon name="chevRight" size={14} /></button>}
-      </div>
-      {ws.length > 0 && (
-        <ul className="ad-warns">
-          {ws.map(w => <li key={w.key}>{w.text}</li>)}
-        </ul>
-      )}
-      {!data ? <div className="ad-line ad-wait" aria-busy="true" /> : (
-        <div className="ad-people">
-          {sorted.map(r => (
-            compact ? (
-              <button key={r.id} type="button" className="ad-person ad-person-c" onClick={onOpenFull}>
-                <span className="ad-pname">{r.name || 'Someone who has left'}</span>
-                <Summary r={r} side={eff} isToday={isToday} />
-              </button>
-            ) : (
-              <div key={r.id} className={'ad-person' + (r.gone || r.duty === 'OFF_DUTY' ? ' off' : '')}>
-                <div className="ad-pside">
-                  <span className="ad-pname">{r.name || 'Someone who has left'}</span>
-                  {r.duty === 'OFF_DUTY' && <span className="rst-tag off">Off duty</span>}
-                  {actions && !r.gone && <span className="ad-pact">{actions(r)}</span>}
-                </div>
-                <div className="ad-plines">
-                  {effort(r) === 0 && (
-                    <div className="ad-line"><span className="ad-head">Today</span>
-                      <span className="ad-zero">{isToday ? 'Nothing yet today' : 'Nothing that day'}</span></div>
-                  )}
-                  {effort(r) > 0
-                    ? <DayLines person={r} side={eff} isToday={isToday} open={openFor(r)} />
-                    : <DayLines person={{ ...r, counts: (r.counts || []).filter(c => ['followup_late', 'followup_tomorrow', 'came_in'].includes(c.measure)) }}
-                        side={eff} isToday={isToday} open={openFor(r)} hideCalls />}
-                  <Holds side={eff} book={eff === 'calling' ? ownerBook[r.id] : book[r.id]} onBook={(seg) => onBook?.(r.id, eff, seg)} />
-                </div>
+      <Head title={isToday ? 'Team today' : 'Team'} hasCalling={hasCalling} side={side} onSide={setSide} data={data}
+        onDay={(d) => setDate(d === data?.today ? null : d)}
+        right={compact && onOpenFull && <button type="button" className="ad-open" onClick={onOpenFull}>Open<Icon name="chevRight" size={14} /></button>} />
+      {!data ? <div className="ad-wait" aria-busy="true" /> : (
+        <div className="tt">
+          <div className="tt-head" aria-hidden="true">
+            <span>Person</span><span>Calls</span><span>Moved to</span><span>Needs attention</span>
+          </div>
+          {rows.map(r => {
+            const expanded = !compact && openId === r.id
+            return (
+              <div key={r.id}>
+                <TeamRow r={r} side={eff} isToday={isToday} lateEnough={lateEnough}
+                  expanded={expanded} actions={compact ? null : actions}
+                  onClick={compact ? onOpenFull : () => setOpenId(expanded ? null : r.id)} />
+                {expanded && (
+                  <Detail t={r.t} side={eff} isToday={isToday} open={openFor(r)}
+                    book={eff === 'calling' ? ownerBook[r.id] : book[r.id]}
+                    onBook={(seg) => onBook?.(r.id, eff, seg)} />
+                )}
               </div>
             )
-          ))}
-          {!sorted.length && <div className="detail-empty">Nobody on this side.</div>}
+          })}
+          {!rows.length && <div className="detail-empty">Nobody on this side.</div>}
         </div>
       )}
     </section>
@@ -367,8 +364,6 @@ export function TeamToday({ store, hasCalling, compact = false, onOpenFull, acti
 }
 
 // ── The people behind a number ──────────────────────────────────────────────
-const REACH_LABEL = Object.fromEntries(REACH_WORDS.map(([k, one]) => [k, one]))
-
 export function ActivityRecords({ store, go, side, date, person, measure, detail, title, Modal }) {
   const [rows, setRows] = useState(null)
   useEffect(() => {
@@ -402,14 +397,14 @@ export function ActivityRecords({ store, go, side, date, person, measure, detail
 
   return (
     <Modal title={title} onClose={store.closeModal} width={520}>
-      {rows === null ? <div className="ad-line ad-wait" aria-busy="true" />
+      {rows === null ? <div className="ad-wait" aria-busy="true" />
         : !rows.length ? <div className="detail-empty">Nobody.</div>
           : (
             <div className="ad-list">
               {rows.map((r, i) => (
                 <button key={`${r.id}-${i}`} type="button" className="ad-row" onClick={() => openRecord(r)}>
                   <span className="ad-row-main">
-                    <span className="ad-row-name">{r.name || r.phone || 'Unnamed'}</span>
+                    <span className="ad-row-name">{r.name || r.phone || 'No name'}</span>
                     <span className="ad-row-sub">{[r.unit, what(r)].filter(Boolean).join(' · ') || r.phone}</span>
                   </span>
                   <span className="ad-row-at">{r.at ? whenLabel(r.at) : ''}</span>

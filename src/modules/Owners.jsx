@@ -65,7 +65,9 @@ function OwnerProjectGrid({ onOpen, onAssign, canAssign, refreshAt }) {
               <span className="pj-count"><b>{pj.counts.total}</b> owner{pj.counts.total !== 1 ? 's' : ''}</span>
             </div>
             <div className="pj-legend">
-              <span className="pj-dot avail">{pj.counts.new} to call</span>
+              {pj.counts.new > 0
+                ? <span className="pj-dot avail">{pj.counts.new} to call</span>
+                : <span className="pj-sub">All called</span>}
               {pj.counts.interested > 0 && <span className="pj-dot sold">{pj.counts.interested} interested</span>}
             </div>
             {/* WHO IS ON IT. A township handed to one caller and then partly
@@ -349,15 +351,21 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     } : null,
     page, onPage: view === 'projects' ? undefined : setPageP, pageSize, onPageSize: view === 'projects' ? undefined : setPageSize,
     showViewSwitch: false,
-    // One control at a time, not two that can disagree: inside a project, the
-    // chip itself is the way back (× returns to the grid, same as clicking
-    // "Group by project" used to try to do) — showing both together read as
-    // two disconnected buttons, and neither obviously undid the other.
     // GROUP BY PROJECT, first in the bar, before search: it changes what the
-    // list IS (cards of projects, or the rows), so it is the first choice.
-    toolbarLeft: (
+    // list IS (cards of projects, or the rows). It is also the ONLY project
+    // control: pick a card and this button becomes that project's chip, and ×
+    // goes back to the cards. A project picker in the Filter menu as well was
+    // two controls for one question.
+    toolbarLeft: projectSel ? (
+      <span className="proj-chip">
+        <Icon name="building" size={14} />
+        <span className="proj-chip-t">{currentProject?.name || (projectSel === '_none' ? 'No project' : projectSel)}</span>
+        <button type="button" aria-label="Back to all projects"
+          onClick={() => { setFlt({ ...flt, project: [], tower: [] }); setView('projects') }}><Icon name="x" size={13} /></button>
+      </span>
+    ) : (
       <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
-        onClick={() => { if (view !== 'projects') setFlt({ ...flt, project: [], tower: [] }); setView(view === 'projects' ? 'list' : 'projects') }}>
+        onClick={() => setView(view === 'projects' ? 'list' : 'projects')}>
         <Icon name="building" size={14} />Group by project
       </button>
     ),

@@ -524,7 +524,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     // there is nothing to show, and a panel saying so is noise.
     ...(l.stage === finalStageOf(store.state.settings, 'leads') ? [{
       id: 'agreements', title: 'Agreement',
-      render: () => <AgreementList query={{ leadId: l.id }} store={store} empty="Not recorded yet — Close the deal above." show={{ party: false }} />,
+      render: () => <AgreementList query={{ leadId: l.id }} store={store} empty="No agreement yet." show={{ party: false }} />,
     }] : []),
     // WHAT THEY ASKED FOR, EACH TIME THEY ASKED.
     //

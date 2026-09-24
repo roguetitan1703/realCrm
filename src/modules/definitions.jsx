@@ -568,8 +568,11 @@ export const OWNERS_DEF = {
   // data, and Sales Executive duplicated the Agent dropdown. Status and Agent
   // stay on the left. `facets` is what the screen read from the server: the
   // firm's projects with counts, and the chosen project's towers.
+  //
+  // PROJECT is not in the menu any more: "Group by project" is the project
+  // control. Pick a card and the button becomes that project's chip, with ×
+  // back to the cards (Owners.jsx). Tower stays here, inside a project only.
   filterFields: (store, facets) => [
-    { key: 'project', label: 'Project', icon: 'building', multi: false, options: facets?.projects || [] },
     // Only inside a project: a tower name means nothing across eight of them.
     ...(facets?.towers?.length
       ? [{ key: 'tower', label: 'Tower', icon: 'layers', multi: false, options: facets.towers }]
@@ -607,7 +610,10 @@ export const OWNERS_DEF = {
     // control. A calling list had no way to close a record at all: a number that
     // had said no could only be walked forward, so it stayed in the queue and
     // was rung again.
-    exit: { label: 'Mark as rejected', when: (o) => !OWNER_TERMINAL_STATUSES.includes(o.stage),
+    // Not at the final status either: the keys are with us, and the way on from
+    // there is Convert to property, not a rejection.
+    exit: { label: 'Mark as rejected', when: (o, store) => !OWNER_TERMINAL_STATUSES.includes(o.stage)
+        && (o.stage || 'New') !== finalStageOf(store.state.settings, 'calling'),
       run: (store, o) => store.openModal({ kind: 'rejectOwner', ownerId: o.id }) },
     // Convert to property, at the final status — components/Agreements.jsx.
     finish: (o, store, ctx) => <FinishOwner owner={o} store={store} go={ctx.go} canAct={ctx.canAct} />,
@@ -1010,11 +1016,19 @@ export function partiesDef(kind) {
     name: rent ? 'Tenants' : 'Buyers',
     singularName: rent ? 'Tenant' : 'Buyer',
     icon: 'people',
-    filterFields: () => [],
+    // Counted by the server (listAgreements), one value at a time.
+    filterFields: (store, facets) => [
+      { key: 'status', label: 'Status', icon: 'filter', multi: false, options: facets?.status || [] },
+    ],
     rowMatch: () => true,
     searchFields: [],
-    // One order, set by the server: the rent ending soonest first. No control.
-    sortOptions: [],
+    // Sorted by the server. "Ends" puts the rent ending soonest first.
+    sortOptions: [
+      { key: 'ends', label: rent ? 'Ends' : 'Date' },
+      { key: 'start', label: 'Started' },
+      { key: 'name', label: 'Name' },
+      { key: 'amount', label: rent ? 'Rent' : 'Price' },
+    ],
     columns: [
       { key: 'name', label: rent ? 'Tenant' : 'Buyer', render: (a) => (
         <div className="cell-prop">
@@ -1057,7 +1071,9 @@ export const CLIENTS_DEF = {
   searchFields: ['name', 'detail', 'phone'],
 
   // Clients filter set is minimal (locality); segments (Buyers/Tenants/...) handled by the module.
-  filterFields: (store) => {
+  filterFields: (store, facets) => {
+    // Landlord or Seller, counted by the server (listContacts). One at a time.
+    const role = facets?.roles ? [{ key: 'role', label: 'Owner of', icon: 'people', multi: false, options: facets.roles }] : []
     // The firm's own locality vocabulary, from the boot payload. This used to
     // be rebuilt by mapping every lead and every property on every render.
     const dyn = localities(store)
@@ -1066,8 +1082,8 @@ export const CLIENTS_DEF = {
     // has never heard of, every one of which matches zero rows. suggest.js
     // deleted exactly these two lists for exactly this reason and this copy
     // survived. A firm with no localities yet gets no locality filter.
-    if (!dyn.length) return []
-    return [{ key: 'locality', label: 'Locality', icon: 'building', options: opt(dyn) }]
+    if (!dyn.length) return role
+    return [...role, { key: 'locality', label: 'Locality', icon: 'building', options: opt(dyn) }]
   },
 
   rowMatch(r, key, vals) {

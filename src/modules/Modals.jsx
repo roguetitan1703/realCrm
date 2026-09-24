@@ -21,7 +21,7 @@ import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities } from '../lib/suggest.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 import { ActivityRecords } from '../components/ActivityDay.jsx'
-import { CloseDealModal, ConvertOwnerModal, AgreementModal } from '../components/Agreements.jsx'
+import { CloseDealModal, AgreementModal } from '../components/Agreements.jsx'
 import { copyText } from '../lib/clipboard.js'
 
 /**
@@ -108,7 +108,6 @@ export default function Modals({ store, go }) {
       {m?.kind === 'scheduleFollowUp' && <ScheduleFollowUpModal store={store} leadId={m.leadId} />}
       {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} />}
       {m?.kind === 'closeDeal' && <CloseDealModal store={store} leadId={m.leadId} Modal={Modal} />}
-      {m?.kind === 'convertOwner' && <ConvertOwnerModal store={store} ownerId={m.ownerId} Modal={Modal} />}
       {m?.kind === 'agreement' && <AgreementModal store={store} mode={m.mode} agreementId={m.agreementId} propertyId={m.propertyId} onDone={m.onDone} Modal={Modal} />}
       {m?.kind === 'ownerEdit' && <OwnerEditModal store={store} propId={m.propId} />}
       {m?.kind === 'ownerUpdate' && <OwnerUpdateModal store={store} propId={m.propId} />}
