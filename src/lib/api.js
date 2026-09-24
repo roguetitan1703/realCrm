@@ -584,6 +584,8 @@ export const api = {
   adminLogout: () => lsSet(ADMIN_TOKEN_KEY, ''),
   adminOverview: () => request('/admin/overview', { headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   // Provision a workspace — SUPERADMIN only, sent with the admin token.
+  // The ids and passwords a roster would be created with. Writes nothing.
+  adminOnboardPreview: (roster) => request('/admin/onboard/preview', { method: 'POST', body: JSON.stringify(roster), headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   adminOnboard: (config) => request('/admin/onboard', { method: 'POST', body: JSON.stringify(config), headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   getAdminToken: () => lsGet(ADMIN_TOKEN_KEY),
   clearAdminToken: () => lsSet(ADMIN_TOKEN_KEY, ''),

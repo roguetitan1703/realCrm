@@ -308,6 +308,86 @@ export default function Admin() {
 // ----------------------------------------------------------------------------
 // WIZARD: ONBOARD WORKSPACE & BULK TEAM PROVISIONING
 // ----------------------------------------------------------------------------
+const TEAM_COLS = '1.3fr 1fr 1.2fr 1fr 1.3fr 0.8fr 24px'
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const isPhone = (c) => /^\+?[\d\s-]{10,15}$/.test(c) && c.replace(/\D/g, '').length >= 10
+const isRole = (c) => /^(agent|manager)$/i.test(c)
+
+/**
+ * A pasted roster: one person per line, cells split by comma or tab — so a
+ * WhatsApp list and a block copied out of Excel read the same. Email, phone and
+ * role are recognised by their shape wherever they sit; the remaining cells are
+ * name, user ID, password in that order. Anything left blank is planned by the
+ * server, never invented here.
+ */
+function parseRoster(text) {
+  const firm = {}
+  const rows = []
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    const head = line.match(/^(firm|workspace|slug|city|owner)\s*:\s*(.*)$/i)
+    if (head) {
+      const key = head[1].toLowerCase(), val = head[2].trim()
+      if (key === 'firm' || key === 'workspace') firm.firmName = val
+      else if (key === 'slug') firm.slug = val.toLowerCase()
+      else if (key === 'city') firm.city = val
+      else {
+        const cells = val.split(/,|\t/).map(c => c.trim()).filter(Boolean)
+        const rest = []
+        for (const c of cells) {
+          if (EMAIL_RE.test(c)) firm.ownerEmail = c
+          else if (isPhone(c)) firm.ownerPhone = c.replace(/\D/g, '').slice(-10)
+          else rest.push(c)
+        }
+        if (rest[0]) firm.ownerName = rest[0]
+        if (rest[1]) firm.ownerPassword = rest[1]
+      }
+      continue
+    }
+    const cells = line.split(/,|\t/).map(c => c.trim())
+    const row = { name: '', loginId: '', email: '', phone: '', role: 'agent', password: '', autoId: true }
+    const rest = []
+    for (const c of cells) {
+      if (!c) continue
+      if (EMAIL_RE.test(c)) row.email = c
+      else if (isPhone(c)) row.phone = c.replace(/\D/g, '').slice(-10)
+      else if (isRole(c)) row.role = c.toLowerCase()
+      else rest.push(c)
+    }
+    row.name = (rest[0] || '').replace(/^[*\-•\d.)\s]+/, '').trim()
+    // A header row copied along with the sheet.
+    if (!row.name || /^(full\s*)?name$/i.test(row.name)) continue
+    if (rest[1]) { row.loginId = rest[1]; row.autoId = false }
+    if (rest[2]) row.password = rest[2]
+    rows.push(row)
+  }
+  return { firm, rows }
+}
+
+function PasteBox({ value, onChange, onApply, withFirm }) {
+  const example = (withFirm ? 'Firm: Sai Realty\nCity: Pune\nOwner: Aniket Sharma, aniket@sairealty.in, 9800000001\n' : '')
+    + 'Ravi Patil, 9800000002, agent\nMeena Joshi, 9800000003, manager, meena@sairealty.in\nKiran Rao, 9800000004, agent, kiran, Kiran@4521'
+  return (
+    <div style={{ background: '#f4f3ef', padding: 14, borderRadius: 10, border: '1px solid var(--line)', marginBottom: 18 }}>
+      <div style={{ fontSize: 12, color: 'var(--ink)', marginBottom: 8, lineHeight: 1.6 }}>
+        {withFirm && <div><b>Firm:</b> name · <b>City:</b> city · <b>Owner:</b> name, email, phone</div>}
+        <div>One person per line — <b>Name, Phone, Role</b> · optional: Email, User ID, Password</div>
+        <div style={{ color: 'var(--muted)' }}>Comma or Excel columns · Role is agent or manager · blank User ID / Password are generated</div>
+      </div>
+      <textarea
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={example}
+        rows={6}
+        style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid var(--line)', fontSize: 12, fontFamily: 'monospace', resize: 'vertical', marginBottom: 10 }}
+      />
+      <Button size="sm" variant="primary" onClick={onApply} disabled={!value.trim()}>Fill form</Button>
+    </div>
+  )
+}
+
 function OnboardWorkspaceModal({ onClose, onSuccess }) {
   const [step, setStep] = useState(1) // 1 = Workspace & Owner, 2 = Bulk Team Setup
   const [form, setForm] = useState({
@@ -327,10 +407,14 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
     primaryColor: '#1E6F52',
   })
 
-  // Bulk team setup array
-  const [team, setTeam] = useState([
-    { name: '', loginId: '', email: '', phone: '', role: 'agent', password: '' }
-  ])
+  // Every row carries its user ID and password from the moment it appears —
+  // planned by the server (planRoster), shown here, and sent back unchanged.
+  // `autoId` marks an ID that came from the name, so renaming the person
+  // re-derives it instead of leaving the old name's ID behind.
+  const blankRow = () => ({ name: '', loginId: '', email: '', phone: '', role: 'agent', password: '', autoId: true })
+  const [team, setTeam] = useState([blankRow()])
+  const [ownerLoginId, setOwnerLoginId] = useState('')
+  const [issues, setIssues] = useState([])
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -339,106 +423,58 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
 
   const setF = (k, v) => setForm(s => ({ ...s, [k]: v }))
 
+  // Ask the server to fill every blank ID and password. Only blanks are filled,
+  // so a value typed while the request was in flight is never overwritten.
+  const plan = async (nextForm = form, nextTeam = team) => {
+    const named = nextTeam.filter(t => t.name.trim())
+    try {
+      const res = await api.adminOnboardPreview({
+        ownerName: nextForm.ownerName, ownerEmail: nextForm.ownerEmail, ownerPassword: nextForm.ownerPassword,
+        team: named.map(({ autoId, ...t }) => t),
+      })
+      if (!res?.success) return
+      setOwnerLoginId(res.owner.loginId)
+      setForm(f => f.ownerPassword ? f : { ...f, ownerPassword: res.owner.password })
+      setIssues(res.issues || [])
+      setTeam(list => {
+        let k = 0
+        return list.map(row => {
+          if (!row.name.trim()) return row
+          const p = res.team[k++]
+          if (!p || p.name !== row.name.trim()) return row
+          return { ...row, loginId: row.loginId || p.loginId, password: row.password || p.password }
+        })
+      })
+    } catch { /* the grid still works; the server plans on submit */ }
+  }
+
+  // The owner's password is generated on open, not after creation.
+  useEffect(() => { plan() }, [])
+
   const parsePastedRoster = () => {
-    if (!rawText.trim()) return
-    const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean)
-    
-    let newForm = { ...form }
-    let rows = []
-    let curName = '', curEmail = '', curPhone = ''
-
-    for (const line of lines) {
-      if (/^firm:\s*/i.test(line) || /^workspace:\s*/i.test(line)) {
-        newForm.firmName = line.replace(/^firm:\s*|^workspace:\s*/i, '').trim()
-        continue
-      }
-      if (/^slug:\s*/i.test(line)) {
-        newForm.slug = line.replace(/^slug:\s*/i, '').trim().toLowerCase()
-        continue
-      }
-      if (/^city:\s*/i.test(line)) {
-        newForm.city = line.replace(/^city:\s*/i, '').trim()
-        continue
-      }
-      if (/^owner:\s*/i.test(line)) {
-        const parts = line.replace(/^owner:\s*/i, '').split(',').map(p => p.trim())
-        if (parts[0]) newForm.ownerName = parts[0]
-        const email = parts.find(p => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p))
-        if (email) newForm.ownerEmail = email
-        const phone = parts.find(p => /^\+?\d{10,12}$/.test(p.replace(/\s+/g, '')))
-        if (phone) newForm.ownerPhone = phone.replace(/\D/g, '').slice(-10)
-        const pw = parts.find(p => p.length >= 4 && p !== parts[0] && p !== email && p !== phone)
-        if (pw) newForm.ownerPassword = pw
-        continue
-      }
-
-      if (line.includes(',') || line.includes('\t')) {
-        const parts = line.split(/,|\t/).map(p => p.trim())
-        if (parts.length >= 2) {
-          let name = parts[0].replace(/^[\*\-\•\d\.\s]+/, '').replace(/^Full Name:\s*/i, '').trim()
-          if (!name || /firm name|workspace name/i.test(name)) continue
-
-          let loginId = parts[1] && !parts[1].includes('@') && !/^\d+$/.test(parts[1]) ? parts[1] : ''
-          let email = parts.find(p => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p)) || ''
-          let phone = parts.find(p => /^\+?\d{10,12}$/.test(p.replace(/\s+/g, ''))) || ''
-          let customPw = parts.find(p => /^[a-zA-Z0-9@#$]{5,20}$/.test(p) && p !== name && p !== loginId && p !== email && p !== phone && p !== 'agent' && p !== 'manager')
-          
-          const firstWord = name.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '') || 'user'
-          const autoPw = customPw || `${firstWord}123`
-
-          rows.push({
-            name,
-            loginId,
-            email,
-            phone: phone ? phone.replace(/\D/g, '').slice(-10) : '',
-            role: 'agent',
-            password: autoPw
-          })
-        }
-      } else {
-        const nameMatch = line.match(/(?:full name|name):\s*([^\*\n]+)/i)
-        const emailMatch = line.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)
-        const phoneMatch = line.match(/(?:\+?91[\s\-]?)?(\d{10})/)
-
-        if (nameMatch) {
-          if (curName) {
-            const firstWord = curName.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '') || 'user'
-            rows.push({ name: curName, loginId: '', email: curEmail, phone: curPhone, role: 'agent', password: `${firstWord}123` })
-          }
-          curName = nameMatch[1].replace(/[\*]/g, '').trim()
-          curEmail = ''; curPhone = ''
-        } else if (emailMatch) {
-          curEmail = emailMatch[0]
-        } else if (phoneMatch) {
-          curPhone = phoneMatch[1]
-        } else if (!curName && line.length > 2 && !line.startsWith('[') && !line.includes('@')) {
-          curName = line.replace(/[\*]/g, '').trim()
-        }
-      }
-    }
-    if (curName) {
-      const firstWord = curName.split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '') || 'user'
-      rows.push({ name: curName, loginId: '', email: curEmail, phone: curPhone, role: 'agent', password: `${firstWord}123` })
-    }
-
-    setForm(newForm)
-    if (rows.length > 0) {
-      setTeam(rows)
-    }
+    const { firm, rows } = parseRoster(rawText)
+    const nextForm = { ...form, ...firm }
+    const nextTeam = rows.length ? rows : team
+    setForm(nextForm)
+    setTeam(nextTeam)
     setShowPasteBox(false)
     setRawText('')
+    plan(nextForm, nextTeam)
   }
 
   const updateTeamRow = (idx, field, val) => {
     setTeam(list => {
       const copy = [...list]
-      copy[idx] = { ...copy[idx], [field]: val }
+      const row = { ...copy[idx], [field]: val }
+      if (field === 'name' && row.autoId) row.loginId = ''
+      if (field === 'loginId') row.autoId = !val
+      copy[idx] = row
       return copy
     })
   }
 
   const addTeamRow = () => {
-    setTeam(list => [...list, { name: '', loginId: '', email: '', phone: '', role: 'agent', password: '' }])
+    setTeam(list => [...list, blankRow()])
   }
 
   const removeTeamRow = (idx) => {
@@ -457,13 +493,10 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
       .filter(t => t.name.trim())
       .map(t => ({
         name: t.name.trim(),
-        loginId: t.loginId.trim(),
+        loginId: t.loginId.trim() || undefined,
         email: t.email.trim(),
         phone: t.phone.trim(),
         role: t.role,
-        // No shared fallback. An empty password means the server generates one
-        // for THIS person; a constant here means every seat on every firm we
-        // ever onboard shares a login.
         password: t.password.trim() || undefined,
       }))
 
@@ -492,7 +525,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
 
   return (
     <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
-      <div style={{ width: '100%', maxWidth: 640, background: '#fff', borderRadius: 16, border: '1px solid var(--line)', padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div style={{ width: '100%', maxWidth: 900, background: '#fff', borderRadius: 16, border: '1px solid var(--line)', padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.3)', maxHeight: '90vh', overflowY: 'auto' }}>
         
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, borderBottom: '1px solid var(--line)', paddingBottom: 14 }}>
@@ -514,34 +547,18 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
           <div>
             <div style={{ marginBottom: 16 }}>
               <Button size="sm" variant="ghost" onClick={() => setShowPasteBox(!showPasteBox)} style={{ border: '1px solid var(--line)', background: '#f9f8f6', width: '100%', justifyContent: 'center' }}>
-                {showPasteBox ? 'Hide Quick Paste Area' : 'Paste All Workspace & Roster Data in One Go'}
+                {showPasteBox ? 'Hide paste box' : 'Paste firm, owner and team'}
               </Button>
             </div>
 
-            {showPasteBox && (
-              <div style={{ background: '#f4f3ef', padding: 14, borderRadius: 10, border: '1px solid var(--line)', marginBottom: 18 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>
-                  Paste Workspace, Owner, and Team Roster Text
-                </label>
-                <textarea
-                  value={rawText}
-                  onChange={e => setRawText(e.target.value)}
-                  placeholder={`Firm: Bhumi PropCity\nCity: Pune\nOwner: Bhumi PropCity, bhumipropcity@gmail.com, 8983337303, 00000000\n\nVinod Goswami, vinod, vinod.bhumipropcity@gmail.com, 9172287808, agent, vinod123\nBinod Bishwakarma, binod, binodbhumipropcity@gmail.com, 9172361915, agent, binod123`}
-                  rows={6}
-                  style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid var(--line)', fontSize: 12, fontFamily: 'monospace', resize: 'vertical', marginBottom: 10 }}
-                />
-                <Button size="sm" variant="primary" onClick={() => { parsePastedRoster(); setShowPasteBox(false); }} disabled={!rawText.trim()}>
-                  Populate Form & Team Roster
-                </Button>
-              </div>
-            )}
+            {showPasteBox && <PasteBox withFirm value={rawText} onChange={setRawText} onApply={parsePastedRoster} />}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 14, marginBottom: 14 }}>
               <Field label="Firm Name *">
-                <Input value={form.firmName} onChange={e => setF('firmName', e.target.value)} placeholder="e.g. Bhumi Real Estate" autoFocus />
+                <Input value={form.firmName} onChange={e => setF('firmName', e.target.value)} placeholder="e.g. Sai Realty" autoFocus />
               </Field>
               <Field label="Workspace Slug (URL)">
-                <Input value={form.slug} onChange={e => setF('slug', e.target.value)} placeholder="e.g. bhumi" />
+                <Input value={form.slug} onChange={e => setF('slug', e.target.value)} placeholder="e.g. sai-realty" />
               </Field>
               <Field label="City *">
                 <Input value={form.city} onChange={e => setF('city', e.target.value)} placeholder="e.g. Pune" />
@@ -550,10 +567,10 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
               <Field label="Owner Full Name">
-                <Input value={form.ownerName} onChange={e => setF('ownerName', e.target.value)} placeholder="e.g. Aniket Sharma" />
+                <Input value={form.ownerName} onChange={e => setF('ownerName', e.target.value)} onBlur={() => plan()} placeholder="e.g. Aniket Sharma" />
               </Field>
               <Field label="Owner Email (Login) *">
-                <Input type="email" value={form.ownerEmail} onChange={e => setF('ownerEmail', e.target.value)} placeholder="aniket@bhumi.com" />
+                <Input type="email" value={form.ownerEmail} onChange={e => setF('ownerEmail', e.target.value)} placeholder="aniket@sairealty.in" />
               </Field>
             </div>
 
@@ -561,9 +578,14 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
               <Field label="Owner Phone">
                 <Input value={form.ownerPhone} onChange={e => setF('ownerPhone', e.target.value)} placeholder="9876543210" />
               </Field>
-              <Field label="Custom Initial Password">
-                <Input value={form.ownerPassword} onChange={e => setF('ownerPassword', e.target.value)} placeholder="Bhumi@2026" />
+              <Field label="Owner Password">
+                <Input value={form.ownerPassword} onChange={e => setF('ownerPassword', e.target.value)} onBlur={() => plan()} style={{ fontWeight: 600, color: '#7c3aed' }} />
               </Field>
+            </div>
+
+            <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--ink)' }}>
+              Owner User ID: <code style={{ background: '#f4f3ef', padding: '3px 8px', borderRadius: 6 }}>{ownerLoginId || '—'}</code>
+              {form.ownerEmail.trim() && <span style={{ color: 'var(--muted)' }}> · or {form.ownerEmail.trim()}</span>}
             </div>
 
             {/* Password change toggle */}
@@ -607,17 +629,20 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
         {step === 2 && (
           <div>
             <div style={{ marginBottom: 14, fontSize: 13, color: 'var(--muted)' }}>
-              Add agents or managers for <b>{form.firmName}</b>. They will be created automatically alongside the workspace owner.
+              Team for <b>{form.firmName}</b>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: TEAM_COLS, gap: 8, padding: '0 10px', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                <span>Name</span><span>User ID</span><span>Password</span><span>Phone</span><span>Email</span><span>Role</span><span />
+              </div>
               {team.map((row, i) => (
-                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.8fr 1.2fr 0.9fr 0.9fr 0.7fr 24px', gap: 8, alignItems: 'center', background: '#f9f8f6', padding: 10, borderRadius: 10, border: '1px solid var(--line)' }}>
-                  <Input value={row.name} onChange={e => updateTeamRow(i, 'name', e.target.value)} placeholder="Full Name *" style={{ fontSize: 12.5 }} />
-                  <Input value={row.loginId} onChange={e => updateTeamRow(i, 'loginId', e.target.value)} placeholder="User ID (optional)" style={{ fontSize: 12.5 }} />
-                  <Input type="email" value={row.email} onChange={e => updateTeamRow(i, 'email', e.target.value)} placeholder="Email (optional)" style={{ fontSize: 12.5 }} />
-                  <Input value={row.phone} onChange={e => updateTeamRow(i, 'phone', e.target.value)} placeholder="Phone (optional)" style={{ fontSize: 12.5 }} />
-                  <Input value={row.password} onChange={e => updateTeamRow(i, 'password', e.target.value)} placeholder="Password" style={{ fontSize: 12.5, fontWeight: 600, color: '#7c3aed' }} />
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: TEAM_COLS, gap: 8, alignItems: 'center', background: '#f9f8f6', padding: 10, borderRadius: 10, border: '1px solid var(--line)' }}>
+                  <Input value={row.name} onChange={e => updateTeamRow(i, 'name', e.target.value)} onBlur={() => plan()} placeholder="Full name" style={{ fontSize: 12.5 }} />
+                  <Input value={row.loginId} onChange={e => updateTeamRow(i, 'loginId', e.target.value)} onBlur={() => plan()} style={{ fontSize: 12.5, fontFamily: 'monospace' }} />
+                  <Input value={row.password} onChange={e => updateTeamRow(i, 'password', e.target.value)} onBlur={() => plan()} style={{ fontSize: 12.5, fontFamily: 'monospace', fontWeight: 600, color: '#7c3aed' }} />
+                  <Input value={row.phone} onChange={e => updateTeamRow(i, 'phone', e.target.value)} placeholder="Phone" style={{ fontSize: 12.5 }} />
+                  <Input type="email" value={row.email} onChange={e => updateTeamRow(i, 'email', e.target.value)} onBlur={() => plan()} placeholder="Email" style={{ fontSize: 12.5 }} />
                   <select value={row.role} onChange={e => updateTeamRow(i, 'role', e.target.value)} style={{ padding: '8px 6px', borderRadius: 6, border: '1px solid var(--line)', fontSize: 12, background: '#fff' }}>
                     <option value="agent">Agent</option>
                     <option value="manager">Manager</option>
@@ -632,31 +657,21 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
             <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
               <Button size="sm" onClick={addTeamRow}>+ Add Row</Button>
               <Button size="sm" variant="ghost" onClick={() => setShowPasteBox(!showPasteBox)} style={{ border: '1px solid var(--line)', background: '#f9f8f6' }}>
-                {showPasteBox ? 'Hide Paste Box' : 'Paste CSV / WhatsApp Text'}
+                {showPasteBox ? 'Hide paste box' : 'Paste team'}
               </Button>
             </div>
 
-            {showPasteBox && (
-              <div style={{ background: '#f4f3ef', padding: 14, borderRadius: 10, border: '1px solid var(--line)', marginBottom: 20 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>
-                  Paste CSV, Excel, or WhatsApp Roster Text
-                </label>
-                <textarea
-                  value={rawText}
-                  onChange={e => setRawText(e.target.value)}
-                  placeholder={`e.g. Vinod Goswami, vinod.bhumipropcity@gmail.com, 9172287808\nor paste WhatsApp messages with Full Name, Email, Phone...`}
-                  rows={5}
-                  style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid var(--line)', fontSize: 12, fontFamily: 'monospace', resize: 'vertical', marginBottom: 10 }}
-                />
-                <Button size="sm" variant="primary" onClick={parsePastedRoster} disabled={!rawText.trim()}>
-                  Load Roster into Grid
-                </Button>
+            {showPasteBox && <PasteBox value={rawText} onChange={setRawText} onApply={parsePastedRoster} />}
+
+            {issues.length > 0 && (
+              <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', color: '#991b1b', padding: '10px 14px', borderRadius: 8, fontSize: 12.5, marginBottom: 16 }}>
+                {issues.map(x => <div key={x}>{x}</div>)}
               </div>
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--line)', paddingTop: 16 }}>
               <Button variant="ghost" onClick={() => setStep(1)}>← Back</Button>
-              <Button variant="primary" disabled={busy} onClick={handleFinish}>
+              <Button variant="primary" disabled={busy || issues.length > 0} onClick={handleFinish}>
                 {busy ? 'Provisioning Workspace…' : 'Complete Onboarding & Create Users'}
               </Button>
             </div>

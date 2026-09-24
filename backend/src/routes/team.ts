@@ -14,6 +14,7 @@ import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { audit } from '../services/audit';
 import { adminSetPassword, suggestPassword, revokeUserSessions, passwordIssue } from '../services/auth';
+import { loginIdFromName } from '../services/roster';
 
 export const teamRouter = Router();
 teamRouter.use(requireTenantAuth);
@@ -43,7 +44,7 @@ async function isLastActiveOwner(tenantId: string, userId: string): Promise<bool
 
 /** Slug an agent's login_id from their name, unique within the tenant. */
 async function deriveLoginId(tenantId: string, name: string): Promise<string> {
-  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'agent';
+  const base = loginIdFromName(name);
   let candidate = base;
   for (let n = 2; (await sql`SELECT 1 FROM users WHERE tenant_id = ${tenantId} AND login_id = ${candidate} LIMIT 1`).length; n++) {
     candidate = `${base}${n}`;

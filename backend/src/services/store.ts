@@ -18,6 +18,7 @@ import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSi
 import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
+import { planRoster, normalizePhone, RosterRow } from './roster.js';
 import { assertLeadWrite, ForbiddenError } from '../lib/permissions.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
@@ -87,12 +88,12 @@ export interface ProvisionInput {
   primaryColor?: string;
   ownerPassword?: string;
   mustChangePassword?: boolean;
-  initialTeam?: Array<{ name: string; email?: string; phone?: string; role?: string; password?: string }>;
+  initialTeam?: RosterRow[];
 }
 export interface ProvisionResult {
   tenant: { id: string; name: string; slug: string; brand_config: any };
-  owner: { id: string; name: string; email: string; phone: string | null; role: 'owner' };
-  team?: Array<{ name: string; email: string; role: string; password: string }>;
+  owner: { id: string; name: string; email: string; phone: string | null; role: 'owner'; login_id: string };
+  team: Array<{ name: string; email: string | null; loginId: string; role: string; password: string }>;
   ingest: { tenantSlug: string; secret: string };
   loginWith: string;
   initialPassword: string;   // hand this to the owner (they change it on first login)
@@ -109,8 +110,12 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   // owner's email is required — a phone-only owner could never receive a code.
   const ownerEmail = input.ownerEmail ? String(input.ownerEmail).trim().toLowerCase() : '';
   if (!EMAIL_RE.test(ownerEmail)) throw new Error("The owner's email is required — sign-in codes are sent by email.");
-  const ownerPhoneRaw = input.ownerPhone ? String(input.ownerPhone).replace(/\D/g, '') : '';
-  const ownerPhone = ownerPhoneRaw ? `+91${ownerPhoneRaw.slice(-10)}` : null;
+  const ownerPhone = normalizePhone(input.ownerPhone);
+
+  // Every login id and password, planned before anything is written: a roster
+  // that cannot be created must not leave a tenant row behind it.
+  const plan = planRoster({ ownerName: input.ownerName, ownerEmail, ownerPassword: input.ownerPassword, team: input.initialTeam });
+  if (plan.issues.length) throw new Error(`Roster is not valid — ${plan.issues.join(' ')}`);
 
   // Unique slug === tenant id (our convention). If taken, suffix -2, -3, …
   const base = (input.slug || firmName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
@@ -137,16 +142,10 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   const ownerId = `owner_${tenantId}`;
   const ownerName = (input.ownerName || 'Owner').trim();
   const ownerMeta = { initials, avatar: '', phone: ownerPhone, email: ownerEmail };
-  const initialPassword = input.ownerPassword ? input.ownerPassword.trim() : suggestPassword();
+  const initialPassword = plan.owner.password;
   const mustChange = input.mustChangePassword !== false; // default true
   const ownerPwHash = await bcrypt.hash(initialPassword, 10);
-  
-  // Auto-slug login_id for owner
-  const ownerBase = ownerName.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'owner';
-  let ownerLoginId = ownerBase;
-  for (let n = 2; (await sql`SELECT 1 FROM users WHERE tenant_id = ${tenantId} AND login_id = ${ownerLoginId} LIMIT 1`).length; n++) {
-    ownerLoginId = `${ownerBase}${n}`;
-  }
+  const ownerLoginId = plan.owner.loginId;
 
   await sql`
     INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
@@ -157,39 +156,26 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
     VALUES (${ownerId}, ${ownerName}, ${ownerName.split(' ')[0]}, ${initials}, '', 'owner', 'ACTIVE', ${sql.json(ownerMeta)}, ${tenantId})
   `;
 
-  // 2.1 Bulk Team Members Provisioning if provided
-  const createdTeam: Array<{ name: string; email: string; loginId: string; role: string; password: string }> = [];
-  if (Array.isArray(input.initialTeam) && input.initialTeam.length > 0) {
-    for (let idx = 0; idx < input.initialTeam.length; idx++) {
-      const tm = input.initialTeam[idx];
-      const tmName = (tm.name || '').trim();
-      if (!tmName) continue;
-      const tmEmail = tm.email ? String(tm.email).trim().toLowerCase() : null;
-      const tmPhone = tm.phone ? String(tm.phone).trim() : null;
-      const tmRole = tm.role === 'manager' ? 'manager' : 'agent';
-      const tmPw = tm.password ? String(tm.password).trim() : (input.ownerPassword ? input.ownerPassword.trim() : suggestPassword());
-      const tmPwHash = await bcrypt.hash(tmPw, 10);
-      const tmId = `usr_${tenantId}_${Date.now()}_${idx}`;
-      const tmParts = tmName.split(/\s+/).filter(Boolean);
-      const tmInitials = tmParts.length === 1 ? tmParts[0].slice(0, 2).toUpperCase() : tmParts.slice(0, 2).map(w => w[0]).join('').toUpperCase();
-      const tmMeta = { initials: tmInitials, avatar: '', phone: tmPhone, email: tmEmail };
-
-      const tmBase = tm.loginId ? String(tm.loginId).trim().toLowerCase().replace(/[^a-z0-9]+/g, '') : (tmName.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'user');
-      let tmLoginId = tmBase;
-      for (let n = 2; (await sql`SELECT 1 FROM users WHERE tenant_id = ${tenantId} AND login_id = ${tmLoginId} LIMIT 1`).length; n++) {
-        tmLoginId = `${tmBase}${n}`;
-      }
-
-      await sql`
-        INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
-        VALUES (${tmId}, ${tenantId}, ${tmName}, ${tmLoginId}, ${tmPhone}, ${tmEmail}, ${tmRole}, 'active', ${sql.json(tmMeta)}, ${tmPwHash}, ${!!tmEmail}, ${mustChange})
-      `;
-      await sql`
-        INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
-        VALUES (${tmId}, ${tmName}, ${tmParts[0]}, ${tmInitials}, '', ${tmRole}, 'ACTIVE', ${sql.json(tmMeta)}, ${tenantId})
-      `;
-      createdTeam.push({ name: tmName, email: tmEmail || '—', loginId: tmLoginId, role: tmRole, password: tmPw });
-    }
+  // 2.1 The team, exactly as planned — the ids and passwords the console showed.
+  const createdTeam: ProvisionResult['team'] = [];
+  const teamIds: string[] = [];
+  for (let idx = 0; idx < plan.team.length; idx++) {
+    const tm = plan.team[idx];
+    const tmId = `usr_${tenantId}_${Date.now()}_${idx}`;
+    const tmParts = tm.name.split(/\s+/).filter(Boolean);
+    const tmInitials = tmParts.length === 1 ? tmParts[0].slice(0, 2).toUpperCase() : tmParts.slice(0, 2).map(w => w[0]).join('').toUpperCase();
+    const tmMeta = { initials: tmInitials, avatar: '', phone: tm.phone, email: tm.email };
+    const tmPwHash = await bcrypt.hash(tm.password, 10);
+    await sql`
+      INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
+      VALUES (${tmId}, ${tenantId}, ${tm.name}, ${tm.loginId}, ${tm.phone}, ${tm.email}, ${tm.role}, 'active', ${sql.json(tmMeta)}, ${tmPwHash}, ${!!tm.email}, ${mustChange})
+    `;
+    await sql`
+      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
+      VALUES (${tmId}, ${tm.name}, ${tmParts[0]}, ${tmInitials}, '', ${tm.role}, 'ACTIVE', ${sql.json(tmMeta)}, ${tenantId})
+    `;
+    teamIds.push(tmId);
+    createdTeam.push({ name: tm.name, email: tm.email, loginId: tm.loginId, role: tm.role, password: tm.password });
   }
 
   // 3. Default settings + routing UNDER the new tenant. A new firm starts EMPTY.
@@ -204,13 +190,14 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   `;
   await sql`
     INSERT INTO crm_routing_rules (strategy, active_agent_ids, last_assigned_index, tenant_id)
-    VALUES ('round_robin', ${sql.json([ownerId])}, -1, ${tenantId})
+    VALUES ('round_robin', ${sql.json([ownerId, ...teamIds])}, -1, ${tenantId})
     ON CONFLICT (tenant_id) DO NOTHING
   `;
 
   return {
     tenant: { id: tenantId, name: firmName, slug: cleanSlug, brand_config },
-    owner: { id: ownerId, name: ownerName, email: ownerEmail, phone: ownerPhone, role: 'owner' },
+    owner: { id: ownerId, name: ownerName, email: ownerEmail, phone: ownerPhone, role: 'owner', login_id: ownerLoginId },
+    team: createdTeam,
     ingest: { tenantSlug: cleanSlug, secret: '' },
     loginWith: ownerEmail,
     initialPassword,
