@@ -260,17 +260,17 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 
 ## Part 4 — Calling organised by project
 
-### 4.1 ⬜ Project group view with "Assign project"
+### 4.1 ✅ Project group view with "Assign project" — `87c3adc`
 - **Said:** they assign a whole project to one person, so give bulk assign on the
   project group.
 - **Direction:** an assign action on the project card assigns every open owner
   in the project, through distribute (2.3).
 
-### 4.2 ⬜ Inside a project: a calling list with bulk assign
+### 4.2 ✅ Inside a project: a calling list with bulk assign — open a card, tick rows, Bulk assign (splits between people since `906fbe8`)
 - **Said:** opening a project shows a lead-list-like view for calling, with bulk
   assign there too.
 
-### 4.3 ⬜ The project card shows who holds it
+### 4.3 ✅ The project card shows who holds it — `87c3adc`
 - **Decided:** after assigning the project and then moving a few inside it, the
   card reads e.g. **"Rupali 40 · Aniket 8 · Unassigned 5"**. Count and names come
   from one query (CLAUDE.md §3.3).
@@ -307,7 +307,7 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 
 ## Part 5 — Imports (owners, leads, properties)
 
-### 5.1 ⬜ Downloadable example sheet per import type
+### 5.1 ✅ Downloadable example sheet per import type — `4479591`
 - **Said:** first "the mapping is also good, just make sure it works"; later
   "better to give out the sheet example instead of mapping it".
 - **Direction:** both. A **Download example** for owners, leads and properties,
@@ -315,11 +315,11 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   still maps.
 - **Open:** confirm mapping stays as the fallback.
 
-### 5.2 ⬜ Multi-sheet Excel: choose the sheet
+### 5.2 ✅ Multi-sheet Excel: choose the sheet — `4479591`
 - **Said:** there's no sheet selection when the uploaded Excel has several sheets.
 - **Know:** not checked. Probably reads only the first sheet, silently.
 
-### 5.3 ⬜ Owner import keeps its real columns
+### 5.3 ✅ Owner import keeps its real columns — `4479591`; unit and project optional since `d8aed1d`
 - **Decided:** tower, unit, configuration (BHK) and area become real fields, not
   flattened into `unit_ref`. A missing name stays empty (never "Owner").
 - **Asked:** what happens to Bhumi's existing properties? **Answered:**
@@ -327,7 +327,7 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 - **Open:** backfill delpat's 732 existing flattened rows (safe tenant). Does
   Mahalaxmi's import (1.2) need a repair? It's a paying-client write, so named first.
 
-### 5.4 ⬜ Large imports
+### 5.4 ✅ Large imports — server-side job, `4479591`; Mahalaxmi imported 3,731 rows on it
 - **Said:** how does the server handle 4k+ rows?
 - **Direction:** chunked, idempotent, with a per-row result (added / updated /
   skipped + reason) and a final count that equals the rows in the file.
@@ -341,11 +341,11 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 clients, the proposed one-person identity, and the three questions for the user.
 Phase A ships with Part 1; B and C wait on answer 1.
 
-### 6.1 ⬜ Unit number not visible at a glance in Contacts → Owners
+### 6.1 ✅ Unit number visible in Contacts → Owners — `ce1020c`
 - **Said:** the owners created while adding properties show other information,
   and the unit number only appears after opening the record.
 
-### 6.2 ⬜ Hardcoded values in the owners list
+### 6.2 ✅ Hardcoded values in the owners list — gone, `ce1020c` / `44eabbf`
 - **Know (22 Sep, `store.ts listContacts` ~1759–1781):** grouped by
   **owner_name** (two different people with one name merge into one row),
   `phone: r.phone || '+91 —'` (invents a phone), `minsAgo: 120` hardcoded (a fake
@@ -401,7 +401,7 @@ Phase A ships with Part 1; B and C wait on answer 1.
 
 ## Part 8 — Reports
 
-### 8.1 ⬜ End-of-day work report, for the agent and for the manager
+### 8.1 🟡 Agent activity — daily, for the agent and for the manager (the client asked, 24 Sep)
 - **Said:** a self work report at end of day for agents, and one for the manager.
 - **Depends on:** 1.3. With the wrong actor, the report is wrong.
 - **Open:** what's in it (calls made, outcomes, visits, follow-ups done or
@@ -531,4 +531,47 @@ new importer. **0 rows called yet. 921 with nobody on them** (VTP Verve PHA
   names) — almost certainly a builder's or society office. 12 on another.
 - **Calling search does not match unit number or tower** — "1603" or
   "GGVT10101" finds nothing.
+
+---
+
+## 2026-09-24 — the next big pieces, as the user described them
+
+### 8.1 (expanded) Agent activity — what they actually did
+- **Said:** the owner wants to see each agent's work daily; agents want to see
+  their own. "We have to be real about it" — counted from actions only.
+- **Measured, bhumi, last 30 days (timeline events by a person):** calls 485,
+  WhatsApp 409, stage changes 445, remarks 307, follow-ups booked 12, site
+  visits 4. Mahalaxmi so far: calls 18, remarks 18, stage changes 49.
+- **The honesty problem:** a "call" is recorded when the agent TAPS Call. The
+  app cannot know the phone rang or anyone answered. Only **114 of 485** calls
+  (24%) carry an outcome afterwards. So "calls" must be reported as "dialled",
+  with outcomes counted separately — or the report will say an agent spoke to
+  40 people when they tapped 40 buttons.
+- **Open:** which actions count, and how; what a day's report shows; where it
+  lives (screen, end-of-day push); what stops it being gamed (a stage flipped
+  back and forth is two "changes").
+
+### 10 ⬜ Conversion — the end of each pipeline becomes a record
+- **Owners (said 24 Sep):** Key Received is the end of calling; there should be
+  a **conversion** from there into a property — the agent fills in the rest of
+  the listing. Converting makes the owner a Contact (Contacts = owners whose
+  property we manage). This is the "they agreed → take the property" step
+  written up and deferred on 23 Sep; it now has a trigger.
+- **Leads (said 24 Sep):** when a lead goes through — the agreement is signed and
+  uploaded — it should land somewhere lasting: the client's current rentals,
+  which double as **renewal reminders** for the year ahead.
+- **Know:** the product already has a tenancy on a property (tenant, dates) and a
+  "Tenancies expiring" group in Today. **0 tenancies are recorded on bhumi or
+  mahalaxmi** — nothing creates one when a lead closes, so the reminders exist
+  and are never fed.
+- **Open:** where closed business lives (a Rentals view by flat and end date vs
+  a second list in Contacts); what a sale records (no renewal); the agreement as
+  an uploaded document on the tenancy; whether Key Received starts conversion
+  automatically or offers it.
+
+### 1.8 ⬜ Carry the sheet's call outcomes into the calling list
+- Their Sierra sheet's Call Status (not interested 281, wrong number 30,
+  interested 39, …) was dropped at import; every row reads New. Map it at import
+  and apply it to the rows already imported from the stored sheet. Paying-client
+  write — confirmed first.
 
