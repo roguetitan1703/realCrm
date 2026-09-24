@@ -295,27 +295,12 @@ export function passwordIssue(pw: string): string | null {
   return null;
 }
 
-/** A person's first name, as the sign-in handle and password are built from it. */
-export function firstNameHandle(name: string): string {
-  return String(name || '').trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-/**
- * THE PASSWORD A NEW SEAT IS HANDED: first name, `@`, digits — Vijay gets
- * `vijay@123`. The firm reads it off the handover and says it down the phone,
- * and random words were a support call each. It is guessable from the team list
- * by design, which is why every seat starts with `must_change_password` on.
- * A short name takes more digits to reach the 8-character minimum (`raj@1234`).
- *
- * With no name it is random — for an account nobody is being handed, where a
- * guessable password would be a way in that nobody knows exists.
- */
-export function suggestPassword(name?: string): string {
-  const first = firstNameHandle(name || '');
-  if (!first) return `${randomBytes(9).toString('base64url')}`;
-  let digits = '123';
-  while (`${first}@${digits}`.length < 8) digits += String(digits.length + 1);
-  return `${first}@${digits}`;
+/** A memorable suggestion an admin can hand over (word-place-number). */
+const PW_WORDS = ['tiger', 'river', 'maple', 'cedar', 'delta', 'orbit', 'ember', 'coral', 'ivory', 'onyx', 'pine', 'wren'];
+const PW_PLACES = ['pune', 'mumbai', 'thane', 'nashik', 'baner', 'wakad', 'kothrud', 'hadapsar'];
+export function suggestPassword(): string {
+  const pick = (a: string[]) => a[Math.floor(Math.random() * a.length)];
+  return `${pick(PW_WORDS)}-${pick(PW_PLACES)}-${Math.floor(10 + Math.random() * 89)}`;
 }
 
 // ---- Sessions --------------------------------------------------------------
