@@ -140,7 +140,7 @@ teamRouter.post('/users', async (req: Request, res: Response) => {
       return res.status(409).json({ error: 'Someone on this team already uses that email.' });
     }
 
-    const initial = String(password || '').trim() || suggestPassword();
+    const initial = String(password || '').trim() || suggestPassword(cleanName);
     const issue = passwordIssue(initial);
     if (issue) return res.status(400).json({ error: issue });
 
@@ -330,7 +330,7 @@ teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) 
       nextLogin = wanted || await deriveLoginId(req.tenantId!, cleanName);
     }
 
-    const initial = String(password || '').trim() || suggestPassword();
+    const initial = String(password || '').trim() || suggestPassword(cleanName);
     const issue = passwordIssue(initial);
     if (issue) return res.status(400).json({ error: issue });
 
@@ -382,7 +382,7 @@ teamRouter.post('/users/:id/reset-password', async (req: Request, res: Response)
     if (!u) return res.status(404).json({ error: 'User not found' });
     const perm = canManageRole(u.role);
     if (!perm.ok) return res.status(403).json({ error: perm.msg });
-    const newPw = String(req.body?.password || '').trim() || suggestPassword();
+    const newPw = String(req.body?.password || '').trim() || suggestPassword(u.name);
     const issue = passwordIssue(newPw);
     if (issue) return res.status(400).json({ error: issue });
     const mustChange = req.body?.mustChangePassword !== false;
