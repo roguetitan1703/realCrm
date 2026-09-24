@@ -497,3 +497,38 @@ leads. 5 has to come before 4.4 (towers). 8 comes after 1.3.
 | *(found while checking)* iPhone pushes failing with no reason | 1.7 |
 | *(found while checking)* Copy break slipped past the build | 9.3 |
 | *(found while checking)* env CRLF | 9.4 |
+
+---
+
+## 2026-09-24 — after the Mahalaxmi import
+
+**Measured on production (read-only):** 3,731 calling rows in 8 projects, all with
+unit numbers in their own column, towers on 3,421, 157 international numbers
+stored correctly, 0 invented names — the live API (`f03dcd1`) already had the
+new importer. **0 rows called yet. 921 with nobody on them** (VTP Verve PHA
+570/670, VTP Sierra PHA 351/353).
+
+**Decided with the user:**
+- "PHA" projects and "Godrej Hill Retreat 2" are **real separate phases**. Not a
+  naming bug; leave them.
+- **Onboarding (2.4 bulk users, 2.5 handover credentials) is deprioritised** —
+  it is the super-admin side and matters at the next client onboarding, not now.
+- **Next, in order:** tower filter (4.4) and case/space-insensitive project names
+  (4.6); then the end-of-day report (8.1) and the per-tenant audit ledger (9.1).
+
+**Found in their sheets — what the importer threw away:**
+- The VTP Sierra sheet (1,529 rows) carried a **Call Status** column: not
+  interested 281, not received 274, received 105, call cut 71, busy 68,
+  incoming not available 57, **interested 39, wrong number 30**. There was no
+  field to map it to, so every row landed as New / never called — agents will
+  re-ring 281 people who already said no and 30 wrong numbers. The raw rows are
+  still stored (crm_import_rows), so this can be applied to the rows already
+  imported without re-importing. **A write to a paying client — needs an OK.**
+- "Assigned To" / "Lead Assign To" in that sheet is free text mixing names and
+  outcomes ("nr 4 times", "self use") — not mappable. "NextAction" repeats the
+  status. "Marketplace Added" is empty. Region / microMarket dropped (minor).
+- **One number sits on 50 flats** in K-SHIRE (+918329745161, 50 different
+  names) — almost certainly a builder's or society office. 12 on another.
+- **Calling search does not match unit number or tower** — "1603" or
+  "GGVT10101" finds nothing.
+
