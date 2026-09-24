@@ -226,7 +226,16 @@ const push = (L, line) => { if (line) L.push(line) }
 const E = {
   home: '🏡', pin: '📍', area: '📐', floor: '🏢', bath: '🛁', car: '🚗',
   key: '🔑', star: '✨', money: '💰', call: '📞', info: 'ℹ️',
-  doc: '📄', sofa: '🛋️',
+  doc: '📄', sofa: '🛋️', camera: '📷',
+}
+
+// 7.5 THE PHOTO LINK, on every message about a listing that has photos. The
+// server decides whether there is one (it has photos, the link is not turned
+// off) and sends its path; the page it opens shows only what a client may see.
+function galleryLine(p) {
+  if (!p?.galleryPath) return null
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  return `${E.camera} ${origin}${p.galleryPath}`
 }
 
 // The listing's own description, appended only when the sender asks for it.
@@ -366,6 +375,7 @@ function buildSale(p, t, firmName, lang, opts) {
   if (d.price) L.push(`${E.money} *${d.price}*${p.negotiable ? ` ${t.negotiable}` : ''}`)
   push(L, terms(p, t, lang))
   if (opts?.includeDescription) push2(L, descriptionBlock(p, t))
+  if (galleryLine(p)) { L.push(''); L.push(galleryLine(p)) }
   L.push('')
   push(L, signOff(firmName))
   return L.join('\n')
@@ -409,6 +419,7 @@ function buildRent(p, t, firmName, lang, opts) {
   if (d.price) L.push(`${E.money} *${d.price}*` + (d.deposit ? ` · ${t.deposit} *${d.deposit}*` : ''))
   push(L, terms(p, t, lang))
   if (opts?.includeDescription) push2(L, descriptionBlock(p, t))
+  if (galleryLine(p)) { L.push(''); L.push(galleryLine(p)) }
   L.push('')
   push(L, signOff(firmName))
   return L.join('\n')
@@ -575,6 +586,8 @@ const NEVER_SHARED_FIELDS = [
   // it meant to: remarks, the event history, and whether the listing is
   // blocked or off-market are all things the firm says to itself.
   'timeline', 'notes', 'remarks', 'tenancy', 'completeness',
+  // Whether and when somebody went to check it, and the photo link's switch.
+  'verifiedAt', 'verifiedBy', 'galleryOff',
 ]
 
 /**
@@ -607,7 +620,7 @@ export function generateMessage(rawProperty, opts = {}) {
     const rows = msg.split('\n')
     const head = rows.slice(0, 3).filter(Boolean)
     const priceLine = rows.find(x => x.startsWith(E.money))
-    msg = [...head, '', priceLine, signOff(firmName)]
+    msg = [...head, '', priceLine, galleryLine(property), signOff(firmName)]
       .filter(Boolean).join('\n')
   }
   // A workspace with no firm name set left a blank line hanging off the end,

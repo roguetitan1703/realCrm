@@ -11,6 +11,7 @@ import { StatusTag, Quoted, Button, KV, Timeline, MoreRows, useCap, CappedList, 
 import { NbaBanner } from '../components/rail.jsx'
 import { leadsForProperty } from '../lib/matching.js'
 import { fileUrl } from '../lib/media.js'
+import { copyText } from '../lib/clipboard.js'
 import Lightbox from '../components/Lightbox.jsx'
 import { latestPlus, quotedLine, unitLabel, fmtDate, configLabel } from '../lib/format.js'
 import { AgreementList, useAgreementsFor } from '../components/Agreements.jsx'
@@ -33,13 +34,13 @@ import { canEditListing, canAddListing } from '../lib/permissions.js'
 // from the UI), so the two lists are near-identical but not the same thing.
 export const PROP_FILTER_KEYS = [
   'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
-  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified',
 ]
 
 const API_FILTERS = [
   'status', 'deal', 'type', 'locality', 'project',
   'category', 'bhk', 'subtype', 'furnishing', 'facing',
-  'possession', 'ownership', 'transaction',
+  'possession', 'ownership', 'transaction', 'verified',
 ]
 function toQuery({ page, limit, q, ...filters }) {
   const out = { page, limit, q }
@@ -348,9 +349,30 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
   // C8. Watermarked on the device before upload, so what's shown here is exactly
   // what a client receives if it's forwarded on.
   const media = (p.media || [])
+  // 7.5 The photo link: one tap copies it; it is also in every share message.
+  // Off, it can be turned back on; New makes a fresh one and the old stops.
+  const link = p.galleryPath ? `${window.location.origin}${p.galleryPath}` : ''
+  const copyLink = () => copyText(link).then(ok => store.toast(ok ? 'Photo link copied' : 'Could not copy. Your browser blocked it.', ok ? undefined : 'warn'))
+  const linkTools = !mayEdit && !link ? null : (
+    <span className="pgal-tools">
+      {link ? (
+        <>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={copyLink}><Icon name="copy" size={13} />Copy photo link</button>
+          <a className="btn btn-ghost btn-sm" href={link} target="_blank" rel="noopener noreferrer"><Icon name="eye" size={13} />Open</a>
+          {mayEdit && <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+            if (window.confirm('Turn off the photo link? Anyone who has it will see nothing.')) store.setPropertyGallery(p.id, 'off').then(r => r && store.toast('Photo link turned off'))
+          }}>Turn off</button>}
+        </>
+      ) : (
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => store.setPropertyGallery(p.id, 'new').then(r => r && store.toast('New photo link made'))}>
+          <Icon name="share" size={13} />Turn on photo link
+        </button>
+      )}
+    </span>
+  )
   const photos = media.length === 0 ? null : (
     <Panel>
-      <SectionHead title="Photos" right={`${media.length}`} />
+      <SectionHead title={`Photos · ${media.length}`} right={linkTools} />
       <div className="pgal">
         {media.map((m, i) => (
           // Every tile the same size, cover named rather than enlarged. A
@@ -451,12 +473,12 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
     },
     {
       id: 'history',
-      title: 'Listing history',
+      title: 'History',
       right: <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'ownerUpdate', propId: p.id })}><Icon name="wa" size={13} />Update owner</button>,
       render: () => (p.timeline && p.timeline.length)
         ? <Timeline events={p.timeline} agents={store.state.agents} currentUserId={store.state.activeAgentId}
             onEditRemark={(eventId, text, outcome) => store.editRemark('property', p.id, eventId, text, outcome)} />
-        : <div className="detail-empty">No activity logged yet. Owner updates, calls, remarks and status changes appear here.</div>,
+        : <div className="detail-empty">Nothing yet.</div>,
     },
   ]
 
@@ -471,7 +493,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
           nba={nba}
           beforeSheet={photos}
           sections={sections}
-          actionCtx={{ onClose: back }}
+          actionCtx={{ onClose: back, go }}
         />
       </div>
       {gallery !== null && (

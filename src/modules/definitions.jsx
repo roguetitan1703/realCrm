@@ -781,6 +781,8 @@ export const PROPERTIES_DEF = {
 
   // The identity line under the record name. Read `p.type` and `p.priceLabel`
   // straight, so a listing added through the current form showed neither.
+  // Who added it is the sheet's "Added by" (7.2), filled from the ledger for a
+  // listing older than the column; it is not repeated up here.
   headerFacts: (p) => [
     configLabel(p),
     p.locality,
@@ -788,6 +790,12 @@ export const PROPERTIES_DEF = {
     p.deal === 'rent' ? 'For rent' : 'For sale',
     labelOf(FURNISH, p.furnishType) || p.furnishing || null,
   ].filter(Boolean),
+
+  // 7.1 Checked on a visit. Beside the name, because it is a fact about the
+  // flat that a buyer's agent asks first; who went and when is in its history.
+  titleBadge: (p) => p.verifiedAt
+    ? <span className="vbadge" title={`Verified ${dayLabel(p.verifiedAt)}`}><Icon name="check" size={12} />Verified</span>
+    : null,
 
   // A listing moves through a sale/lease lifecycle. Rendered as the same stepper.
   progression: {
@@ -847,6 +855,8 @@ export const PROPERTIES_DEF = {
           .filter((x, i, a) => a.findIndex(y => y.value === x.value) === i)) },
       { key: 'locality', label: 'Locality', icon: 'building', group: 'Where', options: asOptions(localities(store)) },
       { key: 'status', label: 'Status', icon: 'check', group: 'State', options: optionsOf(STATUS) },
+      { key: 'verified', label: 'Verified', icon: 'check', multi: false, group: 'State',
+        options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] },
       { key: 'furnishing', label: 'Furnishing', icon: 'home', group: 'Condition', options: optionsOf(FURNISH) },
       { key: 'facing', label: 'Facing', icon: 'tag', group: 'Condition', options: optionsOf(FACING) },
       { key: 'possession', label: 'Possession', icon: 'clock', group: 'State', options: optionsOf(POSSESSION) },
@@ -876,6 +886,7 @@ export const PROPERTIES_DEF = {
     // so this compares directly — case-insensitively, because legacy rows and
     // imports vary. No token translation, and nothing stored gets rewritten.
     if (key === 'status') return vals.some(v => eqi(v, p.status))
+    if (key === 'verified') return vals.includes(p.verifiedAt ? 'yes' : 'no')
     return true
   },
 
@@ -897,7 +908,7 @@ export const PROPERTIES_DEF = {
     { key: 'society', label: 'Property', render: (p) => (
       <div className="cell-prop">
         <div className="thumb-tile" style={{ background: thumbTint(p.id) }}><Icon name="building" size={19} strokeWidth={1.4} /></div>
-        <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}</div><div className="sub">{p.locality}</div></div>
+        <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}{p.verifiedAt && <span className="vtick" title="Verified"><Icon name="check" size={11} /></span>}</div><div className="sub">{p.locality}</div></div>
       </div>
     ) },
     // These columns read the CANONICAL fields with a legacy fallback. They
@@ -960,6 +971,9 @@ export const PROPERTIES_DEF = {
       run: (store, p) => store.openModal({ kind: 'propStatus', propId: p.id }) },
     { id: 'remark', tier: 'quick', icon: 'note', label: 'Add remark',
       run: (store, p) => store.openModal({ kind: 'remark', recordType: 'property', recordId: p.id }) },
+    // 7.1 After the visit that checks it. Undoing it is rare, so it is behind More.
+    { id: 'verify', tier: 'quick', icon: 'check', label: 'Mark as verified', when: (p) => !p.verifiedAt,
+      run: (store, p) => store.verifyProperty(p.id, true) },
     // manage (behind "More"):
     // Periodic, not per-visit — it belongs behind More, not in the five tiles
     // you reach for on every record.
@@ -988,6 +1002,14 @@ export const PROPERTIES_DEF = {
     // "Record tenancy" and "Mark deposit returned" were here, writing the
     // property's tenancy blob. A tenancy is an agreement now — recorded from
     // the flat's Agreements section, or by closing the deal on the lead.
+    { id: 'unverify', tier: 'manage', icon: 'x', label: 'Remove verified', when: (p) => !!p.verifiedAt,
+      run: (store, p) => store.verifyProperty(p.id, false) },
+    // 7.4 Another flat in the same building: the property form, filled in with
+    // what the two share. The flat number, owner, photos, status, verification
+    // and history are the new flat's own and start empty.
+    { id: 'duplicate', tier: 'manage', icon: 'copy', label: 'Duplicate for another flat',
+      when: (p, store, ctx) => !!ctx?.go,
+      run: (store, p, ctx) => ctx.go('properties', { propAdd: true, propId: null, propOpen: false, propCopyOf: p.id }) },
     { id: 'delete', tier: 'manage', icon: 'trash', tone: 'danger', label: 'Delete property record',
       run: (store, p, ctx) => { if (window.confirm('Delete this property permanently?')) { store.deleteProperty(p.id); ctx?.onClose?.() } } },
   ],

@@ -19,6 +19,7 @@ import { importsRouter } from './routes/imports';
 import { activityRouter } from './routes/activity';
 import { agreementsRouter } from './routes/agreements';
 import { propertiesRouter } from './routes/properties';
+import { publicRouter } from './routes/public';
 import { teamRouter } from './routes/team';
 import { actionsRouter } from './routes/actions';
 import { ingestRouter } from './routes/ingest';
@@ -201,6 +202,8 @@ app.use('/api/v1/modules/:moduleKey/records', recordsRouter);
 app.use('/api/v1/leads', leadsRouter);
 app.use('/api/v1/owners', ownersRouter);
 app.use('/api/v1/properties', propertiesRouter);
+// No sign-in: a listing's photo link (7.5).
+app.use('/api/v1/public', publicRouter);
 // Spreadsheet imports run as a server-side job — see routes/imports.ts.
 app.use('/api/v1/imports', importsRouter);
 app.use('/api/v1/activity', activityRouter);

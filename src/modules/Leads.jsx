@@ -583,10 +583,10 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     }] : []),
     {
       id: 'inventory',
-      title: 'Matched & shortlisted inventory',
+      title: 'Shortlisted and matching flats',
       right: <button className="btn btn-secondary btn-sm" onClick={() => store.openModal({ kind: 'attachProp', leadId: l.id })}><Icon name="plus" size={14} /> Attach property</button>,
       render: () => propRows.length === 0
-        ? <div className="detail-empty">No shortlisted or matching inventory yet. Attach one to get started.</div>
+        ? <div className="detail-empty">None yet.</div>
         : <CappedList items={propRows} step={6} noun="properties">{(row, i) => {
             const fb = (l.feedback || {})[row.p.id]
             const rejected = fb?.verdict === 'rejected'
@@ -609,7 +609,13 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                       imported inventory is most of them. */}
                   <div className="relrow-sub">{[row.p.type, row.p.locality, row.line].filter(Boolean).join(' · ')}</div>
                 </button>
-                <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(row.p.id, l.id)} icon="wa">Share Match</Button>
+                <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(row.p.id, l.id)} icon="wa">Share</Button>
+                {/* Shortlisted by a person, so a person can take it off. A
+                    matched row is the matcher's and is not removable here. */}
+                {row.shortlisted && (
+                  <button type="button" className="inv-x" aria-label={`Take ${row.p.society} off the shortlist`} title="Take off the shortlist"
+                    onClick={() => store.detachProp(l.id, row.p.id)}><Icon name="x" size={14} /></button>
+                )}
               </div>
             )
           }}</CappedList>,

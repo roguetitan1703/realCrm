@@ -23,7 +23,7 @@
 import { currentTenant } from './api.js'
 
 export const TAKEOVER_KEYS = [
-  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'propFromOwner', 'projOpen', 'projKey',
+  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'propFromOwner', 'propCopyOf', 'projOpen', 'projKey',
   'leadFilters', 'propFilters', 'ownerSeg', 'ownerStage', 'contactsTab',
   // Today's half (To do / My work / Team) and a teammate opened from Team or
   // the Performance page.
@@ -39,7 +39,7 @@ export const TAKEOVER_KEYS = [
 // full unfiltered book. These are the keys that mean "a record took the screen
 // over", and a navigation made only of them keeps the filters underneath.
 export const RECORD_KEYS = [
-  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propFromOwner', 'projOpen', 'projKey',
+  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propFromOwner', 'propCopyOf', 'projOpen', 'projKey',
   'person',
 ]
 
@@ -66,7 +66,7 @@ const FILTER_LISTS = ['source', 'locality', 'agent', 'flag']
 const PROP_SCALARS = ['sortKey', 'sortDir']
 const PROP_LISTS = [
   'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
-  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified',
 ]
 
 function readBag(p, scalars, lists) {
@@ -104,6 +104,8 @@ export function parseUrl(search = window.location.search) {
       propAdd: p.get('new') === 'property' || undefined,
       // Convert to property: the property form, filled in from this calling row.
       propFromOwner: (p.get('new') === 'property' && p.get('from-owner')) || undefined,
+      // Duplicate: the property form, filled in from another listing (7.4).
+      propCopyOf: (p.get('new') === 'property' && p.get('copy-of')) || undefined,
       // Contacts' tab — Owners / Tenants / Buyers — so a reload stays on it.
       contactsTab: ['tenants', 'buyers'].includes(p.get('tab')) ? p.get('tab') : undefined,
       todayView: ['work', 'team'].includes(p.get('view')) ? p.get('view') : undefined,
@@ -133,6 +135,7 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (sel.projOpen && sel.projKey) p.set('project', sel.projKey)
   if (sel.propAdd) p.set('new', 'property')
   if (sel.propAdd && sel.propFromOwner) p.set('from-owner', sel.propFromOwner)
+  if (sel.propAdd && sel.propCopyOf) p.set('copy-of', sel.propCopyOf)
   if (screen === 'clients' && sel.contactsTab && sel.contactsTab !== 'owners') p.set('tab', sel.contactsTab)
   if (screen === 'today' && sel.todayView) p.set('view', sel.todayView)
   if ((screen === 'today' || screen === 'performance') && sel.person) p.set('person', sel.person)

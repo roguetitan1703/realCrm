@@ -105,7 +105,7 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
   // actions, otherwise the create/log actions that don't need one.
   const actionCtx = sel.leadOpen && sel.leadId ? { kind: 'lead', id: sel.leadId }
     : sel.ownerOpen && sel.ownerId ? { kind: 'owner', id: sel.ownerId }
-    : sel.propOpen && sel.propId ? { kind: 'prop', id: sel.propId }
+    : sel.propOpen && sel.propId ? { kind: 'prop', id: sel.propId, actionCtx: { go } }
     : { kind: tab }
 
   const Screen = SCREENS[tab]

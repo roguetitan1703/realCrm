@@ -19,14 +19,15 @@ plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md` (latest: part E)
 | Backend — AWS EC2, **by hand** | `f03dcd1` when last read (24 Sep, `/health`) | `scripts/deploy-api.sh` on the box — refuses a dirty tree or a branch other than `main` |
 | Frontend — Vercel | not recorded | **Branch Tracking is OFF** — a push to `main` does not deploy; the user deploys by hand |
 | `main` | `a3b51c0` | |
-| `development` | about 16 commits ahead of `main` | agreements and conversion (D), the activity report, contacts tabs, the copy sweep, Today / My work / Performance |
+| `development` | about 17 commits ahead of `main` | agreements and conversion (D), the activity report, contacts tabs, the copy sweep, Today / My work / Performance, Properties Part 7 |
 
 **Deploy order: API first, then frontend.** The new frontend calls
 `/activity/range`, `/agreements` and fields the old API does not have.
 
 What the API deploy runs on production, once:
-- additive schema: `crm_agreements` and its columns, and the index
-  `idx_crm_timeline_day (tenant_id, timestamp)`;
+- additive schema: `crm_agreements` and its columns, the index
+  `idx_crm_timeline_day (tenant_id, timestamp)`, and four property columns
+  (`verified_at`, `verified_by`, `gallery_off`, `gallery_version`);
 - `runOnce 2026_09_25_agreement_party_copy`: fills an agreement's own tenant or
   buyer name and phone from its lead where empty. Production had one agreement
   (urban, a demo firm) with the name already set; nothing on bhumi or mahalaxmi.
@@ -41,8 +42,11 @@ After the API deploy: `npm run link:owners -- --env=production` (report, then
 - **Review on dev, merge `development` → `main`, deploy** (API, then frontend).
 - **Superadmin work** is planned, not built: mahalaxmi-batch.md part E. Support
   access decided read-only and always allowed.
-- **Properties Part 7** (verification visit, gallery link and the rest): set
-  aside by the user.
+- **Properties Part 7** built (mahalaxmi-batch.md Part 7). 7.6 still wants the
+  production count of shortlist use; reading it needs the user's OK.
+- **Photo links on production** are `https://<app>/g/…`; the Vercel rewrite
+  already sends every path to the app. The page reads `/api/v1/public/gallery`,
+  so it needs the API deployed first like everything else.
 - **Production timing of the dashboard** after the deploy: the only number is
   from before (Bhumi's leads report 2 s). A read-only check was blocked by the
   permission tool; ask before retrying.
@@ -58,6 +62,12 @@ After the API deploy: `npm run link:owners -- --env=production` (report, then
 - `/activity/range` on dev: 0.7–1.1 s warm for 7, 14 and 30 days.
 - The copy sweep: 98 on-screen strings; what still has an em dash is server
   logs, the API client's internal error separator, and SQL reading old titles.
+- Part 7 driven on dev (desk and iPhone 13, the photo page signed out): verify,
+  history after a reload, photo link copy/open/off/new, message carries the
+  link, Verified filter, duplicate to save, two quick attaches both kept, remove. Test photos
+  were uploaded to R2 under `delpat/property/` and deleted (checked gone); the
+  duplicate flat was deleted; `p_demo_a2` put back (no photos, not verified).
+  Its history keeps the lines those steps wrote.
 
 ---
 

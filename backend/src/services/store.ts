@@ -20,6 +20,7 @@ import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
 import { followUpKind } from './followUp.js';
+import { galleryPath } from './gallery.js';
 import { assertLeadWrite, ForbiddenError } from '../lib/permissions.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
@@ -462,6 +463,13 @@ function rowToProperty(r: any): any {
     completeness: r.completeness ?? null,
     media: r.media || [],
     geo: r.geo_lat != null && r.geo_lng != null ? { lat: r.geo_lat, lng: r.geo_lng } : null,
+    // 7.1 Who went to confirm it, and when. Null: nobody has.
+    verifiedAt: r.verified_at || null,
+    verifiedBy: r.verified_by || null,
+    // 7.5 The photo link (services/gallery.ts): null when it has no photos or
+    // the link is turned off.
+    galleryPath: galleryPath(r),
+    galleryOff: !!r.gallery_off,
   };
 }
 
@@ -2252,6 +2260,34 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
 
   if (patch.shortlist !== undefined || patch.feedback !== undefined) {
     await syncLeadShortlist(id, shortlist || [], feedback || {}, tid());
+  }
+
+  // ATTACHED AND REMOVED, ON BOTH RECORDS (7.6). The lead's history showed
+  // "Shortlisted …" only in the browser that did it (a local echo nothing
+  // saved), and the flat never knew. Now the lead says which flat, and the
+  // flat says for whom.
+  if (patch.shortlist !== undefined) {
+    const was = new Set<string>(oldLead?.shortlist || []);
+    const now = new Set<string>(shortlist || []);
+    const added = [...now].filter(x => !was.has(x));
+    const removed = [...was].filter(x => !now.has(x));
+    const changed = [...added, ...removed];
+    if (changed.length) {
+      const flats = await sql`SELECT id, project, wing, unit_no, title FROM crm_properties
+                               WHERE tenant_id = ${tid()} AND id IN ${sql(changed)}`;
+      const nameOf = new Map((flats as any[]).map(f => [f.id,
+        [f.project, [f.wing, f.unit_no].filter(Boolean).join('-')].filter(Boolean).join(' ') || f.title || 'a property']));
+      const who = oldLead?.name || oldLead?.phone || 'a lead';
+      const author = ctx.actorId ?? getContext()?.userId ?? 'System';
+      for (const pid of changed) {
+        if (!nameOf.has(pid)) continue;
+        const on = added.includes(pid);
+        await addTimelineEvent({ record_id: id, type: 'shortlist', title: on ? 'Shortlisted' : 'Taken off the shortlist',
+          description: nameOf.get(pid), author, metadata: { propertyId: pid } }).catch(() => {});
+        await addTimelineEvent({ record_id: pid, type: 'shortlist', title: on ? 'Shortlisted' : 'Taken off the shortlist',
+          description: `For ${who}`, author, metadata: { leadId: id } }).catch(() => {});
+      }
+    }
   }
 
   if (patch.stage && patch.stage !== oldLead.stage) {
@@ -4458,6 +4494,7 @@ export async function listProperties(opts: {
   // twelve filters silently stopped doing anything.
   category?: string; bhk?: string; subtype?: string; furnishing?: string;
   facing?: string; possession?: string; ownership?: string; transaction?: string;
+  verified?: string;
   excludeId?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
   const t = tid();
@@ -4507,6 +4544,9 @@ export async function listProperties(opts: {
   if (possession.length) where.push(sql`possession IN ${sql(possession)}`);
   if (ownership.length) where.push(sql`ownership IN ${sql(ownership)}`);
   if (transaction.length) where.push(sql`transaction_type IN ${sql(transaction)}`);
+  // 7.1 Checked on a visit, or not yet. Both picked is no filter.
+  const verified = many(opts.verified);
+  if (verified.length === 1) where.push(verified[0] === 'yes' ? sql`verified_at IS NOT NULL` : sql`verified_at IS NULL`);
   if (opts.project) {
     // A project is a grouping lens over the `project`/`society` fields, not a
     // stored entity — same key the units view groups on. The implicit bucket is
@@ -4556,8 +4596,84 @@ export async function getPropertyById(id: string): Promise<any | null> {
   const t = tid();
   const rows = await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id = ${id} LIMIT 1`;
   if (!rows[0]) return null;
-  const demand = await demandFor(t, [id]);
-  return { ...rowToProperty(rows[0]), demandCount: demand.get(id) ?? 0 };
+  const row = rows[0];
+  const [demand, events, audited] = await Promise.all([
+    demandFor(t, [id]),
+    sql`SELECT * FROM crm_timeline_events WHERE tenant_id = ${t} AND record_id = ${id}
+        ORDER BY timestamp DESC LIMIT 200`,
+    // WHO ADDED IT, for a listing from before the column was stamped (7.2):
+    // the ledger holds the account that made the request. Read, not written
+    // back, so a paying firm's rows are not touched to answer it.
+    row.created_by ? Promise.resolve([]) : sql`
+      SELECT actor_id FROM audit_log
+       WHERE tenant_id = ${t} AND action = 'property.create' AND target_id = ${id}
+         AND actor_type = 'user' AND actor_id IS NOT NULL
+       ORDER BY seq LIMIT 1`,
+  ]);
+  const p = rowToProperty(row);
+  const createdBy = p.createdBy || (audited as any[])[0]?.actor_id || null;
+  // THE LISTING'S HISTORY (7.3): what happened to it, from the shared timeline
+  // (calls and WhatsApps to the owner, remarks, status and price changes,
+  // agreements, verification). It read only the old `timeline` column, so all
+  // of that was saved and shown until the page was reloaded, then never again.
+  // The old column's entries (demo notes) follow, then when it was added.
+  const history: any[] = (events as any[]).map(mapEventForClient);
+  history.push(...(Array.isArray(row.timeline) ? row.timeline : []));
+  if (!(events as any[]).some(e => e.type === 'creation')) {
+    history.push({ id: null, type: 'note', label: 'Added', authorId: createdBy, timestamp: row.created_at, metadata: {} });
+  }
+  return { ...p, createdBy, timeline: history, demandCount: demand.get(id) ?? 0 };
+}
+
+/** One line in a listing's history, by whoever made the request. */
+function propertyEvent(id: string, ctx: ActorCtx, type: string, title: string, description: string, metadata: any = {}) {
+  return addTimelineEvent({
+    record_id: id, type, title, description,
+    author: ctx.actorId ?? getContext()?.userId ?? 'System', metadata,
+  }).catch(err => console.warn('[Property history] could not write:', err?.message));
+}
+
+const rupees = (v: any) => {
+  const n = Number(String(v ?? '').replace(/[^0-9.]/g, ''));
+  return n > 0 ? `₹${Math.round(n).toLocaleString('en-IN')}` : 'no price';
+};
+
+/** 7.1 A visit confirmed the listing, or that mark is taken off. */
+export async function setPropertyVerified(id: string, on: boolean, ctx: ActorCtx = SYSTEM_CTX): Promise<any | null> {
+  const who = ctx.actorId ?? getContext()?.userId ?? null;
+  const rows = on
+    ? await sql`UPDATE crm_properties SET verified_at = NOW(), verified_by = ${who}, updated_at = NOW()
+                 WHERE id = ${id} AND tenant_id = ${tid()} RETURNING id`
+    : await sql`UPDATE crm_properties SET verified_at = NULL, verified_by = NULL, updated_at = NOW()
+                 WHERE id = ${id} AND tenant_id = ${tid()} RETURNING id`;
+  if (!rows[0]) return null;
+  await propertyEvent(id, ctx, 'verification', on ? 'Verified' : 'Not verified',
+    on ? 'Visited and checked' : 'Verification taken off');
+  audit({
+    tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: who, actor_label: ctx.actorLabel ?? null,
+    action: on ? 'property.verify' : 'property.unverify', target_type: 'property', target_id: id,
+    summary: on ? 'Listing marked as verified' : 'Verification removed', metadata: {}, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return getPropertyById(id);
+}
+
+/** 7.5 Turn the photo link off or on, or replace it so the old one stops working. */
+export async function setPropertyGallery(id: string, action: 'off' | 'on' | 'new', ctx: ActorCtx = SYSTEM_CTX): Promise<any | null> {
+  const rows = action === 'off'
+    ? await sql`UPDATE crm_properties SET gallery_off = TRUE WHERE id = ${id} AND tenant_id = ${tid()} RETURNING id`
+    : action === 'on'
+      ? await sql`UPDATE crm_properties SET gallery_off = FALSE WHERE id = ${id} AND tenant_id = ${tid()} RETURNING id`
+      : await sql`UPDATE crm_properties SET gallery_off = FALSE, gallery_version = coalesce(gallery_version, 0) + 1
+                   WHERE id = ${id} AND tenant_id = ${tid()} RETURNING id`;
+  if (!rows[0]) return null;
+  await propertyEvent(id, ctx, 'gallery', 'Photo link',
+    action === 'off' ? 'Turned off' : action === 'on' ? 'Turned on' : 'New link made. The old one stopped working.');
+  audit({
+    tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null, actor_label: ctx.actorLabel ?? null,
+    action: `property.gallery_${action}`, target_type: 'property', target_id: id,
+    summary: `Photo link: ${action}`, metadata: {}, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return getPropertyById(id);
 }
 
 /**
@@ -4727,6 +4843,10 @@ export function prepareListing(body: any): any {
 }
 
 export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
+  // A copy of another listing (7.4) says so in its history; the id is not a
+  // fact about this flat, so it does not go into the row.
+  const copiedFrom = propData.copiedFrom ? String(propData.copiedFrom) : null;
+  if ('copiedFrom' in propData) { propData = { ...propData }; delete propData.copiedFrom; }
   // Random suffix: a bulk import fires these in the same millisecond, and a bare
   // Date.now() collided on the primary key — every row after the first 500'd.
   const newId = propData.id || `p_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -4799,6 +4919,15 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
   if (ownerRecordId) await sql`UPDATE crm_properties SET owner_contact_id = ${ownerRecordId} WHERE id = ${newId} AND tenant_id = ${tid()}`;
   const refreshed = await sql`SELECT * FROM crm_properties WHERE id = ${newId} AND tenant_id = ${tid()}`;
   const created = rowToProperty(refreshed[0] || rows[0]);
+  // The first line of its history: how it came onto the book.
+  const [src] = copiedFrom ? await sql`SELECT project, wing, unit_no, title FROM crm_properties WHERE id = ${copiedFrom} AND tenant_id = ${tid()}` : [];
+  const how = src ? `Copied from ${[src.project, [src.wing, src.unit_no].filter(Boolean).join('-')].filter(Boolean).join(' ') || src.title}`
+    : propData.importBatchId ? 'Imported from a sheet'
+    : propData.source === 'Calling' ? 'Added from the calling list'
+    : propData.source === 'Agreement' ? 'Added when a deal was closed'
+    : 'Added';
+  const first = await propertyEvent(newId, ctx, 'creation', 'Added', how, copiedFrom ? { copiedFrom } : {});
+  if (first) created.timeline = [mapEventForClient(first as TimelineEvent)];
   audit({
     tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'property.create', target_type: 'property', target_id: newId,
@@ -5035,13 +5164,30 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   }
   const refreshed = await sql`SELECT * FROM crm_properties WHERE id = ${id} AND tenant_id = ${tid()}`;
   const updated = rowToProperty(refreshed[0] || rows[0]);
+  // WHAT CHANGED, in its history (7.3). Only what a person would ask about
+  // later: the status, the price, the owner, the photos.
+  const was = before.status || 'Available', now = updated.status || 'Available';
+  if (was !== now) await propertyEvent(id, ctx, 'stage_change', `${was} → ${now}`, `${was} → ${now}`, { from: was, to: now });
+  if (String(before.price ?? '') !== String(updated.price ?? '') && (before.price || updated.price)) {
+    await propertyEvent(id, ctx, 'price', 'Price', `${rupees(before.price)} → ${rupees(updated.price)}`);
+  }
+  if ((before.owner || '') !== (updated.owner || '') || (before.ownerPhone || '') !== (updated.ownerPhone || '')) {
+    await propertyEvent(id, ctx, 'owner', 'Owner', updated.owner || updated.ownerPhone ? `Now ${updated.owner || updated.ownerPhone}` : 'Removed');
+  }
+  const had = (before.media || []).length, has = (updated.media || []).length;
+  if (had !== has) {
+    const n = Math.abs(has - had);
+    await propertyEvent(id, ctx, 'media', 'Photos', `${n} ${n === 1 ? 'photo or video' : 'photos or videos'} ${has > had ? 'added' : 'removed'}`);
+  }
   audit({
     tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'property.update', target_type: 'property', target_id: id,
     summary: `Property "${updated.title}" updated`, metadata: { patch, before: { status: before.status, price: before.price }, after: { status: updated.status, price: updated.price } },
     ip: ctx.ip, user_agent: ctx.userAgent,
   });
-  return updated;
+  // The whole listing, history included: the screen replaces its copy with
+  // this, and the bare row would empty the history until a reload.
+  return (await getPropertyById(id)) || updated;
 }
 
 // --- TEAM & ROUTING ---

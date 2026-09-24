@@ -17,6 +17,9 @@ import { messageLang } from '../data/vocabLocale.js'
 import { disablePush } from './push.js'
 import { isOpen } from '../data/leadStatus.js'
 
+// Pending shortlist writes, per lead (see changeShortlist).
+const shortlistQueue = new Map()
+
 const StoreCtx = createContext(null)
 export const useStore = () => useContext(StoreCtx)
 
@@ -1122,6 +1125,24 @@ export function StoreProvider({ children }) {
    */
   const settled = useCallback(() => dispatch({ type: 'MUTATED' }), [])
 
+  // ONE SHORTLIST CHANGE AT A TIME, PER LEAD. The server takes the whole list,
+  // and the cached lead only moves once the server answers — so a second
+  // attach clicked before the first returned sent a list without the first,
+  // and it was dropped. Each change now builds on the one queued before it.
+  const changeShortlist = (leadId, next, send) => {
+    const q = shortlistQueue.get(leadId) || { list: null, chain: Promise.resolve() }
+    const list = next(q.list || api.lookup('lead', leadId)?.shortlist || [])
+    if (!list) return Promise.resolve(null)
+    q.list = list
+    shortlistQueue.set(leadId, q)
+    q.chain = q.chain.then(() => send(list)).then(res => {
+      // Failed, or nothing newer queued: the cached lead is the truth again.
+      if (!res || q.list === list) shortlistQueue.delete(leadId)
+      return res
+    })
+    return q.chain
+  }
+
   const write = useCallback((what, call, apply, okMsg) => call()
     .then(res => {
       if (rejected(res)) throw new Error(res.error || 'rejected')
@@ -1249,7 +1270,6 @@ export function StoreProvider({ children }) {
     // record of a booked appointment became a sentence anyone could rewrite.
     // A parameter that is accepted and ignored is worse than one that is not
     // offered, so it is not offered.
-    logEvent: (id, kind, text) => api.addRemark(kind === 'property' ? 'property' : 'lead', id, text),
     merge: (leadId) => {
       const primaryId = api.lookup('lead', leadId)?.duplicateOf
       if (!primaryId) { toast('No duplicate recorded for this lead', 'warn'); return Promise.resolve(null) }
@@ -1323,20 +1343,18 @@ export function StoreProvider({ children }) {
     // first one server-side while local state showed both — the divergence only
     // became visible after a reload, which is why nobody caught it. Send the
     // whole list, every time.
-    attachProp: (leadId, propId, label) => {
-      const cur = api.lookup('lead', leadId)?.shortlist || []
-      if (cur.includes(propId)) { toast('Already on this lead’s shortlist'); return Promise.resolve(null) }
-      return write('Shortlist',
-        () => apiClient.updateLead(leadId, { shortlist: [...cur, propId] }),
+    attachProp: (leadId, propId, label) => changeShortlist(leadId,
+      (cur) => (cur.includes(propId) ? (toast('Already on this lead’s shortlist'), null) : [...cur, propId]),
+      (list) => write('Shortlist',
+        () => apiClient.updateLead(leadId, { shortlist: list }),
         () => dispatch({ type: 'ATTACH_PROP', leadId, propId, label }),
-        'Property shortlisted for this lead')
-    },
-    detachProp: (leadId, propId) => {
-      const cur = api.lookup('lead', leadId)?.shortlist || []
-      return write('Remove from shortlist',
-        () => apiClient.updateLead(leadId, { shortlist: cur.filter(x => x !== propId) }),
-        () => dispatch({ type: 'DETACH_PROP', leadId, propId }))
-    },
+        'Shortlisted')),
+    detachProp: (leadId, propId) => changeShortlist(leadId,
+      (cur) => cur.filter(x => x !== propId),
+      (list) => write('Remove from shortlist',
+        () => apiClient.updateLead(leadId, { shortlist: list }),
+        () => dispatch({ type: 'DETACH_PROP', leadId, propId }),
+        'Taken off the shortlist')),
     // Visit feedback was purely local — the verdict that is supposed to refine
     // this lead's matches never reached the server, so it was forgotten on
     // reload and no teammate ever saw why a flat was rejected.
@@ -1472,6 +1490,14 @@ export function StoreProvider({ children }) {
     // against 48ms for the identical control one module over. It is the same
     // gesture on the same kind of list and it has to feel the same. Snaps back
     // to the status the listing actually had if the write is refused.
+    // 7.1 / 7.5: the server answers with the whole listing, which replaces the
+    // cached one, so the badge, the link and the history move together.
+    verifyProperty: (propId, on) => apiClient.verifyProperty(propId, on)
+      .then(r => { if (r?.property) dispatch({ type: 'CACHE_RECORDS', kind: 'property', records: [r.property] }); toast(on ? 'Marked as verified' : 'Verification removed'); return r?.property })
+      .catch(() => { toast('Could not save. Try again.', 'warn') }),
+    setPropertyGallery: (propId, action) => apiClient.setPropertyGallery(propId, action)
+      .then(r => { if (r?.property) dispatch({ type: 'CACHE_RECORDS', kind: 'property', records: [r.property] }); return r?.property })
+      .catch(() => { toast('Could not save. Try again.', 'warn') }),
     setPropStatus: (propId, status) => {
       const prev = api.lookup('property', propId)?.status
       return optimistic('Status change',

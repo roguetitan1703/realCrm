@@ -954,6 +954,9 @@ button.btn-ghost.fu-done{color:var(--accent)}
 .pcard .pc-id{flex:1;min-width:0}
 .pcard .pc-title{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .unit-tag{margin-left:7px;font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.02em;color:var(--ink-2);background:var(--line-2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;white-space:nowrap}
+/* 7.1 Verified on a visit: a badge beside the record's name, a tick in the list */
+.vbadge{display:inline-flex;align-items:center;gap:4px;margin-left:9px;vertical-align:middle;font-family:var(--sans);font-size:11.5px;font-weight:700;letter-spacing:.01em;color:#1f6b45;background:#e6f2ea;border:1px solid #c5e0cf;border-radius:6px;padding:2px 7px}
+.vtick{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:6px;vertical-align:middle;border-radius:50%;color:#1f6b45;background:#e6f2ea;border:1px solid #c5e0cf}
 .pcard .pc-sub{font-size:12px;color:var(--muted);margin-top:2px}
 .pcard .pc-facts{display:flex;flex-wrap:wrap;gap:6px}
 .pcard .pc-facts span{font-size:11.5px;font-weight:500;color:var(--ink-2);background:var(--card-2);border:1px solid var(--line-2);border-radius:6px;padding:2px 8px}
@@ -1919,6 +1922,19 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .lbx-nav.next{right:14px}
 @media (max-width:640px){.lbx{padding:52px 12px}.lbx-nav{width:36px;height:36px}}
 .pgal{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:9px}
+/* Attach property: an attached row stays, marked; a shortlisted flat on a lead can be taken off */
+.ap-row.added{opacity:.75;border-color:#c5e0cf !important}
+.ap-added{display:inline-flex;align-items:center;gap:4px;flex:none;font-size:12.5px;font-weight:700;color:#1f6b45}
+.inv-x{flex:none;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin-left:4px;border:1px solid transparent;border-radius:7px;background:none;color:var(--faint);cursor:pointer}
+.inv-x:hover{border-color:var(--line);color:var(--alert)}
+/* The photo link's controls, in the Photos header (7.5) */
+.pgal-tools{display:inline-flex;align-items:center;gap:2px;flex-wrap:wrap}
+.pgal-tools .btn{text-decoration:none}
+.sh:has(.pgal-tools){flex-wrap:wrap;gap:6px 10px}
+.sh:has(.pgal-tools) .t{white-space:nowrap}
+.app-mobile .sh:has(.pgal-tools) .r{width:100%}
+.app-mobile .pgal-tools{width:100%;gap:6px}
+.app-mobile .pgal-tools .btn{flex:1;justify-content:center;padding-left:6px;padding-right:6px}
 .pgal-i{position:relative;display:block;line-height:0;border-radius:9px;overflow:hidden;border:1px solid var(--line);aspect-ratio:4/3;padding:0;background:var(--card-2,var(--wash));cursor:pointer;width:100%}
 .pgal-i:hover{border-color:var(--accent)}
 .pgal-i img{width:100%;height:100%;object-fit:cover;display:block}
@@ -3235,3 +3251,42 @@ button.cb-col:hover{background:var(--card-2)}
 .cd-opt-main span{color:var(--muted);font-size:12px}
 .cd-opt-what{flex:none;font-size:12px;color:var(--ink-2)}
 .cd-owner{font-size:13.5px;color:var(--ink-2);margin:-4px 0 12px}
+
+/* ── The photo page a client opens (modules/Gallery.jsx, /g/<ref>) ───────────
+   Light, calm and the firm's own: its name and logo on top, the flat and its
+   price, then photos big enough to judge. Works on a phone first. */
+.gv{--gv-accent:var(--accent);min-height:100vh;background:#f6f5f2;color:#1a1d1a;font-family:var(--sans)}
+.gv-wrap{max-width:960px;margin:0 auto;padding:0 16px}
+.gv-bar{background:#fff;border-bottom:3px solid var(--gv-accent)}
+.gv-bar-in{display:flex;align-items:center;gap:10px;height:58px}
+.gv-logo{width:34px;height:34px;border-radius:8px;object-fit:contain;background:#fff}
+.gv-mono{width:34px;height:34px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:var(--gv-accent);color:#fff;font-weight:700}
+.gv-firm{font-weight:700;font-size:15px}
+.gv-head{padding:22px 0 16px}
+.gv-tag{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gv-accent);margin-bottom:6px}
+.gv-title{margin:0;font-family:var(--disp);font-size:26px;font-weight:600;letter-spacing:-.01em;line-height:1.2}
+.gv-sub{margin-top:4px;font-size:15px;color:#5b635e}
+.gv-price{margin-top:12px;font-family:var(--disp);font-size:22px;font-weight:600}
+.gv-price span{font-size:14px;font-weight:500;color:#5b635e}
+.gv-facts{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.gv-facts span{font-size:13px;color:#3b423e;background:#fff;border:1px solid #e2e5e1;border-radius:6px;padding:4px 9px}
+.gv-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.gv-tile{position:relative;display:block;padding:0;border:none;border-radius:10px;overflow:hidden;aspect-ratio:4/3;background:#e9e7e1;cursor:pointer}
+.gv-tile.first{grid-column:1 / -1;aspect-ratio:16/10}
+.gv-tile img{width:100%;height:100%;object-fit:cover;display:block}
+.gv-vid{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;background:#2b2f2c}
+.gv-block{margin-top:22px}
+.gv-block h2{margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6b7570}
+.gv-block p{margin:0;font-size:15px;line-height:1.55;color:#2b312d}
+.gv-desc{white-space:pre-line}
+.gv-foot{margin:28px 0 36px;padding-top:14px;border-top:1px solid #e2e5e1;font-size:13px;color:#6b7570}
+.gv-wait{height:120px;margin-top:22px;border-radius:10px;background:#ebe9e4}
+.gv-wait.tall{height:320px}
+.gv-gone{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding-top:22vh;color:#6b7570}
+.gv-gone h1{margin:6px 0 0;font-size:19px;color:#1a1d1a}
+.gv-gone p{margin:0;font-size:14.5px}
+@media (min-width:720px){
+  .gv-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+  .gv-tile.first{grid-column:span 2;grid-row:span 2;aspect-ratio:auto}
+  .gv-title{font-size:30px}
+}

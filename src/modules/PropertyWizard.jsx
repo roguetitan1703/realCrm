@@ -11,6 +11,7 @@ import {
   appliesTo, areaFieldsFor, countsFor, isPlot, normaliseBhk, normaliseSubtype,
 } from '../data/propertyFields.js'
 import { api } from '../lib/api.js'
+import { unitLabel } from '../lib/format.js'
 
 // ============================================================================
 // 🏗️ PropertyWizard — the stepped add/edit PAGE (spec: properties.md C-add)
@@ -371,6 +372,36 @@ function MediaPicker({ media = [], firmName, onChange, onError }) {
 }
 
 /**
+ * DUPLICATE (7.4): another flat in the same building. What the two share is
+ * copied: the building, the type and configuration, the areas, the price and
+ * its terms, what is in it and around it. What belongs to one flat starts
+ * empty: the flat number and floor, the owner and key, the photos, the status,
+ * the verification and the history. Allowed by name, so a field added to the
+ * form later is not copied until somebody decides it should be.
+ */
+const COPY_KEYS = [
+  ...SHARED_CONTEXT_KEYS,
+  'bhk', 'bathrooms', 'balconies', 'servantRoom',
+  'carpet', 'builtup', 'superBuiltup', 'plotArea', 'priceAreaBasis',
+  'price', 'priceLabel', 'facing', 'age', 'coveredParking', 'openParking',
+  'openSides', 'floorsAllowed', 'roadWidthFt', 'cornerPlot',
+  'depositOption', 'depositAmount', 'lockinOption', 'lockinMonths', 'maintenanceAmount',
+  'parkingChargesMode', 'paintingCharges', 'otherCharges', 'bookingAmount', 'priceIncludes',
+]
+function fromCopy(p) {
+  if (!p) return null
+  const f = blank()
+  for (const k of COPY_KEYS) {
+    const v = p[k]
+    if (v === undefined || v === null || v === '') continue
+    f[k] = typeof v === 'object' ? JSON.parse(JSON.stringify(v)) : v
+  }
+  f.society = p.society || p.project || ''
+  f.project = p.project || p.society || ''
+  return f
+}
+
+/**
  * CONVERT TO PROPERTY starts from the calling row: the same form a listing is
  * added with, filled in from what the caller already knows, so the flat is
  * described in the catalogue's words (type, BHK) and not typed as a phrase.
@@ -395,11 +426,14 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
   const editing = store.lookup('property', sel?.propId)
   const ownerId = !editing ? sel?.propFromOwner : null
   const owner = ownerId ? store.lookup('owner', ownerId) : null
+  const copyId = !editing && !ownerId ? sel?.propCopyOf : null
+  const source = copyId ? store.lookup('property', copyId) : null
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(() => {
     if (editing) return { ...blank(), ...editing }
     if (ownerId) return fromOwner(owner) || blank()
+    if (copyId) return fromCopy(source) || blank()
     // Arriving from a project's page: start inside that project.
     if (sel?.propProject) return { ...blank(), society: sel.propProject, project: sel.propProject }
     // A half-typed listing survives a refresh or an accidental navigation —
@@ -431,11 +465,17 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
     api.getOwner(ownerId).then(r => { if (r?.owner) { store.cacheRecords('owner', [r.owner]); setForm(fromOwner(r.owner)) } }).catch(() => {})
   }, [ownerId])
 
+  // A reload on a duplicate lands here with the listing not cached yet.
+  useEffect(() => {
+    if (!copyId || source) return
+    api.getProperty(copyId).then(r => { if (r?.property) { store.cacheRecords('property', [r.property]); setForm(fromCopy(r.property)) } }).catch(() => {})
+  }, [copyId])
+
   // Persist the draft on every change — but never for an edit, or a half-made
   // change to an existing listing would resurface as a "new property" draft.
-  // Nor for a conversion: that form belongs to one calling row.
+  // Nor for a conversion or a duplicate: those forms belong to one record.
   useEffect(() => {
-    if (editing || ownerId) return
+    if (editing || ownerId || copyId) return
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(form)) } catch { /* quota */ }
   }, [form, editing])
 
@@ -459,17 +499,20 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
     if (!form.subtype) m.push('property type')
     if (applies.bhk && !form.bhk) m.push('configuration')
     if (!form.price) m.push('price')
+    // A copy without its own flat number is the same listing twice.
+    if (copyId && !String(form.unit || '').trim()) m.push('flat number')
     return m
-  }, [form, applies.bhk])
+  }, [form, applies.bhk, copyId])
 
   const close = () => (ownerId
     ? go('calling', { ownerId, ownerOpen: true })
+    : copyId ? go('properties', { propAdd: false, propCopyOf: undefined, propId: copyId, propOpen: true })
     : go('properties', { propAdd: false, propId: null }))
 
   const save = async (again = false) => {
     if (missing.length) { store.toast(`Add the ${missing[0]} first`, 'warn'); return }
     setSaving(true)
-    const payload = { ...form, completeness: score }
+    const payload = { ...form, completeness: score, ...(copyId ? { copiedFrom: copyId } : {}) }
     try {
       if (editing) {
         store.updateProp(editing.id, payload)
@@ -492,6 +535,11 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
       // taken it. Closing on a failed request threw the entry away.
       const created = await store.addProperty(payload)
       if (!created) return
+      // A copy opens the new flat, where its number and photos are added next.
+      if (copyId) {
+        go('properties', { propAdd: false, propCopyOf: undefined, propId: created.id, propOpen: true })
+        return
+      }
       try { localStorage.removeItem(DRAFT_KEY) } catch { /* nothing to clear */ }
 
       if (again) {
@@ -534,7 +582,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
   return (
     <>
       {topBar({
-        eyebrow: editing ? 'Edit property' : ownerId ? 'Convert to property' : 'New property',
+        eyebrow: editing ? 'Edit property' : ownerId ? 'Convert to property' : copyId ? 'Duplicate' : 'New property',
         title: form.society || form.project || (editing ? editing.society : ownerId ? (owner?.name || 'Owner') : 'Add a property'),
         onBack: close,
       })}
@@ -552,8 +600,8 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
           {/* ---- rail ---- */}
           <aside className="pw-rail">
             <div className="pw-rail-head">
-              <div className="pw-rail-t">{editing ? 'Edit listing' : ownerId ? 'Convert to property' : 'Add a property'}</div>
-              <div className="pw-rail-s">{editing ? 'Changes save when you finish' : ownerId ? `From ${owner?.name || 'the calling list'}` : 'Saved as you go'}</div>
+              <div className="pw-rail-t">{editing ? 'Edit listing' : ownerId ? 'Convert to property' : copyId ? 'Another flat' : 'Add a property'}</div>
+              <div className="pw-rail-s">{editing ? 'Changes save when you finish' : ownerId ? `From ${owner?.name || 'the calling list'}` : copyId ? `Copied from ${[source?.society, source && unitLabel(source)].filter(Boolean).join(' ') || 'a listing'}` : 'Saved as you go'}</div>
             </div>
             {/* Quiet by spec: an internal indicator, not a "complete your
                 profile" nag. A hairline and a muted line — no per-step "+20%"
@@ -890,7 +938,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                     is adding that flat. Three actions do not fit a phone
                     footer, and the one that would have been squeezed out is
                     the primary. */}
-                {step >= 1 && !editing && !ownerId && !phone && (
+                {step >= 1 && !editing && !ownerId && !copyId && !phone && (
                   <Button variant="ghost" disabled={saving || missing.length > 0} onClick={() => save(true)}>
                     Save &amp; add another
                   </Button>

@@ -734,6 +734,16 @@ export async function migrateProperColumns(): Promise<void> {
   await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS geo_lat DOUBLE PRECISION`);
   await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS geo_lng DOUBLE PRECISION`);
 
+  // 7.1 A VISIT TO CONFIRM THE LISTING, separate from its status: who went and
+  // when. Empty means nobody has been, not "not needed".
+  await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ`);
+  await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS verified_by TEXT`);
+  // 7.5 THE PHOTO LINK. The link is a signature over the listing (services/
+  // gallery.ts), so there is no token to store; these two only turn it off or
+  // replace it, which is how an old link stops working.
+  await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS gallery_off BOOLEAN DEFAULT FALSE`);
+  await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS gallery_version INTEGER DEFAULT 0`);
+
   const leadCols: [string, string][] = [
     ['deal', 'TEXT'], ['requirement', 'TEXT'], ['locality', 'TEXT'],
     ['purpose', 'TEXT'], ['timeline_pref', 'TEXT'],

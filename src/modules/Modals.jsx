@@ -6,7 +6,7 @@ import { theme } from '../data/theme.js'
 // every money field's onBlur and the lead form's save were one ReferenceError
 // waiting for someone to type a budget. Plain JSX, so the build never said a
 // word about it.
-import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho, personLabel } from '../lib/format.js'
+import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho, personLabel, unitLabel } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink, followUpMessage } from '../lib/matching.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -348,10 +348,7 @@ function OwnerUpdateModal({ store, propId }) {
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} icon="wa" onClick={send}>Send & log to listing</Button>
-        <Button icon="copy" onClick={() => store.toast('Owner update copied')}>Copy</Button>
-      </div>
-      <div style={{ marginTop: 12, background: 'var(--accent-wash)', border: '1px solid var(--accent-line)', borderRadius: 9, padding: '10px 12px', fontSize: 11.5, color: 'var(--accent-ink)', display: 'flex', gap: 9 }}>
-        <Icon name="zap" size={15} style={{ flexShrink: 0, marginTop: 1 }} /><span>Sends from your own WhatsApp on setup. The update is logged to this listing's history either way.</span>
+        <Button icon="copy" onClick={() => copyText(text).then(ok => store.toast(ok ? 'Owner update copied' : 'Could not copy. Your browser blocked it.', ok ? undefined : 'warn'))}>Copy</Button>
       </div>
     </Modal>
   )
@@ -385,6 +382,10 @@ function AttachPropModal({ store, leadId }) {
   const l = store.lookup('lead', leadId)
   const [q, setQ] = useState('')
   const [mode, setMode] = useState('suggested')
+  // What was attached in this sitting. The modal stays open (a lead is usually
+  // sent three or four flats at once) and those rows stay put, marked Added,
+  // rather than vanishing from under the pointer.
+  const [added, setAdded] = useState([])
 
   const req = l?.req || {}
   // What we actually know. Each of these narrows the server query, and only if
@@ -457,12 +458,16 @@ function AttachPropModal({ store, leadId }) {
     { data: [] })
 
   if (!l) return null
-  const already = new Set(l.shortlist || [])
+  const already = new Set((l.shortlist || []).filter(id => !added.includes(id)))
   const cands = (page?.data || [])
     .filter(p => !already.has(p.id))
     .map(p => ({ p, ...fitReasons(p, req) }))
     .sort((a, b) => b.score - a.score)
-  const attach = (p) => { store.attachProp(leadId, p.id, p.society); store.closeModal() }
+  const attach = (p) => {
+    if (added.includes(p.id)) return
+    setAdded(a => [...a, p.id])
+    store.attachProp(leadId, p.id, [p.society, unitLabel(p)].filter(Boolean).join(' '))
+  }
 
   const emptyLine = searching ? 'Nothing matches that search.'
     : suggesting ? 'No available listing fits this requirement. Try All inventory.'
@@ -501,12 +506,13 @@ function AttachPropModal({ store, leadId }) {
           // the answer when nothing else is.
           const ok = (reasons || []).filter(r => r.ok)
           const why = (suggesting ? ok.find(r => !/^(Same locality|Config matches)/.test(r.t)) : null) || ok[0]
+          const isAdded = added.includes(p.id)
           return (
-            <button key={p.id} className="ap-row" onClick={() => attach(p)}
-              style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+            <button key={p.id} className={'ap-row' + (isAdded ? ' added' : '')} onClick={() => attach(p)} disabled={isAdded}
+              style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: isAdded ? 'default' : 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
               <div style={{ width: 40, height: 40, borderRadius: 8, background: thumbTint(p.id), display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--faint)', flexShrink: 0 }}><Icon name="building" size={19} strokeWidth={1.4} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{p.society}</div>
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}</div>
                 {/* Joined from what EXISTS. Written as `a · b · c` it printed a
                     trailing separator on every one of delpat's imported rows,
                     which carry no price — a dangling "·" reads as a value that
@@ -520,10 +526,15 @@ function AttachPropModal({ store, leadId }) {
                     claim an agent can check against the row above it. */}
                 {canSuggest && why && <div className="ap-why">{why.t}</div>}
               </div>
-              <Icon name="plus" size={17} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+              {isAdded
+                ? <span className="ap-added"><Icon name="check" size={14} />Added</span>
+                : <Icon name="plus" size={17} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
             </button>
           )
         })}
+      </div>
+      <div className="modal-actions" style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
+        <Button variant="primary" onClick={store.closeModal}>{added.length ? `Done, ${added.length} added` : 'Done'}</Button>
       </div>
     </Modal>
   )

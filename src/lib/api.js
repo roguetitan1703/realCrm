@@ -725,6 +725,11 @@ export const api = {
 
   // Real 30-day sales metrics for one agent (calls / site visits / win rate)
   getAgentPerformance: (id) => request(`/team/users/${encodeURIComponent(id)}/performance`),
+  // 7.1 Checked on a visit (or not). 7.5 The photo link: 'off' | 'on' | 'new'.
+  verifyProperty: (id, on) => request(`/properties/${encodeURIComponent(id)}/verify`, { method: 'POST', body: JSON.stringify({ on }) }),
+  setPropertyGallery: (id, action) => request(`/properties/${encodeURIComponent(id)}/gallery`, { method: 'POST', body: JSON.stringify({ action }) }),
+  // No sign-in: what a client sees on a photo link.
+  publicGallery: (ref) => request(`/public/gallery/${encodeURIComponent(ref)}`, { fresh: true }),
   updateProperty: (id, patch) => request(`/modules/properties/records/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
   // Team & Routing

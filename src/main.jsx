@@ -4,6 +4,7 @@ import './styles.css'
 import { StoreProvider } from './lib/store.jsx'
 import App from './App.jsx'
 import Admin from './modules/Admin.jsx'
+import Gallery from './modules/Gallery.jsx'
 import { registerServiceWorker, applyPwaIdentity, slugFromLocation } from './lib/pwa.js'
 
 // index.html already linked this tenant's manifest before the parser got here —
@@ -19,9 +20,15 @@ const isAdminRoute =
   window.location.pathname.replace(/\/+$/, '').endsWith('/admin') ||
   new URLSearchParams(window.location.search).has('admin')
 
+// A listing's photo link (7.5): /g/<ref>, opened by a client from WhatsApp.
+// No workspace and no sign-in, so it mounts on its own like the console.
+const galleryRef = (/^\/g\/([^/?#]+)/.exec(window.location.pathname) || [])[1] || null
+
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    {isAdminRoute ? (
+    {galleryRef ? (
+      <Gallery refId={decodeURIComponent(galleryRef)} />
+    ) : isAdminRoute ? (
       <Admin />
     ) : (
       <StoreProvider>

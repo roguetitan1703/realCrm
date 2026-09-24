@@ -14,8 +14,9 @@ import { prepareListing,
   createProperty, getUnits, blockUnit, releaseUnit,
   listProperties, getPropertyById, getPropertiesSummary,
   listProjects, getProject, getPropertyBuyers,
+  setPropertyVerified, setPropertyGallery,
 } from '../services/store';
-import { canAddListing } from '../lib/permissions';
+import { canAddListing, canEditListing } from '../lib/permissions';
 
 export const propertiesRouter = Router();
 propertiesRouter.use(requireTenantAuth);
@@ -49,6 +50,7 @@ propertiesRouter.get('/', async (req: Request, res: Response) => {
       possession: str(q.possession),
       ownership: str(q.ownership),
       transaction: str(q.transaction),
+      verified: str(q.verified),
       excludeId: str(q.excludeId),
       // Whose listings, by owner record — see listProperties.
       ownerId: str(q.ownerId),
@@ -133,6 +135,43 @@ propertiesRouter.get('/:id', async (req: Request, res: Response) => {
     return res.status(200).json({ success: true, property: p });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to fetch property', message: err.message });
+  }
+});
+
+const actor = (req: Request) => ({
+  actorType: 'user' as const, actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
+  ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null,
+});
+
+/**
+ * 7.1 VERIFIED ON A VISIT — POST /properties/:id/verify { on: boolean }
+ * Not a status: a listing can be Available and not yet checked.
+ */
+propertiesRouter.post('/:id/verify', async (req: Request, res: Response) => {
+  if (!canEditListing(req.user?.role)) return res.status(422).json({ error: 'Not allowed', message: 'Sign in to change a listing.' });
+  try {
+    const p = await setPropertyVerified(req.params.id, req.body?.on !== false, actor(req));
+    if (!p) return res.status(404).json({ error: 'Not found' });
+    return res.json({ success: true, property: p });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Could not save', message: err.message });
+  }
+});
+
+/**
+ * 7.5 THE PHOTO LINK — POST /properties/:id/gallery { action: 'off' | 'on' | 'new' }
+ * 'new' replaces the link; anyone holding the old one sees nothing.
+ */
+propertiesRouter.post('/:id/gallery', async (req: Request, res: Response) => {
+  const action = req.body?.action;
+  if (!['off', 'on', 'new'].includes(action)) return res.status(400).json({ error: 'action must be off, on or new' });
+  if (!canEditListing(req.user?.role)) return res.status(422).json({ error: 'Not allowed', message: 'Sign in to change a listing.' });
+  try {
+    const p = await setPropertyGallery(req.params.id, action, actor(req));
+    if (!p) return res.status(404).json({ error: 'Not found' });
+    return res.json({ success: true, property: p });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Could not save', message: err.message });
   }
 });
 

@@ -356,31 +356,50 @@ Phase A ships with Part 1; B and C wait on answer 1.
 
 ## Part 7 — Properties
 
-### 7.1 ⬜ Verification visit, separate from stage
+### 7.1 ✅ Verification visit, separate from stage
 - **Said:** when they add a property they visit it to confirm everything, and
   need a checkmark for that.
 - **Direction:** `verified_at` / `verified_by`, a toggle on the record, and a
   filter. Not a stage.
+- **Built (25 Sep):** "Mark as verified" in the property's actions (undo behind
+  More actions), a Verified badge beside the name, a tick in the list, a
+  Verified filter (Yes / No, in SQL), and a line in the history.
 
-### 7.2 ⬜ "Added by" in property detail
+### 7.2 ✅ "Added by" in property detail
 - **Know (22 Sep):** the column exists from 11 Sep. **bhumi: 2 of 7** recent
   properties stamped; the rest are blank.
 - **Open:** backfill from the audit log where it's provable. A bhumi write, so
   it needs an OK.
+- **Built (25 Sep), without the write:** the property read falls back to the
+  audit log's `property.create` by a person when the column is empty, so the
+  sheet's "Added by" fills for older listings and no paying firm's row is
+  changed. Imports and anything with no person behind it stay blank.
 
-### 7.3 ⬜ Property timeline records what happened to it
+### 7.3 ✅ Property timeline records what happened to it
 - **Said:** the timeline should record activity and status changes, starting
   with "added by whom".
 - **Depends on:** 1.3 (right actor) and 7.2.
+- **Found:** the property page read only the old `timeline` column. Calls and
+  WhatsApps to the owner, remarks and agreement lines were saved to the shared
+  timeline and shown until a reload, then never again.
+- **Built (25 Sep):** the page reads the shared timeline. Written going
+  forward: added (how: copied, imported, from calling, from a closed deal),
+  status, price, owner, photos added or removed, verified, photo link, and
+  shortlisted or taken off for a lead. Older listings show "Added" at their
+  creation time.
 
-### 7.4 ⬜ Duplicate property
+### 7.4 ✅ Duplicate property
 - **Said:** give an option; decide what gets duplicated and what doesn't.
 - **Proposal:** copy project, tower, location, configuration, area, amenities,
   price fields and type. **Don't copy** unit number, owner, photos and videos,
   stage, verification, timeline, created-by, or shares.
-- **Open:** confirm the list.
+- **Built (25 Sep) to that list:** "Duplicate for another flat" (More actions,
+  desk and phone) opens the property form filled from an allowed list of
+  fields; floor and description are also left out. The flat number is required
+  before it saves; it opens the new flat, whose history says what it was
+  copied from.
 
-### 7.5 ⬜ Shareable photo / video gallery link
+### 7.5 ✅ Shareable photo / video gallery link
 - **Said:** photos and videos are uploaded, but can't be shared in one tap on
   WhatsApp. Wanted: a link that opens a plain viewer with the firm's name and
   branding, included in Share on WhatsApp (and any share message), and copyable
@@ -390,12 +409,30 @@ Phase A ships with Part 1; B and C wait on answer 1.
 - **Direction:** a per-property unguessable token, a public read-only gallery
   page, and a way to revoke the link. Internal fields never appear (same
   `NEVER_SHARED_FIELDS` rule as the message).
+- **Built (25 Sep):** `/g/<id>.<signature>` (services/gallery.ts): an HMAC
+  over firm, listing and a version, so every listing with a photo has a link
+  with nothing to create. Turn off (`gallery_off`) and New link (bumps
+  `gallery_version`, the old one dies). The page (modules/Gallery.jsx) shows the
+  firm's name and logo, what the flat is, price, area, floor, furnishing,
+  facing, possession, amenities, description and the photos, from an allow-list
+  built on the server; no owner, flat number or key. The link is in every
+  share and "Copy listing details" message, and on the Photos panel (Copy,
+  Open, Turn off).
 
-### 7.6 ⬜ "Attach property" needs a real review
+### 7.6 🔶 "Attach property" needs a real review
 - **Said:** attach property needs a serious review and a check of how it's
   actually used.
 - **Open:** measure use first (how many attaches per firm, from where), then
   review the flow with the user.
+- **Reviewed and fixed (25 Sep):** a shortlisted flat could not be taken off
+  (the store had it, no screen called it); attaching wrote a history line only
+  in the browser that did it; two attaches in quick succession sent a list
+  without the first and dropped it; the modal closed after every attach; two
+  flats in one building looked identical in it. Now: Remove on a shortlisted
+  row, history on the lead AND the flat, shortlist changes queued per lead, the
+  modal stays open with rows marked Added and a Done count, flat numbers shown.
+- **Not measured on production.** Dev holds demo use only (delpat 1, urban 27,
+  raipur 28). The production count needs the user's OK to read.
 
 ---
 
