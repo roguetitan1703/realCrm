@@ -790,3 +790,42 @@ errors, no sideways scroll; probe rows deleted.
 **Not built, decided.** An end-of-day push — not required (24 Sep): the report
 is on screen whenever anyone opens it. Targets — deliberately not built.
 
+
+## D — Conversion, Agreements, Contacts (decided 24 Sep, building)
+
+**Decided with the user:** Contacts = Owners · Tenants · Buyers. Rentals and
+sales are ONE record, an Agreement (kind rent | sale); renewals and reminders
+only on rent. No separate Rentals screen — Tenants shows each agreement's flat,
+rent and end date; reminders come through Today. Each pipeline has a FINAL
+stage held as a role, not a name: renamable, not deletable, "Make final" moves
+it. Project names (4.6) go in first.
+
+**What done means:**
+- **D0 Project names.** "Sai Heights", "sai heights" and "SaiHeights" are one
+  card in Calling and in Properties, shown with the most common spelling; the
+  filter, Assign project and the card's counts cover every spelling. No stored
+  name is rewritten.
+- **D1 Final stage.** Settings say which stage is final for leads and for
+  calling; nothing reads the name `Deal Closed` / `Key Received` outside the
+  defaults. In the editor the final stage is tagged, renames with its records,
+  cannot be removed, and "Make final" moves the role. The paying firms' stored
+  lists are not rewritten — the role defaults to today's names.
+- **D2 Convert to property.** On a calling record at the final stage: a form
+  filled from the record → a property linked to the owner, who appears in
+  Contacts → Owners. The same project + tower + unit attaches to the existing
+  flat instead of duplicating. The record shows what it became; pressing again
+  cannot make a second one.
+- **D3 Close the deal.** On a lead at the final stage: rent → an Agreement
+  (rent), the lead in Contacts → Tenants, the flat Rented; sale → an Agreement
+  (sale), Contacts → Buyers, the flat Sold. A flat outside our inventory is
+  allowed. Same no-duplicate rule.
+- **D4 Agreement.** Flat, owner, tenant/buyer, amount, deposit, start, end (rent
+  defaults to 11 months), the agreement file, status. Renewal makes a new
+  agreement linked to the old, which is kept. Today's expiring group reads
+  agreements; the agent is alerted 30 days before a rent ends (catalogue entry,
+  recipient count asserted). The tenancy blob and its form are gone.
+- **D5 Contacts.** Owners · Tenants · Buyers on the one module standard; a
+  person opens with their flats and agreements.
+- **Checked:** build and backend parse; phone and desk driven; the rows each
+  button writes read back from the database; probes deleted; the only change to
+  bhumi / mahalaxmi is the additive schema on deploy.
