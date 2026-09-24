@@ -338,6 +338,29 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
   const { data: desk } = useServerData(() => api.getDeskSummary(), [], null, '/workspace/desk-summary')
   const openLoad = (id) => desk?.perAgent?.[id]?.open ?? 0
 
+  // WHAT IS ALREADY SITTING THERE. Round-robin decides who gets a record as it
+  // ARRIVES, so switching it on does nothing for the four thousand rows
+  // imported last week — they stay with nobody, and nothing on this screen said
+  // so. Counted here, offered as one press.
+  const [backlogAt, setBacklogAt] = useState(0)
+  const [handing, setHanding] = useState(false)
+  const { data: backlog } = useServerData(() => api.routingBacklog(), [backlogAt, store.state.dataAsOf], null)
+  const waiting = backlog ? (sideKey === 'leads' ? backlog.leads : backlog.owners) : 0
+  const handOut = async () => {
+    setHanding(true)
+    try {
+      const res = await api.assignUnowned(sideKey)
+      store.toast(res.assigned
+        ? `${res.assigned} handed out — ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
+        : 'Nothing to hand out')
+      setBacklogAt(n => n + 1)
+      store.settled?.()
+    } catch (err) {
+      store.toast(err.message || 'Could not hand them out', 'warn')
+    }
+    setHanding(false)
+  }
+
   const setStrategy = (v) => set({ [f.strategy]: v })
   const setRota = (next) => set({ [f.rota]: next })
   const toggleAgent = (id) => setRota(rota.includes(id) ? rota.filter(x => x !== id) : [...rota, id])
@@ -354,6 +377,23 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
         <Button variant="ghost" disabled={!dirty} onClick={() => setDraft({})}>Discard</Button>
         <Button variant="primary" disabled={!dirty || !loaded} onClick={save}>Save changes</Button>
       </div>
+
+      {/* Stated whenever there is a backlog, not only just after saving: the
+          question "why is nothing being assigned" outlives the click that
+          caused it. Only when the rota is on — with manual routing, records
+          waiting for a manager to pick is the intended state, not a problem. */}
+      {loaded && strategy === 'round_robin' && waiting > 0 && (
+        <div className="rt-backlog">
+          <div className="rt-backlog-t">
+            {waiting} {side.noun}{waiting === 1 ? '' : 's'} {waiting === 1 ? 'has' : 'have'} nobody on {waiting === 1 ? 'it' : 'them'}
+            <span className="rt-backlog-s">Rotation only applies to new arrivals — these were here before it was switched on.</span>
+          </div>
+          <Button variant="primary" size="sm" disabled={handing || !!dirty} onClick={handOut}>
+            {handing ? 'Handing out…' : `Hand out ${waiting}`}
+          </Button>
+        </div>
+      )}
+
 
       <div className="rt-switch" role="tablist">
         {Object.values(ROUTING_SIDES).map(s => (

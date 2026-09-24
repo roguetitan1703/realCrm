@@ -3769,6 +3769,81 @@ export async function distributeWork(opts: {
   return { leads, owners, perTarget };
 }
 
+/**
+ * WHAT IS SITTING WITH NOBODY ON IT, per side.
+ *
+ * Turning on round-robin changes who gets records AS THEY ARRIVE — it looks
+ * forward, and cannot see the four thousand rows imported the week before. That
+ * is a reasonable thing to be surprised by, so the Routing screen states it and
+ * offers to deal with it.
+ */
+export async function unownedBacklog(): Promise<{ leads: number; owners: number }> {
+  const t = tid();
+  const [l] = await sql`
+    SELECT count(*)::int AS n FROM crm_leads l
+     LEFT JOIN users u ON u.id = l.agent_id AND u.tenant_id = l.tenant_id AND u.deleted_at IS NULL
+     WHERE l.tenant_id = ${t} AND ${OPEN} AND (l.agent_id IS NULL OR u.id IS NULL)`;
+  const [o] = await sql`
+    SELECT count(*)::int AS n FROM crm_owners o
+     LEFT JOIN users u ON u.id = o.agent_id AND u.tenant_id = o.tenant_id AND u.deleted_at IS NULL
+     WHERE o.tenant_id = ${t} AND ${OWNER_OPEN} AND (o.agent_id IS NULL OR u.id IS NULL)`;
+  return { leads: l?.n ?? 0, owners: o?.n ?? 0 };
+}
+
+/**
+ * Hand the backlog out, now, by the same rota arrivals use.
+ *
+ * Deliberately NOT the idle/unowned sweep: that is a standing rule on a timer,
+ * and a person who has just switched the rota on is asking for one thing to
+ * happen once. Same rotation, same assignment history, one press.
+ */
+export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SYSTEM_CTX): Promise<{ assigned: number; perTarget: { id: string; name: string | null; n: number }[] }> {
+  const who = getContext();
+  if (who?.role === 'agent') throw new ForbiddenError('Handing out work is done from the desk.');
+  const t = tid();
+  const rows = side === 'leads'
+    ? await sql`SELECT l.id FROM crm_leads l
+                 LEFT JOIN users u ON u.id = l.agent_id AND u.tenant_id = l.tenant_id AND u.deleted_at IS NULL
+                 WHERE l.tenant_id = ${t} AND ${OPEN} AND (l.agent_id IS NULL OR u.id IS NULL)
+                 ORDER BY l.created_at`
+    : await sql`SELECT o.id FROM crm_owners o
+                 LEFT JOIN users u ON u.id = o.agent_id AND u.tenant_id = o.tenant_id AND u.deleted_at IS NULL
+                 WHERE o.tenant_id = ${t} AND ${OWNER_OPEN} AND (o.agent_id IS NULL OR u.id IS NULL)
+                 ORDER BY o.tower NULLS LAST, o.unit_no, o.created_at`;
+  if (!rows.length) return { assigned: 0, perTarget: [] };
+
+  // The rota, claimed once for the whole backlog — the same trick the import
+  // uses. One round trip instead of one per record.
+  const ids = (rows as any[]).map(r => r.id);
+  const pool = side === 'leads'
+    ? await Promise.all(ids.map(() => nextRoutedAgent()))
+    : await nextRoutedOwnerAgents(ids.length);
+
+  const byTarget = new Map<string, string[]>();
+  ids.forEach((id, i) => {
+    const agent = pool[i];
+    if (!agent) return;
+    byTarget.set(agent, [...(byTarget.get(agent) || []), id]);
+  });
+  if (!byTarget.size) throw new ForbiddenError('Nobody is in the rotation — add people in Settings → Routing.');
+
+  const names = await sql`SELECT id, name FROM users WHERE tenant_id = ${t} AND id IN ${sql([...byTarget.keys()])}`;
+  const perTarget: { id: string; name: string | null; n: number }[] = [];
+  let assigned = 0;
+  for (const [target, list] of byTarget) {
+    const n = side === 'leads' ? await bulkAssignLeads(list, target, ctx) : await bulkAssignOwners(list, target, ctx);
+    assigned += n;
+    perTarget.push({ id: target, name: (names as any[]).find(u => u.id === target)?.name ?? null, n });
+  }
+  audit({
+    tenant_id: t, actor_type: ctx.actorType || 'user', actor_id: ctx.actorId ?? null,
+    actor_label: ctx.actorLabel ?? null, action: 'routing.backlog_assigned', target_type: side, target_id: null,
+    summary: `${assigned} unowned ${side === 'leads' ? 'lead' : 'calling record'}(s) handed out by the rota`,
+    metadata: { side, perTarget }, ip: ctx.ip, user_agent: ctx.userAgent,
+  });
+  return { assigned, perTarget };
+}
+
 /** What one person is still holding — the question the suspend and hand-over
  *  screens have to answer before they can offer to move anything. */
 export async function heldWork(userId: string): Promise<{ leads: number; owners: number }> {

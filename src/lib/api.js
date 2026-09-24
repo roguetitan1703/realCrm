@@ -731,6 +731,9 @@ export const api = {
   getRouting: () => request('/team/routing'),
   updateRouting: (config) => request('/team/routing', { method: 'PUT', body: JSON.stringify(config) }),
   updateAgentStatus: (id, status) => request(`/team/users/${id}/duty-status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  // What is still sitting with nobody on it, and the one press that hands it out.
+  routingBacklog: () => request('/team/routing/backlog', { fresh: true }),
+  assignUnowned: (side) => request('/team/routing/assign-unowned', { method: 'POST', body: JSON.stringify({ side }) }),
   // What this person is still holding, before anything is moved.
   workloadOf: (userId) => request(`/team/users/${encodeURIComponent(userId)}/workload`, { fresh: true }),
   // Hand their OPEN work to several people at once — see distributeWork().

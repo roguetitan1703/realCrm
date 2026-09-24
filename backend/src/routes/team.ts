@@ -9,7 +9,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getAgents, getRoutingRules, updateRoutingRules, getAgentPerformance, distributeWork, heldWork } from '../services/store';
+import { getAgents, getRoutingRules, updateRoutingRules, getAgentPerformance, distributeWork, heldWork, unownedBacklog, assignUnowned } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { audit } from '../services/audit';
@@ -527,6 +527,38 @@ teamRouter.get('/routing', async (req: Request, res: Response) => {
     success: true,
     rules: await getRoutingRules(),
   });
+});
+
+/**
+ * WHAT IS STILL SITTING WITH NOBODY ON IT
+ * GET /api/v1/team/routing/backlog → { leads, owners }
+ * Round-robin looks forward — it decides who gets a record as it ARRIVES — so
+ * switching it on leaves everything imported before it untouched. The screen
+ * says so, and offers the one press below.
+ */
+teamRouter.get('/routing/backlog', async (_req: Request, res: Response) => {
+  try {
+    return res.status(200).json({ success: true, ...(await unownedBacklog()) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to count unowned records', message: err.message });
+  }
+});
+
+/** POST /api/v1/team/routing/assign-unowned { side: 'leads' | 'owners' } */
+teamRouter.post('/routing/assign-unowned', async (req: Request, res: Response) => {
+  try {
+    const perm = canManageRole('agent');
+    if (!perm.ok) return res.status(403).json({ error: perm.msg });
+    const side = req.body?.side === 'owners' ? 'owners' : 'leads';
+    const out = await assignUnowned(side, {
+      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: null,
+      ip: req.ip, userAgent: req.get('user-agent') ?? undefined,
+    } as any);
+    return res.status(200).json({ success: true, ...out });
+  } catch (err: any) {
+    const code = err?.name === 'ForbiddenError' ? 403 : 500;
+    return res.status(code).json({ error: 'Could not hand them out', message: err.message });
+  }
 });
 
 /**
