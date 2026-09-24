@@ -787,6 +787,6 @@ Follow-Up; the System auto status counted 0; an agent asking for another
 person's day gets their own. Phone (iPhone 13 viewport) and desk driven, no page
 errors, no sideways scroll; probe rows deleted.
 
-**Not done.** An end-of-day push to each agent and the manager (spec question
-3) — not asked for yet. Targets — deliberately not built.
+**Not built, decided.** An end-of-day push — not required (24 Sep): the report
+is on screen whenever anyone opens it. Targets — deliberately not built.
 

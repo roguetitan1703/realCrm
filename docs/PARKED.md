@@ -12,6 +12,18 @@ recorded, update it in place rather than adding a second entry.
 
 ---
 
+## A mark for one number on many records (parked 24 Sep, "intelligence")
+
+**What it is.** One phone number standing on many calling rows — measured on
+Mahalaxmi's K-SHIRE import: one number on 50 flats (a builder's office or a
+society line, not an owner). A mark on the row would stop an agent ringing the
+same office fifty times.
+
+**Why parked.** The user files it under intelligence the product can add later,
+not something the desk is blocked on.
+
+---
+
 ## Mahalaxmi's already-imported sheet statuses — not back-filled (declined 24 Sep)
 
 **What is wrong.** Their VTP Sierra and Owner Calling sheets were imported
