@@ -745,7 +745,10 @@ export const api = {
   renewAgreement: (id, body) => request(`/agreements/${encodeURIComponent(id)}/renew`, { method: 'POST', body: JSON.stringify(body) }),
   endAgreement: (id) => request(`/agreements/${encodeURIComponent(id)}/end`, { method: 'POST', body: '{}' }),
   convertOwner: (id, body) => request(`/owners/${encodeURIComponent(id)}/convert`, { method: 'POST', body: JSON.stringify(body) }),
-  getActivity: (q) => request(`/activity?${new URLSearchParams(Object.entries(q).filter(([, v]) => v))}`, { fresh: true }),
+  // Through the read cache like every other summary: a write clears it, and
+  // asking fresh on every render fired the same report three times on one
+  // dashboard load.
+  getActivity: (q) => request(`/activity?${new URLSearchParams(Object.entries(q).filter(([, v]) => v))}`),
   getActivityRecords: (q) => request(`/activity/records?${new URLSearchParams(Object.entries(q).filter(([, v]) => v))}`, { fresh: true }),
   // Open records per person, on ONE side — the number an assign screen should
   // show is the one for the work it is handing out.

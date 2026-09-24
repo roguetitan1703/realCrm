@@ -40,10 +40,12 @@ function Parties({ store, go, topBar, phone, kind }) {
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const [flt, setFlt] = useState({ status: ['active'] })
-  const [sortKey, setSortKey] = useState('ends')
-  const [sortDir, setSortDir] = useState('asc')
-  const status = flt.status?.[0] || 'all'
+  // Tenants: two tabs, everyone and the rents that need a renewal call. Buyers
+  // have none: a sale does not end, so "current" and "ended" meant nothing.
+  const [seg, setSeg] = useState('all')
+  const [sortKey, setSortKey] = useState(kind === 'rent' ? 'ends' : 'start')
+  const [sortDir, setSortDir] = useState(kind === 'rent' ? 'asc' : 'desc')
+  const status = kind === 'rent' ? seg : 'all'
   const source = useServerList(
     (params) => api.listAgreements({
       kind, status, q: params.q, page: params.page, limit: params.limit,
@@ -53,24 +55,19 @@ function Parties({ store, go, topBar, phone, kind }) {
     [kind, status, sortKey, sortDir, state.dataAsOf],
   )
   const c = source.counts || {}
-  const facets = {
-    status: kind === 'rent'
-      ? [
-          { value: 'active', label: 'Renting now', count: c.active ?? 0 },
-          { value: 'ending', label: 'Ending in 30 days', count: c.ending ?? 0 },
-          { value: 'past', label: 'Moved out or renewed', count: c.past ?? 0 },
-        ]
-      : [
-          { value: 'active', label: 'Current', count: c.active ?? 0 },
-          { value: 'past', label: 'Ended', count: c.past ?? 0 },
-        ],
-  }
+  const segments = kind === 'rent'
+    ? [{ key: 'all', label: 'All' }, { key: 'ending', label: 'Ending in 30 days', tone: 'alert' }].map(sg => ({
+        ...sg, on: seg === sg.key, count: c[sg.key] ?? 0,
+        disabled: (c[sg.key] ?? 0) === 0 && seg !== sg.key,
+        onClick: () => { setSeg(sg.key); setPage(1) },
+      }))
+    : undefined
   const open = (a) => (a.propertyId
     ? go('properties', { propId: a.propertyId, propOpen: true })
     : a.leadId ? go('leads', { leadId: a.leadId, leadOpen: true }) : null)
   const { header, toolbar, body } = ModuleListView({
     def, source, store, onOpen: open, phone,
-    filters: flt, onFilters: (v) => { setFlt(v); setPage(1) }, facets,
+    segments,
     search: q, onSearch: (v) => { setQ(v); setPage(1) },
     sortKey, onSortKey: (v) => { setSortKey(v); setPage(1) }, sortDir, onSortDir: (v) => { setSortDir(v); setPage(1) },
     view: 'list', showViewSwitch: false,
@@ -92,10 +89,10 @@ function Parties({ store, go, topBar, phone, kind }) {
 
 function Owners({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
-  // WHAT THEY GAVE US, as a filter: Landlords first, because a flat to let is
-  // the work that comes back every eleven months. Clearing it shows everyone.
-  const [flt, setFlt] = useState({ role: ['Landlord'] })
-  const seg = flt.role?.[0] || 'all'
+  // WHAT THEY GAVE US, as tabs: Landlords first, because a flat to let is the
+  // work that comes back every eleven months.
+  const [seg, setSeg] = useState('Landlord')
+  const [flt, setFlt] = useState({})
   const [q, setQ] = useState('')
   const [sortKey, setSortKey] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
@@ -148,13 +145,17 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
       : Promise.resolve([]),
     [selClient?.id], [])
 
-  // What they have given us: a flat to let, a flat to sell, or both.
-  const facets = {
-    roles: [
-      { value: 'Landlord', label: 'Landlords', count: counts.Landlord ?? 0 },
-      { value: 'Seller', label: 'Sellers', count: counts.Seller ?? 0 },
-    ],
-  }
+  // What they have given us: a flat to let, a flat to sell, or both. Someone
+  // with both is under each tab.
+  const segments = [
+    { key: 'Landlord', label: 'Landlords' },
+    { key: 'Seller', label: 'Sellers' },
+    { key: 'all', label: 'All' },
+  ].map(sg => ({
+    ...sg, on: seg === sg.key, count: counts[sg.key] ?? 0,
+    disabled: (counts[sg.key] ?? 0) === 0 && seg !== sg.key,
+    onClick: () => { setSeg(sg.key); setPage(1) },
+  }))
 
   // No KPI strip. It repeated the pills directly under it — "0 Owners · 0
   // Sellers · 0 Landlords" above "All 0 · Sellers 0 · Landlords 0" — the same
@@ -163,7 +164,7 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
   const { header, toolbar, body } = ModuleListView({
     def: CLIENTS_DEF, source: { ...source, rows }, store,
     onOpen: (r) => setSelClient(r),
-    filters: flt, onFilters: setFltP, facets,
+    segments, filters: flt, onFilters: setFltP,
     search: q, onSearch: setQP,
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
     view, onView: setView,
@@ -176,7 +177,7 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
     // are still trying to win a property from belongs in Calling.
     cta: { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) },
     emptyTitle: 'No owners match',
-    emptyHint: 'Adjust the role, filter or search.',
+    emptyHint: 'Try another tab, filter or search.',
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} />
       : <ModuleTable def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP} />,

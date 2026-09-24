@@ -55,7 +55,7 @@ function OwnerProjectGrid({ onOpen, onAssign, canAssign, refreshAt }) {
   return (
     <div className="grid-cards">
       {rows.map(pj => (
-        <div key={pj.key} className="projcard">
+        <div key={pj.key} className="projcard pj-box">
           <button className="pj-open" onClick={() => onOpen(pj.key)}>
             <div className="pj-head">
               <div className="pj-id">

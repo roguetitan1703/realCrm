@@ -1016,19 +1016,23 @@ export function partiesDef(kind) {
     name: rent ? 'Tenants' : 'Buyers',
     singularName: rent ? 'Tenant' : 'Buyer',
     icon: 'people',
-    // Counted by the server (listAgreements), one value at a time.
-    filterFields: (store, facets) => [
-      { key: 'status', label: 'Status', icon: 'filter', multi: false, options: facets?.status || [] },
-    ],
+    // The tabs are the screen's (Clients.jsx); there is nothing else to filter by.
+    filterFields: () => [],
     rowMatch: () => true,
     searchFields: [],
     // Sorted by the server. "Ends" puts the rent ending soonest first.
-    sortOptions: [
-      { key: 'ends', label: rent ? 'Ends' : 'Date' },
-      { key: 'start', label: 'Started' },
-      { key: 'name', label: 'Name' },
-      { key: 'amount', label: rent ? 'Rent' : 'Price' },
-    ],
+    sortOptions: rent
+      ? [
+          { key: 'ends', label: 'Ends' },
+          { key: 'start', label: 'Started' },
+          { key: 'name', label: 'Name' },
+          { key: 'amount', label: 'Rent' },
+        ]
+      : [
+          { key: 'start', label: 'Date' },
+          { key: 'name', label: 'Name' },
+          { key: 'amount', label: 'Price' },
+        ],
     columns: [
       { key: 'name', label: rent ? 'Tenant' : 'Buyer', render: (a) => (
         <div className="cell-prop">
@@ -1070,21 +1074,11 @@ export const CLIENTS_DEF = {
 
   searchFields: ['name', 'detail', 'phone'],
 
-  // Clients filter set is minimal (locality); segments (Buyers/Tenants/...) handled by the module.
-  filterFields: (store, facets) => {
-    // Landlord or Seller, counted by the server (listContacts). One at a time.
-    const role = facets?.roles ? [{ key: 'role', label: 'Owner of', icon: 'people', multi: false, options: facets.roles }] : []
-    // The firm's own locality vocabulary, from the boot payload. This used to
-    // be rebuilt by mapping every lead and every property on every render.
-    const dyn = localities(store)
-    // NO FALLBACK LIST. This offered four Pune neighbourhoods to any firm whose
-    // own vocabulary was still empty -- a filter naming places a firm in Nagpur
-    // has never heard of, every one of which matches zero rows. suggest.js
-    // deleted exactly these two lists for exactly this reason and this copy
-    // survived. A firm with no localities yet gets no locality filter.
-    if (!dyn.length) return role
-    return [...role, { key: 'locality', label: 'Locality', icon: 'building', options: opt(dyn) }]
-  },
+  // Landlord or Seller is the tab row (Clients.jsx). There was a Locality
+  // filter here that the owners query never received: picking one changed
+  // nothing. Gone until listContacts filters by it.
+  filterFields: () => [],
+
 
   rowMatch(r, key, vals) {
     if (key === 'locality') return vals.includes(r.locality)

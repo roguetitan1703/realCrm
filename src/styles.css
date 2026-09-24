@@ -965,10 +965,11 @@ button.btn-ghost.fu-done{color:var(--accent)}
 .projcard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);cursor:pointer;transition:border-color .12s,box-shadow .12s;text-align:left;width:100%;padding:16px 17px;display:flex;flex-direction:column;gap:14px}
 .projcard:hover{border-color:var(--muted);box-shadow:var(--shadow)}
 .projcard.indep{border-style:dashed}
-/* The card became a container with its own Assign control, so the part that
-   opens the project is the button INSIDE it — a button in a button is invalid
-   and swallows the inner click. */
-.projcard{padding:0}
+/* The CALLING card (Owners.jsx) is a container with its own Assign control, so
+   the part that opens the project is the button INSIDE it (a button in a button
+   swallows the inner click). Only that card drops its padding: this rule once
+   applied to every .projcard and left the Properties cards with none. */
+.projcard.pj-box{padding:0}
 .pj-open{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:14px;padding:16px 17px 12px;width:100%;box-sizing:border-box;flex:1}
 .pj-assign{display:flex;align-items:center;gap:6px;margin:0 17px 14px;padding:7px 11px;border:1px solid var(--line);
   background:var(--card-2);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;align-self:flex-start}
@@ -3035,7 +3036,8 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .ad{display:flex;flex-direction:column;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
 .ad-panel,.ad-team{border:none;padding:0;background:none}
 .ad-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.ad-title{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-2)}
+/* Same title as every other panel's SectionHead (.sh .t). */
+.ad-title{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
 .ad-top .seg button{padding:4px 11px;font-size:12.5px}
 .ad-top-r{margin-left:auto;display:inline-flex;align-items:center;gap:8px}
 .ad-day{display:inline-flex;align-items:center;gap:2px;font-size:12.5px;font-weight:600;color:var(--ink-2)}
@@ -3046,6 +3048,9 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .ad-open{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);background:var(--card);border-radius:6px;padding:4px 8px 4px 10px;font:inherit;font-size:12.5px;font-weight:600;color:var(--ink-2);cursor:pointer}
 .ad-open:hover{color:var(--ink);border-color:var(--ink-2)}
 .ad-wait{height:44px;border-radius:6px;background:var(--line-2)}
+.dash-wait{height:48px;border-radius:var(--radius);background:var(--line-2)}
+.dash-kpis .dash-wait{height:78px}
+.dash-wait.tall{height:140px}
 .ad-quiet{color:var(--faint)}
 
 /* My day: four tiles, then what moved */
@@ -3144,8 +3149,16 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .cd-file{display:inline-flex;align-items:center;gap:7px;align-self:flex-start;padding:8px 12px;border:1px dashed var(--line);border-radius:var(--radius);font-size:13px;color:var(--ink-2);cursor:pointer}
 .cd-file:hover{border-color:var(--accent);color:var(--accent-ink)}
 .cd-file input{display:none}
-.cd-opts{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius);margin:6px 0;max-height:190px;overflow-y:auto}
-.cd-opts button{display:flex;justify-content:space-between;gap:10px;padding:8px 11px;border:none;border-bottom:1px solid var(--line-2);background:none;font:inherit;font-size:13px;text-align:left;cursor:pointer;color:var(--ink)}
+.cd-search{display:flex;align-items:center;gap:8px;padding:0 11px;height:40px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);color:var(--muted);cursor:text}
+.cd-search:focus-within{border-color:var(--accent)}
+.cd-search input{flex:1;min-width:0;border:none;outline:none;background:none;font:inherit;font-size:14px;color:var(--ink)}
+.cd-note{margin-top:6px;padding:9px 11px;font-size:13px;color:var(--muted)}
+.cd-opts{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius);margin-top:6px;max-height:220px;overflow-y:auto}
+.cd-opts-t{padding:7px 11px 5px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--line-2)}
+.cd-opts button{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 11px;border:none;border-bottom:1px solid var(--line-2);background:none;font:inherit;font-size:13px;text-align:left;cursor:pointer;color:var(--ink)}
+.cd-opts button:last-child{border-bottom:none}
 .cd-opts button:hover{background:var(--card-2)}
-.cd-opts button span{color:var(--muted)}
+.cd-opt-main{display:flex;flex-direction:column;min-width:0}
+.cd-opt-main span{color:var(--muted);font-size:12px}
+.cd-opt-what{flex:none;font-size:12px;color:var(--ink-2)}
 .cd-owner{font-size:13.5px;color:var(--ink-2);margin:-4px 0 12px}

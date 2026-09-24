@@ -36,7 +36,7 @@ export default function Dashboard({ store, go, topBar }) {
   // and this screen used to hold all of them in memory to produce a handful of
   // integers -- the clearest example in the app of downloading a book to read
   // its page count.
-  const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null, '/workspace/desk-summary')
+  const { data: desk, loading: deskLoading } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null, '/workspace/desk-summary')
   // The at-risk list, sorted oldest-activity-first so the top of it is the lead
   // that has been waiting longest. Same two flags the tiles above count, asked
   // of the same endpoint, so the panel and the tiles cannot disagree.
@@ -45,7 +45,13 @@ export default function Dashboard({ store, go, topBar }) {
   // The going-cold LIST is gone from this screen: it was the tile above printed
   // a second time, six rows of it, and "who is this happening to" is a question
   // the per-agent table answers for the whole desk in one row each.
-  const { data: ownerSummary } = useServerData(() => api.getOwnersSummary(), [state.dataAsOf], null, '/owners/summary')
+  const { data: ownerSummary, loading: ownerLoading } = useServerData(() => api.getOwnersSummary(), [state.dataAsOf], null, '/owners/summary')
+  // THE PAGE ARRIVES AS ONE. Until both reads have answered (or failed) it
+  // shows grey blocks where the sections go, instead of the calling queue
+  // appearing late above everything and Team today, lowest on the page, being
+  // the first thing drawn. Team today is not even asked for until then: it is
+  // the slowest read and the least urgent.
+  const ready = (!!desk || !deskLoading) && (!!ownerSummary || !ownerLoading)
 
   const totals = desk?.leads || { total: 0, open: 0, overdue: 0, won: 0, new_today: 0, unassigned: 0 }
   // The firm's own number from Settings -> Response times, not a literal 3.
@@ -131,6 +137,19 @@ export default function Dashboard({ store, go, topBar }) {
     )
   }
 
+  if (!ready) {
+    return (
+      <>
+        {topBar({ title: 'Dashboard' })}
+        <div className="app-body dash" aria-busy="true">
+          <div className="dash-kpis">{[0, 1, 2].map(i => <div key={i} className="dash-wait" />)}</div>
+          <Panel><div className="dash-wait" /></Panel>
+          <Panel><div className="dash-wait tall" /></Panel>
+        </div>
+      </>
+    )
+  }
+
   return (
     <>
       {topBar({ title: 'Dashboard' })}
@@ -177,7 +196,9 @@ export default function Dashboard({ store, go, topBar }) {
               alert={oq.callbacksOverdue > 0} onClick={() => toCalling('callbacks_overdue')} />
           )}
           {hasCalling && (
-            <Kpi icon="check" label="Calls logged today" value={oq.calledToday} onClick={() => toCalling('never_called')} />
+            // PEOPLE, not calls: it counts calling rows rung today. Team today's
+            // "calls" counts every call, so the two must not share the word.
+            <Kpi icon="check" label="People called today" value={oq.calledToday} onClick={() => toCalling('never_called')} />
           )}
         </div>
 

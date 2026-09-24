@@ -27,6 +27,17 @@ const today = () => new Date().toISOString().slice(0, 10)
 const reason = (e) => String(e?.message || e).replace(/^API Error: \d+ [^—]*— ?/, '') || 'Could not save.'
 const flatName = (p) => [p.project || p.society, unitLabel(p)].filter(Boolean).join(' ') || p.title || 'Flat'
 
+/** One flat in the pick list: name and area, then what it is. */
+function FlatOption({ p, onPick }) {
+  const what = [p.bhk && p.subtype !== 'plot' ? `${p.bhk} BHK` : null, p.deal === 'rent' ? 'Rent' : p.deal === 'sale' ? 'Sale' : null, p.status].filter(Boolean).join(' · ')
+  return (
+    <button type="button" onClick={() => onPick(p)}>
+      <span className="cd-opt-main"><b>{flatName(p)}</b><span>{p.locality}</span></span>
+      {what && <span className="cd-opt-what">{what}</span>}
+    </button>
+  )
+}
+
 // ── The card ────────────────────────────────────────────────────────────────
 export function AgreementCard({ a, store, onChanged, show = {} }) {
   const [busy, setBusy] = useState(false)
@@ -211,7 +222,7 @@ export function CloseDealModal({ store, leadId, Modal }) {
   const [outside, setOutside] = useState(false)
   const [np, setNp] = useState({ society: '', tower: '', unit: '', locality: '', subtype: 'apartment', bhk: '' })
   const [q, setQ] = useState('')
-  const [found, setFound] = useState([])
+  const [found, setFound] = useState(null)       // null = not searched yet
   const [f, setF] = useState({ amount: '', deposit: '', startDate: today(), endDate: '' })
   const [file, setFile] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -220,11 +231,13 @@ export function CloseDealModal({ store, leadId, Modal }) {
   const shortlist = l?.shortlistProps || []
 
   useEffect(() => {
-    if (outside || q.trim().length < 2) { setFound([]); return }
+    if (outside || q.trim().length < 2) { setFound(null); return }
     let live = true
+    setFound('busy')
     const t = setTimeout(() => {
       api.listProperties({ q: q.trim(), limit: 8 })
-        .then(r => { if (live) setFound(r?.data || r?.rows || []) }).catch(() => {})
+        .then(r => { if (live) setFound(r?.data || r?.rows || []) })
+        .catch(() => { if (live) setFound([]) })
     }, 250)
     return () => { live = false; clearTimeout(t) }
   }, [q, outside])
@@ -268,16 +281,25 @@ export function CloseDealModal({ store, leadId, Modal }) {
           <OutsideFlat v={np} set={setN} />
         ) : (
           <>
-            {shortlist.length > 0 && (
+            <label className="cd-search">
+              <Icon name="search" size={15} />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Type a project, flat no. or area" autoComplete="off" />
+            </label>
+            {q.trim().length < 2 ? (
+              shortlist.length > 0 && (
+                <div className="cd-opts">
+                  <div className="cd-opts-t">Shortlisted for {l?.name || 'this lead'}</div>
+                  {shortlist.map(p => <FlatOption key={p.id} p={p} onPick={pick} />)}
+                </div>
+              )
+            ) : found === 'busy' || found === null ? (
+              <div className="cd-note">Searching…</div>
+            ) : found.length ? (
               <div className="cd-opts">
-                {shortlist.map(p => <button type="button" key={p.id} onClick={() => pick(p)}><b>{flatName(p)}</b><span>{p.locality}</span></button>)}
+                {found.map(p => <FlatOption key={p.id} p={p} onPick={pick} />)}
               </div>
-            )}
-            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search our flats by project, flat no. or area" />
-            {found.length > 0 && (
-              <div className="cd-opts">
-                {found.map(p => <button type="button" key={p.id} onClick={() => pick(p)}><b>{flatName(p)}</b><span>{p.locality}</span></button>)}
-              </div>
+            ) : (
+              <div className="cd-note">No flat found for “{q.trim()}”.</div>
             )}
           </>
         )}
