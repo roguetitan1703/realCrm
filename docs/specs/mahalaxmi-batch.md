@@ -678,3 +678,20 @@ people behind it. Above it, sentences — only the ones that are true today:
 4. Targets (e.g. 50 calls a day) — not built unless asked; a target shown
    without being asked for reads as surveillance.
 
+### Activity — the calling side, and one switch (decided 24 Sep)
+- **One switch, Leads | Calling**, on both "My day" and "Team today". Never both
+  on one screen — the user wants each view clean, not the two crammed together.
+- **Calling is chasing, not inbound**, so it is measured as EFFORT TODAY, never
+  as coverage. No "called 3 of 700 · 697 uncalled" — on a 700-row list that is a
+  number that shames a full day's work and changes nobody's next call.
+- What the calling view counts, in the same words as leads:
+  **calls made · people called · answered · didn't pick up · busy · switched
+  off · wrong number** — the outcome breakdown comes only from outcomes the
+  caller logged, which is the point: it shows who logs and pushes the rest to.
+- **Where they stand now** — only statuses a PERSON set today, told as what the
+  owner now is: "3 interested · 1 key received · 5 not interested · 2 do not
+  call". Excluded: the automatic "New → Contacted" the app writes on a first
+  dial (authored 'System', metadata.auto = true — see noteOwnerContact) and the
+  default a row arrives with.
+- Follow-ups become **callbacks**: set · done · missed · due tomorrow.
+
