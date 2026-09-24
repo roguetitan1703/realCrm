@@ -1311,9 +1311,9 @@ export async function getBootstrap(): Promise<any> {
     -- the OWNER's name, so a picker built on it offered "ASHA BHARAT KOTHARI"
     -- as a township. Ordered by size so the biggest developments come first.
     projects AS (
-      SELECT project AS v FROM crm_properties
+      SELECT mode() WITHIN GROUP (ORDER BY project) AS v FROM crm_properties
        WHERE tenant_id = ${t} AND coalesce(project, '') <> ''
-       GROUP BY 1 ORDER BY count(*) DESC LIMIT 200
+       GROUP BY ${projectNorm(sql`project`)} ORDER BY count(*) DESC LIMIT 200
     ),
     configs AS (
       SELECT DISTINCT v FROM (
@@ -3386,6 +3386,18 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
  * The queue segments — the same predicates getOwnerQueueCounts counts, so a
  * pill that says 104 opens a list of 104. Defined once, used by both.
  */
+/**
+ * ONE PROJECT, HOWEVER IT WAS TYPED.
+ *
+ * "Sai Heights", "sai heights" and "SaiHeights" came in on three sheets and
+ * showed as three projects — three cards, three Assign buttons, each holding a
+ * third of the flats. Grouping and filtering compare this key: letters and
+ * digits only, lower-cased. What is SHOWN is the spelling most rows use
+ * (mode()), and nothing stored is rewritten — the key is read, never saved.
+ * Used for calling rows and properties alike, so the two cannot group a
+ * township differently.
+ */
+export const projectNorm = (expr: any) => sql`lower(regexp_replace(coalesce(${expr}, ''), '[^[:alnum:]]', '', 'g'))`;
 export const OWNER_OPEN = sql`coalesce(stage, 'New') NOT IN ('Not Interested', 'Do Not Call')`;
 // Takes the firm's day boundary because "today" is a local question — see
 // dayStart(). As a module-level constant it could only ever ask Postgres for
@@ -3425,9 +3437,9 @@ export async function listOwners(opts: {
   // project: undefined, which is not a filter at all and returned every
   // owner instead of the handful with no project.
   if (opts.project === '_none') where.push(sql`coalesce(project, '') = ''`);
-  else if (opts.project) where.push(sql`project = ${opts.project}`);
+  else if (opts.project) where.push(sql`${projectNorm(sql`project`)} = ${projectNorm(sql`${String(opts.project)}::text`)}`);
   // TOWER, inside a project. Case- and space-blind for the same reason project
-  // names are about to be: "T1", "t1" and "T 1" are one tower on a real sheet.
+  // names are: "T1", "t1" and "T 1" are one tower on a real sheet.
   if (opts.tower === '_none') where.push(sql`coalesce(tower, '') = ''`);
   else if (opts.tower) where.push(sql`lower(replace(coalesce(tower, ''), ' ', '')) = lower(replace(${String(opts.tower)}, ' ', ''))`);
   if (opts.agentId) where.push(sql`agent_id = ${opts.agentId}`);
@@ -3516,7 +3528,9 @@ export async function listOwnerProjects(): Promise<{ rows: any[]; total: number 
   const scope = ownerScope();
   const [rows, holders] = await Promise.all([
     sql`
-    SELECT coalesce(nullif(project, ''), 'No project') AS key,
+    SELECT CASE WHEN ${projectNorm(sql`project`)} = '' THEN 'No project'
+                ELSE mode() WITHIN GROUP (ORDER BY project) END AS key,
+           ${projectNorm(sql`project`)} AS norm,
            count(*)::int AS total,
            count(*) FILTER (WHERE coalesce(stage, 'New') = 'New')::int AS "new",
            count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
@@ -3526,13 +3540,13 @@ export async function listOwnerProjects(): Promise<{ rows: any[]; total: number 
            -- from the rows, never a list somebody typed.
            array_remove(array_agg(DISTINCT nullif(tower, '')), NULL) AS towers
       FROM crm_owners WHERE tenant_id = ${t} AND ${scope}
-     GROUP BY 1 ORDER BY 2 DESC`,
+     GROUP BY ${projectNorm(sql`project`)} ORDER BY 2 DESC`,
     // WHO IS ON THIS PROJECT, by name. A firm assigns a township to somebody,
     // then moves a handful of its flats to two other callers — and the card
     // could only say "728 owners", which answers a question nobody asked. One
     // query for every project, so a card and its own list cannot disagree.
     sql`
-    SELECT coalesce(nullif(o.project, ''), 'No project') AS key,
+    SELECT ${projectNorm(sql`o.project`)} AS norm,
            o.agent_id AS id,
            coalesce(u.name, a.name) AS name,
            count(*)::int AS n
@@ -3544,16 +3558,16 @@ export async function listOwnerProjects(): Promise<{ rows: any[]; total: number 
   ]);
   const byProject = new Map<string, { id: string; name: string; n: number }[]>();
   for (const h of holders as any[]) {
-    const list = byProject.get(h.key) || [];
+    const list = byProject.get(h.norm) || [];
     list.push({ id: h.id, name: h.name || h.id, n: h.n });
-    byProject.set(h.key, list);
+    byProject.set(h.norm, list);
   }
   return {
     rows: rows.map((r: any) => ({
       key: r.key, name: r.key, locality: r.locality || null,
       counts: { total: r.total, new: r.new, interested: r.interested, unassigned: r.unassigned },
       towers: (r.towers || []).sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true })),
-      holders: byProject.get(r.key) || [],
+      holders: byProject.get(r.norm) || [],
     })),
     total: rows.length,
   };
@@ -3592,7 +3606,7 @@ export async function assignProjectOwners(opts: {
   const rows = await sql`
     SELECT id FROM crm_owners
      WHERE tenant_id = ${t} AND ${OWNER_OPEN}
-       AND ${isNone ? sql`coalesce(project, '') = ''` : sql`project = ${project}`}
+       AND ${isNone ? sql`coalesce(project, '') = ''` : sql`${projectNorm(sql`project`)} = ${projectNorm(sql`${project}::text`)}`}
        ${opts.onlyUnassigned ? sql`AND agent_id IS NULL` : sql``}
      ORDER BY tower NULLS LAST, unit_no, created_at`;
 
@@ -3614,7 +3628,7 @@ export async function assignProjectOwners(opts: {
   const after = await sql`
     SELECT agent_id AS id, count(*)::int AS n FROM crm_owners
      WHERE tenant_id = ${t} AND ${OWNER_OPEN}
-       AND ${isNone ? sql`coalesce(project, '') = ''` : sql`project = ${project}`}
+       AND ${isNone ? sql`coalesce(project, '') = ''` : sql`${projectNorm(sql`project`)} = ${projectNorm(sql`${project}::text`)}`}
        AND agent_id IN ${sql(targets)}
      GROUP BY 1`;
   for (const row of after as any[]) {
@@ -4457,7 +4471,7 @@ export async function listProperties(opts: {
     // the units that have no project at all, so it matches on absence.
     where.push(opts.project === INDEPENDENT_PROJECT
       ? sql`${PROJECT_KEY} IS NULL`
-      : sql`${PROJECT_KEY} = ${opts.project}`);
+      : sql`${projectNorm(PROJECT_KEY)} = ${projectNorm(sql`${String(opts.project)}::text`)}`);
   }
   if (opts.excludeId) where.push(sql`id <> ${opts.excludeId}`);
 
@@ -4520,9 +4534,9 @@ export async function getPropertiesSummary(): Promise<any> {
         FROM crm_properties WHERE tenant_id = ${t} GROUP BY 1`,
     sql`SELECT DISTINCT locality AS v FROM crm_properties
         WHERE tenant_id = ${t} AND coalesce(locality, '') <> '' ORDER BY 1`,
-    sql`SELECT ${PROJECT_KEY} AS v, count(*)::int AS n
-        FROM crm_properties WHERE tenant_id = ${t}
-        GROUP BY 1 HAVING ${PROJECT_KEY} IS NOT NULL
+    sql`SELECT mode() WITHIN GROUP (ORDER BY ${PROJECT_KEY}) AS v, count(*)::int AS n
+        FROM crm_properties WHERE tenant_id = ${t} AND ${PROJECT_KEY} IS NOT NULL
+        GROUP BY ${projectNorm(PROJECT_KEY)}
         ORDER BY 2 DESC LIMIT 200`,
   ]);
   const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
@@ -4559,7 +4573,8 @@ export async function listProjects(opts: { q?: string; limit?: number } = {}): P
   // bucket, the same way the browser-side grouping did it. A broker who only
   // lists scattered flats still sees their inventory here.
   const rows = await sql`
-    SELECT coalesce(${PROJECT_KEY}, ${INDEPENDENT_PROJECT}) AS key,
+    SELECT CASE WHEN ${projectNorm(PROJECT_KEY)} = '' THEN ${INDEPENDENT_PROJECT}
+                ELSE mode() WITHIN GROUP (ORDER BY ${PROJECT_KEY}) END AS key,
            count(*)::int AS units,
            count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available,
            count(*) FILTER (WHERE coalesce(status, 'Available') = 'Sold')::int AS sold,
@@ -4571,7 +4586,7 @@ export async function listProjects(opts: { q?: string; limit?: number } = {}): P
            min(${PRICE_NUM}) AS price_min,
            max(${PRICE_NUM}) AS price_max
       FROM crm_properties WHERE ${clause}
-     GROUP BY 1
+     GROUP BY ${projectNorm(PROJECT_KEY)}
      ORDER BY 2 DESC LIMIT ${limit}`;
 
   // Biggest projects first, with the implicit bucket always last — it is a
@@ -4600,7 +4615,9 @@ export async function listProjects(opts: { q?: string; limit?: number } = {}): P
 /** One project's header row. Its units come from listProperties({ project }). */
 export async function getProject(key: string): Promise<any | null> {
   const { rows } = await listProjects({});
-  return rows.find(r => r.key === key) || null;
+  // Any spelling of the project finds it — the key shown is only the commonest.
+  const norm = (v: string) => String(v || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  return rows.find(r => r.key === key) || rows.find(r => norm(r.key) === norm(key)) || null;
 }
 
 /**

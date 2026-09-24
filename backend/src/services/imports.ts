@@ -69,7 +69,13 @@ export function unitKey(project?: string | null, tower?: string | null, unit?: s
   const part = (v?: string | null) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
   const u = part(unit);
   if (!u) return null;
-  return [part(project), part(tower), u].join('|');
+  // The project compares the way every screen groups it (projectNorm in
+  // store.ts): letters and digits only. "Sai Heights" and "SaiHeights" are one
+  // township, so flat 101 in both is one flat. The tower drops spaces, as the
+  // Tower filter does.
+  const proj = String(project ?? '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const tow = String(tower ?? '').toLowerCase().replace(/\s+/g, '');
+  return [proj, tow, u].join('|');
 }
 
 // ---------------------------------------------------------------------------
