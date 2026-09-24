@@ -203,6 +203,10 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // queue" is the question a manager asks before any other, and here it was
   // two clicks deep inside the filter panel beside Locality.
   const [agentSel, setAgentSel] = useState('all')
+  // TOWER — only meaningful inside a project, so it resets whenever the
+  // project does and is not offered until one is chosen.
+  const [towerSel, setTowerSel] = useState('all')
+  useEffect(() => { setTowerSel('all') }, [flt.project])
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selected, setSelected] = useState(new Set())
@@ -218,6 +222,15 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const setSegP = (v) => { setSeg(v); setView('list'); setPage(1); setSelected(new Set()) }
   const setStageP = (v) => { setStage(v); setView('list'); setPage(1); setSelected(new Set()) }
   const setAgentP = (v) => { setAgentSel(v); setView('list'); setPage(1); setSelected(new Set()) }
+  const setTowerP = (v) => { setTowerSel(v); setView('list'); setPage(1); setSelected(new Set()) }
+  // PROJECT, ON THE LEFT, with the other "which rows" controls. It lived on the
+  // right as a chip that only appeared once you had opened a card — and people
+  // read a toolbar from the left, so they never found the way back out of a
+  // project or into another. Choosing "All projects" returns to the full list.
+  const setProjectP = (v) => {
+    setFlt({ ...flt, project: v === 'all' ? undefined : v })
+    setView('list'); setPage(1); setSelected(new Set())
+  }
   const setPageP = (v) => { setPage(v); setSelected(new Set()) }
 
   // A checked row belongs to the list it was checked in. Switching to the
@@ -244,18 +257,18 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
       mine: phone ? 1 : undefined,
       stage: stage === 'all' ? undefined : stage,
       project: flt.project || undefined,
-      // The dropdown wins over the filter panel's own Sales Executive row when
-      // it is set — one question, and the control you last touched answers it.
-      ...(agentSel !== 'all' ? { agent: agentSel } : {}),
-      // The filter panel's own fields — same names the backend already reads
-      // for listLeads, so Locality and Sales Executive behave identically.
-      locality: params.locality, agent: params.agent,
+      tower: towerSel === 'all' ? undefined : towerSel,
+      // WHOSE LIST. This spread used to sit ABOVE `agent: params.agent`, which
+      // then overwrote it with the filter panel's empty value — so the Agent
+      // dropdown changed its label and filtered nothing. It is the only agent
+      // control now; the panel's duplicate Sales Executive row is gone.
+      agent: agentSel === 'all' ? undefined : agentSel,
       sortKey: params.sortKey, sortDir: params.sortDir,
     }),
     // Same as Leads: a row you just called keeps its place in the queue.
     { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone,
-      holdOrder: true, viewDeps: [seg, stage, agentSel, flt.project, phone] },
-    [state.dataAsOf, seg, stage, agentSel, flt.project, phone],
+      holdOrder: true, viewDeps: [seg, stage, agentSel, flt.project, towerSel, phone] },
+    [state.dataAsOf, seg, stage, agentSel, flt.project, towerSel, phone],
     { store, kind: 'owner' },
   )
 
@@ -263,6 +276,9 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // agree, and a manager is not shown the firm's seven hundred while standing
   // in a lift. The desk still sees the desk.
   const counts = useOwnersSummary(state.dataAsOf, !!phone)
+  const { data: projectList } = useServerData(
+    () => api.listOwnerProjects().then(r => r?.data || []), [state.dataAsOf], [])
+  const currentProject = (projectList || []).find(p => (p.key === 'No project' ? '_none' : p.key) === flt.project)
   const queue = counts.queue || {}
   const segs = [
     { key: 'all', label: 'Everyone', on: seg === 'all', count: counts.total ?? 0, onClick: () => setSegP('all') },
@@ -304,6 +320,19 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     phone,
     leftAddon: (
       <div className="leads-dd-row">
+        <SelectDropdown
+          label="Project" value={flt.project || 'all'} onChange={setProjectP} searchable
+          options={[
+            { value: 'all', label: 'All projects' },
+            ...(projectList || []).map(p => ({ value: p.key === 'No project' ? '_none' : p.key, label: p.name, count: p.counts.total })),
+          ]}
+        />
+        {currentProject?.towers?.length > 0 && (
+          <SelectDropdown
+            label="Tower" value={towerSel} onChange={setTowerP}
+            options={[{ value: 'all', label: 'All towers' }, ...currentProject.towers.map(t => ({ value: t, label: t }))]}
+          />
+        )}
         <SelectDropdown label="Status" value={stage} onChange={setStageP} options={stageOptions} />
         {canAssign && (
           <SelectDropdown
@@ -332,14 +361,9 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     // chip itself is the way back (× returns to the grid, same as clicking
     // "Group by project" used to try to do) — showing both together read as
     // two disconnected buttons, and neither obviously undid the other.
-    toolbarRight: flt.project ? (
-      <span className="proj-chip">
-        <span className="proj-chip-t">{flt.project === '_none' ? 'No project' : flt.project}</span>
-        <button onClick={() => { setFlt({ ...flt, project: undefined }); setView('projects') }}><Icon name="x" size={12} /></button>
-      </span>
-    ) : (
+    toolbarRight: (
       <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
-        onClick={() => setView(view === 'projects' ? 'list' : 'projects')}>
+        onClick={() => { if (view !== 'projects') setFlt({ ...flt, project: undefined }); setView(view === 'projects' ? 'list' : 'projects') }}>
         <Icon name="building" size={14} />Group by project
       </button>
     ),

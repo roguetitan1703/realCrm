@@ -556,24 +556,13 @@ export const OWNERS_DEF = {
   // Same two fields as the lead filter bar (minus Source/Needs-attention,
   // which don't have an owner-side equivalent yet) — same shape, same
   // options source, so the two toolbars behave identically.
-  filterFields: (store) => [
-    { key: 'locality', label: 'Locality', icon: 'building', options: asOptions(localities(store)) },
-    { key: 'agent', label: 'Sales Executive', icon: 'person', options: [
-      { value: '_none', label: 'Unassigned' }, ...store.activeAgents().map(a => ({ value: a.id, label: a.first })),
-    ] },
-    // EVERY WAY INTO THIS LIST HAS TO LAND ON A CONTROL YOU CAN SEE AND UNDO.
-    // The dashboard's Past-SLA tile and the Team page's Unassigned tile both
-    // filtered by a flag the server honours and no control on screen showed —
-    // right rows, no chip, nothing to click to get back. The two flags with no
-    // pill of their own live here; the ones that DO have a pill (overdue,
-    // no-answer, came-back) are not repeated, because two controls for one
-    // question is how the pills and the KPI strip ended up saying different
-    // things about the same leads.
-    // "Needs attention" is gone. It held two entries: Past SLA, which was
-    // never_contacted with a clock on it and is deleted, and Nobody assigned,
-    // which is the Sales Executive control's own Unassigned option. A dropdown
-    // with one entry duplicating another control is the third-way-to-ask-one-
-    // question fault, not a filter.
+  filterFields: () => [
+    // EMPTY ON PURPOSE. It held two rows: Locality, whose options came from a
+    // list of localities that has nothing to do with a firm's calling data
+    // (only one of Mahalaxmi's eight projects even carries a locality), and
+    // Sales Executive, which duplicated the Agent dropdown on the left — two
+    // controls for one question is how they end up disagreeing. Project,
+    // Tower, Status and Agent are the controls on the left of the toolbar.
   ],
 
   headerFacts: (o) => {

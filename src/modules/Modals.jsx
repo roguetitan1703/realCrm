@@ -1272,13 +1272,17 @@ function AssignProjectModal({ store, project }) {
         <>
           <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 12 }}>
             {project?.counts?.total} owner{project?.counts?.total === 1 ? '' : 's'} in this project
-            {project?.counts?.unassigned ? `, ${project.counts.unassigned} with nobody on them` : ''}. Closed rows stay where they are.
+            {project?.counts?.unassigned ? `, ${project.counts.unassigned} unassigned` : ''}. Closed rows stay where they are.
           </div>
           <button onClick={() => setOnlyUnassigned(v => !v)}
             style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 11px', marginBottom: 14,
               border: '1px solid ' + (onlyUnassigned ? 'var(--accent)' : 'var(--line)'), background: onlyUnassigned ? 'var(--accent-wash)' : '#fff',
               borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600 }}>
-            <span style={{ flex: 1, textAlign: 'left' }}>Only the ones nobody is on</span>
+            {/* Said as what it does, with the number. "Only the ones nobody is
+                on" was read as a riddle. */}
+            <span style={{ flex: 1, textAlign: 'left' }}>
+              Only unassigned owners{project?.counts?.unassigned != null ? ` (${project.counts.unassigned})` : ''}
+            </span>
             {onlyUnassigned && <Icon name="check" style={{ color: 'var(--accent)' }} />}
           </button>
           <div className="imp-map-label" style={{ marginBottom: 6 }}>Share between</div>

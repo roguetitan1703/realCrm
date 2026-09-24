@@ -84,11 +84,9 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
     ...o, on: seg === o.key, count: counts[o.key] ?? 0, onClick: () => setSegP(o.key),
   }))
 
-  const kpis = roleOptions.map(o => ({
-    label: o.key === 'all' ? 'Owners' : o.label,
-    value: counts[o.key] ?? 0,
-    onClick: () => setSegP(o.key),
-  }))
+  // No KPI strip. It repeated the pills directly under it — "0 Owners · 0
+  // Sellers · 0 Landlords" above "All 0 · Sellers 0 · Landlords 0" — the same
+  // three numbers twice, one of them unclickable noise.
 
   const { header, toolbar, body } = ModuleListView({
     def: CLIENTS_DEF, source: { ...source, rows }, store,
@@ -96,7 +94,7 @@ export default function Clients({ store, go, sel, setSel, topBar, phone }) {
     filters: flt, onFilters: setFltP,
     search: q, onSearch: setQP,
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
-    kpis, segments: segs, view, onView: setView,
+    segments: segs, view, onView: setView,
     page, onPage: setPage, pageSize, onPageSize: setPageSizeP,
     // A listing owner is not created here — they exist because a listing names
     // them, so the CTA that adds one is adding the property. Someone you want

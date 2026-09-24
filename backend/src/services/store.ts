@@ -3378,7 +3378,7 @@ const ownerSegments = (d0: any): Record<string, any> => ({
 });
 
 export async function listOwners(opts: {
-  page?: number; limit?: number; q?: string; stage?: string; project?: string; agentId?: string;
+  page?: number; limit?: number; q?: string; stage?: string; project?: string; tower?: string; agentId?: string;
   locality?: string; agent?: string; source?: string; segment?: string; mine?: boolean;
   sortKey?: string; sortDir?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
@@ -3403,6 +3403,10 @@ export async function listOwners(opts: {
   // owner instead of the handful with no project.
   if (opts.project === '_none') where.push(sql`coalesce(project, '') = ''`);
   else if (opts.project) where.push(sql`project = ${opts.project}`);
+  // TOWER, inside a project. Case- and space-blind for the same reason project
+  // names are about to be: "T1", "t1" and "T 1" are one tower on a real sheet.
+  if (opts.tower === '_none') where.push(sql`coalesce(tower, '') = ''`);
+  else if (opts.tower) where.push(sql`lower(replace(coalesce(tower, ''), ' ', '')) = lower(replace(${String(opts.tower)}, ' ', ''))`);
   if (opts.agentId) where.push(sql`agent_id = ${opts.agentId}`);
 
   // The filter-bar fields — same shapes as listLeads' Locality/Sales
@@ -3494,7 +3498,10 @@ export async function listOwnerProjects(): Promise<{ rows: any[]; total: number 
            count(*) FILTER (WHERE coalesce(stage, 'New') = 'New')::int AS "new",
            count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
            count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned,
-           mode() WITHIN GROUP (ORDER BY locality) AS locality
+           mode() WITHIN GROUP (ORDER BY locality) AS locality,
+           -- The towers this project actually has, for the Tower control —
+           -- from the rows, never a list somebody typed.
+           array_remove(array_agg(DISTINCT nullif(tower, '')), NULL) AS towers
       FROM crm_owners WHERE tenant_id = ${t} AND ${scope}
      GROUP BY 1 ORDER BY 2 DESC`,
     // WHO IS ON THIS PROJECT, by name. A firm assigns a township to somebody,
@@ -3522,6 +3529,7 @@ export async function listOwnerProjects(): Promise<{ rows: any[]; total: number 
     rows: rows.map((r: any) => ({
       key: r.key, name: r.key, locality: r.locality || null,
       counts: { total: r.total, new: r.new, interested: r.interested, unassigned: r.unassigned },
+      towers: (r.towers || []).sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true })),
       holders: byProject.get(r.key) || [],
     })),
     total: rows.length,

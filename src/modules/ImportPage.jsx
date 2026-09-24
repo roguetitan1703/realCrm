@@ -151,7 +151,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
     if (!job) return
     setChecking(true); setError(null)
     try {
-      const out = await api.previewImport(job.id, mapping, intoProject.trim() || null)
+      const out = await api.previewImport(job.id, mapping, mapping.project ? null : (intoProject.trim() || null))
       setPreview(out); setFilterStatus('all'); setStep('review')
     } catch (err) {
       setError('Could not check the file: ' + (err.message || err))
@@ -323,15 +323,15 @@ export default function ImportPage({ store, go, sel, topBar }) {
                 {/* THE PROJECT, ONCE, for a sheet that does not carry one — and
                     as the fallback for rows inside a sheet that does, where the
                     cell is blank. A row with its own project keeps it. */}
-                {(kind === 'owners' || kind === 'properties') && (
+                {/* ONLY when no column is mapped to Project. With both on screen
+                    — a project column AND a box to type one — it was not clear
+                    which one wins, and the answer ("the box fills blanks") is a
+                    rule nobody should have to learn. One or the other. */}
+                {(kind === 'owners' || kind === 'properties') && !mapping.project && (
                   <div className="imp-project">
                     <label className="imp-map-label">
                       Import into project
-                      <span className="imp-map-hint">
-                        {mapping.project
-                          ? ' — used only where the column is empty'
-                          : ' — this sheet has no project column, so every row lands here'}
-                      </span>
+                      <span className="imp-map-hint"> — this sheet has no project column, so every row lands here</span>
                     </label>
                     <input className="input" value={intoProject} onChange={e => setIntoProject(e.target.value)}
                       placeholder="e.g. VTP Leonara" />
