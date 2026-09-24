@@ -13,7 +13,25 @@
  * A row that already carries a login id and password comes out unchanged, so
  * what the screen showed is what gets created.
  */
-import { suggestPassword, passwordIssue, firstNameHandle } from './auth.js';
+import { passwordIssue } from './auth.js';
+
+/**
+ * ONBOARDING ONLY: the handle and password a new firm's people are handed.
+ * Vijay is `vijay` / `vijay@123`. A short name takes more digits to reach the
+ * 8-character minimum (`raj@1234`). The Team screen's add, reassign and reset
+ * keep their own generator — this rule was asked for the handover, nowhere else.
+ * Guessable from the team list by design, so onboarding keeps
+ * must_change_password on by default.
+ */
+function firstName(name: string): string {
+  return String(name || '').trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+function onboardingPassword(name: string): string {
+  const first = firstName(name) || 'user';
+  let digits = '123';
+  while (`${first}@${digits}`.length < 8) digits += String(digits.length + 1);
+  return `${first}@${digits}`;
+}
 
 export interface RosterRow {
   name?: string;
@@ -40,9 +58,9 @@ export function cleanLoginId(raw: string): string {
   return String(raw || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
 }
 
-/** The login id a name gets when nobody chose one: the first name — `vijay`. */
-export function loginIdFromName(name: string, fallback = 'agent'): string {
-  return firstNameHandle(name).slice(0, 16) || fallback;
+/** The login id a name gets at onboarding when nobody chose one: `vijay`. */
+function loginIdFromName(name: string, fallback = 'agent'): string {
+  return firstName(name).slice(0, 16) || fallback;
 }
 
 export function normalizePhone(raw: string | null | undefined): string | null {
@@ -74,7 +92,7 @@ export function planRoster(input: { ownerName?: string; ownerEmail?: string; own
   const taken = new Set<string>();
   const issues: string[] = [];
 
-  const ownerPassword = String(input.ownerPassword || '').trim() || suggestPassword(input.ownerName || 'owner');
+  const ownerPassword = String(input.ownerPassword || '').trim() || onboardingPassword(input.ownerName || 'owner');
   const ownerIssue = passwordIssue(ownerPassword);
   if (ownerIssue) issues.push(`Owner: ${ownerIssue}`);
   const owner = { loginId: claim(loginIdFromName(input.ownerName || '', 'owner'), taken), password: ownerPassword };
@@ -93,7 +111,7 @@ export function planRoster(input: { ownerName?: string; ownerEmail?: string; own
     const email = String(row.email || '').trim().toLowerCase() || null;
     if (email && !EMAIL_RE.test(email)) issues.push(`${name}: "${email}" is not an email.`);
 
-    const password = String(row.password || '').trim() || suggestPassword(name);
+    const password = String(row.password || '').trim() || onboardingPassword(name);
     const pwIssue = passwordIssue(password);
     if (pwIssue) issues.push(`${name}: ${pwIssue}`);
 
