@@ -575,3 +575,106 @@ new importer. **0 rows called yet. 921 with nobody on them** (VTP Verve PHA
   and apply it to the rows already imported from the stored sheet. Paying-client
   write — confirmed first.
 
+---
+
+## 2026-09-24 (later) — decisions, and the activity report thought through as a business
+
+**Decided:** conversion is a **button**, on both sides — "Convert to property" on
+a calling row at Key Received, "Close the deal" on a lead. Nothing converts on
+its own when a status is set.
+
+### The three nouns, so the naming question has an answer
+The confusion is real: Contacts today means "owners whose property we manage",
+and Properties is also "what we manage". The way out is to give each screen ONE
+kind of thing:
+
+| Screen | Holds | Comes from |
+|---|---|---|
+| **Leads** | people asking for a flat — prospects | enquiries, imports |
+| **Calling** | owners we are asking for a flat — prospects | imports |
+| **Properties** | the FLATS we have | added, or converted from Calling |
+| **Contacts** | the PEOPLE we do business with — owners and tenants/buyers | a conversion, or a deal closed |
+| **Rentals** (new) | the AGREEMENTS between them — who, which flat, until when | a deal closed |
+
+So: keep the name **Contacts**, and let it mean what it says — everyone who has
+become business (an owner whose flat we took on, a tenant or buyer who closed),
+each with their role. Prospects stay in their pipelines. A flat is a Property;
+an agreement is a Rental.
+
+### What the tenancy feature actually is (measured 24 Sep)
+The user suspected it was shallow. It is:
+- a JSON blob on the property: tenant name (free text), tenant phone, start,
+  end, deposit — **no rent amount**, **no agreement document**;
+- **one per flat, overwritten** on renewal — the previous tenancy is lost;
+- **not linked to anybody**: the tenant is a string, not the lead who rented;
+- the only reminder is Today's "Tenancies expiring" group (≤ 60 days);
+- **0 recorded** on bhumi or mahalaxmi.
+Rentals should be built as a real record (flat, owner, tenant = the lead, rent,
+deposit, dates, agreement file, history of renewals), and the old blob migrated
+into it where any exists (none do on the paying firms).
+
+### Agent activity — the business first
+
+**Who reads it, and what they are trying to find out**
+- **The agent, end of the day:** "What did I get done — and can I show it?" and
+  "What have I left for tomorrow?" It is proof of work as much as a to-do list.
+- **The owner/manager, during and at the end of the day:** "Did everyone
+  actually work today? Who is falling behind, and on what? Is any customer
+  being ignored?" He is not asking for charts; he is deciding who to talk to.
+
+**What an agent can actually do — and so what can be counted**
+(every one of these is already recorded with who did it and when)
+
+| They… | Recorded as | Shown as |
+|---|---|---|
+| tap Call on someone | a call | **Calls made** |
+| write down how the call went | the call's outcome | **Answered / Didn't pick up / Busy / Switched off** |
+| send a WhatsApp | a WhatsApp | **WhatsApps sent** |
+| write a note on its own | a remark | **Notes written** |
+| write a note on a call or message | the note on it | counted with that call, not twice |
+| book a call back, visit or meeting | a follow-up | **Follow-ups set** |
+| do a follow-up that was due | follow-up closed by the work | **Follow-ups done on time / late** |
+| let one pass | follow-up past due | **Follow-ups missed** |
+| take someone to a flat (with photo) | a visit | **Site visits** |
+| change where a customer stands | a status change | **by what it BECAME** (below) |
+
+**Not activity:** being assigned leads, the rota moving leads, opening a record
+to look at it. None of these is work the agent did.
+
+**The words — rules the screen follows**
+1. Verbs a broker uses, never product words. Not "stage changes", "events",
+   "moved forward", "touched" — "calls made", "notes written", "site visits".
+2. **A status change is told as what the customer now is**, never as movement:
+   "4 now interested · 2 visits booked · 3 said not interested · 1 deal closed".
+   "Moved forward 6" means nothing to a firm owner; "4 now interested" does.
+3. **"Calls made" never claims a conversation.** A call is a tap on the button;
+   the app cannot know anyone answered. "Answered" is shown only where the
+   agent wrote the outcome down — measured, that is 114 of 485 calls on bhumi
+   (24%). The report will, usefully, push that number up.
+4. Show both **calls made** and **people called**: five taps on one number is
+   five calls and one person.
+5. A status flipped and flipped back counts as nothing.
+6. The day is the firm's day, midnight to midnight in its own timezone.
+7. **Every number opens the list of people behind it.** A number you cannot
+   open is a number nobody trusts.
+
+**The agent's view — "My day"** (Today, top, phone first)
+> **Today** — 38 calls to 31 people · 12 answered · 9 WhatsApps · 6 notes · 1 site visit
+> **Where they stand now** — 4 interested · 2 visits booked · 3 not interested
+> **Follow-ups** — 5 done · 2 missed · 7 due tomorrow
+> **New today** — 6 came in · 4 called · **2 not called yet**
+
+**The manager's view — "Team today"** (desk)
+One row per person, the same words in columns, sortable, every cell opens the
+people behind it. Above it, sentences — only the ones that are true today:
+> Zahir hasn't made a call today.
+> 3 enquiries that came in this morning haven't been called — 2 with Aniket.
+> Khushboo has 4 follow-ups from yesterday still open.
+
+**Open, for the owner (Mahalaxmi) and the user**
+1. Do these words match how they talk? Anything he specifically asked to see?
+2. Is "today" enough, or does he want the week / a chosen date?
+3. An end-of-day message to each agent and to the manager — yes, and at what time?
+4. Targets (e.g. 50 calls a day) — not built unless asked; a target shown
+   without being asked for reads as surveillance.
+
