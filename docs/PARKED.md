@@ -12,6 +12,29 @@ recorded, update it in place rather than adding a second entry.
 
 ---
 
+## Mahalaxmi's already-imported sheet statuses — not back-filled (declined 24 Sep)
+
+**What is wrong.** Their VTP Sierra and Owner Calling sheets were imported
+before the importer had a Status field, so every row reads New. Dry run on
+production, 24 Sep, read-only: 1,137 records would have changed (Sierra: 661
+Contacted, 280 Not Interested, 60 Do Not Call, 48 Interested; Owner Calling,
+whose outcomes are under "Feedback": 86 Contacted, 1 Not Interested, 1 Do Not
+Call), 23 left New with the sheet's words as a note, 43 sheet rows skipped at
+import left alone.
+
+**Why declined.** The user does not want a one-off repair that would have to be
+run again for every import that predates the field. From now on the importer
+does it (Status column at import, `d381de2`); these rows stay as they are and
+the agents work them from New. The Owner Calling "Feedback" words are on those
+records as notes; the Sierra "Call Status" words are only in
+`crm_import_rows`.
+
+**If it is ever wanted.** The script was `backend/src/scripts/import-status.ts`
+at `4c89b5f` — report first, `--apply` to write, leaves any record a person has
+touched, second run changes 0. Recover it from that commit rather than rewriting.
+
+---
+
 ## D6 — the project filter squeezes the results count (Properties)
 
 **What happens.** With a project selected, the filter chip in the Properties
