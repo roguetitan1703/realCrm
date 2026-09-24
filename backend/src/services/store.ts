@@ -13,6 +13,7 @@ import { randomBytes } from 'crypto';
 import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_IDS, migrateProperColumns } from './db.js';
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
+import { finalStageOf } from '../../../src/data/pipelineRoles.js';
 import { audit } from './audit.js';
 import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, lastPersonActivity, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
@@ -1231,6 +1232,17 @@ if (process.env.CRM_NO_BOOT !== '1') seedDatabase()
   // visit" and show nothing underneath. Same rebuild, same function; the rows
   // now carry each payload.
   .then(() => runOnce('2026_08_23_enquiry_payloads_v3', () => backfillEnquiries()))
+  // The property `tenancy` blob becomes an agreement (services/agreements.ts).
+  // Measured 24 Sep: one row on either database, on the demo firm `urban`.
+  // Imported when it runs, not at the top of the file: agreements.ts imports
+  // this module.
+  // _v2: v1 read only the form's key names and skipped the demo seed's
+  // (startDate/endDate), so it moved nothing. Idempotent — a flat already moved
+  // is skipped — so running it again where v1 ran is safe.
+  .then(() => runOnce('2026_09_24_tenancy_to_agreements_v2', async () => {
+    const n = await (await import('./agreements.js')).migrateTenancyBlobs();
+    console.log(`[Agreements] moved ${n} tenancy record(s) into agreements`);
+  }))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
@@ -3152,6 +3164,8 @@ function ownerScope(mine?: boolean) {
 
 function rowToOwner(r: any): any {
   return {
+    // The flat this row became when it was converted (services/agreements.ts).
+    convertedPropertyId: r.converted_property_id || null,
     id: r.id,
     name: r.name || '',
     phone: r.phone || '',
@@ -4278,13 +4292,10 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
                OR stage = 'New' OR created_at > now() - interval '14 days'
                OR (${CAME_BACK_TODAY}))
         ORDER BY created_at DESC LIMIT 200`,
-    // A tenancy that has ended, or ends inside the 60-day window the renewal
-    // signal treats as due. Anything further out is not today's problem.
-    sql`SELECT * FROM crm_properties
-        WHERE tenant_id = ${t}
-          AND config->'tenancy'->>'end' IS NOT NULL
-          AND (config->'tenancy'->>'end')::date <= (now() + interval '60 days')::date
-        ORDER BY (config->'tenancy'->>'end')::date ASC LIMIT 50`,
+    // Rents ending within 60 days, from agreements (services/agreements.ts).
+    // This read `config->'tenancy'`, a key nothing wrote — the blob lived in
+    // the `tenancy` column — so the group was empty on every desk, always.
+    import('./agreements.js').then(m => m.rentsEnding(50)),
     // The true size of each group, regardless of how many rows came back above.
     sql`SELECT count(*) FILTER (WHERE ${FOLLOWUP_PAST_DUE})::int AS overdue,
                count(*) FILTER (WHERE (${CAME_BACK_TODAY}))::int AS came_back,
@@ -4306,7 +4317,7 @@ export async function getTodayFeed(mine?: boolean): Promise<any> {
   const lc: any = leadCounts[0] || {};
   return {
     leads: leads.map(r => rowToLead(r)),
-    renewals: renewals.map(rowToProperty),
+    renewals,
     counts: {
       overdue: lc.overdue ?? 0, cameBack: lc.came_back ?? 0, fresh: lc.fresh ?? 0, unassigned: lc.unassigned ?? 0,
       noNext: lc.no_next ?? 0, scheduled: lc.scheduled ?? 0,
@@ -4774,8 +4785,8 @@ export async function linkListingOwner(propertyId: string, data: {
 
   const [byUnit] = data.unitNo
     ? await sql`SELECT id FROM crm_owners
-         WHERE tenant_id = ${t} AND lower(coalesce(project, '')) = lower(${data.project || ''})
-           AND lower(coalesce(tower, '')) = lower(${data.tower || ''})
+         WHERE tenant_id = ${t} AND ${projectNorm(sql`project`)} = ${projectNorm(sql`${data.project || ''}::text`)}
+           AND lower(replace(coalesce(tower, ''), ' ', '')) = lower(replace(${data.tower || ''}, ' ', ''))
            AND lower(coalesce(unit_no, '')) = lower(${data.unitNo})
          LIMIT 1`
     : [];
@@ -5441,9 +5452,31 @@ export async function updateSettings(patch: any): Promise<any> {
   }
   // Same contract as renameStage, over the calling queue: the rows sitting on
   // the old status move with it, so renaming never orphans a queue.
+  // The final status is a ROLE (src/data/pipelineRoles.js): renaming the stage
+  // that holds it carries the role to the new name, or "Convert to property"
+  // would silently stop appearing on the day somebody tidied the wording.
+  const before = await getSettings();
+  const finalCalling = finalStageOf(before, 'calling');
   if (patch.renameOwnerStage?.from && patch.renameOwnerStage?.to) {
     await sql`UPDATE crm_owners SET stage = ${patch.renameOwnerStage.to} WHERE stage = ${patch.renameOwnerStage.from} AND tenant_id = ${tid()};`;
+    if (patch.renameOwnerStage.from === finalCalling) {
+      patch.finalStages = { ...(before.finalStages || {}), ...(patch.finalStages || {}), calling: patch.renameOwnerStage.to };
+    }
     delete patch.renameOwnerStage;
+  }
+  // "Make final" names a stage that is on the list and is not an ending.
+  if (patch.finalStages?.calling) {
+    const list = Array.isArray(patch.ownerStages) ? patch.ownerStages : (before.ownerStages || OWNER_STATUSES);
+    if (!list.includes(patch.finalStages.calling) || OWNER_TERMINAL_STATUSES.includes(patch.finalStages.calling)) {
+      throw new Error(`"${patch.finalStages.calling}" cannot be the final status.`);
+    }
+  }
+  // …and cannot be removed: a list without it has nowhere for a conversion.
+  if (Array.isArray(patch.ownerStages)) {
+    const willBeFinal = patch.finalStages?.calling || finalCalling;
+    if (!patch.ownerStages.includes(willBeFinal)) {
+      throw new Error(`"${willBeFinal}" is the final status and cannot be removed. Make another status final first.`);
+    }
   }
   // The two terminal statuses are what the sweeps and every "open" count key
   // off in SQL. A firm can rename or add anything else; removing these would

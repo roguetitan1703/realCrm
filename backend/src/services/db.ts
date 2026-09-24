@@ -358,6 +358,54 @@ export async function initSchema(): Promise<void> {
       );
     `;
     await sql`CREATE INDEX IF NOT EXISTS idx_import_rows_status ON crm_import_rows (job_id, status);`;
+
+    // AGREEMENTS — what a pipeline ends in. A lead closed on a rent is a
+    // tenancy; closed on a sale, a purchase. One record, two kinds: renewal and
+    // the end-date reminder belong to rent only. It replaces the `tenancy` blob
+    // on a property, which held no rent, no document, one tenancy per flat
+    // overwritten at renewal, and a tenant who was a string rather than the
+    // lead who rented. `property_label` is a flat outside our inventory;
+    // `party_name` / `party_phone` a tenant who never was a lead (a tenancy
+    // from before the CRM, or the old blob moved across).
+    // `renews_id` chains a renewal to the agreement it replaced, which is kept.
+    await sql`
+      CREATE TABLE IF NOT EXISTS crm_agreements (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        property_id TEXT,
+        property_label TEXT,
+        owner_id TEXT,
+        lead_id TEXT,
+        party_name TEXT,
+        party_phone TEXT,
+        agent_id TEXT,
+        amount NUMERIC,
+        deposit NUMERIC,
+        start_date DATE,
+        end_date DATE,
+        file_key TEXT,
+        file_name TEXT,
+        renews_id TEXT,
+        notes TEXT,
+        created_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
+    // Added after the table first existed on the development database; a
+    // CREATE ... IF NOT EXISTS never adds a column to a table that is there.
+    await sql`ALTER TABLE crm_agreements ADD COLUMN IF NOT EXISTS party_name TEXT;`;
+    await sql`ALTER TABLE crm_agreements ADD COLUMN IF NOT EXISTS party_phone TEXT;`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_agreements_tenant ON crm_agreements (tenant_id, kind, status);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_agreements_end ON crm_agreements (tenant_id, end_date) WHERE kind = 'rent' AND status = 'active';`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_agreements_lead ON crm_agreements (tenant_id, lead_id);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_agreements_property ON crm_agreements (tenant_id, property_id);`;
+    // What a calling row became when it was converted — the flat we now manage.
+    await sql`ALTER TABLE crm_owners ADD COLUMN IF NOT EXISTS converted_property_id TEXT;`;
+    // Once per agreement: the 30-day reminder (notifications.ts) stamps this.
+    await sql`ALTER TABLE crm_agreements ADD COLUMN IF NOT EXISTS ending_notified_at TIMESTAMPTZ;`;
     await sql`CREATE INDEX IF NOT EXISTS idx_crm_owners_agent ON crm_owners (tenant_id, agent_id);`;
 
     await sql`

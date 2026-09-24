@@ -920,6 +920,10 @@ export function SortControl({ value, options, dir, onSort, onDir }) {
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [open])
+  // A list with one fixed order (Contacts → Tenants: by when the rent ends)
+  // declares no sort options, and gets no control — one that changes nothing
+  // is a fake feature.
+  if (!options || !options.length) return null
 
   const activeLabel = options.find(o => o.value === value)?.label || 'Sort'
 

@@ -21,6 +21,7 @@ import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities } from '../lib/suggest.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 import { ActivityRecords } from '../components/ActivityDay.jsx'
+import { CloseDealModal, ConvertOwnerModal, AgreementModal } from '../components/Agreements.jsx'
 import { copyText } from '../lib/clipboard.js'
 
 /**
@@ -106,7 +107,9 @@ export default function Modals({ store, go }) {
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
       {m?.kind === 'scheduleFollowUp' && <ScheduleFollowUpModal store={store} leadId={m.leadId} />}
       {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'tenancy' && <TenancyModal store={store} propId={m.propId} />}
+      {m?.kind === 'closeDeal' && <CloseDealModal store={store} leadId={m.leadId} Modal={Modal} />}
+      {m?.kind === 'convertOwner' && <ConvertOwnerModal store={store} ownerId={m.ownerId} Modal={Modal} />}
+      {m?.kind === 'agreement' && <AgreementModal store={store} mode={m.mode} agreementId={m.agreementId} propertyId={m.propertyId} onDone={m.onDone} Modal={Modal} />}
       {m?.kind === 'ownerEdit' && <OwnerEditModal store={store} propId={m.propId} />}
       {m?.kind === 'ownerUpdate' && <OwnerUpdateModal store={store} propId={m.propId} />}
     </>
@@ -355,50 +358,6 @@ function OwnerUpdateModal({ store, propId }) {
   )
 }
 
-// ---- Rental tenancy: tenant, agreement window, deposit held ----
-function TenancyModal({ store, propId }) {
-  const p = store.lookup('property', propId)
-  const t = p?.tenancy
-  const [f, setF] = useState({
-    tenant: t?.tenant || '', phone: t?.phone || '',
-    start: t?.start || '', end: t?.end || '',
-    deposit: t?.deposit ? String(t.deposit) : (p ? String(p.deposit || '') : ''),
-  })
-  if (!p) return null
-  const set = (k, v) => setF(s => ({ ...s, [k]: v }))
-  const save = () => {
-    if (!f.tenant.trim()) { store.toast('Add the tenant name', 'warn'); return }
-    const depNum = parseInt(String(f.deposit).replace(/[^0-9]/g, '')) || p.deposit || 0
-    const tenancy = {
-      tenant: f.tenant.trim(), phone: f.phone.trim(),
-      start: f.start || undefined, end: f.end || undefined,
-      deposit: depNum, depositLabel: depNum ? '₹' + depNum.toLocaleString('en-IN') : p.depositLabel,
-      depositReturned: t?.depositReturned || false, agentId: t?.agentId,
-    }
-    store.setTenancy(propId, tenancy); store.closeModal()
-  }
-  const clear = () => { store.setTenancy(propId, null); store.closeModal() }
-  return (
-    <Modal title={t ? 'Update tenancy' : 'Record tenancy'} onClose={store.closeModal} width={440}>
-      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
-        <b style={{ color: 'var(--ink)' }}>{p.society}</b> · {p.type} · {p.priceLabel}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <Field label="Tenant name"><Input value={f.tenant} onChange={e => set('tenant', e.target.value)} placeholder="e.g. Rahul Verma" autoFocus /></Field>
-        <Field label="Tenant phone"><PhoneInput value={f.phone} onChange={e => set('phone', e.target.value)} placeholder="98xxx xxxxx" /></Field>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <div style={{ flex: 1 }}><Field label="Agreement start"><input className="input" type="date" value={f.start} onChange={e => set('start', e.target.value)} /></Field></div>
-          <div style={{ flex: 1 }}><Field label="Agreement end"><input className="input" type="date" value={f.end} onChange={e => set('end', e.target.value)} /></Field></div>
-        </div>
-        <Field label="Deposit held (₹)"><Input value={f.deposit} onChange={e => set('deposit', e.target.value)} placeholder="200000" /></Field>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} onClick={save}>{t ? 'Save tenancy' : 'Record tenancy'}</Button>
-          {t && <Button variant="danger" onClick={clear}>Free flat</Button>}
-        </div>
-      </div>
-    </Modal>
-  )
-}
 
 // ---- Attach a property to a lead's shortlist ----
 //

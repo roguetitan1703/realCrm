@@ -113,6 +113,11 @@ export const NOTIFICATIONS: NotifKind[] = [
       trigger: 'a booked site visit approaches', push: true, gate: null }),
   K({ key: 'calendar_task_assigned', label: 'A task was assigned to you', audience: 'assignee',
       trigger: 'a calendar task is created against a user', push: true, gate: null }),
+  // A rent runs out. The one alert about inventory: a tenancy ends whether or
+  // not anyone opens the record, and a renewal is the business to be had.
+  K({ key: 'agreement_ending', label: 'A rent agreement ends in 30 days', audience: 'assignee',
+      trigger: 'an active rent agreement is 30 days from its end date — once per agreement; the desk if nobody is on it',
+      push: true, gate: null }),
   K({ key: 'remark_added', label: 'Someone left a remark', audience: 'assignee',
       // Demoted to the drawer. Somebody typing a note on your record is worth
       // knowing and is not worth a buzz.

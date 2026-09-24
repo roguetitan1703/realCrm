@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Panel, SectionHead, StageTag, Button, Input, Segmented, Toggle, Avatar } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES } from '../data/theme.js'
+import { finalStageOf, finalIsEditable } from '../data/pipelineRoles.js'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import ThisDevice from '../components/ThisDevice.jsx'
@@ -154,13 +155,22 @@ function PipelineSection({ store, settings }) {
   // caller's terminal two are fixed because the sweeps and every "open" count
   // do. Same rule, two lists.
   const locked = isLeads ? PROTECTED_STAGES : OWNER_TERMINAL_STATUSES
+  // The stage the conversion button lives on (src/data/pipelineRoles.js). On
+  // Calling it is a role: renamed with its owners, never removed, and moved
+  // with "Make final". On Leads it is fixed for now — see pipelineRoles.js.
+  const finalName = finalStageOf(settings, isLeads ? 'leads' : 'calling')
+  const finalMovable = finalIsEditable(isLeads ? 'leads' : 'calling')
+  const makeFinal = (s) => {
+    if (!window.confirm(`Make "${s}" the final status? "Convert to property" moves from "${finalName}" to "${s}".`)) return
+    store.patchSettings({ finalStages: { ...(settings.finalStages || {}), calling: s } }, `"${s}" is now the final status`)
+  }
 
   const [newStage, setNewStage] = useState('')
   const [editing, setEditing] = useState(null)
   const [draft, setDraft] = useState('')
   useEffect(() => { setEditing(null); setDraft(''); setNewStage('') }, [side])
 
-  const freeCount = stages.filter(s => !locked.includes(s)).length
+  const freeCount = stages.filter(s => !locked.includes(s) && s !== finalName).length
 
   // Lead stages have their own three store methods (they also move the leads
   // on a renamed stage). Calling statuses go through one generic writer.
@@ -232,13 +242,19 @@ function PipelineSection({ store, settings }) {
                 ) : (
                   <span className="chip-grow"><StageTag stage={s} /></span>
                 )}
+                {s === finalName && <span className="chip-final">Final</span>}
                 {!isLocked && !isEditing && (
                   <>
+                    {finalMovable && s !== finalName && (
+                      <button className="icon-mini" onClick={() => makeFinal(s)} title="Make final"><Icon name="check" size={13} /></button>
+                    )}
                     <button className="icon-mini" onClick={() => { setEditing(s); setDraft(s) }} title="Rename"><Icon name="edit" size={13} /></button>
-                    <button className="icon-mini danger" disabled={freeCount <= 1} onClick={() => remove(s)} title="Remove"><Icon name="x" size={13} /></button>
+                    {s !== finalName && (
+                      <button className="icon-mini danger" disabled={freeCount <= 1} onClick={() => remove(s)} title="Remove"><Icon name="x" size={13} /></button>
+                    )}
                   </>
                 )}
-                {isLocked && <span className="chip-lock">locked</span>}
+                {isLocked && s !== finalName && <span className="chip-lock">locked</span>}
               </div>
             )
           })}

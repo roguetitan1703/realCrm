@@ -120,4 +120,4 @@ export default function PhoneActions({ store, go, context = {} }) {
 // PROPERTIES_DEF forces a decision about which side of the line it sits on.
 // 'ownerUpdate' is deliberately NOT here — it sends the owner a WhatsApp, which
 // is an agent's job. 'copy' only reads.
-const EDITS_A_LISTING = new Set(['status', 'addOwner', 'tenancy', 'deposit'])
+const EDITS_A_LISTING = new Set(['status', 'addOwner'])

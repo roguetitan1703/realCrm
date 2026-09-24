@@ -12,6 +12,8 @@ import { useServerList } from '../lib/serverList.js'
 import { api } from '../lib/api.js'
 import Icon from '../components/Icon.jsx'
 import { LEADS_DEF } from './definitions.jsx'
+import { AgreementList } from '../components/Agreements.jsx'
+import { finalStageOf } from '../data/pipelineRoles.js'
 
 // A scheduled appointment's action reads like "Site Visit — Anita Rao", so the
 // type is a prefix rather than its own field. Matched loosely because the
@@ -517,6 +519,13 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   ) : null
 
   const sections = [
+    // THE DEAL THEY CLOSED — the agreement's card, where its file is attached
+    // and a rent is renewed or ended. Only at the final stage: before that
+    // there is nothing to show, and a panel saying so is noise.
+    ...(l.stage === finalStageOf(store.state.settings, 'leads') ? [{
+      id: 'agreements', title: 'Agreement',
+      render: () => <AgreementList query={{ leadId: l.id }} store={store} empty="Not recorded yet — Close the deal above." show={{ party: false }} />,
+    }] : []),
     // WHAT THEY ASKED FOR, EACH TIME THEY ASKED.
     //
     // A repeat enquiry used to survive only as a note — "[Repeat enquiry via
@@ -671,7 +680,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
           railTop={followUpCard}
           nextUp={nextUp}
           sections={sections}
-          actionCtx={{ onClose: back }}
+          actionCtx={{ onClose: back, go }}
         />
       </div>
     </>

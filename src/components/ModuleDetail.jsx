@@ -376,6 +376,11 @@ const facts = def.headerFacts ? def.headerFacts(record, store).filter(Boolean) :
                 <Icon name="x" size={14} />{prog.exit.label}
               </button>
             )}
+            {/* WHERE THE PIPELINE ENDS — "Close the deal", "Convert to
+                property", or what the record became. The module supplies it
+                (progression.finish); the header only places it. Shown to
+                everyone once done; the button only to who may set the status. */}
+            {prog.finish && prog.finish(record, store, { ...actionCtx, canAct: canSetProg })}
           </div>
         )}
       </div>

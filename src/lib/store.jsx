@@ -680,29 +680,6 @@ function reducer(state, action) {
     case 'PROP_STATUS':
       return patchRecord(state, 'property', action.propId, p => ({ ...p, status: action.status }))
 
-    case 'SET_TENANCY': {
-      const { propId, tenancy } = action
-      return patchRecord(state, 'property', propId, p => ({
-        ...p,
-        tenancy: tenancy || undefined,
-        // A let flat is Leased. This wrote 'Under offer' — not a real status
-        // (the value is 'Under Offer'), so the row landed with a status nothing
-        // matches — and the wrong idea besides: the flat isn't under offer,
-        // it's tenanted.
-        status: tenancy ? 'Leased' : 'Available',
-        timeline: withEvent(p, 'note', tenancy
-          ? 'Tenancy set · ' + tenancy.tenant + ' · ' + p.priceLabel + ' · deposit ' + (tenancy.depositLabel || '—') + ' held'
-          : 'Tenancy cleared — flat available again'),
-      }))
-    }
-
-    case 'RETURN_DEPOSIT':
-      return patchRecord(state, 'property', action.propId, p => (p.tenancy ? {
-        ...p,
-        tenancy: { ...p.tenancy, depositReturned: true },
-        timeline: withEvent(p, 'note', 'Deposit ' + (p.tenancy.depositLabel || '') + ' returned to ' + p.tenancy.tenant),
-      } : p))
-
     case 'TOGGLE_AGENT': {
       const on = state.inactiveAgentIds.includes(action.agentId)
       return {
@@ -1201,6 +1178,10 @@ export function StoreProvider({ children }) {
     // request in the overwhelmingly common case. A miss is a normal outcome,
     // not an error: useRecord() fetches that one record by id.
     lookup: (kind, id) => (id && state.cache?.[kind]?.[id]) || null,
+    // A write made outside the store's own methods (the conversion forms in
+    // components/Agreements.jsx) announces itself the same way, so every open
+    // screen refetches instead of showing the record as it was.
+    touched: settled,
     cacheRecords: (kind, records, partial) => dispatch({ type: 'CACHE_RECORDS', kind, records, partial }),
 
     assign: (leadId, agentId) => {
@@ -1494,14 +1475,6 @@ export function StoreProvider({ children }) {
         () => apiClient.updateProperty(propId, { status }),
         'Status → ' + status)
     },
-    setTenancy: (propId, tenancy) => write('Tenancy',
-      () => apiClient.updateProperty(propId, { tenancy, status: tenancy ? 'Leased' : 'Available' }),
-      () => dispatch({ type: 'SET_TENANCY', propId, tenancy }),
-      tenancy ? 'Tenancy saved' : 'Flat freed'),
-    returnDeposit: (propId) => write('Deposit',
-      () => apiClient.updateProperty(propId, { depositReturned: true }),
-      () => dispatch({ type: 'RETURN_DEPOSIT', propId }),
-      'Deposit marked returned'),
     toggleAgent: (agentId) => {
       const isOff = !state.inactiveAgentIds.includes(agentId)
       return write('Duty status',
@@ -1564,7 +1537,9 @@ export function StoreProvider({ children }) {
     // the old status with it, exactly as renaming a lead stage does.
     setOwnerStages: (next, note, rename) => write('Calling statuses',
       () => apiClient.updateSettings({ ownerStages: next, ...(rename ? { renameOwnerStage: rename } : {}) }),
-      () => dispatch({ type: 'PATCH_SETTINGS', patch: { ownerStages: next } }),
+      // The server moves the final role when its stage is renamed; take its
+      // answer rather than guessing, so the Final tag lands on the new name.
+      (res) => dispatch({ type: 'PATCH_SETTINGS', patch: { ownerStages: next, ...(res?.settings?.finalStages ? { finalStages: res.settings.finalStages } : {}) } }),
       note),
     // Generic settings patch — persists any key (slaHours, reminderDays, currency, …).
     patchSettings: (patch, note) => write('Settings',

@@ -119,13 +119,15 @@ function OwnerRow({ o, onOpen, store }) {
 
 // Inventory has its own clock, and it is the half of the day a lead list can
 // never show: a tenancy runs out whether or not anyone opened the record.
-function RenewalRow({ p, onOpen, signal }) {
+function RenewalRow({ p: a, onOpen, signal }) {
+  // An agreement (services/agreements.ts rentsEnding), not a property: the
+  // tenant and the flat are both on it, and it opens the flat it is about.
   return (
-    <button type="button" className="q-row q-row-1" onClick={() => onOpen(p)}>
+    <button type="button" className="q-row q-row-1" onClick={() => onOpen(a)}>
       <span className="q-ic"><Icon name="building" size={17} /></span>
       <span className="q-main">
-        <span className="q-name">{p.society || p.title}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}</span>
-        <span className="q-sub">{p.tenancy?.tenant ? `${p.tenancy.tenant} · ${p.locality}` : p.locality}</span>
+        <span className="q-name">{a.flat}</span>
+        <span className="q-sub">{a.party?.name || 'Tenant'}</span>
       </span>
       <span className="q-right">
         {signal.tone === 'overdue' ? <Overdue>{signal.label}</Overdue> : <span className="source">{signal.label}</span>}
@@ -248,7 +250,11 @@ export default function PhoneToday({ store, me, go, topBar }) {
 
   const openLead = (l) => go('leads', { leadId: l.id, leadOpen: true })
   const openOwner = (o) => { store.cacheRecords('owner', [o]); go('calling', { ownerId: o.id, ownerOpen: true }) }
-  const openProp = (p) => go('properties', { propId: p.id, propOpen: true })
+  // A renewal row is an agreement: open its flat, or the lead when the flat is
+  // not one of ours.
+  const openAgreement = (a) => (a.propertyId
+    ? go('properties', { propId: a.propertyId, propOpen: true })
+    : a.leadId ? go('leads', { leadId: a.leadId, leadOpen: true }) : null)
   // A group knows where it goes. Previously "See all" only ever landed on the
   // leads list, which is wrong the moment a group is owners.
   const seeAll = (g) => (g.screen === 'calling'
@@ -256,7 +262,7 @@ export default function PhoneToday({ store, me, go, topBar }) {
     : go('leads', { leadFilters: g.filter }))
 
   const renewals = feed.renewals
-    .map(p => ({ p, signal: renewalSignal(p.tenancy) }))
+    .map(a => ({ p: a, signal: renewalSignal({ end: a.endDate }) }))
     .filter(r => r.signal && r.signal.tone !== 'ok')
     .sort((a, b) => a.signal.days - b.signal.days)
 
@@ -330,7 +336,7 @@ export default function PhoneToday({ store, me, go, topBar }) {
           g.count > BULK && !g.nocap && (g.filter || g.screen)
             ? <BulkRow key={g.key} g={g} onSeeAll={seeAll} />
             : <Group key={g.key} g={g} store={store} onSeeAll={seeAll}
-                onOpen={g.kind === 'renewal' ? openProp : g.kind === 'owner' ? openOwner : openLead} />
+                onOpen={g.kind === 'renewal' ? openAgreement : g.kind === 'owner' ? openOwner : openLead} />
         ))}
         {!groups.length && (
           <div className="empty">

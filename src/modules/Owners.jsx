@@ -93,7 +93,7 @@ function OwnerProjectGrid({ onOpen, onAssign, canAssign, refreshAt }) {
 // The record a caller works from. Its own component (not a branch inside
 // Owners) because it holds hooks of its own — rendering it from partway through
 // the list component would change the hook count between the two views.
-function OwnerRecord({ store, ownerId, topBar, phone, onBack }) {
+function OwnerRecord({ store, ownerId, topBar, phone, onBack, go }) {
   const cached = store.lookup('owner', ownerId)
   // Reload or a deep link lands here with nothing cached. Fetching also gets
   // the timeline, which the list rows never carry.
@@ -167,7 +167,7 @@ function OwnerRecord({ store, ownerId, topBar, phone, onBack }) {
               currentUserId={store.state.activeAgentId}
               onEditRemark={(eventId, text, outcome) => store.editRemark('owner', o.id, eventId, text, outcome)} />,
           }]}
-          actionCtx={{ onClose: onBack }}
+          actionCtx={{ onClose: onBack, go }}
         />
       </div>
     </>
@@ -313,7 +313,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   })
 
   if (openId) {
-    return <OwnerRecord store={store} ownerId={openId} topBar={topBar} phone={phone} onBack={back} />
+    return <OwnerRecord store={store} ownerId={openId} topBar={topBar} phone={phone} onBack={back} go={go} />
   }
 
   const { header, toolbar, body } = ModuleListView({

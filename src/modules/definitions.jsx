@@ -23,8 +23,10 @@ import React from 'react'
 import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER_MODULE_SCHEMA } from '../components/ModuleFields.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button, RepeatTag } from '../components/primitives.jsx'
 import { OwnerCell, StageCell } from '../components/collections.jsx'
+import { FinishLead, FinishOwner } from '../components/Agreements.jsx'
+import { finalStageOf } from '../data/pipelineRoles.js'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
+import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, dayLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
 import { getPref } from '../lib/prefs.js'
 import { copyText } from '../lib/clipboard.js'
 import { messageLang } from '../data/vocabLocale.js'
@@ -140,8 +142,12 @@ export const LEADS_DEF = {
     note: (l) => (l.rejectionReason
       ? (l.stage === REJECTED_STATUS ? l.rejectionReason : `Was rejected — ${l.rejectionReason}`)
       : null),
-    exit: { label: 'Mark as rejected', when: (l) => l.stage !== REJECTED_STATUS,
+    // Not on a closed deal either: a lead with a signed agreement is not
+    // "rejected", and the status dropdown still reopens it if it has to be.
+    exit: { label: 'Mark as rejected', when: (l, store) => l.stage !== REJECTED_STATUS && l.stage !== finalStageOf(store.state.settings, 'leads'),
       run: (store, l) => store.openModal({ kind: 'rejectLead', leadId: l.id }) },
+    // Close the deal, at the final stage — components/Agreements.jsx.
+    finish: (l, store, ctx) => <FinishLead lead={l} store={store} go={ctx.go} canAct={ctx.canAct} />,
   },
 
   searchFields: ['name', 'phone', 'req.locality', 'req.config'],
@@ -603,6 +609,8 @@ export const OWNERS_DEF = {
     // was rung again.
     exit: { label: 'Mark as rejected', when: (o) => !OWNER_TERMINAL_STATUSES.includes(o.stage),
       run: (store, o) => store.openModal({ kind: 'rejectOwner', ownerId: o.id }) },
+    // Convert to property, at the final status — components/Agreements.jsx.
+    finish: (o, store, ctx) => <FinishOwner owner={o} store={store} go={ctx.go} canAct={ctx.canAct} />,
   },
 
   sortOptions: [
@@ -892,7 +900,7 @@ export const PROPERTIES_DEF = {
     // a sq.m listing was labelled sqft. Same drift that broke the filters and
     // the record sheet; this was the third place it was hiding.
     { key: 'config', label: 'Config · deal', render: (p) => (
-      <span className="cell-txt">{configLabel(p)} · {p.deal === 'rent' || p.tenancy ? 'Rent' : 'Sale'}</span>
+      <span className="cell-txt">{configLabel(p)} · {p.deal === 'rent' ? 'Rent' : 'Sale'}</span>
     ) },
     { key: 'carpet', label: 'Area', render: (p) => {
       const v = p.carpet || p.builtup || p.superBuiltup || p.plotArea
@@ -971,11 +979,9 @@ export const PROPERTIES_DEF = {
           ok ? 'Listing details copied' : 'Could not copy — your browser blocked it',
           ok ? undefined : 'warn'))
       } },
-    { id: 'tenancy', tier: 'manage', icon: 'people', when: (p) => p.deal === 'rent',
-      label: (p) => p.tenancy ? 'Update tenancy' : 'Record tenancy', sub: (p) => p.tenancy ? p.tenancy.tenant : 'Mark as let / deposit',
-      run: (store, p) => store.openModal({ kind: 'tenancy', propId: p.id }) },
-    { id: 'deposit', tier: 'manage', icon: 'check', when: (p) => p.deal === 'rent' && p.tenancy && !p.tenancy.depositReturned,
-      label: 'Mark deposit returned', sub: (p) => p.tenancy?.depositLabel, run: (store, p) => store.returnDeposit(p.id) },
+    // "Record tenancy" and "Mark deposit returned" were here, writing the
+    // property's tenancy blob. A tenancy is an agreement now — recorded from
+    // the flat's Agreements section, or by closing the deal on the lead.
     { id: 'delete', tier: 'manage', icon: 'trash', tone: 'danger', label: 'Delete property record',
       run: (store, p, ctx) => { if (window.confirm('Delete this property permanently?')) { store.deleteProperty(p.id); ctx?.onClose?.() } } },
   ],
@@ -984,6 +990,59 @@ export const PROPERTIES_DEF = {
 // ---------------------------------------------------------------------------
 // CLIENTS (derived directory: leads + property owners)
 // ---------------------------------------------------------------------------
+/**
+ * CONTACTS → TENANTS / BUYERS. A person is here because an agreement names
+ * them (backend/src/services/agreements.ts), so a row IS an agreement: who,
+ * which flat, how much, until when. Opening one opens the lead they closed as
+ * (where the agreement card lives), or the flat when there was no lead.
+ */
+const rupeesOf = (n) => (n == null ? '—' : `₹${Math.round(Number(n)).toLocaleString('en-IN')}`)
+export function partiesDef(kind) {
+  const rent = kind === 'rent'
+  const when = (a) => {
+    if (!rent) return dayLabel(a.startDate)
+    if (a.status !== 'active') return a.status === 'renewed' ? 'Renewed' : 'Ended'
+    if (!a.endDate) return 'No end date'
+    return a.daysLeft < 0 ? `Ended ${dayLabel(a.endDate)}` : `Ends ${dayLabel(a.endDate)}`
+  }
+  return {
+    id: rent ? 'tenants' : 'buyers',
+    name: rent ? 'Tenants' : 'Buyers',
+    singularName: rent ? 'Tenant' : 'Buyer',
+    icon: 'people',
+    filterFields: () => [],
+    rowMatch: () => true,
+    searchFields: [],
+    // One order, set by the server: the rent ending soonest first. No control.
+    sortOptions: [],
+    columns: [
+      { key: 'name', label: rent ? 'Tenant' : 'Buyer', render: (a) => (
+        <div className="cell-prop">
+          <span className="av av-sm av-demand">{initials(a.party?.name || '?')}</span>
+          <div><div className="name">{a.party?.name || '—'}</div><div className="sub mono-num">{a.party?.phone || ''}</div></div>
+        </div>
+      ) },
+      { key: 'flat', label: 'Flat', render: (a) => <span className="cell-txt">{a.flat}</span> },
+      { key: 'amount', label: rent ? 'Rent' : 'Price', render: (a) => <span className="mono-num">{rupeesOf(a.amount)}{rent && a.amount != null ? '/mo' : ''}</span> },
+      { key: 'when', label: rent ? 'Agreement' : 'Date', render: (a) => (
+        <span className={'cell-txt' + (rent && a.status === 'active' && a.daysLeft != null && a.daysLeft <= 30 ? ' u-alert' : '')}>{when(a)}</span>
+      ) },
+      { key: 'owner', label: 'Owner', render: (a) => <span className="cell-txt">{a.owner?.name || '—'}</span> },
+    ],
+    actions: [],
+    card: (a) => (
+      <>
+        <div className="rc-top">
+          <span className="av av-sm av-demand">{initials(a.party?.name || '?')}</span>
+          <div className="rc-title rc-title-flex">{a.party?.name || '—'}</div>
+        </div>
+        <div className="rc-sub">{a.flat}</div>
+        <div className="rc-facts"><span>{rupeesOf(a.amount)}{rent && a.amount != null ? '/mo' : ''}</span><span>{when(a)}</span></div>
+      </>
+    ),
+  }
+}
+
 export const CLIENTS_DEF = {
   id: 'clients',
   name: 'Contacts',

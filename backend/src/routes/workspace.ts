@@ -263,11 +263,14 @@ workspaceRouter.post('/settings', async (req: Request, res: Response) => {
     });
   }
   const patch = req.body;
-  const updated = await updateSettings(patch);
-  res.status(200).json({
-    success: true,
-    settings: updated,
-  });
+  try {
+    const updated = await updateSettings(patch);
+    res.status(200).json({ success: true, settings: updated });
+  } catch (err: any) {
+    // A refused change (removing the final status, say) is the firm's to
+    // correct, and says why — it is not a server fault.
+    res.status(400).json({ error: 'Not saved', message: err?.message || 'Could not save the settings.' });
+  }
 });
 
 /**

@@ -737,6 +737,14 @@ export const api = {
   routingBacklog: () => request('/team/routing/backlog', { fresh: true }),
   // What people did on a day — services/activityReport.ts. Fresh: it is the
   // day as it stands, and a 30-second-old answer hides the call just logged.
+  // Agreements — what a closed deal is (services/agreements.ts).
+  listAgreements: (q = {}) => request(`/agreements?${new URLSearchParams(Object.entries(q).filter(([, v]) => v != null && v !== ''))}`, { fresh: true }),
+  getAgreement: (id) => request(`/agreements/${encodeURIComponent(id)}`, { fresh: true }),
+  createAgreement: (body) => request('/agreements', { method: 'POST', body: JSON.stringify(body) }),
+  updateAgreement: (id, patch) => request(`/agreements/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  renewAgreement: (id, body) => request(`/agreements/${encodeURIComponent(id)}/renew`, { method: 'POST', body: JSON.stringify(body) }),
+  endAgreement: (id) => request(`/agreements/${encodeURIComponent(id)}/end`, { method: 'POST', body: '{}' }),
+  convertOwner: (id, body) => request(`/owners/${encodeURIComponent(id)}/convert`, { method: 'POST', body: JSON.stringify(body) }),
   getActivity: (q) => request(`/activity?${new URLSearchParams(Object.entries(q).filter(([, v]) => v))}`, { fresh: true }),
   getActivityRecords: (q) => request(`/activity/records?${new URLSearchParams(Object.entries(q).filter(([, v]) => v))}`, { fresh: true }),
   // Open records per person, on ONE side — the number an assign screen should

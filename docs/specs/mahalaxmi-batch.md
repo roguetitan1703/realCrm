@@ -829,3 +829,36 @@ it. Project names (4.6) go in first.
 - **Checked:** build and backend parse; phone and desk driven; the rows each
   button writes read back from the database; probes deleted; the only change to
   bhumi / mahalaxmi is the additive schema on deploy.
+
+### D, as built (24 Sep)
+
+- **D0** `projectNorm` (store.ts) groups and filters Calling, Properties, the
+  project page, Assign project and the import's same-flat check. Checked on
+  dev: four spellings → one card of 4; any spelling filters to all.
+- **D1** `src/data/pipelineRoles.js`. Calling: the final status is a role —
+  rename carries it, removal refused (400), "Make final" moves it, an ending
+  cannot be final. **Leads: not done as agreed.** "Deal Closed" shows the
+  Final tag but cannot be renamed or moved: it is also what every "open" count
+  in SQL excludes (TERMINAL_STATUSES, ~78 reads). Making it per-firm means
+  threading the firm's list through all of them — a separate piece of work.
+- **D2/D3** `services/agreements.ts`, `routes/agreements.ts`,
+  `POST /owners/:id/convert`, `components/Agreements.jsx`, and a `finish` slot
+  in the shared record header (ModuleDetail ← progression.finish). A second
+  press is 409 with the existing id. Close the deal moves the lead to the final
+  stage through updateLead and the flat to Leased / Sold. Mark as rejected is
+  hidden on a closed deal.
+- **D4** `crm_agreements` (db.ts). Renewal = a new row with `renews_id`; End
+  frees a Leased flat. Reminder `agreement_ending` (catalogue, copy, sweep):
+  once per agreement, the agent or the desk. The tenancy blob's UI, store
+  actions and quick actions are gone; the one stored blob (demo `urban`) moves
+  by `runOnce('2026_09_24_tenancy_to_agreements_v2')`. Today's "Tenancies
+  expiring" reads agreements — it read `config->'tenancy'`, which nothing ever
+  wrote, so it had been empty on every desk.
+- **D5** Contacts → Owners · Tenants · Buyers (sidebar, `?tab=`), Tenants and
+  Buyers one row per agreement.
+- **Checked on dev (delpat):** every button through the real endpoints and the
+  real screens; the agreement PDF uploaded and serves (one probe file stays in
+  the dev bucket — no delete route); the reminder sweep for delpat alone sent 1
+  then 0; probe rows deleted (owners, properties, leads, agreements, events,
+  notifications). Nothing run against production.
+

@@ -10,6 +10,8 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
+import { convertOwner } from '../services/agreements';
+import { holds, sendError } from './agreements';
 import {
   createOwner, listOwners, getOwnersSummary, listOwnerProjects,
   getOwnerById, updateOwner, deleteOwner, bulkAssignOwners, assignProjectOwners, splitAssign, OWNER_STATUSES,
@@ -137,6 +139,26 @@ ownersRouter.patch('/:id', async (req: Request, res: Response) => {
     return res.status(200).json({ success: true, owner: updated });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to update owner', message: err.message });
+  }
+});
+
+/**
+ * CONVERT TO PROPERTY — the owner at the final status has handed over keys.
+ * POST /owners/:id/convert  body { deal, type, locality, price?, furnishing?, availableFrom?, project?, tower?, unitNo? }
+ * 409 with `existingId` when this owner is already in Properties.
+ */
+ownersRouter.post('/:id/convert', async (req: Request, res: Response) => {
+  try {
+    if (!(await holds('crm_owners', req.params.id))) {
+      return res.status(422).json({ error: 'Only the person on this owner, or a manager, can convert them.' });
+    }
+    const out = await convertOwner(req.params.id, req.body || {}, {
+      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
+      ip: req.ip, userAgent: req.get('user-agent') ?? undefined,
+    });
+    return res.status(201).json({ success: true, ...out });
+  } catch (err: any) {
+    return sendError(res, err);
   }
 });
 

@@ -41,7 +41,11 @@ const NAV = [
   // a property, never here. It had a second tab reading the leads table, which
   // put one person on two screens under two names; leads are Leads, and people
   // being rung to win a property are Calling.
-  { key: 'clients', label: 'Contacts', icon: 'people' },
+  // Three kinds of person we do business with (decided 24 Sep): owners whose
+  // flat we manage, tenants renting through us, buyers who bought through us.
+  // Tenants and buyers exist because an agreement names them — Close the deal.
+  { key: 'clients', label: 'Contacts', icon: 'people', subKey: 'contactsTab',
+    children: [{ sub: 'owners', label: 'Owners' }, { sub: 'tenants', label: 'Tenants' }, { sub: 'buyers', label: 'Buyers' }] },
   { key: 'calendar', label: 'Calendar', icon: 'calendar' },
   { section: 'Manage' },
   { key: 'import', label: 'Import', icon: 'layers' },
@@ -255,7 +259,7 @@ export default function App() {
       <PushRow store={store} />
       <EnvMark />
       {state.dataStale && <StaleBanner />}
-      <AppShell nav={nav} active={effectiveScreen} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
+      <AppShell nav={nav} active={effectiveScreen} activeSub={sel.contactsTab || 'owners'} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
         <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.ownerId || ''}-${sel.propId || ''}`} {...ctx} />
       </AppShell>
       {state.waState && <WaModal store={store} />}

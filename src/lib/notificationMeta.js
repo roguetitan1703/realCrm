@@ -26,6 +26,7 @@ const META = {
   lead_retry_due: { icon: 'phone', tone: 'attention' },
   followup_set: { icon: 'calendar', tone: 'info' },
   followup_due: { icon: 'clock', tone: 'attention' },
+  agreement_ending: { icon: 'calendar', tone: 'attention' },
   site_visit_reminder: { icon: 'mapPin', tone: 'attention' },
   calendar_task_assigned: { icon: 'calendar', tone: 'info' },
   remark_added: { icon: 'note', tone: 'info' },

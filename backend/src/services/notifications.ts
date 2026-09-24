@@ -335,6 +335,43 @@ export async function processScheduledNotifications(
       // Going cold is 161 of bhumi's 217 open leads at the default, and turning
       // that into pushes without deciding who gets them and how often is how a
       // desk mutes the app. See docs/PARKED.md.
+
+      // 3. agreement_ending — a rent ends within 30 days. ONCE per agreement
+      // (ending_notified_at), and only for one that has not already ended: the
+      // day this ships, an agreement that ended last month is not news, and
+      // a gate never set is a backlog with a fuse (see followup_due above).
+      const ending = await sql`
+        SELECT a.id, a.agent_id, a.lead_id, a.property_id, a.party_name,
+               to_char(a.end_date, 'DD Mon') AS ends,
+               coalesce(l.name, a.party_name) AS who,
+               coalesce(nullif(concat_ws(' ', p.project, nullif(concat_ws('-', p.wing, p.unit_no), '')), ''), a.property_label) AS flat,
+               (u.id IS NOT NULL) AS agent_active
+          FROM crm_agreements a
+          LEFT JOIN crm_leads l ON l.id = a.lead_id AND l.tenant_id = a.tenant_id
+          LEFT JOIN crm_properties p ON p.id = a.property_id AND p.tenant_id = a.tenant_id
+          LEFT JOIN users u ON u.id = a.agent_id AND u.tenant_id = a.tenant_id
+                           AND u.deleted_at IS NULL AND u.status ILIKE 'active'
+         WHERE a.tenant_id = ${t} AND a.kind = 'rent' AND a.status = 'active'
+           AND a.end_date IS NOT NULL
+           AND a.end_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date
+           AND a.end_date <= (now() AT TIME ZONE 'Asia/Kolkata')::date + 30
+           AND a.ending_notified_at IS NULL
+         LIMIT 50`;
+      for (const a of ending as any[]) {
+        const n = {
+          tenantId: t, type: 'agreement_ending',
+          data: { name: a.who, flat: a.flat, ends: a.ends },
+          link: a.property_id ? `?screen=properties&prop=${a.property_id}` : a.lead_id ? `?screen=leads&lead=${a.lead_id}` : `?screen=clients`,
+          toSelf: true,
+        };
+        // The agent on it; the desk when nobody is, or they have left. A
+        // reminder addressed to nobody is not an error — which is exactly why
+        // it has to be routed somewhere on purpose.
+        if (a.agent_id && a.agent_active) await notify({ userId: a.agent_id, ...n }).catch(() => {});
+        else await notifyRoles(['owner', 'manager'], n).catch(() => {});
+        await sql`UPDATE crm_agreements SET ending_notified_at = NOW() WHERE id = ${a.id} AND tenant_id = ${t}`;
+      }
+      if (ending.length) console.log(`[ScheduledNotify] ${t}: ${ending.length} agreement(s) ending within 30 days notified`);
     }
 
     // Trim the delivery log at most once a day. Inside the sweep because there

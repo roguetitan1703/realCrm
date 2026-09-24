@@ -32,7 +32,12 @@ After the API deploy: `npm run link:owners -- --env=production` (report, then
 
 ## Waiting on the user
 
-- **Merge `development` → `main` and deploy** (API, then frontend).
+- **Merge `development` → `main` and deploy** (API, then frontend). The API
+  deploy runs the additive schema (crm_agreements, two columns) and one
+  runOnce that writes ONE agreement on the demo firm `urban` from its old
+  tenancy; nothing on bhumi or mahalaxmi.
+- **Conversion and agreements (D) — review on dev.** Leads' "Deal Closed"
+  cannot be renamed yet; see the plan, "D, as built".
 - **Activity report — Mahalaxmi's owner to see it.** The words ("calls",
   "answered", "no outcome written", "Now") are the spec's guess at how he
   talks; his answer is the real check. Open: an end-of-day push, and whether

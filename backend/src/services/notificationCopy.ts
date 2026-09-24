@@ -104,6 +104,10 @@ export const COPY: Builders = {
     title: `Not contacted for ${d.hours}h`,
     body: facts(d.name, 'assigned to you'),
   }),
+  agreement_ending: (d) => ({
+    title: `Rent agreement ends ${d.ends}`,
+    body: facts(d.name, d.flat),
+  }),
   followup_due: (d) => ({
     title: 'Follow-up due now',
     body: facts(d.name, d.action, d.locality),

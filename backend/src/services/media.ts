@@ -49,6 +49,10 @@ export const ALLOWED_UPLOAD_TYPES: Record<string, string> = {
   'video/mp4': 'mp4',
   'video/quicktime': 'mov',
   'video/webm': 'webm',
+  // An agreement is signed on paper and scanned — a PDF far more often than a
+  // photo. Served like every other object: unguessable key, handed only to
+  // whoever may read the agreement.
+  'application/pdf': 'pdf',
 };
 
 let client: S3Client | null = null;

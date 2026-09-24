@@ -12,7 +12,8 @@ import { NbaBanner } from '../components/rail.jsx'
 import { leadsForProperty } from '../lib/matching.js'
 import { fileUrl } from '../lib/media.js'
 import Lightbox from '../components/Lightbox.jsx'
-import { latestPlus, quotedLine, unitLabel, fmtDate, renewalSignal, configLabel } from '../lib/format.js'
+import { latestPlus, quotedLine, unitLabel, fmtDate, configLabel } from '../lib/format.js'
+import { AgreementList, useAgreementsFor } from '../components/Agreements.jsx'
 import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
@@ -286,6 +287,9 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
   // deep link, a notification, or page 40 of the list is no longer conditional
   // on the whole book being in memory.
   const { record: p, loading, error } = useRecord(store, 'property', sel.propId)
+  // The live rent on this flat, if any — for the renewal banner. Called here,
+  // above the early returns, as every hook in this component must be.
+  const { rows: liveAgreements } = useAgreementsFor({ propertyId: sel.propId, status: 'active' }, store)
   const mayEdit = canEditListing(store.state.role)
   // The two things this page needs beyond the listing itself, each its own read:
   // the buyers it matches, and the other units in its project. Both used to be
@@ -320,16 +324,18 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
 
   const proj = p.project || p.society
   const buyers = leadsForProperty(p, candidates || [])
-  const tenancy = p.deal === 'rent' ? p.tenancy : null
-  const renewal = renewalSignal(tenancy)
+  // A rent ending within 60 days is the one thing about a let flat that needs
+  // doing, so it takes the banner.
+  const ending = (liveAgreements || []).find(a => a.kind === 'rent' && a.daysLeft != null && a.daysLeft <= 60)
   // Edit reuses the add page (spec) — one form to maintain, not two.
   const openEdit = () => go('properties', { propAdd: true, propId: p.id, propOpen: false })
 
   // Rail: Next-Best-Action banner (renewal or share).
-  const nba = renewal && renewal.tone !== 'ok'
-    ? <NbaBanner label={renewal.tone === 'overdue' ? 'Renewal · overdue' : 'Renewal due'} icon="clock"
-        title={renewal.label} sub={tenancy.tenant}
-        cta={{ label: 'Handle renewal', icon: 'calendar', onClick: () => store.openModal({ kind: 'tenancy', propId: p.id }) }} />
+  const nba = ending
+    ? <NbaBanner label="Renewal due" icon="clock"
+        title={ending.daysLeft === 0 ? 'Rent agreement ends today' : `Rent agreement ends in ${ending.daysLeft} days`}
+        sub={ending.party?.name || ''}
+        cta={{ label: 'Renew', icon: 'calendar', onClick: () => store.openModal({ kind: 'agreement', mode: 'renew', agreementId: ending.id }) }} />
     : <NbaBanner label={buyers[0] ? `Interested ${p.deal === 'rent' ? 'tenant' : 'buyer'}` : 'Share listing'} icon="wa"
         title={buyers[0] ? `Send to ${buyers[0].lead.name.split(' ')[0]}` : 'Pick a recipient'}
         sub={buyers[0] ? `${p.type} · ${p.locality}` : 'No matched contacts yet'}
@@ -367,27 +373,15 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
   // Module-unique related sections (the record sheet already covers all fields).
   const sections = [
     {
-      id: 'tenancy', when: () => p.deal === 'rent',
-      title: 'Tenancy & deposit',
-      right: !mayEdit ? null : tenancy
-        ? <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'tenancy', propId: p.id })}><Icon name="edit" size={13} />Manage</button>
-        : <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'tenancy', propId: p.id })}><Icon name="plus" size={13} />Record</button>,
-      render: () => !tenancy
-        ? <div className="detail-empty">Flat is vacant. Record a tenancy when it's let — track the agreement window and deposit here.</div>
-        : <>
-            {renewal && renewal.tone !== 'ok' && (
-              <div className={'renewal-banner ' + renewal.tone}>
-                <Icon name="clock" size={15} /><span className="u-spring">{renewal.label}</span>
-                <button className="btn btn-sm" onClick={() => store.openModal({ kind: 'tenancy', propId: p.id })}>Renew</button>
-              </div>
-            )}
-            <KV items={[
-              { k: 'Tenant', v: tenancy.tenant + (tenancy.phone ? ` · ${tenancy.phone}` : '') },
-              { k: 'Agreement', v: `${fmtDate(tenancy.start)} → ${fmtDate(tenancy.end)}` },
-              { k: renewal ? 'Renewal' : 'Status', v: renewal ? renewal.label : 'Active' },
-              { k: 'Deposit', v: tenancy.depositReturned ? `${tenancy.depositLabel} · returned` : `${tenancy.depositLabel} · held` },
-            ]} />
-          </>,
+      // WHO HAS IT, on what terms — the agreements this flat is in
+      // (components/Agreements.jsx). It was a `tenancy` blob: no rent, no
+      // document, one per flat and overwritten at renewal. A deal closed on a
+      // lead lands here; "Record" is for a tenancy the CRM never saw close.
+      id: 'agreements',
+      title: 'Agreements',
+      right: !mayEdit ? null
+        : <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'agreement', mode: 'new', propertyId: p.id })}><Icon name="plus" size={13} />Record</button>,
+      render: () => <AgreementList query={{ propertyId: p.id }} store={store} empty="No agreement on this flat yet." show={{ flat: false }} />,
     },
     {
       // Collapsed. This is a neighbour's inventory, not this listing's — useful
