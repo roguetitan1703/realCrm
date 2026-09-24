@@ -3428,7 +3428,9 @@ export async function listOwners(opts: {
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
 
   const sortCols: Record<string, any> = {
-    name: sql`name`, recent: sql`created_at`, project: sql`project`,
+    // By the number when there is no name, as Leads does — an imported list
+    // routinely has a few hundred rows without one.
+    name: sql`lower(coalesce(nullif(name, ''), phone))`, recent: sql`created_at`, project: sql`project`,
     // NULLS LAST on both: a row with no callback and a row never dialled are
     // the bottom of a queue sorted by either, not the top.
     callback: sql`callback_at ASC NULLS LAST, created_at`,
@@ -3438,7 +3440,9 @@ export async function listOwners(opts: {
   const dir = opts.sortDir === 'desc' ? sql`DESC` : opts.sortDir === 'asc' ? sql`ASC` : sql`DESC`;
 
   const [rows, totalRows] = await Promise.all([
-    sql`SELECT * FROM crm_owners WHERE ${clause} ORDER BY ${orderCol} ${dir} LIMIT ${limit} OFFSET ${offset}`,
+    // `id` breaks ties, so two owners with one name cannot trade places
+    // between refreshes.
+    sql`SELECT * FROM crm_owners WHERE ${clause} ORDER BY ${orderCol} ${dir}, id LIMIT ${limit} OFFSET ${offset}`,
     sql`SELECT count(*)::int AS n FROM crm_owners WHERE ${clause}`,
   ]);
   return { rows: rows.map(rowToOwner), total: totalRows[0]?.n || 0, page, limit };

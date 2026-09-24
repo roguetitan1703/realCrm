@@ -181,7 +181,12 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // Soonest callback first. "Recently added" was right for a list you browse
   // and wrong for a queue you work: it put the 732nd import at the top and the
   // person expecting a call at 11am somewhere on page thirty.
-  const [sortKey, setSortKey] = useState('callback')
+  // A TO Z, like Leads. It was "Callback due", which on a freshly imported list
+  // of three thousand numbers with no callbacks set is no order at all — and
+  // once a caller did set one, the row jumped to wherever that time fell, away
+  // from where they had just been working. Who to ring next is the Never called
+  // pill's job; this is where each owner SITS.
+  const [sortKey, setSortKey] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
   // The project grid is a desk lens — a phone gets the queue itself, because a
   // caller in the field opens this to dial the next person, not to browse
