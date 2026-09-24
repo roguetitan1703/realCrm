@@ -713,3 +713,29 @@ people behind it. Above it, sentences — only the ones that are true today:
 - **Monthly agent performance.** After the daily report has run long enough to
   have data, and outcomes are being logged.
 
+---
+
+## 2026-09-24 — what "done" means for the next set of work (agreed before starting)
+
+**A. Status column at import** — (1) a Status field on the Map step, auto-matched
+to Call Status / Status / Feedback / Outcome; (2) the Review step shows the
+translation counts BEFORE anything is written; (3) after import every row's
+status matches that line, and the sheet's own words are kept on the record;
+(4) these statuses are authored "Import" and count 0 as activity; (5) importing
+the same file again changes nothing.
+
+**B. Mahalaxmi's rows already imported** — (1) read-only dry run on production
+first, counts per status and sheet, 0 writes, user says go; (2) exactly those
+counts change and nothing else, bhumi untouched, only rows still at New (a row
+an agent has worked is left alone), each changed row gets an "Imported as"
+entry; (3) a second run changes 0 rows.
+
+**C. Activity report** — (1) My day with a Leads | Calling switch, plain words,
+every number opens its records; (2) Team today, one row per active person, only
+true warnings; (3) numbers proven against an independent database count for a
+real bhumi agent and day; (4) system / import / rota entries count 0, "calls
+made" never shown as "answered", a status flipped back counts 0, the firm's
+day; (5) phone and desk, no page errors.
+
+**D. Conversion and Rentals** — defined the same way when started.
+
