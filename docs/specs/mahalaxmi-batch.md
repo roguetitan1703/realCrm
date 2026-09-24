@@ -569,7 +569,7 @@ new importer. **0 rows called yet. 921 with nobody on them** (VTP Verve PHA
   an uploaded document on the tenancy; whether Key Received starts conversion
   automatically or offers it.
 
-### 1.8 ⬜ Carry the sheet's call outcomes into the calling list
+### 1.8 🟡 Carry the sheet's call outcomes into the calling list
 - Their Sierra sheet's Call Status (not interested 281, wrong number 30,
   interested 39, …) was dropped at import; every row reads New. Map it at import
   and apply it to the rows already imported from the stored sheet. Paying-client
@@ -694,4 +694,22 @@ people behind it. Above it, sentences — only the ones that are true today:
   dial (authored 'System', metadata.auto = true — see noteOwnerContact) and the
   default a row arrives with.
 - Follow-ups become **callbacks**: set · done · missed · due tomorrow.
+
+### 1.8 (decided 24 Sep) — a Status column at import, not a script
+- **Checked:** the Sierra sheet's Notes came from "Sales Comment"; its **Call
+  Status column was not imported** and lives only in crm_import_rows. The Owner
+  Calling sheet's "Feedback" did come in as notes. 13 calling notes mention an
+  outcome in all.
+- **Decided:** the importer gets a **Status** field with an automatic
+  translation of the usual words (not interested / NI → Not Interested; wrong no
+  → Do Not Call; interested → Interested; received / not received / nr / busy /
+  cut / cnc / switched off → Contacted); anything unrecognised stays a note; the
+  review step shows the counts before importing. **Imported statuses are
+  authored "Import", never a person — they must not count as activity.** The
+  rows already in are fixed by running the same rule once over the stored
+  sheets, counts shown before it writes.
+
+### Parked (24 Sep)
+- **Monthly agent performance.** After the daily report has run long enough to
+  have data, and outcomes are being logged.
 
