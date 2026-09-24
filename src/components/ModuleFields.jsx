@@ -11,7 +11,7 @@ import {
   BHK_FILTER,
   appliesTo, areaFieldsFor, labelOf, normaliseBhk, normaliseSubtype, optionsOf,
 } from '../data/propertyFields.js'
-import { allOf, configLabel, fmtMoney, listText, money, textList, arrivedOn } from '../lib/format.js'
+import { allOf, configLabel, fmtMoney, listText, money, textList, arrivedOn, dayLabel } from '../lib/format.js'
 
 // How soon the lead needs possession. A LEAD-side vocabulary (it describes the
 // buyer's urgency, not the property), so it lives with the lead schema — but
@@ -561,7 +561,10 @@ export const PROPERTY_MODULE_SCHEMA = {
         ? (p.maintenanceAmount ? `${p.maintenanceAmount} separate` : 'Separate')
         : labelOf(MAINTENANCE_MODE, v),
     }),
-    { key: 'availableFrom', label: 'Available from', type: 'text', section: 'terms', when: (p) => pApplies(p).rentTerms },
+    // A date, shown as one ("1 Oct 2026") and edited with a date picker. It was
+    // a text field over a DATE column and printed the raw stored timestamp.
+    { key: 'availableFrom', label: 'Available from', type: 'date', section: 'terms', when: (p) => pApplies(p).rentTerms,
+      renderValue: (v) => (v ? dayLabel(v) : '') },
     {
       key: 'preferredTenants', label: 'Preferred tenants', type: 'chips', section: 'terms',
       when: (p) => pApplies(p).tenantPreference,

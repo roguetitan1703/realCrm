@@ -231,6 +231,9 @@ function ModuleFormModal({ store, moduleId, recordId }) {
         </>
       )
     }
+    // A date field gets a date picker, holding "YYYY-MM-DD" — which is exactly
+    // what the server now sends for a DATE column, so the box opens filled.
+    if (f.type === 'date') return <Input type="date" value={String(v || '').slice(0, 10)} onChange={e => setField(f.key, e.target.value)} />
     return <Input type={f.type === 'number' ? 'number' : 'text'} value={v} onChange={e => setField(f.key, e.target.value)} />
   }
 

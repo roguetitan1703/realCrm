@@ -37,7 +37,7 @@ const SEARCH_DEBOUNCE = 300
  *                 already shown are the rows it needs to look up.
  */
 export function useServerList(fetcher, query, deps = [], cache = null) {
-  const { filters, search, sortKey, sortDir, page = 1, pageSize = 20, accumulate = false } = query || {}
+  const { filters, search, sortKey, sortDir, page = 1, pageSize = 20, accumulate = false, holdOrder = false, viewDeps } = query || {}
 
   const [state, setState] = useState({ rows: [], total: 0, loading: true, error: null })
   const seq = useRef(0)
@@ -57,6 +57,12 @@ export function useServerList(fetcher, query, deps = [], cache = null) {
 
   const filterKey = JSON.stringify(filters || {})
   const depKey = JSON.stringify(deps)
+  // WHAT THE PERSON IS LOOKING AT — every choice they made about this list, and
+  // nothing else. A refetch that arrives with this unchanged was caused by
+  // something happening TO a row (a call logged, a stage moved), not by them
+  // asking for a different list.
+  const viewKey = JSON.stringify([filterKey, search || '', sortKey, sortDir, page, pageSize, accumulate, viewDeps ?? null])
+  const lastViewRef = useRef(null)
 
   useEffect(() => {
     const mine = ++seq.current
@@ -68,10 +74,31 @@ export function useServerList(fetcher, query, deps = [], cache = null) {
     }))
       .then(res => {
         if (mine !== seq.current) return   // a newer query already answered
-        const rows = res?.data || []
+        let rows = res?.data || []
         // PARTIAL: these are list columns, not the whole record. See
         // CACHE_RECORDS in store.jsx for why that has to be said out loud.
         if (cacheRef.current && rows.length) cacheRef.current.store.cacheRecords(cacheRef.current.kind, rows, true)
+
+        // A ROW YOU JUST WORKED STAYS WHERE IT WAS.
+        //
+        // Sorted by last activity, logging a call on the fourth row made it the
+        // most recent thing on the desk — so the refetch that follows every
+        // write moved it to the top and slid everything under it down one. The
+        // person working down the list lost their place on every tap. When the
+        // view itself has not changed, the rows keep the order they were shown
+        // in: their contents update, their positions do not. Rows that no
+        // longer match drop out; rows that newly match are added at the top.
+        // Changing the sort, a filter or the page is asking for a new list, and
+        // gets one in the server's order.
+        const sameView = holdOrder && lastViewRef.current === viewKey && (!accumulate || page === 1)
+        if (sameView && rowsRef.current.length) {
+          const before = rowsRef.current.map(r => r.id)
+          const fresh = new Map(rows.map(r => [r.id, r]))
+          const kept = before.filter(id => fresh.has(id)).map(id => fresh.get(id))
+          const added = rows.filter(r => !before.includes(r.id))
+          rows = [...added, ...kept]
+        }
+        lastViewRef.current = viewKey
         const merged = accumulate && page > 1 ? [...rowsRef.current, ...rows] : rows
         rowsRef.current = merged
         setState({ rows: merged, total: res?.total ?? merged.length, loading: false, error: null })

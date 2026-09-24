@@ -423,7 +423,15 @@ function rowToProperty(r: any): any {
     // Rent terms
     preferredTenants: r.preferred_tenants || [],
     petFriendly: r.pet_friendly ?? null,
-    availableFrom: r.available_from || null,
+    // A CALENDAR DATE, sent as one. The column is DATE, the driver turns it into
+    // a JS Date at UTC midnight, and JSON turned that into
+    // "2026-10-01T00:00:00.000Z" — which the property page printed verbatim,
+    // the WhatsApp share would have sent to a client, and the edit form's date
+    // box could not read at all, so it opened empty and a save could wipe it.
+    // UTC parts are exact here (the driver built the Date at UTC midnight).
+    availableFrom: r.available_from instanceof Date
+      ? r.available_from.toISOString().slice(0, 10)
+      : (r.available_from ? String(r.available_from).slice(0, 10) : null),
     maintenanceMode: r.maintenance_mode || null,
     maintenanceAmount: r.maintenance_amount != null ? Number(r.maintenance_amount) : null,
     depositOption: r.deposit_option || null,

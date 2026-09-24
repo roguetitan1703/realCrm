@@ -1,5 +1,5 @@
 import { isOpen } from '../data/leadStatus.js'
-import { askedFor, budgetOf, facetFit, latestOf, localityFit } from './format.js'
+import { askedFor, budgetOf, facetFit, latestOf, localityFit, dayLabel } from './format.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import {
@@ -397,7 +397,8 @@ function buildRent(p, t, firmName, lang, opts) {
     // Decisive for the person reading it, and only asked once "Bachelors" is
     // picked -- so when it is there it was answered deliberately.
     p.bachelorPref ? localLabel(lang, 'bachelor', p.bachelorPref, labelOf(BACHELOR_PREF, p.bachelorPref)) : null,
-    p.availableFrom ? `${t.availableFrom} ${p.availableFrom}` : d.possession || null,
+    // "1 Oct", not the stored "2026-10-01" — this line goes to a client.
+    p.availableFrom ? `${t.availableFrom} ${dayLabel(p.availableFrom)}` : d.possession || null,
   ], E.key))
   if (furnished(p)) push(L, bullet(contents(p, lang), E.sofa))
   push(L, paperwork(p, t, lang, { deed: false }))

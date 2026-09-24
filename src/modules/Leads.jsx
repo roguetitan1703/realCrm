@@ -165,7 +165,11 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
       // did not: clicking one flipped the arrow and re-fetched the same order.
       sortKey: params.sortKey, sortDir: params.sortDir,
     }),
-    { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
+    // holdOrder: a lead you just called stays in its place in the list — see
+    // useServerList. viewDeps is everything the person chose, so changing any
+    // of it still re-sorts.
+    { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone,
+      holdOrder: true, viewDeps: [seg, intent, stage] },
     [state.dataAsOf, seg, intent, stage],
     // The rows this page shows, into the record cache -- see useServerList.
     // Never passed, so opening a row always cost a fetch for a record the

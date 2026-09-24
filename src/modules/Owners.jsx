@@ -247,7 +247,9 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
       locality: params.locality, agent: params.agent,
       sortKey: params.sortKey, sortDir: params.sortDir,
     }),
-    { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
+    // Same as Leads: a row you just called keeps its place in the queue.
+    { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone,
+      holdOrder: true, viewDeps: [seg, stage, agentSel, flt.project, phone] },
     [state.dataAsOf, seg, stage, agentSel, flt.project, phone],
     { store, kind: 'owner' },
   )

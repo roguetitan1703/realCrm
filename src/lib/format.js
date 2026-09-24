@@ -196,6 +196,24 @@ export function nextStepOf(lead) {
  * When a lead came in. Same rule as everything else — see whenLabel — with an
  * option to drop the clock time where only the day matters (a list column).
  */
+/**
+ * A calendar date — "1 Oct 2026" — from "2026-10-01".
+ *
+ * Built from the parts, not `new Date("2026-10-01")`: that parses as UTC
+ * midnight, and anywhere west of Greenwich it becomes the evening BEFORE. A
+ * date someone picked from a calendar has no time and no timezone, and must not
+ * gain either on its way to the screen. The year only when it is not this one.
+ * Anything that is not a plain date is returned untouched rather than guessed at.
+ */
+export function dayLabel(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || ''))
+  if (!m) return ymd || ''
+  const [, y, mo, d] = m.map(Number)
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const label = `${d} ${MONTHS[mo - 1]}`
+  return y === new Date().getFullYear() ? label : `${label} ${y}`
+}
+
 export function arrivedOn(iso, { withTime = false } = {}) {
   if (!iso) return ''
   const d = new Date(iso)
