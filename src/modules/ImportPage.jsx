@@ -68,6 +68,10 @@ export default function ImportPage({ store, go, sel, topBar }) {
   const [rowCount, setRowCount] = useState(0)
   const [samples, setSamples] = useState({})        // column → first non-empty value
   const [mapping, setMapping] = useState({})
+  // A project typed ONCE for the whole file. Real lists arrive as "the Leonara
+  // sheet" with no society column in them, and pasting the same name into four
+  // thousand rows is how somebody decides not to import at all.
+  const [intoProject, setIntoProject] = useState('')
   const [showAllFields, setShowAllFields] = useState(false)
   const [job, setJob] = useState(null)              // the server's job row
   const [preview, setPreview] = useState(null)      // { counts, reasons, sample }
@@ -98,7 +102,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
   const restart = () => {
     clearInterval(poll.current)
     setKind(null); setStep('choose'); setFile(null); setFileMeta(null); setSheetNames([]); setHeaders([])
-    setRowCount(0); setSamples({}); setMapping({}); setJob(null); setPreview(null); setError(null); setBusy(null); setUploaded(0)
+    setRowCount(0); setSamples({}); setMapping({}); setIntoProject(''); setJob(null); setPreview(null); setError(null); setBusy(null); setUploaded(0)
   }
 
   // ---- Upload: read the file here, hand the rows to the server ------------
@@ -147,7 +151,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
     if (!job) return
     setChecking(true); setError(null)
     try {
-      const out = await api.previewImport(job.id, mapping)
+      const out = await api.previewImport(job.id, mapping, intoProject.trim() || null)
       setPreview(out); setFilterStatus('all'); setStep('review')
     } catch (err) {
       setError('Could not check the file: ' + (err.message || err))
@@ -315,6 +319,24 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     </Button>
                   </div>
                 </div>
+
+                {/* THE PROJECT, ONCE, for a sheet that does not carry one — and
+                    as the fallback for rows inside a sheet that does, where the
+                    cell is blank. A row with its own project keeps it. */}
+                {(kind === 'owners' || kind === 'properties') && (
+                  <div className="imp-project">
+                    <label className="imp-map-label">
+                      Import into project
+                      <span className="imp-map-hint">
+                        {mapping.project
+                          ? ' — used only where the column is empty'
+                          : ' — this sheet has no project column, so every row lands here'}
+                      </span>
+                    </label>
+                    <input className="input" value={intoProject} onChange={e => setIntoProject(e.target.value)}
+                      placeholder="e.g. VTP Leonara" />
+                  </div>
+                )}
 
                 {/* A workbook with several sheets used to import the first one
                     without saying which. */}

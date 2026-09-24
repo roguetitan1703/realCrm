@@ -615,7 +615,7 @@ export const api = {
   listImports: () => request('/imports', { fresh: true }),
   createImport: (body) => request('/imports', { method: 'POST', body: JSON.stringify(body) }),
   appendImportRows: (id, rows) => request(`/imports/${encodeURIComponent(id)}/rows`, { method: 'POST', body: JSON.stringify({ rows }) }),
-  previewImport: (id, mapping) => request(`/imports/${encodeURIComponent(id)}/preview`, { method: 'POST', body: JSON.stringify({ mapping }) }),
+  previewImport: (id, mapping, project) => request(`/imports/${encodeURIComponent(id)}/preview`, { method: 'POST', body: JSON.stringify({ mapping, project }) }),
   runImport: (id) => request(`/imports/${encodeURIComponent(id)}/run`, { method: 'POST', body: JSON.stringify({}) }),
   // Polled while the job runs, so it must never come from the read cache.
   getImport: (id) => request(`/imports/${encodeURIComponent(id)}`, { fresh: true }),

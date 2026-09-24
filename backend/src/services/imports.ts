@@ -90,7 +90,16 @@ export type Prepared = {
  * Every reason is a sentence a person can act on ("No phone number"), because
  * this string is what the skipped-rows download will hand back to them.
  */
-export function prepareRow(kind: ImportKind, raw: Record<string, any>, mapping: Record<string, string>): Prepared {
+/**
+ * @param opts.project  a project typed ONCE for the whole file, used wherever a
+ *   row does not carry its own. Real lists arrive as "the Leonara sheet" with
+ *   no society column in them, and asking somebody to paste the same name into
+ *   four thousand rows is asking them not to import.
+ */
+export function prepareRow(
+  kind: ImportKind, raw: Record<string, any>, mapping: Record<string, string>,
+  opts: { project?: string | null } = {},
+): Prepared {
   const v: Record<string, any> = {};
   for (const f of FIELDS[kind]) {
     const got = readField(raw, mapping, f);
@@ -108,20 +117,29 @@ export function prepareRow(kind: ImportKind, raw: Record<string, any>, mapping: 
   };
 
   if (kind === 'owners') {
+    // THE ONLY THING A CALLING ROW CANNOT DO WITHOUT is a number to ring.
+    //
+    // It also demanded a project and a unit, which refused whole real lists:
+    // a sheet of numbers for one society carries neither, and a shop list
+    // carries no flat number at all. Both are worth having and neither is worth
+    // rejecting a row over — what is missing stays empty and is visible on the
+    // record rather than guessed.
     if (!v.phone) return { ok: false, reason: unreadablePhone(mapping.phone) };
-    if (!v.project) return { ok: false, reason: 'No project' };
-    if (!v.unitNo) return { ok: false, reason: 'No unit number' };
+    const project = v.project || (opts.project ? String(opts.project).trim() : '') || null;
     return {
       ok: true,
-      key: unitKey(v.project, v.wing, v.unitNo),
+      // IDENTITY FOLLOWS WHAT THE ROW HAS. With a flat, the flat is the record
+      // (one owner with three flats is three calls). Without one, the person is
+      // — otherwise re-importing the same list would double every row in it.
+      key: v.unitNo ? unitKey(project, v.wing, v.unitNo) : (normPhone(v.phone) || null),
       record: {
         // No name is a name nobody has. It stays empty.
         name: v.name || null,
         phone: v.phone,
         email: v.email || null,
-        project: v.project,
+        project,
         tower: v.wing || null,
-        unitNo: v.unitNo,
+        unitNo: v.unitNo || null,
         config: v.config || null,
         carpetArea: v.carpet ?? null,
         saleableArea: v.saleable ?? null,
@@ -151,16 +169,19 @@ export function prepareRow(kind: ImportKind, raw: Record<string, any>, mapping: 
   }
 
   // properties
-  if (!v.project) return { ok: false, reason: 'No project' };
+  const project = v.project || (opts.project ? String(opts.project).trim() : '') || null;
+  if (!project) return { ok: false, reason: 'No project' };
+  // A listing IS a unit — it is the thing being sold or let — so this one stays
+  // required, unlike a calling row.
   if (!v.title) return { ok: false, reason: 'No unit number' };
   // Sale or rent is never guessed: a blank read as "sale" prices a rental at
   // eighty-five lakh and nobody questions a filled-in field.
   if (!v.deal) return { ok: false, reason: 'Not marked sale or rent' };
   return {
     ok: true,
-    key: unitKey(v.project, v.wing, v.title),
+    key: unitKey(project, v.wing, v.title),
     record: {
-      title: v.title, project: v.project, wing: v.wing || null, type: v.type || null,
+      title: v.title, project, wing: v.wing || null, type: v.type || null,
       deal: v.deal, price: v.price ?? null, locality: v.locality || null,
       status: v.status || 'Available', carpet: v.carpet ?? null, floor: v.floor || null,
       totalFloors: v.totalFloors ?? null, facing: v.facing || null, furnishing: v.furnishing || null,
@@ -178,8 +199,19 @@ async function existingKeys(kind: ImportKind): Promise<Set<string>> {
   const t = tid();
   const out = new Set<string>();
   if (kind === 'owners') {
-    const rows = await sql`SELECT project, tower, unit_no FROM crm_owners WHERE tenant_id = ${t}`;
-    for (const r of rows as any[]) { const k = unitKey(r.project, r.tower, r.unit_no); if (k) out.add(k); }
+    const rows = await sql`SELECT project, tower, unit_no, phone FROM crm_owners WHERE tenant_id = ${t}`;
+    for (const r of rows as any[]) {
+      const k = unitKey(r.project, r.tower, r.unit_no);
+      if (k) out.add(k);
+      // AND BY PHONE, because a row can arrive without a flat — a sheet of
+      // numbers for one society carries none. Those rows are keyed on the
+      // person (see prepareRow), so the people already on file have to be
+      // keyed that way too, or re-importing the same list would add every one
+      // of them a second time. It does not fold a second flat into the first:
+      // a row that HAS a unit is matched on the unit.
+      const ph = normPhone(r.phone);
+      if (ph) out.add(ph);
+    }
   } else if (kind === 'clients') {
     const rows = await sql`SELECT phone FROM crm_leads WHERE tenant_id = ${t} AND phone IS NOT NULL`;
     for (const r of rows as any[]) { const k = normPhone(r.phone); if (k) out.add(k); }
@@ -264,7 +296,7 @@ function jobShape(r: any): any {
  * review table can show. The same prepareRow the run uses, so the number the
  * person approves is the number that happens.
  */
-export async function previewImport(id: string, mapping: Record<string, string>): Promise<any> {
+export async function previewImport(id: string, mapping: Record<string, string>, options: { project?: string | null } = {}): Promise<any> {
   const t = tid();
   const [job] = await sql`SELECT * FROM crm_import_jobs WHERE id = ${id} AND tenant_id = ${t} LIMIT 1`;
   if (!job) return null;
@@ -279,7 +311,7 @@ export async function previewImport(id: string, mapping: Record<string, string>)
   const PER_STATUS = 50;
   const perStatus = new Map<string, number>();
   for (const r of rows as any[]) {
-    const p = prepareRow(kind, r.raw, mapping);
+    const p = prepareRow(kind, r.raw, mapping, options);
     let status: string, reason: string | null = null;
     if (!p.ok) { status = 'unusable'; reason = p.reason || 'Unusable row'; counts.unusable++; reasons[reason] = (reasons[reason] || 0) + 1; }
     else if (p.key && seen.has(p.key)) { status = 'repeatedInFile'; reason = 'Same unit earlier in this file'; counts.repeatedInFile++; }
@@ -297,7 +329,8 @@ export async function previewImport(id: string, mapping: Record<string, string>)
     }
   }
   sample.sort((a, b) => a.rowNo - b.rowNo);
-  await sql`UPDATE crm_import_jobs SET mapping = ${sql.json(mapping)} WHERE id = ${id} AND tenant_id = ${t}`;
+  // Kept with the job, so the run writes what the review counted.
+  await sql`UPDATE crm_import_jobs SET mapping = ${sql.json(mapping)}, options = ${sql.json(options || {})} WHERE id = ${id} AND tenant_id = ${t}`;
   return { counts, reasons, sample };
 }
 
@@ -316,6 +349,7 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
   if (job.status === 'done' || job.status === 'reverted') throw new Error('This import has already run');
   const kind = job.kind as ImportKind;
   const mapping = job.mapping || {};
+  const options = job.options || {};
 
   await sql`UPDATE crm_import_jobs SET status = 'running', started_at = NOW(), error = NULL WHERE id = ${id} AND tenant_id = ${t}`;
 
@@ -336,7 +370,7 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
       const outcomes: { rowNo: number; status: RowOutcome; reason: string | null; recordId: string | null }[] = [];
 
       for (const r of chunk) {
-        const p = prepareRow(kind, r.raw, mapping);
+        const p = prepareRow(kind, r.raw, mapping, options);
         if (!p.ok) { outcomes.push({ rowNo: r.row_no, status: 'skipped', reason: p.reason || 'Unusable row', recordId: null }); skipped++; continue; }
         if (p.key && seen.has(p.key)) { outcomes.push({ rowNo: r.row_no, status: 'skipped', reason: 'Same unit earlier in this file', recordId: null }); skipped++; continue; }
         if (p.key && onFile.has(p.key)) { outcomes.push({ rowNo: r.row_no, status: 'skipped', reason: 'Already on file', recordId: null }); skipped++; continue; }

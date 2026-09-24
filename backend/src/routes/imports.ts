@@ -94,7 +94,11 @@ importsRouter.post('/:id/rows', async (req: Request, res: Response) => {
 importsRouter.post('/:id/preview', async (req: Request, res: Response) => {
   try {
     if (!mayImport(res)) return;
-    const out = await previewImport(req.params.id, req.body?.mapping || {});
+    // `project` is typed once for the whole file and used wherever a row has
+    // none of its own — see prepareRow.
+    const out = await previewImport(req.params.id, req.body?.mapping || {}, {
+      project: req.body?.project ? String(req.body.project).trim() : null,
+    });
     if (!out) return res.status(404).json({ error: 'No such import' });
     return res.json({ success: true, ...out });
   } catch (err: any) {
