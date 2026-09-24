@@ -735,6 +735,10 @@ export const api = {
   updateAgentStatus: (id, status) => request(`/team/users/${id}/duty-status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   // What is still sitting with nobody on it, and the one press that hands it out.
   routingBacklog: () => request('/team/routing/backlog', { fresh: true }),
+  // What people did on a day — services/activityReport.ts. Fresh: it is the
+  // day as it stands, and a 30-second-old answer hides the call just logged.
+  getActivity: (q) => request(`/activity?${new URLSearchParams(Object.entries(q).filter(([, v]) => v))}`, { fresh: true }),
+  getActivityRecords: (q) => request(`/activity/records?${new URLSearchParams(Object.entries(q).filter(([, v]) => v))}`, { fresh: true }),
   // Open records per person, on ONE side — the number an assign screen should
   // show is the one for the work it is handing out.
   agentLoads: (side) => request(`/team/loads?side=${side === 'owners' ? 'owners' : 'leads'}`, { fresh: true }),

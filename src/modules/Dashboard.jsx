@@ -3,6 +3,7 @@ import { Kpi, Panel, SectionHead } from '../components/primitives.jsx'
 import { buildRoster, DeskTable } from '../components/roster.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
+import { MyDay, TeamToday } from '../components/ActivityDay.jsx'
 
 // THE MANAGER'S SCREEN. One question: is the team working the book, and who is
 // stuck. Tiles for what can be cleared today, then a row per agent with a
@@ -179,6 +180,14 @@ export default function Dashboard({ store, go, topBar }) {
             <Kpi icon="check" label="Calls logged today" value={oq.calledToday} onClick={() => toCalling('never_called')} />
           )}
         </div>
+
+        {/* WHAT PEOPLE DID TODAY — the owner's first question, so it sits
+            straight under the tiles. The table at the bottom is the book by
+            agent (what is stuck); this is the day by person (what got done).
+            An agent at a desk sees their own. */}
+        {state.role === 'agent'
+          ? <Panel><MyDay store={store} hasCalling={hasCalling} variant="panel" /></Panel>
+          : <Panel><TeamToday store={store} hasCalling={hasCalling} /></Panel>}
 
         {/* WHERE THE BOOK COMES FROM. One panel, not two.
             "Leads by stage" went with it: the stage pills on the Leads screen

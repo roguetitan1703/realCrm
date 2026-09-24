@@ -50,7 +50,6 @@ export function buildRoster({ agents, perAgent = {}, perAgentCalls = {}, wonLabe
       noNextStep: r.noNextStep ?? 0,
       goingCold: r.goingCold ?? 0,
       coldToday: r.coldToday ?? 0,
-      workedToday: r.workedToday ?? 0,
       owners: c.owners ?? 0,
       calledToday: c.calledToday ?? 0,
       off: inactive(a.id),
@@ -169,7 +168,10 @@ export function DeskTable({ rows, onCell }) {
     // goes, the same as Open and Worked today beside it.
     { key: 'noNextStep', label: 'Nothing booked', seg: null },
     { key: 'coldToday', label: 'Went cold today', seg: 'going_cold', tone: 'alert' },
-    { key: 'workedToday', label: 'Worked today', seg: null, up: true },
+    // "Worked today" was here: every event a person wrote, bulk assignments and
+    // all, so an owner handing out 700 rows read as 700 things done. What a
+    // person did is Team today now (components/ActivityDay.jsx), counted from
+    // actions only; a second, looser number beside it would disagree with it.
   ]
   return (
     <div className="dt-wrap">

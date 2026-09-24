@@ -48,7 +48,7 @@ export const REJECTED_STATUS = 'Rejected';
  * statuses stopped starting with the word "Closed" it silently counted every
  * finished lead as open. An explicit list cannot drift like that.
  */
-const OPEN = sql`coalesce(stage, '') NOT IN ${sql(TERMINAL_STATUSES)}`;
+export const OPEN = sql`coalesce(stage, '') NOT IN ${sql(TERMINAL_STATUSES)}`;
 
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
@@ -1196,7 +1196,12 @@ export async function resetDatabase(): Promise<ServerState> {
 // credentials from the environment and guarantees the demo tenant exists, and
 // both of those genuinely belong on every boot. Its one-time part (retiring
 // legacy tenant ids) carries its own guard.
-seedDatabase()
+// A READ-ONLY SCRIPT MUST NOT MIGRATE. Importing this module used to start the
+// boot below unconditionally, so a script that only wanted to READ through the
+// store's queries ran initSchema() — and any runOnce not yet applied there —
+// against whichever database it pointed at, production included. Such a script
+// sets CRM_NO_BOOT=1 before importing; the server never does.
+if (process.env.CRM_NO_BOOT !== '1') seedDatabase()
   .then(() => ensureAuthIdentity())
   .then(() => runOnce('backfill_password_auth', () => backfillPasswordAuth()))
   .then(() => runOnce('backfill_shortlist', () => backfillShortlist()))
@@ -1544,11 +1549,6 @@ export async function getDeskSummary(): Promise<any> {
           FROM activities
          WHERE tenant_id = ${t} AND type = 'site_visit' AND agent_id IS NOT NULL
            AND at >= now() - interval '30 days'
-         GROUP BY 1),
-    per_agent_today AS (SELECT author AS k, count(*)::int AS n
-          FROM crm_timeline_events
-         WHERE tenant_id = ${t} AND coalesce(author, 'System') <> 'System'
-           AND timestamp >= ${today}
          GROUP BY 1)
     SELECT
       (SELECT row_to_json(x) FROM totals x) AS totals,
@@ -1560,8 +1560,7 @@ export async function getDeskSummary(): Promise<any> {
       (SELECT row_to_json(x) FROM owners x) AS owners,
       (SELECT coalesce(json_agg(x), '[]'::json) FROM per_agent_calls x) AS per_agent_calls,
       (SELECT coalesce(json_agg(x), '[]'::json) FROM per_agent_lead_calls x) AS per_agent_lead_calls,
-      (SELECT coalesce(json_agg(x), '[]'::json) FROM per_agent_visits x) AS per_agent_visits,
-      (SELECT coalesce(json_agg(x), '[]'::json) FROM per_agent_today x) AS per_agent_today
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM per_agent_visits x) AS per_agent_visits
   `;
   const totals: any[] = deskRow?.totals ? [deskRow.totals] : [];
   const byStage: any[] = deskRow?.by_stage || [];
@@ -1573,7 +1572,6 @@ export async function getDeskSummary(): Promise<any> {
   const perAgentCalls: any[] = deskRow?.per_agent_calls || [];
   const perAgentLeadCalls: any[] = deskRow?.per_agent_lead_calls || [];
   const perAgentVisits: any[] = deskRow?.per_agent_visits || [];
-  const perAgentToday: any[] = deskRow?.per_agent_today || [];
 
   const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
   const stagesByAgent = new Map<string, Record<string, number>>();
@@ -1588,12 +1586,10 @@ export async function getDeskSummary(): Promise<any> {
     perAgent: (() => {
       const calls = new Map((perAgentLeadCalls as any[]).map(r => [r.k, r.calls]));
       const visits = new Map((perAgentVisits as any[]).map(r => [r.k, r.visits]));
-      const today_ = new Map((perAgentToday as any[]).map(r => [r.k, r.n]));
       return Object.fromEntries(perAgent.map(r => [r.k, {
         open: r.open, overdue: r.overdue, won: r.won, total: r.total,
         neverContacted: r.never_contacted, noNextStep: r.no_next_step,
         goingCold: r.going_cold, coldToday: r.cold_today,
-        workedToday: today_.get(r.k) ?? 0,
         byStage: stagesByAgent.get(r.k) || {},
         // 30-day, and named so. The roster's old "Calls · 30d" label sat over an
         // all-time count from a different endpoint.
@@ -2257,6 +2253,10 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       // not say who moved the lead — the route's duplicate was the only one
       // that named anybody.
       author: ctx.actorId ?? getContext()?.userId ?? undefined,
+      // What it was and what it became, as data. The activity report tells a
+      // status change by what the customer BECAME and drops one flipped back,
+      // and before this it had to read both out of the title.
+      metadata: { from: oldLead.stage || null, to: patch.stage },
     });
   }
 
@@ -3386,7 +3386,7 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
  * The queue segments — the same predicates getOwnerQueueCounts counts, so a
  * pill that says 104 opens a list of 104. Defined once, used by both.
  */
-const OWNER_OPEN = sql`coalesce(stage, 'New') NOT IN ('Not Interested', 'Do Not Call')`;
+export const OWNER_OPEN = sql`coalesce(stage, 'New') NOT IN ('Not Interested', 'Do Not Call')`;
 // Takes the firm's day boundary because "today" is a local question — see
 // dayStart(). As a module-level constant it could only ever ask Postgres for
 // UTC midnight, which is 05:30 in Pune.
@@ -3675,7 +3675,8 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
     // what the screen resolves to a name. This read ctx.actorLabel, which no
     // route ever fills (a token carries no name), so every owner stage change
     // an agent made was filed as "System".
-    await addTimelineEvent({ record_id: id, type: 'stage_change', title: `Stage → ${patch.stage}`, description: `Marked ${patch.stage}`, author: ctx.actorId ?? getContext()?.userId ?? 'System' });
+    await addTimelineEvent({ record_id: id, type: 'stage_change', title: `Stage → ${patch.stage}`, description: `Marked ${patch.stage}`, author: ctx.actorId ?? getContext()?.userId ?? 'System',
+      metadata: { from: existing.stage || 'New', to: patch.stage } });
   }
   if (patch.callbackAt !== undefined && patch.callbackAt !== existing.callbackAt) {
     await addTimelineEvent({

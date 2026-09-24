@@ -20,6 +20,7 @@ import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities } from '../lib/suggest.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
+import { ActivityRecords } from '../components/ActivityDay.jsx'
 import { copyText } from '../lib/clipboard.js'
 
 /**
@@ -97,6 +98,8 @@ export default function Modals({ store, go }) {
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'rejectLead' && <RejectLeadModal store={store} leadId={m.leadId} />}
+      {m?.kind === 'activityRecords' && <ActivityRecords store={store} go={go} Modal={Modal} side={m.side} date={m.date}
+        person={m.person} measure={m.measure} detail={m.detail} title={m.title} />}
       {m?.kind === 'rejectOwner' && <RejectOwnerModal store={store} ownerId={m.ownerId} />}
       {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} only={m.only} />}
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
@@ -1019,8 +1022,11 @@ function RejectLeadModal({ store, leadId }) {
   const save = async () => {
     setBusy(true)
     const text = note.trim() ? `${reason} — ${note.trim()}` : reason
-    await store.updateLead(leadId, { stage: REJECTED_STATUS, rejectionReason: reason })
-    await store.addRemark('lead', leadId, `Rejected: ${text}`)
+    // The reason and the note ride on the status change itself. They were a
+    // second entry — a remark saying "Rejected: …" a second after the status
+    // line said the same — which the record showed twice and the activity
+    // report would have counted as a note the agent wrote.
+    await store.updateLead(leadId, { stage: REJECTED_STATUS, rejectionReason: reason, stageNote: text })
     setBusy(false)
     store.closeModal()
   }

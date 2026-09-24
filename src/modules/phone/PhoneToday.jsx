@@ -23,6 +23,7 @@ import { isTerminal } from '../../data/leadStatus.js'
 import { Overdue, StageTag, MoreRows, useCap, RepeatTag } from '../../components/primitives.jsx'
 import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue, personLabel } from '../../lib/format.js'
 import Icon from '../../components/Icon.jsx'
+import { MyDay } from '../../components/ActivityDay.jsx'
 
 const CLOSED = (l) => isTerminal(l.stage)
 
@@ -276,6 +277,8 @@ export default function PhoneToday({ store, me, go, topBar }) {
   const upcoming = open.filter(l => l.followUp && !followUpOverdue(l.followUp) && l.followUp.date !== 'Today')
 
   const isDesk = state.role !== 'agent'
+  // The firm cold-calls if there is any calling work on this desk at all.
+  const hasCalling = Object.values(oc).some(v => Number(v) > 0)
   const ownerRows = feed.owners || {}
 
   // Ordered by how much the day depends on them, and interleaved rather than
@@ -314,6 +317,10 @@ export default function PhoneToday({ store, me, go, topBar }) {
       {topBar({ title: 'Today' })}
       {feed.loading ? <TodaySkeleton /> : (
       <div className="q-wrap">
+        {/* What I have done today, above what I still have to do. Starts on
+            Calling for somebody whose work is the calling list and no leads. */}
+        <MyDay store={store} hasCalling={hasCalling}
+          defaultSide={hasCalling && !scoped.length ? 'calling' : 'leads'} />
         {groups.map(g => (
           // A group that can be worked through is a list. One that can only be
           // started is a line with a number on it.

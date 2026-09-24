@@ -401,7 +401,7 @@ Phase A ships with Part 1; B and C wait on answer 1.
 
 ## Part 8 — Reports
 
-### 8.1 🟡 Agent activity — daily, for the agent and for the manager (the client asked, 24 Sep)
+### 8.1 ✅ Agent activity — daily, for the agent and for the manager (the client asked, 24 Sep) — see "C, as built" at the end
 - **Said:** a self work report at end of day for agents, and one for the manager.
 - **Depends on:** 1.3. With the wrong actor, the report is wrong.
 - **Open:** what's in it (calls made, outcomes, visits, follow-ups done or
@@ -569,7 +569,7 @@ new importer. **0 rows called yet. 921 with nobody on them** (VTP Verve PHA
   an uploaded document on the tenancy; whether Key Received starts conversion
   automatically or offers it.
 
-### 1.8 🟡 Carry the sheet's call outcomes into the calling list
+### 1.8 ✅ Carry the sheet's call outcomes into the calling list — at import `d381de2`; the back-fill was declined, see PARKED.md
 - Their Sierra sheet's Call Status (not interested 281, wrong number 30,
   interested 39, …) was dropped at import; every row reads New. Map it at import
   and apply it to the rows already imported from the stored sheet. Paying-client
@@ -738,4 +738,46 @@ made" never shown as "answered", a status flipped back counts 0, the firm's
 day; (5) phone and desk, no page errors.
 
 **D. Conversion and Rentals** — defined the same way when started.
+
+## C, as built (24 Sep)
+
+**Where.** "My day" at the top of Today on the phone (and the Dashboard panel
+for an agent at a desk); "Team today" on the Dashboard straight under the
+tiles, for the owner and managers. Both have the Leads | Calling switch and a
+‹ day › stepper. Every number opens the people behind it; a row opens the record.
+Code: `backend/src/services/activityReport.ts` (what counts — one list of
+facts, the counts and the lists read the same query), `routes/activity.ts`,
+`src/components/ActivityDay.jsx`.
+
+**Decisions made while building, so they are not re-litigated:**
+- "Answered" is decided in one place — `reach` on each call outcome in
+  `src/data/callOutcomes.js`. Calls with no outcome are shown as "no outcome
+  written".
+- Status changes now record `{from, to}` (leads and owners). Older rows are read
+  from their titles. A person's day on one record counts as what they last set,
+  and nothing if it ends where it started.
+- A rejection no longer writes a second "Rejected: …" remark; the reason and
+  note ride on the status line. Old ones are not counted as notes.
+- "Worked today" is gone from the By-agent table: it counted every event a
+  person wrote, bulk assignments included, and would have disagreed with Team
+  today.
+- Warnings, only when true: idle ("hasn't called a lead today" / "…anyone on
+  the calling list today", only after noon, only agents on duty holding work
+  on that side); enquiries that came in and haven't been called, with whom;
+  3+ follow-ups/callbacks late.
+- Late / due tomorrow are shown for today only — a past day cannot know them.
+- The calling side has no "done" for callbacks: a cleared callback is not proof
+  anybody rang.
+
+**Checked.** Siddhi, bhumi, 23 Sep, report vs a hand-written query on production
+(read-only): 34 calls = 9 answered + 16 not received + 2 busy/off + 7 no
+outcome; 5 WhatsApps; 6 notes; her New → Follow-Up → New flip counted 0, Deal
+Closed 1. On dev with a probe lead: agent's taps → 3 calls / 1 person / 1
+answered / 1 not received / 1 no outcome / 1 WhatsApp / 1 note / Now 1
+Follow-Up; the System auto status counted 0; an agent asking for another
+person's day gets their own. Phone (iPhone 13 viewport) and desk driven, no page
+errors, no sideways scroll; probe rows deleted.
+
+**Not done.** An end-of-day push to each agent and the manager (spec question
+3) — not asked for yet. Targets — deliberately not built.
 

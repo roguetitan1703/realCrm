@@ -20,18 +20,29 @@
 // in routes/actions.ts had to regex English; and renaming an option would have
 // orphaned every row already written. The 46 rows that existed were migrated to
 // keys by 2026_08_18_outcome_keys (services/db.ts).
-const o = (value, label) => ({ value, label })
+const o = (value, label, reach) => (reach ? { value, label, reach } : { value, label })
+
+// `reach` is whether somebody picked up, and it is the ONLY place that is
+// decided: the activity report's "answered" reads it, so an outcome added here
+// without one is counted as nothing rather than guessed into a pile. A call is
+// a tap on the button; only the outcome the caller wrote says anyone answered.
+export const CALL_REACH = {
+  answered: 'answered',
+  no_answer: 'not received',
+  unreachable: 'busy or off',
+  wrong_number: 'wrong number',
+}
 
 export const CALL_OUTCOMES = [
   // ~15 remarks are a captured requirement typed as prose ("Looking 3bhk in
   // Mahalunge without broker", "Immi posse by Godrej Hill Retreet 2bhk
   // required") — the outcome is right, though the requirement belongs in the
   // req fields rather than a remark.
-  o('discussed', 'Connected · discussed requirements'),
+  o('discussed', 'Connected · discussed requirements', 'answered'),
   // ~9: "Coming today", "He will come tomorrow", "Coming For 1st Sep For Visit".
-  o('visit', 'Interested · scheduling a site visit'),
+  o('visit', 'Interested · scheduling a site visit', 'answered'),
   // ~5: "Call Back Later", "Will call back later", "call him after a hour".
-  o('callback', 'Asked to call back'),
+  o('callback', 'Asked to call back', 'answered'),
   // THE BIGGEST PILE BY FAR — about 42 remarks: "Call not rec" ×16,
   // "Call not received" ×9, "Call not Recived" ×8, "Call not tec", "Not rec",
   // "Call not answered", "Not responce", "Call cut".
@@ -41,23 +52,23 @@ export const CALL_OUTCOMES = [
   // head were not in the dropdown and they reached for the free-text box
   // instead — 42 times. The option now says what they say. The key is unchanged,
   // so nothing that reads `no_answer` cares that the wording moved.
-  o('no_answer', 'Call not received'),
+  o('no_answer', 'Call not received', 'no_answer'),
   // ~10: "Switch off", "Out of covrege", "Incoming are Band", and the three
   // "Talking with someone" / "Speaking to someone" — a line that is engaged.
-  o('unreachable', 'Busy or switched off'),
+  o('unreachable', 'Busy or switched off', 'unreachable'),
   // NEW — earned. ~10 remarks end this way and there was nowhere to put it:
   // "Send details on wp" (×6, usually appended to a requirement), "Sharing
   // details", "Details will share", "Whatapp message sent", "Call not rec
   // message sent on whataap". It is the commonest way a SUCCESSFUL call ends
   // on this desk, and every one of them was logged as an outcome-less call.
-  o('details_sent', 'Sent details on WhatsApp'),
+  o('details_sent', 'Sent details on WhatsApp', 'answered'),
   // NEW — earned, and it is not the same as "Not interested": the firm lost
   // this one to somebody else and that is worth being able to count.
   // "Requirement completed", "Booking other broker", "Done Bellier".
-  o('booked_elsewhere', 'Already booked elsewhere'),
-  o('wrong_number', 'Wrong number'),
+  o('booked_elsewhere', 'Already booked elsewhere', 'answered'),
+  o('wrong_number', 'Wrong number', 'wrong_number'),
   // ~10: "Not looking" ×3, "Not required", "She said not interested don't call".
-  o('not_interested', 'Not interested'),
+  o('not_interested', 'Not interested', 'answered'),
 ]
 
 /**
