@@ -3770,6 +3770,57 @@ export async function distributeWork(opts: {
 }
 
 /**
+ * HOW MUCH EACH PERSON IS CARRYING, on ONE side of the desk.
+ *
+ * Every assign screen showed the same number — open LEADS — including the ones
+ * handing out calling rows, where it answers a question nobody asked. "Kavish
+ * 84 open" while you are splitting a township tells you nothing about the
+ * township and quietly steers the split by the wrong measure.
+ */
+export async function agentLoads(side: 'leads' | 'owners'): Promise<Record<string, number>> {
+  const t = tid();
+  const rows = side === 'leads'
+    ? await sql`SELECT agent_id AS id, count(*)::int AS n FROM crm_leads
+                 WHERE tenant_id = ${t} AND ${OPEN} AND agent_id IS NOT NULL GROUP BY 1`
+    : await sql`SELECT agent_id AS id, count(*)::int AS n FROM crm_owners
+                 WHERE tenant_id = ${t} AND ${OWNER_OPEN} AND agent_id IS NOT NULL GROUP BY 1`;
+  return Object.fromEntries((rows as any[]).map(r => [r.id, r.n]));
+}
+
+/**
+ * ONE SELECTION, SEVERAL PEOPLE — the same deal the project assign and the
+ * leaver hand-over use, for a set of ids somebody has ticked.
+ *
+ * Bulk assign could only ever hand the whole selection to one person, so
+ * splitting fifty leads between three callers meant three passes of ticking.
+ */
+export async function splitAssign(
+  kind: 'leads' | 'owners', ids: string[], targets: string[], ctx: ActorCtx = SYSTEM_CTX,
+): Promise<{ assigned: number; perTarget: { id: string; name: string | null; n: number }[] }> {
+  const t = tid();
+  const clean = [...new Set((ids || []).filter(Boolean))];
+  const live = await sql`
+    SELECT id, name FROM users
+     WHERE tenant_id = ${t} AND id IN ${sql([...new Set((targets || []).filter(Boolean))])}
+       AND deleted_at IS NULL AND lower(coalesce(status, 'active')) = 'active'`;
+  if (!clean.length || !live.length) return { assigned: 0, perTarget: [] };
+  const order = targets.filter(id => live.some((u: any) => u.id === id));
+
+  const share = new Map<string, string[]>(order.map(id => [id, []]));
+  clean.forEach((id, i) => share.get(order[i % order.length])!.push(id));
+
+  const perTarget: { id: string; name: string | null; n: number }[] = [];
+  let assigned = 0;
+  for (const [target, list] of share) {
+    if (!list.length) continue;
+    const n = kind === 'leads' ? await bulkAssignLeads(list, target, ctx) : await bulkAssignOwners(list, target, ctx);
+    assigned += n;
+    perTarget.push({ id: target, name: (live as any[]).find(u => u.id === target)?.name ?? null, n });
+  }
+  return { assigned, perTarget };
+}
+
+/**
  * WHAT IS SITTING WITH NOBODY ON IT, per side.
  *
  * Turning on round-robin changes who gets records AS THEY ARRIVE — it looks

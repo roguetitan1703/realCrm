@@ -12,7 +12,7 @@ import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import {
   createOwner, listOwners, getOwnersSummary, listOwnerProjects,
-  getOwnerById, updateOwner, deleteOwner, bulkAssignOwners, assignProjectOwners, OWNER_STATUSES,
+  getOwnerById, updateOwner, deleteOwner, bulkAssignOwners, assignProjectOwners, splitAssign, OWNER_STATUSES,
 } from '../services/store';
 
 export const ownersRouter = Router();
@@ -58,15 +58,24 @@ ownersRouter.get('/projects', async (_req: Request, res: Response) => {
   }
 });
 
-/** POST /api/v1/owners/bulk-assign  body { ids: string[], agentId: string|null } */
+/**
+ * POST /api/v1/owners/bulk-assign  { ids, agentId }  — one person, or null to unassign
+ *   or { ids, agentIds: [a, b] } — split between them, one each in turn.
+ */
 ownersRouter.post('/bulk-assign', async (req: Request, res: Response) => {
   try {
-    const { ids, agentId } = req.body || {};
+    const { ids, agentId, agentIds } = req.body || {};
     if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids[] is required' });
-    const n = await bulkAssignOwners(ids, agentId || null, {
-      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
+    const ctx = {
+      actorType: 'user' as const, actorId: req.user?.id ?? null, actorLabel: null,
       ip: req.ip, userAgent: req.get('user-agent') ?? undefined,
-    });
+    };
+    if (Array.isArray(agentIds) && agentIds.length > 1) {
+      const out = await splitAssign('owners', ids, agentIds.map(String), ctx);
+      return res.status(200).json({ success: true, updated: out.assigned, perTarget: out.perTarget });
+    }
+    const one = Array.isArray(agentIds) && agentIds.length === 1 ? String(agentIds[0]) : (agentId || null);
+    const n = await bulkAssignOwners(ids, one, ctx);
     return res.status(200).json({ success: true, updated: n });
   } catch (err: any) {
     if (err?.status === 403) return res.status(403).json({ success: false, error: 'Forbidden', message: err.message });

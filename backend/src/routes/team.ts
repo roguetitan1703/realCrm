@@ -9,7 +9,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { getAgents, getRoutingRules, updateRoutingRules, getAgentPerformance, distributeWork, heldWork, unownedBacklog, assignUnowned } from '../services/store';
+import { getAgents, getRoutingRules, updateRoutingRules, getAgentPerformance, distributeWork, heldWork, unownedBacklog, assignUnowned, agentLoads } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { audit } from '../services/audit';
@@ -527,6 +527,19 @@ teamRouter.get('/routing', async (req: Request, res: Response) => {
     success: true,
     rules: await getRoutingRules(),
   });
+});
+
+/**
+ * HOW MUCH EACH PERSON IS CARRYING, on the side you are looking at.
+ * GET /api/v1/team/loads?side=leads|owners → { [userId]: openCount }
+ */
+teamRouter.get('/loads', async (req: Request, res: Response) => {
+  try {
+    const side = req.query.side === 'owners' ? 'owners' : 'leads';
+    return res.status(200).json({ success: true, side, loads: await agentLoads(side) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to read workloads', message: err.message });
+  }
 });
 
 /**

@@ -659,7 +659,9 @@ export const api = {
   getLeadsSummary: (params = {}) => request(`/leads/summary${qs(params)}`),
   // One request for the whole selection — see bulkAssignLeads() for why this is
   // not a loop of updateLead on the client.
-  bulkAssignLeads: (ids, agentId) => request('/leads/bulk-assign', { method: 'POST', body: JSON.stringify({ ids, agentId }) }),
+  // One person (agentId, or null to unassign) or several (agentIds) — several
+  // splits the selection between them, one record each in turn.
+  bulkAssignLeads: (ids, agentId, agentIds) => request('/leads/bulk-assign', { method: 'POST', body: JSON.stringify({ ids, agentId, agentIds }) }),
   bulkDeleteLeads: (ids) => request('/leads/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) }),
   // Candidate listings for a lead's requirement. Scored client-side by
   // matching.js — this only narrows what it runs against.
@@ -690,7 +692,7 @@ export const api = {
   createOwner: (owner) => request('/owners', { method: 'POST', body: JSON.stringify(owner) }),
   updateOwner: (id, patch) => request(`/owners/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteOwner: (id) => request(`/owners/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  bulkAssignOwners: (ids, agentId) => request('/owners/bulk-assign', { method: 'POST', body: JSON.stringify({ ids, agentId }) }),
+  bulkAssignOwners: (ids, agentId, agentIds) => request('/owners/bulk-assign', { method: 'POST', body: JSON.stringify({ ids, agentId, agentIds }) }),
 
   // Properties CRUD
   getProperties: () => request('/properties'),
@@ -733,6 +735,9 @@ export const api = {
   updateAgentStatus: (id, status) => request(`/team/users/${id}/duty-status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   // What is still sitting with nobody on it, and the one press that hands it out.
   routingBacklog: () => request('/team/routing/backlog', { fresh: true }),
+  // Open records per person, on ONE side — the number an assign screen should
+  // show is the one for the work it is handing out.
+  agentLoads: (side) => request(`/team/loads?side=${side === 'owners' ? 'owners' : 'leads'}`, { fresh: true }),
   assignUnowned: (side) => request('/team/routing/assign-unowned', { method: 'POST', body: JSON.stringify({ side }) }),
   // What this person is still holding, before anything is moved.
   workloadOf: (userId) => request(`/team/users/${encodeURIComponent(userId)}/workload`, { fresh: true }),

@@ -1136,17 +1136,37 @@ function AssignModal({ store, leadId }) {
 // rather than a loop of single-lead assigns from the client. ----
 function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
   const [busy, setBusy] = useState(false)
+  const [picked, setPicked] = useState([])
   const n = leadIds.length
   const noun = isOwner ? 'owner' : 'lead'
-  const assign = (agentId) => {
+  // THE NUMBER BESIDE EACH NAME IS ABOUT THE WORK BEING HANDED OUT. Every
+  // assign screen read the desk summary, which counts open LEADS — so splitting
+  // a calling list showed how many buyers each person was carrying, which
+  // steers the decision by the wrong measure entirely.
+  const { data: loads } = useServerData(
+    () => api.agentLoads(isOwner ? 'owners' : 'leads').then(r => r?.loads || {}),
+    [isOwner, store.state.dataAsOf], {})
+  const agents = store.activeAgents()
+
+  const toggle = (id) => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))
+  // What each picked person would take — one record each in turn, the same deal
+  // the server does.
+  const share = (id) => {
+    const i = picked.indexOf(id)
+    if (i < 0) return null
+    return Math.floor(n / picked.length) + (i < n % picked.length ? 1 : 0)
+  }
+
+  const send = (agentIds, single) => {
     setBusy(true)
     const call = isOwner ? api.bulkAssignOwners : api.bulkAssignLeads
-    call(leadIds, agentId)
+    call(leadIds, single ?? null, agentIds)
       .then(res => {
         if (res?.success) {
-          store.toast(agentId ? `${res.assigned ?? n} ${noun}${n === 1 ? '' : 's'} assigned` : `${res.assigned ?? n} ${noun}${n === 1 ? '' : 's'} unassigned`)
-          // The rows that changed are leads or owners; neither is in the
-          // boot payload this used to re-read.
+          const moved = res.assigned ?? res.updated ?? n
+          store.toast(res.perTarget?.length > 1
+            ? `${moved} shared — ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
+            : (agentIds || single ? `${moved} ${noun}${moved === 1 ? '' : 's'} assigned` : `${moved} ${noun}${moved === 1 ? '' : 's'} unassigned`))
           store.settled?.()
           onDone?.()
           store.closeModal()
@@ -1157,31 +1177,39 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
       })
       .catch(err => { store.toast(err.message || 'Could not assign', 'warn'); setBusy(false) })
   }
-  // Who is already carrying what. Handing twenty owners to whoever is at the
-  // top of the roster is the mistake this modal exists to prevent, and the
-  // number that prevents it was one query away and not being shown.
-  const { data: desk } = useServerData(() => api.getDeskSummary(), [], null, '/workspace/desk-summary')
-  const agents = store.activeAgents()
 
   return (
-    <Modal title={`Assign ${n} ${noun}${n === 1 ? '' : 's'}`} onClose={store.closeModal} width={400}>
+    <Modal title={`Assign ${n} ${noun}${n === 1 ? '' : 's'}`} onClose={store.closeModal} width={420}>
       <div className="pick-list">
         {agents.map(a => {
-          const open = desk?.perAgent?.[a.id]?.open ?? 0
+          const on = picked.includes(a.id)
+          const mine = share(a.id)
           return (
-            <button key={a.id} className="pick-row" disabled={busy} onClick={() => assign(a.id)}>
+            <button key={a.id} className={'pick-row' + (on ? ' on' : '')} disabled={busy} onClick={() => toggle(a.id)}>
               <Avatar agent={a} size="sm" />
               <span className="pick-name">{a.name || a.first}</span>
-              <span className="pick-load">{open} open</span>
-              <Icon name="chevRight" size={15} className="ic pick-go" />
+              {/* Their open work ON THIS SIDE, and what they would take. */}
+              <span className="pick-load">{loads?.[a.id] ?? 0} open{on ? ` · takes ${mine}` : ''}</span>
+              {on
+                ? <Icon name="check" size={15} className="ic" style={{ color: 'var(--accent)' }} />
+                : <Icon name="chevRight" size={15} className="ic pick-go" />}
             </button>
           )
         })}
         {!agents.length && <div className="detail-empty">No active team members to assign to.</div>}
       </div>
+      {/* Pick one and it all goes there; pick several and it is split between
+          them. Either way the button says which. */}
+      <Button variant="primary" block disabled={busy || !picked.length} style={{ marginTop: 12 }}
+        onClick={() => send(picked.length > 1 ? picked : undefined, picked[0])}>
+        {busy ? 'Assigning…'
+          : picked.length > 1 ? `Split ${n} between ${picked.length}`
+            : picked.length ? `Give all ${n} to ${store.agentById(picked[0])?.first || 'them'}`
+              : `Pick who takes ${n === 1 ? 'it' : 'them'}`}
+      </Button>
       {/* Taking work off the desk is a different intent from handing it to
           someone, so it does not sit in the same list as the people. */}
-      <button className="pick-unassign" disabled={busy} onClick={() => assign(null)}>
+      <button className="pick-unassign" disabled={busy} onClick={() => send(undefined, null)}>
         Leave unassigned
       </button>
     </Modal>
@@ -1199,6 +1227,9 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
  */
 function AssignProjectModal({ store, project }) {
   const people = store.activeAgents()
+  // Their open CALLING work — this screen hands out calling rows, so the number
+  // beside a name has to be about those, not about leads.
+  const { data: loads } = useServerData(() => api.agentLoads('owners').then(r => r?.loads || {}), [store.state.dataAsOf], {})
   const [picked, setPicked] = useState([])
   const [onlyUnassigned, setOnlyUnassigned] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -1256,7 +1287,9 @@ function AssignProjectModal({ store, project }) {
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--line)'), background: on ? 'var(--accent-wash)' : '#fff', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit' }}>
                   <Avatar agent={a} size="sm" />
                   <span style={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: 13.5 }}>{a.name || a.first}</span>
-                  {on && <span className="u-muted" style={{ fontSize: 12, fontWeight: 600 }}>{share(a.id)}</span>}
+                  <span className="u-muted" style={{ fontSize: 12, fontWeight: 600 }}>
+                    {loads?.[a.id] ?? 0} open{on ? ` · takes ${share(a.id)}` : ''}
+                  </span>
                   {on && <Icon name="check" style={{ color: 'var(--accent)' }} />}
                 </button>
               )

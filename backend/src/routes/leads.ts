@@ -12,7 +12,7 @@
 import { Router, Request, Response } from 'express';
 import { CallActionSchema, WhatsAppActionSchema, StageChangeSchema, MergeSchema } from '../models';
 import { requireTenantAuth, requireModuleEnabled, requireQuotaAvailable } from '../middleware/auth';
-import { getLeads, createLead, getAgents, getLeadById, listLeads, getLeadsSummary, getLeadCandidates, bulkAssignLeads, bulkDeleteLeads } from '../services/store';
+import { getLeads, createLead, getAgents, getLeadById, listLeads, getLeadsSummary, getLeadCandidates, bulkAssignLeads, bulkDeleteLeads, splitAssign } from '../services/store';
 import { sql } from '../services/db';
 
 export const leadsRouter = Router();
@@ -88,18 +88,27 @@ leadsRouter.get('/summary', async (req: Request, res: Response) => {
 /**
  * ASSIGN MANY LEADS AT ONCE
  * POST /api/v1/leads/bulk-assign  { ids: [...], agentId: string|null }
+ *   or { ids: [...], agentIds: [a, b] } — split between them, one each in turn
+ *   (see splitAssign). Handing a selection to one person was the only option,
+ *   so sharing fifty leads between three callers meant three passes of ticking.
  * Declared before /:id so "bulk-assign" is not read as a lead id.
  */
 leadsRouter.post('/bulk-assign', async (req: Request, res: Response) => {
   try {
-    const { ids, agentId } = req.body || {};
+    const { ids, agentId, agentIds } = req.body || {};
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ success: false, error: 'Pick at least one lead.' });
     }
-    const assigned = await bulkAssignLeads(ids, agentId ?? null, {
-      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
+    const ctx = {
+      actorType: 'user' as const, actorId: req.user?.id ?? null, actorLabel: null,
       ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null,
-    });
+    };
+    if (Array.isArray(agentIds) && agentIds.length > 1) {
+      const out = await splitAssign('leads', ids, agentIds.map(String), ctx);
+      return res.status(200).json({ success: true, assigned: out.assigned, perTarget: out.perTarget });
+    }
+    const one = Array.isArray(agentIds) && agentIds.length === 1 ? String(agentIds[0]) : (agentId ?? null);
+    const assigned = await bulkAssignLeads(ids, one, ctx);
     return res.status(200).json({ success: true, assigned });
   } catch (err: any) {
     if (err?.status === 403) {

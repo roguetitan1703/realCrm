@@ -2625,6 +2625,10 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .pick-list{display:flex;flex-direction:column;gap:6px;max-height:44vh;overflow-y:auto}
 .pick-row{display:flex;align-items:center;gap:10px;width:100%;border:1px solid var(--line);background:var(--card);border-radius:10px;
   padding:9px 12px;cursor:pointer;font-family:inherit;color:var(--ink);text-align:left;transition:border-color .12s,background .12s}
+/* Picked, in the assign list: several can be on at once because the selection
+   is split between them. */
+.pick-row.on{border-color:var(--accent);background:var(--accent-wash)}
+
 .pick-row:hover:not(:disabled){border-color:var(--accent);background:var(--accent-wash)}
 .pick-row:disabled{opacity:.55;cursor:default}
 .pick-name{flex:1;font-weight:600;font-size:13.5px}
