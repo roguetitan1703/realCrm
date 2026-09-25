@@ -275,8 +275,9 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   card reads e.g. **"Rupali 40 · Aniket 8 · Unassigned 5"**. Count and names come
   from one query (CLAUDE.md §3.3).
 
-### 4.4 ⬜ Tower filter
+### 4.4 🔶 Tower filter
 - **Said:** needed for calling (owners) and properties.
+- **State (25 Sep):** Calling has it (Filter → Tower, inside a project). Properties does not.
 - **Depends on:** 5.3. Tower must be a real column, not buried in `unit_ref`.
 
 ### 4.5 ✅ "Key Received" ends the calling walk, and Reject closes a record — `ce40bd1`
@@ -296,7 +297,7 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   (nothing to write), mahalaxmi's list loses Callback, delpat 1 record moves,
   urban and raipur 6 each, both paying clients 0 records.
 
-### 4.6 ⬜ Project names ignore case and spacing
+### 4.6 ✅ Project names ignore case and spacing — `e3122d0`
 - **Said:** "Sai Heights" and "sai heights" split into two groups, in both
   properties and calling.
 - **Know (22 Sep):** case-sensitive today. Only **2 splits exist, both delpat**.
@@ -588,7 +589,7 @@ new importer. **0 rows called yet. 921 with nobody on them** (VTP Verve PHA
   lives (screen, end-of-day push); what stops it being gamed (a stage flipped
   back and forth is two "changes").
 
-### 10 ⬜ Conversion — the end of each pipeline becomes a record
+### 10 ✅ Conversion — the end of each pipeline becomes a record — built as D, below
 - **Owners (said 24 Sep):** Key Received is the end of calling; there should be
   a **conversion** from there into a property — the agent fills in the rest of
   the listing. Converting makes the owner a Contact (Contacts = owners whose
