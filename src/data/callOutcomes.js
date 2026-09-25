@@ -86,23 +86,25 @@ export const CALL_OUTCOMES = [
 export const WA_OUTCOMES = [
   // ~7: "Details shared on whatsapp" ×2, "Send details on wp" ×3, "Send details
   // on wo", plus the ones appended to a requirement.
-  o('wa_details_sent', 'Details shared'),
+  // `reach` on a WhatsApp: 'replied' when the person wrote back, 'messaged'
+  // otherwise. The Performance page's contact status reads it (activityReport).
+  o('wa_details_sent', 'Details shared', 'messaged'),
   // ~8, and this was invisible: "call not received" ×3, "Call not rec" ×2,
   // "Call not Recived" ×2, "Not rec texted on whatapp". Agents text the person
   // who did not pick up. That is a retry, not a cold message, and counting it
   // as one is how "no answer, not retried" overstates the abandoned pile.
-  o('wa_after_no_answer', 'Sent after an unanswered call'),
+  o('wa_after_no_answer', 'Sent after an unanswered call', 'messaged'),
   // "Looking baner side", "Required Fully furnished Flat For Blueridge only",
   // "Hello required in banerarea only", "He will require Flat for Air plan".
-  o('wa_discussed', 'Replied · discussed requirements'),
+  o('wa_discussed', 'Replied · discussed requirements', 'replied'),
   // "Coming for visit on Sunday", "sunday visit", "Hello will come for Tommorow".
-  o('wa_visit', 'Replied · coming for a visit'),
+  o('wa_visit', 'Replied · coming for a visit', 'replied'),
   // ~10: "Not looking" ×5, "Not looking Currently", "He is not looking anymore",
   // "Budget are very low", "Booking other broker", "Direct owner thru".
-  o('wa_not_looking', 'Replied · not looking'),
+  o('wa_not_looking', 'Replied · not looking', 'replied'),
   // "Not responding". The honest answer when nothing has come back yet, so an
   // agent with no news is never pushed into inventing some.
-  o('wa_no_reply', 'No reply yet'),
+  o('wa_no_reply', 'No reply yet', 'messaged'),
 ]
 
 // Both lists, one lookup. A caller asking for the label of an outcome should

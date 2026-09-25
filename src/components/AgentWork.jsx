@@ -36,9 +36,11 @@ import { tally, fmt, word, fuWord, shiftDay, dayName, useSide, MEASURE_TITLE, DE
 // What a person's calls came to, in the order a manager reads it.
 const CONTACT = [
   { key: 'answered', label: 'Picked up', color: '#2f7d54' },
+  { key: 'replied', label: 'Replied on WhatsApp', color: '#5aa37a' },
   { key: 'no_answer', label: 'Did not pick up', color: '#c79a2b' },
   { key: 'unreachable', label: 'Busy or switched off', color: '#d27433' },
   { key: 'wrong_number', label: 'Wrong number', color: '#b23a3a' },
+  { key: 'messaged', label: 'Messaged, no reply', color: '#8fa9c4' },
   { key: 'no_outcome', label: 'Result not written', color: '#a6ada9' },
   { key: 'other', label: 'Other', color: '#6f8090' },
 ]

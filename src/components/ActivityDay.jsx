@@ -44,6 +44,9 @@ const REACH = [
   ['unreachable', 'busy or switched off', 'busy or switched off'],
   ['wrong_number', 'wrong number', 'wrong numbers'],
   ['no_outcome', 'result not written', 'result not written'],
+  // A WhatsApp's reach, for the contact status (activityReport `contactOf`).
+  ['replied', 'replied on WhatsApp', 'replied on WhatsApp'],
+  ['messaged', 'messaged, no reply', 'messaged, no reply'],
 ]
 const REACH_LABEL = Object.fromEntries(REACH.map(([k, one]) => [k, one]))
 
@@ -213,10 +216,12 @@ export function ActivityRecords({ store, go, side, date, person, measure, detail
   useEffect(() => {
     let live = true
     // "People called" is the calls, one line per person.
-    api.getActivityRecords({ side, date, person, measure: measure === 'people' ? 'call' : measure, detail })
+    api.getActivityRecords({ side, date, person, measure: measure === 'people' ? 'contact' : measure, detail })
       .then(r => {
         if (!live) return
         let list = r?.records || []
+        // "People contacted" is the contact rows, already one per person per
+        // agent; across a team one person can sit under two agents.
         if (measure === 'people') {
           const seen = new Set()
           list = list.filter(x => (seen.has(x.id) ? false : seen.add(x.id)))

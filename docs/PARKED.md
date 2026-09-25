@@ -12,6 +12,24 @@ recorded, update it in place rather than adding a second entry.
 
 ---
 
+## Parked by the user, 25 Sep
+
+- **1.1 Today does not scroll on iPhone (installed app).** See
+  mahalaxmi-batch.md 1.1 for what is known.
+- **1.7 step 2, iPhone alerts failing.** Step 1 (recording the whole failure
+  reason) shipped in `a44afd3`; the next step is reading those reasons and the
+  EC2 checks listed in mahalaxmi-batch.md 1.7.
+- **9.4 env loader and CRLF.** Harmless unless the server's `.env` has CRLF;
+  check `grep -c $'' .env` on EC2 before touching it.
+- **A speed test of each step on production.** Time every screen's reads and
+  every common write on the live API, per firm (the dashboard's summaries, Team
+  today, Performance, the lead and calling lists, saving a lead, which takes
+  about 3.5 s on dev, attaching a flat, closing a deal). The only production
+  number so far is from before the day index (Bhumi's leads report, 2 s).
+  Read-only; production reads need the user's go-ahead each time.
+
+---
+
 ## A mark for one number on many records (parked 24 Sep, "intelligence")
 
 **What it is.** One phone number standing on many calling rows — measured on

@@ -53,7 +53,7 @@ import { sql } from './db.js';
 import { getContext } from './context.js';
 import { timezoneOf, FOLLOWUP_OVERDUE, OPEN, OWNER_OPEN } from './store.js';
 import { CONTACT_EVENT_TYPES } from './leadSegments.js';
-import { CALL_OUTCOMES } from '../../../src/data/callOutcomes.js';
+import { CALL_OUTCOMES, WA_OUTCOMES } from '../../../src/data/callOutcomes.js';
 
 export type Side = 'leads' | 'calling';
 
@@ -66,6 +66,9 @@ const reachOf = sql`(CASE
   WHEN e.metadata->>'outcome' IN ${sql(keysFor('unreachable'))} THEN 'unreachable'
   WHEN e.metadata->>'outcome' IN ${sql(keysFor('wrong_number'))} THEN 'wrong_number'
   ELSE 'other' END)`;
+/** A WhatsApp: did the person write back? From the same catalogue's `reach`. */
+const waReplied = (WA_OUTCOMES as any[]).filter(o => o.reach === 'replied').map(o => o.value);
+const waReachOf = sql`(CASE WHEN e.metadata->>'outcome' IN ${sql(waReplied)} THEN 'replied' ELSE 'messaged' END)`;
 
 /** Written by a person. System and Import are not anybody's work. */
 const BY_PERSON = sql`coalesce(e.author, 'System') NOT IN ('System', 'Import')
@@ -111,15 +114,23 @@ function dayBounds(tz: string, date: string | null): Bounds {
 
 
 /**
- * WHAT HAPPENED WHEN SOMEBODY WAS CALLED, once per person (the Performance
- * page's contact-status breakdown). A person rung three times is one person:
- * picked up if any call to them was answered that day, otherwise how the last
- * call went. The same calls as `call`, so the slices add up to "people called".
+ * WHAT HAPPENED WHEN SOMEBODY WAS CONTACTED, once per person (the Performance
+ * page's contact-status breakdown). Contacted is a call or a WhatsApp from the
+ * app, each a tap: neither proves the phone rang or the message went, the
+ * same rule as `call`. A person reached three ways is one person, with the
+ * best thing that happened that day:
+ *
+ *   picked up > replied on WhatsApp > wrong number > did not pick up / busy
+ *   (the later of the two) > messaged, no reply > result not written > other
+ *
+ * The slices add up to "people contacted" (`people` below counts the same set).
  */
+const CONTACT_RANK = sql`(CASE detail WHEN 'answered' THEN 0 WHEN 'replied' THEN 1 WHEN 'wrong_number' THEN 2
+  WHEN 'no_answer' THEN 3 WHEN 'unreachable' THEN 3 WHEN 'messaged' THEN 4 WHEN 'no_outcome' THEN 5 ELSE 6 END)`;
 const contactOf = (f: any) => sql`
   SELECT DISTINCT ON (person, record_id) person, record_id, at, 'contact' AS measure, detail
-    FROM (${f}) c WHERE measure = 'call'
-   ORDER BY person, record_id, (detail = 'answered') DESC, at DESC`;
+    FROM (${f}) c WHERE measure IN ('call', 'whatsapp')
+   ORDER BY person, record_id, ${CONTACT_RANK}, at DESC`;
 
 /**
  * Every fact for one side of the desk on one day. The single source of every
@@ -135,7 +146,7 @@ function facts(side: Side, t: string, tz: string, bounds: Bounds) {
     SELECT e.author AS person, e.record_id, e.timestamp AS at,
            CASE e.type WHEN 'call' THEN 'call' WHEN 'whatsapp' THEN 'whatsapp'
                        WHEN 'remark' THEN 'note' ELSE 'followup_set' END AS measure,
-           CASE WHEN e.type = 'call' THEN ${reachOf} ELSE NULL END AS detail
+           CASE WHEN e.type = 'call' THEN ${reachOf} WHEN e.type = 'whatsapp' THEN ${waReachOf} ELSE NULL END AS detail
       FROM crm_timeline_events e ${onSide}
      WHERE e.tenant_id = ${t} AND ${inDay} AND ${BY_PERSON}
        AND (e.type IN ('call', 'whatsapp')
@@ -265,7 +276,7 @@ export async function activityDay(opts: { side: Side; date?: string | null; pers
       FROM f GROUP BY 1, 2, 3
     UNION ALL
     SELECT person, 'people', NULL, count(DISTINCT record_id)::int, count(DISTINCT record_id)::int
-      FROM f WHERE measure = 'call' GROUP BY 1
+      FROM f WHERE measure IN ('call', 'whatsapp') GROUP BY 1
     UNION ALL
     SELECT person, measure, detail, count(*)::int, count(*)::int
       FROM (${contactOf(sql`SELECT * FROM f`)}) k GROUP BY 1, 2, 3`;

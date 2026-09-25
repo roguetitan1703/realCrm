@@ -1262,6 +1262,21 @@ if (process.env.CRM_NO_BOOT !== '1') seedDatabase()
        WHERE l.id = a.lead_id AND l.tenant_id = a.tenant_id AND (a.party_name IS NULL OR a.party_phone IS NULL)`;
     console.log(`[Agreements] copied the party onto ${r.count} agreement(s)`);
   }))
+  // THE INTRO MESSAGE, WITHOUT EM DASHES (the user's OK, 25 Sep, all firms).
+  // The default was rewritten in plain sentences; a firm that saved its own
+  // copy kept the dash. The old default becomes the new one; a firm's own text
+  // only has " — " turned into ", ". Nothing else in settings is touched.
+  .then(() => runOnce('2026_09_25_intro_message_no_dashes', async () => {
+    const OLD = 'Hello, this is {agentName} from {firmName}. We work on residential property in the area — happy to help if you are looking to buy, sell or rent.';
+    const NEW = 'Hello, this is {agentName} from {firmName}. We work on residential property in the area and are happy to help if you are looking to buy, sell or rent.';
+    const r = await sql`
+      UPDATE crm_settings SET value = jsonb_set(value, '{introMessage}', to_jsonb(
+          CASE WHEN value->>'introMessage' = ${OLD}::text THEN ${NEW}::text
+               ELSE replace(replace(value->>'introMessage', ' — ', ', '), '—', ', ') END))
+       WHERE key = 'default' AND value->>'introMessage' LIKE ${'%—%'}::text
+       RETURNING tenant_id`;
+    console.log(`[Settings] intro message without em dashes: ${r.count} firm(s)${r.count ? ` (${(r as any[]).map(x => x.tenant_id).join(', ')})` : ''}`);
+  }))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
