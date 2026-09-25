@@ -644,6 +644,12 @@ export async function migrateAuthV2(): Promise<void> {
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (tenant_id, user_id);`;
+  // A SUPPORT SESSION: Delpat looking at a firm's desk, read only, as its
+  // owner. Who opened it; never slides (auth.ts touchSession).
+  await sql.unsafe(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS support_by TEXT`);
+  // The superadmin locks out like everybody else.
+  await sql.unsafe(`ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS failed_logins INT DEFAULT 0`);
+  await sql.unsafe(`ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ`);
 
   // Password-reset tokens (owner/manager self-serve). Token emailed as a link;
   // only its hash is stored; single-use; short TTL.
@@ -910,6 +916,21 @@ async function createLedgerTables(): Promise<void> {
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log (tenant_id, created_at);`;
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action);`;
+  // 9.1 One chain per firm from here (services/audit.ts); NULL = the legacy
+  // chain every row before this belongs to.
+  await sql.unsafe(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS chain TEXT`);
+  await sql`CREATE INDEX IF NOT EXISTS idx_audit_chain ON audit_log (chain, seq);`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS audit_checks (
+      chain TEXT PRIMARY KEY,
+      last_seq BIGINT NOT NULL DEFAULT 0,
+      last_hash TEXT,
+      checked BIGINT NOT NULL DEFAULT 0,
+      ok BOOLEAN NOT NULL DEFAULT TRUE,
+      broken_at BIGINT,
+      checked_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
 
   // --------------------------------------------------------------------------
   // ACTIVITIES (docs/specs/contacts-leads.md B4) — a visit/call/meeting with

@@ -8,7 +8,8 @@ import { autoEnablePush } from './lib/push.js'
 import { isDeskRole, roleLabel } from './lib/permissions.js'
 import PushRow from './components/PushRow.jsx'
 import EnvMark from './components/EnvMark.jsx'
-import { api } from './lib/api.js'
+import { api, currentTenant } from './lib/api.js'
+import { readSupport } from './lib/support.js'
 import { useServerData } from './lib/useServerData.js'
 
 import Login from './modules/Login.jsx'
@@ -118,8 +119,10 @@ export default function App() {
 
   // Alerts are on by default — no toggle exists, so subscribing is the app's
   // job, once, as soon as there's a signed-in person to attach the device to.
+  // Never from a support view: this browser's alerts belong to its own user.
+  const support = state.loggedIn ? readSupport(currentTenant()) : null
   useEffect(() => {
-    if (state.loggedIn) autoEnablePush()
+    if (state.loggedIn && !support) autoEnablePush()
   }, [state.loggedIn])
 
   // Tab title follows identity: the platform until a workspace is entered, the
@@ -188,7 +191,7 @@ export default function App() {
         {state.dataStale && <StaleBanner />}
         {/* The phone chrome returns before the desk one, so this needs its own
             mount — not a second implementation, the same component. */}
-        <PushRow store={store} />
+        {support ? <SupportBar support={support} onClose={() => store.logout()} /> : <PushRow store={store} />}
         <EnvMark />
         <Phone store={store} framed={false} screen={screen} sel={sel} setSel={setSel} go={go} />
         <Toasts toasts={state.toasts} onDismiss={(id) => store.dispatch({ type: 'UNTOAST', id })} />
@@ -266,7 +269,7 @@ export default function App() {
   return (
     <div className="viewport">
       {/* One mount for the whole app: an overlay, not a card in a screen. */}
-      <PushRow store={store} />
+      {support ? <SupportBar support={support} onClose={() => store.logout()} /> : <PushRow store={store} />}
       <EnvMark />
       {state.dataStale && <StaleBanner />}
       <AppShell nav={nav} active={effectiveScreen} activeSub={sel.contactsTab || 'owners'} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
@@ -275,6 +278,23 @@ export default function App() {
       {state.waState && <WaModal store={store} />}
       <Modals store={store} go={go} />
       <Toasts toasts={state.toasts} onDismiss={(id) => store.dispatch({ type: 'UNTOAST', id })} />
+    </div>
+  )
+}
+
+/**
+ * DELPAT IS LOOKING. Across the top of a support view (lib/support.js): who
+ * opened it, that nothing can be changed, when it ends, and a way out.
+ */
+function SupportBar({ support, onClose }) {
+  const until = support.expiresAt
+    ? new Date(support.expiresAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
+    : ''
+  return (
+    <div className="supbar" role="status">
+      <span className="supbar-t">Delpat support{support.by ? `, ${support.by}` : ''}</span>
+      <span>Read only{until ? ` until ${until}` : ''}</span>
+      <button type="button" onClick={onClose}>Close</button>
     </div>
   )
 }

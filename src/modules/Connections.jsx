@@ -779,7 +779,23 @@ export default function Connections({ store }) {
               <button className="cx-x" onClick={() => setPack(null)} aria-label="Close"><Icon name="x" size={16} /></button>
             </div>
             <div className="cx-pack">
-              <textarea className="textarea cx-pack-t" readOnly rows={9} value={pack.email} />
+              <textarea className="textarea cx-pack-t" readOnly rows={15}
+                value={pack.email.replace('{{KEY}}', pack.key || '[we will send the key separately]')} />
+              {/* The key goes in only on the owner's say-so, through the same
+                  owner-only, audited route the card's eye button uses. */}
+              {!pack.key && (
+                <div className="cx-pack-docs">
+                  <div>
+                    <div className="cx-pack-docs-l">Key</div>
+                    <div className="cx-pack-docs-u">Not in the email yet</div>
+                  </div>
+                  <Button variant="secondary" size="sm" icon="eye" onClick={() => api.revealConnectionKey(pack.connection.id)
+                    .then(r => (r?.success ? setPack(p => ({ ...p, key: r.apiKey })) : store.toast(r?.message || 'Only the owner can add the key', 'warn')))
+                    .catch(e => store.toast(e.message || 'Only the owner can add the key', 'warn'))}>
+                    Add the key
+                  </Button>
+                </div>
+              )}
               <div className="cx-pack-docs">
                 <div>
                   <div className="cx-pack-docs-l">Documentation page</div>
@@ -792,7 +808,7 @@ export default function Connections({ store }) {
               </div>
               <div className="cx-map-foot">
                 <Button variant="secondary" icon={copiedPack === 'pack' ? 'check' : 'copy'}
-                  onClick={() => copyPack(pack.email, 'pack')}>
+                  onClick={() => copyPack(pack.email.replace('{{KEY}}', pack.key || '[we will send the key separately]'), 'pack')}>
                   {copiedPack === 'pack' ? 'Copied' : 'Copy email'}
                 </Button>
                 <Button variant="ghost" onClick={() => setPack(null)}>Close</Button>

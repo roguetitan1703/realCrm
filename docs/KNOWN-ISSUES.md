@@ -75,8 +75,10 @@ it was measured, or it does not belong here.
   out", after checking no route relies on 403 to force it.
 
 - **10 live accounts hold a known default password (prod, 26 Aug, verified by
-  bcrypt-comparing every one of the 30 users).** `bhumi` is **NOT** clean, which
-  this file previously claimed:
+  bcrypt-comparing every one of the 30 users).** Each can now be reset from the
+  superadmin console's firm page ("New password", which also forces a change at
+  the next sign-in). `bhumi` is **NOT** clean, which this file previously
+  claimed:
 
   | tenant | accounts | password |
   |---|---|---|

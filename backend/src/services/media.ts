@@ -22,7 +22,7 @@
  */
 
 import crypto from 'crypto';
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Objects are never overwritten — replacing a photo writes a NEW key — so
@@ -103,6 +103,23 @@ function s3(): S3Client {
  * delivery ever moves to a public CDN hostname — an unguessable key is what
  * makes "unlisted" media safe there.
  */
+/**
+ * How much a firm keeps in R2 (E7): every object under its folder, counted
+ * and summed. Paged 1,000 at a time and capped, so a very large firm answers
+ * "at least" rather than holding the console up; `capped` says which.
+ */
+export async function prefixUsage(prefix: string, maxPages = 30): Promise<{ objects: number; bytes: number; capped: boolean }> {
+  if (!mediaConfigured()) return { objects: 0, bytes: 0, capped: false };
+  let token: string | undefined, objects = 0, bytes = 0, pages = 0;
+  do {
+    const out: any = await s3().send(new ListObjectsV2Command({ Bucket: bucket(), Prefix: prefix, ContinuationToken: token, MaxKeys: 1000 }));
+    for (const o of out.Contents || []) { objects++; bytes += Number(o.Size || 0); }
+    token = out.IsTruncated ? out.NextContinuationToken : undefined;
+    pages++;
+  } while (token && pages < maxPages);
+  return { objects, bytes, capped: !!token };
+}
+
 export function buildMediaKey(tenantId: string, kind: string, ext: string): string {
   const now = new Date();
   const yyyy = now.getUTCFullYear();

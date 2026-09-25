@@ -238,8 +238,10 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   the round-robin with the owner; team phones stored as `+91…` like every other
   writer. The onboarding placeholders carried Bhumi staff names, emails, phones
   and passwords in the public bundle — replaced with invented ones.
-- **Not checked against a database** — no DB in that session. Verified by
-  driving the form in a browser with the admin API answered by `planRoster`.
+- **Taken onto `development` 25 Sep**, with three fixes: a duplicate phone
+  (owner or team) is refused in the plan, provisioning is ONE transaction (a
+  failure no longer leaves half a firm), and a password that must be changed
+  is enforced on the server (see Superadmin, as built).
 
 ---
 
@@ -466,7 +468,7 @@ Phase A ships with Part 1; B and C wait on answer 1.
 
 ## Part 9 — Platform
 
-### 9.1 ⬜ Audit ledger per tenant, and the "broken" chain
+### 9.1 ✅ Audit ledger per tenant, and the "broken" chain — see Superadmin, as built
 - **Know (22 Sep):** a single global hash chain. It reports broken because Date
   values hash as `{}` when written and as ISO strings after reading back:
   **1,489 rows** (property.create 754, owner.create 735), **0 link breaks,
@@ -475,7 +477,7 @@ Phase A ships with Part 1; B and C wait on answer 1.
 - **Decided:** per-tenant chains, a hashing fix, a legacy verifier for the old
   rows, and incremental verification.
 
-### 9.2 ⬜ Portal setup email per connection ("emails for sources")
+### 9.2 ✅ Portal setup email per connection ("emails for sources") — see Superadmin, as built
 - **Said:** a generated email per portal connection, like the 99acres one sent
   for Mahalaxmi (endpoint + key + format).
 - **Direction:** "Email setup" on each connection builds that text with Copy.
@@ -955,7 +957,43 @@ it. Project names (4.6) go in first.
 - **Removed:** the 7/30-day cards, the 14-day chart and `/activity/range`; the
   direction was one day, told as a story, not more data.
 
-### Superadmin — decided 25 Sep, not built
+### Superadmin — as built (25 Sep, the user: "do all parts")
+- **Console session:** a sessions row (tenant_id NULL), 12 hours, not
+  extended; logout revokes it; 5 failures lock the account 15 minutes. Old
+  30-day tokens are refused, so the console signs out once after deploy.
+- **The raw route is gone:** a superadmin token no longer opens firm routes
+  (401); the leftover `'superadmin'` role checks are removed.
+- **Support view:** Open desk on a firm's page. A session as the firm's owner,
+  `support_by` set, 2 hours, never extended; middleware refuses every write
+  (422, so the tab is not signed out) except closing it. The token travels in
+  the URL fragment and lives only in that tab's sessionStorage
+  (`src/lib/support.js`): the operator's own sign-in in the same browser is not
+  read, replaced or signed out, the firm's snapshot cache is not written, push
+  is not turned on. A banner shows who, until when, and Close. Opening is on
+  the firm's ledger by name; what it reads is attributed to Delpat.
+- **Firm page** (`/admin?firm=<id>`): Overview (people, leads and this week,
+  calling list, properties, agreements, storage from R2; leads by source with
+  the last one, a quiet source flagged; work per person in 7 days), People and
+  sign-ins (flags: suspended, locked out, still on the password given, never
+  signed in; last sign-in; devices; alerts on/last reached/failed; Sign out and
+  New password), who is signed in now, recent sign-ins and failures, and the
+  Audit log. Every action from the console is on the firm's ledger.
+- **9.1 ledger:** Dates hash as ISO strings; each firm has its own chain from
+  now (`audit_log.chain`), 'platform' for Delpat's own; the rows before stay
+  one legacy chain, checked with the old date reading as a fallback;
+  `audit_checks` keeps how far each chain is verified. On dev the legacy chain
+  reads broken at #2: row #1 was deleted there at some point; that is a true
+  finding on dev, not the date bug.
+- **9.2 setup email:** Address, key (placeholder until the owner presses Add
+  the key, through the owner-only audited key route), format and docs link,
+  signed with the firm's name.
+- **Forced password change on the server:** a sign-in with a password that
+  must be changed gets a token (`mc`) that opens only the change, sign-out and
+  "who am I" (checked on dev: leads 401, change 200, then full access).
+- **Push reachability** (PARKED "belongs to superadmin") is the firm page's
+  Alerts column.
+
+### Superadmin — decided 25 Sep (the plan that was built above)
 - **Getting into a firm's desk:** a support session, **read-only**, **always
   allowed** (no opt-in by the firm). A session row marked with the superadmin,
   two hours, not sliding; opened in a new tab with its own sessionStorage key so

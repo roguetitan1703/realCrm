@@ -28,6 +28,7 @@ import {
 import { parsePayload, suggestConfig, flattenPaths, TRANSFORMS, sanitizeConfig } from '../services/parser';
 import { audit } from '../services/audit';
 import { getTenantForIngest } from '../services/store';
+import { sql } from '../services/db';
 
 export const connectionsRouter = Router();
 
@@ -44,7 +45,7 @@ const userOf = (req: Request): string | null => (req as any).user?.id ?? null;
 /** Connections and keys: owner or manager. */
 function requireManager(req: Request, res: Response): boolean {
   const role = roleOf(req);
-  if (['owner', 'manager', 'superadmin'].includes(role)) return true;
+  if (['owner', 'manager'].includes(role)) return true;
   res.status(403).json({ error: 'Forbidden', message: 'Only an owner or manager can manage connections.' });
   return false;
 }
@@ -53,7 +54,7 @@ function requireManager(req: Request, res: Response): boolean {
  *  every future lead wrongly, and nobody notices until the numbers are wrong. */
 function requireOwner(req: Request, res: Response): boolean {
   const role = roleOf(req);
-  if (['owner', 'superadmin'].includes(role)) return true;
+  if (['owner'].includes(role)) return true;
   res.status(403).json({ error: 'Forbidden', message: 'Only the workspace owner can change how a provider is read.' });
   return false;
 }
@@ -316,11 +317,11 @@ connectionsRouter.post('/:id/replay', async (req: Request, res: Response) => {
  * does not care who is calling, so there is one pack rather than a page per
  * portal — and a page per portal would rot the moment a portal changed its UI.
  *
- * The key itself is NEVER put in this pack. It goes to the provider's tech
- * contact through whatever channel the firm already trusts them on — the same
- * reason a bank tells you your card number over the phone but never emails it.
- * The pack shows a placeholder token so the email reads correctly end to end;
- * the firm fills in the real key from the connection card when they send it.
+ * 9.2 (decided 22 Sep): the email a firm actually sends a portal, like the
+ * one that went to 99acres for Mahalaxmi: where to send, how to sign it, what
+ * to send, and the docs for the detail. The key is NOT put in by the server:
+ * the pack carries `{{KEY}}`, and the screen fills it only through the key's
+ * own owner-only route (GET /:id/key, audited), when the owner asks it to.
  */
 connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => {
   const tenant = requireTenant(req, res); if (!tenant) return;
@@ -328,7 +329,9 @@ connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => 
   const integration = await getIntegration(tenant, req.params.id);
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 
-  const t = await getTenantForIngest(tenant);
+  // The firm's slug and the name it signs with (getTenantForIngest carries
+  // only the id, which left this email reading "for our firm", unsigned).
+  const [t] = await sql`SELECT id, slug, name, brand_config FROM tenants WHERE id = ${tenant} LIMIT 1`;
   const slug = t?.slug || t?.id || tenant;
   const host = req.get('x-forwarded-host') || req.get('host') || 'api.re.delpat.in';
   const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
@@ -340,23 +343,32 @@ connectionsRouter.get('/:id/setup-pack', async (req: Request, res: Response) => 
   // three header formats in prose here was the actual complaint: it read
   // worse than the page it was duplicating, in a format the reader cannot
   // scan. One link, one sentence.
+  const endpoint = `${domain}/api/v1/ingest/${slug}`;
+  const firm = t?.brand_config?.firmName || t?.name || '';
   const email = [
-    `Subject: ${integration.provider} integration setup`,
+    `Subject: ${integration.provider} lead feed for ${firm || 'our firm'}`,
     '',
     'Hi,',
     '',
-    'Please send enquiries to the endpoint documented here:',
-    docsUrl,
+    'Please send each enquiry to us as it arrives:',
     '',
-    'Send one test enquiry first. We will confirm it on our side before the',
-    'live feed goes on.',
+    `Address:  POST ${endpoint}`,
+    `Key:      {{KEY}}  (in the header X-API-Key)`,
+    'Format:   JSON, one enquiry per request, with the name, phone and',
+    '          what they are looking for.',
+    `Details:  ${docsUrl}`,
+    '',
+    'Please send one test enquiry first. We will confirm it on our side',
+    'before the live feed goes on.',
     '',
     'Thanks,',
-  ].join('\n');
+    firm,
+  ].join('\n').trimEnd();
 
   return res.status(200).json({
     success: true,
     docsUrl,
+    endpoint,
     provider: integration.provider,
     email,
   });

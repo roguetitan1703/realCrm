@@ -19,7 +19,7 @@ plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md` (latest: part E)
 | Backend — AWS EC2, **by hand** | `f03dcd1` when last read (24 Sep, `/health`) | `scripts/deploy-api.sh` on the box — refuses a dirty tree or a branch other than `main` |
 | Frontend — Vercel | not recorded | **Branch Tracking is OFF** — a push to `main` does not deploy; the user deploys by hand |
 | `main` | `a3b51c0` | |
-| `development` | about 17 commits ahead of `main` | agreements and conversion (D), the activity report, contacts tabs, the copy sweep, Today / My work / Performance, Properties Part 7 |
+| `development` | about 25 commits ahead of `main` | agreements and conversion (D), the activity report, contacts tabs, the copy sweep, Today / My work / Performance, Properties Part 7, the superadmin console, the per-firm ledger |
 
 **Deploy order: API first, then frontend.** The new frontend calls
 `/agreements`, `/public/gallery`, the `contact` counts and fields the old API
@@ -27,22 +27,32 @@ does not have.
 
 What the API deploy runs on production, once:
 - additive schema: `crm_agreements` and its columns, the index
-  `idx_crm_timeline_day (tenant_id, timestamp)`, and four property columns
-  (`verified_at`, `verified_by`, `gallery_off`, `gallery_version`);
+  `idx_crm_timeline_day (tenant_id, timestamp)`, four property columns
+  (`verified_at`, `verified_by`, `gallery_off`, `gallery_version`),
+  `sessions.support_by`, `superadmins.failed_logins / locked_until`,
+  `audit_log.chain` with its index, and the `audit_checks` table;
+- `runOnce 2026_09_25_intro_message_no_dashes`: a firm's saved intro message
+  loses its em dash (the old default becomes the new one); logs which firms
+  (user's OK for all firms, 25 Sep);
 - `runOnce 2026_09_25_agreement_party_copy`: fills an agreement's own tenant or
   buyer name and phone from its lead where empty. Production had one agreement
   (urban, a demo firm) with the name already set; nothing on bhumi or mahalaxmi.
 
-After the API deploy: `npm run link:owners -- --env=production` (report, then
-`--apply`) to join listing owners to calling rows — not yet run on production.
+After the API deploy:
+- the superadmin console signs out once (its old 30-day token has no session);
+- the first ledger check reads the whole legacy chain once (about 8,000 rows,
+  paged); after that only new rows;
+- `npm run link:owners -- --env=production` (report, then `--apply`) to join
+  listing owners to calling rows — not yet run on production.
 
 ---
 
 ## Waiting on the user
 
 - **Review on dev, merge `development` → `main`, deploy** (API, then frontend).
-- **Superadmin work** is planned, not built: mahalaxmi-batch.md part E. Support
-  access decided read-only and always allowed.
+- **Superadmin console built** (mahalaxmi-batch.md, "Superadmin — as built"):
+  console session, support view, firm page, per-firm ledger, setup email.
+  Worth a look on dev at `/admin` before deploying.
 - **Properties Part 7** built (mahalaxmi-batch.md Part 7). 7.6 still wants the
   production count of shortlist use; reading it needs the user's OK.
 - **Photo links on production** are `https://<app>/g/…`; the Vercel rewrite

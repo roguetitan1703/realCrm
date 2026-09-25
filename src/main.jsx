@@ -6,10 +6,14 @@ import App from './App.jsx'
 import Admin from './modules/Admin.jsx'
 import Gallery from './modules/Gallery.jsx'
 import { registerServiceWorker, applyPwaIdentity, slugFromLocation } from './lib/pwa.js'
+import { captureSupport } from './lib/support.js'
 
 // index.html already linked this tenant's manifest before the parser got here —
 // that is the only moment that decides what an install captures. This keeps the
 // links in step for the rest of the session, from the same single reader.
+// A read-only support view handed over by the superadmin console, taken
+// before anything reads a token (lib/support.js).
+captureSupport()
 registerServiceWorker()
 applyPwaIdentity(slugFromLocation())
 

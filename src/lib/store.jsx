@@ -15,6 +15,7 @@ import { applyPwaIdentity, slugFromLocation } from './pwa.js'
 import { getPref, setPref } from './prefs.js'
 import { messageLang } from '../data/vocabLocale.js'
 import { disablePush } from './push.js'
+import { readSupport, endSupport } from './support.js'
 import { isOpen } from '../data/leadStatus.js'
 
 // Pending shortlist writes, per lead (see changeShortlist).
@@ -70,6 +71,8 @@ function stateCacheKey() {
   return `crm_state_cache_${currentTenant() || 'unresolved'}`
 }
 function writeStateCache(serverState) {
+  // Not from a support view: the snapshot is read by whoever signs in here next.
+  if (readSupport(currentTenant())) return
   try {
     window.localStorage?.setItem(stateCacheKey(), JSON.stringify({ state: serverState, at: Date.now() }))
   } catch (e) {
@@ -116,6 +119,9 @@ function readStateCache() {
 
 function loadAuthSession() {
   if (typeof window === 'undefined' || !window.localStorage) return { loggedIn: false }
+  // A support view is its own session, in this tab only, as the firm's owner.
+  const sup = readSupport(currentTenant())
+  if (sup) return { loggedIn: true, role: 'owner', activeAgentId: sup.owner?.id || null, tenantName: '', tenantCity: '', support: { by: sup.by, expiresAt: sup.expiresAt } }
   try {
     // ONE SESSION PER WORKSPACE. This was a single global `crm_auth_session`
     // describing whichever firm signed in last, and the isolation it needed was
@@ -197,6 +203,8 @@ function sessionKey() {
 
 function persistAuthSession(patch = {}) {
   if (typeof window === 'undefined' || !window.localStorage) return
+  // Never written for a support view: the stored session is the operator's own.
+  if (readSupport(currentTenant())) return
   const key = sessionKey()
   if (!key) return
   try {
@@ -831,6 +839,13 @@ export function StoreProvider({ children }) {
   // "this session is over" rather than two that can drift.
   useEffect(() => subscribeAuthFailure(() => {
     if (!apiClient.getToken?.()) return   // already signed out; nothing to end
+    // A support view that ran out: end it here, and leave the stored sign-in alone.
+    if (readSupport(currentTenant())) {
+      endSupport(currentTenant())
+      dispatch({ type: 'LOGOUT' })
+      toast('The support view has ended.', 'warn')
+      return
+    }
     apiClient.clearToken?.()
     dispatch({ type: 'LOGOUT' })
     toast('Signed out. Your session expired.', 'warn')
@@ -1632,6 +1647,17 @@ export function StoreProvider({ children }) {
       return true
     },
     logout: () => {
+      // CLOSING A SUPPORT VIEW ends that session on the server and in this tab,
+      // and nothing else: no push unsubscribe, no stored token cleared, since
+      // both belong to whoever signs in to this firm on this browser.
+      if (readSupport(currentTenant())) {
+        apiClient.logout?.()
+        endSupport(currentTenant())
+        invalidateReads()
+        dispatch({ type: 'LOGOUT' })
+        toast('Support view closed')
+        return
+      }
       // Drop this device's push subscription FIRST, while the token still
       // authenticates the call that removes it. It survived sign-out entirely
       // — nothing here ever touched it — so a signed-out phone kept receiving

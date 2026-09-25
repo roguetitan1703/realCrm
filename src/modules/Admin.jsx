@@ -3,41 +3,62 @@
  * 🛰️ SUPERADMIN CONSOLE — the platform desk above every tenant
  * ============================================================================
  * Delpat-only. Reached at /admin (or ?admin). Superadmins sign in with email +
- * password — never the tenant phone OTP — and land on a powerful overview:
- * the tenant roster, bulk onboarding wizard, and audit chain.
+ * password, never a firm's sign-in, for a 12-hour session. Firms (each opens
+ * its page: modules/admin/FirmPage.jsx), onboarding a firm, and Delpat's own
+ * log.
  * ============================================================================
  */
 
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api.js'
 import { copyText } from '../lib/clipboard.js'
-import { PLATFORM } from '../data/platform.js'
 import { AppShell } from '../layouts/layouts.jsx'
-import { Button, Field, Input, PageHeader, RowMenu, Pager } from '../components/primitives.jsx'
+import { Button, Field, Input } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
+import FirmPage from './admin/FirmPage.jsx'
+import Ledger from './admin/Ledger.jsx'
 
 const COLOR_PRESETS = ['#7C3AED', '#1E6F52', '#1D4ED8', '#B45309', '#B91C1C', '#0F766E', '#0E7490', '#BE185D']
 
 const ADMIN_NAV = [
-  { section: 'Platform Control' },
-  { key: 'workspaces', label: 'Workspaces', icon: 'building' },
-  { key: 'audit', label: 'Audit Ledger', icon: 'shield' },
+  { section: 'Platform' },
+  { key: 'workspaces', label: 'Firms', icon: 'building' },
+  { key: 'audit', label: 'Delpat log', icon: 'shield' },
 ]
+
+const DAY_MS = 86400000
+const agoShort = (at) => {
+  if (!at) return 'Never'
+  const d = Math.floor((Date.now() - new Date(at).getTime()) / DAY_MS)
+  return d <= 0 ? 'Today' : d === 1 ? 'Yesterday' : `${d} days ago`
+}
 
 export default function Admin() {
   const [authed, setAuthed] = useState(() => Boolean(api.getAdminToken?.()))
-  const [email, setEmail] = useState('delpatllp@gmail.com')
+  // No address pre-filled: the console's sign-in is in the public bundle.
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [signingIn, setSigningIn] = useState(false)
   const [error, setError] = useState('')
 
   const [data, setData] = useState(null)
   const [loadErr, setLoadErr] = useState('')
-  const [activeNav, setActiveNav] = useState('workspaces') // 'workspaces' | 'audit'
+  const [activeNav, setActiveNav] = useState('workspaces')
+  // A firm opened from the list. In the URL (?firm=), so a reload stays on it.
+  const [firm, setFirmState] = useState(() => new URLSearchParams(window.location.search).get('firm'))
+  const setFirm = (id) => {
+    setFirmState(id)
+    const p = new URLSearchParams(window.location.search)
+    if (id) p.set('firm', id); else p.delete('firm')
+    window.history.pushState(null, '', `${window.location.pathname}?${p}`)
+  }
+  useEffect(() => {
+    const onPop = () => setFirmState(new URLSearchParams(window.location.search).get('firm'))
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
-  // Modals & Drawers
   const [showOnboardModal, setShowOnboardModal] = useState(false)
-  const [inspectTenant, setInspectTenant] = useState(null)
   const [handoverSummary, setHandoverSummary] = useState(null)
 
   const loadData = async () => {
@@ -45,9 +66,11 @@ export default function Admin() {
       setLoadErr('')
       const res = await api.adminOverview()
       if (res?.success) setData(res)
-      else throw new Error(res?.error || 'Could not fetch superadmin overview')
+      else throw new Error(res?.error || 'Could not read the firms')
     } catch (err) {
-      setLoadErr(err.message || 'Failed to load superadmin overview')
+      // An expired or signed-out console session: back to sign-in.
+      if (/401|authentication/i.test(err.message || '')) { api.clearAdminToken(); setAuthed(false); return }
+      setLoadErr(err.message || 'Could not read the firms')
     }
   }
 
@@ -68,14 +91,14 @@ export default function Admin() {
         throw new Error(res?.error || 'Invalid credentials')
       }
     } catch (err) {
-      setError(err.message || 'Login failed')
+      setError('Those details did not match.')
     } finally {
       setSigningIn(false)
     }
   }
 
-  const doAdminLogout = () => {
-    api.adminLogout()
+  const doAdminLogout = async () => {
+    await api.adminLogout()
     setAuthed(false)
     setData(null)
   }
@@ -92,23 +115,23 @@ export default function Admin() {
               D
             </div>
             <div>
-              <div style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Delpat Superadmin</div>
-              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>Platform Operations Console</div>
+              <div style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Delpat</div>
+              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>Superadmin</div>
             </div>
           </div>
 
           {error && <div style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
           <form onSubmit={doAdminLogin}>
-            <Field label="Superadmin Email">
-              <Input type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+            <Field label="Email">
+              <Input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="username" />
             </Field>
             <div style={{ height: 14 }} />
             <Field label="Password">
-              <Input type="password" value={password} onChange={e => setPassword(e.target.value)} required />
+              <Input type="password" value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" />
             </Field>
             <Button variant="primary" block type="submit" disabled={signingIn} style={{ marginTop: 20, height: 44, background: '#7c3aed', borderColor: '#7c3aed' }}>
-              {signingIn ? 'Signing in…' : 'Sign in to Console'}
+              {signingIn ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
         </div>
@@ -117,27 +140,13 @@ export default function Admin() {
   }
 
   // --------------------------------------------------------------------------
-  // AUTHENTICATED: SUPERADMIN DESK (SIDEBAR NAVIGATION + PURPLE ACCENT)
+  // AUTHENTICATED
   // --------------------------------------------------------------------------
   const tenants = data?.tenants || []
-  const auditLogs = data?.audit?.recent || []
-  const auditOk = data?.audit?.ok
-  const totalUsers = tenants.reduce((acc, t) => acc + (t.users || 0), 0)
-  const totalLeads = tenants.reduce((acc, t) => acc + (t.leads || 0), 0)
-
-  const kpis = [
-    { label: 'Workspaces', value: tenants.length },
-    { label: 'Total Users', value: totalUsers },
-    { label: 'Active Leads', value: totalLeads },
-    { label: 'Audit Ledger', value: auditOk ? 'Intact' : 'Broken', tone: auditOk ? undefined : 'alert' },
-  ]
-
   const adminFooter = {
-    name: 'Delpat Superadmin',
-    role: 'Platform Owner',
-    items: [
-      { icon: 'x', label: 'Sign out', onClick: doAdminLogout }
-    ]
+    name: 'Delpat',
+    role: 'Superadmin',
+    items: [{ icon: 'x', label: 'Sign out', onClick: doAdminLogout }],
   }
 
   return (
@@ -145,135 +154,58 @@ export default function Admin() {
       <AppShell
         nav={ADMIN_NAV}
         active={activeNav}
-        onNav={setActiveNav}
+        onNav={(k) => { setActiveNav(k); setFirm(null) }}
         footer={adminFooter}
-        firmName="Delpat Platform"
-        sub="Superadmin Console"
+        firmName="Delpat"
+        sub="Superadmin"
       >
-        <PageHeader
-          kpis={kpis}
-          right={
-            <Button variant="primary" icon="userPlus" onClick={() => setShowOnboardModal(true)} style={{ background: '#7c3aed', borderColor: '#7c3aed' }}>
-              Onboard Workspace
-            </Button>
-          }
-        />
+        <div className="app-body">
+          {activeNav === 'workspaces' && firm && (
+            <FirmPage firmId={firm} onBack={() => { setFirm(null); loadData() }} />
+          )}
 
-        <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
-          {loadErr && (
-            <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', color: '#991b1b', padding: 14, borderRadius: 10, marginBottom: 20 }}>
-              {loadErr}
+          {activeNav === 'workspaces' && !firm && (
+            <div className="adm-page">
+              <div className="adm-head">
+                <h1>Firms</h1>
+                <Button variant="primary" icon="userPlus" onClick={() => setShowOnboardModal(true)}>Onboard a firm</Button>
+              </div>
+              {loadErr && <div className="adm-err">{loadErr}</div>}
+              {!data ? <div className="adm-wait tall" aria-busy="true" /> : (
+                <section className="adm-panel">
+                  <table className="adm-tbl adm-firms">
+                    <thead><tr><th>Firm</th><th>People</th><th>Leads</th><th>This week</th><th>Calling</th><th>Properties</th><th>Last work</th><th>Last signed in</th></tr></thead>
+                    <tbody>
+                      {tenants.map(t => {
+                        const idle = !t.last_work || Date.now() - new Date(t.last_work).getTime() > 3 * DAY_MS
+                        return (
+                          <tr key={t.id} className="adm-link" onClick={() => setFirm(t.id)}>
+                            <td><b>{t.name}</b><span className="adm-dim">/{t.slug}</span></td>
+                            <td>{t.users}</td>
+                            <td>{Number(t.leads).toLocaleString('en-IN')}</td>
+                            <td>{t.leads_7d}</td>
+                            <td>{Number(t.owners).toLocaleString('en-IN')}</td>
+                            <td>{Number(t.properties).toLocaleString('en-IN')}</td>
+                            <td className={idle ? 'adm-warn' : ''}>{agoShort(t.last_work)}</td>
+                            <td>{agoShort(t.last_seen)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </section>
+              )}
             </div>
           )}
 
-          {/* VIEW 1: WORKSPACES (Default) */}
-          {activeNav === 'workspaces' && (
-            <div className="panel acc-panel" style={{ background: '#fff', borderRadius: 14, border: '1px solid var(--line, #e5e3dd)', padding: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--ink)' }}>Active Workspaces</div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>Manage client consultancy instances and credentials</div>
-                </div>
-              </div>
-
-              <div style={{ overflowX: 'auto' }}>
-                <table className="acc-tbl" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--line, #e5e3dd)', color: 'var(--muted)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                      <th style={{ padding: '10px 12px' }}>Workspace</th>
-                      <th style={{ padding: '10px 12px' }}>Slug</th>
-                      <th style={{ padding: '10px 12px' }}>Status</th>
-                      <th style={{ padding: '10px 12px' }}>Users</th>
-                      <th style={{ padding: '10px 12px' }}>Leads</th>
-                      <th style={{ padding: '10px 12px', textAlign: 'right' }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tenants.map(t => {
-                      const primaryColor = t.brand_config?.color || '#7c3aed'
-                      return (
-                        <tr key={t.id} style={{ borderBottom: '1px solid var(--line, #e5e3dd)' }}>
-                          <td style={{ padding: '12px' }}>
-                            <div className="acc-who" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <span className="av av-sm" style={{ width: 34, height: 34, borderRadius: 8, background: primaryColor, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13 }}>
-                                {t.brand_config?.initials || t.name.slice(0, 2).toUpperCase()}
-                              </span>
-                              <div className="acc-name">
-                                <div className="acc-n" style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink)' }}>{t.name}</div>
-                                <div className="u-muted acc-role" style={{ fontSize: 11, color: 'var(--muted)' }}>Created {new Date(t.created_at).toLocaleDateString()}</div>
-                              </div>
-                            </div>
-                          </td>
-                          <td style={{ padding: '12px' }}>
-                            <code style={{ background: '#f4f3ef', padding: '3px 8px', borderRadius: 6, fontSize: 12.5, color: 'var(--ink)' }}>/{t.slug}</code>
-                          </td>
-                          <td style={{ padding: '12px' }}>
-                            <span className="pill acc-pill-on" style={{ background: '#dcfce7', color: '#15803d', padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
-                              {t.subscription_status || 'ACTIVE'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px', fontWeight: 600 }}>{t.users || 0}</td>
-                          <td style={{ padding: '12px', fontWeight: 600 }}>{t.leads || 0}</td>
-                          <td style={{ padding: '12px', textAlign: 'right' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-                              <button
-                                className="btn btn-sm btn-quiet"
-                                onClick={() => setInspectTenant(t)}
-                                style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed' }}
-                              >
-                                View Details
-                              </button>
-                              <button
-                                className="btn btn-sm btn-quiet"
-                                onClick={() => window.open(`/${t.slug}`, '_blank')}
-                                style={{ fontSize: 12, fontWeight: 600 }}
-                              >
-                                Open Desk
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* VIEW 2: AUDIT LEDGER */}
           {activeNav === 'audit' && (
-            <div className="panel acc-panel" style={{ background: '#fff', borderRadius: 14, border: '1px solid var(--line, #e5e3dd)', padding: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--ink)' }}>Tamper-Evident Audit Ledger</div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>Cryptographic chain status: {auditOk ? 'Intact' : 'Broken'}</div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {auditLogs.map(log => (
-                  <div key={log.seq} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: '#f9f8f6', borderRadius: 8, border: '1px solid var(--line)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <span className="mono-num" style={{ background: '#7c3aed', color: '#fff', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
-                        #{log.seq}
-                      </span>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>{log.summary || log.action}</div>
-                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{log.tenant_id} · {new Date(log.created_at).toLocaleString()}</div>
-                      </div>
-                    </div>
-                    <code style={{ fontSize: 10, color: 'var(--muted)', background: '#fff', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--line)' }}>
-                      {log.prev_hash ? log.prev_hash.slice(0, 12) + '…' : 'GENESIS'}
-                    </code>
-                  </div>
-                ))}
-              </div>
+            <div className="adm-page">
+              <div className="adm-head"><h1>Delpat log</h1></div>
+              <section className="adm-panel"><Ledger firmId={null} /></section>
             </div>
           )}
         </div>
 
-      {/* MODAL 1: ONBOARD WORKSPACE + BULK USERS WIZARD */}
       {showOnboardModal && (
         <OnboardWorkspaceModal
           onClose={() => setShowOnboardModal(false)}
@@ -284,21 +216,8 @@ export default function Admin() {
           }}
         />
       )}
-
-      {/* MODAL 2: HANDOVER CREDENTIALS SUMMARY */}
       {handoverSummary && (
-        <HandoverModal
-          data={handoverSummary}
-          onClose={() => setHandoverSummary(null)}
-        />
-      )}
-
-      {/* MODAL 3: INSPECT TENANT */}
-      {inspectTenant && (
-        <InspectTenantModal
-          tenant={inspectTenant}
-          onClose={() => setInspectTenant(null)}
-        />
+        <HandoverModal data={handoverSummary} onClose={() => setHandoverSummary(null)} />
       )}
       </AppShell>
     </div>
@@ -738,39 +657,6 @@ Open https://${window.location.host}/${tenant.slug} on your phone browser and ta
           <Button variant="ghost" onClick={onClose}>Close</Button>
           <Button variant="primary" onClick={copyToClipboard}>
             {copied ? '✓ Copied to Clipboard!' : 'Copy Handover Summary'}
-          </Button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ----------------------------------------------------------------------------
-// INSPECT TENANT MODAL
-// ----------------------------------------------------------------------------
-function InspectTenantModal({ tenant, onClose }) {
-  return (
-    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
-      <div style={{ width: '100%', maxWidth: 500, background: '#fff', borderRadius: 16, border: '1px solid var(--line)', padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.3)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--line)', paddingBottom: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 17, color: 'var(--ink)' }}>{tenant.name}</div>
-          <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--muted)' }}>✕</button>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13, color: 'var(--ink)', marginBottom: 20 }}>
-          <div><b>Workspace ID:</b> <code>{tenant.id}</code></div>
-          <div><b>Slug Path:</b> <code>/{tenant.slug}</code></div>
-          <div><b>Plan:</b> {tenant.subscription_plan || 'PRO'}</div>
-          <div><b>Status:</b> {tenant.subscription_status || 'ACTIVE'}</div>
-          <div><b>Total Users:</b> {tenant.users || 0}</div>
-          <div><b>Total Leads:</b> {tenant.leads || 0}</div>
-          <div><b>Total Properties:</b> {tenant.properties || 0}</div>
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-          <Button variant="primary" onClick={() => window.open(`/${tenant.slug}`, '_blank')}>
-            Open Workspace Desk ➔
           </Button>
         </div>
       </div>

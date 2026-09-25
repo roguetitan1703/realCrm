@@ -17,7 +17,7 @@ import { getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateB
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { isDeskRole } from '../lib/permissions';
-import { listAudit, verifyAuditChain } from '../services/audit';
+import { listAudit, verifyTenantLedger } from '../services/audit';
 
 export const workspaceRouter = Router();
 
@@ -38,7 +38,8 @@ workspaceRouter.get('/audit', async (req: Request, res: Response) => {
     if (role !== 'owner' && role !== 'manager') {
       return res.status(403).json({ error: 'Owner or manager access required' });
     }
-    const [entries, chain] = await Promise.all([listAudit(60), verifyAuditChain()]);
+    const [entries, ledger] = await Promise.all([listAudit(60), verifyTenantLedger(req.tenantId!)]);
+    const chain = { ok: ledger.ok, brokenAtSeq: ledger.own.brokenAtSeq ?? ledger.legacy.brokenAtSeq };
     return res.status(200).json({
       success: true,
       entries,

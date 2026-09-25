@@ -12,6 +12,7 @@
 // Accepts VITE_API_URL with or without a trailing /api/v1 so it can't be mis-set.
 import { enqueue, flushOutbox } from './outbox.js';
 import { setServerEnv } from './env.js';
+import { readSupport } from './support.js';
 
 function resolveBaseUrl() {
   const env = import.meta.env || {};
@@ -284,6 +285,10 @@ function tokenFor(tenantId) {
   // itself stopped auto-entering: the app asks `getToken()` whether to boot,
   // and a leftover global key kept answering yes.
   if (!tenantId) return '';
+  // A support view in THIS tab (lib/support.js) is the credential here, ahead
+  // of any sign-in this browser holds for the firm, which it never touches.
+  const sup = readSupport(tenantId);
+  if (sup) return sup.token;
   // That workspace's own key, and only it — so two firms signed in on one
   // browser both keep working rather than the last one in evicting the other.
   // No fallback to the global key: that fallback IS the bug this function
@@ -581,8 +586,19 @@ export const api = {
     if (res?.token) lsSet(ADMIN_TOKEN_KEY, res.token);
     return res;
   },
-  adminLogout: () => lsSet(ADMIN_TOKEN_KEY, ''),
-  adminOverview: () => request('/admin/overview', { headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  // Ends the console's session on the server (it is a real session now), then
+  // forgets the token here whatever the answer.
+  adminLogout: () => request('/admin/logout', { method: 'POST', headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } })
+    .catch(() => null).finally(() => lsSet(ADMIN_TOKEN_KEY, '')),
+  adminOverview: () => request('/admin/overview', { fresh: true, headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  adminFirm: (id) => request(`/admin/firms/${encodeURIComponent(id)}`, { fresh: true, headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  // Opens a firm's desk read only: a two-hour support token for that firm.
+  adminSupport: (id) => request(`/admin/firms/${encodeURIComponent(id)}/support`, { method: 'POST', headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  adminSignOutUser: (id, uid) => request(`/admin/firms/${encodeURIComponent(id)}/users/${encodeURIComponent(uid)}/sign-out`, { method: 'POST', headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  adminResetUserPassword: (id, uid) => request(`/admin/firms/${encodeURIComponent(id)}/users/${encodeURIComponent(uid)}/reset-password`, { method: 'POST', headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  // A ledger page: a firm's (id) or Delpat's own (id null).
+  adminLedger: (id, q = {}) => request(`${id ? `/admin/firms/${encodeURIComponent(id)}/audit` : '/admin/platform/audit'}?${new URLSearchParams(Object.entries(q).filter(([, v]) => v))}`,
+    { fresh: true, headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   // Provision a workspace — SUPERADMIN only, sent with the admin token.
   // The ids and passwords a roster would be created with. Writes nothing.
   adminOnboardPreview: (roster) => request('/admin/onboard/preview', { method: 'POST', body: JSON.stringify(roster), headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
