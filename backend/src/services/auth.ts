@@ -31,20 +31,42 @@ const DEMO_OTP = process.env.DEMO_OTP === 'true';
 
 export interface TenantTokenClaims {
   kind: 'user';
+  /** A support session: Delpat, read only (who opened it, by name). */
+  sup?: string;
   tenant_id: string;
   user_id: string;
   role: string;
   jti?: string;   // session id (auth v2) — the sessions row that backs this token
+  /** Signed in with a password that must be changed first: this token can
+   *  only change it (middleware/auth.ts). */
+  mc?: boolean;
 }
 export interface SuperadminTokenClaims {
   kind: 'superadmin';
   superadmin_id: string;
   email: string;
+  jti?: string;   // the sessions row behind it; without one it is refused
 }
 export type TokenClaims = TenantTokenClaims | SuperadminTokenClaims;
 
-export function signToken(claims: TokenClaims): string {
-  return jwt.sign(claims, JWT_SECRET, { expiresIn: TOKEN_TTL });
+export function signToken(claims: TokenClaims, ttl: string = TOKEN_TTL): string {
+  return jwt.sign(claims, JWT_SECRET, { expiresIn: ttl } as any);
+}
+
+// THE SUPERADMIN'S SESSION. The account that reaches every firm held a 30-day
+// token with no session behind it: it could not be signed out, did not expire
+// for a month, and nothing could revoke it. Twelve hours, a sessions row
+// (tenant_id NULL), and a real logout.
+export const SUPERADMIN_HOURS = 12;
+// A SUPPORT SESSION: two hours, fixed, not extended by use.
+export const SUPPORT_HOURS = 2;
+
+/** A superadmin session that is still live, or null. Never extended. */
+export async function superadminSessionAlive(jti: string | undefined): Promise<boolean> {
+  if (!jti) return false;
+  const [r] = await sql`SELECT 1 FROM sessions WHERE id = ${jti} AND tenant_id IS NULL
+                          AND revoked = FALSE AND expires_at > NOW() LIMIT 1`;
+  return !!r;
 }
 
 export function verifyToken(token: string): TokenClaims | null {
@@ -223,6 +245,7 @@ export async function superadminLogin(email: string, password: string, ctx: Requ
 
   if (rows.length === 0) { fail('unknown email'); return null; }
   const sa = rows[0];
+  if (sa.locked_until && new Date(sa.locked_until) > new Date()) { fail('locked'); return null; }
   const passStr = String(password || '').trim();
   // Hash only. This accepted three hardcoded strings — '00000000',
   // 'delpat-demo-1', 'Delpat@2026' — on the account that can reach EVERY
@@ -232,9 +255,19 @@ export async function superadminLogin(email: string, password: string, ctx: Requ
   // second live credential. Boot hashes that env var into password_hash
   // (ensureAuthIdentity); this only ever checks the hash.
   const ok = await bcrypt.compare(passStr, sa.password_hash);
-  if (!ok) { fail('bad password'); return null; }
+  if (!ok) {
+    const failed = (sa.failed_logins || 0) + 1;
+    const lock = failed >= MAX_FAILED ? new Date(Date.now() + LOCK_MINUTES * 60000).toISOString() : null;
+    await sql`UPDATE superadmins SET failed_logins = ${failed}, locked_until = ${lock} WHERE id = ${sa.id}`;
+    fail('bad password'); return null;
+  }
+  await sql`UPDATE superadmins SET failed_logins = 0, locked_until = NULL WHERE id = ${sa.id}`;
 
-  const token = signToken({ kind: 'superadmin', superadmin_id: sa.id, email: sa.email });
+  const jti = `sess_sa_${Date.now()}_${randomBytes(9).toString('base64url')}`;
+  await sql`
+    INSERT INTO sessions (id, tenant_id, user_id, expires_at, ip, user_agent)
+    VALUES (${jti}, NULL, ${sa.id}, NOW() + make_interval(hours => ${SUPERADMIN_HOURS}), ${ctx.ip || null}, ${ctx.userAgent || null})`;
+  const token = signToken({ kind: 'superadmin', superadmin_id: sa.id, email: sa.email, jti }, `${SUPERADMIN_HOURS}h`);
   audit({
     tenant_id: null, actor_type: 'superadmin', actor_id: sa.id, actor_label: sa.name || sa.email,
     action: 'auth.login', target_type: 'superadmin', target_id: sa.id,
@@ -339,7 +372,8 @@ export async function touchSession(jti: string): Promise<any | null> {
   const rows = await sql`SELECT * FROM sessions WHERE id = ${jti} AND revoked = FALSE AND expires_at > NOW() LIMIT 1`;
   if (!rows.length) return null;
   await sql`
-    UPDATE sessions SET last_seen_at = NOW(), expires_at = ${sessionExpiryISO()}
+    UPDATE sessions SET last_seen_at = NOW(),
+           expires_at = CASE WHEN support_by IS NULL THEN ${sessionExpiryISO()}::timestamptz ELSE expires_at END
     WHERE id = ${jti} AND last_seen_at < NOW() - INTERVAL '5 minutes'
   `;
   return rows[0];
@@ -406,7 +440,7 @@ export async function passwordLogin(
 
   await sql`UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ${u.id}`;
   const jti = await createSession(tenantId, u.id, ctx);
-  const token = signToken({ kind: 'user', tenant_id: tenantId, user_id: u.id, role: u.role, jti });
+  const token = signToken({ kind: 'user', tenant_id: tenantId, user_id: u.id, role: u.role, jti, ...(u.must_change_password ? { mc: true } : {}) });
   audit({
     tenant_id: tenantId, actor_type: 'user', actor_id: u.id, actor_label: u.name || handle,
     action: 'auth.login', target_type: 'user', target_id: u.id,

@@ -135,13 +135,7 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
     city, logoUrl: '', firmName, initials,
   };
 
-  // 1. The tenant row — the anchor every tenant-scoped row hangs off.
-  await sql`
-    INSERT INTO tenants (id, name, slug, brand_config, subscription_plan, subscription_status)
-    VALUES (${tenantId}, ${firmName}, ${cleanSlug}, ${sql.json(brand_config)}, 'PRO', 'ACTIVE')
-  `;
-
-  // 2. The owner — a login-capable user (email OTP) + a roster mirror.
+  // The hashes first: bcrypt is slow, and the writes below hold a transaction.
   const ownerId = `owner_${tenantId}`;
   const ownerName = (input.ownerName || 'Owner').trim();
   const ownerMeta = { initials, avatar: '', phone: ownerPhone, email: ownerEmail };
@@ -149,53 +143,64 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   const mustChange = input.mustChangePassword !== false; // default true
   const ownerPwHash = await bcrypt.hash(initialPassword, 10);
   const ownerLoginId = plan.owner.loginId;
-
-  await sql`
-    INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
-    VALUES (${ownerId}, ${tenantId}, ${ownerName}, ${ownerLoginId}, ${ownerPhone}, ${ownerEmail}, 'owner', 'active', ${sql.json(ownerMeta)}, ${ownerPwHash}, TRUE, ${mustChange})
-  `;
-  await sql`
-    INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
-    VALUES (${ownerId}, ${ownerName}, ${ownerName.split(' ')[0]}, ${initials}, '', 'owner', 'ACTIVE', ${sql.json(ownerMeta)}, ${tenantId})
-  `;
-
-  // 2.1 The team, exactly as planned — the ids and passwords the console showed.
-  const createdTeam: ProvisionResult['team'] = [];
-  const teamIds: string[] = [];
-  for (let idx = 0; idx < plan.team.length; idx++) {
-    const tm = plan.team[idx];
-    const tmId = `usr_${tenantId}_${Date.now()}_${idx}`;
-    const tmParts = tm.name.split(/\s+/).filter(Boolean);
-    const tmInitials = tmParts.length === 1 ? tmParts[0].slice(0, 2).toUpperCase() : tmParts.slice(0, 2).map(w => w[0]).join('').toUpperCase();
-    const tmMeta = { initials: tmInitials, avatar: '', phone: tm.phone, email: tm.email };
-    const tmPwHash = await bcrypt.hash(tm.password, 10);
-    await sql`
-      INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
-      VALUES (${tmId}, ${tenantId}, ${tm.name}, ${tm.loginId}, ${tm.phone}, ${tm.email}, ${tm.role}, 'active', ${sql.json(tmMeta)}, ${tmPwHash}, ${!!tm.email}, ${mustChange})
-    `;
-    await sql`
-      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
-      VALUES (${tmId}, ${tm.name}, ${tmParts[0]}, ${tmInitials}, '', ${tm.role}, 'ACTIVE', ${sql.json(tmMeta)}, ${tenantId})
-    `;
-    teamIds.push(tmId);
-    createdTeam.push({ name: tm.name, email: tm.email, loginId: tm.loginId, role: tm.role, password: tm.password });
-  }
-
-  // 3. Default settings + routing UNDER the new tenant. A new firm starts EMPTY.
+  const stamp = Date.now();
+  const team = await Promise.all(plan.team.map(async (tm, idx) => {
+    const parts = tm.name.split(/\s+/).filter(Boolean);
+    return {
+      ...tm, id: `usr_${tenantId}_${stamp}_${idx}`, first: parts[0],
+      initials: parts.length === 1 ? parts[0].slice(0, 2).toUpperCase() : parts.slice(0, 2).map(w => w[0]).join('').toUpperCase(),
+      hash: await bcrypt.hash(tm.password, 10),
+    };
+  }));
   const settings = {
     firmName, city,
     stages: LEAD_STATUSES,
     sources: ['99acres', 'MagicBricks', 'Walk-in', 'Referral', 'Website'],
   };
-  await sql`
-    INSERT INTO crm_settings (key, value, tenant_id) VALUES ('default', ${sql.json(settings)}, ${tenantId})
-    ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value
-  `;
-  await sql`
-    INSERT INTO crm_routing_rules (strategy, active_agent_ids, last_assigned_index, tenant_id)
-    VALUES ('round_robin', ${sql.json([ownerId, ...teamIds])}, -1, ${tenantId})
-    ON CONFLICT (tenant_id) DO NOTHING
-  `;
+
+  // ALL OR NOTHING. These writes were one after another with nothing holding
+  // them together, so a failure halfway (a duplicate phone, a dropped
+  // connection) left a firm with an owner and half a team, and the slug taken.
+  // One transaction: either the firm exists whole, or it does not exist.
+  await sql.begin(async (tx: any) => {
+    // 1. The tenant row, the anchor every tenant-scoped row hangs off.
+    await tx`
+      INSERT INTO tenants (id, name, slug, brand_config, subscription_plan, subscription_status)
+      VALUES (${tenantId}, ${firmName}, ${cleanSlug}, ${tx.json(brand_config)}, 'PRO', 'ACTIVE')
+    `;
+    // 2. The owner: a login-capable user and a roster mirror.
+    await tx`
+      INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
+      VALUES (${ownerId}, ${tenantId}, ${ownerName}, ${ownerLoginId}, ${ownerPhone}, ${ownerEmail}, 'owner', 'active', ${tx.json(ownerMeta)}, ${ownerPwHash}, TRUE, ${mustChange})
+    `;
+    await tx`
+      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
+      VALUES (${ownerId}, ${ownerName}, ${ownerName.split(' ')[0]}, ${initials}, '', 'owner', 'ACTIVE', ${tx.json(ownerMeta)}, ${tenantId})
+    `;
+    // 2.1 The team, exactly as planned: the ids and passwords the console showed.
+    for (const tm of team) {
+      const tmMeta = { initials: tm.initials, avatar: '', phone: tm.phone, email: tm.email };
+      await tx`
+        INSERT INTO users (id, tenant_id, name, login_id, phone, email, role, status, metadata, password_hash, email_verified, must_change_password)
+        VALUES (${tm.id}, ${tenantId}, ${tm.name}, ${tm.loginId}, ${tm.phone}, ${tm.email}, ${tm.role}, 'active', ${tx.json(tmMeta)}, ${tm.hash}, ${!!tm.email}, ${mustChange})
+      `;
+      await tx`
+        INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
+        VALUES (${tm.id}, ${tm.name}, ${tm.first}, ${tm.initials}, '', ${tm.role}, 'ACTIVE', ${tx.json(tmMeta)}, ${tenantId})
+      `;
+    }
+    // 3. Default settings and routing under the new tenant. A new firm starts EMPTY.
+    await tx`
+      INSERT INTO crm_settings (key, value, tenant_id) VALUES ('default', ${tx.json(settings)}, ${tenantId})
+      ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value
+    `;
+    await tx`
+      INSERT INTO crm_routing_rules (strategy, active_agent_ids, last_assigned_index, tenant_id)
+      VALUES ('round_robin', ${tx.json([ownerId, ...team.map(t => t.id)])}, -1, ${tenantId})
+      ON CONFLICT (tenant_id) DO NOTHING
+    `;
+  });
+  const createdTeam: ProvisionResult['team'] = team.map(tm => ({ name: tm.name, email: tm.email, loginId: tm.loginId, role: tm.role, password: tm.password }));
 
   return {
     tenant: { id: tenantId, name: firmName, slug: cleanSlug, brand_config },
@@ -6405,7 +6410,7 @@ export interface ActivityInput {
 function canSeeProof(activityAgentId: string | null): boolean {
   const c = getContext();
   if (!c) return false;                                   // no context = no photos
-  if (c.role === 'owner' || c.role === 'manager' || c.role === 'superadmin') return true;
+  if (c.role === 'owner' || c.role === 'manager') return true;
   return Boolean(c.userId && activityAgentId && c.userId === activityAgentId);
 }
 

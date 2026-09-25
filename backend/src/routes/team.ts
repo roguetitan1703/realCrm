@@ -24,7 +24,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // owner: manages everyone. manager: agents only. agent: no user management.
 function canManageRole(targetRole: string): { ok: boolean; msg?: string } {
   const r = getContext()?.role;
-  if (r === 'owner' || r === 'superadmin') return { ok: true };
+  if (r === 'owner') return { ok: true };
   if (r === 'manager') return targetRole === 'agent'
     ? { ok: true }
     : { ok: false, msg: 'Managers can only manage agents.' };
@@ -422,7 +422,7 @@ teamRouter.delete('/users/:id', async (req: Request, res: Response) => {
   try {
     const u = await loadUser(req.tenantId!, req.params.id);
     if (!u) return res.status(404).json({ error: 'User not found' });
-    if (getContext()?.role !== 'owner' && getContext()?.role !== 'superadmin') {
+    if (getContext()?.role !== 'owner') {
       return res.status(403).json({ error: 'Only an owner can delete a user.' });
     }
     if (u.role === 'owner' && await isLastActiveOwner(req.tenantId!, u.id)) {

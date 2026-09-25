@@ -27,7 +27,7 @@ const ctxOf = (req: Request) => ({
   actorType: 'user' as const, actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
   ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null,
 });
-const isDesk = () => ['owner', 'manager', 'admin', 'superadmin'].includes(String(getContext()?.role || ''));
+const isDesk = () => ['owner', 'manager', 'admin'].includes(String(getContext()?.role || ''));
 
 /** An agent writes on what they hold; the desk writes on anything. */
 export async function holds(table: 'crm_leads' | 'crm_owners', id: string | null | undefined): Promise<boolean> {

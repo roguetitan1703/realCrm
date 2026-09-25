@@ -84,7 +84,7 @@ function claim(base: string, taken: Set<string>): string {
  * refuses while there are any, BEFORE the tenant row exists, so a bad roster
  * never leaves a half-made firm behind.
  */
-export function planRoster(input: { ownerName?: string; ownerEmail?: string; ownerPassword?: string; team?: RosterRow[] }): {
+export function planRoster(input: { ownerName?: string; ownerEmail?: string; ownerPhone?: string | null; ownerPassword?: string; team?: RosterRow[] }): {
   owner: { loginId: string; password: string };
   team: PlannedMember[];
   issues: string[];
@@ -126,6 +126,12 @@ export function planRoster(input: { ownerName?: string; ownerEmail?: string; own
   const emails = [ownerEmail, ...team.map(t => t.email)].filter(Boolean);
   for (const e of new Set(emails)) {
     if (emails.filter(x => x === e).length > 1) issues.push(`${e} is on more than one person.`);
+  }
+  // A phone is one person per firm (users has a unique (tenant_id, phone)), so
+  // two rows with one number would fail halfway through creating the firm.
+  const phones = [normalizePhone(input.ownerPhone), ...team.map(t => t.phone)].filter(Boolean) as string[];
+  for (const ph of new Set(phones)) {
+    if (phones.filter(x => x === ph).length > 1) issues.push(`${ph} is on more than one person.`);
   }
   return { owner, team, issues };
 }

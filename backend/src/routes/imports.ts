@@ -37,7 +37,7 @@ const KINDS: ImportKind[] = ['owners', 'clients', 'properties'];
  *  previous import ran off routes an agent could call directly. */
 function mayImport(res: Response): boolean {
   const role = getContext()?.role;
-  if (role === 'owner' || role === 'admin' || role === 'manager' || role === 'superadmin') return true;
+  if (role === 'owner' || role === 'admin' || role === 'manager') return true;
   res.status(403).json({ error: 'forbidden', message: 'Only an owner or manager can import records.' });
   return false;
 }

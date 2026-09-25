@@ -100,6 +100,13 @@ export async function withRequestContext(req: Request, res: Response, next: Next
     // request with no req.user, so every protected route still 401s. The only
     // behaviour that changes is that the pre-login routes now work, which is
     // the entire point of them.
+    // A PASSWORD THAT MUST BE CHANGED FIRST. The sign-in screen already stops
+    // at "set a new password", but the token it holds was a full one: anybody
+    // who lifted it from the browser could use the desk on the password they
+    // were handed. With `mc` it opens only the change itself (then the client
+    // signs in again for a full token), sign-out, and "who am I".
+    const MC_OPEN = ['/api/v1/auth/password/change', '/api/v1/auth/logout', '/api/v1/auth/me'];
+    if (claims.mc && !MC_OPEN.includes(req.originalUrl.split('?')[0])) sessionAlive = false;
     if (!sessionAlive) {
       // Take the token OFF the request, not just out of the context. Several
       // auth routes (/auth/me, /auth/password/change, /auth/sessions) read the
@@ -115,22 +122,35 @@ export async function withRequestContext(req: Request, res: Response, next: Next
       };
       return runWithContext(ctx, () => next());
     }
+    // A SUPPORT SESSION (routes/admin.ts): Delpat reading a firm's desk as its
+    // owner. Read only, enforced here, once, for every route: anything but a
+    // read is refused (422, not 403, so the tab is not signed out), except
+    // ending the session. Whatever it does read is attributed to Delpat.
+    if (claims.sup) {
+      const path = req.originalUrl.split('?')[0];
+      const reads = ['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+      if (!reads && path !== '/api/v1/auth/logout') {
+        return res.status(422).json({ error: 'Read only', message: 'This is a read-only support view.' });
+      }
+    }
     ctx = {
-      tenantId: claims.tenant_id, userId: claims.user_id, role: claims.role, actorType: 'user',
-      actorLabel: null, ip: req.ip || req.socket?.remoteAddress || null,
+      tenantId: claims.tenant_id, userId: claims.user_id, role: claims.role,
+      actorType: claims.sup ? 'superadmin' : 'user',
+      actorLabel: claims.sup ? `Delpat support (${claims.sup})` : null,
+      ip: req.ip || req.socket?.remoteAddress || null,
       userAgent: (req.headers['user-agent'] as string) || null,
     };
     req.user = { id: claims.user_id, tenant_id: claims.tenant_id, role: claims.role as any } as any;
-  } else if (claims && claims.kind === 'superadmin') {
-    ctx = {
-      tenantId: headerTenant, userId: claims.superadmin_id, role: 'superadmin', actorType: 'superadmin',
-      actorLabel: claims.email, ip: req.ip || req.socket?.remoteAddress || null,
-      userAgent: (req.headers['user-agent'] as string) || null,
-    };
-    // Superadmin is an authenticated actor too — requireTenantAuth gates on
-    // req.user, and Delpat acting on a tenant must not be treated as anonymous.
-    req.user = { id: claims.superadmin_id, tenant_id: headerTenant, role: 'superadmin' } as any;
   } else {
+    // A SUPERADMIN TOKEN IS NOT A WAY INTO A FIRM. It was: any firm's routes,
+    // chosen by a header, as a role most checks treated as the owner, for 30
+    // days, recorded nowhere as "Delpat was here". Delpat now enters a firm
+    // only through a support session (read only, two hours, on the firm's own
+    // ledger); a superadmin token here is simply not a firm credential. The
+    // console's own routes (/api/v1/admin) check it themselves.
+    //
+    // Tokenless: the login screen has selected a workspace; scope to it. This is
+    // the pre-authentication hydrate path only.
     // Tokenless: the login screen has selected a workspace; scope to it. This is
     // the pre-authentication hydrate path only.
     ctx = {

@@ -11,7 +11,7 @@
  * because a wrong one there goes out to every buyer under the firm's name.
  */
 
-const DESK_ROLES = new Set(['owner', 'admin', 'manager', 'superadmin']);
+const DESK_ROLES = new Set(['owner', 'admin', 'manager']);
 
 /**
  * EVERY EMPLOYEE MAINTAINS THE BOOK — the firm's decision, taken deliberately.
@@ -51,7 +51,7 @@ export function canAddListing(role?: string | null): boolean {
 }
 
 export function canDeleteRecord(role?: string | null): boolean {
-  return role === 'owner' || role === 'admin' || role === 'superadmin';
+  return role === 'owner' || role === 'admin';
 }
 
 export function isDeskRole(role?: string | null): boolean {
