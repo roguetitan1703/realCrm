@@ -55,7 +55,7 @@ After the API deploy:
   Worth a look on dev at `/admin` before deploying.
 - **Properties Part 7** built (mahalaxmi-batch.md Part 7). 7.6 still wants the
   production count of shortlist use; reading it needs the user's OK.
-- **Photo links on production** are `https://<app>/g/…`; the Vercel rewrite
+- **Photo links on production** are `https://<app>/<firm>/photos/<project>-<code>`; the Vercel rewrite
   already sends every path to the app. The page reads `/api/v1/public/gallery`,
   so it needs the API deployed first like everything else.
 - **Production timing of the dashboard** after the deploy: the only number is

@@ -24,14 +24,15 @@ const isAdminRoute =
   window.location.pathname.replace(/\/+$/, '').endsWith('/admin') ||
   new URLSearchParams(window.location.search).has('admin')
 
-// A listing's photo link (7.5): /g/<ref>, opened by a client from WhatsApp.
-// No workspace and no sign-in, so it mounts on its own like the console.
-const galleryRef = (/^\/g\/([^/?#]+)/.exec(window.location.pathname) || [])[1] || null
+// A listing's photo link (7.5): /<firm slug>/photos/<project>-<code>, opened
+// by a client from WhatsApp. No sign-in, so it mounts on its own like the
+// console, without the desk.
+const galleryAt = /^\/([a-z0-9-]+)\/photos\/([^/?#]+)\/?$/.exec(window.location.pathname)
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    {galleryRef ? (
-      <Gallery refId={decodeURIComponent(galleryRef)} />
+    {galleryAt ? (
+      <Gallery slug={galleryAt[1]} refId={decodeURIComponent(galleryAt[2])} />
     ) : isAdminRoute ? (
       <Admin />
     ) : (

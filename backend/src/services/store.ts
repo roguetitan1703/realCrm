@@ -89,6 +89,8 @@ export interface ProvisionInput {
   ownerEmail: string;
   ownerPhone?: string;
   primaryColor?: string;
+  /** The firm's logo as a data URL (an image, under 512 KB), same as Settings stores. */
+  logoUrl?: string;
   ownerPassword?: string;
   mustChangePassword?: boolean;
   initialTeam?: RosterRow[];
@@ -129,10 +131,16 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   const tenantId = cleanSlug;
   const parts = firmName.trim().split(/\s+/).filter(Boolean);
   const initials = parts.length === 1 ? parts[0].slice(0, 2).toUpperCase() : parts.slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
+  // The logo chosen at onboarding, if any: the same data URL Settings saves,
+  // served from /pwa/<slug>/logo. Anything that is not an image is dropped.
+  const logo = String(input.logoUrl || '');
+  if (logo && (!/^data:image\/(png|jpe?g|webp|svg\+xml);base64,/.test(logo) || logo.length > 720_000)) {
+    throw new Error('The logo must be a PNG, JPG, WebP or SVG image under 512 KB.');
+  }
   const brand_config = {
     primaryColor: input.primaryColor || '#1E6F52',
     surfaceColor: '#F6F5F2',
-    city, logoUrl: '', firmName, initials,
+    city, logoUrl: logo, firmName, initials,
   };
 
   // The hashes first: bcrypt is slow, and the writes below hold a transaction.

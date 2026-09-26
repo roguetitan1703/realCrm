@@ -324,6 +324,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
     ownerPassword: '',
     mustChangePassword: true,
     primaryColor: '#1E6F52',
+    logoUrl: '',
   })
 
   // Every row carries its user ID and password from the moment it appears —
@@ -518,6 +519,29 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
                 />
                 <span>Force owner to change password on first login</span>
               </label>
+            </div>
+
+            {/* The firm's logo: the same data URL Settings saves. */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--ink)', marginBottom: 8 }}>Logo</label>
+              <div className="adm-logo">
+                <span className="adm-logo-box" style={{ background: form.logoUrl ? '#fff' : form.primaryColor }}>
+                  {form.logoUrl ? <img src={form.logoUrl} alt="" /> : (form.firmName || '?').trim().slice(0, 1).toUpperCase()}
+                </span>
+                <label className="btn btn-secondary btn-sm">
+                  {form.logoUrl ? 'Replace' : 'Upload logo'}
+                  <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden onChange={e => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (!file) return
+                    if (file.size > 512 * 1024) { setError('The logo must be under 512 KB.'); return }
+                    const reader = new FileReader()
+                    reader.onload = () => { setError(''); setF('logoUrl', String(reader.result)) }
+                    reader.readAsDataURL(file)
+                  }} />
+                </label>
+                {form.logoUrl && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setF('logoUrl', '')}>Remove</button>}
+              </div>
             </div>
 
             {/* Primary Accent Color Selection */}

@@ -1,7 +1,7 @@
 /**
  * PAGES ANYONE MAY OPEN, WITHOUT SIGNING IN.
  *
- *   GET /api/v1/public/gallery/:ref   a listing's photos, for its photo link
+ *   GET /api/v1/public/gallery/:slug/:ref   a listing's photos, for its photo link
  *                                     (services/gallery.ts decides what is shown)
  *
  * A link that is wrong, turned off or replaced answers 404 with the same body,
@@ -12,9 +12,9 @@ import { publicGallery } from '../services/gallery';
 
 export const publicRouter = Router();
 
-publicRouter.get('/gallery/:ref', async (req: Request, res: Response) => {
+publicRouter.get('/gallery/:slug/:ref', async (req: Request, res: Response) => {
   try {
-    const g = await publicGallery(req.params.ref);
+    const g = await publicGallery(req.params.slug, req.params.ref);
     if (!g) return res.status(404).json({ error: 'This link does not work any more.' });
     res.set('Cache-Control', 'private, max-age=60');
     return res.json({ success: true, ...g });

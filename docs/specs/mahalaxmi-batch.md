@@ -429,15 +429,17 @@ Phase A ships with Part 1; B and C wait on answer 1.
 - **Direction:** a per-property unguessable token, a public read-only gallery
   page, and a way to revoke the link. Internal fields never appear (same
   `NEVER_SHARED_FIELDS` rule as the message).
-- **Built (25 Sep):** `/g/<id>.<signature>` (services/gallery.ts): an HMAC
-  over firm, listing and a version, so every listing with a photo has a link
-  with nothing to create. Turn off (`gallery_off`) and New link (bumps
-  `gallery_version`, the old one dies). The page (modules/Gallery.jsx) shows the
-  firm's name and logo, what the flat is, price, area, floor, furnishing,
-  facing, possession, amenities, description and the photos, from an allow-list
-  built on the server; no owner, flat number or key. The link is in every
-  share and "Copy listing details" message, and on the Photos panel (Copy,
-  Open, Turn off).
+- **Built (25 Sep), reshaped 26 Sep at the user's word:** the link is
+  `/<firm slug>/photos/<project name>-<code>` (services/gallery.ts), the code a
+  12-character HMAC over firm, listing and a version, so every listing with a
+  photo has a link with nothing to create; the project name is for reading and
+  the code alone finds the listing. Turn off (`gallery_off`) and New link (bumps
+  `gallery_version`, the old one dies). The page (modules/Gallery.jsx) is a
+  viewer: the firm's name and logo, the project name, one photo at a time in a
+  fixed frame that fits it whole, a strip of thumbnails; swipe, arrows, keys.
+  No price and no details, and the server sends none. On a phone it fills the
+  screen. The link is in every share and "Copy listing details" message, and on
+  the Photos panel (Copy, Open, Turn off).
 
 ### 7.6 🔶 "Attach property" needs a real review
 - **Said:** attach property needs a serious review and a check of how it's

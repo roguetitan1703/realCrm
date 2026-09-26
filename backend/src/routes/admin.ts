@@ -253,7 +253,7 @@ adminRouter.post('/onboard', async (req: Request, res: Response) => {
   try {
     const {
       firmName, city, slug, adminName, ownerName, adminEmail, ownerEmail,
-      adminPhone, ownerPhone, primaryColor, ownerPassword, mustChangePassword, initialTeam
+      adminPhone, ownerPhone, primaryColor, logoUrl, ownerPassword, mustChangePassword, initialTeam
     } = req.body || {};
 
     const result = await provisionTenant({
@@ -262,6 +262,7 @@ adminRouter.post('/onboard', async (req: Request, res: Response) => {
       ownerEmail: ownerEmail || adminEmail,
       ownerPhone: ownerPhone || adminPhone,
       primaryColor,
+      logoUrl,
       ownerPassword,
       mustChangePassword,
       initialTeam,
@@ -276,7 +277,7 @@ adminRouter.post('/onboard', async (req: Request, res: Response) => {
     return res.status(201).json({ success: true, message: `Workspace '${result.tenant.name}' provisioned.`, ...result });
   } catch (err: any) {
     const msg = err?.message || 'Provisioning failed';
-    const isValidation = /required|email|Roster is not valid/i.test(msg);
+    const isValidation = /required|email|Roster is not valid|logo/i.test(msg);
     return res.status(isValidation ? 400 : 500).json({ success: false, error: isValidation ? 'Invalid workspace details' : 'Provisioning failed', message: msg });
   }
 });
