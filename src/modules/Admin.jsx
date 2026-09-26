@@ -12,7 +12,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api.js'
 import { copyText } from '../lib/clipboard.js'
-import { AppShell } from '../layouts/layouts.jsx'
 import { Button, Field, Input } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import FirmPage from './admin/FirmPage.jsx'
@@ -108,58 +107,43 @@ export default function Admin() {
   // --------------------------------------------------------------------------
   if (!authed) {
     return (
-      <div className="viewport" style={{ background: '#0f0c1b', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, '--accent': '#7c3aed' }}>
-        <div style={{ width: '100%', maxWidth: 400, background: '#18122B', border: '1px solid rgba(124, 58, 237, 0.25)', borderRadius: 16, padding: 32, boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: 18 }}>
-              D
-            </div>
-            <div>
-              <div style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>Delpat</div>
-              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>Superadmin</div>
-            </div>
-          </div>
-
-          {error && <div style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
-
-          <form onSubmit={doAdminLogin}>
-            <Field label="Email">
-              <Input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="username" />
-            </Field>
-            <div style={{ height: 14 }} />
-            <Field label="Password">
-              <Input type="password" value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" />
-            </Field>
-            <Button variant="primary" block type="submit" disabled={signingIn} style={{ marginTop: 20, height: 44, background: '#7c3aed', borderColor: '#7c3aed' }}>
-              {signingIn ? 'Signing in…' : 'Sign in'}
-            </Button>
-          </form>
-        </div>
+      <div className="sa sa-signin">
+        <form className="sa-signin-card" onSubmit={doAdminLogin}>
+          <div className="sa-brand"><b>Delpat</b><span>Superadmin</span></div>
+          {error && <div className="adm-err">{error}</div>}
+          <Field label="Email">
+            <Input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="username" />
+          </Field>
+          <Field label="Password">
+            <Input type="password" value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" />
+          </Field>
+          <Button variant="primary" block type="submit" disabled={signingIn}>{signingIn ? 'Signing in…' : 'Sign in'}</Button>
+        </form>
       </div>
     )
   }
 
   // --------------------------------------------------------------------------
-  // AUTHENTICATED
+  // AUTHENTICATED: one bar across the top, the page under it at full width.
+  // (It was the desk's sidebar holding two links, and every page boxed into
+  // the middle of the screen.)
   // --------------------------------------------------------------------------
   const tenants = data?.tenants || []
-  const adminFooter = {
-    name: 'Delpat',
-    role: 'Superadmin',
-    items: [{ icon: 'x', label: 'Sign out', onClick: doAdminLogout }],
-  }
+  const nav = (k) => { setActiveNav(k); setFirm(null) }
 
   return (
-    <div className="viewport" style={{ '--accent': '#7c3aed', '--accent-wash': 'rgba(124, 58, 237, 0.1)' }}>
-      <AppShell
-        nav={ADMIN_NAV}
-        active={activeNav}
-        onNav={(k) => { setActiveNav(k); setFirm(null) }}
-        footer={adminFooter}
-        firmName="Delpat"
-        sub="Superadmin"
-      >
-        <div className="app-body">
+    <div className="sa">
+      <header className="sa-top">
+        <div className="sa-brand"><b>Delpat</b><span>Superadmin</span></div>
+        <nav className="sa-nav">
+          {ADMIN_NAV.filter(n => n.key).map(n => (
+            <button key={n.key} type="button" className={activeNav === n.key ? 'on' : ''} onClick={() => nav(n.key)}>{n.label}</button>
+          ))}
+        </nav>
+        <button type="button" className="sa-out" onClick={doAdminLogout}>Sign out</button>
+      </header>
+
+      <main className="sa-main">
           {activeNav === 'workspaces' && firm && (
             <FirmPage firmId={firm} onBack={() => { setFirm(null); loadData() }} />
           )}
@@ -167,25 +151,25 @@ export default function Admin() {
           {activeNav === 'workspaces' && !firm && (
             <div className="adm-page">
               <div className="adm-head">
-                <h1>Firms</h1>
-                <Button variant="primary" icon="userPlus" onClick={() => setShowOnboardModal(true)}>Onboard a firm</Button>
+                <h1>Firms <span className="adm-count">{tenants.length || ''}</span></h1>
+                <Button variant="primary" icon="plus" onClick={() => setShowOnboardModal(true)}>Onboard a firm</Button>
               </div>
               {loadErr && <div className="adm-err">{loadErr}</div>}
               {!data ? <div className="adm-wait tall" aria-busy="true" /> : (
                 <section className="adm-panel">
                   <table className="adm-tbl adm-firms">
-                    <thead><tr><th>Firm</th><th>People</th><th>Leads</th><th>This week</th><th>Calling</th><th>Properties</th><th>Last work</th><th>Last signed in</th></tr></thead>
+                    <thead><tr><th>Firm</th><th className="num">People</th><th className="num">Leads</th><th className="num">This week</th><th className="num">Calling</th><th className="num">Properties</th><th>Last work</th><th>Last signed in</th></tr></thead>
                     <tbody>
                       {tenants.map(t => {
                         const idle = !t.last_work || Date.now() - new Date(t.last_work).getTime() > 3 * DAY_MS
                         return (
                           <tr key={t.id} className="adm-link" onClick={() => setFirm(t.id)}>
                             <td><b>{t.name}</b><span className="adm-dim">/{t.slug}</span></td>
-                            <td>{t.users}</td>
-                            <td>{Number(t.leads).toLocaleString('en-IN')}</td>
-                            <td>{t.leads_7d}</td>
-                            <td>{Number(t.owners).toLocaleString('en-IN')}</td>
-                            <td>{Number(t.properties).toLocaleString('en-IN')}</td>
+                            <td className="num">{t.users}</td>
+                            <td className="num">{Number(t.leads).toLocaleString('en-IN')}</td>
+                            <td className="num">{t.leads_7d}</td>
+                            <td className="num">{Number(t.owners).toLocaleString('en-IN')}</td>
+                            <td className="num">{Number(t.properties).toLocaleString('en-IN')}</td>
                             <td className={idle ? 'adm-warn' : ''}>{agoShort(t.last_work)}</td>
                             <td>{agoShort(t.last_seen)}</td>
                           </tr>
@@ -204,7 +188,7 @@ export default function Admin() {
               <section className="adm-panel"><Ledger firmId={null} /></section>
             </div>
           )}
-        </div>
+      </main>
 
       {showOnboardModal && (
         <OnboardWorkspaceModal
@@ -219,7 +203,6 @@ export default function Admin() {
       {handoverSummary && (
         <HandoverModal data={handoverSummary} onClose={() => setHandoverSummary(null)} />
       )}
-      </AppShell>
     </div>
   )
 }
@@ -499,7 +482,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
                 <Input value={form.ownerPhone} onChange={e => setF('ownerPhone', e.target.value)} placeholder="9876543210" />
               </Field>
               <Field label="Owner Password">
-                <Input value={form.ownerPassword} onChange={e => setF('ownerPassword', e.target.value)} onBlur={() => plan()} style={{ fontWeight: 600, color: '#7c3aed' }} />
+                <Input value={form.ownerPassword} onChange={e => setF('ownerPassword', e.target.value)} onBlur={() => plan()} style={{ fontWeight: 600 }} />
               </Field>
             </div>
 
@@ -583,7 +566,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
                 <div key={i} style={{ display: 'grid', gridTemplateColumns: TEAM_COLS, gap: 8, alignItems: 'center', background: '#f9f8f6', padding: 10, borderRadius: 10, border: '1px solid var(--line)' }}>
                   <Input value={row.name} onChange={e => updateTeamRow(i, 'name', e.target.value)} onBlur={() => plan()} placeholder="Full name" style={{ fontSize: 12.5 }} />
                   <Input value={row.loginId} onChange={e => updateTeamRow(i, 'loginId', e.target.value)} onBlur={() => plan()} style={{ fontSize: 12.5, fontFamily: 'monospace' }} />
-                  <Input value={row.password} onChange={e => updateTeamRow(i, 'password', e.target.value)} onBlur={() => plan()} style={{ fontSize: 12.5, fontFamily: 'monospace', fontWeight: 600, color: '#7c3aed' }} />
+                  <Input value={row.password} onChange={e => updateTeamRow(i, 'password', e.target.value)} onBlur={() => plan()} style={{ fontSize: 12.5, fontFamily: 'monospace', fontWeight: 600 }} />
                   <Input value={row.phone} onChange={e => updateTeamRow(i, 'phone', e.target.value)} placeholder="Phone" style={{ fontSize: 12.5 }} />
                   <Input type="email" value={row.email} onChange={e => updateTeamRow(i, 'email', e.target.value)} onBlur={() => plan()} placeholder="Email" style={{ fontSize: 12.5 }} />
                   <select value={row.role} onChange={e => updateTeamRow(i, 'role', e.target.value)} style={{ padding: '8px 6px', borderRadius: 6, border: '1px solid var(--line)', fontSize: 12, background: '#fff' }}>

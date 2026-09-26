@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../../lib/api.js'
 import { copyText } from '../../lib/clipboard.js'
 import { supportFragment } from '../../lib/support.js'
-import { Button, Segmented } from '../../components/primitives.jsx'
+import { Button } from '../../components/primitives.jsx'
 import Icon from '../../components/Icon.jsx'
 import Ledger, { fmtWhen } from './Ledger.jsx'
 
@@ -73,7 +73,10 @@ export default function FirmPage({ firmId, onBack }) {
     finally { setBusy('') }
   }
 
-  if (err) return <div className="adm-page"><button className="adm-back" onClick={onBack}><Icon name="chevLeft" size={15} />Firms</button><div className="adm-err">{err}</div></div>
+  const crumb = (name) => (
+    <div className="adm-crumb"><button type="button" onClick={onBack}>Firms</button><span>/</span><b>{name}</b></div>
+  )
+  if (err) return <div className="adm-page">{crumb('')}<div className="adm-err">{err}</div></div>
   if (!d) return <div className="adm-page"><div className="adm-wait tall" aria-busy="true" /></div>
 
   const t = d.tenant
@@ -83,18 +86,20 @@ export default function FirmPage({ firmId, onBack }) {
 
   return (
     <div className="adm-page">
-      <button className="adm-back" onClick={onBack}><Icon name="chevLeft" size={15} />Firms</button>
+      {crumb(t.name)}
       <div className="adm-head">
         <div>
           <h1>{t.name}</h1>
           <div className="adm-sub"><code>/{t.slug}</code><span>{t.plan || 'PRO'} · {(t.status || 'ACTIVE').toLowerCase()}</span><span>Since {new Date(t.created_at).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span></div>
         </div>
-        <Button variant="primary" icon="eye" disabled={busy === 'desk'} onClick={openDesk}>Open desk, read only</Button>
+        <Button variant="secondary" icon="eye" disabled={busy === 'desk'} onClick={openDesk}>Open desk, read only</Button>
       </div>
 
-      <div className="adm-tabs">
-        <Segmented options={[{ value: 'overview', label: 'Overview' }, { value: 'people', label: 'People and sign-ins' }, { value: 'audit', label: 'Audit log' }]} value={tab} onChange={setTab} />
-      </div>
+      <nav className="adm-tabs">
+        {[['overview', 'Overview'], ['people', 'People and sign-ins'], ['audit', 'Audit log']].map(([k, label]) => (
+          <button key={k} type="button" className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>
+        ))}
+      </nav>
 
       {tab === 'overview' && (
         <>
