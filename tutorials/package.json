@@ -1,0 +1,18 @@
+{
+  "name": "nivaas-tutorials",
+  "private": true,
+  "type": "module",
+  "description": "Tutorial videos, recorded from the real desk and composed in code. Not part of the app build.",
+  "scripts": {
+    "record": "node record.mjs",
+    "test": "node record.mjs --test",
+    "studio": "remotion studio studio/index.jsx"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.529",
+    "@remotion/google-fonts": "^4.0.529",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.529"
+  }
+}
