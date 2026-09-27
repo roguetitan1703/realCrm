@@ -12,6 +12,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api.js'
 import { copyText } from '../lib/clipboard.js'
+import { AppShell } from '../layouts/layouts.jsx'
 import { Button, Field, Input } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import FirmPage from './admin/FirmPage.jsx'
@@ -19,10 +20,18 @@ import Ledger from './admin/Ledger.jsx'
 
 const COLOR_PRESETS = ['#7C3AED', '#1E6F52', '#1D4ED8', '#B45309', '#B91C1C', '#0F766E', '#0E7490', '#BE185D']
 
+// The console's navigation, in the desk's own sidebar. A firm, once opened,
+// gets its own section under its name: its pages are places to go, not tabs
+// on a page.
 const ADMIN_NAV = [
   { section: 'Platform' },
   { key: 'workspaces', label: 'Firms', icon: 'building' },
   { key: 'audit', label: 'Delpat log', icon: 'shield' },
+]
+const FIRM_NAV = [
+  { key: 'overview', label: 'Overview', icon: 'grid' },
+  { key: 'people', label: 'People and sign-ins', icon: 'people' },
+  { key: 'ledger', label: 'Audit log', icon: 'note' },
 ]
 
 const DAY_MS = 86400000
@@ -44,15 +53,20 @@ export default function Admin() {
   const [loadErr, setLoadErr] = useState('')
   const [activeNav, setActiveNav] = useState('workspaces')
   // A firm opened from the list. In the URL (?firm=), so a reload stays on it.
-  const [firm, setFirmState] = useState(() => new URLSearchParams(window.location.search).get('firm'))
-  const setFirm = (id) => {
-    setFirmState(id)
+  const readUrl = () => {
     const p = new URLSearchParams(window.location.search)
-    if (id) p.set('firm', id); else p.delete('firm')
+    return { firm: p.get('firm'), page: FIRM_NAV.some(n => n.key === p.get('page')) ? p.get('page') : 'overview' }
+  }
+  const [at, setAt] = useState(readUrl)
+  const firm = at.firm
+  const setFirm = (id, page = 'overview') => {
+    setAt({ firm: id, page })
+    const p = new URLSearchParams(window.location.search)
+    if (id) { p.set('firm', id); p.set('page', page) } else { p.delete('firm'); p.delete('page') }
     window.history.pushState(null, '', `${window.location.pathname}?${p}`)
   }
   useEffect(() => {
-    const onPop = () => setFirmState(new URLSearchParams(window.location.search).get('firm'))
+    const onPop = () => setAt(readUrl())
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
@@ -129,23 +143,28 @@ export default function Admin() {
   // the middle of the screen.)
   // --------------------------------------------------------------------------
   const tenants = data?.tenants || []
-  const nav = (k) => { setActiveNav(k); setFirm(null) }
+  const openFirm = tenants.find(t => t.id === firm)
+  const nav = [
+    ...ADMIN_NAV,
+    ...(firm ? [{ section: openFirm?.name || 'Firm' }, ...FIRM_NAV.map(n => ({ ...n, key: `firm:${n.key}` }))] : []),
+  ]
+  const active = firm ? `firm:${at.page}` : activeNav
+  const onNav = (k) => {
+    if (k.startsWith('firm:')) { setFirm(firm, k.slice(5)); return }
+    setActiveNav(k); setFirm(null)
+  }
+  const footer = {
+    agent: { initials: 'D', avatar: '' },
+    name: 'Delpat',
+    role: 'Superadmin',
+    items: [{ icon: 'x', label: 'Sign out', onClick: doAdminLogout }],
+  }
 
   return (
-    <div className="sa">
-      <header className="sa-top">
-        <div className="sa-brand"><b>Delpat</b><span>Superadmin</span></div>
-        <nav className="sa-nav">
-          {ADMIN_NAV.filter(n => n.key).map(n => (
-            <button key={n.key} type="button" className={activeNav === n.key ? 'on' : ''} onClick={() => nav(n.key)}>{n.label}</button>
-          ))}
-        </nav>
-        <button type="button" className="sa-out" onClick={doAdminLogout}>Sign out</button>
-      </header>
-
-      <main className="sa-main">
-          {activeNav === 'workspaces' && firm && (
-            <FirmPage firmId={firm} onBack={() => { setFirm(null); loadData() }} />
+    <div className="viewport sa">
+      <AppShell nav={nav} active={active} onNav={onNav} footer={footer} firmName="Delpat" sub="Superadmin">
+          {firm && (
+            <FirmPage firmId={firm} page={at.page} onBack={() => { setActiveNav('workspaces'); setFirm(null); loadData() }} />
           )}
 
           {activeNav === 'workspaces' && !firm && (
@@ -182,13 +201,13 @@ export default function Admin() {
             </div>
           )}
 
-          {activeNav === 'audit' && (
+          {activeNav === 'audit' && !firm && (
             <div className="adm-page">
               <div className="adm-head"><h1>Delpat log</h1></div>
               <section className="adm-panel"><Ledger firmId={null} /></section>
             </div>
           )}
-      </main>
+      </AppShell>
 
       {showOnboardModal && (
         <OnboardWorkspaceModal

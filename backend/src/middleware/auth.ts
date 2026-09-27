@@ -197,7 +197,7 @@ export async function requireTenantAuth(req: Request, res: Response, next: NextF
       return res.status(401).json({ error: 'Unauthorized: Invalid Tenant Context' });
     }
     if (tenant.subscription_status !== 'ACTIVE') {
-      return res.status(403).json({ error: 'Forbidden: Tenant workspace inactive or expired' });
+      return res.status(403).json({ error: 'Workspace inactive', message: 'This workspace is not active. Please contact Delpat.' });
     }
     req.tenant = tenant;
     req.tenantId = tenantSlugOrId;

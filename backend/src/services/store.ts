@@ -3731,7 +3731,11 @@ export async function assignProjectOwners(opts: {
 }
 
 export async function getOwnerById(id: string): Promise<any | null> {
-  const rows = await sql`SELECT * FROM crm_owners WHERE id = ${id} AND tenant_id = ${tid()} LIMIT 1`;
+  // AN AGENT'S ROW, OR NOT FOUND. The list was scoped to the agent but one row
+  // by id was not, for reading or (through updateOwner) for changing: an agent
+  // could move another agent's row to any status, or to themselves. Same rule
+  // as a lead: not yours reads as not there.
+  const rows = await sql`SELECT * FROM crm_owners WHERE id = ${id} AND tenant_id = ${tid()} AND ${ownerScope()} LIMIT 1`;
   if (!rows[0]) return null;
   const events = await getTimelineEvents(id);
   return { ...rowToOwner(rows[0]), timeline: events.map(mapEventForClient) };
@@ -3741,6 +3745,11 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
   const t = tid();
   const existing = await getOwnerById(id);
   if (!existing) return null;
+  // An agent does not hand a row to somebody else; that is the desk's.
+  const c = getContext();
+  if (c?.role === 'agent' && patch.agentId !== undefined && patch.agentId !== c.userId) {
+    patch = { ...patch }; delete patch.agentId;
+  }
   const next = {
     name: patch.name !== undefined ? patch.name : existing.name,
     phone: patch.phone !== undefined ? patch.phone : existing.phone,
@@ -4509,7 +4518,7 @@ export async function listProperties(opts: {
   // twelve filters silently stopped doing anything.
   category?: string; bhk?: string; subtype?: string; furnishing?: string;
   facing?: string; possession?: string; ownership?: string; transaction?: string;
-  verified?: string;
+  verified?: string; tower?: string;
   excludeId?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
   const t = tid();
@@ -4561,6 +4570,9 @@ export async function listProperties(opts: {
   if (transaction.length) where.push(sql`transaction_type IN ${sql(transaction)}`);
   // 7.1 Checked on a visit, or not yet. Both picked is no filter.
   const verified = many(opts.verified);
+  // 4.4 A tower, inside a project. The listing's wing, or its older `tower`.
+  const tower = many(opts.tower);
+  if (tower.length) where.push(sql`lower(coalesce(nullif(wing, ''), tower, '')) IN ${sql(tower.map(x => x.toLowerCase()))}`);
   if (verified.length === 1) where.push(verified[0] === 'yes' ? sql`verified_at IS NOT NULL` : sql`verified_at IS NULL`);
   if (opts.project) {
     // A project is a grouping lens over the `project`/`society` fields, not a

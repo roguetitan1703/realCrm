@@ -294,9 +294,14 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   card reads e.g. **"Rupali 40 · Aniket 8 · Unassigned 5"**. Count and names come
   from one query (CLAUDE.md §3.3).
 
-### 4.4 🔶 Tower filter
+### 4.4 ✅ Tower filter
 - **Said:** needed for calling (owners) and properties.
-- **State (25 Sep):** Calling has it (Filter → Tower, inside a project). Properties does not.
+- **Done:** Calling (Filter → Tower, inside a project) and, 27 Sep, Properties:
+  with one project picked, Filter offers that project's towers (from its
+  page's own wings); changing the project clears it. Also fixed on the way: the
+  Project filter and the project page were both `?project=` in the address, so
+  a reload of a project-filtered list opened the project page; the filter is
+  `in-project` now.
 - **Depends on:** 5.3. Tower must be a real column, not buried in `unit_ref`.
 
 ### 4.5 ✅ "Key Received" ends the calling walk, and Reject closes a record — `ce40bd1`
@@ -441,7 +446,7 @@ Phase A ships with Part 1; B and C wait on answer 1.
   screen. The link is in every share and "Copy listing details" message, and on
   the Photos panel (Copy, Open, Turn off).
 
-### 7.6 🔶 "Attach property" needs a real review
+### 7.6 ✅ "Attach property" needs a real review
 - **Said:** attach property needs a serious review and a check of how it's
   actually used.
 - **Open:** measure use first (how many attaches per firm, from where), then
@@ -453,8 +458,11 @@ Phase A ships with Part 1; B and C wait on answer 1.
   flats in one building looked identical in it. Now: Remove on a shortlisted
   row, history on the lead AND the flat, shortlist changes queued per lead, the
   modal stays open with rows marked Added and a Done count, flat numbers shown.
-- **Not measured on production.** Dev holds demo use only (delpat 1, urban 27,
-  raipur 28). The production count needs the user's OK to read.
+- **Measured on production, 27 Sep (read-only, the user's OK):** bhumi 9
+  attaches on 6 of its 709 leads, 7 of them in the last 30 days (last one that
+  morning); mahalaxmi 1 on 1 of 112. The visit verdict (liked / rejected) has
+  never been recorded by either paying firm. Attach is used lightly, by one
+  firm; the verdict is unused.
 
 ---
 

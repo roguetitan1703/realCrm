@@ -169,7 +169,7 @@ export function subscribeAuthFailure(fn) {
 }
 
 /**
- * 401/403 on a TENANT call means this token is finished. Deliberately not
+ * 401 on a TENANT call means this token is finished. Deliberately not
  * wired to the /admin console's token: the two identities are kept apart
  * everywhere else, and signing out of one must not sign out of the other.
  */
@@ -424,7 +424,12 @@ async function request(endpoint, options = {}) {
       try { const body = await res.clone().json(); detail = body?.message || body?.error || ''; } catch { /* not json */ }
       // ANY call may be the one that discovers the session is over — not just
       // the boot read. See noteSessionExpired().
-      if (res.status === 401 || res.status === 403) noteSessionExpired(endpoint);
+      // ONLY 401 ENDS A SESSION. A 403 is "you may not do this" (a manager's
+      // action, a record that changed hands, a firm whose plan is inactive), and
+      // it signed the person out as if their session had expired. A dead
+      // session always answers 401 (middleware/auth.ts), so nothing relied on
+      // 403 for it; a refusal now shows its reason and leaves them signed in.
+      if (res.status === 401) noteSessionExpired(endpoint);
       throw new Error(`API Error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
     }
     const data = await res.json();

@@ -66,7 +66,7 @@ const FILTER_LISTS = ['source', 'locality', 'agent', 'flag']
 const PROP_SCALARS = ['sortKey', 'sortDir']
 const PROP_LISTS = [
   'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
-  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'tower',
 ]
 
 function readBag(p, scalars, lists) {
@@ -84,8 +84,26 @@ function writeBag(p, f, scalars, lists) {
 
 const readFilters = (p) => readBag(p, FILTER_SCALARS, FILTER_LISTS)
 const writeFilters = (p, f) => writeBag(p, f, FILTER_SCALARS, FILTER_LISTS)
-const readPropFilters = (p) => readBag(p, PROP_SCALARS, PROP_LISTS)
-const writePropFilters = (p, f) => writeBag(p, f, PROP_SCALARS, PROP_LISTS)
+// THE PROJECT FILTER IS NOT THE PROJECT PAGE. Both were `?project=`: filter
+// the list by a project, reload or go back, and the URL opened that project's
+// page instead. The filter is `in-project` in the address; the bag keeps
+// calling it `project`, which is what the API and the filter panel use.
+const PROP_URL_NAME = { project: 'in-project' }
+const readPropFilters = (p) => {
+  const q = new URLSearchParams()
+  for (const [k, v] of p.entries()) {
+    if (k === 'project') continue                       // the project page's key
+    const bagKey = Object.keys(PROP_URL_NAME).find(b => PROP_URL_NAME[b] === k) || k
+    q.append(bagKey, v)
+  }
+  return readBag(q, PROP_SCALARS, PROP_LISTS)
+}
+const writePropFilters = (p, f) => {
+  if (!f) return
+  const q = new URLSearchParams()
+  writeBag(q, f, PROP_SCALARS, PROP_LISTS)
+  for (const [k, v] of q.entries()) p.append(PROP_URL_NAME[k] || k, v)
+}
 
 /** Read screen + selection out of the current URL. */
 export function parseUrl(search = window.location.search) {

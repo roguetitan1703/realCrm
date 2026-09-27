@@ -43,8 +43,9 @@ function Panel({ title, right, children }) {
   )
 }
 
-export default function FirmPage({ firmId, onBack }) {
-  const [tab, setTab] = useState('overview')
+export default function FirmPage({ firmId, page = 'overview', onBack }) {
+  // Which of the firm's pages: chosen in the console's sidebar.
+  const tab = page
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
   const [shown, setShown] = useState(null)   // a password just reset, shown once
@@ -95,11 +96,6 @@ export default function FirmPage({ firmId, onBack }) {
         <Button variant="secondary" icon="eye" disabled={busy === 'desk'} onClick={openDesk}>Open desk, read only</Button>
       </div>
 
-      <nav className="adm-tabs">
-        {[['overview', 'Overview'], ['people', 'People and sign-ins'], ['audit', 'Audit log']].map(([k, label]) => (
-          <button key={k} type="button" className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>
-        ))}
-      </nav>
 
       {tab === 'overview' && (
         <>
@@ -202,7 +198,7 @@ export default function FirmPage({ firmId, onBack }) {
         </>
       )}
 
-      {tab === 'audit' && <Panel title="Audit log"><Ledger firmId={firmId} /></Panel>}
+      {tab === 'ledger' && <Panel title="Audit log"><Ledger firmId={firmId} /></Panel>}
 
       {shown && (
         <div className="modal-overlay adm-overlay" onClick={() => setShown(null)}>

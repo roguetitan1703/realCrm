@@ -51,6 +51,7 @@ propertiesRouter.get('/', async (req: Request, res: Response) => {
       ownership: str(q.ownership),
       transaction: str(q.transaction),
       verified: str(q.verified),
+      tower: str(q.tower),
       excludeId: str(q.excludeId),
       // Whose listings, by owner record — see listProperties.
       ownerId: str(q.ownerId),

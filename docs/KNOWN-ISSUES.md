@@ -66,14 +66,6 @@ it was measured, or it does not belong here.
 
 ## Security and integrity
 
-- **A refusal signs the person out (found 24 Sep; low, 25 Sep).** `src/lib/api.js`
-  treats every 401 AND 403 as a dead session (`noteSessionExpired`), and 29
-  routes answer "you may not do this" with 403. The UI hides those actions from
-  people who may not take them, so the only way to reach one is a stale screen:
-  a record reassigned away while it is still open, a role changed mid-session.
-  New routes use 422 for a refusal. The fix is to let only 401 mean "signed
-  out", after checking no route relies on 403 to force it.
-
 - **10 live accounts hold a known default password (prod, 26 Aug, verified by
   bcrypt-comparing every one of the 30 users).** Each can now be reset from the
   superadmin console's firm page ("New password", which also forces a change at

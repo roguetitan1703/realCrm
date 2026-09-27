@@ -824,7 +824,7 @@ export const PROPERTIES_DEF = {
   // dead end with the record sitting right there.
   searchFields: ['society', 'title', 'locality', 'owner', 'type', 'project', 'tower', 'unit'],
 
-  filterFields: (store) => {
+  filterFields: (store, facets) => {
     // Project options are derived from the live inventory, so a broker can narrow
     // the unit list to one township/society.
     const projects = store?.state?.projects || []
@@ -842,6 +842,8 @@ export const PROPERTIES_DEF = {
     const hasSale = !store?.state?.hydrated || (store?.state?.dealMix?.sale ?? 1) > 0
     return [
       { key: 'project', label: 'Project', icon: 'building', group: 'Where', options: opt(projects) },
+      // 4.4 Only inside one project: the screen passes that project's towers.
+      ...(facets?.towers?.length ? [{ key: 'tower', label: 'Tower', icon: 'layers', group: 'Where', options: facets.towers }] : []),
       { key: 'deal', label: 'Deal', icon: 'tag', multi: false, group: 'What', options: optionsOf(DEALS) },
       // Every option below is generated FROM the canonical vocabulary, so a
       // filter choice can no longer name a value the database doesn't store.
@@ -887,6 +889,7 @@ export const PROPERTIES_DEF = {
     // imports vary. No token translation, and nothing stored gets rewritten.
     if (key === 'status') return vals.some(v => eqi(v, p.status))
     if (key === 'verified') return vals.includes(p.verifiedAt ? 'yes' : 'no')
+    if (key === 'tower') return vals.some(v => eqi(v, p.wing || p.tower))
     return true
   },
 

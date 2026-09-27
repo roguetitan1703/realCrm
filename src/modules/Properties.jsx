@@ -34,13 +34,13 @@ import { canEditListing, canAddListing } from '../lib/permissions.js'
 // from the UI), so the two lists are near-identical but not the same thing.
 export const PROP_FILTER_KEYS = [
   'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
-  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'tower',
 ]
 
 const API_FILTERS = [
   'status', 'deal', 'type', 'locality', 'project',
   'category', 'bhk', 'subtype', 'furnishing', 'facing',
-  'possession', 'ownership', 'transaction', 'verified',
+  'possession', 'ownership', 'transaction', 'verified', 'tower',
 ]
 function toQuery({ page, limit, q, ...filters }) {
   const out = { page, limit, q }
@@ -142,8 +142,18 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   // and keep the sort, which lives in the same bag but is not a filter.
   const setFltP = (v) => {
     const cleared = Object.fromEntries(PROP_FILTER_KEYS.map(k => [k, undefined]))
-    patchBag({ ...cleared, ...(v || {}) })
+    const next = { ...cleared, ...(v || {}) }
+    // A tower belongs to one project: a different project, or none, clears it.
+    if (JSON.stringify(next.project || []) !== JSON.stringify(flt.project || [])) next.tower = undefined
+    patchBag(next)
   }
+  // 4.4 THE TOWERS OF THE ONE PROJECT PICKED, for the Tower filter. Read from
+  // the project, the same aggregate its page groups units by; with no project
+  // or several, there is no tower to offer.
+  const oneProject = flt.project?.length === 1 ? flt.project[0] : null
+  const { data: projectTowers } = useServerData(
+    () => (oneProject ? api.getProject(oneProject).then(r => r?.project?.wings || []) : Promise.resolve([])),
+    [oneProject], [])
   const setQP = (v) => { setQ(v); setPage(1) }
   const setSortKeyP = (v) => patchBag({ sortKey: v })
   const setSortDirP = (v) => patchBag({ sortDir: v })
@@ -184,6 +194,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
     source,
     onOpen: (p) => open(p.id),
     filters: flt, onFilters: setFltP,
+    facets: { towers: (projectTowers || []).map(t => ({ value: t, label: t })) },
     search: q, onSearch: setQP,
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
     kpis, view, onView: setView, phone,
