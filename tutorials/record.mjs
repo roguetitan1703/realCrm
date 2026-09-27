@@ -42,7 +42,10 @@ const LOGINS = {
 // zoom to 1.6x and stay sharp on a 1920×1080 video.
 const DEVICES = {
   desk: { viewport: { width: 1600, height: 900 }, deviceScaleFactor: 2 },
-  phone: { ...devices['iPhone 13'], deviceScaleFactor: 3 },
+  // The phone's whole screen, as an installed app has it. Playwright's
+  // "iPhone 13" is 390×664, the space under Safari's address bar, which
+  // recorded as a squat, square-looking phone.
+  phone: { ...devices['iPhone 13'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 },
 }
 
 // Pacing, in ms. The cursor travels during LEAD; DWELL lets the result land.
@@ -95,6 +98,42 @@ async function settledBox(page, loc) {
     await page.waitForTimeout(90)
   }
   return prev && { x: prev.x, y: prev.y, w: prev.width, h: prev.height }
+}
+
+// A native <select>'s list, drawn into the page for the camera: under the
+// box (or over it, if there is more room there), in the page's own type,
+// scrolled so the option about to be chosen is in view. Only ever on a
+// recording; it takes no clicks and is removed before the real choice is made.
+async function openDrawnList(sel, chosen) {
+  await sel.evaluate((el, chosen) => {
+    document.getElementById('__tut_menu')?.remove()
+    const r = el.getBoundingClientRect(), font = getComputedStyle(el).fontFamily
+    const rowH = 42, want = el.options.length * rowH + 12
+    const below = innerHeight - r.bottom - 14, above = r.top - 14
+    const down = below >= Math.min(want, 260) || below >= above
+    const h = Math.min(want, down ? below : above)
+    const menu = document.createElement('div')
+    menu.id = '__tut_menu'
+    Object.assign(menu.style, {
+      position: 'fixed', left: `${r.left}px`, width: `${r.width}px`, top: `${down ? r.bottom + 6 : r.top - 6 - h}px`, height: `${h}px`,
+      overflow: 'hidden', background: '#fff', border: '1px solid rgba(35,35,31,.12)', borderRadius: '12px',
+      boxShadow: '0 16px 40px rgba(35,35,31,.22)', padding: '6px', boxSizing: 'border-box', zIndex: '2147483647', fontFamily: font,
+    })
+    for (const o of el.options) {
+      const d = document.createElement('div')
+      d.textContent = o.textContent
+      d.dataset.tutOption = o.textContent
+      Object.assign(d.style, {
+        height: `${rowH}px`, display: 'flex', alignItems: 'center', padding: '0 12px', borderRadius: '8px', fontSize: '15px',
+        color: '#23231F', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: o.selected ? '600' : '400',
+      })
+      menu.appendChild(d)
+    }
+    document.body.appendChild(menu)
+    const pick = [...menu.children].find(c => c.dataset.tutOption === chosen)
+    if (pick) menu.scrollTop = Math.max(0, pick.offsetTop - h / 2 + rowH / 2)
+  }, chosen)
+  return sel.page().locator('#__tut_menu > div').filter({ hasText: chosen }).first()
 }
 
 async function signIn(browser, who, device) {
@@ -212,6 +251,7 @@ async function play(browser, tut, { record, voice }) {
     }
     await track(LEAD)
     const tAct = now()
+    let pick = null
     if (kind === 'click') await loc.click()
     else if (kind === 'type') {
       await loc.click()
@@ -221,7 +261,23 @@ async function play(browser, tut, { record, voice }) {
     }
     // A native dropdown's list is drawn by the operating system, not the page,
     // so it never appears in the capture: the choice lands in the box instead.
-    else if (kind === 'choose') await loc.selectOption({ label: step.option })
+    // On a recording the list is drawn into the page, opened, and the option
+    // picked from it with the cursor, as a second beat of the same step.
+    else if (kind === 'choose') {
+      if (record) {
+        const opt = await openDrawnList(loc, step.option)
+        await page.waitForTimeout(450)
+        const ob = await settledBox(page, opt)
+        const t2 = now()
+        await page.waitForTimeout(950)
+        const t2Act = now()
+        await opt.evaluate(el => { el.style.background = 'rgba(183,121,31,.16)' })
+        await page.waitForTimeout(260)
+        await page.evaluate(() => document.getElementById('__tut_menu')?.remove())
+        await loc.selectOption({ label: step.option })
+        pick = { box: ob, boxes: [{ t: t2, ...ob }], tStart: t2, tAct: t2Act }
+      } else await loc.selectOption({ label: step.option })
+    }
     // The file picker is the operating system's too; the file is handed over.
     else if (kind === 'upload') {
       const [chooser] = await Promise.all([page.waitForEvent('filechooser'), loc.click()])
@@ -236,11 +292,14 @@ async function play(browser, tut, { record, voice }) {
       const need = tStart + VOICE_AT + line.ms + 450 - now()
       if (need > 0) await page.waitForTimeout(need)
     }
-    timeline.push({
-      voice: line || null,
-      n: shown.indexOf(step) + 1, say: step.say, kind, zoom: step.zoom || 1, spotlight: step.spotlight !== false,
-      box, boxes, goneAt, tStart, tAct, tEnd: now(),
-    })
+    const n = shown.indexOf(step) + 1, zoom = step.zoom || 1
+    if (pick) {
+      // Opening the list, then choosing from it: one caption, one line said.
+      timeline.push({ voice: line || null, n, say: step.say, kind: 'click', zoom, box, boxes, goneAt: null, tStart, tAct, tEnd: pick.tStart })
+      timeline.push({ voice: null, n, say: step.say, kind: 'click', zoom, ...pick, goneAt: null, tEnd: now() })
+    } else {
+      timeline.push({ voice: line || null, n, say: step.say, kind, zoom, box, boxes, goneAt, tStart, tAct, tEnd: now() })
+    }
   }
 
   if (record) {
@@ -281,7 +340,10 @@ async function main() {
         // file be replaced while a player has it open, and that should not
         // cost the render.
         const fresh = path.join(HERE, 'out', `${id}.new.mp4`), final = path.join(HERE, 'out', `${id}.mp4`)
-        execSync(`npx remotion render studio/index.jsx Tutorial "${fresh}" --props="{\\"id\\":\\"${id}\\"}" --concurrency=4 --log=error`, { cwd: HERE, stdio: 'inherit' })
+        // Frames as PNG and the video in standard (limited-range BT.709) colour.
+        // The default JPEG frames made a full-range file that most players
+        // read as limited, which crushed darks and blew out lights.
+        execSync(`npx remotion render studio/index.jsx Tutorial "${fresh}" --props="{\\"id\\":\\"${id}\\"}" --image-format=png --color-space=bt709 --pixel-format=yuv420p --crf=16 --concurrency=4 --log=error`, { cwd: HERE, stdio: 'inherit' })
         try { fs.renameSync(fresh, final); console.log(`✓ tutorials/out/${id}.mp4`) }
         catch { console.log(`✓ tutorials/out/${id}.new.mp4 (the old ${id}.mp4 is open somewhere, so it was left alone)`) }
       }

@@ -5,7 +5,7 @@
 // with the time each was painted, and timeline.json, each step with what it
 // says and where its target sat. Everything the viewer's eye is led by is
 // drawn here from those numbers: the camera that zooms onto the step, the
-// cursor, the ring and dimming around the target, the caption, the progress.
+// cursor, the ring around the target, the caption, the progress.
 //
 // Times are milliseconds of the recording (r). The video is an intro card,
 // then the recording, then a closing card.
@@ -30,7 +30,9 @@ const C = { ink: '#23231F', muted: '#77756E', linen: '#F6F5F2', bg: '#ECE8DF', a
 
 // The screen sits inset on the backdrop at rest and fills the frame when the
 // camera moves in. MOVE is how long the camera takes to get somewhere.
-const INSET = 0.86, MOVE = 1050
+// A phone is tall and narrow, so it is given more of the frame's height.
+const MOVE = 1050
+const insetFor = (vp) => (vp.height > vp.width ? 0.93 : 0.86)
 
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v))
 const ease = (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2)
@@ -44,7 +46,7 @@ const window01 = (r, a, b, d = 250) => clamp((r - a) / d) * (1 - clamp((r - b) /
 // mid-zoom pushed the picture back and forth by a pixel or two, which read as
 // shake. Now each move is planned once, as a rectangle already inside the
 // screen, and the camera only ever glides from one rectangle to the next.
-const restScale = (vp) => Math.min(W / vp.width, H / vp.height) * INSET
+const restScale = (vp) => Math.min(W / vp.width, H / vp.height) * insetFor(vp)
 
 function viewFor(vp, z, cx, cy) {
   const w = W / restScale(vp) / z, h = (w * H) / W
@@ -224,8 +226,7 @@ export function Tutorial({ id, timeline: tl }) {
     const o = window01(rr, step.tStart + 200, until)
     if (o > 0) {
       const pad = 6
-      const a = toVideo({ x: box.x - pad, y: box.y - pad })
-      ring = { o, x: a.x, y: a.y, w: (box.w + pad * 2) * k, h: (box.h + pad * 2) * k, dim: step.spotlight }
+      ring = { o, x: (box.x - pad) * dsf, y: (box.y - pad) * dsf, w: (box.w + pad * 2) * dsf, h: (box.h + pad * 2) * dsf }
     }
   }
 
@@ -234,12 +235,14 @@ export function Tutorial({ id, timeline: tl }) {
   // whose target would be under it, decided once per step so it never jumps.
   let caption = null
   if (step && r >= 0) {
-    const end = tl.steps[i + 1]?.tStart ?? last.tEnd + 500
-    const o = ease(clamp((rr - step.tStart - 60) / 320)) * (1 - clamp((rr - (end - 200)) / 200))
-    const low = step.box && toVideo({ x: 0, y: step.box.y + step.box.h }, cameraAt(step.tAct, tl, keys)).y > H - 210
+    // A step can be two beats (open a list, then pick from it): one caption.
+    const first = tl.steps.find(x => x.n === step.n)
+    const end = tl.steps.slice(i + 1).find(x => x.n !== step.n)?.tStart ?? last.tEnd + 500
+    const o = ease(clamp((rr - first.tStart - 60) / 320)) * (1 - clamp((rr - (end - 200)) / 200))
+    const low = first.box && toVideo({ x: 0, y: first.box.y + first.box.h }, cameraAt(first.tAct, tl, keys)).y > H - 210
     if (o > 0) caption = { o, top: !!low }
   }
-  const done = tl.steps.filter(s => rr >= s.tAct).length
+  const done = new Set(tl.steps.filter(s => rr >= s.tAct).map(s => s.n)).size
   const progress = done / Math.max(1, tl.total)
   const s = k / dsf   // image pixels to video pixels
   const radius = phone ? 52 : 16
@@ -258,15 +261,18 @@ export function Tutorial({ id, timeline: tl }) {
             filter: r > tl.duration ? `blur(${(14 * ease(clamp((r - tl.duration) / 600))) / s}px)` : undefined,
           }}>
             <Img src={staticFile(`rec/${id}/${shot.file}`)} style={{ width: '100%', height: '100%', display: 'block' }} />
+            {/* No dimming round the target. It spilled over the whole frame at
+                .28 for most of every step, and on top of the app's own backdrop
+                behind a modal it turned the video grey. The zoom and the ring
+                already say where to look. */}
+            {ring && (
+              <div style={{
+                position: 'absolute', left: ring.x, top: ring.y, width: ring.w, height: ring.h, borderRadius: 12 / s,
+                border: `${3 / s}px solid ${C.accent}`, opacity: ring.o,
+                boxShadow: `0 0 0 ${6 / s}px ${C.accentSoft}`,
+              }} />
+            )}
           </div>
-          {ring && (
-            <div style={{
-              position: 'absolute', left: 0, top: 0, width: ring.w, height: ring.h, borderRadius: 12,
-              transform: `translate(${ring.x}px, ${ring.y}px)`,
-              border: `3px solid ${C.accent}`, opacity: ring.o,
-              boxShadow: `0 0 0 6px ${C.accentSoft}${ring.dim ? ', 0 0 0 4000px rgba(24,22,18,.28)' : ''}`,
-            }} />
-          )}
         </AbsoluteFill>
       )}
 
@@ -280,15 +286,19 @@ export function Tutorial({ id, timeline: tl }) {
       {cursorOpacity > 0 && <div style={{ opacity: cursorOpacity }}><Cursor x={cur.x} y={cur.y} press={press} /></div>}
 
       {caption && (
-        <div style={{ position: 'absolute', left: 0, right: 0, [caption.top ? 'top' : 'bottom']: 54, display: 'flex', justifyContent: 'center' }}>
+        // On a phone the caption stands beside it, in the empty half of the
+        // frame, rather than over the bottom of its screen.
+        <div style={phone
+          ? { position: 'absolute', left: 90, width: Math.max(420, toVideo({ x: 0, y: 0 }).x - 170), top: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }
+          : { position: 'absolute', left: 0, right: 0, [caption.top ? 'top' : 'bottom']: 54, display: 'flex', justifyContent: 'center' }}>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 22, maxWidth: 1400,
+            display: 'flex', alignItems: phone ? 'flex-start' : 'center', flexDirection: phone ? 'column' : 'row', gap: phone ? 18 : 22, maxWidth: 1400,
             background: 'rgba(35,35,31,.94)', color: C.linen, borderRadius: 18, padding: '22px 34px 22px 24px',
             boxShadow: '0 18px 50px rgba(0,0,0,.28)',
-            opacity: caption.o, transform: `translateY(${(1 - caption.o) * (caption.top ? -14 : 14)}px)`,
+            opacity: caption.o, transform: phone ? `translateX(${(1 - caption.o) * -16}px)` : `translateY(${(1 - caption.o) * (caption.top ? -14 : 14)}px)`,
           }}>
             <div style={{ flex: 'none', minWidth: 58, height: 58, borderRadius: 14, background: C.accent, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: DISPLAY, fontSize: 30, fontWeight: 600 }}>{step.n}</div>
-            <div style={{ fontSize: 36, fontWeight: 500, lineHeight: 1.25 }}>{step.say}</div>
+            <div style={{ fontSize: phone ? 40 : 36, fontWeight: 500, lineHeight: 1.25 }}>{step.say}</div>
           </div>
         </div>
       )}

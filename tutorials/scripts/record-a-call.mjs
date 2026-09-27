@@ -9,10 +9,10 @@ export default {
   start: '?screen=today',
   steps: [
     { say: 'Tap the phone icon next to the lead', click: { role: 'button', name: 'Call Riya Kapoor' } },
-    { say: 'Tap Yes, continue. Your phone dials them.', click: { role: 'button', name: 'Yes, continue' }, zoom: 1.3 },
-    { say: 'After the call, choose how it went', choose: { css: 'select' }, option: 'Interested · scheduling a site visit', zoom: 1.3 },
-    { say: 'Add a short note', type: { placeholder: 'Add a remark…' }, text: 'Wants a 2 BHK in Hinjewadi. Visit on Saturday.', zoom: 1.3 },
-    { say: 'Tap Save', click: { role: 'button', name: 'Save', exact: true }, zoom: 1.3 },
+    { say: 'Tap Yes, continue. Your phone dials them.', click: { role: 'button', name: 'Yes, continue' } },
+    { say: 'After the call, choose how it went', choose: { css: 'select' }, option: 'Interested · scheduling a site visit' },
+    { say: 'Add a short note', type: { placeholder: 'Add a remark…' }, text: 'Wants a 2 BHK in Hinjewadi. Visit on Saturday.' },
+    { say: 'Tap Save', click: { role: 'button', name: 'Save', exact: true } },
     // Called, Riya is no longer waiting on the to-do list.
     { expect: { gone: 'Riya Kapoor' } },
   ],
