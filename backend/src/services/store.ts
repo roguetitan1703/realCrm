@@ -146,7 +146,12 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   // The hashes first: bcrypt is slow, and the writes below hold a transaction.
   const ownerId = `owner_${tenantId}`;
   const ownerName = (input.ownerName || 'Owner').trim();
-  const ownerMeta = { initials, avatar: '', phone: ownerPhone, email: ownerEmail };
+  // The owner's avatar carries the OWNER's initials. It was given the firm's
+  // (`initials` above, which is the brand's monogram), so Neha Kulkarni of
+  // Harbourline Realty showed as "HR" on every screen that shows a person.
+  const ownerParts = ownerName.split(/\s+/).filter(Boolean);
+  const ownerInitials = ownerParts.length === 1 ? ownerParts[0].slice(0, 2).toUpperCase() : ownerParts.slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  const ownerMeta = { initials: ownerInitials, avatar: '', phone: ownerPhone, email: ownerEmail };
   const initialPassword = plan.owner.password;
   const mustChange = input.mustChangePassword !== false; // default true
   const ownerPwHash = await bcrypt.hash(initialPassword, 10);
@@ -183,7 +188,7 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
     `;
     await tx`
       INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
-      VALUES (${ownerId}, ${ownerName}, ${ownerName.split(' ')[0]}, ${initials}, '', 'owner', 'ACTIVE', ${tx.json(ownerMeta)}, ${tenantId})
+      VALUES (${ownerId}, ${ownerName}, ${ownerName.split(' ')[0]}, ${ownerInitials}, '', 'owner', 'ACTIVE', ${tx.json(ownerMeta)}, ${tenantId})
     `;
     // 2.1 The team, exactly as planned: the ids and passwords the console showed.
     for (const tm of team) {

@@ -355,7 +355,17 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
     return next
   })
   const dirty = Object.keys(draft).length
-  const save = () => { store.setRouting(draft, 'Saved'); setDraft({}) }
+  // The draft is dropped when the server has taken it, not on the click. It
+  // was cleared at once, so for the length of the request the screen showed
+  // the OLD rule, the name just ticked unticked and "No changes", and a
+  // failed save threw the edit away with nothing left to retry.
+  const [saving, setSaving] = useState(false)
+  const save = async () => {
+    setSaving(true)
+    const ok = await store.setRouting(draft, 'Saved')
+    setSaving(false)
+    if (ok) setDraft({})
+  }
 
   const strategy = val(f.strategy, sideKey === 'leads' ? 'round_robin' : 'manual')
   const rota = val(f.rota, [])
@@ -403,8 +413,8 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
           that leaving with something unsaved is a visible fact, not a silence. */}
       <div className="rt-save">
         <span className="rt-save-n">{dirty ? `${dirty} unsaved change${dirty === 1 ? '' : 's'}` : 'No changes'}</span>
-        <Button variant="ghost" disabled={!dirty} onClick={() => setDraft({})}>Discard</Button>
-        <Button variant="primary" disabled={!dirty || !loaded} onClick={save}>Save changes</Button>
+        <Button variant="ghost" disabled={!dirty || saving} onClick={() => setDraft({})}>Discard</Button>
+        <Button variant="primary" disabled={!dirty || !loaded || saving} onClick={save}>{saving ? 'Saving…' : 'Save changes'}</Button>
       </div>
 
       {/* Stated whenever there is a backlog, not only just after saving: the
