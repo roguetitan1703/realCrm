@@ -493,9 +493,12 @@ Phase A ships with Part 1; B and C wait on answer 1.
 - **Direction:** "Email setup" on each connection builds that text with Copy.
   The key is included only through the owner-only reveal path.
 
-### 9.3 ⬜ Build catches undefined identifiers
+### 9.3 ✅ Build catches undefined identifiers
 - **Why:** the Copy break (Part 0) shipped because `vite build` doesn't catch a
   missing import in JSX. Add an eslint `no-undef` step to `npm run build`.
+- **Done:** `check:names` (eslint.config.js: `no-undef` and `react/jsx-no-undef`
+  only) runs between the vocabulary guard and Vite. 0 errors in `src/` today; a
+  probe file calling an unimported `copyText` and `<MissingPanel />` failed it.
 
 ### 9.4 ⬜ env loader and CRLF
 - **Know:** `.env` lines split on `\n` only. Harmless unless the file has CRLF.

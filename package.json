@@ -9,7 +9,7 @@
     "dev:api:prod": "tsx backend/src/scripts/run-api.ts --env=production --port=5000 --watch",
     "start:api": "tsx backend/src/scripts/run-api.ts --env=production",
     "start:api:dev": "tsx backend/src/scripts/run-api.ts --env=development",
-    "build": "npm run check:vocab && vite build --mode production",
+    "build": "npm run check:vocab && npm run check:names && vite build --mode production",
     "build:dev": "npm run check:vocab && vite build --mode development",
     "preview": "vite preview",
     "seed:dev": "tsx backend/src/scripts/seed-dev.ts",
@@ -22,7 +22,8 @@
     "seed:dev:inventory": "tsx backend/src/scripts/seed-dev-inventory.ts",
     "keys:check": "tsx backend/src/scripts/integration-keys.ts",
     "link:owners": "tsx backend/src/scripts/link-listing-owners.ts",
-    "stages:calling": "tsx backend/src/scripts/calling-stages.ts"
+    "stages:calling": "tsx backend/src/scripts/calling-stages.ts",
+    "check:names": "eslint src scripts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1098.0",
@@ -48,6 +49,10 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/nodemailer": "^8.0.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^15.15.0",
     "playwright": "^1.61.1",
     "tsx": "^4.23.0",
     "vite": "^6.0.7"

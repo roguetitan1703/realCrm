@@ -12,6 +12,28 @@ recorded, update it in place rather than adding a second entry.
 
 ---
 
+## Server-side permissions, reviewed once, route by route (parked 27 Sep)
+
+**What is wrong.** The screens hide what a role may not do, but several routes
+do not check it themselves, so the same request sent straight to the API (an
+agent's token is in their own browser) is allowed. Found 27 Sep: a calling row
+could be read and changed by any agent by its id, including its status and who
+holds it. **That one is fixed** (`e790e25`: not yours reads as not found, and an
+agent cannot hand a row on). Not yet reviewed the same way: property, agreement,
+import, connection, notification and media routes, the record actions
+(`/records/:id/actions/*` are open to every signed-in user by design), and
+which roles may read which lists.
+
+**Why parked.** The user wants it done in one pass, not found piecemeal.
+Reaching it needs a token and hand-made requests; no screen offers it.
+
+**What the fix takes.** One table of route × role (read, change, hand on,
+delete), checked against the code; one scope helper per record type, used by
+both the list and the single record; refusals as 404 for "not yours" and 422
+for "not allowed", never 403 (a 403 no longer signs out, but 422 is the rule).
+
+---
+
 ## Parked by the user, 25 Sep
 
 - **1.1 Today does not scroll on iPhone (installed app).** See
@@ -20,7 +42,8 @@ recorded, update it in place rather than adding a second entry.
   reason) shipped in `a44afd3`; the next step is reading those reasons and the
   EC2 checks listed in mahalaxmi-batch.md 1.7.
 - **9.4 env loader and CRLF.** Harmless unless the server's `.env` has CRLF;
-  check `grep -c $'' .env` on EC2 before touching it.
+  check `grep -c $'
+' .env` on EC2 before touching it.
 - **A speed test of each step on production.** Time every screen's reads and
   every common write on the live API, per firm (the dashboard's summaries, Team
   today, Performance, the lead and calling lists, saving a lead, which takes
