@@ -103,6 +103,11 @@ async function main() {
 
   const agents: { id: string }[] = await sql`
     SELECT id FROM users WHERE tenant_id = ${TUTORIAL.tenant} AND role = 'agent' ORDER BY name`;
+  // The agents sign in too, for the tutorials shot on an agent's phone: the
+  // same known password, already changed, so no first-sign-in screen.
+  const bcrypt = (await import('bcryptjs')).default;
+  await sql`UPDATE users SET password_hash = ${await bcrypt.hash(TUTORIAL.password, 10)}, must_change_password = FALSE
+            WHERE tenant_id = ${TUTORIAL.tenant} AND role = 'agent'`;
   // The rota is the agents, not the owner: the tutorial adds someone to it.
   await sql`UPDATE crm_routing_rules SET active_agent_ids = ${sql.json(agents.map(a => a.id))}
             WHERE tenant_id = ${TUTORIAL.tenant}`;
@@ -116,6 +121,21 @@ async function main() {
       INSERT INTO crm_leads (id, tenant_id, name, phone, stage, source, locality, agent_id, req, created_at, updated_at)
       VALUES (${`l_tut_${i}`}, ${TUTORIAL.tenant}, ${`${pick(FIRST)} ${pick(LAST)}`}, ${`+9199555${String(700000 + i).slice(-6)}`},
               ${pick(STAGES)}, ${pick(SOURCES)}, ${req.locality}, ${pick(pool)}, ${sql.json(req)}, ${created}, ${created})`;
+  }
+  // THE LEADS A TUTORIAL NAMES. Random names can repeat, and a tutorial that
+  // clicks "Arjun Nair" must mean one person. These two names cannot come out
+  // of FIRST × LAST above.
+  const rohan = (await sql`SELECT id FROM users WHERE tenant_id = ${TUTORIAL.tenant} AND login_id = 'rohan'`)[0]?.id;
+  const fixed = [
+    { id: 'l_tut_kavya', name: 'Kavya Menon', agent: null, locality: 'Aundh', config: '3 BHK', ago: 1 },      // unassigned
+    { id: 'l_tut_riya', name: 'Riya Kapoor', agent: rohan, locality: 'Hinjewadi', config: '2 BHK', ago: 0 },  // Rohan's, not yet called
+  ];
+  for (const f of fixed) {
+    const at = new Date(now - f.ago * 86400_000 - 3600_000);
+    await sql`
+      INSERT INTO crm_leads (id, tenant_id, name, phone, stage, source, locality, agent_id, req, created_at, updated_at)
+      VALUES (${f.id}, ${TUTORIAL.tenant}, ${f.name}, ${`+9199555${String(799000 + fixed.indexOf(f)).slice(-6)}`}, 'New', 'Website', ${f.locality},
+              ${f.agent}, ${sql.json({ locality: f.locality, config: f.config, budgetMin: 6000000, budgetMax: 9500000 })}, ${at}, ${at})`;
   }
   const [n] = await sql`SELECT count(*)::int n FROM crm_leads WHERE tenant_id = ${TUTORIAL.tenant}`;
   console.log(`✓ ${TUTORIAL.firmName} (/${TUTORIAL.tenant}): owner ${TUTORIAL.ownerEmail}, ${agents.length} agents, ${n.n} leads`);

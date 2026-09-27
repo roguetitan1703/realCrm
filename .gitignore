@@ -96,3 +96,4 @@ backups/
 # Tutorial videos: raw captures and rendered output
 tutorials/out/
 tutorials/public/rec/
+tutorials/.voice-cache/

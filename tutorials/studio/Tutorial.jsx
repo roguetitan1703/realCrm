@@ -10,7 +10,8 @@
 // Times are milliseconds of the recording (r). The video is an intro card,
 // then the recording, then a closing card.
 // ============================================================================
-import { AbsoluteFill, Img, staticFile, useCurrentFrame } from 'remotion'
+import { useMemo } from 'react'
+import { AbsoluteFill, Html5Audio, Img, Sequence, staticFile, useCurrentFrame } from 'remotion'
 import { loadFont as loadDisplay } from '@remotion/google-fonts/SpaceGrotesk'
 import { loadFont as loadSans } from '@remotion/google-fonts/IBMPlexSans'
 
@@ -18,8 +19,10 @@ const { fontFamily: DISPLAY } = loadDisplay('normal', { weights: ['500', '600'],
 const { fontFamily: SANS } = loadSans('normal', { weights: ['400', '500', '600'], subsets: ['latin'] })
 
 export const FPS = 30
-export const INTRO_MS = 3000
-export const OUTRO_MS = 3400
+// The cards last long enough for their spoken line, and never less than this.
+const INTRO_MIN = 3000, OUTRO_MIN = 3400
+export const introMs = (tl) => Math.max(INTRO_MIN, (tl.voice?.intro?.ms || 0) + 1300)
+export const outroMs = (tl) => Math.max(OUTRO_MIN, (tl.voice?.outro?.ms || 0) + 1500)
 const W = 1920, H = 1080
 
 // The product's own palette: charcoal, linen, ochre.
@@ -27,7 +30,7 @@ const C = { ink: '#23231F', muted: '#77756E', linen: '#F6F5F2', bg: '#ECE8DF', a
 
 // The screen sits inset on the backdrop at rest and fills the frame when the
 // camera moves in. MOVE is how long the camera takes to get somewhere.
-const INSET = 0.86, MOVE = 900
+const INSET = 0.86, MOVE = 1050
 
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v))
 const ease = (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2)
@@ -35,46 +38,86 @@ const lerp = (a, b, p) => a + (b - a) * p
 // 0 → 1 over [a, a+d], then 1 → 0 over [b, b+d].
 const window01 = (r, a, b, d = 250) => clamp((r - a) / d) * (1 - clamp((r - b) / d))
 
-// WHERE THE CAMERA IS at time r: zoom and the CSS point it is centred on.
-// Each step moves it to that step's zoom and target; after the last step it
-// comes back out. A move that starts before the previous one finished starts
-// from wherever that one had got to.
-function cameraAt(r, tl) {
+// THE CAMERA IS A RECTANGLE OF THE SCREEN, in the page's CSS pixels, that
+// fills the video frame. It used to be a zoom and a centre point, clamped to
+// the screen's edge on every frame; crossing from "centred" to "clamped"
+// mid-zoom pushed the picture back and forth by a pixel or two, which read as
+// shake. Now each move is planned once, as a rectangle already inside the
+// screen, and the camera only ever glides from one rectangle to the next.
+const restScale = (vp) => Math.min(W / vp.width, H / vp.height) * INSET
+
+function viewFor(vp, z, cx, cy) {
+  const w = W / restScale(vp) / z, h = (w * H) / W
+  const fit = (size, span, c) => (size <= span ? clamp(c - size / 2, 0, span - size) : span / 2 - size / 2)
+  return { x: fit(w, vp.width, cx), y: fit(h, vp.height, cy), w, z }
+}
+const restView = (vp) => viewFor(vp, 1, vp.width / 2, vp.height / 2)
+
+// One planned rectangle per step. A target already comfortably in view at
+// the same zoom does not move the camera: re-centring on every click is what
+// makes a screen recording feel seasick.
+function plan(tl) {
   const vp = tl.viewport
-  const rest = { z: 1, x: vp.width / 2, y: vp.height / 2 }
-  const keys = tl.steps.map(s => ({ t: s.tStart, to: s.box ? { z: s.zoom, x: s.box.x + s.box.w / 2, y: s.box.y + s.box.h / 2 } : rest }))
+  let prev = restView(vp)
+  const keys = []
+  for (const s of tl.steps) {
+    const b = s.box
+    let to = !b || s.zoom === 1 ? restView(vp) : viewFor(vp, s.zoom, b.x + b.w / 2, b.y + b.h / 2)
+    if (b && s.zoom === prev.z && s.zoom !== 1) {
+      const m = prev.w * 0.08, h = (prev.w * H) / W
+      const inside = b.x > prev.x + m && b.x + b.w < prev.x + prev.w - m && b.y > prev.y + m && b.y + b.h < prev.y + h - m
+      if (inside) to = prev
+    }
+    keys.push({ t: s.tStart, to })
+    prev = to
+  }
   const last = tl.steps[tl.steps.length - 1]
-  if (last) keys.push({ t: last.tEnd, to: rest })
-  let cur = rest
+  if (last) keys.push({ t: last.tEnd, to: restView(vp) })
+  return keys
+}
+
+function cameraAt(r, tl, keys) {
+  let cur = restView(tl.viewport)
   for (let i = 0; i < keys.length; i++) {
     const k = keys[i]
     if (r < k.t) break
+    if (k.to === cur) continue
     const until = Math.min(r, keys[i + 1]?.t ?? Infinity)
     const p = ease(clamp((until - k.t) / MOVE))
-    cur = {
-      z: Math.exp(lerp(Math.log(cur.z), Math.log(k.to.z), p)),
-      x: lerp(cur.x, k.to.x, p),
-      y: lerp(cur.y, k.to.y, p),
-    }
+    // Width in log space so zooming in and out feel equally paced; the
+    // centre moves in a straight line.
+    const hc = (cur.w * H) / W, ht = (k.to.w * H) / W
+    const cx = lerp(cur.x + cur.w / 2, k.to.x + k.to.w / 2, p)
+    const cy = lerp(cur.y + hc / 2, k.to.y + ht / 2, p)
+    const w = Math.exp(lerp(Math.log(cur.w), Math.log(k.to.w), p))
+    cur = p >= 1 ? k.to : { x: cx - w / 2, y: cy - (w * H) / W / 2, w, z: k.to.z }
   }
   return cur
 }
 
-// The screen's rectangle on the video for a camera: scale k (video px per CSS
-// px) and its top-left. Centred on the target, but never showing past the
-// screen's edge once it is bigger than the frame.
-function place(cam, vp) {
-  const k = (W / vp.width) * INSET * cam.z
-  const w = vp.width * k, h = vp.height * k
-  const fit = (size, frame, c) => (size <= frame ? (frame - size) / 2 : clamp(frame / 2 - c * k, frame - size, 0))
-  return { k, w, h, x: fit(w, W, cam.x), y: fit(h, H, cam.y) }
+// Where a step's target is at time r: the recorder read it several times
+// while the step played, so the ring follows a button that grows or moves.
+function boxAt(s, r) {
+  const bs = s.boxes?.length ? s.boxes : s.box ? [{ t: s.tStart, ...s.box }] : []
+  if (!bs.length) return null
+  if (r <= bs[0].t) return bs[0]
+  for (let i = 1; i < bs.length; i++) {
+    if (r <= bs[i].t) {
+      const a = bs[i - 1], b = bs[i], p = (r - a.t) / Math.max(1, b.t - a.t)
+      return { x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p), w: lerp(a.w, b.w, p), h: lerp(a.h, b.h, p) }
+    }
+  }
+  return bs[bs.length - 1]
 }
 
-// Where the cursor's tip rests for a step: the middle of the target, or the
-// start of a field it types into.
-const aim = (s) => (s.kind === 'type'
-  ? { x: s.box.x + Math.min(s.box.w * 0.3, 70), y: s.box.y + s.box.h / 2 }
-  : { x: s.box.x + s.box.w / 2, y: s.box.y + s.box.h / 2 })
+// Where the cursor's tip rests for a step: the middle of the target as it was
+// when pressed, or the start of a field it types into.
+const aim = (s) => {
+  const b = boxAt(s, s.tAct)
+  return s.kind === 'type'
+    ? { x: b.x + Math.min(b.w * 0.3, 70), y: b.y + b.h / 2 }
+    : { x: b.x + b.w / 2, y: b.y + b.h / 2 }
+}
 
 function cursorAt(r, tl) {
   let from = { x: tl.viewport.width * 0.7, y: tl.viewport.height * 0.75 }
@@ -102,14 +145,14 @@ function frameAt(r, frames) {
 
 function Cursor({ x, y, press }) {
   return (
-    <svg width="44" height="60" viewBox="0 0 22 30" style={{ position: 'absolute', left: x - 3, top: y - 2, transform: `scale(${press})`, transformOrigin: '3px 2px', filter: 'drop-shadow(0 3px 6px rgba(0,0,0,.35))' }}>
+    <svg width="44" height="60" viewBox="0 0 22 30" style={{ position: 'absolute', left: 0, top: 0, transform: `translate(${x - 3}px, ${y - 2}px) scale(${press})`, transformOrigin: '3px 2px', filter: 'drop-shadow(0 3px 6px rgba(0,0,0,.35))' }}>
       <path d="M1.5 1.5 L1.5 23 L7 18 L11 27 L14.5 25.5 L10.6 16.8 L18 16.8 Z" fill="#141414" stroke="#fff" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   )
 }
 
-function Intro({ tl, ms }) {
-  const out = 1 - clamp((ms - (INTRO_MS - 700)) / 500)
+function Intro({ tl, ms, len }) {
+  const out = 1 - clamp((ms - (len - 700)) / 500)
   const up = (delay) => ({ opacity: clamp((ms - delay) / 500) * out, transform: `translateY(${(1 - ease(clamp((ms - delay) / 600))) * 24}px)` })
   const secs = Math.round(tl.duration / 1000)
   return (
@@ -141,90 +184,108 @@ function Outro({ tl, ms }) {
   )
 }
 
+const f = (ms) => Math.round((ms / 1000) * FPS)
+
 export function Tutorial({ id, timeline: tl }) {
   const frame = useCurrentFrame()
   const ms = (frame / FPS) * 1000
+  const keys = useMemo(() => (tl ? plan(tl) : []), [tl])
   if (!tl) return null
-  const r = ms - INTRO_MS
+  const INTRO = introMs(tl)
+  const r = ms - INTRO
   const rr = clamp(r, 0, tl.duration)
-  const vp = tl.viewport
+  const vp = tl.viewport, dsf = tl.dsf || 2
+  const phone = tl.device === 'phone'
 
-  const cam = cameraAt(rr, tl)
-  const pl = place(cam, vp)
-  const toVideo = (p) => ({ x: pl.x + p.x * pl.k, y: pl.y + p.y * pl.k })
+  const cam = cameraAt(rr, tl, keys)
+  const k = W / cam.w   // video pixels per CSS pixel
+  const toVideo = (p, c = cam) => ({ x: (p.x - c.x) * (W / c.w), y: (p.y - c.y) * (W / c.w) })
   const shot = frameAt(rr, tl.frames)
 
   // The screen arrives: scaled up slightly and faded in as the intro leaves.
-  const arrive = ease(clamp((ms - (INTRO_MS - 500)) / 700))
-  const inScreen = r >= -500 && r <= tl.duration
+  const arrive = ease(clamp((ms - (INTRO - 500)) / 700))
 
   // The step on screen now, for the caption, the ring and the progress bar.
-  const step = [...tl.steps].reverse().find(s => rr >= s.tStart)
+  const i = tl.steps.findLastIndex(s => rr >= s.tStart)
+  const step = tl.steps[i]
   const last = tl.steps[tl.steps.length - 1]
-  const captionOn = step && r >= 0 && r < last.tEnd + 400
 
   const cur = toVideo(cursorAt(rr, tl))
-  const act = step && (step.kind !== 'point') ? rr - step.tAct : -1
+  const act = step && step.kind !== 'point' ? rr - step.tAct : -1
   const press = act >= 0 && act < 240 ? 1 - 0.18 * Math.sin((act / 240) * Math.PI) : 1
   const ripple = act >= 0 && act < 600 ? act / 600 : null
   const cursorOpacity = clamp(r / 400) * (1 - clamp((r - tl.duration + 200) / 300))
 
   let ring = null
-  if (step?.box) {
-    const until = step.kind === 'type' ? step.tEnd - 350 : step.tAct + 450
+  const box = step && boxAt(step, rr)
+  if (box) {
+    let until = step.kind === 'type' ? step.tEnd - 350 : step.tAct + 450
+    if (step.goneAt) until = Math.min(until, step.goneAt - 150)
     const o = window01(rr, step.tStart + 200, until)
     if (o > 0) {
       const pad = 6
-      const tl0 = toVideo({ x: step.box.x - pad, y: step.box.y - pad })
-      ring = { o, x: tl0.x - pl.x, y: tl0.y - pl.y, w: (step.box.w + pad * 2) * pl.k, h: (step.box.h + pad * 2) * pl.k, dim: step.spotlight }
+      const a = toVideo({ x: box.x - pad, y: box.y - pad })
+      ring = { o, x: a.x, y: a.y, w: (box.w + pad * 2) * k, h: (box.h + pad * 2) * k, dim: step.spotlight }
     }
   }
 
-  // The caption moves to the top when the target is low enough to sit under it.
-  let captionTop = false
-  if (step?.box) captionTop = toVideo({ x: 0, y: step.box.y + step.box.h }).y > H - 200
-  const cIn = step ? ease(clamp((rr - step.tStart) / 350)) : 0
+  // THE CAPTION. It fades out just before the next one comes in rather than
+  // being swapped under the viewer's eye, and it sits at the top for a step
+  // whose target would be under it, decided once per step so it never jumps.
+  let caption = null
+  if (step && r >= 0) {
+    const end = tl.steps[i + 1]?.tStart ?? last.tEnd + 500
+    const o = ease(clamp((rr - step.tStart - 60) / 320)) * (1 - clamp((rr - (end - 200)) / 200))
+    const low = step.box && toVideo({ x: 0, y: step.box.y + step.box.h }, cameraAt(step.tAct, tl, keys)).y > H - 210
+    if (o > 0) caption = { o, top: !!low }
+  }
   const done = tl.steps.filter(s => rr >= s.tAct).length
-  const progress = lerp(0, 1, done / Math.max(1, tl.total))
+  const progress = done / Math.max(1, tl.total)
+  const s = k / dsf   // image pixels to video pixels
+  const radius = phone ? 52 : 16
 
   return (
     <AbsoluteFill style={{ background: `radial-gradient(1200px 700px at 85% 0%, rgba(183,121,31,.10), transparent 60%), ${C.bg}`, fontFamily: SANS, overflow: 'hidden' }}>
-      {inScreen || r > tl.duration ? (
-        <div style={{
-          position: 'absolute', left: pl.x, top: pl.y, width: pl.w, height: pl.h,
-          borderRadius: 18 * (1 - clamp((cam.z - 1) / 0.25)) + 2, overflow: 'hidden',
-          boxShadow: '0 30px 80px rgba(35,35,31,.22), 0 0 0 1px rgba(35,35,31,.08)',
-          opacity: arrive, transform: `scale(${0.96 + 0.04 * arrive})`,
-          // Out of focus under the closing card, so the words are all there is to read.
-          filter: r > tl.duration ? `blur(${14 * ease(clamp((r - tl.duration) / 600))}px)` : undefined,
-        }}>
-          <Img src={staticFile(`rec/${id}/${shot.file}`)} style={{ width: '100%', height: '100%', display: 'block' }} />
+      {r >= -500 && (
+        <AbsoluteFill style={{ opacity: arrive, transform: `scale(${0.96 + 0.04 * arrive})` }}>
+          {/* Moved by one transform, never by layout: sub-pixel and smooth. */}
+          <div style={{
+            position: 'absolute', left: 0, top: 0, width: vp.width * dsf, height: vp.height * dsf,
+            transformOrigin: '0 0', transform: `translate(${-cam.x * k}px, ${-cam.y * k}px) scale(${s})`,
+            borderRadius: radius / s, overflow: 'hidden',
+            boxShadow: `${phone ? `0 0 0 ${14 / s}px #1E1E1B, ` : ''}0 ${30 / s}px ${80 / s}px rgba(35,35,31,.24), 0 0 0 ${1 / s}px rgba(35,35,31,.08)`,
+            // Out of focus under the closing card, so the words are all there is to read.
+            filter: r > tl.duration ? `blur(${(14 * ease(clamp((r - tl.duration) / 600))) / s}px)` : undefined,
+          }}>
+            <Img src={staticFile(`rec/${id}/${shot.file}`)} style={{ width: '100%', height: '100%', display: 'block' }} />
+          </div>
           {ring && (
             <div style={{
-              position: 'absolute', left: ring.x, top: ring.y, width: ring.w, height: ring.h, borderRadius: 12,
+              position: 'absolute', left: 0, top: 0, width: ring.w, height: ring.h, borderRadius: 12,
+              transform: `translate(${ring.x}px, ${ring.y}px)`,
               border: `3px solid ${C.accent}`, opacity: ring.o,
-              boxShadow: `0 0 0 6px ${C.accentSoft}${ring.dim ? ', 0 0 0 4000px rgba(24,22,18,.30)' : ''}`,
+              boxShadow: `0 0 0 6px ${C.accentSoft}${ring.dim ? ', 0 0 0 4000px rgba(24,22,18,.28)' : ''}`,
             }} />
           )}
-        </div>
-      ) : null}
+        </AbsoluteFill>
+      )}
 
       {ripple !== null && cursorOpacity > 0 && (
         <div style={{
-          position: 'absolute', left: cur.x - (10 + 40 * ripple), top: cur.y - (10 + 40 * ripple),
-          width: 2 * (10 + 40 * ripple), height: 2 * (10 + 40 * ripple), borderRadius: '50%',
+          position: 'absolute', left: 0, top: 0, width: 2 * (10 + 40 * ripple), height: 2 * (10 + 40 * ripple), borderRadius: '50%',
+          transform: `translate(${cur.x - (10 + 40 * ripple)}px, ${cur.y - (10 + 40 * ripple)}px)`,
           border: `3px solid ${C.accent}`, opacity: 0.8 * (1 - ripple),
         }} />
       )}
       {cursorOpacity > 0 && <div style={{ opacity: cursorOpacity }}><Cursor x={cur.x} y={cur.y} press={press} /></div>}
 
-      {captionOn && (
-        <div style={{ position: 'absolute', left: 0, right: 0, [captionTop ? 'top' : 'bottom']: 54, display: 'flex', justifyContent: 'center' }}>
+      {caption && (
+        <div style={{ position: 'absolute', left: 0, right: 0, [caption.top ? 'top' : 'bottom']: 54, display: 'flex', justifyContent: 'center' }}>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 22, maxWidth: 1400,
             background: 'rgba(35,35,31,.94)', color: C.linen, borderRadius: 18, padding: '22px 34px 22px 24px',
             boxShadow: '0 18px 50px rgba(0,0,0,.28)',
-            opacity: cIn, transform: `translateY(${(1 - cIn) * (captionTop ? -16 : 16)}px)`,
+            opacity: caption.o, transform: `translateY(${(1 - caption.o) * (caption.top ? -14 : 14)}px)`,
           }}>
             <div style={{ flex: 'none', minWidth: 58, height: 58, borderRadius: 14, background: C.accent, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: DISPLAY, fontSize: 30, fontWeight: 600 }}>{step.n}</div>
             <div style={{ fontSize: 36, fontWeight: 500, lineHeight: 1.25 }}>{step.say}</div>
@@ -233,10 +294,20 @@ export function Tutorial({ id, timeline: tl }) {
       )}
 
       {r >= 0 && r <= tl.duration + 300 && (
-        <div style={{ position: 'absolute', left: 0, bottom: 0, height: 6, width: W * progress, background: C.accent, opacity: 1 - clamp((r - tl.duration) / 300) }} />
+        <div style={{ position: 'absolute', left: 0, bottom: 0, height: 6, width: W, transformOrigin: '0 0', transform: `scaleX(${progress})`, background: C.accent, opacity: 1 - clamp((r - tl.duration) / 300) }} />
       )}
 
-      {ms < INTRO_MS && <Intro tl={tl} ms={ms} />}
+      {ms < INTRO && <Intro tl={tl} ms={ms} len={INTRO} />}
+
+      {/* The narration: the title over the intro, each step's line as the
+          step begins, and the closing line over the closing card. */}
+      {tl.voice?.intro && <Sequence from={f(450)}><Html5Audio src={staticFile(`rec/${id}/${tl.voice.intro.file}`)} /></Sequence>}
+      {tl.steps.map(st => st.voice && (
+        <Sequence key={st.n} from={f(INTRO + st.tStart + (tl.voice?.at ?? 150))}>
+          <Html5Audio src={staticFile(`rec/${id}/${st.voice.file}`)} />
+        </Sequence>
+      ))}
+      {tl.voice?.outro && <Sequence from={f(INTRO + tl.duration + 350)}><Html5Audio src={staticFile(`rec/${id}/${tl.voice.outro.file}`)} /></Sequence>}
       {r > tl.duration && <Outro tl={tl} ms={r - tl.duration} />}
     </AbsoluteFill>
   )
