@@ -280,12 +280,17 @@ export default function ImportPage({ store, go, sel, topBar }) {
             {/* STEP 2 — the file */}
             {step === 'upload' && (
               <Panel>
-                <div className="imp-bar">
-                  <div className="imp-step-title">Upload your file <span className="imp-target">{kindLabel}</span></div>
-                  <div className="imp-bar-actions">
-                    <button className="btn btn-quiet btn-sm" onClick={() => getExample(kind)}><Icon name="share" size={13} />Example sheet</button>
-                    <button className="btn btn-quiet btn-sm" onClick={restart}>Change type</button>
+                {/* WHAT IS BEING IMPORTED IS A SWITCH, first in the bar. It was
+                    a grey label with "Change type" at the far right, so people
+                    clicked the label expecting it to change and nothing did. */}
+                <div className="imp-bar imp-bar-left">
+                  <div className="seg" role="radiogroup" aria-label="What you are importing">
+                    {['clients', 'properties', 'owners'].map(k => (
+                      <button key={k} type="button" role="radio" aria-checked={kind === k}
+                        className={kind === k ? 'on' : ''} onClick={() => chooseKind(k)}>{KIND_LABEL[k]}</button>
+                    ))}
                   </div>
+                  <button className="btn btn-quiet btn-sm" onClick={() => getExample(kind)}><Icon name="share" size={13} />Example sheet</button>
                 </div>
                 {error && <div className="imp-error">{error}</div>}
                 {/* The columns we ask for, said plainly, so the example sheet is

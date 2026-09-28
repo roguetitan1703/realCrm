@@ -365,8 +365,11 @@ export async function parseSpreadsheet(file, wanted) {
  * Mapping stays — real lists arrive in whatever shape a builder's office
  * exported — but a firm starting from nothing should be able to fill in the
  * sheet we actually want. The required columns are the ones a record cannot
- * work without: a calling row needs a number and a flat to call about, a
- * listing needs to say whether it is for sale or for rent.
+ * work without: a calling row needs a number to call, a listing needs to say
+ * whether it is for sale or for rent. A calling row does NOT need its flat: a
+ * firm's list is often names and numbers in a project before anyone knows
+ * which door is whose, and the importer has only ever required the phone —
+ * this line said "Tower, Unit no." and told those firms they could not import.
  *
  * The sample rows are ignored on import (they carry no phone/unit of yours),
  * and are there so the format of a cell is obvious.
@@ -374,7 +377,7 @@ export async function parseSpreadsheet(file, wanted) {
 export const EXAMPLE_SHEETS = {
   owners: {
     title: 'Owners to call',
-    required: ['Project', 'Tower', 'Unit no.', 'Phone'],
+    required: ['Phone'],
     columns: ['Project', 'Tower', 'Unit no.', 'Owner name', 'Phone', 'Configuration', 'Carpet area', 'Saleable area', 'Email', 'Locality', 'Notes'],
     rows: [
       ['VTP Leonara', 'B', '1603', 'Shivani Rajput', '9876543210', '2 BHK', '658', '1088', '', 'Kharadi', 'called Jan, not selling'],
