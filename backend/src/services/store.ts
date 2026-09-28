@@ -3502,28 +3502,38 @@ const ownerSegments = (d0: any): Record<string, any> => ({
   to_call: sql`${OWNER_OPEN} AND callback_at IS NULL AND last_call_at IS NULL`,
   never_called: sql`${OWNER_OPEN} AND last_call_at IS NULL`,
   unassigned: sql`${OWNER_OPEN} AND agent_id IS NULL`,
+  closed: sql`NOT (${OWNER_OPEN})`,
 });
 
-export async function listOwners(opts: {
+type OwnerListOpts = {
   page?: number; limit?: number; q?: string; stage?: string; project?: string; tower?: string; agentId?: string;
   locality?: string; agent?: string; source?: string; segment?: string; mine?: boolean;
   sortKey?: string; sortDir?: string;
-} = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
-  const t = tid();
-  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
-  const page = Math.max(Number(opts.page) || 1, 1);
-  const offset = (page - 1) * limit;
+};
 
+/**
+ * WHICH CALLING ROWS A REQUEST MEANS — one builder, read by the list and by its
+ * tab counts. The tabs used to come from getOwnersSummary, which knew nothing
+ * of the project, tower or agent on screen: inside one project the tabs said
+ * "Everyone 754" over a list of forty, and a tab could promise rows the list
+ * then could not find. `omit` drops the axes a count is being taken ACROSS —
+ * the tab row counts across segment and stage, the agent picker across agent.
+ */
+async function ownerWhere(t: string, opts: OwnerListOpts, omit: { tab?: boolean; agent?: boolean } = {}): Promise<any[]> {
   const where: any[] = [sql`tenant_id = ${t}`, ownerScope(opts.mine)];
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
     where.push(sql`(lower(coalesce(name, '')) LIKE ${like} OR phone LIKE ${like} OR lower(coalesce(project, '')) LIKE ${like})`);
   }
-  const stages = String(opts.stage || '').split(',').map(x => x.trim()).filter(Boolean);
-  if (stages.length) where.push(sql`stage IN ${sql(stages)}`);
-  const seg = ownerSegments(dayStart(await timezoneOf(t)))[String(opts.segment || '')];
-  if (seg) where.push(seg);
+  if (!omit.tab) {
+    // coalesce: a row with no stage is New everywhere else (OWNER_OPEN, the
+    // counts), so the New tab has to find it too.
+    const stages = String(opts.stage || '').split(',').map(x => x.trim()).filter(Boolean);
+    if (stages.length) where.push(sql`coalesce(stage, 'New') IN ${sql(stages)}`);
+    const seg = ownerSegments(dayStart(await timezoneOf(t)))[String(opts.segment || '')];
+    if (seg) where.push(seg);
+  }
   // '_none' is the "No project" bucket from listOwnerProjects — those rows
   // have project NULL or ''. Without this branch a click on that card sent
   // project: undefined, which is not a filter at all and returned every
@@ -3534,7 +3544,7 @@ export async function listOwners(opts: {
   // names are: "T1", "t1" and "T 1" are one tower on a real sheet.
   if (opts.tower === '_none') where.push(sql`coalesce(tower, '') = ''`);
   else if (opts.tower) where.push(sql`lower(replace(coalesce(tower, ''), ' ', '')) = lower(replace(${String(opts.tower)}, ' ', ''))`);
-  if (opts.agentId) where.push(sql`agent_id = ${opts.agentId}`);
+  if (opts.agentId && !omit.agent) where.push(sql`agent_id = ${opts.agentId}`);
 
   // The filter-bar fields — same shapes as listLeads' Locality/Sales
   // Executive so the two toolbars behave identically, not just look alike.
@@ -3545,7 +3555,7 @@ export async function listOwners(opts: {
     where.push(anyOf(localities.map(l =>
       sql`lower(coalesce(locality, '')) LIKE ${'%' + l.toLowerCase().split('/')[0].trim() + '%'}`)));
   }
-  const agents = many(opts.agent);
+  const agents = omit.agent ? [] : many(opts.agent);
   if (agents.length) {
     const named = agents.filter(a => a !== '_none');
     const parts: any[] = [];
@@ -3555,8 +3565,16 @@ export async function listOwners(opts: {
   }
   const sources = many(opts.source);
   if (sources.length) where.push(sql`lower(coalesce(source, '')) IN ${sql(sources.map(s => s.toLowerCase()))}`);
+  return where;
+}
+const andAll = (where: any[]) => where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
 
-  const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+export async function listOwners(opts: OwnerListOpts = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
+  const t = tid();
+  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
+  const page = Math.max(Number(opts.page) || 1, 1);
+  const offset = (page - 1) * limit;
+  const clause = andAll(await ownerWhere(t, opts));
 
   const sortCols: Record<string, any> = {
     // By the number when there is no name, as Leads does — an imported list
@@ -3577,6 +3595,43 @@ export async function listOwners(opts: {
     sql`SELECT count(*)::int AS n FROM crm_owners WHERE ${clause}`,
   ]);
   return { rows: rows.map(rowToOwner), total: totalRows[0]?.n || 0, page, limit };
+}
+
+/**
+ * THE CALLING TABS' COUNTS, for exactly the rows on screen: the same builder as
+ * listOwners with every filter the list has, taken across the tabs themselves.
+ * All · Callbacks · one per status the rows hold · Closed · Unassigned — each
+ * FILTER below is the segment or stage that tab sends, so a tab and the list it
+ * opens cannot disagree. The agent picker is counted across agents, inside the
+ * same project, tower and tab.
+ */
+export async function getOwnerTabs(opts: OwnerListOpts = {}): Promise<any> {
+  const t = tid();
+  const seg = ownerSegments(dayStart(await timezoneOf(t)));
+  const acrossTabs = andAll(await ownerWhere(t, opts, { tab: true }));
+  const acrossAgents = andAll(await ownerWhere(t, opts, { agent: true }));
+  const [[c], byStage, byAgent] = await Promise.all([
+    sql`SELECT count(*)::int AS total,
+               count(*) FILTER (WHERE ${seg.callbacks})::int AS callbacks,
+               count(*) FILTER (WHERE ${seg.closed})::int AS closed,
+               count(*) FILTER (WHERE ${seg.unassigned})::int AS unassigned
+          FROM crm_owners WHERE ${acrossTabs}`,
+    sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
+          FROM crm_owners WHERE ${acrossTabs} GROUP BY 1`,
+    sql`SELECT coalesce(o.agent_id, '_none') AS value,
+               coalesce(u.name, a.name, 'Unassigned') AS label,
+               count(*)::int AS count
+          FROM crm_owners o
+          LEFT JOIN users u ON u.id = o.agent_id AND u.tenant_id = o.tenant_id
+          LEFT JOIN crm_agents a ON a.id = o.agent_id AND a.tenant_id = o.tenant_id
+         WHERE o.tenant_id = ${t} AND o.id IN (SELECT id FROM crm_owners WHERE ${acrossAgents})
+         GROUP BY 1, 2 ORDER BY 3 DESC`,
+  ]);
+  return {
+    total: c?.total ?? 0, callbacks: c?.callbacks ?? 0, closed: c?.closed ?? 0, unassigned: c?.unassigned ?? 0,
+    byStage: Object.fromEntries((byStage as any[]).map(r => [r.stage, r.n])),
+    byAgent: (byAgent as any[]).map(r => ({ value: r.value, label: r.label, count: r.count })),
+  };
 }
 
 /** Segment pill counts for the owners list, scoped the same way listOwners is. */

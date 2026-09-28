@@ -157,6 +157,8 @@ export function followUpLabel(fu) {
       if (sameDay(d, now)) return `Today, ${time}`
       const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1)
       if (sameDay(d, tomorrow)) return `Tomorrow, ${time}`
+      const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1)
+      if (sameDay(d, yesterday)) return `Yesterday, ${time}`
       const date = d.toLocaleDateString('en-IN', d.getFullYear() === now.getFullYear()
         ? { weekday: 'short', day: 'numeric', month: 'short' }
         : { day: 'numeric', month: 'short', year: 'numeric' })
@@ -807,18 +809,14 @@ export function callbackSignal(iso, from = new Date()) {
   const d = new Date(iso)
   if (isNaN(d)) return null
   const mins = Math.round((d - from) / 60000)
-  const T = d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }).toLowerCase()
-  if (mins < 0) {
-    const late = Math.abs(mins)
-    if (late < 60) return { tone: 'overdue', label: `${late}m late`, mins }
-    if (late < 1440) return { tone: 'overdue', label: `${Math.round(late / 60)}h late`, mins }
-    return { tone: 'overdue', label: `${Math.round(late / 1440)}d late`, mins }
-  }
-  const sameDay = d.toDateString() === from.toDateString()
-  if (sameDay) return { tone: 'due', label: T, mins }
-  const days = Math.ceil(mins / 1440)
-  if (days === 1) return { tone: 'ok', label: `Tomorrow ${T}`, mins }
-  return { tone: 'ok', label: `${fmtDate(d.toISOString().slice(0, 10))} ${T}`, mins }
+  // WHEN, not how late. "2d late" told a caller they had failed and not when
+  // the call was booked for; a callback reads like a follow-up — the same
+  // label, the same red once its moment has passed — so a lead and an owner
+  // cannot describe one kind of appointment in two languages.
+  const label = followUpLabel({ at: d.toISOString() })
+  if (mins < 0) return { tone: 'overdue', label, mins }
+  if (d.toDateString() === from.toDateString()) return { tone: 'due', label, mins }
+  return { tone: 'ok', label, mins }
 }
 
 // avatar palette cycling for thumbs

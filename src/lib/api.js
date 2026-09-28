@@ -706,6 +706,13 @@ export const api = {
     return request(`/owners${s ? `?${s}` : ''}`)
   },
   getOwnersSummary: (mine) => request('/owners/summary' + (mine ? '?mine=1' : '')),
+  // The calling tabs' counts, for the same filters as listOwners.
+  getOwnerTabs: (params = {}) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
+    const s = qs.toString()
+    return request(`/owners/tabs${s ? `?${s}` : ''}`)
+  },
   // A whole project to one caller, or split between several.
   assignOwnerProject: (project, targets, onlyUnassigned) => request('/owners/assign-project', {
     method: 'POST', body: JSON.stringify({ project, targets, onlyUnassigned }),

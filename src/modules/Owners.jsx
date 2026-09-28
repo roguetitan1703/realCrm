@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
@@ -6,37 +6,11 @@ import { Button, Overdue, Timeline } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { initials, callbackSignal, whenLabel } from '../lib/format.js'
 import { canAssignLead } from '../lib/permissions.js'
-import { OWNER_STATUSES } from '../data/ownerStatus.js'
+import { OWNER_STAGES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { useServerList } from '../lib/serverList.js'
 import { useServerData } from '../lib/useServerData.js'
 import { api } from '../lib/api.js'
 import { OWNERS_DEF } from './definitions.jsx'
-
-// Segment pill counts, straight from the database — same pattern as Leads.
-function useOwnersSummary(dataAsOf, mine) {
-  const [counts, setCounts] = useState({})
-  useEffect(() => {
-    let live = true
-    api.getOwnersSummary(mine).then(r => { if (live && r?.success) setCounts(r.summary) }).catch(() => {})
-    return () => { live = false }
-  }, [dataAsOf, mine])
-  return counts
-}
-
-// The pills are the queue, not the status list.
-//
-// Six status pills answered "how many are marked Contacted", which is a report.
-// A caller opening this screen is asking "what do I dial next", and the answer
-// is ordered: anyone already late, anyone due today, then the ones nobody has
-// tried. Status is still reachable — it is the second row of pills — but it is
-// no longer what the screen opens on.
-const QUEUE_SEGMENTS = [
-  { key: 'callbacks_overdue', label: 'Late callbacks', count: 'callbacksOverdue', tone: 'alert' },
-  { key: 'callbacks_today', label: 'Due today', count: 'callbacksToday' },
-  { key: 'to_call', label: 'Never called', count: 'toCall' },
-  { key: 'callbacks', label: 'All callbacks', count: 'callbacksUpcoming' },
-  { key: 'unassigned', label: 'Unassigned', count: 'unassigned' },
-]
 
 // The project cards — same "township lens" as Properties' Group by project,
 // over the cold-calling list. Clicking one filters the existing table by that
@@ -122,10 +96,10 @@ function OwnerRecord({ store, ownerId, topBar, phone, onBack, go }) {
   // cold call produces that has to survive until the next one.
   const callbackCard = (
     <div className="fu-card">
-      <div className="fu-h"><Icon name="phone" size={13} className="ic" />Callback</div>
+      <div className="fu-head">Callback</div>
       {o.callbackAt ? (
-        <div className="fu-body">
-          <div className="fu-main">
+        <div className="fu-active">
+          <div>
             <div className="fu-title">{o.callbackNote || 'Call back'}</div>
             <div className={'fu-when' + (cb?.tone === 'overdue' ? ' is-late' : '')}>{cb?.label}</div>
           </div>
@@ -138,7 +112,7 @@ function OwnerRecord({ store, ownerId, topBar, phone, onBack, go }) {
       )}
       <Button variant="secondary" size="sm" block icon="calendar"
         onClick={() => store.openModal({ kind: 'ownerCallback', ownerId: o.id })}>
-        {o.callbackAt ? 'Reschedule callback' : 'Schedule callback'}
+        {o.callbackAt ? 'Reschedule' : 'Schedule callback'}
       </Button>
     </div>
   )
@@ -178,130 +152,124 @@ function OwnerRecord({ store, ownerId, topBar, phone, onBack, go }) {
 
 export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
-  const [flt, setFlt] = useState({})
+  // THE FILTER LIVES IN THE URL (nav.js, the calling bag), as it does on Leads
+  // and Properties. It was private state here: a reload lost the tab and the
+  // project, and leaving a project kept a tab switched on that nothing
+  // explained, so × showed an empty list instead of the project cards.
+  //
+  // `q`, the page, the view and the selection stay local: a history entry per
+  // keystroke is not navigation.
+  const bag = sel.ownerFilters || {}
+  const tab = bag.tab || (bag.status ? `status:${bag.status}` : 'all')
+  const status = tab.startsWith('status:') ? tab.slice(7) : undefined
+  const segment = status || tab === 'all' ? undefined : tab
+  const projectSel = bag.project
+  const towerSel = bag.tower
+  const agentSel = bag.caller || 'all'
+  // A to Z, like Leads: this is where each owner SITS. The Callbacks tab is the
+  // one list whose order is its point — soonest first, so whoever is already
+  // due is at the top — and a sort picked by hand still wins.
+  const sortKey = bag.sortKey || (tab === 'callbacks' ? 'callback' : 'name')
+  const sortDir = bag.sortDir || 'asc'
+
   const [q, setQ] = useState('')
-  // Soonest callback first. "Recently added" was right for a list you browse
-  // and wrong for a queue you work: it put the 732nd import at the top and the
-  // person expecting a call at 11am somewhere on page thirty.
-  // A TO Z, like Leads. It was "Callback due", which on a freshly imported list
-  // of three thousand numbers with no callbacks set is no order at all — and
-  // once a caller did set one, the row jumped to wherever that time fell, away
-  // from where they had just been working. Who to ring next is the Never called
-  // pill's job; this is where each owner SITS.
-  const [sortKey, setSortKey] = useState('name')
-  const [sortDir, setSortDir] = useState('asc')
-  // The project grid is a desk lens — a phone gets the queue itself, because a
-  // caller in the field opens this to dial the next person, not to browse
-  // townships. It also keeps the phone's Load-more path live: `onPage` is
-  // withheld in the projects view, and a phone stuck there had no way to
-  // reach page two.
-  const [view, setView] = useState(phone ? 'list' : 'projects')
-  // Two independent axes: which slice of the queue, and which status. A pill in
-  // one row never silently clears the other — picking "Late callbacks" and then
-  // "Interested" means both, which is a question a caller actually asks.
-  const [seg, setSeg] = useState('all')
-  const [stage, setStage] = useState('all')
-  // WHOSE CALLING LIST. The same top-level control Leads has: "show me Zahir's
-  // queue" is the question a manager asks before any other, and here it was
-  // two clicks deep inside the filter panel beside Locality.
-  const [agentSel, setAgentSel] = useState('all')
-  // TOWER — only meaningful inside a project, so it resets whenever the
-  // project does and is not offered until one is chosen.
-  // Project and Tower are Filter-menu chips (OWNERS_DEF.filterFields), one
-  // value each, held in the same bag the FilterBar edits.
-  const projectSel = flt.project?.[0]
-  const towerSel = flt.tower?.[0]
+  // The project grid is a desk lens — a phone gets the queue itself. Arriving
+  // with a tab, a project or a caller already chosen means the list.
+  const [view, setView] = useState(phone || bag.tab || bag.status || bag.project || bag.caller ? 'list' : 'projects')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selected, setSelected] = useState(new Set())
-  // The open record lives in the URL, not in local state — same as Leads and
-  // Properties. Local state meant a reload lost the record, back left the app,
-  // and the phone's action button had no way to know which owner was on screen,
-  // so an owner's record on a phone offered no actions at all.
+  // The open record lives in the URL too — see Leads and Properties.
   const openId = sel?.ownerOpen ? sel.ownerId : null
 
   const role = state.role
   const canAssign = canAssignLead(role)
 
-  const setSegP = (v) => { setSeg(v); setView('list'); setPage(1); setSelected(new Set()) }
-  const setStageP = (v) => { setStage(v); setView('list'); setPage(1); setSelected(new Set()) }
-  const setAgentP = (v) => { setAgentSel(v); setView('list'); setPage(1); setSelected(new Set()) }
-  // A tower belongs to one project, so changing the project drops it; any
-  // filter change shows the list, not the project grid.
-  const onFilters = (v) => {
-    const next = { ...v }
-    if ((next.project?.[0]) !== projectSel) delete next.tower
-    setFlt(next); setView('list'); setPage(1); setSelected(new Set())
+  // REPLACE rather than push (useNav): back leaves the screen, it does not walk
+  // back through every tab tapped on the way.
+  const patchBag = (patch) => {
+    setSel(s => {
+      const next = { ...(s.ownerFilters || {}), ...patch }
+      for (const k of Object.keys(next)) if (next[k] === undefined || next[k] === null || next[k] === '' || next[k] === 'all') delete next[k]
+      return { ...s, ownerFilters: Object.keys(next).length ? next : undefined }
+    })
+    setPage(1); setSelected(new Set())
   }
-  const toProject = (key) => onFilters(key ? { ...flt, project: [key] } : { ...flt, project: [] })
+  // A tab is its own order: a sort picked on another tab does not follow it.
+  const pickTab = (key) => {
+    const st = key.startsWith('status:') ? key.slice(7) : undefined
+    patchBag({ tab: st || key === 'all' ? undefined : key, status: st, sortKey: undefined, sortDir: undefined })
+    setView('list')
+  }
+  const setAgentP = (v) => { patchBag({ caller: v }); setView('list') }
+  // The Filter menu holds Tower only, and only inside a project.
+  const onFilters = (v) => { patchBag({ tower: projectSel ? v?.tower?.[0] : undefined }); setView('list') }
+  const toProject = (key) => { patchBag({ project: key, tower: undefined }); setView('list') }
+  // LEAVING A PROJECT is going back to the cards with nothing left switched on:
+  // the tab, the tower and the sort all belonged to that project's list.
+  const leaveProject = () => {
+    patchBag({ project: undefined, tower: undefined, tab: undefined, status: undefined, sortKey: undefined, sortDir: undefined })
+    setView('projects')
+  }
   const setPageP = (v) => { setPage(v); setSelected(new Set()) }
 
-  // A checked row belongs to the list it was checked in. Switching to the
-  // project grid, picking a different project, or leaving one all change
-  // which rows are even on screen — the selection has to clear with them, not
-  // silently carry an id from Godrej into a bulk-assign run on the full list.
+  // A checked row belongs to the list it was checked in.
   useEffect(() => { setSelected(new Set()) }, [view, projectSel])
 
-  // A tile on the dashboard or a group on Today names the slice it opens. Read
-  // once and cleared, so it seeds the screen rather than pinning it — the pills
-  // still work normally the moment you arrive.
-  useEffect(() => {
-    if (!sel?.ownerSeg && !sel?.ownerStage) return
-    if (sel.ownerSeg) setSeg(sel.ownerSeg)
-    if (sel.ownerStage) setStage(sel.ownerStage)
-    setView('list'); setPage(1)
-    setSel({ ownerSeg: undefined, ownerStage: undefined })
-  }, [sel?.ownerSeg, sel?.ownerStage])
-
+  // ONE SET OF PARAMETERS for the rows and for the tab counts, so a tab can
+  // never promise rows its list cannot find.
+  const scope = {
+    q: q || undefined,
+    mine: phone ? 1 : undefined,
+    project: projectSel || undefined,
+    tower: towerSel || undefined,
+    agent: agentSel === 'all' ? undefined : agentSel,
+  }
   const source = useServerList(
     (params) => api.listOwners({
-      page: params.page, limit: params.limit, q: params.q,
-      segment: seg === 'all' ? undefined : seg,
-      mine: phone ? 1 : undefined,
-      stage: stage === 'all' ? undefined : stage,
-      project: projectSel || undefined,
-      tower: towerSel || undefined,
-      // WHOSE LIST. This spread used to sit ABOVE `agent: params.agent`, which
-      // then overwrote it with the filter panel's empty value — so the Agent
-      // dropdown changed its label and filtered nothing. It is the only agent
-      // control now; the panel's duplicate Sales Executive row is gone.
-      agent: agentSel === 'all' ? undefined : agentSel,
+      ...scope, page: params.page, limit: params.limit, q: params.q,
+      segment, stage: status,
       sortKey: params.sortKey, sortDir: params.sortDir,
     }),
     // Same as Leads: a row you just called keeps its place in the queue.
-    { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone,
-      holdOrder: true, viewDeps: [seg, stage, agentSel, projectSel, towerSel, phone] },
-    [state.dataAsOf, seg, stage, agentSel, projectSel, towerSel, phone],
+    { filters: {}, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone,
+      holdOrder: true, viewDeps: [tab, agentSel, projectSel, towerSel, phone] },
+    [state.dataAsOf, tab, agentSel, projectSel, towerSel, phone],
     { store, kind: 'owner' },
   )
+  const { data: counts } = useServerData(
+    () => api.getOwnerTabs({ ...scope, segment, stage: status }).then(r => r?.tabs || {}),
+    [state.dataAsOf, q, tab, agentSel, projectSel, towerSel, phone], {})
 
-  // On a phone the queue is MINE — the pills, the rows and the tab badge all
-  // agree, and a manager is not shown the firm's seven hundred while standing
-  // in a lift. The desk still sees the desk.
-  const counts = useOwnersSummary(state.dataAsOf, !!phone)
   const { data: projectList } = useServerData(
     () => api.listOwnerProjects().then(r => r?.data || []), [state.dataAsOf], [])
   const currentProject = (projectList || []).find(p => (p.key === 'No project' ? '_none' : p.key) === projectSel)
-  const facets = {
-    projects: (projectList || []).map(p => ({ value: p.key === 'No project' ? '_none' : p.key, label: p.name, count: p.counts.total })),
-    towers: (currentProject?.towers || []).map(t => ({ value: t, label: t })),
-  }
-  const queue = counts.queue || {}
+  const facets = { towers: (currentProject?.towers || []).map(t => ({ value: t, label: t })) }
+
+  // THE TABS ARE THE WALK. Calling goes New → Contacted → Interested → Key
+  // Received, or ends; these are the firm's own statuses, in its order, each
+  // counted over the rows on screen. The old tabs were callback times — Late,
+  // Due today — over a list where a handful of rows have a callback at all.
+  // Callbacks stays as the one tab that is a time: it is where the scheduled
+  // calls are. Closed holds both endings, which nobody rings. A status the firm
+  // dropped but rows still carry gets a tab while it holds any, so no row is
+  // reachable only through All.
+  const byStage = (counts || {}).byStage || {}
+  const firmStages = (state.settings.ownerStages?.length ? state.settings.ownerStages : OWNER_STAGES)
+    .filter(s => !OWNER_TERMINAL_STATUSES.includes(s))
+  const stray = Object.keys(byStage).filter(s => byStage[s] > 0 && !firmStages.includes(s) && !OWNER_TERMINAL_STATUSES.includes(s))
   const segs = [
-    { key: 'all', label: 'Everyone', on: seg === 'all', count: counts.total ?? 0, onClick: () => setSegP('all') },
-    ...QUEUE_SEGMENTS.map(s => ({
-      key: s.key, label: s.label, tone: s.tone,
-      on: seg === s.key, count: queue[s.count] ?? 0, onClick: () => setSegP(s.key),
-    })),
-  ]
-  // Status is a dropdown, not a second row of pills — same control Leads uses,
-  // in the same place. Six statuses beside five queue pills read as eleven
-  // pills competing on one screen, and only one row of them was the queue.
-  const stageOptions = [
-    { value: 'all', label: 'All' },
-    ...(state.settings.ownerStages?.length ? state.settings.ownerStages : OWNER_STATUSES)
-      .map(s => ({ value: s, label: s, count: counts.byStage?.[s] ?? 0 })),
-  ]
+    { key: 'all', label: 'All', count: counts?.total ?? 0 },
+    { key: 'callbacks', label: 'Callbacks', count: counts?.callbacks ?? 0 },
+    ...[...firmStages, ...stray].map(s => ({ key: `status:${s}`, label: s, count: byStage[s] ?? 0 })),
+    { key: 'closed', label: 'Closed', count: counts?.closed ?? 0 },
+    ...(canAssign && !phone ? [{ key: 'unassigned', label: 'Unassigned', count: counts?.unassigned ?? 0 }] : []),
+  ].map(s => ({ ...s, on: tab === s.key, disabled: s.key !== 'all' && !s.count, onClick: () => pickTab(s.key) }))
+
+  // The callback time is a column on the one tab that is about it. Everywhere
+  // else it was "Not called" down seven hundred rows.
+  const def = useMemo(() => (tab === 'callbacks' ? OWNERS_DEF
+    : { ...OWNERS_DEF, columns: OWNERS_DEF.columns.filter(c => c.key !== 'callback') }), [tab])
 
   const open = (o) => {
     store.cacheRecords('owner', [o])
@@ -319,30 +287,27 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   }
 
   const { header, toolbar, body } = ModuleListView({
-    def: OWNERS_DEF, source, store, onOpen: open,
-    filters: flt, onFilters, facets,
+    def, source, store, onOpen: open,
+    filters: towerSel ? { tower: [towerSel] } : {}, onFilters, facets,
     search: q, onSearch: (v) => { setQ(v); setPage(1) },
-    sortKey, onSortKey: (v) => { setSortKey(v); setPage(1) }, sortDir, onSortDir: (v) => { setSortDir(v); setPage(1) },
+    sortKey, onSortKey: (v) => patchBag({ sortKey: v }), sortDir, onSortDir: (v) => patchBag({ sortDir: v }),
     segments: segs, view, onView: setView,
     phone,
-    leftAddon: (
+    leftAddon: canAssign ? (
       <div className="leads-dd-row">
-        <SelectDropdown label="Status" value={stage} onChange={setStageP} options={stageOptions} />
-        {canAssign && (
-          <SelectDropdown
-            label="Agent" value={agentSel} onChange={setAgentP} searchable
-            options={[
-              { value: 'all', label: 'All' },
-              ...(counts.byAgent || []).map(a => ({
-                value: a.value,
-                label: a.value === state.activeAgentId ? 'Me' : a.label,
-                count: a.count,
-              })),
-            ]}
-          />
-        )}
+        <SelectDropdown
+          label="Agent" value={agentSel} onChange={setAgentP} searchable
+          options={[
+            { value: 'all', label: 'All' },
+            ...((counts || {}).byAgent || []).map(a => ({
+              value: a.value,
+              label: a.value === state.activeAgentId ? 'Me' : a.label,
+              count: a.count,
+            })),
+          ]}
+        />
       </div>
-    ),
+    ) : null,
     // The toolbar IS the selection bar — see FilterBar. No second band.
     selection: (canAssign && view === 'list' && selected.size > 0) ? {
       count: selected.size,
@@ -351,17 +316,13 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     } : null,
     page, onPage: view === 'projects' ? undefined : setPageP, pageSize, onPageSize: view === 'projects' ? undefined : setPageSize,
     showViewSwitch: false,
-    // GROUP BY PROJECT, first in the bar, before search: it changes what the
-    // list IS (cards of projects, or the rows). It is also the ONLY project
-    // control: pick a card and this button becomes that project's chip, and ×
-    // goes back to the cards. A project picker in the Filter menu as well was
-    // two controls for one question.
+    // GROUP BY PROJECT, first in the bar: it changes what the list IS. Inside a
+    // project it becomes that project's chip, and × goes back to the cards.
     toolbarLeft: projectSel ? (
       <span className="proj-chip">
         <Icon name="building" size={14} />
         <span className="proj-chip-t">{currentProject?.name || (projectSel === '_none' ? 'No project' : projectSel)}</span>
-        <button type="button" aria-label="Back to all projects"
-          onClick={() => { setFlt({ ...flt, project: [], tower: [] }); setView('projects') }}><Icon name="x" size={13} /></button>
+        <button type="button" aria-label="Back to all projects" onClick={leaveProject}><Icon name="x" size={13} /></button>
       </span>
     ) : (
       <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
@@ -378,8 +339,8 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
           onAssign={(pj) => store.openModal({ kind: 'assignProject', project: pj })}
           onOpen={(key) => toProject(key === 'No project' ? '_none' : key)} />
       : v === 'grid'
-        ? <ModuleCards def={OWNERS_DEF} rows={list} store={store} onOpen={open} phone={phone} />
-        : <ModuleTable def={OWNERS_DEF} rows={list} store={store} onOpen={open} sortKey={sortKey} sortDir={sortDir} onSort={(v) => { setSortKey(v); setPage(1) }}
+        ? <ModuleCards def={def} rows={list} store={store} onOpen={open} phone={phone} />
+        : <ModuleTable def={def} rows={list} store={store} onOpen={open} sortKey={sortKey} sortDir={sortDir} onSort={(v) => patchBag({ sortKey: v })}
             selectable={canAssign} selectedIds={selected} onSelectionChange={setSelected} />,
   })
 

@@ -24,7 +24,7 @@ import { currentTenant } from './api.js'
 
 export const TAKEOVER_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'propFromOwner', 'propCopyOf', 'projOpen', 'projKey',
-  'leadFilters', 'propFilters', 'ownerSeg', 'ownerStage', 'contactsTab',
+  'leadFilters', 'propFilters', 'ownerFilters', 'contactsTab',
   // Today's half (To do / My work / Team) and a teammate opened from Team or
   // the Performance page.
   'todayView', 'person',
@@ -105,6 +105,22 @@ const writePropFilters = (p, f) => {
   for (const [k, v] of q.entries()) p.append(PROP_URL_NAME[k] || k, v)
 }
 
+// THE CALLING BAG. Its tab, status, caller, project and tower were private
+// useState in Owners.jsx: a reload lost them, and leaving a project left a tab
+// switched on that nothing on screen explained. Read and written only on the
+// calling screen, so `tab`, `status` and `caller` cannot leak into the other
+// two bags; the project is `in-project` for the reason PROP_URL_NAME gives.
+const OWNER_URL = { tab: 'tab', status: 'status', caller: 'caller', project: 'in-project', tower: 'tower', sortKey: 'sortKey', sortDir: 'sortDir' }
+const readOwnerFilters = (p) => {
+  const f = {}
+  for (const [k, u] of Object.entries(OWNER_URL)) { const v = p.get(u); if (v) f[k] = v }
+  return Object.keys(f).length ? f : undefined
+}
+const writeOwnerFilters = (p, f) => {
+  if (!f) return
+  for (const [k, u] of Object.entries(OWNER_URL)) if (f[k] && f[k] !== 'all') p.set(u, f[k])
+}
+
 /** Read screen + selection out of the current URL. */
 export function parseUrl(search = window.location.search) {
   const p = new URLSearchParams(search)
@@ -128,8 +144,14 @@ export function parseUrl(search = window.location.search) {
       contactsTab: ['tenants', 'buyers'].includes(p.get('tab')) ? p.get('tab') : undefined,
       todayView: ['work', 'team'].includes(p.get('view')) ? p.get('view') : undefined,
       person: p.get('person') || undefined,
-      leadFilters: readFilters(p),
-      propFilters: readPropFilters(p),
+      // EACH BAG ON ITS OWN SCREEN ONLY. The three share parameter names —
+      // `status`, `in-project`, `sortKey` — so reading all three everywhere
+      // filled the property bag from a calling URL, and it wrote those back
+      // after the calling bag had cleared them: × on a calling project left
+      // the project in the address, and the next tab brought it back.
+      leadFilters: p.get('screen') === 'leads' ? readFilters(p) : undefined,
+      propFilters: p.get('screen') === 'properties' ? readPropFilters(p) : undefined,
+      ownerFilters: p.get('screen') === 'calling' ? readOwnerFilters(p) : undefined,
     },
     // Not navigation, but they ride the same query string and must survive it.
     ws: p.get('ws') || null,
@@ -157,8 +179,9 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (screen === 'clients' && sel.contactsTab && sel.contactsTab !== 'owners') p.set('tab', sel.contactsTab)
   if (screen === 'today' && sel.todayView) p.set('view', sel.todayView)
   if ((screen === 'today' || screen === 'performance') && sel.person) p.set('person', sel.person)
-  writeFilters(p, sel.leadFilters)
-  writePropFilters(p, sel.propFilters)
+  if (screen === 'leads') writeFilters(p, sel.leadFilters)
+  if (screen === 'properties') writePropFilters(p, sel.propFilters)
+  if (screen === 'calling') writeOwnerFilters(p, sel.ownerFilters)
   const q = p.toString()
   return q ? `?${q}` : window.location.pathname
 }

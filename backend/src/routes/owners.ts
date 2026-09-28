@@ -13,7 +13,7 @@ import { requireTenantAuth } from '../middleware/auth';
 import { convertOwner } from '../services/agreements';
 import { holds, sendError } from './agreements';
 import {
-  createOwner, listOwners, getOwnersSummary, listOwnerProjects,
+  createOwner, listOwners, getOwnersSummary, getOwnerTabs, listOwnerProjects,
   getOwnerById, updateOwner, deleteOwner, bulkAssignOwners, assignProjectOwners, splitAssign, OWNER_STATUSES,
 } from '../services/store';
 
@@ -38,6 +38,23 @@ ownersRouter.get('/', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to fetch owners', message: err.message });
+  }
+});
+
+/** GET /api/v1/owners/tabs — the calling tabs' counts, with the list's own
+ *  filters (same query string as GET /owners). Before /:id. */
+ownersRouter.get('/tabs', async (req: Request, res: Response) => {
+  try {
+    const q = req.query;
+    const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+    const tabs = await getOwnerTabs({
+      q: str(q.q), stage: str(q.stage), project: str(q.project), tower: str(q.tower),
+      locality: str(q.locality), agent: str(q.agent), source: str(q.source),
+      segment: str(q.segment), mine: q.mine === '1',
+    });
+    return res.status(200).json({ success: true, tabs });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to count owners', message: err.message });
   }
 });
 

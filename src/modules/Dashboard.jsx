@@ -3,6 +3,7 @@ import { Kpi, Panel, SectionHead } from '../components/primitives.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { TeamToday } from '../components/ActivityDay.jsx'
+import { callingFiltersFor } from '../data/ownerStatus.js'
 
 // THE MANAGER'S SCREEN. One question: is the team working the book, and who is
 // stuck. Tiles for what can be cleared today, then a row per agent with a
@@ -79,7 +80,7 @@ export default function Dashboard({ store, go, topBar }) {
   // nothing at all: no request changed, no chip appeared, the book just sat
   // there. One shape now, and it is the URL's.
   const toLeads = (leadFilters) => go('leads', { leadFilters, leadOpen: false, leadId: undefined })
-  const toCalling = (ownerSeg, ownerStage) => go('calling', { ownerSeg, ownerStage, ownerOpen: false, ownerId: undefined })
+  const toCalling = (segment) => go('calling', { ownerFilters: callingFiltersFor(segment), ownerOpen: false, ownerId: undefined })
 
   // Sources that have actually sent a lead, counted server-side. `bySource` is
   // the firm's real traffic, not settings.sources -- which a new Connections
@@ -180,7 +181,7 @@ export default function Dashboard({ store, go, topBar }) {
           <Kpi icon="clock" label="Went cold today" value={n(totals.cold_today)}
             alert={totals.cold_today > 0} onClick={() => toLeads({ seg: 'going_cold' })} />
           {hasCalling && (
-            <Kpi icon="phone" label="Late callbacks" value={oq.callbacksOverdue}
+            <Kpi icon="phone" label="Callbacks due" value={oq.callbacksOverdue}
               alert={oq.callbacksOverdue > 0} onClick={() => toCalling('callbacks_overdue')} />
           )}
           {hasCalling && (
@@ -220,10 +221,10 @@ export default function Dashboard({ store, go, topBar }) {
                   a tile above. */}
               <div className="qfig">
                 <button className={'qfig-i' + (oq.callbacksOverdue ? ' alert' : '')} onClick={() => toCalling('callbacks_overdue')}>
-                  <span className="qfig-v">{oq.callbacksOverdue}</span><span className="qfig-l">Late</span>
+                  <span className="qfig-v">{oq.callbacksOverdue}</span><span className="qfig-l">Due</span>
                 </button>
                 <button className="qfig-i" onClick={() => toCalling('callbacks_today')}>
-                  <span className="qfig-v">{oq.callbacksToday}</span><span className="qfig-l">Due today</span>
+                  <span className="qfig-v">{oq.callbacksToday}</span><span className="qfig-l">Later today</span>
                 </button>
                 <button className="qfig-i" onClick={() => toCalling('to_call')}>
                   <span className="qfig-v">{oq.toCall}</span><span className="qfig-l">Never called</span>

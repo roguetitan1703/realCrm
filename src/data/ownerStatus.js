@@ -73,3 +73,17 @@ export function statusFromSheet(text) {
   }
   return null
 }
+
+/**
+ * WHERE A LINK INTO CALLING LANDS. The dashboard and Today count callbacks and
+ * owners to call, and each figure opens the calling tab that holds those rows:
+ * a callback figure opens Callbacks (sorted soonest first, so the ones already
+ * due are at the top), "never called" opens New. One map, so the two screens
+ * that link in cannot land on different tabs for the same figure.
+ */
+export function callingFiltersFor(segment) {
+  if (String(segment || '').startsWith('callbacks')) return { tab: 'callbacks' }
+  if (segment === 'to_call' || segment === 'never_called') return { status: 'New' }
+  if (segment === 'unassigned') return { tab: 'unassigned' }
+  return undefined
+}
