@@ -8,7 +8,7 @@ a live database so the next session neither re-derives it nor assumes it.
 Open bugs go in `docs/KNOWN-ISSUES.md`, not here. Point at them. The working
 plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md` (latest: part E).
 
-**Last session: 2026-09-25.**
+**Last session: 2026-09-28.**
 
 ---
 
@@ -19,7 +19,7 @@ plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md` (latest: part E)
 | Backend — AWS EC2, **by hand** | `f03dcd1` when last read (24 Sep, `/health`) | `scripts/deploy-api.sh` on the box — refuses a dirty tree or a branch other than `main` |
 | Frontend — Vercel | not recorded | **Branch Tracking is OFF** — a push to `main` does not deploy; the user deploys by hand |
 | `main` | `a3b51c0` | |
-| `development` | about 25 commits ahead of `main` | agreements and conversion (D), the activity report, contacts tabs, the copy sweep, Today / My work / Performance, Properties Part 7, the superadmin console, the per-firm ledger |
+| `development` | 41 commits ahead of `main` | agreements and conversion (D), the activity report, contacts tabs, the copy sweep, Today / My work / Performance, Properties Part 7, the superadmin console, the per-firm ledger, the build's name check, tutorials, and (28 Sep) calling tabs, property tabs + project list + duplicate, the photo editor, the import switch, listings added |
 
 **Deploy order: API first, then frontend.** The new frontend calls
 `/agreements`, `/public/gallery`, the `contact` counts and fields the old API
@@ -30,7 +30,8 @@ What the API deploy runs on production, once:
   `idx_crm_timeline_day (tenant_id, timestamp)`, four property columns
   (`verified_at`, `verified_by`, `gallery_off`, `gallery_version`),
   `sessions.support_by`, `superadmins.failed_logins / locked_until`,
-  `audit_log.chain` with its index, and the `audit_checks` table;
+  `audit_log.chain` with its index, the `audit_checks` table and its `reason`
+  column;
 - `runOnce 2026_09_25_intro_message_no_dashes`: a firm's saved intro message
   loses its em dash (the old default becomes the new one); logs which firms
   (user's OK for all firms, 25 Sep);
@@ -50,6 +51,12 @@ After the API deploy:
 ## Waiting on the user
 
 - **Review on dev, merge `development` → `main`, deploy** (API, then frontend).
+- **How many production listings are an invented flat A-101.** Until 166eba6,
+  createProperty wrote tower `A` and unit `101` for any listing saved without
+  them (a calling row converted before its flat was known, a copy). Dev: 3 of
+  delpat's 25 read A-101, 1 of urban's reads unit 101. A real A-101 and an
+  invented one look the same; on production (bhumi, mahalaxmi) the count needs
+  the user's OK to read, and any repair needs the user's decision per firm.
 - **Superadmin console built** (mahalaxmi-batch.md, "Superadmin — as built"):
   console session, support view, firm page, per-firm ledger, setup email.
   Worth a look on dev at `/admin` before deploying.
@@ -66,21 +73,25 @@ After the API deploy:
 
 ## Checked this session
 
-- **Dev only.** Today / My work / Performance driven in Chromium, desk 1440 and
-  iPhone 13: agent desk lands on Today, no horizontal scroll on the phone, Back
-  from a teammate returns to the Team tab, a dashboard row opens that person,
-  picking a bar reads that day. No page errors.
-- Performance restructured (mahalaxmi-batch.md part E): on dev, yesterday's
-  team slices summed to people contacted (61) and "picked up" opened 19 people,
-  matching the summary; desk and iPhone 13, no errors.
-- The copy sweep: 98 on-screen strings; what still has an em dash is server
-  logs, the API client's internal error separator, and SQL reading old titles.
-- Part 7 driven on dev (desk and iPhone 13, the photo page signed out): verify,
-  history after a reload, photo link copy/open/off/new, message carries the
-  link, Verified filter, duplicate to save, two quick attaches both kept, remove. Test photos
-  were uploaded to R2 under `delpat/property/` and deleted (checked gone); the
-  duplicate flat was deleted; `p_demo_a2` put back (no photos, not verified).
-  Its history keeps the lines those steps wrote.
+- **Dev only, `delpat`, desk 1440 and iPhone 13, no page errors.**
+- Calling: every tab's count equals its list total, firm-wide and inside
+  Godrej Green Vistas (All 726 · Callbacks 7 · New 709 · Interested 4 · Key
+  Received 4 · Closed 9); a reload and a record round trip keep the tab; × goes
+  to the 13 project cards with the URL cleared. The phone shows the signed-in
+  person's own list; with the owner signed in (holds none) every tab read 0 and
+  matched. Not checked: an agent who holds rows, on the phone (no agent password).
+- Properties: tab counts equal list totals firm-wide (23) and in Oakridge
+  Towers; project band, Add unit, filter menu (Tower, Flat no.; no Project or
+  Status); bulk duplicate → confirm → copies with "No flat no. yet", found by
+  Flat no. → Not added yet; single duplicate → form → "Save without a flat
+  number?" on desk and phone; old `?project=` links land on the filtered list.
+  Every probe listing deleted by id (listings back to 23).
+- Photos, on `p_1790420338574_60jw` (6 items): Make cover moves in 35 ms desk /
+  105 ms phone and saves; drag reorders; remove + Undo leaves 6 on screen and
+  on the server; a refused save puts the tiles back. Order restored; the 19
+  "Photos" history lines the runs wrote were deleted.
+- Listings added: a probe listing by akashpatel showed in Performance (Listings
+  1), his day, and Team today; deleted.
 
 ---
 
