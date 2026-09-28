@@ -1831,6 +1831,12 @@ export async function listContacts(opts: {
            count(p.id)::int AS listings,
            count(p.id) FILTER (WHERE p.deal = 'sale')::int AS sale,
            count(p.id) FILTER (WHERE p.deal = 'rent')::int AS rent,
+           -- WHAT THEIR FLATS ARE DOING NOW: a landlord whose flat is free
+           -- again is the call to make, and the row could not say so.
+           count(p.id) FILTER (WHERE coalesce(p.status, 'Available') = 'Available')::int AS st_available,
+           count(p.id) FILTER (WHERE p.status = 'Leased')::int AS st_leased,
+           count(p.id) FILTER (WHERE p.status = 'Sold')::int AS st_sold,
+           count(p.id) FILTER (WHERE p.status = 'Blocked')::int AS st_blocked,
            (array_agg(p.title ORDER BY p.created_at DESC))[1] AS first_title,
            (array_agg(p.type ORDER BY p.created_at DESC))[1] AS first_type
       FROM crm_owners o
@@ -1855,6 +1861,7 @@ export async function listContacts(opts: {
       locality: owner.locality || '',
       minsAgo: last ? Math.max(0, Math.round((Date.now() - new Date(last).getTime()) / 60000)) : null,
       listings: r.listings, localities: owner.locality ? [owner.locality] : [],
+      flats: { Available: r.st_available, Leased: r.st_leased, Sold: r.st_sold, Blocked: r.st_blocked },
       firstTitle: r.first_title, firstType: r.first_type,
     };
   });

@@ -4,7 +4,7 @@ import Icon from '../../components/Icon.jsx'
 import MessageTemplates from '../../components/MessageTemplates.jsx'
 import { roleLabel } from '../../lib/permissions.js'
 
-export default function PhoneMe({ store, me, topBar }) {
+export default function PhoneMe({ store, me, topBar, go }) {
   const { state } = store
 
   return (
@@ -33,6 +33,12 @@ export default function PhoneMe({ store, me, topBar }) {
             <Icon name="x" size={14} /> Sign out
           </button>
         </div>
+
+        {/* What is booked, by day — the desk's Calendar, opened from here so the
+            bottom bar stays five tabs. */}
+        <button type="button" className="me-link" onClick={() => go?.('calendar')}>
+          <Icon name="calendar" size={17} /><span>Calendar</span><Icon name="chevRight" size={16} className="me-link-go" />
+        </button>
 
         {/* Alerts and install — the same component and the same two rows the
             desk's Settings → This device renders. This screen had its own card

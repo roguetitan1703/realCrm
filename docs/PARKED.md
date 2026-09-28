@@ -12,6 +12,21 @@ recorded, update it in place rather than adding a second entry.
 
 ---
 
+## Contacts → Tenants: nothing for tenants who have moved out (parked 28 Sep)
+
+**What is wrong.** Tenants has All and "Ending in 30 days". A rent that has
+ended — the flat is free to let again — has no tab of its own; it sits in All
+among the live ones, and the moment the landlord's flat comes back is the
+moment to ring them.
+
+**Why parked.** The user, 28 Sep: after the Contacts filters, not now.
+
+**What the fix takes.** A "Moved out" tab on Tenants over `status IN ('ended')`
+(listAgreements already takes `status=past`), counted like the other two, each
+row opening the flat with its landlord one tap away.
+
+---
+
 ## Filter options that no longer exist once another filter is on (parked 28 Sep)
 
 **What is wrong.** A filter menu offers every value the firm has, whatever else

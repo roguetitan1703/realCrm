@@ -35,12 +35,12 @@ const TABS = [
   { key: 'leads', label: 'Leads', icon: 'leads' },
   { key: 'calling', label: 'Calling', icon: 'phone' },
   { key: 'properties', label: 'Props', icon: 'building' },
-  // What is booked, by day. The desk had it and the phone did not — an agent
-  // could book a visit on the phone and had nowhere there to see the week.
-  { key: 'calendar', label: 'Calendar', icon: 'calendar' },
   { key: 'me', label: 'Me', icon: 'person' },
 ]
 
+// Calendar is a screen but not a tab: it opens from Me (the bottom bar stays
+// five). The desk had it and the phone did not — an agent could book a visit
+// on the phone and had nowhere there to see the week.
 const SCREENS = { leads: Leads, calling: Owners, properties: Properties, calendar: Calendar }
 
 export default function Phone({ store, framed = false, screen, sel, setSel, go: navGo }) {
@@ -101,7 +101,7 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
   const BADGES = { today: overdueN + lateCallbacks, calling: lateCallbacks }
   const tabs = {
     tabs: TABS.map(t => (BADGES[t.key] ? { ...t, badge: BADGES[t.key] } : t)),
-    active: tab,
+    active: tab === 'calendar' ? 'me' : tab,
     onNav: (k) => go(k),
   }
 
@@ -113,10 +113,12 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
     : { kind: tab }
 
   const Screen = SCREENS[tab]
+  // Opened from Me, so its back arrow returns there.
+  const screenCtx = tab === 'calendar' ? { ...ctx, topBar: (o) => topBar({ ...o, onBack: () => go('me') }) } : ctx
   const body = Screen
-    ? <Screen key={`${tab}-${sel.leadId || ''}-${sel.propId || ''}`} {...ctx} />
+    ? <Screen key={`${tab}-${sel.leadId || ''}-${sel.propId || ''}`} {...screenCtx} />
     : tab === 'me'
-      ? <PhoneMe store={store} me={me} topBar={topBar} />
+      ? <PhoneMe store={store} me={me} topBar={topBar} go={go} />
       : <PhoneToday store={store} go={go} topBar={topBar} sel={sel} phone />
 
   return (

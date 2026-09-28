@@ -1110,6 +1110,9 @@ export function partiesDef(kind) {
   }
 }
 
+const flatsLine = (f) => (f ? ['Available', 'Leased', 'Sold', 'Blocked']
+  .filter(k => f[k] > 0).map(k => `${f[k]} ${k.toLowerCase()}`).join(' · ') : '')
+
 export const CLIENTS_DEF = {
   id: 'clients',
   name: 'Contacts',
@@ -1153,6 +1156,9 @@ export const CLIENTS_DEF = {
     { key: 'role', label: 'Role', sortable: true, render: (r) => <span className="source">{r.role}</span> },
     { key: 'detail', label: 'Requirement / listings', render: (r) => <span className="cell-txt">{r.detail}</span> },
     { key: 'locality', label: 'Locality', render: (r) => r.locality },
+    // What their flats are doing now, from the listings: "1 available · 1
+    // leased". A landlord with a flat free again is who to ring.
+    { key: 'flats', label: 'Their flats', render: (r) => <span className="cell-txt">{flatsLine(r.flats) || '—'}</span> },
     { key: 'signal', label: 'Status', render: (r) => r.signal },
   ],
 
@@ -1189,7 +1195,7 @@ export const CLIENTS_DEF = {
         <div className="rc-title rc-title-flex">{r.name}</div>
       </div>
       <div className="rc-sub mono-num">{r.phone}</div>
-      <div className="rc-facts"><span>{r.detail}</span></div>
+      <div className="rc-facts"><span>{r.detail}</span>{flatsLine(r.flats) && <span>{flatsLine(r.flats)}</span>}</div>
       <div className="rc-foot">
         <span className="source">{r.role}</span>
         {r.signal}

@@ -3468,3 +3468,15 @@ button.mp-makecover{pointer-events:auto;border:none;cursor:pointer;background:rg
 
 /* Call / WhatsApp at the end of a contact row. */
 .row-reach{display:inline-flex;gap:2px}
+
+/* A row on the phone's Me screen that opens another screen. */
+.me-link{display:flex;align-items:center;gap:11px;width:100%;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;font:inherit;font-size:14.5px;font-weight:600;color:var(--ink);cursor:pointer;text-align:left}
+.me-link span{flex:1}
+.me-link-go{color:var(--muted)}
+
+/* Calling on a phone: Group by project / the project chip beside the two
+   dropdowns, in one row that never runs off the screen. */
+.leads-dd-row{max-width:100%;min-width:0}
+.leads-dd-row .proj-chip{min-width:0;flex:1 1 0}
+.leads-dd-row .proj-chip-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.leads-dd-row .grp-toggle{white-space:nowrap}

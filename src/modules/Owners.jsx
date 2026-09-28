@@ -309,6 +309,21 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     return <OwnerRecord store={store} ownerId={openId} topBar={topBar} phone={phone} onBack={back} go={go} />
   }
 
+  // GROUP BY PROJECT, or the project's chip with × back to the cards.
+  const groupCtl = projectSel ? (
+    <span className="proj-chip">
+      <Icon name="building" size={14} />
+      <span className="proj-chip-t">{currentProject?.name || (projectSel === '_none' ? 'No project' : projectSel)}</span>
+      <button type="button" aria-label="Back to all projects" onClick={leaveProject}><Icon name="x" size={13} /></button>
+    </span>
+  ) : (
+    <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
+      onClick={() => setView(view === 'projects' ? 'list' : 'projects')}>
+      <Icon name="building" size={14} />{phone ? 'By project' : 'Group by project'}
+    </button>
+  )
+
+
   const { header, toolbar, body } = ModuleListView({
     def, source, store, onOpen: open,
     filters: towerSel ? { tower: [towerSel] } : {}, onFilters, facets,
@@ -330,6 +345,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
             })),
           ]}
         />}
+        {phone && groupCtl}
       </div>
     ),
     // The toolbar IS the selection bar — see FilterBar. No second band.
@@ -342,18 +358,8 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     showViewSwitch: false,
     // GROUP BY PROJECT, first in the bar: it changes what the list IS. Inside a
     // project it becomes that project's chip, and × goes back to the cards.
-    toolbarLeft: projectSel ? (
-      <span className="proj-chip">
-        <Icon name="building" size={14} />
-        <span className="proj-chip-t">{currentProject?.name || (projectSel === '_none' ? 'No project' : projectSel)}</span>
-        <button type="button" aria-label="Back to all projects" onClick={leaveProject}><Icon name="x" size={13} /></button>
-      </span>
-    ) : (
-      <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
-        onClick={() => setView(view === 'projects' ? 'list' : 'projects')}>
-        <Icon name="building" size={14} />Group by project
-      </button>
-    ),
+    // On a phone it sits beside the two dropdowns instead, one row of controls.
+    toolbarLeft: phone ? undefined : groupCtl,
     cta: { label: 'New owner', onClick: () => store.openModal({ kind: 'newOwner' }) },
     emptyTitle: 'No owners match', emptyHint: 'Adjust the filter or search, or import a list.',
     renderTable: (list, v) => v === 'projects'
