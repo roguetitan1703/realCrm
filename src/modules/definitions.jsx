@@ -26,7 +26,7 @@ import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { FinishLead, FinishOwner } from '../components/Agreements.jsx'
 import { finalStageOf } from '../data/pipelineRoles.js'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, dayLabel, arrivedOn, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
+import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, dayLabel, arrivedOn, flatOf, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
 import { getPref } from '../lib/prefs.js'
 import { copyText } from '../lib/clipboard.js'
 import { messageLang } from '../data/vocabLocale.js'
@@ -825,9 +825,6 @@ export const PROPERTIES_DEF = {
   searchFields: ['society', 'title', 'locality', 'owner', 'type', 'project', 'tower', 'unit'],
 
   filterFields: (store, facets) => {
-    // Project options are derived from the live inventory, so a broker can narrow
-    // the unit list to one township/society.
-    const projects = store?.state?.projects || []
     // Sale-only concepts are hidden when the inventory holds no sale listings
     // at all — a lettings-only desk should never be offered "Ownership" or
     // "Transaction", which can only ever return nothing. Counted on the server;
@@ -841,7 +838,9 @@ export const PROPERTIES_DEF = {
     // the panel. They then appeared on their own a moment later.
     const hasSale = !store?.state?.hydrated || (store?.state?.dealMix?.sale ?? 1) > 0
     return [
-      { key: 'project', label: 'Project', icon: 'building', group: 'Where', options: opt(projects) },
+      // PROJECT is not here: Group by project is the project control, as on
+      // Calling — pick a card and it becomes the project's chip. STATUS is not
+      // here either: it is the tab row.
       // 4.4 Only inside one project: the screen passes that project's towers.
       ...(facets?.towers?.length ? [{ key: 'tower', label: 'Tower', icon: 'layers', group: 'Where', options: facets.towers }] : []),
       { key: 'deal', label: 'Deal', icon: 'tag', multi: false, group: 'What', options: optionsOf(DEALS) },
@@ -856,7 +855,10 @@ export const PROPERTIES_DEF = {
         options: optionsOf([...SUBTYPES.residential, ...SUBTYPES.commercial]
           .filter((x, i, a) => a.findIndex(y => y.value === x.value) === i)) },
       { key: 'locality', label: 'Locality', icon: 'building', group: 'Where', options: asOptions(localities(store)) },
-      { key: 'status', label: 'Status', icon: 'check', group: 'State', options: optionsOf(STATUS) },
+      // The flats nobody has numbered yet: copies made in bulk, calling rows
+      // converted before the number was known.
+      { key: 'unit', label: 'Flat no.', icon: 'tag', multi: false, group: 'State',
+        options: [{ value: 'missing', label: 'Not added yet' }] },
       { key: 'verified', label: 'Verified', icon: 'check', multi: false, group: 'State',
         options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] },
       { key: 'furnishing', label: 'Furnishing', icon: 'home', group: 'Condition', options: optionsOf(FURNISH) },
@@ -911,7 +913,7 @@ export const PROPERTIES_DEF = {
     { key: 'society', label: 'Property', render: (p) => (
       <div className="cell-prop">
         <div className="thumb-tile" style={{ background: thumbTint(p.id) }}><Icon name="building" size={19} strokeWidth={1.4} /></div>
-        <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}{p.verifiedAt && <span className="vtick" title="Verified"><Icon name="check" size={11} /></span>}</div><div className="sub">{p.locality}</div></div>
+        <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}{!flatOf(p) && !isPlot(p.subtype ?? normaliseSubtype(p.type, p.category)) && <span className="unit-tag unit-missing">No flat no. yet</span>}{p.verifiedAt && <span className="vtick" title="Verified"><Icon name="check" size={11} /></span>}</div><div className="sub">{p.locality}</div></div>
       </div>
     ) },
     // These columns read the CANONICAL fields with a legacy fallback. They

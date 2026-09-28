@@ -63,10 +63,10 @@ const FILTER_LISTS = ['source', 'locality', 'agent', 'flag']
 // every TAKEOVER key on any navigation that is not record-only, so two list
 // screens are never filtered at once. It also keeps the URL readable —
 // ?screen=properties&status=Available rather than a prefixed dialect.
-const PROP_SCALARS = ['sortKey', 'sortDir']
+const PROP_SCALARS = ['sortKey', 'sortDir', 'tab']
 const PROP_LISTS = [
   'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
-  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'tower',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'tower', 'unit',
 ]
 
 function readBag(p, scalars, lists) {

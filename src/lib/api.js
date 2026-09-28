@@ -741,6 +741,13 @@ export const api = {
   },
   getProperty: (id) => request(`/properties/${encodeURIComponent(id)}`),
   getPropertiesSummary: () => request('/properties/summary'),
+  // The property tabs' counts, for the same filters as listProperties.
+  getPropertyTabs: (params = {}) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
+    const s = qs.toString()
+    return request(`/properties/tabs${s ? `?${s}` : ''}`)
+  },
   // The buyers already matched to one property. Replaces running the matcher
   // over every lead in the browser to answer a question about a single flat.
   getPropertyBuyers: (id) => request(`/properties/${encodeURIComponent(id)}/buyers`),

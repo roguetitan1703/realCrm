@@ -159,7 +159,7 @@ const SCORE_WEIGHTS = [
   { key: 'photos', weight: 4, has: f => (f.media || []).length > 0 },
 ]
 
-function scoreOf(f) {
+export function scoreOf(f) {
   return SCORE_WEIGHTS.reduce((n, w) => n + (w.has(f) ? w.weight : 0), 0)
 }
 
@@ -388,7 +388,7 @@ const COPY_KEYS = [
   'depositOption', 'depositAmount', 'lockinOption', 'lockinMonths', 'maintenanceAmount',
   'parkingChargesMode', 'paintingCharges', 'otherCharges', 'bookingAmount', 'priceIncludes',
 ]
-function fromCopy(p) {
+export function fromCopy(p) {
   if (!p) return null
   const f = blank()
   for (const k of COPY_KEYS) {
@@ -499,10 +499,8 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
     if (!form.subtype) m.push('property type')
     if (applies.bhk && !form.bhk) m.push('configuration')
     if (!form.price) m.push('price')
-    // A copy without its own flat number is the same listing twice.
-    if (copyId && !String(form.unit || '').trim()) m.push('flat number')
     return m
-  }, [form, applies.bhk, copyId])
+  }, [form, applies.bhk])
 
   const close = () => (ownerId
     ? go('calling', { ownerId, ownerOpen: true })
@@ -511,6 +509,25 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
 
   const save = async (again = false) => {
     if (missing.length) { store.toast(`Add the ${missing[0]} first`, 'warn'); return }
+    // A COPY MAY NOT KNOW ITS FLAT YET. A firm lists the flats it has, and the
+    // owner of the one next door is often a name before anybody knows the
+    // number — so it saves without one, as "No flat no. yet", and is filled in
+    // later. Asked once, because a copy with no number of its own is also how
+    // the same listing ends up in the book twice.
+    if (copyId && !String(form.unit || '').trim()) {
+      store.openModal({
+        kind: 'confirm',
+        title: 'Save without a flat number?',
+        lines: [[form.society || form.project, form.tower && `Wing ${form.tower}`].filter(Boolean).join(' · ')].filter(Boolean),
+        cancelLabel: 'Add it',
+        confirmLabel: 'Save without it',
+        onConfirm: () => commit(again),
+      })
+      return
+    }
+    return commit(again)
+  }
+  const commit = async (again = false) => {
     setSaving(true)
     const payload = { ...form, completeness: score, ...(copyId ? { copiedFrom: copyId } : {}) }
     try {

@@ -102,6 +102,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'activityRecords' && <ActivityRecords store={store} go={go} Modal={Modal} side={m.side} date={m.date}
         person={m.person} measure={m.measure} detail={m.detail} title={m.title} />}
       {m?.kind === 'rejectOwner' && <RejectOwnerModal store={store} ownerId={m.ownerId} />}
+      {m?.kind === 'confirm' && <ConfirmModal store={store} {...m} />}
       {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} only={m.only} />}
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
@@ -1037,6 +1038,32 @@ function RejectLeadModal({ store, leadId }) {
  * not call again" and a wrong number are Do Not Call, the rest are Not
  * Interested — a distinction the caller should not have to make twice.
  */
+// ---- Confirm ----
+// One question and two answers, for an action that makes or changes records in
+// one go. `lines` names what it will touch, so the confirm is about something
+// the person can see. Its buttons are the modal's sticky action row, so it
+// works on a phone as it does at a desk.
+function ConfirmModal({ store, title, lines, confirmLabel, cancelLabel, onConfirm }) {
+  const list = lines || []
+  return (
+    <Modal title={title} onClose={store.closeModal} width={420}>
+      {list.length > 0 && (
+        <div className="confirm-lines">
+          {list.slice(0, 8).map((l, i) => <div key={i} className="confirm-line">{l}</div>)}
+          {list.length > 8 && <div className="confirm-line u-muted">and {list.length - 8} more</div>}
+        </div>
+      )}
+      <div className="lc-foot">
+        <Button onClick={store.closeModal}>{cancelLabel || 'Cancel'}</Button>
+        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }}
+          onClick={() => { store.closeModal(); onConfirm?.() }}>
+          {confirmLabel || 'Confirm'}
+        </Button>
+      </div>
+    </Modal>
+  )
+}
+
 function RejectOwnerModal({ store, ownerId }) {
   const o = store.lookup('owner', ownerId)
   const [pick, setPick] = useState(OWNER_REJECTION_REASONS[0])

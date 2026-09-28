@@ -4,7 +4,7 @@ import { useServerList } from '../lib/serverList.js'
 import { useRecord } from '../lib/useRecord.js'
 import { api } from '../lib/api.js'
 import { ModuleListView, ModuleTable, PropertyCard, ProjectCard } from '../components/collections.jsx'
-import { unitsByWing, priceRangeLabel } from '../lib/projects.js'
+import { priceRangeLabel } from '../lib/projects.js'
 import { useServerData } from '../lib/useServerData.js'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { StatusTag, Quoted, Button, KV, Timeline, MoreRows, useCap, CappedList, Panel, SectionHead } from '../components/primitives.jsx'
@@ -18,7 +18,7 @@ import { AgreementList, useAgreementsFor } from '../components/Agreements.jsx'
 import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
-import PropertyWizard from './PropertyWizard.jsx'
+import PropertyWizard, { fromCopy, scoreOf } from './PropertyWizard.jsx'
 import { canEditListing, canAddListing } from '../lib/permissions.js'
 
 // The filter bar speaks in arrays ({ status: ['Available','Blocked'] }) because
@@ -34,13 +34,13 @@ import { canEditListing, canAddListing } from '../lib/permissions.js'
 // from the UI), so the two lists are near-identical but not the same thing.
 export const PROP_FILTER_KEYS = [
   'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
-  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'tower',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'tower', 'unit',
 ]
 
 const API_FILTERS = [
   'status', 'deal', 'type', 'locality', 'project',
   'category', 'bhk', 'subtype', 'furnishing', 'facing',
-  'possession', 'ownership', 'transaction', 'verified', 'tower',
+  'possession', 'ownership', 'transaction', 'verified', 'tower', 'tab', 'unit',
 ]
 function toQuery({ page, limit, q, ...filters }) {
   const out = { page, limit, q }
@@ -50,20 +50,6 @@ function toQuery({ page, limit, q, ...filters }) {
     else if (v) out[k] = v
   }
   return out
-}
-
-// Counts for the stat strip, straight from Postgres. Refetched whenever the
-// desk's data moves, so adding a listing moves the number without a reload.
-function usePropertiesSummary(dataAsOf) {
-  const [summary, setSummary] = useState({ total: 0, byStatus: {}, byDeal: {} })
-  useEffect(() => {
-    let live = true
-    api.getPropertiesSummary()
-      .then(r => { if (live && r?.success) setSummary(r.summary) })
-      .catch(() => {})   // the strip degrades to zeros; the list still works
-    return () => { live = false }
-  }, [dataAsOf])
-  return summary
 }
 
 /**
@@ -94,7 +80,6 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
     return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} phone={phone} />
   }
   if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} />
-  if (sel.projOpen && sel.projKey) return <ProjectDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} />
   return <PropertyList store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} mayEdit={mayEditAny} mayAdd={mayAdd} />
 }
 
@@ -112,16 +97,24 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   const bag = sel.propFilters || {}
   const sortKey = bag.sortKey || 'recent'
   const sortDir = bag.sortDir || 'asc'
+  const tab = bag.tab || 'all'
   const flt = useMemo(() => {
     const o = {}
     for (const k of PROP_FILTER_KEYS) if (bag[k]?.length) o[k] = bag[k]
     return o
   }, [JSON.stringify(bag)])
+  const projectSel = flt.project?.length === 1 ? flt.project[0] : null
 
   const [q, setQ] = useState('')
-  const [view, setView] = useState('list')
+  // GROUPED BY PROJECT IS WHERE THE DESK STARTS: a firm's inventory is
+  // townships, and a flat is found by its building first. Arriving with a
+  // filter, a tab or a project already chosen means the list. A phone gets the
+  // list, as Calling's does.
+  const filtered = Object.keys(flt).length > 0 || tab !== 'all'
+  const [view, setView] = useState(phone || filtered ? 'list' : 'projects')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  const [selected, setSelected] = useState(new Set())
 
   // Any change to what's being asked for invalidates whatever page you were on —
   // page 3 of "3BHK in Baner" is a different page 3 once the filter changes.
@@ -136,88 +129,155 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
       }
       return { ...s, propFilters: Object.keys(next).length ? next : undefined }
     })
-    setPage(1)
+    setPage(1); setSelected(new Set())
   }
   // The panel hands back the WHOLE bag, so replace the filter keys wholesale
-  // and keep the sort, which lives in the same bag but is not a filter.
+  // and keep the sort, the tab and the project, which live in the same bag but
+  // are not the panel's.
   const setFltP = (v) => {
-    const cleared = Object.fromEntries(PROP_FILTER_KEYS.map(k => [k, undefined]))
+    const cleared = Object.fromEntries(PROP_FILTER_KEYS.filter(k => k !== 'project').map(k => [k, undefined]))
     const next = { ...cleared, ...(v || {}) }
-    // A tower belongs to one project: a different project, or none, clears it.
-    if (JSON.stringify(next.project || []) !== JSON.stringify(flt.project || [])) next.tower = undefined
+    if (!projectSel) next.tower = undefined
     patchBag(next)
+    setView('list')
   }
-  // 4.4 THE TOWERS OF THE ONE PROJECT PICKED, for the Tower filter. Read from
-  // the project, the same aggregate its page groups units by; with no project
-  // or several, there is no tower to offer.
-  const oneProject = flt.project?.length === 1 ? flt.project[0] : null
-  const { data: projectTowers } = useServerData(
-    () => (oneProject ? api.getProject(oneProject).then(r => r?.project?.wings || []) : Promise.resolve([])),
-    [oneProject], [])
+  const pickTab = (key) => { patchBag({ tab: key }); setView('list') }
+  const toProject = (key) => { patchBag({ project: [key], tower: undefined }); setView('list') }
+  // LEAVING A PROJECT goes back to the cards with nothing left switched on.
+  const leaveProject = () => {
+    const cleared = Object.fromEntries([...PROP_FILTER_KEYS, 'tab', 'sortKey', 'sortDir'].map(k => [k, undefined]))
+    patchBag(cleared)
+    setView('projects')
+  }
+  // An old link to the project page (?project=) lands here, on the same list.
+  useEffect(() => {
+    if (!sel.projOpen || !sel.projKey) return
+    // The key is read HERE, not inside the updater: React may run an updater
+    // twice, and the second run sees the key the first one cleared.
+    const key = sel.projKey
+    setSel(s => ({ ...s, projOpen: false, projKey: undefined, propFilters: { project: [key] } }))
+    setView('list')
+  }, [sel.projOpen, sel.projKey])
+
+  // THE ONE PROJECT PICKED: its facts for the band above the list, and its
+  // towers for the Tower filter. Read from the project aggregate, the same one
+  // its card on the grid was drawn from.
+  const { data: project } = useServerData(
+    () => (projectSel ? api.getProject(projectSel).then(r => r?.project || null) : Promise.resolve(null)),
+    [projectSel, state.dataAsOf], null)
   const setQP = (v) => { setQ(v); setPage(1) }
   const setSortKeyP = (v) => patchBag({ sortKey: v })
   const setSortDirP = (v) => patchBag({ sortDir: v })
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
+  const setPageP = (v) => { setPage(v); setSelected(new Set()) }
+  useEffect(() => { setSelected(new Set()) }, [view, projectSel])
 
   const open = (id) => go('properties', { propId: id, propOpen: true })
-  const openProject = (key) => go('properties', { projKey: key, projOpen: true })
 
-  // Counts come from Postgres, not from counting an array the browser had to
-  // download first. `Listings` is the firm's real total — it used to be the
-  // length of whatever happened to be in memory, which is the same number only
-  // for as long as the whole book fits there.
-  const summary = usePropertiesSummary(state.dataAsOf)
-  const kpis = [
-    { label: 'Listings', value: summary.total, onClick: () => setFltP({}) },
-    { label: 'Available', value: summary.byStatus?.Available || 0, tone: 'accent', onClick: () => setFltP({ status: ['Available'] }) },
-    { label: 'Rentals', value: summary.byDeal?.rent || 0, onClick: () => setFltP({ deal: ['rent'] }) },
-  ]
-
-  // The listings themselves: one page, fetched for the filters actually on
-  // screen. The project view is an aggregate over the whole book and cannot be
-  // built from a page, so it keeps the in-memory collection until it gets its
-  // own endpoint.
+  // ONE QUESTION for the rows and for the tab counts, so a tab can never
+  // promise listings its list cannot find.
   const source = useServerList(
-    (params) => api.listProperties(toQuery(params)),
+    (params) => api.listProperties(toQuery({ ...params, tab: tab === 'all' ? undefined : tab })),
     { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone },
-    [state.dataAsOf],
+    [state.dataAsOf, tab],
     { store, kind: 'property' },
   )
+  const { data: counts } = useServerData(
+    () => api.getPropertyTabs(toQuery({ ...flt, q })).then(r => r?.tabs || {}),
+    [state.dataAsOf, q, JSON.stringify(flt)], {})
 
-  // Shared query engine drives filter/search/sort; a custom renderTable keeps the
-  // module-specific card grid (with demand count) + demand-column table view.
-  // The project view reads its own aggregate endpoint, so the unit pager is
-  // hidden there rather than paging rows it isn't showing.
+  // THE TABS ARE WHAT A LISTING IS DOING. The strip of Listings / Available /
+  // Rentals they replace was three firm-wide totals that ignored every filter
+  // on screen. Available splits by deal because an available flat is worked as
+  // a sale or as a rental; the three off the market do not. A listing that
+  // never said sale or rent is in neither, and has its own tab while any exist.
+  const c = counts || {}
+  const segs = [
+    { key: 'all', label: 'All', count: c.total ?? 0 },
+    { key: 'available_sale', label: 'Available for sale', count: c.available_sale ?? 0 },
+    { key: 'available_rent', label: 'Available for rent', count: c.available_rent ?? 0 },
+    ...(c.available_unstated > 0 || tab === 'available_unstated'
+      ? [{ key: 'available_unstated', label: 'Available, deal not stated', count: c.available_unstated ?? 0 }] : []),
+    { key: 'Blocked', label: 'Blocked', count: c.Blocked ?? 0 },
+    { key: 'Sold', label: 'Sold', count: c.Sold ?? 0 },
+    { key: 'Leased', label: 'Leased', count: c.Leased ?? 0 },
+  ].map(s => ({ ...s, on: tab === s.key, disabled: s.key !== 'all' && !s.count, onClick: () => pickTab(s.key) }))
+
+  // DUPLICATE, from the rows. One row is the ordinary duplicate: the form,
+  // filled in, where its own flat number and photos are added. Several is a
+  // batch of copies made at once, each without a flat number until somebody
+  // adds it — a firm lists the flats it has, and a floor is not all one owner.
+  const picked = (source.rows || []).filter(p => selected.has(p.id))
+  const duplicate = () => {
+    if (picked.length === 1) { go('properties', { propAdd: true, propId: null, propCopyOf: picked[0].id }); return }
+    store.openModal({
+      kind: 'confirm',
+      title: `Duplicate ${picked.length} listings?`,
+      lines: picked.map(p => [p.society || p.project, unitLabel(p), configLabel(p)].filter(Boolean).join(' · ')),
+      confirmLabel: `Duplicate ${picked.length}`,
+      onConfirm: () => {
+        const rows = picked.map(p => { const f = fromCopy(p); return { ...f, completeness: scoreOf(f), copiedFrom: p.id } })
+        setSelected(new Set())
+        store.addProperties(rows).then(() => store.touched?.())
+      },
+    })
+  }
+
   const paginated = view !== 'projects'
   const { header, toolbar, body } = ModuleListView({
     def: PROPERTIES_DEF, store,
     source,
     onOpen: (p) => open(p.id),
     filters: flt, onFilters: setFltP,
-    facets: { towers: (projectTowers || []).map(t => ({ value: t, label: t })) },
+    facets: { towers: (projectSel ? project?.wings || [] : []).map(t => ({ value: t, label: t })) },
     search: q, onSearch: setQP,
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
-    kpis, view, onView: setView, phone,
-    page, onPage: paginated ? setPage : undefined, pageSize, onPageSize: paginated ? setPageSizeP : undefined,
+    segments: segs, view, onView: setView, phone,
+    page, onPage: paginated ? setPageP : undefined, pageSize, onPageSize: paginated ? setPageSizeP : undefined,
     // Grid/list toggle only applies to the flat unit views, hide it in project view.
     showViewSwitch: view !== 'projects',
-    // No import button here: the top bar already carries Import on
-    // every screen, and two buttons for one action in one viewport is a
-    // question ("are these different?") rather than a convenience.
-    toolbarRight: <>
+    selection: (mayAdd && view !== 'projects' && selected.size > 0) ? {
+      count: selected.size,
+      actions: [{ label: 'Duplicate', icon: 'copy', onClick: duplicate }],
+      onClear: () => setSelected(new Set()),
+    } : null,
+    // GROUP BY PROJECT, first in the bar — the same control Calling has. Inside
+    // a project it becomes that project's chip, and × goes back to the cards.
+    toolbarLeft: projectSel ? (
+      <span className="proj-chip">
+        <Icon name="building" size={14} />
+        <span className="proj-chip-t">{project?.name || projectSel}</span>
+        <button type="button" aria-label="Back to all projects" onClick={leaveProject}><Icon name="x" size={13} /></button>
+      </span>
+    ) : (
       <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
         onClick={() => setView(view === 'projects' ? 'list' : 'projects')}>
         <Icon name="building" size={14} />Group by project
       </button>
-    </>,
-    cta: mayAdd ? { label: 'Add property', onClick: () => go('properties', { propAdd: true, propId: null }) } : null,
+    ),
+    cta: mayAdd ? {
+      label: projectSel ? 'Add unit' : 'Add property',
+      onClick: () => go('properties', { propAdd: true, propId: null, ...(projectSel ? { propProject: projectSel } : {}) }),
+    } : null,
     emptyHint: 'Try clearing a filter or search.',
     renderTable: (list, v) => v === 'projects'
-      ? <ProjectGrid onOpen={openProject} />
+      ? <ProjectGrid onOpen={toProject} />
       : v === 'grid'
         ? <div className="grid-cards">{list.map(p => <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} onClick={() => open(p.id)} />)}</div>
-        : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open} />,
+        : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open}
+            selectable={mayAdd} selectedIds={selected} onSelectionChange={setSelected} />,
   })
+
+  // The project's facts, above its list: what the page for it used to show,
+  // without being a second screen that the list's search and filters never
+  // reached.
+  const facts = project ? [
+    project.developer || null,
+    project.locality || null,
+    `${project.counts.total} unit${project.counts.total !== 1 ? 's' : ''}`,
+    project.wings?.length ? `${project.wings.length} wing${project.wings.length > 1 ? 's' : ''}` : null,
+    priceRangeLabel(project.priceRange),
+  ].filter(Boolean) : []
 
   return (
     <>
@@ -225,6 +285,12 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
         title: 'Properties',
         actions: (phone || !mayEdit) ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'properties' })}>Import</Button>
       })}
+      {projectSel && project && (
+        <div className="proj-band">
+          <span className="proj-band-t">{project.name}</span>
+          {facts.map((f, i) => <span key={i} className="proj-band-f">{f}</span>)}
+        </div>
+      )}
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>
     </>
@@ -279,7 +345,7 @@ function ProjectGrid({ onOpen }) {
 // `demandCount` rides on the row from the server, counted by one join over the
 // page being rendered. It used to be leadsForProperty() run per row against
 // every lead in the firm.
-function PropTable({ def, list, store, onOpen }) {
+function PropTable({ def, list, store, onOpen, selectable, selectedIds, onSelectionChange }) {
   const demandCol = { key: 'demand', label: 'Buyers', render: (p) => (
     p.demandCount ? <span className="pc-demand"><Icon name="people" size={13} />{p.demandCount}</span> : <span className="cell-quiet">—</span>
   ) }
@@ -287,7 +353,8 @@ function PropTable({ def, list, store, onOpen }) {
   const cols = def.columns.slice()
   cols.splice(cols.length - 1, 0, demandCol)
   const augmented = { ...def, columns: cols }
-  return <ModuleTable def={augmented} rows={list} store={store} onOpen={(p) => onOpen(p.id)} />
+  return <ModuleTable def={augmented} rows={list} store={store} onOpen={(p) => onOpen(p.id)}
+    selectable={selectable} selectedIds={selectedIds} onSelectionChange={onSelectionChange} />
 }
 
 // ---------------------------------------------------------------------------
@@ -510,77 +577,6 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
       {gallery !== null && (
         <Lightbox items={p.media || []} index={gallery} onClose={() => setGallery(null)} />
       )}
-    </>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// ProjectDetail — a project is a DERIVED aggregate, not a stored record. This is
-// a lightweight page: a header band of project facts + the units grid grouped by
-// wing. Each unit row opens its normal PropertyDetail. "Add units" bulk-adds.
-function ProjectDetail({ store, go, sel, setSel, topBar }) {
-  const key = sel.projKey
-  const back = () => setSel(s => ({ ...s, projOpen: false, projKey: undefined }))
-  // The header is one aggregate row and the units are one page of listings.
-  // Both used to be derived by grouping every property in the firm in the
-  // browser, which is why this screen could not exist without the collection.
-  const { data: project, loading } = useServerData(
-    () => api.getProject(key).then(r => r?.project || null), [key], null)
-  const { data: unitPage } = useServerData(
-    () => api.listProperties({ project: key, limit: 200 }), [key], { data: [] })
-  if (!project) {
-    return <>{topBar({ title: 'Project', eyebrow: 'Properties', onBack: back })}
-      {loading
-        ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
-        : <div className="detail-missing">No units in this project.</div>}</>
-  }
-
-  const { name, locality, developer, counts, priceRange, wings } = project
-  const wingGroups = unitsByWing(unitPage?.data || [])
-  const openUnit = (id) => go('properties', { propId: id, propOpen: true })
-
-  const facts = [
-    `${counts.total} unit${counts.total !== 1 ? 's' : ''}`,
-    `${counts.available} available`,
-    counts.sold ? `${counts.sold} sold` : null,
-    wings.length ? `${wings.length} wing${wings.length > 1 ? 's' : ''}` : null,
-    priceRangeLabel(priceRange),
-  ].filter(Boolean)
-
-  return (
-    <>
-      {topBar({ eyebrow: 'Properties', title: name, onBack: back })}
-      <div className="app-body pagewrap">
-        <div className="rechead">
-          <div className="rh-top">
-            <div className="rh-id">
-              <div className="rh-icon"><Icon name="building" size={22} /></div>
-              <div className="rh-idtext">
-                <div className="rh-title">{name}</div>
-                <div className="rh-facts">
-                  {developer ? <span>{developer}</span> : null}
-                  <span>{locality}</span>
-                  {facts.map((f, i) => <span key={i}>{f}</span>)}
-                </div>
-              </div>
-            </div>
-            <div className="rh-actions">
-              {/* C9: a handful of units is "add another in this project" (the
-                  wizard keeps the building context and you only change what
-                  differs); a builder's whole sheet is the Excel importer. The
-                  tabular bulk-add modal that sat between them is retired. */}
-              <Button variant="primary" icon="plus" onClick={() => go('properties', { propAdd: true, propId: null, propProject: key })}>Add unit</Button>
-            </div>
-          </div>
-        </div>
-
-        {wingGroups.map(group => (
-          <div key={group.wing} className="panel wing-panel">
-            <div className="sh"><span className="t">{group.wing}</span><span className="r">{group.units.length} unit{group.units.length !== 1 ? 's' : ''}</span></div>
-            <UnitsTable units={group.units} onOpen={openUnit} />
-          </div>
-        ))}
-      </div>
     </>
   )
 }

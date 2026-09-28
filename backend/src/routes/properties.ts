@@ -12,7 +12,7 @@ import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { prepareListing,
   createProperty, getUnits, blockUnit, releaseUnit,
-  listProperties, getPropertyById, getPropertiesSummary,
+  listProperties, getPropertyById, getPropertiesSummary, getPropertyTabs,
   listProjects, getProject, getPropertyBuyers,
   setPropertyVerified, setPropertyGallery,
 } from '../services/store';
@@ -29,32 +29,40 @@ propertiesRouter.use(requireTenantAuth);
  * firm and filter the array in Node, which is the same mistake getState() made
  * and the reason a launch shipped ~10MB.
  */
+// The list's filters, read once for the list and for its tab counts, so the
+// two cannot be asked different questions.
+const listOpts = (q: any) => {
+  const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  return {
+    q: str(q.q),
+    status: str(q.status),
+    deal: str(q.deal),
+    type: str(q.type),
+    locality: str(q.locality),
+    project: str(q.project),
+    category: str(q.category),
+    bhk: str(q.bhk),
+    subtype: str(q.subtype),
+    furnishing: str(q.furnishing),
+    facing: str(q.facing),
+    possession: str(q.possession),
+    ownership: str(q.ownership),
+    transaction: str(q.transaction),
+    verified: str(q.verified),
+    tower: str(q.tower),
+    excludeId: str(q.excludeId),
+    // Whose listings, by owner record — see listProperties.
+    ownerId: str(q.ownerId),
+    tab: str(q.tab),
+    unit: str(q.unit),
+  };
+};
+
 propertiesRouter.get('/', async (req: Request, res: Response) => {
   try {
     const q = req.query;
-    const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
     const { rows, total, page, limit } = await listProperties({
-      page: Number(q.page) || 1,
-      limit: Number(q.limit) || 50,
-      q: str(q.q),
-      status: str(q.status),
-      deal: str(q.deal),
-      type: str(q.type),
-      locality: str(q.locality),
-      project: str(q.project),
-      category: str(q.category),
-      bhk: str(q.bhk),
-      subtype: str(q.subtype),
-      furnishing: str(q.furnishing),
-      facing: str(q.facing),
-      possession: str(q.possession),
-      ownership: str(q.ownership),
-      transaction: str(q.transaction),
-      verified: str(q.verified),
-      tower: str(q.tower),
-      excludeId: str(q.excludeId),
-      // Whose listings, by owner record — see listProperties.
-      ownerId: str(q.ownerId),
+      ...listOpts(q), page: Number(q.page) || 1, limit: Number(q.limit) || 50,
     });
     return res.status(200).json({
       success: true, data: rows, total, page, limit,
@@ -72,6 +80,15 @@ propertiesRouter.get('/', async (req: Request, res: Response) => {
  * The stat strip and the filter menus, without reading the listings themselves.
  * Declared before /:id so 'summary' is never taken for an id.
  */
+/** GET /api/v1/properties/tabs — the tab row's counts for the list's filters. */
+propertiesRouter.get('/tabs', async (req: Request, res: Response) => {
+  try {
+    return res.status(200).json({ success: true, tabs: await getPropertyTabs(listOpts(req.query)) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to count properties', message: err.message });
+  }
+});
+
 propertiesRouter.get('/summary', async (_req: Request, res: Response) => {
   try {
     return res.status(200).json({ success: true, summary: await getPropertiesSummary() });

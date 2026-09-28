@@ -4580,15 +4580,59 @@ export async function listProperties(opts: {
   facing?: string; possession?: string; ownership?: string; transaction?: string;
   verified?: string; tower?: string;
   excludeId?: string;
+  tab?: string; unit?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
   const t = tid();
   const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
   const page = Math.max(Number(opts.page) || 1, 1);
   const offset = (page - 1) * limit;
+  const clause = andAll(propertyWhere(t, opts));
 
+  const [rows, countRows] = await Promise.all([
+    sql`SELECT * FROM crm_properties WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+    sql`SELECT count(*)::int AS n FROM crm_properties WHERE ${clause}`,
+  ]);
+
+  // The "N buyers waiting" badge on a card. The desk computed it by running the
+  // matcher over every lead in the firm, per card — which is the single reason
+  // the listings grid needed the leads in memory at all. One join, bounded to
+  // the page that is actually being rendered.
+  const demand = await demandFor(t, rows.map((r: any) => r.id));
+  const mapped = rows.map((r: any) => ({ ...rowToProperty(r), demandCount: demand.get(r.id) ?? 0 }));
+  return { rows: mapped, total: countRows[0]?.n ?? 0, page, limit };
+}
+
+/**
+ * THE PROPERTY TABS: what a listing is doing, from the two columns that say so.
+ * Status is Available / Blocked / Sold / Leased, and an Available listing is
+ * worked as a sale or a rental — so "Available" splits by deal, and the three
+ * that are no longer on the market do not. Unknown is not a default: an
+ * Available listing that never said sale or rent is in neither, and gets its
+ * own tab while any exist (see Properties.jsx).
+ */
+const PROP_AVAILABLE = sql`coalesce(status, 'Available') = 'Available'`;
+const PROPERTY_TABS: Record<string, any> = {
+  available_sale: sql`${PROP_AVAILABLE} AND deal = 'sale'`,
+  available_rent: sql`${PROP_AVAILABLE} AND deal = 'rent'`,
+  available_unstated: sql`${PROP_AVAILABLE} AND coalesce(deal, '') NOT IN ('sale', 'rent')`,
+  // Keyed by the status itself, the vocabulary's own spelling.
+  Blocked: sql`status = 'Blocked'`,
+  Sold: sql`status = 'Sold'`,
+  Leased: sql`status = 'Leased'`,
+};
+// A flat whose number nobody has written down yet — a copy made in bulk, or a
+// calling row converted before anyone knew it. Absence, not a placeholder.
+const PROP_NO_UNIT = sql`coalesce(nullif(trim(unit_no), ''), nullif(trim(unit), '')) IS NULL`;
+
+type PropertyListOpts = Parameters<typeof listProperties>[0] & {};
+
+/** Which listings a request means — read by the list and by its tab counts. */
+function propertyWhere(t: string, opts: PropertyListOpts = {}, omit: { tab?: boolean } = {}): any[] {
   // Built as a list of fragments so an absent filter contributes no SQL at all,
   // rather than a `WHERE (x IS NULL OR …)` that no index can use.
   const where: any[] = [sql`tenant_id = ${t}`];
+  if (!omit.tab && opts.tab && PROPERTY_TABS[opts.tab]) where.push(PROPERTY_TABS[opts.tab]);
+  if (opts.unit === 'missing') where.push(PROP_NO_UNIT);
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
@@ -4643,21 +4687,27 @@ export async function listProperties(opts: {
       : sql`${projectNorm(PROJECT_KEY)} = ${projectNorm(sql`${String(opts.project)}::text`)}`);
   }
   if (opts.excludeId) where.push(sql`id <> ${opts.excludeId}`);
+  return where;
+}
 
-  const clause = where.reduce((acc, frag, i) => (i === 0 ? frag : sql`${acc} AND ${frag}`));
-
-  const [rows, countRows] = await Promise.all([
-    sql`SELECT * FROM crm_properties WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
-    sql`SELECT count(*)::int AS n FROM crm_properties WHERE ${clause}`,
-  ]);
-
-  // The "N buyers waiting" badge on a card. The desk computed it by running the
-  // matcher over every lead in the firm, per card — which is the single reason
-  // the listings grid needed the leads in memory at all. One join, bounded to
-  // the page that is actually being rendered.
-  const demand = await demandFor(t, rows.map((r: any) => r.id));
-  const mapped = rows.map((r: any) => ({ ...rowToProperty(r), demandCount: demand.get(r.id) ?? 0 }));
-  return { rows: mapped, total: countRows[0]?.n ?? 0, page, limit };
+/**
+ * The property tabs' counts, for the filters on screen — the same builder as
+ * listProperties taken across the tabs, so a tab and the list it opens cannot
+ * disagree. `noUnit` is how many of those have no flat number yet.
+ */
+export async function getPropertyTabs(opts: PropertyListOpts = {}): Promise<any> {
+  const t = tid();
+  const across = andAll(propertyWhere(t, opts, { tab: true }));
+  const [r] = await sql`
+    SELECT count(*)::int AS total,
+           count(*) FILTER (WHERE ${PROPERTY_TABS.available_sale})::int AS available_sale,
+           count(*) FILTER (WHERE ${PROPERTY_TABS.available_rent})::int AS available_rent,
+           count(*) FILTER (WHERE ${PROPERTY_TABS.available_unstated})::int AS available_unstated,
+           count(*) FILTER (WHERE ${PROPERTY_TABS.Blocked})::int AS "Blocked",
+           count(*) FILTER (WHERE ${PROPERTY_TABS.Sold})::int AS "Sold",
+           count(*) FILTER (WHERE ${PROPERTY_TABS.Leased})::int AS "Leased"
+      FROM crm_properties WHERE ${across}`;
+  return r || {};
 }
 
 /** Open leads whose requirement matches each of the given listings. */
@@ -4943,8 +4993,13 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
   const locality = propData.locality || 'Pune';
   const price = propData.price != null ? String(propData.price) : '';
   // Accept both column names (tower/unit) and the form names (wing/flat).
-  const tower = propData.tower || propData.wing || 'A';
-  const unit = propData.unit || propData.flat || '101';
+  // NOT KNOWN IS BLANK. These were 'A' and '101' when the form left them out,
+  // so every listing saved without a flat number — a calling row converted
+  // before anyone knew it, a copy — was filed as flat A-101: a real-looking
+  // address nobody gave, and one the owner-linking below then matched on.
+  const str = (v: any) => (v == null ? '' : String(v).trim());
+  const tower = str(propData.tower) || str(propData.wing) || null;
+  const unit = str(propData.unit) || str(propData.flat) || null;
   const tenancy = propData.tenancy || null;
   const timeline = propData.timeline || [];
 
