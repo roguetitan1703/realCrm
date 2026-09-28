@@ -5320,6 +5320,10 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   if (had !== has) {
     const n = Math.abs(has - had);
     await propertyEvent(id, ctx, 'media', 'Photos', `${n} ${n === 1 ? 'photo or video' : 'photos or videos'} ${has > had ? 'added' : 'removed'}`);
+  } else if (has && (before.media?.[0]?.key || null) !== (updated.media?.[0]?.key || null)) {
+    // The cover is what a shared listing leads with, so a new one is history;
+    // the order of the rest is not.
+    await propertyEvent(id, ctx, 'media', 'Photos', 'New cover photo');
   }
   audit({
     tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,

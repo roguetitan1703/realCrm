@@ -3447,3 +3447,12 @@ video.gv-media{background:#000}
 /* The confirm modal's list of what it will touch. */
 .confirm-lines{display:flex;flex-direction:column;gap:4px;margin:-4px 0 14px;max-height:40vh;overflow:auto}
 .confirm-line{font-size:13px;color:var(--ink);padding:6px 9px;background:var(--bg-2, #F6F5F2);border-radius:7px}
+
+/* Media editor: reorder, cover. */
+.mp-item[draggable=true]{cursor:grab}
+.mp-moving{opacity:.4}
+.mp-over{outline:2px solid var(--accent);outline-offset:-2px}
+button.mp-makecover{pointer-events:auto;border:none;cursor:pointer;background:rgba(255,255,255,.92);color:var(--ink);font-family:inherit;opacity:0;transition:opacity .12s}
+.mp-item:hover .mp-makecover,.mp-makecover:focus-visible{opacity:1}
+@media (hover:none){button.mp-makecover{opacity:1}}
+.toast-act{margin-left:10px;border:none;background:transparent;color:var(--accent-ink, var(--accent));font:inherit;font-weight:700;cursor:pointer;padding:2px 4px;text-decoration:underline;text-underline-offset:2px}

@@ -550,7 +550,7 @@ function reducer(state, action) {
     }
 
     case 'TOAST': {
-      const t = { id: ++_toastSeq, text: action.text, tone: action.tone || 'ok' }
+      const t = { id: ++_toastSeq, text: action.text, tone: action.tone || 'ok', ...(action.act ? { act: action.act } : {}) }
       return { ...state, toasts: [...state.toasts, t] }
     }
     case 'UNTOAST':
@@ -1015,8 +1015,9 @@ export function StoreProvider({ children }) {
   }, [loadServerState, loadNotifUnread])
 
 
-  const toast = useCallback((text, tone) => {
-    dispatch({ type: 'TOAST', text, tone })
+  // `act` is one thing to do about what just happened — Undo — as { label, run }.
+  const toast = useCallback((text, tone, act) => {
+    dispatch({ type: 'TOAST', text, tone, act })
   }, [])
 
   // Every toast gets its own timer, in an effect rather than during render.
@@ -1025,9 +1026,10 @@ export function StoreProvider({ children }) {
   useEffect(() => {
     state.toasts.forEach((t, i) => {
       if (timers.current[t.id]) return
+      // A toast with something to do stays long enough to do it.
       timers.current[t.id] = setTimeout(
         () => dispatch({ type: 'UNTOAST', id: t.id }),
-        2000,
+        t.act ? 6000 : 2000,
       )
     })
   }, [state.toasts])
@@ -1177,6 +1179,8 @@ export function StoreProvider({ children }) {
     return res
   }, [])
 
+  // Each listing's photo saves, chained so they reach the server in order.
+  const mediaQueue = useRef({})
   const optimistic = useCallback((what, apply, revert, call, okMsg) => {
     apply()
     if (okMsg) toast(okMsg)
@@ -1236,6 +1240,24 @@ export function StoreProvider({ children }) {
       () => apiClient.updateLead(leadId, patch).then(adopt('lead')),
       () => dispatch({ type: 'UPDATE_LEAD', leadId, patch }),
       'Lead details updated'),
+    // A LISTING'S PHOTOS, saved as they are changed. Optimistic: reordering and
+    // removing are taps on tiles, and a tile that waits on the server before it
+    // moves reads as a frozen screen. A refused write puts the list back as it
+    // was and says so.
+    //
+    // ONE AT A TIME, IN ORDER. Remove then Undo are two saves a second apart;
+    // sent together, the Undo could land first and the removal after it, and
+    // the photo the screen showed restored was gone on the server.
+    setPropertyMedia: (propId, media) => {
+      const prev = api.lookup('property', propId)?.media || []
+      const queue = mediaQueue.current
+      const run = (queue[propId] || Promise.resolve()).then(() => apiClient.updateProperty(propId, { media }))
+      queue[propId] = run.catch(() => {})
+      return optimistic('Photos',
+        () => dispatch({ type: 'UPDATE_PROP', propId, patch: { media } }),
+        () => dispatch({ type: 'UPDATE_PROP', propId, patch: { media: prev } }),
+        () => run)
+    },
     updateProp: (propId, patch) => write('Update property',
       () => apiClient.updateProperty(propId, patch).then(adopt('property')),
       () => dispatch({ type: 'UPDATE_PROP', propId, patch }),

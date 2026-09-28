@@ -15,7 +15,7 @@
 // already have renders on the first frame rather than flashing a spinner.
 
 import { useEffect, useRef, useState } from 'react'
-import { api } from './api.js'
+import { api, hasPendingWrites } from './api.js'
 
 const FETCHERS = {
   property: (id) => api.getProperty(id).then(r => r?.property || null),
@@ -67,6 +67,11 @@ export function useRecord(store, kind, id) {
     fetcher(id)
       .then(rec => {
         if (!live) return
+        // A READ THAT LEFT BEFORE A WRITE LANDED says what the record was, not
+        // what it is: applied, it paints over an optimistic change the person
+        // just made — a photo removed came back. The write's own completion
+        // moves the tick, and that read is the one that counts.
+        if (rec && known && hasPendingWrites()) { setState({ loading: false, error: null }); return }
         if (rec) store.cacheRecords(kind, [rec])
         // A real 404 is a deleted record, not a failure — the screen says
         // "Not found", which is the truth.

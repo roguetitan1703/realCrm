@@ -13,6 +13,7 @@ import { leadsForProperty } from '../lib/matching.js'
 import { fileUrl } from '../lib/media.js'
 import { copyText } from '../lib/clipboard.js'
 import Lightbox from '../components/Lightbox.jsx'
+import MediaEditor from '../components/MediaEditor.jsx'
 import { latestPlus, quotedLine, unitLabel, fmtDate, configLabel } from '../lib/format.js'
 import { AgreementList, useAgreementsFor } from '../components/Agreements.jsx'
 import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
@@ -448,7 +449,16 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
       )}
     </span>
   )
-  const photos = media.length === 0 ? null : (
+  // Someone who may edit the listing arranges its photos here — order, cover,
+  // remove, add — without opening the form. Everyone else sees the gallery.
+  const photos = mayEdit ? (
+    <Panel>
+      <SectionHead title={media.length ? `Photos · ${media.length}` : 'Photos'} right={linkTools} />
+      <MediaEditor media={media} firmName={store.state.settings.firmName}
+        onChange={(next) => store.setPropertyMedia(p.id, next)}
+        onError={(m) => store.toast(m, 'warn')} toast={store.toast} />
+    </Panel>
+  ) : media.length === 0 ? null : (
     <Panel>
       <SectionHead title={`Photos · ${media.length}`} right={linkTools} />
       <div className="pgal">

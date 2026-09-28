@@ -305,6 +305,10 @@ export function Toasts({ toasts, onDismiss }) {
               <Icon name={isAlert ? 'x' : 'check'} size={14} />
             </span>
             <span className="toast-text">{t.text}</span>
+            {t.act && (
+              <button type="button" className="toast-act"
+                onClick={(e) => { e.stopPropagation(); t.act.run(); onDismiss?.(t.id) }}>{t.act.label}</button>
+            )}
             <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 6 }}>✕</span>
           </div>
         )
