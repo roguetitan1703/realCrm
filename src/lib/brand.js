@@ -47,6 +47,12 @@ export function applyBrandColor(hex) {
   root.setProperty('--accent-ink', rgbToHex(mix(rgb, BLACK, 0.18)))   // darker text-on-light
   root.setProperty('--accent-wash', rgbToHex(mix(rgb, WHITE, 0.90)))  // faint fill
   root.setProperty('--accent-line', rgbToHex(mix(rgb, WHITE, 0.72)))  // soft border
+  // THE FIRM'S DARK AND ITS LIGHT-ON-DARK, for surfaces drawn dark — the
+  // toasts. They were a fixed charcoal with a green tick whatever the firm's
+  // colour, and Undo was the firm's own accent on that charcoal: a red firm
+  // got dark red on near-black, which nobody could read.
+  root.setProperty('--accent-deep', rgbToHex(mix(rgb, BLACK, 0.80)))   // a near-black of the firm's hue
+  root.setProperty('--accent-soft', rgbToHex(mix(rgb, WHITE, 0.55)))   // readable on --accent-deep
   // Keep the browser UI (address bar, PWA theme) in step with the desk.
   const meta = document.querySelector('meta[name="theme-color"]')
   if (meta) meta.setAttribute('content', rgbToHex(rgb))

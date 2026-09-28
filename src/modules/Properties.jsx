@@ -109,10 +109,10 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   const [q, setQ] = useState('')
   // GROUPED BY PROJECT IS WHERE THE DESK STARTS: a firm's inventory is
   // townships, and a flat is found by its building first. Arriving with a
-  // filter, a tab or a project already chosen means the list. A phone gets the
-  // list, as Calling's does.
+  // filter, a tab or a project already chosen means the list. The same on a
+  // phone.
   const filtered = Object.keys(flt).length > 0 || tab !== 'all'
-  const [view, setView] = useState(phone || filtered ? 'list' : 'projects')
+  const [view, setView] = useState(filtered ? 'list' : 'projects')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selected, setSelected] = useState(new Set())
@@ -210,7 +210,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   // adds it — a firm lists the flats it has, and a floor is not all one owner.
   const picked = (source.rows || []).filter(p => selected.has(p.id))
   const duplicate = () => {
-    if (picked.length === 1) { go('properties', { propAdd: true, propId: null, propCopyOf: picked[0].id }); return }
+    if (picked.length === 1) { go('properties', { propAdd: true, propId: null, propCopyOf: picked[0].id, propCopyBack: 'list' }); return }
     store.openModal({
       kind: 'confirm',
       title: `Duplicate ${picked.length} listings?`,
@@ -456,7 +456,8 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
       <SectionHead title={media.length ? `Photos · ${media.length}` : 'Photos'} right={linkTools} />
       <MediaEditor media={media} firmName={store.state.settings.firmName}
         onChange={(next) => store.setPropertyMedia(p.id, next)}
-        onError={(m) => store.toast(m, 'warn')} toast={store.toast} />
+        onError={(m) => store.toast(m, 'warn')} toast={store.toast}
+        confirm={(o) => store.openModal({ kind: 'confirm', ...o })} />
     </Panel>
   ) : media.length === 0 ? null : (
     <Panel>

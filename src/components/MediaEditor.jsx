@@ -24,11 +24,13 @@ import { fileUrl, processListingImage, uploadMedia } from '../lib/media.js'
 // Every change goes out through onChange at once — the caller decides whether
 // that is a form field or a save. Order is dragging on a desk; a phone cannot
 // drag inside a scrolling page reliably, so each tile also has Make cover.
-// Removing a file keeps the file itself, so Undo puts it back where it was.
+// Removing asks first — a tap on a small X is easy to make by accident, and a
+// listing's video is not something anyone wants to re-shoot. The file itself
+// is kept, so Undo still puts it back where it was.
 // ============================================================================
 const MAX_VIDEO_MB = 60
 
-export default function MediaEditor({ media = [], firmName, onChange, onError, toast }) {
+export default function MediaEditor({ media = [], firmName, onChange, onError, toast, confirm }) {
   // In-flight and failed items only. Anything that succeeded lives in `media`
   // (the saved value) — keeping one list would mean the form's value could
   // hold a photo that isn't actually in R2.
@@ -117,6 +119,16 @@ export default function MediaEditor({ media = [], firmName, onChange, onError, t
     commit(next)
   }
 
+  const askRemove = (m) => {
+    const what = m.kind === 'video' ? 'video' : 'photo'
+    if (!confirm) { remove(m.key); return }
+    confirm({
+      title: `Remove this ${what}?`,
+      confirmLabel: `Remove ${what}`,
+      onConfirm: () => remove(m.key),
+    })
+  }
+
   const remove = (key) => {
     const list = latest.current
     const at = list.findIndex(x => x.key === key)
@@ -176,7 +188,7 @@ export default function MediaEditor({ media = [], firmName, onChange, onError, t
                     <button type="button" className="mp-badge mp-makecover" onClick={() => move(i, 0)}>Make cover</button>
                   )}
                 {m.kind === 'video' && <span className="mp-badge mp-vid-b">Video</span>}
-                <button type="button" className="mp-x" aria-label="Remove" onClick={() => remove(m.key)}>
+                <button type="button" className="mp-x" aria-label="Remove" onClick={() => askRemove(m)}>
                   <Icon name="x" size={12} />
                 </button>
               </div>

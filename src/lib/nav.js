@@ -23,7 +23,7 @@
 import { currentTenant } from './api.js'
 
 export const TAKEOVER_KEYS = [
-  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'propFromOwner', 'propCopyOf', 'projOpen', 'projKey',
+  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'propFromOwner', 'propCopyOf', 'propCopyBack', 'projOpen', 'projKey',
   'leadFilters', 'propFilters', 'ownerFilters', 'contactsTab',
   // Today's half (To do / My work / Team) and a teammate opened from Team or
   // the Performance page.
@@ -39,7 +39,7 @@ export const TAKEOVER_KEYS = [
 // full unfiltered book. These are the keys that mean "a record took the screen
 // over", and a navigation made only of them keeps the filters underneath.
 export const RECORD_KEYS = [
-  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propFromOwner', 'propCopyOf', 'projOpen', 'projKey',
+  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propFromOwner', 'propCopyOf', 'propCopyBack', 'projOpen', 'projKey',
   'person',
 ]
 
@@ -140,6 +140,9 @@ export function parseUrl(search = window.location.search) {
       propFromOwner: (p.get('new') === 'property' && p.get('from-owner')) || undefined,
       // Duplicate: the property form, filled in from another listing (7.4).
       propCopyOf: (p.get('new') === 'property' && p.get('copy-of')) || undefined,
+      // Where Back from that form goes: the list it was started from, or the
+      // listing it copies (the default).
+      propCopyBack: (p.get('new') === 'property' && p.get('back') === 'list') ? 'list' : undefined,
       // Contacts' tab — Owners / Tenants / Buyers — so a reload stays on it.
       contactsTab: ['tenants', 'buyers'].includes(p.get('tab')) ? p.get('tab') : undefined,
       todayView: ['work', 'team'].includes(p.get('view')) ? p.get('view') : undefined,
@@ -176,6 +179,7 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (sel.propAdd) p.set('new', 'property')
   if (sel.propAdd && sel.propFromOwner) p.set('from-owner', sel.propFromOwner)
   if (sel.propAdd && sel.propCopyOf) p.set('copy-of', sel.propCopyOf)
+  if (sel.propAdd && sel.propCopyOf && sel.propCopyBack === 'list') p.set('back', 'list')
   if (screen === 'clients' && sel.contactsTab && sel.contactsTab !== 'owners') p.set('tab', sel.contactsTab)
   if (screen === 'today' && sel.todayView) p.set('view', sel.todayView)
   if ((screen === 'today' || screen === 'performance') && sel.person) p.set('person', sel.person)

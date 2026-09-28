@@ -16,6 +16,7 @@ import { useServerData } from '../lib/useServerData.js'
 import Leads from './Leads.jsx'
 import Owners from './Owners.jsx'
 import Properties from './Properties.jsx'
+import Calendar from './Calendar.jsx'
 import PhoneToday from './phone/PhoneToday.jsx'
 import PhoneMe from './phone/PhoneMe.jsx'
 import PhoneActions from './phone/PhoneActions.jsx'
@@ -34,10 +35,13 @@ const TABS = [
   { key: 'leads', label: 'Leads', icon: 'leads' },
   { key: 'calling', label: 'Calling', icon: 'phone' },
   { key: 'properties', label: 'Props', icon: 'building' },
+  // What is booked, by day. The desk had it and the phone did not — an agent
+  // could book a visit on the phone and had nowhere there to see the week.
+  { key: 'calendar', label: 'Calendar', icon: 'calendar' },
   { key: 'me', label: 'Me', icon: 'person' },
 ]
 
-const SCREENS = { leads: Leads, calling: Owners, properties: Properties }
+const SCREENS = { leads: Leads, calling: Owners, properties: Properties, calendar: Calendar }
 
 export default function Phone({ store, framed = false, screen, sel, setSel, go: navGo }) {
   const { state } = store

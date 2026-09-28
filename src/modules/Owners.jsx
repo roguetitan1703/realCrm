@@ -179,9 +179,10 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const sortDir = bag.sortDir || 'asc'
 
   const [q, setQ] = useState('')
-  // The project grid is a desk lens — a phone gets the queue itself. Arriving
+  // GROUPED BY PROJECT is where Calling opens, on a phone too: a calling list
+  // is townships, and a caller picks the building before the flat. Arriving
   // with a tab, a project or a caller already chosen means the list.
-  const [view, setView] = useState(phone || bag.tab || bag.step || bag.status || bag.project || bag.caller ? 'list' : 'projects')
+  const [view, setView] = useState(bag.tab || bag.step || bag.status || bag.project || bag.caller ? 'list' : 'projects')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selected, setSelected] = useState(new Set())
@@ -231,7 +232,10 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // never promise rows its list cannot find.
   const scope = {
     q: q || undefined,
-    mine: phone ? 1 : undefined,
+    // AN AGENT'S PHONE IS THEIR OWN LIST. An owner or manager on a phone sees
+    // the firm, as at the desk: "mine" for them was the rows assigned to the
+    // owner personally — none — so Calling on the owner's phone was empty.
+    mine: phone && role === 'agent' ? 1 : undefined,
     project: projectSel || undefined,
     tower: towerSel || undefined,
     agent: agentSel === 'all' ? undefined : agentSel,

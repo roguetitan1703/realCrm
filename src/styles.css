@@ -12,6 +12,7 @@
   --chrome:#22242A; --chrome-2:#2C2E35; --on-chrome:#E9E8E4; --on-chrome-mut:#9A9B9E;
   /* the ONE accent */
   --accent:#1E6F52; --accent-rgb:30,111,82; --accent-ink:#17583F; --accent-wash:#E8F1EC; --accent-line:#C4DDD0;
+  --accent-deep:#06160F; --accent-soft:#9ABEB1;
   /* contained signals */
   --alert:#C0392B; --alert-wash:#F6E4E1; --danger:#C0392B;
   /* stage temperature ramp — ONE slate hue, cold(light)→hot(dark). value, not rainbow */
@@ -1338,11 +1339,11 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
    TOAST · EMPTY · MODAL
    ============================================================================ */
 .toast-stack{position:fixed;right:24px;bottom:24px;left:auto;transform:none;z-index:10000;width:360px;max-width:calc(100vw - 32px);height:0;display:flex;justify-content:flex-end;align-items:flex-end;pointer-events:none}
-.toast-card{position:absolute;bottom:0;right:0;width:100%;max-width:360px;display:flex;align-items:center;gap:12px;background:#1A1C21;color:#F8F9FA;border:1px solid rgba(255,255,255,.13);border-radius:12px;padding:13px 16px;font-size:13.5px;font-weight:500;line-height:1.4;box-shadow:0 16px 36px rgba(0,0,0,.35),0 4px 12px rgba(0,0,0,.18);transition:transform .32s cubic-bezier(.22,1,.36,1),opacity .32s ease,box-shadow .32s ease;transform-origin:bottom right;pointer-events:auto}
+.toast-card{position:absolute;bottom:0;right:0;width:100%;max-width:360px;display:flex;align-items:center;gap:12px;background:var(--accent-deep);color:#F8F9FA;border:1px solid rgba(var(--accent-rgb),.38);border-radius:12px;padding:13px 16px;font-size:13.5px;font-weight:500;line-height:1.4;box-shadow:0 16px 36px rgba(0,0,0,.35),0 4px 12px rgba(0,0,0,.18);transition:transform .32s cubic-bezier(.22,1,.36,1),opacity .32s ease,box-shadow .32s ease;transform-origin:bottom right;pointer-events:auto}
 .toast-card:hover{box-shadow:0 20px 44px rgba(0,0,0,.45),0 6px 16px rgba(0,0,0,.25)}
-.toast-card.toast-alert{background:#2E1715;border-color:rgba(231,111,99,.35)}
+.toast-card.toast-alert{border-color:rgba(231,111,99,.55)}
 .toast-badge{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.toast-badge.badge-ok{background:rgba(46,196,134,.18);color:#2EC486}
+.toast-badge.badge-ok{background:rgba(var(--accent-rgb),.32);color:var(--accent-soft)}
 .toast-badge.badge-alert{background:rgba(231,111,99,.22);color:#E76F63}
 .toast-text{flex:1;word-break:break-word}
 .empty{text-align:center;padding:34px 20px;border:1px dashed var(--line);border-radius:var(--radius-lg);color:var(--muted);background:var(--card)}
@@ -3458,6 +3459,9 @@ video.gv-media{background:#000}
 button.mp-makecover{pointer-events:auto;border:none;cursor:pointer;background:rgba(255,255,255,.92);color:var(--ink);font-family:inherit;opacity:0;transition:opacity .12s}
 .mp-item:hover .mp-makecover,.mp-makecover:focus-visible{opacity:1}
 @media (hover:none){button.mp-makecover{opacity:1}}
-.toast-act{margin-left:10px;border:none;background:transparent;color:var(--accent-ink, var(--accent));font:inherit;font-weight:700;cursor:pointer;padding:2px 4px;text-decoration:underline;text-underline-offset:2px}
+.toast-act{margin-left:10px;border:none;background:transparent;color:var(--accent-soft);font:inherit;font-weight:700;cursor:pointer;padding:2px 4px;text-decoration:underline;text-underline-offset:2px}
 
 .tt-listed{color:var(--ink-2);font-weight:600}
+
+/* The phone toolbar's first control (Group by project / the project chip). */
+.ptool-left{display:flex;padding:0 0 8px}

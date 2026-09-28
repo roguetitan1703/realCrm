@@ -326,9 +326,14 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
     return m
   }, [form, applies.bhk])
 
+  // BACK GOES WHERE YOU CAME FROM. A copy started from the list (a project's
+  // rows, filtered) returns to that list with its filters; one started on a
+  // listing returns to that listing. It always went to the listing, so
+  // duplicating from a project dropped you on a page you had never opened.
   const close = () => (ownerId
     ? go('calling', { ownerId, ownerOpen: true })
-    : copyId ? go('properties', { propAdd: false, propCopyOf: undefined, propId: copyId, propOpen: true })
+    : copyId && sel?.propCopyBack === 'list' ? go('properties', { propAdd: false, propCopyOf: undefined, propCopyBack: undefined })
+    : copyId ? go('properties', { propAdd: false, propCopyOf: undefined, propCopyBack: undefined, propId: copyId, propOpen: true })
     : go('properties', { propAdd: false, propId: null }))
 
   const save = async (again = false) => {
@@ -723,6 +728,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                     onChange={v => set('media', v)}
                     onError={m => store.toast(m, 'warn')}
                     toast={store.toast}
+                    confirm={(o) => store.openModal({ kind: 'confirm', ...o })}
                   />
                 </div>
 

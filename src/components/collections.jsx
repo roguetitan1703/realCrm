@@ -137,7 +137,7 @@ export function ModuleListView({
           def={def} fields={fields} filters={filters} onFilters={onFilters}
           search={search} onSearch={onSearch}
           sortKey={sortKey} onSortKey={onSortKey} sortDir={sortDir} onSortDir={onSortDir}
-          sortOptions={sortOptions} resultCount={total}
+          sortOptions={sortOptions} resultCount={total} left={toolbarLeft}
         />
       ),
       // One layout, no switch. A table needs a horizontal scroll to be read on
@@ -145,7 +145,10 @@ export function ModuleListView({
       // "Nothing matches" is a claim about the data. It must not be made while
       // the answer is still in flight, or the first frame of every search reads
       // as no results.
-      body: list.length === 0
+      // Grouped by project is the same view on a phone: the screen draws its
+      // project cards, which do not depend on the page of rows.
+      body: view === 'projects' && renderTable ? renderTable(phoneList, 'projects')
+        : list.length === 0
         ? (loading
             ? <ListSpinner />
             : <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>)
@@ -204,7 +207,7 @@ export function ModuleListView({
 // differs. A chip is a 40px tap target; the desk's nested popovers are not.
 function PhoneToolbar({
   def, fields, filters, onFilters, search, onSearch,
-  sortKey, onSortKey, sortDir, onSortDir, sortOptions, resultCount,
+  sortKey, onSortKey, sortDir, onSortDir, sortOptions, resultCount, left,
 }) {
   const [sheet, setSheet] = useState(false)
   const activeCount = fields.reduce((n, f) => n + ((filters[f.key] || []).length ? 1 : 0), 0)
@@ -218,6 +221,9 @@ function PhoneToolbar({
 
   return (
     <>
+      {/* The screen's own first control — Group by project, or the project
+          chip with its × — on its own line above search, as on the desk. */}
+      {left && <div className="ptool-left">{left}</div>}
       <div className="ptool">
         <SearchField
           className="ptool-search" value={search} onChange={onSearch} iconSize={16}
