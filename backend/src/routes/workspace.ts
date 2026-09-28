@@ -127,11 +127,11 @@ workspaceRouter.get('/contacts', requireTenantAuth, async (req: Request, res: Re
     const q = req.query;
     const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
     const out = await listContacts({
-      tab: str(q.tab), role: str(q.role), q: str(q.q),
+      tab: str(q.tab), role: str(q.role), q: str(q.q), project: str(q.project), locality: str(q.locality),
       page: Number(q.page) || 1, limit: Number(q.limit) || 25,
     });
     return res.status(200).json({
-      success: true, data: out.rows, total: out.total, counts: out.counts,
+      success: true, data: out.rows, total: out.total, counts: out.counts, facets: out.facets,
       page: out.page, limit: out.limit,
       pages: Math.max(1, Math.ceil(out.total / out.limit)),
     });

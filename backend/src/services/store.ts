@@ -1777,8 +1777,8 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
  * seller/landlord/both.
  */
 export async function listContacts(opts: {
-  tab?: string; role?: string; q?: string; page?: number; limit?: number;
-} = {}): Promise<{ rows: any[]; total: number; counts: Record<string, number>; page: number; limit: number }> {
+  tab?: string; role?: string; q?: string; page?: number; limit?: number; project?: string; locality?: string;
+} = {}): Promise<{ rows: any[]; total: number; counts: Record<string, number>; page: number; limit: number; facets?: any }> {
   const t = tid();
   const limit = Math.min(Math.max(Number(opts.limit) || 25, 1), 200);
   const page = Math.max(Number(opts.page) || 1, 1);
@@ -1802,7 +1802,24 @@ export async function listContacts(opts: {
   // through the link.
   const where: any[] = [sql`o.tenant_id = ${t}`];
   if (q) where.push(sql`(lower(coalesce(o.name, '')) LIKE ${like} OR coalesce(o.phone, '') LIKE ${like} OR lower(coalesce(o.project, '')) LIKE ${like} OR lower(coalesce(o.unit_no, '')) LIKE ${like})`);
+  // WHICH BUILDING, WHICH AREA — through the listings that make them a contact:
+  // an owner is in a project if a flat of theirs we hold is.
+  if (opts.project) where.push(sql`EXISTS (SELECT 1 FROM crm_properties x WHERE x.tenant_id = o.tenant_id AND x.owner_contact_id = o.id
+    AND ${projectNorm(sql`x.project`)} = ${projectNorm(sql`${String(opts.project)}::text`)})`);
+  if (opts.locality) where.push(sql`EXISTS (SELECT 1 FROM crm_properties x WHERE x.tenant_id = o.tenant_id AND x.owner_contact_id = o.id
+    AND lower(coalesce(x.locality, '')) = lower(${String(opts.locality)}))`);
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+  // What the Project and Locality menus offer: the owners' listings'.
+  const [fProjects, fLocalities] = await Promise.all([
+    sql`SELECT mode() WITHIN GROUP (ORDER BY p.project) AS v, count(DISTINCT o.id)::int AS n
+          FROM crm_owners o JOIN crm_properties p ON p.owner_contact_id = o.id AND p.tenant_id = o.tenant_id
+         WHERE o.tenant_id = ${t} AND coalesce(p.project, '') <> ''
+         GROUP BY ${projectNorm(sql`p.project`)} ORDER BY 1`,
+    sql`SELECT mode() WITHIN GROUP (ORDER BY p.locality) AS v, count(DISTINCT o.id)::int AS n
+          FROM crm_owners o JOIN crm_properties p ON p.owner_contact_id = o.id AND p.tenant_id = o.tenant_id
+         WHERE o.tenant_id = ${t} AND coalesce(p.locality, '') <> ''
+         GROUP BY lower(p.locality) ORDER BY 1`,
+  ]);
 
   // AN INNER JOIN, DELIBERATELY. A contact here is someone whose property this
   // firm manages — which is created by adding the property, not by calling
@@ -1855,6 +1872,7 @@ export async function listContacts(opts: {
       Landlord: all.filter(r => r.role === 'Landlord' || r.role === 'Seller / Landlord').length,
     },
     page, limit,
+    facets: { projects: fProjects, localities: fLocalities },
   };
 }
 

@@ -176,7 +176,7 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
         if (patch[k] !== undefined) continue
         // Opening a record keeps the filters underneath it — for whichever
         // list you were standing on, not just Leads.
-        if (recordOnly && (k === 'leadFilters' || k === 'propFilters' || k === 'ownerFilters')) continue
+        if (recordOnly && (k === 'leadFilters' || k === 'propFilters' || k === 'ownerFilters' || k === 'contactFilters')) continue
         next[k] = null
       }
       return { ...next, ...patch }

@@ -1030,6 +1030,12 @@ export const PROPERTIES_DEF = {
  * (where the agreement card lives), or the flat when there was no lead.
  */
 const rupeesOf = (n) => (n == null ? '—' : `₹${Math.round(Number(n)).toLocaleString('en-IN')}`)
+// A call to a tenant or buyer goes on the lead they came from, else the flat.
+const partyContact = (a, channel) => ({
+  kind: 'contact', channel, name: a.party?.name, phone: a.party?.phone,
+  recordType: a.leadId ? 'lead' : 'property', recordId: a.leadId || a.propertyId,
+})
+
 export function partiesDef(kind) {
   const rent = kind === 'rent'
   const when = (a) => {
@@ -1043,8 +1049,12 @@ export function partiesDef(kind) {
     name: rent ? 'Tenants' : 'Buyers',
     singularName: rent ? 'Tenant' : 'Buyer',
     icon: 'people',
-    // The tabs are the screen's (Clients.jsx); there is nothing else to filter by.
-    filterFields: () => [],
+    // WHICH BUILDING, WHICH AREA — how a tenant or buyer is found when nobody
+    // remembers the name. Options from the flats this kind's agreements are on.
+    filterFields: (store, facets) => [
+      { key: 'project', label: 'Project', icon: 'building', multi: false, options: facets?.projects || [] },
+      { key: 'locality', label: 'Locality', icon: 'building', multi: false, options: facets?.localities || [] },
+    ],
     rowMatch: () => true,
     searchFields: [],
     // Sorted by the server. "Ends" puts the rent ending soonest first.
@@ -1073,8 +1083,20 @@ export function partiesDef(kind) {
         <span className={'cell-txt' + (rent && a.status === 'active' && a.daysLeft != null && a.daysLeft <= 30 ? ' u-alert' : '')}>{when(a)}</span>
       ) },
       { key: 'owner', label: 'Owner', render: (a) => <span className="cell-txt">{a.owner?.name || '—'}</span> },
+      { key: 'reach', label: '', render: (a, store) => a.party?.phone ? (
+        <span className="row-reach" onClick={(e) => e.stopPropagation()}>
+          <button type="button" className="btn btn-quiet btn-sm" aria-label="Call" title="Call" onClick={() => store.openModal(partyContact(a, 'call'))}><Icon name="phone" size={14} /></button>
+          <button type="button" className="btn btn-quiet btn-sm" aria-label="WhatsApp" title="WhatsApp" onClick={() => store.openModal(partyContact(a, 'wa'))}><Icon name="wa" size={14} /></button>
+        </span>
+      ) : null },
     ],
     actions: [],
+    // Ringing a tenant about the renewal is the reason this list exists, and
+    // it had no way to. Logged on the lead they came from, or on the flat.
+    phoneActions: (a, store) => (a.party?.phone ? [
+      { key: 'call', icon: 'phone', label: 'Call', onClick: () => store.openModal(partyContact(a, 'call')) },
+      { key: 'wa', icon: 'wa', label: 'WhatsApp', tone: 'wa', onClick: () => store.openModal(partyContact(a, 'wa')) },
+    ] : []),
     card: (a) => (
       <>
         <div className="rc-top">
@@ -1101,10 +1123,13 @@ export const CLIENTS_DEF = {
 
   searchFields: ['name', 'detail', 'phone'],
 
-  // Landlord or Seller is the tab row (Clients.jsx). There was a Locality
-  // filter here that the owners query never received: picking one changed
-  // nothing. Gone until listContacts filters by it.
-  filterFields: () => [],
+  // Landlord or Seller is the tab row (Clients.jsx). Project and Locality are
+  // the flats of theirs we hold — listContacts filters by both and sends the
+  // options.
+  filterFields: (store, facets) => [
+      { key: 'project', label: 'Project', icon: 'building', multi: false, options: facets?.projects || [] },
+      { key: 'locality', label: 'Locality', icon: 'building', multi: false, options: facets?.localities || [] },
+    ],
 
 
   rowMatch(r, key, vals) {
@@ -1137,19 +1162,24 @@ export const CLIENTS_DEF = {
     // contacts aren't their own record yet (that's B3) but ARE tied to a
     // real property, so the action logs there — same as a property's own
     // "Call owner" quick action.
+    // ON THE OWNER'S RECORD. These pointed at `r.rawProps[0]`, a field the
+    // contact rows stopped carrying when owners became records — so a call
+    // from Contacts was logged against nothing and appeared nowhere.
     { id: 'call', tier: 'quick', icon: 'phone', label: 'Call',
+      when: (r) => !!r.phone,
       run: (store, r) => store.openModal({
-        kind: 'contact', channel: 'call', name: r.name, phone: r.phone,
-        recordType: r.kind === 'demand' ? 'lead' : 'property',
-        recordId: r.kind === 'demand' ? r.rawLeadId : r.rawProps?.[0]?.id,
+        kind: 'contact', channel: 'call', name: r.name, phone: r.phone, recordType: 'owner', recordId: r.ownerId,
       }) },
     { id: 'wa', tier: 'quick', icon: 'wa', label: 'WhatsApp',
+      when: (r) => !!r.phone,
       run: (store, r) => store.openModal({
-        kind: 'contact', channel: 'wa', name: r.name, phone: r.phone,
-        recordType: r.kind === 'demand' ? 'lead' : 'property',
-        recordId: r.kind === 'demand' ? r.rawLeadId : r.rawProps?.[0]?.id,
+        kind: 'contact', channel: 'wa', name: r.name, phone: r.phone, recordType: 'owner', recordId: r.ownerId,
       }) },
   ],
+  phoneActions: (r, store) => (r.phone ? [
+    { key: 'call', icon: 'phone', label: 'Call', onClick: () => store.openModal({ kind: 'contact', channel: 'call', name: r.name, phone: r.phone, recordType: 'owner', recordId: r.ownerId }) },
+    { key: 'wa', icon: 'wa', label: 'WhatsApp', tone: 'wa', onClick: () => store.openModal({ kind: 'contact', channel: 'wa', name: r.name, phone: r.phone, recordType: 'owner', recordId: r.ownerId }) },
+  ] : []),
 
   // Grid-view card for a client (derived contact).
   card: (r) => (

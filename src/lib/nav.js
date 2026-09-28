@@ -24,7 +24,7 @@ import { currentTenant } from './api.js'
 
 export const TAKEOVER_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'propFromOwner', 'propCopyOf', 'propCopyBack', 'projOpen', 'projKey',
-  'leadFilters', 'propFilters', 'ownerFilters', 'contactsTab',
+  'leadFilters', 'propFilters', 'ownerFilters', 'contactFilters', 'contactsTab',
   // Today's half (To do / My work / Team) and a teammate opened from Team or
   // the Performance page.
   'todayView', 'person',
@@ -111,6 +111,18 @@ const writePropFilters = (p, f) => {
 // calling screen, so `tab`, `status` and `caller` cannot leak into the other
 // two bags; the project is `in-project` for the reason PROP_URL_NAME gives.
 const OWNER_URL = { tab: 'tab', step: 'step', status: 'status', caller: 'caller', project: 'in-project', tower: 'tower', sortKey: 'sortKey', sortDir: 'sortDir' }
+// THE CONTACTS BAG: which building, which area, on whichever Contacts tab is
+// open. Its own screen only, like the calling bag.
+const CONTACT_URL = { project: 'in-project', locality: 'locality' }
+const readContactFilters = (p) => {
+  const f = {}
+  for (const [k, u] of Object.entries(CONTACT_URL)) { const v = p.get(u); if (v) f[k] = v }
+  return Object.keys(f).length ? f : undefined
+}
+const writeContactFilters = (p, f) => {
+  if (!f) return
+  for (const [k, u] of Object.entries(CONTACT_URL)) if (f[k]) p.set(u, f[k])
+}
 const readOwnerFilters = (p) => {
   const f = {}
   for (const [k, u] of Object.entries(OWNER_URL)) { const v = p.get(u); if (v) f[k] = v }
@@ -155,6 +167,7 @@ export function parseUrl(search = window.location.search) {
       leadFilters: p.get('screen') === 'leads' ? readFilters(p) : undefined,
       propFilters: p.get('screen') === 'properties' ? readPropFilters(p) : undefined,
       ownerFilters: p.get('screen') === 'calling' ? readOwnerFilters(p) : undefined,
+      contactFilters: p.get('screen') === 'clients' ? readContactFilters(p) : undefined,
     },
     // Not navigation, but they ride the same query string and must survive it.
     ws: p.get('ws') || null,
@@ -186,6 +199,7 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (screen === 'leads') writeFilters(p, sel.leadFilters)
   if (screen === 'properties') writePropFilters(p, sel.propFilters)
   if (screen === 'calling') writeOwnerFilters(p, sel.ownerFilters)
+  if (screen === 'clients') writeContactFilters(p, sel.contactFilters)
   const q = p.toString()
   return q ? `?${q}` : window.location.pathname
 }

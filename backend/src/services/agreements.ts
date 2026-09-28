@@ -111,12 +111,19 @@ const TODAY_IST = sql`(now() AT TIME ZONE 'Asia/Kolkata')::date`;
 export async function listAgreements(opts: {
   kind?: string; status?: string; leadId?: string; propertyId?: string; ownerId?: string; agentId?: string;
   q?: string; sort?: string; dir?: string; page?: number; limit?: number;
+  project?: string; locality?: string;
 } = {}) {
   const t = tid();
   const limit = Math.min(Math.max(Number(opts.limit) || 25, 1), 200);
   const page = Math.max(Number(opts.page) || 1, 1);
   const where: any[] = [sql`a.tenant_id = ${t}`];
   if (opts.kind === 'rent' || opts.kind === 'sale') where.push(sql`a.kind = ${opts.kind}`);
+  // WHICH BUILDING, WHICH AREA — how a firm finds a tenant or a buyer when it
+  // does not remember the name. Read from the flat the agreement is on.
+  const base: any[] = [...where];
+  if (opts.project) base.push(sql`${projectNorm(sql`coalesce(p.project, a.property_label)`)} = ${projectNorm(sql`${String(opts.project)}::text`)}`);
+  if (opts.locality) base.push(sql`lower(coalesce(p.locality, '')) = lower(${String(opts.locality)})`);
+  where.length = 0; where.push(...base);
   // `status` is what the Tenants and Buyers lists filter by. "ending" is the
   // renewal work: a live rent that ends within ENDING_SOON_DAYS or is past its
   // end with nobody having renewed or ended it. "past" is ended or renewed.
@@ -134,8 +141,9 @@ export async function listAgreements(opts: {
   const q = String(opts.q || '').trim().toLowerCase();
   if (q) {
     const like = `%${q}%`;
-    where.push(sql`(lower(coalesce(a.party_name, l.name, '')) LIKE ${like} OR coalesce(a.party_phone, l.phone, '') LIKE ${like}
-      OR lower(coalesce(p.project, a.property_label, '')) LIKE ${like} OR lower(coalesce(p.unit_no, '')) LIKE ${like})`);
+    const match = sql`(lower(coalesce(a.party_name, l.name, '')) LIKE ${like} OR coalesce(a.party_phone, l.phone, '') LIKE ${like}
+      OR lower(coalesce(p.project, a.property_label, '')) LIKE ${like} OR lower(coalesce(p.unit_no, '')) LIKE ${like})`;
+    where.push(match); base.push(match);
   }
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
   // Default: live rents by how soon they end (the order a desk works renewals
@@ -154,20 +162,38 @@ export async function listAgreements(opts: {
       LEFT JOIN crm_properties p ON p.id = a.property_id AND p.tenant_id = a.tenant_id
       LEFT JOIN crm_leads l ON l.id = a.lead_id AND l.tenant_id = a.tenant_id
      WHERE ${clause}`;
-  // The counts beside the status filter, for one kind. Same table, same kind,
-  // none of the other filters: they say how many of each there are.
+  // The counts beside the status tabs, for one kind: every filter on screen
+  // but the tab itself, so "Ending in 30 days" inside one project says how
+  // many of THAT project's rents end — it used to say the firm's.
   let counts: Record<string, number> | undefined;
+  let facets: any;
   if (opts.kind === 'rent' || opts.kind === 'sale') {
+    const baseClause = base.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
     const [c] = await sql`
-      SELECT count(*) FILTER (WHERE status = 'active')::int AS active,
-             count(*) FILTER (WHERE kind = 'rent' AND status = 'active' AND end_date IS NOT NULL
-                                AND end_date <= ${TODAY_IST} + ${ENDING_SOON_DAYS}::int)::int AS ending,
-             count(*) FILTER (WHERE status IN ('ended', 'renewed'))::int AS past,
+      SELECT count(*) FILTER (WHERE a.status = 'active')::int AS active,
+             count(*) FILTER (WHERE a.kind = 'rent' AND a.status = 'active' AND a.end_date IS NOT NULL
+                                AND a.end_date <= ${TODAY_IST} + ${ENDING_SOON_DAYS}::int)::int AS ending,
+             count(*) FILTER (WHERE a.status IN ('ended', 'renewed'))::int AS past,
              count(*)::int AS "all"
-        FROM crm_agreements WHERE tenant_id = ${t} AND kind = ${opts.kind}`;
+        FROM crm_agreements a
+        LEFT JOIN crm_properties p ON p.id = a.property_id AND p.tenant_id = a.tenant_id
+        LEFT JOIN crm_leads l ON l.id = a.lead_id AND l.tenant_id = a.tenant_id
+       WHERE ${baseClause}`;
     counts = c as any;
+    // The Project and Locality menus offer what this kind's agreements are on.
+    const [projects, localities] = await Promise.all([
+      sql`SELECT mode() WITHIN GROUP (ORDER BY coalesce(p.project, a.property_label)) AS v, count(*)::int AS n
+            FROM crm_agreements a LEFT JOIN crm_properties p ON p.id = a.property_id AND p.tenant_id = a.tenant_id
+           WHERE a.tenant_id = ${t} AND a.kind = ${opts.kind} AND coalesce(p.project, a.property_label, '') <> ''
+           GROUP BY ${projectNorm(sql`coalesce(p.project, a.property_label)`)} ORDER BY 1`,
+      sql`SELECT mode() WITHIN GROUP (ORDER BY p.locality) AS v, count(*)::int AS n
+            FROM crm_agreements a JOIN crm_properties p ON p.id = a.property_id AND p.tenant_id = a.tenant_id
+           WHERE a.tenant_id = ${t} AND a.kind = ${opts.kind} AND coalesce(p.locality, '') <> ''
+           GROUP BY lower(p.locality) ORDER BY 1`,
+    ]);
+    facets = { projects, localities };
   }
-  return { rows: rows.map(rowToAgreement), total: n, page, limit, counts };
+  return { rows: rows.map(rowToAgreement), total: n, page, limit, counts, facets };
 }
 
 export async function getAgreement(id: string) {

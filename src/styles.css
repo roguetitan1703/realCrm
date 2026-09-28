@@ -3465,3 +3465,6 @@ button.mp-makecover{pointer-events:auto;border:none;cursor:pointer;background:rg
 
 /* The phone toolbar's first control (Group by project / the project chip). */
 .ptool-left{display:flex;padding:0 0 8px}
+
+/* Call / WhatsApp at the end of a contact row. */
+.row-reach{display:inline-flex;gap:2px}

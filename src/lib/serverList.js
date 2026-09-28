@@ -104,7 +104,8 @@ export function useServerList(fetcher, query, deps = [], cache = null) {
         // `counts` rides along when the server sends them (Contacts' Owners,
         // Tenants and Buyers): the numbers beside a filter's options. They were
         // dropped here, so every one of those read 0.
-        setState({ rows: merged, total: res?.total ?? merged.length, counts: res?.counts, loading: false, error: null })
+        // `facets` likewise: the options a filter menu offers, from the same query.
+        setState({ rows: merged, total: res?.total ?? merged.length, counts: res?.counts, facets: res?.facets, loading: false, error: null })
       })
       .catch(err => {
         if (mine !== seq.current) return

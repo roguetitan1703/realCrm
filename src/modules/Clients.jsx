@@ -23,6 +23,24 @@ import { useServerData } from '../lib/useServerData.js'
 // It once had a Clients tab reading the leads table, which put the same person
 // on two screens under two names; a tenant or a buyer is here only because an
 // agreement names them (Close the deal), never because they enquired.
+// WHICH BUILDING, WHICH AREA, on every tab — in the URL (nav.js, the contacts
+// bag), so opening a flat and coming back keeps it. The menus' options come
+// from the list's own response.
+function useContactFilters(sel, setSel, setPage) {
+  const bag = sel?.contactFilters || {}
+  const filters = {}
+  if (bag.project) filters.project = [bag.project]
+  if (bag.locality) filters.locality = [bag.locality]
+  const onFilters = (v) => {
+    const next = { project: v?.project?.[0], locality: v?.locality?.[0] }
+    for (const k of Object.keys(next)) if (!next[k]) delete next[k]
+    setSel(s => ({ ...s, contactFilters: Object.keys(next).length ? next : undefined }))
+    setPage(1)
+  }
+  return { bag, filters, onFilters }
+}
+const asOptions = (list) => (list || []).map(f => ({ value: f.v, label: f.v, count: f.n }))
+
 export default function Clients(props) {
   const tab = props.sel?.contactsTab || 'owners'
   if (tab === 'tenants' || tab === 'buyers') return <Parties {...props} kind={tab === 'tenants' ? 'rent' : 'sale'} />
@@ -34,11 +52,12 @@ export default function Clients(props) {
  * A row opens the FLAT, which is where the agreement lives (renew, end, the
  * file). The lead they came from is linked on it; it is not the tenant.
  */
-function Parties({ store, go, topBar, phone, kind }) {
+function Parties({ store, go, sel, setSel, topBar, phone, kind }) {
   const { state } = store
   const def = partiesDef(kind)
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
+  const { bag, filters, onFilters } = useContactFilters(sel, setSel, setPage)
   const [pageSize, setPageSize] = useState(20)
   // Tenants: two tabs, everyone and the rents that need a renewal call. Buyers
   // have none: a sale does not end, so "current" and "ended" meant nothing.
@@ -49,10 +68,10 @@ function Parties({ store, go, topBar, phone, kind }) {
   const source = useServerList(
     (params) => api.listAgreements({
       kind, status, q: params.q, page: params.page, limit: params.limit,
-      sort: sortKey, dir: sortDir,
-    }).then(r => ({ data: r?.rows || [], total: r?.total ?? 0, counts: r?.counts || {} })),
+      sort: sortKey, dir: sortDir, project: bag.project, locality: bag.locality,
+    }).then(r => ({ data: r?.rows || [], total: r?.total ?? 0, counts: r?.counts || {}, facets: r?.facets })),
     { search: q, page, pageSize },
-    [kind, status, sortKey, sortDir, state.dataAsOf],
+    [kind, status, sortKey, sortDir, bag.project, bag.locality, state.dataAsOf],
   )
   const c = source.counts || {}
   const segments = kind === 'rent'
@@ -65,9 +84,10 @@ function Parties({ store, go, topBar, phone, kind }) {
   const open = (a) => (a.propertyId
     ? go('properties', { propId: a.propertyId, propOpen: true })
     : a.leadId ? go('leads', { leadId: a.leadId, leadOpen: true }) : null)
+  const facets = { projects: asOptions(source.facets?.projects), localities: asOptions(source.facets?.localities) }
   const { header, toolbar, body } = ModuleListView({
     def, source, store, onOpen: open, phone,
-    segments,
+    segments, filters, onFilters, facets,
     search: q, onSearch: (v) => { setQ(v); setPage(1) },
     sortKey, onSortKey: (v) => { setSortKey(v); setPage(1) }, sortDir, onSortDir: (v) => { setSortDir(v); setPage(1) },
     view: 'list', showViewSwitch: false,
@@ -92,7 +112,6 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
   // WHAT THEY GAVE US, as tabs: Landlords first, because a flat to let is the
   // work that comes back every eleven months.
   const [seg, setSeg] = useState('Landlord')
-  const [flt, setFlt] = useState({})
   const [q, setQ] = useState('')
   const [sortKey, setSortKey] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
@@ -100,7 +119,7 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
   const [selClient, setSelClient] = useState(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const setFltP = (v) => { setFlt(v); setPage(1) }
+  const { bag, filters: flt, onFilters: setFltP } = useContactFilters(sel, setSel, setPage)
   const setQP = (v) => { setQ(v); setPage(1) }
   const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
   const setSortDirP = (v) => { setSortDir(v); setPage(1) }
@@ -114,9 +133,9 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
   // both are paged and counted in SQL. Building them in the browser is what
   // made a few hundred contacts require every lead and every property.
   const source = useServerList(
-    (params) => api.listContacts({ ...params, tab: 'owners', role: seg === 'all' ? undefined : seg }),
+    (params) => api.listContacts({ ...params, tab: 'owners', role: seg === 'all' ? undefined : seg, project: bag.project, locality: bag.locality }),
     { search: q, sortKey, sortDir, page, pageSize },
-    [seg, state.dataAsOf],
+    [seg, bag.project, bag.locality, state.dataAsOf],
   )
   const rows = (source.rows || []).map(r => ({
     ...r,
@@ -165,6 +184,7 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
     def: CLIENTS_DEF, source: { ...source, rows }, store,
     onOpen: (r) => setSelClient(r),
     segments, filters: flt, onFilters: setFltP,
+    facets: { projects: asOptions(source.facets?.projects), localities: asOptions(source.facets?.localities) },
     search: q, onSearch: setQP,
     sortKey, onSortKey: setSortKeyP, sortDir, onSortDir: setSortDirP,
     view, onView: setView,
