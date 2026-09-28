@@ -93,7 +93,3 @@ backups/
 # .env.example and .env.template, which are committed on purpose, and a blanket
 # pattern this far down the file silently overrides both.
 
-# Tutorial videos: raw captures and rendered output
-tutorials/out/
-tutorials/public/rec/
-tutorials/.voice-cache/
