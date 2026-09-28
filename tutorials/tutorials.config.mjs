@@ -1,5 +1,5 @@
 // ============================================================================
-// Nivaas tutorial videos. Engine: delpat-skills/tutorial-videos
+// Tutorial videos for the real estate CRM by Delpat. Engine: delpat-skills/tutorial-videos
 // (`tutorial-videos record <id>`, `tutorial-videos test`). See its SKILL.md.
 //
 // Recorded against the DEVELOPMENT app (:5173 + API :5001) on the `tutorial`
@@ -31,7 +31,7 @@ export default {
     nav: (page, label) => page.locator('.n-list a').filter({ hasText: new RegExp(String.raw`^\s*${label}\s*\d*\s*$`) }),
   },
 
-  // Nivaas's own charcoal, linen and ochre, in its own type.
+  // The CRM's own charcoal, linen and ochre, in its own type.
   brand: {
     accent: '#B7791F', ink: '#23231F', muted: '#77756E', paper: '#F6F5F2', backdrop: '#ECE8DF',
     fonts: { display: 'Space Grotesk', body: 'IBM Plex Sans' },
