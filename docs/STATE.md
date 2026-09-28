@@ -21,6 +21,8 @@ plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md` (latest: part E)
 | `main` | `a3b51c0` | |
 | `development` | 41 commits ahead of `main` | agreements and conversion (D), the activity report, contacts tabs, the copy sweep, Today / My work / Performance, Properties Part 7, the superadmin console, the per-firm ledger, the build's name check, tutorials, and (28 Sep) calling tabs, property tabs + project list + duplicate, the photo editor, the import switch, listings added |
 
+**What this release is, for the clients and for the deploy: `docs/releases/2026-09-28.md`.** `development` is pushed to origin (28 Sep).
+
 **Deploy order: API first, then frontend.** The new frontend calls
 `/agreements`, `/public/gallery`, the `contact` counts and fields the old API
 does not have.
