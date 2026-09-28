@@ -12,6 +12,25 @@ recorded, update it in place rather than adding a second entry.
 
 ---
 
+## Filter options that no longer exist once another filter is on (parked 28 Sep)
+
+**What is wrong.** A filter menu offers every value the firm has, whatever else
+is already chosen. Inside one project on Properties, Locality still lists every
+locality in the firm and Configuration every configuration, so most picks
+return "No properties match" — the menu offered a choice it knew nothing about.
+The same on Calling and Leads. The tab and dropdown counts are already scoped
+(getOwnerTabs, getPropertyTabs); the menus' options are not.
+
+**Why parked.** The user asked for it recorded and done later, 28 Sep.
+
+**What the fix takes.** Each list's options come from the server with the
+list's own where-builder (ownerWhere, propertyWhere, the lead list's), taken
+across the field being offered — the rule the tab counts already follow — and
+each option carries its count. An option with 0 is shown dimmed rather than
+removed while it is the one selected, so a pick never silently vanishes.
+
+---
+
 ## Server-side permissions, reviewed once, route by route (parked 27 Sep)
 
 **What is wrong.** The screens hide what a role may not do, but several routes
