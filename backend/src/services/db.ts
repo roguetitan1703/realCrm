@@ -931,6 +931,10 @@ async function createLedgerTables(): Promise<void> {
       checked_at TIMESTAMPTZ DEFAULT NOW()
     );
   `;
+  // WHY IT BROKE: 'removed' (the row before it is gone) or 'changed' (the row
+  // itself no longer hashes to what was written). The screen said "changed, or
+  // removed", which left the one question that matters unanswered.
+  await sql`ALTER TABLE audit_checks ADD COLUMN IF NOT EXISTS reason TEXT;`;
 
   // --------------------------------------------------------------------------
   // ACTIVITIES (docs/specs/contacts-leads.md B4) — a visit/call/meeting with

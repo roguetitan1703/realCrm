@@ -21,12 +21,17 @@ function CheckLine({ check }) {
     const n = (own?.checked || 0) + (legacy?.checked || 0)
     return <div className="adm-check ok"><Icon name="check" size={15} />All {n.toLocaleString('en-IN')} entries check out.</div>
   }
-  const at = own?.brokenAtSeq || legacy?.brokenAtSeq
+  const bad = own?.brokenAtSeq ? own : legacy
+  const at = bad?.brokenAtSeq
   return (
     <div className="adm-check bad">
       <Icon name="alert" size={15} />
-      Entry #{at} does not match the one before it: it was changed, or an entry before it was removed.
-      {!own?.brokenAtSeq && legacy?.brokenAtSeq ? ' (In the entries from before each firm had its own chain.)' : ''}
+      {bad?.reason === 'removed'
+        ? `An entry just before #${at} has been deleted.`
+        : bad?.reason === 'changed'
+          ? `Entry #${at} was changed after it was written.`
+          : `Entry #${at} does not match the one before it: it was changed, or an entry before it was removed.`}
+      {bad === legacy ? ' (In the entries from before each firm had its own chain.)' : ''}
     </div>
   )
 }

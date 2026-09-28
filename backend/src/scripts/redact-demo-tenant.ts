@@ -305,6 +305,15 @@ async function main() {
     const a = await sql`DELETE FROM audit_log WHERE tenant_id = ${T} RETURNING 1`;
     const w = await sql`DELETE FROM webhook_inbox WHERE tenant_id = ${T} RETURNING 1`;
     console.log(`audit_log          ${a.length} deleted`);
+    // Deleting rows cuts the chains they sat in: the firm's own, and the legacy
+    // chain every firm shared before 25 Sep. Left cut, the ledger reports a
+    // deleted entry on this desk for ever. Re-sealed from what remains; this
+    // script only ever holds the development connection.
+    const { resealChain } = await import('./lib/audit-reseal.js');
+    for (const chain of ['legacy', T]) {
+      const r = await resealChain(sql, chain);
+      console.log(`audit chain ${chain.padEnd(8)} re-sealed ${r.rewritten} of ${r.rows} rows`);
+    }
     console.log(`webhook_inbox      ${w.length} deleted`);
   } else {
     const a = await sql`SELECT count(*)::int n FROM audit_log WHERE tenant_id = ${T}`;

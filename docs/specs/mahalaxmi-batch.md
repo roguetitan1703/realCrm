@@ -995,8 +995,12 @@ it. Project names (4.6) go in first.
   now (`audit_log.chain`), 'platform' for Delpat's own; the rows before stay
   one legacy chain, checked with the old date reading as a fallback;
   `audit_checks` keeps how far each chain is verified. On dev the legacy chain
-  reads broken at #2: row #1 was deleted there at some point; that is a true
-  finding on dev, not the date bug.
+  read broken at #2: `redact-demo-tenant` deleted delpat's 1,584 audit rows on
+  27 Aug (#1 and #6–#196 among them), which cut the chain every firm then
+  shared. A true finding on dev, not the date bug. Re-sealed on dev 28 Sep with
+  `scripts/audit-reseal-dev.ts` (development only; 577 rows), and the two dev
+  scripts that delete audit rows now re-seal after themselves. The check now
+  says which: `reason` 'removed' (the row before is gone) or 'changed'.
 - **9.2 setup email:** Address, key (placeholder until the owner presses Add
   the key, through the owner-only audited key route), format and docs link,
   signed with the firm's name.

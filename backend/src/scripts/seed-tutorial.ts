@@ -2,7 +2,7 @@
  * ============================================================================
  * THE TUTORIAL FIRM, RESET TO THE SAME STATE EVERY TIME
  * ============================================================================
- * WHEN TO RUN THIS: before recording a tutorial video (tutorials/record.mjs
+ * WHEN TO RUN THIS: before recording a tutorial video (`tutorial-videos record`
  * runs it for you), or when the `tutorial` firm on development looks wrong.
  *
  *   npm run seed:tutorial
@@ -67,7 +67,7 @@ async function wipe() {
   const T = TUTORIAL.tenant;
   const tables: { table_name: string }[] = await sql`
     SELECT DISTINCT table_name FROM information_schema.columns
-    WHERE table_schema = 'public' AND column_name = 'tenant_id' AND table_name <> 'tenants'`;
+    WHERE table_schema = 'public' AND column_name = 'tenant_id' AND table_name NOT IN ('tenants', 'audit_log')`;
   // Foreign keys decide the order, and nothing here knows it: delete what can
   // be deleted, and go round again until a pass removes nothing.
   let left = tables.map(t => t.table_name);
@@ -80,9 +80,12 @@ async function wipe() {
     if (failed.length === left.length) throw new Error(`Could not clear: ${failed.join(', ')}`);
     left = failed;
   }
-  // The audit ledger is chained per firm under `chain`, not tenant_id alone.
-  const hasChain = await sql`SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_log' AND column_name = 'chain'`;
-  if (hasChain.length) await sql`DELETE FROM audit_log WHERE chain = ${T}`;
+  // The firm's own audit chain goes whole, with its saved check: a check left
+  // behind remembers a hash no row has any more and reports the new firm's
+  // first entry as following a deleted one. Rows in the legacy chain (from
+  // before per-firm chains) are left alone; this firm has none.
+  await sql`DELETE FROM audit_log WHERE chain = ${T}`;
+  await sql`DELETE FROM audit_checks WHERE chain = ${T}`;
   await sql`DELETE FROM tenants WHERE id = ${T}`;
 }
 

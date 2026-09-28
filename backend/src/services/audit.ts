@@ -198,9 +198,10 @@ export async function listAudit(limit = 60): Promise<any[]> {
   `;
 }
 
-export type ChainCheck = { ok: boolean; checked: number; brokenAtSeq: number | null; checkedAt: string };
+export type ChainCheck = { ok: boolean; checked: number; brokenAtSeq: number | null; reason: 'removed' | 'changed' | null; checkedAt: string };
 
-const rowHash = (r: any, prevHash: string | null, legacyDates = false) => crypto.createHash('sha256').update(
+/** A stored row's hash, recomputed from its content and the hash before it. */
+export const rowHash = (r: any, prevHash: string | null, legacyDates = false) => crypto.createHash('sha256').update(
   canonical({
     actor_type: r.actor_type, actor_id: r.actor_id, actor_label: r.actor_label,
     action: r.action, target_type: r.target_type, target_id: r.target_id,
@@ -216,11 +217,12 @@ const rowHash = (r: any, prevHash: string | null, legacyDates = false) => crypto
 export async function verifyChain(chain: string): Promise<ChainCheck> {
   const [prev] = await sql`SELECT * FROM audit_checks WHERE chain = ${chain}`;
   if (prev && prev.ok === false) {
-    return { ok: false, checked: Number(prev.checked), brokenAtSeq: Number(prev.broken_at), checkedAt: prev.checked_at };
+    return { ok: false, checked: Number(prev.checked), brokenAtSeq: Number(prev.broken_at), reason: prev.reason || null, checkedAt: prev.checked_at };
   }
   const from = Number(prev?.last_seq || 0);
   let prevHash: string | null = prev?.last_hash || null;
   let checked = Number(prev?.checked || 0), lastSeq = from, broken: number | null = null;
+  let reason: 'removed' | 'changed' | null = null;
   const where = chain === 'legacy' ? sql`chain IS NULL` : sql`chain = ${chain}`;
   // In pages, so a first check of a long chain does not hold every row at once.
   for (;;) {
@@ -231,17 +233,19 @@ export async function verifyChain(chain: string): Promise<ChainCheck> {
     for (const r of rows as any[]) {
       const linked = (r.prev_hash || null) === prevHash;
       const same = linked && (rowHash(r, prevHash) === r.hash || rowHash(r, prevHash, true) === r.hash);
-      if (!same) { broken = Number(r.seq); break; }
+      // Not linked: it points at a hash no surviving row has, so the row
+      // before it was deleted. Linked but different: this row was edited.
+      if (!same) { broken = Number(r.seq); reason = linked ? 'changed' : 'removed'; break; }
       prevHash = r.hash; lastSeq = Number(r.seq); checked++;
     }
     if (broken || rows.length < 2000) break;
   }
   await sql`
-    INSERT INTO audit_checks (chain, last_seq, last_hash, checked, ok, broken_at, checked_at)
-    VALUES (${chain}, ${lastSeq}, ${prevHash}, ${checked}, ${!broken}, ${broken}, NOW())
+    INSERT INTO audit_checks (chain, last_seq, last_hash, checked, ok, broken_at, reason, checked_at)
+    VALUES (${chain}, ${lastSeq}, ${prevHash}, ${checked}, ${!broken}, ${broken}, ${reason}, NOW())
     ON CONFLICT (chain) DO UPDATE SET last_seq = EXCLUDED.last_seq, last_hash = EXCLUDED.last_hash,
-      checked = EXCLUDED.checked, ok = EXCLUDED.ok, broken_at = EXCLUDED.broken_at, checked_at = NOW()`;
-  return { ok: !broken, checked, brokenAtSeq: broken, checkedAt: new Date().toISOString() };
+      checked = EXCLUDED.checked, ok = EXCLUDED.ok, broken_at = EXCLUDED.broken_at, reason = EXCLUDED.reason, checked_at = NOW()`;
+  return { ok: !broken, checked, brokenAtSeq: broken, reason, checkedAt: new Date().toISOString() };
 }
 
 /**
