@@ -3519,21 +3519,19 @@ type OwnerListOpts = {
  * then could not find. `omit` drops the axes a count is being taken ACROSS —
  * the tab row counts across segment and stage, the agent picker across agent.
  */
-async function ownerWhere(t: string, opts: OwnerListOpts, omit: { tab?: boolean; agent?: boolean } = {}): Promise<any[]> {
+async function ownerWhere(t: string, opts: OwnerListOpts, omit: { segment?: boolean; stage?: boolean; agent?: boolean } = {}): Promise<any[]> {
   const where: any[] = [sql`tenant_id = ${t}`, ownerScope(opts.mine)];
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
     where.push(sql`(lower(coalesce(name, '')) LIKE ${like} OR phone LIKE ${like} OR lower(coalesce(project, '')) LIKE ${like})`);
   }
-  if (!omit.tab) {
-    // coalesce: a row with no stage is New everywhere else (OWNER_OPEN, the
-    // counts), so the New tab has to find it too.
-    const stages = String(opts.stage || '').split(',').map(x => x.trim()).filter(Boolean);
-    if (stages.length) where.push(sql`coalesce(stage, 'New') IN ${sql(stages)}`);
-    const seg = ownerSegments(dayStart(await timezoneOf(t)))[String(opts.segment || '')];
-    if (seg) where.push(seg);
-  }
+  // coalesce: a row with no stage is New everywhere else (OWNER_OPEN, the
+  // counts), so the New tab has to find it too.
+  const stages = omit.stage ? [] : String(opts.stage || '').split(',').map(x => x.trim()).filter(Boolean);
+  if (stages.length) where.push(sql`coalesce(stage, 'New') IN ${sql(stages)}`);
+  const seg = omit.segment ? null : ownerSegments(dayStart(await timezoneOf(t)))[String(opts.segment || '')];
+  if (seg) where.push(seg);
   // '_none' is the "No project" bucket from listOwnerProjects — those rows
   // have project NULL or ''. Without this branch a click on that card sent
   // project: undefined, which is not a filter at all and returned every
@@ -3598,26 +3596,36 @@ export async function listOwners(opts: OwnerListOpts = {}): Promise<{ rows: any[
 }
 
 /**
- * THE CALLING TABS' COUNTS, for exactly the rows on screen: the same builder as
- * listOwners with every filter the list has, taken across the tabs themselves.
- * All · Callbacks · one per status the rows hold · Closed · Unassigned — each
- * FILTER below is the segment or stage that tab sends, so a tab and the list it
- * opens cannot disagree. The agent picker is counted across agents, inside the
- * same project, tower and tab.
+ * THE CALLING SCREEN'S COUNTS, for exactly the rows on screen — the same
+ * builder as listOwners, each count taken across the one control it labels:
+ *
+ *   • the tab row (All · Callbacks · Unassigned) across the tab, inside the
+ *     Status dropdown's choice — "Callbacks 3" with Interested picked means
+ *     three Interested owners have a callback;
+ *   • the tab row's two status tabs (the first steps of the walk) across both
+ *     the tab and the dropdown, because picking one replaces the dropdown;
+ *   • the Status dropdown across status, inside the tab — under Callbacks it
+ *     says which statuses the callbacks hold;
+ *   • the Agent dropdown across agent.
+ *
+ * `stage` here is the DROPDOWN's status only; a status tab is not sent.
  */
 export async function getOwnerTabs(opts: OwnerListOpts = {}): Promise<any> {
   const t = tid();
   const seg = ownerSegments(dayStart(await timezoneOf(t)));
-  const acrossTabs = andAll(await ownerWhere(t, opts, { tab: true }));
+  const acrossSegment = andAll(await ownerWhere(t, opts, { segment: true }));
+  const acrossBoth = andAll(await ownerWhere(t, opts, { segment: true, stage: true }));
+  const acrossStage = andAll(await ownerWhere(t, opts, { stage: true }));
   const acrossAgents = andAll(await ownerWhere(t, opts, { agent: true }));
-  const [[c], byStage, byAgent] = await Promise.all([
+  const byStageOf = (where: any) => sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
+          FROM crm_owners WHERE ${where} GROUP BY 1`;
+  const [[c], tabStage, byStage, byAgent] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${seg.callbacks})::int AS callbacks,
-               count(*) FILTER (WHERE ${seg.closed})::int AS closed,
                count(*) FILTER (WHERE ${seg.unassigned})::int AS unassigned
-          FROM crm_owners WHERE ${acrossTabs}`,
-    sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
-          FROM crm_owners WHERE ${acrossTabs} GROUP BY 1`,
+          FROM crm_owners WHERE ${acrossSegment}`,
+    byStageOf(acrossBoth),
+    byStageOf(acrossStage),
     sql`SELECT coalesce(o.agent_id, '_none') AS value,
                coalesce(u.name, a.name, 'Unassigned') AS label,
                count(*)::int AS count
@@ -3627,9 +3635,10 @@ export async function getOwnerTabs(opts: OwnerListOpts = {}): Promise<any> {
          WHERE o.tenant_id = ${t} AND o.id IN (SELECT id FROM crm_owners WHERE ${acrossAgents})
          GROUP BY 1, 2 ORDER BY 3 DESC`,
   ]);
+  const map = (rows: any) => Object.fromEntries((rows as any[]).map(r => [r.stage, r.n]));
   return {
-    total: c?.total ?? 0, callbacks: c?.callbacks ?? 0, closed: c?.closed ?? 0, unassigned: c?.unassigned ?? 0,
-    byStage: Object.fromEntries((byStage as any[]).map(r => [r.stage, r.n])),
+    total: c?.total ?? 0, callbacks: c?.callbacks ?? 0, unassigned: c?.unassigned ?? 0,
+    tabStage: map(tabStage), byStage: map(byStage),
     byAgent: (byAgent as any[]).map(r => ({ value: r.value, label: r.label, count: r.count })),
   };
 }

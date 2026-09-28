@@ -160,9 +160,15 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // `q`, the page, the view and the selection stay local: a history entry per
   // keystroke is not navigation.
   const bag = sel.ownerFilters || {}
-  const tab = bag.tab || (bag.status ? `status:${bag.status}` : 'all')
-  const status = tab.startsWith('status:') ? tab.slice(7) : undefined
-  const segment = status || tab === 'all' ? undefined : tab
+  // TWO CONTROLS, ONE QUESTION EACH. The tab row is where a caller works from —
+  // everyone, the scheduled callbacks, the first two steps of the walk (`step`),
+  // nobody's rows. The Status dropdown (`status`) is any status, on top of
+  // Callbacks or Unassigned. A step tab and a dropdown status would be two
+  // statuses at once, which is never a row, so picking one clears the other.
+  const tab = bag.tab || (bag.step ? `step:${bag.step}` : 'all')
+  const segment = bag.tab || undefined
+  const status = bag.status
+  const stage = bag.step || status
   const projectSel = bag.project
   const towerSel = bag.tower
   const agentSel = bag.caller || 'all'
@@ -175,7 +181,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const [q, setQ] = useState('')
   // The project grid is a desk lens — a phone gets the queue itself. Arriving
   // with a tab, a project or a caller already chosen means the list.
-  const [view, setView] = useState(phone || bag.tab || bag.status || bag.project || bag.caller ? 'list' : 'projects')
+  const [view, setView] = useState(phone || bag.tab || bag.step || bag.status || bag.project || bag.caller ? 'list' : 'projects')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selected, setSelected] = useState(new Set())
@@ -197,10 +203,15 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   }
   // A tab is its own order: a sort picked on another tab does not follow it.
   const pickTab = (key) => {
-    const st = key.startsWith('status:') ? key.slice(7) : undefined
-    patchBag({ tab: st || key === 'all' ? undefined : key, status: st, sortKey: undefined, sortDir: undefined })
+    const step = key.startsWith('step:') ? key.slice(5) : undefined
+    patchBag({
+      tab: step || key === 'all' ? undefined : key, step,
+      ...(step ? { status: undefined } : {}),
+      sortKey: undefined, sortDir: undefined,
+    })
     setView('list')
   }
+  const setStatusP = (v) => { patchBag({ status: v, step: undefined }); setView('list') }
   const setAgentP = (v) => { patchBag({ caller: v }); setView('list') }
   // The Filter menu holds Tower only, and only inside a project.
   const onFilters = (v) => { patchBag({ tower: projectSel ? v?.tower?.[0] : undefined }); setView('list') }
@@ -208,7 +219,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // LEAVING A PROJECT is going back to the cards with nothing left switched on:
   // the tab, the tower and the sort all belonged to that project's list.
   const leaveProject = () => {
-    patchBag({ project: undefined, tower: undefined, tab: undefined, status: undefined, sortKey: undefined, sortDir: undefined })
+    patchBag({ project: undefined, tower: undefined, tab: undefined, step: undefined, status: undefined, sortKey: undefined, sortDir: undefined })
     setView('projects')
   }
   const setPageP = (v) => { setPage(v); setSelected(new Set()) }
@@ -228,43 +239,51 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const source = useServerList(
     (params) => api.listOwners({
       ...scope, page: params.page, limit: params.limit, q: params.q,
-      segment, stage: status,
+      segment, stage,
       sortKey: params.sortKey, sortDir: params.sortDir,
     }),
     // Same as Leads: a row you just called keeps its place in the queue.
     { filters: {}, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone,
-      holdOrder: true, viewDeps: [tab, agentSel, projectSel, towerSel, phone] },
-    [state.dataAsOf, tab, agentSel, projectSel, towerSel, phone],
+      holdOrder: true, viewDeps: [tab, status, agentSel, projectSel, towerSel, phone] },
+    [state.dataAsOf, tab, status, agentSel, projectSel, towerSel, phone],
     { store, kind: 'owner' },
   )
   const { data: counts } = useServerData(
+    // The dropdown's status only: a step tab is counted across, not within.
     () => api.getOwnerTabs({ ...scope, segment, stage: status }).then(r => r?.tabs || {}),
-    [state.dataAsOf, q, tab, agentSel, projectSel, towerSel, phone], {})
+    [state.dataAsOf, q, tab, status, agentSel, projectSel, towerSel, phone], {})
 
   const { data: projectList } = useServerData(
     () => api.listOwnerProjects().then(r => r?.data || []), [state.dataAsOf], [])
   const currentProject = (projectList || []).find(p => (p.key === 'No project' ? '_none' : p.key) === projectSel)
   const facets = { towers: (currentProject?.towers || []).map(t => ({ value: t, label: t })) }
 
-  // THE TABS ARE THE WALK. Calling goes New → Contacted → Interested → Key
-  // Received, or ends; these are the firm's own statuses, in its order, each
-  // counted over the rows on screen. The old tabs were callback times — Late,
-  // Due today — over a list where a handful of rows have a callback at all.
-  // Callbacks stays as the one tab that is a time: it is where the scheduled
-  // calls are. Closed holds both endings, which nobody rings. A status the firm
-  // dropped but rows still carry gets a tab while it holds any, so no row is
-  // reachable only through All.
-  const byStage = (counts || {}).byStage || {}
+  // THE TAB ROW IS SHORT ON PURPOSE: where a caller works from, not every
+  // status. All · Callbacks (the one tab that is a time) · the first two steps
+  // of the firm's walk, where nearly every row sits (New 713 and Contacted 2 of
+  // 754 on dev) · Unassigned for whoever hands work out. Every status —
+  // Interested, Key Received, and the two endings Not Interested and Do Not
+  // Call — is in the Status dropdown, under its own name.
+  const c = counts || {}
+  const tabStage = c.tabStage || {}
+  const byStage = c.byStage || {}
   const firmStages = (state.settings.ownerStages?.length ? state.settings.ownerStages : OWNER_STAGES)
     .filter(s => !OWNER_TERMINAL_STATUSES.includes(s))
-  const stray = Object.keys(byStage).filter(s => byStage[s] > 0 && !firmStages.includes(s) && !OWNER_TERMINAL_STATUSES.includes(s))
+  const steps = firmStages.slice(0, 2)
   const segs = [
-    { key: 'all', label: 'All', count: counts?.total ?? 0 },
-    { key: 'callbacks', label: 'Callbacks', count: counts?.callbacks ?? 0 },
-    ...[...firmStages, ...stray].map(s => ({ key: `status:${s}`, label: s, count: byStage[s] ?? 0 })),
-    { key: 'closed', label: 'Closed', count: counts?.closed ?? 0 },
-    ...(canAssign && !phone ? [{ key: 'unassigned', label: 'Unassigned', count: counts?.unassigned ?? 0 }] : []),
-  ].map(s => ({ ...s, on: tab === s.key, disabled: s.key !== 'all' && !s.count, onClick: () => pickTab(s.key) }))
+    { key: 'all', label: 'All', count: c.total ?? 0 },
+    { key: 'callbacks', label: 'Callbacks', count: c.callbacks ?? 0 },
+    ...steps.map(s => ({ key: `step:${s}`, label: s, count: tabStage[s] ?? 0 })),
+    ...(canAssign && !phone ? [{ key: 'unassigned', label: 'Unassigned', count: c.unassigned ?? 0 }] : []),
+  ].map(s => ({ ...s, on: tab === s.key, disabled: s.key !== 'all' && !s.count && tab !== s.key, onClick: () => pickTab(s.key) }))
+  // Every status the firm uses, then the two endings, then any status the firm
+  // dropped that rows still carry — so no row is reachable only through All.
+  const allStatuses = [...firmStages, ...OWNER_TERMINAL_STATUSES]
+  const stray = Object.keys(byStage).filter(s => byStage[s] > 0 && !allStatuses.includes(s))
+  const statusOptions = [
+    { value: 'all', label: 'All' },
+    ...[...allStatuses, ...stray].map(s => ({ value: s, label: s, count: byStage[s] ?? 0 })),
+  ]
 
   // The callback time is a column on the one tab that is about it. Everywhere
   // else it was "Not called" down seven hundred rows.
@@ -293,9 +312,10 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     sortKey, onSortKey: (v) => patchBag({ sortKey: v }), sortDir, onSortDir: (v) => patchBag({ sortDir: v }),
     segments: segs, view, onView: setView,
     phone,
-    leftAddon: canAssign ? (
+    leftAddon: (
       <div className="leads-dd-row">
-        <SelectDropdown
+        <SelectDropdown label="Status" value={status || 'all'} onChange={setStatusP} options={statusOptions} />
+        {canAssign && <SelectDropdown
           label="Agent" value={agentSel} onChange={setAgentP} searchable
           options={[
             { value: 'all', label: 'All' },
@@ -305,9 +325,9 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
               count: a.count,
             })),
           ]}
-        />
+        />}
       </div>
-    ) : null,
+    ),
     // The toolbar IS the selection bar — see FilterBar. No second band.
     selection: (canAssign && view === 'list' && selected.size > 0) ? {
       count: selected.size,

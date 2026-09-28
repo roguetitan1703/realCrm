@@ -110,7 +110,7 @@ const writePropFilters = (p, f) => {
 // switched on that nothing on screen explained. Read and written only on the
 // calling screen, so `tab`, `status` and `caller` cannot leak into the other
 // two bags; the project is `in-project` for the reason PROP_URL_NAME gives.
-const OWNER_URL = { tab: 'tab', status: 'status', caller: 'caller', project: 'in-project', tower: 'tower', sortKey: 'sortKey', sortDir: 'sortDir' }
+const OWNER_URL = { tab: 'tab', step: 'step', status: 'status', caller: 'caller', project: 'in-project', tower: 'tower', sortKey: 'sortKey', sortDir: 'sortDir' }
 const readOwnerFilters = (p) => {
   const f = {}
   for (const [k, u] of Object.entries(OWNER_URL)) { const v = p.get(u); if (v) f[k] = v }
