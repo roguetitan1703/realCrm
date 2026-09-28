@@ -180,6 +180,7 @@ function OtherActivity({ t, side, open }) {
     ...(side === 'leads' ? [{ n: t.n('visit'), label: word(t.n('visit'), 'site visit', 'site visits'), m: 'visit' }] : []),
     { n: t.n('followup_set'), label: `${fuWord(side, t.n('followup_set'))} booked`, m: 'followup_set' },
     ...(side === 'leads' ? [{ n: t.n('followup_done'), label: `${word(t.n('followup_done'), 'follow-up', 'follow-ups')} done`, m: 'followup_done' }] : []),
+    ...(side === 'calling' ? [{ n: t.listings, label: `${word(t.listings, 'listing', 'listings')} added`, m: 'listing' }] : []),
   ]
   return (
     <div className="pv-other">
@@ -324,18 +325,21 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
 
           <Section title="Agents">
             <div className="pv-agents">
-              <div className="pv-ag pv-ag-head" aria-hidden="true">
-                <span>Agent</span><span>People</span><span>Calls</span><span>Picked up</span><span>What came of it</span><span />
+              {/* LISTINGS, on the calling side: the flats an agent put on the
+                  book that day — the supply the calling is for. */}
+              <div className={'pv-ag pv-ag-head' + (side === 'calling' ? ' with-listings' : '')} aria-hidden="true">
+                <span>Agent</span><span>People</span><span>Calls</span><span>Picked up</span>{side === 'calling' && <span>Listings</span>}<span>What came of it</span><span />
               </div>
               {people.map(p => {
                 const out = p.t.statuses.slice(0, 3)
                 const more = p.t.statuses.length - out.length
                 return (
-                  <button type="button" key={p.id} className={'pv-ag' + (p.gone || p.duty === 'OFF_DUTY' ? ' off' : '')} onClick={() => onOpenPerson?.(p)}>
+                  <button type="button" key={p.id} className={'pv-ag' + (side === 'calling' ? ' with-listings' : '') + (p.gone || p.duty === 'OFF_DUTY' ? ' off' : '')} onClick={() => onOpenPerson?.(p)}>
                     <span className="pv-ag-name">{p.name || 'Someone who has left'}{p.duty === 'OFF_DUTY' && <span className="tt-tag">Off duty</span>}</span>
                     <span className="pv-ag-n" data-l="people"><b>{fmt(p.t.people)}</b></span>
                     <span className="pv-ag-n" data-l="calls">{fmt(p.t.calls)}</span>
                     <span className="pv-ag-n" data-l="picked up">{fmt(p.t.n('contact', 'answered'))}</span>
+                    {side === 'calling' && <span className="pv-ag-n" data-l="listings added">{fmt(p.t.listings)}</span>}
                     <span className="pv-ag-out">
                       {out.length
                         ? <>{out.map(s => <span key={s.detail} className="pv-chip">{s.n} {stageLabel(s.detail)}</span>)}{more > 0 && <span className="ad-quiet">+{more}</span>}</>

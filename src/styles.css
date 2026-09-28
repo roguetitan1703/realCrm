@@ -3194,6 +3194,7 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 /* Agents: one row each, opens the agent */
 .pv-agents{display:flex;flex-direction:column}
 .pv-ag{display:grid;grid-template-columns:minmax(130px,1.3fr) 70px 60px 80px minmax(160px,2.2fr) 18px;align-items:center;gap:12px;padding:10px 8px;border:none;border-top:1px solid var(--line-2);background:none;font:inherit;font-size:13.5px;text-align:left;cursor:pointer;color:var(--ink-2)}
+.pv-ag.with-listings{grid-template-columns:minmax(130px,1.3fr) 70px 60px 80px 70px minmax(160px,2.2fr) 18px}
 .pv-ag:hover{background:var(--card-2)}
 .pv-ag.off{opacity:.6}
 .pv-ag-head{cursor:default;border-top:none;padding-top:0;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
@@ -3227,7 +3228,7 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 @media (max-width:900px){
   .pv-pair{grid-template-columns:1fr}
   .pv-ag-head{display:none}
-  .pv-ag{grid-template-columns:1fr 18px;gap:4px 10px}
+  .pv-ag,.pv-ag.with-listings{grid-template-columns:1fr 18px;gap:4px 10px}
   .pv-ag-name{grid-column:1}
   .pv-ag .pv-go{grid-column:2;grid-row:1}
   .pv-ag-n{display:inline;grid-column:1}
@@ -3458,3 +3459,5 @@ button.mp-makecover{pointer-events:auto;border:none;cursor:pointer;background:rg
 .mp-item:hover .mp-makecover,.mp-makecover:focus-visible{opacity:1}
 @media (hover:none){button.mp-makecover{opacity:1}}
 .toast-act{margin-left:10px;border:none;background:transparent;color:var(--accent-ink, var(--accent));font:inherit;font-weight:700;cursor:pointer;padding:2px 4px;text-decoration:underline;text-underline-offset:2px}
+
+.tt-listed{color:var(--ink-2);font-weight:600}

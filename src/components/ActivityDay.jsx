@@ -63,7 +63,8 @@ export function tally(person) {
     missed: n('followup_missed'),
     dueToday: n('followup_today'),
     notCalled: n('came_in', 'not_called'),
-    effort: n('call') + n('whatsapp') + n('note') + n('status') + n('visit') + n('followup_set') + n('followup_done'),
+    listings: n('listing'),
+    effort: n('call') + n('whatsapp') + n('note') + n('status') + n('visit') + n('followup_set') + n('followup_done') + n('listing'),
   }
 }
 
@@ -118,7 +119,7 @@ export const fuWord = (side, n) => side === 'calling' ? word(n, 'callback', 'cal
 export const MEASURE_TITLE = {
   call: 'Calls', people: 'People called', whatsapp: 'WhatsApps', note: 'Notes', visit: 'Site visits',
   status: 'Moved to', followup_set: 'Booked', followup_done: 'Done', followup_missed: 'Missed',
-  followup_today: 'Due today', followup_tomorrow: 'Due tomorrow', came_in: 'New leads',
+  followup_today: 'Due today', followup_tomorrow: 'Due tomorrow', came_in: 'New leads', listing: 'Listings added',
 }
 export const DETAIL_TITLE = {
   ...REACH_LABEL, called: 'called', not_called: 'not called', just_in: 'just came in',
@@ -156,7 +157,8 @@ function TeamRow({ r, side, isToday, lateEnough, onClick }) {
         <span className="tt-moved">
           {moved.length
             ? <>{moved.map(s => `${s.n} ${stageLabel(s.detail)}`).join(', ')}{movedMore > 0 && <span className="ad-quiet"> +{movedMore} more</span>}</>
-            : <span className="ad-quiet">No change</span>}
+            : !t.listings && <span className="ad-quiet">No change</span>}
+          {t.listings > 0 && <span className="tt-listed">{moved.length ? ' · ' : ''}{fmt(t.listings)} {word(t.listings, 'listing', 'listings')} added</span>}
         </span>
         <span className="tt-attn">
           {attn.map(a => <span key={a}>{a}</span>)}
@@ -234,7 +236,8 @@ export function ActivityRecords({ store, go, side, date, person, measure, detail
 
   const openRecord = (r) => {
     store.closeModal()
-    if (side === 'calling') go('calling', { ownerId: r.id, ownerOpen: true })
+    if (r.kind === 'property') go('properties', { propId: r.id, propOpen: true })
+    else if (side === 'calling') go('calling', { ownerId: r.id, ownerOpen: true })
     else go('leads', { leadId: r.id, leadOpen: true })
   }
   const what = (r) => {

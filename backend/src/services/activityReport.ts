@@ -192,7 +192,18 @@ function facts(side: Side, t: string, tz: string, bounds: Bounds) {
       UNION ALL
       SELECT r.agent_id, r.id, r.callback_at, 'followup_tomorrow', NULL FROM crm_owners r
        WHERE r.tenant_id = ${t} AND r.agent_id IS NOT NULL AND ${isToday}
-         AND ${OWNER_OPEN} AND r.callback_at >= ${d1} AND r.callback_at < ${d2}`;
+         AND ${OWNER_OPEN} AND r.callback_at >= ${d1} AND r.callback_at < ${d2}
+      UNION ALL
+      -- LISTINGS ADDED: supply work, so it is on the calling side, where the
+      -- calls to owners it usually comes from are. Whoever the listing says
+      -- added it (created_by, the signed-in account — never a typed name),
+      -- on that day. A listing from an imported sheet is not somebody's
+      -- work that day; one added by hand, copied, or converted from a
+      -- calling row is.
+      SELECT p.created_by, p.id, p.created_at, 'listing', NULL FROM crm_properties p
+       WHERE p.tenant_id = ${t} AND p.created_by IS NOT NULL
+         AND p.created_at >= ${d0} AND p.created_at < ${d1}
+         AND coalesce(p.config->>'importBatchId', '') = ''`;
   }
 
   // When a lead came in: its first arrival, or a repeat enquiry the same day.
@@ -333,6 +344,19 @@ export async function activityRecords(opts: { side: Side; date?: string | null; 
   const tz = await timezoneOf(t);
   const person = allowedPerson(opts.person ?? null);
   const f = facts(opts.side, t, tz, dayBounds(tz, validDate(opts.date)));
+  // The listings behind "listings added" are listings, not calling rows.
+  if (opts.measure === 'listing') {
+    const rows = await sql`
+      SELECT f.record_id AS id, f.person, f.measure, f.at, p.project, p.wing, p.unit_no, p.title, p.deal
+        FROM (${f}) f JOIN crm_properties p ON p.id = f.record_id AND p.tenant_id = ${t}
+       WHERE f.measure = 'listing' ${person ? sql`AND f.person = ${person}` : sql``}
+       ORDER BY f.at DESC LIMIT 500`;
+    return rows.map((r: any) => ({
+      id: r.id, person: r.person, measure: r.measure, detail: null, at: r.at, kind: 'property',
+      name: r.project || r.title, phone: null, stage: null,
+      unit: [r.wing, r.unit_no].filter(Boolean).join('-') || null,
+    }));
+  }
   const table = opts.side === 'leads' ? sql`crm_leads` : sql`crm_owners`;
   // A person's contact status is derived from their calls, not a fact of its own.
   const src = opts.measure === 'contact' ? contactOf(f) : f;
