@@ -12,6 +12,25 @@ recorded, update it in place rather than adding a second entry.
 
 ---
 
+## Updates to a flat's owner, and one person across roles (parked 30 Sep)
+
+**What is missing.** (1) A landlord hears nothing about their flat between
+handing it over and a deal: the visits and interest on it are in the listing's
+history and go nowhere. (2) One person who is an owner, a buyer and a lead is
+three records on three screens (Contacts Phase B).
+
+**Why parked.** The user, 30 Sep: owner updates want more usage first, and
+would be built as a reminder to the agent with a drafted WhatsApp message, not
+an automatic send; one-person-across-roles is not wanted now. Also ruled out
+the same day, so they are not re-proposed: real call data (the firms use no
+phone provider), the WhatsApp Business API (paid, the firms will not pay),
+commission tracking (to be asked of the clients first), e-sign (a place to
+store the agreement is enough and exists), posting listings out to portals
+(expensive and gated), rent-cycle work (brokers are not involved after the
+deal).
+
+---
+
 ## Contacts → Tenants: nothing for tenants who have moved out (parked 28 Sep)
 
 **What is wrong.** Tenants has All and "Ending in 30 days". A rent that has

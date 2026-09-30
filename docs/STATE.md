@@ -8,7 +8,7 @@ a live database so the next session neither re-derives it nor assumes it.
 Open bugs go in `docs/KNOWN-ISSUES.md`, not here. Point at them. The working
 plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md` (latest: part E).
 
-**Last session: 2026-09-28.**
+**Last session: 2026-09-30.**
 
 ---
 
@@ -53,12 +53,16 @@ After the API deploy:
 ## Waiting on the user
 
 - **Review on dev, merge `development` → `main`, deploy** (API, then frontend).
-- **How many production listings are an invented flat A-101.** Until 166eba6,
-  createProperty wrote tower `A` and unit `101` for any listing saved without
-  them (a calling row converted before its flat was known, a copy). Dev: 3 of
-  delpat's 25 read A-101, 1 of urban's reads unit 101. A real A-101 and an
-  invented one look the same; on production (bhumi, mahalaxmi) the count needs
-  the user's OK to read, and any repair needs the user's decision per firm.
+- **Production, read only, 28–30 Sep (nothing written):** 0 listings at flat
+  A-101 in any firm; 5 at flat 101 in another wing (bhumi 3, mahalaxmi 1,
+  urban 1), not provably typed or defaulted, left alone. No paying firm's
+  listing carries the invented "2 BHK" / "Pune"; our own `delpat` org has 747
+  imported listings saved as sale in Pune by the old default. Bhumi: 39 of 39
+  calling rows have nobody on them. The audit ledger: 10,809 of 10,809 verify
+  with the fixed checker (9994f29), so it reads clean after the deploy and
+  nothing is re-sealed on production.
+- Default passwords are **not** an open item: the user, 30 Sep (sign-in no
+  longer forces a change, by choice).
 - **Superadmin console built** (mahalaxmi-batch.md, "Superadmin — as built"):
   console session, support view, firm page, per-firm ledger, setup email.
   Worth a look on dev at `/admin` before deploying.
