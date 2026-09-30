@@ -59,7 +59,8 @@ export interface AuditEntry {
  * zero tampering involved. Sorting keys on both sides makes the canonical
  * form stable across the write → JSONB → read round trip.
  */
-function stableStringify(value: any, legacyDates = false): string {
+type LegacyDates = false | true | 'columns';
+function stableStringify(value: any, legacyDates: LegacyDates = false, inList = false): string {
   // Match JSONB's normalization so the canonical form is identical before the
   // write and after the JSONB round-trip:
   //   • undefined is not a JSON value — JSONB drops it in objects and stores
@@ -71,11 +72,21 @@ function stableStringify(value: any, legacyDates = false): string {
   if (value instanceof Date) return JSON.stringify(value.toISOString());
   // The old rows were hashed with every Date as `{}`; on read-back those are
   // ISO strings. Checking a legacy row, such a string is tried as `{}`.
-  if (legacyDates && typeof value === 'string' && ISO_AT.test(value)) return '{}';
-  if (Array.isArray(value)) return `[${value.map(v => stableStringify(v, legacyDates)).join(',')}]`;
+  //
+  // 'columns' is the third reading, for a row that held BOTH kinds: a listing's
+  // own dates (createdAt, availableFrom) were Dates and hashed as `{}`, while
+  // each photo's upload time inside `media` was text all along and hashed as
+  // text. Read every date as `{}` and the photos are wrong; read none and the
+  // listing's are. Dates inside a list were stored as JSON, so they were text.
+  // Measured on production, read only, 30 Sep: 31 of 10,809 entries fitted
+  // neither of the first two readings, every one a `property.create` with
+  // photos (26 bhumi, 5 mahalaxmi), each correctly linked to the row before
+  // it; all 31 recompute with this reading.
+  if (legacyDates && typeof value === 'string' && ISO_AT.test(value) && !(legacyDates === 'columns' && inList)) return '{}';
+  if (Array.isArray(value)) return `[${value.map(v => stableStringify(v, legacyDates, true)).join(',')}]`;
   if (typeof value === 'object') {
     const keys = Object.keys(value).filter(k => value[k] !== undefined).sort();
-    return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k], legacyDates)}`).join(',')}}`;
+    return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k], legacyDates, inList)}`).join(',')}}`;
   }
   return JSON.stringify(value);
 }
@@ -83,7 +94,7 @@ function stableStringify(value: any, legacyDates = false): string {
 const ISO_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/;
 
 /** Deterministic string representation of the row's content (excludes seq/hash/created_at). */
-function canonical(entry: AuditEntry, tenantId: string | null, legacyDates = false): string {
+function canonical(entry: AuditEntry, tenantId: string | null, legacyDates: LegacyDates = false): string {
   return stableStringify({
     tenant_id: tenantId,
     actor_type: entry.actor_type,
@@ -201,7 +212,7 @@ export async function listAudit(limit = 60): Promise<any[]> {
 export type ChainCheck = { ok: boolean; checked: number; brokenAtSeq: number | null; reason: 'removed' | 'changed' | null; checkedAt: string };
 
 /** A stored row's hash, recomputed from its content and the hash before it. */
-export const rowHash = (r: any, prevHash: string | null, legacyDates = false) => crypto.createHash('sha256').update(
+export const rowHash = (r: any, prevHash: string | null, legacyDates: LegacyDates = false) => crypto.createHash('sha256').update(
   canonical({
     actor_type: r.actor_type, actor_id: r.actor_id, actor_label: r.actor_label,
     action: r.action, target_type: r.target_type, target_id: r.target_id,
@@ -232,7 +243,8 @@ export async function verifyChain(chain: string): Promise<ChainCheck> {
         FROM audit_log WHERE ${where} AND seq > ${lastSeq} ORDER BY seq ASC LIMIT 2000`;
     for (const r of rows as any[]) {
       const linked = (r.prev_hash || null) === prevHash;
-      const same = linked && (rowHash(r, prevHash) === r.hash || rowHash(r, prevHash, true) === r.hash);
+      // As written now, then the two ways old rows were written (see stableStringify).
+      const same = linked && ([false, true, 'columns'] as LegacyDates[]).some(m => rowHash(r, prevHash, m) === r.hash);
       // Not linked: it points at a hash no surviving row has, so the row
       // before it was deleted. Linked but different: this row was edited.
       if (!same) { broken = Number(r.seq); reason = linked ? 'changed' : 'removed'; break; }
