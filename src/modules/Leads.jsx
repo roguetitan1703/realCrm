@@ -9,6 +9,7 @@ import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
 import { LEAD_STATUSES } from '../data/leadStatus.js'
 import { useServerList } from '../lib/serverList.js'
+import UnassignedBar from '../components/UnassignedBar.jsx'
 import { api } from '../lib/api.js'
 import Icon from '../components/Icon.jsx'
 import { LEADS_DEF } from './definitions.jsx'
@@ -338,6 +339,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
         // must not offer a route to one.
         actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import</Button>
       })}
+      <UnassignedBar store={store} side="leads" go={go} onShow={() => patchFilters({ flag: ['unassigned'] })} />
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>
     </>

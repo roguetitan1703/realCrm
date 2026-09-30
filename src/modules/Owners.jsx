@@ -9,6 +9,7 @@ import { canAssignLead } from '../lib/permissions.js'
 import { OWNER_STAGES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { useServerList } from '../lib/serverList.js'
 import { useServerData } from '../lib/useServerData.js'
+import UnassignedBar from '../components/UnassignedBar.jsx'
 import { api } from '../lib/api.js'
 import { OWNERS_DEF } from './definitions.jsx'
 
@@ -380,6 +381,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
         title: 'Calling',
         actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'owners' })}>Import</Button>
       })}
+      <UnassignedBar store={store} side="owners" go={go} onShow={() => pickTab('unassigned')} />
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>
     </>

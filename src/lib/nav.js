@@ -24,7 +24,7 @@ import { currentTenant } from './api.js'
 
 export const TAKEOVER_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'propFromOwner', 'propCopyOf', 'propCopyBack', 'projOpen', 'projKey',
-  'leadFilters', 'propFilters', 'ownerFilters', 'contactFilters', 'contactsTab',
+  'leadFilters', 'propFilters', 'ownerFilters', 'contactFilters', 'contactsTab', 'settingsSection', 'settingsSide',
   // Today's half (To do / My work / Team) and a teammate opened from Team or
   // the Performance page.
   'todayView', 'person',

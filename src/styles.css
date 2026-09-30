@@ -3480,3 +3480,7 @@ button.mp-makecover{pointer-events:auto;border:none;cursor:pointer;background:rg
 .leads-dd-row .proj-chip{min-width:0;flex:1 1 0}
 .leads-dd-row .proj-chip-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .leads-dd-row .grp-toggle{white-space:nowrap}
+
+/* Records with nobody on them, said above the list they are in. */
+.unas-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:14px 22px 0;padding:10px 14px;border:1px solid var(--accent-line);background:var(--accent-wash);border-radius:10px;font-size:13.5px;color:var(--ink)}
+.unas-acts{display:inline-flex;gap:8px;align-items:center}

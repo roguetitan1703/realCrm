@@ -101,7 +101,7 @@ export function TopBar({ title, eyebrow, onBack, onSearch, onBell, unread, actio
       {/* centered global search */}
       <div className="u-spring" />
       {onSearch && (
-        <div className="tb-search" onClick={onSearch}><Icon name="search" size={15} /><span>Search leads, properties, clients…</span><kbd>/</kbd></div>
+        <div className="tb-search" onClick={onSearch}><Icon name="search" size={15} /><span>Search leads, properties, clients…</span><kbd>{/Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘K' : 'Ctrl K'}</kbd></div>
       )}
       <div className="u-spring" />
 

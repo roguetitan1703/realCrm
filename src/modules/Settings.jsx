@@ -29,7 +29,7 @@ const NAV = [
   { key: 'system', label: 'This device', icon: 'settings', everyone: true },
 ]
 
-export default function Settings({ store, topBar }) {
+export default function Settings({ store, topBar, sel }) {
   const { settings, agents, routing, inactiveAgentIds } = store.state
   const nav = isDeskRole(store.state.role) ? NAV : NAV.filter(n => n.everyone)
   // Routing edits are held until Save, and held HERE — moving to another
@@ -37,7 +37,8 @@ export default function Settings({ store, topBar }) {
   const [routingDraft, setRoutingDraft] = useState({})
   // The first section they can actually open. Defaulting to 'brand' would land
   // an agent on a blank pane beside a nav that does not list it.
-  const [section, setSection] = useState(nav[0].key)
+  // A link from a list ("Choose who takes turns") names the section and side.
+  const [section, setSection] = useState(nav.some(n => n.key === sel?.settingsSection) ? sel.settingsSection : nav[0].key)
 
   return (
     <>
@@ -55,7 +56,7 @@ export default function Settings({ store, topBar }) {
             <div className="set-main">
               {section === 'brand' && <BrandSection store={store} settings={settings} />}
               {section === 'pipeline' && <PipelineSection store={store} settings={settings} />}
-              {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} draft={routingDraft} setDraft={setRoutingDraft} />}
+              {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} draft={routingDraft} setDraft={setRoutingDraft} startSide={sel?.settingsSide} />}
               {section === 'followup' && <ResponseTimesSection store={store} settings={settings} />}
               {section === 'messages' && <MessagesSection store={store} />}
               {/* {section === 'audit' && <AuditSection />} */}
@@ -320,8 +321,8 @@ const ROUTING_SIDES = {
   },
 }
 
-function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDraft }) {
-  const [sideKey, setSideKey] = useState('leads')
+function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDraft, startSide }) {
+  const [sideKey, setSideKey] = useState(startSide === 'owners' ? 'owners' : 'leads')
   const side = ROUTING_SIDES[sideKey]
   const f = side.f
 
@@ -375,7 +376,11 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
   // collection went away `leads` was undefined and the section threw on render,
   // taking the entire Settings screen down with it.
   const { data: desk } = useServerData(() => api.getDeskSummary(), [], null, '/workspace/desk-summary')
-  const openLoad = (id) => desk?.perAgent?.[id]?.open ?? 0
+  // OF THIS SIDE. It read open LEADS on both tabs, so under Calling a caller
+  // holding four hundred owners and no leads showed 0 beside their name.
+  const openLoad = (id) => (sideKey === 'owners'
+    ? desk?.perAgentCalls?.[id]?.owners ?? 0
+    : desk?.perAgent?.[id]?.open ?? 0)
 
   // WHAT IS ALREADY SITTING THERE. Round-robin decides who gets a record as it
   // ARRIVES, so switching it on does nothing for the four thousand rows
@@ -425,7 +430,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
         <div className="rt-backlog">
           <div className="rt-backlog-t">
             {waiting} {side.noun}{waiting === 1 ? '' : 's'} {waiting === 1 ? 'has' : 'have'} nobody on {waiting === 1 ? 'it' : 'them'}
-            <span className="rt-backlog-s">Taking turns only applies to new leads. These were here before it was switched on.</span>
+            <span className="rt-backlog-s">Taking turns only applies to new {side.noun}s. These were here before it was switched on.</span>
           </div>
           <Button variant="primary" size="sm" disabled={handing || !!dirty} onClick={handOut}>
             {handing ? 'Handing out…' : `Hand out ${waiting}`}

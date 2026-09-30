@@ -107,6 +107,19 @@ export default function App() {
       if (store.state.notifOpen) store.setNotif(false)
     },
   }), [store])
+  // SEARCH FROM THE KEYBOARD: Ctrl/Cmd+K anywhere, and "/" when nothing is
+  // being typed into. The "/" on the search box was a label nothing listened
+  // for.
+  useEffect(() => {
+    const onKey = (e) => {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '') || e.target?.isContentEditable
+      const k = (e.key || '').toLowerCase()
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && k === 'k') { e.preventDefault(); if (store.state.loggedIn) store.setSearch(true) }
+      else if (k === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && store.state.loggedIn && !store.state.modal) { e.preventDefault(); store.setSearch(true) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [store])
   const { screen, setScreen, sel, setSel, go, boot } = useNav({
     home: isPhone || state.role === 'agent' ? 'today' : 'dashboard',
     onExitWarning: warnExit,
