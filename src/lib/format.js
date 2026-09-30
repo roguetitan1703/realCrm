@@ -704,6 +704,8 @@ export function ratePsf(p) {
 // the seed (tower/totalFloors), the add-property form (wing/flat) and the card
 // (tower/unit). These tolerant accessors read whichever exists so grouping and
 // labelling stay consistent everywhere. Nothing rewrites the stored data.
+/** Rent, Sale, or nothing: a listing that never said is not for sale. */
+export const dealWord = (p, rent = 'Rent', sale = 'Sale') => (p?.deal === 'rent' ? rent : p?.deal === 'sale' ? sale : '')
 export const wingOf = (p) => (p && (p.wing || p.tower)) || null
 export const flatOf = (p) => (p && (p.flat || p.unit)) || null
 
@@ -768,6 +770,9 @@ export function quotedLine(p) {
   if (p.deal === 'rent') {
     return { label: 'Rent', figure, note: p.depositLabel ? 'deposit ' + p.depositLabel : (p.negotiable ? 'negotiable' : null) }
   }
+  // "Asking" is a sale's word. A listing that never said sale or rent has a
+  // price and nothing else known about it.
+  if (p.deal !== 'sale') return { label: 'Price', figure, note: null }
   return { label: 'Asking', figure, note: p.negotiable ? 'indicative, negotiable' : 'fixed' }
 }
 

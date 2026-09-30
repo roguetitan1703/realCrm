@@ -172,6 +172,8 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const stage = bag.step || status
   const projectSel = bag.project
   const towerSel = bag.tower
+  // Several configurations at once, one URL value: "2 BHK,3 BHK".
+  const configSel = bag.config || ''
   const agentSel = bag.caller || 'all'
   // A to Z, like Leads: this is where each owner SITS. The Callbacks tab is the
   // one list whose order is its point — soonest first, so whoever is already
@@ -183,7 +185,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // GROUPED BY PROJECT is where Calling opens, on a phone too: a calling list
   // is townships, and a caller picks the building before the flat. Arriving
   // with a tab, a project or a caller already chosen means the list.
-  const [view, setView] = useState(bag.tab || bag.step || bag.status || bag.project || bag.caller ? 'list' : 'projects')
+  const [view, setView] = useState(bag.tab || bag.step || bag.status || bag.project || bag.caller || bag.config ? 'list' : 'projects')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selected, setSelected] = useState(new Set())
@@ -215,13 +217,16 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   }
   const setStatusP = (v) => { patchBag({ status: v, step: undefined }); setView('list') }
   const setAgentP = (v) => { patchBag({ caller: v }); setView('list') }
-  // The Filter menu holds Tower only, and only inside a project.
-  const onFilters = (v) => { patchBag({ tower: projectSel ? v?.tower?.[0] : undefined }); setView('list') }
+  // The Filter menu: Configuration anywhere, Tower only inside a project.
+  const onFilters = (v) => {
+    patchBag({ tower: projectSel ? v?.tower?.[0] : undefined, config: (v?.config || []).join(',') || undefined })
+    setView('list')
+  }
   const toProject = (key) => { patchBag({ project: key, tower: undefined }); setView('list') }
   // LEAVING A PROJECT is going back to the cards with nothing left switched on:
   // the tab, the tower and the sort all belonged to that project's list.
   const leaveProject = () => {
-    patchBag({ project: undefined, tower: undefined, tab: undefined, step: undefined, status: undefined, sortKey: undefined, sortDir: undefined })
+    patchBag({ project: undefined, tower: undefined, config: undefined, tab: undefined, step: undefined, status: undefined, sortKey: undefined, sortDir: undefined })
     setView('projects')
   }
   const setPageP = (v) => { setPage(v); setSelected(new Set()) }
@@ -239,6 +244,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     mine: phone && role === 'agent' ? 1 : undefined,
     project: projectSel || undefined,
     tower: towerSel || undefined,
+    config: configSel || undefined,
     agent: agentSel === 'all' ? undefined : agentSel,
   }
   const source = useServerList(
@@ -249,19 +255,22 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     }),
     // Same as Leads: a row you just called keeps its place in the queue.
     { filters: {}, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone,
-      holdOrder: true, viewDeps: [tab, status, agentSel, projectSel, towerSel, phone] },
-    [state.dataAsOf, tab, status, agentSel, projectSel, towerSel, phone],
+      holdOrder: true, viewDeps: [tab, status, agentSel, projectSel, towerSel, configSel, phone] },
+    [state.dataAsOf, tab, status, agentSel, projectSel, towerSel, configSel, phone],
     { store, kind: 'owner' },
   )
   const { data: counts } = useServerData(
     // The dropdown's status only: a step tab is counted across, not within.
     () => api.getOwnerTabs({ ...scope, segment, stage: status }).then(r => r?.tabs || {}),
-    [state.dataAsOf, q, tab, status, agentSel, projectSel, towerSel, phone], {})
+    [state.dataAsOf, q, tab, status, agentSel, projectSel, towerSel, configSel, phone], {})
 
   const { data: projectList } = useServerData(
     () => api.listOwnerProjects().then(r => r?.data || []), [state.dataAsOf], [])
   const currentProject = (projectList || []).find(p => (p.key === 'No project' ? '_none' : p.key) === projectSel)
-  const facets = { towers: (currentProject?.towers || []).map(t => ({ value: t, label: t })) }
+  const facets = {
+    towers: (currentProject?.towers || []).map(t => ({ value: t, label: t })),
+    configs: (counts || {}).byConfig || [],
+  }
 
   // THE TAB ROW IS SHORT ON PURPOSE: where a caller works from, not every
   // status. All · Callbacks (the one tab that is a time) · the first two steps
@@ -327,7 +336,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
 
   const { header, toolbar, body } = ModuleListView({
     def, source, store, onOpen: open,
-    filters: towerSel ? { tower: [towerSel] } : {}, onFilters, facets,
+    filters: { ...(towerSel ? { tower: [towerSel] } : {}), ...(configSel ? { config: configSel.split(',') } : {}) }, onFilters, facets,
     search: q, onSearch: (v) => { setQ(v); setPage(1) },
     sortKey, onSortKey: (v) => patchBag({ sortKey: v }), sortDir, onSortDir: (v) => patchBag({ sortDir: v }),
     segments: segs, view, onView: setView,

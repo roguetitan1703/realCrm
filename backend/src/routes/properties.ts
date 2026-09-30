@@ -185,6 +185,14 @@ propertiesRouter.post('/:id/gallery', async (req: Request, res: Response) => {
   if (!['off', 'on', 'new'].includes(action)) return res.status(400).json({ error: 'action must be off, on or new' });
   if (!canEditListing(req.user?.role)) return res.status(422).json({ error: 'Not allowed', message: 'Sign in to change a listing.' });
   try {
+    // A LINK TO NOTHING IS NOT A LINK. Turning it on with no photos wrote
+    // "Turned on" into the listing's history and told the person it was made,
+    // while the listing still had no link to copy.
+    if (action !== 'off') {
+      const cur = await getPropertyById(req.params.id);
+      if (!cur) return res.status(404).json({ error: 'Not found' });
+      if (!(cur.media || []).length) return res.status(422).json({ error: 'No photos', message: 'Add a photo first.' });
+    }
     const p = await setPropertyGallery(req.params.id, action, actor(req));
     if (!p) return res.status(404).json({ error: 'Not found' });
     return res.json({ success: true, property: p });

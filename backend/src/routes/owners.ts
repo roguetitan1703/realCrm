@@ -28,7 +28,7 @@ ownersRouter.get('/', async (req: Request, res: Response) => {
     const { rows, total, page, limit } = await listOwners({
       page: Number(q.page) || 1, limit: Number(q.limit) || 50,
       q: str(q.q), stage: str(q.stage), project: str(q.project), tower: str(q.tower), agentId: str(q.agentId),
-      locality: str(q.locality), agent: str(q.agent), source: str(q.source),
+      locality: str(q.locality), agent: str(q.agent), source: str(q.source), config: str(q.config),
       segment: str(q.segment), mine: q.mine === '1',
       sortKey: str(q.sortKey), sortDir: str(q.sortDir),
     });
@@ -49,7 +49,7 @@ ownersRouter.get('/tabs', async (req: Request, res: Response) => {
     const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
     const tabs = await getOwnerTabs({
       q: str(q.q), stage: str(q.stage), project: str(q.project), tower: str(q.tower),
-      locality: str(q.locality), agent: str(q.agent), source: str(q.source),
+      locality: str(q.locality), agent: str(q.agent), source: str(q.source), config: str(q.config),
       segment: str(q.segment), mine: q.mine === '1',
     });
     return res.status(200).json({ success: true, tabs });

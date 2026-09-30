@@ -373,7 +373,9 @@ function rowToProperty(r: any): any {
     // may carry stale copies of status/id/title from earlier writes; columns are truth.
     ...cfg,
     project: r.project || cfg.project || society,
-    deal: r.deal || cfg.deal || 'sale',
+    // Not stated stays not stated: read back as 'sale', a listing that never
+    // said was shown and matched as one for sale.
+    deal: r.deal || cfg.deal || null,
     carpet: r.carpet_sqft ?? cfg.carpet ?? cfg.area ?? 0,
     facing: r.facing || cfg.facing,
     furnishing: r.furnishing || cfg.furnishing,
@@ -3533,8 +3535,12 @@ const ownerSegments = (d0: any): Record<string, any> => ({
 type OwnerListOpts = {
   page?: number; limit?: number; q?: string; stage?: string; project?: string; tower?: string; agentId?: string;
   locality?: string; agent?: string; source?: string; segment?: string; mine?: boolean;
+  config?: string;
   sortKey?: string; sortDir?: string;
 };
+// A flat's configuration as the sheet typed it: "2 BHK", "2bhk" and "2 Bhk"
+// are one, so it is compared without case or spaces, as a project's name is.
+const CONFIG_KEY = (expr: any) => sql`lower(replace(coalesce(${expr}, ''), ' ', ''))`;
 
 /**
  * WHICH CALLING ROWS A REQUEST MEANS — one builder, read by the list and by its
@@ -3544,8 +3550,12 @@ type OwnerListOpts = {
  * then could not find. `omit` drops the axes a count is being taken ACROSS —
  * the tab row counts across segment and stage, the agent picker across agent.
  */
-async function ownerWhere(t: string, opts: OwnerListOpts, omit: { segment?: boolean; stage?: boolean; agent?: boolean } = {}): Promise<any[]> {
+async function ownerWhere(t: string, opts: OwnerListOpts, omit: { segment?: boolean; stage?: boolean; agent?: boolean; config?: boolean } = {}): Promise<any[]> {
   const where: any[] = [sql`tenant_id = ${t}`, ownerScope(opts.mine)];
+  // CONFIGURATION — which kind of flat is being rung about. "All the 3 BHKs
+  // in this tower" is how a caller works a project for one buyer's need.
+  const configs = omit.config ? [] : String(opts.config || '').split(',').map(x => x.trim()).filter(Boolean);
+  if (configs.length) where.push(sql`${CONFIG_KEY(sql`config`)} IN ${sql(configs.map(c => c.toLowerCase().replace(/\s+/g, '')))}`);
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
@@ -3642,9 +3652,10 @@ export async function getOwnerTabs(opts: OwnerListOpts = {}): Promise<any> {
   const acrossBoth = andAll(await ownerWhere(t, opts, { segment: true, stage: true }));
   const acrossStage = andAll(await ownerWhere(t, opts, { stage: true }));
   const acrossAgents = andAll(await ownerWhere(t, opts, { agent: true }));
+  const acrossConfig = andAll(await ownerWhere(t, opts, { config: true }));
   const byStageOf = (where: any) => sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
           FROM crm_owners WHERE ${where} GROUP BY 1`;
-  const [[c], tabStage, byStage, byAgent] = await Promise.all([
+  const [[c], tabStage, byStage, byAgent, byConfig] = await Promise.all([
     sql`SELECT count(*)::int AS total,
                count(*) FILTER (WHERE ${seg.callbacks})::int AS callbacks,
                count(*) FILTER (WHERE ${seg.unassigned})::int AS unassigned
@@ -3659,12 +3670,18 @@ export async function getOwnerTabs(opts: OwnerListOpts = {}): Promise<any> {
           LEFT JOIN crm_agents a ON a.id = o.agent_id AND a.tenant_id = o.tenant_id
          WHERE o.tenant_id = ${t} AND o.id IN (SELECT id FROM crm_owners WHERE ${acrossAgents})
          GROUP BY 1, 2 ORDER BY 3 DESC`,
+    // The Configuration menu: what the rows on screen hold, in the spelling
+    // most of them use, counted across the configuration filter itself.
+    sql`SELECT mode() WITHIN GROUP (ORDER BY config) AS label, count(*)::int AS count
+          FROM crm_owners WHERE ${acrossConfig} AND coalesce(config, '') <> ''
+         GROUP BY ${CONFIG_KEY(sql`config`)} ORDER BY 1`,
   ]);
   const map = (rows: any) => Object.fromEntries((rows as any[]).map(r => [r.stage, r.n]));
   return {
     total: c?.total ?? 0, callbacks: c?.callbacks ?? 0, unassigned: c?.unassigned ?? 0,
     tabStage: map(tabStage), byStage: map(byStage),
     byAgent: (byAgent as any[]).map(r => ({ value: r.value, label: r.label, count: r.count })),
+    byConfig: (byConfig as any[]).map(r => ({ value: r.label, label: r.label, count: r.count })),
   };
 }
 
@@ -5021,10 +5038,18 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
   // Random suffix: a bulk import fires these in the same millisecond, and a bare
   // Date.now() collided on the primary key — every row after the first 500'd.
   const newId = propData.id || `p_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-  const title = propData.title || `${propData.type || '2 BHK'} · ${propData.locality || 'Pune'}`;
+  // WHAT WAS NOT SAID IS NOT SAVED. These defaulted to '2 BHK', 'Pune' and
+  // (below) 'sale': a sheet without those columns imported 747 listings on our
+  // own production org as flats for SALE in PUNE, none of which anybody said.
+  // The form asks for all three, so a hand-added listing always had them; an
+  // import or the API did not. The title falls back to the building's name, the
+  // only honest label left, and is blank when even that is missing.
+  const said = (v: any) => (v == null ? '' : String(v).trim());
+  const type = said(propData.type) || null;
+  const locality = said(propData.locality) || null;
+  const title = said(propData.title) || said(propData.project) || said(propData.society)
+    || [type, locality].filter(Boolean).join(' · ') || null;
   const status = propData.status || 'Available';
-  const type = propData.type || '2 BHK';
-  const locality = propData.locality || 'Pune';
   const price = propData.price != null ? String(propData.price) : '';
   // Accept both column names (tower/unit) and the form names (wing/flat).
   // NOT KNOWN IS BLANK. These were 'A' and '101' when the form left them out,
@@ -5048,10 +5073,10 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
   }
 
   // New first-class columns (source of truth going forward); config stays populated too.
-  const project = propData.project || config.society || title.split(' - ')[0];
+  const project = propData.project || config.society || (title ? title.split(' - ')[0] : null);
   const wing = propData.wing || tower;
   const unitNo = propData.unit_no || propData.flat || unit;
-  const deal = propData.deal || 'sale';
+  const deal = propData.deal === 'sale' || propData.deal === 'rent' ? propData.deal : null;
   const facing = propData.facing ?? null;
   const furnishing = propData.furnishing ?? null;
   const parking = propData.parking ?? null;

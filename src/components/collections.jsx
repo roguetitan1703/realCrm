@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, NewTag, Quoted, PageHeader, ViewSwitch, Pager, Button } from './primitives.jsx'
-import { quotedLine, unitLabel } from '../lib/format.js'
+import { quotedLine, unitLabel, dealWord } from '../lib/format.js'
 import { priceRangeLabel } from '../lib/projects.js'
 import { getNestedValue } from './ModuleFields.jsx'
 
@@ -1072,9 +1072,11 @@ export function PropertyCard({ p, onClick, matchCount }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span className="unit-tag" style={{ margin: 0 }}>{p.type || 'Property'}</span>
-          <span style={{ fontSize: 11.5, fontWeight: 600, padding: '2px 8px', borderRadius: 6, background: 'var(--card-2)', color: 'var(--ink-2)', border: '1px solid var(--line)', textTransform: 'uppercase' }}>
-            {p.deal === 'rent' ? 'For Rent' : 'For Sale'}
-          </span>
+          {dealWord(p) && (
+            <span style={{ fontSize: 11.5, fontWeight: 600, padding: '2px 8px', borderRadius: 6, background: 'var(--card-2)', color: 'var(--ink-2)', border: '1px solid var(--line)', textTransform: 'uppercase' }}>
+              {dealWord(p, 'For Rent', 'For Sale')}
+            </span>
+          )}
           {p.tower && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Tower {p.tower}{p.unit ? ` · #${p.unit}` : ''}</span>}
         </div>
         <StatusTag status={p.status || 'Available'} />

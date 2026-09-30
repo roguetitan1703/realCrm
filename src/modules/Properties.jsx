@@ -432,7 +432,8 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
   // Off, it can be turned back on; New makes a fresh one and the old stops.
   const link = p.galleryPath ? `${window.location.origin}${p.galleryPath}` : ''
   const copyLink = () => copyText(link).then(ok => store.toast(ok ? 'Photo link copied' : 'Could not copy. Your browser blocked it.', ok ? undefined : 'warn'))
-  const linkTools = !mayEdit && !link ? null : (
+  // Nothing to link to without a photo, so no link controls until there is one.
+  const linkTools = !media.length || (!mayEdit && !link) ? null : (
     <span className="pgal-tools">
       {link ? (
         <>

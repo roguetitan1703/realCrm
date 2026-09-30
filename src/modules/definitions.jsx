@@ -26,7 +26,7 @@ import { OwnerCell, StageCell } from '../components/collections.jsx'
 import { FinishLead, FinishOwner } from '../components/Agreements.jsx'
 import { finalStageOf } from '../data/pipelineRoles.js'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, dayLabel, arrivedOn, flatOf, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
+import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, dayLabel, arrivedOn, flatOf, dealWord, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
 import { getPref } from '../lib/prefs.js'
 import { copyText } from '../lib/clipboard.js'
 import { messageLang } from '../data/vocabLocale.js'
@@ -577,6 +577,12 @@ export const OWNERS_DEF = {
     ...(facets?.towers?.length
       ? [{ key: 'tower', label: 'Tower', icon: 'layers', multi: false, options: facets.towers }]
       : []),
+    // CONFIGURATION, on the list and inside a project: the kinds of flat the
+    // rows on screen actually hold, as the sheet spelled them, with counts.
+    // Absent when no row carries one, so the menu never offers an empty list.
+    ...(facets?.configs?.length
+      ? [{ key: 'config', label: 'Configuration', icon: 'home', options: facets.configs }]
+      : []),
   ],
 
   headerFacts: (o) => {
@@ -922,7 +928,7 @@ export const PROPERTIES_DEF = {
     // a sq.m listing was labelled sqft. Same drift that broke the filters and
     // the record sheet; this was the third place it was hiding.
     { key: 'config', label: 'Config · deal', render: (p) => (
-      <span className="cell-txt">{configLabel(p)} · {p.deal === 'rent' ? 'Rent' : 'Sale'}</span>
+      <span className="cell-txt">{[configLabel(p), dealWord(p)].filter(Boolean).join(' · ')}</span>
     ) },
     { key: 'carpet', label: 'Area', render: (p) => {
       const v = p.carpet || p.builtup || p.superBuiltup || p.plotArea

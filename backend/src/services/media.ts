@@ -168,6 +168,8 @@ export interface FetchedObject {
   body: NodeJS.ReadableStream;
   contentType: string;
   contentLength?: number;
+  /** `bytes a-b/size`, when a part was asked for. */
+  contentRange?: string;
   etag?: string;
   lastModified?: Date;
 }
@@ -179,19 +181,23 @@ export interface FetchedObject {
  */
 export async function fetchObject(
   key: string,
-  ifNoneMatch?: string
-): Promise<{ object?: FetchedObject; notModified?: boolean; missing?: boolean }> {
+  ifNoneMatch?: string,
+  /** `bytes=a-b`: a part of the object, for a video that is being played. */
+  range?: string
+): Promise<{ object?: FetchedObject; notModified?: boolean; missing?: boolean; badRange?: boolean }> {
   try {
     const out = await s3().send(new GetObjectCommand({
       Bucket: bucket(),
       Key: key,
       IfNoneMatch: ifNoneMatch,
+      Range: range,
     }));
     return {
       object: {
         body: out.Body as NodeJS.ReadableStream,
         contentType: out.ContentType || 'application/octet-stream',
         contentLength: out.ContentLength,
+        contentRange: out.ContentRange,
         etag: out.ETag,
         lastModified: out.LastModified,
       },
@@ -199,6 +205,7 @@ export async function fetchObject(
   } catch (err: any) {
     const status = err?.$metadata?.httpStatusCode;
     if (status === 304) return { notModified: true };
+    if (status === 416) return { badRange: true };
     if (status === 404 || err?.name === 'NoSuchKey') return { missing: true };
     throw err;
   }

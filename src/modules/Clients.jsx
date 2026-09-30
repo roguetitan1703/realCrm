@@ -3,7 +3,8 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { StatusTag, Avatar, Button } from '../components/primitives.jsx'
-import { initials, reqLine } from '../lib/format.js'
+import { initials, reqLine, dealWord } from '../lib/format.js'
+import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import { CLIENTS_DEF, partiesDef } from './definitions.jsx'
 import { api } from '../lib/api.js'
 import { useServerList } from '../lib/serverList.js'
@@ -222,7 +223,7 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
                     <div key={p.id} className="cli-prop">
                       <div>
                         <div className="cli-prop-t">{p.society || p.title} <span className="u-muted cli-prop-meta">({p.type} · {p.locality})</span></div>
-                        <div className="relrow-sub">{p.carpet ? p.carpet + ' sqft · ' : ''}{p.deal === 'rent' ? 'For Rent' : 'For Sale'}</div>
+                        <div className="relrow-sub">{[p.carpet ? `${p.carpet} ${labelOf(AREA_UNITS, p.areaUnit || 'sqft')}` : '', dealWord(p, 'For Rent', 'For Sale')].filter(Boolean).join(' · ')}</div>
                       </div>
                       <Button size="sm" variant="secondary" onClick={() => go('properties', { propId: p.id, propOpen: true })}>View property →</Button>
                     </div>

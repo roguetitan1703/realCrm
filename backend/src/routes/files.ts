@@ -62,6 +62,24 @@ function setMediaHeaders(
   if (length != null) res.setHeader('Content-Length', String(length));
   // Media is never HTML; stop a stored file from being sniffed into one.
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  // Says a part of the file can be asked for — what lets a video start playing
+  // and be scrubbed without the whole file arriving first.
+  res.setHeader('Accept-Ranges', 'bytes');
+}
+
+/**
+ * `Range: bytes=a-b` for a file of `size` bytes, or null when there is none or
+ * it is not one this route answers (several ranges at once: the whole file is
+ * a correct answer to those). 'bad' is a range outside the file.
+ */
+function parseRange(header: string | undefined, size: number): { start: number; end: number } | 'bad' | null {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(header || '').trim());
+  if (!m || (m[1] === '' && m[2] === '')) return null;
+  let start: number, end: number;
+  if (m[1] === '') { start = Math.max(0, size - Number(m[2])); end = size - 1; }   // the last N bytes
+  else { start = Number(m[1]); end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1); }
+  if (!(start <= end) || start >= size) return 'bad';
+  return { start, end };
 }
 
 mediaRouter.use(requireTenantAuth);
@@ -124,10 +142,44 @@ filesRouter.get(/^\/(.+)$/, async (req: Request, res: Response) => {
         res.setHeader('Cache-Control', IMMUTABLE_CACHE_CONTROL);
         return res.status(304).end();
       }
-      setMediaHeaders(res, hit.meta.contentType, hit.meta.etag, hit.meta.lastModified, hit.meta.size);
+      // A PART OF IT, when that is what was asked for. A video element asks for
+      // the first bytes, then the index, then wherever the viewer scrubs to;
+      // answered with the whole file every time, a 40MB walkthrough had to
+      // arrive in full before one frame played.
+      const size = hit.meta.size ?? fs.statSync(hit.bodyPath).size;
+      const range = parseRange(req.headers.range as string | undefined, size);
+      if (range === 'bad') {
+        res.setHeader('Content-Range', `bytes */${size}`);
+        return res.status(416).end();
+      }
+      if (range) {
+        setMediaHeaders(res, hit.meta.contentType, hit.meta.etag, hit.meta.lastModified, range.end - range.start + 1);
+        res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${size}`);
+        res.status(206);
+        return fs.createReadStream(hit.bodyPath, { start: range.start, end: range.end })
+          .on('error', () => { if (!res.headersSent) res.status(500).end(); else res.destroy(); })
+          .pipe(res);
+      }
+      setMediaHeaders(res, hit.meta.contentType, hit.meta.etag, hit.meta.lastModified, size);
       return fs.createReadStream(hit.bodyPath)
         .on('error', () => { if (!res.headersSent) res.status(500).end(); else res.destroy(); })
         .pipe(res);
+    }
+
+    // 2a. Miss, and only a part is wanted: R2 answers the range itself. Nothing
+    //     is cached from it — a part is not the file — so the next whole read
+    //     (or the first photo view) still fills the cache.
+    const wanted = String(req.headers.range || '').trim();
+    if (/^bytes=(\d*)-(\d*)$/.test(wanted) && wanted !== 'bytes=-') {
+      const part = await fetchObject(key, undefined, wanted);
+      if (part.badRange) return res.status(416).end();
+      if (part.missing || !part.object) return res.status(404).send('Not found');
+      const o = part.object;
+      setMediaHeaders(res, o.contentType, o.etag, o.lastModified?.toUTCString(), o.contentLength);
+      if (o.contentRange) { res.setHeader('Content-Range', o.contentRange); res.status(206); }
+      const partBody: any = o.body;
+      partBody.on('error', () => { if (!res.headersSent) res.status(500).end(); else res.destroy(); });
+      return partBody.pipe(res);
     }
 
     // 2. Miss — pull from R2, serving the client and filling the cache in one pass.

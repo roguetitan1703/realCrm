@@ -110,7 +110,7 @@ const writePropFilters = (p, f) => {
 // switched on that nothing on screen explained. Read and written only on the
 // calling screen, so `tab`, `status` and `caller` cannot leak into the other
 // two bags; the project is `in-project` for the reason PROP_URL_NAME gives.
-const OWNER_URL = { tab: 'tab', step: 'step', status: 'status', caller: 'caller', project: 'in-project', tower: 'tower', sortKey: 'sortKey', sortDir: 'sortDir' }
+const OWNER_URL = { tab: 'tab', step: 'step', status: 'status', caller: 'caller', config: 'config', project: 'in-project', tower: 'tower', sortKey: 'sortKey', sortDir: 'sortDir' }
 // THE CONTACTS BAG: which building, which area, on whichever Contacts tab is
 // open. Its own screen only, like the calling bag.
 const CONTACT_URL = { project: 'in-project', locality: 'locality' }

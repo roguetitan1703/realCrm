@@ -57,7 +57,7 @@ export default function Lightbox({ items = [], index = 0, onClose, srcFor }) {
 
       <div className="lbx-stage" onClick={e => e.stopPropagation()}>
         {m.kind === 'video'
-          ? <video src={fileUrl(m.key)} controls autoPlay playsInline />
+          ? <video key={m.key} src={fileUrl(m.key)} controls autoPlay playsInline preload="metadata" />
           : <img src={src} alt="" />}
       </div>
 
