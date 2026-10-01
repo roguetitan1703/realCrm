@@ -20,6 +20,8 @@ export default function Performance({ store, go, sel, topBar }) {
   const hasCalling = (ownerSummary?.summary?.queue?.total || 0) > 0
   const settled = !!ownerSummary || !loading
   const person = sel?.person
+  // The day lives in the URL, so an agent opened from a past day opens on it.
+  const day = sel?.day || null
   const toLeads = (leadFilters) => go('leads', { leadFilters, leadOpen: false, leadId: undefined })
 
   if (person) {
@@ -28,10 +30,11 @@ export default function Performance({ store, go, sel, topBar }) {
     const canHand = who && ['agent', 'manager'].includes(who.role || 'agent')
     return (
       <>
-        {topBar({ eyebrow: 'Performance', title: name, onBack: () => go('performance', { person: undefined }) })}
+        {topBar({ eyebrow: 'Performance', title: name, onBack: () => go('performance', { person: undefined, day: day || undefined }) })}
         <div className="app-body pagewrap perf">
           {!settled ? <div className="ad-wait tall" aria-busy="true" /> : (
             <AgentWork store={store} person={person} title={name} heading={false} mode="drill" hasCalling={hasCalling}
+              date={day} onDate={(d) => go('performance', { person, day: d || undefined })}
               book={desk?.perAgent?.[person]} ownerBook={desk?.perAgentCalls?.[person]}
               onBook={(seg) => toLeads(seg ? { agent: [person], seg } : { agent: [person] })}
               actions={<>
@@ -49,7 +52,8 @@ export default function Performance({ store, go, sel, topBar }) {
       {topBar({ title: 'Performance' })}
       <div className="app-body pagewrap perf">
         {!settled ? <div className="ad-wait tall" aria-busy="true" /> : (
-          <TeamBoard store={store} hasCalling={hasCalling} onOpenPerson={(c) => go('performance', { person: c.id })}
+          <TeamBoard store={store} hasCalling={hasCalling} onOpenPerson={(c) => go('performance', { person: c.id, day: day || undefined })}
+            date={day} onDate={(d) => go('performance', { day: d || undefined })}
             books={desk?.perAgent || {}} onBook={(id, seg) => toLeads({ agent: [id], seg })} />
         )}
       </div>

@@ -31,7 +31,17 @@ import { useServerData } from '../lib/useServerData.js'
 import { Segmented } from './primitives.jsx'
 import Icon from './Icon.jsx'
 import { stageLabel } from '../data/pipelineRoles.js'
-import { tally, fmt, word, fuWord, shiftDay, dayName, useSide, MEASURE_TITLE, DETAIL_TITLE, titleOf } from './ActivityDay.jsx'
+import { tally, fmt, word, fuWord, dayName, useSide, DayPicker, MEASURE_TITLE, DETAIL_TITLE, titleOf } from './ActivityDay.jsx'
+
+/**
+ * The day a view shows. Performance and the phone's Team tab keep it in the
+ * URL (`day`), so opening an agent from a past day opens that agent on that
+ * day, and Back returns to it; My work keeps its own. Null is today.
+ */
+function useViewDay(date, onDate) {
+  const [own, setOwn] = useState(null)
+  return onDate ? [date || null, onDate] : [own, setOwn]
+}
 
 // What a person's calls came to, in the order a manager reads it.
 const CONTACT = [
@@ -76,13 +86,7 @@ function Head({ title, hasCalling, side, onSide, day, onDay, actions }) {
         <Segmented options={[{ value: 'leads', label: 'Leads' }, { value: 'calling', label: 'Calling' }]} value={side} onChange={onSide} />
       )}
       <span className="pv-head-r">
-        {day && (
-          <span className="ad-day pv-day">
-            <button type="button" aria-label="Day before" onClick={() => onDay(shiftDay(day.day, -1))}><Icon name="chevLeft" size={15} /></button>
-            <span className="ad-day-l">{dayName(day.day, day.today)}</span>
-            <button type="button" aria-label="Day after" disabled={day.day >= day.today} onClick={() => onDay(shiftDay(day.day, 1))}><Icon name="chevRight" size={15} /></button>
-          </span>
-        )}
+        {day && <DayPicker className="pv-day" day={day.day} today={day.today} onDay={onDay} />}
         {actions}
       </span>
     </div>
@@ -218,11 +222,11 @@ function Pending({ t, side, isToday, open, book, onBook }) {
 }
 
 // ── One agent: their own day ("self") or opened from the team ("drill") ─────
-export function AgentWork({ store, person, title, heading = true, mode = 'self', hasCalling, defaultSide = 'leads', book, ownerBook, onBook, actions }) {
+export function AgentWork({ store, person, title, heading = true, mode = 'self', hasCalling, defaultSide = 'leads', book, ownerBook, onBook, actions, date: viewDate, onDate }) {
   const { state } = store
   const [side, setSide] = useSide(hasCalling ? defaultSide : 'leads')
   const eff = hasCalling ? side : 'leads'
-  const [date, setDate] = useState(null)
+  const [date, setDate] = useViewDay(viewDate, onDate)
   const { data: day } = useServerData(
     () => api.getActivity({ side: eff, date, person }), [eff, date, person, state.dataAsOf], null)
   const me = (day?.people || []).find(p => p.id === person) || (day?.people || [])[0]
@@ -237,7 +241,7 @@ export function AgentWork({ store, person, title, heading = true, mode = 'self',
 
   return (
     <div className="pv">
-      <Head title={heading ? title : null} hasCalling={hasCalling} side={side} onSide={(v) => { setSide(v); setDate(null) }}
+      <Head title={heading ? title : null} hasCalling={hasCalling} side={side} onSide={setSide}
         day={day} onDay={(d) => setDate(d === day?.today ? null : d)} actions={actions} />
       {!day ? <div className="ad-wait tall" aria-busy="true" /> : (
         <>
@@ -273,11 +277,11 @@ export function AgentWork({ store, person, title, heading = true, mode = 'self',
  * holding (never contacted), `onOpenPerson` opens an agent's drill-down, and
  * `onBook(agentId, seg)` opens their leads.
  */
-export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, books = {}, onBook }) {
+export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, books = {}, onBook, date: viewDate, onDate }) {
   const { state } = store
   const [side, setSide] = useSide('leads')
   const eff = hasCalling ? side : 'leads'
-  const [date, setDate] = useState(null)
+  const [date, setDate] = useViewDay(viewDate, onDate)
   const { data: day } = useServerData(() => api.getActivity({ side: eff, date }), [eff, date, state.dataAsOf], null)
   const isToday = !day || day.day === day.today
 
@@ -313,7 +317,7 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
 
   return (
     <div className="pv">
-      <Head title={heading ? 'Team' : null} hasCalling={hasCalling} side={side} onSide={(v) => { setSide(v); setDate(null) }}
+      <Head title={heading ? 'Team' : null} hasCalling={hasCalling} side={side} onSide={setSide}
         day={day} onDay={(d) => setDate(d === day?.today ? null : d)} />
       {!day ? <div className="ad-wait tall" aria-busy="true" /> : (
         <>

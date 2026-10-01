@@ -26,8 +26,8 @@ export const TAKEOVER_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'propFromOwner', 'propCopyOf', 'propCopyBack', 'projOpen', 'projKey',
   'leadFilters', 'propFilters', 'ownerFilters', 'contactFilters', 'contactsTab', 'settingsSection', 'settingsSide',
   // Today's half (To do / My work / Team) and a teammate opened from Team or
-  // the Performance page.
-  'todayView', 'person',
+  // the Performance page, and the day they are read on.
+  'todayView', 'person', 'day',
 ]
 
 // Opening a record is not leaving the screen.
@@ -159,6 +159,7 @@ export function parseUrl(search = window.location.search) {
       contactsTab: ['tenants', 'buyers'].includes(p.get('tab')) ? p.get('tab') : undefined,
       todayView: ['work', 'team'].includes(p.get('view')) ? p.get('view') : undefined,
       person: p.get('person') || undefined,
+      day: /^\d{4}-\d{2}-\d{2}$/.test(p.get('day') || '') ? p.get('day') : undefined,
       // EACH BAG ON ITS OWN SCREEN ONLY. The three share parameter names —
       // `status`, `in-project`, `sortKey` — so reading all three everywhere
       // filled the property bag from a calling URL, and it wrote those back
@@ -196,6 +197,7 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (screen === 'clients' && sel.contactsTab && sel.contactsTab !== 'owners') p.set('tab', sel.contactsTab)
   if (screen === 'today' && sel.todayView) p.set('view', sel.todayView)
   if ((screen === 'today' || screen === 'performance') && sel.person) p.set('person', sel.person)
+  if ((screen === 'today' || screen === 'performance') && sel.day) p.set('day', sel.day)
   if (screen === 'leads') writeFilters(p, sel.leadFilters)
   if (screen === 'properties') writePropFilters(p, sel.propFilters)
   if (screen === 'calling') writeOwnerFilters(p, sel.ownerFilters)

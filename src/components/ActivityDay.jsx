@@ -25,7 +25,7 @@
 //
 // Leads | Calling is a switch beside the title, never both on one screen, and
 // each side is its own set of facts: calls to leads, or calls to owners.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { dayLabel, whenLabel } from '../lib/format.js'
@@ -89,6 +89,31 @@ function useDay({ side, date, person, dataAsOf }) {
   return useServerData(() => api.getActivity({ side, date, person }), [side, date, person, dataAsOf], null)
 }
 
+/**
+ * Which day, as a calendar. A day three weeks back was twenty-one taps of an
+ * arrow. The input is the browser's own date picker, opened from the label;
+ * nothing after today, since nothing has happened there yet.
+ */
+export function DayPicker({ day, today, onDay, className = '' }) {
+  const ref = useRef(null)
+  const pick = () => {
+    const el = ref.current
+    if (!el) return
+    try { el.showPicker() } catch { el.focus(); el.click() }
+  }
+  return (
+    <span className={'ad-day ' + className}>
+      <button type="button" className="ad-day-b" onClick={pick} aria-label="Pick a day">
+        <Icon name="calendar" size={14} />
+        <span className="ad-day-l">{dayName(day, today)}</span>
+      </button>
+      <input ref={ref} type="date" className="ad-day-in" tabIndex={-1} aria-hidden="true"
+        value={day} max={today}
+        onChange={(e) => { const v = e.target.value; if (v && v <= today) onDay(v) }} />
+    </span>
+  )
+}
+
 // ── The head: title and switch together, the day on the right ───────────────
 export function Head({ title, hasCalling, side, onSide, data, onDay, right }) {
   const day = data?.day
@@ -99,13 +124,7 @@ export function Head({ title, hasCalling, side, onSide, data, onDay, right }) {
         <Segmented options={[{ value: 'leads', label: 'Leads' }, { value: 'calling', label: 'Calling' }]} value={side} onChange={onSide} />
       )}
       <span className="ad-top-r">
-        {day && (
-          <span className="ad-day">
-            <button type="button" aria-label="Day before" onClick={() => onDay(shiftDay(day, -1))}><Icon name="chevLeft" size={15} /></button>
-            <span className="ad-day-l">{dayName(day, data.today)}</span>
-            <button type="button" aria-label="Day after" disabled={day >= data.today} onClick={() => onDay(shiftDay(day, 1))}><Icon name="chevRight" size={15} /></button>
-          </span>
-        )}
+        {day && <DayPicker day={day} today={data.today} onDay={onDay} />}
         {right}
       </span>
     </div>
@@ -195,7 +214,7 @@ export function TeamToday({ store, hasCalling, onOpen }) {
     <section className="ad ad-team ad-compact">
       <Head title={isToday ? 'Team today' : 'Team'} hasCalling={hasCalling} side={side} onSide={setSide} data={data}
         onDay={(d) => setDate(d === data?.today ? null : d)}
-        right={onOpen && <button type="button" className="ad-open" onClick={() => onOpen(null)}>Performance<Icon name="chevRight" size={14} /></button>} />
+        right={onOpen && <button type="button" className="ad-open" onClick={() => onOpen(null, date)}>Performance<Icon name="chevRight" size={14} /></button>} />
       {!data ? <div className="ad-wait" aria-busy="true" /> : (
         <div className="tt">
           <div className="tt-head" aria-hidden="true">
@@ -203,7 +222,7 @@ export function TeamToday({ store, hasCalling, onOpen }) {
           </div>
           {rows.map(r => (
             <TeamRow key={r.id} r={r} side={eff} isToday={isToday} lateEnough={lateEnough}
-              onClick={() => onOpen?.(r)} />
+              onClick={() => onOpen?.(r, date)} />
           ))}
           {!rows.length && <div className="detail-empty">Nobody on this side.</div>}
         </div>

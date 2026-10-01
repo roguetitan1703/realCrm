@@ -247,7 +247,7 @@ export default function Dashboard({ store, go, topBar }) {
             row per person; a row opens that person on Performance. An agent's
             desk has Today instead of this page. */}
         <Panel><TeamToday store={store} hasCalling={hasCalling}
-          onOpen={(r) => go('performance', r ? { person: r.id } : {})} /></Panel>
+          onOpen={(r, day) => go('performance', { person: r?.id, day: day || undefined })} /></Panel>
       </div>
     </>
   )
