@@ -7,7 +7,8 @@ import { theme } from '../data/theme.js'
 // waiting for someone to type a budget. Plain JSX, so the build never said a
 // word about it.
 import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho, personLabel, unitLabel } from '../lib/format.js'
-import { matchesForLead, leadsForProperty, ownerUpdateMessage, whatsappLink, followUpMessage } from '../lib/matching.js'
+import { matchesForLead, leadsForProperty, ownerUpdateMessage, openWhatsAppChat, followUpMessage } from '../lib/matching.js'
+import WaSend from '../components/WaSend.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { notifMeta, cleanTitle, isAssignment } from '../lib/notificationMeta.js'
@@ -332,8 +333,8 @@ function OwnerUpdateModal({ store, propId }) {
   // helper text below was false; it vanished on refresh) and never actually
   // opened WhatsApp. Now it really sends and really persists (B5 pattern):
   // log a 'wa' event, then attach the composed text as its remark.
-  const send = () => {
-    if (digits) window.open(whatsappLink(text, digits), '_blank', 'noopener')
+  const send = (app) => {
+    if (digits) openWhatsAppChat(text, digits, app)
     store.logContactAction('property', p.id, 'wa').then(res => {
       if (res?.timeline_event?.id) store.editRemark('property', p.id, res.timeline_event.id, text)
     })
@@ -348,7 +349,7 @@ function OwnerUpdateModal({ store, propId }) {
         <Textarea value={text} onChange={e => { setEdited(true); setText(e.target.value) }} style={{ minHeight: 190, fontSize: 13, lineHeight: 1.55 }} />
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} icon="wa" onClick={send}>Send & log to listing</Button>
+        <WaSend label="Send & log to listing" style={{ flex: 1, justifyContent: 'center' }} onSend={send} />
         <Button icon="copy" onClick={() => copyText(text).then(ok => store.toast(ok ? 'Owner update copied' : 'Could not copy. Your browser blocked it.', ok ? undefined : 'warn'))}>Copy</Button>
       </div>
     </Modal>
@@ -1535,7 +1536,7 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
   const ch = CHANNELS[channel] || CHANNELS.call
   const label = ch.noun
 
-  const proceed = () => {
+  const proceed = (app) => {
     if (channel === 'email') {
       if (email) window.location.href = `mailto:${email}`
     } else if (digits) {
@@ -1549,7 +1550,7 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
             })
           }
         }
-        window.open(whatsappLink(msg, digits), '_blank', 'noopener')
+        openWhatsAppChat(msg, digits, app)
       } else {
         window.location.href = `tel:+${digits.length > 10 ? digits : '91' + digits}`
       }
@@ -1614,7 +1615,9 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <Button onClick={store.closeModal}>No</Button>
-        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} icon={channel === 'wa' ? 'wa' : 'phone'} onClick={proceed}>Yes, continue</Button>
+        {channel === 'wa'
+          ? <WaSend label="Yes, continue" style={{ flex: 1, justifyContent: 'center' }} onSend={proceed} />
+          : <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} icon="phone" onClick={() => proceed()}>Yes, continue</Button>}
       </div>
     </Modal>
   )

@@ -5,7 +5,8 @@ import { QuickChip, Segmented } from '../components/primitives.jsx'
 import { copyText } from '../lib/clipboard.js'
 import Icon from '../components/Icon.jsx'
 import { thumbTint } from '../lib/format.js'
-import { whatsappLink, matchesForLead } from '../lib/matching.js'
+import { openWhatsAppChat, matchesForLead } from '../lib/matching.js'
+import WaSend from '../components/WaSend.jsx'
 import { MESSAGE_LANGUAGES } from '../data/vocabLocale.js'
 import { WA_OUTCOMES } from '../data/callOutcomes.js'
 
@@ -123,7 +124,7 @@ export default function WaModal({ store }) {
     const what = [p.society || p.title || 'a listing', p.priceLabel || p.price || ''].filter(Boolean).join(' · ')
     return `Sent ${what} details on WhatsApp`
   }
-  const send = () => {
+  const send = (app) => {
     if (l) {
       const note = noteFor()
       store.logContactAction('lead', l.id, 'wa')
@@ -133,7 +134,7 @@ export default function WaModal({ store }) {
           else store.closeWhatsApp()
         })
     }
-    window.open(whatsappLink(wa.message, l?.phone), '_blank', 'noopener')
+    openWhatsAppChat(wa.message, l?.phone, app)
     // NOT closed here. The composer used to vanish the instant WhatsApp opened,
     // which is why a message could never carry an outcome: by the time the agent
     // came back and knew whether anyone had replied, the only way to say so was
@@ -256,9 +257,7 @@ export default function WaModal({ store }) {
           style={{ borderRadius: 0, minHeight: 190, flex: 1, overflowY: 'auto' }} />
 
         <div className="wa-foot">
-          <button className="btn btn-primary wa-send" onClick={send} disabled={!wa.message}>
-            <Icon name="wa" />Open in WhatsApp
-          </button>
+          <WaSend label="Open in WhatsApp" className="wa-send" onSend={send} disabled={!wa.message} />
           <button className="btn wa-alt" onClick={copy} disabled={!wa.message}><Icon name="copy" />Copy</button>
         </div>
         </>)}

@@ -2,6 +2,7 @@ import { isOpen } from '../data/leadStatus.js'
 import { askedFor, budgetOf, facetFit, latestOf, localityFit, dayLabel } from './format.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
+import { parsePhone } from './importSchema.js'
 import {
   AREA_UNITS, BHK, COUNTED_ITEMS, FACING, FIXTURES, FURNISH, OWNERSHIP,
   LOCKIN_OPTIONS, PAINTING_CHARGES, POSSESSION, SOCIETY_AMENITIES, SUBTYPES,
@@ -548,9 +549,39 @@ const PACKS = {
 // If we know the recipient's number the chat opens directly on them; otherwise
 // WhatsApp asks the user to pick a contact — both are valid, real hand-offs.
 export function whatsappLink(message, phone) {
-  const digits = String(phone || '').replace(/\D/g, '')
+  const digits = waDigits(phone)
   const text = encodeURIComponent(message || '')
   return digits ? `https://wa.me/${digits}?text=${text}` : `https://wa.me/?text=${text}`
+}
+
+// With its country code: wa.me refuses a bare 10-digit Indian number.
+const waDigits = (phone) => (parsePhone(phone) || String(phone || '')).replace(/\D/g, '')
+
+// WHICH WHATSAPP. An agent's phone often carries both WhatsApp and WhatsApp
+// Business, and a wa.me link is claimed by WhatsApp alone, so it always opened
+// the personal app and never asked. On Android an intent names the app; if
+// that app is not installed, Android offers it on the Play Store. No web
+// fallback: it would navigate this page away, and the screen that sent it is
+// still waiting to log the message. iOS and a desk have no way to name the
+// app, so they get the one link.
+export const WA_APPS = { personal: 'com.whatsapp', business: 'com.whatsapp.w4b' }
+export const canPickWhatsApp = () =>
+  typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent || '')
+
+/** Open WhatsApp on this message: `app` is 'personal' | 'business' on Android. */
+export function openWhatsAppChat(message, phone, app) {
+  const web = whatsappLink(message, phone)
+  if (!app || !WA_APPS[app] || !canPickWhatsApp()) {
+    window.open(web, '_blank', 'noopener')
+    return
+  }
+  window.location.href = whatsappIntent(message, phone, app)
+}
+
+export function whatsappIntent(message, phone, app) {
+  const digits = waDigits(phone)
+  const q = [digits && `phone=${digits}`, `text=${encodeURIComponent(message || '')}`].filter(Boolean).join('&')
+  return `intent://send?${q}#Intent;scheme=whatsapp;package=${WA_APPS[app]};end`
 }
 
 // EVERYTHING A CLIENT MUST NEVER RECEIVE, in one list.
