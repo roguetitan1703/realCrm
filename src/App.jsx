@@ -306,7 +306,7 @@ function SupportBar({ support, onClose }) {
   return (
     <div className="supbar" role="status">
       <span className="supbar-t">Delpat support{support.by ? `, ${support.by}` : ''}</span>
-      <span>Read only{until ? ` until ${until}` : ''}</span>
+      <span>{support.write ? 'Making changes' : 'Read only'}{until ? ` until ${until}` : ''}</span>
       <button type="button" onClick={onClose}>Close</button>
     </div>
   )

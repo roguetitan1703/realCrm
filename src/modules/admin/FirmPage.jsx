@@ -54,11 +54,12 @@ export default function FirmPage({ firmId, page = 'overview', onBack }) {
   const load = () => api.adminFirm(firmId).then(r => { setD(r); setErr('') }).catch(e => setErr(e.message || 'Could not read the firm'))
   useEffect(() => { setD(null); load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [firmId])
 
-  const openDesk = async () => {
+  const openDesk = async (write = false) => {
+    if (write && !window.confirm(`Open ${d?.tenant?.name || 'this firm'}'s desk to make changes? What you do there is saved on their records as their owner.`)) return
     setBusy('desk')
     try {
-      const r = await api.adminSupport(firmId)
-      const frag = supportFragment({ slug: r.slug, token: r.token, expiresAt: r.expiresAt, by: r.by, owner: r.owner })
+      const r = await api.adminSupport(firmId, write)
+      const frag = supportFragment({ slug: r.slug, token: r.token, expiresAt: r.expiresAt, by: r.by, owner: r.owner, write: !!r.write })
       window.open(`/${r.slug}/${frag}`, '_blank')
     } catch (e) { alert(e.message || 'Could not open the desk') } finally { setBusy('') }
   }
@@ -93,7 +94,8 @@ export default function FirmPage({ firmId, page = 'overview', onBack }) {
           <h1>{t.name}</h1>
           <div className="adm-sub"><code>/{t.slug}</code><span>{t.plan || 'PRO'} · {(t.status || 'ACTIVE').toLowerCase()}</span><span>Since {new Date(t.created_at).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span></div>
         </div>
-        <Button variant="secondary" icon="eye" disabled={busy === 'desk'} onClick={openDesk}>Open desk, read only</Button>
+        <Button variant="secondary" icon="eye" disabled={busy === 'desk'} onClick={() => openDesk(false)}>Open desk, read only</Button>
+        <Button variant="secondary" icon="edit" disabled={busy === 'desk'} onClick={() => openDesk(true)}>Open desk to make changes</Button>
       </div>
 
 

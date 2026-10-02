@@ -121,7 +121,7 @@ function loadAuthSession() {
   if (typeof window === 'undefined' || !window.localStorage) return { loggedIn: false }
   // A support view is its own session, in this tab only, as the firm's owner.
   const sup = readSupport(currentTenant())
-  if (sup) return { loggedIn: true, role: 'owner', activeAgentId: sup.owner?.id || null, tenantName: '', tenantCity: '', support: { by: sup.by, expiresAt: sup.expiresAt } }
+  if (sup) return { loggedIn: true, role: 'owner', activeAgentId: sup.owner?.id || null, tenantName: '', tenantCity: '', support: { by: sup.by, expiresAt: sup.expiresAt, write: !!sup.write } }
   try {
     // ONE SESSION PER WORKSPACE. This was a single global `crm_auth_session`
     // describing whichever firm signed in last, and the isolation it needed was

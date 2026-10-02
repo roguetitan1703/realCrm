@@ -597,8 +597,9 @@ export const api = {
     .catch(() => null).finally(() => lsSet(ADMIN_TOKEN_KEY, '')),
   adminOverview: () => request('/admin/overview', { fresh: true, headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   adminFirm: (id) => request(`/admin/firms/${encodeURIComponent(id)}`, { fresh: true, headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
-  // Opens a firm's desk read only: a two-hour support token for that firm.
-  adminSupport: (id) => request(`/admin/firms/${encodeURIComponent(id)}/support`, { method: 'POST', headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  // Opens a firm's desk: a two-hour support token for that firm, read only
+  // unless `write`.
+  adminSupport: (id, write = false) => request(`/admin/firms/${encodeURIComponent(id)}/support`, { method: 'POST', headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` }, body: JSON.stringify({ write }) }),
   adminSignOutUser: (id, uid) => request(`/admin/firms/${encodeURIComponent(id)}/users/${encodeURIComponent(uid)}/sign-out`, { method: 'POST', headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   adminResetUserPassword: (id, uid) => request(`/admin/firms/${encodeURIComponent(id)}/users/${encodeURIComponent(uid)}/reset-password`, { method: 'POST', headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   // A ledger page: a firm's (id) or Delpat's own (id null).

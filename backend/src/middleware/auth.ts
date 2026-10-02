@@ -122,11 +122,14 @@ export async function withRequestContext(req: Request, res: Response, next: Next
       };
       return runWithContext(ctx, () => next());
     }
-    // A SUPPORT SESSION (routes/admin.ts): Delpat reading a firm's desk as its
-    // owner. Read only, enforced here, once, for every route: anything but a
-    // read is refused (422, not 403, so the tab is not signed out), except
-    // ending the session. Whatever it does read is attributed to Delpat.
-    if (claims.sup) {
+    // A SUPPORT SESSION (routes/admin.ts): Delpat at a firm's desk as its
+    // owner. Read only unless it was opened to make changes (`supw`), enforced
+    // here, once, for every route: anything but a read is refused (422, not
+    // 403, so the tab is not signed out), except ending the session. Changes
+    // made in one are recorded as the owner's, on the records and in the
+    // ledger; the ledger's "opened the desk to make changes" entry, with its
+    // time and who opened it, is what says Delpat was there.
+    if (claims.sup && !claims.supw) {
       const path = req.originalUrl.split('?')[0];
       const reads = ['GET', 'HEAD', 'OPTIONS'].includes(req.method);
       if (!reads && path !== '/api/v1/auth/logout') {

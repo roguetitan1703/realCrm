@@ -162,10 +162,12 @@ adminRouter.get('/firms/:id', async (req: Request, res: Response) => {
 });
 
 /**
- * OPEN THE FIRM'S DESK, READ ONLY (decided 25 Sep: read only, always allowed).
- * A session as the firm's owner, marked with who opened it, two hours and not
- * extended; every write it attempts is refused by middleware/auth.ts. Opening
- * it is written to the firm's own ledger.
+ * OPEN THE FIRM'S DESK (25 Sep: read only, always allowed; 2 Oct: or to make
+ * changes, when `write` is asked for). A session as the firm's owner, marked
+ * with who opened it, two hours and not extended. Read only, every write is
+ * refused by middleware/auth.ts. To make changes, what it does is recorded as
+ * the owner's, on the records and in the ledger; the ledger's open entry (who,
+ * when, for two hours) is what says Delpat was there.
  */
 adminRouter.post('/firms/:id/support', async (req: Request, res: Response) => {
   const t = await firmOr404(req, res); if (!t) return;
@@ -173,14 +175,15 @@ adminRouter.post('/firms/:id/support', async (req: Request, res: Response) => {
                              ORDER BY (lower(status) = 'active') DESC, created_at LIMIT 1`;
   if (!owner) return res.status(422).json({ error: 'This firm has no owner account to open the desk as.' });
   const sa = saOf(req);
+  const write = req.body?.write === true;
   const jti = `sess_sup_${Date.now()}_${randomBytes(9).toString('base64url')}`;
   const [row] = await sql`
     INSERT INTO sessions (id, tenant_id, user_id, expires_at, ip, user_agent, support_by)
     VALUES (${jti}, ${t.id}, ${owner.id}, NOW() + make_interval(hours => ${SUPPORT_HOURS}), ${ctxOf(req).ip}, ${ctxOf(req).user_agent}, ${sa.superadmin_id})
     RETURNING expires_at`;
-  const token = signToken({ kind: 'user', tenant_id: t.id, user_id: owner.id, role: 'owner', jti, sup: sa.name }, `${SUPPORT_HOURS}h`);
-  firmAudit(req, t.id, 'support.open', `${sa.name} (Delpat) opened the desk, read only, for ${SUPPORT_HOURS} hours`, { type: 'session', id: jti });
-  return res.json({ success: true, token, slug: t.slug || t.id, expiresAt: row.expires_at, owner: { id: owner.id, name: owner.name }, by: sa.name });
+  const token = signToken({ kind: 'user', tenant_id: t.id, user_id: owner.id, role: 'owner', jti, sup: sa.name, ...(write ? { supw: true } : {}) }, `${SUPPORT_HOURS}h`);
+  firmAudit(req, t.id, 'support.open', `${sa.name} (Delpat) opened the desk, ${write ? 'to make changes' : 'read only'}, for ${SUPPORT_HOURS} hours`, { type: 'session', id: jti });
+  return res.json({ success: true, token, slug: t.slug || t.id, expiresAt: row.expires_at, owner: { id: owner.id, name: owner.name }, by: sa.name, write });
 });
 
 adminRouter.post('/firms/:id/users/:uid/sign-out', async (req: Request, res: Response) => {
