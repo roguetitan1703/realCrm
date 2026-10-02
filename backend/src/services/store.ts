@@ -5073,7 +5073,13 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
   }
 
   // New first-class columns (source of truth going forward); config stays populated too.
-  const project = propData.project || config.society || (title ? title.split(' - ')[0] : null);
+  // A TYPE IS NOT A BUILDING. A listing with no society is titled by its type
+  // ("3 BHK Apartment", "Shop"), and this fallback then filed it under a
+  // project of that name: grouped by project, a firm's standalone shops became
+  // one building called "Shop", and the owner record made from the listing
+  // carried it onto the calling list. The title stands in for the project only
+  // when it is something other than the type.
+  const project = propData.project || config.society || (title && title !== type ? title.split(' - ')[0] : null);
   const wing = propData.wing || tower;
   const unitNo = propData.unit_no || propData.flat || unit;
   const deal = propData.deal === 'sale' || propData.deal === 'rent' ? propData.deal : null;
