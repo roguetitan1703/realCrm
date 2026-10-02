@@ -100,8 +100,9 @@ const midnightOf = (ms: number) => Math.floor((ms + IST) / DAY) * DAY - IST;
 function working(t: Date | null): Date | null {
   if (!t) return null;
   const ms = t.getTime(), h = ((ms + IST) % DAY) / 3600_000, m0 = midnightOf(ms);
-  const out = h < 10 ? m0 + (10 + (h / 10) * 0.25) * 3600_000
-    : h > 19.5 ? m0 + DAY + (10 + ((h - 19.5) / 4.5) * 0.25 - 0.25) * 3600_000
+  // Last night first (10:00 to 10:15), then this morning (10:15 to 10:30).
+  const out = h < 10 ? m0 + (10.25 + (h / 10) * 0.25) * 3600_000
+    : h > 19.5 ? m0 + DAY + (10 + ((h - 19.5) / 4.5) * 0.25) * 3600_000
     : ms;
   return out < NOW - 60_000 ? new Date(out) : null;
 }
@@ -665,8 +666,8 @@ async function build(sql: any) {
                 updated_at = ${o.events.length ? o.events[o.events.length - 1].at : o.createdAt}
               WHERE id = ${id} AND tenant_id = ${SLUG}`;
   }
-  // The hand-out happened the day after the list came in.
-  await sql`UPDATE crm_timeline_events e SET timestamp = o.created_at + interval '20 hours'
+  // The hand-out happened the morning after the list came in (11:00 + 23h).
+  await sql`UPDATE crm_timeline_events e SET timestamp = o.created_at + interval '23 hours'
             FROM crm_owners o WHERE e.tenant_id = ${SLUG} AND o.tenant_id = ${SLUG} AND e.record_id = o.id AND e.type = 'assignment'`;
   step(`${callRows.length} on the calling list, ${p.owners.filter(o => !o.assign).length} with nobody on them`);
 
