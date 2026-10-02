@@ -99,43 +99,57 @@ told us at profiling goes here; nothing about a city is in the code.
   changes are the one direct write. Same shapes the services write:
   `author` = user id, `metadata.outcome` from `callOutcomes.js`,
   `metadata.from`/`to` on status changes.
-- **Time:** every timestamp is written relative to an anchor and stored with
-  it (`brand_config.demo.anchor`). `--refresh` on the morning of a demo shifts
-  every timestamp in the firm by (now − anchor): overdue stays 4 hours
-  overdue, the visit stays at 4 pm today.
+- **Time:** everything is planned relative to the moment of the build, in
+  office hours (10:00 to 19:30 India time; night folds into the next morning,
+  in order). The build time is stored (`brand_config.demo.anchor`).
+  `--refresh` moves every date forward by whole calendar days, so a 4 pm call
+  stays at 4 pm and "due today" stays today. **Build after 11 am**: "today"
+  holds only the work done before the build, and every refresh keeps that.
+- **Not through the app, on purpose:** the ledger. Audit rows keep the real
+  time they were written, so the ledger says the generator made the firm,
+  which is true.
 
 ---
 
-## 5. Safety
+## 5. Running it
 
-- Writes only a tenant whose `brand_config.demo.generator` marker it set
-  itself. Reset and delete refuse anything without the marker, and refuse
-  `bhumi`, `mahalaxmi`, `delpat` by name as well.
-- **Production:** a dry run always comes first and prints what it would write,
-  table by table. `--write` asks for the user's OK each time; one approval
-  does not cover the next run.
-- `postgres(url, { max: 1 })`. Never left running.
+```bash
+npx tsx backend/src/scripts/seed-demo-tenant.ts --profile=vadodara --env=development             # plan: writes nothing
+npx tsx backend/src/scripts/seed-demo-tenant.ts --profile=vadodara --env=development --write     # build or rebuild
+npx tsx backend/src/scripts/seed-demo-tenant.ts --profile=vadodara --env=development --refresh   # dates up to today
+npx tsx backend/src/scripts/seed-demo-tenant.ts --profile=vadodara --env=development --delete
+```
 
----
-
-## 6. Phone numbers: they must work, and they must reach us
-
-Call and WhatsApp have to work in a demo, so every number is a real one, and a
-real number belongs to somebody. A pool of numbers Delpat answers
-(`phonePool`) is shared across leads and owners. The records the flows tap use
-the presenter's own phone, so the call rings in the room and WhatsApp opens a
-chat we control. Leads and owners may share a number (no merge outside webhook
-and import). Team members each need their own number within the firm (unique
-index on `users`).
-
-The live-enquiry flow must send from a number **outside** the pool, or the
-webhook matches an existing lead and merges into it.
+Photos need the Vite dev server (`npm run dev`), or pass `--no-photos`.
+Everyone in the firm signs in with the profile's `password` (default
+`Demo@1234`). A build takes about 7 minutes against the development database.
 
 ---
 
-## 7. Open before the first production run
+## 6. Safety
 
-1. **Photos.** Our own or the broker's photos per project, uploaded through the
-   media service. Not portal photos: they belong to other brokers.
-2. **The pool's numbers**, and which phone the presenter carries.
-3. The flows a given broker gets, from profiling.
+- Only a slug starting `demo-`, never `bhumi`, `mahalaxmi`, `delpat`,
+  `skyline-realty`, `test-org`, `tutorial`, `urban`, `raipur`. A firm is
+  remade or deleted only when it carries this script's marker
+  (`brand_config.demo.generator`).
+- Plan mode is the default. **Production** needs `--env=production` and
+  `--confirm=<slug>` on every run, and the user's OK each time.
+- It refuses a database that has not run this checkout's newest one-time
+  migration: production's API must be deployed first.
+- It never runs the server's boot (`CRM_NO_BOOT=1`), so it cannot migrate
+  anything.
+
+---
+
+## 7. Decided
+
+- **Phone numbers are random.** Nobody contacts these people; a tap that rings
+  a stranger is accepted.
+- **Photos** are openly licensed interiors from Openverse
+  (`demo-profiles/photos.json`, CC0 or CC BY, share-alike dropped), never a
+  building's outside. Each upload is stamped with the firm's name by the app's
+  own `processListingImage()`, the way every listing photo is.
+- **Owners who listed with us** sit at Key Received with the agent who listed
+  them, after a call: they are past the calling funnel.
+- **The live enquiry** uses the firm's real Website connection (its key is in
+  Settings → Connections). Send it from a number no lead has, or it merges.
