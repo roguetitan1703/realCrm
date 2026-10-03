@@ -35,6 +35,10 @@ if (!tenant) {
   process.exit(1);
 }
 const apply = process.argv.includes('--apply');
+// Importing the store starts the server's boot (schema and one-time repairs)
+// unless this is set: run from a laptop, that migrated production from
+// whatever happened to be checked out there.
+process.env.CRM_NO_BOOT = '1';
 
 const { dbRef, databaseUrl } = await import('../services/env');
 const { sql } = await import('../services/db');
