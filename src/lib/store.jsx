@@ -1478,12 +1478,13 @@ export function StoreProvider({ children }) {
       'Owner details updated'),
     // A callback is one moment, so it travels as one ISO timestamp — not the
     // lead follow-up's {date,time,action}, where 'Today' is a display string
-    // the server has to guess a date from. Setting the status to Callback is
-    // part of scheduling one: the two disagreeing is what made "Callback" mean
-    // nothing. Passing `at: null` clears both.
+    // the server has to guess a date from. It leaves the status alone: Callback
+    // stopped being a calling status on 2026-09-23, and this kept writing it,
+    // so every owner given a callback landed on a status no menu offered.
+    // Passing `at: null` clears it.
     setOwnerCallback: (id, at, note) => {
       const patch = at
-        ? { callbackAt: at, callbackNote: note || null, stage: 'Callback' }
+        ? { callbackAt: at, callbackNote: note || null }
         : { callbackAt: null, callbackNote: null }
       return write('Schedule callback',
         () => apiClient.updateOwner(id, patch),

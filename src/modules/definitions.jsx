@@ -59,6 +59,17 @@ const ownerStages = (store) => (store?.state?.settings?.ownerStages?.length
   ? store.state.settings.ownerStages
   : OWNER_STATUSES).filter(s => !OWNER_TERMINAL_STATUSES.includes(s))
 
+// The status menu on every owner row: the walk, then each ending by name.
+const ownerStageCell = (o, store) => (
+  <StageCell
+    record={o} store={store} stages={ownerStages(store)}
+    canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o)}
+    onSet={(stage) => store.setOwnerStage(o.id, stage)}
+    endings={OWNER_TERMINAL_STATUSES}
+    onReject={(rec, status) => store.openModal({ kind: 'rejectOwner', ownerId: rec.id, status })}
+  />
+)
+
 
 // Localities are DERIVED from the firm's own records, never listed here. There
 // used to be two hardcoded pools — one for leads, one for properties — that
@@ -647,14 +658,7 @@ export const OWNERS_DEF = {
       if (!cb) return <span className="cell-quiet">{o.lastCallAt ? 'No callback' : 'Not called'}</span>
       return cb.tone === 'overdue' ? <Overdue>{cb.label}</Overdue> : <span className="source">{cb.label}</span>
     } },
-    { key: 'stage', label: 'Status', sortable: true, render: (o, store) => (
-      <StageCell
-        record={o} store={store} stages={ownerStages(store)}
-        canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o)}
-        onSet={(stage) => store.setOwnerStage(o.id, stage)}
-        onReject={(rec) => store.openModal({ kind: 'rejectOwner', ownerId: rec.id })}
-      />
-    ) },
+    { key: 'stage', label: 'Status', sortable: true, render: (o, store) => ownerStageCell(o, store) },
     { key: 'agent', label: 'Sales Executive', render: (o, store) => (
       <OwnerCell
         record={o} store={store} canAssign={canAssignLead(store.state.role)}
@@ -686,12 +690,7 @@ export const OWNERS_DEF = {
     <>
       <div className="rc-top">
         <div className="rc-title">{o.name || 'Unnamed owner'}</div>
-        <StageCell
-          record={o} store={store} stages={ownerStages(store)}
-          canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o)}
-          onSet={(stage) => store.setOwnerStage(o.id, stage)}
-          onReject={(rec) => store.openModal({ kind: 'rejectOwner', ownerId: rec.id })}
-        />
+        {ownerStageCell(o, store)}
       </div>
       <div className="rc-sub mono-num">{o.phone}</div>
       <div className="rc-facts"><span>{[o.project, o.unitLabel || o.unitRef].filter(Boolean).join(' · ') || '—'}</span></div>
@@ -747,11 +746,7 @@ export const OWNERS_DEF = {
       <div className="prow">
         <div className="prow-top">
           <span className="prow-name">{o.name || 'Unnamed owner'}</span>
-          <StageCell
-            record={o} store={store} stages={ownerStages(store)}
-            canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, o)}
-            onSet={(stage) => store.setOwnerStage(o.id, stage)}
-          />
+          {ownerStageCell(o, store)}
         </div>
         {(o.project || o.unitLabel || o.unitRef) && <div className="prow-req">{[o.project, o.unitLabel || o.unitRef].filter(Boolean).join(' · ')}</div>}
         <div className="prow-foot">

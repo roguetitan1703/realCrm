@@ -102,7 +102,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'rejectLead' && <RejectLeadModal store={store} leadId={m.leadId} />}
       {m?.kind === 'activityRecords' && <ActivityRecords store={store} go={go} Modal={Modal} side={m.side} date={m.date}
         person={m.person} measure={m.measure} detail={m.detail} title={m.title} />}
-      {m?.kind === 'rejectOwner' && <RejectOwnerModal store={store} ownerId={m.ownerId} />}
+      {m?.kind === 'rejectOwner' && <RejectOwnerModal store={store} ownerId={m.ownerId} status={m.status} />}
       {m?.kind === 'confirm' && <ConfirmModal store={store} {...m} />}
       {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} only={m.only} />}
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
@@ -1080,9 +1080,12 @@ function ConfirmModal({ store, title, lines, choices, chosen, confirmLabel, canc
   )
 }
 
-function RejectOwnerModal({ store, ownerId }) {
+function RejectOwnerModal({ store, ownerId, status }) {
   const o = store.lookup('owner', ownerId)
-  const [pick, setPick] = useState(OWNER_REJECTION_REASONS[0])
+  // Opened from a named ending ("Not Interested"), only that ending's reasons.
+  const reasons = OWNER_REJECTION_REASONS.filter(r => !status || r.status === status)
+  const title = status || 'Mark as rejected'
+  const [pick, setPick] = useState(reasons[0])
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -1096,12 +1099,12 @@ function RejectOwnerModal({ store, ownerId }) {
   }
 
   return (
-    <Modal title="Mark as rejected" onClose={store.closeModal} width={420}>
+    <Modal title={title} onClose={store.closeModal} width={420}>
       <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
         Why are we not taking <b style={{ color: 'var(--ink)' }}>{o?.name || o?.phone || 'this flat'}</b> further?
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 12 }}>
-        {OWNER_REJECTION_REASONS.map(r => (
+        {reasons.map(r => (
           <button key={r.reason} onClick={() => setPick(r)}
             style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', textAlign: 'left',
               border: '1px solid ' + (pick.reason === r.reason ? 'var(--accent)' : 'var(--line)'),
@@ -1118,7 +1121,7 @@ function RejectOwnerModal({ store, ownerId }) {
       <div className="lc-foot">
         <Button onClick={store.closeModal}>Cancel</Button>
         <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} disabled={busy} onClick={save}>
-          {busy ? 'Saving…' : 'Mark as rejected'}
+          {busy ? 'Saving…' : title}
         </Button>
       </div>
     </Modal>

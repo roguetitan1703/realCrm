@@ -19,6 +19,11 @@
  * dropped status onto the nearest honest one (Callback → Contacted, keeping the
  * callback time). The endings stay in the vocabulary; the server appends them.
  *
+ * 2026-10-03: the walk gained Call Not Received · Incoming Not Available ·
+ * Switch Off after New. A firm with a stored list never sees a new default, so
+ * this now ADDS whatever of the walk is missing, each after the step before it,
+ * and keeps every status the firm named itself, in the firm's order.
+ *
  * Usage:
  *   npm run stages:calling -- --env=production                 report, all firms
  *   npm run stages:calling -- --env=production --apply         do it
@@ -41,10 +46,22 @@ const { databaseUrl, dbRef } = await import('../services/env');
 const sql = postgres(databaseUrl(), { max: 1, ssl: 'require' });
 
 /** The walk. The endings are deliberately absent — Reject sets those. */
-const WALK = ['New', 'Contacted', 'Interested', 'Key Received'];
+const WALK = ['New', 'Call Not Received', 'Incoming Not Available', 'Switch Off', 'Contacted', 'Interested', 'Key Received'];
 const ENDINGS = ['Not Interested', 'Do Not Call'];
 /** What a record sitting on a dropped status becomes. */
 const MOVED: Record<string, string> = { Callback: 'Contacted' };
+
+/** The firm's list with the missing steps of the walk put in, each after the
+ *  nearest step before it that the list has. Nothing the firm named is lost. */
+function merged(current: string[]): string[] {
+  const out = current.filter(s => !MOVED[s] && !ENDINGS.includes(s));
+  WALK.forEach((s, i) => {
+    if (out.includes(s)) return;
+    const prev = WALK.slice(0, i).reverse().find(p => out.includes(p));
+    out.splice(prev ? out.indexOf(prev) + 1 : 0, 0, s);
+  });
+  return out;
+}
 
 console.log(`\n  ${env.toUpperCase()} · db ${dbRef(databaseUrl())}${only ? ` · tenant ${only}` : ''}${apply ? '' : ' · report only'}\n`);
 
@@ -69,6 +86,7 @@ for (const r of rows as any[]) {
   const needsList = Boolean(current) && (WALK.some(s => !current!.includes(s)) || current!.some(s => MOVED[s]));
   if (!needsList && !onDropped.length) { console.log(`  ${String(r.tenant).padEnd(16)} already fine`); continue; }
   console.log(`  ${String(r.tenant).padEnd(16)} ${custom}`);
+  if (current) console.log(`  ${''.padEnd(16)} becomes: ${[...merged(current), ...ENDINGS].join(' · ')}`);
   if (onDropped.length) console.log(`  ${''.padEnd(16)} records to move: ${onDropped.map(c => `${c.n} × ${c.stage} → ${MOVED[c.stage]}`).join(', ')}`);
 
   if (!apply) continue;
@@ -81,7 +99,7 @@ for (const r of rows as any[]) {
   }
   // The endings are appended by updateSettings for every write; kept here so a
   // firm's stored vocabulary still carries them when nothing goes through that.
-  const next = [...WALK, ...ENDINGS];
+  const next = current ? [...merged(current), ...ENDINGS] : [...WALK, ...ENDINGS];
   if (current) {
     await sql`
       UPDATE crm_settings

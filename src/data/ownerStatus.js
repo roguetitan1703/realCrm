@@ -12,10 +12,18 @@
 //     the conversation and a record could be "Callback" with no callback on it;
 //   • the two endings are reached through Reject, with a reason, exactly as a
 //     lead is — they are not steps forward and do not belong in the same walk.
+//
+// The three "did not get through" statuses were added 2026-10-03 because a
+// client's callers asked for them by name, and Mahalaxmi's sheet already used
+// those words. Before that, every unanswered dial showed as Contacted, the same
+// as an owner who had actually been spoken to.
 
 /** The progression, in order — what the status dropdown offers. */
 export const OWNER_STAGES = [
   'New',
+  'Call Not Received',
+  'Incoming Not Available',
+  'Switch Off',
   'Contacted',
   'Interested',
   'Key Received',
@@ -30,6 +38,7 @@ export const OWNER_STATUSES = [...OWNER_STAGES, ...OWNER_TERMINAL_STATUSES]
 /** Why a calling record ends, and where it lands. The reason is kept as a
  *  remark; the status is one of the two endings. */
 export const OWNER_REJECTION_REASONS = [
+  { reason: 'Said not interested', status: 'Not Interested' },
   { reason: 'Not selling or renting', status: 'Not Interested' },
   { reason: 'Already with another agency', status: 'Not Interested' },
   { reason: 'Asked us not to call again', status: 'Do Not Call' },
@@ -49,9 +58,11 @@ export const isOwnerOpen = (s) => !OWNER_TERMINAL_STATUSES.includes(String(s || 
  *   wrong no · invalid                               → Do Not Call  (Wrong number)
  *   not intrested · already flat on rent             → Not Interested
  *   intrested · intrested they will call when …      → Interested
- *   not received · received · call cut · busy ·
- *   incoming not avilable · switch off · voice note ·
- *   not available · cnc (not connected) · cnr        → Contacted
+ *   not received · cnr                               → Call Not Received
+ *   incoming not avilable                            → Incoming Not Available
+ *   switch off                                       → Switch Off
+ *   received · call cut · busy · voice note ·
+ *   not available · cnc (not connected)              → Contacted
  *
  * Anything else — "possession after 2/3 months", "reapet no.", a note about
  * where the key is — is NOT guessed at. It returns null, the row keeps its
@@ -68,7 +79,10 @@ export function statusFromSheet(text) {
   if (/\bnot int[a-z]*st/.test(w)) return { status: 'Not Interested', reason: 'Said not interested (from the sheet)' }
   if (/\balready\b.*\b(rent|rented|sold)\b/.test(w)) return { status: 'Not Interested', reason: 'Already rented or sold (from the sheet)' }
   if (/^int[a-z]*st/.test(w)) return { status: 'Interested', reason: null }
-  if (/\b(not )?received\b|\bcall cut\b|\bbusy\b|\bincoming\b|\bswitch(ed)? ?off\b|\bvoice note\b|\bnot a[a-z]*ble\b|^cn[cr]$|\bnot reachable\b|\bunreachable\b|\bno answer\b|\bringing\b/.test(w)) {
+  if (/\bincoming\b/.test(w)) return { status: 'Incoming Not Available', reason: null }
+  if (/\bswitch(ed)? ?off\b/.test(w)) return { status: 'Switch Off', reason: null }
+  if (/\bnot rec[a-z]*\b|^cnr$|\bno answer\b/.test(w)) return { status: 'Call Not Received', reason: null }
+  if (/\breceived\b|\bcall cut\b|\bbusy\b|\bvoice note\b|\bnot a[a-z]*ble\b|^cnc$|\bnot reachable\b|\bunreachable\b|\bringing\b/.test(w)) {
     return { status: 'Contacted', reason: null }
   }
   return null

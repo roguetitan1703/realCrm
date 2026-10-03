@@ -274,10 +274,9 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
 
   // THE TAB ROW IS SHORT ON PURPOSE: where a caller works from, not every
   // status. All · Callbacks (the one tab that is a time) · the first two steps
-  // of the firm's walk, where nearly every row sits (New 713 and Contacted 2 of
-  // 754 on dev) · Unassigned for whoever hands work out. Every status —
-  // Interested, Key Received, and the two endings Not Interested and Do Not
-  // Call — is in the Status dropdown, under its own name.
+  // of the firm's walk (New, and Call Not Received: the never-dialled and the
+  // ring-again) · Unassigned for whoever hands work out. Every other status is
+  // in the Status dropdown, under its own name.
   const c = counts || {}
   const tabStage = c.tabStage || {}
   const byStage = c.byStage || {}

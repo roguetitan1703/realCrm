@@ -677,7 +677,7 @@ export function OwnerCell({ record, store, onAssign, canAssign }) {
  * click, the popover edge measurement, the phone target — is the same problem
  * twice and is not worth having twice.
  */
-export function StageCell({ record, store, stages, canSet, onSet, onReject, value, Tag = StageTag }) {
+export function StageCell({ record, store, stages, canSet, onSet, onReject, endings, value, Tag = StageTag }) {
   const current = value !== undefined ? value : record.stage
   const [open, setOpen] = useState(false)
   // Which edge it hangs from, and whether it opens upward, is now measured by
@@ -703,13 +703,19 @@ export function StageCell({ record, store, stages, canSet, onSet, onReject, valu
             meant working down a list you had to open each dead lead to close
             it. Separated and toned because it is the one entry that asks a
             question back (the reason) instead of just setting a value. */}
+        {/* `endings` names each closing status (a calling record's Not
+            Interested, Do Not Call), because callers asked for the status by
+            name and did not recognise it in "Mark as rejected". Each still asks
+            for the reason. */}
         {onReject && (
           <>
             <div className="p-sep" />
-            <button className="p-item danger" onClick={() => { setOpen(false); onReject(record) }}>
-              <span className="p-ic"><Icon name="x" size={14} /></span>
-              Mark as rejected
-            </button>
+            {(endings || [null]).map(s => (
+              <button key={s || 'reject'} className="p-item danger" onClick={() => { setOpen(false); onReject(record, s) }}>
+                <span className="p-ic"><Icon name="x" size={14} /></span>
+                {s || 'Mark as rejected'}
+              </button>
+            ))}
           </>
         )}
       </AnchoredPopover>

@@ -298,7 +298,11 @@ function plan() {
   const unassignedProject: string | null = P.story?.unassignedProject || resProjects[resProjects.length - 1]?.name || null;
   const callingProjects = [...resProjects.map(p => ({ p, share: calling.residential / resProjects.length })),
     ...offices.map(p => ({ p, share: calling.commercial / offices.length }))];
-  const O_MIX: [string, number][] = [['New', 0.30], ['Contacted', 0.22], ['Callback', 0.14], ['Interested', 0.12], ['Key Received', 0.05], ['Not Interested', 0.12], ['Do Not Call', 0.05]];
+  // 'Callback' here is a plan, not a status: an owner who asked to be rung
+  // back ends up Contacted with a callback time (ownerStory). Calling has had
+  // no Callback status since 2026-09-23.
+  const O_MIX: [string, number][] = [['New', 0.28], ['Call Not Received', 0.10], ['Incoming Not Available', 0.03], ['Switch Off', 0.03],
+    ['Contacted', 0.14], ['Callback', 0.12], ['Interested', 0.12], ['Key Received', 0.05], ['Not Interested', 0.09], ['Do Not Call', 0.04]];
   let oi = 0;
   for (const { p, share } of callingProjects) {
     const n = Math.round(volume.owners * share);
@@ -427,19 +431,28 @@ function ownerStory(O: OwnerPlan, agent: string) {
   const phr = P.phrases || {};
   const t = new Date(O.createdAt.getTime() + int(1, 10) * DAY + int(1, 8) * 3600_000);
   const first = t.getTime() < NOW - 3600_000 ? t : new Date(NOW - int(2, 20) * 3600_000);
-  const answered = O.stage !== 'Contacted' || chance(0.4);
-  ev('call', 'Call', answered ? pick(phr.owner || ['spoke to owner']) : 'Call initiated', first, { outcome: answered ? 'discussed' : 'no_answer', edited: true });
+  const NOT_THROUGH: Record<string, string> = { 'Call Not Received': 'no_answer', 'Incoming Not Available': 'unreachable', 'Switch Off': 'unreachable' };
+  const missed = NOT_THROUGH[O.stage];
+  const answered = !missed && (O.stage !== 'Contacted' || chance(0.4));
+  ev('call', 'Call', answered ? pick(phr.owner || ['spoke to owner']) : 'Call initiated', first,
+    { outcome: answered ? 'discussed' : (missed || 'no_answer'), edited: true });
   ev('stage_change', 'Stage → Contacted', 'First outreach logged', later(first, 0, 1), { auto: true }, 'System');
   if (O.stage === 'Contacted') return;
+  if (missed) {
+    ev('stage_change', `Stage → ${O.stage}`, `Marked ${O.stage}`, later(first, 1, 5), { from: 'Contacted', to: O.stage });
+    return;
+  }
   const t2 = later(first, 30, 2000);
-  const to = O.stage === 'Key Received' ? 'Interested' : O.stage;
-  ev('stage_change', `Stage → ${to}`, `Marked ${to}`, t2, { from: 'Contacted', to });
   if (O.stage === 'Callback') {
+    O.stage = 'Contacted';
     const kind = pick(['overdue', 'overdue', 'today', 'soon']);
     O.callbackAt = kind === 'overdue' ? pastSlot() : kind === 'today' ? (todaySlot() ?? soonSlot()) : soonSlot();
     O.callbackNote = pick(phr.callback || ['call back']);
     ev('follow_up', 'Callback scheduled', O.callbackNote, later(t2, 0, 2));
+    return;
   }
+  const to = O.stage === 'Key Received' ? 'Interested' : O.stage;
+  ev('stage_change', `Stage → ${to}`, `Marked ${to}`, t2, { from: 'Contacted', to });
   if (O.stage === 'Key Received') {
     const t3 = new Date(Math.min(t2.getTime() + int(1, 5) * DAY, NOW - 3 * 3600_000));
     ev('remark', 'Remark', 'chavi office ma aapi didhi', t3);

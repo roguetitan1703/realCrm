@@ -3255,7 +3255,7 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
 // Mirrors src/data/ownerStatus.js — see there for why Callback is not a status
 // and why the walk ends at Key Received. 'Callback' stays in the vocabulary so
 // the records written under it remain valid and filterable.
-export const OWNER_STAGES = ['New', 'Contacted', 'Interested', 'Key Received'];
+export const OWNER_STAGES = ['New', 'Call Not Received', 'Incoming Not Available', 'Switch Off', 'Contacted', 'Interested', 'Key Received'];
 export const OWNER_TERMINAL_STATUSES = ['Not Interested', 'Do Not Call'];
 export const OWNER_STATUSES = [...OWNER_STAGES, 'Callback', ...OWNER_TERMINAL_STATUSES];
 
