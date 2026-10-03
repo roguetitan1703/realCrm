@@ -28,6 +28,10 @@ export const TAKEOVER_KEYS = [
   // Today's half (To do / My work / Team) and a teammate opened from Team or
   // the Performance page, and the day they are read on.
   'todayView', 'person', 'day',
+  // The screen a record was opened FROM, when that was another screen (a row on
+  // Performance, Today, Calendar). Not in the URL: the record's back button reads
+  // it to step back there instead of dropping you on this screen's list.
+  'recFrom',
 ]
 
 // Opening a record is not leaving the screen.

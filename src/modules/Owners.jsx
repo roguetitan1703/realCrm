@@ -312,9 +312,13 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     // ON TOP OF the list's state, not instead of it. These replaced the whole
     // selection, so the open project went with it and Back landed on the
     // project cards instead of the project's list.
-    setSel(s => ({ ...s, ownerId: o.id, ownerOpen: true }))
+    setSel(s => ({ ...s, ownerId: o.id, ownerOpen: true, recFrom: undefined }))
   }
-  const back = () => setSel(s => ({ ...s, ownerOpen: false, ownerId: undefined }))
+  // Opened from another screen (a Performance or Today row): back returns
+  // there, as the phone's back gesture does. From this list: back to the list.
+  const back = () => (sel.recFrom
+    ? window.history.back()
+    : setSel(s => ({ ...s, ownerOpen: false, ownerId: undefined })))
 
   const bulkAssign = () => store.openModal({
     kind: 'bulkAssign', leadIds: [...selected], isOwner: true,

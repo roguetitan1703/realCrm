@@ -424,7 +424,9 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     )
   }
   const a = store.agentById(l.agentId)
-  const back = () => setSel(s => ({ ...s, leadOpen: false }))
+  // Opened from another screen (a Performance, Today or Calendar row): back
+  // returns there, as the phone's back gesture does — see Owners.jsx.
+  const back = () => (sel.recFrom ? window.history.back() : setSel(s => ({ ...s, leadOpen: false })))
   const role = store.state.role
   const userId = store.state.activeAgentId
   const editable = canEditLead(role, userId, l)

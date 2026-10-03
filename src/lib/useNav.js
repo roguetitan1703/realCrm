@@ -26,6 +26,8 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
   const first = useRef(bootNav()).current
   const [screen, setScreenState] = useState(first.screen || home)
   const [sel, setSelState] = useState(first.sel)
+  const screenRef = useRef(screen)
+  screenRef.current = screen
 
   // Set when a popstate is what changed the state, so the effect below doesn't
   // immediately push the entry the user just went back through.
@@ -169,6 +171,11 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
     // tile tapped an hour ago still silently filtering the book.
     const recordOnly = Object.keys(patch).length > 0
       && Object.keys(patch).every(k => RECORD_KEYS.includes(k))
+    // A record opened from ANOTHER screen remembers which, so its back button
+    // returns there. Opened from a Performance row, back used to land on the
+    // Calling or Leads list, a screen the person never visited.
+    const from = screenRef.current
+    const fromElsewhere = recordOnly && key !== from && (patch.leadOpen || patch.ownerOpen || patch.propOpen)
     setScreenState(key)
     setSelState(s => {
       const next = { ...s }
@@ -179,6 +186,7 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
         if (recordOnly && (k === 'leadFilters' || k === 'propFilters' || k === 'ownerFilters' || k === 'contactFilters')) continue
         next[k] = null
       }
+      if (fromElsewhere) next.recFrom = from
       return { ...next, ...patch }
     })
   }, [])
