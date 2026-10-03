@@ -46,31 +46,31 @@ export default function UnassignedBar({ store, side, go, onShow }) {
     try {
       const res = await api.assignUnowned(side)
       store.toast(res.assigned
-        ? `${res.assigned} handed out: ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
-        : 'Nothing to hand out')
+        ? `Shared: ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
+        : 'Nothing left to share')
       setAt(x => x + 1)
       store.settled?.()
     } catch (err) {
-      store.toast(String(err.message || 'Could not hand them out').replace(/^API Error: \d+ [^—]*— ?/, ''), 'warn')
+      store.toast(String(err.message || 'Could not share them').replace(/^API Error: \d+ [^—]*— ?/, ''), 'warn')
     }
     setBusy(false)
   }
   const ask = () => store.openModal({
     kind: 'confirm',
-    title: `Hand out ${n} ${word}?`,
+    title: `Share ${n} ${word} equally between these agents?`,
     lines: turn.map(a => a.name),
-    confirmLabel: `Hand out ${n}`,
+    confirmLabel: 'Share them',
     onConfirm: handOut,
   })
 
   return (
     <div className="unas-bar">
-      <span className="unas-t"><b>{n.toLocaleString('en-IN')}</b> {word} {n === 1 ? 'has' : 'have'} nobody on {n === 1 ? 'it' : 'them'}</span>
+      <span className="unas-t"><b>{n.toLocaleString('en-IN')}</b> {word} {n === 1 ? 'is' : 'are'} not given to any agent yet</span>
       <span className="unas-acts">
-        {onShow && <Button variant="ghost" size="sm" onClick={onShow}>Show</Button>}
+        {onShow && <Button variant="ghost" size="sm" onClick={onShow}>See {n === 1 ? 'it' : 'them'}</Button>}
         {turn.length
-          ? <Button variant="primary" size="sm" disabled={busy} onClick={ask}>{busy ? 'Handing out…' : `Hand out ${n}`}</Button>
-          : <Button variant="secondary" size="sm" onClick={() => go('settings', { settingsSection: 'routing', settingsSide: side })}>Choose who takes turns</Button>}
+          ? <Button variant="primary" size="sm" disabled={busy} onClick={ask}>{busy ? 'Sharing…' : 'Share with agents'}</Button>
+          : <Button variant="secondary" size="sm" onClick={() => go('settings', { settingsSection: 'routing', settingsSide: side })}>Pick agents to share with</Button>}
       </span>
     </div>
   )

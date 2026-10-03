@@ -55,7 +55,13 @@ export default function FirmPage({ firmId, page = 'overview', onBack }) {
   useEffect(() => { setD(null); load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [firmId])
 
   const openDesk = async (write = false) => {
-    if (write && !window.confirm(`Open ${d?.tenant?.name || 'this firm'}'s desk to make changes? What you do there is saved on their records as their owner.`)) return
+    const firm = d?.tenant?.name || 'this firm'
+    const ownerName = d?.team?.find(u => u.role === 'owner')?.name || 'their owner'
+    if (write && !window.confirm(`You will be signed in to ${firm} as ${ownerName}.
+
+Anything you add or change will show as done by ${ownerName}.
+
+Continue?`)) return
     setBusy('desk')
     try {
       const r = await api.adminSupport(firmId, write)
@@ -94,8 +100,8 @@ export default function FirmPage({ firmId, page = 'overview', onBack }) {
           <h1>{t.name}</h1>
           <div className="adm-sub"><code>/{t.slug}</code><span>{t.plan || 'PRO'} · {(t.status || 'ACTIVE').toLowerCase()}</span><span>Since {new Date(t.created_at).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span></div>
         </div>
-        <Button variant="secondary" icon="eye" disabled={busy === 'desk'} onClick={() => openDesk(false)}>Open desk, read only</Button>
-        <Button variant="secondary" icon="edit" disabled={busy === 'desk'} onClick={() => openDesk(true)}>Open desk to make changes</Button>
+        <Button variant="secondary" icon="eye" disabled={busy === 'desk'} onClick={() => openDesk(false)}>View their CRM</Button>
+        <Button variant="secondary" icon="edit" disabled={busy === 'desk'} onClick={() => openDesk(true)}>Work in their CRM</Button>
       </div>
 
 
