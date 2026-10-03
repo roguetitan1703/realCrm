@@ -59,6 +59,14 @@ const ownerStages = (store) => (store?.state?.settings?.ownerStages?.length
   ? store.state.settings.ownerStages
   : OWNER_STATUSES).filter(s => !OWNER_TERMINAL_STATUSES.includes(s))
 
+// Why a rejected lead was rejected, under its status on every list row: the
+// picked reason, what the agent typed with it, and any remark since.
+function RejectionNote({ lead }) {
+  if (lead.stage !== REJECTED_STATUS) return null
+  const text = lead.rejectionNote || lead.rejectionReason
+  return text ? <div className="rej-note" title={text}>{text}</div> : null
+}
+
 // The status menu on every owner row: the walk, then each ending by name.
 const ownerStageCell = (o, store) => (
   <StageCell
@@ -247,13 +255,16 @@ export const LEADS_DEF = {
     { key: 'req', label: 'Requirement', render: (l) => reqShort(l.req) },
     { key: 'budget', label: 'Budget', sortable: true, render: (l) => <Money>{budgetRange(l.req)}</Money> },
     { key: 'stage', label: 'Stage', sortable: true, render: (l, store) => (
-      <StageCell
-        record={l} store={store}
-        stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
-        canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l)}
-        onSet={(stage) => store.setStage(l.id, stage)}
-        onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
-      />
+      <div>
+        <StageCell
+          record={l} store={store}
+          stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}
+          canSet={canUpdateLeadStatus(store.state.role, store.state.activeAgentId, l)}
+          onSet={(stage) => store.setStage(l.id, stage)}
+          onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
+        />
+        <RejectionNote lead={l} />
+      </div>
     ) },
     // WHERE THEY ARRIVED, AND HOW MANY PORTALS SINCE. The column is attribution
     // — the source a lead came in on, never overwritten — but a person who has
@@ -508,6 +519,7 @@ export const LEADS_DEF = {
             This line is one row with an ellipsis, so every part it carries is
             room taken from `interest`, which sits last and is cut first. */}
         {reqShort(l.req, { budget: false }) && <div className="prow-req">{reqShort(l.req, { budget: false })}</div>}
+        <RejectionNote lead={l} />
         <div className="prow-foot">
           <div className="prow-meta">
             {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
@@ -546,6 +558,7 @@ export const LEADS_DEF = {
         </div>
         <div className="rc-sub mono-num">{l.phone}</div>
         <div className="rc-facts"><span>{reqShort(l.req)}</span></div>
+        <RejectionNote lead={l} />
         <div className="rc-foot">
           <span className="rc-money"><Money>{budgetRange(l.req)}</Money></span>
           {a ? <span className="rc-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
