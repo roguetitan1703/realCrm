@@ -557,7 +557,7 @@ teamRouter.get('/routing/backlog', async (_req: Request, res: Response) => {
   }
 });
 
-/** POST /api/v1/team/routing/assign-unowned { side: 'leads' | 'owners' } */
+/** POST /api/v1/team/routing/assign-unowned { side: 'leads' | 'owners', agentIds?: string[] } */
 teamRouter.post('/routing/assign-unowned', async (req: Request, res: Response) => {
   try {
     const perm = canManageRole('agent');
@@ -566,7 +566,7 @@ teamRouter.post('/routing/assign-unowned', async (req: Request, res: Response) =
     const out = await assignUnowned(side, {
       actorType: 'user', actorId: req.user?.id ?? null, actorLabel: null,
       ip: req.ip, userAgent: req.get('user-agent') ?? undefined,
-    } as any);
+    } as any, Array.isArray(req.body?.agentIds) ? req.body.agentIds : undefined);
     return res.status(200).json({ success: true, ...out });
   } catch (err: any) {
     const code = err?.name === 'ForbiddenError' ? 403 : 500;

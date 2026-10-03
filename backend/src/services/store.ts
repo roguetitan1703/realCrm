@@ -4125,7 +4125,7 @@ export async function unownedBacklog(): Promise<{ leads: number; owners: number 
  * and a person who has just switched the rota on is asking for one thing to
  * happen once. Same rotation, same assignment history, one press.
  */
-export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SYSTEM_CTX): Promise<{ assigned: number; perTarget: { id: string; name: string | null; n: number }[] }> {
+export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SYSTEM_CTX, agentIds?: string[]): Promise<{ assigned: number; perTarget: { id: string; name: string | null; n: number }[] }> {
   const who = getContext();
   if (who?.role === 'agent') throw new ForbiddenError('Handing out work is done from the desk.');
   const t = tid();
@@ -4140,12 +4140,23 @@ export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SY
                  ORDER BY o.tower NULLS LAST, o.unit_no, o.created_at`;
   if (!rows.length) return { assigned: 0, perTarget: [] };
 
-  // The rota, claimed once for the whole backlog — the same trick the import
-  // uses. One round trip instead of one per record.
   const ids = (rows as any[]).map(r => r.id);
-  const pool = side === 'leads'
-    ? await Promise.all(ids.map(() => nextRoutedAgent()))
-    : await nextRoutedOwnerAgents(ids.length);
+  // THE PEOPLE THE DESK TICKED, when it chose: dealt in turn, one each. Only
+  // members of this firm who can be given work; anyone else in the list is
+  // dropped, never trusted. Without a choice, the saved rota decides, claimed
+  // once for the whole backlog — the same trick the import uses.
+  let pool: (string | null)[];
+  if (Array.isArray(agentIds) && agentIds.length) {
+    const ok = (await sql`SELECT id FROM users WHERE tenant_id = ${t} AND id IN ${sql(agentIds.map(String))}
+                           AND deleted_at IS NULL AND lower(coalesce(status, 'active')) <> 'suspended'`).map((r: any) => r.id);
+    const chosen = agentIds.map(String).filter(id => ok.includes(id));
+    if (!chosen.length) throw new ForbiddenError('None of those people can be given work.');
+    pool = ids.map((_, i) => chosen[i % chosen.length]);
+  } else {
+    pool = side === 'leads'
+      ? await Promise.all(ids.map(() => nextRoutedAgent()))
+      : await nextRoutedOwnerAgents(ids.length);
+  }
 
   const byTarget = new Map<string, string[]>();
   ids.forEach((id, i) => {

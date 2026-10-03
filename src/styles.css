@@ -3455,6 +3455,8 @@ video.gv-media{background:#000}
 /* The confirm modal's list of what it will touch. */
 .confirm-lines{display:flex;flex-direction:column;gap:4px;margin:-4px 0 14px;max-height:40vh;overflow:auto}
 .confirm-line{font-size:13px;color:var(--ink);padding:6px 9px;background:var(--bg-2, #F6F5F2);border-radius:7px}
+.confirm-pick{display:flex;align-items:center;gap:9px;cursor:pointer}
+.confirm-pick input{width:16px;height:16px;accent-color:var(--accent)}
 
 /* Media editor: reorder, cover. */
 .mp-item[draggable=true]{cursor:grab}

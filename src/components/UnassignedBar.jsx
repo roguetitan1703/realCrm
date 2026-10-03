@@ -41,10 +41,12 @@ export default function UnassignedBar({ store, side, go, onShow }) {
   // turn; with nobody taking turns there is nobody to deal to.
   const turn = (state.routing?.[s.rota] || []).map(id => store.agentById(id)).filter(Boolean)
 
-  const handOut = async () => {
+  // Everyone who can be given work, the rota ticked (or everyone, with no rota).
+  const team = store.activeAgents().filter(a => a.role !== 'owner')
+  const handOut = async (agentIds) => {
     setBusy(true)
     try {
-      const res = await api.assignUnowned(side)
+      const res = await api.assignUnowned(side, agentIds)
       store.toast(res.assigned
         ? `Assigned: ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
         : 'Nothing to assign')
@@ -58,7 +60,8 @@ export default function UnassignedBar({ store, side, go, onShow }) {
   const ask = () => store.openModal({
     kind: 'confirm',
     title: `Assign ${n} ${word} equally to:`,
-    lines: turn.map(a => a.name),
+    choices: team.map(a => ({ id: a.id, label: a.name })),
+    chosen: turn.filter(a => team.some(x => x.id === a.id)).map(a => a.id),
     confirmLabel: 'Assign',
     onConfirm: handOut,
   })
@@ -68,9 +71,7 @@ export default function UnassignedBar({ store, side, go, onShow }) {
       <span className="unas-t"><b>{n.toLocaleString('en-IN')}</b> {word} {n === 1 ? 'is' : 'are'} unassigned</span>
       <span className="unas-acts">
         {onShow && <Button variant="ghost" size="sm" onClick={onShow}>Show</Button>}
-        {turn.length
-          ? <Button variant="primary" size="sm" disabled={busy} onClick={ask}>{busy ? 'Assigning…' : 'Assign'}</Button>
-          : <Button variant="secondary" size="sm" onClick={() => go('settings', { settingsSection: 'routing', settingsSide: side })}>Assign</Button>}
+        <Button variant="primary" size="sm" disabled={busy || !team.length} onClick={ask}>{busy ? 'Assigning…' : 'Assign'}</Button>
       </span>
     </div>
   )

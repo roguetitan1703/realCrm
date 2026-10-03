@@ -796,7 +796,7 @@ export const api = {
   // Open records per person, on ONE side — the number an assign screen should
   // show is the one for the work it is handing out.
   agentLoads: (side) => request(`/team/loads?side=${side === 'owners' ? 'owners' : 'leads'}`, { fresh: true }),
-  assignUnowned: (side) => request('/team/routing/assign-unowned', { method: 'POST', body: JSON.stringify({ side }) }),
+  assignUnowned: (side, agentIds) => request('/team/routing/assign-unowned', { method: 'POST', body: JSON.stringify({ side, agentIds }) }),
   // What this person is still holding, before anything is moved.
   workloadOf: (userId) => request(`/team/users/${encodeURIComponent(userId)}/workload`, { fresh: true }),
   // Hand their OPEN work to several people at once — see distributeWork().

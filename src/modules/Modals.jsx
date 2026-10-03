@@ -1044,11 +1044,26 @@ function RejectLeadModal({ store, leadId }) {
 // one go. `lines` names what it will touch, so the confirm is about something
 // the person can see. Its buttons are the modal's sticky action row, so it
 // works on a phone as it does at a desk.
-function ConfirmModal({ store, title, lines, confirmLabel, cancelLabel, onConfirm }) {
+// `choices` [{ id, label }] turns the list into tick boxes (`chosen`, or all,
+// ticked to start); onConfirm then gets the ticked ids, and nothing ticked
+// cannot be confirmed.
+function ConfirmModal({ store, title, lines, choices, chosen, confirmLabel, cancelLabel, onConfirm }) {
   const list = lines || []
+  const [picked, setPicked] = useState(() => new Set(chosen?.length ? chosen : (choices || []).map(c => c.id)))
+  const flip = (id) => setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
   return (
     <Modal title={title} onClose={store.closeModal} width={420}>
-      {list.length > 0 && (
+      {choices?.length > 0 && (
+        <div className="confirm-lines">
+          {choices.map(c => (
+            <label key={c.id} className="confirm-line confirm-pick">
+              <input type="checkbox" checked={picked.has(c.id)} onChange={() => flip(c.id)} />
+              {c.label}
+            </label>
+          ))}
+        </div>
+      )}
+      {!choices?.length && list.length > 0 && (
         <div className="confirm-lines">
           {list.slice(0, 8).map((l, i) => <div key={i} className="confirm-line">{l}</div>)}
           {list.length > 8 && <div className="confirm-line u-muted">and {list.length - 8} more</div>}
@@ -1056,8 +1071,8 @@ function ConfirmModal({ store, title, lines, confirmLabel, cancelLabel, onConfir
       )}
       <div className="lc-foot">
         <Button onClick={store.closeModal}>{cancelLabel || 'Cancel'}</Button>
-        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }}
-          onClick={() => { store.closeModal(); onConfirm?.() }}>
+        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} disabled={!!choices?.length && !picked.size}
+          onClick={() => { store.closeModal(); onConfirm?.(choices?.length ? [...picked] : undefined) }}>
           {confirmLabel || 'Confirm'}
         </Button>
       </div>
