@@ -130,8 +130,12 @@ function OwnerRecord({ store, ownerId, topBar, phone, onBack, go }) {
           // Same reasoning as a lead: reaching the person is why this page is
           // open, so it is full width on the record rather than behind a menu.
           primary={[
+            // RECORD CALL on a desk: nothing dials from a desk, and "Call" sent
+            // callers to Add remark instead, so the call itself was never logged.
             ...(o.phone ? [
-              { label: 'Call', icon: 'phone', onClick: () => contact('call') },
+              phone
+                ? { label: 'Call', icon: 'phone', onClick: () => contact('call') }
+                : { label: 'Record call', icon: 'phone', onClick: () => store.openModal({ kind: 'logCall', recordType: 'owner', recordId: o.id, record: o }) },
               { label: 'WhatsApp', icon: 'wa', tone: 'wa', onClick: () => contact('wa') },
             ] : []),
             ...(o.email ? [{ label: 'Email', icon: 'mail', onClick: () => contact('email') }] : []),
@@ -305,9 +309,12 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
 
   const open = (o) => {
     store.cacheRecords('owner', [o])
-    setSel({ ownerId: o.id, ownerOpen: true })
+    // ON TOP OF the list's state, not instead of it. These replaced the whole
+    // selection, so the open project went with it and Back landed on the
+    // project cards instead of the project's list.
+    setSel(s => ({ ...s, ownerId: o.id, ownerOpen: true }))
   }
-  const back = () => setSel({ ownerOpen: false, ownerId: undefined })
+  const back = () => setSel(s => ({ ...s, ownerOpen: false, ownerId: undefined }))
 
   const bulkAssign = () => store.openModal({
     kind: 'bulkAssign', leadIds: [...selected], isOwner: true,

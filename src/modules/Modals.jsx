@@ -108,7 +108,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
       {m?.kind === 'scheduleFollowUp' && <ScheduleFollowUpModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} />}
+      {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} recordType={m.recordType} recordId={m.recordId} record={m.record} />}
       {m?.kind === 'closeDeal' && <CloseDealModal store={store} leadId={m.leadId} Modal={Modal} />}
       {m?.kind === 'agreement' && <AgreementModal store={store} mode={m.mode} agreementId={m.agreementId} propertyId={m.propertyId} onDone={m.onDone} Modal={Modal} />}
       {m?.kind === 'ownerEdit' && <OwnerEditModal store={store} propId={m.propId} />}
@@ -548,16 +548,25 @@ function AttachPropModal({ store, leadId }) {
 // The old modal put Call / WhatsApp / SMS behind one button, so every outreach
 // started with a choice nobody needed to make. WhatsApp is its own composer;
 // SMS is gone.
-function LogCallModal({ store, leadId }) {
-  const l = store.lookup('lead', leadId)
-  const [outcome, setOutcome] = useState(CALL_OUTCOMES[0].value)
+//
+// RECORD CALL is the desk's main button on a lead and on an owner. It used to
+// read "Call" and open the dial-and-log confirm, which on a desk dials nothing:
+// callers backed out of it and wrote what happened as a plain remark, so the
+// call itself was never counted. The outcome starts empty so nobody records
+// "Connected" by not touching the menu.
+function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) {
+  const id = recordId || leadId
+  // `record` when the opener holds it: a record reached by a link is fetched,
+  // not cached, and the lookup alone would draw nothing.
+  const l = store.lookup(recordType, id) || record
+  const [outcome, setOutcome] = useState('')
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   if (!l) return null
 
   const save = () => {
     setBusy(true)
-    const label = labelForOutcome(outcome)
+    const label = labelForOutcome(outcome) || 'Call recorded'
     // The KEY goes to the server, the label only to the toast. This used to
     // send `label`, so metadata.outcome held "No answer" — display copy doing
     // the work of a key, which meant renaming an option silently orphaned every
@@ -570,20 +579,21 @@ function LogCallModal({ store, leadId }) {
     api.logContactAction(l.id, 'call')
       .then(res => {
         const evtId = res?.timeline_event?.id
-        return evtId ? api.editRemark(l.id, evtId, text.trim(), outcome) : null
+        return evtId ? api.editRemark(l.id, evtId, text.trim(), outcome || undefined) : null
       })
       .catch(err => console.warn('[Call log] error:', err.message))
-      .finally(() => { store.settled?.(); store.toast(`Call logged · ${label}`); store.closeModal() })
+      .finally(() => { store.settled?.(); store.toast(label); store.closeModal() })
   }
 
   return (
-    <Modal title={`Log a call with ${l.name.split(' ')[0]}`} onClose={store.closeModal} width={430}>
+    <Modal title={`Record call · ${(l.name || l.phone || '').split(' ')[0]}`} onClose={store.closeModal} width={430}>
       <div className="lc-who">
         <span className="mono-num">{l.phone || '—'}</span>
-        <StageTag stage={l.stage} />
+        <StageTag stage={l.stage || 'New'} />
       </div>
-      <Field label="Outcome">
+      <Field label="What happened">
         <select className="input" value={outcome} onChange={e => setOutcome(e.target.value)}>
+          <option value="">Pick one</option>
           {CALL_OUTCOMES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </Field>
@@ -592,8 +602,8 @@ function LogCallModal({ store, leadId }) {
       </Field>
       <div className="lc-foot">
         <Button onClick={store.closeModal}>Cancel</Button>
-        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} disabled={busy} onClick={save}>
-          {busy ? 'Saving…' : 'Log call'}
+        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} disabled={busy || (!outcome && !text.trim())} onClick={save}>
+          {busy ? 'Saving…' : 'Save'}
         </Button>
       </div>
     </Modal>

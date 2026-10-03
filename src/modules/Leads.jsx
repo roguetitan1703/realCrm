@@ -672,8 +672,11 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
             ...(phone && isSiteVisit(l.followUp)
               ? [{ label: 'Log visit', icon: 'camera', onClick: () => store.openModal({ kind: 'visitProof', leadId: l.id }) }]
               : []),
+            // RECORD CALL on a desk — see Owners.jsx: nothing dials from a desk.
             ...(l.phone ? [
-              { label: 'Call', icon: 'phone', onClick: () => contact('call') },
+              phone
+                ? { label: 'Call', icon: 'phone', onClick: () => contact('call') }
+                : { label: 'Record call', icon: 'phone', onClick: () => store.openModal({ kind: 'logCall', recordType: 'lead', recordId: l.id, record: l }) },
               { label: 'WhatsApp', icon: 'wa', tone: 'wa', onClick: () => contact('wa') },
             ] : []),
             // Email steps aside for Log visit. The row is three across on a

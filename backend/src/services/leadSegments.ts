@@ -105,6 +105,28 @@ export const lastPersonActivity = (table = 'crm_leads') => sql`
                AND coalesce(e.author, 'System') <> 'System'), ${sql(table)}.created_at)`;
 
 /**
+ * WHAT SOMEBODY LAST WROTE ON THIS RECORD, for the list row.
+ *
+ * Words a person wrote, never the system's: a remark, the remark saved on a
+ * call or message (its description, once it is no longer "Call initiated"),
+ * and the free-text note an imported sheet carried. Both Leads and Calling
+ * print it under the status, because firms asked not to open each record to
+ * read what was said. One expression, so the two lists cannot disagree about
+ * what counts as a remark. The `_at` twin is the same row's time.
+ */
+const LAST_REMARK_ROW = (table: string) => sql`
+  FROM crm_timeline_events e
+  WHERE e.record_id = ${sql(table)}.id AND e.tenant_id = ${sql(table)}.tenant_id
+    AND coalesce(e.author, 'System') <> 'System'
+    AND coalesce(btrim(e.description), '') <> ''
+    AND (e.type = 'remark'
+      OR (e.type IN ('call', 'whatsapp', 'sms', 'email') AND e.description NOT ILIKE '% initiated')
+      OR (e.type = 'note' AND e.title = 'Note'))
+  ORDER BY e.timestamp DESC LIMIT 1`;
+export const lastRemark = (table = 'crm_leads') => sql`(SELECT e.description ${LAST_REMARK_ROW(table)})`;
+export const lastRemarkAt = (table = 'crm_leads') => sql`(SELECT e.timestamp ${LAST_REMARK_ROW(table)})`;
+
+/**
  * NOT HANDED ON IN THE LAST `days` DAYS.
  *
  * The idle reassignment sweep's second condition, and it is not optional.

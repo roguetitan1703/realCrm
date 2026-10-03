@@ -649,7 +649,9 @@ input,textarea,select{font-family:inherit}
 /* standardized table cell renderers (used by MODULE_DEFINITION columns) */
 .cell-txt{font-size:13px}
 .cell-quiet{font-size:13px;color:var(--muted)}
-/* Why a lead was rejected, under its status. Two lines at most; the whole text is the title. */
+/* Under the status on a list row: why it was rejected, and the last remark. Two lines at most; the whole text is the title. */
+.rej-note .rn-why{color:var(--ink);font-weight:600}
+.rej-note .rn-when{color:var(--faint)}
 .rej-note{margin-top:4px;max-width:240px;font-size:12px;line-height:1.35;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .prow .rej-note,.rc-facts + .rej-note{max-width:none}
 .cell-agent{display:flex;align-items:center;gap:8px;font-size:13px}

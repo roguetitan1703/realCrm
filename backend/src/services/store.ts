@@ -15,7 +15,7 @@ import { agents as seedAgents, properties as seedProps, leads as seedLeads } fro
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { finalStageOf, stageLabelIn, LABELLED_LEAD_STAGES } from '../../../src/data/pipelineRoles.js';
 import { audit } from './audit.js';
-import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, lastPersonActivity, type LeadSegment } from './leadSegments.js';
+import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, lastPersonActivity, lastRemark, lastRemarkAt, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
 import { suggestPassword } from './auth.js';
@@ -614,9 +614,9 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     // Only where the list query asked (listLeads). The status line reads
     // "Interested → Rejected: Budget mismatch: wants 2BHK under 40L"; the row
     // wants what follows the status, which is the reason and the agent's words.
-    rejectionNote: r.rejection_line == null && r.rejection_remark == null ? undefined
-      : ([(/^[^→]*→[^:]*:\s*(.+)$/s.exec(String(r.rejection_line || ''))?.[1] || '').trim(), String(r.rejection_remark || '').trim()]
-          .filter((s, i, a) => s && a.indexOf(s) === i).join(' · ') || null),
+    rejectionNote: r.rejection_line == null ? undefined
+      : ((/^[^→]*→[^:]*:\s*(.+)$/s.exec(String(r.rejection_line))?.[1] || '').trim() || null),
+    ...lastRemarkOf(r),
     followUp: r.follow_up || null,
     overdue: Boolean(r.overdue),
     importBatchId: r.import_batch_id || undefined,
@@ -3009,22 +3009,17 @@ export async function listLeads(opts: LeadFilterOpts & {
                             ${lastPersonActivity()} AS last_activity_at,
                             -- WHY IT WAS REJECTED, on the row. The reason column
                             -- holds only the picked reason; what the agent typed
-                            -- under it lives on the status line, and remarks
-                            -- written after. The list showed neither, so reading
-                            -- why meant opening every rejected lead.
+                            -- under it lives on the status line. The list showed
+                            -- neither, so reading why meant opening every
+                            -- rejected lead.
                             ${sql`CASE WHEN crm_leads.stage = ${REJECTED_STATUS} THEN (
                               SELECT ev.description FROM crm_timeline_events ev
                                WHERE ev.tenant_id = crm_leads.tenant_id AND ev.record_id = crm_leads.id
                                  AND ev.type = 'stage_change' AND ev.metadata->>'to' = ${REJECTED_STATUS}
                                ORDER BY ev.timestamp DESC LIMIT 1) END`} AS rejection_line,
-                            ${sql`CASE WHEN crm_leads.stage = ${REJECTED_STATUS} THEN (
-                              SELECT ev.description FROM crm_timeline_events ev
-                               WHERE ev.tenant_id = crm_leads.tenant_id AND ev.record_id = crm_leads.id
-                                 AND ev.type = 'remark' AND coalesce(ev.description, '') <> ''
-                                 AND ev.timestamp >= coalesce((SELECT max(s.timestamp) FROM crm_timeline_events s
-                                   WHERE s.tenant_id = crm_leads.tenant_id AND s.record_id = crm_leads.id
-                                     AND s.type = 'stage_change' AND s.metadata->>'to' = ${REJECTED_STATUS}), crm_leads.updated_at)
-                               ORDER BY ev.timestamp DESC LIMIT 1) END`} AS rejection_remark
+                            -- The last thing anybody wrote on it (leadSegments).
+                            ${lastRemark()} AS last_remark,
+                            ${lastRemarkAt()} AS last_remark_at
            FROM crm_leads WHERE ${clause} ORDER BY ${col} ${dir} NULLS LAST, id LIMIT ${limit} OFFSET ${offset}`,
     sql`SELECT count(*)::int AS n FROM crm_leads WHERE ${clause}`,
   ]);
@@ -3291,8 +3286,20 @@ function ownerScope(mine?: boolean) {
   return mine ? sql`agent_id = ${me}` : sql`(agent_id = ${me} OR created_by = ${me})`;
 }
 
+/** The list row's last remark (leadSegments.lastRemark), where the query
+ *  asked for it; absent otherwise, never an empty claim. */
+function lastRemarkOf(r: any): any {
+  if (r.last_remark === undefined) return {};
+  return {
+    lastRemark: r.last_remark || null,
+    lastRemarkAt: r.last_remark_at == null ? null
+      : (r.last_remark_at instanceof Date ? r.last_remark_at.toISOString() : String(r.last_remark_at)),
+  };
+}
+
 function rowToOwner(r: any): any {
   return {
+    ...lastRemarkOf(r),
     // The flat this row became when it was converted (services/agreements.ts).
     convertedPropertyId: r.converted_property_id || null,
     id: r.id,
@@ -3648,7 +3655,8 @@ export async function listOwners(opts: OwnerListOpts = {}): Promise<{ rows: any[
   const [rows, totalRows] = await Promise.all([
     // `id` breaks ties, so two owners with one name cannot trade places
     // between refreshes.
-    sql`SELECT * FROM crm_owners WHERE ${clause} ORDER BY ${orderCol} ${dir}, id LIMIT ${limit} OFFSET ${offset}`,
+    sql`SELECT crm_owners.*, ${lastRemark('crm_owners')} AS last_remark, ${lastRemarkAt('crm_owners')} AS last_remark_at
+          FROM crm_owners WHERE ${clause} ORDER BY ${orderCol} ${dir}, id LIMIT ${limit} OFFSET ${offset}`,
     sql`SELECT count(*)::int AS n FROM crm_owners WHERE ${clause}`,
   ]);
   return { rows: rows.map(rowToOwner), total: totalRows[0]?.n || 0, page, limit };

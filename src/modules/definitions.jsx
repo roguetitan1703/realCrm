@@ -59,12 +59,23 @@ const ownerStages = (store) => (store?.state?.settings?.ownerStages?.length
   ? store.state.settings.ownerStages
   : OWNER_STATUSES).filter(s => !OWNER_TERMINAL_STATUSES.includes(s))
 
-// Why a rejected lead was rejected, under its status on every list row: the
-// picked reason, what the agent typed with it, and any remark since.
-function RejectionNote({ lead }) {
-  if (lead.stage !== REJECTED_STATUS) return null
-  const text = lead.rejectionNote || lead.rejectionReason
-  return text ? <div className="rej-note" title={text}>{text}</div> : null
+// UNDER THE STATUS ON EVERY LIST ROW, leads and calling: why a rejected lead
+// was rejected (the reason and what was typed with it), and the last thing
+// anybody wrote on the record. Firms asked for both so that nobody opens each
+// record to read what was said.
+function RowNote({ record }) {
+  const why = record.stage === REJECTED_STATUS ? (record.rejectionNote || record.rejectionReason) : null
+  const last = record.lastRemark && record.lastRemark !== why ? record.lastRemark : null
+  if (!why && !last) return null
+  const when = last && record.lastRemarkAt ? whenLabel(record.lastRemarkAt) : null
+  return (
+    <div className="rej-note" title={[why, last && `${last}${when ? ` (${when})` : ''}`].filter(Boolean).join('\n')}>
+      {why && <span className="rn-why">{why}</span>}
+      {why && last && ' · '}
+      {last}
+      {when && <span className="rn-when"> · {when}</span>}
+    </div>
+  )
 }
 
 // The status menu on every owner row: the walk, then each ending by name.
@@ -263,7 +274,7 @@ export const LEADS_DEF = {
           onSet={(stage) => store.setStage(l.id, stage)}
           onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
         />
-        <RejectionNote lead={l} />
+        <RowNote record={l} />
       </div>
     ) },
     // WHERE THEY ARRIVED, AND HOW MANY PORTALS SINCE. The column is attribution
@@ -384,8 +395,8 @@ export const LEADS_DEF = {
     // first one. Four ways to do two things.
     { id: 'whatsapp', tier: 'quick', icon: 'wa', label: 'WhatsApp',
       run: (store, l) => store.openWhatsApp(null, l.id) },
-    { id: 'logCall', tier: 'quick', icon: 'phone', label: 'Log call',
-      run: (store, l) => store.openModal({ kind: 'logCall', leadId: l.id }) },
+    // Recording a call is the record's main button on a desk ("Record call",
+    // Leads.jsx), so it is not repeated here.
     // Scheduling was deliberately NOT here while the follow-up card owned it —
     // see the note above. The card is gone on a phone (it rendered above the
     // record's own identity, restating what the action bar already offers), and
@@ -519,7 +530,7 @@ export const LEADS_DEF = {
             This line is one row with an ellipsis, so every part it carries is
             room taken from `interest`, which sits last and is cut first. */}
         {reqShort(l.req, { budget: false }) && <div className="prow-req">{reqShort(l.req, { budget: false })}</div>}
-        <RejectionNote lead={l} />
+        <RowNote record={l} />
         <div className="prow-foot">
           <div className="prow-meta">
             {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
@@ -558,7 +569,7 @@ export const LEADS_DEF = {
         </div>
         <div className="rc-sub mono-num">{l.phone}</div>
         <div className="rc-facts"><span>{reqShort(l.req)}</span></div>
-        <RejectionNote lead={l} />
+        <RowNote record={l} />
         <div className="rc-foot">
           <span className="rc-money"><Money>{budgetRange(l.req)}</Money></span>
           {a ? <span className="rc-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
@@ -671,7 +682,7 @@ export const OWNERS_DEF = {
       if (!cb) return <span className="cell-quiet">{o.lastCallAt ? 'No callback' : 'Not called'}</span>
       return cb.tone === 'overdue' ? <Overdue>{cb.label}</Overdue> : <span className="source">{cb.label}</span>
     } },
-    { key: 'stage', label: 'Status', sortable: true, render: (o, store) => ownerStageCell(o, store) },
+    { key: 'stage', label: 'Status', sortable: true, render: (o, store) => <div>{ownerStageCell(o, store)}<RowNote record={o} /></div> },
     { key: 'agent', label: 'Sales Executive', render: (o, store) => (
       <OwnerCell
         record={o} store={store} canAssign={canAssignLead(store.state.role)}
@@ -707,6 +718,7 @@ export const OWNERS_DEF = {
       </div>
       <div className="rc-sub mono-num">{o.phone}</div>
       <div className="rc-facts"><span>{[o.project, o.unitLabel || o.unitRef].filter(Boolean).join(' · ') || '—'}</span></div>
+      <RowNote record={o} />
       <div className="rc-foot">
         {(() => { const a = store.agentById(o.agentId); return a ? <span className="rc-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned /> })()}
       </div>
@@ -718,13 +730,8 @@ export const OWNERS_DEF = {
   // "Callback" status with nowhere to record when — so the status meant
   // someone had said "call me back" and nothing ever surfaced them again.
   actions: [
-    { id: 'call', tier: 'quick', icon: 'phone', label: 'Call',
-      when: (o) => !!o.phone,
-      sub: (o) => (o.lastCallAt ? `Last called ${whenLabel(o.lastCallAt)}` : 'Not called yet'),
-      run: (store, o) => store.openModal({
-        kind: 'contact', channel: 'call', name: o.name, phone: o.phone, email: o.email,
-        recordType: 'owner', recordId: o.id,
-      }) },
+    // Call is the record's main button (Record call on a desk, Call on a
+    // phone — Owners.jsx), and the callback card says when it was last called.
     { id: 'whatsapp', tier: 'quick', icon: 'wa', label: 'WhatsApp',
       when: (o) => !!o.phone,
       run: (store, o) => store.openModal({
@@ -762,6 +769,7 @@ export const OWNERS_DEF = {
           {ownerStageCell(o, store)}
         </div>
         {(o.project || o.unitLabel || o.unitRef) && <div className="prow-req">{[o.project, o.unitLabel || o.unitRef].filter(Boolean).join(' · ')}</div>}
+        <RowNote record={o} />
         <div className="prow-foot">
           <div className="prow-meta">
             {a ? <span className="prow-agent"><Avatar agent={a} size="sm" />{a.first}</span> : <Unassigned />}
