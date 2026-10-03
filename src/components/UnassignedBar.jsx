@@ -46,31 +46,31 @@ export default function UnassignedBar({ store, side, go, onShow }) {
     try {
       const res = await api.assignUnowned(side)
       store.toast(res.assigned
-        ? `Shared: ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
-        : 'Nothing left to share')
+        ? `Assigned: ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
+        : 'Nothing to assign')
       setAt(x => x + 1)
       store.settled?.()
     } catch (err) {
-      store.toast(String(err.message || 'Could not share them').replace(/^API Error: \d+ [^—]*— ?/, ''), 'warn')
+      store.toast(String(err.message || 'Could not assign them').replace(/^API Error: \d+ [^—]*— ?/, ''), 'warn')
     }
     setBusy(false)
   }
   const ask = () => store.openModal({
     kind: 'confirm',
-    title: `Share ${n} ${word} equally between these agents?`,
+    title: `Assign ${n} ${word} equally to:`,
     lines: turn.map(a => a.name),
-    confirmLabel: 'Share them',
+    confirmLabel: 'Assign',
     onConfirm: handOut,
   })
 
   return (
     <div className="unas-bar">
-      <span className="unas-t"><b>{n.toLocaleString('en-IN')}</b> {word} {n === 1 ? 'is' : 'are'} not given to any agent yet</span>
+      <span className="unas-t"><b>{n.toLocaleString('en-IN')}</b> {word} {n === 1 ? 'is' : 'are'} unassigned</span>
       <span className="unas-acts">
-        {onShow && <Button variant="ghost" size="sm" onClick={onShow}>See {n === 1 ? 'it' : 'them'}</Button>}
+        {onShow && <Button variant="ghost" size="sm" onClick={onShow}>Show</Button>}
         {turn.length
-          ? <Button variant="primary" size="sm" disabled={busy} onClick={ask}>{busy ? 'Sharing…' : 'Share with agents'}</Button>
-          : <Button variant="secondary" size="sm" onClick={() => go('settings', { settingsSection: 'routing', settingsSide: side })}>Pick agents to share with</Button>}
+          ? <Button variant="primary" size="sm" disabled={busy} onClick={ask}>{busy ? 'Assigning…' : 'Assign'}</Button>
+          : <Button variant="secondary" size="sm" onClick={() => go('settings', { settingsSection: 'routing', settingsSide: side })}>Assign</Button>}
       </span>
     </div>
   )
