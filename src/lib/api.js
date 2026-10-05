@@ -37,10 +37,19 @@ const BASE_URL = resolveBaseUrl();
 // sends no auth header on <img src>, so that route sits outside the API's auth
 // surface. Postgres stores the object KEY, never a URL, so if delivery ever
 // moves to a CDN hostname this one function is the only thing that changes.
+//
+// LISTING photos and videos (`<firm>/property/…`) come from our media domain
+// when VITE_MEDIA_URL is set (workers/media): straight from storage, cached by
+// Cloudflare near the viewer, and not streamed out of EC2 as billed data out.
+// Agreements and visit selfies stay on /files. The API redirects old /files
+// links for listing media the same way, so both routes agree.
+const MEDIA_URL = String(import.meta.env.VITE_MEDIA_URL || '').trim().replace(/\/+$/, '');
 export function fileUrl(key) {
   if (!key) return '';
+  const path = String(key).split('/').map(encodeURIComponent).join('/');
+  if (MEDIA_URL && /^[A-Za-z0-9_-]+\/property\//.test(String(key))) return `${MEDIA_URL}/${path}`;
   const origin = BASE_URL.replace(/\/api\/v1$/, '');
-  return `${origin}/files/${String(key).split('/').map(encodeURIComponent).join('/')}`;
+  return `${origin}/files/${path}`;
 }
 
 // ---------------------------------------------------------------------------

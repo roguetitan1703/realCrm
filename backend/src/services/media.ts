@@ -164,6 +164,35 @@ export async function presignUpload(key: string, contentType: string): Promise<s
   return getSignedUrl(s3(), cmd, { expiresIn: UPLOAD_URL_TTL_SECONDS });
 }
 
+/**
+ * OUR OWN DOMAIN FOR LISTING MEDIA (workers/media). Set both and uploads go to
+ * the Worker on MEDIA_PUBLIC_BASE instead of <account>.r2.cloudflarestorage.com,
+ * which office firewalls block as "cloud storage", and listing photos are read
+ * from there instead of being streamed out of EC2 as billed data out. Unset,
+ * everything works as before — presigned R2 PUTs and /files.
+ */
+export function mediaDomain(): string | null {
+  const base = String(process.env.MEDIA_PUBLIC_BASE || '').trim().replace(/\/+$/, '');
+  return base && process.env.MEDIA_UPLOAD_SECRET ? base : null;
+}
+
+/** Listing photos and videos — the only kind the media domain serves. */
+export const isPublicMediaKey = (key: string) => /^[A-Za-z0-9_-]+\/property\//.test(key);
+
+/**
+ * An upload link on the media domain: the key, the type and the expiry, signed
+ * with MEDIA_UPLOAD_SECRET. The Worker recomputes the signature and refuses
+ * anything else — the same guarantees as a presigned R2 PUT (this key, this
+ * type, for five minutes), on a hostname the client's network can reach.
+ */
+export function workerUploadUrl(base: string, key: string, contentType: string): string {
+  const exp = Math.floor(Date.now() / 1000) + UPLOAD_URL_TTL_SECONDS;
+  const sig = crypto.createHmac('sha256', String(process.env.MEDIA_UPLOAD_SECRET))
+    .update(`${key}\n${contentType}\n${exp}`).digest('hex');
+  const path = key.split('/').map(encodeURIComponent).join('/');
+  return `${base}/upload/${path}?ct=${encodeURIComponent(contentType)}&exp=${exp}&sig=${sig}`;
+}
+
 export interface FetchedObject {
   body: NodeJS.ReadableStream;
   contentType: string;

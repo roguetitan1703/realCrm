@@ -93,3 +93,8 @@ backups/
 # .env.example and .env.template, which are committed on purpose, and a blanket
 # pattern this far down the file silently overrides both.
 
+
+# Cloudflare Worker local state and secrets (workers/media)
+.wrangler/
+.dev.vars
+

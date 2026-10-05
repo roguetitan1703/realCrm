@@ -37,9 +37,12 @@ import {
   IMMUTABLE_CACHE_CONTROL,
   buildMediaKey,
   fetchObject,
+  isPublicMediaKey,
   isSafeKey,
   mediaConfigured,
+  mediaDomain,
   presignUpload,
+  workerUploadUrl,
 } from '../services/media';
 import { audit } from '../services/audit';
 
@@ -107,7 +110,9 @@ mediaRouter.post('/upload-url', async (req: Request, res: Response) => {
     // to a safe bucket by buildMediaKey rather than trusted.
     const kind = String(req.body?.kind || 'misc');
     const key = buildMediaKey(req.tenantId!, kind, ext);
-    const uploadUrl = await presignUpload(key, contentType);
+    // Our own domain when it is configured (services/media.ts mediaDomain).
+    const domain = mediaDomain();
+    const uploadUrl = domain ? workerUploadUrl(domain, key, contentType) : await presignUpload(key, contentType);
     return res.json({ key, uploadUrl, expiresIn: 300 });
   } catch (e: any) {
     console.error('[media] presign failed:', e?.message);
@@ -131,6 +136,17 @@ filesRouter.get(/^\/(.+)$/, async (req: Request, res: Response) => {
 
     const key = decodeURIComponent((req.params as any)[0] || '');
     if (!isSafeKey(key)) return res.status(400).send('Bad key');
+
+    // A listing photo or video lives on the media domain now. Links already
+    // out there (old WhatsApp messages, a cached page) still arrive here, and
+    // are sent on rather than streamed out of EC2 as billed data out.
+    const domain = mediaDomain();
+    if (domain && isPublicMediaKey(key)) {
+      // 302, held a day: a 301 is kept by browsers for good, and this has to
+      // stay reversible by unsetting MEDIA_PUBLIC_BASE.
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return res.redirect(302,`${domain}/${key.split('/').map(encodeURIComponent).join('/')}`);
+    }
 
     const inm = req.headers['if-none-match'] as string | undefined;
 

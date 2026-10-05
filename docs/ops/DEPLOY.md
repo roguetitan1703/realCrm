@@ -237,6 +237,35 @@ hostname later is a one-line frontend change with no data migration.
 5. Sign in as another agent → the entry is visible but the photo is not
    ("Proof on file"). Owners and managers see every photo.
 
+### Listing media on our domain — `media.re.delpat.in` (workers/media)
+
+Two problems with the setup above: uploads go to
+`<account>.r2.cloudflarestorage.com`, which office firewalls and antivirus
+block as "cloud storage" (a client's desk sat on "uploading" for ever), and
+every photo view and video play streams out of EC2, billed by AWS as data out.
+
+The Worker `re-media` fixes both, on our own domain, bound straight to the
+bucket. **Listing** photos and videos are read from it; **every** upload goes to
+it with a ticket the API signs. Agreements and visit selfies are still READ only
+through `/files` (sign-in checked). Nothing changes until the env below is set,
+and unsetting it puts everything back.
+
+Once, in this order (delpat.in's DNS must be on Cloudflare; it is):
+
+1. `npx wrangler login` (or a token with Workers Scripts:Edit, Workers R2
+   Storage:Edit, and on delpat.in Workers Routes:Edit + DNS:Edit), then
+   `npm run media:deploy`. Cloudflare creates the `media.re.delpat.in` record.
+2. Make a secret (`openssl rand -hex 32`) and give it to the Worker:
+   `npx wrangler secret put UPLOAD_SECRET --config workers/media/wrangler.toml`.
+3. Check: `curl -I https://media.re.delpat.in/<a real <firm>/property/... key>`
+   → 200, `content-type: image/jpeg`. An `/agreement/` key → 404.
+4. API (`.env.production` on EC2): `MEDIA_PUBLIC_BASE=https://media.re.delpat.in`
+   and `MEDIA_UPLOAD_SECRET=<the same secret>`, then deploy/restart.
+   Uploads now go to the Worker; old `/files` links to listing media 302 there.
+5. Vercel, Production: `VITE_MEDIA_URL=https://media.re.delpat.in`, redeploy.
+
+To undo: remove the vars in 4 and 5. The Worker can stay; nothing reads it.
+
 ---
 
 ## The development backend, on the same EC2 box

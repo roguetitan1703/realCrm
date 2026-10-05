@@ -26,6 +26,8 @@
     "keys:check": "tsx backend/src/scripts/integration-keys.ts",
     "link:owners": "tsx backend/src/scripts/link-listing-owners.ts",
     "stages:calling": "tsx backend/src/scripts/calling-stages.ts",
+    "media:dev": "npx -y wrangler@4 dev --config workers/media/wrangler.toml --local --port 8787",
+    "media:deploy": "npx -y wrangler@4 deploy --config workers/media/wrangler.toml",
     "check:names": "eslint src scripts"
   },
   "dependencies": {
