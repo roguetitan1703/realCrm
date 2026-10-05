@@ -76,7 +76,9 @@ function drawWatermark(ctx, w, h, lines) {
 
 /**
  * THE FIRM'S MARK on a LISTING photo: its logo and its name, together, in the
- * bottom-right corner on a light label — the way a brokerage signs its photos.
+ * top-left corner on a light label — the way a brokerage signs its photos, and
+ * the first thing a client's eye lands on. (It started bottom-right and small;
+ * firms wanted it more prominent and at the top.)
  *
  * It replaced two faint copies of the name written across the frame at an
  * angle. Firms said that read like a draft stamp on a Word document; it carried
@@ -102,14 +104,14 @@ function loadLogo(url) {
   return logoCache.get(url)
 }
 
-function drawBrandMark(ctx, w, h, firmName, logo) {
+function drawBrandMark(ctx, w, h, firmName, logo, k = 1) {
   const name = (firmName || '').trim()
   if (!name && !logo) return
   const short = Math.min(w, h)
-  const pad = Math.round(short * 0.03)
-  const logoH = Math.max(26, Math.round(short * 0.07))
-  const inner = Math.round(logoH * 0.22)
-  const font = Math.max(13, Math.round(logoH * 0.46))
+  const pad = Math.round(short * 0.035)
+  const logoH = Math.round(Math.max(40, short * 0.11) * k)
+  const inner = Math.round(logoH * 0.2)
+  const font = Math.round(Math.max(18, logoH * 0.5))
   const logoW = logo ? Math.min(Math.round(logoH * (logo.width / logo.height || 1)), logoH * 3) : 0
   ctx.save()
   ctx.font = `700 ${font}px system-ui, -apple-system, "Segoe UI", sans-serif`
@@ -117,8 +119,14 @@ function drawBrandMark(ctx, w, h, firmName, logo) {
   const gap = logo && name ? inner : 0
   const boxW = inner * 2 + logoW + gap + textW
   const boxH = logoH + inner * 2
-  const x = w - pad - boxW
-  const y = h - pad - boxH
+  // Never wider than the photo allows: a long firm name on a narrow portrait
+  // shot is drawn smaller rather than running off the edge.
+  if (boxW > w - pad * 2 && k > 0.4) {
+    ctx.restore()
+    return drawBrandMark(ctx, w, h, firmName, logo, k * ((w - pad * 2) / boxW) * 0.98)
+  }
+  const x = pad
+  const y = pad
   // A light label, so a logo in any colour reads on it and the photo under it
   // still shows through a little.
   ctx.shadowColor = 'rgba(0,0,0,0.18)'
