@@ -78,7 +78,7 @@ export function AgreementCard({ a, store, onChanged, show = {} }) {
       </div>
       <div className="agr-acts">
         {a.fileKey
-          ? <a className="btn btn-ghost btn-sm" href={fileUrl(a.fileKey)} target="_blank" rel="noreferrer"><Icon name="note" size={13} />{a.fileName || 'Agreement'}</a>
+          ? <a className="btn btn-ghost btn-sm" href={fileUrl(a.fileKey, a.fileTicket)} target="_blank" rel="noreferrer"><Icon name="note" size={13} />{a.fileName || 'Agreement'}</a>
           : live && (
             <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
               <Icon name="upload" size={13} />{busy ? 'Uploading…' : 'Attach agreement'}

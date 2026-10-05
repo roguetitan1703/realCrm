@@ -27,6 +27,7 @@
 import { sql } from './db.js';
 import { getContext } from './context.js';
 import { audit } from './audit.js';
+import { fileTicket } from './media.js';
 import {
   createProperty, prepareListing, updateLead, getLeadById, addTimelineEvent, getSettings, projectNorm,
   type ActorCtx,
@@ -98,7 +99,8 @@ export function rowToAgreement(r: any) {
     deposit: r.deposit != null ? Number(r.deposit) : null,
     startDate: r.start_ymd || null, endDate: r.end_ymd || null,
     daysLeft: r.days_left != null ? Number(r.days_left) : null,
-    fileKey: r.file_key || null, fileName: r.file_name || null,
+    // The ticket /files asks for before it opens an agreement (services/media.ts).
+    fileKey: r.file_key || null, fileName: r.file_name || null, fileTicket: fileTicket(r.file_key),
     renewsId: r.renews_id || null, notes: r.notes || null,
     createdAt: r.created_at, createdBy: r.created_by || null,
   };

@@ -164,34 +164,74 @@ export async function presignUpload(key: string, contentType: string): Promise<s
   return getSignedUrl(s3(), cmd, { expiresIn: UPLOAD_URL_TTL_SECONDS });
 }
 
-/**
- * OUR OWN DOMAIN FOR LISTING MEDIA (workers/media). Set both and uploads go to
- * the Worker on MEDIA_PUBLIC_BASE instead of <account>.r2.cloudflarestorage.com,
- * which office firewalls block as "cloud storage", and listing photos are read
- * from there instead of being streamed out of EC2 as billed data out. Unset,
- * everything works as before — presigned R2 PUTs and /files.
- */
-export function mediaDomain(): string | null {
-  const base = String(process.env.MEDIA_PUBLIC_BASE || '').trim().replace(/\/+$/, '');
+// ── WHERE A FILE IS READ FROM, AND WHERE IT IS WRITTEN ─────────────────────
+//
+//   listing photos/videos  READ  MEDIA_CDN_URL (cdn.delpat.in, the bucket's own
+//                                 custom domain): by name, permanent, cached by
+//                                 Cloudflare, no EC2. The gallery link is the
+//                                 gate — whoever opens it sees the photos.
+//   agreements, selfies    READ  /files on the API, ONLY with a ticket the API
+//                                 issues to whoever it shows the file to
+//                                 (fileTicket below). Expires.
+//   everything             WRITE MEDIA_UPLOAD_URL (upload.delpat.in, the
+//                                 workers/media Worker) with a 5-minute ticket,
+//                                 not <account>.r2.cloudflarestorage.com, which
+//                                 office firewalls block as "cloud storage".
+//
+// Each is off until its variable is set, and unsetting puts it back.
+
+const trimUrl = (v: unknown) => String(v || '').trim().replace(/\/+$/, '');
+
+/** Listing photos and videos — the only kind served publicly by name. */
+export const isPublicMediaKey = (key: string) => /^[A-Za-z0-9_-]+\/property\//.test(key);
+
+export const mediaCdn = (): string | null => trimUrl(process.env.MEDIA_CDN_URL) || null;
+
+export function uploadBase(): string | null {
+  const base = trimUrl(process.env.MEDIA_UPLOAD_URL);
   return base && process.env.MEDIA_UPLOAD_SECRET ? base : null;
 }
 
-/** Listing photos and videos — the only kind the media domain serves. */
-export const isPublicMediaKey = (key: string) => /^[A-Za-z0-9_-]+\/property\//.test(key);
-
 /**
- * An upload link on the media domain: the key, the type and the expiry, signed
- * with MEDIA_UPLOAD_SECRET. The Worker recomputes the signature and refuses
- * anything else — the same guarantees as a presigned R2 PUT (this key, this
- * type, for five minutes), on a hostname the client's network can reach.
+ * An upload link on our upload domain: the key, the type and the expiry,
+ * signed with MEDIA_UPLOAD_SECRET. The Worker recomputes the signature and
+ * refuses anything else — the same guarantees as a presigned R2 PUT (this key,
+ * this type, for five minutes), on a hostname the client's network can reach.
  */
 export function workerUploadUrl(base: string, key: string, contentType: string): string {
   const exp = Math.floor(Date.now() / 1000) + UPLOAD_URL_TTL_SECONDS;
   const sig = crypto.createHmac('sha256', String(process.env.MEDIA_UPLOAD_SECRET))
     .update(`${key}\n${contentType}\n${exp}`).digest('hex');
   const path = key.split('/').map(encodeURIComponent).join('/');
-  return `${base}/upload/${path}?ct=${encodeURIComponent(contentType)}&exp=${exp}&sig=${sig}`;
+  return `${base}/${path}?ct=${encodeURIComponent(contentType)}&exp=${exp}&sig=${sig}`;
 }
+
+// ── PRIVATE FILES: A TICKET, NOT JUST THE NAME ──────────────────────────────
+// /files used to hand any object to whoever held its name, with no sign-in —
+// an <img> cannot send one. Agreements and visit selfies are now read only with
+// `?t=<exp>.<sig>`, issued by the API next to the key, to a viewer it already
+// decided may see that file. Valid for 12 hours, rounded up to the hour so the
+// link stays the same for an hour and the browser cache still works.
+const TICKET_HOURS = 12;
+const ticketSig = (key: string, exp: number) =>
+  crypto.createHmac('sha256', String(process.env.JWT_SECRET)).update(`files\n${key}\n${exp}`).digest('hex').slice(0, 32);
+
+export function fileTicket(key: string | null | undefined): string | undefined {
+  if (!key || isPublicMediaKey(key) || !process.env.JWT_SECRET) return undefined;
+  const exp = Math.ceil((Date.now() / 1000 + TICKET_HOURS * 3600) / 3600) * 3600;
+  return `${exp}.${ticketSig(key, exp)}`;
+}
+
+export function ticketValid(key: string, ticket: unknown): boolean {
+  const m = /^(\d{10})\.([a-f0-9]{32})$/.exec(String(ticket || ''));
+  if (!m || Number(m[1]) * 1000 < Date.now()) return false;
+  const want = ticketSig(key, Number(m[1]));
+  return crypto.timingSafeEqual(Buffer.from(want), Buffer.from(m[2]));
+}
+
+/** Enforced only once FILES_REQUIRE_TICKET is set — after the frontend that
+ *  sends tickets is live, or agreements would stop opening in between. */
+export const ticketsRequired = () => /^(1|true|yes)$/i.test(String(process.env.FILES_REQUIRE_TICKET || ''));
 
 export interface FetchedObject {
   body: NodeJS.ReadableStream;

@@ -1,20 +1,24 @@
-# re-media — listing media and uploads on media.re.delpat.in. See src/index.js.
+# re-upload — uploads into the media bucket on upload.delpat.in. See src/index.js.
 #
-#   npm run media:dev      local, against a simulated bucket (no Cloudflare login)
-#   npm run media:deploy   to Cloudflare (needs `npx wrangler login` or a
+#   npm run media:dev      local, against a simulated bucket (no Cloudflare login;
+#                          put UPLOAD_SECRET=<anything> in workers/media/.dev.vars)
+#   npm run media:deploy   to Cloudflare (needs `npx wrangler login`, or a
 #                          CLOUDFLARE_API_TOKEN with Workers Scripts:Edit,
 #                          Workers R2 Storage:Edit, and on the delpat.in zone
 #                          Workers Routes:Edit + DNS:Edit)
 #   npx wrangler secret put UPLOAD_SECRET --config workers/media/wrangler.toml
 #                          once; the same value goes into the API's
 #                          MEDIA_UPLOAD_SECRET.
-name = "re-media"
+#
+# Reading is not this Worker's job: cdn.delpat.in (the bucket's custom domain)
+# serves listing media, the API's /files the rest.
+name = "re-upload"
 main = "src/index.js"
 compatibility_date = "2025-09-01"
 workers_dev = false
 
 # Cloudflare creates the DNS record for this itself.
-routes = [{ pattern = "media.re.delpat.in", custom_domain = true }]
+routes = [{ pattern = "upload.delpat.in", custom_domain = true }]
 
 # Both environments write to this one bucket; keys start with the firm's folder.
 [[r2_buckets]]

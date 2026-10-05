@@ -237,34 +237,42 @@ hostname later is a one-line frontend change with no data migration.
 5. Sign in as another agent → the entry is visible but the photo is not
    ("Proof on file"). Owners and managers see every photo.
 
-### Listing media on our domain — `media.re.delpat.in` (workers/media)
+### Media on our own domains
 
 Two problems with the setup above: uploads go to
 `<account>.r2.cloudflarestorage.com`, which office firewalls and antivirus
 block as "cloud storage" (a client's desk sat on "uploading" for ever), and
 every photo view and video play streams out of EC2, billed by AWS as data out.
 
-The Worker `re-media` fixes both, on our own domain, bound straight to the
-bucket. **Listing** photos and videos are read from it; **every** upload goes to
-it with a ticket the API signs. Agreements and visit selfies are still READ only
-through `/files` (sign-in checked). Nothing changes until the env below is set,
-and unsetting it puts everything back.
+| Files | Read from | Written to |
+|---|---|---|
+| Listing photos, videos | `cdn.delpat.in` — the bucket's custom domain, by name, permanent, cached | `upload.delpat.in` |
+| Agreements, visit selfies | `/files` on the API, only with a 12-hour ticket the API issues next to the key | `upload.delpat.in` |
 
-Once, in this order (delpat.in's DNS must be on Cloudflare; it is):
+`upload.delpat.in` is the Worker `re-upload` (workers/media), bound to the
+bucket; it writes only with a 5-minute ticket the API signs. Everything is off
+until its variable is set, and unsetting it puts that part back.
 
-1. `npx wrangler login` (or a token with Workers Scripts:Edit, Workers R2
-   Storage:Edit, and on delpat.in Workers Routes:Edit + DNS:Edit), then
-   `npm run media:deploy`. Cloudflare creates the `media.re.delpat.in` record.
-2. Make a secret (`openssl rand -hex 32`) and give it to the Worker:
+`cdn.delpat.in` answers for ANY key in the bucket, agreements included, to
+whoever has the name. Close that with one Cloudflare rule — Security → WAF →
+Custom rules, on delpat.in: **Block** when
+`(http.host eq "cdn.delpat.in" and not http.request.uri.path contains "/property/")`.
+
+Once, in this order:
+
+1. `npx wrangler login`, then `npm run media:deploy`. Cloudflare creates
+   `upload.delpat.in`.
+2. A secret (`openssl rand -hex 32`) for the Worker:
    `npx wrangler secret put UPLOAD_SECRET --config workers/media/wrangler.toml`.
-3. Check: `curl -I https://media.re.delpat.in/<a real <firm>/property/... key>`
-   → 200, `content-type: image/jpeg`. An `/agreement/` key → 404.
-4. API (`.env.production` on EC2): `MEDIA_PUBLIC_BASE=https://media.re.delpat.in`
-   and `MEDIA_UPLOAD_SECRET=<the same secret>`, then deploy/restart.
-   Uploads now go to the Worker; old `/files` links to listing media 302 there.
-5. Vercel, Production: `VITE_MEDIA_URL=https://media.re.delpat.in`, redeploy.
+3. API (`.env.production` on EC2), then deploy:
+   `MEDIA_CDN_URL=https://cdn.delpat.in`, `MEDIA_UPLOAD_URL=https://upload.delpat.in`,
+   `MEDIA_UPLOAD_SECRET=<the same secret>`. Leave `FILES_REQUIRE_TICKET` unset.
+4. Vercel, Production: `VITE_MEDIA_URL=https://cdn.delpat.in`, redeploy.
+5. When 4 is live: `FILES_REQUIRE_TICKET=1` on the API, restart. From here a
+   private file's name alone opens nothing.
+6. The WAF rule above.
 
-To undo: remove the vars in 4 and 5. The Worker can stay; nothing reads it.
+To undo: remove the variables. The Worker can stay; nothing calls it.
 
 ---
 

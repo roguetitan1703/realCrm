@@ -540,13 +540,13 @@ export const outcomeLabel = (raw) =>
  * that too would make an agent's own record look incomplete to their manager.
  */
 function VisitProof({ meta }) {
-  const { photoKey, photoWithheld, geo, distanceM } = meta
+  const { photoKey, photoTicket, photoWithheld, geo, distanceM } = meta
   if (!photoKey && !photoWithheld && !geo) return null
   return (
     <div className="ev-proof">
       {photoKey && (
-        <a href={fileUrl(photoKey)} target="_blank" rel="noreferrer" className="ev-proof-img">
-          <img src={fileUrl(photoKey)} alt="Visit proof" loading="lazy" />
+        <a href={fileUrl(photoKey, photoTicket)} target="_blank" rel="noreferrer" className="ev-proof-img">
+          <img src={fileUrl(photoKey, photoTicket)} alt="Visit proof" loading="lazy" />
         </a>
       )}
       {photoWithheld && <span className="ev-proof-locked"><Icon name="shield" size={12} />Proof on file</span>}

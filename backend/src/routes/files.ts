@@ -22,9 +22,14 @@
  *                  that object without logging in. Property photos get
  *                  forwarded to clients on WhatsApp anyway, so they carry no
  *                  secrecy. Visit-proof selfies are gated by never handing the
- *                  key to an agent in the first place. If that ever needs to
- *                  be stronger, this is the single place to add a signed-token
- *                  query param — the storage layer above already supports it.
+ *                  key to an agent in the first place.
+ *
+ *                  Since 2026-10: agreements and visit selfies need `?t=`, a
+ *                  ticket the API issues next to the key (FILES_REQUIRE_TICKET),
+ *                  and listing media is read from cdn.delpat.in — old listing
+ *                  links here are redirected there (MEDIA_CDN_URL). Uploads go
+ *                  to upload.delpat.in when MEDIA_UPLOAD_URL is set. See
+ *                  services/media.ts and docs/ops/DEPLOY.md.
  * ============================================================================
  */
 
@@ -39,9 +44,12 @@ import {
   fetchObject,
   isPublicMediaKey,
   isSafeKey,
+  mediaCdn,
   mediaConfigured,
-  mediaDomain,
   presignUpload,
+  ticketValid,
+  ticketsRequired,
+  uploadBase,
   workerUploadUrl,
 } from '../services/media';
 import { audit } from '../services/audit';
@@ -110,9 +118,9 @@ mediaRouter.post('/upload-url', async (req: Request, res: Response) => {
     // to a safe bucket by buildMediaKey rather than trusted.
     const kind = String(req.body?.kind || 'misc');
     const key = buildMediaKey(req.tenantId!, kind, ext);
-    // Our own domain when it is configured (services/media.ts mediaDomain).
-    const domain = mediaDomain();
-    const uploadUrl = domain ? workerUploadUrl(domain, key, contentType) : await presignUpload(key, contentType);
+    // Our own upload domain when it is configured (services/media.ts).
+    const base = uploadBase();
+    const uploadUrl = base ? workerUploadUrl(base, key, contentType) : await presignUpload(key, contentType);
     return res.json({ key, uploadUrl, expiresIn: 300 });
   } catch (e: any) {
     console.error('[media] presign failed:', e?.message);
@@ -137,15 +145,21 @@ filesRouter.get(/^\/(.+)$/, async (req: Request, res: Response) => {
     const key = decodeURIComponent((req.params as any)[0] || '');
     if (!isSafeKey(key)) return res.status(400).send('Bad key');
 
-    // A listing photo or video lives on the media domain now. Links already
-    // out there (old WhatsApp messages, a cached page) still arrive here, and
-    // are sent on rather than streamed out of EC2 as billed data out.
-    const domain = mediaDomain();
-    if (domain && isPublicMediaKey(key)) {
+    // A listing photo or video is read from the CDN now. A page or service
+    // worker still holding an old /files link arrives here and is sent on,
+    // rather than streamed out of EC2 as billed data out.
+    const cdn = mediaCdn();
+    if (cdn && isPublicMediaKey(key)) {
       // 302, held a day: a 301 is kept by browsers for good, and this has to
-      // stay reversible by unsetting MEDIA_PUBLIC_BASE.
+      // stay reversible by unsetting MEDIA_CDN_URL.
       res.setHeader('Cache-Control', 'public, max-age=86400');
-      return res.redirect(302,`${domain}/${key.split('/').map(encodeURIComponent).join('/')}`);
+      return res.redirect(302, `${cdn}/${key.split('/').map(encodeURIComponent).join('/')}`);
+    }
+    // Agreements and visit selfies: only with the ticket the API issued next to
+    // the key (services/media.ts fileTicket). Not found rather than forbidden:
+    // a name without a ticket learns nothing about whether the file exists.
+    if (!isPublicMediaKey(key) && ticketsRequired() && !ticketValid(key, req.query.t)) {
+      return res.status(404).send('Not found');
     }
 
     const inm = req.headers['if-none-match'] as string | undefined;

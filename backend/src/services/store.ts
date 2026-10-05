@@ -15,6 +15,7 @@ import { agents as seedAgents, properties as seedProps, leads as seedLeads } fro
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { finalStageOf, stageLabelIn, LABELLED_LEAD_STAGES } from '../../../src/data/pipelineRoles.js';
 import { audit } from './audit.js';
+import { fileTicket } from './media.js';
 import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, lastPersonActivity, lastRemark, lastRemarkAt, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
@@ -6691,7 +6692,9 @@ function mapActivityForClient(a: any, propCoords?: { lat: number; lng: number } 
       meta.distanceM = distanceMetres(a.geo_lat, a.geo_lng, propCoords.lat, propCoords.lng);
     }
   }
-  if (a.photo_key && canSeeProof(agentId)) meta.photoKey = a.photo_key;
+  // The ticket rides with the key, to the same viewer: /files opens a selfie
+  // only with it (services/media.ts fileTicket).
+  if (a.photo_key && canSeeProof(agentId)) { meta.photoKey = a.photo_key; meta.photoTicket = fileTicket(a.photo_key); }
   else if (a.photo_key) meta.photoWithheld = true;   // UI can say "proof on file"
 
   return {
