@@ -70,7 +70,7 @@ const FILTER_LISTS = ['source', 'locality', 'agent', 'flag']
 const PROP_SCALARS = ['sortKey', 'sortDir', 'tab']
 const PROP_LISTS = [
   'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
-  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'tower', 'unit',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'unit',
 ]
 
 function readBag(p, scalars, lists) {

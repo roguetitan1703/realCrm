@@ -49,6 +49,7 @@ const listOpts = (q: any) => {
     ownership: str(q.ownership),
     transaction: str(q.transaction),
     verified: str(q.verified),
+    media: str(q.media),
     tower: str(q.tower),
     excludeId: str(q.excludeId),
     // Whose listings, by owner record — see listProperties.

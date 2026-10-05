@@ -30,7 +30,7 @@ import { fileUrl, processListingImage, uploadMedia } from '../lib/media.js'
 // ============================================================================
 const MAX_VIDEO_MB = 60
 
-export default function MediaEditor({ media = [], firmName, onChange, onError, toast, confirm }) {
+export default function MediaEditor({ media = [], firmName, logoUrl, onChange, onError, toast, confirm }) {
   // In-flight and failed items only. Anything that succeeded lives in `media`
   // (the saved value) — keeping one list would mean the form's value could
   // hold a photo that isn't actually in R2.
@@ -63,7 +63,7 @@ export default function MediaEditor({ media = [], firmName, onChange, onError, t
       let blob = item.file
       let w, h
       if (item.kind === 'photo') {
-        const done = await processListingImage(item.file, firmName)
+        const done = await processListingImage(item.file, firmName, logoUrl)
         blob = done.blob; w = done.width; h = done.height
       }
       const key = await uploadMedia(blob, 'property')

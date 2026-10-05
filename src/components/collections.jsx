@@ -1063,6 +1063,20 @@ export function ProjectCard({ project, onClick }) {
 }
 
 // ---- Property card: data-dense body. No image block. ----
+// WHAT A LISTING'S GALLERY HOLDS, on its row and card — "5 photos · 1 video",
+// or that it has none yet. Whether a flat can be sent to a client was only
+// answerable by opening it. The Photos & video filter asks the server the same.
+export const mediaCount = (p) => {
+  const list = Array.isArray(p?.media) ? p.media : []
+  const videos = list.filter(m => m?.kind === 'video').length
+  return { photos: list.length - videos, videos }
+}
+export function MediaNote({ p }) {
+  const { photos, videos } = mediaCount(p)
+  const bits = [photos && `${photos} photo${photos > 1 ? 's' : ''}`, videos && `${videos} video${videos > 1 ? 's' : ''}`].filter(Boolean)
+  return <span className={'media-note' + (bits.length ? '' : ' is-none')}><Icon name="camera" size={11} />{bits.length ? bits.join(' · ') : 'No photos'}</span>
+}
+
 export function PropertyCard({ p, onClick, matchCount }) {
   const facts = [
     p.carpet || p.area ? `${p.carpet || p.area} sqft` : null,
@@ -1095,6 +1109,7 @@ export function PropertyCard({ p, onClick, matchCount }) {
             <Icon name="pin" size={13} style={{ marginRight: 4, verticalAlign: -1 }} />
             {p.locality || '—'}
           </div>
+          <div style={{ marginTop: 4 }}><MediaNote p={p} /></div>
         </div>
       </div>
 

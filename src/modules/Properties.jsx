@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { useServerList } from '../lib/serverList.js'
 import { useRecord } from '../lib/useRecord.js'
 import { api } from '../lib/api.js'
-import { ModuleListView, ModuleTable, PropertyCard, ProjectCard } from '../components/collections.jsx'
+import { ModuleListView, ModuleTable, PropertyCard, ProjectCard, MediaNote } from '../components/collections.jsx'
 import { priceRangeLabel } from '../lib/projects.js'
 import { useServerData } from '../lib/useServerData.js'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
@@ -35,13 +35,13 @@ import { canEditListing, canAddListing } from '../lib/permissions.js'
 // from the UI), so the two lists are near-identical but not the same thing.
 export const PROP_FILTER_KEYS = [
   'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
-  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'tower', 'unit',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'unit',
 ]
 
 const API_FILTERS = [
   'status', 'deal', 'type', 'locality', 'project',
   'category', 'bhk', 'subtype', 'furnishing', 'facing',
-  'possession', 'ownership', 'transaction', 'verified', 'tower', 'tab', 'unit',
+  'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'tab', 'unit',
 ]
 function toQuery({ page, limit, q, ...filters }) {
   const out = { page, limit, q }
@@ -313,7 +313,7 @@ function UnitsTable({ units, onOpen }) {
           <tbody>
             {units.slice(0, cap).map(u => (
               <tr key={u.id} onClick={() => onOpen(u.id)}>
-                <td><span className="unit-tag unit-tag-flush">{unitLabel(u) || '—'}</span></td>
+                <td><span className="unit-tag unit-tag-flush">{unitLabel(u) || '—'}</span><div className="sub"><MediaNote p={u} /></div></td>
                 <td className="cell-txt">{configLabel(u)} · {u.totalFloors ? `${u.floor}/${u.totalFloors}` : (u.floor || '—')}</td>
                 <td className="cell-txt">{u.carpet ? `${u.carpet} ${labelOf(AREA_UNITS, u.areaUnit || 'sqft')}` : '—'}</td>
                 <td className="cell-txt">{u.owner || '—'}</td>
@@ -455,7 +455,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
   const photos = mayEdit ? (
     <Panel>
       <SectionHead title={media.length ? `Photos · ${media.length}` : 'Photos'} right={linkTools} />
-      <MediaEditor media={media} firmName={store.state.settings.firmName}
+      <MediaEditor media={media} firmName={store.state.settings.firmName} logoUrl={store.state.brand?.logoUrl}
         onChange={(next) => store.setPropertyMedia(p.id, next)}
         onError={(m) => store.toast(m, 'warn')} toast={store.toast}
         confirm={(o) => store.openModal({ kind: 'confirm', ...o })} />

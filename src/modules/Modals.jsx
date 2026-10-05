@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import Icon from '../components/Icon.jsx'
-import { Button, Field, Input, PhoneInput, Textarea, Segmented, Avatar, Source, StageTag, Money } from '../components/primitives.jsx'
+import { Button, Field, Input, PhoneInput, Textarea, Segmented, Avatar, Source, StageTag, Money, SuggestInput } from '../components/primitives.jsx'
 import { theme } from '../data/theme.js'
 // parseBudgetNum was USED in three places here and imported in none of them —
 // every money field's onBlur and the lead form's save were one ReferenceError
@@ -19,7 +19,7 @@ import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES, STATUS } from '../data/prop
 import CameraCapture from '../components/CameraCapture.jsx'
 import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
-import { localities } from '../lib/suggest.js'
+import { localities, projectNames } from '../lib/suggest.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 import { ActivityRecords } from '../components/ActivityDay.jsx'
 import { CloseDealModal, AgreementModal } from '../components/Agreements.jsx'
@@ -241,6 +241,8 @@ function ModuleFormModal({ store, moduleId, recordId }) {
     // A date field gets a date picker, holding "YYYY-MM-DD" — which is exactly
     // what the server now sends for a DATE column, so the box opens filled.
     if (f.type === 'date') return <Input type="date" value={String(v || '').slice(0, 10)} onChange={e => setField(f.key, e.target.value)} />
+    // A field that names something the firm already has (a project) offers it.
+    if (f.suggest) return <SuggestInput value={v} onChange={val => setField(f.key, val)} options={f.suggest(store)} />
     return <Input type={f.type === 'number' ? 'number' : 'text'} value={v} onChange={e => setField(f.key, e.target.value)} />
   }
 
@@ -649,20 +651,8 @@ function PickBuyerModal({ store, propId }) {
 // the two in definitions.jsx. Locality is free text with suggestions drawn from
 // this firm's own records — see src/lib/suggest.js.
 
-// Free text, with the firm's existing values offered as you type. A native
-// datalist deliberately: it suggests without restricting, which is the whole
-// requirement — the next locality is always one nobody has typed yet.
-function SuggestInput({ id, value, onChange, options, placeholder }) {
-  return (
-    <>
-      <input className="input" list={id} value={value} placeholder={placeholder}
-        onChange={e => onChange(e.target.value)} autoComplete="off" style={{ width: '100%' }} />
-      <datalist id={id}>
-        {options.map(o => <option key={o} value={o} />)}
-      </datalist>
-    </>
-  )
-}
+// SuggestInput — free text with the firm's own values offered — lives in
+// components/primitives.jsx now; project fields use it as well as locality.
 
 const CONFIG_OPTIONS = [
   '1 BHK Apartment', '2 BHK Apartment', '3 BHK Apartment',
@@ -931,7 +921,7 @@ function NewOwnerModal({ store, ownerId }) {
             could not be filtered — nothing knew which part of the sentence was
             which. Identity is project + tower + unit. */}
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr .6fr .8fr .8fr', gap: 12 }}>
-          <Field label="Project / Society"><Input value={f.project} onChange={e => set('project', e.target.value)} placeholder="e.g. Godrej Green Vistas" /></Field>
+          <Field label="Project / Society"><SuggestInput value={f.project} onChange={v => set('project', v)} options={projectNames(store)} placeholder="e.g. Godrej Green Vistas" /></Field>
           <Field label="Tower"><Input value={f.tower} onChange={e => set('tower', e.target.value)} placeholder="B" /></Field>
           <Field label="Unit no."><Input value={f.unitNo} onChange={e => set('unitNo', e.target.value)} placeholder="1603" /></Field>
           <Field label="Configuration"><Input value={f.config} onChange={e => set('config', e.target.value)} placeholder="2 BHK" /></Field>

@@ -232,7 +232,12 @@ teamRouter.patch('/users/:id', async (req: Request, res: Response) => {
         summary: `User ID ${u.login_id} → ${nextLogin}`, metadata: { from: u.login_id, to: nextLogin },
       });
     }
-    await sql`UPDATE crm_agents SET name = ${cleanName}, role = ${newRole}, metadata = ${sql.json(meta)} WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
+    // The short name and initials go with the name (the re-invite path below
+    // already did this; this one didn't, and the columns kept the old person).
+    // The list reads them from the name anyway — store.ts nameParts.
+    const parts = cleanName.split(/\s+/).filter(Boolean);
+    const initials = parts.length === 1 ? parts[0].slice(0, 2).toUpperCase() : parts.slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
+    await sql`UPDATE crm_agents SET name = ${cleanName}, first = ${parts[0] || cleanName}, initials = ${initials}, role = ${newRole}, metadata = ${sql.json({ ...meta, initials })} WHERE id = ${u.id} AND tenant_id = ${req.tenantId}`;
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: getContext()?.userId ?? null,
       actor_label: null, action: 'user.updated',

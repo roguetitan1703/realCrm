@@ -25,5 +25,11 @@ routes = [{ pattern = "upload.delpat.in", custom_domain = true }]
 binding = "MEDIA"
 bucket_name = "re-delpat"
 
+# The shop's bucket. Bound so this Worker can take its uploads too; nothing in
+# src/index.js writes to it yet — every ticket today is for MEDIA.
+[[r2_buckets]]
+binding = "SHOP"
+bucket_name = "amulya-bs"
+
 [observability]
 enabled = true

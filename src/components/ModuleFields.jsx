@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import Icon from './Icon.jsx'
+import { localities, projectNames } from '../lib/suggest.js'
 // The record sheet reads the SAME vocabulary the add form writes. When these
 // were two hand-typed lists, the sheet's editor offered "Semi-furnished" while
 // the form stored "semi" — the exact drift that broke property filtering.
@@ -391,7 +392,7 @@ export const OWNER_MODULE_SCHEMA = {
     { key: 'name', label: 'Full Name', type: 'text', section: 'core', required: true, hideInSheet: true },
     { key: 'phone', label: 'Primary Phone', type: 'text', section: 'core', required: true, hideInSheet: true },
     { key: 'email', label: 'Email Address', type: 'email', section: 'domain' },
-    { key: 'project', label: 'Project / Society', type: 'text', section: 'domain' },
+    { key: 'project', label: 'Project / Society', type: 'text', section: 'domain', suggest: projectNames },
     // The flat in its own fields — project + tower + unit is what makes two
     // rows the same calling row. `unitRef` stays for the records written before
     // these columns existed, and is shown only when it holds something.
@@ -399,7 +400,7 @@ export const OWNER_MODULE_SCHEMA = {
     { key: 'unitNo', label: 'Unit no.', type: 'text', section: 'domain' },
     { key: 'config', label: 'Configuration', type: 'text', section: 'domain' },
     { key: 'unitRef', label: 'Unit reference (old)', type: 'text', section: 'domain' },
-    { key: 'locality', label: 'Locality', type: 'text', section: 'domain' },
+    { key: 'locality', label: 'Locality', type: 'text', section: 'domain', suggest: localities },
     { key: 'source', label: 'Source', type: 'text', section: 'domain' },
     {
       key: 'agentId', label: 'Assigned Owner', type: 'select', section: 'domain',
@@ -455,8 +456,9 @@ export const PROPERTY_MODULE_SCHEMA = {
   moduleName: 'Property',
   fields: [
     // ---- Overview: what it is, where, what it costs ----------------------
-    { key: 'society', label: 'Project / Society', type: 'text', section: 'core', required: true },
-    { key: 'locality', label: 'Locality', type: 'text', section: 'core' },
+    // `suggest`: the edit form offers the firm's existing names (src/lib/suggest.js).
+    { key: 'society', label: 'Project / Society', type: 'text', section: 'core', required: true, suggest: projectNames },
+    { key: 'locality', label: 'Locality', type: 'text', section: 'core', suggest: localities },
     tokenField('deal', 'Deal', DEALS, 'core'),
     tokenField('category', 'Category', CATEGORIES, 'core'),
     {

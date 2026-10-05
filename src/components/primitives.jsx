@@ -1,5 +1,5 @@
 // Small pure components — each maps to a class in styles.css. Change look = edit styles.css.
-import { useState, useEffect, useRef, useLayoutEffect } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect, useId } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
@@ -188,6 +188,26 @@ export function Field({ label, children, required, hint }) {
 }
 export function Input({ error, ...rest }) {
   return <input className={'input' + (error ? ' err' : '')} {...rest} />
+}
+/**
+ * Free text, with the firm's own values offered as you type (src/lib/suggest.js).
+ * A native datalist on purpose: it suggests without restricting — the next
+ * project or locality is always one nobody has typed yet — and picking a
+ * suggestion is what stops "Godrej Hill Retreat" and "Godrej Hills Retreat"
+ * becoming two projects. `onChange` receives the string.
+ */
+export function SuggestInput({ value, onChange, options = [], id, style, ...rest }) {
+  const auto = useId()
+  const listId = id || `sg-${auto.replace(/:/g, '')}`
+  return (
+    <>
+      <input className="input" list={listId} value={value ?? ''} autoComplete="off"
+        onChange={e => onChange(e.target.value)} style={{ width: '100%', ...style }} {...rest} />
+      <datalist id={listId}>
+        {options.map(o => <option key={o} value={o} />)}
+      </datalist>
+    </>
+  )
 }
 export function PhoneInput({ value, onChange, ...rest }) {
   return (

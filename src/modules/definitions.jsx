@@ -22,7 +22,7 @@
 import React from 'react'
 import { LEAD_MODULE_SCHEMA, PROPERTY_MODULE_SCHEMA, CLIENT_MODULE_SCHEMA, OWNER_MODULE_SCHEMA } from '../components/ModuleFields.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, Quoted, Button, RepeatTag } from '../components/primitives.jsx'
-import { OwnerCell, StageCell } from '../components/collections.jsx'
+import { OwnerCell, StageCell, MediaNote, mediaCount } from '../components/collections.jsx'
 import { FinishLead, FinishOwner } from '../components/Agreements.jsx'
 import { finalStageOf } from '../data/pipelineRoles.js'
 import { getNestedValue } from '../components/ModuleFields.jsx'
@@ -883,6 +883,8 @@ export const PROPERTIES_DEF = {
         options: [{ value: 'missing', label: 'Not added yet' }] },
       { key: 'verified', label: 'Verified', icon: 'check', multi: false, group: 'State',
         options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] },
+      { key: 'media', label: 'Photos & video', icon: 'camera', group: 'State',
+        options: [{ value: 'photos', label: 'Has photos' }, { value: 'video', label: 'Has video' }, { value: 'none', label: 'None yet' }] },
       { key: 'furnishing', label: 'Furnishing', icon: 'home', group: 'Condition', options: optionsOf(FURNISH) },
       { key: 'facing', label: 'Facing', icon: 'tag', group: 'Condition', options: optionsOf(FACING) },
       { key: 'possession', label: 'Possession', icon: 'clock', group: 'State', options: optionsOf(POSSESSION) },
@@ -913,6 +915,10 @@ export const PROPERTIES_DEF = {
     // imports vary. No token translation, and nothing stored gets rewritten.
     if (key === 'status') return vals.some(v => eqi(v, p.status))
     if (key === 'verified') return vals.includes(p.verifiedAt ? 'yes' : 'no')
+    if (key === 'media') {
+      const m = mediaCount(p)
+      return (vals.includes('photos') && m.photos > 0) || (vals.includes('video') && m.videos > 0) || (vals.includes('none') && !m.photos && !m.videos)
+    }
     if (key === 'tower') return vals.some(v => eqi(v, p.wing || p.tower))
     return true
   },
@@ -935,7 +941,7 @@ export const PROPERTIES_DEF = {
     { key: 'society', label: 'Property', render: (p) => (
       <div className="cell-prop">
         <div className="thumb-tile" style={{ background: thumbTint(p.id) }}><Icon name="building" size={19} strokeWidth={1.4} /></div>
-        <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}{!flatOf(p) && !isPlot(p.subtype ?? normaliseSubtype(p.type, p.category)) && <span className="unit-tag unit-missing">No flat no. yet</span>}{p.verifiedAt && <span className="vtick" title="Verified"><Icon name="check" size={11} /></span>}</div><div className="sub">{p.locality}</div></div>
+        <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}{!flatOf(p) && !isPlot(p.subtype ?? normaliseSubtype(p.type, p.category)) && <span className="unit-tag unit-missing">No flat no. yet</span>}{p.verifiedAt && <span className="vtick" title="Verified"><Icon name="check" size={11} /></span>}</div><div className="sub">{p.locality}{p.locality ? ' · ' : ''}<MediaNote p={p} /></div></div>
       </div>
     ) },
     // These columns read the CANONICAL fields with a legacy fallback. They

@@ -75,53 +75,67 @@ function drawWatermark(ctx, w, h, lines) {
 }
 
 /**
- * The anti-crop mark for LISTING media (spec C3w).
+ * THE FIRM'S MARK on a LISTING photo: its logo and its name, together, in the
+ * bottom-right corner on a light label — the way a brokerage signs its photos.
  *
- * A corner logo alone is useless: anyone can crop the corner off and repost the
- * photo as their own, which is the actual thing being defended against. The
- * mark therefore sits inside the frame — but sparingly, because a listing photo
- * a client will not look twice at is worth less than one that could
- * theoretically be stolen.
+ * It replaced two faint copies of the name written across the frame at an
+ * angle. Firms said that read like a draft stamp on a Word document; it carried
+ * no logo, and a client could not tell whose listing they were looking at.
  *
- * Deliberately different from the visit-proof stamp, which is a legible
- * provenance caption for an internal record nobody is trying to steal.
+ * Sized from the photo's short side, so it is the same share of the picture on
+ * a portrait phone shot and a wide one. No logo: the name alone. Neither: none.
  */
-function drawAntiCropMark(ctx, w, h, firmName) {
-  const text = (firmName || '').trim()
-  if (!text) return
+const logoCache = new Map()
+function loadLogo(url) {
+  if (!url) return Promise.resolve(null)
+  if (!logoCache.has(url)) {
+    logoCache.set(url, new Promise((resolve) => {
+      const img = new Image()
+      // Stored as a data URL (Settings → Brand); anything else must allow CORS,
+      // or drawing it would taint the canvas and the photo could not be saved.
+      if (!url.startsWith('data:')) img.crossOrigin = 'anonymous'
+      img.onload = () => resolve(img)
+      img.onerror = () => resolve(null)   // a broken logo never stops an upload
+      img.src = url
+    }))
+  }
+  return logoCache.get(url)
+}
 
-  // TWO marks, not a tiled field.
-  //
-  // The first version tiled the name across the entire frame and added a solid
-  // corner bar on a black scrim. It defended the photo and ruined it — a
-  // listing shot a client will not look twice at is worth less than one that
-  // could theoretically be stolen. Two placements on the diagonal still mean a
-  // crop cannot take the mark off without taking most of the picture with it,
-  // which is the point; the corner bar added nothing that these do not.
-  const size = Math.max(14, Math.round(w * 0.030))
-  const spots = [
-    { x: w * 0.30, y: h * 0.34 },
-    { x: w * 0.70, y: h * 0.70 },
-  ]
-
+function drawBrandMark(ctx, w, h, firmName, logo) {
+  const name = (firmName || '').trim()
+  if (!name && !logo) return
+  const short = Math.min(w, h)
+  const pad = Math.round(short * 0.03)
+  const logoH = Math.max(26, Math.round(short * 0.07))
+  const inner = Math.round(logoH * 0.22)
+  const font = Math.max(13, Math.round(logoH * 0.46))
+  const logoW = logo ? Math.min(Math.round(logoH * (logo.width / logo.height || 1)), logoH * 3) : 0
   ctx.save()
-  ctx.font = `700 ${size}px system-ui, -apple-system, sans-serif`
-  ctx.textBaseline = 'middle'
-  ctx.textAlign = 'center'
-  ctx.lineWidth = Math.max(1, size / 10)
-  ctx.lineJoin = 'round'
-  for (const s of spots) {
-    ctx.save()
-    ctx.translate(s.x, s.y)
-    ctx.rotate(-Math.PI / 9)
-    // Dark outline under a light fill: white alone vanishes over a bright wall
-    // or a blown-out sky, and an invisible watermark defends nothing. Both
-    // halves stay faint.
-    ctx.strokeStyle = 'rgba(0,0,0,0.10)'
-    ctx.strokeText(text, 0, 0)
-    ctx.fillStyle = 'rgba(255,255,255,0.16)'
-    ctx.fillText(text, 0, 0)
-    ctx.restore()
+  ctx.font = `700 ${font}px system-ui, -apple-system, "Segoe UI", sans-serif`
+  const textW = name ? Math.ceil(ctx.measureText(name).width) : 0
+  const gap = logo && name ? inner : 0
+  const boxW = inner * 2 + logoW + gap + textW
+  const boxH = logoH + inner * 2
+  const x = w - pad - boxW
+  const y = h - pad - boxH
+  // A light label, so a logo in any colour reads on it and the photo under it
+  // still shows through a little.
+  ctx.shadowColor = 'rgba(0,0,0,0.18)'
+  ctx.shadowBlur = Math.round(inner * 0.8)
+  ctx.fillStyle = 'rgba(255,255,255,0.86)'
+  const r = Math.round(boxH * 0.22)
+  ctx.beginPath()
+  ctx.moveTo(x + r, y); ctx.arcTo(x + boxW, y, x + boxW, y + boxH, r); ctx.arcTo(x + boxW, y + boxH, x, y + boxH, r)
+  ctx.arcTo(x, y + boxH, x, y, r); ctx.arcTo(x, y, x + boxW, y, r); ctx.closePath()
+  ctx.fill()
+  ctx.shadowColor = 'transparent'
+  if (logo) ctx.drawImage(logo, x + inner, y + inner, logoW, logoH)
+  if (name) {
+    ctx.fillStyle = 'rgba(20,20,20,0.92)'
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    ctx.fillText(name, x + inner + logoW + gap, y + boxH / 2)
   }
   ctx.restore()
 }
@@ -131,8 +145,8 @@ function drawAntiCropMark(ctx, w, h, firmName) {
  * the spec allows no exception, because these files leave the CRM as WhatsApp
  * attachments and the burned-in mark is the only thing that travels with them.
  */
-export async function processListingImage(blob, firmName) {
-  const img = await loadImage(blob)
+export async function processListingImage(blob, firmName, logoUrl) {
+  const [img, logo] = await Promise.all([loadImage(blob), loadLogo(logoUrl)])
   const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height))
   const w = Math.round(img.width * scale)
   const h = Math.round(img.height * scale)
@@ -142,7 +156,7 @@ export async function processListingImage(blob, firmName) {
   canvas.height = h
   const ctx = canvas.getContext('2d')
   ctx.drawImage(img, 0, 0, w, h)
-  drawAntiCropMark(ctx, w, h, firmName)
+  drawBrandMark(ctx, w, h, firmName, logo)
 
   const out = await canvasToBlob(canvas, 'image/jpeg', JPEG_QUALITY)
   return { blob: out, width: w, height: h }

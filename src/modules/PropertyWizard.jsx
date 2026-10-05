@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Field, Input, Textarea } from '../components/primitives.jsx'
+import { Button, Field, Input, Textarea, SuggestInput } from '../components/primitives.jsx'
+import { projectNames } from '../lib/suggest.js'
 import Icon from '../components/Icon.jsx'
 import MediaEditor from '../components/MediaEditor.jsx'
 import {
@@ -503,7 +504,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                 <div className="pw-grp">
                   <div className="pw-grp-t">Where it is</div>
                   <div className="pw-row">
-                    <Field label="Project / society"><Input value={form.society || ''} onChange={e => set('society', e.target.value)} placeholder="Skyline Heights" /></Field>
+                    <Field label="Project / society"><SuggestInput value={form.society || ''} onChange={v => set('society', v)} options={projectNames(store)} placeholder="Skyline Heights" /></Field>
                     <Field label="Locality" required><Input value={form.locality || ''} onChange={e => set('locality', e.target.value)} placeholder="Wakad" /></Field>
                   </div>
                   {applies.floors ? (
@@ -725,6 +726,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                   <MediaEditor
                     media={form.media || []}
                     firmName={store.state.settings.firmName}
+                    logoUrl={store.state.brand?.logoUrl}
                     onChange={v => set('media', v)}
                     onError={m => store.toast(m, 'warn')}
                     toast={store.toast}

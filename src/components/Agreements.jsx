@@ -18,7 +18,8 @@ import { uploadMedia } from '../lib/media.js'
 import { dayLabel, unitLabel } from '../lib/format.js'
 import { finalStageOf } from '../data/pipelineRoles.js'
 import { BHK_COMMON, BHK_MORE, SUBTYPES } from '../data/propertyFields.js'
-import { Button, Field, Input, Segmented } from './primitives.jsx'
+import { Button, Field, Input, Segmented, SuggestInput } from './primitives.jsx'
+import { projectNames } from '../lib/suggest.js'
 import Icon from './Icon.jsx'
 
 const rupees = (n) => (n == null ? '' : `₹${Math.round(Number(n)).toLocaleString('en-IN')}`)
@@ -187,11 +188,11 @@ function FileField({ file, onFile }) {
  * it is and what it is, in the catalogue's words. The rest of the listing can
  * be filled in later from the flat's own page.
  */
-function OutsideFlat({ v, set }) {
+function OutsideFlat({ v, set, store }) {
   return (
     <div className="cd-outside">
       <Row>
-        <Half><Field label="Project or society"><Input value={v.society} onChange={e => set('society', e.target.value)} placeholder="Green Park" /></Field></Half>
+        <Half><Field label="Project or society"><SuggestInput value={v.society} onChange={val => set('society', val)} options={projectNames(store)} placeholder="Green Park" /></Field></Half>
         <div style={{ width: 90 }}><Field label="Tower"><Input value={v.tower} onChange={e => set('tower', e.target.value)} placeholder="B" /></Field></div>
         <div style={{ width: 90 }}><Field label="Flat no."><Input value={v.unit} onChange={e => set('unit', e.target.value)} placeholder="702" /></Field></div>
       </Row>
@@ -278,7 +279,7 @@ export function CloseDealModal({ store, leadId, Modal }) {
         {flat ? (
           <div className="cd-picked"><span><b>{flatName(flat)}</b> · {flat.locality}</span><button type="button" onClick={() => setFlat(null)}>Change</button></div>
         ) : outside ? (
-          <OutsideFlat v={np} set={setN} />
+          <OutsideFlat v={np} set={setN} store={store} />
         ) : (
           <>
             <label className="cd-search">

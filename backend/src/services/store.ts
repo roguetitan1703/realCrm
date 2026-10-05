@@ -347,13 +347,26 @@ export interface ServerState {
   timeline_events: TimelineEvent[];
 }
 
+/**
+ * The short name and initials, FROM the name, every time. They were stored
+ * copies, and editing a person on Team rewrote the name and left the copies:
+ * bhumi renamed Binod's seat to Siddhi and every "Assigned to" cell, which
+ * prints the short name, still said Binod. A copy nobody reads back is a trap.
+ */
+function nameParts(name: string, fallbackFirst?: string, fallbackInitials?: string) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return { first: fallbackFirst || '', initials: fallbackInitials || '' };
+  return {
+    first: parts[0],
+    initials: parts.length === 1 ? parts[0].slice(0, 2).toUpperCase() : parts.slice(0, 2).map(w => w[0]).join('').toUpperCase(),
+  };
+}
+
 // Helper converters from DB rows to frontend shapes
 function rowToAgent(r: any): any {
   return {
     id: r.id,
     name: r.name,
-    first: r.first,
-    initials: r.initials,
     avatar: r.avatar,
     role: r.role || 'agent',
     dutyStatus: r.duty_status || 'ACTIVE',
@@ -363,6 +376,8 @@ function rowToAgent(r: any): any {
     // Comes from users.status, which is where suspension is decided.
     suspended: String(r.user_status || '').toLowerCase() === 'suspended',
     ...(r.metadata || {}),
+    // After metadata, which carries a stored `initials` of its own.
+    ...nameParts(r.name, r.first, r.initials),
   };
 }
 
@@ -1370,10 +1385,16 @@ export async function getBootstrap(): Promise<any> {
     -- falls back to the first segment of the title, which for imported rows is
     -- the OWNER's name, so a picker built on it offered "ASHA BHARAT KOTHARI"
     -- as a township. Ordered by size so the biggest developments come first.
+    -- Listings AND the calling list: a firm types a project when it adds an
+    -- owner as much as when it lists a flat, and suggesting only one side's
+    -- names is how "Godrej Hill Retreat" gets a second spelling.
     projects AS (
-      SELECT mode() WITHIN GROUP (ORDER BY project) AS v FROM crm_properties
-       WHERE tenant_id = ${t} AND coalesce(project, '') <> ''
-       GROUP BY ${projectNorm(sql`project`)} ORDER BY count(*) DESC LIMIT 200
+      SELECT mode() WITHIN GROUP (ORDER BY project) AS v FROM (
+        SELECT project FROM crm_properties WHERE tenant_id = ${t} AND coalesce(project, '') <> ''
+        UNION ALL
+        SELECT project FROM crm_owners WHERE tenant_id = ${t} AND coalesce(project, '') <> ''
+      ) p
+       GROUP BY ${projectNorm(sql`project`)} ORDER BY count(*) DESC LIMIT 300
     ),
     configs AS (
       SELECT DISTINCT v FROM (
@@ -4673,7 +4694,7 @@ export async function listProperties(opts: {
   // twelve filters silently stopped doing anything.
   category?: string; bhk?: string; subtype?: string; furnishing?: string;
   facing?: string; possession?: string; ownership?: string; transaction?: string;
-  verified?: string; tower?: string;
+  verified?: string; tower?: string; media?: string;
   excludeId?: string;
   tab?: string; unit?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
@@ -4718,6 +4739,13 @@ const PROPERTY_TABS: Record<string, any> = {
 // A flat whose number nobody has written down yet — a copy made in bulk, or a
 // calling row converted before anyone knew it. Absence, not a placeholder.
 const PROP_NO_UNIT = sql`coalesce(nullif(trim(unit_no), ''), nullif(trim(unit), '')) IS NULL`;
+// What the listing's gallery holds. `media` is the JSONB list the editor writes.
+const mediaHas = (kind: string) => sql`EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(media, '[]'::jsonb)) m WHERE m->>'kind' = ${kind})`;
+const PROP_MEDIA: Record<string, any> = {
+  photos: mediaHas('photo'),
+  video: mediaHas('video'),
+  none: sql`jsonb_array_length(coalesce(media, '[]'::jsonb)) = 0`,
+};
 
 type PropertyListOpts = Parameters<typeof listProperties>[0] & {};
 
@@ -4773,6 +4801,10 @@ function propertyWhere(t: string, opts: PropertyListOpts = {}, omit: { tab?: boo
   const tower = many(opts.tower);
   if (tower.length) where.push(sql`lower(coalesce(nullif(wing, ''), tower, '')) IN ${sql(tower.map(x => x.toLowerCase()))}`);
   if (verified.length === 1) where.push(verified[0] === 'yes' ? sql`verified_at IS NOT NULL` : sql`verified_at IS NULL`);
+  // Photos / video / none yet: what an agent checks before sending a listing
+  // to a client, and could only learn by opening each one. Any of the picked.
+  const media = many(opts.media).filter(m => PROP_MEDIA[m]);
+  if (media.length) where.push(sql`(${media.map(m => PROP_MEDIA[m]).reduce((a, c) => sql`${a} OR ${c}`)})`);
   if (opts.project) {
     // A project is a grouping lens over the `project`/`society` fields, not a
     // stored entity — same key the units view groups on. The implicit bucket is

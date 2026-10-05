@@ -30,5 +30,15 @@ export function localities(store) {
   return s.localities || []
 }
 
+/**
+ * Every project name this firm already uses, listings and calling list alike,
+ * in the spelling most of its rows carry. Offered wherever a project is typed
+ * so a second spelling of one township is a choice nobody has to make.
+ */
+export function projectNames(store) {
+  const s = store?.state || store || {}
+  return s.projects || []
+}
+
 /** Shape a derived list for a filter's `options`. */
 export const asOptions = (list) => list.map(v => ({ value: v, label: v }))
