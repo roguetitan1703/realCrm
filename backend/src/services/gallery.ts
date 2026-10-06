@@ -61,6 +61,16 @@ const safeEq = (a: string, b: string) => a.length === b.length && crypto.timingS
  * does not work", and none says which.
  */
 export async function publicGallery(slug: string, ref: string): Promise<any | null> {
+  const g = await resolveGallery(slug, ref);
+  return g ? g.public : null;
+}
+
+/**
+ * The same lookup, with what the SERVER needs beside the public shape: the
+ * listing, the firm and its logo image — for the link-preview card
+ * (services/shareCard.ts). Never sent to a browser as it is.
+ */
+export async function resolveGallery(slug: string, ref: string): Promise<{ public: any; tenantId: string; propertyId: string; logoData: string } | null> {
   const m = new RegExp(`^[a-z0-9-]*?-?([a-z0-9]{${CODE_LEN}})$`).exec(String(ref || '').toLowerCase());
   if (!m || !/^[a-z0-9-]{1,64}$/.test(String(slug || ''))) return null;
   const want = m[1];
@@ -82,13 +92,18 @@ export async function publicGallery(slug: string, ref: string): Promise<any | nu
   if (!media.length) return null;
   const brand = t.brand_config || {};
   return {
-    firm: {
-      name: brand.firmName || t.name || '',
-      // Served by /pwa/<slug>/logo, the same place the app's own icon comes from.
-      logoUrl: brand.logoUrl ? `/pwa/${t.slug || t.id}/logo` : '',
-      color: brand.primaryColor || null,
+    public: {
+      firm: {
+        name: brand.firmName || t.name || '',
+        // Served by /pwa/<slug>/logo, the same place the app's own icon comes from.
+        logoUrl: brand.logoUrl ? `/pwa/${t.slug || t.id}/logo` : '',
+        color: brand.primaryColor || null,
+      },
+      project: projectOf(row),
+      media,
     },
-    project: projectOf(row),
-    media,
+    tenantId: row.tenant_id,
+    propertyId: row.id,
+    logoData: typeof brand.logoUrl === 'string' && brand.logoUrl.startsWith('data:image/') ? brand.logoUrl : '',
   };
 }

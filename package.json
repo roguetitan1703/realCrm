@@ -40,6 +40,7 @@
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "jpeg-js": "^0.4.4",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^9.0.3",
     "postgres": "^3.4.9",

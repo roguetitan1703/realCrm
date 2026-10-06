@@ -22,7 +22,7 @@
  */
 
 import crypto from 'crypto';
-import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Objects are never overwritten — replacing a photo writes a NEW key — so
@@ -248,6 +248,40 @@ export interface FetchedObject {
  * answer 304 itself and we never pull bytes we're about to discard.
  * Returns null on 304/404 — the caller distinguishes via `notModified`.
  */
+// ── Server-side reads and writes (the share card, services/shareCard.ts) ────
+// Everything else moves bytes browser↔bucket; these are for the one thing the
+// API makes itself.
+
+/** A whole object in memory, or null when it does not exist. Small files only. */
+export async function readObjectBuffer(key: string): Promise<Buffer | null> {
+  const got = await fetchObject(key);
+  if (!got.object) return null;
+  const chunks: Buffer[] = [];
+  for await (const c of got.object.body as any) chunks.push(Buffer.from(c));
+  return Buffer.concat(chunks);
+}
+
+export async function objectExists(key: string): Promise<boolean> {
+  try { await s3().send(new HeadObjectCommand({ Bucket: bucket(), Key: key })); return true; }
+  catch (err: any) {
+    const status = err?.$metadata?.httpStatusCode;
+    if (status === 404 || err?.name === 'NotFound' || err?.name === 'NoSuchKey') return false;
+    throw err;
+  }
+}
+
+export async function writeObject(key: string, body: Buffer, contentType: string): Promise<void> {
+  await s3().send(new PutObjectCommand({ Bucket: bucket(), Key: key, Body: body, ContentType: contentType, CacheControl: IMMUTABLE_CACHE_CONTROL }));
+}
+
+/** Delete every object under `prefix` except `keep`. Best effort. */
+export async function pruneObjects(prefix: string, keep: string): Promise<number> {
+  const out: any = await s3().send(new ListObjectsV2Command({ Bucket: bucket(), Prefix: prefix, MaxKeys: 50 }));
+  const old = (out.Contents || []).map((o: any) => o.Key).filter((k: string) => k && k !== keep);
+  for (const k of old) await s3().send(new DeleteObjectCommand({ Bucket: bucket(), Key: k }));
+  return old.length;
+}
+
 export async function fetchObject(
   key: string,
   ifNoneMatch?: string,
