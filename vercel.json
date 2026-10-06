@@ -28,10 +28,16 @@
         {
           "type": "header",
           "key": "user-agent",
-          "value": "(?i).*(whatsapp|facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot|telegrambot|discordbot|skypeuripreview|googlebot|bingbot|applebot|redditbot|pinterestbot|yandexbot|duckduckbot|embedly|iframely|vkshare|mastodon|bitlybot).*"
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
         }
       ],
-      "destination": "https://api.dev.re.delpat.in/share/gallery/:slug/:ref"
+      "destination": "https://api.dev.re.delpat.in/share/gallery/:slug/:ref",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
     },
     {
       "source": "/:slug/photos/:ref/",
@@ -43,10 +49,16 @@
         {
           "type": "header",
           "key": "user-agent",
-          "value": "(?i).*(whatsapp|facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot|telegrambot|discordbot|skypeuripreview|googlebot|bingbot|applebot|redditbot|pinterestbot|yandexbot|duckduckbot|embedly|iframely|vkshare|mastodon|bitlybot).*"
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
         }
       ],
-      "destination": "https://api.dev.re.delpat.in/share/gallery/:slug/:ref"
+      "destination": "https://api.dev.re.delpat.in/share/gallery/:slug/:ref",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
     },
     {
       "source": "/:slug/photos/:ref",
@@ -54,10 +66,16 @@
         {
           "type": "header",
           "key": "user-agent",
-          "value": "(?i).*(whatsapp|facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot|telegrambot|discordbot|skypeuripreview|googlebot|bingbot|applebot|redditbot|pinterestbot|yandexbot|duckduckbot|embedly|iframely|vkshare|mastodon|bitlybot).*"
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
         }
       ],
-      "destination": "https://api.re.delpat.in/share/gallery/:slug/:ref"
+      "destination": "https://api.re.delpat.in/share/gallery/:slug/:ref",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
     },
     {
       "source": "/:slug/photos/:ref/",
@@ -65,10 +83,16 @@
         {
           "type": "header",
           "key": "user-agent",
-          "value": "(?i).*(whatsapp|facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot|telegrambot|discordbot|skypeuripreview|googlebot|bingbot|applebot|redditbot|pinterestbot|yandexbot|duckduckbot|embedly|iframely|vkshare|mastodon|bitlybot).*"
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
         }
       ],
-      "destination": "https://api.re.delpat.in/share/gallery/:slug/:ref"
+      "destination": "https://api.re.delpat.in/share/gallery/:slug/:ref",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
     },
     {
       "source": "/(.*)",

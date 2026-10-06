@@ -20,9 +20,12 @@ export const publicRouter = Router();
 // JavaScript. The gallery is a single-page app, so every photo link showed the
 // same bare "Real Estate by Delpat" shell — or nothing.
 //
-// vercel.json sends ONLY those crawlers' requests for /<firm>/photos/<code>
-// here (matched on user agent); people still get the app. Same rule as the
-// page itself: the project, the firm, the photos — no price, no flat, no owner.
+// vercel.json sends requests for /<firm>/photos/<code> here when the user agent
+// looks like a link-preview fetcher — a wide net (any "bot", "preview", HTTP
+// library…), because every app that draws a card has its own name. A person
+// caught by it is sent straight on with ?app=1, which the rule skips, so a
+// wrong match costs one redirect, not the page. Same rule as the page itself:
+// the project, the firm, the photos — no price, no flat, no owner.
 export const shareRouter = Router();
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -95,6 +98,7 @@ ${name('twitter:card', image ? 'summary_large_image' : 'summary')}
 ${name('twitter:title', title)}
 ${name('twitter:description', desc)}
 ${name('twitter:image', image)}
+<script>(function(){var u=new URL(location.href);if(u.searchParams.has('app'))return;u.searchParams.set('app','1');location.replace(u.href)})()</script>
 </head><body>${esc(title)}</body></html>`);
 });
 

@@ -1,18 +1,51 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/pwa/:path*", "destination": "https://api.dev.re.delpat.in/pwa/:path*" },
-    { "source": "/:slug/sw.js", "destination": "/sw.js" },
+    {
+      "source": "/pwa/:path*",
+      "destination": "https://api.dev.re.delpat.in/pwa/:path*"
+    },
+    {
+      "source": "/:slug/sw.js",
+      "destination": "/sw.js"
+    },
     {
       "source": "/:slug/photos/:ref",
-      "has": [{ "type": "header", "key": "user-agent", "value": "(?i).*(whatsapp|facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot|telegrambot|discordbot|skypeuripreview|googlebot|bingbot|applebot|redditbot|pinterestbot|yandexbot|duckduckbot|embedly|iframely|vkshare|mastodon|bitlybot).*" }],
-      "destination": "https://api.dev.re.delpat.in/share/gallery/:slug/:ref"
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
+        }
+      ],
+      "destination": "https://api.dev.re.delpat.in/share/gallery/:slug/:ref",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
     },
     {
       "source": "/:slug/photos/:ref/",
-      "has": [{ "type": "header", "key": "user-agent", "value": "(?i).*(whatsapp|facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot|telegrambot|discordbot|skypeuripreview|googlebot|bingbot|applebot|redditbot|pinterestbot|yandexbot|duckduckbot|embedly|iframely|vkshare|mastodon|bitlybot).*" }],
-      "destination": "https://api.dev.re.delpat.in/share/gallery/:slug/:ref"
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
+        }
+      ],
+      "destination": "https://api.dev.re.delpat.in/share/gallery/:slug/:ref",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
     },
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }

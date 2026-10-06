@@ -28,6 +28,13 @@ const isAdminRoute =
 // by a client from WhatsApp. No sign-in, so it mounts on its own like the
 // console, without the desk.
 const galleryAt = /^\/([a-z0-9-]+)\/photos\/([^/?#]+)\/?$/.exec(window.location.pathname)
+// ?app=1 is how the link-preview page (backend routes/public.ts) hands a person
+// it caught by mistake on to the app; the link they keep is the shared one.
+if (galleryAt && new URLSearchParams(window.location.search).has('app')) {
+  const u = new URL(window.location.href)
+  u.searchParams.delete('app')
+  window.history.replaceState(null, '', u.pathname + u.search + u.hash)
+}
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
