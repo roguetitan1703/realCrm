@@ -32,8 +32,9 @@ shareRouter.get('/gallery/:slug/:ref', async (req: Request, res: Response) => {
   const slug = String(req.params.slug || '');
   const ref = String(req.params.ref || '');
   const apiBase = (process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
-  const appHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
-  const pageUrl = appHost ? `https://${appHost}/${encodeURIComponent(slug)}/photos/${encodeURIComponent(ref)}` : '';
+  // No og:url: the API cannot know the app's address (Caddy replaces
+  // X-Forwarded-Host with its own), and an API address there would be the one
+  // the apps open on tap. Without it they use the link that was shared.
   let found: Awaited<ReturnType<typeof resolveGallery>> = null;
   try { found = await resolveGallery(slug, ref); } catch { found = null; }
   const g: any = found?.public || null;
@@ -84,7 +85,6 @@ ${meta('og:type', 'website')}
 ${meta('og:site_name', firm)}
 ${meta('og:title', title)}
 ${meta('og:description', desc)}
-${meta('og:url', pageUrl)}
 ${meta('og:image', image)}
 ${image.startsWith('https:') ? meta('og:image:secure_url', image) : ''}
 ${image && (card || cover) ? meta('og:image:type', 'image/jpeg') : ''}
@@ -95,7 +95,7 @@ ${name('twitter:card', image ? 'summary_large_image' : 'summary')}
 ${name('twitter:title', title)}
 ${name('twitter:description', desc)}
 ${name('twitter:image', image)}
-</head><body>${pageUrl ? `<a href="${esc(pageUrl)}">${esc(title)}</a>` : esc(title)}</body></html>`);
+</head><body>${esc(title)}</body></html>`);
 });
 
 publicRouter.get('/gallery/:slug/:ref', async (req: Request, res: Response) => {
