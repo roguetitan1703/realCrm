@@ -2,6 +2,16 @@
   "rewrites": [
     { "source": "/pwa/:path*", "destination": "https://api.re.delpat.in/pwa/:path*" },
     { "source": "/:slug/sw.js", "destination": "/sw.js" },
+    {
+      "source": "/:slug/photos/:ref",
+      "has": [{ "type": "header", "key": "user-agent", "value": "(?i).*(whatsapp|facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot|telegrambot|discordbot|skypeuripreview|googlebot|bingbot|applebot|redditbot|pinterestbot|yandexbot|duckduckbot|embedly|iframely|vkshare|mastodon|bitlybot).*" }],
+      "destination": "https://api.re.delpat.in/share/gallery/:slug/:ref"
+    },
+    {
+      "source": "/:slug/photos/:ref/",
+      "has": [{ "type": "header", "key": "user-agent", "value": "(?i).*(whatsapp|facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot|telegrambot|discordbot|skypeuripreview|googlebot|bingbot|applebot|redditbot|pinterestbot|yandexbot|duckduckbot|embedly|iframely|vkshare|mastodon|bitlybot).*" }],
+      "destination": "https://api.re.delpat.in/share/gallery/:slug/:ref"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

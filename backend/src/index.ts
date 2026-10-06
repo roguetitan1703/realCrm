@@ -19,7 +19,7 @@ import { importsRouter } from './routes/imports';
 import { activityRouter } from './routes/activity';
 import { agreementsRouter } from './routes/agreements';
 import { propertiesRouter } from './routes/properties';
-import { publicRouter } from './routes/public';
+import { publicRouter, shareRouter } from './routes/public';
 import { teamRouter } from './routes/team';
 import { actionsRouter } from './routes/actions';
 import { ingestRouter } from './routes/ingest';
@@ -204,6 +204,9 @@ app.use('/api/v1/owners', ownersRouter);
 app.use('/api/v1/properties', propertiesRouter);
 // No sign-in: a listing's photo link (7.5).
 app.use('/api/v1/public', publicRouter);
+// The link-preview card for that photo link — HTML for crawlers only, routed
+// here by vercel.json on user agent. See routes/public.ts.
+app.use('/share', shareRouter);
 // Spreadsheet imports run as a server-side job — see routes/imports.ts.
 app.use('/api/v1/imports', importsRouter);
 app.use('/api/v1/activity', activityRouter);

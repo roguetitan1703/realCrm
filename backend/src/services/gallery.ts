@@ -74,7 +74,11 @@ export async function publicGallery(slug: string, ref: string): Promise<any | nu
   const row = (rows as any[]).find(r => safeEq(want, code(r.tenant_id, r.id, r.gallery_version || 0)));
   if (!row) return null;
   const media = (Array.isArray(row.media) ? row.media : []).filter((x: any) => x && x.key)
-    .map((x: any) => ({ key: x.key, kind: x.kind === 'video' ? 'video' : 'photo' }));
+    .map((x: any) => ({
+      key: x.key, kind: x.kind === 'video' ? 'video' : 'photo',
+      // The size, where the editor recorded it: a link preview states it.
+      ...(Number(x.w) > 0 && Number(x.h) > 0 ? { w: Number(x.w), h: Number(x.h) } : {}),
+    }));
   if (!media.length) return null;
   const brand = t.brand_config || {};
   return {
