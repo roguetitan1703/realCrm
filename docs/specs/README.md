@@ -17,6 +17,7 @@ than design-and-build one point at a time.
 | [branding.md](./branding.md) | E5 + platform identity, themes, URL, landing/login | 🔒 locked (landing parked) |
 | [pwa.md](./pwa.md) | E3/E4 PWA & app-shell audit | 🔒 locked (one big overhaul) |
 | [enquiries.md](./enquiries.md) | F. Enquiries: a person is not an enquiry | 🧭 planning (decisions locked, 4 opens) |
+| [gallery-enquiry.md](./gallery-enquiry.md) | Photo link: "I'm interested", who answers, sends as a record | 🧭 thinking (nothing decided) |
 
 > Each spec carries: **Decisions** (locked), **Data model**, **Flows/API**,
 > **Migration/rollback**, and a **Build checklist** (executed later, once locked).
