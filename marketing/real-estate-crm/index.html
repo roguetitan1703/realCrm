@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Real Estate CRM by Delpat | Leads, calling and listings for Indian property firms</title>
+<meta name="description" content="A CRM for real estate brokers, channel partners and developers in India. Portal enquiries from 99acres, MagicBricks and Housing.com arrive on their own, follow-ups are tracked per agent, and listings go out on WhatsApp. Built by Delpat LLP, Pune.">
+<link rel="canonical" href="https://delpat.in/real-estate-crm">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Delpat">
+<meta property="og:title" content="Real Estate CRM by Delpat">
+<meta property="og:description" content="Enquiries, calls, follow-ups and listings in one place, for real estate firms in India.">
+<meta property="og:url" content="https://delpat.in/real-estate-crm">
+<meta property="og:image" content="https://delpat.in/real-estate-crm/images/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The real estate CRM dashboard: leads by source, calling queue and follow-ups">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Real Estate CRM by Delpat">
+<meta name="twitter:description" content="Enquiries, calls, follow-ups and listings in one place, for real estate firms in India.">
+<meta name="twitter:image" content="https://delpat.in/real-estate-crm/images/og.jpg">
+<meta name="theme-color" content="#125e8a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Real Estate CRM",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web, Android, iOS (installable web app)",
+  "description": "A CRM for real estate brokers, channel partners and developers in India: portal lead capture, follow-ups, owner calling, listings and team performance.",
+  "creator": { "@type": "Organization", "name": "Delpat LLP", "url": "https://delpat.in", "address": { "@type": "PostalAddress", "addressLocality": "Pune", "addressCountry": "IN" } }
+}
+</script>
+<style>
+/* Tokens follow delpat.in (Manrope headings, Inter body, primary #125e8a). */
+:root{
+  --bg:#fff9fb; --surface:#ffffff; --surface-2:#f3f6f8; --text:#252627; --muted:#5b6470;
+  --border:#e5e7eb; --primary:#125e8a; --primary-ink:#ffffff; --secondary:#197bbd;
+  --accent:#10b981; --band:#0c2b3e; --band-text:#e6eef3; --band-muted:#9fbccd;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 12px 32px -12px rgba(16,24,40,.18);
+  --radius:14px; --max:1140px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not(.light){
+    --bg:#050002; --surface:#0f1216; --surface-2:#161a20; --text:#d8d9da; --muted:#9aa3ad;
+    --border:#2a3038; --primary:#73c0ed; --primary-ink:#050002; --secondary:#41a4e6;
+    --accent:#48efb7; --band:#0b1d29; --band-text:#e6eef3; --band-muted:#8fb3c8;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -12px rgba(0,0,0,.6);
+  }
+}
+:root.dark{
+  --bg:#050002; --surface:#0f1216; --surface-2:#161a20; --text:#d8d9da; --muted:#9aa3ad;
+  --border:#2a3038; --primary:#73c0ed; --primary-ink:#050002; --secondary:#41a4e6;
+  --accent:#48efb7; --band:#0b1d29; --band-text:#e6eef3; --band-muted:#8fb3c8;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -12px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+img{max-width:100%;height:auto;display:block}
+a{color:var(--primary)}
+h1,h2,h3{font-family:Manrope,Inter,system-ui,sans-serif;line-height:1.2;margin:0;color:var(--text);letter-spacing:-.01em}
+h1{font-size:clamp(2rem,4.6vw,3.25rem);font-weight:800}
+h2{font-size:clamp(1.5rem,3vw,2.125rem);font-weight:800}
+h3{font-size:1.0625rem;font-weight:700}
+p{margin:0}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 20px}
+section{padding:72px 0}
+.eyebrow{font:600 .8125rem/1 Inter,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--primary);margin-bottom:12px}
+.lede{color:var(--muted);font-size:1.0625rem;max-width:62ch;margin-top:14px}
+.btn{display:inline-flex;align-items:center;gap:8px;font:600 1rem/1 Inter,sans-serif;text-decoration:none;padding:14px 22px;border-radius:10px;border:1px solid transparent;transition:transform .15s,background .15s}
+.btn:hover{transform:translateY(-1px)}
+.btn-primary{background:var(--primary);color:var(--primary-ink)}
+.btn-ghost{border-color:var(--border);color:var(--text);background:var(--surface)}
+.btn:focus-visible,a:focus-visible{outline:3px solid var(--secondary);outline-offset:2px}
+
+/* Top bar */
+.top{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--border)}
+.top .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+.brand{font:800 1.25rem/1 Manrope,sans-serif;color:var(--text);text-decoration:none}
+.brand span{color:var(--muted);font-weight:600;font-size:.9375rem;margin-left:8px}
+.top .btn{padding:10px 16px;font-size:.9375rem}
+
+/* Hero */
+.hero{padding:64px 0 40px}
+.hero-grid{display:grid;grid-template-columns:1fr;gap:40px;align-items:center}
+.hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
+.hero-for{margin-top:20px;color:var(--muted);font-size:.9375rem}
+.shots{position:relative}
+.frame{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.frame-bar{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface-2)}
+.frame-bar i{width:9px;height:9px;border-radius:50%;background:var(--border)}
+.phone{position:absolute;right:-8px;bottom:-28px;width:30%;max-width:190px;border-radius:26px;border:6px solid #1c1f24;box-shadow:var(--shadow);overflow:hidden;background:#1c1f24}
+@media (min-width:960px){.hero-grid{grid-template-columns:1fr 1.15fr}.hero{padding:88px 0 64px}}
+
+/* Problem */
+.cards3{display:grid;gap:16px;margin-top:32px;grid-template-columns:1fr}
+@media (min-width:760px){.cards3{grid-template-columns:repeat(3,1fr)}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px}
+.card h3{margin-bottom:8px}
+.card p{color:var(--muted)}
+.problem .card{border-top:3px solid var(--primary)}
+
+/* Features */
+.alt{background:var(--surface-2)}
+.feat{display:grid;gap:16px;margin-top:32px;grid-template-columns:1fr}
+@media (min-width:700px){.feat{grid-template-columns:repeat(2,1fr)}}
+@media (min-width:1040px){.feat{grid-template-columns:repeat(3,1fr)}}
+.feat ul{margin:12px 0 0;padding:0;list-style:none}
+.feat li{position:relative;padding-left:20px;color:var(--muted);margin:8px 0;font-size:.9688rem}
+.feat li::before{content:"";position:absolute;left:2px;top:.62em;width:7px;height:7px;border-radius:2px;background:var(--accent)}
+
+/* Integrations */
+.int{display:grid;gap:12px;margin-top:32px;grid-template-columns:1fr}
+@media (min-width:760px){.int{grid-template-columns:repeat(2,1fr)}}
+.int-row{display:flex;gap:16px;align-items:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px}
+.int-name{font:700 1rem/1.3 Manrope,sans-serif;min-width:140px}
+.int-row p{color:var(--muted);font-size:.9375rem}
+@media (max-width:480px){.int-row{flex-direction:column;gap:4px}}
+
+/* White-label */
+.wl{display:grid;gap:32px;grid-template-columns:1fr;align-items:center}
+@media (min-width:900px){.wl{grid-template-columns:1fr 1fr}}
+.ticks{list-style:none;padding:0;margin:20px 0 0}
+.ticks li{padding:12px 0 12px 30px;border-bottom:1px solid var(--border);position:relative}
+.ticks li::before{content:"";position:absolute;left:4px;top:19px;width:12px;height:7px;border-left:2px solid var(--accent);border-bottom:2px solid var(--accent);transform:rotate(-45deg)}
+
+/* Screens */
+.screens{display:grid;gap:28px;margin-top:36px;grid-template-columns:1fr}
+@media (min-width:900px){.screens{grid-template-columns:repeat(2,1fr)}.screens .wide{grid-column:1/-1}}
+figure{margin:0}
+figure a{display:block;text-decoration:none}
+figcaption{margin-top:12px;color:var(--muted);font-size:.9375rem}
+figcaption b{color:var(--text);font-weight:600}
+.phone-fig{display:grid;gap:24px;align-items:center;grid-template-columns:1fr}
+.phone-fig .phone-img{max-width:260px;margin:0 auto;border-radius:28px;border:7px solid #1c1f24;overflow:hidden;box-shadow:var(--shadow)}
+@media (min-width:900px){.phone-fig{grid-template-columns:280px 1fr}}
+
+/* Who */
+.who{display:grid;gap:16px;margin-top:32px;grid-template-columns:1fr}
+@media (min-width:760px){.who{grid-template-columns:repeat(3,1fr)}}
+
+/* Closing */
+.band{background:var(--band);color:var(--band-text);text-align:center}
+.band h2{color:#fff}
+.band p{color:var(--band-muted);margin:14px auto 0;max-width:56ch}
+.band .btn-primary{background:#10b981;color:#04140d;margin-top:28px}
+footer{padding:28px 0;border-top:1px solid var(--border);color:var(--muted);font-size:.875rem}
+footer .wrap{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between}
+footer a{color:var(--text);font-weight:600;text-decoration:none}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn{transition:none}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="https://delpat.in">Delpat<span>Real Estate CRM</span></a>
+    <a class="btn btn-primary" href="mailto:om@delpat.in?subject=Real%20estate%20CRM%20demo">Book a demo</a>
+  </div>
+</header>
+
+<main>
+
+<!-- 1. Hero -->
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <p class="eyebrow">Real estate CRM</p>
+      <h1>Every enquiry, call and listing your firm handles, in one place.</h1>
+      <p class="lede">Portal enquiries arrive on their own and go to an agent. Each agent sees who to call next and records what happened. You see, per agent, what was done and what was missed.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="mailto:om@delpat.in?subject=Real%20estate%20CRM%20demo">Book a demo</a>
+        <a class="btn btn-ghost" href="#screens">See the screens</a>
+      </div>
+      <p class="hero-for">For brokers, channel partners and developers' sales teams in India.</p>
+    </div>
+    <div class="shots">
+      <div class="frame">
+        <div class="frame-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+        <img src="images/dashboard.webp" width="1600" height="1000" alt="The owner's dashboard: leads not contacted, follow-ups overdue, leads by source and the calling queue" fetchpriority="high">
+      </div>
+      <div class="phone"><img src="images/phone-today.webp" width="600" height="1022" alt="An agent's phone: overdue follow-ups with a call button on each"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 2. Problem -->
+<section class="problem">
+  <div class="wrap">
+    <p class="eyebrow">The problem</p>
+    <h2>Most firms run on four inboxes and a notebook.</h2>
+    <div class="cards3">
+      <div class="card">
+        <h3>Leads are everywhere</h3>
+        <p>Enquiries come from 99acres, MagicBricks, Housing.com, WhatsApp, calls and walk-ins. They end up in portal dashboards, phones and spreadsheets, and some are never called.</p>
+      </div>
+      <div class="card">
+        <h3>Follow-ups depend on memory</h3>
+        <p>A promised callback lives in an agent's head or diary. When it is missed, nobody finds out until the buyer has moved on.</p>
+      </div>
+      <div class="card">
+        <h3>The owner can't see the work</h3>
+        <p>Who called whom today, what came of it, and which leads nobody has touched: the answers take a round of phone calls to the team.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Features -->
+<section class="alt" id="features">
+  <div class="wrap">
+    <p class="eyebrow">What it does</p>
+    <h2>Built around how a property firm actually works.</h2>
+    <div class="feat">
+      <div class="card">
+        <h3>Leads and follow-ups</h3>
+        <ul>
+          <li>Portal and website enquiries become leads automatically and are assigned to agents in turn.</li>
+          <li>Each lead has a status, a next follow-up and a full history of calls, WhatsApp messages, remarks and visits.</li>
+          <li>Ready-made lists: not contacted, going cold, follow-up overdue, and buyers who enquired again.</li>
+          <li>A repeat enquiry from the same number is added to the existing lead, not created twice.</li>
+          <li>Rejected leads keep the reason, such as budget or locality mismatch.</li>
+          <li>Import existing leads from Excel or CSV, checked before anything is saved, with undo.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Calling owners</h3>
+        <ul>
+          <li>A calling list of property owners, grouped by project and tower.</li>
+          <li>Call outcomes such as call not received, switched off, interested, key received and do not call.</li>
+          <li>Callbacks are scheduled and show up on the agent's list when due.</li>
+          <li>Assign a whole project to an agent in one step.</li>
+          <li>When an owner hands over the key, convert the row into a listing.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Listings</h3>
+        <ul>
+          <li>Flats, offices, shops and warehouses, for sale or rent, grouped by project, tower and unit.</li>
+          <li>Photos and videos, with your firm's logo and name added to each photo.</li>
+          <li>One link per listing to send on WhatsApp. It shows the photos only: no price, flat number or owner.</li>
+          <li>Each lead shows the listings that match what they asked for, ready to share.</li>
+          <li>WhatsApp messages written for you, in English or Marathi.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Site visits and deals</h3>
+        <ul>
+          <li>Site visits are logged with a selfie and the phone's location.</li>
+          <li>A calendar of visits and tasks, with reminders before each visit.</li>
+          <li>Close a deal as a rent or sale agreement, with the documents attached.</li>
+          <li>Tenants and buyers are kept as contacts, alongside owners.</li>
+          <li>A reminder 30 days before a rent agreement ends.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Team and visibility</h3>
+        <ul>
+          <li>Owner, manager and agent roles. Agents see only their own leads.</li>
+          <li>A dashboard of what needs attention today: uncontacted leads, overdue follow-ups, callbacks due.</li>
+          <li>Each agent's calls, pickups and status changes, for today, 7 or 30 days.</li>
+          <li>Missed follow-ups and uncalled leads, counted per agent.</li>
+          <li>Move an agent's work to someone else when they are on leave or leave the firm.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>On the phone</h3>
+        <ul>
+          <li>Installs on Android and iPhone from the browser. No app store needed.</li>
+          <li>The agent's day as one list: overdue, due today, then new leads.</li>
+          <li>Call from the app, then record the outcome and the next step.</li>
+          <li>Notifications for a new lead, a follow-up due, a visit coming up or a buyer enquiring again.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4. Lead integrations -->
+<section id="integrations">
+  <div class="wrap">
+    <p class="eyebrow">Lead sources</p>
+    <h2>Where your leads come from.</h2>
+    <p class="lede">Each source gets its own key. Enquiries are stored as they arrive, so none is lost while a source is being set up.</p>
+    <div class="int">
+      <div class="int-row"><div class="int-name">99acres</div><p>Each enquiry becomes a lead with the buyer's name, phone and requirement, and is assigned to an agent.</p></div>
+      <div class="int-row"><div class="int-name">MagicBricks</div><p>Same: each enquiry becomes a lead and is assigned to an agent.</p></div>
+      <div class="int-row"><div class="int-name">Housing.com</div><p>Same: each enquiry becomes a lead and is assigned to an agent.</p></div>
+      <div class="int-row"><div class="int-name">Your website</div><p>Any form or system that can send an enquiry to a web address (a webhook) can feed leads in.</p></div>
+      <div class="int-row"><div class="int-name">Excel and CSV</div><p>Bring in existing leads, owners and listings, with a report of any row that was not imported and why.</p></div>
+      <div class="int-row"><div class="int-name">WhatsApp and calls</div><p>Messages open in WhatsApp or WhatsApp Business on the agent's phone with the text ready. Calls go through the phone's own dialler.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. White-label -->
+<section class="alt" id="white-label">
+  <div class="wrap wl">
+    <div>
+      <p class="eyebrow">White-label</p>
+      <h2>Your firm's name on every screen.</h2>
+      <p class="lede">Your team and your clients see your brand. Delpat appears only as a small "Powered by" line.</p>
+      <ul class="ticks">
+        <li>Your firm's name, logo and colour in the app and on the sign-in page.</li>
+        <li>The app installs on phones with your logo as its icon.</li>
+        <li>Listing photos and shared photo links carry your name and logo.</li>
+        <li>Each firm's data is kept separate, with its own sign-in address.</li>
+      </ul>
+    </div>
+    <div class="frame">
+      <img src="images/listing.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="A listing with four photos, each marked with the firm's name, and a Copy photo link button">
+    </div>
+  </div>
+</section>
+
+<!-- 6. Screenshots -->
+<section id="screens">
+  <div class="wrap">
+    <p class="eyebrow">Screens</p>
+    <h2>The product, as your team will use it.</h2>
+    <p class="lede">Shown with a demo firm. Every name, number and project below is made up.</p>
+    <div class="screens">
+      <figure class="wide">
+        <a href="images/leads.webp"><div class="frame"><img src="images/leads.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="The leads list with requirement, budget, stage, source, agent and next follow-up for each lead"></div></a>
+        <figcaption><b>Leads.</b> Every enquiry with its requirement, stage, source, agent and next follow-up, and the lists that need action today.</figcaption>
+      </figure>
+      <figure>
+        <a href="images/lead-timeline.webp"><div class="frame"><img src="images/lead-timeline.webp" width="1200" height="791" loading="lazy" decoding="async" alt="A lead's history: calls, remarks, status changes, a site visit with location and a scheduled follow-up"></div></a>
+        <figcaption><b>One lead's history.</b> Calls, remarks, WhatsApp messages, status changes and site visits, in order.</figcaption>
+      </figure>
+      <figure>
+        <a href="images/calling.webp"><div class="frame"><img src="images/calling.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="The owner calling list grouped by project, showing owners to call, interested owners and the agent on each project"></div></a>
+        <figcaption><b>Calling owners.</b> Grouped by project, with how many are left to call and who is calling them.</figcaption>
+      </figure>
+      <figure class="wide phone-fig">
+        <div class="phone-img"><img src="images/phone-today.webp" width="600" height="1022" loading="lazy" decoding="async" alt="An agent's Today screen on a phone, listing overdue follow-ups with a call button on each"></div>
+        <figcaption><b>An agent's phone.</b> The day's list starts with what is overdue. One tap calls the person; the agent then records what happened and when to call next.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- 7. Who it's for -->
+<section class="alt" id="who">
+  <div class="wrap">
+    <p class="eyebrow">Who it's for</p>
+    <h2>Firms that sell and rent property in India.</h2>
+    <div class="who">
+      <div class="card">
+        <h3>Brokers and agencies</h3>
+        <p>Resale and rentals, residential and commercial. Portal leads, owner calling, listings with photos, and rent agreements in one place.</p>
+      </div>
+      <div class="card">
+        <h3>Channel partners</h3>
+        <p>Many projects at once, many towers per project. Leads and inventory grouped by project, so each agent works their own.</p>
+      </div>
+      <div class="card">
+        <h3>Developers' sales teams</h3>
+        <p>Enquiries from portals and your website go to the sales team in turn, and management sees follow-ups and visits per person.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 8. Closing CTA -->
+<section class="band">
+  <div class="wrap">
+    <h2>See it with your own leads.</h2>
+    <p>We'll walk you through it on a call and answer how it would fit your team.</p>
+    <a class="btn btn-primary" href="mailto:om@delpat.in?subject=Real%20estate%20CRM%20demo">Book a demo</a>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Built by <a href="https://delpat.in">Delpat LLP, Pune</a></span>
+    <a href="mailto:om@delpat.in">om@delpat.in</a>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -125,9 +125,14 @@ function person(): string {
   return `${pick(P.people.first)} ${pick(P.people.last)}`;
 }
 const usedPhones = new Set<string>();
+// "phones": "fiction" keeps every number in the 99555 block seed-dev uses, for a
+// firm whose screens are shown outside Delpat: a random mobile number is
+// somebody's, and a screenshot on a public page would print it.
 function phone(): string {
   for (;;) {
-    const p = `+91${pick(['9', '8', '7', '6'])}${String(int(100000000, 999999999))}`;
+    const p = P.phones === 'fiction'
+      ? `+9199555${String(int(0, 99999)).padStart(5, '0')}`
+      : `+91${pick(['9', '8', '7', '6'])}${String(int(100000000, 999999999))}`;
     if (!usedPhones.has(p)) { usedPhones.add(p); return p; }
   }
 }

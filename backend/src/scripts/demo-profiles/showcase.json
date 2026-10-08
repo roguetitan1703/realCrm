@@ -1,0 +1,482 @@
+{
+  "_about": "9 Oct 2026. The Vadodara profile with every name invented, for screenshots shown outside Delpat (the product page). Firm, projects and builders are made up; localities and GIDC estates are public area names; people are invented; phones are in the 99555 fiction block.",
+  "slug": "demo-showcase",
+  "seed": 20261009,
+  "firm": {
+    "name": "Amberleaf Realty",
+    "city": "Vadodara",
+    "state": "Gujarat",
+    "color": "#1F5C7A"
+  },
+  "market": {
+    "summary": "Small, mid-scale city. Stock is mostly offices, shops and warehouses for rent. People transferred in for oil and gas, manufacturing, processing and pharma jobs need flats to rent, and there is little variety: residential demand outruns residential stock, so the calling list exists to find flat owners.",
+    "deal": {
+      "rent": 0.8,
+      "sale": 0.2
+    },
+    "stock": {
+      "commercial": 0.75,
+      "residential": 0.25
+    },
+    "demand": {
+      "commercial": 0.45,
+      "residential": 0.55
+    },
+    "calling": {
+      "residential": 0.7,
+      "commercial": 0.3
+    },
+    "segment": "resale"
+  },
+  "team": [
+    {
+      "name": "Hitesh Shah",
+      "role": "owner",
+      "email": "hitesh@amberleaf.example"
+    },
+    {
+      "name": "Nirav Patel",
+      "role": "manager"
+    },
+    {
+      "name": "Krupa Desai",
+      "role": "agent",
+      "works": "offices and shops"
+    },
+    {
+      "name": "Jignesh Parmar",
+      "role": "agent",
+      "works": "warehouses and industrial"
+    },
+    {
+      "name": "Dhruv Trivedi",
+      "role": "agent",
+      "works": "residential rentals"
+    }
+  ],
+  "people": {
+    "first": [
+      "Hardik",
+      "Chirag",
+      "Bhavin",
+      "Ketan",
+      "Mehul",
+      "Jayesh",
+      "Parth",
+      "Viral",
+      "Darshan",
+      "Sagar",
+      "Hetal",
+      "Nisha",
+      "Riddhi",
+      "Foram",
+      "Payal",
+      "Krina",
+      "Rakesh",
+      "Alpesh",
+      "Sanjay",
+      "Manish"
+    ],
+    "last": [
+      "Patel",
+      "Shah",
+      "Desai",
+      "Mehta",
+      "Parikh",
+      "Joshi",
+      "Trivedi",
+      "Pandya",
+      "Bhatt",
+      "Thakkar",
+      "Amin",
+      "Solanki",
+      "Chauhan",
+      "Rana",
+      "Soni",
+      "Modi",
+      "Panchal",
+      "Vyas"
+    ],
+    "companies": [
+      "a pharma company in Nandesari",
+      "a refinery contractor at Koyali",
+      "an engineering unit in Makarpura GIDC",
+      "a chemical plant in Por",
+      "a logistics firm on the Halol road"
+    ]
+  },
+  "localities": [
+    {
+      "name": "Alkapuri",
+      "kind": "commercial",
+      "lat": 22.311,
+      "lng": 73.171
+    },
+    {
+      "name": "Sayajigunj",
+      "kind": "commercial",
+      "lat": 22.317,
+      "lng": 73.184
+    },
+    {
+      "name": "Genda Circle",
+      "kind": "commercial",
+      "lat": 22.3215,
+      "lng": 73.166
+    },
+    {
+      "name": "Gorwa",
+      "kind": "mixed",
+      "lat": 22.333,
+      "lng": 73.16
+    },
+    {
+      "name": "Karelibaug",
+      "kind": "mixed",
+      "lat": 22.323,
+      "lng": 73.207
+    },
+    {
+      "name": "New Alkapuri",
+      "kind": "residential",
+      "lat": 22.308,
+      "lng": 73.135
+    },
+    {
+      "name": "Bhayli",
+      "kind": "residential",
+      "lat": 22.293,
+      "lng": 73.123
+    },
+    {
+      "name": "Vasna-Bhayli Road",
+      "kind": "residential",
+      "lat": 22.298,
+      "lng": 73.14
+    },
+    {
+      "name": "Gotri",
+      "kind": "residential",
+      "lat": 22.317,
+      "lng": 73.14
+    },
+    {
+      "name": "Makarpura GIDC",
+      "kind": "industrial",
+      "lat": 22.247,
+      "lng": 73.19
+    },
+    {
+      "name": "Waghodia GIDC",
+      "kind": "industrial",
+      "lat": 22.305,
+      "lng": 73.39
+    },
+    {
+      "name": "Por",
+      "kind": "industrial",
+      "lat": 22.166,
+      "lng": 73.19
+    }
+  ],
+  "projects": [
+    {
+      "name": "Riverside Trade Centre",
+      "locality": "Genda Circle",
+      "kind": "office",
+      "towers": [
+        "A"
+      ],
+      "floors": 8,
+      "perFloor": 6,
+      "area": [
+        400,
+        1500
+      ],
+      "rentPerSqft": [
+        35,
+        60
+      ]
+    },
+    {
+      "name": "Orchid Business Park",
+      "locality": "Genda Circle",
+      "kind": "office",
+      "towers": [
+        "A",
+        "B"
+      ],
+      "floors": 10,
+      "perFloor": 6,
+      "area": [
+        350,
+        2000
+      ],
+      "rentPerSqft": [
+        35,
+        60
+      ]
+    },
+    {
+      "name": "Sunpath Plaza",
+      "locality": "Alkapuri",
+      "kind": "office",
+      "towers": [
+        "A"
+      ],
+      "floors": 6,
+      "perFloor": 8,
+      "area": [
+        300,
+        1200
+      ],
+      "rentPerSqft": [
+        30,
+        45
+      ],
+      "shopsOnGround": true,
+      "shopRentPerSqft": [
+        70,
+        120
+      ],
+      "est": "shop rent"
+    },
+    {
+      "name": "Makarpura GIDC",
+      "locality": "Makarpura GIDC",
+      "kind": "warehouse",
+      "towers": [
+        "Shed"
+      ],
+      "units": 18,
+      "area": [
+        5000,
+        35000
+      ],
+      "rentPerSqft": [
+        17,
+        23
+      ]
+    },
+    {
+      "name": "Waghodia GIDC",
+      "locality": "Waghodia GIDC",
+      "kind": "warehouse",
+      "towers": [
+        "Shed"
+      ],
+      "units": 12,
+      "area": [
+        8000,
+        25000
+      ],
+      "rentPerSqft": [
+        15,
+        20
+      ]
+    },
+    {
+      "name": "Por GIDC",
+      "locality": "Por",
+      "kind": "warehouse",
+      "towers": [
+        "Shed"
+      ],
+      "units": 10,
+      "area": [
+        10000,
+        25000
+      ],
+      "rentPerSqft": [
+        17,
+        22
+      ]
+    },
+    {
+      "name": "Palm Grove Residency",
+      "builder": "Meridian Homes",
+      "locality": "Vasna-Bhayli Road",
+      "kind": "residential",
+      "towers": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      "floors": 12,
+      "perFloor": 4,
+      "configs": {
+        "2 BHK": {
+          "rent": [
+            12000,
+            18000
+          ],
+          "sale": [
+            4500000,
+            6000000
+          ]
+        },
+        "3 BHK": {
+          "rent": [
+            16000,
+            26000
+          ],
+          "sale": [
+            6500000,
+            8500000
+          ]
+        }
+      },
+      "est": "sale prices"
+    },
+    {
+      "name": "Skyview Heights",
+      "builder": "Westwind Developers",
+      "locality": "Vasna-Bhayli Road",
+      "kind": "residential",
+      "towers": [
+        "A",
+        "B"
+      ],
+      "floors": 10,
+      "perFloor": 4,
+      "configs": {
+        "2 BHK": {
+          "rent": [
+            11000,
+            16000
+          ]
+        },
+        "3 BHK": {
+          "rent": [
+            15000,
+            24000
+          ]
+        }
+      }
+    },
+    {
+      "name": "Lotus Pavilion",
+      "locality": "Gotri",
+      "kind": "residential",
+      "towers": [
+        "A",
+        "B"
+      ],
+      "floors": 11,
+      "perFloor": 4,
+      "configs": {
+        "2 BHK": {
+          "rent": [
+            14000,
+            25000
+          ]
+        },
+        "3 BHK": {
+          "rent": [
+            20000,
+            32000
+          ]
+        }
+      }
+    }
+  ],
+  "independent": {
+    "residentialRent": {
+      "1 BHK": {
+        "rent": [
+          6000,
+          11000
+        ],
+        "est": true
+      },
+      "2 BHK": {
+        "rent": [
+          8000,
+          26000
+        ]
+      },
+      "3 BHK": {
+        "rent": [
+          15000,
+          35000
+        ],
+        "est": true
+      }
+    },
+    "shops": {
+      "localities": [
+        "Karelibaug",
+        "Gorwa",
+        "Sayajigunj"
+      ],
+      "area": [
+        150,
+        600
+      ],
+      "rentPerSqft": [
+        60,
+        120
+      ],
+      "est": true
+    }
+  },
+  "demand": {
+    "commercial": [
+      "office 800-1000 sqft near genda circle, furnished, 5 seats",
+      "ca firm wants 400 sqft in alkapuri, ground or 1st floor",
+      "godown 10k sqft makarpura side, truck access needed",
+      "shed for pharma packaging, waghodia or por, 15-20k sqft",
+      "shop on main road karelibaug for mobile store"
+    ],
+    "residential": [
+      "transferred from mumbai, 2bhk on rent near gorwa, company lease",
+      "refinery job at koyali, wants 2bhk bhayli side, family of 3",
+      "bachelor sharing 2bhk near alkapuri, 2 friends pharma job"
+    ]
+  },
+  "phrases": {
+    "call": [
+      "not ans",
+      "call cut",
+      "busy hatu",
+      "switch off",
+      "sanje 7 pachi call karvano"
+    ],
+    "remark": [
+      "site joi lidhi, rate vadhare lage che",
+      "company lease par levu che, documents mangya",
+      "owner 11 mahina nu agreement j karse",
+      "deposit 3 mahina nu, negotiable",
+      "truck entry joie che, height 30 ft",
+      "furnished office joie, 5 seat ready"
+    ],
+    "callback": [
+      "kale savare call karo",
+      "sanje 7 pachi",
+      "monday e call karo"
+    ],
+    "owner": [
+      "office khali che, tenant joie che",
+      "godown aapvu che, long lease",
+      "flat bhade aapvo che, family ne j"
+    ]
+  },
+  "volume": {
+    "leads": 180,
+    "owners": 260,
+    "units": 140
+  },
+  "open": [],
+  "phones": "fiction",
+  "photos": {
+    "source": "free stock interiors (Unsplash/Pexels licence)",
+    "kinds": [
+      "office",
+      "shop",
+      "warehouse",
+      "flat"
+    ],
+    "rule": "interiors only, never a building's outside"
+  }
+}
