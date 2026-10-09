@@ -35,10 +35,11 @@ take would show that call on the lead before it is recorded.
 Check the video before using it: `tutorial-videos probe product-tour …` must show
 `yuv420p(tv, bt709)` and an audio stream; look at `still`/`frame` PNGs.
 
-The page uses WebP copies: full-size `dashboard`, `signin`, `phone-today`, and
-`leads`, `calling`, `listing`, `performance` cropped to the content (from x=470,
-y=150 to 3200×1606 on the 3200×1800 PNG — no sidebar), plus `demo.mp4`,
-`demo-poster.jpg` (frame at 9 s) and `og.jpg`.
+The page uses WebP copies of three screenshots (`dashboard` in the hero,
+`signin` for white-label, `phone-today`), the live snippets for the four
+feature sections, the walkthrough, `og.jpg`, and the video: a web copy of
+`out/product-tour.mp4` (crf 24, `+faststart`, 6.9 MB) with `demo-poster.jpg`
+taken at 5 s.
 
 Shoot during working hours: Today and Performance count today's activity, and
 at night they are empty. Which leads are overdue moves with the clock, so the
