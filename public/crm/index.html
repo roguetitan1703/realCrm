@@ -5,20 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Real Estate CRM by Delpat | Leads, calling and listings for Indian property firms</title>
 <meta name="description" content="A CRM for real estate brokers, channel partners and developers in India. Portal enquiries from 99acres, MagicBricks and Housing.com arrive on their own, follow-ups are tracked per agent, and listings go out on WhatsApp. Built by Delpat LLP, Pune.">
-<link rel="canonical" href="https://delpat.in/real-estate-crm">
+<link rel="canonical" href="https://realestate.delpat.in/crm">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Delpat">
 <meta property="og:title" content="Real Estate CRM by Delpat">
 <meta property="og:description" content="Enquiries, calls, follow-ups and listings in one place, for real estate firms in India.">
-<meta property="og:url" content="https://delpat.in/real-estate-crm">
-<meta property="og:image" content="https://delpat.in/real-estate-crm/images/og.jpg">
+<meta property="og:url" content="https://realestate.delpat.in/crm">
+<meta property="og:image" content="https://realestate.delpat.in/crm/images/og.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="The real estate CRM dashboard: leads by source, calling queue and follow-ups">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Real Estate CRM by Delpat">
 <meta name="twitter:description" content="Enquiries, calls, follow-ups and listings in one place, for real estate firms in India.">
-<meta name="twitter:image" content="https://delpat.in/real-estate-crm/images/og.jpg">
+<meta name="twitter:image" content="https://realestate.delpat.in/crm/images/og.jpg">
 <meta name="theme-color" content="#125e8a">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -83,6 +83,10 @@ section{padding:72px 0}
 .brand{font:800 1.25rem/1 Manrope,sans-serif;color:var(--text);text-decoration:none}
 .brand span{color:var(--muted);font-weight:600;font-size:.9375rem;margin-left:8px}
 .top .btn{padding:10px 16px;font-size:.9375rem}
+.top-act{display:flex;align-items:center;gap:18px}
+.signin{color:var(--text);font-weight:600;font-size:.9375rem;text-decoration:none}
+.signin:hover{color:var(--primary)}
+@media (max-width:520px){.brand span{display:none}.top-act{gap:12px}}
 
 /* Hero */
 .hero{padding:64px 0 40px}
@@ -159,7 +163,10 @@ footer a{color:var(--text);font-weight:600;text-decoration:none}
 <header class="top">
   <div class="wrap">
     <a class="brand" href="https://delpat.in">Delpat<span>Real Estate CRM</span></a>
-    <a class="btn btn-primary" href="mailto:om@delpat.in?subject=Real%20estate%20CRM%20demo">Book a demo</a>
+    <nav class="top-act">
+      <a class="signin" href="/">Sign in</a>
+      <a class="btn btn-primary" href="mailto:om@delpat.in?subject=Real%20estate%20CRM%20demo">Book a demo</a>
+    </nav>
   </div>
 </header>
 
@@ -181,9 +188,9 @@ footer a{color:var(--text);font-weight:600;text-decoration:none}
     <div class="shots">
       <div class="frame">
         <div class="frame-bar" aria-hidden="true"><i></i><i></i><i></i></div>
-        <img src="images/dashboard.webp" width="1600" height="1000" alt="The owner's dashboard: leads not contacted, follow-ups overdue, leads by source and the calling queue" fetchpriority="high">
+        <img src="/crm/images/dashboard.webp" width="1600" height="1000" alt="The owner's dashboard: leads not contacted, follow-ups overdue, leads by source and the calling queue" fetchpriority="high">
       </div>
-      <div class="phone"><img src="images/phone-today.webp" width="600" height="1022" alt="An agent's phone: overdue follow-ups with a call button on each"></div>
+      <div class="phone"><img src="/crm/images/phone-today.webp" width="600" height="1022" alt="An agent's phone: overdue follow-ups with a call button on each"></div>
     </div>
   </div>
 </section>
@@ -312,7 +319,7 @@ footer a{color:var(--text);font-weight:600;text-decoration:none}
       </ul>
     </div>
     <div class="frame">
-      <img src="images/listing.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="A listing with four photos, each marked with the firm's name, and a Copy photo link button">
+      <img src="/crm/images/listing.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="A listing with four photos, each marked with the firm's name, and a Copy photo link button">
     </div>
   </div>
 </section>
@@ -325,19 +332,19 @@ footer a{color:var(--text);font-weight:600;text-decoration:none}
     <p class="lede">Shown with a demo firm. Every name, number and project below is made up.</p>
     <div class="screens">
       <figure class="wide">
-        <a href="images/leads.webp"><div class="frame"><img src="images/leads.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="The leads list with requirement, budget, stage, source, agent and next follow-up for each lead"></div></a>
+        <a href="/crm/images/leads.webp"><div class="frame"><img src="/crm/images/leads.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="The leads list with requirement, budget, stage, source, agent and next follow-up for each lead"></div></a>
         <figcaption><b>Leads.</b> Every enquiry with its requirement, stage, source, agent and next follow-up, and the lists that need action today.</figcaption>
       </figure>
       <figure>
-        <a href="images/lead-timeline.webp"><div class="frame"><img src="images/lead-timeline.webp" width="1200" height="791" loading="lazy" decoding="async" alt="A lead's history: calls, remarks, status changes, a site visit with location and a scheduled follow-up"></div></a>
+        <a href="/crm/images/lead-timeline.webp"><div class="frame"><img src="/crm/images/lead-timeline.webp" width="1200" height="791" loading="lazy" decoding="async" alt="A lead's history: calls, remarks, status changes, a site visit with location and a scheduled follow-up"></div></a>
         <figcaption><b>One lead's history.</b> Calls, remarks, WhatsApp messages, status changes and site visits, in order.</figcaption>
       </figure>
       <figure>
-        <a href="images/calling.webp"><div class="frame"><img src="images/calling.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="The owner calling list grouped by project, showing owners to call, interested owners and the agent on each project"></div></a>
+        <a href="/crm/images/calling.webp"><div class="frame"><img src="/crm/images/calling.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="The owner calling list grouped by project, showing owners to call, interested owners and the agent on each project"></div></a>
         <figcaption><b>Calling owners.</b> Grouped by project, with how many are left to call and who is calling them.</figcaption>
       </figure>
       <figure class="wide phone-fig">
-        <div class="phone-img"><img src="images/phone-today.webp" width="600" height="1022" loading="lazy" decoding="async" alt="An agent's Today screen on a phone, listing overdue follow-ups with a call button on each"></div>
+        <div class="phone-img"><img src="/crm/images/phone-today.webp" width="600" height="1022" loading="lazy" decoding="async" alt="An agent's Today screen on a phone, listing overdue follow-ups with a call button on each"></div>
         <figcaption><b>An agent's phone.</b> The day's list starts with what is overdue. One tap calls the person; the agent then records what happened and when to call next.</figcaption>
       </figure>
     </div>

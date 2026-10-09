@@ -107,6 +107,8 @@ export interface ProvisionResult {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const RESERVED_SLUGS = new Set(['admin', 'pwa', 'crm']);
+
 export async function provisionTenant(input: ProvisionInput): Promise<ProvisionResult> {
   const firmName = String(input.firmName || '').trim();
   const city = String(input.city || '').trim();
@@ -124,9 +126,12 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   if (plan.issues.length) throw new Error(`Roster is not valid. ${plan.issues.join(' ')}`);
 
   // Unique slug === tenant id (our convention). If taken, suffix -2, -3, …
+  // The slug is the first path segment of the firm's address, so the paths the
+  // site itself serves count as taken: /admin is the console, /pwa the app
+  // manifests, /crm the product page (public/crm, vercel.json).
   const base = (input.slug || firmName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
   let cleanSlug = base;
-  for (let n = 2; (await sql`SELECT 1 FROM tenants WHERE id = ${cleanSlug} OR slug = ${cleanSlug} LIMIT 1`).length; n++) {
+  for (let n = 2; RESERVED_SLUGS.has(cleanSlug) || (await sql`SELECT 1 FROM tenants WHERE id = ${cleanSlug} OR slug = ${cleanSlug} LIMIT 1`).length; n++) {
     cleanSlug = `${base}-${n}`;
   }
   const tenantId = cleanSlug;

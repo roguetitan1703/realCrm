@@ -1,27 +1,35 @@
-# Real Estate CRM — product page for delpat.in
+# Real Estate CRM — the product page
 
-A self-contained page (`index.html`, no build, no JavaScript) meant to live at
-`https://delpat.in/real-estate-crm`. It is written to be ported into the
-delpat.in Next.js + Tailwind site; the CSS tokens at the top of `index.html`
-already use that site's fonts (Manrope headings, Inter body) and colours
-(primary `#125e8a`, secondary `#197bbd`, accent `#10b981`, light `#fff9fb` /
-dark `#050002`). Dark mode follows `prefers-color-scheme` and the site's
-`html.dark` class.
+Lives at **https://realestate.delpat.in/crm**, served by this repo's Vercel
+deployment: the page is the static file `public/crm/index.html` (Vite copies
+`public/` into the build untouched), and `vercel.json` rewrites `/crm` to it
+ahead of the app's catch-all. No build step, no JavaScript. The delpat.in
+site's source was not on this machine, so it lives here; link to it from
+delpat.in when that site is to hand.
+
+`crm` is a reserved firm address (`RESERVED_SLUGS` in `provisionTenant`), so no
+firm can ever be given `/crm`. This README is kept out of `public/` because it
+names the demo firm's sign-in.
+
+The CSS tokens follow delpat.in (Manrope headings, Inter body, primary
+`#125e8a`, secondary `#197bbd`, accent `#10b981`, light `#fff9fb` / dark
+`#050002`). Dark mode follows `prefers-color-scheme` and an `html.dark` class.
 
 ## Files
 
 | File | What it is |
 |---|---|
-| `index.html` | The page: hero, problem, features, lead sources, white-label, screens, who it's for, closing CTA, footer |
-| `images/*.webp` | Screenshots of the real app (≈ 300 KB total) |
-| `images/og.jpg` | 1200×630 link-preview image |
+| `public/crm/index.html` | The page: hero, problem, features, lead sources, white-label, screens, who it's for, closing CTA, footer |
+| `public/crm/images/*.webp` | Screenshots of the real app (≈ 300 KB total) |
+| `public/crm/images/og.jpg` | 1200×630 link-preview image |
 
 ## Before it goes live
 
 - **Book a demo** is `mailto:om@delpat.in?subject=Real%20estate%20CRM%20demo` in
   three places (top bar, hero, closing band). Swap for the contact page if one exists.
 - `og:image`, `twitter:image`, `og:url` and `canonical` are absolute URLs on
-  `https://delpat.in/real-estate-crm`. Change them if the page lives elsewhere.
+  `https://realestate.delpat.in/crm`. Change them if the page moves.
+- **Sign in** in the top bar goes to `/`, the firm picker.
 
 ## The screenshots are a demo firm, not a client
 
