@@ -43,5 +43,20 @@ export default {
     fonts: { display: 'Manrope', body: 'Inter' },
   },
 
-  voice: { name: 'af_heart' },
+  voice: { name: 'af_heart', speed: 1.05 },
+
+  // A product video, not a click-by-click tutorial: lines over shots, chapter
+  // labels, a branded close (see the engine's studio/edit.js and Tutorial.jsx).
+  style: 'promo',
+  pacing: { lead: 900, dwell: 700 },
+  // The CRM's own loading indicators; while one shows, the edit cuts the wait.
+  busy: ['.list-spin', '.mp-spin', '.cam-loading'],
+  // How the narrator reads what the captions write.
+  lexicon: {
+    'delpat.in': 'delpat dot in',
+    CRM: 'C R M',
+    '99acres': 'ninety-nine acres',
+    'Housing.com': 'Housing dot com',
+    MagicBricks: 'Magic Bricks',
+  },
 }
