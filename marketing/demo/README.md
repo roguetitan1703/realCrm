@@ -21,7 +21,16 @@ tutorial-videos record product-tour --config marketing/demo/tutorials.config.mjs
 
 # the page's screenshots, same sign-in, devices and hidden badges as the video
 node marketing/demo/screens.mjs            # → out/screens/*.png
+
+# the live snippets and the walkthrough (real markup, not pictures)
+tutorial-videos snap page-snippets --config marketing/demo/tutorials.config.mjs
+tutorial-videos snap record-call-walkthrough --no-reset --config marketing/demo/tutorials.config.mjs
+#   copy out/snaps/page-snippets → webloom public/real-estate-crm/live/page
+#   and  out/snaps/record-call-walkthrough → …/live/record-call
 ```
+
+Take the walkthrough straight after a reset: it saves a call, and a second
+take would show that call on the lead before it is recorded.
 
 Check the video before using it: `tutorial-videos probe product-tour …` must show
 `yuv420p(tv, bt709)` and an audio stream; look at `still`/`frame` PNGs.
