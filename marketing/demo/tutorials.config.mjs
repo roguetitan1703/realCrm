@@ -40,6 +40,7 @@ export default {
   brand: {
     label: 'Real Estate CRM by Delpat',
     accent: '#10b981', ink: '#0c2b3e', muted: '#5b6470', paper: '#ffffff', backdrop: '#eef4f8',
+    secondary: '#197bbd', deep: '#06111a',
     fonts: { display: 'Manrope', body: 'Inter' },
   },
 
