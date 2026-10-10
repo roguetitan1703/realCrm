@@ -20,7 +20,7 @@ export default {
         { at: { text: '19 to call' }, label: 'Owners still to call' },
         { at: { role: 'button', name: 'Assign', nth: 3 }, label: 'Hand a project to an agent' },
       ],
-      cutouts: [{ at: { css: '.projcard' }, name: 'project', count: 6 }] },
+      cutouts: [{ at: { css: '.projcard' }, name: 'project', count: 6, parts: { toCall: { css: '.pj-dot.avail' }, assign: { css: '.pj-assign' } } }] },
     { walk: false, click: { nav: 'Properties' } },
     { walk: false, click: { text: 'Palm Grove Residency', exact: true } },
     { walk: false, click: { text: 'D-304', exact: true } },

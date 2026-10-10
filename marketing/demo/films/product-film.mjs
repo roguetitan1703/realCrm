@@ -9,7 +9,7 @@
 //   → out/product-film-aurora.mp4 and out/product-film-mono.mp4
 export default {
   title: 'Real Estate CRM by Delpat',
-  uses: ['page-snippets', 'record-call-walkthrough'],
+  uses: ['page-snippets', 'record-call-walkthrough', 'film-pieces'],
   scenes: [
     {
       kind: 'title', kicker: 'Real Estate CRM by Delpat',
@@ -49,9 +49,10 @@ export default {
     {
       kind: 'fan', eyebrow: 'Listings', base: 'page-snippets',
       headline: ['Your firm’s name', 'on every photo.'],
-      photos: ['photo-1', 'photo-2', 'photo-3', 'photo-4'],
+      // From film-pieces: the photos kept sharp enough to enlarge.
+      photos: ['photo-1', 'photo-2', 'photo-3', 'photo-4'], photosBase: 'film-pieces',
       // Where the firm's name sits on the first photo, in its CSS px.
-      watermark: { x: 2.5, y: 3.5, w: 37, h: 10.5 }, watermarkLabel: 'Your firm’s name',
+      watermark: { x: 2.5, y: 3.5, w: 40, h: 10.5 }, watermarkLabel: 'Your firm’s name',
       button: 'copy-link', send: 'whatsapp', gatherLabel: 'One link. Photos only.',
       say: 'Listing photos carry your firm’s name. One link sends them on WhatsApp, without the price or the flat number.',
     },
@@ -59,12 +60,12 @@ export default {
       kind: 'grid', eyebrow: 'Calling owners', base: 'page-snippets',
       headline: ['Win listings,', 'project by project.'],
       cards: ['project-1', 'project-2', 'project-3', 'project-4', 'project-5', 'project-6'],
-      // Palm Grove Residency; its parts in the card's CSS px.
+      // Palm Grove Residency; its parts as measured by `extract`.
       focus: {
         card: 'project-6',
         parts: [
-          { x: 14, y: 108, w: 76, h: 20, label: 'Owners still to call' },
-          { x: 14, y: 186, w: 88, h: 36, label: 'Hand it to an agent' },
+          { part: 'toCall', label: 'Owners still to call' },
+          { part: 'assign', label: 'Hand it to an agent' },
         ],
       },
       say: 'The calling list wins you new listings, project by project. Hand a whole project to an agent in one step.',
