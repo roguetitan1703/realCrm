@@ -43,7 +43,7 @@ export default {
     fonts: { display: 'Manrope', body: 'Inter' },
   },
 
-  voice: { name: 'af_heart', speed: 1.05 },
+  voice: { name: 'am_fenrir', speed: 1.05 },
 
   // A product video, not a click-by-click tutorial: lines over shots, chapter
   // labels, a branded close (see the engine's studio/edit.js and Tutorial.jsx).
