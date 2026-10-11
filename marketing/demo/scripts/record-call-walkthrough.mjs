@@ -14,4 +14,7 @@ export default {
     { expect: { text: 'Wants to visit on Saturday' } },
   ],
   outro: 'Saved on the lead, for whoever calls next.',
+  // The dashboard tiles as the first stage shows them, for the product film
+  // (it carries one into this screen, so its number must match).
+  cutouts: [{ file: 'wt-01.html', at: { css: '.kpi' }, name: 'kpi', count: 4 }],
 }
