@@ -311,7 +311,7 @@ Recorded so a later session does not mistake "not in BACKLOG" for "checked".
 - **The audit chain** — `verifyAuditChain()` fails at seq 227 and has not been
   diagnosed. The ledger is sold to clients as tamper-evident.
 - **The notification matrix** — which types actually send, to whom, and whether
-  the recipient list is ever empty. `docs/specs/notification-delivery.md`
+  the recipient list is ever empty. `docs/archive/notification-delivery.md`
   describes the intent; nobody has compared it to what production sent.
 - **Permissions beyond the password path** — RBAC on routes, what a manager can
   reach that an agent cannot, and whether any route trusts a client-supplied
