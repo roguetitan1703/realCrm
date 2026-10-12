@@ -84,7 +84,7 @@ what changes is that both buttons now carry a link that knows who used it.
 
 - **Copy stays** — it is how a listing reaches a broker group, a WhatsApp
   status, Instagram, an SMS. Copy photo link and Copy listing details become
-  one **Copy**: the text, ending in the link.
+  one **Copy**: the text, ending in the link when the flat is Public (§5b).
 - **No lead is invented for a Copy.** A stranger who taps *I'm interested* on a
   copied link is put into WhatsApp with that agent, the flat named; the agent
   adds them as they do today. *Book a visit* asks a name and number, and that
@@ -156,39 +156,73 @@ realestate.delpat.in/bhumi/homes/pride-world-city   one public listing (the owne
   catalogue) shows "This home is no longer available" and the firm's catalogue.
   Nobody has to manage it.
 
-## 5b. Keeping links under control
+## 5b. What a link is, and what it shows when anything changes
 
-**The worry (user, 12 Oct):** every send and copy makes a link; links pile up in
-chats and groups carrying the firm's data, with no way to take them back.
+The first answer here (12 Oct) was patches — reuse links, expire them after 30
+days, add switches. The user took it apart: a link that is reused and whose
+timer resets on every copy never expires, so the expiry did nothing, and it said
+nothing about a flat that changes, a flat that is let, or a firm that no longer
+wants its flats shown. Modelled instead:
 
-**The answer is not a screen of links.** Nobody non-technical manages a list of
-codes. Control sits on the things people already think in — a flat, a buyer,
-the whole firm — and the links follow.
+### A link has no life of its own
 
-1. **Fewer links in the first place.** The same agent copying the same flat gets
-   the **same link** every time; the same agent sending the same flats to the
-   same lead gets the same link. A link is (agent, flats, lead), not one per
-   press.
-2. **A link holds nothing.** It is a key to a row; the page reads the flat as it
-   is *now*. Photos, area, BHK — never price (until decided), flat number,
-   owner, or the buyer's name. So a link "out there" exposes only what the
-   firm would show anyway, and changes the moment the listing does.
-3. **A link ends by itself.** 30 days after it was last sent or copied (sending
-   again restarts it). An expired link shows the firm's name and *Talk to us*,
-   no flats. The firm's own catalogue address never expires.
-4. **The flat closes its links.** Let, sold, removed, or **Stop sharing** on the
-   listing: every link that carries it shows "This home is no longer
-   available" for that flat. Stop sharing replaces today's *Turn off photo
-   link*, in the same place, with what it affects: *Shared 12 times · 9 links
-   open*.
-5. **The buyer closes theirs.** A lead marked Rejected or Deal Closed: links sent
-   to them show *Talk to us* only.
-6. **A person leaving does not orphan anything.** A suspended or removed agent's
-   links keep working; *Talk to us* goes to the lead's holder, else the firm's
-   contact person.
-7. **The owner has one switch for everything.** Settings → Sharing: *142 links
-   open · Close all shared links* — for a leak, or the day the firm stops.
-   Owner only, confirmed, recorded in the ledger. Links made afterwards work.
+A link is a **pointer to a promise**: *this agent showed these flats to this
+buyer* (or, for a Copy, *to whoever reads this*). It stores who, to whom, which
+flats, when, and **what the flats looked like when sent** (for the lead's
+history). It never stores a page. Every time it is opened, the page is worked
+out **from the state of four things at that moment**, and from nothing else:
+
+| Thing | Its states that matter |
+|---|---|
+| **Each flat** | available · not available (let, sold, held, withdrawn, deleted) · public or not · its details |
+| **The buyer** (a send) | open · closed (rejected, deal closed) · merged · deleted |
+| **The sender** | active · gone (suspended, removed) |
+| **The firm** | active · sharing stopped |
+
+So there is nothing to expire and nothing to clean up. A link is exactly as
+alive as the things it points at, and the firm controls those already.
+
+### Every case
+
+| What happens | What anyone opening the link sees |
+|---|---|
+| A flat's details or photos change | The flat as it is now. A wrong photo fixed once is fixed in every chat it was ever sent to. The lead keeps a record of what was sent. |
+| One of three sent flats is let | The two still available, and "1 home from this list has been taken". |
+| All of them are let | "These homes have been taken", *Talk to us*, and the catalogue if the firm has one. |
+| A flat is deleted, or merged into another | Treated as taken. |
+| The buyer's lead is closed | *Talk to us* only. A closed buyer's chat should not keep selling. |
+| The buyer's lead is merged | The send moves to the surviving lead. |
+| The sender leaves | The page is unchanged; *Talk to us* goes to the lead's holder, else the firm's contact person. |
+| A Copy of a flat that is not public | **There is no link in it** — see below. |
+| A public flat is made private | Every Copy link of it shows "This home is no longer available". Sends to named buyers are unaffected. |
+| The firm stops sharing | Every link shows the firm's name and *Talk to us*, nothing else. |
+| The same agent copies the same flat again | The same link. There is never a reason for two. |
+
+### The rule that removes the "links everywhere" problem
+
+**Who can see a flat is a property of the flat, not of the link.**
+
+- **Sending to a named buyer** (WhatsApp from a lead) is the agent's judgement,
+  as it is today: any available flat.
+- **A Copy goes to people nobody can name** — a group, a status. That is
+  *public*. So a Copy carries a link **only if the flat is marked Public**; for
+  any other flat, Copy gives the description text alone, as it does today.
+- **Public** is the same mark as "in the catalogue". One question per flat —
+  *may people outside the firm see this?* — answered once, by the firm.
+
+The text an agent pastes can never be recalled; that is true today and stays
+true. The **link** is the firm's window, and the firm decides what is in it.
+
+### Where control lives — on things people already understand
+
+| Who | Where | What they can do |
+|---|---|---|
+| Anyone who edits a flat | The flat | **Public** on/off. Its status (Available / Let / …), as today. "Sent to 6 buyers · copied 4 times", opening the buyers it went to and how each answered. |
+| The lead's agent | The lead | The flats sent, each with what the buyer did. **Stop showing** on a send made by mistake (rare, in the row's menu). |
+| The owner | Settings | **Stop all sharing** — for a leak, or the day the firm leaves. Confirmed, owner only, in the ledger. |
+
+No list of links exists anywhere, because nothing about a link is decided
+separately from the flat, the buyer, the sender or the firm.
 
 ## 6. What it needs that does not exist
 
@@ -218,7 +252,9 @@ the whole firm — and the links follow.
 - **Catalogue order** — proposal: grouped by area, areas with most homes
   first, newest first inside each. Not nearest-first: it needs the buyer's
   location, and people browse the area they want, not the one they stand in.
-- **Link life:** 30 days from the last send, or longer for sale listings?
+- **Copy of a private flat gives text without a link** (§5b): agents who post
+  non-catalogue flats in broker groups lose the photo link there. Accept, or
+  allow a link on any flat and rely on Stop showing? Recommended: accept.
 - **The firm's working hours** for *Book a visit* do not exist as a setting yet;
   one is needed (default 10:00–19:00).
 
