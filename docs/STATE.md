@@ -22,7 +22,7 @@ PARKED. No app behaviour changed.
 | Frontend — Delpat's Vercel | not read; Branch Tracking is OFF, the user deploys by hand | |
 | Dev API (`api.dev.re.delpat.in`) | **stopped by the user** (12 Oct) | |
 | `main` | `820514e` (6 Oct) | |
-| `development` | ahead of `main` by marketing/demo and docs commits only — **no app code**. Pushed | |
+| `development` | ahead of `main`: marketing/demo, docs, and **`4fbfc20` — the alert read fix and the Apple connect fix (app + API)**. Pushed | |
 
 **Production API is 7 commits behind `main`** (photo-link previews, the
 Binod/Siddhi rename fix, reserved `admin`/`pwa` slugs). The user will deploy
@@ -53,7 +53,9 @@ them soon. Order: API first, then frontend.
   alerts are almost never read (bhumi 6 of 299, mahalaxmi 0 of 463 in 14 days).
 - **The user's old note**, item by item against current code: 13 done, 5
   partial, 6 open. Only the open and partial ones are in BACKLOG.
-- Nothing written to any database.
+- **Dev database:** `notifications.read_at` added (initSchema, on a local
+  `dev:api`); probe alerts on `delpat` created and deleted by id. Production
+  gets the column on the next API deploy. Nothing written to production.
 
 ---
 
