@@ -88,6 +88,20 @@ export async function isPushSubscribed() {
   return !!(await currentSubscription());
 }
 
+const isGone = (e) => /API Error: 410\b/.test(String(e?.message || ''));
+
+/** Tell the server what this sign-in's browser says about alerts. Best effort. */
+async function reportState() {
+  const s = await pushStatus().catch(() => null);
+  if (!s) return;
+  const state = s.permission === 'unsupported' ? 'unsupported'
+    : s.permission === 'denied' ? 'denied'
+    : s.ok ? 'on'
+    : s.permission === 'default' ? 'default'
+    : 'off';
+  await api.reportPushState(state).catch(() => {});
+}
+
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -113,14 +127,22 @@ export async function enablePush() {
   if (perm !== 'granted') return { ok: false, reason: 'denied' };
 
   try {
+    const fresh = () => reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
     let sub = await reg.pushManager.getSubscription();
-    if (!sub) {
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey),
-      });
+    if (!sub) sub = await fresh();
+    try {
+      await api.subscribePush(sub.toJSON());
+    } catch (e) {
+      // 410: the push service has already refused this endpoint. Keeping it
+      // means a device that is never reached; a new subscription is a new one.
+      if (!isGone(e)) throw e;
+      await sub.unsubscribe().catch(() => {});
+      sub = await fresh();
+      await api.subscribePush(sub.toJSON());
     }
-    await api.subscribePush(sub.toJSON());
     return { ok: true };
   } catch (e) {
     console.warn('[Push] enable failed:', e?.message || e);
@@ -170,8 +192,8 @@ export async function pushStatus() {
  * attempt per device: if the person says no, we do not nag on every load.
  */
 export function autoEnablePush() {
-  if (!pushSupported()) return;
-  if (pushPermission() === 'denied') return;
+  if (!pushSupported()) { api.reportPushState('unsupported').catch(() => {}); return; }
+  if (pushPermission() === 'denied') { reportState(); return; }
 
   const run = async () => {
     off();
@@ -187,8 +209,13 @@ export function autoEnablePush() {
     // So re-register the endpoint we hold instead of trusting it. The insert is
     // an upsert keyed on the endpoint, so re-sending the same one is free.
     const sub = await currentSubscription();
-    if (sub) { await api.subscribePush(sub.toJSON()).catch(() => {}); return; }
-    await enablePush();
+    let held = false;
+    if (sub) {
+      try { await api.subscribePush(sub.toJSON()); held = true; }
+      catch (e) { if (isGone(e)) await sub.unsubscribe().catch(() => {}); else held = true; }
+    }
+    if (!held) await enablePush();
+    await reportState();
   };
   const off = () => {
     window.removeEventListener('pointerdown', run);
@@ -196,6 +223,7 @@ export function autoEnablePush() {
   };
 
   if (pushPermission() === 'granted') { run(); return; }
+  reportState();
   window.addEventListener('pointerdown', run, { once: true });
   window.addEventListener('keydown', run, { once: true });
 }

@@ -143,7 +143,8 @@ export async function withRequestContext(req: Request, res: Response, next: Next
       ip: req.ip || req.socket?.remoteAddress || null,
       userAgent: (req.headers['user-agent'] as string) || null,
     };
-    req.user = { id: claims.user_id, tenant_id: claims.tenant_id, role: claims.role as any } as any;
+    // session_id: which sign-in this request is, for what must end with it.
+    req.user = { id: claims.user_id, tenant_id: claims.tenant_id, role: claims.role as any, session_id: claims.jti || null } as any;
   } else {
     // A SUPERADMIN TOKEN IS NOT A WAY INTO A FIRM. It was: any firm's routes,
     // chosen by a header, as a role most checks treated as the owner, for 30

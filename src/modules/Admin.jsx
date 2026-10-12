@@ -32,6 +32,7 @@ const FIRM_NAV = [
   { key: 'overview', label: 'Overview', icon: 'grid' },
   { key: 'people', label: 'People and sign-ins', icon: 'people' },
   { key: 'ledger', label: 'Audit log', icon: 'note' },
+  { key: 'alerts', label: 'Alerts', icon: 'bell' },
 ]
 
 const DAY_MS = 86400000

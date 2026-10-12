@@ -2201,7 +2201,10 @@ export function NotifModal({ store, go }) {
 
   const filteredNotifs = notifs.filter(n => {
     if (filter === 'unread') return !n.read
-    if (filter === 'assigned') return (n.title || '').toLowerCase().includes('assign') || (n.body || '').toLowerCase().includes('assign')
+    // The same test as the tab's count: by type. The list matched the title
+    // text while the count matched the type, so the tab promised one number
+    // and opened onto another.
+    if (filter === 'assigned') return isAssignment(n)
     return true
   })
 

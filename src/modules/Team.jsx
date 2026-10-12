@@ -6,6 +6,7 @@ import { useServerData } from '../lib/useServerData.js'
 import { buildRoster } from '../components/roster.jsx'
 import { whenLabel } from '../lib/format.js'
 import { copyText } from '../lib/clipboard.js'
+import { REACH_LABEL, shownLabel, reachWarn } from '../lib/alertReach.js'
 
 const ROLE_LABEL = { admin: 'Owner / Admin', owner: 'Owner', agent: 'Sales Advisor', manager: 'Sales Manager' }
 const roleLabel = (r) => ROLE_LABEL[r] || (r ? r[0].toUpperCase() + r.slice(1) : 'Sales Advisor')
@@ -85,6 +86,9 @@ function AccessPanel({ store }) {
 
   const load = () => api.getUsers().then(r => setUsers(r.users || [])).catch(() => setUsers([]))
   useEffect(() => { load() }, [])
+  // Can each person be reached by alerts — the manager's "who do I talk to".
+  const { data: reachData } = useServerData(() => api.getAlertReach(), [], null, '/notifications/reach')
+  const reachOf = new Map((reachData?.reach || []).map(r => [r.id, r]))
 
   const pageCount = Math.max(1, Math.ceil((users?.length || 0) / pageSize))
   // A row acted on could move the person off the page they were on (a
@@ -142,6 +146,7 @@ function AccessPanel({ store }) {
               <td><span className="skel skel-line" style={{ width: 150 }} /></td>
               <td><span className="skel skel-line" style={{ width: 60 }} /></td>
               <td><span className="skel skel-line" style={{ width: 50 }} /></td>
+              <td><span className="skel skel-line" style={{ width: 60 }} /></td>
               <td className="acc-actcol"><span className="skel skel-line" style={{ width: 180 }} /></td>
             </tr>
           ))}
@@ -150,7 +155,7 @@ function AccessPanel({ store }) {
         <div className="acc-tbl-wrap">
           <table className="tbl acc-tbl">
             <thead>
-              <tr><th>Person</th><th>User ID</th><th>Email</th><th>Status</th><th>Last active</th><th className="acc-actcol">Actions</th></tr>
+              <tr><th>Person</th><th>User ID</th><th>Email</th><th>Status</th><th>Last active</th><th>Alerts</th><th className="acc-actcol">Actions</th></tr>
             </thead>
             <tbody>
               {pageRows.map(u => {
@@ -184,6 +189,16 @@ function AccessPanel({ store }) {
                       {u.must_change_password && <span className="acc-mustchg" title="They set their own password on first sign-in">first-login password pending</span>}
                     </td>
                     <td className="u-muted acc-last">{timeAgo(u.last_active)}</td>
+                    <td className="acc-reach">
+                      {(() => {
+                        const r = reachOf.get(u.id)
+                        if (!r || isSuspended(u)) return <span className="u-muted">—</span>
+                        return (<>
+                          <span className={'acc-reach-v' + (reachWarn(r) ? ' warn' : '')}>{REACH_LABEL[r.reach]}</span>
+                          {shownLabel(r) && <span className="u-muted acc-reach-s">{shownLabel(r)}</span>}
+                        </>)
+                      })()}
+                    </td>
                     <td className="acc-actcol">
                       {mine ? (
                         <div className="acc-actions">

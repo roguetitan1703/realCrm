@@ -136,6 +136,37 @@ export const COPY: Builders = {
 };
 
 /**
+ * THE MORNING SUMMARY (spec §4): several alerts held overnight, or held for
+ * the morning, reach the phone as ONE notification. Each type says its count
+ * as a short phrase; the title is the total. Only alerts still open are in it,
+ * so work done in the meantime is never announced.
+ */
+const PHRASE: Record<string, (n: number) => string> = {
+  lead_assigned: (n) => `${plural(n, 'new lead')}`,
+  lead_assigned_bulk: (n) => `${plural(n, 'batch', 'batches')} of leads`,
+  lead_reassigned: (n) => `${plural(n, 'lead')} moved to you`,
+  lead_unrouted: (n) => `${plural(n, 'lead')} with nobody on ${n === 1 ? 'it' : 'them'}`,
+  lead_untouched: (n) => `${plural(n, 'lead')} still waiting`,
+  lead_repeat: (n) => `${n} came back`,
+  followup_due: (n) => `${plural(n, 'follow-up')} due`,
+  site_visit_reminder: (n) => `${plural(n, 'site visit')}`,
+  calendar_task_assigned: (n) => `${plural(n, 'booking')} made for you`,
+  owner_assigned: (n) => `${plural(n, 'batch', 'batches')} of owners to call`,
+  owner_reassigned: (n) => `${plural(n, 'batch', 'batches')} of owners moved to you`,
+  agreement_ending: (n) => `${plural(n, 'tenancy', 'tenancies')} ending`,
+  lead_reassign_loop: (n) => `${plural(n, 'lead')} keeps being handed on`,
+  owner_reassign_loop: (n) => `${plural(n, 'owner')} keeps being handed on`,
+};
+
+export function summaryCopy(byType: Record<string, number>): NotifCopy {
+  const total = Object.values(byType).reduce((a, b) => a + b, 0);
+  const parts = Object.entries(byType)
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, n]) => (PHRASE[t] ? PHRASE[t](n) : null));
+  return { title: `${plural(total, 'thing')} waiting for you`, body: facts(...parts) };
+}
+
+/**
  * Words for a type. Returns null for a type with no entry so the caller can
  * fall back to whatever it passed — a type added without copy still delivers
  * rather than sending an empty notification.

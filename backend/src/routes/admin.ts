@@ -29,6 +29,8 @@ import { sql } from '../services/db.js';
 import { provisionTenant } from '../services/store.js';
 import { planRoster } from '../services/roster.js';
 import { prefixUsage } from '../services/media.js';
+import { deliveryReadiness } from '../services/push.js';
+import { alertOutcomes } from '../services/alertLifecycle.js';
 import { randomBytes } from 'crypto';
 
 export const adminRouter = Router();
@@ -109,7 +111,7 @@ adminRouter.get('/firms/:id', async (req: Request, res: Response) => {
   const t = await firmOr404(req, res); if (!t) return;
   try {
     const id = t.id;
-    const [counts, team, sessions, logins, sources, worked, usage] = await Promise.all([
+    const [counts, team, sessions, logins, sources, worked, usage, readiness, alerts] = await Promise.all([
       sql`SELECT
             (SELECT count(*)::int FROM crm_leads WHERE tenant_id = ${id}) AS leads,
             (SELECT count(*)::int FROM crm_leads WHERE tenant_id = ${id} AND created_at > NOW() - INTERVAL '7 days') AS leads_7d,
@@ -124,12 +126,11 @@ adminRouter.get('/firms/:id', async (req: Request, res: Response) => {
                    (SELECT max(a.created_at) FROM audit_log a WHERE a.tenant_id = ${id} AND a.action = 'auth.login' AND a.actor_id = u.id),
                    (SELECT max(s.created_at) FROM sessions s WHERE s.user_id = u.id AND s.support_by IS NULL)) AS last_login,
                  (SELECT count(*)::int FROM sessions s WHERE s.user_id = u.id AND s.revoked = FALSE AND s.expires_at > NOW() AND s.support_by IS NULL) AS live_sessions,
-                 (SELECT count(*)::int FROM push_subscriptions p WHERE p.tenant_id = ${id} AND p.user_id = u.id) AS devices,
-                 (SELECT max(d.created_at) FROM push_deliveries d WHERE d.tenant_id = ${id} AND d.user_id = u.id AND d.status IN ('sent', 'displayed')) AS last_alert_ok,
-                 (SELECT count(*)::int FROM push_deliveries d WHERE d.tenant_id = ${id} AND d.user_id = u.id AND d.status = 'failed' AND d.created_at > NOW() - INTERVAL '7 days') AS alerts_failed_7d
+                 -- Reachability is push.ts deliveryReadiness, merged in below.
+                 NULL AS reach
             FROM users u WHERE u.tenant_id = ${id} AND u.deleted_at IS NULL
            ORDER BY (u.role = 'owner') DESC, lower(u.status) = 'suspended', u.name`,
-      sql`SELECT s.id, s.user_id, u.name, s.created_at, s.last_seen_at, s.expires_at, s.ip, s.user_agent, s.support_by
+      sql`SELECT s.id, s.user_id, u.name, s.created_at, s.last_seen_at, s.expires_at, s.ip, s.user_agent, s.support_by, s.push_state
             FROM sessions s LEFT JOIN users u ON u.id = s.user_id
            WHERE s.tenant_id = ${id} AND s.revoked = FALSE AND s.expires_at > NOW()
            ORDER BY s.last_seen_at DESC LIMIT 100`,
@@ -144,7 +145,13 @@ adminRouter.get('/firms/:id', async (req: Request, res: Response) => {
              AND coalesce(e.author, 'System') NOT IN ('System', 'Import')
            GROUP BY 1`,
       prefixUsage(`${id}/`).catch(() => null),
+      deliveryReadiness(id),
+      alertOutcomes(id, 14),
     ]);
+    // One answer to "can this person be reached": the firm's Team screen reads
+    // the same function.
+    const reachOf = new Map((readiness as any[]).map(r => [r.id, r]));
+    for (const u of team as any[]) Object.assign(u, reachOf.get(u.id) || {});
     // Leads in the last 7 days per source (the query above counts all time).
     const src7 = await sql`SELECT coalesce(nullif(source, ''), 'Not stated') AS source, count(*)::int AS n
       FROM crm_leads WHERE tenant_id = ${id} AND created_at > NOW() - INTERVAL '7 days' GROUP BY 1`;
@@ -152,7 +159,7 @@ adminRouter.get('/firms/:id', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       tenant: { id: t.id, name: t.name, slug: t.slug, plan: t.subscription_plan, status: t.subscription_status, created_at: t.created_at },
-      counts: counts[0], team, sessions, logins,
+      counts: counts[0], team, sessions, logins, alerts,
       sources: (sources as any[]).map(r => ({ source: r.source, last_at: r.last_at, n_7d: byS.get(r.source) || 0 })),
       worked, storage: usage,
     });

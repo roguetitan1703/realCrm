@@ -10,7 +10,7 @@
 
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
-import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_IDS, migrateProperColumns } from './db.js';
+import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_IDS, migrateProperColumns, runOnce } from './db.js';
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { finalStageOf, stageLabelIn, LABELLED_LEAD_STAGES } from '../../../src/data/pipelineRoles.js';
@@ -19,6 +19,7 @@ import { fileTicket } from './media.js';
 import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, lastPersonActivity, lastRemark, lastRemarkAt, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles } from './notifications.js';
+import { firstRunAlertLifecycle } from './alertLifecycle.js';
 import { suggestPassword } from './auth.js';
 import { followUpKind } from './followUp.js';
 import { galleryPath } from './gallery.js';
@@ -44,7 +45,8 @@ import { parsePayload } from './parser.js';
 // Lead status is flat, not a pipeline — see src/data/leadStatus.js for why.
 // These two must stay in step with that file.
 export const LEAD_STATUSES = ['New', 'Follow-Up', 'Callback', 'Call Not Received', 'Interested', 'Site Visit', 'Deal Closed', 'Rejected'];
-export const TERMINAL_STATUSES = ['Deal Closed', 'Rejected'];
+import { TERMINAL_STATUSES, OWNER_TERMINAL_STATUSES } from './statuses.js';
+export { TERMINAL_STATUSES, OWNER_TERMINAL_STATUSES };
 export const WON_STATUS = 'Deal Closed';
 export const REJECTED_STATUS = 'Rejected';
 /**
@@ -730,12 +732,7 @@ async function syncLeadShortlist(leadId: string, shortlist: string[], feedback: 
  * has no way to tell "this row was never migrated" from "someone deliberately
  * set it to that value afterwards", so it keeps undoing the second one.
  */
-async function runOnce(name: string, fn: () => Promise<void>): Promise<void> {
-  const done = await sql`SELECT 1 FROM schema_migrations WHERE name = ${name} LIMIT 1`;
-  if (done.length) return;
-  await fn();
-  await sql`INSERT INTO schema_migrations (name) VALUES (${name}) ON CONFLICT DO NOTHING`;
-}
+// Lives in db.ts now, so modules the store imports can gate their own repairs.
 
 export async function migrateLeadStatuses(): Promise<void> {
   const MAP: Record<string, string> = {
@@ -1311,6 +1308,10 @@ if (process.env.CRM_NO_BOOT !== '1') seedDatabase()
        RETURNING tenant_id`;
     console.log(`[Settings] intro message without em dashes: ${r.count} firm(s)${r.count ? ` (${(r as any[]).map(x => x.tenant_id).join(', ')})` : ''}`);
   }))
+  // AN ALERT IS OPEN WORK (docs/specs/notifications.md §10). Names the records
+  // on every existing alert from its link, then closes the ones whose work is
+  // already done. Writes only status columns on `notifications`.
+  .then(() => runOnce('2026_10_12_alert_lifecycle_first_run', () => firstRunAlertLifecycle()))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
@@ -2442,6 +2443,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
         type: 'calendar_task_assigned',
         data: { name, at, isVisit },
         link,
+        subjectAt: at,
         push: true
       }).catch(err => console.warn('[Notify] calendar_task_assigned failed:', err?.message));
     }
@@ -3278,6 +3280,7 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
     notify({
       userId: agentId, type: 'lead_assigned_bulk',
       data: { n },
+      record: { kind: 'lead', ids: clean },
       // The recipient's own rows, not the whole desk's -- the alert says N
       // leads are yours and the list it opened held everyone's.
       link: `?screen=leads&agent=${encodeURIComponent(agentId)}`,
@@ -3302,7 +3305,6 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
 // and why the walk ends at Key Received. 'Callback' stays in the vocabulary so
 // the records written under it remain valid and filterable.
 export const OWNER_STAGES = ['New', 'Call Not Received', 'Incoming Not Available', 'Switch Off', 'Contacted', 'Interested', 'Key Received'];
-export const OWNER_TERMINAL_STATUSES = ['Not Interested', 'Do Not Call'];
 export const OWNER_STATUSES = [...OWNER_STAGES, 'Callback', ...OWNER_TERMINAL_STATUSES];
 
 /** Same rule as leadScope, over crm_owners: an agent sees what's assigned to
@@ -3376,9 +3378,9 @@ function rowToOwner(r: any): any {
  * timeline and the queue are the durable record, this is only the nudge.
  */
 const ARRIVAL_QUIET_MS = 20_000;
-const arrivalTally = new Map<string, { n: number; timer: NodeJS.Timeout }>();
+const arrivalTally = new Map<string, { ids: string[]; timer: NodeJS.Timeout }>();
 
-function queueOwnerArrivalNotice(agentId: string): void {
+function queueOwnerArrivalNotice(agentId: string, ownerId: string): void {
   // Read HERE and closed over. The tally is keyed by tenant AND agent because
   // it is process-wide: two firms importing at once would otherwise share a
   // counter and each be told the other's total. Capturing the actor is what
@@ -3389,19 +3391,21 @@ function queueOwnerArrivalNotice(agentId: string): void {
   const key = `${tenantId}:${agentId}`;
   const prev = arrivalTally.get(key);
   if (prev) clearTimeout(prev.timer);
-  const n = (prev?.n || 0) + 1;
+  const ids = [...(prev?.ids || []), ownerId];
+  const n = ids.length;
   const timer = setTimeout(() => {
     arrivalTally.delete(key);
     if (actorId === agentId) return;
     notify({
       userId: agentId, tenantId, type: 'owner_assigned',
       data: { n },
+      record: { kind: 'owner', ids },
       link: `?screen=calling&agent=${encodeURIComponent(agentId)}`,
       toSelf: true,   // the actor check above already ran, with real context
     }).catch(err => console.warn('[Notify] owner arrival failed:', err?.message));
   }, ARRIVAL_QUIET_MS);
   timer.unref?.();
-  arrivalTally.set(key, { n, timer });
+  arrivalTally.set(key, { ids, timer });
 }
 
 export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
@@ -3439,7 +3443,7 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
   // that was 731 of 732 owners routed and not one notification sent. The
   // debounce is what makes this safe to widen: an import still produces one
   // alert per agent, not one per row.
-  if (agentId) queueOwnerArrivalNotice(agentId);
+  if (agentId) queueOwnerArrivalNotice(agentId, id);
   if (data.notes) {
     await addTimelineEvent({ record_id: id, type: 'note', title: 'Note', description: String(data.notes), author: 'Import' });
   }
@@ -3516,7 +3520,7 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
   // One notice per agent however many rows they got — the debounce in
   // queueOwnerArrivalNotice collapses the batch, and it is the same path a
   // single arrival takes, so the alert reads the same either way.
-  for (const r of rows) if (r.agent_id) queueOwnerArrivalNotice(r.agent_id);
+  for (const r of rows) if (r.agent_id) queueOwnerArrivalNotice(r.agent_id, r.id);
 
   // Notes as timeline entries, in one statement rather than one per row.
   //
@@ -4287,6 +4291,7 @@ export async function bulkAssignOwners(ids: string[], agentId: string | null, ct
     notify({
       userId: agentId, type: 'owner_reassigned', push: true,
       data: { n },
+      record: { kind: 'owner', ids: clean },
       // Calling, not Contacts: Contacts is the people whose property we manage,
       // and a calling record handed over is work in the queue.
       link: '?screen=calling',
@@ -5703,7 +5708,7 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
       AND l.created_at < NOW() - (${UNOWNED_GRACE_MINUTES}::text || ' minutes')::interval
   `;
   let n = 0;
-  const tally = new Map<string, number>();
+  const tally = new Map<string, string[]>();
   for (const lead of rows) {
     const agentId = await nextRoutedAgent();
     if (!agentId) break;
@@ -5714,7 +5719,7 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
       description: `Nobody had picked it up, so it went to ${name}`,
       author: 'System', metadata: { agentId, reason: 'sweep_unassigned' },
     });
-    tally.set(agentId, (tally.get(agentId) || 0) + 1);
+    tally.set(agentId, [...(tally.get(agentId) || []), lead.id]);
     n++;
   }
   // The owner sweeps have always done this; the lead sweeps wrote a timeline
@@ -5747,7 +5752,7 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
       AND NOT ${FOLLOWUP_UPCOMING}
   `;
   let n = 0;
-  const tally = new Map<string, number>();
+  const tally = new Map<string, string[]>();
   const lost = new Map<string, number>();
   /** What the rota moved on this pass, for the loop check below. */
   const movedNow: { recordId: string; toName: string | null }[] = [];
@@ -5762,7 +5767,7 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
       reason: `no activity for ${days} days`,
       author: 'System', metadata: { reason: 'sweep_idle', days },
     });
-    tally.set(agentId, (tally.get(agentId) || 0) + 1);
+    tally.set(agentId, [...(tally.get(agentId) || []), lead.id]);
     lost.set(lead.agent_id, (lost.get(lead.agent_id) || 0) + 1);
     movedNow.push({ recordId: lead.id, toName: name });
     n++;
@@ -5797,7 +5802,7 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
       AND o.created_at < NOW() - (${UNOWNED_GRACE_MINUTES}::text || ' minutes')::interval
   `;
   let n = 0;
-  const tally = new Map<string, number>();
+  const tally = new Map<string, string[]>();
   const movedNow: { recordId: string; toName: string | null }[] = [];
   for (const owner of rows) {
     const agentId = await nextRoutedOwnerAgent();
@@ -5808,7 +5813,7 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
       reason: 'nobody had picked it up',
       author: 'System', metadata: { reason: 'sweep_unassigned' },
     });
-    tally.set(agentId, (tally.get(agentId) || 0) + 1);
+    tally.set(agentId, [...(tally.get(agentId) || []), owner.id]);
     n++;
   }
   await notifyOwnerBatch(tenantId, tally, 'owner_assigned', 'to call');
@@ -5825,8 +5830,9 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
  */
 interface AssignBatchCopy { type: string; noun: string; verb: string; body: string; link: string }
 
-async function notifyAssignBatch(tenantId: string, tally: Map<string, number>, c: AssignBatchCopy): Promise<void> {
-  for (const [agentId, count] of tally) {
+async function notifyAssignBatch(tenantId: string, tally: Map<string, string[]>, c: AssignBatchCopy): Promise<void> {
+  for (const [agentId, ids] of tally) {
+    const count = ids.length;
     notify({
       // tenantId passed EXPLICITLY rather than left to notify()'s fallback.
       // runRoutingSweeps does wrap each tenant in runWithContext, so the
@@ -5843,6 +5849,8 @@ async function notifyAssignBatch(tenantId: string, tally: Map<string, number>, c
       // which three were new. 27 of them went out on bhumi in a fortnight and
       // exactly one was read.
       link: `${c.link}&agent=${encodeURIComponent(agentId)}`,
+      // The records themselves: the alert closes when the last one is worked.
+      record: { kind: c.noun === 'owner' ? 'owner' : 'lead', ids },
       // A sweep has no human actor — its context carries userId: null — so
       // there is no "you did this yourself" case to suppress.
       toSelf: true,
@@ -5850,7 +5858,7 @@ async function notifyAssignBatch(tenantId: string, tally: Map<string, number>, c
   }
 }
 
-async function notifyOwnerBatch(tenantId: string, tally: Map<string, number>, type: string, verb: string): Promise<void> {
+async function notifyOwnerBatch(tenantId: string, tally: Map<string, string[]>, type: string, verb: string): Promise<void> {
   return notifyAssignBatch(tenantId, tally, {
     type, noun: 'owner', verb, body: 'Added to your calling queue.', link: '?screen=calling',
   });
@@ -5868,7 +5876,7 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
       AND ${notHandedOnSince(days, 'crm_owners')}
   `;
   let n = 0;
-  const tally = new Map<string, number>();
+  const tally = new Map<string, string[]>();
   for (const owner of rows) {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${owner.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
     const agentId = await nextRoutedOwnerAgent();
@@ -5886,7 +5894,7 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
       reason: `no activity for ${days} days`,
       author: 'System', metadata: { reason: 'sweep_idle', days },
     });
-    tally.set(agentId, (tally.get(agentId) || 0) + 1);
+    tally.set(agentId, [...(tally.get(agentId) || []), owner.id]);
     movedNow.push({ recordId: owner.id, toName: null });
     n++;
   }
@@ -6058,11 +6066,15 @@ export async function addTimelineEvent(evt: Omit<TimelineEvent, 'id' | 'timestam
   // assign, and one of those would have told the agent their leads had been
   // "remarked on" once per row.
   if (evt.record_id?.startsWith('l') && (evt.type === 'note' || evt.type === 'remark')) {
-    sql`SELECT name, agent_id FROM crm_leads WHERE id = ${evt.record_id} AND tenant_id = ${t} LIMIT 1`
+    // `id` too: the link below is built from it, and without it every remark
+    // alert pointed at `lead=undefined` and opened nothing.
+    sql`SELECT id, name, agent_id FROM crm_leads WHERE id = ${evt.record_id} AND tenant_id = ${t} LIMIT 1`
       .then(rows => {
         const lead = rows[0];
         const ctx = getContext();
-        if (lead && lead.agent_id && ctx?.actorId && ctx.actorId !== lead.agent_id) {
+        // `userId` — the request context has no `actorId`, so this read
+        // undefined and a remark written from the record never told its holder.
+        if (lead && lead.agent_id && ctx?.userId && ctx.userId !== lead.agent_id) {
           notify({
             userId: lead.agent_id,
             tenantId: t,

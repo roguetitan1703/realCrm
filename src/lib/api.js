@@ -835,7 +835,9 @@ export const api = {
   // PWA home-screen icons (generated client-side, stored on the tenant)
 
   // Notifications (per-user alert feed)
-  getNotifications: () => request('/notifications'),
+  // Fresh, like the count: the bell's list is open work, and it closes as work
+  // is done anywhere — a 30-second cached copy showed alerts already settled.
+  getNotifications: () => request('/notifications', { fresh: true }),
   // Fresh: a count read after a mark-read joined a poll already in flight from
   // before the write, and put the old number back on the bell.
   getNotifUnread: () => request('/notifications?count=1', { fresh: true }),
@@ -846,6 +848,8 @@ export const api = {
   getVapid: () => request('/notifications/vapid'),
   subscribePush: (subscription) => request('/notifications/subscribe', { method: 'POST', body: JSON.stringify({ subscription }) }),
   unsubscribePush: (endpoint) => request('/notifications/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
+  reportPushState: (state) => request('/notifications/device-state', { method: 'POST', body: JSON.stringify({ state }) }),
+  getAlertReach: () => request('/notifications/reach'),
 
   // Composable Actions
   // callBridge() is gone with the route it called. It reported success for a

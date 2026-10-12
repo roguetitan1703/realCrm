@@ -31,6 +31,8 @@ import { pwaRouter } from './routes/pwa';
 import { filesRouter, mediaRouter } from './routes/files';
 import { withRequestContext } from './middleware/auth';
 import { getTenantForIngest, runRoutingSweeps } from './services/store';
+import { scheduleCloseSettled } from './services/alertLifecycle';
+import { processScheduledNotifications } from './services/notifications';
 import { envBanner, appEnv, runningCode } from './services/env';
 import { checkIntegrationKeys } from './services/ingestion';
 
@@ -127,6 +129,16 @@ app.use(express.json({
   verify: (req: any, _res, buf) => { req.rawBody = buf.toString('utf8'); },
 }));
 app.use(express.urlencoded({ extended: true }));
+// THE BELL FOLLOWS THE WORK. After any write that succeeded, close the alerts
+// whose work it may have finished (alertLifecycle.ts). One hook for every write
+// path, so a new route cannot forget; debounced per tenant, and after the
+// response, so it costs the request nothing.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method !== 'GET' && req.method !== 'OPTIONS') {
+    res.on('finish', () => { if (res.statusCode < 400) scheduleCloseSettled(req.tenantId); });
+  }
+  next();
+});
 // text/plain and XML arrive from senders that never set a content-type properly.
 // Parsed as text so /ingest can still read them (payloadOf) instead of landing
 // an empty object and losing a real enquiry.
@@ -348,6 +360,10 @@ if (isMain || process.env.START_SERVER === 'true') {
     // minute. On a server that is every tenant swept N times per interval by
     // processes nobody knows are running.
     setInterval(() => { runRoutingSweeps().catch(err => console.warn('[Routing Sweep] run failed:', err?.message)); }, 5 * 60 * 1000);
+    // The alert sweep on a clock of its own. It ran only when an open tab
+    // polled /pulse, so an alert held for 09:00 waited for the first person to
+    // open the app — the one moment it was meant to reach them before.
+    setInterval(() => { processScheduledNotifications().catch(() => {}); }, 60 * 1000);
     // CAN THIS SERVER STILL OPEN THE PORTALS' KEYS?
     //
     // Replacing the demo JWT_SECRET in August silently replaced the lock on

@@ -58,6 +58,21 @@ export const LEGACY_TENANT_IDS = ['bhumi-propcity', 'org_bhumi_109'];
 /**
  * Initialize idempotent Supabase PostgreSQL database tables.
  */
+/**
+ * Run a one-time repair exactly once, ever, per database.
+ *
+ * The boot chain re-ran every historical migration on every restart. For DDL
+ * that is harmless. For a migration that rewrites ROWS BY VALUE it is not: it
+ * has no way to tell "this row was never migrated" from "someone deliberately
+ * set it to that value afterwards", so it keeps undoing the second one.
+ */
+export async function runOnce(name: string, fn: () => Promise<void>): Promise<void> {
+  const done = await sql`SELECT 1 FROM schema_migrations WHERE name = ${name} LIMIT 1`;
+  if (done.length) return;
+  await fn();
+  await sql`INSERT INTO schema_migrations (name) VALUES (${name}) ON CONFLICT DO NOTHING`;
+}
+
 export async function initSchema(): Promise<void> {
   console.log('[Supabase DB] ⚙️ Verifying PostgreSQL schema and DDL tables...');
   try {
@@ -549,6 +564,26 @@ export async function initSchema(): Promise<void> {
     // answer. Recorded at subscribe time from the request's User-Agent.
     await sql`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS user_agent TEXT;`;
     await sql`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ;`;
+    // WHICH SIGN-IN. A subscription outlived the session that made it, and the
+    // send asked only "is this person signed in ANYWHERE" -- so an iPhone nobody
+    // was signed in to went on showing lead names because its owner was signed
+    // in on a laptop (Siddhi: 20 sent, 0 shown, no iPhone session; prod 12 Oct).
+    // Bound on every signed-in app open (autoEnablePush re-uploads). Rows from
+    // before this column are NULL -- which session made them was never recorded
+    // -- and get a grace week from the marker below to be re-bound by use.
+    await sql`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS session_id TEXT;`;
+    await sql`INSERT INTO schema_migrations (name) VALUES ('push_subscription_session') ON CONFLICT DO NOTHING`;
+    // ENDPOINTS A PUSH SERVICE HAS SAID ARE GONE (404/410). The row was deleted
+    // on the 410 and the app re-uploaded the same endpoint on its next open, so
+    // a dead device came back every day: one VivoBrowser endpoint took 38 410s
+    // from 23 Sep and was re-created again on 12 Oct (prod). Remembered here so
+    // /subscribe can refuse it and the browser is told to subscribe afresh.
+    await sql`
+      CREATE TABLE IF NOT EXISTS push_gone_endpoints (
+        endpoint TEXT PRIMARY KEY,
+        gone_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
 
     // ── Push delivery log ────────────────────────────────────────────────────
     // WHY THIS EXISTS: for months the only evidence a push had been sent was
@@ -591,6 +626,12 @@ export async function initSchema(): Promise<void> {
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_push_deliv_ack ON push_deliveries (ack_token) WHERE ack_token IS NOT NULL;`;
     await sql`CREATE INDEX IF NOT EXISTS idx_push_deliv_tenant ON push_deliveries (tenant_id, created_at DESC);`;
     await sql`CREATE INDEX IF NOT EXISTS idx_push_deliv_user ON push_deliveries (tenant_id, user_id, created_at DESC);`;
+    // A summary push covers several alerts; a failure below HTTP keeps what it
+    // sent so the retry can send it again (push.ts retryFailedPushes).
+    await sql`ALTER TABLE push_deliveries ADD COLUMN IF NOT EXISTS notification_ids TEXT[];`;
+    await sql`ALTER TABLE push_deliveries ADD COLUMN IF NOT EXISTS payload JSONB;`;
+    await sql`ALTER TABLE push_deliveries ADD COLUMN IF NOT EXISTS attempt INT DEFAULT 1;`;
+    await sql`ALTER TABLE push_deliveries ADD COLUMN IF NOT EXISTS retried_at TIMESTAMPTZ;`;
 
     await migrateProperColumns();
     await createLedgerTables();
@@ -644,6 +685,13 @@ export async function migrateAuthV2(): Promise<void> {
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (tenant_id, user_id);`;
+  // WHAT THIS SIGN-IN'S BROWSER SAYS ABOUT ALERTS: on, off, default (not yet
+  // asked), denied, unsupported. A refusal left no trace on the server, so a
+  // desk could not tell "blocked them" from "browser cannot" from "never asked"
+  // (bhumi: two agents, 0 of 73 alerts shown, no answer which). Reported by the
+  // app on every signed-in open; NULL until it has.
+  await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS push_state TEXT;`;
+  await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS push_state_at TIMESTAMPTZ;`;
   // A SUPPORT SESSION: Delpat looking at a firm's desk, read only, as its
   // owner. Who opened it; never slides (auth.ts touchSession).
   await sql.unsafe(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS support_by TEXT`);
@@ -896,6 +944,22 @@ async function createLedgerTables(): Promise<void> {
   // column existed keep NULL: the time was never recorded, and inventing one
   // would be a fact nobody can tell from a real one.
   await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;`;
+  // AN ALERT IS OPEN WORK (docs/specs/notifications.md). What it is about, so
+  // it can close when that work is done; when it was shown on a screen; when
+  // and why it closed; and when its push may go out. `subject_at` is the
+  // booking an alert about a follow-up was about, as written in follow_up.at,
+  // so a rescheduled booking closes the alert for the old one.
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS record_kind TEXT;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS record_ids TEXT[];`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS subject_at TEXT;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS shown_at TIMESTAMPTZ;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS close_reason TEXT;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS urgency TEXT;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS send_after TIMESTAMPTZ;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS pushed_at TIMESTAMPTZ;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_notifications_open ON notifications (tenant_id, user_id) WHERE closed_at IS NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_notifications_due ON notifications (tenant_id, send_after) WHERE pushed_at IS NULL AND send_after IS NOT NULL AND closed_at IS NULL;`;
 
   // Append-only, tamper-evident. seq gives a monotonic order; prev_hash/hash
   // form a chain so no past row can be altered or removed undetected. Never

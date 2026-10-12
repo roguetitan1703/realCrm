@@ -16,7 +16,7 @@
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { listNotifications, unreadCount, markRead, markAllRead } from '../services/notifications';
-import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription, listDeliveries, deliveryReadiness, recordAck, rebindSubscription } from '../services/push';
+import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription, listDeliveries, deliveryReadiness, recordAck, rebindSubscription, recordPushState } from '../services/push';
 
 export const notificationsRouter = Router();
 
@@ -61,7 +61,12 @@ notificationsRouter.post('/subscribe', async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Not signed in' });
-    await saveSubscription(req.tenantId!, userId, req.body?.subscription, req.get('user-agent') || undefined);
+    // The sign-in that registered this device: when it ends, so do the pushes.
+    const sessionId = (req.user as any)?.session_id || undefined;
+    const saved = await saveSubscription(req.tenantId!, userId, req.body?.subscription, req.get('user-agent') || undefined, sessionId);
+    // 410: the push service already refused this endpoint. The browser must
+    // drop its subscription and make a new one (lib/push.js).
+    if (!saved) return res.status(410).json({ error: 'Subscription is gone', gone: true });
     return res.status(200).json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to subscribe', message: err.message });
@@ -88,6 +93,29 @@ notificationsRouter.get('/deliveries', async (req: Request, res: Response) => {
     return res.status(200).json({ pushEnabled: pushEnabled(), deliveries, readiness });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to read delivery log', message: err.message });
+  }
+});
+
+// ── Who can be reached ──────────────────────────────────────────────────────
+// The Team screen's Alerts column: per person, on / blocked / browser cannot /
+// off, and how many alerts reached a screen this week. Owners and managers.
+notificationsRouter.get('/reach', async (req: Request, res: Response) => {
+  const role = String(req.user?.role || '').toLowerCase();
+  if (role !== 'owner' && role !== 'admin' && role !== 'manager') return res.status(403).json({ error: 'Not permitted' });
+  try {
+    return res.status(200).json({ success: true, reach: await deliveryReadiness(req.tenantId!) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to read reach', message: err.message });
+  }
+});
+
+notificationsRouter.post('/device-state', async (req: Request, res: Response) => {
+  try {
+    const u = req.user as any;
+    if (u?.id && u?.session_id) await recordPushState(u.session_id, u.id, String(req.body?.state || ''));
+    return res.status(204).end();
+  } catch (err: any) {
+    return res.status(204).end();
   }
 });
 
