@@ -19,16 +19,15 @@ Paying tenants are `bhumi` and `mahalaxmi`. A line that writes their data says s
 
 ## Now
 
-- **Notifications as open work** — `specs/notifications.md`, decided 12 Oct.
-  The bell clears itself when the work is done; urgency decides the buzz; one
-  fixed night window, no setting; a device is a sign-in; every type measured.
-  Next: step 1 of its build order.
+_Nothing picked._
 
 ## Next — candidates, most useful first
 
-- **A call completes the follow-up it was made for.** Today closing a booking is
-  its own flow, opening the timeline row, adding an outcome, then rescheduling
-  (~6 controls); logging the call leaves the booking open. *agent*
+- **A call about a booked visit or meeting completes nothing.** A logged call
+  already completes a booked call or callback (`closeFollowUpFor`, since
+  18 Aug). A call made about a site visit or meeting — "where have you
+  reached" — leaves the booking open, and closing it is its own flow (~6
+  controls). *agent*
 - **One outcome model.** A call (`CALL_OUTCOMES`), a WhatsApp share
   (`WA_OUTCOMES`, its own sheet in `WaModal.jsx`) and a site visit
   (`VISIT_OUTCOMES`, "What came of it?") ask "what happened" three different
@@ -83,9 +82,12 @@ gaps are in `specs/notifications.md` §1, not here.
 
 - **After the API deploy:** a photo link previews in WhatsApp, Slack and
   Telegram; Siddhi's leads show Siddhi.
-- **After the API deploy (`4fbfc20`):** Apple failures (`ETIMEDOUT/ENETUNREACH`,
-  110 of 458 in 14 days before) drop to near zero; tapped pushes land with
-  `read_at` set.
+- **After the API deploy — notifications** (`specs/notifications.md` §13):
+  the boot log's first-run line matches the preview (bhumi ~2,177 closed,
+  mahalaxmi ~717); Apple failures (110 of 458 in 14 days before) drop to near
+  zero; the first 09:00 summary goes out; Team shows Anil's and Vinod's state;
+  after a week, console → Alerts says which types change behaviour, and
+  whether `lead_untouched` earns its place (spec §12).
 
 ## Bigger pieces — each has a spec
 

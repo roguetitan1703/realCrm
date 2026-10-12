@@ -1,6 +1,7 @@
 # Notifications — an alert is open work
 
-**Status:** 🧭 decided 12 Oct, not built. Replaces the old `notifications.md`
+**Status:** ✅ built on `development` 12 Oct, all five steps — **not deployed**. See
+§13, as built. Replaces the old `notifications.md`
 (how an alert reads; its voice rules carry over in §8) and
 `notification-delivery.md` (whether it arrives; its mechanics carry over in §5).
 
@@ -180,3 +181,40 @@ Each step ships alone. Steps 1–2 end the piles; 3–4 end the lost pushes;
 - The night window's hours — measure first (§4).
 - Whether `lead_untouched` survives at all once `lead_assigned` closes on
   contact: it re-announces the same open item. Decide from §6's numbers.
+
+## 13. As built (12 Oct)
+
+- **Where:** `alertLifecycle.ts` (close tests, `closeSettled`, first run,
+  outcomes), `notificationCatalogue.ts` (`urgency`, `closesWhen`,
+  `LEGACY_CLOSE`), `notifications.ts` (`notify`, `releaseAt`, `dispatchDue`),
+  `push.ts` (devices, retries, `deliveryReadiness`), `statuses.ts`.
+- **Closing:** after every successful write (one hook in `index.ts`, debounced
+  a second per tenant) and every minute from the sweep, which now also runs on
+  a server timer — it used to run only when an open tab polled `/pulse`.
+- **Two reasons added** to §3: `superseded` — one open alert per piece of work
+  on one record, the newest stands — and `expired`, first run only, for old
+  alerts that name no record (batch alerts linking a filtered list).
+- **One clock:** an alert is stamped by the app, like the timeline it is
+  compared with. Stamped by the database, a call seconds after an alert read as
+  earlier than it on a machine whose clock drifted 25 s.
+- **Night window: 21:00–09:00 IST**, measured: 2.3% of bhumi's person-written
+  work and 0% of mahalaxmi's falls inside it over 30 days; no push was ever
+  tapped there. `releaseAt()` in `notifications.ts`.
+- **Urgency high** for `now` and `at_time` only; the morning summary goes at
+  normal priority with a 12-hour expiry.
+- **Retries:** a send that failed below HTTP keeps its payload and is resent by
+  the sweep, up to attempt 3, within 30 minutes.
+- **Reach** is one query (`deliveryReadiness`) read by the Team screen's Alerts
+  column (`GET /notifications/reach`, owners and managers) and the console.
+  **Outcomes** (§6) are the console's firm page → Alerts.
+- **Fixed on the way:** the Assignments tab listed by title and counted by
+  type; a remark written from a record never alerted its holder (the context
+  has no `actorId`) and, when it did, linked `lead=undefined`.
+- **First run on production, previewed read-only 12 Oct**
+  (`scripts/alert-first-run-preview.ts`): bhumi 2,177 of 2,202 open alerts
+  close (bell per agent 140–297 → 0–5), mahalaxmi 717 of 751 (141–181 → 4–14).
+- **Verified on dev:** 16 + 9 scenario checks through the API (assign, call,
+  reassign, bulk, summary dispatch, device state, dead endpoint, booking
+  reschedule and clear, remark opened, superseded, retry), 10 night-window
+  cases, and the phone bell, Team column and console pages in a browser.
+

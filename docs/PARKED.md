@@ -246,19 +246,6 @@ Confirmed again by the user on 12 Oct: keep it hidden for now.
 
 ---
 
-## Assignments tab: the count and the list disagree
-
-The tab counts by type (`isAssignment`, 6 types); the list it opens filters on
-the word "assign" appearing in the title or body. Measured 2026-08-20: bhumi's
-tab reads **276** and opens onto **290** rows — the 14 extras are all
-`lead_untouched` ("… · assigned to you"). delpat: 137 vs 139, the extras being
-one `lead_untouched` and one `lead_unrouted` ("Lead arrived **un**assigned").
-
-Fix is one line — filter by `isAssignment` — and it is parked only because the
-user asked for other work first.
-
----
-
 ## ~~`reminderDays` is a control that changes nothing~~ — DONE
 
 Was: Settings → Follow-up SLA → "Ongoing follow-up" wrote `settings.reminderDays`

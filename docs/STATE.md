@@ -7,10 +7,10 @@ a live database so the next session neither re-derives it nor assumes it.
 
 The work itself is in `docs/BACKLOG.md`; set-aside work in `docs/PARKED.md`.
 
-**Last session: 2026-10-12** (second session that day): picked up the handover,
-triaged the user's old running note against the code, re-measured every old
-known issue on production, and restructured the docs into STATE / BACKLOG /
-PARKED. No app behaviour changed.
+**Last session: 2026-10-12** (second session that day): docs restructured into
+STATE / BACKLOG / PARKED; the old known issues re-measured on production; then
+**notifications rebuilt as open work** (`specs/notifications.md`, all five
+steps, built and verified on dev — §13 says what and how).
 
 ---
 
@@ -22,7 +22,7 @@ PARKED. No app behaviour changed.
 | Frontend — Delpat's Vercel | not read; Branch Tracking is OFF, the user deploys by hand | |
 | Dev API (`api.dev.re.delpat.in`) | **stopped by the user** (12 Oct) | |
 | `main` | `820514e` (6 Oct) | |
-| `development` | ahead of `main`: marketing/demo, docs, and **`4fbfc20` — the alert read fix and the Apple connect fix (app + API)**. Pushed | |
+| `development` | ahead of `main`: marketing/demo, docs, `4fbfc20` (alert read fix, Apple connect fix) and **the alert lifecycle** (app + API, needs both deployed). Pushed | |
 
 **Production API is 7 commits behind `main`** (photo-link previews, the
 Binod/Siddhi rename fix, reserved `admin`/`pwa` slugs). The user will deploy
@@ -32,7 +32,13 @@ them soon. Order: API first, then frontend.
 
 ## Waiting on the user
 
-- **Deploy the API**, then the two checks under "To verify" in BACKLOG.
+- **Deploy the API, then the frontend.** The API deploy runs the alert first run
+  on production (`2026_10_12_alert_lifecycle_first_run`): it **writes status
+  columns on bhumi's and mahalaxmi's `notifications`** — previewed read-only on
+  12 Oct, bhumi 2,177 of 2,202 open alerts close, mahalaxmi 717 of 751. Re-run
+  `npx tsx backend/src/scripts/alert-first-run-preview.ts --tenant=bhumi,mahalaxmi`
+  just before deploying if days have passed. Then the checks under "To verify"
+  in BACKLOG.
 - Decided 12 Oct: onboarding keeps `vijay@123`; the audit ledger stays hidden
   from firm owners; default passwords on delpat/skyline are ignored (people
   changed their own).
@@ -53,9 +59,16 @@ them soon. Order: API first, then frontend.
   alerts are almost never read (bhumi 6 of 299, mahalaxmi 0 of 463 in 14 days).
 - **The user's old note**, item by item against current code: 13 done, 5
   partial, 6 open. Only the open and partial ones are in BACKLOG.
-- **Dev database:** `notifications.read_at` added (initSchema, on a local
-  `dev:api`); probe alerts on `delpat` created and deleted by id. Production
-  gets the column on the next API deploy. Nothing written to production.
+- **Dev database:** the alert lifecycle's columns and first run applied (the
+  first-run marker was cleared once and re-run so dev matches what production
+  will get: 117 record-less alerts expired). Probe leads `PROBE …` on `delpat`
+  and their alerts, deliveries and timeline rows created and deleted by id; one
+  probe subscription and one gone-endpoint row likewise. Nothing written to
+  production: the first-run preview copies into a TEMP table, switches the
+  transaction read-only and rolls back; production's `notifications` still has
+  its original 9 columns afterwards.
+- **Production, read only:** agents' working hours by hour (night window
+  21:00–09:00 IST), and the delivery gaps behind `specs/notifications.md` §1.
 
 ---
 
