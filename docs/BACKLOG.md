@@ -19,9 +19,10 @@ Paying tenants are `bhumi` and `mahalaxmi`. A line that writes their data says s
 
 ## Now
 
-- **Does work on a lead close its alerts?** Waiting on the user. When the
-  recipient records work on a lead, their unread alerts for it would be marked
-  read — the one change that ends the 139–296 piles.
+- **Notifications as open work** — `specs/notifications.md`, decided 12 Oct.
+  The bell clears itself when the work is done; urgency decides the buzz; one
+  fixed night window, no setting; a device is a sign-in; every type measured.
+  Next: step 1 of its build order.
 
 ## Next — candidates, most useful first
 
@@ -65,26 +66,9 @@ Paying tenants are `bhumi` and `mahalaxmi`. A line that writes their data says s
 
 ## Bugs
 
-Measured on production, read-only, 12 Oct, unless marked.
+Measured on production, read-only, 12 Oct, unless marked. Alert delivery
+gaps are in `specs/notifications.md` §1, not here.
 
-- **Pushes held while Android sleeps** — 208 alerts in 14 days (two firms) were
-  accepted by FCM/WNS and shown on no device; after 20:00 IST sent outnumbers
-  shown 85 to 23, and 85 FCM displays arrived 5 min–6 h late. Pushes go at
-  normal urgency (`push.ts` `sendNotification`); `urgency: 'high'` would let
-  them through Doze. *agent*
-- **Anil and Vinod have never had a subscription** (bhumi; 0 of 73 alerts
-  shown). Anil's phone runs VivoBrowser, where push is unsupported and the
-  prompt hides itself (`PushRow.jsx`); Vinod is on Chrome and probably denied —
-  a denial leaves no trace on the server. Needs: "open in Chrome" for in-app
-  browsers, permission state reported to the server, and a word with Vinod.
-- **A dead endpoint is re-registered on every app open** — Zahir's VivoBrowser
-  endpoint: 38 × 410 since 23 Sep, never once delivered; `autoEnablePush`
-  re-uploads it, the next push prunes it. Tombstone a 410'd endpoint and
-  re-subscribe fresh.
-- **Pushes go to signed-out phones** — the signed-in check is per user, not per
-  device: Mukesh's iPhone 0/25 shown, Siddhi's 0/20 with no iPhone session,
-  Prerana's after its session was revoked 7 Oct. Lead names on a handset nobody
-  is signed in to. Tie each subscription to its session.
 - **"Going cold" is most of the book** — bhumi 493 of 585 open (84%, at their
   7-day setting), mahalaxmi 168 of 231 (73%, 1-day). 19 and 35 crossed the line
   in the last day. Likely our model, not the agents: real portal leads may not
