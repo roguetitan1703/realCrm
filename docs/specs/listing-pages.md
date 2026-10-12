@@ -16,8 +16,9 @@
 
 ## 1. What the user has decided (12 Oct)
 
-1. **Every share knows who it went to.** A link with no recipient is the
-   problem, not a variant. A listing is not "shared"; it is *sent to a lead*.
+1. **Every share knows who sent it, and to whom when there is a whom.** A
+   description copied for a group has no lead, and that is allowed; it still
+   carries the agent.
 2. **Four agents sending one flat to four leads is four sends**, each its own,
    each answering to its own agent. Nothing collides, nothing is reassigned.
 3. **A tap goes to the agent who sent it.** An agent can only send to their own
@@ -68,39 +69,28 @@ notion of *sent*.
 
 ## 3. The proposal
 
-### Two verbs, everywhere
+### No new words: the buttons they already press, tracked underneath
 
-| | **Send** | **Post** |
-|---|---|---|
-| For | one buyer | anyone (status, groups, Instagram) |
-| Always knows | the agent **and the lead** | the agent |
-| Carries | one or several flats | one public flat, or the whole catalogue |
-| A tap goes to | the sender, about this lead | the sender; the enquiry becomes a new lead for them |
+The people using this are not technical (user, 12 Oct). They know two things:
+**WhatsApp** a lead, and **Copy** a listing to paste somewhere. They will not
+learn "send", "post", "share links" or "codes". So nothing new appears to press;
+what changes is that both buttons now carry a link that knows who used it.
 
-There is no third kind. "Nobody's link" is gone: the firm's own catalogue
-address (`/bhumi/homes`, §5) is the only link without a sender, and it is the
-owner's, used where the firm speaks as itself.
+| They press | Where | What changes | Tap on the page goes to |
+|---|---|---|---|
+| **WhatsApp** | a lead | can tick **several flats** for one message (rows on the lead are already listed: shortlisted, then matches) | the agent, about **this lead** |
+| **Share → a buyer** | a listing | as today; the buyer list stays; "Continue without a recipient" becomes **Copy** | the agent, about that lead |
+| **Copy** | a listing | the description, as today, **with the agent's own link at the end** | the agent; no lead |
 
-### Send: from the lead, with several flats
-
-The lead's **flats section** (shortlisted first, then matches) gets a tick per
-row and one button: **Send 3 on WhatsApp**. The composer opens with those flats
-and one link. A single row's **Share** is the same thing with one tick.
-
-- **From a property** (entry points 3–4): **Send** → pick the buyer. "Continue
-  without a recipient" becomes **"To a number"**: type it, it finds the person
-  (`findLeadByPhone`) or creates them. Every send has a lead.
-- **Copy photo link / Copy listing details** (5–6) go. Their real use — posting
-  to a status or a brokers' group — is **Post**.
-- **What it records:** one *send* row — lead, agent, flats, code, when — and
-  each flat lands in the lead's `lead_shortlist` as **sent** (attached, if it
-  was not already). The timeline line says "Sent 3 flats" from data, not text.
-
-### Post: from a public listing, or the catalogue
-
-On a listing marked public, and on the catalogue: **Post** copies (or opens the
-phone's share sheet with) the agent's own link. Enquiries from it create a lead
-for that agent, source **Catalogue**, with the flat attached.
+- **Copy stays** — it is how a listing reaches a broker group, a WhatsApp
+  status, Instagram, an SMS. Copy photo link and Copy listing details become
+  one **Copy**: the text, ending in the link.
+- **No lead is invented for a Copy.** A stranger who taps *I'm interested* on a
+  copied link is put into WhatsApp with that agent, the flat named; the agent
+  adds them as they do today. *Book a visit* asks a name and number, and that
+  does make a lead, for that agent, source **Shared listing**.
+- **Every link carries the agent**, so nothing is "nobody's" except the firm's
+  own catalogue address, which the owner uses as the firm.
 
 ### The buyer's page — one page for one flat, several, or the catalogue
 
