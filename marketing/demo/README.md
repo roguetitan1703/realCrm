@@ -29,18 +29,8 @@ tutorial-videos snap record-call-walkthrough --no-reset --config marketing/demo/
 #   and  out/snaps/record-call-walkthrough → …/live/record-call
 ```
 
-The product film (motion graphics from the app's real components, in two
-looks) is made from those snapshots, not from the app:
-
-```bash
-tutorial-videos extract page-snippets record-call-walkthrough --config marketing/demo/tutorials.config.mjs
-tutorial-videos film product-film --config marketing/demo/tutorials.config.mjs
-#   → out/product-film-aurora.mp4 (colour) and out/product-film-mono.mp4 (black and white)
-#   check first: --look aurora --stills 3:0.8,5:0.5
-```
-
-Its script is `films/product-film.mjs`; it also uses `out/screens/dashboard.png`
-and `phone-today.png` (from `screens.mjs`).
+The snapshots above are also what **cutroom** (`Delpat-Tech/cutroom`, the motion-graphics
+engine) bakes its real-UI assets from; the product film is made there, not here.
 
 Take the walkthrough straight after a reset: it saves a call, and a second
 take would show that call on the lead before it is recorded.
