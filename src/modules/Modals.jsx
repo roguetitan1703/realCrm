@@ -100,7 +100,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'rejectLead' && <RejectLeadModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'activityRecords' && <ActivityRecords store={store} go={go} Modal={Modal} side={m.side} date={m.date}
+      {m?.kind === 'activityRecords' && <ActivityRecords store={store} go={go} Modal={Modal} side={m.side} date={m.date} from={m.from}
         person={m.person} measure={m.measure} detail={m.detail} title={m.title} />}
       {m?.kind === 'rejectOwner' && <RejectOwnerModal store={store} ownerId={m.ownerId} status={m.status} />}
       {m?.kind === 'confirm' && <ConfirmModal store={store} {...m} />}

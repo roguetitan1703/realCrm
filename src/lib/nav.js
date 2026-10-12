@@ -27,7 +27,7 @@ export const TAKEOVER_KEYS = [
   'leadFilters', 'propFilters', 'ownerFilters', 'contactFilters', 'contactsTab', 'settingsSection', 'settingsSide',
   // Today's half (To do / My work / Team) and a teammate opened from Team or
   // the Performance page, and the day they are read on.
-  'todayView', 'person', 'day',
+  'todayView', 'person', 'day', 'from',
   // The screen a record was opened FROM, when that was another screen (a row on
   // Performance, Today, Calendar). Not in the URL: the record's back button reads
   // it to step back there instead of dropping you on this screen's list.
@@ -164,6 +164,8 @@ export function parseUrl(search = window.location.search) {
       todayView: ['work', 'team'].includes(p.get('view')) ? p.get('view') : undefined,
       person: p.get('person') || undefined,
       day: /^\d{4}-\d{2}-\d{2}$/.test(p.get('day') || '') ? p.get('day') : undefined,
+      // The first day of a week or month read on Performance or Team.
+      from: /^\d{4}-\d{2}-\d{2}$/.test(p.get('from') || '') ? p.get('from') : undefined,
       // EACH BAG ON ITS OWN SCREEN ONLY. The three share parameter names —
       // `status`, `in-project`, `sortKey` — so reading all three everywhere
       // filled the property bag from a calling URL, and it wrote those back
@@ -202,6 +204,7 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (screen === 'today' && sel.todayView) p.set('view', sel.todayView)
   if ((screen === 'today' || screen === 'performance') && sel.person) p.set('person', sel.person)
   if ((screen === 'today' || screen === 'performance') && sel.day) p.set('day', sel.day)
+  if ((screen === 'today' || screen === 'performance') && sel.from) p.set('from', sel.from)
   if (screen === 'leads') writeFilters(p, sel.leadFilters)
   if (screen === 'properties') writePropFilters(p, sel.propFilters)
   if (screen === 'calling') writeOwnerFilters(p, sel.ownerFilters)

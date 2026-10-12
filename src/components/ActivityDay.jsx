@@ -114,6 +114,86 @@ export function DayPicker({ day, today, onDay, className = '' }) {
   )
 }
 
+// ── A week, a month, or any stretch ─────────────────────────────────────────
+// The same report over more days: `from` is the first day, `day` the last.
+// Day / 7 days / 30 days / Custom is a switch beside the date, and the picker
+// beside it chooses the day, the first day of the week or month, or both ends.
+
+const DAYS = { 7: 7, 30: 30 }
+const short = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+const spanOf = (from, to) => Math.round((new Date(`${to}T12:00:00Z`) - new Date(`${from}T12:00:00Z`)) / 86400000) + 1
+
+/** Which switch position a range is. */
+export const rangeMode = (from, to) => !from ? 'day' : DAYS[spanOf(from, to)] ? String(spanOf(from, to)) : 'custom'
+
+/** "Today", "Last 7 days", "6 Oct to 12 Oct". */
+export function periodName(data) {
+  if (!data?.day) return ''
+  if (!data.from) return dayName(data.day, data.today)
+  const n = spanOf(data.from, data.day)
+  if (data.day === data.today && DAYS[n]) return `Last ${n} days`
+  return `${short(data.from)} to ${short(data.day)}`
+}
+
+/** A date input opened from a label: the browser's own calendar. */
+function DatePick({ value, min, max, label, onPick, aria }) {
+  const ref = useRef(null)
+  const open = () => { const el = ref.current; if (!el) return; try { el.showPicker() } catch { el.focus(); el.click() } }
+  return (
+    <span className="ad-day">
+      <button type="button" className="ad-day-b" onClick={open} aria-label={aria}>
+        <Icon name="calendar" size={14} />
+        <span className="ad-day-l">{label}</span>
+      </button>
+      <input ref={ref} type="date" className="ad-day-in" tabIndex={-1} aria-hidden="true"
+        value={value} min={min} max={max} onChange={(e) => { const v = e.target.value; if (v) onPick(v) }} />
+    </span>
+  )
+}
+
+/**
+ * The switch and its picker. `data` is the report (day, from, today);
+ * `onRange({ from, day })` sets them — null `day` is today, null `from` one day.
+ */
+export function RangeControl({ data, onRange }) {
+  // Custom is a choice, not a length: a custom stretch that happens to be 30
+  // days long is still Custom while the person is setting it.
+  const [custom, setCustom] = useState(false)
+  if (!data?.day) return null
+  const { today } = data
+  const to = data.day
+  const mode = custom && data.from ? 'custom' : rangeMode(data.from, to)
+  const set = (from, day) => onRange({ from: from || null, day: day === today ? null : day })
+  // A window of n days starting on `start`, kept inside today: a start too
+  // recent for a whole window becomes the last n days.
+  const windowFrom = (start, n) => {
+    const end = shiftDay(start, n - 1) > today ? today : shiftDay(start, n - 1)
+    return [shiftDay(end, -(n - 1)), end]
+  }
+  const pickMode = (m) => {
+    setCustom(m === 'custom')
+    if (m === 'day') return set(null, to)
+    if (DAYS[m]) return set(shiftDay(to, -(DAYS[m] - 1)), to)
+    return set(data.from || shiftDay(to, -6), to)
+  }
+  return (
+    <span className="ad-range">
+      <Segmented value={mode} onChange={pickMode} options={[
+        { value: 'day', label: 'Day' }, { value: '7', label: '7 days' },
+        { value: '30', label: '30 days' }, { value: 'custom', label: 'Custom' },
+      ]} />
+      {mode === 'day' && <DatePick value={to} max={today} label={dayName(to, today)} aria="Pick a day" onPick={(v) => set(null, v)} />}
+      {DAYS[mode] && <DatePick value={data.from} max={today} label={periodName(data)} aria="Pick the first day"
+        onPick={(v) => { const [f, e] = windowFrom(v, DAYS[mode]); set(f, e) }} />}
+      {mode === 'custom' && <>
+        <DatePick value={data.from} max={to} label={short(data.from)} aria="First day" onPick={(v) => set(v, to)} />
+        <span className="ad-range-to">to</span>
+        <DatePick value={to} min={data.from} max={today} label={short(to)} aria="Last day" onPick={(v) => set(data.from, v)} />
+      </>}
+    </span>
+  )
+}
+
 // ── The head: title and switch together, the day on the right ───────────────
 export function Head({ title, hasCalling, side, onSide, data, onDay, right }) {
   const day = data?.day
@@ -232,12 +312,12 @@ export function TeamToday({ store, hasCalling, onOpen }) {
 }
 
 // ── The people behind a number ──────────────────────────────────────────────
-export function ActivityRecords({ store, go, side, date, person, measure, detail, title, Modal }) {
+export function ActivityRecords({ store, go, side, date, from, person, measure, detail, title, Modal }) {
   const [rows, setRows] = useState(null)
   useEffect(() => {
     let live = true
     // "People called" is the calls, one line per person.
-    api.getActivityRecords({ side, date, person, measure: measure === 'people' ? 'contact' : measure, detail })
+    api.getActivityRecords({ side, date, from, person, measure: measure === 'people' ? 'contact' : measure, detail })
       .then(r => {
         if (!live) return
         let list = r?.records || []
@@ -251,7 +331,7 @@ export function ActivityRecords({ store, go, side, date, person, measure, detail
       })
       .catch(() => { if (live) setRows([]) })
     return () => { live = false }
-  }, [side, date, person, measure, detail])
+  }, [side, date, from, person, measure, detail])
 
   const openRecord = (r) => {
     store.closeModal()

@@ -22,7 +22,7 @@ steps, built and verified on dev — §13 says what and how).
 | Frontend — Delpat's Vercel | not read; Branch Tracking is OFF, the user deploys by hand | |
 | Dev API (`api.dev.re.delpat.in`) | **stopped by the user** (12 Oct) | |
 | `main` | `820514e` (6 Oct) | |
-| `development` | ahead of `main`: marketing/demo, docs, `4fbfc20` (alert read fix, Apple connect fix) and **the alert lifecycle** (app + API, needs both deployed). Pushed | |
+| `development` | ahead of `main`: marketing/demo, docs, `4fbfc20` (alert read fix, Apple connect fix), **the alert lifecycle**, and **Performance / My work over 7 days, 30 days or a custom range** (all app + API, need both deployed). Pushed | |
 
 **Production API is 7 commits behind `main`** (photo-link previews, the
 Binod/Siddhi rename fix, reserved `admin`/`pwa` slugs). The user will deploy

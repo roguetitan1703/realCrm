@@ -387,7 +387,7 @@ export default function Today({ store, go, topBar, sel = {}, phone = true }) {
         <div className="q-wrap">
           {settling ? <div className="ad-wait tall" aria-busy="true" /> : (
             <AgentWork store={store} person={sel.person} title={who?.name || 'Teammate'} heading={false} mode="drill" hasCalling={hasCalling}
-              date={sel.day} onDate={(d) => go('today', { todayView: 'team', person: sel.person, day: d || undefined })}
+              date={sel.day} from={sel.from} onRange={(r) => go('today', { todayView: 'team', person: sel.person, day: r.day || undefined, from: r.from || undefined })}
               book={desk?.perAgent?.[sel.person] || {}} ownerBook={desk?.perAgentCalls?.[sel.person] || {}}
               onBook={(seg) => go('leads', { leadFilters: seg ? { agent: [sel.person], seg } : { agent: [sel.person] } })}
               actions={<button type="button" className="aw-link" onClick={() => go('leads', { leadFilters: { agent: [sel.person] } })}>Their leads<Icon name="chevRight" size={14} /></button>} />
@@ -441,7 +441,7 @@ export default function Today({ store, go, topBar, sel = {}, phone = true }) {
           {settling ? wait : <TeamBoard store={store} hasCalling={hasCalling} heading={false}
             books={desk?.perAgent || {}} onBook={(id, seg) => go('leads', { leadFilters: { agent: [id], seg } })}
             onOpenPerson={(c) => go('today', { todayView: 'team', person: c.id, day: sel.day || undefined })}
-            date={sel.day} onDate={(d) => go('today', { todayView: 'team', day: d || undefined })} />}
+            date={sel.day} from={sel.from} onRange={(r) => go('today', { todayView: 'team', day: r.day || undefined, from: r.from || undefined })} />}
         </div>
       )}
     </>

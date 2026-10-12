@@ -31,16 +31,17 @@ import { useServerData } from '../lib/useServerData.js'
 import { Segmented } from './primitives.jsx'
 import Icon from './Icon.jsx'
 import { stageLabel } from '../data/pipelineRoles.js'
-import { tally, fmt, word, fuWord, dayName, useSide, DayPicker, MEASURE_TITLE, DETAIL_TITLE, titleOf } from './ActivityDay.jsx'
+import { tally, fmt, word, fuWord, useSide, RangeControl, periodName, MEASURE_TITLE, DETAIL_TITLE, titleOf } from './ActivityDay.jsx'
 
 /**
- * The day a view shows. Performance and the phone's Team tab keep it in the
- * URL (`day`), so opening an agent from a past day opens that agent on that
- * day, and Back returns to it; My work keeps its own. Null is today.
+ * The days a view shows: `day` the last (null is today), `from` the first
+ * (null is just the one day). Performance and the phone's Team tab keep both in
+ * the URL, so an agent opened from last week opens on last week, and Back
+ * returns to it; My work keeps its own.
  */
-function useViewDay(date, onDate) {
-  const [own, setOwn] = useState(null)
-  return onDate ? [date || null, onDate] : [own, setOwn]
+function useViewRange(date, from, onRange) {
+  const [own, setOwn] = useState({ day: null, from: null })
+  return onRange ? [{ day: date || null, from: from || null }, onRange] : [own, setOwn]
 }
 
 // What a person's calls came to, in the order a manager reads it.
@@ -72,13 +73,13 @@ function teamTally(people) {
 
 /** Titles for the list a number opens. */
 const listTitle = (who, day, measure, detail) => titleOf([
-  who, dayName(day?.day, day?.today),
+  who, periodName(day),
   measure === 'contact' ? (detail === 'retry' ? 'To try again' : CONTACT_LABEL[detail]) : MEASURE_TITLE[measure],
   measure === 'contact' ? '' : (DETAIL_TITLE[detail] || (measure === 'status' ? stageLabel(detail) : '')),
 ])
 
 // ── The head: which side, which day ─────────────────────────────────────────
-function Head({ title, hasCalling, side, onSide, day, onDay, actions }) {
+function Head({ title, hasCalling, side, onSide, day, onRange, actions }) {
   return (
     <div className="pv-head">
       {title && <h2 className="aw-title">{title}</h2>}
@@ -86,7 +87,7 @@ function Head({ title, hasCalling, side, onSide, day, onDay, actions }) {
         <Segmented options={[{ value: 'leads', label: 'Leads' }, { value: 'calling', label: 'Calling' }]} value={side} onChange={onSide} />
       )}
       <span className="pv-head-r">
-        {day && <DayPicker className="pv-day" day={day.day} today={day.today} onDay={onDay} />}
+        <RangeControl data={day} onRange={onRange} />
         {actions}
       </span>
     </div>
@@ -222,19 +223,20 @@ function Pending({ t, side, isToday, open, book, onBook }) {
 }
 
 // ── One agent: their own day ("self") or opened from the team ("drill") ─────
-export function AgentWork({ store, person, title, heading = true, mode = 'self', hasCalling, defaultSide = 'leads', book, ownerBook, onBook, actions, date: viewDate, onDate }) {
+export function AgentWork({ store, person, title, heading = true, mode = 'self', hasCalling, defaultSide = 'leads', book, ownerBook, onBook, actions, date: viewDate, from: viewFrom, onRange: onViewRange }) {
   const { state } = store
   const [side, setSide] = useSide(hasCalling ? defaultSide : 'leads')
   const eff = hasCalling ? side : 'leads'
-  const [date, setDate] = useViewDay(viewDate, onDate)
+  const [range, setRange] = useViewRange(viewDate, viewFrom, onViewRange)
+  const { day: date, from } = range
   const { data: day } = useServerData(
-    () => api.getActivity({ side: eff, date, person }), [eff, date, person, state.dataAsOf], null)
+    () => api.getActivity({ side: eff, date, from, person }), [eff, date, from, person, state.dataAsOf], null)
   const me = (day?.people || []).find(p => p.id === person) || (day?.people || [])[0]
   const t = tally(me)
   const isToday = !day || day.day === day.today
   const self = mode === 'self'
   const open = (measure, detail) => store.openModal({
-    kind: 'activityRecords', side: eff, date: day?.day, person, measure, detail,
+    kind: 'activityRecords', side: eff, date: day?.day, from: day?.from, person, measure, detail,
     title: listTitle(self ? '' : title, day, measure, detail),
   })
   const b = eff === 'calling' ? ownerBook : book
@@ -242,7 +244,7 @@ export function AgentWork({ store, person, title, heading = true, mode = 'self',
   return (
     <div className="pv">
       <Head title={heading ? title : null} hasCalling={hasCalling} side={side} onSide={setSide}
-        day={day} onDay={(d) => setDate(d === day?.today ? null : d)} actions={actions} />
+        day={day} onRange={setRange} actions={actions} />
       {!day ? <div className="ad-wait tall" aria-busy="true" /> : (
         <>
           <Section title={self ? 'My performance' : 'Summary'}>
@@ -277,12 +279,13 @@ export function AgentWork({ store, person, title, heading = true, mode = 'self',
  * holding (never contacted), `onOpenPerson` opens an agent's drill-down, and
  * `onBook(agentId, seg)` opens their leads.
  */
-export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, books = {}, onBook, date: viewDate, onDate }) {
+export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, books = {}, onBook, date: viewDate, from: viewFrom, onRange: onViewRange }) {
   const { state } = store
   const [side, setSide] = useSide('leads')
   const eff = hasCalling ? side : 'leads'
-  const [date, setDate] = useViewDay(viewDate, onDate)
-  const { data: day } = useServerData(() => api.getActivity({ side: eff, date }), [eff, date, state.dataAsOf], null)
+  const [range, setRange] = useViewRange(viewDate, viewFrom, onViewRange)
+  const { day: date, from } = range
+  const { data: day } = useServerData(() => api.getActivity({ side: eff, date, from }), [eff, date, from, state.dataAsOf], null)
   const isToday = !day || day.day === day.today
 
   const people = (day?.people || [])
@@ -295,7 +298,7 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
       || String(a.name || '~').localeCompare(String(b.name || '~')))
   const team = teamTally(people)
   const open = (measure, detail, who) => store.openModal({
-    kind: 'activityRecords', side: eff, date: day?.day, person: who?.id || null, measure, detail,
+    kind: 'activityRecords', side: eff, date: day?.day, from: day?.from, person: who?.id || null, measure, detail,
     title: listTitle(who?.name || 'Team', day, measure, detail),
   })
 
@@ -318,7 +321,7 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
   return (
     <div className="pv">
       <Head title={heading ? 'Team' : null} hasCalling={hasCalling} side={side} onSide={setSide}
-        day={day} onDay={(d) => setDate(d === day?.today ? null : d)} />
+        day={day} onRange={setRange} />
       {!day ? <div className="ad-wait tall" aria-busy="true" /> : (
         <>
           <Section title="Team summary"><Summary t={team} open={(m, d) => open(m, d)} /></Section>
