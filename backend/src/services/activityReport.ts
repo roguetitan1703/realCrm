@@ -4,7 +4,7 @@
  * ============================================================================
  * The owner asked to see each agent's work every day; the agents asked to see
  * their own. Everything below counts ACTIONS A PERSON TOOK, and nothing else.
- * The spec, and why each rule is there: docs/specs/mahalaxmi-batch.md,
+ * The spec, and why each rule is there: docs/archive/mahalaxmi-batch.md,
  * "Agent activity — the business first" and "Activity — the calling side".
  *
  * ONE LIST OF FACTS. Every number on either screen is a count over `facts()`,

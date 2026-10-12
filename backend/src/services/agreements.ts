@@ -21,7 +21,7 @@
  * points at the old one (the old one is kept, marked renewed), and warns its
  * agent 30 days before it ends. A sale has none of that. It replaces the
  * `tenancy` blob on a property: no rent, no document, one per flat overwritten
- * at renewal, a tenant who was a string. See docs/specs/mahalaxmi-batch.md "D".
+ * at renewal, a tenant who was a string. See docs/archive/mahalaxmi-batch.md "D".
  * ============================================================================
  */
 import { sql } from './db.js';

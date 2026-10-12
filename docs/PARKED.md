@@ -1,11 +1,12 @@
 # Parked
 
-Things that are **understood and deliberately not built yet** — not a backlog of
-ideas. Every entry names what is actually wrong, what it costs today, and what
-the fix would take, so picking one up does not mean re-deriving it.
+Things **set aside** — either for later or declined. Every entry names what is
+actually wrong, what it costs today, and what the fix would take, so picking
+one up does not mean re-deriving it. Mark each **Later** or **Declined** in its
+heading when you touch it.
 
-`docs/ROADMAP.md` is what to build next. This is what we looked at, decided
-against doing right now, and want to stop rediscovering.
+`BACKLOG.md` is what we might do next. Picking an entry up moves it there and
+deletes it here.
 
 When an item ships, delete it from here. When one turns out to be worse than
 recorded, update it in place rather than adding a second entry.
@@ -89,14 +90,6 @@ for "not allowed", never 403 (a 403 no longer signs out, but 422 is the rule).
 
 ## Parked by the user, 25 Sep
 
-- **1.1 Today does not scroll on iPhone (installed app).** See
-  mahalaxmi-batch.md 1.1 for what is known.
-- **1.7 step 2, iPhone alerts failing.** Step 1 (recording the whole failure
-  reason) shipped in `a44afd3`; the next step is reading those reasons and the
-  EC2 checks listed in mahalaxmi-batch.md 1.7.
-- **9.4 env loader and CRLF.** Harmless unless the server's `.env` has CRLF;
-  check `grep -c $'
-' .env` on EC2 before touching it.
 - **A speed test of each step on production.** Time every screen's reads and
   every common write on the live API, per firm (the dashboard's summaries, Team
   today, Performance, the lead and calling lists, saving a lead, which takes
@@ -309,7 +302,7 @@ A sweep on 26 Aug found a live owner password in the public JS bundle and stoppe
 there. These areas were **never opened**. Nothing here has been measured, so
 nothing here is safe or unsafe — it is unknown, which is worse than either.
 
-Recorded so a later session does not mistake "not in KNOWN-ISSUES" for "checked".
+Recorded so a later session does not mistake "not in BACKLOG" for "checked".
 
 - **Ingestion** — `services/ingestion.ts`, `parser.ts`, the webhook path and
   `/api/v1/ingest`. Known separately: no rate limit, and bhumi's Housing mapping
@@ -379,3 +372,9 @@ and support number wait for a Save button. Also: the caption *"PNG or SVG, under
 number an agent contacts when alerts are blocked — a typo is a dead end nobody
 discovers.
 
+---
+
+## Declined: dropping `archive_bhumi_*_20260806`
+
+517 archived leads from the reverted August imports, two of them `Deal Closed`.
+Do not drop without asking the user.

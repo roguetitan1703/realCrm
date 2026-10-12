@@ -1,9 +1,7 @@
 # Specs — running build plans
 
-These are the **detailed, buildable plans** behind [ROADMAP.md](../ROADMAP.md).
-One spec per roadmap block. We **plan every point here first** (revising as we
-work through the roadmap), and **develop once** the plans are settled — rather
-than design-and-build one point at a time.
+Designs for the bigger pieces in [BACKLOG.md](../BACKLOG.md), written before
+building. Once a spec ships it keeps a short as-built note, not the build log.
 
 **Status per spec:** 🧭 planning · 🔒 locked (ready to build) · 🏗️ building · ✅ built
 
