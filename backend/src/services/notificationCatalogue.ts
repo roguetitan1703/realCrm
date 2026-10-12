@@ -107,8 +107,7 @@ export const NOTIFICATIONS: NotifKind[] = [
       trigger: 'no contact recorded within slaHours of arrival', push: true, gate: 'slaHours' }),
 
   K({ key: 'followup_due', label: 'A booked next step is due', audience: 'assignee',
-      // INERT. The query reads follow_up->>'due_at', which nothing writes.
-      trigger: 'a booked follow-up falls due — never fires, see KNOWN-ISSUES', push: true, gate: null }),
+      trigger: 'a booked follow-up falls due (within the last 24 hours)', push: true, gate: null }),
   K({ key: 'site_visit_reminder', label: 'A site visit is coming up', audience: 'assignee',
       trigger: 'a booked site visit approaches', push: true, gate: null }),
   K({ key: 'calendar_task_assigned', label: 'A task was assigned to you', audience: 'assignee',
