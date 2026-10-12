@@ -156,6 +156,40 @@ realestate.delpat.in/bhumi/homes/pride-world-city   one public listing (the owne
   catalogue) shows "This home is no longer available" and the firm's catalogue.
   Nobody has to manage it.
 
+## 5b. Keeping links under control
+
+**The worry (user, 12 Oct):** every send and copy makes a link; links pile up in
+chats and groups carrying the firm's data, with no way to take them back.
+
+**The answer is not a screen of links.** Nobody non-technical manages a list of
+codes. Control sits on the things people already think in — a flat, a buyer,
+the whole firm — and the links follow.
+
+1. **Fewer links in the first place.** The same agent copying the same flat gets
+   the **same link** every time; the same agent sending the same flats to the
+   same lead gets the same link. A link is (agent, flats, lead), not one per
+   press.
+2. **A link holds nothing.** It is a key to a row; the page reads the flat as it
+   is *now*. Photos, area, BHK — never price (until decided), flat number,
+   owner, or the buyer's name. So a link "out there" exposes only what the
+   firm would show anyway, and changes the moment the listing does.
+3. **A link ends by itself.** 30 days after it was last sent or copied (sending
+   again restarts it). An expired link shows the firm's name and *Talk to us*,
+   no flats. The firm's own catalogue address never expires.
+4. **The flat closes its links.** Let, sold, removed, or **Stop sharing** on the
+   listing: every link that carries it shows "This home is no longer
+   available" for that flat. Stop sharing replaces today's *Turn off photo
+   link*, in the same place, with what it affects: *Shared 12 times · 9 links
+   open*.
+5. **The buyer closes theirs.** A lead marked Rejected or Deal Closed: links sent
+   to them show *Talk to us* only.
+6. **A person leaving does not orphan anything.** A suspended or removed agent's
+   links keep working; *Talk to us* goes to the lead's holder, else the firm's
+   contact person.
+7. **The owner has one switch for everything.** Settings → Sharing: *142 links
+   open · Close all shared links* — for a leak, or the day the firm stops.
+   Owner only, confirmed, recorded in the ledger. Links made afterwards work.
+
 ## 6. What it needs that does not exist
 
 - A **send** table (code, kind send/post, tenant, agent, lead or null, listing
@@ -181,7 +215,12 @@ realestate.delpat.in/bhumi/homes/pride-world-city   one public listing (the owne
 ## 8. Open
 
 - **Price** — the owner's call (§1.10).
-- **The one word before a code** (`/bhumi/pride-world-city/k7m2qx`) for a
-  one-flat send: readable in a chat, ignored on lookup. Keep or drop.
-- **"Book a visit" slots:** any day/time the buyer picks, or the firm's hours?
-- **Catalogue order:** newest first, or by area?
+- **Catalogue order** — proposal: grouped by area, areas with most homes
+  first, newest first inside each. Not nearest-first: it needs the buyer's
+  location, and people browse the area they want, not the one they stand in.
+- **Link life:** 30 days from the last send, or longer for sale listings?
+- **The firm's working hours** for *Book a visit* do not exist as a setting yet;
+  one is needed (default 10:00–19:00).
+
+Decided 12 Oct: no flat name in a link (`/bhumi/k7m2qx` only); visits only in
+the firm's working hours.
