@@ -19,7 +19,7 @@ Paying tenants are `bhumi` and `mahalaxmi`. A line that writes their data says s
 
 ## Now
 
-_Nothing picked._
+_Nothing picked._ Alerts (first under Bugs) diagnosed 12 Oct; the fix is ready to pick.
 
 ## Next — candidates, most useful first
 
@@ -43,15 +43,6 @@ _Nothing picked._
   production activity (who works what, what is never touched) → a short list of
   proposals. *manager*
 
-## To decide
-
-- **Onboarding passwords.** Onboarding hands out `vijay` / `vijay@123` (decided
-  24 Sep, must-change on). The Team screen generates `tiger-pune-42` and shows
-  it only after saving. Keep, or one generator shown before saving, with Copy
-  carrying the workspace link?
-- **Audit ledger visible to the firm's owner.** It records always; the Settings
-  view is hidden on purpose (PARKED). The user has asked for it on.
-
 ## Small
 
 - Schedule follow-up has no busy guard; a double tap sends two writes (the
@@ -61,30 +52,47 @@ _Nothing picked._
 - Chart palette repeats after 6 sources (`styles.css` `data-i`).
 - Row menus follow their button when it scrolls out of view instead of closing.
 - Credential Copy does not include the workspace link.
+- Demo connections on `raipur` and `urban` still default `deal: 'sale'`.
+- Sale-stamped leads from before the rule (bhumi 252, mahalaxmi 67) cannot be
+  told from real sales by count; `scripts/reprocess-inbox.ts --overwrite=deal`
+  reads the stored payload.
+- `test:ingest` / `test:leadflows` hit a real endpoint; which tenant is unaudited.
+- The app has never stored an audit-chain check (`audit_checks` empty); the
+  chain verifies clean, 7 chains, 13,941 rows.
 - `.env` lines split on `\n` only; check `grep -c $'\r' .env` on EC2 first.
 
 ## Bugs
 
 Measured on production, read-only, 12 Oct, unless marked.
 
-- **Alerts are not being read.** 14 days: bhumi 299 alerts, 6 read (all by
-  Amit); mahalaxmi 463, 0 read by any of the four agents. Either they never
-  reach a screen people look at, or they are noise. *agent*
+- **Alerts: "unread" measures the drawer, not the agent** (diagnosed 12 Oct).
+  `read` is one boolean with no time; only the bell drawer sets it, and tapping
+  one item marks ALL read (`Modals.jsx` `openNotif`). A tapped phone push sets
+  only `push_deliveries.clicked_at` (20 of 21 tapped are still unread); acting
+  on the lead never closes its alert. Piles now 139–296 unread per agent, so
+  the badge is wallpaper. Agents do act: mahalaxmi works 77% of `lead_assigned`
+  within 24 h, and a shown push triples action inside 2 h (35% vs 6%). Fix:
+  tap marks read; one item marks one; work on a lead closes its alerts;
+  `read_at`; bulk-assign alerts carry `agent=` into the filter. *agent*
+- **A quarter of bhumi's alerts go nowhere** — 76 of 299 had no subscription
+  (Anil 40/40, Vinod 30/33, Mukesh 6), though all three use the app daily.
+  A device check with them, not code.
+- **Apple push times out from EC2** — 112 failures to `web.push.apple.com`, all
+  `ETIMEDOUT`/`ENETUNREACH`, same endpoints succeed at other times. Points at
+  IPv6 egress; try IPv4-first in `push.ts`, verify on the deployed box. (This
+  was 1.7.)
 - **"Going cold" is most of the book** — bhumi 493 of 585 open (84%, at their
   7-day setting), mahalaxmi 168 of 231 (73%, 1-day). 19 and 35 crossed the line
-  in the last day. A pile nobody can work. *manager*
+  in the last day. Likely our model, not the agents: real portal leads may not
+  behave the way the pile assumes. Study how real leads actually move before
+  changing the rule. *manager*
 - **A lead's Callback stores no time** — bhumi 19 of 20, mahalaxmi 42 of 42 have
   none, so nothing can say a callback is late. (Owners store one.) *agent*
 - **Booked site visits with no time** — bhumi 5 of 29 (typed text only).
-- **2 of bhumi's 7 agents have no push subscription** (Vinod, Anil); alerts to
-  them are undeliverable before they are sent.
 - **`/api/v1/ingest` has no rate limit** (code). A leaked key fills a desk.
 
 ## To verify
 
-- **iPhone push failures (1.7).** Step 1 records the whole failure reason
-  (`a44afd3`). Suspicion only — read `push_deliveries` on production before
-  building anything.
 - **After the API deploy:** a photo link previews in WhatsApp, Slack and
   Telegram; Siddhi's leads show Siddhi.
 

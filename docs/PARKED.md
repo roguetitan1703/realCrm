@@ -242,6 +242,7 @@ Until then the script is the interface, and it is read-only and safe on `bhumi`.
 `AuditSection` in `src/modules/Settings.jsx` is written and working; its nav
 entry and its render are both commented out. **That is deliberate — the client
 is not to have it yet.** Do not "fix" the dead code or restore the nav item.
+Confirmed again by the user on 12 Oct: keep it hidden for now.
 
 ---
 

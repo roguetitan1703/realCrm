@@ -193,7 +193,7 @@ the system is deployed. Then `docs/BACKLOG.md`.
 |---|---|---|
 | `CLAUDE.md` | How to work here. Rules only, no incidents, no backlog | Rarely. Fold, don't append |
 | `docs/STATE.md` | **Where the last session left the system.** Deployed vs committed, what is waiting on the user, what was checked against the live database | **Overwritten every session** |
-| `docs/BACKLOG.md` | **The one list** — Now, Next, To decide, Small, Bugs, To verify, Bigger pieces. One line per item; detail lives in a spec or the commit | Every session that finds, picks or ships something |
+| `docs/BACKLOG.md` | **The one list** — Now, Next, Small, Bugs, To verify, Bigger pieces. One line per item; detail lives in a spec or the commit | Every session that finds, picks or ships something |
 | `docs/PARKED.md` | Set aside — **Later** or **Declined** — with the numbers, so it is not rediscovered or "fixed" | When something is set aside; picking it up moves it to BACKLOG |
 | `docs/incidents.md` | What the six shapes actually cost | When a rule needs its evidence |
 | `docs/specs/` | Designs for the bigger pieces: `auth`, `contacts-leads`, `properties`, `ingestion`, `enquiries`, `pwa`, `branding`, `data-lifecycle`, `notifications` (how an alert reads), `notification-delivery` (whether it arrives) | Before building; a short as-built note after |

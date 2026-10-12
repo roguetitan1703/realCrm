@@ -33,8 +33,9 @@ them soon. Order: API first, then frontend.
 ## Waiting on the user
 
 - **Deploy the API**, then the two checks under "To verify" in BACKLOG.
-- **Two decisions** under "To decide" in BACKLOG (onboarding passwords, the
-  audit ledger for firm owners).
+- Decided 12 Oct: onboarding keeps `vijay@123`; the audit ledger stays hidden
+  from firm owners; default passwords on delpat/skyline are ignored (people
+  changed their own).
 - **Merge `development` → `main`** when convenient (docs and marketing only).
 - **webloom / delpat-skills** branches as left on 12 Oct: webloom's walkthrough
   counter fix `fc94993` on `feat/real-estate-crm-page`; delpat-skills
