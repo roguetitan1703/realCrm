@@ -158,11 +158,11 @@ export async function unreadCount(userId: string): Promise<number> {
 }
 
 export async function markRead(id: string, userId: string): Promise<void> {
-  await sql`UPDATE notifications SET read = TRUE WHERE id = ${id} AND user_id = ${userId} AND tenant_id = ${tid()}`;
+  await sql`UPDATE notifications SET read = TRUE, read_at = COALESCE(read_at, NOW()) WHERE id = ${id} AND user_id = ${userId} AND tenant_id = ${tid()}`;
 }
 
 export async function markAllRead(userId: string): Promise<void> {
-  await sql`UPDATE notifications SET read = TRUE WHERE user_id = ${userId} AND tenant_id = ${tid()} AND read = FALSE`;
+  await sql`UPDATE notifications SET read = TRUE, read_at = NOW() WHERE user_id = ${userId} AND tenant_id = ${tid()} AND read = FALSE`;
 }
 
 /**

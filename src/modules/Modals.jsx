@@ -2175,11 +2175,18 @@ export function NotifModal({ store, go }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Opening one alert reads THAT alert. It called mark-all, so a single tap
+  // cleared the whole pile and the pile stopped meaning anything.
+  // A bulk-assign alert links `?screen=leads&agent=<id>`; reading only `lead=`
+  // dropped the agent and landed on the whole book.
   const openNotif = (n) => {
-    if (!n.read) store.markAllNotifsRead()
-    const m = (n.link || '').match(/lead=([^&]+)/)
+    if (!n.read) store.markNotifRead(n.id)
+    const p = new URLSearchParams(String(n.link || '').replace(/^[^?]*\?/, ''))
+    const leadId = p.get('lead')
+    const agent = p.getAll('agent')
     close()
-    if (m) go('leads', { leadId: m[1], leadOpen: true })
+    if (leadId) go('leads', { leadId, leadOpen: true })
+    else if (agent.length) go('leads', { leadFilters: { agent }, leadOpen: false, leadId: undefined })
     else go('leads')
   }
 

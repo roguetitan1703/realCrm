@@ -426,6 +426,11 @@ function reducer(state, action) {
       notifUnread: action.unread ?? 0,
     }
     case 'MARK_NOTIFS_READ': return { ...state, notifications: (state.notifications || []).map(n => ({ ...n, read: true })), notifUnread: 0 }
+    case 'MARK_NOTIF_READ': return {
+      ...state,
+      notifications: (state.notifications || []).map(n => n.id === action.id ? { ...n, read: true } : n),
+      notifUnread: Math.max(0, (state.notifUnread || 0) - 1),
+    }
 
     case 'PATCH_SETTINGS': return { ...state, settings: { ...state.settings, ...action.patch } }
     case 'SET_ROUTING': return { ...state, routing: { ...state.routing, ...action.patch } }
@@ -1644,6 +1649,11 @@ export function StoreProvider({ children }) {
       if (v) loadNotifications() // refresh the feed whenever the drawer opens
     },
     loadNotifications,
+    markNotifRead: (id) => {
+      dispatch({ type: 'MARK_NOTIF_READ', id })
+      // Re-read the count once the server has it.
+      apiClient.markNotificationRead(id).then(loadNotifUnread).catch(err => console.warn('[Notifications] mark-read failed:', err.message))
+    },
     markAllNotifsRead: () => {
       dispatch({ type: 'MARK_NOTIFS_READ' })
       apiClient.markAllNotificationsRead().catch(err => console.warn('[Notifications] mark-all failed:', err.message))

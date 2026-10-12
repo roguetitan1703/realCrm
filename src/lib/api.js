@@ -836,7 +836,9 @@ export const api = {
 
   // Notifications (per-user alert feed)
   getNotifications: () => request('/notifications'),
-  getNotifUnread: () => request('/notifications?count=1'),
+  // Fresh: a count read after a mark-read joined a poll already in flight from
+  // before the write, and put the old number back on the bell.
+  getNotifUnread: () => request('/notifications?count=1', { fresh: true }),
   markNotificationRead: (id) => request(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }),
   markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
 

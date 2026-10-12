@@ -891,6 +891,11 @@ async function createLedgerTables(): Promise<void> {
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (tenant_id, user_id, read);`;
+  // WHEN it was read. A bare boolean could say 6 of 299 alerts were read and
+  // nothing about when, or how long after the push. Rows read before this
+  // column existed keep NULL: the time was never recorded, and inventing one
+  // would be a fact nobody can tell from a real one.
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;`;
 
   // Append-only, tamper-evident. seq gives a monotonic order; prev_hash/hash
   // form a chain so no past row can be altered or removed undetected. Never

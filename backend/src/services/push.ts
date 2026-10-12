@@ -11,7 +11,22 @@
 
 import webpush from 'web-push';
 import { randomBytes } from 'crypto';
+import dns from 'node:dns';
+import net from 'node:net';
 import { sql } from './db.js';
+
+// A QUARTER OF iPHONE PUSHES NEVER LEFT THE BOX. 110 of 458 sends to
+// web.push.apple.com in a fortnight failed as `ETIMEDOUT/ENETUNREACH` (prod,
+// 12 Oct): Node tries every address Apple's DNS returns, IPv6 and IPv4
+// interleaved, and gives each attempt 250 ms before moving on. The box has no
+// IPv6 route (ENETUNREACH, instantly) and a connect from India to Apple can
+// take longer than 250 ms, so every IPv4 attempt was abandoned too. IPv4 first,
+// and a connect is given 2.5 s. Process-wide — Node has no per-request knob for
+// web-push's agent — and harmless for the database and mail connections.
+dns.setDefaultResultOrder('ipv4first');
+if (typeof (net as any).setDefaultAutoSelectFamilyAttemptTimeout === 'function') {
+  (net as any).setDefaultAutoSelectFamilyAttemptTimeout(2500);
+}
 
 const PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
 const PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
@@ -271,6 +286,18 @@ export async function recordAck(token: string, event: string): Promise<boolean> 
         UPDATE push_deliveries SET displayed_at = COALESCE(displayed_at, NOW()),
           status = CASE WHEN status = 'sent' THEN 'displayed' ELSE status END
         WHERE ack_token = ${token} RETURNING id`;
+  // A TAPPED PUSH IS A READ ALERT. Only the bell drawer ever set `read`, so the
+  // agent who tapped the notification on their phone and went straight to the
+  // lead still owed it in the bell: 20 of 21 tapped pushes were unread (prod,
+  // 12 Oct). Scoped through the delivery row to the one alert, its own
+  // recipient and tenant — the token is the only credential this path has.
+  if (event === 'clicked' && rows.length) {
+    await sql`
+      UPDATE notifications n SET read = TRUE, read_at = COALESCE(n.read_at, NOW())
+      FROM push_deliveries d
+      WHERE d.ack_token = ${token} AND n.id = d.notification_id
+        AND n.tenant_id = d.tenant_id AND n.user_id = d.user_id AND n.read = FALSE`;
+  }
   return rows.length > 0;
 }
 
