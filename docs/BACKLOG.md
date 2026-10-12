@@ -19,7 +19,9 @@ Paying tenants are `bhumi` and `mahalaxmi`. A line that writes their data says s
 
 ## Now
 
-_Nothing picked._ Alerts (first under Bugs) diagnosed 12 Oct; the fix is ready to pick.
+- **Does work on a lead close its alerts?** Waiting on the user. When the
+  recipient records work on a lead, their unread alerts for it would be marked
+  read — the one change that ends the 139–296 piles.
 
 ## Next — candidates, most useful first
 
@@ -65,22 +67,24 @@ _Nothing picked._ Alerts (first under Bugs) diagnosed 12 Oct; the fix is ready t
 
 Measured on production, read-only, 12 Oct, unless marked.
 
-- **Alerts: "unread" measures the drawer, not the agent** (diagnosed 12 Oct).
-  `read` is one boolean with no time; only the bell drawer sets it, and tapping
-  one item marks ALL read (`Modals.jsx` `openNotif`). A tapped phone push sets
-  only `push_deliveries.clicked_at` (20 of 21 tapped are still unread); acting
-  on the lead never closes its alert. Piles now 139–296 unread per agent, so
-  the badge is wallpaper. Agents do act: mahalaxmi works 77% of `lead_assigned`
-  within 24 h, and a shown push triples action inside 2 h (35% vs 6%). Fix:
-  tap marks read; one item marks one; work on a lead closes its alerts;
-  `read_at`; bulk-assign alerts carry `agent=` into the filter. *agent*
-- **A quarter of bhumi's alerts go nowhere** — 76 of 299 had no subscription
-  (Anil 40/40, Vinod 30/33, Mukesh 6), though all three use the app daily.
-  A device check with them, not code.
-- **Apple push times out from EC2** — 112 failures to `web.push.apple.com`, all
-  `ETIMEDOUT`/`ENETUNREACH`, same endpoints succeed at other times. Points at
-  IPv6 egress; try IPv4-first in `push.ts`, verify on the deployed box. (This
-  was 1.7.)
+- **Pushes held while Android sleeps** — 208 alerts in 14 days (two firms) were
+  accepted by FCM/WNS and shown on no device; after 20:00 IST sent outnumbers
+  shown 85 to 23, and 85 FCM displays arrived 5 min–6 h late. Pushes go at
+  normal urgency (`push.ts` `sendNotification`); `urgency: 'high'` would let
+  them through Doze. *agent*
+- **Anil and Vinod have never had a subscription** (bhumi; 0 of 73 alerts
+  shown). Anil's phone runs VivoBrowser, where push is unsupported and the
+  prompt hides itself (`PushRow.jsx`); Vinod is on Chrome and probably denied —
+  a denial leaves no trace on the server. Needs: "open in Chrome" for in-app
+  browsers, permission state reported to the server, and a word with Vinod.
+- **A dead endpoint is re-registered on every app open** — Zahir's VivoBrowser
+  endpoint: 38 × 410 since 23 Sep, never once delivered; `autoEnablePush`
+  re-uploads it, the next push prunes it. Tombstone a 410'd endpoint and
+  re-subscribe fresh.
+- **Pushes go to signed-out phones** — the signed-in check is per user, not per
+  device: Mukesh's iPhone 0/25 shown, Siddhi's 0/20 with no iPhone session,
+  Prerana's after its session was revoked 7 Oct. Lead names on a handset nobody
+  is signed in to. Tie each subscription to its session.
 - **"Going cold" is most of the book** — bhumi 493 of 585 open (84%, at their
   7-day setting), mahalaxmi 168 of 231 (73%, 1-day). 19 and 35 crossed the line
   in the last day. Likely our model, not the agents: real portal leads may not
@@ -95,6 +99,9 @@ Measured on production, read-only, 12 Oct, unless marked.
 
 - **After the API deploy:** a photo link previews in WhatsApp, Slack and
   Telegram; Siddhi's leads show Siddhi.
+- **After the API deploy (`4fbfc20`):** Apple failures (`ETIMEDOUT/ENETUNREACH`,
+  110 of 458 in 14 days before) drop to near zero; tapped pushes land with
+  `read_at` set.
 
 ## Bigger pieces — each has a spec
 
