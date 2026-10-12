@@ -196,7 +196,7 @@ the system is deployed. Then `docs/BACKLOG.md`.
 | `docs/BACKLOG.md` | **The one list** — Now, Next, Small, Bugs, To verify, Bigger pieces. One line per item; detail lives in a spec or the commit | Every session that finds, picks or ships something |
 | `docs/PARKED.md` | Set aside — **Later** or **Declined** — with the numbers, so it is not rediscovered or "fixed" | When something is set aside; picking it up moves it to BACKLOG |
 | `docs/incidents.md` | What the six shapes actually cost | When a rule needs its evidence |
-| `docs/specs/` | Designs for the bigger pieces: `auth`, `contacts-leads`, `properties`, `ingestion`, `enquiries`, `pwa`, `branding`, `data-lifecycle`, `notifications` (an alert is open work: lifecycle, urgency, delivery, measurement) | Before building; a short as-built note after |
+| `docs/specs/` | Designs for the bigger pieces: `auth`, `contacts-leads`, `properties`, `ingestion`, `enquiries`, `pwa`, `branding`, `data-lifecycle`, `listing-pages`, `notifications` (an alert is open work: lifecycle, urgency, delivery, measurement) | Before building; a short as-built note after |
 | `docs/architecture/`, `docs/ops/DEPLOY.md`, `backend/API_SPECIFICATION.md` | Reference | As needed |
 
 `docs/archive/` (old roadmaps, the Mahalaxmi batch, demo-era plans) is history.
