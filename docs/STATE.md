@@ -5,10 +5,13 @@ the handoff. Only what git cannot tell you belongs here: what is *deployed* (as
 opposed to committed), what is waiting on the user, and what was checked against
 a live database so the next session neither re-derives it nor assumes it.
 
-Open bugs go in `docs/KNOWN-ISSUES.md`, not here. Point at them. The working
-plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md` (latest: part E).
+Open bugs go in `docs/KNOWN-ISSUES.md`, not here. The working list for the
+product is `docs/specs/mahalaxmi-batch.md`; the next conversation is the user
+bringing blockers and facts, so expect this file to be rewritten then.
 
-**Last session: 2026-09-30.**
+**Last session: 2026-10-12** (a long one, 7–12 Oct: link previews, the public
+product page, the demo firm, tutorials and snapshots; the motion-graphics work
+has moved out of this repo entirely).
 
 ---
 
@@ -16,106 +19,92 @@ plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md` (latest: part E)
 
 | | at | how |
 |---|---|---|
-| Backend — AWS EC2, **by hand** | `f03dcd1` when last read (24 Sep, `/health`) | `scripts/deploy-api.sh` on the box — refuses a dirty tree or a branch other than `main` |
-| Frontend — Vercel | not recorded | **Branch Tracking is OFF** — a push to `main` does not deploy; the user deploys by hand |
-| `main` | `a3b51c0` | |
-| `development` | 41 commits ahead of `main` | agreements and conversion (D), the activity report, contacts tabs, the copy sweep, Today / My work / Performance, Properties Part 7, the superadmin console, the per-firm ledger, the build's name check, tutorials, and (28 Sep) calling tabs, property tabs + project list + duplicate, the photo editor, the import switch, listings added |
+| Backend — AWS EC2, by hand | **`78458b6` (5 Oct)**, read from `/health` 12 Oct | `scripts/deploy-api.sh` on the box, `main` only |
+| Frontend — Vercel | **not read this session**; Branch Tracking is OFF, the user deploys by hand | |
+| Dev API (`api.dev.re.delpat.in`) | **502 on 12 Oct 01:25** — down or restarting | |
+| `main` | `820514e` (6 Oct) | |
+| `development` | 13 commits ahead of `main` — all `marketing/demo` (the product page's video, screens, snapshots, tutorials config) and the gallery-enquiry spec. **No app code.** Pushed? **No** — the last marketing commits are local only |
 
-**What this release is, for the clients and for the deploy: `docs/releases/2026-09-28.md`.** `development` is pushed to origin (28 Sep).
+**Production API is 7 commits behind `main`**, and those commits are the point
+of the whole early-October batch:
+- photo links preview on every app that fetches previews (`/share/gallery` with
+  the broad UA rewrite in `vercel.json`; a human visitor is sent on to `?app=1`
+  once) — production still answers `Cannot GET /share`;
+- the Binod/Siddhi fix (`1fc8f77`: renamed people kept their old name in
+  columns; projects got second spellings; listings hid their media);
+- `admin` and `pwa` reserved as workspace slugs.
 
-**Deploy order: API first, then frontend.** The new frontend calls
-`/agreements`, `/public/gallery`, the `contact` counts and fields the old API
-does not have.
-
-What the API deploy runs on production, once:
-- additive schema: `crm_agreements` and its columns, the index
-  `idx_crm_timeline_day (tenant_id, timestamp)`, four property columns
-  (`verified_at`, `verified_by`, `gallery_off`, `gallery_version`),
-  `sessions.support_by`, `superadmins.failed_logins / locked_until`,
-  `audit_log.chain` with its index, the `audit_checks` table and its `reason`
-  column;
-- `runOnce 2026_09_25_intro_message_no_dashes`: a firm's saved intro message
-  loses its em dash (the old default becomes the new one); logs which firms
-  (user's OK for all firms, 25 Sep);
-- `runOnce 2026_09_25_agreement_party_copy`: fills an agreement's own tenant or
-  buyer name and phone from its lead where empty. Production had one agreement
-  (urban, a demo firm) with the name already set; nothing on bhumi or mahalaxmi.
-
-After the API deploy:
-- the superadmin console signs out once (its old 30-day token has no session);
-- the first ledger check reads the whole legacy chain once (about 8,000 rows,
-  paged); after that only new rows;
-- `npm run link:owners -- --env=production` (report, then `--apply`) to join
-  listing owners to calling rows — not yet run on production.
+Deploy order unchanged: API first, then frontend.
 
 ---
 
 ## Waiting on the user
 
-- **Review on dev, merge `development` → `main`, deploy** (API, then frontend).
-- **Production, read only, 28–30 Sep (nothing written):** 0 listings at flat
-  A-101 in any firm; 5 at flat 101 in another wing (bhumi 3, mahalaxmi 1,
-  urban 1), not provably typed or defaulted, left alone. No paying firm's
-  listing carries the invented "2 BHK" / "Pune"; our own `delpat` org has 747
-  imported listings saved as sale in Pune by the old default. Bhumi: 39 of 39
-  calling rows have nobody on them. The audit ledger: 10,809 of 10,809 verify
-  with the fixed checker (9994f29), so it reads clean after the deploy and
-  nothing is re-sealed on production.
-- Default passwords are **not** an open item: the user, 30 Sep (sign-in no
-  longer forces a change, by choice).
-- **Superadmin console built** (mahalaxmi-batch.md, "Superadmin — as built"):
-  console session, support view, firm page, per-firm ledger, setup email.
-  Worth a look on dev at `/admin` before deploying.
-- **Properties Part 7** built (mahalaxmi-batch.md Part 7). 7.6 still wants the
-  production count of shortlist use; reading it needs the user's OK.
-- **Photo links on production** are `https://<app>/<firm>/photos/<project>-<code>`; the Vercel rewrite
-  already sends every path to the app. The page reads `/api/v1/public/gallery`,
-  so it needs the API deployed first like everything else.
-- **Production timing of the dashboard** after the deploy: the only number is
-  from before (Bhumi's leads report 2 s). A read-only check was blocked by the
-  permission tool; ask before retrying.
+- **Deploy the API** (`./scripts/deploy-api.sh`), then check a photo link's
+  preview from WhatsApp, Slack and Telegram, and that Siddhi's leads show
+  Siddhi.
+- **Merge or drop `development`** → `main` for the marketing commits (nothing
+  deploys from them). Push `development` first; the last five are local.
+- **webloom** (`Delpat-Tech/webloom`): the CRM product page is on `main` at
+  `0ef5e88` (video, live snippets, walkthrough). The walkthrough counter fix
+  (`fc94993`, read "1/0" in the page's HTML before its stages loaded) is on
+  `feat/real-estate-crm-page` only. Vercel's build state for `0ef5e88` was
+  "pending" with no checks when last looked; confirm delpat.in/real-estate-crm
+  is live.
+- **delpat-skills** `feat/natural-pace` is unmerged: tutorial-videos' edit
+  (waits cut, idle trimmed, holds), promo style, lexicon, `snap`, `extract`
+  (live cutouts, parts, radii). The installed skill already runs this branch.
+- **Carried from 30 Sep, not re-checked:** `npm run link:owners --
+  --env=production` not yet run; Properties 7.6 wants the production shortlist
+  count (needs the user's OK to read); dashboard timing on production after the
+  deploy.
+- **Gallery enquiry** ("I'm interested" on a shared photo link): spec only,
+  `docs/specs/gallery-enquiry.md`, parked until the attribution question is
+  settled.
 
 ---
 
 ## Checked this session
 
-- **Dev only, `delpat`, desk 1440 and iPhone 13, no page errors.**
-- Calling: every tab's count equals its list total, firm-wide and inside
-  Godrej Green Vistas (All 726 · Callbacks 7 · New 709 · Interested 4 · Key
-  Received 4 · Closed 9); a reload and a record round trip keep the tab; × goes
-  to the 13 project cards with the URL cleared. The phone shows the signed-in
-  person's own list; with the owner signed in (holds none) every tab read 0 and
-  matched. Not checked: an agent who holds rows, on the phone (no agent password).
-- Properties: tab counts equal list totals firm-wide (23) and in Oakridge
-  Towers; project band, Add unit, filter menu (Tower, Flat no.; no Project or
-  Status); bulk duplicate → confirm → copies with "No flat no. yet", found by
-  Flat no. → Not added yet; single duplicate → form → "Save without a flat
-  number?" on desk and phone; old `?project=` links land on the filtered list.
-  Every probe listing deleted by id (listings back to 23).
-- Photos, on `p_1790420338574_60jw` (6 items): Make cover moves in 35 ms desk /
-  105 ms phone and saves; drag reorders; remove + Undo leaves 6 on screen and
-  on the server; a refused save puts the tiles back. Order restored; the 19
-  "Photos" history lines the runs wrote were deleted.
-- Listings added: a probe listing by akashpatel showed in Performance (Listings
-  1), his day, and Team today; deleted.
+- **Production, read only:** `/health` (commit above) and the `/share` route
+  (404 "Cannot GET"). Nothing else read; nothing written.
+- **Dev database, `demo-showcase` (Amberleaf Realty, invented):** reset from
+  `backend/src/scripts/demo-profiles/showcase.json` (`npm run seed:demo -- --write`
+  equivalent, ~6 min) several times for recordings; the walkthrough capture
+  **saved one call on Alpesh Joshi** ("Interested · scheduling a site visit",
+  "Wants to visit on Saturday"), which stays until the next reset. No other
+  dev data touched. `bhumi` and `mahalaxmi` untouched.
+- **Tutorials** (`marketing/demo/tutorials.config.mjs`): `product-tour` and
+  `record-call-walkthrough` pass as tests on dev, 12 Oct.
+- **Website** (`localhost:3001/real-estate-crm`): no overflow at desk or phone
+  width, no page errors; the walkthrough clicks through to "Start again"; the
+  live snippets render with the dev API blocked (images embedded).
 
 ---
 
 ## Do not repeat
 
-- Dev has demo data on `delpat`:
-  - `npm run seed:dev:activity` (rerun 25 Sep): three days of agent work.
-    `-- --clear` removes it and restores what it moved.
-  - `npm run seed:dev:inventory`: 19 flats (`p_demo_`), 22 owners (`own_demo_`),
-    4 agreements, 2 leads. `-- --clear` removes them.
-- The dev activity seed writes call events but not `crm_owners.last_call_at`,
-  so on dev the dashboard's "People called today" reads 0 beside Team today's
-  calls. A real logged call sets both.
-- Left in place on dev because the user converted it: the calling row "zeta
-  probe heights" (`own_1790258291624_0_7945dd`) and the flat made from it.
-- Playwright's WebKit build is not downloaded; phone checks ran in Chromium with
-  the iPhone 13 descriptor.
+- **The motion-graphics engine is not here.** It is `Delpat-Tech/cutroom`
+  (`D:\Work\Delpat\projects\cutroom`, DESIGN.md + HANDOFF.md). This repo keeps
+  only `marketing/demo/` (tutorials, snapshot scripts, the demo profile), which
+  cutroom will bake from. Do not add film code to `tutorial-videos` or here.
+- **Demo recordings and snapshots use `demo-showcase` only**, never a client
+  firm; shoot in working hours (Today and Performance count today's activity);
+  take the walkthrough straight after a reset (it saves a call). The end
+  snapshot once captured "Saving…"; the recorder now waits for the save.
+- Dev has demo data on `delpat`: `npm run seed:dev:activity` (three days of
+  agent work; `-- --clear` removes it) and `npm run seed:dev:inventory` (19
+  flats `p_demo_`, 22 owners `own_demo_`, 4 agreements, 2 leads; `-- --clear`).
+  The activity seed does not set `crm_owners.last_call_at`.
+- Left on dev because the user converted it: calling row "zeta probe heights"
+  (`own_1790258291624_0_7945dd`) and the flat made from it.
 - The dev database is shared with the user's own preview testing. Delete only
   your own probe rows, by id.
-- Read-only scripts that import `services/store.ts` must set `CRM_NO_BOOT=1`,
-  or importing the store runs `initSchema()` against whatever database it names.
+- Read-only scripts that import `services/store.ts` must set `CRM_NO_BOOT=1`.
+- Playwright's WebKit build is not downloaded; phone checks run in Chromium
+  with the iPhone 13 descriptor.
+- Caddy overwrites `X-Forwarded-Host` on the API box, so `og:url` was removed
+  from the share card; do not put it back from the request host.
+- Remotion leaves a webpack bundle per render in `%TEMP%`; thirty of them once
+  filled `C:`. The installed tutorial-videos deletes them; check `C:` before
+  rendering anything.
