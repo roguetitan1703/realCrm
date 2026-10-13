@@ -23,6 +23,7 @@
     "test:tutorials": "tutorial-videos test",
     "seed:dev:activity": "tsx backend/src/scripts/seed-dev-activity.ts",
     "seed:dev:inventory": "tsx backend/src/scripts/seed-dev-inventory.ts",
+    "seed:dev:alerts": "tsx backend/src/scripts/seed-alert-cases.ts",
     "keys:check": "tsx backend/src/scripts/integration-keys.ts",
     "link:owners": "tsx backend/src/scripts/link-listing-owners.ts",
     "stages:calling": "tsx backend/src/scripts/calling-stages.ts",
