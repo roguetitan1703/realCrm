@@ -51,6 +51,7 @@ leadsRouter.get('/page', async (req: Request, res: Response) => {
       segment: str(q.segment), intent: str(q.intent),
       // The filter panel's fields, forwarded rather than dropped.
       source: str(q.source), locality: str(q.locality), agent: str(q.agent), flag: str(q.flag),
+      alert: str(q.alert),
       sortKey: str(q.sortKey), sortDir: str(q.sortDir),
     });
     return res.status(200).json({
@@ -78,6 +79,7 @@ leadsRouter.get('/summary', async (req: Request, res: Response) => {
       q: str(q.q), stage: str(q.stage), agentId: str(q.agentId),
       segment: str(q.segment), intent: str(q.intent),
       source: str(q.source), locality: str(q.locality), agent: str(q.agent), flag: str(q.flag),
+      alert: str(q.alert),
     });
     return res.status(200).json({ success: true, summary });
   } catch (err: any) {

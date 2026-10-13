@@ -103,7 +103,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const canFilterByAgent = canAssignLead(state.role)
   const flt = useMemo(() => {
     const o = {}
-    for (const k of ['source', 'locality', 'agent', 'flag']) {
+    for (const k of ['source', 'locality', 'agent', 'flag', 'alert']) {
       if (k === 'agent' && !canFilterByAgent) continue
       if (f[k]?.length) o[k] = f[k]
     }
@@ -133,7 +133,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   }
 
   const setFltP = (v) => patchFilters({
-    source: v?.source, locality: v?.locality, agent: v?.agent, flag: v?.flag,
+    source: v?.source, locality: v?.locality, agent: v?.agent, flag: v?.flag, alert: v?.alert,
   })
   const setQP = (v) => { setQ(v); setPage(1); setSelected(new Set()) }
   const setSortKeyP = (v) => patchFilters({ sortKey: v })
@@ -169,7 +169,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
       // they used to stop here, so Source / Locality / Sales Executive / Needs
       // attention changed the chip and nothing else.
       source: params.source, locality: params.locality,
-      agent: params.agent, flag: params.flag,
+      agent: params.agent, flag: params.flag, alert: params.alert,
       // Ordering is done in SQL, so the sort headers have to reach SQL. They
       // did not: clicking one flipped the arrow and re-fetched the same order.
       sortKey: params.sortKey, sortDir: params.sortDir,
@@ -194,7 +194,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     segment: seg === 'all' ? undefined : seg,
     intent: intent === 'all' ? undefined : intent,
     stage: stage === 'all' ? undefined : stage,
-    source: flt.source, locality: flt.locality, agent: flt.agent, flag: flt.flag,
+    source: flt.source, locality: flt.locality, agent: flt.agent, flag: flt.flag, alert: flt.alert,
   }), [q, seg, intent, stage, flt])
 
   const onOpen = (l) => go('leads', { leadId: l.id, leadOpen: true })

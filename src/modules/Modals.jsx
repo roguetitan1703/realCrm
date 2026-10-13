@@ -2184,8 +2184,10 @@ export function NotifModal({ store, go }) {
     const p = new URLSearchParams(String(n.link || '').replace(/^[^?]*\?/, ''))
     const leadId = p.get('lead')
     const agent = p.getAll('agent')
+    const alert = p.get('alert')
     close()
     if (leadId) go('leads', { leadId, leadOpen: true })
+    else if (alert) go('leads', { leadFilters: { alert: [alert] }, leadOpen: false, leadId: undefined })
     else if (agent.length) go('leads', { leadFilters: { agent }, leadOpen: false, leadId: undefined })
     else go('leads')
   }

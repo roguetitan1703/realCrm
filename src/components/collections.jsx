@@ -801,7 +801,7 @@ export function FilterBar({ fields = [], value = {}, onChange, search, left, rig
 
   const active = fields.filter(f => (value[f.key] || []).length)
   const set = (key, vals) => onChange({ ...value, [key]: vals })
-  const labelFor = (f, v) => (f.options.find(o => o.value === v)?.label) ?? v
+  const labelFor = (f, v) => f.valueLabel ? f.valueLabel(v) : ((f.options.find(o => o.value === v)?.label) ?? v)
   const toggleVal = (f, v) => {
     const cur = value[f.key] || [], has = cur.includes(v)
     const next = f.multi === false ? (has ? [] : [v]) : (has ? cur.filter(x => x !== v) : [...cur, v])
@@ -864,7 +864,7 @@ export function FilterBar({ fields = [], value = {}, onChange, search, left, rig
             <div className="popover">
               {/* Grouped when the module says so. A flat list of eleven filters
                   is a list you read; four short groups is a list you scan. */}
-              {groupFields(fields).map(([groupName, items]) => (
+              {groupFields(fields.filter(f => f.addable !== false)).map(([groupName, items]) => (
                 <div key={groupName || '_'}>
                   <div className="p-head">{groupName || 'Filter by'}</div>
                   {items.map(f => (

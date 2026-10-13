@@ -2845,6 +2845,8 @@ async function arrivalStageOf(tenantId: string): Promise<string> {
 
 /** Everything the leads list can be narrowed by, from the query string. */
 export interface LeadFilterOpts {
+  /** A notification id: the records that alert named (a batch hand-over). */
+  alert?: string;
   q?: string; stage?: string; agentId?: string;
   segment?: string; intent?: string;
   source?: string; locality?: string; agent?: string; flag?: string;
@@ -2886,6 +2888,12 @@ function leadFilterParts(t: string, opts: LeadFilterOpts, SEGMENTS: Record<strin
       OR lower(coalesce(email, '')) LIKE ${like} OR lower(coalesce(locality, '')) LIKE ${like})`);
   }
   if (opts.agentId) base.push(sql`agent_id = ${opts.agentId}`);
+  // THE RECORDS ONE ALERT NAMED ("3 leads assigned to you"), and only for the
+  // person it was sent to: an alert id is not a way into anyone else's list.
+  if (opts.alert) {
+    base.push(sql`id IN (SELECT unnest(record_ids) FROM notifications
+                          WHERE id = ${opts.alert} AND tenant_id = ${t} AND user_id = ${getContext()?.userId ?? ''})`);
+  }
 
   const many = (v?: string) => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
   // OR binds LOOSER than AND, so any group of alternatives has to carry its own
@@ -3276,17 +3284,42 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
     summary: agentId ? `${n} lead${n === 1 ? '' : 's'} assigned to ${name}` : `${n} lead${n === 1 ? '' : 's'} unassigned`,
     metadata: { ids: clean, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
   });
-  if (agentId) {
-    notify({
-      userId: agentId, type: 'lead_assigned_bulk',
-      data: { n },
-      record: { kind: 'lead', ids: clean },
-      // The recipient's own rows, not the whole desk's -- the alert says N
-      // leads are yours and the list it opened held everyone's.
-      link: `?screen=leads&agent=${encodeURIComponent(agentId)}`,
-    }).catch(err => console.warn('[Notify] bulk assign failed:', err?.message));
-  }
+  if (agentId) await notifyHandedOver('lead', agentId, before as any[]);
   return n;
+}
+
+/**
+ * THE ALERT FOR WORK HANDED TO SOMEBODY BY HAND — bulk assign, reassign, the
+ * Assign menu. One record is that record, by name: "Lead moved to you · Rahul".
+ * It was always "1 lead assigned to you", nameless, because every hand-over
+ * went through the batch path — a reassigned lead could not be told from a new
+ * one, nor from anyone else. Several are one alert, naming the records, which
+ * opens exactly those (`?alert=` on the list) rather than the whole book.
+ * `moved` rows are the ones that actually changed hands, with who held them.
+ */
+async function notifyHandedOver(kind: 'lead' | 'owner', agentId: string, moved: { id: string; agent_id: string | null }[]): Promise<void> {
+  if (!moved.length) return;
+  const t = tid();
+  const ids = moved.map(m => m.id);
+  if (moved.length === 1) {
+    const m = moved[0];
+    const table = kind === 'lead' ? sql`crm_leads` : sql`crm_owners`;
+    const [row] = await sql`SELECT name, phone, locality, source FROM ${table} WHERE id = ${m.id} AND tenant_id = ${t}`;
+    const name = row?.name || row?.phone || undefined;
+    const type = kind === 'lead' ? (m.agent_id ? 'lead_reassigned' : 'lead_assigned') : (m.agent_id ? 'owner_reassigned' : 'owner_assigned');
+    await notify({
+      userId: agentId, type,
+      data: kind === 'lead' && !m.agent_id ? { name, locality: row?.locality, source: row?.source } : { name },
+      link: kind === 'lead' ? `?screen=leads&lead=${m.id}` : `?screen=calling&owner=${m.id}`,
+    }).catch(err => console.warn('[Notify] hand-over failed:', err?.message));
+    return;
+  }
+  await notify({
+    userId: agentId, type: kind === 'lead' ? 'lead_assigned_bulk' : 'owner_reassigned',
+    data: { n: moved.length },
+    record: { kind, ids },
+    link: kind === 'lead' ? `?screen=leads&agent=${encodeURIComponent(agentId)}` : '?screen=calling',
+  }).catch(err => console.warn('[Notify] hand-over failed:', err?.message));
 }
 
 // ============================================================================
@@ -4287,16 +4320,7 @@ export async function bulkAssignOwners(ids: string[], agentId: string | null, ct
     summary: agentId ? `${n} owner${n === 1 ? '' : 's'} assigned` : `${n} owner${n === 1 ? '' : 's'} unassigned`,
     metadata: { ids: clean, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
   });
-  if (agentId) {
-    notify({
-      userId: agentId, type: 'owner_reassigned', push: true,
-      data: { n },
-      record: { kind: 'owner', ids: clean },
-      // Calling, not Contacts: Contacts is the people whose property we manage,
-      // and a calling record handed over is work in the queue.
-      link: '?screen=calling',
-    }).catch(err => console.warn('[Notify] owner bulk assign failed:', err?.message));
-  }
+  if (agentId) await notifyHandedOver('owner', agentId, before as any[]);
   return n;
 }
 
@@ -5833,6 +5857,19 @@ interface AssignBatchCopy { type: string; noun: string; verb: string; body: stri
 async function notifyAssignBatch(tenantId: string, tally: Map<string, string[]>, c: AssignBatchCopy): Promise<void> {
   for (const [agentId, ids] of tally) {
     const count = ids.length;
+    // One record is that record, by name — see notifyHandedOver.
+    if (count === 1) {
+      const isLead = c.noun !== 'owner';
+      const [row] = isLead
+        ? await sql`SELECT name, phone FROM crm_leads WHERE id = ${ids[0]} AND tenant_id = ${tenantId}`
+        : await sql`SELECT name, phone FROM crm_owners WHERE id = ${ids[0]} AND tenant_id = ${tenantId}`;
+      notify({
+        userId: agentId, tenantId, type: c.type, data: { name: row?.name || row?.phone || undefined },
+        link: isLead ? `?screen=leads&lead=${ids[0]}` : `?screen=calling&owner=${ids[0]}`,
+        toSelf: true,
+      }).catch(err => console.warn(`[Notify] ${c.type} failed:`, err?.message));
+      continue;
+    }
     notify({
       // tenantId passed EXPLICITLY rather than left to notify()'s fallback.
       // runRoutingSweeps does wrap each tenant in runWithContext, so the

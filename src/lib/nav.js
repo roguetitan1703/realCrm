@@ -56,7 +56,7 @@ export const RECORD_KEYS = [
 // object now, and it lives in the query string, which is the only place that
 // survives all four.
 const FILTER_SCALARS = ['seg', 'intent', 'stage', 'sortKey', 'sortDir']
-const FILTER_LISTS = ['source', 'locality', 'agent', 'flag']
+const FILTER_LISTS = ['source', 'locality', 'agent', 'flag', 'alert']
 
 // THE SAME BAG, FOR THE OTHER LIST SCREEN. Properties kept its filters in a
 // private useState — the state the paragraph above describes — so filtering the

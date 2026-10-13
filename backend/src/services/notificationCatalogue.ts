@@ -76,7 +76,11 @@ export interface NotifKind {
 }
 
 /**
- * WHEN IT BUZZES (docs/specs/notifications.md §4).
+ * WHEN IT BUZZES (docs/specs/notifications.md §4). The rule a person can say:
+ * work HANDED to you buzzes now (assigned, moved, booked for you, came back);
+ * reminders come at their time; the rest waits for the morning summary. Tried
+ * on dev 13 Oct: a lead assigned by hand was held for 9 am, and the person
+ * assigning it expected the phone to ring.
  *   now      — immediately, high priority: someone has to act now.
  *   at_time  — fired by the sweep when the thing comes due.
  *   morning  — held, and sent as one summary at the end of the night window.
@@ -101,19 +105,19 @@ export const NOTIFICATIONS: NotifKind[] = [
   K({ key: 'lead_assigned_bulk', label: 'Several leads were assigned to you', audience: 'assignee',
       // All 27 measured carried the link `?screen=leads` — an alert about
       // specific records that opens the unfiltered list.
-      trigger: 'a bulk assign covering more than one record', urgency: 'morning', closesWhen: 'lead_worked', gate: null }),
+      trigger: 'a bulk assign covering more than one record', urgency: 'now', closesWhen: 'lead_worked', gate: null }),
   K({ key: 'lead_unrouted', label: 'A lead arrived with nobody to take it', audience: 'desk',
       trigger: 'a lead is created and the rota is empty or auto-assign is off', urgency: 'now', closesWhen: 'lead_routed', gate: null }),
   K({ key: 'lead_repeat', label: 'Someone enquired again', audience: 'assignee',
-      trigger: 'a second enquiry lands on an existing lead, outside the 6-hour session window', urgency: 'morning', closesWhen: 'lead_worked', gate: null }),
+      trigger: 'a second enquiry lands on an existing lead, outside the 6-hour session window', urgency: 'now', closesWhen: 'lead_worked', gate: null }),
 
   // ---- It changed hands ----------------------------------------------------
   K({ key: 'lead_reassigned', label: 'A lead moved to you', audience: 'assignee',
       trigger: 'agent_id changes on a lead that already had one', urgency: 'now', closesWhen: 'lead_worked', gate: 'reassign_idle_days' }),
   K({ key: 'owner_assigned', label: 'An owner was assigned to you', audience: 'assignee',
-      trigger: 'agent_id set on a calling-queue row', urgency: 'morning', closesWhen: 'owner_worked', gate: null }),
+      trigger: 'agent_id set on a calling-queue row', urgency: 'now', closesWhen: 'owner_worked', gate: null }),
   K({ key: 'owner_reassigned', label: 'An owner moved to you', audience: 'assignee',
-      trigger: 'agent_id changes on a calling-queue row', urgency: 'morning', closesWhen: 'owner_worked', gate: 'owner_reassign_idle_days' }),
+      trigger: 'agent_id changes on a calling-queue row', urgency: 'now', closesWhen: 'owner_worked', gate: 'owner_reassign_idle_days' }),
   K({ key: 'lead_reassign_loop', label: 'A lead keeps being reassigned', audience: 'desk',
       trigger: 'hand-off count past the number set in Routing', urgency: 'morning', closesWhen: 'opened', gate: 'reassign_alert_count' }),
   K({ key: 'owner_reassign_loop', label: 'An owner keeps being reassigned', audience: 'desk',
@@ -131,7 +135,7 @@ export const NOTIFICATIONS: NotifKind[] = [
   K({ key: 'site_visit_reminder', label: 'A site visit is coming up', audience: 'assignee',
       trigger: 'a booked site visit approaches', urgency: 'at_time', closesWhen: 'booking', gate: null }),
   K({ key: 'calendar_task_assigned', label: 'A task was assigned to you', audience: 'assignee',
-      trigger: 'a calendar task is created against a user', urgency: 'morning', closesWhen: 'booking', gate: null }),
+      trigger: 'a calendar task is created against a user', urgency: 'now', closesWhen: 'booking', gate: null }),
   // A rent runs out. The one alert about inventory: a tenancy ends whether or
   // not anyone opens the record, and a renewal is the business to be had.
   K({ key: 'agreement_ending', label: 'A rent agreement ends in 30 days', audience: 'assignee',

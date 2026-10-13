@@ -216,6 +216,9 @@ export const LEADS_DEF = {
   filterFields: (store, facets) => [
     { key: 'source', label: 'Source', icon: 'trend', options: facets?.bySource || [] },
     { key: 'locality', label: 'Locality', icon: 'building', options: facets?.byLocality || [] },
+    // Only ever arrives from an alert ("3 leads assigned to you"): a chip to
+    // see and clear, never a choice in the Filter menu.
+    { key: 'alert', label: 'From alert', icon: 'bell', options: [], addable: false, valueLabel: () => 'these leads' },
   ],
 
   // Per-key filter logic (mirrors the module's normalized predicates).

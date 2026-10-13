@@ -91,6 +91,9 @@ export async function notify(n: NotifyInput): Promise<void> {
   if (!title) return;
   const id = `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const record = n.record ?? recordFromLink(n.link);
+  // A batch opens exactly its records: `alert=` on the list resolves to this
+  // row's record_ids (store.ts leadFilterParts), not the agent's whole book.
+  const link = record && record.kind === 'lead' && record.ids.length > 1 ? `?screen=leads&alert=${id}` : (n.link ?? null);
   // `push: false` from a call site still demotes; it can never promote.
   const urgency: Urgency = n.push === false ? 'drawer' : urgencyFor(n.type);
   // ONE CLOCK. The work that closes an alert is stamped by this process
@@ -102,7 +105,7 @@ export async function notify(n: NotifyInput): Promise<void> {
   await sql`
     INSERT INTO notifications (id, tenant_id, user_id, type, title, body, link,
                                record_kind, record_ids, subject_at, urgency, send_after, created_at)
-    VALUES (${id}, ${t}, ${n.userId}, ${n.type}, ${title}, ${body}, ${n.link ?? null},
+    VALUES (${id}, ${t}, ${n.userId}, ${n.type}, ${title}, ${body}, ${link},
             ${record?.kind ?? null}, ${record?.ids?.length ? record.ids : null}, ${n.subjectAt ?? null},
             ${urgency}, ${sendAfter}, ${now})
   `;
@@ -110,7 +113,7 @@ export async function notify(n: NotifyInput): Promise<void> {
   // Anything else waits for dispatchDue(), which the sweep runs every minute.
   if (sendAfter && sendAfter.getTime() <= Date.now()) {
     await sql`UPDATE notifications SET pushed_at = NOW() WHERE id = ${id}`;
-    sendPushToUser(t, n.userId, payloadFor(t, { title, body, link: n.link ?? null }), {
+    sendPushToUser(t, n.userId, payloadFor(t, { title, body, link }), {
       notificationId: id, type: n.type, urgent: urgency === 'now' || urgency === 'at_time',
     }).catch(() => {});
   }
