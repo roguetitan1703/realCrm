@@ -366,3 +366,14 @@ discovers.
 
 517 archived leads from the reverted August imports, two of them `Deal Closed`.
 Do not drop without asking the user.
+
+---
+
+## Later: listing pages — sending flats, the buyer's page, the catalogue (parked 13 Oct)
+
+Parked mid-ideation by the user to ship the notifications release. Everything —
+the decisions, six share entry points measured, the one-page-per-buyer model
+and its open questions — is in `docs/specs/listing-pages.md` §0. Two facts that
+make it worth coming back to: bhumi sends listings to leads ~2 a day (59 to 29
+leads in 30 days) with nothing recording which; and both paying firms get every
+lead from portals they pay for.

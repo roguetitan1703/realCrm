@@ -32,13 +32,12 @@ them soon. Order: API first, then frontend.
 
 ## Waiting on the user
 
-- **Deploy the API, then the frontend.** The API deploy runs the alert first run
-  on production (`2026_10_12_alert_lifecycle_first_run`): it **writes status
-  columns on bhumi's and mahalaxmi's `notifications`** — previewed read-only on
-  12 Oct, bhumi 2,177 of 2,202 open alerts close, mahalaxmi 717 of 751. Re-run
-  `npx tsx backend/src/scripts/alert-first-run-preview.ts --tenant=bhumi,mahalaxmi`
-  just before deploying if days have passed. Then the checks under "To verify"
-  in BACKLOG.
+- **Release `docs/releases/2026-10-13.md`:** the user checks on development,
+  then `development` → `main` (fast-forward), API first, then frontend. The
+  API's first run writes status columns on bhumi's and mahalaxmi's
+  `notifications` — previewed read-only 13 Oct: bhumi 2,227 of 2,246 close,
+  mahalaxmi 757 of 786. Then the checks under "To verify" in BACKLOG.
+- **Listing pages are parked** (`specs/listing-pages.md` §0, PARKED.md).
 - Decided 12 Oct: onboarding keeps `vijay@123`; the audit ledger stays hidden
   from firm owners; default passwords on delpat/skyline are ignored (people
   changed their own).

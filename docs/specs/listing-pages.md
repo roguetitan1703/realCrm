@@ -1,7 +1,51 @@
 # Listing pages — sending flats, and the firm's catalogue
 
-**Status:** 🧭 ideation, 12 Oct — nothing built. Replaces `gallery-enquiry.md`
+**Status:** 🅿️ **parked 13 Oct**, mid-ideation — nothing built. The latest model is
+§0; sections below it are the steps that led there and are partly superseded. Replaces `gallery-enquiry.md`
 (8 Oct), whose reasoning is folded in below.
+
+## 0. Where the thinking got to (12 Oct, last) — read this first
+
+The per-send link (§3–5b) was wrong at the root: ten sends gave one buyer ten
+links, and nobody knew which was current. Each fix to it (reuse, expiry,
+switches) patched that. The user's test case broke it: *I sent a buyer 10 flats,
+then the lead flips — what can I do, and where do I see it?*
+
+**One page per buyer.** Each lead has ONE page, "Rahul's homes", and one link.
+The flats attached to the lead (the shortlist that already exists) **are** that
+page: what is on the lead is exactly what the buyer sees.
+
+```
+Rahul's homes                                   [ Send on WhatsApp ]
+Link sent 12 Oct · opened yesterday 9:40 pm
+  Pride World City · 2 BHK      Interested            [ Book visit ]
+  Lakeview · 2 BHK              Not for me · budget
+  Green Park · 3 BHK            Taken                 [ Remove ]
+  … 6 more                      Not opened yet
+  + Add homes          (the matches list already on the lead)
+```
+
+| Case | What happens |
+|---|---|
+| Send 10 flats | Tick them, Send on WhatsApp: one link, ten rows marked *Not opened yet* |
+| Buyer acts | Rows read Opened / Interested / Not for me (why); alert only on Interested or Book a visit |
+| Requirement flips | Edit the requirement as today; remove what no longer fits, add new; Send again — **same link**, "I've updated your homes" |
+| A flat is let | *Taken* on both sides, greyed; remove or leave it |
+| Buyer goes quiet | Nothing; last opened is shown |
+| Lead closed | Page shows *Talk to us* only; reopening the lead reopens it |
+| Lead reassigned | *Talk to us* goes to the **current holder** (changes the earlier "to the sender" rule — unconfirmed) |
+| Sent to a wrong number | **Stop sharing** on the lead: the link dies; the next send makes a new one |
+| "Send the catalogue" | The page ends with *See all our homes*; enquiries from there still land on this lead |
+
+**Copy** (groups, status) is separate: public flats only, carries the agent,
+governed by the flat's Public switch (§5b).
+
+**Open when this is picked up:** what the user meant by "flips" (taken as:
+requirement changes, goes cold, drops out, reassigned); the reassignment rule;
+price (the owner's call); catalogue order (proposed: by area, newest first);
+firm working hours as a setting (for Book a visit).
+
+---
 
 **Who it is for.**
 - **The agent, on a phone, from a lead:** send this buyer the flats that fit, in

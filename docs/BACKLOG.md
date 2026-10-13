@@ -92,9 +92,6 @@ gaps are in `specs/notifications.md` §1, not here.
 ## Bigger pieces — each has a spec
 
 - **Enquiries** — a person is not an enquiry. `specs/enquiries.md`, planning.
-- **Listing pages** — sending several flats to a lead, the buyer's buttons, and
-  the firm's public catalogue. `specs/listing-pages.md`, ideation; price waits
-  on the owner.
 - **PWA on a real device** — install identity, offline. `specs/pwa.md`.
 - **Branding audit** across login, desk, phone, PWA, email, share.
   `specs/branding.md`.

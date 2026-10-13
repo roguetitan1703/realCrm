@@ -15,7 +15,7 @@ building. Once a spec ships it keeps a short as-built note, not the build log.
 | [branding.md](./branding.md) | E5 + platform identity, themes, URL, landing/login | 🔒 locked (landing parked) |
 | [pwa.md](./pwa.md) | E3/E4 PWA & app-shell audit | 🔒 locked (one big overhaul) |
 | [enquiries.md](./enquiries.md) | F. Enquiries: a person is not an enquiry | 🧭 planning (decisions locked, 4 opens) |
-| [listing-pages.md](./listing-pages.md) | Sending flats to a lead, the buyer's page, the firm's catalogue | 🧭 ideation (decisions in §1) |
+| [listing-pages.md](./listing-pages.md) | Sending flats to a lead, the buyer's page, the firm's catalogue | 🅿️ parked 13 Oct (model in §0) |
 
 > Each spec carries: **Decisions** (locked), **Data model**, **Flows/API**,
 > **Migration/rollback**, and a **Build checklist** (executed later, once locked).
