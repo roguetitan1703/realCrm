@@ -2334,6 +2334,8 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .q-call{flex:none;width:44px;align-self:stretch;display:flex;align-items:center;justify-content:center;
   background:none;border:none;border-left:1px solid var(--line);color:var(--ink-2);cursor:pointer}
 .q-call:active{background:var(--card-2);color:var(--accent)}
+/* The booked job, by name, where the phone icon sits on a call. */
+.q-act{width:auto;min-width:56px;padding:0 12px;font:600 13px/1 inherit;font-family:inherit;color:var(--accent-ink);white-space:nowrap}
 
 /* ---- Me ---- */
 .me-band{display:flex;align-items:center;gap:13px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}

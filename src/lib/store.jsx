@@ -1232,6 +1232,11 @@ export function StoreProvider({ children }) {
     // components/Agreements.jsx) announces itself the same way, so every open
     // screen refetches instead of showing the record as it was.
     touched: settled,
+    // The same, under the name ten callers use. `store.settled?.()` was
+    // called after an assignment, a call's outcome, a bulk move — and the store
+    // never had a `settled`, so the optional call did nothing and each of those
+    // screens stayed as it was until something else refetched.
+    settled,
     cacheRecords: (kind, records, partial) => dispatch({ type: 'CACHE_RECORDS', kind, records, partial }),
 
     assign: (leadId, agentId) => {
@@ -1349,6 +1354,9 @@ export function StoreProvider({ children }) {
       apiClient.logContactAction(id, channel)
         .then(res => {
           if (res?.success && res.timeline_event) dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event })
+          // A logged call closes a booked call server-side (closeFollowUpFor),
+          // so Today's row for it has to go whether or not an outcome follows.
+          if (res?.success) settled()
           resolve(res)
         })
         .catch(err => { console.warn('[Contact log API] error:', err.message); resolve(null) })
@@ -1367,6 +1375,15 @@ export function StoreProvider({ children }) {
     // contain it, and the agent saw their own logged visit only after refreshing
     // the browser. `settled()` bumps the token every list and record screen
     // watches, which re-reads the lead itself.
+    // A booked meeting or demo, finished from Today with how it went. The
+    // server clears the booking and writes its 'Completed' row; `settled()`
+    // re-reads Today, so the row leaves the To do list.
+    completeFollowUp: (leadId, outcome, remark) => apiClient.completeFollowUp(leadId, outcome, remark)
+      .then(res => {
+        if (res?.success) { settled(); toast('Saved'); return res }
+        toast('Could not save', 'warn'); return null
+      })
+      .catch(err => { toast(err.message || 'Could not save. Try again.', 'warn'); return null }),
     logActivity: (leadId, payload) => new Promise((resolve) => {
       apiClient.logActivity(leadId, payload)
         .then(res => {

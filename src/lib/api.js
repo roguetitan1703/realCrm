@@ -867,6 +867,8 @@ export const api = {
   // sendWhatsApp() is gone with the fabricated WABA route it called.
   // B4 — a structured activity on a LEAD (site visit with proof, meeting, …).
   // `propertyId` is a reference to the unit it concerned, never ownership.
+  // A booked meeting, demo or other follow-up, finished with how it went.
+  completeFollowUp: (leadId, outcome, remark) => request(`/records/${leadId}/actions/follow-up/done`, { method: 'POST', body: JSON.stringify({ outcome, remark }) }),
   logActivity: (leadId, payload) => request(`/records/${leadId}/actions/activity`, { method: 'POST', queueable: true, body: JSON.stringify(payload) }),
   // B4 media — asks the server to mint a presigned PUT. The bytes then go
   // browser→R2 directly (see uploadMedia in lib/media.js), never through here.

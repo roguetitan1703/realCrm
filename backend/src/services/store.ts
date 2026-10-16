@@ -22,6 +22,7 @@ import { notify, notifyRoles } from './notifications.js';
 import { firstRunAlertLifecycle } from './alertLifecycle.js';
 import { suggestPassword } from './auth.js';
 import { followUpKind } from './followUp.js';
+import { followUpKindOf } from '../../../src/data/followUpKinds.js';
 import { galleryPath } from './gallery.js';
 import { planRoster, normalizePhone, RosterRow } from './roster.js';
 import { assertLeadWrite, ForbiddenError } from '../lib/permissions.js';
@@ -6852,11 +6853,13 @@ export async function addActivity(input: ActivityInput): Promise<any> {
  * restored at 5s, cleared again at 9s. One write, on the side that owns the
  * row.
  */
-const FOLLOW_UP_CLOSED_BY: Record<string, RegExp> = {
-  site_visit: /site\s*visit/i,
-  visit: /site\s*visit/i,
-  call: /call|callback/i,
-  meeting: /meeting|demo/i,
+// Which logged activity finishes which kind of booking. The kinds themselves
+// are src/data/followUpKinds.js, which Today's row reads for its button.
+const FOLLOW_UP_CLOSED_BY: Record<string, string> = {
+  site_visit: 'visit',
+  visit: 'visit',
+  call: 'call',
+  meeting: 'meeting',
 };
 
 export async function closeFollowUpFor(leadId: string, activityType: string): Promise<void> {
@@ -6866,22 +6869,75 @@ export async function closeFollowUpFor(leadId: string, activityType: string): Pr
     SELECT follow_up FROM crm_leads
     WHERE id = ${leadId} AND tenant_id = ${tid()} AND follow_up IS NOT NULL LIMIT 1`;
   const action = String(rows[0]?.follow_up?.action || '');
-  if (!action || !match.test(action)) return;
+  if (!action || followUpKindOf(action) !== match) return;
+  await endFollowUp(leadId, action);
+}
+
+/**
+ * The booking is over: clear it and say so. The one write every path that
+ * finishes a follow-up ends in, so Performance's `followup_done` (the
+ * 'Completed' row, activityReport.ts) and the `booking` alert close test
+ * (follow_up cleared, alertLifecycle.ts) see every one of them.
+ *
+ * A site visit writes its own proven record — photo, GPS, outcome — and a
+ * second line saying the appointment ended is the duplicate that used to sit
+ * on top of it; Performance counts it as a visit. Everything else gets the
+ * one event.
+ */
+async function endFollowUp(leadId: string, action: string, metadata?: Record<string, any>): Promise<void> {
   await sql`
     UPDATE crm_leads SET follow_up = NULL, updated_at = NOW()
     WHERE id = ${leadId} AND tenant_id = ${tid()}`;
-  // A site visit writes its own proven record — photo, GPS, outcome — and a
-  // second line saying the appointment ended is the duplicate that used to sit
-  // on top of it. Everything else gets the one event.
-  if (!/site\s*visit/i.test(action)) {
+  if (followUpKindOf(action) !== 'visit') {
     await addTimelineEvent({
       record_id: leadId,
       type: 'follow_up',
       title: 'Completed',
       description: followUpKind({ action }),
       author: getContext()?.userId || null,
+      ...(metadata ? { metadata } : {}),
     }).catch(() => {});
   }
+}
+
+/** The row that booked the follow-up standing now: its latest Scheduled or Rescheduled line. */
+async function currentBookingEvent(leadId: string): Promise<string | null> {
+  const rows = await sql`
+    SELECT id FROM crm_timeline_events
+     WHERE record_id = ${leadId} AND tenant_id = ${tid()}
+       AND type = 'follow_up' AND title IN ('Scheduled', 'Rescheduled')
+     ORDER BY timestamp DESC LIMIT 1`;
+  return rows[0]?.id || null;
+}
+
+/**
+ * HOW IT WENT, AND THAT IS WHAT FINISHES IT — a meeting, a demo, or a booking
+ * that names no kind. The outcome and the note land on the booking's own row,
+ * as the history's "Add outcome" puts them (updateTimelineEvent keeps the
+ * booked sentence), then the booking ends through endFollowUp.
+ *
+ * `eventId` is the row the history edited. Recording an outcome on an OLDER
+ * booking — one since replaced — attaches it there and leaves the booking that
+ * stands now alone. Without an id (Today's row) it is the standing booking.
+ *
+ * Returns the edited row and whether the booking ended. A follow-up set before
+ * bookings were written to the history has no row to edit; its outcome goes on
+ * the 'Completed' row instead, so it is not lost.
+ */
+export async function completeFollowUp(
+  leadId: string, outcome: string, remark: string, eventId?: string,
+): Promise<{ event: TimelineEvent | null; ended: boolean }> {
+  const t = tid();
+  const rows = await sql`SELECT follow_up FROM crm_leads WHERE id = ${leadId} AND tenant_id = ${t} LIMIT 1`;
+  const fu = rows[0]?.follow_up || null;
+  const standing = fu ? await currentBookingEvent(leadId) : null;
+  const target = eventId || standing;
+  const event = target ? await updateTimelineEvent(target, t, remark, outcome) : null;
+  const ends = !!fu && (!eventId || eventId === standing || !standing);
+  if (!ends) return { event, ended: false };
+  await endFollowUp(leadId, String(fu.action || 'Follow-up'),
+    event ? undefined : { outcome, ...(remark ? { remark } : {}) });
+  return { event, ended: true };
 }
 
 async function closeSiteVisitAppointment(leadId: string): Promise<void> {

@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import Icon from '../components/Icon.jsx'
-import { Button, Field, Input, PhoneInput, Textarea, Segmented, Avatar, Source, StageTag, Money, SuggestInput } from '../components/primitives.jsx'
+import { Button, Field, Input, PhoneInput, Textarea, Segmented, Avatar, Source, StageTag, Money, SuggestInput, OutcomeForm } from '../components/primitives.jsx'
 import { theme } from '../data/theme.js'
 // parseBudgetNum was USED in three places here and imported in none of them —
 // every money field's onBlur and the lead form's save were one ReferenceError
 // waiting for someone to type a budget. Plain JSX, so the build never said a
 // word about it.
-import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho, personLabel, unitLabel } from '../lib/format.js'
+import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho, personLabel, unitLabel, followUpAction, followUpLabel } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, openWhatsAppChat, followUpMessage } from '../lib/matching.js'
 import WaSend from '../components/WaSend.jsx'
 import { api } from '../lib/api.js'
@@ -21,6 +21,7 @@ import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities, projectNames } from '../lib/suggest.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
+import { FOLLOW_UP_ACTIONS, followUpKindOf } from '../data/followUpKinds.js'
 import { ActivityRecords } from '../components/ActivityDay.jsx'
 import { CloseDealModal, AgreementModal } from '../components/Agreements.jsx'
 import { copyText } from '../lib/clipboard.js'
@@ -99,6 +100,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'propStatus' && <StatusModal store={store} propId={m.propId} />}
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
+      {m?.kind === 'followUpDone' && <FollowUpDoneModal store={store} leadId={m.leadId} />}
       {m?.kind === 'rejectLead' && <RejectLeadModal store={store} leadId={m.leadId} />}
       {m?.kind === 'activityRecords' && <ActivityRecords store={store} go={go} Modal={Modal} side={m.side} date={m.date} from={m.from}
         person={m.person} measure={m.measure} detail={m.detail} title={m.title} />}
@@ -1737,6 +1739,32 @@ function RemarkModal({ store, recordType, recordId }) {
   )
 }
 
+// A booked meeting, demo or other follow-up: how it went, and saving that is
+// what finishes it (completeFollowUp, server-side — the same write the
+// history's "Add outcome" makes). The form is the history's own (OutcomeForm).
+// A site visit never comes here: it is logged with proof (VisitProofModal).
+function FollowUpDoneModal({ store, leadId }) {
+  const l = store.lookup('lead', leadId)
+  const [outcome, setOutcome] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!l?.followUp) return null
+  const save = async () => {
+    if (!outcome) { store.toast('Pick how it went', 'warn'); return }
+    setBusy(true)
+    const res = await store.completeFollowUp(l.id, outcome, note.trim())
+    setBusy(false)
+    if (res) store.closeModal()
+  }
+  return (
+    <Modal title={`${followUpAction(l.followUp) || 'Follow-up'}: ${personLabel(l)}`} onClose={busy ? () => {} : store.closeModal} width={420}>
+      <OutcomeForm line={followUpLabel(l.followUp)} outcomes={VISIT_OUTCOMES} blank="How did it go?"
+        outcome={outcome} onOutcome={setOutcome} text={note} onText={setNote} placeholder="What happened?"
+        autoFocus={false} saving={busy} footClass="mfm-foot" onCancel={store.closeModal} onSave={save} />
+    </Modal>
+  )
+}
+
 // ============================================================================
 // 📍 VisitProofModal (B4) — a site visit you can't log from the sofa
 // ============================================================================
@@ -2354,7 +2382,14 @@ const instantOf = (ymd, timeStr) => {
 
 function ScheduleFollowUpModal({ store, leadId }) {
   const l = store.lookup('lead', leadId)
-  const [action, setAction] = useState('Site Visit')
+  // A reschedule keeps what was booked. This opened on Site Visit every time,
+  // so moving a meeting by an hour quietly turned it into a visit.
+  const [action, setAction] = useState(() => {
+    const cur = followUpAction(l?.followUp).toLowerCase()
+    return FOLLOW_UP_ACTIONS.find(a => a.toLowerCase() === cur)
+      || (cur && FOLLOW_UP_ACTIONS.find(a => followUpKindOf(a) === followUpKindOf(cur)))
+      || 'Site Visit'
+  })
   const chips = dayChips()
   const [day, setDay] = useState(chips[1].ymd)
   const [customDate, setCustomDate] = useState(chips[1].ymd)
@@ -2397,7 +2432,7 @@ function ScheduleFollowUpModal({ store, leadId }) {
         <div className="field">
           <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Activity Type</label>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 5 }}>
-            {['Site Visit', 'Client Meeting', 'Follow-up Call', 'Online Demo'].map(t =>
+            {FOLLOW_UP_ACTIONS.map(t =>
               pill(action === t, () => setAction(t), t)
             )}
           </div>
