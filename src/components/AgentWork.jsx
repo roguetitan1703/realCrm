@@ -12,6 +12,11 @@
 //   • AgentWork mode="self": "My work" on Today, the agent's own day and what
 //     is pending with them. Simpler: no breakdown chart, no team.
 //
+// A RANGE IS NOT A BIGGER DAY (docs/specs/performance.md). Over 7 or 30 days
+// each view leads with the days themselves and the change on the period
+// before, agents are read by how regularly they worked, and what is open NOW
+// folds to one line. The parts are in components/RangeView.jsx.
+//
 // PEOPLE, NOT CALLS, lead. Three calls to one number is one person, and the
 // contact status is per person (services/activityReport.ts `contactOf`):
 // picked up if any call that day was answered, otherwise the last call. So the
@@ -32,6 +37,7 @@ import { Segmented } from './primitives.jsx'
 import Icon from './Icon.jsx'
 import { stageLabel } from '../data/pipelineRoles.js'
 import { tally, fmt, word, fuWord, useSide, RangeControl, periodName, MEASURE_TITLE, DETAIL_TITLE, titleOf } from './ActivityDay.jsx'
+import { daysOf, seriesOf, rateOf, usePrevious, Change, Trend, Totals, CameIn, RangeAgents, Folded, workedDays } from './RangeView.jsx'
 
 /**
  * The days a view shows: `day` the last (null is today), `from` the first
@@ -245,12 +251,42 @@ export function AgentWork({ store, person, title, heading = true, mode = 'self',
   })
   const b = eff === 'calling' ? ownerBook : book
   const pending = pendingRows({ t, side: eff, isToday, open, book: b, onBook })
+  const isRange = !!day?.from
+  const prev = usePrevious({ side: eff, data: day, person, dataAsOf: state.dataAsOf })
+  const dates = isRange ? daysOf(day.from, day.day) : []
+  const byDay = isRange ? seriesOf(me ? [me] : []) : {}
+  const toDay = (d) => setRange({ from: null, day: d === day?.today ? null : d })
+  const prevMe = prev ? tally((prev.people || []).find(p => p.id === person) || (prev.people || [])[0]) : null
 
   return (
     <div className="pv">
       <Head title={heading ? title : null} hasCalling={hasCalling} side={side} onSide={setSide}
         day={day} onRange={setRange} actions={actions} />
-      {!day ? <div className="ad-wait tall" aria-busy="true" /> : (
+      {!day ? <div className="ad-wait tall" aria-busy="true" /> : isRange ? (
+        <>
+          <Section title={self ? 'My performance' : 'Summary'}>
+            <div className="pv-trend">
+              <Trend dates={dates} byDay={byDay} onDay={toDay} />
+              <Totals t={t} prev={prevMe} loading={!prev} n={dates.length} open={open}
+                worked={{ n: workedDays(dates, byDay), of: dates.length }} />
+            </div>
+          </Section>
+          {!self && (
+            <div className="pv-pair">
+              <Section title="How the calls went" right={<Change now={rateOf(t)} before={prevMe ? rateOf(prevMe) : null} points loading={!prev} />}>
+                <ContactStatus t={t} open={open} />
+              </Section>
+              <Section title="What came of it">
+                <Outcomes t={t} open={open} />
+                {eff === 'leads' && <CameIn t={t} open={open} />}
+              </Section>
+            </div>
+          )}
+          {self && eff === 'leads' && t.n('came_in') > 0 && <Section title="New leads"><CameIn t={t} open={open} /></Section>}
+          <Section title={self ? 'My activity' : 'Other activity'}><OtherActivity t={t} side={eff} open={open} /></Section>
+          <Folded title={self ? 'My pending work' : 'Pending work'} n={pending.length}><Pending rows={pending} /></Folded>
+        </>
+      ) : (
         <>
           <Section title={self ? 'My performance' : 'Summary'}>
             <Summary t={t} open={open} self={self} />
@@ -302,6 +338,12 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
     .sort((a, b) => ((a.gone || a.duty === 'OFF_DUTY') - (b.gone || b.duty === 'OFF_DUTY'))
       || String(a.name || '~').localeCompare(String(b.name || '~')))
   const team = teamTally(people)
+  const isRange = !!day?.from
+  const prev = usePrevious({ side: eff, data: day, person: null, dataAsOf: state.dataAsOf })
+  const prevTeam = prev ? teamTally(prev.people || []) : null
+  const dates = isRange ? daysOf(day.from, day.day) : []
+  const byDay = isRange ? seriesOf(people) : {}
+  const toDay = (d) => setRange({ from: null, day: d === day?.today ? null : d })
   const open = (measure, detail, who) => store.openModal({
     kind: 'activityRecords', side: eff, date: day?.day, from: day?.from, person: who?.id || null, measure, detail,
     title: listTitle(who?.name || 'Team', day, measure, detail),
@@ -323,11 +365,50 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
     .map(a => ({ ...a, by: a.by.filter(x => x.n > 0), total: a.by.reduce((s, x) => s + x.n, 0) }))
     .filter(a => a.total > 0)
 
+  const attnList = !attn.length ? <div className="pv-clear"><Icon name="check" size={15} />Nothing unresolved.</div> : (
+    <div className="pv-pend">
+      {attn.map(a => (
+        <div key={a.key} className={'pv-attn-r' + (a.tone ? ` ${a.tone}` : '')}>
+          <span className="pv-attn-l"><b>{fmt(a.total)}</b><span>{a.label}</span></span>
+          <span className="pv-attn-who">
+            {a.by.map(x => (
+              <button type="button" key={x.p.id} className="pv-who" onClick={() => a.go(x.p)}>
+                {(x.p.name || 'Left').split(' ')[0]} <b>{fmt(x.n)}</b>
+              </button>
+            ))}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+
   return (
     <div className="pv">
       <Head title={heading ? 'Team' : null} hasCalling={hasCalling} side={side} onSide={setSide}
         day={day} onRange={setRange} />
-      {!day ? <div className="ad-wait tall" aria-busy="true" /> : (
+      {!day ? <div className="ad-wait tall" aria-busy="true" /> : isRange ? (
+        <>
+          <Section title="Team summary">
+            <div className="pv-trend">
+              <Trend dates={dates} byDay={byDay} onDay={toDay} />
+              <Totals t={team} prev={prevTeam} loading={!prev} n={dates.length} open={(m, d) => open(m, d)} />
+            </div>
+          </Section>
+          <Section title="Agents">
+            <RangeAgents people={people} dates={dates} prev={prev} loading={!prev} onOpenPerson={onOpenPerson} />
+          </Section>
+          <div className="pv-pair">
+            <Section title="How the calls went" right={<Change now={rateOf(team)} before={prevTeam ? rateOf(prevTeam) : null} points loading={!prev} />}>
+              <ContactStatus t={team} open={(m, d) => open(m, d)} />
+            </Section>
+            <Section title="What came of it">
+              <Outcomes t={team} open={(m, d) => open(m, d)} />
+              {eff === 'leads' && <CameIn t={team} open={(m, d) => open(m, d)} />}
+            </Section>
+          </div>
+          <Folded title="Needs attention" n={attn.length}>{attnList}</Folded>
+        </>
+      ) : (
         <>
           <Section title="Team summary"><Summary t={team} open={(m, d) => open(m, d)} /></Section>
           <div className="pv-pair">
@@ -366,22 +447,7 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
           </Section>
 
           <Section title="Needs attention" right={count(attn.length)}>
-            {!attn.length ? <div className="pv-clear"><Icon name="check" size={15} />Nothing unresolved.</div> : (
-              <div className="pv-pend">
-                {attn.map(a => (
-                  <div key={a.key} className={'pv-attn-r' + (a.tone ? ` ${a.tone}` : '')}>
-                    <span className="pv-attn-l"><b>{fmt(a.total)}</b><span>{a.label}</span></span>
-                    <span className="pv-attn-who">
-                      {a.by.map(x => (
-                        <button type="button" key={x.p.id} className="pv-who" onClick={() => a.go(x.p)}>
-                          {(x.p.name || 'Left').split(' ')[0]} <b>{fmt(x.n)}</b>
-                        </button>
-                      ))}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+            {attnList}
           </Section>
         </>
       )}

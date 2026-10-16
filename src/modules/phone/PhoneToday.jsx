@@ -383,7 +383,7 @@ export default function Today({ store, go, topBar, sel = {}, phone = true }) {
     const who = (state.agents || []).find(a => a.id === sel.person)
     return (
       <>
-        {topBar({ title: who?.name || 'Teammate', eyebrow: 'Team', onBack: () => go('today', { todayView: 'team', person: undefined, day: sel.day || undefined }) })}
+        {topBar({ title: who?.name || 'Teammate', eyebrow: 'Team', onBack: () => go('today', { todayView: 'team', person: undefined, day: sel.day || undefined, from: sel.from || undefined }) })}
         <div className="q-wrap">
           {settling ? <div className="ad-wait tall" aria-busy="true" /> : (
             <AgentWork store={store} person={sel.person} title={who?.name || 'Teammate'} heading={false} mode="drill" hasCalling={hasCalling}
@@ -440,7 +440,7 @@ export default function Today({ store, go, topBar, sel = {}, phone = true }) {
         <div className="q-wrap">
           {settling ? wait : <TeamBoard store={store} hasCalling={hasCalling} heading={false}
             books={desk?.perAgent || {}} onBook={(id, seg) => go('leads', { leadFilters: { agent: [id], seg } })}
-            onOpenPerson={(c) => go('today', { todayView: 'team', person: c.id, day: sel.day || undefined })}
+            onOpenPerson={(c) => go('today', { todayView: 'team', person: c.id, day: sel.day || undefined, from: sel.from || undefined })}
             date={sel.day} from={sel.from} onRange={(r) => go('today', { todayView: 'team', day: r.day || undefined, from: r.from || undefined })} />}
         </div>
       )}

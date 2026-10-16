@@ -4,7 +4,8 @@
  *
  *   GET /activity?side=leads|calling&date=YYYY-MM-DD[&from=YYYY-MM-DD][&person=id]
  *       `date` is the last day, `from` the first (a week, a month); one day without it
- *       one row per person, every count; an agent only ever gets their own
+ *       one row per person, every count; an agent only ever gets their own.
+ *       With `from`, each person also has `days`: people, calls, picked up per firm day
  *   GET /activity/records?side=&date=&person=&measure=&detail=
  *       the people behind one of those numbers, from the same query
  */

@@ -102,7 +102,21 @@ against anyone else.
 
 ## 6. As built
 
-_Filled in when built._
+- **The series rides on the report.** `GET /activity` with `from` adds `days`
+  to each person: `{ day, people, calls, answered }` per firm day, grouped from
+  the same `facts()` in the same request (`contactByDay` is `contactOf`'s rule
+  per day). One request, so the bars and the totals cannot come from two
+  different reads. A day has no `days`. Checked on dev `delpat`, 30 days: all 7
+  days with calls equal their own one-day report (leads), and 3 of 3 (calling).
+- **The previous period** is the same call, `from − n` to `from − 1`
+  (`usePrevious`). A rate's change is in points; a count's in percent.
+- **Two bands, not two axes.** The picked-up line sits in its own band above
+  the bars on its own 0–100% scale; the day axis is shared. A day with nobody
+  contacted has no rate, and the line breaks there.
+- The parts are `components/RangeView.jsx`: Trend, Totals, RangeAgents, Spark,
+  CameIn, Folded. AgentWork and TeamBoard switch to them when `from` is set.
+  Pending work on an agent's page folds like Needs attention.
+- The phone's Team tab now keeps `from` when it opens an agent and on Back.
 
 ## Later
 

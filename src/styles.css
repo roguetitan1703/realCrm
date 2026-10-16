@@ -3276,6 +3276,65 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .app-mobile .pv-donut{flex-direction:column;align-items:stretch}
 .app-mobile .pv-donut-svg{align-self:center}
 
+/* A range on Performance and My work (components/RangeView.jsx) */
+.pv-trend{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:22px;align-items:start}
+.pv-tr{display:flex;flex-direction:column;gap:6px;min-width:0}
+.pv-tr-key{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--ink-2)}
+.pv-tr-key span{display:inline-flex;align-items:center;gap:6px}
+.pv-tr-key .sw-bar{width:10px;height:10px;border-radius:3px;background:var(--accent)}
+.pv-tr-key .sw-line{width:14px;height:2px;border-radius:1px;background:var(--ink)}
+.pv-tr-plot{position:relative;width:100%;min-width:0}
+.pv-tr-plot svg{display:block}
+.pv-tr-grid{stroke:var(--line-2);stroke-width:1}
+.pv-tr-base{stroke:var(--line);stroke-width:1}
+.pv-tr-ax{font-size:10.5px;fill:var(--muted);font-variant-numeric:tabular-nums}
+.pv-tr-bar{fill:var(--accent)}
+.pv-tr-line{fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.pv-tr-dot{fill:var(--ink);stroke:var(--card);stroke-width:2}
+.pv-tr-hl{fill:var(--line-2);opacity:.7}
+.pv-tr-day{fill:transparent;cursor:pointer;outline:none}
+.pv-tr-day:focus-visible{stroke:var(--accent);stroke-width:2}
+.pv-tip{position:absolute;top:-4px;transform:translate(-50%,-100%);display:flex;flex-direction:column;gap:1px;padding:7px 10px;border-radius:8px;background:var(--chrome);color:var(--on-chrome);font-size:12px;white-space:nowrap;pointer-events:none;box-shadow:var(--shadow-pop);z-index:2}
+.pv-tip b{font-weight:600}
+.pv-tip span{color:var(--on-chrome-mut);font-variant-numeric:tabular-nums}
+.pv-tot{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;align-content:start}
+.pv-tot-i{display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:none;background:none;padding:0;font:inherit;text-align:left;cursor:pointer;color:var(--ink-2)}
+.pv-tot-i b{font-family:var(--disp);font-size:24px;font-weight:600;line-height:1.1;color:var(--ink)}
+.pv-tot-i > span{font-size:12.5px}
+.pv-tot-i em{font-style:normal;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pv-tot-i:not(.static):hover > span{color:var(--accent-ink,var(--accent))}
+.pv-tot-i.static{cursor:default}
+.pv-tot-vs{grid-column:1/-1;font-size:11px;color:var(--faint)}
+.pv-chg{font-size:12px;font-weight:600;color:var(--ink-2);font-variant-numeric:tabular-nums;min-height:1em}
+.pv-chg.none{color:var(--faint);font-weight:500}
+.pv-chg.up,.pv-chg.down{color:var(--ink)}
+.pv-sec-t .pv-chg{letter-spacing:0;text-transform:none}
+.pv-came{display:flex;align-items:center;gap:8px;padding-top:10px;border-top:1px solid var(--line-2);font-size:13px;color:var(--faint)}
+.pv-came button{border:none;background:none;padding:0;font:inherit;color:var(--ink-2);cursor:pointer}
+.pv-came button b{color:var(--ink);font-variant-numeric:tabular-nums}
+.pv-came button:hover{color:var(--accent-ink,var(--accent))}
+.pv-ag.pv-rg{grid-template-columns:minmax(130px,1.3fr) 96px 90px 90px 80px 70px 18px}
+.pv-rg-spark{display:flex;align-items:center}
+.pv-spark{display:block}
+.pv-spark-base{stroke:var(--line-2);stroke-width:1}
+.pv-spark-line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.pv-spark-dot{fill:var(--accent)}
+.pv-fold{gap:0}
+.pv-fold.open{gap:12px}
+.pv-fold-t{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;padding:0;font:inherit;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);cursor:pointer;text-align:left}
+.pv-fold-t .pv-go{margin-left:auto}
+.pv-fold-t:hover{color:var(--ink)}
+@media (max-width:900px){
+  .pv-trend{grid-template-columns:1fr}
+  .pv-ag.pv-rg{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px}
+  .pv-ag.pv-rg.pv-ag-head{display:none}
+  .pv-rg .pv-ag-name{flex:1 1 calc(100% - 150px);min-width:0}
+  .pv-rg .pv-rg-spark{flex:none}
+  .pv-rg .pv-go{order:1;flex:none}
+  .pv-rg .pv-ag-n{order:2;font-size:12.5px}
+}
+.app-mobile .pv-trend{grid-template-columns:1fr}
+
 /* Today: tabs on a phone, two columns at a desk */
 .today-tabs{padding:10px 12px 0}
 .today-tabs .seg button{padding:8px 6px}

@@ -141,6 +141,14 @@ const contactOf = (f: any) => sql`
   SELECT DISTINCT ON (person, record_id) person, record_id, at, 'contact' AS measure, detail
     FROM (${f}) c WHERE measure IN ('call', 'whatsapp')
    ORDER BY person, record_id, ${CONTACT_RANK}, at DESC`;
+/**
+ * The same rule, once per person per record per FIRM DAY: the range's per-day
+ * series, so a day's bar is exactly what that day's own report says.
+ */
+const contactByDay = (f: any, tz: string) => sql`
+  SELECT DISTINCT ON (person, record_id, day) person, record_id, day, detail
+    FROM (SELECT c.*, (c.at AT TIME ZONE ${tz})::date AS day FROM (${f}) c WHERE measure IN ('call', 'whatsapp')) c
+   ORDER BY person, record_id, day, ${CONTACT_RANK}, at DESC`;
 
 /**
  * Every fact for one side of the desk on one day. The single source of every
@@ -299,7 +307,9 @@ const todayIn = (tz: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz 
 /**
  * The day, for one person or for the whole desk.
  * Returns one row per person: every count by measure and detail, and the
- * number of distinct records behind each.
+ * number of distinct records behind each. Over a range, each person also
+ * carries `days`: [{ day, people, calls, answered }] for the days they
+ * contacted anybody (a day missing from it is a day with nobody contacted).
  */
 export async function activityDay(opts: { side: Side; date?: string | null; from?: string | null; person?: string | null }) {
   const t = getContext()!.tenantId;
@@ -340,9 +350,24 @@ export async function activityDay(opts: { side: Side; date?: string | null; from
            to_char((now() AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') AS today,
            extract(hour FROM now() AT TIME ZONE ${tz})::int AS hour`;
 
-  // Three independent reads, sent together: the report is on the dashboard,
-  // and each one waited for the last to come back before it set out.
-  const [counts, people, [clock]] = await Promise.all([countsQ, peopleQ, clockQ]) as any[];
+  // A RANGE also answers day by day: per person per firm day, the people
+  // contacted (distinct records), the calls, and how many of those people
+  // picked up (contactOf's rule, per day). Same facts, same request, so a bar
+  // is that day's own report and a total is the range's. A day has no series.
+  const seriesQ = from ? sql`
+    WITH f AS (SELECT * FROM (${f}) x WHERE person IS NOT NULL ${person ? sql`AND person = ${person}` : sql``}
+                 AND measure IN ('call', 'whatsapp'))
+    SELECT k.person, to_char(k.day, 'YYYY-MM-DD') AS day, count(*)::int AS people,
+           count(*) FILTER (WHERE k.detail = 'answered')::int AS answered,
+           coalesce(max(c.calls), 0)::int AS calls
+      FROM (${contactByDay(sql`SELECT * FROM f`, tz)}) k
+      LEFT JOIN (SELECT person, (at AT TIME ZONE ${tz})::date AS day, count(*) AS calls
+                   FROM f WHERE measure = 'call' GROUP BY 1, 2) c ON c.person = k.person AND c.day = k.day
+     GROUP BY 1, 2 ORDER BY 2` : null;
+
+  // Independent reads, sent together: the report is on the dashboard, and
+  // each one waited for the last to come back before it set out.
+  const [counts, people, [clock], series] = await Promise.all([countsQ, peopleQ, clockQ, seriesQ || Promise.resolve(null)]) as any[];
 
   const byPerson = new Map<string, any>();
   for (const p of people as any[]) {
@@ -363,6 +388,10 @@ export async function activityDay(opts: { side: Side; date?: string | null; from
       byPerson.set(c.person, { id: c.person, name: k?.name || null, role: k?.role || null, duty: null, gone: true, holding: 0, counts: [] });
     }
     byPerson.get(c.person).counts.push({ measure: c.measure, detail: c.detail, n: c.n, records: c.records });
+  }
+  if (series) {
+    for (const p of byPerson.values()) p.days = [];
+    for (const d of series as any[]) byPerson.get(d.person)?.days.push({ day: d.day, people: d.people, calls: d.calls, answered: d.answered });
   }
   return { side: opts.side, day: clock.day, from: clock.from || null, today: clock.today, hour: clock.hour, timezone: tz, people: [...byPerson.values()] };
 }

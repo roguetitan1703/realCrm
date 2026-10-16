@@ -123,7 +123,7 @@ export function DayPicker({ day, today, onDay, className = '' }) {
 
 const DAYS = { 7: 7, 30: 30 }
 const short = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })
-const spanOf = (from, to) => Math.round((new Date(`${to}T12:00:00Z`) - new Date(`${from}T12:00:00Z`)) / 86400000) + 1
+export const spanOf = (from, to) => Math.round((new Date(`${to}T12:00:00Z`) - new Date(`${from}T12:00:00Z`)) / 86400000) + 1
 
 /** Which switch position a range is. */
 export const rangeMode = (from, to) => !from ? 'day' : DAYS[spanOf(from, to)] ? String(spanOf(from, to)) : 'custom'
