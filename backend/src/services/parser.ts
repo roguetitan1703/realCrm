@@ -205,7 +205,10 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
 // parsed object goes straight into createLead: without it, a mapping could set
 // `id`, `tenant_id` or `stage` from a value a stranger POSTed.
 const WRITABLE = new Set([
-  'name', 'phone', 'email', 'source', 'notes',
+  // Not `notes`: the column is a list and the parsed value is a string, so a
+  // mapping onto it stored a bare string that crashed the assigned agent's
+  // Today. The message belongs in `req.notes`, which is what the mapper offers.
+  'name', 'phone', 'email', 'source',
   'req.deal', 'req.locality', 'req.config', 'req.purpose', 'req.notes',
   'req.category', 'req.subtype',
   'req.timeline', 'req.budget',
