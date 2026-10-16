@@ -9,6 +9,7 @@
     "color": "#1F5C7A"
   },
   "market": {
+    "preset": "gujarat",
     "summary": "Small, mid-scale city. Stock is mostly offices, shops and warehouses for rent. People transferred in for oil and gas, manufacturing, processing and pharma jobs need flats to rent, and there is little variety: residential demand outruns residential stock, so the calling list exists to find flat owners.",
     "deal": {
       "rent": 0.8,

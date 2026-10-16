@@ -216,34 +216,25 @@ What `demo-showcase` holds:
 8. No buyers.
 9. Calendar tasks, import history and agreement files.
 
-### 8.2 Market presets
+### 8.2 Market presets (built 17 Oct, generator side)
 
-**One option, `"market": "us" | "india" | "gujarat"`.** It can go in the profile, or be passed as `--market=` to override it. The preset lives in `demo-profiles/markets/<market>.json` and is merged *under* the profile: any field the profile names wins.
+**A profile sits on a market preset.** `demo-profiles/markets/<name>.json` holds what is true of a whole market; the profile names it in `market.preset` (or `--market=` overrides it) and overrides any field: objects merge key by key, arrays and values replace, `_sources` from both are kept. `gujarat` extends `india`. The Indian profiles (`showcase`, `vadodara`, `film`) are on `gujarat` and plan **byte-identical** to before (full plan JSON compared at three fixed moments).
 
-| Field | `gujarat` (today's profiles) | `india` | `us` |
-|---|---|---|---|
-| Names | Patel, Shah, Desai… | A pan-India pool | US pool |
-| Localities | Profile (Vadodara) | Profile (Pune, Bengaluru…) | Profile (e.g. Austin) |
-| Kinds and sizes | BHK; carpet sqft; offices, warehouses | BHK; carpet sqft | Bedrooms and baths ("3 bd / 2 ba"); sq ft; single-family, condo, townhome |
-| Prices | ₹; rent per month; sale in lakhs | ₹ | $; rent per month; sale $250k to $900k |
-| Deal terms | 11-month rent, deposit 2 to 3 months | Same | 12-month lease, deposit 1 month |
-| Phones | `+91 99555 xxxxx` (fiction block) | Same | `+1 <area> 555-01xx`, the range reserved for fiction |
-| Sources | 99acres, MagicBricks, Housing.com, Walk-in, Referral, Website | Same | Zillow, Realtor.com, Website, Open house, Referral, Sign call |
-| Notes language | Gujarati in Latin script | Hinglish | Plain English (as `film.json` already does) |
-| Timezone, hours | Asia/Kolkata, 10:00 to 19:30 | Same | Profile (America/Chicago…), 9:00 to 18:00 |
-| Deal mix | Profile | Profile | Sale-heavy (0.7 sale) |
+| Field | `india` / `gujarat` | `us` |
+|---|---|---|
+| `locale` (written to settings) | `{IN, INR, en-IN, 91, bhk}` | `{US, USD, en-US, 1, bed}` |
+| `timezone`, `hours`, `weekOff` | Asia/Kolkata, 10:00 to 19:30, none | America/Chicago, 9:00 to 19:00, none (agents show at weekends) |
+| `phone` | `+91 99555 xxxxx` fiction block, or random | `+1 <area> 555-01xx` only (the range reserved for fiction), 14 weighted area codes; there is no safe random US number |
+| `people` | one pool (Gujarati in `gujarat`) | `groups` weighted 48/32/9/8 from Census QuickFacts; surnames from the 2010 Census list, given names from SSA Texas 1980s/1990s; first and last name come from one group |
+| `sources` | 99acres, MagicBricks, Housing.com, Walk-in, Referral, Website (equal) | `[name, weight]`: Referral, Past client, Agent referral, Zillow, Realtor.com, Homes.com, Redfin, Apartments.com, Website, Open house, Sign call (weights estimated from NAR 2025 and Comscore) |
+| Sizes, baths, rounding | BHK; India area bands; ₹500 / ₹50,000 | `sizes`/`baths` by bedrooms; $25 / $5,000 |
+| Lease | 334 days, deposit 2 to 3 months | 365 days, deposit 1 month; `fairHousing` drops "family only" |
+| `homes` (profile) | absent: flats in projects and independent rentals | single-family, townhouse, condo, each with sizes and rent/sale bands by bedrooms; a locality's `priceIndex` (ZIP median over city median) scales sale prices, its square root rents |
+| Notes | Gujarati in Latin script / Hinglish | US agent English ("LVM", "Pre-approved {budget}…"); `{budget}`, `{config}`, `{locality}` are filled from the lead |
 
-**The generator** assumes India in about a dozen places. Make them read the preset:
+Several agents on homes split as a US team does (`works`: `buyers`, `listings`, `rentals`; two agents with the same work take turns). The build writes `locale`, `timezone`, `workHours` and `sources` through `updateSettings`. `--offline --sample=10` plans without a database.
 
-- the `IST` constant and office hours (seed-demo-tenant.ts:44, 101–117);
-- `en-IN` in the follow-up text (:371);
-- the `+91` numbers (:132–139);
-- the default sources (:264);
-- the BHK area bands and lakh rounding (:244–245);
-- deposits counted in months (:255, 758);
-- two Gujarati fallbacks (:420 `site par malvanu`, :470 `chavi office ma aapi didhi`).
-
-It must also write the firm's `timezone`, `workHours`, `sources` and templates into `crm_settings`. That is size **S to M**, with no product risk. **`india` and `gujarat` need no product change.**
+**Stored values the app must agree on** (Builder A's dialect work): bedrooms in `bhk` as `'1'`…`'4'`; a lead's `req.config` as `"3 bd"`; single-family as `independent_house`, condo as `apartment`, townhouse as a new `townhouse`; `type` set to `"3 bd Single-family"`; follow-up action still `Site Visit` (shown as Showing); area in `carpet` with `areaUnit: 'sqft'`.
 
 **What blocks a US firm in the product.** Nothing stores a currency, country or locale today. `crm_settings` (key `default`) is the home for them: `updateSettings` merges any key, so no migration is needed. The backend reads them through `deskConfigOf` (store.ts:2826); the frontend reads `store.state.settings` and `src/lib/format.js`.
 
@@ -293,10 +284,10 @@ Run *after* the build's time of day, it works. But the demo is a day stale every
 
 1. Fix the refresh snowball (S). Until the tick exists, run it only after the build's clock time.
 2. Settings written from the profile; shortlist; buyers; unassigned leads (S each).
-3. The market preset in the generator, with the `gujarat` and `india` presets (S to M). No product change.
+3. ~~The market preset in the generator~~: built 17 Oct, with `india`, `gujarat` and `us`, and `film-us.json` (Austin).
 4. The roll and the tick, with arrivals through the ingest key (M), plus the PM2 app.
 5. The skill, from `demo-tenant-skill.md`.
-6. US: product currency, budget parsing, phone and timezone settings (about a week, reviewed as money/identity work). Then vocabulary, after Om's product calls. Then the `us` preset.
+6. US: product currency, budget parsing, phone and timezone settings (about a week, reviewed as money/identity work). Then vocabulary, after Om's product calls. The `us` preset is built; `film-us` waits for the app to read `locale`.
 
 ### 8.5 For Om to decide
 

@@ -1,0 +1,72 @@
+{
+  "_about": "A US residential brokerage, researched 17 Oct 2026 for Austin, TX (the first US profile, film-us.json). Market-wide facts live here; the metro's neighbourhoods, buildings and price index live in the profile. Every number names its source in _sources; a number marked ESTIMATE in _sources has none and is ours.",
+  "_sources": [
+    { "what": "Phone numbers in 555-0100 to 555-0199 only: 'Only 555-0100 through 555-0199 are now specifically reserved for fictional use'", "url": "https://en.wikipedia.org/wiki/555_(North_American_Numbering_Plan)", "note": "cites ATIS '555 NXX Line Number Reference Document' and NANPA '555 Line Numbers'; the NANPA/ATIS PDFs refused our fetch (403)" },
+    { "what": "Austin area codes 512 (1947) and 737 (2013 overlay)", "url": "https://en.wikipedia.org/wiki/Area_codes_512_and_737" },
+    { "what": "Out-of-town area codes and their weights (Texas metros, Bay Area, Chicago, New York): people who moved to Austin keep their numbers", "url": null, "note": "ESTIMATE. Also forced by the fiction block: each area code has only 100 fictional numbers, so a few hundred contacts need about a dozen area codes" },
+    { "what": "Name groups weighted 48 / 32 / 9 / 8 (white non-Hispanic, Hispanic or Latino, Asian, Black); QuickFacts Austin city: Hispanic 32.2%, White alone not Hispanic 47.6%, Black alone 7.5%, Asian alone 8.6%", "url": "https://www.census.gov/quickfacts/fact/table/austincitytexas/PST045224", "note": "read from search-result text; census.gov refused our fetch" },
+    { "what": "Surnames: the 2010 Census frequently occurring surnames, top 40 by count (Smith 2,442,977 ... Flores 433,969)", "url": "https://www.census.gov/topics/population/genealogy/data/2010_surnames.html", "note": "ranks 11-40 via https://en.wikipedia.org/wiki/List_of_most_common_surnames_in_North_America. Which group a surname is listed under, and the Asian surnames beyond the top 40 (Tran, Le, Pham, Patel, Kim, Chen, Wang, Singh), are our ESTIMATE" },
+    { "what": "Given names: SSA Texas top 20 for births 1980-1989 and 1990-1999 (people now about 26 to 46, the age that buys and rents)", "url": "https://namealmanac.com/state/TX/1980s", "note": "and https://namealmanac.com/state/TX/1990s; both built on the SSA state file. Splitting names across groups, and the Asian given names, are our ESTIMATE" },
+    { "what": "Sources and weights. NAR 2025 Profile of Home Buyers and Sellers: 43% of buyers found their agent by referral, 15% used an agent they had used before, 7% inquired about a property seen online, 7% were referred by another agent, 6% found the agent through a website, 5% met them at an open house; 52% of buyers found their home online", "url": "https://nowbam.com/how-home-buyers-and-sellers-find-their-agents-in-2025/", "note": "quoting NAR 2025; also https://store.realtor/2025-nar-profile-of-home-buyers-and-sellers-digital-download. The online share is split across portals in the order of their traffic (next source). The weights themselves are our ESTIMATE from these shares" },
+    { "what": "Portal order: Comscore March 2024 monthly unique users Zillow 112M, Realtor.com 54M, Redfin 41M, Homes.com 39M", "url": "https://www.realestatenews.com/2024/01/26/zillow-retained-its-lead-in-q4-homes-com-came-in-fourth", "note": "search-result text. Redfin is weighted low on purpose: it routes its buyers to its own and partner agents, so a small independent brokerage sees few. Apartments.com share: not found, ESTIMATE" },
+    { "what": "Residential only: 'Although 70% of NAR members specialize primarily in residential brokerage'", "url": "https://www.nar.realtor/magazine/real-estate-news/sales-marketing/income-steady-even-as-market-slows-2025-member-trends" },
+    { "what": "Deposit one month's rent: Texas sets no cap; one month is the common deposit", "url": "https://capitol.texas.gov/tlodocs/89R/billtext/html/HB02901I.htm", "note": "a 2025 bill proposing a one-month cap; whether it passed was not confirmed" },
+    { "what": "12-month lease", "url": null, "note": "ESTIMATE: no citable source found" },
+    { "what": "Fair housing: no 'family only' tenant preference on a listing", "url": "https://www.law.cornell.edu/uscode/text/42/3604", "note": "42 U.S.C. 3604(c): no notice or advertisement indicating a preference based on familial status" },
+    { "what": "Written buyer agreement before touring (NAR settlement, from 17 Aug 2024)", "url": "https://www.nar.realtor/the-facts/written-buyer-agreements-101", "note": "why the notes say 'signed buyer agreement' before a showing" },
+    { "what": "Sizes in sq ft by bedrooms, baths by bedrooms, office hours 9:00 to 19:00 and no weekly day off (agents show homes at weekends)", "url": null, "note": "ESTIMATE: no source found for any of these" }
+  ],
+  "locale": { "country": "US", "currency": "USD", "numberLocale": "en-US", "phoneCountry": "1", "rooms": "bed" },
+  "timezone": "America/Chicago",
+  "hours": { "start": 9, "end": 19 },
+  "weekOff": [],
+  "phone": {
+    "scheme": "nanp",
+    "areaCodes": [["512", 40], ["737", 20], ["210", 4], ["254", 3], ["713", 4], ["214", 4], ["972", 3], ["281", 2], ["415", 3], ["650", 2], ["310", 3], ["312", 2], ["917", 2], ["206", 2]]
+  },
+  "rounding": { "rent": 25, "sale": 5000, "budget": { "rent": 50, "sale": 10000 } },
+  "furnish": ["none", "none", "none", "none", "full"],
+  "lease": { "days": 365, "depositMonths": ["1"] },
+  "fairHousing": true,
+  "balconies": false,
+  "commercialRentPer": "year",
+  "ownerReject": ["Just refinanced, staying put", "Listed with another agent", "Not selling this year"],
+  "sizes": { "1": [650, 850], "2": [950, 1250], "3": [1400, 2000], "4": [2100, 2900] },
+  "baths": { "1": [1], "2": [1, 2, 2], "3": [2, 2, 3], "4": [2, 3, 3] },
+  "ownerArea": [700, 1600],
+  "sources": [
+    ["Referral", 26], ["Past client", 10], ["Agent referral", 5],
+    ["Zillow", 18], ["Realtor.com", 9], ["Homes.com", 3], ["Redfin", 2], ["Apartments.com", 7],
+    ["Website", 6], ["Open house", 6], ["Sign call", 4]
+  ],
+  "people": {
+    "groups": [
+      { "share": 48,
+        "first": ["Christopher", "Michael", "Matthew", "James", "John", "Robert", "Justin", "Jason", "Brandon", "Ryan", "William", "Andrew", "Zachary", "Jacob",
+                  "Jessica", "Jennifer", "Amanda", "Ashley", "Sarah", "Stephanie", "Elizabeth", "Lauren", "Megan", "Emily", "Hannah", "Taylor", "Rachel", "Heather"],
+        "last": ["Smith", "Johnson", "Williams", "Brown", "Miller", "Davis", "Wilson", "Anderson", "Taylor", "Moore", "Martin", "Thompson", "White", "Clark",
+                 "Lewis", "Walker", "Young", "Allen", "King", "Wright", "Scott", "Hill"] },
+      { "share": 32,
+        "first": ["Jose", "Juan", "Daniel", "David", "Joshua", "Jonathan", "Christopher", "Michael", "Eric", "Joseph",
+                  "Maria", "Jessica", "Stephanie", "Crystal", "Christina", "Alyssa", "Victoria", "Alexis", "Michelle", "Laura"],
+        "last": ["Garcia", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Perez", "Sanchez", "Ramirez", "Torres", "Flores"] },
+      { "share": 9,
+        "first": ["Kevin", "David", "Andrew", "Ryan", "Daniel", "Rahul", "Vikram", "Minh",
+                  "Michelle", "Jennifer", "Amy", "Priya", "Anh", "Grace", "Christina"],
+        "last": ["Nguyen", "Lee", "Tran", "Le", "Pham", "Patel", "Kim", "Chen", "Wang", "Singh"] },
+      { "share": 8,
+        "first": ["Christopher", "Michael", "Brandon", "Justin", "Joshua", "Jonathan", "Eric",
+                  "Jasmine", "Ashley", "Brittany", "Kimberly", "Tiffany", "Kayla", "Amber"],
+        "last": ["Johnson", "Williams", "Brown", "Jones", "Jackson", "Davis", "Harris", "Robinson", "Thomas", "Taylor"] }
+    ]
+  },
+  "phrases": {
+    "call": ["LVM", "No answer, LVM", "Texted, no reply yet", "Busy, call back after 5", "Went to voicemail, texted"],
+    "remark": ["Wants to tour Sat morning", "Signed buyer agreement, sending listings", "Needs to sell current home first", "Lender letter received",
+               "HOA too high on the condo, prefers a house", "Wants a yard for the dog", "Toured 3, liked the one in {locality}", "Asked about schools and commute"],
+    "callback": ["Call after 5", "Call Monday morning", "Text first, then call"],
+    "owner": ["Thinking of selling in the spring", "Would list if the price is right", "Renting it out, ask again next year"],
+    "visitNote": "Showing, meet at the front door",
+    "keyReceived": "Listing agreement signed, lockbox on"
+  }
+}
