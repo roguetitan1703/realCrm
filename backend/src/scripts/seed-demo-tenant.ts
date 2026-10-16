@@ -11,6 +11,7 @@
  *   ... --write                       build it (remakes it if this script made it)
  *   ... --refresh                     move every date forward to now
  *   ... --delete                      remove it, rows and photos
+ *   ... --channel=msedge             stamp photos in an installed browser (no Playwright download)
  *   --env=production needs --confirm=<slug> as well, every time.
  *
  * WHAT IT WRITES, AND HOW. The firm is made by provisionTenant(), the console's
@@ -155,6 +156,12 @@ const laneOfWorks = (w = ''): Kind | null => /office|shop/i.test(w) ? 'office' :
 const AGENTS = TEAM.filter(t => t.role === 'agent');
 const agentFor = (lane: Kind) => (AGENTS.find(a => laneOfWorks(a.works) === (lane === 'shop' ? 'office' : lane)) || AGENTS[0]).name;
 const idleToday: string | null = P.story?.idleToday || AGENTS.find(a => laneOfWorks(a.works) === 'warehouse')?.name || null;
+// Days (0 today, 1 yesterday, …) on which a named person did nothing at all:
+// `story.offDays: { "Name": [2, 4] }`. A week where everyone worked every day
+// gives Performance's range view nothing to show; this is the agent who is
+// slipping. Same days every run.
+const offDays: Record<string, number[]> = P.story?.offDays || {};
+const isOff = (who: string | null, t: Date) => !!who && (offDays[who] || []).includes(dayOf(t));
 
 function plan() {
   const volume = P.volume || { leads: 180, owners: 260, units: 140 };
@@ -341,7 +348,7 @@ function story(L: LeadPlan, agent: string, flag?: string) {
   const ev = (type: string, title: string, description: string, raw: Date | null, metadata?: any) => {
     const t = working(raw);
     if (!t) return null;
-    if (agent === idleToday && dayOf(t) === 0) return null;
+    if ((agent === idleToday && dayOf(t) === 0) || isOff(agent, t)) return null;
     L.events.push({ type, title, description, author: agent, at: t, metadata }); return t;
   };
   const call = (t: Date | null, outcome: string, remark?: string) => ev('call', 'Call', remark || 'Call initiated', t, { outcome, edited: true });
@@ -410,7 +417,7 @@ function story(L: LeadPlan, agent: string, flag?: string) {
   if (visit.getTime() > NOW - 3600_000 || visit <= t2) visit.setTime(t2.getTime() + 3 * 3600_000);
   if (L.stage === 'Site Visit' && chance(0.35)) {
     // Booked, not yet happened: today or tomorrow.
-    schedule('Site Visit', chance(0.5) ? 'today' : 'soon', 'site par malvanu');
+    schedule('Site Visit', chance(0.5) ? 'today' : 'soon', phr.visitNote || 'site par malvanu');
     move(later(t2, 30, 300), 'Interested', 'Site Visit');
     return;
   }
@@ -429,7 +436,7 @@ function ownerStory(O: OwnerPlan, agent: string) {
   const ev = (type: string, title: string, description: string, raw: Date | null, metadata?: any, author: string | null = agent) => {
     const t = working(raw);
     if (!t) return;
-    if (author === idleToday && dayOf(t) === 0) return;
+    if ((author === idleToday && dayOf(t) === 0) || isOff(author, t)) return;
     O.events.push({ type, title, description, author, at: t, metadata });
   };
   if (O.stage === 'New') return;
@@ -591,7 +598,7 @@ async function preparePhotos(firmName: string): Promise<Record<string, { buf: Bu
       const raw = Buffer.from(await (await fetch(ph.url, { headers: { 'User-Agent': 'delpat-demo/1.0' } })).arrayBuffer());
       if (!page) {
         const { chromium } = await import('playwright');
-        browser = await chromium.launch();
+        browser = await chromium.launch(args.channel ? { channel: String(args.channel) } : {});
         page = await browser.newPage();
         const vite = String(args.vite || 'http://localhost:5173');
         await page.goto(vite).catch(() => die(`The Vite dev server is not answering at ${vite}. Start it (npm run dev) or pass --no-photos.`));
@@ -616,7 +623,7 @@ async function build(sql: any) {
   const p = plan();
   const { provisionTenant, createLead, createOwnersBatch, bulkAssignOwners, createProperty, prepareListing } = await import('../services/store.js');
   const { createAgreement } = await import('../services/agreements.js');
-  const { createIntegration } = await import('../services/ingestion.js');
+  const { createIntegration, setParserConfig } = await import('../services/ingestion.js');
   const { runWithContext } = await import('../services/context.js');
   const media = await import('../services/media.js');
   const bcrypt = (await import('bcryptjs')).default;
@@ -810,8 +817,11 @@ async function build(sql: any) {
             WHERE o.tenant_id = ${SLUG} AND e.tenant_id = ${SLUG} AND e.record_id = o.id AND e.id LIKE ${`evt_dmc_${NOW}_%`}`;
   step(`${listed.length} listing owners moved to Key Received`);
 
-  // 9. A real connection for the live-enquiry moment.
-  await createIntegration(SLUG, 'Website', ownerId);
+  // 9. A real connection for the live-enquiry moment, with its field mapping:
+  // without one the parser stores an enquiry as pending and no lead appears
+  // (scripts/demo-enquiry.ts sends exactly these fields).
+  const site = await createIntegration(SLUG, 'Website', ownerId);
+  await setParserConfig(SLUG, site.integration.id, { map: { name: 'name', phone: 'phone', 'req.notes': 'message' }, defaults: { source: 'Website' } });
 
   // 10. The alerts the build itself raised are not news to anyone.
   await new Promise(r => setTimeout(r, 2500));
@@ -823,7 +833,7 @@ async function build(sql: any) {
 
   console.log(`\n✓ ${P.firm.name} at /${SLUG}. Everyone signs in with ${PASSWORD}:`);
   for (const u of users.sort((a, b) => (a.role > b.role ? -1 : 1))) console.log(`    ${u.login_id.padEnd(12)} ${u.name} (${u.role})`);
-  console.log(`  The live-enquiry key is in Settings → Connections (Website).`);
+  console.log(`  Send a live enquiry: npx tsx backend/src/scripts/demo-enquiry.ts --firm=${SLUG}`);
 }
 
 main().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });

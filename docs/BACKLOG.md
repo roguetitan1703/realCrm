@@ -89,9 +89,15 @@ gaps are in `specs/notifications.md` §1, not here.
   none, so nothing can say a callback is late. (Owners store one.) *agent*
 - **Booked site visits with no time** — bhumi 5 of 29 (typed text only).
 - **`/api/v1/ingest` has no rate limit** (code). A leaked key fills a desk.
+- **A column header sorts one way only** (code, dev). Clicking Last enquiry
+  again does not flip it (`Table` calls `onSort(key)`, never the direction);
+  only the toolbar arrow does. Newest-first takes two controls. *manager*
 
 ## To verify
 
+- **A listing owner's Callback stays on To do after the call** (seen on the
+  demo, 17 Oct): a lead's booked call closes on Call, an owner's did not.
+  Check whether that is the rule or a gap. *agent*
 - **After the Vercel deploy:** /privacy, /terms and /data-deletion open in an
   incognito window with the full text in the page source (Meta App Review).
 - **After the API deploy:** a photo link previews in WhatsApp, Slack and
