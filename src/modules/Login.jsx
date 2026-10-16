@@ -663,6 +663,12 @@ export default function Login({ store }) {
             ) : (
               <div>Need access? Contact your firm&apos;s administration desk.</div>
             )}
+            {/* Static pages outside the app (public/legal, vercel.json). */}
+            <nav aria-label="Legal" style={{ marginTop: 12 }}>
+              <a href="/privacy" style={{ color: 'var(--muted)' }}>Privacy Policy</a>
+              {' · '}<a href="/terms" style={{ color: 'var(--muted)' }}>Terms</a>
+              {' · '}<a href="/data-deletion" style={{ color: 'var(--muted)' }}>Data Deletion</a>
+            </nav>
           </div>
         </div>
       </div>

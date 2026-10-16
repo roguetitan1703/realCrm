@@ -80,6 +80,8 @@ gaps are in `specs/notifications.md` §1, not here.
 
 ## To verify
 
+- **After the Vercel deploy:** /privacy, /terms and /data-deletion open in an
+  incognito window with the full text in the page source (Meta App Review).
 - **After the API deploy:** a photo link previews in WhatsApp, Slack and
   Telegram; Siddhi's leads show Siddhi.
 - **After the API deploy — notifications** (`specs/notifications.md` §13):
@@ -91,6 +93,9 @@ gaps are in `specs/notifications.md` §1, not here.
 
 ## Bigger pieces — each has a spec
 
+- **WhatsApp and Instagram through Meta** (Tech Provider: Embedded Signup with
+  Coexistence, webhook, inbox, New contacts queue). Brief only, no spec yet;
+  the legal pages it needs are live at /privacy, /terms, /data-deletion.
 - **Enquiries** — a person is not an enquiry. `specs/enquiries.md`, planning.
 - **PWA on a real device** — install identity, offline. `specs/pwa.md`.
 - **Branding audit** across login, desk, phone, PWA, email, share.

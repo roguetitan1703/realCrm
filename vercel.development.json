@@ -1,6 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
+    { "source": "/privacy", "destination": "/legal/privacy.html" },
+    { "source": "/terms", "destination": "/legal/terms.html" },
+    { "source": "/data-deletion", "destination": "/legal/data-deletion.html" },
     {
       "source": "/pwa/:path*",
       "destination": "https://api.dev.re.delpat.in/pwa/:path*"

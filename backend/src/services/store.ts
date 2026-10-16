@@ -109,7 +109,10 @@ export interface ProvisionResult {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const RESERVED_SLUGS = new Set(['admin', 'pwa']);
+// The first path segment is the firm, so a path the app serves itself must
+// never become one: /privacy, /terms and /data-deletion are the public legal
+// pages (vercel.json), /legal their files.
+const RESERVED_SLUGS = new Set(['admin', 'pwa', 'privacy', 'terms', 'data-deletion', 'legal']);
 
 export async function provisionTenant(input: ProvisionInput): Promise<ProvisionResult> {
   const firmName = String(input.firmName || '').trim();

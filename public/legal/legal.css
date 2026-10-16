@@ -1,0 +1,46 @@
+/* The public legal pages: /privacy, /terms, /data-deletion (vercel.json).
+   Static HTML so a crawler or a Meta reviewer reads the text without running
+   the app. Colours are the app's own tokens (src/styles.css). */
+:root {
+  --bg: #F6F5F2; --card: #FFFFFF; --line: #E3E1DB;
+  --ink: #23231F; --ink-2: #4A4843; --muted: #77756E; --accent: #1E6F52;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171714; --card: #1F1F1B; --line: #34332E;
+    --ink: #ECEAE4; --ink-2: #C9C6BE; --muted: #95928A; --accent: #5FB592;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.65 'IBM Plex Sans', system-ui, sans-serif;
+}
+.top {
+  max-width: 760px; margin: 0 auto; padding: 24px 16px 0;
+  display: flex; align-items: center; gap: 12px;
+}
+.top img { width: 32px; height: 32px; border-radius: 6px; display: block; }
+.top a { color: var(--ink); text-decoration: none; font: 700 16px 'Space Grotesk', sans-serif; letter-spacing: -0.02em; }
+main {
+  max-width: 760px; margin: 20px auto 0; padding: 32px 16px 40px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+}
+@media (min-width: 640px) { main { padding: 40px 48px 48px; } .top { padding-left: 0; padding-right: 0; } }
+h1 { font: 700 clamp(26px, 5vw, 34px)/1.2 'Space Grotesk', sans-serif; letter-spacing: -0.03em; margin: 0 0 6px; }
+h2 { font: 600 18px/1.35 'Space Grotesk', sans-serif; margin: 32px 0 8px; }
+.updated { color: var(--muted); font-size: 14px; margin: 0 0 28px; }
+p, li { color: var(--ink-2); }
+ul, ol { padding-left: 22px; }
+li { margin: 4px 0; }
+li ul { margin: 6px 0; }
+a { color: var(--accent); }
+strong { color: var(--ink); }
+footer {
+  max-width: 760px; margin: 0 auto; padding: 24px 16px 40px;
+  font-size: 13px; color: var(--muted); text-align: center;
+}
+footer nav a { color: var(--ink-2); text-decoration: none; }
+footer nav a:hover { text-decoration: underline; }
+footer nav a[aria-current="page"] { color: var(--ink); font-weight: 600; }
