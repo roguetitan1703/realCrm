@@ -1233,11 +1233,6 @@ export function StoreProvider({ children }) {
     // components/Agreements.jsx) announces itself the same way, so every open
     // screen refetches instead of showing the record as it was.
     touched: settled,
-    // The same, under the name ten callers use. `store.settled?.()` was
-    // called after an assignment, a call's outcome, a bulk move — and the store
-    // never had a `settled`, so the optional call did nothing and each of those
-    // screens stayed as it was until something else refetched.
-    settled,
     cacheRecords: (kind, records, partial) => dispatch({ type: 'CACHE_RECORDS', kind, records, partial }),
 
     assign: (leadId, agentId) => {
