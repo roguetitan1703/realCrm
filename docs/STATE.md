@@ -7,10 +7,12 @@ a live database so the next session neither re-derives it nor assumes it.
 
 The work itself is in `docs/BACKLOG.md`; set-aside work in `docs/PARKED.md`.
 
-**Last session: 2026-10-12** (second session that day): docs restructured into
-STATE / BACKLOG / PARKED; the old known issues re-measured on production; then
-**notifications rebuilt as open work** (`specs/notifications.md`, all five
-steps, built and verified on dev — §13 says what and how).
+**Last session: 2026-10-15 → 17.** Om's dev-preview testing turned into one
+update (hand-over alerts, working hours, two tab rows, follow-up Done from
+Today, Performance over a range on `specs/performance.md`, legal pages); then a
+read-only usage snapshot of both paying firms (`usage-2026-10-17.md`) and a
+plan written from it by Fable (`PLAN.md`). BACKLOG and PARKED now follow the
+plan.
 
 ---
 
@@ -18,56 +20,39 @@ steps, built and verified on dev — §13 says what and how).
 
 | | at | how |
 |---|---|---|
-| Backend — AWS EC2 (one box, PM2 runs prod and dev) | **`78458b6` (5 Oct)**, read from `/health` 12 Oct | `scripts/deploy-api.sh` on the box, `main` only |
-| Frontend — Delpat's Vercel | not read; Branch Tracking is OFF, the user deploys by hand | |
-| Dev API (`api.dev.re.delpat.in`) | **stopped by the user** (12 Oct) | |
+| Backend — AWS EC2 (one box, PM2 runs prod and dev) | **`78458b6` (5 Oct)**, read from `/health` 17 Oct | `scripts/deploy-api.sh` on the box, `main` only |
+| Dev API (`api.dev.re.delpat.in`) | **`0eb1c5c`**, read 17 Oct — behind `development`; pull + `npm i` + `pm2 restart re-api-dev` before re-testing | |
+| Frontend — Delpat's Vercel | not read; the user deploys by hand | |
 | `main` | `820514e` (6 Oct) | |
-| `development` | ahead of `main`: marketing/demo, docs, `4fbfc20` (alert read fix, Apple connect fix), **the alert lifecycle**, and **Performance / My work over 7 days, 30 days or a custom range** (all app + API, need both deployed). Pushed | |
-
-**Production API is 7 commits behind `main`** (photo-link previews, the
-Binod/Siddhi rename fix, reserved `admin`/`pwa` slugs). The user will deploy
-them soon. Order: API first, then frontend.
+| `development` | `main` + 45 commits, nothing on `main` missing from it | |
 
 ---
 
 ## Waiting on the user
 
-- **Release `docs/releases/2026-10-13.md`:** the user checks on development,
-  then `development` → `main` (fast-forward), API first, then frontend. The
-  API's first run writes status columns on bhumi's and mahalaxmi's
-  `notifications` — previewed read-only 13 Oct: bhumi 2,227 of 2,246 close,
-  mahalaxmi 757 of 786. Then the checks under "To verify" in BACKLOG.
-- **Listing pages are parked** (`specs/listing-pages.md` §0, PARKED.md).
-- Decided 12 Oct: onboarding keeps `vijay@123`; the audit ledger stays hidden
-  from firm owners; default passwords on delpat/skyline are ignored (people
-  changed their own).
-- **Merge `development` → `main`** when convenient (docs and marketing only).
-- **webloom / delpat-skills** branches as left on 12 Oct: webloom's walkthrough
-  counter fix `fc94993` on `feat/real-estate-crm-page`; delpat-skills
-  `feat/natural-pace` unmerged.
+- **Re-test on the dev preview**, then Release 1 (`releases/2026-10-13.md`):
+  `development` → `main` (fast-forward), API first, then frontend. Re-run
+  `alert-first-run-preview.ts` the morning of the deploy — last run 16 Oct:
+  bhumi 2,284 of 2,308 close, mahalaxmi 1,014 of 1,021.
+- **The eight questions in `PLAN.md` §6** (help desk, price, the one-tap
+  contact question, visit proof, catalog scope, bhumi's Meta verification,
+  usage notes to owners, the deploy window).
+- **Work OS is not linked to this repo** (`get_project` by remote: unmatched;
+  the project is "Real Estate CRM"). Work OS #102 says delpat.in; the legal
+  pages are on realestate.delpat.in, undeployed. Not changed — Om's call.
+- Decided 12 Oct and still standing: onboarding keeps `vijay@123`; the audit
+  ledger stays hidden from firm owners.
 
 ---
 
 ## Checked this session
 
-- **Production, read only** (`default_transaction_read_only`, one scratch script,
-  deleted): every old known issue re-measured; results are the Bugs and Small
-  sections of BACKLOG. Notable: bhumi's owner no longer holds the default
-  password; the audit chain verifies clean (7 chains, 13,941 rows);
-  `lead_retry_due`/`lead_stale_sla` have not fired since 1 Sep / 12 Aug;
-  alerts are almost never read (bhumi 6 of 299, mahalaxmi 0 of 463 in 14 days).
-- **The user's old note**, item by item against current code: 13 done, 5
-  partial, 6 open. Only the open and partial ones are in BACKLOG.
-- **Dev database:** the alert lifecycle's columns and first run applied (the
-  first-run marker was cleared once and re-run so dev matches what production
-  will get: 117 record-less alerts expired). Probe leads `PROBE …` on `delpat`
-  and their alerts, deliveries and timeline rows created and deleted by id; one
-  probe subscription and one gone-endpoint row likewise. Nothing written to
-  production: the first-run preview copies into a TEMP table, switches the
-  transaction read-only and rolls back; production's `notifications` still has
-  its original 9 columns afterwards.
-- **Production, read only:** agents' working hours by hour (night window
-  21:00–09:00 IST), and the delivery gaps behind `specs/notifications.md` §1.
+- **Production, read only** (one scratch script, deleted): the usage snapshot,
+  18 Aug – 16 Oct, both firms; and the alert first-run preview (above).
+- **Dev database** (`delpat` only): working hours set to 10 and back to 9–21
+  through the UI; a race probe lead `TEST 96 · race` (three Done saves at once →
+  one Completed row) created and deleted by id; builders' probe leads deleted
+  by id. Om's TEST 1–6 cases from 13 Oct are still there on purpose.
 
 ---
 
@@ -90,8 +75,10 @@ them soon. Order: API first, then frontend.
 - The dev database is shared with the user's own preview testing. Delete only
   your own probe rows, by id.
 - Read-only scripts that import `services/store.ts` must set `CRM_NO_BOOT=1`.
-- Playwright's WebKit build is not downloaded; phone checks run in Chromium
-  with the iPhone 13 descriptor.
+- No Playwright browser is downloaded on this machine: launch with
+  `chromium.launch({ channel: 'msedge' })` and the iPhone 13 descriptor.
+- `npm run build` needs `VITE_API_URL` set locally (no production env file
+  here): `VITE_API_URL=http://localhost:5001 npm run build`.
 - Caddy overwrites `X-Forwarded-Host` on the API box, so `og:url` was removed
   from the share card; do not put it back from the request host.
 - Remotion leaves a webpack bundle per render in `%TEMP%`; thirty of them once

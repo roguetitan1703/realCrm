@@ -19,31 +19,41 @@ Paying tenants are `bhumi` and `mahalaxmi`. A line that writes their data says s
 
 ## Now
 
-_Nothing picked._
+The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
+`usage-2026-10-17.md`. Decisions waiting on Om are `PLAN.md` §6.
 
-## Next — candidates, most useful first
+- **Release 1** — everything on `development` (`releases/2026-10-13.md`).
+  Waits on Om's re-test on the dev preview; re-run the first-run preview the
+  morning of the deploy, and have the reopen script written before it.
+- **Feed watch** — an active integration silent 7+ days after a normal month
+  raises one alert to the owner and to Delpat. bhumi's 99acres sent nothing for
+  4 weeks (12 Sep – 9 Oct) and nobody noticed. *owner, Delpat*
 
-- **A call about a booked visit or meeting completes nothing.** A logged call
-  already completes a booked call or callback (`closeFollowUpFor`, since
-  18 Aug). A call made about a site visit or meeting — "where have you
-  reached" — leaves the booking open, and closing it is its own flow (~6
-  controls). *agent*
-- **One outcome model.** A call (`CALL_OUTCOMES`), a WhatsApp share
-  (`WA_OUTCOMES`, its own sheet in `WaModal.jsx`) and a site visit
-  (`VISIT_OUTCOMES`, "What came of it?") ask "what happened" three different
-  ways; the visit options are unexplained and "Booked" is ambiguous. *agent*
-- **Skeletons, not spinners or zeros.** Lists use `ListSpinner` (deliberately,
-  Aug); sidebar badges read 0 before the desk summary lands; only
-  `state.hydrated` tells "not loaded" from "empty", and one panel reads it.
-  One shared skeleton for list, table and tiles.
-- **Property import: choose a default sale/rent.** Rows without one are refused
-  (`imports.ts`), with no option to apply one to the file. *manager*
-- **Leads pagination restyle** (`Pager`, `primitives.jsx`). Look not yet agreed.
-- **Group-by as a kanban** — leads (no group-by at all today) and calling inside
-  a project (a table today). Needs a design pass before code.
-- **See how firms actually use it, and suggest.** Read-only pass over
-  production activity (who works what, what is never touched) → a short list of
-  proposals. *manager*
+## Next — in plan order
+
+- **One place to say what happened.** Outcome on 20% of bhumi's calls (Ravish
+  163 calls, Anil 110: none), 51% of mahalaxmi's; mahalaxmi sets a status on
+  36% of leads with no call logged. The outcome sheet opens as the dialer takes
+  the screen, says "Optional." (`Modals.jsx:1604`) beside a status pill that
+  asks the same fact. One sheet on return from the dialer, outcome sets the
+  status by a visible map, a status change with no contact asks one tap
+  (waits on PLAN Q3). Absorbs "one outcome model" (`CALL_OUTCOMES`,
+  `WA_OUTCOMES`, `VISIT_OUTCOMES`). *agent*
+- **Finish what was booked.** Past due now: bhumi 24 of 33, mahalaxmi 7 of 9.
+  Done on the phone lead record (`FollowUpDoneModal` is ready); moving to Site
+  Visit books the visit; "Did it happen?" the day after. Visit proof rule waits
+  on PLAN Q4 (also settles: history's Add outcome closes a visit with no proof).
+  A call about a booked visit still completes nothing. *agent*
+- **Team: who stopped.** One line per agent inactive 7+ days holding open leads
+  (Siddhi: 65 open, last active 11 Oct). Then one support call per owner. *owner*
+- **Business rails.** Weekly numbers script (PLAN §4, read-only); a release
+  every two weeks (window: PLAN Q8); `docs/ops/ONBOARDING.md` from the
+  mahalaxmi go-live; a written price (PLAN Q2). *Delpat*
+- **Help desk** (Work OS #129) — what it is waits on PLAN Q1; recommended:
+  report a problem to Delpat from inside the app.
+- **Collapsible sidebar** (Work OS #130) — ride in a release, never its own. *owner*
+- **Catalog, steps 1–2** (Work OS #131) — proposed for weeks 5–8 in PLAN; still
+  in `PARKED.md` until Om answers PLAN Q5.
 
 ## Small
 
@@ -62,10 +72,6 @@ _Nothing picked._
 - The app has never stored an audit-chain check (`audit_checks` empty); the
   chain verifies clean, 7 chains, 13,941 rows.
 - `.env` lines split on `\n` only; check `grep -c $'\r' .env` on EC2 first.
-- The phone lead record has no Done for a booked meeting; only Today's row and
-  the history's Add outcome finish one (`FollowUpDoneModal` is ready to add).
-- The history's Add outcome on a booked site visit closes it with no photo or
-  GPS; Today's row sends visits to visit proof. Decide whether history should too.
 - The dev R2 bucket's CORS refuses `localhost:5190` (builder ports), so visit
   proof cannot upload from a builder's frontend.
 

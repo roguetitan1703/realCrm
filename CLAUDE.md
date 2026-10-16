@@ -193,6 +193,7 @@ the system is deployed. Then `docs/BACKLOG.md`.
 |---|---|---|
 | `CLAUDE.md` | How to work here. Rules only, no incidents, no backlog | Rarely. Fold, don't append |
 | `docs/STATE.md` | **Where the last session left the system.** Deployed vs committed, what is waiting on the user, what was checked against the live database | **Overwritten every session** |
+| `docs/PLAN.md` | **The order of work** for the next weeks, from the latest usage snapshot (`docs/usage-*.md`); its §6 holds the user's open decisions | When a plan is reviewed; BACKLOG follows it |
 | `docs/BACKLOG.md` | **The one list** — Now, Next, Small, Bugs, To verify, Bigger pieces. One line per item; detail lives in a spec or the commit | Every session that finds, picks or ships something |
 | `docs/PARKED.md` | Set aside — **Later** or **Declined** — with the numbers, so it is not rediscovered or "fixed" | When something is set aside; picking it up moves it to BACKLOG |
 | `docs/incidents.md` | What the six shapes actually cost | When a rule needs its evidence |

@@ -13,6 +13,27 @@ recorded, update it in place rather than adding a second entry.
 
 ---
 
+## Declined for now — the plan of 17 Oct (`PLAN.md` §2)
+
+No number from either firm asks for these; reopen with one.
+
+- **The "Phase 2" list** (Work OS note): qualifier bot, click-to-WhatsApp ads,
+  campaigns and broadcasts, drips, Instagram comment-to-DM, AI reply
+  suggestions, WhatsApp calling, Android call-to-lead card. Each waits on a
+  Meta approval Delpat does not have.
+- **Meta track B (build)** — Later, gated: no build before Meta verifies
+  Delpat. Track A (paperwork, #101–#106) runs on Om's time. This replaces the
+  30 Sep line below that ruled the WhatsApp Business API out because the firms
+  will not pay: the bet now is client #3 onwards, not the two firms.
+- **Skeletons, pagination restyle, group-by as kanban** — no number behind them.
+- **Property import: a default sale/rent for the file** — lead import is 0 at
+  both firms; no new work on import, agreements, units, calendar, email or
+  verification (0–3 uses ever). Keep them working; add nothing; remove nothing.
+- **Pushing bhumi to call its 1,324 imported owners** (0 calls) — ask once
+  whether they meant to.
+
+---
+
 ## Updates to a flat's owner, and one person across roles (parked 30 Sep)
 
 **What is missing.** (1) A landlord hears nothing about their flat between
