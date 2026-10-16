@@ -1,0 +1,19 @@
+{
+  "_about": "Gujarat: the Indian market, with Gujarati names and agents writing Gujarati in Latin script. Everything else comes from india.json. The names and phrases are the ones the Vadodara broker's profiling gave (vadodara.json); the showcase and film profiles name their own.",
+  "extends": "india",
+  "_sources": [
+    { "what": "Gujarati names and Gujarati-in-Latin-script notes", "url": "backend/src/scripts/demo-profiles/vadodara.json", "note": "from the Vadodara broker's profiling, not a frequency source" }
+  ],
+  "people": {
+    "first": ["Hardik", "Chirag", "Bhavin", "Ketan", "Mehul", "Jayesh", "Parth", "Viral", "Darshan", "Sagar", "Hetal", "Nisha", "Riddhi", "Foram", "Payal", "Krina", "Rakesh", "Alpesh", "Sanjay", "Manish"],
+    "last": ["Patel", "Shah", "Desai", "Mehta", "Parikh", "Joshi", "Trivedi", "Pandya", "Bhatt", "Thakkar", "Amin", "Solanki", "Chauhan", "Rana", "Soni", "Modi", "Panchal", "Vyas"]
+  },
+  "phrases": {
+    "call": ["not ans", "call cut", "busy hatu", "switch off", "sanje 7 pachi call karvano"],
+    "remark": ["site joi lidhi, rate vadhare lage che", "company lease par levu che, documents mangya", "owner 11 mahina nu agreement j karse", "deposit 3 mahina nu, negotiable"],
+    "callback": ["kale savare call karo", "sanje 7 pachi", "monday e call karo"],
+    "owner": ["office khali che, tenant joie che", "flat bhade aapvo che, family ne j"],
+    "visitNote": "site par malvanu",
+    "keyReceived": "chavi office ma aapi didhi"
+  }
+}

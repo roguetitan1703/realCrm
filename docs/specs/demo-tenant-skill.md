@@ -1,8 +1,9 @@
 # Draft skill: `demo-tenant`
 
 Draft, 17 Oct 2026. The design is `demo-tenants.md` §8. It becomes a skill
-(in `Delpat-Tech/delpat-skills`, beside `tutorial-videos`) once `--market`
-and `--tick` exist; until then, steps marked *(planned)* do not run.
+(in `Delpat-Tech/delpat-skills`, beside `tutorial-videos`) once `--tick`
+exists; until then, steps marked *(planned)* do not run. Market presets are
+built (`demo-profiles/markets/`: `us`, `india`, `gujarat`).
 
 ---
 
@@ -46,10 +47,19 @@ their own reset (`tutorial-videos`), or anything on `bhumi` or `mahalaxmi`.
 ## What it does
 
 1. Write the profile `backend/src/scripts/demo-profiles/<name>.json` from the
-   answers. `slug` starts `demo-`. A market preset fills everything the person
-   did not name; the profile overrides the preset field by field.
-2. Plan, and show the plan to the person:
-   `npx tsx backend/src/scripts/seed-demo-tenant.ts --profile=<name> --env=<env>`
+   answers. `slug` starts `demo-`; `market.preset` names the market. The preset
+   fills everything the person did not name (currency, phones, names,
+   sources, sizes, notes, hours); the profile overrides it field by field.
+   **What the profile adds is researched, not guessed:** real neighbourhood
+   names with coordinates, price bands from a public source (MLS report,
+   rent index, ZIP medians) and a `priceIndex` per neighbourhood. Every
+   number goes in `_sources` with its URL, or is marked ESTIMATE.
+   `film-us.json` (Austin) is the worked example. A new market is a new
+   preset file, researched the same way.
+2. Plan, and show the plan to the person, with a sample of leads and listings:
+   `npx tsx backend/src/scripts/seed-demo-tenant.ts --profile=<name> --env=<env> --sample=10`
+   (`--offline` plans without a database). Check each agent's to-do line: the
+   flows the pitch needs must be on it at the time of day it will be built.
 3. On a yes, build. Photos need `npm run dev` running, or `--no-photos`:
    `... --write` (production: `--env=production --confirm=<slug>`).
 4. If kept fresh: install the daily job *(planned)*: `... --tick`, see the spec.
@@ -89,7 +99,7 @@ their own reset (`tutorial-videos`), or anything on `bhumi` or `mahalaxmi`.
 | Contacts → Tenants → Ending in 30 days | owner | 3 to 5 agreements |
 | A lead | agent | shortlist, matching flats, history in order |
 | Settings → Connections | owner | Website connection with a key and deliveries in its inbox |
-| Money and phones | any | the market's currency and phone format everywhere (US needs spec §8.2 shipped) |
+| Money and phones | any | the market's currency and phone format everywhere; `crm_settings.locale` holds the preset's (US needs the app to read it, spec §8.2) |
 
 Measure, do not eyeball: count rows per tab with a read-only query
 (`default_transaction_read_only`) and compare with the screen.

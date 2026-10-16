@@ -1,0 +1,32 @@
+{
+  "_about": "What is true of the Indian market as a whole. A profile sits on this (market.preset) and overrides any field. These values are what seed-demo-tenant.ts did before presets existed, so every Indian profile builds exactly as it did. Names and phrases here are used only by a profile that names none of its own.",
+  "_sources": [
+    { "what": "Portal names 99acres, MagicBricks, Housing.com as the default enquiry sources", "url": "docs/specs/demo-tenants.md", "note": "carried from the Vadodara profiling; no share data, so they are equally likely" },
+    { "what": "11-month rent agreement, deposit 2 to 3 months", "url": "docs/specs/demo-tenants.md §8.2", "note": "carried from the Vadodara broker's profiling, not a published statistic" },
+    { "what": "Office hours 10:00 to 19:30 India time", "url": "backend/src/scripts/seed-demo-tenant.ts (before presets)", "note": "estimate carried from the existing generator" },
+    { "what": "Pan-India name pool", "url": null, "note": "ESTIMATE: common names, not drawn from a frequency source. A city profile should give its own." }
+  ],
+  "locale": { "country": "IN", "currency": "INR", "numberLocale": "en-IN", "phoneCountry": "91", "rooms": "bhk" },
+  "timezone": "Asia/Kolkata",
+  "hours": { "start": 10, "end": 19.5 },
+  "weekOff": [],
+  "phone": { "scheme": "in" },
+  "rounding": { "rent": 500, "sale": 50000, "budget": { "rent": 1000, "sale": 100000 } },
+  "furnish": ["none", "semi", "semi", "full"],
+  "lease": { "days": 334, "depositMonths": ["2", "3"] },
+  "officeSalePerSqft": [6500, 9500],
+  "ownerReject": ["Already let out", "Selling, not renting", "Not now"],
+  "sources": ["99acres", "MagicBricks", "Housing.com", "Walk-in", "Referral", "Website"],
+  "people": {
+    "first": ["Rahul", "Amit", "Vikram", "Suresh", "Arjun", "Rohit", "Sandeep", "Manoj", "Priya", "Neha", "Pooja", "Anjali", "Kavita", "Sneha", "Ritu", "Deepak", "Ankit", "Karan", "Meera", "Swati"],
+    "last": ["Sharma", "Verma", "Gupta", "Singh", "Kumar", "Iyer", "Nair", "Reddy", "Rao", "Kulkarni", "Joshi", "Mehta", "Patel", "Das", "Banerjee", "Mishra", "Agarwal", "Menon"]
+  },
+  "phrases": {
+    "call": ["not ans", "call cut kiya", "busy hai, baad mein", "switch off", "shaam 7 ke baad call karo"],
+    "remark": ["site dekhi, rent zyada bola", "company lease, documents maange", "11 mahine ka agreement chahiye", "deposit 3 mahine, baat ho sakti hai"],
+    "callback": ["kal subah call karo", "shaam 7 ke baad", "Monday ko call karo"],
+    "owner": ["flat khali hai, tenant chahiye", "rent pe dena hai, family only"],
+    "visitNote": "site pe milna",
+    "keyReceived": "chabi office mein de di"
+  }
+}

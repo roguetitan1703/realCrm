@@ -13,6 +13,15 @@
  *   ... --delete                      remove it, rows and photos
  *   ... --channel=msedge             stamp photos in an installed browser (no Playwright download)
  *   --env=production needs --confirm=<slug> as well, every time.
+ *   ... --offline --sample=10         plan without a database, with sample leads and listings
+ *   ... --market=us                   build the profile on another market preset
+ *   ... --now=<iso> --dump=<file>     the whole plan as JSON, at a fixed moment (to diff two versions)
+ *
+ * MARKETS. A profile sits on a preset in demo-profiles/markets/ (us, india,
+ * gujarat): currency, phone numbering, names, sources, sizes, notes language,
+ * hours. The preset's `locale` and the timezone are written to the firm's
+ * settings, so the app shows the market. Every number in a preset or profile
+ * names its source in `_sources`, or says it is an estimate.
  *
  * WHAT IT WRITES, AND HOW. The firm is made by provisionTenant(), the console's
  * own path, so it can never take a slug that exists. Leads, owners, listings
@@ -41,7 +50,6 @@ const GEN = 'seed-demo-tenant';
 const PROTECTED = new Set(['bhumi', 'mahalaxmi', 'delpat', 'skyline-realty', 'test-org', 'tutorial', 'urban', 'raipur']);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DAY = 86400_000;
-const IST = 5.5 * 3600_000;
 
 const args: Record<string, string | true> = Object.fromEntries(process.argv.slice(2).map(a => {
   const [k, ...v] = a.replace(/^--/, '').split('=');
@@ -65,7 +73,30 @@ const MODE = args.write ? 'write' : args.refresh ? 'refresh' : args.delete ? 'de
 const profileName = typeof args.profile === 'string' ? args.profile : die('Name a profile: --profile=vadodara');
 const profilePath = path.join(HERE, 'demo-profiles', `${profileName}.json`);
 if (!fs.existsSync(profilePath)) die(`No profile at ${profilePath}`);
-const P: any = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+
+// ── The market: a preset the profile sits on ────────────────────────────────
+// demo-profiles/markets/<name>.json holds what is true of a whole market
+// (currency, phone numbering, names, listing sources, sizes, price bands, the
+// way agents write, hours). The profile names its market in `market.preset`
+// (or --market=) and overrides any field of it: objects merge key by key,
+// arrays and values replace. `_sources` from both are kept.
+const merge = (base: any, over: any, key = ''): any => {
+  if (key === '_sources' && Array.isArray(base) && Array.isArray(over)) return [...base, ...over];
+  if (over === null || typeof over !== 'object' || Array.isArray(over)) return over;
+  if (base === null || typeof base !== 'object' || Array.isArray(base)) return over;
+  const out: any = { ...base };
+  for (const k of Object.keys(over)) out[k] = merge(base[k], over[k], k);
+  return out;
+};
+function loadMarket(name: string): any {
+  const f = path.join(HERE, 'demo-profiles', 'markets', `${name}.json`);
+  if (!fs.existsSync(f)) die(`No market preset at ${f}`);
+  const m = JSON.parse(fs.readFileSync(f, 'utf8'));
+  return m.extends ? merge(loadMarket(m.extends), m) : m;
+}
+const RAW: any = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+const MARKET: string = typeof args.market === 'string' ? args.market : RAW.market?.preset || 'india';
+const P: any = merge(loadMarket(MARKET), RAW);
 const SLUG: string = P.slug;
 if (!/^demo-[a-z0-9-]+$/.test(SLUG || '')) die(`The profile's slug must start "demo-" (got "${SLUG}").`);
 if (PROTECTED.has(SLUG)) die(`"${SLUG}" is a real or fixture firm.`);
@@ -82,16 +113,32 @@ const roundTo = (n: number, step: number) => Math.round(n / step) * step;
 const shuffle = <T,>(a: T[]) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
 
 // ── Time: everything is relative to the moment it is built (the anchor) ─────
-const NOW = Date.now();
-const istMidnight = (daysAgo: number) => Math.floor((NOW + IST) / DAY) * DAY - IST - daysAgo * DAY;
-/** A moment on the IST day `daysAgo`, between two hours, never in the future. */
-function at(daysAgo: number, fromH = 10, toH = 19): Date | null {
-  const t = istMidnight(daysAgo) + (fromH + rnd() * (toH - fromH)) * 3600_000;
+const NOW = typeof args.now === 'string' ? Date.parse(args.now) : Date.now();
+// The market's clock. The offset is the zone's at the moment of the build:
+// a firm's history is 45 days long, and a daylight-saving change inside it
+// moves a few calls by an hour, which nobody reading a desk can see.
+const TZ: string = P.timezone || 'Asia/Kolkata';
+const ZONE = (() => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+    .formatToParts(new Date(NOW)).map(x => [x.type, x.value]));
+  const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+  return Math.round((asUtc - Math.floor(NOW / 1000) * 1000) / 60_000) * 60_000;
+})();
+// Office hours: when the desk opens and stops (19.5 is 7:30 pm).
+const H0: number = P.hours?.start ?? 10;
+const H1: number = P.hours?.end ?? 19.5;
+// Days of the week nobody works (0 is Sunday). Empty for a market that works all week.
+const WEEK_OFF = new Set<number>(P.weekOff || []);
+const weekOff = (t: Date) => WEEK_OFF.size > 0 && WEEK_OFF.has(new Date(t.getTime() + ZONE).getUTCDay());
+const localMidnight = (daysAgo: number) => Math.floor((NOW + ZONE) / DAY) * DAY - ZONE - daysAgo * DAY;
+/** A moment on the local day `daysAgo`, between two hours, never in the future. */
+function at(daysAgo: number, fromH = H0, toH = H1 - 0.5): Date | null {
+  const t = localMidnight(daysAgo) + (fromH + rnd() * (toH - fromH)) * 3600_000;
   return t < NOW - 120_000 ? new Date(t) : null;
 }
 const later = (d: Date, minMin: number, maxMin: number) => new Date(Math.min(d.getTime() + int(minMin, maxMin) * 60_000, NOW - 60_000));
-const dayOf = (d: Date) => Math.floor((NOW + IST) / DAY) - Math.floor((d.getTime() + IST) / DAY);
-const midnightOf = (ms: number) => Math.floor((ms + IST) / DAY) * DAY - IST;
+const dayOf = (d: Date) => Math.floor((NOW + ZONE) / DAY) - Math.floor((d.getTime() + ZONE) / DAY);
+const midnightOf = (ms: number) => Math.floor((ms + ZONE) / DAY) * DAY - ZONE;
 /**
  * OFFICE HOURS. A call logged at 5:43 am reads as made up to anyone who has
  * run a desk. Night and early morning fold into the first half hour of the
@@ -100,43 +147,73 @@ const midnightOf = (ms: number) => Math.floor((ms + IST) / DAY) * DAY - IST;
  */
 function working(t: Date | null): Date | null {
   if (!t) return null;
-  const ms = t.getTime(), h = ((ms + IST) % DAY) / 3600_000, m0 = midnightOf(ms);
-  // Last night first (10:00 to 10:15), then this morning (10:15 to 10:30).
-  const out = h < 10 ? m0 + (10.25 + (h / 10) * 0.25) * 3600_000
-    : h > 19.5 ? m0 + DAY + (10 + ((h - 19.5) / 4.5) * 0.25) * 3600_000
+  const ms = t.getTime(), h = ((ms + ZONE) % DAY) / 3600_000, m0 = midnightOf(ms);
+  // Last night first (opening to +15 min), then this morning (+15 to +30).
+  const out = h < H0 ? m0 + (H0 + 0.25 + (h / H0) * 0.25) * 3600_000
+    : h > H1 ? m0 + DAY + (H0 + ((h - H1) / (24 - H1)) * 0.25) * 3600_000
     : ms;
   return out < NOW - 60_000 ? new Date(out) : null;
 }
 /** A working moment that has already passed, within the last day or so. */
-const pastSlot = () => working(new Date(NOW - int(2, 26) * 3600_000)) ?? at(1, 10, 19)!;
+const pastSlot = () => working(new Date(NOW - int(2, 26) * 3600_000)) ?? at(1)!;
 /** A working moment still to come today, or null when the day is over. */
 function todaySlot(): Date | null {
-  const from = Math.max(NOW + 45 * 60_000, midnightOf(NOW) + 10 * 3600_000), to = midnightOf(NOW) + 19 * 3600_000;
+  const from = Math.max(NOW + 45 * 60_000, midnightOf(NOW) + H0 * 3600_000), to = midnightOf(NOW) + (H1 - 0.5) * 3600_000;
   return from < to ? new Date(from + rnd() * (to - from)) : null;
 }
-const soonSlot = () => new Date(midnightOf(NOW) + int(1, 3) * DAY + pick([11, 12, 15, 16, 17, 18]) * 3600_000);
+const soonSlot = () => new Date(midnightOf(NOW) + int(1, 3) * DAY + (H0 + pick([1, 2, 5, 6, 7, 8])) * 3600_000);
 
 // ── People and numbers ──────────────────────────────────────────────────────
+/** One of [value, weight] pairs, in proportion to the weights. */
+const pickW = <T,>(pairs: [T, number][]): T => {
+  let r = rnd() * pairs.reduce((s, [, w]) => s + w, 0);
+  for (const [v, w] of pairs) if ((r -= w) <= 0) return v;
+  return pairs[pairs.length - 1][0];
+};
 const usedNames = new Set<string>();
+// `people.groups` mixes name pools the way a metro is mixed: a first name and
+// a surname come from the same group, so nobody is called "Wei Hernandez" by
+// accident. Without groups, one pool (the Gujarat profiles).
+// A profile that names its own first and last names replaces the market's groups.
+const NAMES = RAW.people?.first ? RAW.people : P.people;
+const oneName = () => {
+  const g = NAMES.groups ? pickW(NAMES.groups.map((x: any) => [x, x.share] as [any, number])) : NAMES;
+  return `${pick(g.first)} ${pick(g.last)}`;
+};
 function person(): string {
   for (let i = 0; i < 50; i++) {
-    const n = `${pick(P.people.first)} ${pick(P.people.last)}`;
+    const n = oneName();
     if (!usedNames.has(n)) { usedNames.add(n); return n; }
   }
-  return `${pick(P.people.first)} ${pick(P.people.last)}`;
+  return oneName();
 }
 const usedPhones = new Set<string>();
-// "phones": "fiction" keeps every number in the 99555 block seed-dev uses, for a
-// firm whose screens are shown outside Delpat: a random mobile number is
-// somebody's, and a screenshot on a public page would print it.
+// "phones": "fiction" keeps every number in a block nobody answers, for a firm
+// whose screens are shown outside Delpat: a random mobile number is somebody's,
+// and a screenshot on a public page would print it. India: the 99555 block
+// seed-dev uses. North America (`phone.scheme: "nanp"`): 555-0100 to 555-0199,
+// the only range reserved for fiction, in every area code the preset weights;
+// there is no safe random US number, so that market is always fiction.
 function phone(): string {
-  for (;;) {
-    const p = P.phones === 'fiction'
-      ? `+9199555${String(int(0, 99999)).padStart(5, '0')}`
-      : `+91${pick(['9', '8', '7', '6'])}${String(int(100000000, 999999999))}`;
+  const scheme = P.phone?.scheme || 'in';
+  for (let i = 0; i < 20000; i++) {
+    const p = scheme === 'nanp'
+      ? `+1${pickW(P.phone.areaCodes)}55501${String(int(0, 99)).padStart(2, '0')}`
+      : P.phones === 'fiction'
+        ? `+9199555${String(int(0, 99999)).padStart(5, '0')}`
+        : `+91${pick(['9', '8', '7', '6'])}${String(int(100000000, 999999999))}`;
     if (!usedPhones.has(p)) { usedPhones.add(p); return p; }
   }
+  return die(`Ran out of unused numbers after ${usedPhones.size}: give the market preset more area codes.`);
 }
+const MONEY = new Intl.NumberFormat(P.locale?.numberLocale || 'en-IN', { style: 'currency', currency: P.locale?.currency || 'INR', maximumFractionDigits: 0 });
+// The short form agents type: "$450K", "$1.2M"; ₹ in lakhs and crores.
+const shortMoney = (n: number) => P.locale?.currency === 'USD'
+  ? (n >= 1e6 ? `$${+(n / 1e6).toFixed(2)}M` : n >= 1e4 ? `$${Math.round(n / 1000)}K` : MONEY.format(n))
+  : (n >= 1e7 ? `${+(n / 1e7).toFixed(2)} Cr` : n >= 1e5 ? `${+(n / 1e5).toFixed(1)} L` : MONEY.format(n));
+/** A phrase with {budget}, {config}, {locality} filled from the lead it is about. */
+const fill = (s: string, req?: any) => !s || !s.includes('{') || !req ? s
+  : s.replace('{budget}', req.maxBudget ? shortMoney(req.maxBudget) : '').replace('{config}', req.config || '').replace('{locality}', req.locality || '');
 const locOf = (name: string) => P.localities.find((l: any) => l.name === name) || P.localities[0];
 const near = (loc: any) => ({ lat: +(loc.lat + (rnd() - 0.5) * 0.012).toFixed(6), lng: +(loc.lng + (rnd() - 0.5) * 0.012).toFixed(6) });
 
@@ -144,17 +221,35 @@ const near = (loc: any) => ({ lat: +(loc.lat + (rnd() - 0.5) * 0.012).toFixed(6)
 // THE PLAN — pure data, no database. Plan mode prints it; write mode builds it.
 // ============================================================================
 type Kind = 'office' | 'shop' | 'warehouse' | 'flat';
-interface UnitPlan { key: string; kind: Kind; data: any; createdAt: Date; lane: Kind; photos: number; deal: 'rent' | 'sale'; locality: string; price: number }
+interface UnitPlan { key: string; kind: Kind; data: any; createdAt: Date; lane: Kind; photos: number; deal: 'rent' | 'sale'; locality: string; price: number; agent?: string }
 interface EventPlan { type: string; title: string; description: string; author: string | null; at: Date; metadata?: any }
-interface LeadPlan { key: string; name: string; phone: string; source: string; stage: string; lane: Kind; req: any; createdAt: Date;
+interface LeadPlan { key: string; name: string; phone: string; source: string; stage: string; lane: Kind; req: any; createdAt: Date; agent?: string;
   events: EventPlan[]; followUp?: any; overdue?: boolean; rejection?: string; visit?: { at: Date; remark: string };
   close?: { kind: 'rent' | 'sale'; at: Date; endsInDays: number } }
-interface OwnerPlan { key: string; data: any; lane: Kind; assign: boolean; createdAt: Date; stage: string; callbackAt?: Date; callbackNote?: string; events: EventPlan[]; rejection?: string }
+interface OwnerPlan { key: string; data: any; lane: Kind; assign: boolean; createdAt: Date; stage: string; callbackAt?: Date; callbackNote?: string; events: EventPlan[]; rejection?: string; agent?: string }
 
 const TEAM = P.team as { name: string; role: string; email?: string; works?: string }[];
-const laneOfWorks = (w = ''): Kind | null => /office|shop/i.test(w) ? 'office' : /warehouse|industrial/i.test(w) ? 'warehouse' : /resident|flat/i.test(w) ? 'flat' : null;
+const laneOfWorks = (w = ''): Kind | null => /office|shop/i.test(w) ? 'office' : /warehouse|industrial/i.test(w) ? 'warehouse'
+  : /resident|flat|home|buyer|listing|seller|rental|leas/i.test(w) ? 'flat' : null;
 const AGENTS = TEAM.filter(t => t.role === 'agent');
-const agentFor = (lane: Kind) => (AGENTS.find(a => laneOfWorks(a.works) === (lane === 'shop' ? 'office' : lane)) || AGENTS[0]).name;
+/**
+ * Who works it. One agent per kind of space (the Gujarat firms), or several
+ * on homes split the way a US team is: a buyer's agent takes the people
+ * buying, a listing agent the homes for sale and the owners being prospected,
+ * a leasing agent everything for rent ("works": "buyers" / "listings" / "rentals").
+ */
+// Several agents doing the same work take it in turn (two who both work
+// "buyers"), so nobody's desk is empty.
+const turn: Record<string, number> = {};
+function agentFor(lane: Kind, ctx: { deal?: string; side?: 'lead' | 'unit' | 'owner' } = {}): string {
+  const inLane = AGENTS.filter(a => laneOfWorks(a.works) === (lane === 'shop' ? 'office' : lane));
+  if (inLane.length > 1) {
+    const want = ctx.deal === 'rent' ? /rent|leas/i : ctx.side === 'lead' ? /buyer/i : /listing|seller/i;
+    const hits = inLane.filter(a => want.test(a.works || ''));
+    if (hits.length) { const k = String(want); turn[k] = (turn[k] ?? -1) + 1; return hits[turn[k] % hits.length].name; }
+  }
+  return (inLane[0] || AGENTS[0]).name;
+}
 const idleToday: string | null = P.story?.idleToday || AGENTS.find(a => laneOfWorks(a.works) === 'warehouse')?.name || null;
 // Days (0 today, 1 yesterday, …) on which a named person did nothing at all:
 // `story.offDays: { "Name": [2, 4] }`. A week where everyone worked every day
@@ -162,6 +257,22 @@ const idleToday: string | null = P.story?.idleToday || AGENTS.find(a => laneOfWo
 // slipping. Same days every run.
 const offDays: Record<string, number[]> = P.story?.offDays || {};
 const isOff = (who: string | null, t: Date) => !!who && (offDays[who] || []).includes(dayOf(t));
+
+// Rounding of a price as a broker quotes it, by deal, and of a lead's budget.
+const ROUND = { rent: 500, sale: 50000, ...(P.rounding || {}), budget: { rent: 1000, sale: 100000, ...(P.rounding?.budget || {}) } };
+// Homes sold by type (`homes`, the US preset): single-family, condo, townhouse,
+// each with its own sizes and price bands. Absent, a residential unit is a flat
+// in a project or an independent rental (the Gujarat profiles).
+const HOMES: Record<string, any> | null = P.homes || null;
+const residentialLocalities = () => P.localities.filter((l: any) => l.kind !== 'industrial' && l.kind !== 'commercial');
+// What a neighbourhood does to a price: `priceIndex` is its sale median over
+// the city's; rents spread less than sale prices, so a rent moves by its square
+// root unless the locality gives its own `rentIndex` (an estimate, said so in
+// the preset).
+const placeIndex = (loc: any, deal: string) => deal === 'sale' ? (loc.priceIndex ?? 1) : (loc.rentIndex ?? Math.sqrt(loc.priceIndex ?? 1));
+const sizeOf = (bhk: string) => int(...((P.sizes || { '1': [450, 600], '2': [800, 1050], '3': [1250, 1600] })[bhk] as [number, number] || [800, 1050]));
+// Baths per bedroom count, as the market lists them; India counts one each.
+const bathsOf = (bhk: string) => (P.baths?.[bhk] ? pick(P.baths[bhk] as number[]) : Number(bhk));
 
 function plan() {
   const volume = P.volume || { leads: 180, owners: 260, units: 140 };
@@ -178,10 +289,12 @@ function plan() {
   };
   want.shop = comN - want.office - want.warehouse;
   let seq = 0;
-  const rentOf = (range: number[], area: number) => roundTo(area * (range[0] + rnd() * (range[1] - range[0])), 500);
-  const furnish = () => pick(['none', 'semi', 'semi', 'full']);
+  // Commercial rent per sqft: per month in India, per year in the US.
+  const perMonth = P.commercialRentPer === 'year' ? 1 / 12 : 1;
+  const rentOf = (range: number[], area: number) => roundTo(area * (range[0] + rnd() * (range[1] - range[0])) * perMonth, ROUND.rent);
+  const furnish = () => pick(P.furnish || ['none', 'semi', 'semi', 'full']);
   const status = () => (chance(0.06) ? 'Blocked' : chance(0.04) ? 'Token Pending' : 'Available');
-  const made = (daysAgo: number) => new Date(istMidnight(daysAgo) + int(10, 18) * 3600_000);
+  const made = (daysAgo: number) => new Date(localMidnight(daysAgo) + int(H0, H0 + 8) * 3600_000);
   // One listing per unit: A-502 listed three times is the first thing a broker
   // would notice.
   const taken = new Set<string>();
@@ -200,7 +313,7 @@ function plan() {
     if (!unitNo) continue;
     const floor = Number(unitNo.slice(0, -2));
     const deal = chance(0.12) ? 'sale' : 'rent';
-    const price = deal === 'rent' ? rentOf(pj.rentPerSqft, area) : roundTo(area * int(6500, 9500), 50000);
+    const price = deal === 'rent' ? rentOf(pj.rentPerSqft, area) : roundTo(area * int(...(P.officeSalePerSqft || [6500, 9500]) as [number, number]), ROUND.sale);
     units.push({ key: `u${seq++}`, kind: 'office', lane: 'office', deal, locality: pj.locality, price, photos: chance(0.75) ? int(2, 3) : 0, createdAt: made(int(2, 60)),
       data: { category: 'commercial', subtype: 'office', deal, project: pj.name, society: pj.name, builder: pj.builder, tower, unit: unitNo,
         floor: String(floor), totalFloors: pj.floors, carpet: area, areaUnit: 'sqft', furnishType: furnish(), locality: pj.locality, price, status: status(),
@@ -230,38 +343,73 @@ function plan() {
       data: { category: 'commercial', subtype: 'shop', deal: 'rent', project: pj?.name || null, society: pj?.name || null, tower: pj ? pj.towers[0] : null,
         unit: pj ? `G${String(i + 1).padStart(2, '0')}` : null, floor: 'ground', carpet: area, areaUnit: 'sqft', furnishType: 'none', locality, price, status: status(), ...near(locOf(locality)) } });
   }
-  // Flats: few, which is the point in a city where people need them.
+  // Homes. In a Gujarat city few flats, which is the point where people need
+  // them; in a US metro, most of the book.
   const resProjects = byKind('residential');
   const indep = P.independent?.residentialRent || {};
+  const saleShare = P.market?.deal?.sale ?? 0.2;
+  const inProjectShare = P.market?.inProject ?? 0.7;
+  // US fair housing law forbids a listing that prefers families (or anyone):
+  // no "family only" there. The deposit is counted in months of rent.
+  const extras = (deal: string) => ({
+    ...(P.balconies === false ? {} : { balconies: int(1, 2) }),
+    ...(P.fairHousing ? {} : { preferredTenants: chance(0.5) ? ['family'] : [] }),
+    ...(deal === 'rent' ? { depositOption: pick(P.lease?.depositMonths || ['2', '3']) } : {}),
+  });
+  const typeLabel = (config: string, label?: string) => (label ? `${config} ${label}` : undefined);
   for (let i = 0; i < want.flat; i++) {
-    const inProject = i < Math.round(want.flat * 0.7);
+    const inProject = i < Math.round(want.flat * inProjectShare);
+    if (!inProject && HOMES) { units.push(home(`u${seq++}`)); continue; }
     const pj = inProject ? resProjects[i % resProjects.length] : null;
     const configs = pj ? Object.keys(pj.configs) : Object.keys(indep);
     const config = pick(configs);
     const band = pj ? pj.configs[config] : indep[config];
-    const deal: 'rent' | 'sale' = band.sale && chance(0.2) ? 'sale' : 'rent';
+    const deal: 'rent' | 'sale' = band.sale && (!band.rent || chance(saleShare)) ? 'sale' : 'rent';
     const bhk = config.match(/\d/)?.[0] || '2';
-    const area = int(...({ '1': [450, 600], '2': [800, 1050], '3': [1250, 1600] }[bhk] as [number, number] || [800, 1050]));
-    const price = deal === 'rent' ? roundTo(int(band.rent[0], band.rent[1]), 500) : roundTo(int(band.sale[0], band.sale[1]), 50000);
-    const locality = pj ? pj.locality : pick(P.localities.filter((l: any) => l.kind !== 'industrial' && l.kind !== 'commercial').map((l: any) => l.name) as string[]);
+    const area = sizeOf(bhk);
+    const price = deal === 'rent' ? roundTo(int(band.rent[0], band.rent[1]), ROUND.rent) : roundTo(int(band.sale[0], band.sale[1]), ROUND.sale);
+    const locality = pj ? pj.locality : pick(residentialLocalities().map((l: any) => l.name) as string[]);
     const flatTower = pj ? pick(pj.towers) as string : null;
     const flatNo = pj ? freeUnit(`${pj.name}|${flatTower}`, () => `${int(1, pj.floors)}0${int(1, pj.perFloor)}`) : null;
     if (pj && !flatNo) continue;
     const floor = flatNo ? Number(flatNo.slice(0, -2)) : int(1, 4);
+    const sub = pj?.subtype ? HOMES?.[pj.subtype] : null;
     units.push({ key: `u${seq++}`, kind: 'flat', lane: 'flat', deal, locality, price, photos: chance(0.85) ? int(3, 4) : 0, createdAt: made(int(1, 40)),
-      data: { category: 'residential', subtype: 'apartment', bhk, deal, project: pj?.name || null, society: pj?.name || null, builder: pj?.builder || null,
+      data: { category: 'residential', subtype: sub?.subtype || 'apartment', ...(sub ? { type: typeLabel(config, sub.label) } : {}), bhk, deal,
+        project: pj?.name || null, society: pj?.name || null, builder: pj?.builder || null,
         tower: flatTower, unit: flatNo, floor: String(floor), totalFloors: pj?.floors ?? 4,
-        carpet: area, areaUnit: 'sqft', furnishType: furnish(), locality, price, status: status(), bathrooms: Number(bhk), balconies: int(1, 2),
-        preferredTenants: chance(0.5) ? ['family'] : [], ...(deal === 'rent' ? { depositOption: pick(['2', '3']) } : {}), ...near(locOf(locality)) } });
+        carpet: area, areaUnit: 'sqft', furnishType: furnish(), locality, price, status: status(), bathrooms: bathsOf(bhk),
+        ...extras(deal), ...near(locOf(locality)) } });
+  }
+  // A house, townhouse or condo on its own, priced by its neighbourhood.
+  function home(key: string): UnitPlan {
+    const type = pickW(Object.entries(HOMES!).map(([k, h]: any) => [k, h.share] as [string, number]));
+    const h = HOMES![type];
+    const config = pickW(Object.entries(h.configs).map(([c, b]: any) => [c, b.share ?? 1] as [string, number]));
+    const band = h.configs[config];
+    const deal: 'rent' | 'sale' = band.sale && band.rent ? (chance(saleShare) ? 'sale' : 'rent') : band.sale ? 'sale' : 'rent';
+    const where = residentialLocalities().filter((l: any) => !h.localities || h.localities.includes(l.kind));
+    const loc = pickW(where.map((l: any) => [l, l.weight ?? 1] as [any, number]));
+    const bhk = config.match(/\d/)?.[0] || '2';
+    const price = roundTo(int(band[deal][0], band[deal][1]) * placeIndex(loc, deal), ROUND[deal]);
+    const area = roundTo(int(...(h.sqft[bhk] as [number, number])), 10);
+    return { key, kind: 'flat', lane: 'flat', deal, locality: loc.name, price, photos: chance(0.85) ? int(3, 4) : 0, createdAt: made(int(1, 40)),
+      data: { category: 'residential', subtype: h.subtype, type: typeLabel(config, h.label), bhk, deal, project: null, society: null, builder: null,
+        tower: null, unit: null, floor: null, totalFloors: pick(h.storeys || [1, 2]),
+        carpet: area, areaUnit: 'sqft', furnishType: furnish(), locality: loc.name, price, status: status(), bathrooms: bathsOf(bhk),
+        ...extras(deal), ...near(loc) } };
   }
   for (const u of units) {
     u.data.owner = person(); u.data.ownerPhone = phone();
     if (u.data.status === 'Available' && u.deal === 'rent' && chance(0.5)) u.data.availableFrom = new Date(NOW + int(0, 30) * DAY).toISOString().slice(0, 10);
+    u.agent = agentFor(u.lane, { deal: u.deal, side: 'unit' });
   }
 
   // ── Leads: what people asked for, and how far each one got ────────────────
   const demand = P.market?.demand || { commercial: 0.45, residential: 0.55 };
-  const SOURCES = P.sources || ['99acres', 'MagicBricks', 'Housing.com', 'Walk-in', 'Referral', 'Website'];
+  // Sources as names (equally likely) or [name, weight] pairs (the market's real mix).
+  const SOURCES: (string | [string, number])[] = P.sources || ['99acres', 'MagicBricks', 'Housing.com', 'Walk-in', 'Referral', 'Website'];
+  const source = () => (Array.isArray(SOURCES[0]) ? pickW(SOURCES as [string, number][]) : pick(SOURCES as string[]));
   const MIX: [string, number, string?][] = [
     ['New', 0.06, 'fresh'], ['New', 0.03, 'slipped'], ['Call Not Received', 0.10], ['Callback', 0.08],
     ['Follow-Up', 0.24], ['Interested', 0.18], ['Site Visit', 0.09], ['Deal Closed', 0.07], ['Rejected', 0.15],
@@ -279,13 +427,24 @@ function plan() {
   for (const [stage, flag] of shuffle(rows)) {
     const residential = chance(demand.residential);
     const lane: Kind = residential ? 'flat' : pick(['office', 'office', 'warehouse', 'shop'] as Kind[]);
-    const agent = agentFor(lane);
     const ageR = flag === 'fresh' ? [0, 0] : flag === 'slipped' ? [2, 3] : AGE[stage];
-    const created = flag === 'fresh' ? at(0, 8, Math.max(9, Math.min(19, (NOW + IST) % DAY / 3600_000)))
-      ?? new Date(NOW - int(20, 90) * 60_000) : new Date(istMidnight(int(ageR[0], ageR[1])) + int(9, 20) * 3600_000);
+    const created = flag === 'fresh' ? at(0, H0 - 2, Math.max(H0 - 1, Math.min(H1 - 0.5, (NOW + ZONE) % DAY / 3600_000)))
+      ?? new Date(NOW - int(20, 90) * 60_000) : new Date(localMidnight(int(ageR[0], ageR[1])) + int(H0 - 1, H0 + 10) * 3600_000);
     const createdAt = created.getTime() > NOW ? new Date(NOW - 30 * 60_000) : created;
     let req: any;
-    if (lane === 'flat') {
+    if (lane === 'flat' && HOMES) {
+      // A buyer or a renter, for a kind of home, priced where they want to live.
+      const type = pickW(Object.entries(HOMES).map(([k, h]: any) => [k, h.leadShare ?? h.share] as [string, number]));
+      const h = HOMES[type];
+      const config = pickW(Object.entries(h.configs).map(([c, b]: any) => [c, b.share ?? 1] as [string, number]));
+      const band = h.configs[config];
+      const deal = band.sale && band.rent ? (chance(P.market?.leadDeal?.sale ?? 0.5) ? 'sale' : 'rent') : band.sale ? 'sale' : 'rent';
+      const where = residentialLocalities().filter((l: any) => !h.localities || h.localities.includes(l.kind));
+      const loc = pickW(where.map((l: any) => [l, l.weight ?? 1] as [any, number]));
+      const budget = roundTo(int(band[deal][0], band[deal][1]) * placeIndex(loc, deal) * 1.05, ROUND.budget[deal as 'rent' | 'sale']);
+      req = { deal, category: 'residential', subtype: h.subtype, config, locality: loc.name, maxBudget: budget };
+      req.notes = fill(pick(Array.isArray(R) ? R : R[deal] || []) || '', req) || null;
+    } else if (lane === 'flat') {
       const config = pick(['1 BHK', '2 BHK', '2 BHK', '2 BHK', '3 BHK']);
       const bands = P.independent?.residentialRent?.[config]?.rent || [9000, 20000];
       const budget = roundTo(int(bands[0], bands[1]) * 1.1, 1000);
@@ -299,7 +458,8 @@ function plan() {
         maxBudget: like ? roundTo(like.price * (0.9 + rnd() * 0.5), 1000) : null,
         notes: pick(C.filter((c: string) => (sub === 'warehouse' ? /godown|shed|sqft/.test(c) : sub === 'shop' ? /shop/.test(c) : /office|ca firm/.test(c)))) || null };
     }
-    const L: LeadPlan = { key: `l${li++}`, name: person(), phone: phone(), source: pick(SOURCES), stage, lane, req, createdAt, events: [] };
+    const agent = agentFor(lane, { deal: req.deal, side: 'lead' });
+    const L: LeadPlan = { key: `l${li++}`, name: person(), phone: phone(), source: source(), stage, lane, req, createdAt, agent, events: [] };
     story(L, agent, flag);
     leads.push(L);
   }
@@ -309,7 +469,7 @@ function plan() {
   const owners: OwnerPlan[] = [];
   const unassignedProject: string | null = P.story?.unassignedProject || resProjects[resProjects.length - 1]?.name || null;
   const callingProjects = [...resProjects.map(p => ({ p, share: calling.residential / resProjects.length })),
-    ...offices.map(p => ({ p, share: calling.commercial / offices.length }))];
+    ...(calling.commercial ? offices : []).map(p => ({ p, share: calling.commercial / offices.length }))];
   // 'Callback' here is a plan, not a status: an owner who asked to be rung
   // back ends up Contacted with a callback time (ownerStory). Calling has had
   // no Callback status since 2026-09-23.
@@ -323,7 +483,7 @@ function plan() {
     // One project came in as a fresh list nobody has been given yet: the
     // owner's morning starts there.
     const fresh = p.name === unassignedProject;
-    const importedAt = new Date(istMidnight(fresh ? 1 : int(12, 30)) + 11 * 3600_000);
+    const importedAt = new Date(localMidnight(fresh ? 1 : int(12, 30)) + (H0 + 1) * 3600_000);
     const seen = new Set<string>();
     for (let i = 0; i < n; i++) {
       const tower = pick(p.towers as string[]);
@@ -335,8 +495,9 @@ function plan() {
       const stage = fresh ? 'New' : (() => { let r = rnd(); for (const [s, w] of O_MIX) { if ((r -= w) <= 0) return s; } return 'New'; })();
       const O: OwnerPlan = { key: `o${oi++}`, lane, assign: !fresh, createdAt: importedAt, stage, events: [],
         data: { name: person(), phone: phone(), project: p.name, tower, unitNo, config, locality: p.locality, source: 'Import',
-          carpetArea: isRes ? int(800, 1500) : roundTo(int(p.area?.[0] || 400, p.area?.[1] || 1500), 25) } };
-      ownerStory(O, agentFor(lane));
+          carpetArea: isRes ? int(...((P.ownerArea || [800, 1500]) as [number, number])) : roundTo(int(p.area?.[0] || 400, p.area?.[1] || 1500), 25) } };
+      O.agent = agentFor(lane, { side: 'owner' });
+      ownerStory(O, O.agent);
       owners.push(O);
     }
   }
@@ -348,7 +509,7 @@ function story(L: LeadPlan, agent: string, flag?: string) {
   const ev = (type: string, title: string, description: string, raw: Date | null, metadata?: any) => {
     const t = working(raw);
     if (!t) return null;
-    if ((agent === idleToday && dayOf(t) === 0) || isOff(agent, t)) return null;
+    if ((agent === idleToday && dayOf(t) === 0) || isOff(agent, t) || weekOff(t)) return null;
     L.events.push({ type, title, description, author: agent, at: t, metadata }); return t;
   };
   const call = (t: Date | null, outcome: string, remark?: string) => ev('call', 'Call', remark || 'Call initiated', t, { outcome, edited: true });
@@ -356,19 +517,19 @@ function story(L: LeadPlan, agent: string, flag?: string) {
   const phr = P.phrases || {};
   const c0 = L.createdAt;
   const first = later(c0, 12, 95);
-  const remark = () => (L.req.notes && chance(0.5) ? L.req.notes : pick(phr.remark || ['spoke, will share options']));
+  const remark = () => (L.req.notes && chance(0.5) ? L.req.notes : fill(pick(phr.remark || ['spoke, will share options']), L.req));
   const fuAt = (kind: 'overdue' | 'today' | 'soon') => kind === 'overdue' ? pastSlot()
     : kind === 'today' ? (todaySlot() ?? soonSlot())
     : soonSlot();
   const touchRecent = () => { // the open book gets worked: a touch in the last two days
-    const d = int(0, 2); const t = at(d, 10, 19);
+    const d = int(0, 2); const t = at(d);
     if (t && t > c0) { if (chance(0.6)) call(t, pick(['discussed', 'no_answer', 'callback', 'details_sent']), chance(0.4) ? remark() : undefined); else ev('whatsapp', 'WhatsApp', 'WhatsApp initiated', t, { outcome: 'wa_details_sent', edited: true }); }
   };
   const schedule = (action: string, kind: 'overdue' | 'today' | 'soon', note?: string) => {
     const when = fuAt(kind);
     L.followUp = { action, at: when.toISOString(), note: note || null };
     L.overdue = kind === 'overdue';
-    ev('follow_up', 'Scheduled', `${action}, ${when.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`,
+    ev('follow_up', 'Scheduled', `${action}, ${when.toLocaleString(P.locale?.numberLocale || 'en-IN', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`,
       later(first, 5, 120));
   };
 
@@ -413,15 +574,15 @@ function story(L: LeadPlan, agent: string, flag?: string) {
   }
   // Site Visit and Deal Closed: they went and saw it.
   const visit = new Date(Math.min(t2.getTime() + int(1, 4) * DAY, NOW - 3 * 3600_000));
-  visit.setTime(istMidnight(dayOf(visit)) + int(11, 17) * 3600_000);
+  visit.setTime(localMidnight(dayOf(visit)) + int(H0 + 1, H0 + 7) * 3600_000);
   if (visit.getTime() > NOW - 3600_000 || visit <= t2) visit.setTime(t2.getTime() + 3 * 3600_000);
   if (L.stage === 'Site Visit' && chance(0.35)) {
     // Booked, not yet happened: today or tomorrow.
-    schedule('Site Visit', chance(0.5) ? 'today' : 'soon', phr.visitNote || 'site par malvanu');
+    schedule('Site Visit', chance(0.5) ? 'today' : 'soon', phr.visitNote || 'Meet at the site');
     move(later(t2, 30, 300), 'Interested', 'Site Visit');
     return;
   }
-  L.visit = { at: working(visit) ?? new Date(t2.getTime() + 3 * 3600_000), remark: pick(phr.remark || ['site visit done']) };
+  L.visit = { at: working(visit) ?? new Date(t2.getTime() + 3 * 3600_000), remark: fill(pick(phr.remark || ['site visit done']), L.req) };
   move(later(visit, 20, 90), 'Interested', 'Site Visit');
   ev('remark', 'Remark', L.visit.remark, later(visit, 60, 240));
   if (L.stage === 'Site Visit') { touchRecent(); schedule('Follow-up Call', pick(['today', 'soon', 'overdue'])); return; }
@@ -436,7 +597,7 @@ function ownerStory(O: OwnerPlan, agent: string) {
   const ev = (type: string, title: string, description: string, raw: Date | null, metadata?: any, author: string | null = agent) => {
     const t = working(raw);
     if (!t) return;
-    if ((author === idleToday && dayOf(t) === 0) || isOff(author, t)) return;
+    if ((author === idleToday && dayOf(t) === 0) || isOff(author, t) || weekOff(t)) return;
     O.events.push({ type, title, description, author, at: t, metadata });
   };
   if (O.stage === 'New') return;
@@ -467,16 +628,50 @@ function ownerStory(O: OwnerPlan, agent: string) {
   ev('stage_change', `Stage → ${to}`, `Marked ${to}`, t2, { from: 'Contacted', to });
   if (O.stage === 'Key Received') {
     const t3 = new Date(Math.min(t2.getTime() + int(1, 5) * DAY, NOW - 3 * 3600_000));
-    ev('remark', 'Remark', 'chavi office ma aapi didhi', t3);
+    ev('remark', 'Remark', phr.keyReceived || 'Keys with us', t3);
     ev('stage_change', 'Stage → Key Received', 'Marked Key Received', later(t3, 1, 10), { from: 'Interested', to: 'Key Received' });
   }
-  if (O.stage === 'Not Interested' || O.stage === 'Do Not Call') O.rejection = O.stage === 'Do Not Call' ? 'Asked not to be called' : pick(['Already let out', 'Selling, not renting', 'Not now']);
+  if (O.stage === 'Not Interested' || O.stage === 'Do Not Call') O.rejection = O.stage === 'Do Not Call' ? 'Asked not to be called' : pick(P.ownerReject || ['Already let out', 'Selling, not renting', 'Not now']);
 }
 
 // ============================================================================
 // THE DATABASE
 // ============================================================================
+/** What the plan holds, for a person to read before anything is written. */
+function summarise(p: ReturnType<typeof plan>) {
+  const count = (xs: any[], f: (x: any) => string) => Object.entries(xs.reduce((m: any, x) => { const k = f(x); m[k] = (m[k] || 0) + 1; return m; }, {})).map(([k, v]) => `${k} ${v}`).join(', ');
+  const L = P.locale || {};
+  console.log(`Market: ${MARKET} · ${L.country || 'IN'} · ${L.currency || 'INR'} · ${L.numberLocale || 'en-IN'} · +${L.phoneCountry || '91'} · rooms ${L.rooms || 'bhk'} · ${TZ} ${H0}:00 to ${Math.floor(H1)}:${String(Math.round((H1 % 1) * 60)).padStart(2, '0')}${WEEK_OFF.size ? ` · off ${[...WEEK_OFF].join(',')}` : ''}`);
+  console.log(`Team: ${TEAM.map(t => `${t.name} (${t.role}${t.works ? `, ${t.works}` : ''})`).join('; ')}; everyone signs in with ${PASSWORD}`);
+  console.log(`Listings ${p.units.length}: ${count(p.units, u => `${u.data.type || u.kind} ${u.deal}`)}; with photos ${p.units.filter(u => u.photos).length}`);
+  console.log(`Leads ${p.leads.length}: ${count(p.leads, l => (l.close ? 'Deal Closed' : l.stage))}`);
+  console.log(`  wanting: ${count(p.leads, l => `${l.req.subtype} ${l.req.deal}`)}`);
+  console.log(`  from: ${count(p.leads, l => l.source)}`);
+  console.log(`Calling ${p.owners.length}: ${count(p.owners, o => o.stage)}; nobody on ${p.owners.filter(o => !o.assign).length}`);
+  console.log(`History events ${p.leads.reduce((s, l) => s + l.events.length, 0) + p.owners.reduce((s, o) => s + o.events.length, 0)}; idle today: ${idleToday || 'nobody'}`);
+  // Each agent's to-do as it will stand at the build, and their last 7 days.
+  const today1 = midnightOf(NOW) + DAY;
+  for (const a of AGENTS) {
+    const mine = p.leads.filter(l => l.agent === a.name && l.followUp && !l.close);
+    const due = (l: LeadPlan) => new Date(l.followUp.at).getTime();
+    const over = mine.filter(l => due(l) < NOW), today = mine.filter(l => due(l) >= NOW && due(l) < today1);
+    const week = Array.from({ length: 7 }, (_, d) => p.leads.reduce((s, l) => s + l.events.filter(e => e.author === a.name && dayOf(e.at) === d).length, 0)
+      + p.owners.reduce((s, o) => s + o.events.filter(e => e.author === a.name && dayOf(e.at) === d).length, 0));
+    console.log(`  ${a.name}: overdue ${over.length} (${count(over, l => l.followUp.action)}), due later today ${today.length} (${count(today, l => l.followUp.action) || 'none'}); events today, then each day back: ${week.join(' ')}`);
+  }
+  const n = Number(args.sample) || 0;
+  if (n) {
+    console.log(`\nSample leads:`);
+    for (const l of p.leads.slice(0, n)) console.log(`  ${l.name.padEnd(22)} ${l.phone.padEnd(14)} ${`${l.req.deal} ${l.req.config || ''} ${l.req.subtype}`.padEnd(32)} ${String(l.req.locality).padEnd(18)} max ${l.req.maxBudget ? MONEY.format(l.req.maxBudget) : '?'}  ${l.source.padEnd(13)} ${l.stage}${l.req.notes ? `  "${l.req.notes}"` : ''}`);
+    console.log(`Sample listings:`);
+    for (const u of p.units.slice(-Math.ceil(n / 2))) console.log(`  ${String(u.data.type || `${u.data.bhk ? `${u.data.bhk} BHK ` : ''}${u.data.subtype}`).padEnd(26)} ${u.deal.padEnd(5)} ${(u.data.project ? `${u.data.project} ${u.data.tower || ''}-${u.data.unit || ''}` : u.locality).padEnd(30)} ${String(u.data.carpet).padStart(5)} sqft ${u.data.bathrooms ?? '-'} ba  ${MONEY.format(u.price)}${u.deal === 'rent' ? '/mo' : ''}  owner ${u.data.owner} ${u.data.ownerPhone}`);
+  }
+}
+
 async function main() {
+  if (typeof args.dump === 'string') { fs.writeFileSync(args.dump, JSON.stringify(plan(), null, 1)); console.log(`plan written to ${args.dump}`); return; }
+  // Plan without a database: what would be built, not whether the firm exists.
+  if (args.offline) { if (MODE !== 'plan') die('--offline only plans.'); summarise(plan()); return; }
   const { dbRef, databaseUrl } = await import('../services/env.js');
   const { sql } = await import('../services/db.js');
   const url = databaseUrl()!;
@@ -489,15 +684,8 @@ async function main() {
   if (existing && !ours) die(`/${SLUG} exists and this script did not make it. Refusing to touch it.`);
 
   if (MODE === 'plan') {
-    const p = plan();
-    const count = (xs: any[], f: (x: any) => string) => Object.entries(xs.reduce((m: any, x) => { const k = f(x); m[k] = (m[k] || 0) + 1; return m; }, {})).map(([k, v]) => `${k} ${v}`).join(', ');
     console.log(`\n${existing ? `/${SLUG} exists (made by this script, ${existing.brand_config.demo.builtAt}); --write would remake it.` : `/${SLUG} does not exist; --write would make it.`}`);
-    console.log(`Team: ${TEAM.map(t => `${t.name} (${t.role})`).join(', ')}; everyone signs in with ${PASSWORD}`);
-    console.log(`Listings ${p.units.length}: ${count(p.units, u => u.kind)}; with photos ${p.units.filter(u => u.photos).length}`);
-    console.log(`Leads ${p.leads.length}: ${count(p.leads, l => (l.close ? 'Deal Closed' : l.stage))}`);
-    console.log(`  wanting: ${count(p.leads, l => l.lane)}`);
-    console.log(`Calling ${p.owners.length}: ${count(p.owners, o => o.stage)}; nobody on ${p.owners.filter(o => !o.assign).length}`);
-    console.log(`History events ${p.leads.reduce((s, l) => s + l.events.length, 0) + p.owners.reduce((s, o) => s + o.events.length, 0)}; idle today: ${idleToday || 'nobody'}`);
+    summarise(plan());
     await sql.end(); return;
   }
   if (MODE === 'delete') {
@@ -508,8 +696,8 @@ async function main() {
     if (!existing) die(`/${SLUG} does not exist.`);
     await refresh(sql, existing.brand_config.demo); await sql.end(); return;
   }
-  const hourNow = ((NOW + IST) % DAY) / 3600_000;
-  if (hourNow < 11) console.log(`  note: it is ${Math.floor(hourNow)}:${String(Math.floor((hourNow % 1) * 60)).padStart(2, '0')} in India, so "today" will hold almost no work. A refresh keeps the time of day it was built at; build after 11 for a demo.`);
+  const hourNow = ((NOW + ZONE) % DAY) / 3600_000;
+  if (hourNow < H0 + 1) console.log(`  note: it is ${Math.floor(hourNow)}:${String(Math.floor((hourNow % 1) * 60)).padStart(2, '0')} in ${TZ}, so "today" will hold almost no work. A refresh keeps the time of day it was built at; build after ${H0 + 1}:00 there for a demo.`);
   if (existing) { console.log('  remaking: removing the earlier build'); await wipe(sql); }
   await build(sql);
   await sql.end();
@@ -553,7 +741,7 @@ async function wipe(sql: any) {
 // the refresh runs in the morning) steps back one day.
 async function refresh(sql: any, demo: any) {
   const anchor = new Date(demo.anchor).getTime();
-  const days = Math.floor((NOW + IST) / DAY) - Math.floor((anchor + IST) / DAY);
+  const days = Math.floor((NOW + ZONE) / DAY) - Math.floor((anchor + ZONE) / DAY);
   if (days < 1) { console.log('Built today already; nothing to move.'); return; }
   const secs = days * 86400;
   const shift = days * DAY;
@@ -621,7 +809,7 @@ async function preparePhotos(firmName: string): Promise<Record<string, { buf: Bu
 
 async function build(sql: any) {
   const p = plan();
-  const { provisionTenant, createLead, createOwnersBatch, bulkAssignOwners, createProperty, prepareListing } = await import('../services/store.js');
+  const { provisionTenant, updateSettings, createLead, createOwnersBatch, bulkAssignOwners, createProperty, prepareListing } = await import('../services/store.js');
   const { createAgreement } = await import('../services/agreements.js');
   const { createIntegration, setParserConfig } = await import('../services/ingestion.js');
   const { runWithContext } = await import('../services/context.js');
@@ -643,7 +831,6 @@ async function build(sql: any) {
   const idOf = (name: string | null) => (name ? users.find(u => u.name === name)?.id ?? null : null);
   const ownerId = made.owner.id;
   await sql`UPDATE crm_routing_rules SET active_agent_ids = ${sql.json(users.filter(u => u.role === 'agent').map(u => u.id))} WHERE tenant_id = ${SLUG}`;
-  if (P.sources) await sql`UPDATE crm_settings SET value = jsonb_set(value, '{sources}', ${sql.json(P.sources)}) WHERE tenant_id = ${SLUG} AND key = 'default'`;
   await sql`UPDATE tenants SET brand_config = brand_config || ${sql.json({ demo: { generator: GEN, profile: profileName, seed: P.seed, anchor: new Date(NOW).toISOString(), builtAt: new Date(NOW).toISOString() } })} WHERE id = ${SLUG}`;
   step(`firm /${SLUG} with ${users.length} people`);
 
@@ -651,6 +838,14 @@ async function build(sql: any) {
     const u = users.find(x => x.name === name);
     return runWithContext({ tenantId: SLUG, userId: u?.id ?? null, role: u?.role ?? null, actorType: u ? 'user' : 'system' }, fn);
   };
+  // The market, in the firm's settings, through the path Settings saves by:
+  // the app reads its currency, number format, phone country and room words
+  // from `locale`, and its day from `timezone`.
+  await as(owner.name, () => updateSettings({
+    locale: P.locale, timezone: TZ, workHours: { start: Math.floor(H0), end: Math.ceil(H1) },
+    ...(P.sources ? { sources: P.sources.map((x: any) => (Array.isArray(x) ? x[0] : x)) } : {}),
+  }));
+  step(`settings: ${JSON.stringify(P.locale)}, ${TZ}`);
   const ctxOf = (name: string | null) => { const id = idOf(name); return id ? { actorType: 'user' as const, actorId: id, actorLabel: name } : { actorType: 'system' as const }; };
   const pool = async <T,>(items: T[], n: number, fn: (x: T) => Promise<void>) => {
     let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) await fn(items[i++]); }));
@@ -669,7 +864,7 @@ async function build(sql: any) {
         if (put.ok) items.push({ key, kind: 'photo', w: ph.w, h: ph.h, at: u.createdAt.toISOString() });
       }
     }
-    const agent = agentFor(u.lane);
+    const agent = u.agent!;
     const created = await as(agent, () => createProperty(prepareListing({ ...u.data, media: items }), ctxOf(agent)));
     unitId.set(u.key, created.id);
   });
@@ -680,7 +875,7 @@ async function build(sql: any) {
   const ownerId2 = new Map<string, string>();
   p.owners.forEach((o, i) => ownerId2.set(o.key, callRows[i].id));
   for (const a of AGENTS) {
-    const ids = p.owners.filter(o => o.assign && agentFor(o.lane) === a.name).map(o => ownerId2.get(o.key)!);
+    const ids = p.owners.filter(o => o.assign && o.agent === a.name).map(o => ownerId2.get(o.key)!);
     if (ids.length) await as(owner.name, () => bulkAssignOwners(ids, idOf(a.name), ctxOf(owner.name)));
   }
   for (const o of p.owners) {
@@ -699,7 +894,7 @@ async function build(sql: any) {
   // 4. Leads, arriving the way a portal enquiry does.
   const leadId = new Map<string, string>();
   await pool(p.leads, 3, async (l) => {
-    const agent = agentFor(l.lane);
+    const agent = l.agent!;
     const lead = await as(null, () => createLead({
       name: l.name, phone: l.phone, source: l.source, stage: l.stage, agentId: idOf(agent), req: l.req, receivedAt: l.createdAt.toISOString(),
     }, { actorType: 'system' }));
@@ -733,7 +928,7 @@ async function build(sql: any) {
     const g = near(locOf(l.req.locality || unit.locality));
     await sql`INSERT INTO activities (id, tenant_id, lead_id, property_id, type, at, agent_id, remark, outcome, geo_lat, geo_lng, geo_accuracy, metadata, created_at)
               VALUES (${`act_dm_${NOW}_${visits++}`}, ${SLUG}, ${leadId.get(l.key)}, ${unitId.get(unit.key) ?? null}, 'site_visit', ${l.visit!.at},
-                      ${idOf(agentFor(l.lane))}, ${l.visit!.remark}, 'interested', ${g.lat}, ${g.lng}, ${int(8, 25)}, ${sql.json({})}, ${l.visit!.at})`;
+                      ${idOf(l.agent!)}, ${l.visit!.remark}, 'interested', ${g.lat}, ${g.lng}, ${int(8, 25)}, ${sql.json({})}, ${l.visit!.at})`;
   }
   step(`${visits} site visits`);
 
@@ -750,8 +945,8 @@ async function build(sql: any) {
     taken.add(fit.key);
     const soon = kind === 'rent' && ends < 4;
     const end = soon ? new Date(NOW + int(9, 26) * DAY) : new Date(NOW + int(90, 300) * DAY);
-    const start = kind === 'rent' ? new Date(end.getTime() - 334 * DAY) : l.close!.at;
-    const agent = agentFor(l.lane);
+    const start = kind === 'rent' ? new Date(end.getTime() - (P.lease?.days ?? 334) * DAY) : l.close!.at;
+    const agent = l.agent!;
     try {
       await as(agent, () => createAgreement({
         kind, leadId: leadId.get(l.key), propertyId: unitId.get(fit.key), amount: fit.price,
