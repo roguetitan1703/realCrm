@@ -2772,7 +2772,21 @@ const arrivalStageCache = new Map<string, { v: DeskConfig; at: number }>();
 const ARRIVAL_TTL_MS = 60_000;
 
 /** The settings every worklist question is asked against. */
-export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string; coldDays: number };
+export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string; coldDays: number; workStart: number; workEnd: number };
+
+/**
+ * THE FIRM'S WORKING HOURS, whole hours on its own clock (Settings → Response
+ * times). Outside them no alert buzzes a phone; at the opening hour each person
+ * gets one summary of what is still open (services/notifications.ts
+ * releaseAt). Stored as `workHours: { start, end }`; anything unreadable is the
+ * default, 9 to 21, the window the alerts ran on before it was a setting.
+ */
+export const DEFAULT_WORK_HOURS = { start: 9, end: 21 };
+function workHoursOf(cfg: any): { start: number; end: number } {
+  const s = Number(cfg?.workHours?.start), e = Number(cfg?.workHours?.end);
+  const ok = Number.isInteger(s) && Number.isInteger(e) && s >= 0 && e <= 24 && s < e;
+  return ok ? { start: s, end: e } : DEFAULT_WORK_HOURS;
+}
 
 /**
  * HOW LONG SILENCE IS ALLOWED TO LAST, in days, for this firm.
@@ -2824,6 +2838,8 @@ export async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
     // never consumed anywhere in the codebase. It is the number behind Going
     // cold now, so the control finally changes something.
     coldDays: quietDays(cfg),
+    workStart: workHoursOf(cfg).start,
+    workEnd: workHoursOf(cfg).end,
   };
   arrivalStageCache.set(tenantId, { v, at: Date.now() });
   return v;

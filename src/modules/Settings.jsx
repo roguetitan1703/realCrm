@@ -578,9 +578,23 @@ function ResponseTimesSection({ store, settings }) {
   const segLabel = (key, fallback) =>
     (store.state.leadSegments || []).find(s => s.key === key)?.label || fallback
   const coldLabel = segLabel('going_cold', 'Going cold')
+  // WORKING HOURS: outside them alerts wait, and go out as one summary at the
+  // opening hour (backend/src/services/notifications.ts releaseAt). Whole
+  // hours; the server falls back to 9 to 21 on anything it cannot read.
+  const hours = settings.workHours || { start: 9, end: 21 }
+  const setHours = (h) => h.start < h.end && store.patchSettings({ workHours: h }, 'Working hours updated')
   return (
     <>
       <SecHead title="Response times" />
+      <Panel>
+        <SectionHead title="Working hours" />
+        <div className="set-sec-sub">Alerts reach phones only in these hours. The rest wait for the start of the day.</div>
+        <div className="set-hours">
+          <HourPick label="From" value={hours.start} max={hours.end - 1} onChange={(v) => setHours({ ...hours, start: v })} />
+          <span className="numsuffix">to</span>
+          <HourPick label="To" value={hours.end} min={hours.start + 1} onChange={(v) => setHours({ ...hours, end: v })} />
+        </div>
+      </Panel>
       <Panel>
         <SectionHead title="A new lead should hear back within" />
         <div className="set-sec-sub">Alerts the assignee, then escalates to a manager.</div>
@@ -605,6 +619,16 @@ function MessagesSection({ store }) {
       <SecHead title="Message templates" />
       <MessageTemplates store={store} />
     </>
+  )
+}
+
+const hourLabel = (h) => (h === 24 ? 'midnight' : h === 0 ? '12 am' : h === 12 ? '12 pm' : h < 12 ? `${h} am` : `${h - 12} pm`)
+function HourPick({ label, value, min = 0, max = 24, onChange }) {
+  const opts = Array.from({ length: 25 }, (_, h) => h).filter(h => h >= min && h <= max)
+  return (
+    <select className="input set-hour" aria-label={label} value={value} onChange={e => onChange(Number(e.target.value))}>
+      {opts.map(h => <option key={h} value={h}>{hourLabel(h)}</option>)}
+    </select>
   )
 }
 

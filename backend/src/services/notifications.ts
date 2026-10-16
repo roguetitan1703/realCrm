@@ -20,6 +20,7 @@ import { sendPushToUser, pruneDeliveryLog, retryFailedPushes } from './push.js';
 import { copyFor, COPY, summaryCopy } from './notificationCopy.js';
 import { recordFromLink, closeSettled } from './alertLifecycle.js';
 import { followUpKind } from './followUp.js';
+import { deskConfigOf, type DeskConfig } from './store.js';
 
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
@@ -101,7 +102,7 @@ export async function notify(n: NotifyInput): Promise<void> {
   // the database instead, a call logged seconds after an alert could read as
   // earlier than it whenever the two clocks drifted — and never close it.
   const now = new Date();
-  const sendAfter = releaseAt(urgency, now);
+  const sendAfter = releaseAt(urgency, now, await deskConfigOf(t));
   await sql`
     INSERT INTO notifications (id, tenant_id, user_id, type, title, body, link,
                                record_kind, record_ids, subject_at, urgency, send_after, created_at)
@@ -121,32 +122,47 @@ export async function notify(n: NotifyInput): Promise<void> {
 
 // ── When a push may go out (spec §4) ─────────────────────────────────────────
 //
-// ONE FIXED NIGHT WINDOW, 21:00–09:00 IST, for every firm, with no setting.
-// Measured on production over 30 days (12 Oct): 2.3% of bhumi's person-written
-// work and 0.0% of mahalaxmi's falls inside it, and of 56 tapped pushes not one
-// was tapped there. A setting was declined: one more thing for a firm to
-// misunderstand. Change it here if the numbers move.
-const IST_OFFSET_MIN = 330;
-const NIGHT_STARTS = 21;   // hour, IST
-const NIGHT_ENDS = 9;      // hour, IST
+// THE FIRM'S WORKING HOURS, on its own clock (Settings → Response times;
+// store.ts workHoursOf, default 9 to 21). Outside them nothing buzzes; the bell
+// is never held. `morning` alerts wait for the next opening hour, where every
+// held alert goes out as one summary (dispatchDue).
+//
+// It was one fixed window, 21:00–09:00 IST, with no setting: measured on
+// production over 30 days (12 Oct), 2.3% of bhumi's person-written work and
+// 0.0% of mahalaxmi's fell inside it, and of 56 tapped pushes none was tapped
+// there. Made a setting on 16 Oct because a window nobody can see is a phone
+// that "did not ring" with no reason anyone can find.
+type Hours = Pick<DeskConfig, 'timezone' | 'workStart' | 'workEnd'>;
 
-const istHour = (d: Date) => new Date(d.getTime() + IST_OFFSET_MIN * 60_000).getUTCHours();
+/** The wall clock in `tz` at `d`. */
+function clockIn(tz: string, d: Date) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
+  }).formatToParts(d).map(x => [x.type, x.value]));
+  return { y: +p.year, mo: +p.month, d: +p.day, h: +p.hour, mi: +p.minute };
+}
 
-/** The next 09:00 IST strictly after `d`. */
-function nextMorning(d: Date): Date {
-  const ist = new Date(d.getTime() + IST_OFFSET_MIN * 60_000);
-  const m = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(), NIGHT_ENDS, 0, 0));
-  if (m.getTime() <= ist.getTime()) m.setUTCDate(m.getUTCDate() + 1);
-  return new Date(m.getTime() - IST_OFFSET_MIN * 60_000);
+/** The instant the firm's clock reads `hour`:00 on the firm's day of `d`. */
+function atHourOn(tz: string, d: Date, hour: number): Date {
+  const c = clockIn(tz, d);
+  const guess = Date.UTC(c.y, c.mo - 1, c.d, hour);
+  const g = clockIn(tz, new Date(guess));
+  const offset = Date.UTC(g.y, g.mo - 1, g.d, g.h, g.mi) - guess;
+  return new Date(guess - offset);
+}
+
+/** The next opening hour strictly after `d`. */
+function nextOpening(hrs: Hours, d: Date): Date {
+  const today = atHourOn(hrs.timezone, d, hrs.workStart);
+  return today > d ? today : atHourOn(hrs.timezone, new Date(d.getTime() + 86_400_000), hrs.workStart);
 }
 
 /** When an alert of this urgency, raised at `now`, may reach a phone. Null: never. */
-export function releaseAt(urgency: Urgency, now: Date): Date | null {
+export function releaseAt(urgency: Urgency, now: Date, hrs: Hours): Date | null {
   if (urgency === 'drawer') return null;
-  if (urgency === 'morning') return nextMorning(now);
-  const h = istHour(now);
-  const night = h >= NIGHT_STARTS || h < NIGHT_ENDS;
-  return night ? nextMorning(now) : now;
+  if (urgency === 'morning') return nextOpening(hrs, now);
+  const h = clockIn(hrs.timezone, now).h;
+  return h >= hrs.workStart && h < hrs.workEnd ? now : nextOpening(hrs, now);
 }
 
 /**

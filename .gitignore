@@ -98,3 +98,4 @@ backups/
 .wrangler/
 .dev.vars
 
+.claude/worktrees/

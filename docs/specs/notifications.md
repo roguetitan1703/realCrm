@@ -86,13 +86,16 @@ safety net. One implementation, two callers.
 
 | Urgency | Reaches the phone | Types |
 |---|---|---|
-| **now** | immediately, high priority | `lead_assigned`, `lead_reassigned`, `lead_unrouted` |
+| **now** | immediately, high priority — work handed to you | `lead_assigned`, `lead_assigned_bulk`, `lead_reassigned`, `lead_unrouted`, `lead_repeat`, `owner_assigned`, `owner_reassigned`, `calendar_task_assigned` (moved here 13 Oct: a lead assigned by hand was held for 9 am) |
 | **at its time** | when the thing is due | `followup_due`, `site_visit_reminder` (an hour before) |
-| **morning** | one notification at the start of the day, summarising | `lead_repeat`, `agreement_ending`, `owner_assigned`, `owner_reassigned`, `lead_assigned_bulk`, `lead_untouched`, `calendar_task_assigned`, `lead_reassign_loop` |
+| **morning** | one notification at the opening hour, summarising | `agreement_ending`, `lead_untouched`, `lead_reassign_loop`, `owner_reassign_loop` |
 | **drawer** | never buzzes | `remark_added`, `lead_moved_away` |
 
-**One fixed night window, no setting** (decided 12 Oct: a setting is one more
-thing for a firm to misunderstand). Inside it nothing buzzes. At its end, each
+**The firm's working hours** — one setting, Settings → Response times, default
+9 am to 9 pm on the firm's clock. (Decided 12 Oct as a fixed window with no
+setting; reversed 16 Oct after testing: a window nobody can see is a phone that
+"did not ring" for no reason anyone can find.) Outside them nothing buzzes, with
+no exceptions; the bell is never held. At the opening hour, each
 person gets **one** push for whatever is **still open** — "3 new leads
 overnight" — and nothing for work already done. The window is ours to tune from
 when agents actually work; measure the hours of person-authored activity per
@@ -197,9 +200,10 @@ Each step ships alone. Steps 1–2 end the piles; 3–4 end the lost pushes;
 - **One clock:** an alert is stamped by the app, like the timeline it is
   compared with. Stamped by the database, a call seconds after an alert read as
   earlier than it on a machine whose clock drifted 25 s.
-- **Night window: 21:00–09:00 IST**, measured: 2.3% of bhumi's person-written
+- **Working hours, default 9 to 21 on the firm's clock** (`workHours` in
+  settings, `releaseAt()` in `notifications.ts`). The default was measured: 2.3% of bhumi's person-written
   work and 0% of mahalaxmi's falls inside it over 30 days; no push was ever
-  tapped there. `releaseAt()` in `notifications.ts`.
+  tapped there.
 - **Urgency high** for `now` and `at_time` only; the morning summary goes at
   normal priority with a 12-hour expiry.
 - **Retries:** a send that failed below HTTP keeps its payload and is resent by
