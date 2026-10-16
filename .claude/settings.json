@@ -1,0 +1,5 @@
+{
+  "permissions": {
+    "allow": ["Bash(npx -y github:Delpat-Tech/delpat-env pull:*)"]
+  }
+}
