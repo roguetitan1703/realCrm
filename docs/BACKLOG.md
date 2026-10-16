@@ -62,6 +62,12 @@ _Nothing picked._
 - The app has never stored an audit-chain check (`audit_checks` empty); the
   chain verifies clean, 7 chains, 13,941 rows.
 - `.env` lines split on `\n` only; check `grep -c $'\r' .env` on EC2 first.
+- The phone lead record has no Done for a booked meeting; only Today's row and
+  the history's Add outcome finish one (`FollowUpDoneModal` is ready to add).
+- The history's Add outcome on a booked site visit closes it with no photo or
+  GPS; Today's row sends visits to visit proof. Decide whether history should too.
+- The dev R2 bucket's CORS refuses `localhost:5190` (builder ports), so visit
+  proof cannot upload from a builder's frontend.
 
 ## Bugs
 

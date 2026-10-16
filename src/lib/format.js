@@ -176,6 +176,15 @@ export function followUpOverdue(fu) {
   return !isNaN(d.getTime()) && d.getTime() < Date.now()
 }
 
+/** A follow-up whose day is today. `at` when there is one; a legacy row only
+ *  when someone typed "Today" into it. */
+export function followUpToday(fu) {
+  if (!fu) return false
+  if (!fu.at) return fu.date === 'Today'
+  const d = new Date(fu.at)
+  return !isNaN(d.getTime()) && d.toDateString() === new Date().toDateString()
+}
+
 /**
  * A CLOSED LEAD HAS NO NEXT STEP.
  *

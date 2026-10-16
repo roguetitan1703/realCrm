@@ -22,11 +22,13 @@ import {
 import {
   addTimelineEvent, updateLead, mergeLeads, getLeadById,
   getTimelineEventById, updateTimelineEvent, maybeAutoAdvanceStage,
-  addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES, noteOwnerContact, closeFollowUpFor,
+  addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES, noteOwnerContact, closeFollowUpFor, completeFollowUp,
   mapEventForClient } from '../services/store';
 import { sql } from '../services/db';
 import { isSafeKey, tenantOfKey } from '../services/media';
 import { audit } from '../services/audit';
+import { assertLeadWrite } from '../lib/permissions';
+import { followUpKindOf } from '../../../src/data/followUpKinds.js';
 
 export const actionsRouter = Router();
 
@@ -116,7 +118,15 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
     // itself: "Follow-up Call — 20 Aug, 11:00 am" as the note beneath a title
     // already saying exactly that. The fallback belongs to the description,
     // which updateTimelineEvent owns; an empty remark is an empty remark.
-    const updated = await updateTimelineEvent(eventId, req.tenantId!, text, outcome);
+    // SAYING HOW IT WENT IS WHAT FINISHES IT. There is no separate "mark done"
+    // — that control stored nothing, which is why it meant nothing. An outcome
+    // against a booking goes through completeFollowUp, the same write Today's
+    // Done makes: the outcome on this row, the booking cleared, a 'Completed'
+    // row for Performance. This cleared the booking and wrote no 'Completed',
+    // so a meeting finished from the history never counted as done.
+    const updated = existing.type === 'follow_up' && outcome
+      ? (await completeFollowUp(existing.record_id, outcome, text, eventId)).event
+      : await updateTimelineEvent(eventId, req.tenantId!, text, outcome);
     if (!updated) return res.status(404).json({ error: 'Not found' });
     // A call that rang out is something the system observed directly, not a
     // judgment call — so it moves the lead's status on its own, same as a
@@ -124,14 +134,6 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
     // interested"…) stays a human decision.
     if (existing.type === 'call' && outcome && DIDNT_REACH_THEM.has(outcome)) {
       await maybeAutoAdvanceStage(existing.record_id, 'Call Not Received', 'Nobody answered the call');
-    }
-    // SAYING HOW IT WENT IS WHAT FINISHES IT. There is no separate "mark done"
-    // — that control stored nothing, which is why it meant nothing. Recording
-    // an outcome against the booking closes it, and no second "completed" row
-    // is written: the one row now says what was planned and what came of it.
-    if (existing.type === 'follow_up' && outcome) {
-      await sql`UPDATE crm_leads SET follow_up = NULL, updated_at = NOW()
-                WHERE id = ${existing.record_id} AND tenant_id = ${req.tenantId!}`;
     }
     audit({
       tenant_id: req.tenantId!, actor_type: 'user', actor_id: authorId,
@@ -151,6 +153,42 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
       timeline_event: mapEventForClient(updated),
     });
   } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to save', message: err.message });
+  }
+});
+
+/**
+ * FINISH A BOOKED MEETING, DEMO OR OTHER FOLLOW-UP from Today's row, with how
+ * it went. Not author-only like the history edit above: the booking is the
+ * lead's, and whoever may move the lead may say it happened — a manager books
+ * the meeting, the agent goes to it. Calls and site visits are finished by
+ * logging them (contact-log, activity), which close the booking themselves.
+ * POST /api/v1/records/:id/actions/follow-up/done   body { outcome, remark? }
+ */
+actionsRouter.post('/:id/actions/follow-up/done', async (req: Request, res: Response) => {
+  try {
+    const leadId = String(req.params.id);
+    const outcome = String(req.body?.outcome || '').trim();
+    const remark = String(req.body?.remark || '').trim();
+    if (!ACTIVITY_OUTCOMES.has(outcome)) return res.status(400).json({ error: 'Pick how it went' });
+    // Scoped read: a lead this person cannot see is a lead that does not exist.
+    const lead = await getLeadById(leadId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    if (!lead.followUp) return res.status(409).json({ error: 'Nothing is booked on this lead' });
+    // A visit is proven or it is not logged (the activity route's photo + GPS).
+    if (followUpKindOf(lead.followUp.action) === 'visit') {
+      return res.status(409).json({ error: 'A site visit is logged with a photo and location' });
+    }
+    assertLeadWrite(req.user?.role, req.user?.id, lead, { followUp: null });
+    const { event, ended } = await completeFollowUp(leadId, outcome, remark);
+    audit({
+      tenant_id: req.tenantId!, actor_type: 'user', actor_id: req.user?.id || null,
+      actor_label: null, action: 'follow_up.completed',
+      target_type: 'lead', target_id: leadId, summary: 'Follow-up done', metadata: { outcome },
+    });
+    return res.status(200).json({ success: true, ended, timeline_event: event ? mapEventForClient(event) : null });
+  } catch (err: any) {
+    if (err?.status === 403) return res.status(403).json({ error: err.message });
     return res.status(500).json({ error: 'Failed to save', message: err.message });
   }
 });

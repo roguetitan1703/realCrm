@@ -32,10 +32,12 @@ import { useServerData } from '../../lib/useServerData.js'
 import { isTerminal } from '../../data/leadStatus.js'
 import { callingFiltersFor } from '../../data/ownerStatus.js'
 import { Overdue, StageTag, MoreRows, useCap, RepeatTag } from '../../components/primitives.jsx'
-import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue, followUpAction, personLabel } from '../../lib/format.js'
+import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue, followUpToday, followUpAction, personLabel } from '../../lib/format.js'
 import Icon from '../../components/Icon.jsx'
 import { AgentWork, TeamBoard } from '../../components/AgentWork.jsx'
 import { Segmented } from '../../components/primitives.jsx'
+import { followUpFinish } from '../../data/followUpKinds.js'
+import { MODULE_DEFINITIONS } from '../definitions.jsx'
 
 const CLOSED = (l) => isTerminal(l.stage)
 
@@ -74,7 +76,21 @@ function quietFor(l) {
   return d >= 1 ? `${d}d` : 'today'
 }
 
-function LeadRow({ l, onOpen, store, tone, quiet }) {
+// A DUE FOLLOW-UP IS FINISHED FROM ITS ROW, by doing what was booked
+// (src/data/followUpKinds.js): a call by calling, which closes the booking
+// server-side; a site visit by logging it with proof; a meeting or anything
+// else by saying how it went. Beside it, Reschedule — the record's own
+// schedule action. Before this a booked visit or meeting had only the phone
+// icon here, and finishing one meant opening the record and finding the
+// booking in its history.
+const SCHEDULE = MODULE_DEFINITIONS.leads.actions.find(a => a.id === 'schedule')
+
+function LeadRow({ l, onOpen, store, tone, quiet, due }) {
+  const call = () => store.openModal({ kind: 'contact', channel: 'call', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id })
+  const fin = due && l.followUp ? followUpFinish(l.followUp) : null
+  // The modals read the lead from the cache; a Today row is a list row.
+  const cache = () => store.cacheRecords('lead', [l], true)
+  const finish = () => { cache(); store.openModal({ kind: fin.finish === 'visit' ? 'visitProof' : 'followUpDone', leadId: l.id }) }
   return (
     <div className="q-row">
       <button type="button" className="q-open" onClick={() => onOpen(l)}>
@@ -90,12 +106,13 @@ function LeadRow({ l, onOpen, store, tone, quiet }) {
               : l.followUp ? <span className="source">{l.followUp.time}</span> : <StageTag stage={l.stage} />}
         </span>
       </button>
-      <button
-        type="button"
-        className="q-call"
-        aria-label={`Call ${personLabel(l)}`}
-        onClick={() => store.openModal({ kind: 'contact', channel: 'call', name: l.name, phone: l.phone, recordType: 'lead', recordId: l.id })}
-      ><Icon name="phone" size={17} /></button>
+      {fin && (
+        <button type="button" className="q-call" aria-label={`Reschedule ${personLabel(l)}`}
+          onClick={() => { cache(); SCHEDULE.run(store, l) }}><Icon name="calendar" size={17} /></button>
+      )}
+      {fin && fin.finish !== 'call'
+        ? <button type="button" className="q-call q-act" onClick={finish}>{fin.label}</button>
+        : <button type="button" className="q-call" aria-label={`Call ${personLabel(l)}`} onClick={call}><Icon name="phone" size={17} /></button>}
     </div>
   )
 }
@@ -182,7 +199,7 @@ function Group({ g, onOpen, store, onSeeAll }) {
       {g.rows.slice(0, cap).map(r => (
         g.kind === 'renewal' ? <RenewalRow key={r.p.id} p={r.p} signal={r.signal} onOpen={onOpen} />
           : g.kind === 'owner' ? <OwnerRow key={r.id} o={r} onOpen={onOpen} store={store} />
-            : <LeadRow key={r.id} l={r} onOpen={onOpen} store={store} tone={g.tone} quiet={g.quiet} />
+            : <LeadRow key={r.id} l={r} onOpen={onOpen} store={store} tone={g.tone} quiet={g.quiet} due={g.due} />
       ))}
       {/* `more` straight from useCap, which already floors it at zero. This
           used to re-derive the remainder as `rows.length - cap` and take the
@@ -281,7 +298,10 @@ function TodoList({ store, go, feed }) {
   const open = scoped.filter(l => !CLOSED(l))
   const overdue = open.filter(l => followUpOverdue(l.followUp))
   const todayFu = open
-    .filter(l => l.followUp && !followUpOverdue(l.followUp) && l.followUp.date === 'Today')
+    // By the appointment's own day. This compared `date` to the string
+    // 'Today', which only rows typed before `at` existed carry, so a meeting
+    // booked for 4 pm today sat under Upcoming.
+    .filter(l => l.followUp && !followUpOverdue(l.followUp) && followUpToday(l.followUp))
     .sort((a, b) => timeRank(a.followUp.time) - timeRank(b.followUp.time))
   // THEY ASKED AGAIN TODAY. The warmest rows on the desk, and Today could not
   // show them: a lead that first arrived in July matches none of the feed's
@@ -292,7 +312,7 @@ function TodoList({ store, go, feed }) {
   const back = new Set(cameBack.map(l => l.id))
   const fresh = open.filter(l => l.stage === 'New' && !back.has(l.id))
   const unassigned = open.filter(l => !l.agentId)
-  const upcoming = open.filter(l => l.followUp && !followUpOverdue(l.followUp) && l.followUp.date !== 'Today')
+  const upcoming = open.filter(l => l.followUp && !followUpOverdue(l.followUp) && !followUpToday(l.followUp))
 
   const isDesk = state.role !== 'agent'
   const ownerRows = feed.owners || {}
@@ -302,9 +322,9 @@ function TodoList({ store, go, feed }) {
   // of problem, and splitting the screen into a leads half and an owners half
   // would mean scrolling past everything on one side to see the other.
   const groups = [
-    { key: 'overdue', label: 'Overdue', rows: overdue, count: c.overdue ?? overdue.length, tone: 'overdue', filter: { flag: ['overdue'] } },
+    { key: 'overdue', label: 'Overdue', rows: overdue, count: c.overdue ?? overdue.length, tone: 'overdue', due: true, filter: { flag: ['overdue'] } },
     { key: 'cbLate', label: 'Callbacks due', kind: 'owner', rows: ownerRows.callbacksOverdue || [], count: oc.callbacksOverdue ?? 0, tone: 'overdue', screen: 'calling', segment: 'callbacks_overdue' },
-    { key: 'today', label: 'Due today', rows: todayFu, count: todayFu.length },
+    { key: 'today', label: 'Due today', rows: todayFu, count: todayFu.length, due: true },
     { key: 'cbToday', label: 'Callbacks later today', kind: 'owner', rows: ownerRows.callbacksToday || [], count: oc.callbacksToday ?? 0, screen: 'calling', segment: 'callbacks_today' },
     { key: 'cameBack', label: 'Came back today', rows: cameBack, count: c.cameBack ?? cameBack.length, filter: { seg: 'repeat_enquiry' } },
     { key: 'fresh', label: 'Not yet contacted', rows: fresh, count: c.fresh ?? fresh.length, filter: { stage: 'New' } },
