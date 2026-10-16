@@ -301,6 +301,7 @@ function freshState() {
     waState: null,
     searchOpen: false,
     notifOpen: false,
+    rangeOpen: false,
   }
 }
 
@@ -1644,6 +1645,7 @@ export function StoreProvider({ children }) {
     openWhatsApp, recompose,
     closeWhatsApp: () => dispatch({ type: 'WA_CLOSE' }),
     setSearch: (v) => dispatch({ type: 'SET', patch: { searchOpen: v } }),
+    setRangeOpen: (v) => dispatch({ type: 'SET', patch: { rangeOpen: v } }),
     setNotif: (v) => {
       dispatch({ type: 'SET', patch: { notifOpen: v } })
       if (v) loadNotifications() // refresh the feed whenever the drawer opens

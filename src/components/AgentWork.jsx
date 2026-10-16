@@ -94,6 +94,9 @@ function Head({ title, hasCalling, side, onSide, day, onRange, actions }) {
   )
 }
 
+/** A section's item count, as a small badge in its heading. Nothing when there are none. */
+const count = (n) => n > 0 ? <span className="pv-count">{n}</span> : null
+
 function Section({ title, className = '', right, children }) {
   return (
     <section className={'panel pv-sec ' + className}>
@@ -199,8 +202,7 @@ function OtherActivity({ t, side, open }) {
 }
 
 // ── 5. What is still open, for one person ───────────────────────────────────
-function Pending({ t, side, isToday, open, book, onBook }) {
-  const rows = [
+const pendingRows = ({ t, side, isToday, open, book, onBook }) => [
     side === 'leads' && book?.neverContacted > 0 && { n: book.neverContacted, label: 'Leads not yet contacted', tone: 'alert', go: () => onBook?.('never_contacted') },
     side === 'leads' && t.notCalled > 0 && { n: t.notCalled, label: 'New leads not called', tone: 'alert', go: () => open('came_in', 'not_called') },
     isToday && t.missed > 0 && { n: t.missed, label: `Missed ${fuWord(side, t.missed)}`, tone: 'alert', go: () => open('followup_missed') },
@@ -209,7 +211,9 @@ function Pending({ t, side, isToday, open, book, onBook }) {
     (t.n('contact', 'no_answer') + t.n('contact', 'unreachable')) > 0 && {
       n: t.n('contact', 'no_answer') + t.n('contact', 'unreachable'), label: 'People to try again', go: () => open('contact', 'retry'),
     },
-  ].filter(Boolean)
+].filter(Boolean)
+
+function Pending({ rows }) {
   if (!rows.length) return <div className="pv-clear"><Icon name="check" size={15} />Nothing pending.</div>
   return (
     <div className="pv-pend">
@@ -240,6 +244,7 @@ export function AgentWork({ store, person, title, heading = true, mode = 'self',
     title: listTitle(self ? '' : title, day, measure, detail),
   })
   const b = eff === 'calling' ? ownerBook : book
+  const pending = pendingRows({ t, side: eff, isToday, open, book: b, onBook })
 
   return (
     <div className="pv">
@@ -264,8 +269,8 @@ export function AgentWork({ store, person, title, heading = true, mode = 'self',
             </div>
           )}
           <Section title={self ? 'My activity' : 'Other activity'}><OtherActivity t={t} side={eff} open={open} /></Section>
-          <Section title={self ? 'My pending work' : 'Pending work'} className="pv-attn">
-            <Pending t={t} side={eff} isToday={isToday} open={open} book={b} onBook={onBook} />
+          <Section title={self ? 'My pending work' : 'Pending work'} right={count(pending.length)}>
+            <Pending rows={pending} />
           </Section>
         </>
       )}
@@ -360,7 +365,7 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
             </div>
           </Section>
 
-          <Section title="Needs attention" className="pv-attn">
+          <Section title="Needs attention" right={count(attn.length)}>
             {!attn.length ? <div className="pv-clear"><Icon name="check" size={15} />Nothing unresolved.</div> : (
               <div className="pv-pend">
                 {attn.map(a => (
