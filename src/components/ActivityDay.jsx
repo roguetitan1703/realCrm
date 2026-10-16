@@ -26,11 +26,13 @@
 // Leads | Calling is a switch beside the title, never both on one screen, and
 // each side is its own set of facts: calls to leads, or calls to owners.
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { dayLabel, whenLabel } from '../lib/format.js'
 import { Segmented } from './primitives.jsx'
 import Icon from './Icon.jsx'
+import { useStore } from '../lib/store.jsx'
 import { stageLabel } from '../data/pipelineRoles.js'
 
 // ── Reading one person's counts ─────────────────────────────────────────────
@@ -159,6 +161,18 @@ export function RangeControl({ data, onRange }) {
   // Custom is a choice, not a length: a custom stretch that happens to be 30
   // days long is still Custom while the person is setting it.
   const [custom, setCustom] = useState(false)
+  // The open state lives in the store so useNav's overlay closes it on Back.
+  const store = useStore()
+  const open = Boolean(store?.state.rangeOpen)
+  const setOpen = (v) => store?.setRangeOpen(v)
+  useEffect(() => () => store?.setRangeOpen(false), []) // eslint-disable-line react-hooks/exhaustive-deps
+  // On a phone the sheet is drawn in the app frame, over the tab bar; a sheet
+  // left inside the scrolling screen slid under it. On a desk it stays a popover.
+  const anchor = useRef(null)
+  const inHost = (node) => {
+    const host = anchor.current?.closest('.app-mobile')
+    return host ? createPortal(node, host) : node
+  }
   if (!data?.day) return null
   const { today } = data
   const to = data.day
@@ -178,18 +192,35 @@ export function RangeControl({ data, onRange }) {
   }
   return (
     <span className="ad-range">
-      <Segmented value={mode} onChange={pickMode} options={[
-        { value: 'day', label: 'Day' }, { value: '7', label: '7 days' },
-        { value: '30', label: '30 days' }, { value: 'custom', label: 'Custom' },
-      ]} />
-      {mode === 'day' && <DatePick value={to} max={today} label={dayName(to, today)} aria="Pick a day" onPick={(v) => set(null, v)} />}
-      {DAYS[mode] && <DatePick value={data.from} max={today} label={periodName(data)} aria="Pick the first day"
-        onPick={(v) => { const [f, e] = windowFrom(v, DAYS[mode]); set(f, e) }} />}
-      {mode === 'custom' && <>
-        <DatePick value={data.from} max={to} label={short(data.from)} aria="First day" onPick={(v) => set(v, to)} />
-        <span className="ad-range-to">to</span>
-        <DatePick value={to} min={data.from} max={today} label={short(to)} aria="Last day" onPick={(v) => set(data.from, v)} />
-      </>}
+      <button type="button" ref={anchor} className="ad-range-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon name="calendar" size={14} />
+        <span className="ad-range-l">{periodName(data)}</span>
+        <Icon name="chevDown" size={14} />
+      </button>
+      {open && inHost(<>
+        <div className="ad-pop-back" onClick={() => setOpen(false)} />
+        <div className="ad-pop" role="dialog" aria-label="Period">
+          <div className="sheet-grab" />
+          <Segmented value={mode} onChange={pickMode} options={[
+            { value: 'day', label: 'Day' }, { value: '7', label: '7 days' },
+            { value: '30', label: '30 days' }, { value: 'custom', label: 'Custom' },
+          ]} />
+          <div className="ad-pop-pick">
+            {mode === 'day' && <>
+              <button type="button" className="ad-step" aria-label="Previous day" onClick={() => set(null, shiftDay(to, -1))}><Icon name="chevLeft" size={16} /></button>
+              <DatePick value={to} max={today} label={dayName(to, today)} aria="Pick a day" onPick={(v) => set(null, v)} />
+              <button type="button" className="ad-step" aria-label="Next day" disabled={to >= today} onClick={() => set(null, shiftDay(to, 1))}><Icon name="chevRight" size={16} /></button>
+            </>}
+            {DAYS[mode] && <DatePick value={data.from} max={today} label={periodName(data)} aria="Pick the first day"
+              onPick={(v) => { const [f, e] = windowFrom(v, DAYS[mode]); set(f, e) }} />}
+            {mode === 'custom' && <>
+              <DatePick value={data.from} max={to} label={short(data.from)} aria="First day" onPick={(v) => set(v, to)} />
+              <span className="ad-range-to">to</span>
+              <DatePick value={to} min={data.from} max={today} label={short(to)} aria="Last day" onPick={(v) => set(data.from, v)} />
+            </>}
+          </div>
+        </div>
+      </>)}
     </span>
   )
 }

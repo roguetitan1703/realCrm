@@ -100,11 +100,12 @@ export default function App() {
   // without knowing what any of them are. All three are separate pieces of
   // store state: the modal stack, the search panel and the alerts drawer.
   const overlay = useMemo(() => ({
-    isOpen: () => Boolean(store.state.modal || store.state.searchOpen || store.state.notifOpen),
+    isOpen: () => Boolean(store.state.modal || store.state.searchOpen || store.state.notifOpen || store.state.rangeOpen),
     close: () => {
       if (store.state.modal) store.closeModal()
       if (store.state.searchOpen) store.setSearch(false)
       if (store.state.notifOpen) store.setNotif(false)
+      if (store.state.rangeOpen) store.setRangeOpen(false)
     },
   }), [store])
   // SEARCH FROM THE KEYBOARD: Ctrl/Cmd+K anywhere, and "/" when nothing is
