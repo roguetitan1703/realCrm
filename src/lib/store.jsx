@@ -1357,7 +1357,7 @@ export function StoreProvider({ children }) {
           if (res?.success && res.timeline_event) dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event })
           // A logged call closes a booked call server-side (closeFollowUpFor),
           // so Today's row for it has to go whether or not an outcome follows.
-          if (res?.success) settled()
+          if (res?.success && channel === 'call') settled()
           resolve(res)
         })
         .catch(err => { console.warn('[Contact log API] error:', err.message); resolve(null) })

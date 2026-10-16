@@ -2332,7 +2332,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
 
   if (hadFollowUp && !followUp) {
     const action = String((hadFollowUp as any).action || 'Follow-up');
-    if (!/site\s*visit/i.test(action)) {
+    if (followUpKindOf(action) !== 'visit') {
       await addTimelineEvent({
         record_id: id,
         type: 'follow_up',
@@ -6900,11 +6900,15 @@ export async function closeFollowUpFor(leadId: string, activityType: string): Pr
  * on top of it; Performance counts it as a visit. Everything else gets the
  * one event.
  */
-async function endFollowUp(leadId: string, action: string, metadata?: Record<string, any>): Promise<void> {
-  await sql`
+async function endFollowUp(leadId: string, action: string, metadata?: Record<string, any>): Promise<boolean> {
+  // Only the write that actually cleared the booking says it ended: two at
+  // once (Today's Done and the history's outcome, or a retried request) both
+  // read a booking, and each wrote a 'Completed' — counted twice.
+  const cleared = await sql`
     UPDATE crm_leads SET follow_up = NULL, updated_at = NOW()
-    WHERE id = ${leadId} AND tenant_id = ${tid()}`;
-  if (followUpKindOf(action) !== 'visit') {
+    WHERE id = ${leadId} AND tenant_id = ${tid()} AND follow_up IS NOT NULL
+    RETURNING id`;
+  if (cleared.length && followUpKindOf(action) !== 'visit') {
     await addTimelineEvent({
       record_id: leadId,
       type: 'follow_up',
@@ -6914,6 +6918,7 @@ async function endFollowUp(leadId: string, action: string, metadata?: Record<str
       ...(metadata ? { metadata } : {}),
     }).catch(() => {});
   }
+  return cleared.length > 0;
 }
 
 /** The row that booked the follow-up standing now: its latest Scheduled or Rescheduled line. */
@@ -6951,9 +6956,9 @@ export async function completeFollowUp(
   const event = target ? await updateTimelineEvent(target, t, remark, outcome) : null;
   const ends = !!fu && (!eventId || eventId === standing || !standing);
   if (!ends) return { event, ended: false };
-  await endFollowUp(leadId, String(fu.action || 'Follow-up'),
+  const ended = await endFollowUp(leadId, String(fu.action || 'Follow-up'),
     event ? undefined : { outcome, ...(remark ? { remark } : {}) });
-  return { event, ended: true };
+  return { event, ended };
 }
 
 async function closeSiteVisitAppointment(leadId: string): Promise<void> {
