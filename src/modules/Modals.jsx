@@ -1850,7 +1850,9 @@ function VisitProofModal({ store, leadId, propId }) {
       // the CRM. Stamped before upload; the stored bytes are the marked ones.
       const stamped = await processImage(shot.blob, [
         store.state.settings.firmName || 'Site visit',
-        new Date().toLocaleString(),
+        // In the firm's date order, like every other date in the app. It was
+        // the phone's own setting, so one firm's proofs read in two orders.
+        new Date().toLocaleString(firmLocale().numberLocale),
         `${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)} · ±${Math.round(geo.accuracy || 0)}m`,
       ])
       const photoKey = await uploadMedia(stamped, 'visit-proof')
