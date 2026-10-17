@@ -1130,7 +1130,7 @@ export async function backfillPropertyCanonicalFields(): Promise<void> {
     const patch: Record<string, any> = {
       category,
       subtype: normaliseSubtype(rawType, category),
-      bhk: normaliseBhk(rawType),
+      bhk: normaliseBhk(rawType, await localeOf(r.tenant_id)),
       furnish_type: normaliseTo(FURNISH, r.furnishing),
       // Legacy `parking` was one field; the schema separates covered from open.
       // With no way to tell which the old number meant, it becomes covered —
