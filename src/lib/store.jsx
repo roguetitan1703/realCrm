@@ -4,6 +4,7 @@
 // mutated via Express backend endpoints. Transient UI is managed in React state.
 // ============================================================================
 import { setStageLabels } from '../data/pipelineRoles.js'
+import { setFirmLocale } from './locale.js'
 import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react'
 import { DEFAULT_SETTINGS, DEFAULT_BRAND, PROTECTED_STAGES } from '../data/theme.js'
 import { initials } from './format.js'
@@ -787,6 +788,9 @@ export function StoreProvider({ children }) {
   // render rather than in an effect: every tag drawn in this same render must
   // already say "Booked", not flash "Deal Closed" first.
   setStageLabels(state.settings?.stageLabels)
+  // The firm's money, phone and bedroom words (lib/locale.js), the same way and
+  // for the same reason: India until the settings say otherwise.
+  setFirmLocale(state.settings?.locale)
   const timers = useRef({})
 
   // Pull the authoritative, tenant-scoped state from the backend. Called on

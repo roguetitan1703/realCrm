@@ -7,6 +7,7 @@ import { whenLabel, agentName, repeatMark } from '../lib/format.js'
 import { fileUrl, formatDistance } from '../lib/media.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 import { stageLabel } from '../data/pipelineRoles.js'
+import { firmLocale, phonePlaceholder } from '../lib/locale.js'
 
 // ---- Button ----
 export function Button({ variant = 'ghost', size, block, icon, children, className, ...rest }) {
@@ -209,11 +210,12 @@ export function SuggestInput({ value, onChange, options = [], id, style, ...rest
     </>
   )
 }
+/** A number typed without its country code; the prefix is the firm's own. */
 export function PhoneInput({ value, onChange, ...rest }) {
   return (
     <div className="input-group">
-      <span className="prefix">+91</span>
-      <input value={value} onChange={onChange} {...rest} />
+      <span className="prefix">+{firmLocale().phoneCountry}</span>
+      <input value={value} onChange={onChange} placeholder={phonePlaceholder('98xxx xxxxx', { national: true })} {...rest} />
     </div>
   )
 }

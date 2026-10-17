@@ -16,6 +16,8 @@ import { randomBytes, createHash } from 'crypto';
 import { sql, DEFAULT_TENANT_ID } from './db.js';
 import { audit } from './audit.js';
 import { emailConfigured, sendOtpEmail, sendPasswordResetEmail } from './email.js';
+import { phoneE164 } from '../../../src/lib/locale.js';
+import { localeOf, type Locale } from './store.js';
 
 export interface RequestCtx {
   ip?: string | null;
@@ -81,10 +83,6 @@ export function verifyToken(token: string): TokenClaims | null {
 // Phone OTP (tenant users)
 // ---------------------------------------------------------------------------
 
-function normalizePhone(raw: string): string {
-  const digits = String(raw || '').replace(/\D/g, '');
-  return digits ? `+91${digits.slice(-10)}` : '';
-}
 
 function isEmail(raw: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(raw || '').trim());
@@ -92,14 +90,14 @@ function isEmail(raw: string): boolean {
 
 /** One key for the OTP challenge whether the user gave a phone or an email, so
  *  the same auth_otp row is looked up on verify. Emails are lowercased; phones
- *  are normalized to +91XXXXXXXXXX. */
-function normalizeIdentifier(raw: string): { key: string; email: string | null; phone: string | null } {
+ *  are normalized to +<the firm's country code><last ten digits>. */
+function normalizeIdentifier(raw: string, loc: Locale): { key: string; email: string | null; phone: string | null } {
   const s = String(raw || '').trim();
   if (isEmail(s)) {
     const email = s.toLowerCase();
     return { key: email, email, phone: null };
   }
-  const phone = normalizePhone(s);
+  const phone = phoneE164(s, loc);
   return { key: phone, email: null, phone: phone || null };
 }
 
@@ -125,7 +123,7 @@ async function brandFor(tenantId: string): Promise<{ name: string; color: string
  * identical whether or not the number belongs to a user.
  */
 export async function issueOtp(tenantId: string, identifierRaw: string): Promise<{ sent: boolean; demoCode?: string; delivery: 'email' | 'demo' | 'sms' | 'none'; sentTo?: string }> {
-  const { key, email, phone } = normalizeIdentifier(identifierRaw);
+  const { key, email, phone } = normalizeIdentifier(identifierRaw, await localeOf(tenantId));
   if (!key) return { sent: false, delivery: DEMO_OTP ? 'demo' : 'none' };
 
   // Find the recipient's email. If they logged in with an email, that's it; if
@@ -177,7 +175,7 @@ export async function issueOtp(tenantId: string, identifierRaw: string): Promise
 
 /** Verify an OTP and, on success, return a tenant-user token. */
 export async function verifyOtp(tenantId: string, identifierRaw: string, code: string, ctx: RequestCtx = {}): Promise<{ token: string; user: any } | null> {
-  const { key, email, phone } = normalizeIdentifier(identifierRaw);
+  const { key, email, phone } = normalizeIdentifier(identifierRaw, await localeOf(tenantId));
   if (!key || !code) return null;
 
   const rows = await sql`

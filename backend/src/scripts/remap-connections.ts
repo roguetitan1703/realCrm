@@ -24,6 +24,7 @@
 import { sql } from '../services/db';
 import { suggestConfig, parsePayload, sanitizeConfig } from '../services/parser';
 import { bestPayload } from '../services/ingestion';
+import { localeOf } from '../services/store';
 
 function parseArgs() {
   const get = (k: string) => {
@@ -64,7 +65,7 @@ async function main() {
     const before = sanitizeConfig(c.parser_config as any).clean;
     const next = suggestConfig(payload, c.provider as string);
     const beforeMap = before?.map || {};
-    const check = parsePayload(payload, next);
+    const check = parsePayload(payload, next, { locale: await localeOf(args.tenant) });
 
     for (const [target, source] of Object.entries(next.map)) {
       const was = beforeMap[target];

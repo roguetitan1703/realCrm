@@ -28,6 +28,7 @@ import Modals from './modules/Modals.jsx'
 import Phone from './modules/Phone.jsx'
 import PhoneToday from './modules/phone/PhoneToday.jsx'
 import Performance from './modules/Performance.jsx'
+import { firmLocale } from './lib/locale.js'
 
 const NAV = [
   { section: 'Workspace' },
@@ -302,7 +303,7 @@ export default function App() {
  */
 function SupportBar({ support, onClose }) {
   const until = support.expiresAt
-    ? new Date(support.expiresAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
+    ? new Date(support.expiresAt).toLocaleTimeString(firmLocale().numberLocale, { hour: 'numeric', minute: '2-digit' })
     : ''
   return (
     <div className="supbar" role="status">

@@ -9,6 +9,7 @@ import ThisDevice from '../components/ThisDevice.jsx'
 import MessageTemplates from '../components/MessageTemplates.jsx'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { isDeskRole } from '../lib/permissions.js'
+import { firmLocale } from '../lib/locale.js'
 
 // `everyone: true` is a section an agent may open. The rest are the desk's.
 // An agent reaches this screen for one reason — the intro message they are
@@ -659,7 +660,7 @@ function auditAgo(ts) {
   if (mins < 60) return `${mins}m ago`
   const hrs = Math.floor(mins / 60)
   if (hrs < 24) return `${hrs}h ago`
-  return new Date(ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  return new Date(ts).toLocaleDateString(firmLocale().numberLocale, { day: 'numeric', month: 'short' })
 }
 
 function AuditSection() {

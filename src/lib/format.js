@@ -3,6 +3,9 @@ import { isTerminal } from '../data/leadStatus.js'
 import {
   AREA_UNITS, BHK, DEAL_LEAD, SUBTYPES, TENANT_TYPES, isPlot, labelOf, normaliseBhk, normaliseSubtype,
 } from '../data/propertyFields.js'
+import {
+  firmLocale, formatMoney, formatMoneyRange, moneyFull, parseMoneyText, phoneLabel, roomsText,
+} from './locale.js'
 
 /**
  * "3 BHK Apartment" — the display config, rebuilt from the two canonical
@@ -16,41 +19,32 @@ export function configLabel(p = {}) {
   const cat = p.category || 'residential'
   const bhk = labelOf(BHK, p.bhk ?? normaliseBhk(p.type))
   const sub = labelOf(SUBTYPES[cat] || SUBTYPES.residential, p.subtype ?? normaliseSubtype(p.type, cat))
-  return [bhk, sub].filter(Boolean).join(' ') || p.type || 'Property'
+  return [bhk, sub].filter(Boolean).join(' ') || roomsText(p.type) || 'Property'
 }
 
 /**
- * A rupee amount, split into the number to show and its unit.
+ * An amount, as the firm writes it — lib/locale.js holds the one formatter
+ * (₹ and k/L/Cr for an Indian firm, $ and K/M/B for a US one).
  *
  * THE UNIT ESCALATES, at every magnitude. The rent path used to divide by 1000
  * and stop there, so a ₹45,00,000 lease read "₹4500k/mo" on the list while the
  * record sheet beside it said "₹45L".
  *
- * TWO DECIMALS, trailing zeros dropped by String(). Rounding to whole units put
- * "₹2L" over a stored ₹2,25,000 — hiding ₹25,000, which is 11% of the figure and
- * enough to change who gets shown what. ₹4.5k, ₹25k, ₹2.25L, ₹93L, ₹1.23Cr.
+ * TWO DECIMALS, trailing zeros dropped. Rounding to whole units put "₹2L" over a
+ * stored ₹2,25,000 — hiding ₹25,000, which is 11% of the figure and enough to
+ * change who gets shown what. ₹4.5k, ₹25k, ₹2.25L, ₹93L, ₹1.23Cr.
  *
  * NO SCALE GUESSING. There is no "a small number must already be in Lakhs" rule
  * here. That heuristic made a stored 123 render "₹1.2Cr" in the list and "₹123"
  * on the sheet — one number, two readings, neither of them checkable. A value in
- * the database is rupees. If that is wrong the input is wrong, and the fix is at
- * the input, not in six formatters each guessing differently.
+ * the database is the full amount. If that is wrong the input is wrong, and the
+ * fix is at the input, not in six formatters each guessing differently.
  */
-function moneyParts(v) {
-  const [unit, div] = v >= 10000000 ? ['Cr', 10000000]
-    : v >= 100000 ? ['L', 100000]
-      : v >= 1000 ? ['k', 1000] : ['', 1]
-  return { shown: Math.round((v / div) * 100) / 100, unit }
-}
-
 /** One figure. `perMonth` is the ONLY deal-awareness money needs — rent is a
  *  rate, a sale price is not, and leaving it off made the record sheet claim a
  *  ₹25,000 rental lead wanted to spend ₹25,000 outright. */
 export function money(n, { perMonth = false } = {}) {
-  const v = Number(n)
-  if (!isFinite(v) || v <= 0) return ''
-  const { shown, unit } = moneyParts(v)
-  return '₹' + shown + unit + (perMonth ? '/mo' : '')
+  return formatMoney(n, { perMonth })
 }
 
 /** Kept for callers that have an amount and no deal (a listing's price, a
@@ -103,13 +97,13 @@ export function whenLabel(iso) {
   if (mins >= 0 && mins < 60) return mins < 1 ? 'just now' : `${mins} min ago`
 
   const now = new Date()
-  const time = d.toLocaleTimeString('en-IN', TIME)
+  const time = d.toLocaleTimeString(firmLocale().numberLocale, TIME)
   const sameDay = (a, b) => a.toDateString() === b.toDateString()
   if (sameDay(d, now)) return time
   const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1)
   if (sameDay(d, yesterday)) return `Yesterday, ${time}`
 
-  const date = d.toLocaleDateString('en-IN', d.getFullYear() === now.getFullYear()
+  const date = d.toLocaleDateString(firmLocale().numberLocale, d.getFullYear() === now.getFullYear()
     ? { day: 'numeric', month: 'short' }
     : { day: 'numeric', month: 'short', year: 'numeric' })
   return `${date}, ${time}`
@@ -152,14 +146,14 @@ export function followUpLabel(fu) {
     const d = new Date(fu.at)
     if (!isNaN(d.getTime())) {
       const now = new Date()
-      const time = d.toLocaleTimeString('en-IN', TIME)
+      const time = d.toLocaleTimeString(firmLocale().numberLocale, TIME)
       const sameDay = (a, b) => a.toDateString() === b.toDateString()
       if (sameDay(d, now)) return `Today, ${time}`
       const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1)
       if (sameDay(d, tomorrow)) return `Tomorrow, ${time}`
       const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1)
       if (sameDay(d, yesterday)) return `Yesterday, ${time}`
-      const date = d.toLocaleDateString('en-IN', d.getFullYear() === now.getFullYear()
+      const date = d.toLocaleDateString(firmLocale().numberLocale, d.getFullYear() === now.getFullYear()
         ? { weekday: 'short', day: 'numeric', month: 'short' }
         : { day: 'numeric', month: 'short', year: 'numeric' })
       return `${date}, ${time}`
@@ -232,7 +226,7 @@ export function arrivedOn(iso, { withTime = false } = {}) {
   if (isNaN(d.getTime())) return ''
   if (withTime) return whenLabel(iso)
   const now = new Date()
-  return d.toLocaleDateString('en-IN', d.getFullYear() === now.getFullYear()
+  return d.toLocaleDateString(firmLocale().numberLocale, d.getFullYear() === now.getFullYear()
     ? { day: 'numeric', month: 'short' }
     : { day: 'numeric', month: 'short', year: 'numeric' })
 }
@@ -277,18 +271,13 @@ export function agentName(agents, id) {
   return a ? (a.first || a.name || id) : id
 }
 
+/** "45L" / "1.2Cr" / "25k" — or "450K" / "1.2M" for a firm outside India. */
 export function parseBudgetNum(v) {
-  if (v === null || v === undefined || v === '') return NaN
-  if (typeof v === 'number') return v
-  const s = String(v).trim()
-  if (/cr/i.test(s)) return parseFloat(s) * 10000000
-  if (/l/i.test(s)) return parseFloat(s) * 100000
-  if (/k/i.test(s)) return parseFloat(s) * 1000
-  return Number(s)
+  return parseMoneyText(v)
 }
 
 /**
- * What a typed money value actually is, in full, in rupees.
+ * What a typed money value actually is, in full.
  *
  * The abbreviation is exactly the thing that is ambiguous: a rent of 4500 shows
  * as ₹4.5k and a budget of 45 lakh shows as ₹45L, and neither tells the person
@@ -303,7 +292,7 @@ export function parseBudgetNum(v) {
 export function moneyEcho(v) {
   const n = parseBudgetNum(v)
   if (!isFinite(n) || n <= 0) return ''
-  return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 })
+  return moneyFull(n)
 }
 
 /**
@@ -351,12 +340,8 @@ export function budgetRange(req) {
   // fact; refusing to show it because its partner is absent is 3.1 (absence
   // treated as a defect rather than as information).
   if (hasMin && hasMax) {
-    const a = moneyParts(min), b = moneyParts(max)
-    const tail = (perMonth ? '/mo' : '')
     // Share the unit when both ends land in it — "₹50–90L", not "₹50L–₹90L".
-    return a.unit === b.unit
-      ? `₹${a.shown}–${b.shown}${b.unit}${tail}`
-      : `₹${a.shown}${a.unit}–₹${b.shown}${b.unit}${tail}`
+    return formatMoneyRange(min, max, { perMonth })
   }
   // "Up to" and "from" rather than a bare figure: which end of the budget we
   // were given changes what it means to an agent about to negotiate.
@@ -397,7 +382,7 @@ export function reqConfigLabel(req) {
   // The current one, plainly. A requirement that has accumulated several is
   // shown in full on the record sheet, never crammed into a line that has to
   // stay one line.
-  return latestOf(req.config) || (f.bhk ? labelOf(BHK, f.bhk) : null)
+  return roomsText(latestOf(req.config)) || (f.bhk ? labelOf(BHK, f.bhk) : null)
 }
 
 export function reqLine(req) {
@@ -461,7 +446,7 @@ export function personLabel(p) {
   if (!p) return '—'
   const n = String(p.name || '').trim()
   if (n) return n
-  return String(p.phone || '').trim() || '—'
+  return phoneLabel(String(p.phone || '').trim()) || '—'
 }
 
 export function initials(name) {
@@ -706,7 +691,7 @@ export function facetFit(p, req) {
 // Rate per sqft (sale only) — a reference figure brokers cite. Data, not a hero.
 export function ratePsf(p) {
   if (p.deal !== 'sale' || !p.carpet || !p.price) return null
-  return '₹' + Math.round(p.price / p.carpet).toLocaleString('en-IN') + '/sqft'
+  return moneyFull(p.price / p.carpet) + '/sqft' // vocab-ok: a rate's suffix, not the area unit
 }
 
 // The inventory data carries three parallel names for the same concepts across

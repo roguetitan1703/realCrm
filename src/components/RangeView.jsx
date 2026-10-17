@@ -17,6 +17,7 @@ import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import Icon from './Icon.jsx'
 import { fmt, word, shiftDay, spanOf } from './ActivityDay.jsx'
+import { firmLocale } from '../lib/locale.js'
 
 /** Every day from `from` to `to`, inclusive. */
 export const daysOf = (from, to) => {
@@ -68,8 +69,8 @@ export function Change({ now, before, points = false, loading = false }) {
 }
 
 const pctText = (r) => (r == null ? '—' : `${Math.round(r * 100)}%`)
-const dayTitle = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
-const tick = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+const dayTitle = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString(firmLocale().numberLocale, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
+const tick = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString(firmLocale().numberLocale, { day: 'numeric', month: 'short', timeZone: 'UTC' })
 
 /** A clean top for the count axis: 1, 2, 5 × 10ⁿ. */
 function niceMax(v) {

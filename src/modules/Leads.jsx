@@ -15,6 +15,7 @@ import Icon from '../components/Icon.jsx'
 import { LEADS_DEF } from './definitions.jsx'
 import { AgreementList } from '../components/Agreements.jsx'
 import { finalStageOf, stageLabel } from '../data/pipelineRoles.js'
+import { firmLocale } from '../lib/locale.js'
 
 // A scheduled appointment's action reads like "Site Visit — Anita Rao", so the
 // type is a prefix rather than its own field. Matched loosely because the
@@ -369,14 +370,14 @@ function sessionSpan(e) {
   if (!e.lastAt || e.lastAt === e.at) return open
   const a = new Date(e.at), b = new Date(e.lastAt)
   if (isNaN(a.getTime()) || isNaN(b.getTime()) || b.getTime() - a.getTime() < 60000) return open
-  return `${open} – ${b.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`
+  return `${open} – ${b.toLocaleTimeString(firmLocale().numberLocale, { hour: 'numeric', minute: '2-digit' })}`
 }
 
 // The clock time of one payload inside its sitting. The date is on the session
 // header above it; repeating it on every line says nothing new.
 function payloadTime(iso) {
   const d = new Date(iso)
-  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
+  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString(firmLocale().numberLocale, { hour: 'numeric', minute: '2-digit' })
 }
 
 // What one payload said: what they wanted, for how much, and which project it

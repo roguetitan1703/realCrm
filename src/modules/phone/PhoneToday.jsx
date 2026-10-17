@@ -38,6 +38,7 @@ import { AgentWork, TeamBoard } from '../../components/AgentWork.jsx'
 import { Segmented } from '../../components/primitives.jsx'
 import { followUpFinish } from '../../data/followUpKinds.js'
 import { MODULE_DEFINITIONS } from '../definitions.jsx'
+import { firmLocale } from '../../lib/locale.js'
 
 const CLOSED = (l) => isTerminal(l.stage)
 
@@ -171,7 +172,7 @@ function RenewalRow({ p: a, onOpen, signal }) {
 function BulkRow({ g, onSeeAll }) {
   return (
     <button className="q-bulk" onClick={() => onSeeAll(g)}>
-      <span className="q-bulk-n">{g.count.toLocaleString('en-IN')}</span>
+      <span className="q-bulk-n">{g.count.toLocaleString(firmLocale().numberLocale)}</span>
       <span className="q-bulk-t">
         <span className="q-bulk-l">{g.label}</span>
       </span>
@@ -185,7 +186,7 @@ function Group({ g, onOpen, store, onSeeAll }) {
   return (
     <section className="q-group">
       <div className={'q-head' + (g.tone === 'overdue' ? ' q-head-alert' : '')}>
-        {g.label}<span className="q-count">{g.count.toLocaleString('en-IN')}</span>
+        {g.label}<span className="q-count">{g.count.toLocaleString(firmLocale().numberLocale)}</span>
         {/* Only when the group holds more than it shows — a "See all" on six of
             six rows is a link back to the same six rows. */}
         {/* Only when the group HAS somewhere to land. 'Due today',

@@ -86,7 +86,8 @@ export async function notify(n: NotifyInput): Promise<void> {
   if (!n.toSelf && getContext()?.userId && getContext()!.userId === n.userId) return;
   // Catalogue first, explicit text second. A call site that passes neither
   // has nothing to say and is dropped rather than filed blank.
-  const c = n.title ? null : copyFor(n.type, n.data);
+  const desk = await deskConfigOf(t);
+  const c = n.title ? null : copyFor(n.type, n.data, desk);
   const title = n.title ?? c?.title;
   const body = n.body ?? c?.body ?? null;
   if (!title) return;
@@ -102,7 +103,7 @@ export async function notify(n: NotifyInput): Promise<void> {
   // the database instead, a call logged seconds after an alert could read as
   // earlier than it whenever the two clocks drifted — and never close it.
   const now = new Date();
-  const sendAfter = releaseAt(urgency, now, await deskConfigOf(t));
+  const sendAfter = releaseAt(urgency, now, desk);
   await sql`
     INSERT INTO notifications (id, tenant_id, user_id, type, title, body, link,
                                record_kind, record_ids, subject_at, urgency, send_after, created_at)
@@ -443,6 +444,7 @@ export async function processScheduledNotifications(
       // (ending_notified_at), and only for one that has not already ended: the
       // day this ships, an agreement that ended last month is not news, and
       // a gate never set is a backlog with a fuse (see followup_due above).
+      const tz = (await deskConfigOf(t)).timezone;
       const ending = await sql`
         SELECT a.id, a.agent_id, a.lead_id, a.property_id, a.party_name,
                to_char(a.end_date, 'DD Mon') AS ends,
@@ -456,8 +458,8 @@ export async function processScheduledNotifications(
                            AND u.deleted_at IS NULL AND u.status ILIKE 'active'
          WHERE a.tenant_id = ${t} AND a.kind = 'rent' AND a.status = 'active'
            AND a.end_date IS NOT NULL
-           AND a.end_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date
-           AND a.end_date <= (now() AT TIME ZONE 'Asia/Kolkata')::date + 30
+           AND a.end_date >= (now() AT TIME ZONE ${tz})::date
+           AND a.end_date <= (now() AT TIME ZONE ${tz})::date + 30
            AND a.ending_notified_at IS NULL
          LIMIT 50`;
       for (const a of ending as any[]) {

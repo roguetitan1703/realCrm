@@ -21,7 +21,13 @@
 //     helpers at the bottom rather than comparing raw strings.
 // ============================================================================
 
+import { firmLocale, roomLabel, roomsPattern } from '../lib/locale.js'
+
 const o = (value, label) => ({ value, label })
+// A bedroom option. Its label is read when it is shown, in the firm's words
+// ("3 BHK" / "3 bed", lib/locale.js) — the value is the stored token and never
+// changes with them.
+const room = (value) => ({ value, get label() { return roomLabel(value) } })
 
 // ---- Top level --------------------------------------------------------------
 export const CATEGORIES = [o('residential', 'Residential'), o('commercial', 'Commercial')]
@@ -46,7 +52,7 @@ export const SUBTYPES = {
   residential: [
     o('apartment', 'Apartment'), o('independent_house', 'Independent House'),
     o('duplex', 'Duplex'), o('independent_floor', 'Independent Floor'),
-    o('villa', 'Villa'), o('penthouse', 'Penthouse'),
+    o('villa', 'Villa'), o('penthouse', 'Penthouse'), o('townhouse', 'Townhouse'),
     o('studio', 'Studio'), o('farm_house', 'Farm House'), o('plot', 'Plot / Land'),
   ],
   commercial: [
@@ -71,27 +77,21 @@ export const OWNERSHIP = [
 // 1/2/3 BHK, so those are the only ones shown at rest; everything else is one
 // tap away. A flat list of sixteen chips makes the common case pay the cost of
 // the rare one, which is the single biggest reason this form felt long.
-export const BHK_COMMON = [o('1', '1 BHK'), o('2', '2 BHK'), o('3', '3 BHK')]
-export const BHK_MORE = [
-  o('1rk', '1 RK'), o('1.5', '1.5 BHK'), o('2.5', '2.5 BHK'),
-  o('3.5', '3.5 BHK'), o('4', '4 BHK'), o('4.5', '4.5 BHK'), o('5', '5 BHK'),
-]
+export const BHK_COMMON = ['1', '2', '3'].map(room)
+export const BHK_MORE = ['1rk', '1.5', '2.5', '3.5', '4', '4.5', '5'].map(room)
 // Only revealed from "5 BHK" onward. A 9 BHK is a real thing (a rented
 // bungalow, a hostel-style let) but offering it up front is noise.
-export const BHK_LARGE = ['6', '7', '8', '9', '10', '11', '12'].map(v => o(v, `${v} BHK`))
+export const BHK_LARGE = ['6', '7', '8', '9', '10', '11', '12'].map(room)
 
 // `5plus` is legacy-only: rows written before the tiers existed collapsed
 // anything ≥5 into it. Kept so those rows still render and filter, never
 // offered as a new choice.
 // The union — a LOOKUP table for labelOf()/normalise(), not something any
 // picker renders whole. Order is irrelevant here; the tiers above decide it.
-export const BHK = [...BHK_COMMON, ...BHK_MORE, ...BHK_LARGE, o('5plus', '5+ BHK')]
+export const BHK = [...BHK_COMMON, ...BHK_MORE, ...BHK_LARGE, room('5plus')]
 
 /** The short list a FILTER offers — the long tail would swamp the filter bar. */
-export const BHK_FILTER = [
-  o('1rk', '1 RK'), o('1', '1 BHK'), o('2', '2 BHK'), o('3', '3 BHK'),
-  o('4', '4 BHK'), o('5', '5 BHK'), o('5plus', '5+ BHK'),
-]
+export const BHK_FILTER = ['1rk', '1', '2', '3', '4', '5', '5plus'].map(room)
 
 const countList = (from, to) => {
   const out = []
@@ -335,11 +335,13 @@ export function normaliseTo(list, raw) {
 /** "3 BHK Apartment" / "2BHK" / "1 RK" → a BHK token. Reads the NUMBER out of a
  *  string that may also name the sub-type, which is exactly what broke the old
  *  single `type` field. */
-export function normaliseBhk(raw) {
+export function normaliseBhk(raw, loc = firmLocale()) {
   if (!raw) return null
   const s = String(raw).toLowerCase()
   if (/\b1\s*rk\b/.test(s)) return '1rk'
-  const m = s.match(/(\d+(?:\.5)?)\s*bhk/)
+  // A firm that says "bed" types it too: "3 bed", "3 bedroom", "studio".
+  if (loc.rooms === 'bed' && /\bstudio\b/.test(s)) return '1rk'
+  const m = s.match(roomsPattern(loc))
   if (!m) return null
   const n = m[1]
   if (BHK.some(b => b.value === n)) return n
@@ -385,5 +387,8 @@ export function labelOf(list, value) {
 
 /** Filter options built from the vocabulary — never a second hardcoded list. */
 export function optionsOf(list) {
-  return list.map(x => ({ value: x.value, label: x.label }))
+  // The label is passed through as a getter, not copied: a module definition
+  // builds its options at import, before the firm's settings have loaded, and
+  // a bedroom label read then would be India's for ever.
+  return list.map(x => Object.defineProperty({ value: x.value }, 'label', { get: () => x.label, enumerable: true }))
 }

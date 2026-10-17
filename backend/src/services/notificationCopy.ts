@@ -29,12 +29,16 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
  * Formatting here rather than at the call site is the point of this module —
  * a "when" phrased at each site is how one fact ends up worded four ways.
  */
-const whenLabel = (at?: string | null) => {
+/** The firm's clock and words — a DeskConfig (store.ts deskConfigOf) fits. */
+export type CopyDesk = { timezone: string; locale: { numberLocale: string } };
+const INDIA_DESK: CopyDesk = { timezone: 'Asia/Kolkata', locale: { numberLocale: 'en-IN' } };
+
+const whenLabel = (at: string | null | undefined, desk: CopyDesk) => {
   if (!at) return undefined;
   const d = new Date(at);
   if (isNaN(d.getTime())) return undefined;
-  return d.toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short',
+  return d.toLocaleString(desk.locale.numberLocale, {
+    timeZone: desk.timezone, weekday: 'short', day: 'numeric', month: 'short',
     hour: 'numeric', minute: '2-digit',
   });
 };
@@ -43,7 +47,7 @@ const whenLabel = (at?: string | null) => {
 const facts = (...parts: (string | null | undefined | false)[]) =>
   parts.filter(Boolean).join(' · ') || undefined;
 
-type Builders = Record<string, (d: any) => NotifCopy>;
+type Builders = Record<string, (d: any, desk: CopyDesk) => NotifCopy>;
 
 export const COPY: Builders = {
   lead_assigned: (d) => ({
@@ -116,9 +120,9 @@ export const COPY: Builders = {
     title: 'Site visit due now',
     body: facts(d.name, d.when, d.locality),
   }),
-  calendar_task_assigned: (d) => ({
+  calendar_task_assigned: (d, desk) => ({
     title: d.isVisit ? 'Site visit assigned to you' : 'Task assigned to you',
-    body: facts(d.name, whenLabel(d.at) || d.when),
+    body: facts(d.name, whenLabel(d.at, desk) || d.when),
   }),
   remark_added: (d) => ({
     title: 'Note added',
@@ -171,11 +175,11 @@ export function summaryCopy(byType: Record<string, number>): NotifCopy {
  * fall back to whatever it passed — a type added without copy still delivers
  * rather than sending an empty notification.
  */
-export function copyFor(type: string, data: any): NotifCopy | null {
+export function copyFor(type: string, data: any, desk: CopyDesk = INDIA_DESK): NotifCopy | null {
   const build = COPY[type];
   if (!build) return null;
   try {
-    const c = build(data || {});
+    const c = build(data || {}, desk);
     return c?.title ? c : null;
   } catch {
     return null;

@@ -33,7 +33,7 @@ import { sql } from '../services/db';
 import { parsePayload, sanitizeConfig, suggestConfig } from '../services/parser';
 import { bestPayload } from '../services/ingestion';
 import { runWithContext } from '../services/context';
-import { updateLead, getLeadById } from '../services/store';
+import { updateLead, getLeadById, localeOf } from '../services/store';
 
 type Args = { tenant: string; provider?: string; apply: boolean; limit: number; detect: boolean; overwrite: Set<string> };
 
@@ -123,7 +123,7 @@ async function main() {
         perProvider[prov].rows++;
 
         const { clean } = sanitizeConfig(args.detect ? detected.get(prov) : (r.parser_config as any));
-        const parsed = parsePayload(r.raw_body, clean);
+        const parsed = parsePayload(r.raw_body, clean, { locale: await localeOf(args.tenant) });
         if (!parsed.ok) { unparseable++; continue; }
 
         const lead = await getLeadById(r.lead_id as string);

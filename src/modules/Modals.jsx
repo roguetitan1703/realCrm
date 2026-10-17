@@ -25,6 +25,7 @@ import { FOLLOW_UP_ACTIONS, followUpKindOf } from '../data/followUpKinds.js'
 import { ActivityRecords } from '../components/ActivityDay.jsx'
 import { CloseDealModal, AgreementModal } from '../components/Agreements.jsx'
 import { copyText } from '../lib/clipboard.js'
+import { currencySymbol, firmLocale, phoneLabel, phonePlaceholder, roomsText } from '../lib/locale.js'
 
 /**
  * Generic modal frame.
@@ -307,7 +308,7 @@ function OwnerEditModal({ store, propId }) {
         <Input value={owner} onChange={e => setOwner(e.target.value)} placeholder="Sneha Rane" autoFocus />
       </Field>
       <Field label="Phone">
-        <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98765 43210" />
+        <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder={phonePlaceholder('+91 98765 43210')} />
       </Field>
       <Field label="Email">
         <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="Optional" />
@@ -592,7 +593,7 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) 
   return (
     <Modal title={`Record call · ${(l.name || l.phone || '').split(' ')[0]}`} onClose={store.closeModal} width={430}>
       <div className="lc-who">
-        <span className="mono-num">{l.phone || '—'}</span>
+        <span className="mono-num">{phoneLabel(l.phone) || '—'}</span>
         <StageTag stage={l.stage || 'New'} />
       </div>
       <Field label="What happened">
@@ -663,6 +664,7 @@ const CONFIG_OPTIONS = [
 
 function NewLeadModal({ store, leadId }) {
   const edit = leadId ? store.lookup('lead', leadId) : null
+  const inr = firmLocale().currency === 'INR'
   const [f, setF] = useState(edit ? {
     name: edit.name || '',
     phone: edit.phone || '',
@@ -795,7 +797,7 @@ function NewLeadModal({ store, leadId }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
           <Field label="Full Name *"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Client Name" autoFocus /></Field>
-          <Field label="Phone Number *"><Input value={f.phone} onChange={e => set('phone', e.target.value)} placeholder="+91 98xxx xxxxx" /></Field>
+          <Field label="Phone Number *"><Input value={f.phone} onChange={e => set('phone', e.target.value)} placeholder={phonePlaceholder('+91 98xxx xxxxx')} /></Field>
         </div>
         <Field label="Email Address (Optional)"><Input value={f.email} onChange={e => set('email', e.target.value)} placeholder="client@domain.com" /></Field>
 
@@ -809,11 +811,11 @@ function NewLeadModal({ store, leadId }) {
           <Input
             value={f.config}
             onChange={e => set('config', e.target.value)}
-            placeholder="e.g. 2 BHK Apartment, 3 BHK, Plot..."
+            placeholder={roomsText('e.g. 2 BHK Apartment, 3 BHK, Plot...')}
             style={{ marginBottom: 8 }}
           />
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-            {['1 BHK', '2 BHK', '3 BHK', '4 BHK+ Villa', 'Commercial Office', 'Plot'] /* vocab-ok */.map(t =>
+            {['1 BHK', '2 BHK', '3 BHK', '4 BHK+ Villa', 'Commercial Office', 'Plot'] /* vocab-ok */.map(t => roomsText(t)).map(t =>
               chip(f.config === t || f.config?.toLowerCase().startsWith(t.toLowerCase()), () => set('config', t), t)
             )}
           </div>
@@ -839,12 +841,12 @@ function NewLeadModal({ store, leadId }) {
           {/* Both echo the figure back in full while it is typed — 4500 and
               45L abbreviate to ₹4.5k and ₹45L downstream, and neither tells the
               person typing which one the box understood. */}
-          <Field label={f.deal === 'rent' ? 'Min Budget (₹/mo)' : 'Min Budget (e.g. 80L or 1.2Cr)'}>
-            <Input value={f.minBudget} onChange={e => set('minBudget', e.target.value)} placeholder={f.deal === 'rent' ? '25000' : '80L'} />
+          <Field label={f.deal === 'rent' ? `Min Budget (${currencySymbol()}/mo)` : inr ? 'Min Budget (e.g. 80L or 1.2Cr)' : 'Min Budget (e.g. 450K or 1.2M)'}>
+            <Input value={f.minBudget} onChange={e => set('minBudget', e.target.value)} placeholder={f.deal === 'rent' ? (inr ? '25000' : '2500') : inr ? '80L' : '450K'} />
             {moneyEcho(f.minBudget) && <span className="money-echo">{moneyEcho(f.minBudget)}</span>}
           </Field>
-          <Field label={f.deal === 'rent' ? 'Max Budget (₹/mo)' : 'Max Budget (e.g. 1.4Cr)'}>
-            <Input value={f.maxBudget} onChange={e => set('maxBudget', e.target.value)} placeholder={f.deal === 'rent' ? '45000' : '1.4Cr'} />
+          <Field label={f.deal === 'rent' ? `Max Budget (${currencySymbol()}/mo)` : inr ? 'Max Budget (e.g. 1.4Cr)' : 'Max Budget (e.g. 1.5M)'}>
+            <Input value={f.maxBudget} onChange={e => set('maxBudget', e.target.value)} placeholder={f.deal === 'rent' ? (inr ? '45000' : '4000') : inr ? '1.4Cr' : '1.5M'} />
             {moneyEcho(f.maxBudget) && <span className="money-echo">{moneyEcho(f.maxBudget)}</span>}
           </Field>
         </div>
@@ -915,7 +917,7 @@ function NewOwnerModal({ store, ownerId }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
           <Field label="Owner Name"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Optional" autoFocus /></Field>
-          <Field label="Phone *"><Input value={f.phone} onChange={e => set('phone', e.target.value)} placeholder="+91 98xxx xxxxx" /></Field>
+          <Field label="Phone *"><Input value={f.phone} onChange={e => set('phone', e.target.value)} placeholder={phonePlaceholder('+91 98xxx xxxxx')} /></Field>
         </div>
         <Field label="Email"><Input value={f.email} onChange={e => set('email', e.target.value)} placeholder="Optional" /></Field>
         {/* THE FLAT, IN ITS OWN BOXES. This was one free-text "unit reference"
@@ -926,7 +928,7 @@ function NewOwnerModal({ store, ownerId }) {
           <Field label="Project / Society"><SuggestInput value={f.project} onChange={v => set('project', v)} options={projectNames(store)} placeholder="e.g. Godrej Green Vistas" /></Field>
           <Field label="Tower"><Input value={f.tower} onChange={e => set('tower', e.target.value)} placeholder="B" /></Field>
           <Field label="Unit no."><Input value={f.unitNo} onChange={e => set('unitNo', e.target.value)} placeholder="1603" /></Field>
-          <Field label="Configuration"><Input value={f.config} onChange={e => set('config', e.target.value)} placeholder="2 BHK" /></Field>
+          <Field label="Configuration"><Input value={f.config} onChange={e => set('config', e.target.value)} placeholder={roomsText('2 BHK')} /></Field>
         </div>
         {edit?.unitRef && !edit?.unitNo && (
           <div className="imp-unmapped">On file as: {edit.unitRef}</div>
@@ -1514,7 +1516,7 @@ function AddAgentModal({ store }) {
       ) : (
         <Field label="Email"><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="kiran@firm.com" type="email" /></Field>
       )}
-      <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
+      <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} /></Field>
       <div className="u-muted" style={{ fontSize: 12, margin: '2px 0 4px' }}>
         {role === 'manager'
           ? 'A manager signs in with their email + password and can self-reset by email. Managers see the whole desk.'
@@ -1572,7 +1574,7 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
         }
         openWhatsAppChat(msg, digits, app)
       } else {
-        window.location.href = `tel:+${digits.length > 10 ? digits : '91' + digits}`
+        window.location.href = `tel:+${digits.length > 10 ? digits : firmLocale().phoneCountry + digits}`
       }
     }
     if (recordType && recordId) {
@@ -2357,7 +2359,7 @@ const nextDow = (dow) => {
 }
 const dayChips = () => {
   const now = new Date()
-  const short = (d) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  const short = (d) => d.toLocaleDateString(firmLocale().numberLocale, { day: 'numeric', month: 'short' })
   return [
     { ymd: ymdOf(now), label: 'Today' },
     { ymd: ymdOf(addDays(now, 1)), label: 'Tomorrow' },
