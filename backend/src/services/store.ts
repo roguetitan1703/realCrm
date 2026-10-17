@@ -36,6 +36,10 @@ import {
 // backfillEnquiries replays stored payloads through the SAME reader the live
 // ingest uses, so a rebuilt session says what the push said.
 import { parsePayload } from './parser.js';
+// The firm's money, phone and bedroom words — one implementation, shared with
+// the screens. The server always passes the firm's locale (deskConfigOf).
+import { resolveLocale, moneyFull } from '../../../src/lib/locale.js';
+export type Locale = ReturnType<typeof resolveLocale>;
 
 /**
  * The tenant to scope the current request's queries to. Comes from the request
@@ -2325,7 +2329,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       // The chip says what kind of entry this is; the title says what happened
       // to it; the description says which follow-up. Three jobs, one word each.
       title: hadFollowUp ? 'Rescheduled' : 'Scheduled',
-      description: [followUpKind(fu), followUpWhen(fu)].filter(Boolean).join(', '),
+      description: [followUpKind(fu), followUpWhen(fu, await deskConfigOf(tid()))].filter(Boolean).join(', '),
       author: getContext()?.userId || null,
     }).catch(() => {});
   }
@@ -2657,12 +2661,12 @@ export const DEFAULT_QUIET_DAYS = 3;
  * appointment must not be phrased three ways.
  */
 
-function followUpWhen(fu: any): string {
+function followUpWhen(fu: any, desk: Pick<DeskConfig, 'timezone' | 'locale'>): string {
   if (fu?.at) {
     const d = new Date(fu.at);
     if (!isNaN(d.getTime())) {
-      return d.toLocaleString('en-IN', {
-        timeZone: DEFAULT_TIMEZONE, day: 'numeric', month: 'short',
+      return d.toLocaleString(desk.locale.numberLocale, {
+        timeZone: desk.timezone, day: 'numeric', month: 'short',
         hour: 'numeric', minute: '2-digit', hour12: true,
       });
     }
@@ -2670,6 +2674,12 @@ function followUpWhen(fu: any): string {
   // Rows saved before `at` existed carry only what a person typed. Shown as
   // stored rather than guessed at — see FOLLOWUP_PAST_DUE.
   return [fu?.date, fu?.time].filter(Boolean).join(' ');
+}
+
+/** An owner's callback as its timeline line names it, on the firm's clock. */
+async function callbackWhen(at: string): Promise<string> {
+  const desk = await deskConfigOf(tid());
+  return new Date(at).toLocaleString(desk.locale.numberLocale, { dateStyle: 'medium', timeStyle: 'short', timeZone: desk.timezone });
 }
 
 export const FOLLOWUP_PAST_DUE = sql`(CASE WHEN follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
@@ -2773,7 +2783,7 @@ const arrivalStageCache = new Map<string, { v: DeskConfig; at: number }>();
 const ARRIVAL_TTL_MS = 60_000;
 
 /** The settings every worklist question is asked against. */
-export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string; coldDays: number; workStart: number; workEnd: number };
+export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string; coldDays: number; workStart: number; workEnd: number; locale: Locale };
 
 /**
  * THE FIRM'S WORKING HOURS, whole hours on its own clock (Settings → Response
@@ -2841,6 +2851,9 @@ export async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
     coldDays: quietDays(cfg),
     workStart: workHoursOf(cfg).start,
     workEnd: workHoursOf(cfg).end,
+    // Currency, phone country and bedroom words (src/lib/locale.js). India,
+    // field by field, for a firm that never set them.
+    locale: resolveLocale(cfg.locale),
   };
   arrivalStageCache.set(tenantId, { v, at: Date.now() });
   return v;
@@ -2857,6 +2870,11 @@ export async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
  */
 export async function timezoneOf(tenantId: string): Promise<string> {
   return (await deskConfigOf(tenantId)).timezone;
+}
+
+/** The firm's locale, for callers that format money or phones for it. */
+export async function localeOf(tenantId: string): Promise<Locale> {
+  return (await deskConfigOf(tenantId)).locale;
 }
 
 async function arrivalStageOf(tenantId: string): Promise<string> {
@@ -4020,7 +4038,7 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
       record_id: id, type: patch.callbackAt ? 'follow_up' : 'note',
       title: patch.callbackAt ? 'Callback scheduled' : 'Callback cleared',
       description: patch.callbackAt
-        ? `${new Date(patch.callbackAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}${patch.callbackNote ? `: ${patch.callbackNote}` : ''}`
+        ? `${await callbackWhen(patch.callbackAt)}${patch.callbackNote ? `: ${patch.callbackNote}` : ''}`
         : 'No callback scheduled',
       // By id, like every other timeline write — see the stage change above.
       author: ctx.actorId ?? getContext()?.userId ?? 'System',
@@ -4951,9 +4969,10 @@ function propertyEvent(id: string, ctx: ActorCtx, type: string, title: string, d
   }).catch(err => console.warn('[Property history] could not write:', err?.message));
 }
 
-const rupees = (v: any) => {
+/** A price in a listing's history, in the firm's currency: ₹45,00,000 · $4,500,000. */
+const priceText = (v: any, loc: Locale) => {
   const n = Number(String(v ?? '').replace(/[^0-9.]/g, ''));
-  return n > 0 ? `₹${Math.round(n).toLocaleString('en-IN')}` : 'no price';
+  return n > 0 ? moneyFull(n, loc) : 'no price';
 };
 
 /** 7.1 A visit confirmed the listing, or that mark is taken off. */
@@ -5506,7 +5525,8 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   const was = before.status || 'Available', now = updated.status || 'Available';
   if (was !== now) await propertyEvent(id, ctx, 'stage_change', `${was} → ${now}`, `${was} → ${now}`, { from: was, to: now });
   if (String(before.price ?? '') !== String(updated.price ?? '') && (before.price || updated.price)) {
-    await propertyEvent(id, ctx, 'price', 'Price', `${rupees(before.price)} → ${rupees(updated.price)}`);
+    const loc = await localeOf(tid());
+    await propertyEvent(id, ctx, 'price', 'Price', `${priceText(before.price, loc)} → ${priceText(updated.price, loc)}`);
   }
   if ((before.owner || '') !== (updated.owner || '') || (before.ownerPhone || '') !== (updated.ownerPhone || '')) {
     await propertyEvent(id, ctx, 'owner', 'Owner', updated.owner || updated.ownerPhone ? `Now ${updated.owner || updated.ownerPhone}` : 'Removed');
@@ -6592,7 +6612,7 @@ export async function backfillEnquiries(): Promise<void> {
     const when = new Date(r.received_at);
     if (isNaN(when.getTime())) continue;
     const integration = r.integration_id ? configs.get(r.integration_id) : null;
-    const parsed = parsePayload(body, integration?.parser_config || null);
+    const parsed = parsePayload(body, integration?.parser_config || null, { locale: await localeOf(r.tenant_id) });
     // `lead.req` is what the live ingest hands recordEnquiry — same shape, same
     // derivations (deal type, commercial subtype, the "0 BHK" clean-up).
     const req = parsed.lead?.req || {};

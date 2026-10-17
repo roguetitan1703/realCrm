@@ -24,6 +24,8 @@
  * ============================================================================
  */
 
+import { parseMoneyText } from '../../../src/lib/locale.js';
+
 export type ParserConfig = {
   map?: Record<string, string>;
   defaults?: Record<string, any>;
@@ -95,7 +97,9 @@ const isEmpty = (v: any) => v === undefined || v === null || (typeof v === 'stri
 // transform were an expression, a parser config would be remote code execution
 // with extra steps. So it's a closed vocabulary of named operations, and an
 // unknown name is an error rather than a silent no-op.
-export const TRANSFORMS: Record<string, (v: any) => any> = {
+// A transform is handed the firm's locale (src/lib/locale.js) as its second
+// argument; only the ones whose meaning depends on the country read it.
+export const TRANSFORMS: Record<string, (v: any, loc?: any) => any> = {
   trim: (v) => (typeof v === 'string' ? v.trim() : v),
   lower: (v) => String(v ?? '').toLowerCase(),
   upper: (v) => String(v ?? '').toUpperCase(),
@@ -105,15 +109,18 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
     return Number.isFinite(n) ? n : null;
   },
   /**
-   * Indian mobile normalisation. Portals send "+91 98765 43210",
+   * Mobile normalisation. Portals send "+91 98765 43210",
    * "098765 43210", "9876543210" and "91-9876543210" for the same person, and
    * dedup compares phone numbers — so unnormalised input silently creates
    * duplicate leads for one caller.
+   *
+   * The name says India because stored parser configs name it; the country
+   * code is the firm's own (+1 for a US firm), India when none is passed.
    */
-  phone_in: (v) => {
+  phone_in: (v, loc) => {
     const d = String(v ?? '').replace(/\D/g, '');
     const ten = d.length > 10 ? d.slice(-10) : d;
-    return ten.length === 10 ? `+91${ten}` : String(v ?? '').trim();
+    return ten.length === 10 ? `+${loc?.phoneCountry || '91'}${ten}` : String(v ?? '').trim();
   },
   /** "2 BHK Apartment in Wakad" → "2 BHK". Portals bury the config in prose. */
   bhk: (v) => {
@@ -121,8 +128,13 @@ export const TRANSFORMS: Record<string, (v: any) => any> = {
     if (m) return `${m[1]} BHK`;
     return /\b1\s*rk\b/i.test(String(v ?? '')) ? '1 RK' : String(v ?? '').trim();
   },
-  /** "₹95 Lakh" / "1.2 Cr" / "9500000" → rupees. */
-  money_in: (v) => {
+  /** "₹95 Lakh" / "1.2 Cr" / "9500000" → rupees. For a firm outside India,
+   *  "$450K" / "1.2M" / "450000" → the amount (src/lib/locale.js). */
+  money_in: (v, loc) => {
+    if (loc && loc.currency !== 'INR') {
+      const n = parseMoneyText(String(v ?? ''), loc);
+      return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+    }
     const s = String(v ?? '').toLowerCase();
     const n = Number(s.replace(/[^0-9.]/g, ''));
     if (!Number.isFinite(n) || n === 0) return null;
@@ -329,7 +341,7 @@ export function sanitizeConfig(config: ParserConfig | null): { clean: ParserConf
   return { clean: { map, defaults, transforms, valueMaps }, dropped: [...new Set(dropped)] };
 }
 
-export function parsePayload(payload: any, config: ParserConfig | null): ParseResult {
+export function parsePayload(payload: any, config: ParserConfig | null, opts: { locale?: any } = {}): ParseResult {
   const trace: ParseResult['trace'] = [];
   const errors: string[] = [];
   const lead: any = {};
@@ -352,7 +364,7 @@ export function parsePayload(payload: any, config: ParserConfig | null): ParseRe
     if (tName) {
       const fn = TRANSFORMS[tName];
       if (!fn) { errors.push(`Unknown transform "${tName}" for "${target}".`); }
-      else if (!isEmpty(value)) { value = fn(value); via = `map+${tName}`; }
+      else if (!isEmpty(value)) { value = fn(value, opts.locale); via = `map+${tName}`; }
     }
 
     const vmap = config.valueMaps?.[target];

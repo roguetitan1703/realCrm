@@ -373,7 +373,9 @@ export async function processInboxRow(
   // the same error forever, until someone happened to reopen the mapper and
   // re-save. This way the very next push after the fix ships parses clean.
   const { clean } = sanitizeConfig(integration.parser_config as any);
-  const parsed = parsePayload(body, clean);
+  // The firm's phone country and currency: +1 and $450K for a US firm.
+  const desk = await deskConfigOf(integration.tenant_id);
+  const parsed = parsePayload(body, clean, { locale: desk.locale });
   if (!parsed.ok) {
     const why = parsed.errors.length
       ? parsed.errors.join(' ')
@@ -434,7 +436,7 @@ export async function processInboxRow(
       // to do it — the full-collection scan removed everywhere else.
       const existing = await findLeadByPhone(cleanPhone);
       if (existing) {
-        const note = `[Repeat enquiry via ${integration.provider}] ${new Date().toLocaleString('en-IN')}`;
+        const note = `[Repeat enquiry via ${integration.provider}] ${new Date().toLocaleString(desk.locale.numberLocale, { timeZone: desk.timezone })}`;
         // A repeat enquiry is usually RICHER than the first, and merging used
         // to keep only the note. MagicBricks' early pushes carried name, phone
         // and locality; the ones arriving now carry the budget, the deal type,

@@ -27,7 +27,7 @@ import {
 } from '../services/ingestion';
 import { parsePayload, suggestConfig, flattenPaths, TRANSFORMS, sanitizeConfig } from '../services/parser';
 import { audit } from '../services/audit';
-import { getTenantForIngest } from '../services/store';
+import { getTenantForIngest, localeOf } from '../services/store';
 import { sql } from '../services/db';
 
 export const connectionsRouter = Router();
@@ -254,7 +254,7 @@ connectionsRouter.post('/:id/preview', async (req: Request, res: Response) => {
       message: 'This connection has not received anything yet. Ask the portal to send one enquiry, then match its fields.',
     });
   }
-  const result = parsePayload(payload, req.body?.config ?? null);
+  const result = parsePayload(payload, req.body?.config ?? null, { locale: await localeOf(tenant) });
   return res.status(200).json({ success: true, ...result, testedAgainst: payload });
 });
 
@@ -275,7 +275,7 @@ connectionsRouter.put('/:id/parser', async (req: Request, res: Response) => {
         message: 'A mapping can only be saved once this connection has received real data.',
       });
     }
-    const check = parsePayload(payload, config);
+    const check = parsePayload(payload, config, { locale: await localeOf(tenant) });
     if (!check.ok) {
       return res.status(400).json({
         error: 'That mapping does not produce a usable lead',

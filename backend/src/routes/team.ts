@@ -11,6 +11,8 @@ import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { getAgents, getRoutingRules, updateRoutingRules, getAgentPerformance, distributeWork, heldWork, unownedBacklog, assignUnowned, agentLoads } from '../services/store';
 import { sql } from '../services/db';
+import { localeOf } from '../services/store';
+import { normalizePhone } from '../services/roster';
 import { getContext } from '../services/context';
 import { audit } from '../services/audit';
 import { adminSetPassword, suggestPassword, revokeUserSessions, passwordIssue } from '../services/auth';
@@ -127,7 +129,7 @@ teamRouter.post('/users', async (req: Request, res: Response) => {
     if (!cleanName) return res.status(400).json({ error: 'Name is required' });
 
     const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
-    const normPhone = cleanPhone ? `+91${cleanPhone.slice(-10)}` : null;
+    const normPhone = normalizePhone(cleanPhone, await localeOf(req.tenantId!));
     const normEmail = email ? String(email).trim().toLowerCase() : null;
 
     let loginIdVal: string | null = String(loginId || '').trim() || await deriveLoginId(req.tenantId!, cleanName);
@@ -190,7 +192,7 @@ teamRouter.patch('/users/:id', async (req: Request, res: Response) => {
       }
     }
     const cleanName = name != null ? String(name).trim() : u.name;
-    const normPhone = phone != null ? (String(phone).replace(/\D/g, '') ? `+91${String(phone).replace(/\D/g, '').slice(-10)}` : null) : u.phone;
+    const normPhone = phone != null ? normalizePhone(phone, await localeOf(req.tenantId!)) : u.phone;
     const normEmail = email != null ? (String(email).trim().toLowerCase() || null) : u.email;
     if (newRole !== 'agent' && (!normEmail || !EMAIL_RE.test(normEmail))) {
       return res.status(400).json({ error: 'An owner or manager needs a valid email.' });
@@ -312,7 +314,7 @@ teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) 
     const cleanName = String(name || '').trim();
     if (!cleanName) return res.status(400).json({ error: 'New person name is required' });
     const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
-    const normPhone = cleanPhone ? `+91${cleanPhone.slice(-10)}` : null;
+    const normPhone = normalizePhone(cleanPhone, await localeOf(req.tenantId!));
     const normEmail = email ? String(email).trim().toLowerCase() : null;
     if (u.role !== 'agent' && (!normEmail || !EMAIL_RE.test(normEmail))) {
       return res.status(400).json({ error: 'An owner/manager seat needs a valid email.' });
@@ -479,7 +481,7 @@ teamRouter.post('/roster', async (req: Request, res: Response) => {
     // is no SMS channel). So email is required — without it the person could be
     // created but never actually log in. Phone stays optional (used for tel:/wa).
     const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
-    const normPhone = cleanPhone ? `+91${cleanPhone.slice(-10)}` : null;
+    const normPhone = normalizePhone(cleanPhone, await localeOf(req.tenantId!));
     const normEmail = email ? String(email).trim().toLowerCase() : null;
     if (!normEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normEmail)) {
       return res.status(400).json({ error: 'A valid email is needed. Sign-in codes are sent by email.' });

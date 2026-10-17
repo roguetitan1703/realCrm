@@ -35,7 +35,7 @@ import { randomBytes } from 'crypto';
 import { sql, DEFAULT_TENANT_ID } from './db.js';
 import { getContext } from './context.js';
 import { audit } from './audit.js';
-import { createOwnersBatch, createLead, createProperty, type ActorCtx } from './store.js';
+import { createOwnersBatch, createLead, createProperty, localeOf, type ActorCtx, type Locale } from './store.js';
 import {
   OWNER_FIELDS, LEAD_FIELDS, PROPERTY_FIELDS, readField, normPhone,
 } from '../../../src/lib/importSchema.js';
@@ -105,11 +105,12 @@ export type Prepared = {
  */
 export function prepareRow(
   kind: ImportKind, raw: Record<string, any>, mapping: Record<string, string>,
-  opts: { project?: string | null } = {},
+  opts: { project?: string | null; locale?: Locale } = {},
 ): Prepared {
   const v: Record<string, any> = {};
   for (const f of FIELDS[kind]) {
-    const got = readField(raw, mapping, f);
+    // In the firm's formats: a US sheet's "450K" and 10-digit numbers are +1.
+    const got = readField(raw, mapping, f, opts.locale);
     if (got !== null) v[f.key] = got;
   }
 
@@ -330,8 +331,9 @@ export async function previewImport(id: string, mapping: Record<string, string>,
   /** How many rows of each group the review table gets to show. */
   const PER_STATUS = 50;
   const perStatus = new Map<string, number>();
+  const locale = await localeOf(t);
   for (const r of rows as any[]) {
-    const p = prepareRow(kind, r.raw, mapping, options);
+    const p = prepareRow(kind, r.raw, mapping, { ...options, locale });
     let status: string, reason: string | null = null;
     if (!p.ok) { status = 'unusable'; reason = p.reason || 'Unusable row'; counts.unusable++; reasons[reason] = (reasons[reason] || 0) + 1; }
     else if (p.key && seen.has(p.key)) { status = 'repeatedInFile'; reason = 'Same unit earlier in this file'; counts.repeatedInFile++; }
@@ -388,13 +390,14 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
       SELECT row_no, raw FROM crm_import_rows
        WHERE job_id = ${id} AND status IN ('pending', 'failed') ORDER BY row_no`;
 
+    const locale = await localeOf(t);
     for (let i = 0; i < pending.length; i += BATCH) {
       const chunk = pending.slice(i, i + BATCH) as any[];
       const toWrite: { rowNo: number; record: any }[] = [];
       const outcomes: { rowNo: number; status: RowOutcome; reason: string | null; recordId: string | null }[] = [];
 
       for (const r of chunk) {
-        const p = prepareRow(kind, r.raw, mapping, options);
+        const p = prepareRow(kind, r.raw, mapping, { ...options, locale });
         if (!p.ok) { outcomes.push({ rowNo: r.row_no, status: 'skipped', reason: p.reason || 'Unusable row', recordId: null }); skipped++; continue; }
         if (p.key && seen.has(p.key)) { outcomes.push({ rowNo: r.row_no, status: 'skipped', reason: 'Same unit earlier in this file', recordId: null }); skipped++; continue; }
         if (p.key && onFile.has(p.key)) { outcomes.push({ rowNo: r.row_no, status: 'skipped', reason: 'Already on file', recordId: null }); skipped++; continue; }

@@ -55,7 +55,7 @@ interface Rule {
  * bulk alert ("12 leads assigned to you") close when the last of its twelve is
  * worked, and a single alert when its one is.
  */
-function rule(test: CloseTest): Rule | null {
+function rule(test: CloseTest, tz: string): Rule | null {
   switch (test) {
     // Assigned to you / moved to you / still waiting / came back.
     case 'lead_worked': return {
@@ -118,7 +118,7 @@ function rule(test: CloseTest): Rule | null {
       pending: sql`EXISTS (SELECT 1 FROM crm_agreements a
         WHERE a.tenant_id = n.tenant_id AND a.id = ANY(n.record_ids)
           AND a.status = 'active' AND a.end_date IS NOT NULL
-          AND a.end_date <= (now() AT TIME ZONE 'Asia/Kolkata')::date + 30)`,
+          AND a.end_date <= (now() AT TIME ZONE ${tz})::date + 30)`,
       done: sql`EXISTS (SELECT 1 FROM crm_agreements a
         WHERE a.tenant_id = n.tenant_id AND a.id = ANY(n.record_ids))`,
     };
@@ -141,11 +141,14 @@ export async function closeSettled(
   const T = sql(table);
   const scope = recordId ? sql`AND ${recordId} = ANY(n.record_ids)` : sql``;
   let closed = 0;
+  // The firm's own clock, for "ends within 30 days". Imported when called, not
+  // at load: this module stays free of store.ts (see statuses.ts).
+  const tz = await (await import('./store.js')).timezoneOf(tenantId);
 
   for (const test of CLOSE_TESTS) {
     const types = typesFor(test);
     if (!types.length) continue;
-    const r = rule(test);
+    const r = rule(test, tz);
     if (!r) {
       const res = await db`
         UPDATE ${T} n SET closed_at = NOW(), close_reason = 'opened'
