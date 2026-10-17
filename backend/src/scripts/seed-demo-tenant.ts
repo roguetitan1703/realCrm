@@ -1016,7 +1016,7 @@ async function build(sql: any) {
   // without one the parser stores an enquiry as pending and no lead appears
   // (scripts/demo-enquiry.ts sends exactly these fields).
   const site = await createIntegration(SLUG, 'Website', ownerId);
-  await setParserConfig(SLUG, site.integration.id, { map: { name: 'name', phone: 'phone', 'req.notes': 'message' }, defaults: { source: 'Website' } });
+  await setParserConfig(SLUG, site.integration.id, { map: { name: 'name', phone: 'phone', 'req.notes': 'message', 'req.locality': 'area', 'req.config': 'bedrooms', 'req.maxBudget': 'budget', 'req.deal': 'looking_to' }, defaults: { source: 'Website' } });
 
   // 10. The alerts the build itself raised are not news to anyone.
   await new Promise(r => setTimeout(r, 2500));
@@ -1028,7 +1028,7 @@ async function build(sql: any) {
 
   console.log(`\n✓ ${P.firm.name} at /${SLUG}. Everyone signs in with ${PASSWORD}:`);
   for (const u of users.sort((a, b) => (a.role > b.role ? -1 : 1))) console.log(`    ${u.login_id.padEnd(12)} ${u.name} (${u.role})`);
-  console.log(`  Send a live enquiry: npx tsx backend/src/scripts/demo-enquiry.ts --firm=${SLUG}`);
+  console.log(`  Send a live enquiry: npx tsx backend/src/scripts/demo-enquiry.ts --firm=${SLUG} --owner=${users.find(u => u.role === 'owner')?.login_id}`);
 }
 
 main().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });

@@ -58,25 +58,25 @@
       "subtype": "independent_house", "label": "Single-family", "share": 0.6, "leadShare": 0.6, "storeys": [1, 1, 2],
       "sqft": { "2": [1000, 1300], "3": [1400, 2100], "4": [2100, 3000] },
       "configs": {
-        "2 bd": { "share": 1, "sale": [400000, 520000], "rent": [1700, 2100] },
-        "3 bd": { "share": 3, "sale": [480000, 650000], "rent": [2300, 2800] },
-        "4 bd": { "share": 2, "sale": [600000, 820000], "rent": [2900, 3700] }
+        "2 bed": { "share": 1, "sale": [400000, 520000], "rent": [1700, 2100] },
+        "3 bed": { "share": 3, "sale": [480000, 650000], "rent": [2300, 2800] },
+        "4 bed": { "share": 2, "sale": [600000, 820000], "rent": [2900, 3700] }
       }
     },
     "townhouse": {
       "subtype": "townhouse", "label": "Townhouse", "share": 0.25, "leadShare": 0.15, "storeys": [2, 2, 3],
       "sqft": { "2": [1100, 1400], "3": [1450, 1900] },
       "configs": {
-        "2 bd": { "share": 1, "sale": [340000, 450000], "rent": [1800, 2200] },
-        "3 bd": { "share": 1, "sale": [400000, 540000], "rent": [2200, 2700] }
+        "2 bed": { "share": 1, "sale": [340000, 450000], "rent": [1800, 2200] },
+        "3 bed": { "share": 1, "sale": [400000, 540000], "rent": [2200, 2700] }
       }
     },
     "condo": {
       "subtype": "apartment", "label": "Condo", "share": 0.15, "leadShare": 0.25, "localities": ["central"], "storeys": [1],
       "sqft": { "1": [650, 850], "2": [950, 1250] },
       "configs": {
-        "1 bd": { "share": 1, "sale": [260000, 340000], "rent": [1250, 1550] },
-        "2 bd": { "share": 1, "sale": [360000, 480000], "rent": [1750, 2150] }
+        "1 bed": { "share": 1, "sale": [260000, 340000], "rent": [1250, 1550] },
+        "2 bed": { "share": 1, "sale": [360000, 480000], "rent": [1750, 2150] }
       }
     }
   },
@@ -85,24 +85,24 @@
       "name": "Halberd Lofts", "locality": "North Burnet", "kind": "residential", "subtype": "condo",
       "towers": ["A"], "floors": 9, "perFloor": 8,
       "configs": {
-        "1 bd": { "rent": [1350, 1700], "sale": [300000, 380000] },
-        "2 bd": { "rent": [1900, 2500], "sale": [420000, 560000] }
+        "1 bed": { "rent": [1350, 1700], "sale": [300000, 380000] },
+        "2 bed": { "rent": [1900, 2500], "sale": [420000, 560000] }
       }
     },
     {
       "name": "Quillmark Residences", "locality": "Mueller", "kind": "residential", "subtype": "condo",
       "towers": ["A", "B"], "floors": 5, "perFloor": 9,
       "configs": {
-        "1 bd": { "rent": [1300, 1650], "sale": [280000, 360000] },
-        "2 bd": { "rent": [1800, 2300], "sale": [380000, 500000] }
+        "1 bed": { "rent": [1300, 1650], "sale": [280000, 360000] },
+        "2 bed": { "rent": [1800, 2300], "sale": [380000, 500000] }
       }
     },
     {
       "name": "Tansy Row Townhomes", "locality": "Pflugerville", "kind": "residential", "subtype": "townhouse",
       "towers": ["Bldg 1", "Bldg 2", "Bldg 3", "Bldg 4"], "floors": 2, "perFloor": 6,
       "configs": {
-        "2 bd": { "rent": [1700, 2000], "sale": [300000, 380000] },
-        "3 bd": { "rent": [2000, 2400], "sale": [350000, 440000] }
+        "2 bed": { "rent": [1700, 2000], "sale": [300000, 380000] },
+        "3 bed": { "rent": [2000, 2400], "sale": [350000, 440000] }
       }
     }
   ],
