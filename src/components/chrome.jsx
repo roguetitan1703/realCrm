@@ -9,12 +9,11 @@ import { currentTenant } from '../lib/api.js'
 
 // Initials from whatever firm name we actually have. Never a bundled default:
 // two wrong letters in the corner of every screen is still the wrong firm.
-const brandInitials = (n) => String(n || '').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
 
 // ---- desktop sidebar ----
 export function Sidebar({ items, active, activeSub, onNav, footer, firmName, logoUrl, sub }) {
   const name = firmName || ''
-  const initials = String(name).trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  const initials = initialsOfName(name)
   return (
     <nav className="nav">
       <div className="n-brand">
@@ -233,8 +232,11 @@ export function TabBar({ tabs, active, onNav }) {
 // ---- mobile top bar ----
 // title/eyebrow, optional back, optional right slot (avatar / action). This is
 // the CRM's phone chrome (agent role) — NOT a separate app.
+// The firm's mark, for the sidebar and the phone's top bar alike. Words that
+// do not start with a letter or digit are skipped: "Limestone & Laurel" drew
+// "L&" when each bar worked it out for itself.
 function initialsOfName(name) {
-  const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
+  const parts = String(name || '').trim().split(/\s+/).filter(w => /^[\p{L}\p{N}]/u.test(w))
   // No name yet means an empty mark, not the platform's. A stock badge shown
   // while the firm's identity is still loading is another second of the wrong
   // brand on a client's screen.
