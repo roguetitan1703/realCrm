@@ -132,6 +132,7 @@
   },
   "story": {
     "idleToday": "Justin Harris",
-    "offDays": { "Justin Harris": [2, 4] }
+    "offDays": { "Justin Harris": [2, 4] },
+    "slow": { "Justin Harris": { "keep": 0.35, "days": 7 } }
   }
 }

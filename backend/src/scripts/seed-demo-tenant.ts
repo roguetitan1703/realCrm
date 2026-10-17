@@ -257,6 +257,12 @@ const idleToday: string | null = P.story?.idleToday || AGENTS.find(a => laneOfWo
 // slipping. Same days every run.
 const offDays: Record<string, number[]> = P.story?.offDays || {};
 const isOff = (who: string | null, t: Date) => !!who && (offDays[who] || []).includes(dayOf(t));
+// A person whose recent days are thin: `story.slow: { "Name": { "keep": 0.4,
+// "days": 7 } }` keeps that share of their work in the last N days. Days off
+// alone left the slipping agent the busiest on the days they did work, and up
+// on the week before, so the range view said the opposite of the story.
+const slow: Record<string, { keep: number; days: number }> = P.story?.slow || {};
+const isThin = (who: string | null, t: Date) => !!who && !!slow[who] && dayOf(t) < slow[who].days && !chance(slow[who].keep);
 
 // Rounding of a price as a broker quotes it, by deal, and of a lead's budget.
 const ROUND = { rent: 500, sale: 50000, ...(P.rounding || {}), budget: { rent: 1000, sale: 100000, ...(P.rounding?.budget || {}) } };
@@ -509,7 +515,7 @@ function story(L: LeadPlan, agent: string, flag?: string) {
   const ev = (type: string, title: string, description: string, raw: Date | null, metadata?: any) => {
     const t = working(raw);
     if (!t) return null;
-    if ((agent === idleToday && dayOf(t) === 0) || isOff(agent, t) || weekOff(t)) return null;
+    if ((agent === idleToday && dayOf(t) === 0) || isOff(agent, t) || weekOff(t) || isThin(agent, t)) return null;
     L.events.push({ type, title, description, author: agent, at: t, metadata }); return t;
   };
   const call = (t: Date | null, outcome: string, remark?: string) => ev('call', 'Call', remark || 'Call initiated', t, { outcome, edited: true });
@@ -597,7 +603,7 @@ function ownerStory(O: OwnerPlan, agent: string) {
   const ev = (type: string, title: string, description: string, raw: Date | null, metadata?: any, author: string | null = agent) => {
     const t = working(raw);
     if (!t) return;
-    if ((author === idleToday && dayOf(t) === 0) || isOff(author, t) || weekOff(t)) return;
+    if ((author === idleToday && dayOf(t) === 0) || isOff(author, t) || weekOff(t) || isThin(author, t)) return;
     O.events.push({ type, title, description, author, at: t, metadata });
   };
   if (O.stage === 'New') return;
