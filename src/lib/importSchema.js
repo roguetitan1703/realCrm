@@ -10,16 +10,25 @@
  */
 
 // ---------------------------------------------------------------------------
-// Value parsers — Indian formats, because that's what the files contain
+// Value parsers — in the firm's own formats (lib/locale.js). An Indian firm's
+// sheet says "95 Lakh" and 10-digit mobiles; a US firm's says "450K" and
+// (512) 555-0143. Each takes the locale last, and the server passes the firm's.
 // ---------------------------------------------------------------------------
+import { firmLocale, parseMoneyText } from './locale.js'
 
-/** "1.85 Cr" | "95 Lakh" | "₹18,50,000" | "45000/mo" | 18500000 → rupees (number) */
-export function parseMoney(raw) {
+/** "1.85 Cr" | "95 Lakh" | "₹18,50,000" | "45000/mo" | 18500000 → rupees (number).
+ *  Outside India: "$450,000" | "450K" | "1.2M" → the amount, a bare number as written. */
+export function parseMoney(raw, loc = firmLocale()) {
   if (raw === null || raw === undefined || raw === '') return null
-  if (typeof raw === 'number') return raw > 0 ? applyBareScale(raw) : null
-  const s = String(raw).toLowerCase().replace(/[₹,\s]/g, '').replace(/\/-?(mo|month|pm|p\.m\.)?$/, '')
+  const india = loc.currency === 'INR'
+  if (typeof raw === 'number') return raw > 0 ? (india ? applyBareScale(raw) : Math.round(raw)) : null
+  const s = String(raw).toLowerCase().replace(/[₹$,\s]/g, '').replace(/\/-?(mo|month|pm|p\.m\.)?$/, '')
   const num = parseFloat(s.replace(/[^0-9.]/g, ''))
   if (isNaN(num) || num <= 0) return null
+  if (!india) {
+    const n = parseMoneyText(s, loc)
+    return n > 0 ? Math.round(n) : null
+  }
   if (/cr|crore/.test(s)) return Math.round(num * 10000000)
   if (/l(ac|akh|k)?\b|lakh|lac/.test(s)) return Math.round(num * 100000)
   return applyBareScale(num)
@@ -67,14 +76,18 @@ export function parseNum(raw) {
  *     with the cell's own text so it can be fixed and re-imported. A stored
  *     number that dials nowhere is worse than a reported blank.
  */
-export function parsePhone(raw) {
+//
+// "Indian" above is the firm's own country (lib/locale.js phoneCountry): for a
+// US firm a bare ten digits is +1, and 1 followed by ten is the same number.
+export function parsePhone(raw, loc = firmLocale()) {
+  const cc = loc.phoneCountry
   let digits = String(raw ?? '').replace(/\D/g, '')
   if (digits.startsWith('00')) digits = digits.slice(2)
   if (digits.length < 10) return null
-  if (digits.length === 10) return `+91${digits}`
-  if (digits.length === 11 && digits.startsWith('0')) return `+91${digits.slice(1)}`
-  if (digits.length === 12 && digits.startsWith('91')) return `+91${digits.slice(2)}`
-  if (digits.length > 15 || digits.startsWith('91')) return null
+  if (digits.length === 10) return `+${cc}${digits}`
+  if (digits.length === 11 && digits.startsWith('0')) return `+${cc}${digits.slice(1)}`
+  if (digits.length === 10 + cc.length && digits.startsWith(cc)) return `+${cc}${digits.slice(cc.length)}`
+  if (digits.length > 15 || digits.startsWith(cc)) return null
   return `+${digits}`
 }
 
@@ -269,12 +282,13 @@ export function isBlankCell(raw) {
   return v === '' || BLANKS.has(v.toLowerCase())
 }
 
-export function readField(row, mapping, field) {
+/** One cell through its field's parser, in the firm's locale (the server passes it). */
+export function readField(row, mapping, field, loc = firmLocale()) {
   const col = mapping[field.key]
   if (!col) return null
   const raw = row[col]
   if (isBlankCell(raw)) return null
-  return field.parse ? field.parse(raw) : String(raw).trim()
+  return field.parse ? field.parse(raw, loc) : String(raw).trim()
 }
 
 // ---------------------------------------------------------------------------

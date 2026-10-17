@@ -6,6 +6,7 @@ import { useServerData } from '../lib/useServerData.js'
 import { buildRoster } from '../components/roster.jsx'
 import { whenLabel } from '../lib/format.js'
 import { copyText } from '../lib/clipboard.js'
+import { firmLocale } from '../lib/locale.js'
 import { REACH_LABEL, shownLabel, reachWarn } from '../lib/alertReach.js'
 
 const ROLE_LABEL = { admin: 'Owner / Admin', owner: 'Owner', agent: 'Sales Advisor', manager: 'Sales Manager' }
@@ -384,7 +385,7 @@ function SeatModal({ store, user, onClose, onDone }) {
             </Field>
           )}
           <Field label={needsEmail ? 'Email' : 'Email (optional)'}><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@firm.com" type="email" /></Field>
-          <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
+          <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} /></Field>
           <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Reassigning…' : 'Reassign seat'}</Button>
         </div>
       </div>
@@ -402,7 +403,7 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
   const [name, setName] = useState(user.name || '')
   const [loginId, setLoginId] = useState(user.login_id || '')
   const [email, setEmail] = useState(user.email || '')
-  const [phone, setPhone] = useState(String(user.phone || '').replace(/^\+91/, ''))
+  const [phone, setPhone] = useState(String(user.phone || '').replace(new RegExp(`^\\+${firmLocale().phoneCountry}`), ''))
   const [role, setRole] = useState(user.role === 'owner' ? 'owner' : user.role)
   const [saving, setSaving] = useState(false)
   const canSetRole = canManage('owner') && user.role !== 'owner'  // only an owner reassigns roles; owner row is fixed here
@@ -436,7 +437,7 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
           )}
           <Field label="Full name"><Input value={name} onChange={e => setName(e.target.value)} autoFocus /></Field>
           <Field label={needsEmail ? 'Email' : 'Email (optional)'}><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@firm.com" type="email" /></Field>
-          <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
+          <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} /></Field>
           {canSetRole && (
             <Field label="Access level">
               <Segmented value={role} onChange={setRole} options={[{ value: 'agent', label: 'Sales agent' }, { value: 'manager', label: 'Manager' }]} />

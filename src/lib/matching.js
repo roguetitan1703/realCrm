@@ -3,6 +3,7 @@ import { askedFor, budgetOf, facetFit, latestOf, localityFit, dayLabel } from '.
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import { parsePhone } from './importSchema.js'
+import { formatMoney, roomsText } from './locale.js'
 import {
   AREA_UNITS, BHK, COUNTED_ITEMS, FACING, FIXTURES, FURNISH, OWNERSHIP,
   LOCKIN_OPTIONS, PAINTING_CHARGES, POSSESSION, SOCIETY_AMENITIES, SUBTYPES,
@@ -132,13 +133,9 @@ function ord(n) {
 //
 // Anything it can't resolve comes back empty, and `bullet()` drops empties —
 // so a half-filled listing produces a shorter message, never a broken one.
-const money = (n) => {
-  const v = Number(n)
-  if (!Number.isFinite(v) || v <= 0) return ''
-  if (v >= 10000000) return `₹${(v / 10000000).toFixed(2).replace(/\.00$/, '')} Cr`
-  if (v >= 100000) return `₹${(v / 100000).toFixed(2).replace(/\.00$/, '')} L`
-  return `₹${v.toLocaleString('en-IN')}`
-}
+// The firm's currency, in the spaced form a client has always been sent
+// ("₹85 L", "₹1.20 Cr") — lib/locale.js, the one money formatter.
+const money = (n) => formatMoney(n, { style: 'message' })
 
 export function describeProperty(p = {}, lang = 'English') {
   // The pack, for the handful of words that belong to a VALUE rather than to
@@ -697,7 +694,7 @@ export function followUpMessage(lead, firmName = tenantFirm(), opts = {}) {
   // Mahalunge,Wakad" to a client, and a "+1" is desk shorthand that means
   // nothing to them — so the message names the current ask and no more.
   const config = latestOf(lead.req?.config) || ''
-  const configLabel = labelOf(BHK, config) || config
+  const configLabel = roomsText(labelOf(BHK, config) || config)
   const dealLabel = lead.req?.deal ? (lead.req.deal === 'rent' ? 'Rent' : 'Sale') : ''
   const reqStr = [configLabel, dealLabel].filter(Boolean).join(' ') || 'property'
   const locStr = latestOf(lead.req?.locality) || 'your preferred location'

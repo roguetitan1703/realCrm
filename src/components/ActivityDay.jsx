@@ -34,9 +34,10 @@ import { Segmented } from './primitives.jsx'
 import Icon from './Icon.jsx'
 import { useStore } from '../lib/store.jsx'
 import { stageLabel } from '../data/pipelineRoles.js'
+import { firmLocale, phoneLabel } from '../lib/locale.js'
 
 // ── Reading one person's counts ─────────────────────────────────────────────
-export const fmt = (n) => Number(n || 0).toLocaleString('en-IN')
+export const fmt = (n) => Number(n || 0).toLocaleString(firmLocale().numberLocale)
 export const word = (n, one, many) => (n === 1 ? one : many)
 
 /** What a call's written outcome says about whether anybody picked up. */
@@ -122,7 +123,7 @@ export function DayPicker({ day, today, onDay, className = '' }) {
 // beside it chooses the day, the first day of the week or month, or both ends.
 
 const DAYS = { 7: 7, 30: 30 }
-const short = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+const short = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString(firmLocale().numberLocale, { day: 'numeric', month: 'short', timeZone: 'UTC' })
 export const spanOf = (from, to) => Math.round((new Date(`${to}T12:00:00Z`) - new Date(`${from}T12:00:00Z`)) / 86400000) + 1
 
 /** Which switch position a range is. */
@@ -386,8 +387,8 @@ export function ActivityRecords({ store, go, side, date, from, person, measure, 
               {rows.map((r, i) => (
                 <button key={`${r.id}-${i}`} type="button" className="ad-row" onClick={() => openRecord(r)}>
                   <span className="ad-row-main">
-                    <span className="ad-row-name">{r.name || r.phone || 'No name'}</span>
-                    <span className="ad-row-sub">{[r.unit, what(r)].filter(Boolean).join(' · ') || r.phone}</span>
+                    <span className="ad-row-name">{r.name || phoneLabel(r.phone) || 'No name'}</span>
+                    <span className="ad-row-sub">{[r.unit, what(r)].filter(Boolean).join(' · ') || phoneLabel(r.phone)}</span>
                   </span>
                   <span className="ad-row-at">{r.at ? whenLabel(r.at) : ''}</span>
                 </button>
