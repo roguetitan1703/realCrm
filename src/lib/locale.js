@@ -73,10 +73,15 @@ const lakhs = (loc) => loc.currency === 'INR'
  */
 export function moneyParts(v, loc = current) {
   const steps = lakhs(loc)
-    ? [['Cr', 10000000], ['L', 100000], ['k', 1000]]
-    : [['B', 1000000000], ['M', 1000000], ['K', 1000]]
-  const [unit, div] = steps.find(([, d]) => v >= d) || ['', 1]
-  return { shown: Math.round((v / div) * 100) / 100, unit }
+    ? [['Cr', 10000000], ['L', 100000], ['k', 1000], ['', 1]]
+    : [['B', 1000000000], ['M', 1000000], ['K', 1000], ['', 1]]
+  // The unit is chosen on the ROUNDED figure: 99,995 rounds to 100 thousand,
+  // which is ₹1L, not "₹100k" — and $999,995 is $1M, not "$1000K".
+  const round = (d) => Math.round((v / d) * 100) / 100
+  let i = steps.findIndex(([, d]) => v >= d)
+  while (i > 0 && round(steps[i][1]) * steps[i][1] >= steps[i - 1][1]) i--
+  const [unit, div] = steps[i]
+  return { shown: round(div), unit }
 }
 
 /**
@@ -138,12 +143,22 @@ export function parseMoneyText(v, loc = current) {
     if (/k/i.test(s)) return parseFloat(s) * 1000
     return Number(s)
   }
-  // The unit is the letter straight after the number, nothing further on: the
-  // "m" of "2500/mo" is a month, not a million.
-  const m = s.replace(/,/g, '').match(/(\d+(?:\.\d+)?)\s*([kmb])?(?![a-z])/i)
+  // The scale is the word straight after the number, nothing further on: the
+  // "m" of "2500/mo" is a month, not a million. A word it does not know is NOT
+  // read as no scale — "$1.2 Million" stored as $1 is a budget nobody can tell
+  // from a real one — so it returns NaN and the caller treats it as unread.
+  const m = s.replace(/,/g, '').match(/(\d+(?:\.\d+)?)\s*([a-z]*)/i)
   if (!m) return NaN
-  const scale = { k: 1000, m: 1000000, b: 1000000000 }[String(m[2] || '').toLowerCase()] || 1
-  return parseFloat(m[1]) * scale
+  const word = m[2].toLowerCase()
+  if (!word) return parseFloat(m[1])
+  const scale = SCALE_WORDS[word]
+  return scale ? parseFloat(m[1]) * scale : NaN
+}
+
+const SCALE_WORDS = {
+  k: 1e3, thousand: 1e3,
+  m: 1e6, mm: 1e6, mn: 1e6, million: 1e6,
+  b: 1e9, bn: 1e9, billion: 1e9,
 }
 
 // ---- Phone numbers -------------------------------------------------------------
@@ -205,11 +220,12 @@ export function roomsText(text, loc = current) {
   return text
     .replace(/(\d+(?:\.5)?)(\+?)\s*B\.?H\.?K\b(\+?)/gi, (m, n, a, b) => `${n}${a || b} bed`)
     .replace(/\b1\s*RK\b/gi, 'Studio')
+    .replace(/(\d+(?:\.5)?)\s*bds?\b/gi, '$1 bed')
 }
 
 /** The pattern that reads a bedroom count out of text, in the firm's words too. */
 export function roomsPattern(loc = current) {
   return loc.rooms === 'bed'
-    ? /(\d+(?:\.5)?)\s*(?:bhk|bed(?:room)?s?|br)\b/
+    ? /(\d+(?:\.5)?)\s*(?:bhk|bed(?:room)?s?|bds?|br)\b/
     : /(\d+(?:\.5)?)\s*bhk/
 }

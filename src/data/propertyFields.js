@@ -52,7 +52,7 @@ export const SUBTYPES = {
   residential: [
     o('apartment', 'Apartment'), o('independent_house', 'Independent House'),
     o('duplex', 'Duplex'), o('independent_floor', 'Independent Floor'),
-    o('villa', 'Villa'), o('penthouse', 'Penthouse'),
+    o('villa', 'Villa'), o('penthouse', 'Penthouse'), o('townhouse', 'Townhouse'),
     o('studio', 'Studio'), o('farm_house', 'Farm House'), o('plot', 'Plot / Land'),
   ],
   commercial: [
@@ -335,13 +335,13 @@ export function normaliseTo(list, raw) {
 /** "3 BHK Apartment" / "2BHK" / "1 RK" → a BHK token. Reads the NUMBER out of a
  *  string that may also name the sub-type, which is exactly what broke the old
  *  single `type` field. */
-export function normaliseBhk(raw) {
+export function normaliseBhk(raw, loc = firmLocale()) {
   if (!raw) return null
   const s = String(raw).toLowerCase()
   if (/\b1\s*rk\b/.test(s)) return '1rk'
   // A firm that says "bed" types it too: "3 bed", "3 bedroom", "studio".
-  if (firmLocale().rooms === 'bed' && /\bstudio\b/.test(s)) return '1rk'
-  const m = s.match(roomsPattern())
+  if (loc.rooms === 'bed' && /\bstudio\b/.test(s)) return '1rk'
+  const m = s.match(roomsPattern(loc))
   if (!m) return null
   const n = m[1]
   if (BHK.some(b => b.value === n)) return n
