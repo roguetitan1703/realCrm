@@ -62,6 +62,17 @@ export default {
     fonts: { display: 'Space Grotesk', body: 'IBM Plex Sans' },
   },
 
-  voice: { name: 'af_heart' },
+  // Brisk: short camera moves, a ring that flashes at the click, tight cuts.
+  tempo: 'fast',
+
+  // ElevenLabs "Chris" (cutroom's demo-kit voice). Paid per line; every line
+  // is cached by the engine, so only changed words are bought. The key comes
+  // from ELEVENLABS_API_KEY or cutroom's .env, never from this repo.
+  voice: { provider: 'elevenlabs', id: 'iP95p4xoKVk53GoZ742B', speed: 1.05, envFile: '../../../cutroom/.env' },
   lexicon: { CRM: 'C R M' },
+
+  // "Sun in Your Eyes" by Alejandro Magaña, Mixkit (Stock Music Free License:
+  // commercial use, no attribution), from cutroom's library. 100 bpm,
+  // four-on-floor, energy 3: a clear pulse every 600 ms that the cuts land on.
+  music: { file: 'assets/mixkit-131.mp3', beatGrid: 'assets/mixkit-131.grid.json', volume: 0.16, duckUnderVoice: 0.35 },
 }
