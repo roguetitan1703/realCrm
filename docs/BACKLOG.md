@@ -89,6 +89,10 @@ gaps are in `specs/notifications.md` §1, not here.
   none, so nothing can say a callback is late. (Owners store one.) *agent*
 - **Booked site visits with no time** — bhumi 5 of 29 (typed text only).
 - **`/api/v1/ingest` has no rate limit** (code). A leaked key fills a desk.
+- **4 paying-firm users cannot sign in by phone code** (production, read-only,
+  17 Oct): bhumi 1 of 4 and mahalaxmi 3 of 5 user phones are stored as bare 10
+  digits, and the sign-in lookup matches `+91…` exactly. Older than the locale
+  work. *agent*
 - **A column header sorts one way only** (code, dev). Clicking Last enquiry
   again does not flip it (`Table` calls `onSort(key)`, never the direction);
   only the toolbar arrow does. Newest-first takes two controls. *manager*
