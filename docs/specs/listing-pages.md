@@ -1,10 +1,101 @@
 # Listing pages — sending flats, and the firm's catalogue
 
-**Status:** 🅿️ **parked 13 Oct**, mid-ideation — nothing built. The latest model is
-§0; sections below it are the steps that led there and are partly superseded. Replaces `gallery-enquiry.md`
-(8 Oct), whose reasoning is folded in below.
+**Status:** reopened 19 Oct by Om with a new model (§A). Nothing built. §A is
+the design; §0–§8 below are the 12–13 Oct thinking, kept for its reasoning and
+superseded wherever §A says otherwise (notably: one page per buyer is replaced
+by a link per send with an expiry).
 
-## 0. Where the thinking got to (12 Oct, last) — read this first
+## A. The model (Om, 19 Oct)
+
+**Two catalogues.**
+
+- **Public catalogue.** Every flat with **Show in catalogue** on (ticked one by
+  one, or as a bulk action on the Properties list) and status Available. One
+  page per firm, which can also be **embedded** in the firm's own website. It
+  never expires. Each flat has a call to action; a form (name, number) makes a
+  lead, source **Catalogue**, routed like a portal lead.
+- **Shared links.** A link is **a custom view plus, optionally, a buyer.** An
+  agent picks flats in one of these ways:
+  - from a lead's shortlist: one, some or all of them;
+  - from the full Properties page: filter or tick the flats, then **Send**.
+
+  The agent then either picks the recipient, or presses **Continue without a
+  recipient**.
+  - **To a buyer (Rahul):** the link is bound to Rahul's lead. A tap on
+    Interested shows on Rahul's lead and in the agent's notifications: "Rahul is
+    interested in Pride World City 2 BHK · from the link sent 14 Oct".
+  - **Without a recipient:** the link carries only its creator. Taps go to that
+    agent.
+  - A shared link may include flats that are not in the public catalogue, when
+    it goes to a named buyer. That is the agent's call.
+
+**No link management.** Sending again makes a new link. Every link expires
+after the firm's setting — **7, 15 or 30 days**, no "never" — fixed at
+creation. Each person can see the links they created, and turn one off (turning
+off and deleting are the same thing). That list is nested (under Me), never in
+the main navigation.
+
+**Call to action on every flat.** **I'm interested** opens WhatsApp to the
+right number, prefilled with the flat ("Hi, I'm interested in the 2 BHK at Pride
+World City · ref k7m2qx"). The tap is recorded before WhatsApp opens. When the
+WhatsApp integration exists, the same button reaches the firm's WhatsApp number
+or bot instead; nothing else changes.
+
+**Prices.** Public catalogue: a firm setting, **Show prices on catalogue**.
+Shared link: a tick when creating it, defaulting to the firm setting. Still to
+do: look at how other public catalogues handle price (the first search,
+19 Oct, found nothing usable).
+
+**Never on any page:** flat number, the owner's name or number, internal notes,
+key details (`NEVER_SHARED_FIELDS`).
+
+### A.1 Cases, from each side
+
+| Who | What happens | Proposed answer |
+|---|---|---|
+| Buyer | Rahul forwards his link to his brother, who taps Interested | Recorded as from Rahul's link ("someone on Rahul's link"); the WhatsApp message arrives from the brother's own number, so the agent sees who it really is |
+| Buyer | Opens the link after it expired | Not a dead end: the firm's name, **Talk to us** (WhatsApp to the agent), and the public catalogue |
+| Buyer | A flat in the link was let after sending | Shown greyed as **Taken**; the rest still work |
+| Buyer | Taps Interested five times | One notification per flat per link per day |
+| Agent | Rahul's lead moves to Priya | Taps and the WhatsApp button go to the lead's **current holder**, worked out when the link is opened |
+| Agent | Sender suspended or left; link had no recipient | Goes to the firm's **reply-to number** (a new setting) |
+| Agent | Has no phone number on file | Same fallback. bhumi has 4 of 8 agents with no phone; fix that data before launch |
+| Agent | Wants to keep a hot buyer's link alive | Sends a new link. Nothing to extend |
+| Agent | A link without a recipient, containing private flats | Not allowed: a link with no buyer shows public flats only, because it can reach anyone |
+| Lead | Rahul's lead is rejected, then he taps Interested | Works until expiry; the alert says he was rejected. A rejected buyer coming back is worth knowing |
+| Lead | Merged into another lead | The link follows the surviving lead |
+| Lead | Deleted | The link turns off |
+| Owner | Changes expiry from 30 to 7 days | New links only. Existing links keep the expiry they were made with |
+| Owner | A link leaks to a competitor | Owner can turn off every link at once (Settings), owner only, recorded |
+| Owner | A ticked flat is let, then comes back | Leaves the catalogue while not Available; returns by itself, the tick stays |
+| Owner | Bulk-ticks 40 flats, 25 with no photos | Proposed: the bulk action says "25 have no photos" and ticks them anyway; the catalogue shows them last |
+| Owner | Does not want the building named publicly (buyers going direct to the society) | Open: a firm setting to show locality only instead of the project name |
+| Public | The same person fills the catalogue form twice, or is already a lead | Existing rule: matched by phone, becomes a repeat enquiry on the existing lead |
+| Public | Bots fill the form | Rate limit and a hidden field; phone number required |
+| Delpat | Someone guesses link codes | Random codes, rate-limited lookups (§5) |
+| Delpat | WhatsApp's preview fetch counts as an open | Preview fetchers are not counted; the firm's own staff opening a link are not counted |
+| Delpat | Today's photo links already sent to buyers | Open: redirect each to the flat's public page if it is in the catalogue, else "no longer available" plus the catalogue. Private flats' old links stop showing photos |
+
+### A.2 Needs that do not exist yet
+
+- A link table (code, creator, lead or none, flat ids, show price, created,
+  expires, turned off) and a tap table (link, flat, kind, at).
+- **Show in catalogue** per flat, with the bulk action; **Send** as a bulk
+  action on Properties (today the selection can only duplicate).
+- Firm settings: link expiry (7/15/30), show prices on catalogue, reply-to
+  number, and possibly project name on catalogue.
+- An embed snippet for the firm's website, and the standalone page
+  `/<firm>/homes`.
+- Agents' phone numbers on file.
+
+### A.3 Order
+
+1. Shared links from a lead and from Properties, with I'm interested landing on
+   the lead and in notifications; "My links" under Me; expiry setting.
+2. Show in catalogue with bulk action, the public page, the form, the embed
+   code, the price setting.
+
+## 0. Where the thinking got to (12 Oct, last) — superseded by §A
 
 The per-send link (§3–5b) was wrong at the root: ten sends gave one buyer ten
 links, and nobody knew which was current. Each fix to it (reuse, expiry,
