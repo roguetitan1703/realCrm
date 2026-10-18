@@ -102,7 +102,7 @@ share (which is a shared link with one flat).
   comes from that device.
 
 **Message first; a form only where it gives the visitor something back.**
-I'm interested always opens WhatsApp. Proposed form cases, each asking a number:
+On shared links, I'm interested always opens WhatsApp (the public catalogue uses its form, §A.1c). Proposed form cases on shared links, each asking a number:
 - **Call me back**: for a visitor with no WhatsApp on that device (a desktop
   visitor to the embedded catalogue).
 - **Book a visit**: a day and a slot within the firm's working hours.
@@ -124,6 +124,28 @@ message itself is the sign-in.
 **Consent.** A number and a device ID are personal data under India's DPDP Act
 2023. Every page links to /privacy, and each form states what is done with the
 number. Proposed: view logs are kept 180 days (`specs/data-lifecycle.md`).
+
+### A.1c Case by case (Om, 19 Oct: "think about it in cases")
+
+The public catalogue's call to action is **the enquiry form**: the form is how
+it asks for contact, nothing else on the page does (Om). I'm interested →
+WhatsApp is for shared links. A link sent to someone is that someone's.
+
+| Case | Who sees it | How they are known | What to record | Already have | To add |
+|---|---|---|---|---|---|
+| **P. Public catalogue** (own page or embedded in the firm's site) | Anyone | Nobody, until the form | Views per flat; form sent | Website lead intake, duplicate-by-phone, routing, source labels | Show in catalogue + bulk; the page; embed code; form → lead (source Catalogue); price setting |
+| **I1. Sent to one buyer** (one flat or several) | The buyer | The lead it was sent to | Opens, flats opened, Interested per flat, expired-link Talk to us | The lead, its shortlist (`lead_shortlist`), alert lifecycle, WhatsApp logging | Link and tap tables; send from shortlist/Properties; alerts (Interested, expired, back on a new day) |
+| **I1f. …and the buyer forwards it** (family, a friend) | Several people on one link | Still the lead; the other people are unknown | Opens per device; "opened on another device" | — | Device ID (to tell devices apart) |
+| **I2. Sent to a group** (broker group, society group, WhatsApp status, Instagram story) | Many, unknown | Nobody | Opens, unique devices, Interested taps per flat | — | Device ID for unique counts; the link on "My links" with its numbers |
+| **I2r. …someone from the group writes on WhatsApp** | One of them | Their WhatsApp number, seen by the agent | The lead it became, credited to the link | Add lead | On Add lead, "came from" lists the agent's recent links, so the source is the link; later, automatic via the message's ref once WhatsApp is integrated |
+| **I3. Sent to one person not yet a lead** (a walk-in, a contact's number) | One person | The agent knows them; the CRM does not | As I2 | — | **Attach to a lead** on the link later, which moves its history onto the lead |
+| **I4. Sent to another broker** (co-broking) | The broker, then their client | Unknown | As I2 | Source "Broker" exists in lead sources | Nothing new; the agent marks the lead's source |
+| **I5. Sent by a manager for an agent's lead** | The buyer | The lead | As I1 | — | Taps go to the lead's holder, not the creator (already the rule) |
+| **X. Staff open their own link; WhatsApp builds a preview** | Not a buyer | — | Nothing | Per-firm session in the browser | Skip both when counting |
+
+What this shows: device IDs matter only for **I1f, I2, I3** (telling viewers
+apart). I1 needs none, and P needs none before the form. The one new idea it
+surfaced is **Attach to a lead** (I3), which also gives I2r its answer.
 
 ### A.2 Needs that do not exist yet
 
