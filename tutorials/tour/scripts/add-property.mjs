@@ -1,5 +1,8 @@
 // For an agent or owner already on the CRM: add a new listing with its
-// photos, then send the photos to a buyer. Desk, on a computer.
+// furnishing and amenities and its photos, then send the photos to a buyer.
+// Desk, on a computer. Each line is about as long as the actions under it:
+// the edit holds the picture before an action so it ends a second before its
+// line, and a line much shorter than its typing leaves the typing unspoken.
 export default {
   id: 'add-property',
   title: 'Add a property with photos, and share it',
@@ -9,17 +12,31 @@ export default {
   start: '?screen=properties',
   steps: [
     { say: 'To add a new listing, open Properties and click Add property.', click: { role: 'button', name: 'Add property' }, zoom: 1.3 },
-    { say: 'Pick the kind of home, and say where it is.', click: { role: 'button', name: 'Townhouse', exact: true }, zoom: 1.4 },
+    { say: 'Pick the kind of home. Then type in its name, and the neighborhood where it sits.', click: { role: 'button', name: 'Townhouse', exact: true }, zoom: 1.4 },
     { type: { placeholder: 'Skyline Heights' }, text: 'Cedar Row Townhomes', zoom: 1.4 },
     { type: { placeholder: 'Wakad' }, text: 'Mueller', zoom: 1.4 },
-    { say: 'Add the bedrooms and the size.', click: { role: 'button', name: '3 bed', exact: true }, zoom: 1.4 },
+    { say: 'Add the bedrooms and the bathrooms, then the size in square feet, and move on to the price.', click: { role: 'button', name: '3 bed', exact: true }, zoom: 1.4 },
+    { click: { role: 'button', name: '2', exact: true }, zoom: 1.4 },
     { type: { placeholder: '0' }, text: '1850', zoom: 1.4 },
     { click: { role: 'button', name: 'Next: Price & terms' }, zoom: 1.3 },
-    { say: 'Add the asking price.', type: { placeholder: '95,00,000' }, text: '625000', zoom: 1.4 },
+    { say: 'Add the asking price, and go on to the details.', type: { placeholder: '95,00,000' }, text: '625000', zoom: 1.4 },
     { click: { role: 'button', name: 'Next: Details & media' }, zoom: 1.3 },
+    { say: 'Say how it comes furnished. Then open the list, and tick what comes with it: a washer, a fridge, a dining table.', click: { role: 'button', name: 'Semi Furnished', exact: true }, zoom: 1.4 },
+    { click: { role: 'button', name: 'Add furnishings & amenities' }, zoom: 1.4 },
+    { click: { role: 'button', name: 'Washing Machine', exact: true }, zoom: 1.4, quick: true },
+    { click: { role: 'button', name: 'Fridge', exact: true }, zoom: 1.4, quick: true },
+    { click: { role: 'button', name: 'Dining Table', exact: true }, zoom: 1.4, quick: true },
+    { say: 'Set how many of each, like two air conditioners, and add what the community offers: a pool, a gym, a garden.', click: { role: 'button', name: 'More AC', exact: true }, zoom: 1.4 },
+    { click: { role: 'button', name: 'More AC', exact: true }, zoom: 1.4, quick: true },
+    { click: { role: 'button', name: 'Swimming Pool', exact: true }, zoom: 1.4, quick: true },
+    { click: { role: 'button', name: 'Gym', exact: true }, zoom: 1.4, quick: true },
+    { click: { role: 'button', name: 'Garden', exact: true }, zoom: 1.4, quick: true },
+    { click: { role: 'button', name: /^Done/ }, zoom: 1.3 },
+    { say: 'Add a short line on what makes this home worth a visit.', type: { placeholder: 'What makes this one worth seeing?' }, text: 'End unit, private patio, steps from the park.', zoom: 1.4 },
     { say: 'Drop in your photos.', upload: { text: 'Browse files', exact: true }, file: ['home-1.jpg', 'home-2.jpg', 'home-3.jpg'], zoom: 1.3, after: 1500 },
+    { wait: 5000 },
     { say: 'Save, and it joins your listings.', click: { role: 'button', name: 'Save property' }, zoom: 1.3, after: 1200 },
-    { click: { role: 'button', name: /^Cedar Row Townhomes/ }, zoom: 1.3 },
+    { say: 'Open the new listing, and go to its photos.', click: { role: 'button', name: /^Cedar Row Townhomes/ }, zoom: 1.3 },
     { click: { css: 'tbody tr:first-child td:nth-child(3)' }, after: 800 },
     { say: 'Every photo already carries your firm’s name.', point: { text: 'Cover', exact: true }, zoom: 1.6 },
     { say: 'Copy the photo link, and send it to a buyer.', click: { text: 'Copy photo link' }, zoom: 1.4, after: 800 },

@@ -70,6 +70,8 @@ export default {
   // .env, never from this repo.
   voice: { provider: 'elevenlabs', id: 'XrExE9yKIg1WjnnlVkGX', speed: 1, envFile: '../../../cutroom/.env' },
   lexicon: { CRM: 'C R M' },
+  // Delpat's mark in the corner and its close at the end (Om, 18 Oct: "we don't have Delpat anywhere").
+  maker: { name: 'Delpat', logo: 'assets/delpat-logo.png', line: 'Software made for your industry.', site: 'delpat.in' },
 
   // Mixkit #282, calm warm hip-hop, 76 bpm (Om's pick, 18 Oct; Stock Music
   // Free License: commercial use, no attribution), from cutroom's library.
