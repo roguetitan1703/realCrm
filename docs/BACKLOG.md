@@ -96,6 +96,9 @@ gaps are in `specs/notifications.md` §1, not here.
 - **A column header sorts one way only** (code, dev). Clicking Last enquiry
   again does not flip it (`Table` calls `onSort(key)`, never the direction);
   only the toolbar arrow does. Newest-first takes two controls. *manager*
+- **Two controls that do nothing** (code, 18 Oct). The profile menu offers "API
+  Integrations & Webhooks", but `dispatchOutboundWebhook` has no caller. "Merge
+  duplicate" shows only when `duplicateOf` is set, and nothing sets it. *owner*
 
 ## To verify
 
