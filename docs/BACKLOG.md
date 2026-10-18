@@ -49,11 +49,14 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 - **Business rails.** Weekly numbers script (PLAN §4, read-only); a release
   every two weeks (window: PLAN Q8); `docs/ops/ONBOARDING.md` from the
   mahalaxmi go-live; a written price (PLAN Q2). *Delpat*
-- **Help desk** (Work OS #129) — what it is waits on PLAN Q1; recommended:
-  report a problem to Delpat from inside the app.
+- **Help desk** (Work OS #129) — Om, 19 Oct: both. (1) Report a problem to
+  Delpat from inside the app, prefilled with firm, person, screen, version;
+  (2) a help centre of how-to pages and videos in the app (the tutorial-videos
+  engine exists).
 - **Collapsible sidebar** (Work OS #130) — ride in a release, never its own. *owner*
-- **Catalog, steps 1–2** (Work OS #131) — proposed for weeks 5–8 in PLAN; still
-  in `PARKED.md` until Om answers PLAN Q5.
+- **Catalog** (Work OS #131) — reopened by Om 19 Oct to be redesigned as one
+  piece; the earlier steps 1–4 (`specs/listing-pages.md` §7) no longer stand
+  until the new model is agreed.
 
 ## Small
 

@@ -234,7 +234,7 @@ firm, days since last API deploy, `main` vs deployed commit.
 
 ## 6. Questions only Om can answer
 
-1. **What is the help desk (#129)?** Example: Ravish's push stopped; today he
+1. **What is the help desk (#129)?** *Answered 19 Oct: report a problem AND a help centre.* Example: Ravish's push stopped; today he
    tells the owner, who WhatsApps you. *Yes = "a way for a firm's person to
    report a problem to Delpat from inside the app"*: S, reuse the support
    WhatsApp bubble, prefilled with firm, user, screen, version; ships in
@@ -261,7 +261,7 @@ firm, days since last API deploy, `main` vs deployed commit.
    shown as "with proof" on Performance. **Recommendation:** keep proof for
    "logged visit"; let the stage move book the date and ask for the result.
    Decide after four weeks of the new flow.
-5. **Catalog: steps 1–2 now and step 3 on evidence, or all four?** Example:
+5. **Catalog: steps 1–2 now and step 3 on evidence, or all four?** *19 Oct: reopened, to be redesigned as one piece.* Example:
    Mohit sends 36 listings a month; nobody else at either firm sends more than
    10. *All four*: ~L, two more releases, the public catalogue built on 0
    numbers. *Steps 1–2 then decide*: two releases, and by 12 Dec we know
