@@ -62,17 +62,16 @@ export default {
     fonts: { display: 'Space Grotesk', body: 'IBM Plex Sans' },
   },
 
-  // Brisk: short camera moves, a ring that flashes at the click, tight cuts.
-  tempo: 'fast',
+  // Normal pace with a quick click flash (Om found 'fast' too quick, 18 Oct).
+  tempo: 'steady',
 
-  // ElevenLabs "Chris" (cutroom's demo-kit voice). Paid per line; every line
-  // is cached by the engine, so only changed words are bought. The key comes
-  // from ELEVENLABS_API_KEY or cutroom's .env, never from this repo.
-  voice: { provider: 'elevenlabs', id: 'iP95p4xoKVk53GoZ742B', speed: 1.05, envFile: '../../../cutroom/.env' },
+  // ElevenLabs "Matilda" (Om's pick, 18 Oct). Paid per line; every line is
+  // cached by the engine. The key comes from ELEVENLABS_API_KEY or cutroom's
+  // .env, never from this repo.
+  voice: { provider: 'elevenlabs', id: 'XrExE9yKIg1WjnnlVkGX', speed: 1, envFile: '../../../cutroom/.env' },
   lexicon: { CRM: 'C R M' },
 
-  // "Sun in Your Eyes" by Alejandro Magaña, Mixkit (Stock Music Free License:
-  // commercial use, no attribution), from cutroom's library. 100 bpm,
-  // four-on-floor, energy 3: a clear pulse every 600 ms that the cuts land on.
-  music: { file: 'assets/mixkit-131.mp3', beatGrid: 'assets/mixkit-131.grid.json', volume: 0.16, duckUnderVoice: 0.35 },
+  // Mixkit #282, calm warm hip-hop, 76 bpm (Om's pick, 18 Oct; Stock Music
+  // Free License: commercial use, no attribution), from cutroom's library.
+  music: { file: 'assets/mixkit-282.mp3', beatGrid: 'assets/mixkit-282.grid.json', volume: 0.16, duckUnderVoice: 0.35 },
 }
