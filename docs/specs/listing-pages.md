@@ -76,6 +76,55 @@ key details (`NEVER_SHARED_FIELDS`).
 | Delpat | WhatsApp's preview fetch counts as an open | Preview fetchers are not counted; the firm's own staff opening a link are not counted |
 | Delpat | Today's photo links already sent to buyers | Open: redirect each to the flat's public page if it is in the catalogue, else "no longer available" plus the catalogue. Private flats' old links stop showing photos |
 
+**An expired link is a signal, not a dead end** (Om, 19 Oct). Talk to us on an
+expired link tells the lead's current holder ("Rahul opened an expired link")
+with one tap to **Send a fresh link**: the same flats, minus any taken.
+
+### A.1b What every page records (Om, 19 Oct; proposals marked)
+
+Applies to all of them: the public catalogue, shared links, and a one-flat
+share (which is a shared link with one flat).
+
+| Record | How | Notes |
+|---|---|---|
+| **Views** | Each open of a link or the catalogue, with the flat(s) opened | Firm staff and WhatsApp's preview fetch are not counted (§4) |
+| **Device** | A first-party ID kept in the visitor's browser for this firm's pages. No fingerprinting | Recognises the same browser coming back. A different phone, another browser or cleared data is a new device. Whether a link opened from WhatsApp keeps the same browser storage on Android and iPhone must be tested before relying on it |
+| **Contact** | Name and number (email optional), from a form, from a bound link's lead, or (once the WhatsApp integration exists) from the incoming message carrying the link's ref | When a device gives a number once, its earlier and later visits attach to that person |
+
+**Who is known, and how**
+
+- **A link sent to Rahul is Rahul.** No device ID is needed; the views go
+  straight onto his lead.
+- **The same link opened on a second device** probably means it was forwarded.
+  Proposed: shown on the lead as "opened on another device", no alert.
+- **A no-recipient link or the catalogue** is anonymous until a number arrives.
+  Its views are counted per device, and attach to the person once a number
+  comes from that device.
+
+**Message first; a form only where it gives the visitor something back.**
+I'm interested always opens WhatsApp. Proposed form cases, each asking a number:
+- **Call me back**: for a visitor with no WhatsApp on that device (a desktop
+  visitor to the embedded catalogue).
+- **Book a visit**: a day and a slot within the firm's working hours.
+- **Tell me about new homes like these**: the visitor is alerted when a matching
+  flat is added. Of all the forms, this one gives the most in return for a number.
+
+**A lead needs a number** (proposed). Views alone never create a lead: an
+anonymous visitor who looked five times is still unknown, and a lead with no
+way to reach them is an invented fact (CLAUDE.md §3.1). A lead is created when a
+number arrives from a form, from WhatsApp (once integrated), or from the agent.
+For someone already a lead, activity raises an alert under these proposed rules:
+- they tap Interested;
+- they open an expired link;
+- they come back to their link on a new day (at most one alert a day).
+
+No visitor accounts or sign-up. Once the WhatsApp integration exists, the
+message itself is the sign-in.
+
+**Consent.** A number and a device ID are personal data under India's DPDP Act
+2023. Every page links to /privacy, and each form states what is done with the
+number. Proposed: view logs are kept 180 days (`specs/data-lifecycle.md`).
+
 ### A.2 Needs that do not exist yet
 
 - A link table (code, creator, lead or none, flat ids, show price, created,
