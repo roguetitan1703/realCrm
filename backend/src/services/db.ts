@@ -1244,6 +1244,16 @@ export async function migrateSharing(): Promise<void> {
       PRIMARY KEY (tenant_id, device_id)
     );
   `;
+  // Browsers the firm's own staff used while signed in: never tied to a lead.
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_share_staff_devices (
+      tenant_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (tenant_id, device_id)
+    );
+  `;
 
   await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS in_catalogue BOOLEAN DEFAULT FALSE`);
   await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS catalogue_slug TEXT`);

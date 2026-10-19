@@ -24,7 +24,7 @@ import { sql } from '../services/db';
 import { sharingOf } from '../services/store';
 import {
   firmBySlug, firmPublic, openCode, interested, talk, catalogueList, catalogueFlat, catalogueEnquiry,
-  resolveOldPhotoLink, deviceIdOf, ShareError, publicFlat, resolveCode, linkRows, linkState,
+  resolveOldPhotoLink, deviceIdOf, ShareError, publicFlat, resolveCode, linkRows, linkState, markStaffDevice,
   SHOWN_COLUMNS, CATALOGUE_WHERE, catalogueUrlOf, firmPhone, type Firm, type PublicReq,
 } from '../services/sharing';
 import { localeOf } from '../services/store';
@@ -42,13 +42,27 @@ const pubReq = (req: Request): PublicReq => ({
 
 /** Run a public handler as the firm in the URL — never the header's or a session's firm. */
 async function asFirm<T>(req: Request, f: Firm, fn: () => Promise<T>): Promise<T> {
-  const u = pubReq(req).user;
+  const pr = pubReq(req);
+  const u = pr.user;
   const staff = u && u.tenant_id === f.id ? u : null;
+  // The firm in the URL is the one any write here belongs to; index.ts closes
+  // that firm's settled alerts after the response, never the header's.
+  (req as any).publicTenantId = f.id;
+  if (staff && pr.deviceId) await markStaffDevice(f.id, pr.deviceId, staff.id).catch(() => {});
   return runWithContext({
     tenantId: f.id, userId: staff?.id || null, role: staff?.role || null, actorType: staff ? 'user' : 'system',
     actorLabel: null, ip: ipOf(req), userAgent: (req.headers['user-agent'] as string) || null,
   }, fn);
 }
+
+/**
+ * THE ONE GATE FOR ANYTHING THAT RESOLVES A CODE: the page, Talk to us and the
+ * preview card. Lookups per address, and a tighter allowance for codes that
+ * match nothing, so guessing is slow long before it is fruitful — on every
+ * door, not just the page.
+ */
+const codeGate = (ip: string) => hit(`s:${ip}`, 120, 60_000) && !spent(`miss:${ip}`, 30, 10 * 60_000);
+const codeMiss = (ip: string) => { hit(`miss:${ip}`, 1_000_000, 10 * 60_000); };
 
 const SLOW = { error: 'slow_down', message: 'Too many requests. Try again in a few minutes.' };
 const NOT_FOUND = { error: 'not_found', message: 'This page does not exist.' };
@@ -63,14 +77,12 @@ function shareFail(res: Response, err: any) {
 
 publicRouter.get('/s/:tenant/:code', async (req: Request, res: Response) => {
   const ip = ipOf(req);
-  // Lookups per address, and a tighter allowance for codes that match nothing,
-  // so guessing is slow long before it is fruitful.
-  if (!hit(`s:${ip}`, 120, 60_000) || spent(`miss:${ip}`, 30, 10 * 60_000)) return res.status(429).json(SLOW);
+  if (!codeGate(ip)) return res.status(429).json(SLOW);
   try {
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
     const out = await asFirm(req, f, () => openCode(f, String(req.params.code), pubReq(req), typeof req.query.flat === 'string' ? req.query.flat : null));
-    if (out.miss) hit(`miss:${ip}`, 1_000_000, 10 * 60_000);
+    if (out.miss) codeMiss(ip);
     res.set('Cache-Control', 'private, no-store');
     return res.json(out.body);
   } catch (err) { return shareFail(res, err); }
@@ -83,18 +95,20 @@ publicRouter.post('/s/:tenant/:code/interested', async (req: Request, res: Respo
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
     const out = await asFirm(req, f, () => interested(f, String(req.params.code), String(req.body?.propertyId || ''), pubReq(req)));
-    if (!out) { hit(`miss:${ip}`, 1_000_000, 10 * 60_000); return res.status(404).json(NOT_FOUND); }
+    if (!out) { codeMiss(ip); return res.status(404).json(NOT_FOUND); }
     return res.json(out);
   } catch (err) { return shareFail(res, err); }
 });
 
 publicRouter.post('/s/:tenant/:code/talk', async (req: Request, res: Response) => {
   const ip = ipOf(req);
-  if (!hit(`talk:${ip}`, 10, 60_000)) return res.status(429).json(SLOW);
+  if (!codeGate(ip) || !hit(`talk:${ip}`, 10, 60_000)) return res.status(429).json(SLOW);
   try {
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
-    return res.json(await asFirm(req, f, () => talk(f, String(req.params.code), pubReq(req))));
+    const out = await asFirm(req, f, () => talk(f, String(req.params.code), pubReq(req)));
+    if (out.miss) codeMiss(ip);
+    return res.json({ waUrl: out.waUrl });
   } catch (err) { return shareFail(res, err); }
 });
 
@@ -273,10 +287,15 @@ async function catalogueSample(f: Firm): Promise<{ n: number; row: any | null }>
 const gone = (f: Firm) => ({ title: 'This home is no longer available', desc: `Homes from ${firmPublic(f).name}` });
 
 shareRouter.get('/s/:slug/:code', async (req: Request, res: Response) => {
+  // Behind the same gate as the page: the card resolves a code too. Every
+  // unusable code, and a miss, gets the one firm card below.
+  const ip = ipOf(req);
+  if (!codeGate(ip)) return res.status(429).send('<!doctype html><title>Homes</title>');
   try {
     const f = await firmBySlug(String(req.params.slug));
     if (!f) return res.status(404).send('<!doctype html><title>Not found</title>');
     const found = await resolveCode(f.id, String(req.params.code));
+    if (!found) codeMiss(ip);
     const sharing = await sharingOf(f.id);
     const firmName = firmPublic(f).name;
     const rows = found && linkState(found.link, sharing.stopped) === 'active' ? await linkRows(f.id, found.link) : [];

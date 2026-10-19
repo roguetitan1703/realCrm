@@ -123,18 +123,27 @@ function rule(test: CloseTest, tz: string): Rule | null {
         WHERE a.tenant_id = n.tenant_id AND a.id = ANY(n.record_ids))`,
     };
     // A buyer on a shared link (listing-pages.md §A). The alert names a lead or
-    // a tap (an I'm interested press, or Talk to us on an expired link): a
-    // lead closes like lead_worked; a tap when Add as lead or attach put it on
-    // a lead.
+    // a tap (an I'm interested press, or Talk to us on an expired link).
+    //   On a lead: contact logged after it (lead_worked_desk), or a fresh link
+    //   sent to that lead after it.
+    //   On a tap: Add as lead or attach put it on a lead, or the link's sender
+    //   made a newer link carrying that flat (a talk: any of the link's flats).
     case 'share_work': {
       // No recipient test on the lead: the alert may have gone to the link's
       // creator or the desk because nobody active held it. Contact by anyone closes it.
       const lw = rule('lead_worked_desk', tz)!;
-      const tap = (leadTest: any) => sql`(n.record_kind = 'share_tap' AND EXISTS (SELECT 1 FROM crm_share_events e
-                WHERE e.tenant_id = n.tenant_id AND e.id = ANY(n.record_ids) AND ${leadTest}))`;
+      const freshToLead = sql`EXISTS (SELECT 1 FROM crm_share_links nl
+          WHERE nl.tenant_id = n.tenant_id AND nl.lead_id = ANY(n.record_ids) AND nl.created_at > n.created_at)`;
+      const resent = sql`EXISTS (SELECT 1 FROM crm_share_links ol JOIN crm_share_links nl
+            ON nl.tenant_id = ol.tenant_id AND nl.created_by = ol.created_by AND nl.created_at > n.created_at
+           AND (e.property_id = ANY(nl.property_ids) OR (e.property_id IS NULL AND nl.property_ids && ol.property_ids))
+          WHERE ol.tenant_id = e.tenant_id AND ol.id = e.link_id)`;
+      const tapDone = sql`(e.lead_id IS NOT NULL OR ${resent})`;
+      const tap = (test: any) => sql`(n.record_kind = 'share_tap' AND EXISTS (SELECT 1 FROM crm_share_events e
+                WHERE e.tenant_id = n.tenant_id AND e.id = ANY(n.record_ids) AND ${test}))`;
       return {
-        pending: sql`((n.record_kind = 'lead' AND ${lw.pending}) OR ${tap(sql`e.lead_id IS NULL`)})`,
-        done: sql`((n.record_kind = 'lead' AND ${lw.done}) OR ${tap(sql`e.lead_id IS NOT NULL`)})`,
+        pending: sql`((n.record_kind = 'lead' AND ${lw.pending} AND NOT ${freshToLead}) OR ${tap(sql`NOT ${tapDone}`)})`,
+        done: sql`((n.record_kind = 'lead' AND (${lw.done} OR ${freshToLead})) OR ${tap(tapDone)})`,
       };
     }
     case 'opened': return null;

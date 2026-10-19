@@ -144,9 +144,10 @@ export const NOTIFICATIONS: NotifKind[] = [
   // ---- A buyer on a shared link (docs/specs/listing-pages.md §A) -----------
   // To the lead's CURRENT holder, worked out when the buyer acts, else the
   // link's creator, else the desk. `share_work` closes them: on a lead, when
-  // contact is logged after the alert (sending a fresh link logs a WhatsApp,
-  // so it counts); on a tap with no lead, when Add as lead puts it on one; on
-  // an expired link with no lead, when its sender makes a newer link.
+  // contact is logged after the alert or a fresh link is sent to that lead; on
+  // a tap with no lead (an I'm interested press, or Talk to us on an expired
+  // link), when Add as lead or attach puts it on a lead, or the link's sender
+  // makes a newer link carrying that flat.
   K({ key: 'share_interested', label: "A buyer tapped I'm interested", audience: 'assignee',
       // One per flat per link per firm-day; the tap row is kept every time.
       trigger: "I'm interested pressed on a shared link, at most one per flat per link per day", urgency: 'now', closesWhen: 'share_work', gate: null }),
@@ -158,7 +159,8 @@ export const NOTIFICATIONS: NotifKind[] = [
       trigger: 'a lead opens the link sent to them on a new day, at most one per lead per day', urgency: 'drawer', closesWhen: 'share_work', gate: null }),
   K({ key: 'share_number_held', label: 'A colleague tried to send homes to your lead', audience: 'assignee',
       // §A.1d step 4: the number is not duplicated; the person holding it is told.
-      trigger: "Send or Add as lead used a number that is already this person's lead", urgency: 'drawer', closesWhen: 'lead_worked', gate: null }),
+      // To the desk instead when nobody active holds it; contact by anyone closes it.
+      trigger: "Send or Add as lead used a number that is already a lead (this person's, or nobody active's)", urgency: 'drawer', closesWhen: 'lead_worked_desk', gate: null }),
 
   K({ key: 'remark_added', label: 'Someone left a remark', audience: 'assignee',
       // Demoted to the drawer. Somebody typing a note on your record is worth

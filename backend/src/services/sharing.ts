@@ -55,6 +55,9 @@ export class ShareError extends Error {
 
 // ── Small helpers ───────────────────────────────────────────────────────────
 
+const NEUTRAL_TALK = "Hi, I'm looking for a home.";
+const CATALOGUE_ENQUIRIES_PER_DAY = 100;
+
 const rid = (p: string) => `${p}_${Date.now().toString(36)}${crypto.randomBytes(4).toString('hex')}`;
 
 /** The firm's day began at…, on the firm's clock. "One a day" means the firm's day. */
@@ -223,12 +226,24 @@ async function deviceLead(tenantId: string, deviceId: string | null): Promise<st
   return d?.lead_id || null;
 }
 
+/**
+ * A browser a member of the firm has used while signed in. It is never tied to
+ * a lead: staff open links to check them, and attaching their browser would
+ * file every later open of theirs under a buyer.
+ */
+export async function markStaffDevice(tenantId: string, deviceId: string | null, userId: string): Promise<void> {
+  if (!deviceId) return;
+  await sql`
+    INSERT INTO crm_share_staff_devices (tenant_id, device_id, user_id, seen_at) VALUES (${tenantId}, ${deviceId}, ${userId}, NOW())
+    ON CONFLICT (tenant_id, device_id) DO UPDATE SET user_id = EXCLUDED.user_id, seen_at = NOW()`;
+}
+
 async function recordEvent(tenantId: string, e: {
   linkId: string | null; propertyId?: string | null; kind: string; code?: string | null;
   deviceId?: string | null; leadId?: string | null;
-}): Promise<any> {
+}, db: any = sql): Promise<any> {
   const id = rid('sev');
-  const [row] = await sql`
+  const [row] = await db`
     INSERT INTO crm_share_events (id, tenant_id, link_id, property_id, kind, code, device_id, lead_id, created_at)
     VALUES (${id}, ${tenantId}, ${e.linkId}, ${e.propertyId ?? null}, ${e.kind}, ${e.code ?? null},
             ${e.deviceId ?? null}, ${e.leadId ?? null}, ${new Date()})
@@ -371,11 +386,35 @@ async function maybeReturned(f: Firm, link: any) {
   });
 }
 
-/** One alert, to a person, or to the desk when nobody can receive it. */
-async function alert(tenantId: string, recipient: any | null, n: { type: string; data: any; link: string; record: any }) {
+/**
+ * One alert, to a person, or to the desk when nobody can receive it. Returns
+ * how many people it went to. Delivering to nobody is not an error anywhere
+ * downstream, so it is said out loud here (CLAUDE.md §4).
+ */
+async function alert(tenantId: string, recipient: any | null, n: { type: string; data: any; link: string; record: any }): Promise<number> {
   const input = { ...n, tenantId };
-  if (recipient) await notify({ ...input, userId: recipient.id });
-  else await notifyRoles(['owner', 'manager'], input);
+  if (recipient) { await notify({ ...input, userId: recipient.id }); return 1; }
+  const [{ k }] = await sql`SELECT count(*)::int AS k FROM users WHERE tenant_id = ${tenantId} AND role IN ('owner', 'manager') AND status ILIKE 'active' AND deleted_at IS NULL`;
+  if (!k) { console.warn(`[Share] ${n.type} for tenant ${tenantId} reached nobody: no holder, creator or active owner/manager`); return 0; }
+  await notifyRoles(['owner', 'manager'], input);
+  return k;
+}
+
+/**
+ * THE FIRST OF ITS KIND TODAY, decided under a lock. Two taps arriving
+ * together each counted the other and neither alerted; now the second waits
+ * for the first to commit, then counts it. Returns the new event and whether
+ * it was the first.
+ */
+async function recordFirstToday(tenantId: string, lockKey: string, e: Parameters<typeof recordEvent>[1],
+  sameKind: (db: any, dayStart: any) => Promise<number>): Promise<{ row: any; first: boolean }> {
+  const tz = (await deskConfigOf(tenantId)).timezone;
+  return await sql.begin(async (tx: any) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${`${tenantId}:${lockKey}`}))`;
+    const before = await sameKind(tx, firmDayStart(tz));
+    const row = await recordEvent(tenantId, e, tx);
+    return { row, first: before === 0 };
+  }) as any;
 }
 
 /** The flat's name in an alert: its project and size, the way an agent says it. */
@@ -400,19 +439,22 @@ export async function interested(f: Firm, code: string, propertyId: string, r: P
   if (!isAvailable(flat)) throw new ShareError(409, 'not_available', 'This home has been taken.');
 
   const leadId = link.lead_id || (await deviceLead(f.id, r.deviceId));
-  const tapCode = await freshCode(f.id);
-  const tap = await recordEvent(f.id, { linkId: link.id, propertyId, kind: 'interested', code: tapCode, deviceId: r.deviceId, leadId });
   const who = await whoAnswers(f.id, leadId, link.created_by);
+  // STAFF TRYING THEIR OWN LINK leave no trace: no tap, no code, no alert. A
+  // staff tap that was written used to count as the day's first, so the
+  // buyer's real tap after it raised nothing.
+  if (staffOf(f, r)) return { waUrl: waUrl(who.phone, `Hi, I'm interested in this home: ${appBase(r.origin)}/${f.slug}/${link.code}`) };
   const tz = (await deskConfigOf(f.id)).timezone;
+  const tapCode = await freshCode(f.id);
 
   // ONE ALERT PER FLAT PER LINK PER DAY (§A.1). Five taps on the same flat are
-  // one buyer being keen, not five pieces of work. Staff trying their own link
-  // raise nothing.
-  const [{ n }] = await sql`
-    SELECT count(*)::int AS n FROM crm_share_events
-     WHERE tenant_id = ${f.id} AND link_id = ${link.id} AND property_id = ${propertyId}
-       AND kind = 'interested' AND created_at >= ${firmDayStart(tz)}`;
-  if (n === 1 && !staffOf(f, r)) {
+  // one buyer being keen, not five pieces of work.
+  const { row: tap, first } = await recordFirstToday(f.id, `interested:${link.id}:${propertyId}`,
+    { linkId: link.id, propertyId, kind: 'interested', code: tapCode, deviceId: r.deviceId, leadId },
+    async (db, day) => (await db`SELECT count(*)::int AS n FROM crm_share_events
+       WHERE tenant_id = ${f.id} AND link_id = ${link.id} AND property_id = ${propertyId}
+         AND kind = 'interested' AND created_at >= ${day}`)[0].n);
+  if (first) {
     // Someone on Rahul's link: the tap came from a browser other than the
     // first one that opened it — forwarded, most likely.
     let someoneOn = false;
@@ -444,29 +486,31 @@ export async function interested(f: Firm, code: string, propertyId: string, r: P
  * WhatsApp to them. On anything else unusable, the firm's own number, and no
  * alert: an agent who turned a link off meant it.
  */
-export async function talk(f: Firm, code: string, r: PublicReq): Promise<{ waUrl: string }> {
+export async function talk(f: Firm, code: string, r: PublicReq): Promise<{ waUrl: string; miss: boolean }> {
   const found = await resolveCode(f.id, code);
   const sharing = await sharingOf(f.id);
-  const general = async () => ({ waUrl: waUrl(await firmPhone(f.id), "Hi, I'm looking for a home.") });
-  if (!found) return general();
+  // EVERY UNUSABLE CODE ANSWERS THE SAME: the firm's number and the same words.
+  // An expired link still tells its holder, but on the server — a holder's
+  // number in the answer would tell a prober the code is real.
+  const firmTalk = async (miss: boolean) => ({ waUrl: waUrl(await firmPhone(f.id), NEUTRAL_TALK), miss });
+  if (!found) return firmTalk(true);
   const { link } = found;
   const state = linkState(link, sharing.stopped);
-  if (state === 'off' || state === 'stopped') return general();
+  if (state === 'off' || state === 'stopped') return firmTalk(false);
   const leadId = link.lead_id || (await deviceLead(f.id, r.deviceId));
   const who = await whoAnswers(f.id, leadId, link.created_by);
-  const url = `${appBase(r.origin)}/${f.slug}/${link.code}`;
-  if (state === 'active') return { waUrl: waUrl(who.phone, `Hi, about the homes you sent: ${url}`) };
+  if (state === 'active') return { waUrl: waUrl(who.phone, `Hi, about the homes you sent: ${appBase(r.origin)}/${f.slug}/${link.code}`), miss: false };
+  if (staffOf(f, r)) return firmTalk(false);
 
-  // Like a tap, the press gets its own code: the ref in the buyer's message and
-  // the handle Add as lead works from when nobody is on the link yet.
-  const talkCode = await freshCode(f.id);
-  const ev = await recordEvent(f.id, { linkId: link.id, kind: 'talk', code: talkCode, deviceId: r.deviceId, leadId });
+  // Like a tap, the press gets its own code: the handle Add as lead works from
+  // when nobody is on the link yet. One alert per link per day, decided under a lock.
   const tz = (await deskConfigOf(f.id)).timezone;
-  // One alert per link per day, however many times the button is pressed.
-  const [{ n }] = await sql`
-    SELECT count(*)::int AS n FROM crm_share_events
-     WHERE tenant_id = ${f.id} AND link_id = ${link.id} AND kind = 'talk' AND created_at >= ${firmDayStart(tz)}`;
-  if (n === 1 && !staffOf(f, r)) {
+  const talkCode = await freshCode(f.id);
+  const { row: ev, first } = await recordFirstToday(f.id, `talk:${link.id}`,
+    { linkId: link.id, kind: 'talk', code: talkCode, deviceId: r.deviceId, leadId },
+    async (db, day) => (await db`SELECT count(*)::int AS n FROM crm_share_events
+       WHERE tenant_id = ${f.id} AND link_id = ${link.id} AND kind = 'talk' AND created_at >= ${day}`)[0].n);
+  if (first) {
     const lead = who.lead;
     await alert(f.id, who.recipient, {
       type: 'share_expired_open',
@@ -475,7 +519,7 @@ export async function talk(f: Firm, code: string, r: PublicReq): Promise<{ waUrl
       record: lead ? { kind: 'lead', ids: [lead.id] } : { kind: 'share_tap', ids: [ev.id] },
     });
   }
-  return { waUrl: waUrl(who.phone, `Hi, I'd like to see these homes again: ${appBase(r.origin)}/${f.slug}/${talkCode}`) };
+  return firmTalk(false);
 }
 
 // ── The catalogue ───────────────────────────────────────────────────────────
@@ -483,6 +527,23 @@ export async function talk(f: Firm, code: string, r: PublicReq): Promise<{ waUrl
 const CATALOGUE_WHERE = (tenantId: string) =>
   sql`tenant_id = ${tenantId} AND in_catalogue = TRUE AND coalesce(status, 'Available') ILIKE 'available'`;
 const HAS_PHOTO = sql`EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(media, '[]'::jsonb)) m WHERE m->>'kind' IS DISTINCT FROM 'video')`;
+
+/**
+ * A catalogue view, at most one per browser per flat (or per list) per firm
+ * day: paging, filtering and reloads are one person looking, not ten.
+ */
+async function catalogueView(f: Firm, propertyId: string | null, r: PublicReq) {
+  if (!counted(f, r)) return;
+  if (r.deviceId) {
+    const tz = (await deskConfigOf(f.id)).timezone;
+    const [seen] = await sql`
+      SELECT 1 FROM crm_share_events
+       WHERE tenant_id = ${f.id} AND link_id IS NULL AND kind = 'view' AND device_id = ${r.deviceId}
+         AND property_id IS NOT DISTINCT FROM ${propertyId} AND created_at >= ${firmDayStart(tz)} LIMIT 1`;
+    if (seen) return;
+  }
+  await recordEvent(f.id, { linkId: null, propertyId, kind: 'view', deviceId: r.deviceId, leadId: await deviceLead(f.id, r.deviceId) });
+}
 
 /** GET /public/catalogue/:tenant?deal=&config=&locality=&page= */
 export async function catalogueList(f: Firm, q: { deal?: string; config?: string; locality?: string; page?: number; limit?: number }, r: PublicReq) {
@@ -505,7 +566,7 @@ export async function catalogueList(f: Firm, q: { deal?: string; config?: string
                array_remove(array_agg(DISTINCT locality), NULL) AS localities
           FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)}`,
   ]);
-  if (counted(f, r)) await recordEvent(f.id, { linkId: null, kind: 'view', deviceId: r.deviceId, leadId: await deviceLead(f.id, r.deviceId) });
+  await catalogueView(f, null, r);
   return {
     firm: firmPublic(f), showPrice: !!sharing.showPriceOnCatalogue,
     flats: (rows as any[]).map(x => publicFlat(x, { showPrice: !!sharing.showPriceOnCatalogue, showProject: sharing.catalogueShowsProject !== false, loc })),
@@ -521,7 +582,7 @@ export async function catalogueFlat(f: Firm, slug: string, r: PublicReq) {
   const [row] = await sql`SELECT ${SHOWN_COLUMNS} FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)} AND catalogue_slug = ${s} LIMIT 1`;
   if (!row) return null;
   const sharing = await sharingOf(f.id);
-  if (counted(f, r)) await recordEvent(f.id, { linkId: null, propertyId: row.id, kind: 'view', deviceId: r.deviceId, leadId: await deviceLead(f.id, r.deviceId) });
+  await catalogueView(f, row.id, r);
   return {
     firm: firmPublic(f), showPrice: !!sharing.showPriceOnCatalogue,
     flat: publicFlat(row, { showPrice: !!sharing.showPriceOnCatalogue, showProject: sharing.catalogueShowsProject !== false, loc: await localeOf(f.id) }),
@@ -539,6 +600,16 @@ export async function catalogueEnquiry(f: Firm, input: { name?: string; phone?: 
   const loc = await localeOf(f.id);
   const digits = String(input.phone || '').replace(/\D/g, '');
   if (digits.length < 10 || digits.length > 13) throw new ShareError(400, 'phone_required', 'A 10-digit mobile number is needed.');
+  // A firm's form takes at most 100 enquiries a day. Above that it is a flood,
+  // not buyers, and every one would be an alert.
+  const tz = (await deskConfigOf(f.id)).timezone;
+  const [{ today }] = await sql`
+    SELECT count(*)::int AS today FROM crm_share_events
+     WHERE tenant_id = ${f.id} AND kind = 'enquiry' AND link_id IS NULL AND created_at >= ${firmDayStart(tz)}`;
+  if (today >= CATALOGUE_ENQUIRIES_PER_DAY) {
+    console.warn(`[Share] catalogue enquiry cap reached for tenant ${f.id}: ${today} today`);
+    throw new ShareError(429, 'slow_down', 'Too many requests. Try again in a few minutes.');
+  }
   const phone = normalizePhone(digits, loc);
   const name = String(input.name || '').trim().slice(0, 80) || null;
   const message = String(input.message || '').trim().slice(0, 1000) || null;
@@ -549,21 +620,29 @@ export async function catalogueEnquiry(f: Firm, input: { name?: string; phone?: 
   const sharing = await sharingOf(f.id);
   const flatName = flat ? publicFlat(flat, { showPrice: false, showProject: sharing.catalogueShowsProject !== false, loc }).title : null;
   const lead = { name, phone, source: 'Catalogue', req: { ...(message ? { notes: message } : {}), ...(flatName ? { interest: flatName } : {}) } };
+  // UNVERIFIED: anyone can type anyone's number into a public form. On a lead
+  // that already exists it is recorded and its holder told, but it does not
+  // reopen the lead, merge its requirement or write its notes (landEnquiry).
   const out = await landEnquiry({
     tenantId: f.id, provider: 'Catalogue', integrationId: null, inboxId: null,
-    lead, body: { name, phone, propertyId: flat?.id || null, message },
+    lead, body: { name, phone, propertyId: flat?.id || null, message }, unverified: true,
   });
   const leadId = out.leadId || null;
+  const createdLead = out.status === 'ingested';
   await recordEvent(f.id, { linkId: null, propertyId: flat?.id || null, kind: 'enquiry', deviceId: r.deviceId, leadId });
   if (leadId) {
     if (flat) await addToShortlist(f.id, leadId, [flat.id]);
-    if (r.deviceId) await attachDevice(f.id, r.deviceId, leadId);
+    // The browser joins the lead only when this enquiry made it: typing an
+    // existing lead's number must not file this browser under them.
+    if (createdLead && r.deviceId) await attachDevice(f.id, r.deviceId, leadId);
   }
   return { ok: true };
 }
 
 /** A device now belongs to a lead: its views, before and after, join it. Never moves a device off another lead. */
 async function attachDevice(tenantId: string, deviceId: string, leadId: string): Promise<boolean> {
+  const [staff] = await sql`SELECT 1 FROM crm_share_staff_devices WHERE tenant_id = ${tenantId} AND device_id = ${deviceId} LIMIT 1`;
+  if (staff) return false;
   const res = await sql`
     INSERT INTO crm_share_devices (tenant_id, device_id, lead_id, attached_at) VALUES (${tenantId}, ${deviceId}, ${leadId}, NOW())
     ON CONFLICT (tenant_id, device_id) DO NOTHING`;
@@ -635,11 +714,16 @@ async function leadForNumber(m: ReturnType<typeof me>, phoneRaw: string, name: s
       }).catch(() => {});
       throw new ShareError(409, 'lead_held_by', 'This number is already a lead with someone else.', { holderName: holder.name || null });
     }
-    // Nobody active holds it: it becomes the caller's, as an assignment (updateLead records it).
-    await runWithContext({ tenantId: m.tenantId, userId: m.userId, role: 'system', actorType: 'system', actorLabel: null, ip: m.ip, userAgent: m.userAgent }, () =>
-      updateLead(existing.id, { agentId: m.userId }, ctxOf(m)));
-    const [fresh] = await sql`SELECT * FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${existing.id}`;
-    return { lead: fresh, created: false };
+    // NOBODY ACTIVE HOLDS IT: unassigned, or its holder has left. An agent
+    // typing the number does not make it theirs: assigning leads is the
+    // desk's job. The desk is told someone wants it.
+    const [sender] = await sql`SELECT name FROM users WHERE tenant_id = ${m.tenantId} AND id = ${m.userId} LIMIT 1`;
+    await notifyRoles(['owner', 'manager'], {
+      tenantId: m.tenantId, type: 'share_number_held',
+      data: { name: existing.name || existing.phone, sender: sender?.name || null, unheld: true },
+      link: `?screen=leads&lead=${existing.id}`, record: { kind: 'lead', ids: [existing.id] },
+    }).catch(() => {});
+    throw new ShareError(409, 'lead_held_by', 'This number is already a lead. The office decides who takes it.', { holderName: 'the office' });
   }
   // The normal lead-creation path. The requirement stays empty: what they were
   // sent is on the shortlist, not a guess at what they want (CLAUDE.md §3.1).
@@ -706,10 +790,12 @@ export async function createShareLink(input: any, origin: string | null) {
   const url = `${appBase(origin)}/${(await firmSlug(m.tenantId))}/${code}`;
   if (lead) {
     await addToShortlist(m.tenantId, lead.id, ids);
-    // A WhatsApp sent is contact made: it closes "expired link" and "came back"
-    // alerts on this lead the way any logged message does (leadSegments.ts).
+    // Its own kind, not `whatsapp`: the link is made before anything is sent,
+    // so it is not contact (leadSegments.ts CONTACT_EVENT_TYPES) and does not
+    // take the lead out of Not contacted. A fresh link closes the share alerts
+    // on this lead by its own rule (alertLifecycle.ts share_work).
     await addTimelineEvent({
-      record_id: lead.id, type: 'whatsapp', title: 'WhatsApp',
+      record_id: lead.id, type: 'share', title: 'Homes sent',
       description: `Sent ${ids.length === 1 ? '1 home' : `${ids.length} homes`}`,
       author: m.userId, metadata: { shareLinkId: link.id, code, propertyIds: ids },
     });
@@ -817,8 +903,10 @@ export async function attachLink(id: string, leadId: string) {
   if (!lead) throw new ShareError(404, 'lead_not_found', 'That lead no longer exists.');
   assertMayShare(m, lead);
   await sql`UPDATE crm_share_links SET lead_id = ${lead.id} WHERE tenant_id = ${m.tenantId} AND id = ${id}`;
-  const moved = await sql`UPDATE crm_share_events SET lead_id = ${lead.id} WHERE tenant_id = ${m.tenantId} AND link_id = ${id} AND (lead_id IS NULL OR lead_id <> ${lead.id})`;
-  const devices = await sql`SELECT DISTINCT device_id FROM crm_share_events WHERE tenant_id = ${m.tenantId} AND link_id = ${id} AND device_id IS NOT NULL`;
+  // Only what belongs to nobody yet: an event already on another lead (a
+  // forwarded link, a browser someone else became) stays where it is.
+  const moved = await sql`UPDATE crm_share_events SET lead_id = ${lead.id} WHERE tenant_id = ${m.tenantId} AND link_id = ${id} AND lead_id IS NULL RETURNING device_id`;
+  const devices = [...new Set((moved as any[]).map(e => e.device_id).filter(Boolean))].map(device_id => ({ device_id }));
   let attached = 0;
   for (const d of devices as any[]) if (await attachDevice(m.tenantId, d.device_id, lead.id)) attached++;
   await addToShortlist(m.tenantId, lead.id, l.property_ids || []);
@@ -901,6 +989,17 @@ export async function tapToLead(code: string, input: any) {
   if (!CODE_RE.test(c)) throw new ShareError(404, 'not_found');
   const [tap] = await sql`SELECT * FROM crm_share_events WHERE tenant_id = ${m.tenantId} AND code = ${c} AND kind IN ('interested', 'talk') LIMIT 1`;
   if (!tap) throw new ShareError(404, 'not_found');
+  // WHO MAY CLAIM IT: the link's sender, the holder of the lead it is on, or
+  // the desk. Anyone else seeing a tap code is not a reason to take the buyer.
+  if (!isDeskRole(m.role)) {
+    const [owner] = await sql`
+      SELECT l.created_by, ld.agent_id FROM crm_share_links l
+        LEFT JOIN crm_leads ld ON ld.tenant_id = l.tenant_id AND ld.id = coalesce(${tap.lead_id}, l.lead_id)
+       WHERE l.tenant_id = ${m.tenantId} AND l.id = ${tap.link_id} LIMIT 1`;
+    if (!owner || (owner.created_by !== m.userId && owner.agent_id !== m.userId)) {
+      throw new ShareError(403, 'forbidden', 'Only the person who sent this link, or the office, can add this buyer.');
+    }
+  }
   let lead: any; let created = false;
   if (input?.leadId) {
     [lead] = await sql`SELECT * FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${String(input.leadId)} LIMIT 1`;
