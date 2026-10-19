@@ -157,15 +157,16 @@ async function whoAnswers(tenantId: string, leadId: string | null, creatorId: st
 
 const SHOWN_COLUMNS = sql`id, title, status, deal, locality, project, bhk, subtype, category, carpet_sqft,
   super_builtup_sqft, builtup_sqft, furnishing, furnish_type, bathrooms, facing, possession, society_amenities,
-  price_amount, media, in_catalogue, catalogue_slug, config, created_at`;
+  price_amount, media, in_catalogue, catalogue_slug, config, created_at, floor, total_floors`;
 
 const isAvailable = (r: any) => /^available$/i.test(String(r.status || 'Available'));
 
 /**
  * The ONLY shape a listing takes on a public page. Built from named columns —
  * never a spread of the row — so a column added later cannot reach a buyer by
- * accident. No unit, tower, floor, owner, notes, key details or description
- * (free text, where a flat number or an owner's name is typed as often as not).
+ * accident. No unit, tower, owner, notes, key details or description (free
+ * text, where a flat number or an owner's name is typed as often as not). The
+ * floor is shown: it tells two flats in one project apart and names no one.
  */
 export function publicFlat(r: any, o: { showPrice: boolean; showProject: boolean; loc: any }) {
   const project = o.showProject ? (r.project || r.config?.society || null) : null;
@@ -184,6 +185,7 @@ export function publicFlat(r: any, o: { showPrice: boolean; showProject: boolean
       carpetSqft: r.carpet_sqft ?? null, superBuiltupSqft: r.super_builtup_sqft ?? null, builtupSqft: r.builtup_sqft ?? null,
       furnishing: r.furnish_type || r.furnishing || null, bathrooms: r.bathrooms || null,
       facing: r.facing || null, possession: r.possession || null,
+      floor: r.floor || r.config?.floor || null, totalFloors: Number(r.total_floors) > 0 ? Number(r.total_floors) : null,
       amenities: Array.isArray(r.society_amenities) ? r.society_amenities : [],
     },
     deal: r.deal || null,
@@ -270,7 +272,7 @@ async function catalogueUrlOf(f: Firm): Promise<string | null> {
 async function unavailableBody(f: Firm) {
   return {
     kind: 'link', state: 'unavailable', firm: firmPublic(f, await localeOf(f.id)), flats: [], showPrice: false,
-    cta: { phone: await firmPhone(f.id) }, catalogueUrl: await catalogueUrlOf(f),
+    forRecipient: false, cta: { phone: await firmPhone(f.id) }, catalogueUrl: await catalogueUrlOf(f),
   };
 }
 
@@ -323,6 +325,10 @@ export async function openCode(f: Firm, code: string, r: PublicReq, flatParam?: 
     const who = await whoAnswers(f.id, link.lead_id, link.created_by);
     body = {
       kind: tap ? 'tap' : 'link', state: state === 'active' ? 'active' : 'unavailable', firm: firmPublic(f, loc), flats, showPrice,
+      // "2 homes for you" on a link sent to one buyer; "2 homes" on a group
+      // link. The same for every viewer of the code, and false on any
+      // unusable code (the unavailable body), so it tells a prober nothing.
+      forRecipient: state === 'active' ? !!link.lead_id : false,
       cta: { phone: who.phone }, catalogueUrl: await catalogueUrlOf(f),
     };
     if (state !== 'active') {
