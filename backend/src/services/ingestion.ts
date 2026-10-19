@@ -591,7 +591,9 @@ export async function landEnquiry(args: {
         // four buzzes would have taught the desk to ignore the fifth. A payload
         // folded into a session already open says nothing new.
         if (session?.isNewSession) {
-          const owner = (reassign as any).agentId || existing.agent_id;
+          // Who holds it NOW: the keeper, or whoever the rota just gave it to.
+          // Never the old holder who cannot take work — with nobody, the desk.
+          const owner = keeper || (reassign as any).agentId || null;
           // A LEAD WHO COMES BACK IS A LIVE LEAD, whatever it was closed as.
           //
           // This used to branch on the rejection REASON: anything reading as
@@ -630,35 +632,28 @@ export async function landEnquiry(args: {
           // `/leads/<id>` -- a path this app does not have, so tapping it went
           // nowhere. The rejection is carried as data on the repeat alert
           // below, which the person holding the lead actually receives.
-          if (owner) {
-            await notify({
-              userId: owner, type: 'lead_repeat',
-              data: {
-                name: existing.name || existing.phone, source: integration.provider,
-                changed: conflicts.length,
-                previousStage: terminal ? existing.stage : null,
-              },
-              link: `?screen=leads&lead=${existing.id}`,
-            }).catch(() => {});
-          }
+          await notifyOrDesk(owner, {
+            tenantId: integration.tenant_id, type: 'lead_repeat',
+            data: {
+              name: existing.name || existing.phone, source: integration.provider,
+              changed: conflicts.length,
+              previousStage: terminal ? existing.stage : null,
+            },
+            link: `?screen=leads&lead=${existing.id}`,
+          }).catch(() => {});
         }
         await mark('merged', { leadId: existing.id });
         return { status: 'merged', leadId: existing.id };
       }
 
-      // Round-robin among agents actually on duty. One atomic statement, not
-      // a separate read-then-write — this used to be its own copy of the
-      // same logic createLead() has, and both copies raced the same way: a
-      // batch of pushes arriving close together would all read the counter
-      // before any of their writes landed, so they'd all pick the same
-      // person. See nextRoutedAgent()'s doc comment.
-      const agentId = await nextRoutedAgent();
-
+      // No agent: createLead deals the rota itself (nextRoutedAgent, one
+      // atomic statement), so a payload never names who gets the lead and a
+      // named agent in createLead always means a person chose one.
       const { external_id, ...leadFields } = lead;
       const created = await createLead({
         ...leadFields,
+        agentId: undefined, agent_id: undefined,
         stage: 'New',
-        agentId,
         source: leadFields.source || integration.provider,
       } as any);
 

@@ -9,6 +9,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
+import { notWorkableBody } from '../services/workforce';
 import { getAgents, getRoutingRules, updateRoutingRules, getAgentPerformance, distributeWork, heldWork, unownedBacklog, assignUnowned, agentLoads } from '../services/store';
 import { sql } from '../services/db';
 import { localeOf } from '../services/store';
@@ -576,6 +577,7 @@ teamRouter.post('/routing/assign-unowned', async (req: Request, res: Response) =
     } as any, Array.isArray(req.body?.agentIds) ? req.body.agentIds : undefined);
     return res.status(200).json({ success: true, ...out });
   } catch (err: any) {
+    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
     const code = err?.name === 'ForbiddenError' ? 403 : 500;
     return res.status(code).json({ error: 'Could not hand them out', message: err.message });
   }
@@ -682,6 +684,7 @@ teamRouter.post('/users/:id/distribute', async (req: Request, res: Response) => 
     } as any);
     return res.status(200).json({ success: true, ...out, agents: await getAgents() });
   } catch (err: any) {
+    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
     const code = err?.name === 'ForbiddenError' ? 403 : 500;
     return res.status(code).json({ error: 'Failed to hand the work over', message: err.message });
   }

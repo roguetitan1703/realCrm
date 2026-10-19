@@ -14,7 +14,7 @@ import { CallActionSchema, WhatsAppActionSchema, StageChangeSchema, MergeSchema 
 import { requireTenantAuth, requireModuleEnabled, requireQuotaAvailable } from '../middleware/auth';
 import { getLeads, createLead, getLeadById, listLeads, getLeadsSummary, getLeadCandidates, bulkAssignLeads, bulkDeleteLeads, splitAssign } from '../services/store';
 import { sql } from '../services/db';
-import { onDutyWorkers } from '../services/workforce';
+import { notWorkableBody } from '../services/workforce';
 import { leadShares } from '../services/sharing';
 import { shareFail } from './sharing';
 
@@ -116,6 +116,7 @@ leadsRouter.post('/bulk-assign', async (req: Request, res: Response) => {
     const assigned = await bulkAssignLeads(ids, one, ctx);
     return res.status(200).json({ success: true, assigned });
   } catch (err: any) {
+    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
     if (err?.status === 403) {
       return res.status(403).json({ success: false, error: 'Forbidden', message: err.message, code: err.code });
     }
@@ -190,14 +191,16 @@ leadsRouter.get('/:id', async (req: Request, res: Response) => {
 });
 
 leadsRouter.post('/', async (req: Request, res: Response) => {
-  const newLead = await createLead(req.body, {
-    actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
-    ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null,
-  });
-  return res.status(201).json({
-    success: true,
-    data: newLead,
-  });
+  try {
+    const newLead = await createLead(req.body, {
+      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
+      ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null,
+    });
+    return res.status(201).json({ success: true, data: newLead });
+  } catch (err: any) {
+    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
+    throw err;
+  }
 });
 
 /**
@@ -273,31 +276,6 @@ leadsRouter.post('/:id/actions/schedule-visit', async (req: Request, res: Respon
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Schedule Visit Failed', message: err.message });
-  }
-});
-
-/**
- * 4. RUN ROUND-ROBIN ASSIGNMENT ACTION (Live duty roster rotation)
- * POST /api/v1/leads/:id/actions/assign-round-robin
- */
-leadsRouter.post('/:id/actions/assign-round-robin', async (req: Request, res: Response) => {
-  try {
-    const recordId = req.params.id;
-    // Who can take work and is on duty (workforce.ts). This filtered on a
-    // field the agent rows never carry and fell back to a made-up id.
-    const [selectedAgentId] = await onDutyWorkers(req.tenantId!);
-    if (!selectedAgentId) return res.status(409).json({ error: 'nobody_available', message: 'Nobody on duty can take this lead.' });
-
-    await sql`UPDATE crm_leads SET agent_id = ${selectedAgentId} WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
-    console.log(`[Leads Router - Round Robin] Assigned Lead ${recordId} to Agent ${selectedAgentId} in DB`);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Lead routed to next active sales agent in rotation.',
-      assigned_user_id: selectedAgentId,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Round Robin Assignment Failed', message: err.message });
   }
 });
 

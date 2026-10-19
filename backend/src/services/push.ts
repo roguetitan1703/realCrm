@@ -14,6 +14,7 @@ import { randomBytes } from 'crypto';
 import dns from 'node:dns';
 import net from 'node:net';
 import { sql } from './db.js';
+import { canTakeWork } from './workforce.js';
 
 // A QUARTER OF iPHONE PUSHES NEVER LEFT THE BOX. 110 of 458 sends to
 // web.push.apple.com in a fortnight failed as `ETIMEDOUT/ENETUNREACH` (prod,
@@ -218,9 +219,12 @@ export async function sendPushToUser(
   // revoked, not expired. Signed out everywhere means no push, whether or not
   // the browser managed to unsubscribe on the way out — which it cannot do at
   // all if the sign-out happened by timeout, or on a device that is offline.
+  // And only to a member of the firm (workforce.ts): removing or suspending
+  // someone revokes their sessions, but a push must not depend on that.
   const [live] = await sql`
-    SELECT count(*)::int AS n FROM sessions
+    SELECT count(*)::int AS n, ${canTakeWork(tenantId, userId)} AS member FROM sessions
     WHERE user_id = ${userId} AND revoked = FALSE AND expires_at > NOW()`;
+  if (!live?.member) { await log('not_a_member'); return; }
   if (!live?.n) { await log('not_signed_in'); return; }
   // ...AND ONLY TO A DEVICE THAT IS ITSELF SIGNED IN. Being signed in on a
   // laptop is not being signed in on the phone in a drawer. Each skipped device
