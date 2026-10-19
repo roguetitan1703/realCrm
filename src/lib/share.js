@@ -92,14 +92,42 @@ export function expiryLabel(link) {
 
 /** The state of one sent home, as the lead's record shows it. */
 export function sentHomeLine(s) {
-  // A home the buyer asked about from the catalogue was never sent to them.
-  const parts = [s.sentAt || s.link ? (s.sentAt ? `Sent ${whenLabel(s.sentAt)}` : 'Sent') : 'Enquired']
+  // WHY THE HOME IS HERE, from the server's `via` (strongest first): a tap,
+  // a real enquiry form, a send, or only a link they opened. A tap from a
+  // browser that is not known to be theirs is "someone", never them.
+  const ORDER = ['tapped', 'enquired', 'sent', 'link']
+  const via = (Array.isArray(s.via) ? s.via : (s.sentAt || s.link ? ['sent'] : []))
+    .filter(v => ORDER.includes(v)).sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b))
+  const why = via[0] === 'tapped'
+    ? (s.tapFrom === 'them' ? 'Tapped I’m interested' : 'Someone on their link tapped I’m interested')
+    : via[0] === 'enquired' ? 'Enquired'
+    : via[0] === 'sent' ? (s.sentAt ? `Sent ${whenLabel(s.sentAt)}` : 'Sent')
+    : via[0] === 'link' ? 'On a link they opened'
+    : ''
+  const parts = [why]
+  // A tap or an enquiry on a home that was also sent still says when.
+  if (via[0] !== 'sent' && via.includes('sent') && s.sentAt) parts.push(`sent ${whenLabel(s.sentAt)}`)
   // Opens of this home's own page. Opens of the list it was sent in are a
   // different number and read as one, quietly, after it.
   if (s.opens > 0) parts.push(`Opened ${s.opens}×`)
   if (s.opens > 0 && s.lastOpenedAt) parts.push(`last ${whenLabel(s.lastOpenedAt)}`)
   if (s.linkOpens > 0) parts.push(`list opened ${s.linkOpens}×`)
-  return parts.join(' · ')
+  return parts.filter(Boolean).join(' · ')
+}
+
+/** What a catalogue change did, from the server's own counts: "8 added ·
+ *  2 waiting until Available · 6 have no photos". `live` is on the public
+ *  page now; `waiting` is ticked but not Available, so not shown yet. */
+export function catalogueToast(r, on, asked) {
+  const n = Number(r?.changed ?? asked) || 0
+  if (!on) return `${n} ${n === 1 ? 'home' : 'homes'} taken out of the catalogue`
+  const waiting = Number(r?.waiting) || 0
+  if (n === 0 && !waiting) return 'Already in the catalogue'
+  const live = r?.live != null ? Number(r.live) : n - waiting
+  const parts = [live > 0 ? `${live} added to the catalogue` : '']
+  if (waiting > 0) parts.push(`${waiting} waiting until Available`)
+  if (Number(r?.withoutPhotos) > 0) parts.push(`${r.withoutPhotos} ${Number(r.withoutPhotos) === 1 ? 'has' : 'have'} no photos`)
+  return parts.filter(Boolean).join(' · ')
 }
 
 /** 409 lead_held_by, in words. `holderName` is a person, or "the office" for a

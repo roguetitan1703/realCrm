@@ -890,9 +890,10 @@ export const PROPERTIES_DEF = {
         options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] },
       { key: 'media', label: 'Photos & video', icon: 'camera', group: 'State',
         options: [{ value: 'photos', label: 'Has photos' }, { value: 'video', label: 'Has video' }, { value: 'none', label: 'None yet' }] },
-      // The desk decides what is public; agents only send.
-      ...(isDeskRole(store?.state?.role) ? [{ key: 'catalogue', label: 'In catalogue', icon: 'eye', multi: false, group: 'State',
-        options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] }] : []),
+      // The desk decides what is public; agents only send. Hidden from them
+      // unless a link switched it on, so it can still be seen and taken off.
+      { key: 'catalogue', label: 'In catalogue', icon: 'eye', multi: false, group: 'State', hidden: !isDeskRole(store?.state?.role),
+        options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] },
       { key: 'furnishing', label: 'Furnishing', icon: 'home', group: 'Condition', options: optionsOf(FURNISH) },
       { key: 'facing', label: 'Facing', icon: 'tag', group: 'Condition', options: optionsOf(FACING) },
       { key: 'possession', label: 'Possession', icon: 'clock', group: 'State', options: optionsOf(POSSESSION) },

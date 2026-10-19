@@ -6,7 +6,8 @@ import { configLabel, personLabel, unitLabel } from '../lib/format.js'
 import { phoneSpaced, phonePlaceholder, phoneProblem } from '../lib/locale.js'
 import { copyText } from '../lib/clipboard.js'
 import { canPickWhatsApp, openWhatsAppChat } from '../lib/matching.js'
-import { canPickContact, pickContact, looksLikePhone, refusal, expiryLabel, heldText } from '../lib/share.js'
+import { canPickContact, pickContact, looksLikePhone, refusal, expiryLabel, heldText, catalogueToast } from '../lib/share.js'
+import { canChangeCatalogue } from '../lib/permissions.js'
 import WaSend from '../components/WaSend.jsx'
 
 // ============================================================================
@@ -117,6 +118,24 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
     }
   }
 
+  // Nothing can go to no recipient: the desk can put them in the catalogue
+  // from here. Ticked homes that are not Available wait, and stay out.
+  const addToCatalogue = async () => {
+    if (busy) return
+    setBusy(true); setErr('')
+    try {
+      const ids = privateOnes.map(h => h.id)
+      const r = await api.setCatalogue(ids, true)
+      store.touched?.()
+      store.toast(catalogueToast(r, true, ids.length))
+      // Which ones are waiting is not said; Make link asks the server, whose
+      // answer (private_flats_without_recipient) marks those out again.
+      setHomes(hs => hs.map(h => (ids.includes(h.id) ? { ...h, inCatalogue: true } : h)))
+    } catch (e) {
+      setErr(e?.status === 403 ? 'Only an owner or manager can change the catalogue.' : 'Could not change the catalogue. Try again.')
+    } finally { setBusy(false) }
+  }
+
   // What can go, not what was picked; none at all names the picked ones.
   const shownN = sendable > 0 ? sendable : homes.length
   const title = shownN === 1 ? 'Send 1 home' : `Send ${shownN} homes`
@@ -205,6 +224,17 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
           <Toggle on={showPrice} type="button" aria-pressed={showPrice} aria-label="Show price" onClick={() => setShowPrice(v => !v)} />
         </label>
 
+        {to.kind === 'none' && homes.length > 0 && sendable === 0 && (
+          <div className="snd-dead" role="status">
+            <div className="snd-dead-t">{homes.length === 1 ? 'This home is not in the catalogue' : 'None of these homes are in the catalogue'}</div>
+            <div className="snd-dead-acts">
+              <Button size="sm" icon="userPlus" onClick={() => setTo({ kind: 'pick' })}>Choose a recipient</Button>
+              {canChangeCatalogue(store.state.role) && (
+                <Button size="sm" icon="eye" disabled={busy} onClick={addToCatalogue}>Add to the catalogue</Button>
+              )}
+            </div>
+          </div>
+        )}
         {privateOnes.length > 0 && sendable > 0 && (
           <div className="snd-note">{privateOnes.length === 1 ? '1 left out: not in the catalogue' : `${privateOnes.length} left out: not in the catalogue`}</div>
         )}

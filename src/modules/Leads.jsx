@@ -487,6 +487,8 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
       linkOpens: (cur.linkOpens || 0) + (r.linkOpens || 0),
       lastOpenedAt: [cur.lastOpenedAt, r.lastOpenedAt].filter(Boolean).sort().pop() || null,
       interested: (cur.interested || 0) + (r.interested || 0),
+      via: [...new Set([...(cur.via || []), ...(r.via || [])])],
+      tapFrom: cur.tapFrom === 'them' || r.tapFrom === 'them' ? 'them' : (cur.tapFrom || r.tapFrom || null),
       enquiries: (cur.enquiries || 0) + (r.enquiries || 0),
       link: cur.link || r.link,
     }
@@ -665,10 +667,11 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                     {/* Agent-side only — the unit no. is never in a client message,
                         but here it's what distinguishes two flats in one society. */}
                     {unitLabel(row.p) && <span className="unit-tag">{unitLabel(row.p)}</span>}
-                    {sent?.interested > 0 && <span className="fit int fit-tight">Interested</span>}
+                    {/* Only a tap known to be theirs says they are interested. */}
+                    {sent?.interested > 0 && sent?.tapFrom !== 'someone' && <span className="fit int fit-tight">Interested</span>}
                     {fb?.verdict === 'liked' && <span className="fit ok fit-tight">👍 Liked</span>}
                     {rejected && <span className="fit no fit-tight">👎 {fb.reason}</span>}
-                    {!fb && !(sent?.interested > 0) && row.shortlisted &&
+                    {!fb && !(sent?.interested > 0 && sent?.tapFrom !== 'someone') && row.shortlisted &&
                       <span className="fit ok fit-tight"><Icon name="check" size={11} />Shortlisted</span>}
                   </div>
                   {/* Joined, not templated. Hardcoding the separators printed a

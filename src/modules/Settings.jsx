@@ -106,6 +106,11 @@ function SharingSection({ store, settings }) {
   const [reply, setReply] = useState(sh.replyToPhone || '')
   useEffect(() => { setReply(sh.replyToPhone || '') }, [sh.replyToPhone])
   const replyDirty = reply.trim() !== (sh.replyToPhone || '')
+  // The empty box shows the number buyers reach instead, and whose it is (an
+  // owner's, per the server's rule): "Akash Patel · +91 98765 43210".
+  const fbDigits = String(sh.replyToFallback || '').replace(/\D/g, '').slice(-10)
+  const fbOwner = fbDigits ? (store.state.agents || []).find(a => String(a.phone || '').replace(/\D/g, '').slice(-10) === fbDigits) : null
+  const replyFallbackLabel = sh.replyToFallback ? [fbOwner?.name, phoneSpaced(sh.replyToFallback)].filter(Boolean).join(' · ') : ''
 
   // The whole object, every time: the server stores the key as one value.
   // `replyToFallback` is the server's answer, not a setting: it is not sent back.
@@ -149,7 +154,7 @@ function SharingSection({ store, settings }) {
             <label className="shr-l" htmlFor="shr-reply">Reply-to number</label>
             <div className="shr-inline">
               <Input id="shr-reply" value={reply} onChange={e => setReply(e.target.value)} inputMode="tel"
-                placeholder={sh.replyToFallback ? phoneSpaced(sh.replyToFallback) : "Firm's WhatsApp number"}
+                placeholder={replyFallbackLabel || "Firm's WhatsApp number"}
                 onKeyDown={e => { if (e.key === 'Enter' && replyDirty) put({ replyToPhone: reply.trim() }, 'Reply-to number saved') }} />
               <Button variant={replyDirty ? 'primary' : 'ghost'} disabled={!replyDirty} onClick={() => put({ replyToPhone: reply.trim() }, 'Reply-to number saved')}>Save</Button>
             </div>
