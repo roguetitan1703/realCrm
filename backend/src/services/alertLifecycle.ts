@@ -29,7 +29,7 @@
 import { sql } from './db.js';
 import { contactedAfter } from './leadSegments.js';
 import { TERMINAL_STATUSES, OWNER_TERMINAL_STATUSES, OWNER_WALK_END } from './statuses.js';
-import { closeTestFor, CLOSE_TESTS, NOTIFICATIONS, LEGACY_CLOSE, type CloseTest } from './notificationCatalogue.js';
+import { closeTestFor, CLOSE_TESTS, NOTIFICATIONS, LEGACY_CLOSE, SUPERSEDES_SAME_TYPE_ONLY, type CloseTest } from './notificationCatalogue.js';
 
 const LEAD_OPEN = (l: string) => sql`coalesce(${sql(l)}.stage, '') NOT IN ${sql(TERMINAL_STATUSES)}`;
 const OWNER_STILL_TO_CALL = (o: string) =>
@@ -193,14 +193,16 @@ export async function closeSettled(
     // ONE OPEN ALERT PER PIECE OF WORK. "Assigned to you", then "still
     // waiting", then a legacy "SLA" alert about the same untouched lead were
     // three rows in the bell for one call to make. The newest stands for it;
-    // the older ones close as `superseded`.
+    // the older ones close as `superseded`. Some tests supersede only within
+    // one type (notificationCatalogue.ts SUPERSEDES_SAME_TYPE_ONLY).
+    const sameType = SUPERSEDES_SAME_TYPE_ONLY.has(test) ? sql`AND m.type = n.type` : sql``;
     const dup = await db`
       UPDATE ${T} n SET closed_at = NOW(), close_reason = 'superseded'
        WHERE n.tenant_id = ${tenantId} AND n.closed_at IS NULL
          AND n.type IN ${sql(types)} AND cardinality(n.record_ids) = 1
          AND EXISTS (SELECT 1 FROM ${T} m
                       WHERE m.tenant_id = n.tenant_id AND m.user_id = n.user_id AND m.closed_at IS NULL
-                        AND m.type IN ${sql(types)} AND m.record_ids = n.record_ids
+                        AND m.type IN ${sql(types)} AND m.record_ids = n.record_ids ${sameType}
                         AND (m.created_at, m.id) > (n.created_at, n.id)) ${scope}`;
     closed += dup.count;
   }

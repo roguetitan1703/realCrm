@@ -446,6 +446,9 @@ tenant and type:
   newer one on the same lead supersedes the open one, so it names them all:
   "Sneha is interested in 2 homes · Maple Court 1 BHK and 1 more".
 - `share_expired_open` — now, to the holder (else creator, else the desk).
+  **(changed, walk fixes)** Neither it nor `share_returned` supersedes an open
+  `share_interested` on the same lead: under `share_work` only an alert of the
+  same type does (`SUPERSEDES_SAME_TYPE_ONLY` in `notificationCatalogue.ts`).
 - `share_returned` — drawer. A known lead back on their link on a new day, at
   most one per lead per day.
 - **(added)** `share_number_held` — drawer, to the holder when another member

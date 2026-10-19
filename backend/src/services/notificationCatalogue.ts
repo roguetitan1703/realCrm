@@ -94,6 +94,19 @@ export type Urgency = 'now' | 'at_time' | 'morning' | 'drawer';
 export const CLOSE_TESTS = ['lead_worked', 'lead_worked_desk', 'lead_routed', 'booking', 'owner_worked', 'agreement', 'share_work', 'opened'] as const;
 export type CloseTest = typeof CLOSE_TESTS[number];
 
+/**
+ * WHERE A NEWER ALERT STANDS FOR AN OLDER ONE (alertLifecycle.ts `superseded`).
+ * By default any newer open alert under the same close test, to the same
+ * person, about the same record, replaces the older: "assigned", then "still
+ * waiting", then an SLA alert are one call to make. Under these tests only an
+ * alert of the SAME type does. The share alerts say different things — "Sneha
+ * is interested in Maple Court" is the business; "opened an expired link" or
+ * "back on their link" is not — and a buyer opening an expired link closed
+ * their unanswered interested alert, leaving the weaker one in the bell.
+ * listing-pages.md §A.5 supersedes interested by interested only.
+ */
+export const SUPERSEDES_SAME_TYPE_ONLY: ReadonlySet<CloseTest> = new Set<CloseTest>(['share_work']);
+
 const K = (k: NotifKind): NotifKind => ({ ...k, push: k.urgency !== 'drawer' });
 
 export const NOTIFICATIONS: NotifKind[] = [

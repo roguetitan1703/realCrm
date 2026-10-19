@@ -1235,6 +1235,16 @@ export async function migrateSharing(): Promise<void> {
   await sql`CREATE INDEX IF NOT EXISTS idx_share_events_link ON crm_share_events (tenant_id, link_id, created_at DESC);`;
   await sql`CREATE INDEX IF NOT EXISTS idx_share_events_lead ON crm_share_events (tenant_id, lead_id, created_at DESC) WHERE lead_id IS NOT NULL;`;
   await sql`CREATE INDEX IF NOT EXISTS idx_share_events_device ON crm_share_events (tenant_id, device_id) WHERE device_id IS NOT NULL;`;
+  // ONE VIEW PER BROWSER, PER PAGE, PER FIRM DAY, decided by this index rather
+  // than by a read before the insert (sharing.ts recordView). `view_day` is the
+  // firm's calendar day, set on views only; rows written before it exist carry
+  // NULL, which never conflicts, so nothing already stored is touched or
+  // refused. Gated: a unique index is a migration, not DDL to re-run on boot.
+  await runOnce('share_events_one_view_per_day', async () => {
+    await sql`ALTER TABLE crm_share_events ADD COLUMN IF NOT EXISTS view_day DATE`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_share_events_one_view ON crm_share_events
+      (tenant_id, kind, (coalesce(link_id, '')), (coalesce(property_id, '')), device_id, view_day)`;
+  });
 
   await sql`
     CREATE TABLE IF NOT EXISTS crm_share_devices (

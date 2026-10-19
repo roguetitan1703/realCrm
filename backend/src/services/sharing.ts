@@ -255,6 +255,53 @@ async function recordEvent(tenantId: string, e: {
   return row;
 }
 
+/**
+ * WHAT A VIEW IS: one browser, one page (a link's list, a flat on it, the
+ * catalogue's list or one of its flats), one firm day. Reloading, paging and
+ * a second request for the same page are the same person looking.
+ *
+ * Decided by the database, not by a read before the write. The catalogue did
+ * check-then-insert, so two requests together (React StrictMode in dev fires
+ * every effect twice) each saw nothing and both counted; shared links did not
+ * check at all, and the counts were then de-duplicated a second, different way
+ * on read. One buyer on one day showed "5 views" on My links and "Opened 1x"
+ * on the lead. Now the unique index idx_share_events_one_view (db.ts) is the
+ * rule, the insert stands down on it, and countedEvents() below applies the
+ * same key to rows written before the index existed.
+ *
+ * A view with no browser ID counts on its own: there is nothing to tell two
+ * of them apart by (device_id NULL never conflicts). Returns whether it counted.
+ */
+async function recordView(tenantId: string, e: {
+  linkId: string | null; propertyId: string | null; kind: 'view' | 'expired_view'; deviceId: string | null; leadId: string | null;
+}): Promise<boolean> {
+  const tz = (await deskConfigOf(tenantId)).timezone;
+  const at = new Date();
+  const rows = await sql`
+    INSERT INTO crm_share_events (id, tenant_id, link_id, property_id, kind, device_id, lead_id, created_at, view_day)
+    VALUES (${rid('sev')}, ${tenantId}, ${e.linkId}, ${e.propertyId}, ${e.kind}, ${e.deviceId}, ${e.leadId}, ${at},
+            (${at}::timestamptz AT TIME ZONE ${tz})::date)
+    ON CONFLICT (tenant_id, kind, (coalesce(link_id, '')), (coalesce(property_id, '')), device_id, view_day) DO NOTHING
+    RETURNING id`;
+  return rows.length > 0;
+}
+
+/** The key of a view (recordView), as SQL over an event aliased `e`; any other event is its own key. */
+const viewKey = (tz: string) => sql`(CASE WHEN e.kind IN ('view', 'expired_view')
+  THEN concat_ws('|', e.kind, coalesce(e.link_id, ''), coalesce(e.property_id, ''), coalesce(e.device_id, e.id),
+                 coalesce(e.view_day, (e.created_at AT TIME ZONE ${tz})::date)::text)
+  ELSE e.id END)`;
+
+/**
+ * Share events as they COUNT: every tap, talk and enquiry, and each view once
+ * by recordView's rule (the first of its key). The one source My links and a
+ * lead's shares count from, so the two cannot disagree about what an open is.
+ */
+const countedEvents = (tenantId: string, tz: string, where: any) => sql`
+  SELECT DISTINCT ON (k.key) e.* FROM crm_share_events e, LATERAL (SELECT ${viewKey(tz)} AS key) k
+   WHERE e.tenant_id = ${tenantId} AND ${where}
+   ORDER BY k.key, e.created_at`;
+
 /** The flats of a link, in its order, as rows. A no-recipient link shows catalogue flats only (§A.1). */
 async function linkRows(tenantId: string, link: any): Promise<any[]> {
   const ids: string[] = link.property_ids || [];
@@ -312,9 +359,9 @@ export async function openCode(f: Firm, code: string, r: PublicReq, flatParam?: 
     if (state === 'active') {
       // Before recording: was this lead here on an earlier day, and not yet today?
       if (link.lead_id) await maybeReturned(f, link).catch(err => console.warn('[Share] returned check failed:', err?.message));
-      await recordEvent(f.id, { linkId: link.id, propertyId, kind: 'view', deviceId: r.deviceId, leadId: knownLead });
+      await recordView(f.id, { linkId: link.id, propertyId, kind: 'view', deviceId: r.deviceId, leadId: knownLead });
     } else if (state === 'expired') {
-      await recordEvent(f.id, { linkId: link.id, propertyId, kind: 'expired_view', deviceId: r.deviceId, leadId: knownLead });
+      await recordView(f.id, { linkId: link.id, propertyId, kind: 'expired_view', deviceId: r.deviceId, leadId: knownLead });
     }
   }
 
@@ -563,15 +610,7 @@ export async function talk(f: Firm, code: string, r: PublicReq): Promise<{ waUrl
  */
 async function catalogueView(f: Firm, propertyId: string | null, r: PublicReq) {
   if (!counted(f, r)) return;
-  if (r.deviceId) {
-    const tz = (await deskConfigOf(f.id)).timezone;
-    const [seen] = await sql`
-      SELECT 1 FROM crm_share_events
-       WHERE tenant_id = ${f.id} AND link_id IS NULL AND kind = 'view' AND device_id = ${r.deviceId}
-         AND property_id IS NOT DISTINCT FROM ${propertyId} AND created_at >= ${firmDayStart(tz)} LIMIT 1`;
-    if (seen) return;
-  }
-  await recordEvent(f.id, { linkId: null, propertyId, kind: 'view', deviceId: r.deviceId, leadId: await deviceLead(f.id, r.deviceId) });
+  await recordView(f.id, { linkId: null, propertyId, kind: 'view', deviceId: r.deviceId, leadId: await deviceLead(f.id, r.deviceId) });
 }
 
 /** GET /public/catalogue/:tenant?deal=&config=&locality=&page= */
@@ -931,13 +970,17 @@ async function firmSlug(tenantId: string): Promise<string> {
 /** The counts on a set of links, one query. */
 async function linkCounts(tenantId: string, linkIds: string[]) {
   if (!linkIds.length) return new Map<string, any>();
+  const tz = (await deskConfigOf(tenantId)).timezone;
+  // Every page of the link counts: its list and each flat on it, each once per
+  // browser per day (countedEvents) -- the sum of what the lead's own record
+  // shows as "Opened" and "list opened" for this link.
   const rows = await sql`
     SELECT link_id,
            count(*) FILTER (WHERE kind IN ('view', 'expired_view'))::int AS views,
            count(DISTINCT device_id) FILTER (WHERE kind IN ('view', 'expired_view', 'interested'))::int AS devices,
            count(*) FILTER (WHERE kind = 'interested')::int AS interested,
            max(created_at) FILTER (WHERE kind IN ('view', 'expired_view')) AS last_opened
-      FROM crm_share_events WHERE tenant_id = ${tenantId} AND link_id IN ${sql(linkIds)}
+      FROM (${countedEvents(tenantId, tz, sql`e.link_id IN ${sql(linkIds)}`)}) c
      GROUP BY link_id`;
   return new Map((rows as any[]).map(r => [r.link_id, r]));
 }
@@ -1050,16 +1093,16 @@ export async function leadShares(leadId: string, origin: string | null) {
   // Same visibility as the lead itself (store.ts leadScope).
   if (m.role === 'agent' && lead.agent_id !== m.userId && lead.created_by !== m.userId) throw new ShareError(404, 'not_found');
   // Independent reads, one round trip.
-  const [sharing, links, events, slug, leadDevices, desk, loc] = await Promise.all([
+  const [sharing, links, events, slug, leadDevices, loc] = await Promise.all([
     sharingOf(m.tenantId),
     sql`SELECT * FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND lead_id = ${leadId} ORDER BY created_at ASC`,
-    sql`
-      SELECT e.*, l.property_ids AS link_props FROM crm_share_events e
-        LEFT JOIN crm_share_links l ON l.id = e.link_id AND l.tenant_id = e.tenant_id
-       WHERE e.tenant_id = ${m.tenantId} AND (e.lead_id = ${leadId} OR e.link_id IN (SELECT id FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND lead_id = ${leadId}))`,
+    deskConfigOf(m.tenantId).then(d => sql`
+      SELECT c.*, l.property_ids AS link_props
+        FROM (${countedEvents(m.tenantId, d.timezone, sql`(e.lead_id = ${leadId} OR e.link_id IN (SELECT id FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND lead_id = ${leadId}))`)}) c
+        LEFT JOIN crm_share_links l ON l.id = c.link_id AND l.tenant_id = c.tenant_id
+       ORDER BY c.created_at`),
     firmSlug(m.tenantId),
     leadDevicesOf(m.tenantId, leadId),
-    deskConfigOf(m.tenantId),
     localeOf(m.tenantId),
   ]);
   const base = `${appBase(origin)}/${slug}`;
@@ -1071,17 +1114,8 @@ export async function leadShares(leadId: string, origin: string | null) {
   // WHAT AN OPEN IS. A home is opened only by a view that names it; opening
   // the list page is an open of the link, not of every home on it (it was
   // counted once per home, so a three-home link opened once read "Opened 3×"
-  // on each). Both count one per browser per firm day: reloading is the same
-  // person looking. A view with no browser ID counts on its own.
-  const tz = desk.timezone;
-  const dayOf = (at: any) => new Date(at).toLocaleDateString('en-CA', { timeZone: tz });
-  const seen = new Set<string>();
-  const firstToday = (scope: string, e: any) => {
-    const key = `${scope}|${e.device_id || e.id}|${dayOf(e.created_at)}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  };
+  // on each). Each view here is already one per browser per page per firm day
+  // (countedEvents -- the same rule My links counts by).
   for (const l of links as any[]) {
     for (const pid of l.property_ids || []) {
       const s = slot(pid);
@@ -1093,11 +1127,11 @@ export async function leadShares(leadId: string, origin: string | null) {
   for (const e of events as any[]) {
     const targets: string[] = e.property_id ? [e.property_id] : (e.link_props || []);
     const isView = e.kind === 'view' || e.kind === 'expired_view';
-    // A list open, once per browser per day per link, on every home it carried.
-    const listOpen = isView && !e.property_id && firstToday(`link:${e.link_id}`, e);
+    // A list open, on every home it carried.
+    const listOpen = isView && !e.property_id;
     for (const pid of targets) {
       const s = slot(pid);
-      if (isView && e.property_id && firstToday(`flat:${pid}`, e)) {
+      if (isView && e.property_id) {
         s.opens++;
         if (!s.lastOpenedAt || new Date(e.created_at) > new Date(s.lastOpenedAt)) s.lastOpenedAt = e.created_at;
       }
