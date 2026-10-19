@@ -127,7 +127,7 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
       const ids = privateOnes.map(h => h.id)
       const r = await api.setCatalogue(ids, true)
       store.touched?.()
-      store.toast(catalogueToast(r, true, ids.length))
+      store.toast(catalogueToast(r, true))
       // Which ones are waiting is not said; Make link asks the server, whose
       // answer (private_flats_without_recipient) marks those out again.
       setHomes(hs => hs.map(h => (ids.includes(h.id) ? { ...h, inCatalogue: true } : h)))

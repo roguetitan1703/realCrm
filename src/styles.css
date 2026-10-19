@@ -2880,6 +2880,11 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .rot-chip.on .rot-check{background:var(--accent);border-color:var(--accent)}
 .rot-chip .rot-name{flex:1;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rot-chip .rot-load{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rot-chip.stuck{cursor:default;background:var(--bg-2,transparent);border-style:dashed}
+.rot-chip.stuck .av{opacity:.5;filter:grayscale(1)}
+.rot-chip.stuck .rot-name{color:var(--muted);white-space:normal;line-height:1.25}
+.rot-chip .rot-why{display:block;font-size:11px;font-weight:500;color:var(--muted)}
+.rot-chip .rot-remove{flex:none;border:0;background:none;padding:6px 2px;font:inherit;font-size:12px;font-weight:600;color:var(--danger,#b4442c);cursor:pointer}
 
 /* Two sweeps, one panel — they are the same kind of rule. */
 .rt-rule{border-top:1px solid var(--line-2);padding-top:13px;margin-top:13px}

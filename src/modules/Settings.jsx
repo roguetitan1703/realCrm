@@ -11,6 +11,7 @@ import MessageTemplates from '../components/MessageTemplates.jsx'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { isDeskRole } from '../lib/permissions.js'
 import { firmLocale, phoneSpaced } from '../lib/locale.js'
+import { canWork, notWorkableReason } from '../lib/workforce.js'
 
 // `everyone: true` is a section an agent may open. The rest are the desk's.
 // An agent reaches this screen for one reason — the intro message they are
@@ -538,7 +539,15 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
   const setStrategy = (v) => set({ [f.strategy]: v })
   const setRota = (next) => set({ [f.rota]: next })
   const toggleAgent = (id) => setRota(rota.includes(id) ? rota.filter(x => x !== id) : [...rota, id])
-  const allOn = agents.length > 0 && rota.length === agents.length
+  // ONLY PEOPLE WHO CAN TAKE WORK ARE OFFERED. The rota skips anyone the
+  // server would refuse (services/workforce.ts), so ticking them here did
+  // nothing — the owner saw a name on the rota and that person got no leads.
+  const workable = agents.filter(canWork)
+  // Ids already on the rota who can no longer take work. Shown with why and a
+  // way off, never dropped quietly: Select all and Clear all leave them alone.
+  const stuck = rota.filter(id => !workable.some(a => a.id === id))
+  const onCount = rota.length - stuck.length
+  const allOn = workable.length > 0 && workable.every(a => rota.includes(a.id))
 
   return (
     <>
@@ -606,17 +615,17 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
             right={
               // Ticking eleven names one at a time to say "everyone" is the
               // common case, and it was the slowest thing on this screen.
-              <button className="rt-all" onClick={() => setRota(allOn ? [] : agents.map(a => a.id))}>
+              <button className="rt-all" disabled={!workable.length} onClick={() => setRota(allOn ? stuck : [...stuck, ...workable.map(a => a.id)])}>
                 {allOn ? 'Clear all' : 'Select all'}
               </button>
             }
           />
-          <div className="set-sec-sub">{rota.length} of {agents.length} receive auto-assigned {side.noun}s</div>
+          <div className="set-sec-sub">{onCount} of {workable.length} receive auto-assigned {side.noun}s</div>
           {/* A grid of chips, not a vertical checklist. Eleven agents was
               eleven full-width rows and half a screen of scrolling to answer
               "who is on". */}
           <div className="rot-grid">
-            {agents.map(a => {
+            {workable.map(a => {
               const on = rota.includes(a.id)
               const off = inactiveAgentIds.includes(a.id)
               return (
@@ -629,8 +638,19 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
                 </button>
               )
             })}
+            {stuck.map(id => {
+              const a = store.agentById(id)
+              const name = a?.first || a?.name || 'Former member'
+              return (
+                <div key={id} className="rot-chip stuck">
+                  <Avatar agent={a || { id, name, first: name }} size="sm" />
+                  <span className="rot-name">{name}<span className="rot-why">{notWorkableReason(a)}</span></span>
+                  <button className="rot-remove" onClick={() => setRota(rota.filter(x => x !== id))}>Remove</button>
+                </div>
+              )
+            })}
           </div>
-          {!agents.length && <div className="detail-empty">No team members yet.</div>}
+          {!workable.length && !stuck.length && <div className="detail-empty">{agents.length ? 'No one on the team can take work.' : 'No team members yet.'}</div>}
         </Panel>
       )}
 
