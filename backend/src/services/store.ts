@@ -3641,10 +3641,20 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
   // A ROW THAT NAMES SOMEONE WHO CANNOT TAKE WORK is filed UNASSIGNED: not
   // given to them, not dealt to the rota in their place (nobody chose that),
   // and the batch is not refused for it. One read for the whole batch.
+  // Each such row comes back with `unassignedReason`, the sentence an import
+  // report shows ("Named Siddhi, who can't take work: left unassigned").
   const named = [...new Set(list.map(d => d.agentId).filter(Boolean).map(String))];
-  const workable = new Set<string>(named.length
-    ? ((await sql`SELECT x.id FROM unnest(${named}::text[]) AS x(id) WHERE ${canTakeWork(t, sql`x.id`)}`) as any[]).map(r => r.id)
-    : []);
+  const namedRows = named.length
+    ? await sql`SELECT x.id, coalesce(u.name, a.name) AS name, ${canTakeWork(t, sql`x.id`)} AS ok
+                  FROM unnest(${named}::text[]) AS x(id)
+                  LEFT JOIN users u ON u.tenant_id = ${t} AND u.id = x.id
+                  LEFT JOIN crm_agents a ON a.tenant_id = ${t} AND a.id = x.id` as any[]
+    : [];
+  const workable = new Set<string>(namedRows.filter(r => r.ok).map(r => r.id));
+  const droppedWhy = (id: any) => {
+    const r = namedRows.find(x => x.id === String(id));
+    return `Named ${r?.name || String(id)}, who can't take work: left unassigned`;
+  };
 
   // The rota is claimed ONCE for the whole batch (see nextRoutedOwnerAgents):
   // the same rotation, one round trip instead of one per row.
@@ -3728,7 +3738,12 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
   }
 
   const byId = new Map((saved as any[]).map(r => [r.id, rowToOwner(r)]));
-  return rows.map(r => byId.get(r.id)).filter(Boolean);
+  return rows.map((r, i) => {
+    const o = byId.get(r.id);
+    if (!o) return null;
+    const asked = list[i].agentId;
+    return asked && !workable.has(String(asked)) ? { ...o, unassignedReason: droppedWhy(asked) } : o;
+  }).filter(Boolean);
 }
 
 /**

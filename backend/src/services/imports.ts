@@ -410,7 +410,9 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
           const saved = await writeRecords(kind, toWrite.map(w => w.record), ctx);
           toWrite.forEach((w, n) => {
             const rec = saved[n];
-            if (rec?.id) { outcomes.push({ rowNo: w.rowNo, status: 'added', reason: null, recordId: rec.id }); added++; }
+            // Added, with the reason when something on the row was not taken
+            // as given (a named holder who cannot take work: createOwnersBatch).
+            if (rec?.id) { outcomes.push({ rowNo: w.rowNo, status: 'added', reason: rec.unassignedReason ?? null, recordId: rec.id }); added++; }
             else { outcomes.push({ rowNo: w.rowNo, status: 'failed', reason: 'The server did not save this row', recordId: null }); failed++; }
           });
         } catch (e: any) {
