@@ -92,9 +92,13 @@ export function expiryLabel(link) {
 
 /** The state of one sent home, as the lead's record shows it. */
 export function sentHomeLine(s) {
-  const parts = [`Sent ${whenLabel(s.sentAt)}`]
+  // A home the buyer asked about from the catalogue was never sent to them.
+  const parts = [s.sentAt || s.link ? (s.sentAt ? `Sent ${whenLabel(s.sentAt)}` : 'Sent') : 'Enquired']
+  // Opens of this home's own page. Opens of the list it was sent in are a
+  // different number and read as one, quietly, after it.
   if (s.opens > 0) parts.push(`Opened ${s.opens}×`)
-  if (s.lastOpenedAt) parts.push(`last ${whenLabel(s.lastOpenedAt)}`)
+  if (s.opens > 0 && s.lastOpenedAt) parts.push(`last ${whenLabel(s.lastOpenedAt)}`)
+  if (s.linkOpens > 0) parts.push(`list opened ${s.linkOpens}×`)
   return parts.join(' · ')
 }
 

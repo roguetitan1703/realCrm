@@ -477,8 +477,11 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
       ...cur,
       sentAt: (r.sentAt > cur.sentAt ? r.sentAt : cur.sentAt),
       opens: (cur.opens || 0) + (r.opens || 0),
+      linkOpens: (cur.linkOpens || 0) + (r.linkOpens || 0),
       lastOpenedAt: [cur.lastOpenedAt, r.lastOpenedAt].filter(Boolean).sort().pop() || null,
-      interested: cur.interested || r.interested,
+      interested: (cur.interested || 0) + (r.interested || 0),
+      enquiries: (cur.enquiries || 0) + (r.enquiries || 0),
+      link: cur.link || r.link,
     }
   }
   const toggleTick = (id) => setTicked(t => { const n = new Set(t); if (n.has(id)) n.delete(id); else n.add(id); return n })
@@ -655,10 +658,10 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                     {/* Agent-side only — the unit no. is never in a client message,
                         but here it's what distinguishes two flats in one society. */}
                     {unitLabel(row.p) && <span className="unit-tag">{unitLabel(row.p)}</span>}
-                    {sent?.interested && <span className="fit int fit-tight">Interested</span>}
+                    {sent?.interested > 0 && <span className="fit int fit-tight">Interested</span>}
                     {fb?.verdict === 'liked' && <span className="fit ok fit-tight">👍 Liked</span>}
                     {rejected && <span className="fit no fit-tight">👎 {fb.reason}</span>}
-                    {!fb && !sent?.interested && row.shortlisted &&
+                    {!fb && !(sent?.interested > 0) && row.shortlisted &&
                       <span className="fit ok fit-tight"><Icon name="check" size={11} />Shortlisted</span>}
                   </div>
                   {/* Joined, not templated. Hardcoding the separators printed a
