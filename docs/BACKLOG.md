@@ -54,9 +54,10 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
   (2) a help centre of how-to pages and videos in the app (the tutorial-videos
   engine exists).
 - **Collapsible sidebar** (Work OS #130) — ride in a release, never its own. *owner*
-- **Catalog** (Work OS #131) — Om's model of 19 Oct is `specs/listing-pages.md` §A:
-  public catalogue (embeddable) + shared links (custom view, optional buyer,
-  7/15/30-day expiry). Three questions open in §A.1 before building.
+- **Catalog** (Work OS #131) — built on `development` (`specs/listing-pages.md`
+  §A, §A.5): public catalogue + shared links, plus work only to people who can
+  take it. Waits on the final walk, then on Om's yes to `stale-rota-ids.ts`
+  (read-only), since stale rota ids at the paying firms stop getting leads.
 
 ## Small
 
