@@ -39,6 +39,8 @@ import { audit } from './audit.js';
 import { landEnquiry } from './ingestion.js';
 import { assertLeadWrite } from '../lib/permissions.js';
 import { normalizePhone } from './roster.js';
+import { CATALOGUE_WHERE, HAS_PHOTO } from './catalogueRules.js';
+import { canTakeWork } from './workforce.js';
 import { BHK } from '../../../src/data/propertyFields.js';
 import { isDeskRole } from '../lib/permissions.js';
 import {
@@ -124,7 +126,7 @@ async function activeUser(tenantId: string, id: string | null | undefined): Prom
   if (!id) return null;
   const [u] = await sql`
     SELECT id, name, phone, role FROM users
-     WHERE tenant_id = ${tenantId} AND id = ${id} AND deleted_at IS NULL AND status ILIKE 'active' LIMIT 1`;
+     WHERE tenant_id = ${tenantId} AND id = ${id} AND ${canTakeWork(tenantId, sql`users.id`)} LIMIT 1`;
   return u || null;
 }
 
@@ -264,7 +266,7 @@ async function linkRows(tenantId: string, link: any): Promise<any[]> {
 
 async function catalogueUrlOf(f: Firm): Promise<string | null> {
   const [hit] = await sql`
-    SELECT 1 FROM crm_properties WHERE tenant_id = ${f.id} AND in_catalogue = TRUE AND coalesce(status, 'Available') ILIKE 'available' LIMIT 1`;
+    SELECT 1 FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)} LIMIT 1`;
   return hit ? `/${f.slug}/homes` : null;
 }
 
@@ -344,9 +346,25 @@ export async function openCode(f: Firm, code: string, r: PublicReq, flatParam?: 
   return { body, miss: false };
 }
 
+/**
+ * WHO TAPPED, AS FAR AS WE KNOW (CLAUDE.md §3.1: unknown is not a fact). A tap
+ * is "them" only when it came from a browser already attached to that lead;
+ * any other browser — forwarded, a second phone, no browser ID — is
+ * "someone". The alert words it the same way ("Someone on Rahul's link").
+ */
+function tapFromOf(deviceId: string | null | undefined, leadDevices: Set<string>): 'them' | 'someone' {
+  return deviceId && leadDevices.has(deviceId) ? 'them' : 'someone';
+}
+async function leadDevicesOf(tenantId: string, leadId: string | null): Promise<Set<string>> {
+  if (!leadId) return new Set();
+  const rows = await sql`SELECT device_id FROM crm_share_devices WHERE tenant_id = ${tenantId} AND lead_id = ${leadId}`;
+  return new Set((rows as any[]).map(r => r.device_id));
+}
+
 /** What a signed-in member of the firm gets on top: enough to open Add as lead. */
 async function staffView(f: Firm, user: { id: string; role: string }, link: any, tap: any | null, state: LinkState) {
   const leadId = tap?.lead_id || link.lead_id || null;
+  const tapFrom = tap ? tapFromOf(tap.device_id, await leadDevicesOf(f.id, leadId)) : null;
   let lead: any = null;
   if (leadId) {
     const [l] = await sql`SELECT id, name, phone, agent_id, created_by, stage FROM crm_leads WHERE tenant_id = ${f.id} AND id = ${leadId} LIMIT 1`;
@@ -359,7 +377,7 @@ async function staffView(f: Firm, user: { id: string; role: string }, link: any,
     }
   }
   return {
-    ...(tap ? { tap: { id: tap.id, code: tap.code, propertyId: tap.property_id, deviceId: tap.device_id, at: tap.created_at, leadId: tap.lead_id || null } } : {}),
+    ...(tap ? { tap: { id: tap.id, code: tap.code, propertyId: tap.property_id, deviceId: tap.device_id, at: tap.created_at, leadId: tap.lead_id || null, tapFrom } } : {}),
     link: {
       id: link.id, code: link.code, state, createdBy: link.created_by, leadId: link.lead_id || null,
       createdAt: link.created_at, expiresAt: link.expires_at, propertyIds: link.property_ids || [], showPrice: !!link.show_price,
@@ -538,9 +556,6 @@ export async function talk(f: Firm, code: string, r: PublicReq): Promise<{ waUrl
 
 // ── The catalogue ───────────────────────────────────────────────────────────
 
-const CATALOGUE_WHERE = (tenantId: string) =>
-  sql`tenant_id = ${tenantId} AND in_catalogue = TRUE AND coalesce(status, 'Available') ILIKE 'available'`;
-const HAS_PHOTO = sql`EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(media, '[]'::jsonb)) m WHERE m->>'kind' IS DISTINCT FROM 'video')`;
 
 /**
  * A catalogue view, at most one per browser per flat (or per list) per firm
@@ -1034,16 +1049,23 @@ export async function leadShares(leadId: string, origin: string | null) {
   if (!lead) throw new ShareError(404, 'not_found');
   // Same visibility as the lead itself (store.ts leadScope).
   if (m.role === 'agent' && lead.agent_id !== m.userId && lead.created_by !== m.userId) throw new ShareError(404, 'not_found');
-  const sharing = await sharingOf(m.tenantId);
-  const links = await sql`SELECT * FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND lead_id = ${leadId} ORDER BY created_at ASC`;
-  const events = await sql`
-    SELECT e.*, l.property_ids AS link_props FROM crm_share_events e
-      LEFT JOIN crm_share_links l ON l.id = e.link_id AND l.tenant_id = e.tenant_id
-     WHERE e.tenant_id = ${m.tenantId} AND (e.lead_id = ${leadId} OR e.link_id IN (SELECT id FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND lead_id = ${leadId}))`;
-  const base = `${appBase(origin)}/${await firmSlug(m.tenantId)}`;
+  // Independent reads, one round trip.
+  const [sharing, links, events, slug, leadDevices, desk, loc] = await Promise.all([
+    sharingOf(m.tenantId),
+    sql`SELECT * FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND lead_id = ${leadId} ORDER BY created_at ASC`,
+    sql`
+      SELECT e.*, l.property_ids AS link_props FROM crm_share_events e
+        LEFT JOIN crm_share_links l ON l.id = e.link_id AND l.tenant_id = e.tenant_id
+       WHERE e.tenant_id = ${m.tenantId} AND (e.lead_id = ${leadId} OR e.link_id IN (SELECT id FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND lead_id = ${leadId}))`,
+    firmSlug(m.tenantId),
+    leadDevicesOf(m.tenantId, leadId),
+    deskConfigOf(m.tenantId),
+    localeOf(m.tenantId),
+  ]);
+  const base = `${appBase(origin)}/${slug}`;
   const flats = new Map<string, any>();
   const slot = (pid: string) => {
-    if (!flats.has(pid)) flats.set(pid, { propertyId: pid, sentAt: null, opens: 0, linkOpens: 0, lastOpenedAt: null, interested: 0, enquiries: 0, devices: new Set<string>(), link: null });
+    if (!flats.has(pid)) flats.set(pid, { propertyId: pid, sentAt: null, opens: 0, linkOpens: 0, lastOpenedAt: null, interested: 0, enquiries: 0, devices: new Set<string>(), link: null, why: new Set<string>(), tapFrom: null });
     return flats.get(pid);
   };
   // WHAT AN OPEN IS. A home is opened only by a view that names it; opening
@@ -1051,7 +1073,7 @@ export async function leadShares(leadId: string, origin: string | null) {
   // counted once per home, so a three-home link opened once read "Opened 3×"
   // on each). Both count one per browser per firm day: reloading is the same
   // person looking. A view with no browser ID counts on its own.
-  const tz = (await deskConfigOf(m.tenantId)).timezone;
+  const tz = desk.timezone;
   const dayOf = (at: any) => new Date(at).toLocaleDateString('en-CA', { timeZone: tz });
   const seen = new Set<string>();
   const firstToday = (scope: string, e: any) => {
@@ -1063,6 +1085,7 @@ export async function leadShares(leadId: string, origin: string | null) {
   for (const l of links as any[]) {
     for (const pid of l.property_ids || []) {
       const s = slot(pid);
+      s.why.add('sent');
       if (!s.sentAt) s.sentAt = l.created_at;
       s.link = { id: l.id, code: l.code, url: `${base}/${l.code}`, state: linkState(l, sharing.stopped), expiresAt: l.expires_at };
     }
@@ -1079,21 +1102,31 @@ export async function leadShares(leadId: string, origin: string | null) {
         if (!s.lastOpenedAt || new Date(e.created_at) > new Date(s.lastOpenedAt)) s.lastOpenedAt = e.created_at;
       }
       if (listOpen) s.linkOpens++;
-      if (e.kind === 'interested') s.interested++;
-      if (e.kind === 'enquiry') s.enquiries++;
+      if (isView && e.link_id) s.why.add('link');
+      if (e.kind === 'interested') {
+        s.interested++;
+        s.why.add('tapped');
+        // "them" wins: one tap from their own browser is enough to say so.
+        if (s.tapFrom !== 'them') s.tapFrom = tapFromOf(e.device_id, leadDevices);
+      }
+      if (e.kind === 'enquiry') { s.enquiries++; s.why.add('enquired'); }
       if (e.device_id) s.devices.add(e.device_id);
     }
   }
   const ids = [...flats.keys()];
   const props = ids.length ? await sql`SELECT id, project, locality, bhk, status, config FROM crm_properties WHERE tenant_id = ${m.tenantId} AND id IN ${sql(ids)}` : [];
   const pById = new Map((props as any[]).map(p => [p.id, p]));
-  const loc = await localeOf(m.tenantId);
-  return [...flats.values()].map(s => ({
+  return [...flats.values()].map(({ why, ...s }) => ({
     ...s, devices: s.devices.size,
+    // WHY THIS HOME IS HERE, strongest first. `link` only for a home they
+    // opened a link with and did not tap.
+    via: VIA_ORDER.filter(v => why.has(v) && !(v === 'link' && why.has('tapped'))),
     title: pById.has(s.propertyId) ? flatLabel(pById.get(s.propertyId), loc) : null,
     available: pById.has(s.propertyId) ? isAvailable(pById.get(s.propertyId)) : false,
   })).sort((a, b) => new Date(b.lastOpenedAt || b.sentAt || 0).getTime() - new Date(a.lastOpenedAt || a.sentAt || 0).getTime());
 }
+
+const VIA_ORDER = ['tapped', 'enquired', 'sent', 'link'] as const;
 
 /**
  * POST /share-taps/:code/lead {phone, name?} | {leadId} — Add as lead from a

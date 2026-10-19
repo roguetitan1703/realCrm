@@ -27,6 +27,8 @@ import { galleryPath } from './gallery.js';
 import { planRoster, normalizePhone, RosterRow } from './roster.js';
 import { assertLeadWrite, ForbiddenError, isDeskRole } from '../lib/permissions.js';
 import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js';
+import { canTakeWork, workableIds, onDutyWorkers } from './workforce.js';
+import { IS_AVAILABLE, HAS_PHOTO } from './catalogueRules.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
 // and three copies of that rule would drift.
@@ -392,6 +394,9 @@ function rowToAgent(r: any): any {
     // Comes from users.status, which is where suspension is decided.
     suspended: String(r.user_status || '').toLowerCase() === 'suspended',
     ...(r.metadata || {}),
+    // CAN BE GIVEN WORK (workforce.ts): the rota skips anyone who cannot, so a
+    // picker offers only these. After metadata, which must not override it.
+    canTakeWork: r.can_take_work === true,
     // After metadata, which carries a stored `initials` of its own.
     ...nameParts(r.name, r.first, r.initials),
   };
@@ -1389,7 +1394,7 @@ export async function getBootstrap(): Promise<any> {
   // exactly what the ten queries returned.
   const [row] = await sql`
     WITH agents AS (
-      SELECT a.*, (u.deleted_at IS NOT NULL) AS departed FROM crm_agents a
+      SELECT a.*, (u.deleted_at IS NOT NULL) AS departed, ${canTakeWork(t, sql`a.id`)} AS can_take_work FROM crm_agents a
         LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
        WHERE a.tenant_id = ${t}
     ),
@@ -1992,12 +1997,25 @@ export async function findLeadByPhone(phone: string, tenantId?: string): Promise
 
 export async function getLeadById(id: string): Promise<any | undefined> {
   const t = tid();
-  const rows = await sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`;
-  if (rows.length === 0) return undefined;
-  const [timelineRows, shortlistRows] = await Promise.all([
+  // ONE ROUND TRIP, NOT FIVE. The row, its timeline, its shortlist, its
+  // enquiries and its activities do not depend on each other; awaited in turn
+  // they were five trips (~150ms each on dev) on every record open and every
+  // lead created. All five run every time; only the answer is gated: a lead
+  // outside this person's scope still returns undefined (the other reads are
+  // discarded, and their errors with them), and for a visible lead an error in
+  // a part surfaces as before (enquiries are optional, the rest are not).
+  const [rowsR, timelineR, shortlistR, enquiriesR, actsR] = await Promise.allSettled([
+    sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`,
     sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} AND tenant_id = ${t} ORDER BY timestamp DESC`,
     sql`SELECT * FROM lead_shortlist WHERE lead_id = ${id} AND tenant_id = ${t}`,
+    getEnquiriesForLead(id),
+    getActivitiesForLead(id),
   ]);
+  const settled = <T,>(r: PromiseSettledResult<T>): T => { if (r.status === 'rejected') throw r.reason; return r.value; };
+  const rows = settled(rowsR);
+  if (rows.length === 0) return undefined;
+  const timelineRows = settled(timelineR);
+  const shortlistRows = settled(shortlistR);
   // author and metadata are NOT optional here. This projection listed six
   // fields and dropped both, so every event on a lead RECORD arrived with
   // authorId null and metadata {} — while the same events fetched through
@@ -2034,14 +2052,14 @@ export async function getLeadById(id: string): Promise<any | undefined> {
   // an implementation detail the agent should never have been able to feel.
   // The enquiry history. Read alongside the timeline so the record can show
   // what was asked for on each occasion rather than a prose note about it.
-  lead.enquiries = await getEnquiriesForLead(id).catch(() => []);
+  lead.enquiries = enquiriesR.status === 'fulfilled' ? enquiriesR.value : [];
   lead.enquiryCount = lead.enquiries.length;
   // Everything they have ever asked for, in one shape. The sheet reads the
   // sets off this, the header reads the latest and the count of the rest, and
   // the matcher reads the span — so none of them can describe the person
   // differently.
   lead.enquiryRollup = enquiryRollup(lead.enquiries);
-  const acts = await getActivitiesForLead(id);
+  const acts = settled(actsR);
   if (acts.length) {
     lead.timeline = [...(lead.timeline || []), ...acts]
       .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -2123,6 +2141,16 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const receivedAt = leadData.received_at ?? leadData.receivedAt ?? null;
 
   const t = tid();
+  // The assignee's name for the first timeline entry, read alongside the
+  // insert rather than after it (one round trip fewer).
+  // `.then` starts it now (a postgres.js query is lazy until then) and keeps a
+  // failed read from becoming an unhandled rejection if the insert throws first.
+  const assigneeP: Promise<any[]> = agentId
+    ? sql`SELECT name FROM users WHERE tenant_id = ${t} AND id = ${agentId} LIMIT 1`.then(r => r as any[], (err: any) => {
+        console.warn(`[Leads] assignee name lookup failed for ${agentId} in ${t}:`, err?.message);
+        return [];
+      })
+    : Promise.resolve([]);
   const rows = await sql`
     INSERT INTO crm_leads (
       id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback,
@@ -2142,7 +2170,7 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
 
   // A person's name, never their user id ("Assigned to agent u_team_…"), and
   // nothing at all when nobody was assigned (it read "agent null").
-  const [assignee] = agentId ? await sql`SELECT name FROM users WHERE tenant_id = ${t} AND id = ${agentId} LIMIT 1` : [];
+  const [assignee] = await assigneeP;
   await addTimelineEvent({
     record_id: newId,
     type: 'creation',
@@ -2167,13 +2195,6 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const notifName = name || phone || undefined;
   notify({ userId: agentId, type: 'lead_assigned', data: { name: notifName, locality, source }, link, push: true })
     .catch(err => console.warn('[Notify] lead_assigned failed:', err?.message));
-  // Name the agent, not their primary key. This read "routed to u_ms6oqbda",
-  // which tells the person reading it nothing and looks broken besides.
-  const agentName = agentId
-    ? (await sql`SELECT name FROM crm_agents WHERE id = ${agentId} AND tenant_id = ${tid()} LIMIT 1`)[0]?.name
-      ?? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name
-      ?? 'an agent'
-    : 'the queue';
   // NO lead_new. It fired on every arrival alongside lead_assigned -- 216 and
   // 216 over the SAME 216 links on bhumi in 14 days -- so one lead landing cost
   // two notifications, and the owner collected 233 in a fortnight. An owner
@@ -4148,7 +4169,7 @@ export async function distributeWork(opts: {
   const live = await sql`
     SELECT id, name FROM users
      WHERE tenant_id = ${t} AND id IN ${sql([...new Set(opts.targets.filter(Boolean))])}
-       AND deleted_at IS NULL AND lower(coalesce(status, 'active')) = 'active'`;
+       AND ${canTakeWork(t, sql`users.id`)}`;
   if (!live.length) throw new ForbiddenError('Pick at least one active person to hand the work to.');
   // The order the caller gave, keeping only the people who may hold work — so
   // the split is predictable and a suspended name silently dropped cannot
@@ -4234,7 +4255,7 @@ export async function splitAssign(
   const live = await sql`
     SELECT id, name FROM users
      WHERE tenant_id = ${t} AND id IN ${sql([...new Set((targets || []).filter(Boolean))])}
-       AND deleted_at IS NULL AND lower(coalesce(status, 'active')) = 'active'`;
+       AND ${canTakeWork(t, sql`users.id`)}`;
   if (!clean.length || !live.length) return { assigned: 0, perTarget: [] };
   const order = targets.filter(id => live.some((u: any) => u.id === id));
 
@@ -4302,9 +4323,7 @@ export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SY
   // once for the whole backlog — the same trick the import uses.
   let pool: (string | null)[];
   if (Array.isArray(agentIds) && agentIds.length) {
-    const ok = (await sql`SELECT id FROM users WHERE tenant_id = ${t} AND id IN ${sql(agentIds.map(String))}
-                           AND deleted_at IS NULL AND lower(coalesce(status, 'active')) <> 'suspended'`).map((r: any) => r.id);
-    const chosen = agentIds.map(String).filter(id => ok.includes(id));
+    const chosen = await workableIds(t, agentIds.map(String));
     if (!chosen.length) throw new ForbiddenError('None of those people can be given work.');
     pool = ids.map((_, i) => chosen[i % chosen.length]);
   } else {
@@ -5055,11 +5074,11 @@ function assertCatalogueRole() {
   if (role && role !== 'system' && !isDeskRole(role)) throw new ForbiddenError('Only an owner or a manager can change what is in the catalogue.');
 }
 
-export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = SYSTEM_CTX): Promise<{ changed: number; withoutPhotos: number }> {
+export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = SYSTEM_CTX): Promise<{ changed: number; live: number; waiting: number; withoutPhotos: number }> {
   assertCatalogueRole();
   const t = tid();
   const clean = [...new Set((ids || []).map(String).filter(Boolean))].slice(0, 1000);
-  if (!clean.length) return { changed: 0, withoutPhotos: 0 };
+  if (!clean.length) return { changed: 0, live: 0, waiting: 0, withoutPhotos: 0 };
   const rows = await sql`
     UPDATE crm_properties SET in_catalogue = ${on}, updated_at = NOW()
      WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND coalesce(in_catalogue, FALSE) <> ${on}
@@ -5089,11 +5108,21 @@ export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = S
       }
     }
   }
-  const withoutPhotos = on
-    ? (await sql`SELECT count(*)::int AS n FROM crm_properties
-                  WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND in_catalogue = TRUE
-                    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(media, '[]'::jsonb)) m WHERE m->>'kind' IS DISTINCT FROM 'video')`)[0].n
-    : 0;
+  // ONE SET: the homes THIS request put in (`changed`), split by the
+  // catalogue's own rule (catalogueRules.ts) — `live` are on the page now,
+  // `waiting` are not Available and appear when they are, `withoutPhotos`
+  // counts live ones only (a sold flat with no photos is not a photo job).
+  // live + waiting = changed, so "2 added · 1 waiting · 1 has no photos" is
+  // about the same homes.
+  const flipped = (rows as any[]).map(r => r.id);
+  const [tally] = on && flipped.length
+    ? await sql`SELECT
+          count(*) FILTER (WHERE ${IS_AVAILABLE})::int AS live,
+          count(*) FILTER (WHERE NOT (${IS_AVAILABLE}))::int AS waiting,
+          count(*) FILTER (WHERE ${IS_AVAILABLE} AND NOT ${HAS_PHOTO})::int AS without
+        FROM crm_properties WHERE tenant_id = ${t} AND id IN ${sql(flipped)}`
+    : [{ live: 0, waiting: 0, without: 0 }];
+  const withoutPhotos = tally.without;
   for (const r of rows as any[]) {
     await propertyEvent(r.id, ctx, 'catalogue', 'Catalogue', on ? 'Shown in the catalogue' : 'Taken out of the catalogue');
   }
@@ -5106,7 +5135,7 @@ export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = S
       metadata: { ids: rows.map((r: any) => r.id) }, ip: ctx.ip, user_agent: ctx.userAgent,
     });
   }
-  return { changed: rows.length, withoutPhotos };
+  return { changed: rows.length, live: tally.live, waiting: tally.waiting, withoutPhotos };
 }
 
 /**
@@ -5690,23 +5719,56 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
  * one sees the PREVIOUS one's committed write, which is the one guarantee a
  * round-robin actually needs.
  */
-export async function nextRoutedAgent(): Promise<string | null> {
-  const rows = await sql`
-    UPDATE crm_routing_rules
-    SET last_assigned_index = (last_assigned_index + 1) % GREATEST(jsonb_array_length(active_agent_ids), 1)
-    WHERE tenant_id = ${tid()} AND jsonb_array_length(active_agent_ids) > 0
-    RETURNING active_agent_ids -> last_assigned_index AS agent_id
-  `;
-  if (rows.length && rows[0].agent_id) return String(rows[0].agent_id).replace(/^"|"$/g, '');
+/**
+ * THE NEXT N PEOPLE ON A ROTA, skipping anyone who cannot take work. Both rotas
+ * (leads: active_agent_ids, owners: owner_active_agent_ids) go through this,
+ * so they cannot disagree about who is on them.
+ *
+ * The stored list can name someone suspended, deleted, or with no user row at
+ * all; handing work to that id filed it under "a former member" until a sweep
+ * moved it. Such an id is treated as ABSENT: the rota steps forward from where
+ * it stood over the ids that are active users of this firm, in the stored
+ * order, and the index lands on the last one dealt. With no stale ids that is
+ * exactly the old step of +n. A rota with nobody active deals nothing — the
+ * caller then does what it does for an empty rota. The stored list is never
+ * rewritten. One statement, the row locked for its duration.
+ */
+async function dealRota(pool: 'leads' | 'owners', n: number): Promise<string[]> {
+  if (n <= 0) return [];
+  const t = tid();
+  const col = sql(pool === 'leads' ? 'active_agent_ids' : 'owner_active_agent_ids');
+  const idx = sql(pool === 'leads' ? 'last_assigned_index' : 'owner_last_assigned_index');
+  const [row] = await sql`
+    WITH r AS (
+      SELECT ${col} AS ids, ${idx} AS i, jsonb_array_length(${col}) AS len
+        FROM crm_routing_rules WHERE tenant_id = ${t} AND jsonb_array_length(${col}) > 0
+         FOR UPDATE
+    ), live AS (
+      SELECT x.id FROM r, jsonb_array_elements_text(r.ids) AS x(id) WHERE ${canTakeWork(t, sql`x.id`)}
+    ), picks AS (
+      SELECT k, (r.i + k) % r.len AS pos, r.ids ->> ((r.i + k) % r.len) AS id
+        FROM r, generate_series(1, r.len * ${n}) AS k
+       WHERE r.ids ->> ((r.i + k) % r.len) IN (SELECT id FROM live)
+       ORDER BY k LIMIT ${n}
+    ), moved AS (
+      UPDATE crm_routing_rules c SET ${idx} = (SELECT pos FROM picks ORDER BY k DESC LIMIT 1)
+       WHERE c.tenant_id = ${t} AND EXISTS (SELECT 1 FROM picks) RETURNING 1
+    )
+    SELECT coalesce((SELECT json_agg(id ORDER BY k) FROM picks), '[]'::json) AS ids, (SELECT count(*) FROM moved)::int AS moved`;
+  return ((row?.ids || []) as any[]).map(String);
+}
 
-  // The pool has never been configured for this tenant (no row, or an empty
-  // active_agent_ids) — fall back to every on-duty agent that actually
-  // exists, so "nobody ticked the checkboxes in Settings yet" degrades to
-  // real distribution instead of one hardcoded id. Still a plain read here,
-  // but this only runs for a genuinely unconfigured tenant, not the
-  // steady-state case a portal integration hits on every push.
-  const agents = await getAgents();
-  const pool = agents.filter(a => a.duty_status !== 'OFF_DUTY').map(a => a.id);
+export async function nextRoutedAgent(): Promise<string | null> {
+  const [next] = await dealRota('leads', 1);
+  if (next) return next;
+
+  // No rota, or nobody on it who can take work — fall back to everyone who
+  // can take work and is on duty (workforce.ts), so "nobody ticked the
+  // checkboxes in Settings yet" degrades to real distribution instead of one
+  // hardcoded id. This filtered on `a.duty_status`, a field the agent rows
+  // never carry (it is dutyStatus), so it removed nobody — suspended people
+  // and agents with no account included.
+  const pool = await onDutyWorkers(tid());
   if (!pool.length) return null;
   const picked = pool[Math.floor(Math.random() * pool.length)];
   return picked;
@@ -5740,7 +5802,7 @@ export async function getAgents(): Promise<any[]> {
   // crm_agents row is kept so historical lead attribution still resolves. A
   // LEFT JOIN keeps any legacy agent that has no users row at all.
   const rows = await sql`
-    SELECT a.*, u.status AS user_status FROM crm_agents a
+    SELECT a.*, u.status AS user_status, ${canTakeWork(tid(), sql`a.id`)} AS can_take_work FROM crm_agents a
     LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
     WHERE a.tenant_id = ${tid()} AND u.deleted_at IS NULL
   `;
@@ -5822,14 +5884,8 @@ export async function updateRoutingRules(patch: Partial<RoutingRule>): Promise<R
 /** Same round-robin as nextRoutedAgent(), against the owner pool instead of
  *  the lead pool — a firm may staff cold-calling differently from leads. */
 export async function nextRoutedOwnerAgent(): Promise<string | null> {
-  const rows = await sql`
-    UPDATE crm_routing_rules
-    SET owner_last_assigned_index = (owner_last_assigned_index + 1) % GREATEST(jsonb_array_length(owner_active_agent_ids), 1)
-    WHERE tenant_id = ${tid()} AND jsonb_array_length(owner_active_agent_ids) > 0
-    RETURNING owner_active_agent_ids -> owner_last_assigned_index AS agent_id
-  `;
-  if (rows.length && rows[0].agent_id) return String(rows[0].agent_id).replace(/^"|"$/g, '');
-  return null;
+  const [next] = await dealRota('owners', 1);
+  return next || null;
 }
 
 /**
@@ -5843,20 +5899,10 @@ export async function nextRoutedOwnerAgent(): Promise<string | null> {
  */
 export async function nextRoutedOwnerAgents(n: number): Promise<(string | null)[]> {
   if (n <= 0) return [];
-  const rows = await sql`
-    UPDATE crm_routing_rules
-    SET owner_last_assigned_index = (owner_last_assigned_index + ${n}) % GREATEST(jsonb_array_length(owner_active_agent_ids), 1)
-    WHERE tenant_id = ${tid()} AND jsonb_array_length(owner_active_agent_ids) > 0
-    RETURNING owner_active_agent_ids, owner_last_assigned_index AS after
-  `;
-  if (!rows.length) return new Array(n).fill(null);
-  const pool = (rows[0].owner_active_agent_ids as any[]).map(String);
-  if (!pool.length) return new Array(n).fill(null);
-  // Where the rota stood BEFORE this claim, recovered from where it now stands,
-  // so the sequence handed back is exactly the one those N steps cover.
-  const after = Number(rows[0].after);
-  const start = ((after - n) % pool.length + pool.length) % pool.length;
-  return Array.from({ length: n }, (_, i) => pool[(start + i + 1) % pool.length]);
+  const dealt = await dealRota('owners', n);
+  // Nobody active on the rota (or no rota): the same as an empty one.
+  if (!dealt.length) return new Array(n).fill(null);
+  return dealt;
 }
 
 /**
@@ -6549,10 +6595,8 @@ export function isPlaceholderName(name: any): boolean {
  */
 export async function activeOwnerOf(agentId: string | null | undefined): Promise<string | null> {
   if (!agentId) return null;
-  const rows = await sql`
-    SELECT id FROM users
-     WHERE id = ${agentId} AND tenant_id = ${tid()} AND status ILIKE 'active' LIMIT 1`;
-  return rows.length ? String(rows[0].id) : null;
+  const [row] = await sql`SELECT ${canTakeWork(tid(), agentId)} AS ok`;
+  return row?.ok ? String(agentId) : null;
 }
 
 /**
