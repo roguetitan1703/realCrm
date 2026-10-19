@@ -559,23 +559,53 @@ export async function catalogueList(f: Firm, q: { deal?: string; config?: string
   const loc = await localeOf(f.id);
   const limit = Math.min(Math.max(Number(q.limit) || 24, 1), 60);
   const page = Math.max(Number(q.page) || 1, 1);
-  const [facets] = await sql`SELECT array_remove(array_agg(DISTINCT deal), NULL) AS deals,
-               array_remove(array_agg(DISTINCT bhk), NULL) AS configs,
-               array_remove(array_agg(DISTINCT locality), NULL) AS localities
-          FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)}`;
+  // Every (deal, size, place) the catalogue holds, with how many flats: small
+  // (one row per combination), and enough to build every facet below.
+  const groups = await sql`SELECT deal, bhk, trim(locality) AS locality, count(*)::int AS n
+          FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)} GROUP BY 1, 2, 3`;
   // THE SIZE. One token per stored value (bhkTokenOf: "2", "2 BHK" and
   // "2 BHK Apartment" are all 2), so the chips and the filter agree on what
   // "2" means. The filter is the stored values that read as the chosen token;
   // exact, so 1 RK and 10 BHK never land under "1".
-  const sizes = ((facets?.configs || []) as string[]).map(raw => ({ raw, token: bhkTokenOf(raw, loc) }));
+  const want = {
+    deal: q.deal ? q.deal.toLowerCase() : null,
+    config: q.config ? bhkTokenOf(q.config, loc) || '(no such size)' : null,
+    locality: q.locality ? q.locality.trim().toLowerCase() : null,
+  };
+  const keyed = (groups as any[]).map(g => ({
+    deal: g.deal ? String(g.deal) : null, config: bhkTokenOf(g.bhk, loc), raw: g.bhk as string | null,
+    locality: g.locality ? String(g.locality) : null, n: g.n as number,
+  }));
   const where = [CATALOGUE_WHERE(f.id)];
-  if (q.deal) where.push(sql`lower(deal) = ${q.deal.toLowerCase()}`);
-  if (q.config) {
-    const want = bhkTokenOf(q.config, loc);
-    const raws = sizes.filter(x => want && x.token === want).map(x => x.raw);
+  if (want.deal) where.push(sql`lower(deal) = ${want.deal}`);
+  if (want.config) {
+    const raws = [...new Set(keyed.filter(x => x.config === want.config && x.raw != null).map(x => x.raw as string))];
     where.push(raws.length ? sql`bhk IN ${sql(raws)}` : sql`FALSE`);
   }
-  if (q.locality) where.push(sql`lower(trim(locality)) = ${q.locality.trim().toLowerCase()}`);
+  if (want.locality) where.push(sql`lower(trim(locality)) = ${want.locality}`);
+  // THE FACETS NARROW EACH OTHER (the tab-count rule): each one's options and
+  // counts are the flats that pass every OTHER active filter, so a chip never
+  // offers a combination that returns nothing, and its own choice stays listed.
+  const passes = (x: typeof keyed[number], skip: 'deal' | 'config' | 'locality') =>
+    (skip === 'deal' || !want.deal || (x.deal || '').toLowerCase() === want.deal)
+    && (skip === 'config' || !want.config || x.config === want.config)
+    && (skip === 'locality' || !want.locality || (x.locality || '').toLowerCase() === want.locality);
+  const facet = (dim: 'deal' | 'config' | 'locality', norm: (v: string) => string) => {
+    const counts = new Map<string, { value: string; n: number }>();
+    for (const x of keyed) {
+      const v = x[dim];
+      if (!v || !passes(x, dim)) continue;
+      const k = norm(v);
+      const hit = counts.get(k);
+      if (hit) hit.n += x.n; else counts.set(k, { value: v, n: x.n });
+    }
+    return [...counts.values()];
+  };
+  const dealF = facet('deal', v => v.toLowerCase()).sort((a, b) => a.value.localeCompare(b.value));
+  // In the vocabulary's order (1 RK, 1, 1.5, 2 …), not the alphabet's.
+  const configF = facet('config', v => v).sort((a, b) => BHK_ORDER.indexOf(a.value) - BHK_ORDER.indexOf(b.value));
+  // WAKAD and Wakad are one place: one chip, and the filter is case-blind.
+  const localityF = facet('locality', v => v.toLowerCase()).sort((a, b) => a.value.localeCompare(b.value));
   const clause = where.reduce((a, c) => sql`${a} AND ${c}`);
   const [rows, [{ n }]] = await Promise.all([
     // Flats with no photos are listed last (§A.4).
@@ -588,22 +618,17 @@ export async function catalogueList(f: Firm, q: { deal?: string; config?: string
     firm: firmPublic(f, await localeOf(f.id)), showPrice: !!sharing.showPriceOnCatalogue,
     flats: (rows as any[]).map(x => publicFlat(x, { showPrice: !!sharing.showPriceOnCatalogue, showProject: sharing.catalogueShowsProject !== false, loc })),
     total: n, page, limit,
-    facets: {
-      deal: (facets?.deals || []).sort(),
-      // In the vocabulary's order (1 RK, 1, 1.5, 2 …), not the alphabet's.
-      config: uniqBy(sizes.map(x => x.token).filter((x): x is string => !!x), x => x)
-        .sort((a, b) => BHK_ORDER.indexOf(a) - BHK_ORDER.indexOf(b)),
-      // WAKAD and Wakad are one place: one chip, and the filter is case-blind.
-      locality: uniqBy((facets?.localities || []).map((x: string) => x.trim()).filter(Boolean), (x: string) => x.toLowerCase()).sort(),
+    facets: { deal: dealF.map(x => x.value), config: configF.map(x => x.value), locality: localityF.map(x => x.value) },
+    // How many flats each option would show, with the other filters as they are.
+    facetCounts: {
+      deal: Object.fromEntries(dealF.map(x => [x.value, x.n])),
+      config: Object.fromEntries(configF.map(x => [x.value, x.n])),
+      locality: Object.fromEntries(localityF.map(x => [x.value, x.n])),
     },
   };
 }
 
 const BHK_ORDER = ['1rk', ...BHK.map((b: any) => b.value).filter((v: string) => v !== '1rk' && v !== '5plus').sort((a: string, b: string) => Number(a) - Number(b)), '5plus'];
-const uniqBy = <T>(xs: T[], key: (x: T) => string): T[] => {
-  const seen = new Set<string>();
-  return xs.filter(x => { const k = key(x); if (seen.has(k)) return false; seen.add(k); return true; });
-};
 
 /** GET /public/catalogue/:tenant/:slug — one flat, or null (the same 404 whatever the reason). */
 export async function catalogueFlat(f: Firm, slug: string, r: PublicReq) {
