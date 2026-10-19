@@ -924,7 +924,9 @@ export async function attachLink(id: string, leadId: string) {
   const [lead] = await sql`SELECT * FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${String(leadId || '')} LIMIT 1`;
   if (!lead) throw new ShareError(404, 'lead_not_found', 'That lead no longer exists.');
   assertMayShare(m, lead);
-  await sql`UPDATE crm_share_links SET lead_id = ${lead.id} WHERE tenant_id = ${m.tenantId} AND id = ${id}`;
+  const bound = await sql`UPDATE crm_share_links SET lead_id = ${lead.id}
+     WHERE tenant_id = ${m.tenantId} AND id = ${id} AND (lead_id IS NULL OR lead_id = ${lead.id}) RETURNING id`;
+  if (!bound.length) throw new ShareError(409, 'link_has_lead', 'Someone has just attached this link to another lead.');
   // Only what belongs to nobody yet: an event already on another lead (a
   // forwarded link, a browser someone else became) stays where it is.
   const moved = await sql`UPDATE crm_share_events SET lead_id = ${lead.id} WHERE tenant_id = ${m.tenantId} AND link_id = ${id} AND lead_id IS NULL RETURNING device_id`;
@@ -1022,6 +1024,17 @@ export async function tapToLead(code: string, input: any) {
       throw new ShareError(403, 'forbidden', 'Only the person who sent this link, or the office, can add this buyer.');
     }
   }
+  // A TAP ALREADY ON A LEAD stays there. Checked before leadForNumber, which
+  // would otherwise create a lead for the number and only then refuse.
+  if (tap.lead_id) {
+    let target: string | null = input?.leadId ? String(input.leadId) : null;
+    if (!target && input?.phone) {
+      const digits = String(input.phone).replace(/\D/g, '');
+      const found = digits.length >= 10 ? await findLeadByPhone(normalizePhone(digits, await localeOf(m.tenantId))!, m.tenantId) : null;
+      target = found?.id || null;
+    }
+    if (target !== tap.lead_id) throw new ShareError(409, 'tap_has_lead', 'This tap already belongs to another lead.');
+  }
   let lead: any; let created = false;
   if (input?.leadId) {
     [lead] = await sql`SELECT * FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${String(input.leadId)} LIMIT 1`;
@@ -1031,8 +1044,11 @@ export async function tapToLead(code: string, input: any) {
     lead = r.lead; created = r.created;
   }
   assertMayShare(m, lead);
-  if (tap.lead_id && tap.lead_id !== lead.id) throw new ShareError(409, 'tap_has_lead', 'This tap already belongs to another lead.');
-  await sql`UPDATE crm_share_events SET lead_id = ${lead.id} WHERE tenant_id = ${m.tenantId} AND id = ${tap.id}`;
+  // Conditional: two people adding the same tap at once — the second loses
+  // and is told, instead of silently moving it.
+  const won = await sql`UPDATE crm_share_events SET lead_id = ${lead.id}
+     WHERE tenant_id = ${m.tenantId} AND id = ${tap.id} AND (lead_id IS NULL OR lead_id = ${lead.id}) RETURNING id`;
+  if (!won.length) throw new ShareError(409, 'tap_has_lead', 'Someone has just added this tap to another lead.');
   let deviceAttached = false;
   if (tap.device_id) deviceAttached = await attachDevice(m.tenantId, tap.device_id, lead.id);
   const [link] = tap.link_id ? await sql`SELECT code, created_at, property_ids FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND id = ${tap.link_id}` : [null];
