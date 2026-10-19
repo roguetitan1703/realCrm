@@ -1,12 +1,13 @@
 # Work state
 
 ## Now
-Catalog: shared links + public catalogue, built to `docs/specs/listing-pages.md` §A (builder A backend, builder B frontend).
+Catalog release readiness: everything merged on `development` (cf81d05); waits on Om's yes to two read-only production runs (STATE.md).
 
 ## Next
-1. Review and merge both builders' work; drive it on phone and desk
-2. Cutroom records the US film (RUN.md); Om re-tests the dev preview for Release 1
+1. Run the two production reads once Om says yes; report per firm
+2. Om re-tests the dev preview (dev API redeploy first), then Release 1 + catalog
 3. Help desk: report a problem, then the help centre
+4. Cutroom records the US film (RUN.md)
 
 ## Later
 - A firm's weekly off for "days worked" — waits on how the firms actually work

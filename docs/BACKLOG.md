@@ -83,6 +83,12 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
   opens can raise it twice.
 - Property `owner_phone` is still stored as typed (dev: delpat 20 of 26);
   only owner records made from it are normalised.
+- Staff numbers (team, profile, sign-in lookup, reply-to) still use
+  `normalizePhone`, which cuts a foreign number to +91 and its last 10 —
+  the second phone rule beside `phoneAsStored`; moving it needs the sign-in
+  lookup migrated with it.
+- A lead whose full record never loads (offline) keeps its homes and history
+  sections spinning instead of showing what the list row has. *agent*
 - The dev R2 bucket's CORS refuses `localhost:5190` (builder ports), so visit
   proof cannot upload from a builder's frontend.
 
@@ -117,6 +123,12 @@ gaps are in `specs/notifications.md` §1, not here.
   now skip them, but how many firms carry them, and so how many portal leads
   went to "a former member", is unmeasured. Run `backend/src/scripts/stale-rota-ids.ts`
   (read-only) once Om approves production reads. *agent*
+- **Shortlists cut by a reopened lead** (dev, 20 Oct; fixed on `development`):
+  a lead reopened from the list showed the legacy column, and removing one home
+  rewrote `lead_shortlist` from it (5 rows → 1). Live since list rows were
+  merged over records; how many production shortlists shrank is unmeasured —
+  count `lead_shortlist`-removal timeline events that dropped more than one
+  home, read-only, with Om's yes. *agent*
 - **A listing owner's Callback stays on To do after the call** (seen on the
   demo, 17 Oct): a lead's booked call closes on Call, an owner's did not.
   Check whether that is the rule or a gap. *agent*
