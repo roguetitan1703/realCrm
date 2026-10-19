@@ -29,7 +29,8 @@ import { AttachLinkModal } from '../components/MyLinks.jsx'
 import { AddFromTapModal } from '../components/AddFromTap.jsx'
 import { copyText } from '../lib/clipboard.js'
 import { currencySymbol, firmLocale, phoneLabel, phonePlaceholder, roomsText } from '../lib/locale.js'
-import { notWorkableReason, assignFailed } from '../lib/workforce.js'
+import { notWorkableReason, assignFailed, shownStrategy } from '../lib/workforce.js'
+import { canAssignLead } from '../lib/permissions.js'
 
 /**
  * Generic modal frame.
@@ -663,8 +664,12 @@ const CONFIG_OPTIONS = [
   '4 BHK+ Villa', 'Commercial Office', 'Plot'
 ];
 
+const NOBODY = '__nobody'
+
 function NewLeadModal({ store, leadId }) {
   const edit = leadId ? store.lookup('lead', leadId) : null
+  // Does the firm deal new leads to the rota (store.ts autoAssigns)?
+  const rota = shownStrategy('leads', store.state.routing?.strategy) === 'round_robin'
   const inr = firmLocale().currency === 'INR'
   const [f, setF] = useState(edit ? {
     name: edit.name || '',
@@ -697,10 +702,12 @@ function NewLeadModal({ store, leadId }) {
     interest: '',
     timeline: 'Within 60 days',
     source: 'Website',
-    // The person adding it, when they can take work; otherwise nobody. The
-    // first name on the roster was a guess, and the server refuses a guess that
-    // landed on someone suspended.
-    agentId: store.activeAgents().some(a => a.id === store.state.activeAgentId) ? store.state.activeAgentId : null,
+    // The person adding it, when they can take work; otherwise NOT SENT, so the
+    // firm's rule decides (the rota, or nobody under Leave unassigned). It was
+    // null, which the server now reads as "the desk chose Unassigned", so an
+    // owner's untouched Add lead stopped reaching the rota. The first name on
+    // the roster was a guess, and the server refuses one that is suspended.
+    agentId: store.activeAgents().some(a => a.id === store.state.activeAgentId) ? store.state.activeAgentId : undefined,
     notes: ''
   })
   const set = (k, v) => setF(s => ({ ...s, [k]: v }))
@@ -747,8 +754,10 @@ function NewLeadModal({ store, leadId }) {
         email: f.email.trim() || undefined,
         source: f.source,
         // Sent only when changed: re-sending a holder who has since been
-        // suspended would have the server refuse an edit to the name.
-        agentId: f.agentId && f.agentId !== edit.agentId ? f.agentId : undefined,
+        // suspended would have the server refuse an edit to the name. Picking
+        // Unassigned is a change too, sent as null; it was dropped here, so
+        // the lead stayed with whoever held it.
+        agentId: (f.agentId || null) !== (edit.agentId || null) ? (f.agentId || null) : undefined,
         deal: f.deal,
         requirement: f.config,
         locality: f.locality,
@@ -776,7 +785,8 @@ function NewLeadModal({ store, leadId }) {
         source: f.source || 'Website',
         stage: 'New',
         minsAgo: 0,
-        agentId: f.agentId || null,
+        // undefined is left out of the body: not sent, the firm's rule decides.
+        agentId: f.agentId,
         deal: f.deal,
         requirement: f.config,
         locality: f.locality,
@@ -882,8 +892,12 @@ function NewLeadModal({ store, leadId }) {
           </div>
           <div className="field">
             <label>Assign Owner</label>
-            <select className="input" value={f.agentId || ''} onChange={e => set('agentId', e.target.value || null)} style={{ width: '100%' }}>
-              <option value="">Unassigned</option>
+            {/* New lead: the empty choice is "not sent" and is named by the
+                firm's rule; Unassigned is its own choice where that differs. */}
+            <select className="input" value={f.agentId === undefined ? '' : f.agentId === null ? (edit ? '' : NOBODY) : f.agentId}
+              onChange={e => set('agentId', e.target.value === NOBODY ? null : (e.target.value || (edit ? null : undefined)))} style={{ width: '100%' }}>
+              <option value="">{edit || !rota ? 'Unassigned' : 'Next in turn'}</option>
+              {!edit && rota && canAssignLead(store.state.role) && <option value={NOBODY}>Unassigned</option>}
               {store.activeAgents().map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               {/* The person holding it now, if they can no longer take work —
                   shown so the field says who it is, not offered. */}

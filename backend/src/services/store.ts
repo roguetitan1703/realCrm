@@ -18,7 +18,7 @@ import { audit } from './audit.js';
 import { fileTicket } from './media.js';
 import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, lastPersonActivity, lastRemark, lastRemarkAt, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
-import { notify, notifyRoles } from './notifications.js';
+import { notify, notifyRoles, notifyOrDesk } from './notifications.js';
 import { firstRunAlertLifecycle } from './alertLifecycle.js';
 import { suggestPassword } from './auth.js';
 import { followUpKind } from './followUp.js';
@@ -41,7 +41,7 @@ import {
 import { parsePayload } from './parser.js';
 // The firm's money, phone and bedroom words — one implementation, shared with
 // the screens. The server always passes the firm's locale (deskConfigOf).
-import { resolveLocale, moneyFull, roomLabel } from '../../../src/lib/locale.js';
+import { resolveLocale, moneyFull, roomLabel, phoneAsStored } from '../../../src/lib/locale.js';
 export type Locale = ReturnType<typeof resolveLocale>;
 
 /**
@@ -326,7 +326,11 @@ export interface TimelineEvent {
 }
 
 export interface RoutingRule {
-  strategy: 'round_robin' | 'weighted' | 'strict_territory';
+  // 'manual' is what Settings → Assigning writes for "Leave unassigned". It was
+  // missing from this type, and nothing on the lead side read it: a firm that
+  // chose to hand out leads by hand had every one dealt by the rota anyway.
+  // autoAssigns() below is the one reading of it.
+  strategy: 'round_robin' | 'weighted' | 'strict_territory' | 'manual';
   active_agent_ids: string[];
   last_assigned_index: number;
   // B — sweep leads nobody currently owns (never assigned, or the owner left).
@@ -2080,14 +2084,19 @@ export async function getLeadById(id: string): Promise<any | undefined> {
 export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
   const newId = leadData.id || `l_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-  // Apply round-robin assignment if agentId not provided. One atomic
-  // statement (nextRoutedAgent) — see its doc comment for why the previous
-  // read-then-write version could send an entire batch to one person.
-  // A person the caller NAMED must be able to take it; the rota only deals
-  // people who can.
-  let agentId = leadData.agentId || leadData.agent_id;
+  // WHO GETS IT. A person the caller NAMED must be able to take it. NOT SENT
+  // is not the same as SENT EMPTY (CLAUDE.md §3.6): this read `agentId ||
+  // rota`, so the desk picking "Unassigned" on Add lead had the lead dealt to
+  // the next person anyway. An explicit null from someone who may assign —
+  // the desk, or a system caller — means unassigned. An agent may not decide
+  // who holds work (canAssignLead, assignUnowned), so an agent's null is
+  // treated as not sent: the firm's arrival rule decides, as it does for a
+  // portal enquiry. Nobody named → arrivalLeadAgent(), which is the rota or,
+  // under "Leave unassigned", nobody.
+  const sentAgent = leadData.agentId !== undefined ? leadData.agentId : leadData.agent_id;
+  let agentId: string | null = sentAgent || null;
   if (agentId) await assertWorkable(tid(), [agentId]);
-  else agentId = await nextRoutedAgent();
+  else if (sentAgent === undefined || getContext()?.role === 'agent') agentId = await arrivalLeadAgent();
 
   // NO INVENTED NAME. This defaulted to 'New Inquiry', which is a fact about
   // the payload dressed up as the person's name: it sorted under N, it was
@@ -2103,7 +2112,10 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // Null, not a placeholder number. This defaulted to '+910000000000', which
   // the screens read as "this lead has a phone" — so Call and WhatsApp rendered
   // and dialled it. A lead with no number shows no way to ring one.
-  const phone = leadData.phone || null;
+  // KEPT THE WAY EVERY OTHER WRITER KEEPS IT (phoneAsStored): a lead typed on
+  // Add lead was stored "90000 12348" beside portal leads stored +91…, so the
+  // record, the dialler and WhatsApp each got a different shape of one number.
+  const phone = leadData.phone ? (await storedPhone(leadData.phone)) : null;
   const email = leadData.email || null;
   const stage = leadData.stage || 'New';
   const source = leadData.source || 'Website';
@@ -2152,13 +2164,14 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const receivedAt = leadData.received_at ?? leadData.receivedAt ?? null;
 
   const t = tid();
-  // The assignee's name for the first timeline entry, read alongside the
-  // insert rather than after it (one round trip fewer).
+  // The assignee's and the creator's names for the first timeline entry, read
+  // alongside the insert rather than after it (one round trip fewer).
   // `.then` starts it now (a postgres.js query is lazy until then) and keeps a
   // failed read from becoming an unhandled rejection if the insert throws first.
-  const assigneeP: Promise<any[]> = agentId
-    ? sql`SELECT name FROM users WHERE tenant_id = ${t} AND id = ${agentId} LIMIT 1`.then(r => r as any[], (err: any) => {
-        console.warn(`[Leads] assignee name lookup failed for ${agentId} in ${t}:`, err?.message);
+  const nameIds = [agentId, createdBy].filter(Boolean) as string[];
+  const namesP: Promise<any[]> = nameIds.length
+    ? sql`SELECT id, coalesce(nullif(btrim(name), ''), nullif(login_id, ''), 'a team member') AS name FROM users WHERE tenant_id = ${t} AND id IN ${sql(nameIds)} AND deleted_at IS NULL`.then(r => r as any[], (err: any) => {
+        console.warn(`[Leads] name lookup failed for ${nameIds.join(',')} in ${t}:`, err?.message);
         return [];
       })
     : Promise.resolve([]);
@@ -2181,12 +2194,20 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
 
   // A person's name, never their user id ("Assigned to agent u_team_…"), and
   // nothing at all when nobody was assigned (it read "agent null").
-  const [assignee] = await assigneeP;
+  // WHO MADE IT, said. Every lead read "Lead created via API" — an agent who
+  // typed one in on Add lead and a portal push were the same line. The name
+  // goes in the words and the id in metadata, NOT in `author`: an authored
+  // event counts as a person working the lead (leadSegments.ts — Going cold,
+  // the idle sweep), and creating a lead is not working it.
+  const names = new Map((await namesP).map((r: any) => [r.id, r.name]));
+  const by = createdBy ? `Added by ${names.get(createdBy) || 'a former member'}` : `Arrived from ${source}`;
+  const to = agentId ? `Assigned to ${names.get(agentId) || 'a former member'}` : 'Unassigned';
   await addTimelineEvent({
     record_id: newId,
     type: 'creation',
     title: 'New Lead Created',
-    description: `Lead created via API (Source: ${source}).${agentId ? ` Assigned to ${assignee?.name || 'a former member'}.` : ''}`,
+    description: `${by}. ${to}.`,
+    metadata: { createdBy: createdBy ?? null, agentId: agentId ?? null, source },
   });
 
   const created = await getLeadById(newId);
@@ -2214,9 +2235,15 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // nobody took it.
   // PUSH: nobody was assigned, so this lead is sitting with no owner and no
   // one is coming for it. That is an exception, not a routine arrival.
-  if (!agentId) {
-    notifyRoles(['owner', 'manager'], {
-      type: 'lead_unrouted', data: { name: notifName, source }, link, push: true,
+  // notifyOrDesk, not notifyRoles: a firm with no active owner or manager is
+  // logged, not delivered to an empty list in silence. Not raised when the
+  // desk itself chose Unassigned (it knows), nor per row of an import: the
+  // import sends one for the whole file (imports.ts).
+  const deskChoseNobody = sentAgent === null && isDeskRole(getContext()?.role);
+  if (!agentId && !deskChoseNobody && !importBatchId) {
+    notifyOrDesk(null, {
+      tenantId: t, type: 'lead_unrouted', data: { name: notifName, source }, link, push: true,
+      record: { kind: 'lead', ids: [newId] },
     }).catch(err => console.warn('[Notify] lead_unrouted failed:', err?.message));
   }
   return created;
@@ -2235,11 +2262,12 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   assertLeadWrite(who?.role, who?.userId, oldLead, patch);
 
   const name = patch.name !== undefined ? patch.name : oldLead.name;
-  const phone = patch.phone !== undefined ? patch.phone : oldLead.phone;
+  const phone = patch.phone !== undefined ? (patch.phone ? await storedPhone(patch.phone) : patch.phone) : oldLead.phone;
   const email = patch.email !== undefined ? patch.email : oldLead.email;
   const stage = patch.stage !== undefined ? patch.stage : oldLead.stage;
   const source = patch.source !== undefined ? patch.source : oldLead.source;
-  const agentId = patch.agentId !== undefined ? patch.agentId : (patch.agent_id !== undefined ? patch.agent_id : oldLead.agentId);
+  // '' is nobody, stored as null — not a value that reads as "someone".
+  const agentId = (patch.agentId !== undefined ? patch.agentId : (patch.agent_id !== undefined ? patch.agent_id : oldLead.agentId)) || null;
   if (agentId && agentId !== oldLead.agentId) await assertWorkable(tid(), [agentId]);
   const req = patch.req !== undefined ? patch.req : oldLead.req;
   const notes = patch.notes !== undefined ? patch.notes : oldLead.notes;
@@ -2927,6 +2955,11 @@ export async function timezoneOf(tenantId: string): Promise<string> {
 }
 
 /** The firm's locale, for callers that format money or phones for it. */
+/** A customer's number in this firm's stored form (locale.js phoneAsStored). */
+async function storedPhone(raw: any): Promise<string | null> {
+  return phoneAsStored(raw, await localeOf(tid())) || null;
+}
+
 export async function localeOf(tenantId: string): Promise<Locale> {
   return (await deskConfigOf(tenantId)).locale;
 }
@@ -3219,16 +3252,20 @@ async function recordAssignments(entries: AssignmentEntry[], q: any = sql): Prom
     const ids = [...new Set(list.flatMap(e => [e.prevAgentId, e.agentId]).filter(Boolean))] as string[];
     const names = new Map<string, string>();
     if (ids.length) {
+      // A member still here reads by name, or by login id when the name is
+      // empty. Only someone missing, or deleted with no name left, reads "a
+      // former member" — never "null": "Siddharth Varma → null" was a hand-off
+      // to an id that no longer resolved, and read as if the lead was dropped.
       const rows = await q`
-        SELECT id, name FROM users WHERE id IN ${sql(ids)}
-        UNION
-        SELECT id, name FROM crm_agents WHERE id IN ${sql(ids)} AND tenant_id = ${t}`;
-      // users wins where both carry the id -- same precedence as the two
-      // sequential lookups this replaces, which only consulted crm_agents when
-      // users had nothing.
-      for (const r of rows as any[]) if (!names.has(r.id) || r.name) names.set(r.id, r.name);
+        SELECT x.id,
+               coalesce(nullif(btrim(u.name), ''), nullif(btrim(a.name), ''),
+                        CASE WHEN u.id IS NOT NULL AND u.deleted_at IS NULL THEN coalesce(nullif(u.login_id, ''), 'a team member') END) AS name
+          FROM unnest(${ids}::text[]) AS x(id)
+          LEFT JOIN users u ON u.id = x.id AND u.tenant_id = ${t}
+          LEFT JOIN crm_agents a ON a.id = x.id AND a.tenant_id = ${t}`;
+      for (const r of rows as any[]) if (r.name) names.set(r.id, r.name);
     }
-    const nameOf = (id?: string | null) => (id ? names.get(id) ?? null : null);
+    const nameOf = (id?: string | null) => (id ? names.get(id) || 'a former member' : null);
 
     const now = new Date().toISOString();
     const rows = list.map((e, i) => {
@@ -3590,7 +3627,7 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
   if (agentId) await assertWorkable(t, [agentId]);
   if (!agentId) {
     const rules = await getRoutingRules();
-    if (rules.owner_strategy === 'round_robin') {
+    if (autoAssigns(rules, 'owners')) {
       agentId = await nextRoutedOwnerAgent();
       autoRouted = Boolean(agentId);
     }
@@ -3598,7 +3635,7 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
   const rows = await sql`
     INSERT INTO crm_owners (id, tenant_id, name, phone, email, project, tower, unit_no, config,
       carpet_area, saleable_area, unit_ref, locality, stage, source, agent_id, created_by, import_batch_id)
-    VALUES (${id}, ${t}, ${data.name || null}, ${data.phone || null}, ${data.email || null},
+    VALUES (${id}, ${t}, ${data.name || null}, ${data.phone ? await storedPhone(data.phone) : null}, ${data.email || null},
       ${data.project || null}, ${data.tower || null}, ${data.unitNo || null}, ${data.config || null},
       ${data.carpetArea ?? null}, ${data.saleableArea ?? null},
       ${data.unitRef || null}, ${data.locality || null},
@@ -3646,7 +3683,7 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
   const t = tid();
   const createdBy = ctx.actorId ?? getContext()?.userId ?? null;
   const rules = await getRoutingRules();
-  const routing = rules.owner_strategy === 'round_robin';
+  const routing = autoAssigns(rules, 'owners');
 
   // A ROW THAT NAMES SOMEONE WHO CANNOT TAKE WORK is filed UNASSIGNED: not
   // given to them, not dealt to the rota in their place (nobody chose that),
@@ -3672,6 +3709,7 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
   const rota = needRota ? await nextRoutedOwnerAgents(needRota) : [];
   let rotaAt = 0;
 
+  const loc = await localeOf(t);
   const rows: any[] = [];
   for (const [i, data] of list.entries()) {
     let agentId = data.agentId ? (workable.has(String(data.agentId)) ? String(data.agentId) : null) : null;
@@ -3680,7 +3718,7 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
       id: data.id || `own_${Date.now()}_${i}_${randomBytes(3).toString('hex')}`,
       tenant_id: t,
       name: data.name || null,
-      phone: data.phone || null,
+      phone: data.phone ? (phoneAsStored(data.phone, loc) || null) : null,
       email: data.email || null,
       project: data.project || null,
       tower: data.tower || null,
@@ -4119,7 +4157,7 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
   if (patch.agentId && patch.agentId !== existing.agentId) await assertWorkable(t, [patch.agentId]);
   const next = {
     name: patch.name !== undefined ? patch.name : existing.name,
-    phone: patch.phone !== undefined ? patch.phone : existing.phone,
+    phone: patch.phone !== undefined ? (patch.phone ? await storedPhone(patch.phone) : patch.phone) : existing.phone,
     email: patch.email !== undefined ? patch.email : existing.email,
     project: patch.project !== undefined ? patch.project : existing.project,
     unit_ref: patch.unitRef !== undefined ? patch.unitRef : existing.unitRef,
@@ -5820,7 +5858,29 @@ async function dealRota(pool: 'leads' | 'owners', n: number): Promise<string[]> 
   return ((row?.ids || []) as any[]).map(String);
 }
 
-export async function nextRoutedAgent(): Promise<string | null> {
+/**
+ * DOES THIS FIRM HAND OUT NEW WORK BY ITSELF, on this side? The one reading of
+ * Settings → Assigning's "Leave unassigned". Every path that would give a
+ * record to somebody nobody chose — arrival, a repeat enquiry on an orphaned
+ * lead, the two sweeps on each side — asks this first, so the setting cannot
+ * be honoured in one place and ignored in the next.
+ *
+ * Leads default to on (a firm with no row, or a legacy strategy, deals the
+ * rota); owners default to off, because they arrive by the hundred from an
+ * import (see `owner_strategy`). A person pressing "Hand out" is choosing, so
+ * assignUnowned does not ask.
+ */
+export function autoAssigns(rules: RoutingRule, side: 'leads' | 'owners'): boolean {
+  return side === 'leads' ? rules.strategy !== 'manual' : rules.owner_strategy === 'round_robin';
+}
+
+/** Who a lead nobody named goes to: the rota's next person, or nobody when the firm leaves leads unassigned. */
+export async function arrivalLeadAgent(): Promise<string | null> {
+  if (!autoAssigns(await getRoutingRules(), 'leads')) return null;
+  return nextRoutedAgent();
+}
+
+async function nextRoutedAgent(): Promise<string | null> {
   const [next] = await dealRota('leads', 1);
   if (next) return next;
 
@@ -5989,7 +6049,7 @@ const UNOWNED_GRACE_MINUTES = 1;
 
 export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
-  if (!rules.sweep_unassigned_enabled) return 0;
+  if (!rules.sweep_unassigned_enabled || !autoAssigns(rules, 'leads')) return 0;
   // "Unowned" includes an agent_id that no longer resolves to a live user —
   // the same orphaned state the desk sees as "Former owner" on the row.
   const rows = await sql`
@@ -6026,7 +6086,7 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
 
 export async function sweepIdleLeads(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
-  if (!rules.reassign_idle_enabled) return 0;
+  if (!rules.reassign_idle_enabled || !autoAssigns(rules, 'leads')) return 0;
   const days = Math.max(Number(rules.reassign_idle_days) || 3, 1);
   // "No activity" is the §1 predicate — something a PERSON did on the record —
   // not `updated_at`, which a portal push, a sweep or any background stamp
@@ -6085,7 +6145,7 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
 // reasoning as TERMINAL_STATUSES for leads: nothing left to chase).
 export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
-  if (!rules.owner_sweep_unassigned_enabled) return 0;
+  if (!rules.owner_sweep_unassigned_enabled || !autoAssigns(rules, 'owners')) return 0;
   const rows = await sql`
     SELECT o.id FROM crm_owners o
     LEFT JOIN users u ON u.id = o.agent_id AND u.tenant_id = o.tenant_id AND u.deleted_at IS NULL
@@ -6171,7 +6231,7 @@ async function notifyOwnerBatch(tenantId: string, tally: Map<string, string[]>, 
 
 export async function sweepIdleOwners(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
-  if (!rules.owner_reassign_idle_enabled) return 0;
+  if (!rules.owner_reassign_idle_enabled || !autoAssigns(rules, 'owners')) return 0;
   const days = Math.max(Number(rules.owner_reassign_idle_days) || 3, 1);
   // Same two predicates as the lead sweep, against the owner's own timeline.
   const rows = await sql`

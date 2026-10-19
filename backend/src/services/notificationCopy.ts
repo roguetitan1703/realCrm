@@ -57,7 +57,11 @@ export const COPY: Builders = {
   lead_assigned_bulk: (d) => ({
     title: `${plural(d.n, 'lead')} assigned to you`,
   }),
-  lead_unrouted: (d) => ({
+  lead_unrouted: (d) => (d.count ? {
+    // One for a whole import (imports.ts), naming how many.
+    title: `${plural(d.count, 'lead')} arrived unassigned`,
+    body: facts(d.source && `from ${d.source}`),
+  } : {
     title: 'Lead arrived unassigned',
     body: facts(d.name, d.source && `nobody is set to receive ${d.source}`),
   }),
