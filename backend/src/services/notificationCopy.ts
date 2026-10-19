@@ -132,6 +132,26 @@ export const COPY: Builders = {
   owner_assigned: (d) => ({
     title: `${plural(d.n, 'owner')} assigned to you`,
   }),
+
+  // A buyer on a shared link (listing-pages.md §A). "Rahul is interested" when
+  // the link was sent to Rahul; "Someone on Rahul's link" when the tap came
+  // from another browser (forwarded); "Someone on your link" with no lead.
+  share_interested: (d) => ({
+    title: d.name ? (d.someoneOn ? `Someone on ${d.name}'s link is interested` : `${d.name} is interested`) : 'Someone on your link is interested',
+    body: facts(d.flat, d.sentOn && `from the link sent ${d.sentOn}`, d.previousStage && `was ${d.previousStage}`),
+  }),
+  share_expired_open: (d) => ({
+    title: d.name ? `${d.name} opened an expired link` : 'Someone opened an expired link',
+    body: facts(d.n && plural(d.n, 'home'), d.sentOn && `sent ${d.sentOn}`),
+  }),
+  share_returned: (d) => ({
+    title: `${d.name || 'A buyer'} is back on your link`,
+    body: facts(d.sentOn && `sent ${d.sentOn}`),
+  }),
+  share_number_held: (d) => ({
+    title: d.sender ? `${d.sender} tried to send homes to your lead` : 'Someone tried to send homes to your lead',
+    body: facts(d.name),
+  }),
   // Same fault, same fix: identical to `owner_assigned` in both branches.
   owner_reassigned: (d) =>
     d.n != null
@@ -159,6 +179,8 @@ const PHRASE: Record<string, (n: number) => string> = {
   owner_reassigned: (n) => `${plural(n, 'batch', 'batches')} of owners moved to you`,
   agreement_ending: (n) => `${plural(n, 'tenancy', 'tenancies')} ending`,
   lead_reassign_loop: (n) => `${plural(n, 'lead')} keeps being handed on`,
+  share_interested: (n) => `${plural(n, 'buyer')} interested`,
+  share_expired_open: (n) => `${plural(n, 'expired link')} opened`,
   owner_reassign_loop: (n) => `${plural(n, 'owner')} keeps being handed on`,
 };
 

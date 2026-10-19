@@ -91,7 +91,7 @@ export interface NotifKind {
 export type Urgency = 'now' | 'at_time' | 'morning' | 'drawer';
 
 /** The close tests alertLifecycle.ts knows. */
-export const CLOSE_TESTS = ['lead_worked', 'lead_worked_desk', 'lead_routed', 'booking', 'owner_worked', 'agreement', 'opened'] as const;
+export const CLOSE_TESTS = ['lead_worked', 'lead_worked_desk', 'lead_routed', 'booking', 'owner_worked', 'agreement', 'share_work', 'opened'] as const;
 export type CloseTest = typeof CLOSE_TESTS[number];
 
 const K = (k: NotifKind): NotifKind => ({ ...k, push: k.urgency !== 'drawer' });
@@ -141,6 +141,25 @@ export const NOTIFICATIONS: NotifKind[] = [
   K({ key: 'agreement_ending', label: 'A rent agreement ends in 30 days', audience: 'assignee',
       trigger: 'an active rent agreement is 30 days from its end date — once per agreement; the desk if nobody is on it',
       urgency: 'morning', closesWhen: 'agreement', gate: null }),
+  // ---- A buyer on a shared link (docs/specs/listing-pages.md §A) -----------
+  // To the lead's CURRENT holder, worked out when the buyer acts, else the
+  // link's creator, else the desk. `share_work` closes them: on a lead, when
+  // contact is logged after the alert (sending a fresh link logs a WhatsApp,
+  // so it counts); on a tap with no lead, when Add as lead puts it on one; on
+  // an expired link with no lead, when its sender makes a newer link.
+  K({ key: 'share_interested', label: "A buyer tapped I'm interested", audience: 'assignee',
+      // One per flat per link per firm-day; the tap row is kept every time.
+      trigger: "I'm interested pressed on a shared link, at most one per flat per link per day", urgency: 'now', closesWhen: 'share_work', gate: null }),
+  K({ key: 'share_expired_open', label: 'A buyer opened an expired link', audience: 'assignee',
+      trigger: 'Talk to us pressed on an expired shared link, at most one per link per day', urgency: 'now', closesWhen: 'share_work', gate: null }),
+  K({ key: 'share_returned', label: 'A buyer is back on their link', audience: 'assignee',
+      // Drawer to start with (spec §6: a type earns its push). A buyer looking
+      // again is worth seeing; whether it is worth a buzz is for the numbers.
+      trigger: 'a lead opens the link sent to them on a new day, at most one per lead per day', urgency: 'drawer', closesWhen: 'share_work', gate: null }),
+  K({ key: 'share_number_held', label: 'A colleague tried to send homes to your lead', audience: 'assignee',
+      // §A.1d step 4: the number is not duplicated; the person holding it is told.
+      trigger: "Send or Add as lead used a number that is already this person's lead", urgency: 'drawer', closesWhen: 'lead_worked', gate: null }),
+
   K({ key: 'remark_added', label: 'Someone left a remark', audience: 'assignee',
       // Demoted to the drawer. Somebody typing a note on your record is worth
       // knowing and is not worth a buzz.

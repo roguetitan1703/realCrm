@@ -122,6 +122,21 @@ function rule(test: CloseTest, tz: string): Rule | null {
       done: sql`EXISTS (SELECT 1 FROM crm_agreements a
         WHERE a.tenant_id = n.tenant_id AND a.id = ANY(n.record_ids))`,
     };
+    // A buyer on a shared link (listing-pages.md §A). The alert names a lead or
+    // a tap (an I'm interested press, or Talk to us on an expired link): a
+    // lead closes like lead_worked; a tap when Add as lead or attach put it on
+    // a lead.
+    case 'share_work': {
+      // No recipient test on the lead: the alert may have gone to the link's
+      // creator or the desk because nobody active held it. Contact by anyone closes it.
+      const lw = rule('lead_worked_desk', tz)!;
+      const tap = (leadTest: any) => sql`(n.record_kind = 'share_tap' AND EXISTS (SELECT 1 FROM crm_share_events e
+                WHERE e.tenant_id = n.tenant_id AND e.id = ANY(n.record_ids) AND ${leadTest}))`;
+      return {
+        pending: sql`((n.record_kind = 'lead' AND ${lw.pending}) OR ${tap(sql`e.lead_id IS NULL`)})`,
+        done: sql`((n.record_kind = 'lead' AND ${lw.done}) OR ${tap(sql`e.lead_id IS NOT NULL`)})`,
+      };
+    }
     case 'opened': return null;
   }
 }
