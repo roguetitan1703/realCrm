@@ -3595,6 +3595,14 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
   const rules = await getRoutingRules();
   const routing = rules.owner_strategy === 'round_robin';
 
+  // A ROW THAT NAMES SOMEONE WHO CANNOT TAKE WORK is filed UNASSIGNED: not
+  // given to them, not dealt to the rota in their place (nobody chose that),
+  // and the batch is not refused for it. One read for the whole batch.
+  const named = [...new Set(list.map(d => d.agentId).filter(Boolean).map(String))];
+  const workable = new Set<string>(named.length
+    ? ((await sql`SELECT x.id FROM unnest(${named}::text[]) AS x(id) WHERE ${canTakeWork(t, sql`x.id`)}`) as any[]).map(r => r.id)
+    : []);
+
   // The rota is claimed ONCE for the whole batch (see nextRoutedOwnerAgents):
   // the same rotation, one round trip instead of one per row.
   const needRota = routing ? list.filter(d => !d.agentId).length : 0;
@@ -3603,8 +3611,8 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
 
   const rows: any[] = [];
   for (const [i, data] of list.entries()) {
-    let agentId = data.agentId || null;
-    if (!agentId && routing) agentId = rota[rotaAt++] ?? null;
+    let agentId = data.agentId ? (workable.has(String(data.agentId)) ? String(data.agentId) : null) : null;
+    if (!data.agentId && routing) agentId = rota[rotaAt++] ?? null;
     rows.push({
       id: data.id || `own_${Date.now()}_${i}_${randomBytes(3).toString('hex')}`,
       tenant_id: t,
