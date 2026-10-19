@@ -892,6 +892,7 @@ export async function myLinks(q: { page?: number; limit?: number; recipient?: 'n
     : [];
   const pById = new Map((props as any[]).map(p => [p.id, p]));
   const base = `${appBase(origin)}/${await firmSlug(m.tenantId)}`;
+  const loc = await localeOf(m.tenantId);
   return {
     data: (rows as any[]).map(l => {
       const c = counts.get(l.id) || {};
