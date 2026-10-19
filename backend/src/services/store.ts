@@ -31,7 +31,7 @@ import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js'
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
 // and three copies of that rule would drift.
 import {
-  FURNISH, STATUS, labelOf,
+  FURNISH, STATUS, BHK, SUBTYPES, labelOf,
   normaliseBhk, normaliseSubtype, normaliseTo,
 } from '../../../src/data/propertyFields.js';
 // backfillEnquiries replays stored payloads through the SAME reader the live
@@ -39,7 +39,7 @@ import {
 import { parsePayload } from './parser.js';
 // The firm's money, phone and bedroom words — one implementation, shared with
 // the screens. The server always passes the firm's locale (deskConfigOf).
-import { resolveLocale, moneyFull } from '../../../src/lib/locale.js';
+import { resolveLocale, moneyFull, roomLabel } from '../../../src/lib/locale.js';
 export type Locale = ReturnType<typeof resolveLocale>;
 
 /**
@@ -5061,11 +5061,12 @@ export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = S
      WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND coalesce(in_catalogue, FALSE) <> ${on}
      RETURNING id, bhk, subtype, locality, catalogue_slug, media`;
   if (on) {
+    const loc = await localeOf(t);
     for (const r of rows as any[]) {
       if (r.catalogue_slug) continue;
       // Words as the page names them: "2 BHK Apartment Wakad", not the raw
       // token "2", which read 2-apartment-wakad.
-      const base = [listingKind(r.bhk, r.subtype), r.locality].filter(Boolean).join(' ').toLowerCase()
+      const base = [listingKind(r.bhk, r.subtype, loc), r.locality].filter(Boolean).join(' ').toLowerCase()
         .normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '') || 'home';
       for (let i = 0; i < 5; i++) {
         const slug = `${base}-${slugSuffix()}`;
@@ -5253,21 +5254,32 @@ export async function getPropertyBuyers(propertyId: string, limit = 50): Promise
  * listing. Used by the property form's route AND by the two conversions
  * (services/agreements.ts), so a flat made either way reads the same.
  */
-/** "3 BHK Apartment" from the stored tokens. Also the kind on a buyer's page (sharing.ts publicFlat). */
-export function listingKind(bhk: string | null | undefined, subtype: string | null | undefined): string {
-  // Older rows carry "2 BHK" as text; without this they read "2 BHK BHK".
-  const t = bhk ? String(bhk).trim().replace(/\s*bhk$/i, '').toLowerCase() : '';
-  const bhkLabel = t === '1rk' ? '1 RK'
-    : t === '5plus' ? '5+ BHK'
-    : t ? `${t} BHK` : '';
-  const subLabel = subtype
-    ? String(subtype).split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-    : '';
-  return [bhkLabel, subLabel].filter(Boolean).join(' ').trim();
+/**
+ * A stored bedroom value → its one token ('2', '1rk', '5plus'). New rows hold
+ * the token itself; older rows hold text ("2 BHK", "3 BHK Apartment", "3 bed"),
+ * read by normaliseBhk (src/data/propertyFields.js) in the firm's words. Null
+ * when nothing in it names a size. The catalogue's chips, its filter, every
+ * page's name and its address all read the size through this.
+ */
+export function bhkTokenOf(raw: unknown, loc: Locale): string | null {
+  const s = raw == null ? '' : String(raw).trim().toLowerCase();
+  if (!s) return null;
+  if (BHK.some((b: any) => b.value === s)) return s;
+  return normaliseBhk(s, loc);
 }
 
-export function prepareListing(body: any): any {
-  if (!body.type && (body.bhk || body.subtype)) body.type = listingKind(body.bhk, body.subtype);
+const SUBTYPE_LIST = Object.values(SUBTYPES).flat() as any[];
+
+/** "3 BHK Apartment" / "3 bed Apartment" from a row, in the firm's words. Also
+ *  the kind on a buyer's page (sharing.ts publicFlat) and the words of a page's
+ *  address (setCatalogue). */
+export function listingKind(bhk: string | null | undefined, subtype: string | null | undefined, loc: Locale): string {
+  const t = bhkTokenOf(bhk, loc);
+  return [t ? roomLabel(t, loc) : '', subtype ? labelOf(SUBTYPE_LIST, subtype) : ''].filter(Boolean).join(' ').trim();
+}
+
+export function prepareListing(body: any, loc: Locale): any {
+  if (!body.type && (body.bhk || body.subtype)) body.type = listingKind(body.bhk, body.subtype, loc);
   if (!body.title) {
     body.title = [body.society || body.project, body.unit || body.flat].filter(Boolean).join(' - ')
       || body.type || 'Untitled property';

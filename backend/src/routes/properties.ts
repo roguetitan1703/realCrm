@@ -10,7 +10,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { prepareListing,
+import { prepareListing, localeOf,
   createProperty, getUnits, blockUnit, releaseUnit,
   listProperties, getPropertyById, getPropertiesSummary, getPropertyTabs,
   listProjects, getProject, getPropertyBuyers,
@@ -243,7 +243,7 @@ propertiesRouter.post('/', async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
 
-    prepareListing(body);
+    prepareListing(body, await localeOf(req.tenantId!));
     if (!body.type) {
       return res.status(400).json({ error: 'Validation Error', message: 'A property type or configuration is required' });
     }

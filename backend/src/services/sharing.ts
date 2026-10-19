@@ -39,9 +39,10 @@ import { audit } from './audit.js';
 import { landEnquiry } from './ingestion.js';
 import { assertLeadWrite } from '../lib/permissions.js';
 import { normalizePhone } from './roster.js';
+import { BHK } from '../../../src/data/propertyFields.js';
 import { isDeskRole } from '../lib/permissions.js';
 import {
-  findLeadByPhone, createLead, updateLead, addTimelineEvent, sharingOf, deskConfigOf, localeOf, listingKind,
+  findLeadByPhone, createLead, updateLead, addTimelineEvent, sharingOf, deskConfigOf, localeOf, listingKind, bhkTokenOf, type Locale,
   REJECTED_STATUS, type ActorCtx,
 } from './store.js';
 
@@ -172,7 +173,7 @@ const isAvailable = (r: any) => /^available$/i.test(String(r.status || 'Availabl
  */
 export function publicFlat(r: any, o: { showPrice: boolean; showProject: boolean; loc: any }) {
   const project = o.showProject ? (r.project || r.config?.society || null) : null;
-  const kind = listingKind(r.bhk, r.subtype);
+  const kind = listingKind(r.bhk, r.subtype, o.loc);
   const where = project || r.locality || '';
   const media = (Array.isArray(r.media) ? r.media : []).filter((x: any) => x && x.key).map((x: any) => ({
     key: x.key, kind: x.kind === 'video' ? 'video' : 'photo',
@@ -412,8 +413,8 @@ async function recordFirstToday(tenantId: string, lockKey: string, e: Parameters
 }
 
 /** The flat's name in an alert: its project and size, the way an agent says it. */
-function flatLabel(r: any): string {
-  return [r?.project || r?.config?.society || r?.locality, listingKind(r?.bhk, null)].filter(Boolean).join(' ') || 'a home';
+function flatLabel(r: any, loc: Locale): string {
+  return [r?.project || r?.config?.society || r?.locality, listingKind(r?.bhk, null, loc)].filter(Boolean).join(' ') || 'a home';
 }
 
 /**
@@ -462,7 +463,7 @@ export async function interested(f: Firm, code: string, propertyId: string, r: P
     await alert(f.id, who.recipient, {
       type: 'share_interested',
       data: {
-        name: lead ? (lead.name || lead.phone) : null, someoneOn, flat: flatLabel(flat),
+        name: lead ? (lead.name || lead.phone) : null, someoneOn, flat: flatLabel(flat, await localeOf(f.id)),
         sentOn: sentOn(link.created_at, tz),
         previousStage: lead && String(lead.stage || '').toLowerCase() === REJECTED_STATUS.toLowerCase() ? lead.stage : null,
       },
@@ -545,23 +546,29 @@ export async function catalogueList(f: Firm, q: { deal?: string; config?: string
   const loc = await localeOf(f.id);
   const limit = Math.min(Math.max(Number(q.limit) || 24, 1), 60);
   const page = Math.max(Number(q.page) || 1, 1);
+  const [facets] = await sql`SELECT array_remove(array_agg(DISTINCT deal), NULL) AS deals,
+               array_remove(array_agg(DISTINCT bhk), NULL) AS configs,
+               array_remove(array_agg(DISTINCT locality), NULL) AS localities
+          FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)}`;
+  // THE SIZE. One token per stored value (bhkTokenOf: "2", "2 BHK" and
+  // "2 BHK Apartment" are all 2), so the chips and the filter agree on what
+  // "2" means. The filter is the stored values that read as the chosen token;
+  // exact, so 1 RK and 10 BHK never land under "1".
+  const sizes = ((facets?.configs || []) as string[]).map(raw => ({ raw, token: bhkTokenOf(raw, loc) }));
   const where = [CATALOGUE_WHERE(f.id)];
   if (q.deal) where.push(sql`lower(deal) = ${q.deal.toLowerCase()}`);
-  // Exact: the choices are the stored tokens from `facets.config`; a prefix
-  // would put 1 RK and 10 BHK under "1".
-  // Older rows carry "2 BHK" as text; the token is what is left without it.
-  if (q.config) where.push(sql`lower(regexp_replace(trim(bhk), '[[:space:]]*bhk$', '', 'i')) = ${bhkToken(q.config)}`);
+  if (q.config) {
+    const want = bhkTokenOf(q.config, loc);
+    const raws = sizes.filter(x => want && x.token === want).map(x => x.raw);
+    where.push(raws.length ? sql`bhk IN ${sql(raws)}` : sql`FALSE`);
+  }
   if (q.locality) where.push(sql`lower(trim(locality)) = ${q.locality.trim().toLowerCase()}`);
   const clause = where.reduce((a, c) => sql`${a} AND ${c}`);
-  const [rows, [{ n }], facets] = await Promise.all([
+  const [rows, [{ n }]] = await Promise.all([
     // Flats with no photos are listed last (§A.4).
     sql`SELECT ${SHOWN_COLUMNS} FROM crm_properties WHERE ${clause}
          ORDER BY ${HAS_PHOTO} DESC, created_at DESC LIMIT ${limit} OFFSET ${(page - 1) * limit}`,
     sql`SELECT count(*)::int AS n FROM crm_properties WHERE ${clause}`,
-    sql`SELECT array_remove(array_agg(DISTINCT deal), NULL) AS deals,
-               array_remove(array_agg(DISTINCT bhk), NULL) AS configs,
-               array_remove(array_agg(DISTINCT locality), NULL) AS localities
-          FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)}`,
   ]);
   await catalogueView(f, null, r);
   return {
@@ -569,15 +576,17 @@ export async function catalogueList(f: Firm, q: { deal?: string; config?: string
     flats: (rows as any[]).map(x => publicFlat(x, { showPrice: !!sharing.showPriceOnCatalogue, showProject: sharing.catalogueShowsProject !== false, loc })),
     total: n, page, limit,
     facets: {
-      deal: (facets[0]?.deals || []).sort(),
-      config: uniqBy((facets[0]?.configs || []).map(bhkToken).filter(Boolean), x => x).sort(),
+      deal: (facets?.deals || []).sort(),
+      // In the vocabulary's order (1 RK, 1, 1.5, 2 …), not the alphabet's.
+      config: uniqBy(sizes.map(x => x.token).filter((x): x is string => !!x), x => x)
+        .sort((a, b) => BHK_ORDER.indexOf(a) - BHK_ORDER.indexOf(b)),
       // WAKAD and Wakad are one place: one chip, and the filter is case-blind.
-      locality: uniqBy((facets[0]?.localities || []).map((x: string) => x.trim()).filter(Boolean), (x: string) => x.toLowerCase()).sort(),
+      locality: uniqBy((facets?.localities || []).map((x: string) => x.trim()).filter(Boolean), (x: string) => x.toLowerCase()).sort(),
     },
   };
 }
 
-const bhkToken = (v: unknown): string => String(v ?? '').trim().replace(/\s*bhk$/i, '').toLowerCase();
+const BHK_ORDER = ['1rk', ...BHK.map((b: any) => b.value).filter((v: string) => v !== '1rk' && v !== '5plus').sort((a: string, b: string) => Number(a) - Number(b)), '5plus'];
 const uniqBy = <T>(xs: T[], key: (x: T) => string): T[] => {
   const seen = new Set<string>();
   return xs.filter(x => { const k = key(x); if (seen.has(k)) return false; seen.add(k); return true; });
@@ -892,7 +901,7 @@ export async function myLinks(q: { page?: number; limit?: number; recipient?: 'n
         lead: l.lead_id ? { id: l.lead_id, name: l.lead_name || l.lead_phone || null } : null,
         flats: (l.property_ids || []).map((id: string) => {
           const p = pById.get(id);
-          return p ? { id, title: flatLabel(p), available: isAvailable(p) } : { id, title: null, available: false };
+          return p ? { id, title: flatLabel(p, loc), available: isAvailable(p) } : { id, title: null, available: false };
         }),
         views: c.views || 0, devices: c.devices || 0, interested: c.interested || 0, lastOpenedAt: c.last_opened || null,
       };
@@ -1001,9 +1010,10 @@ export async function leadShares(leadId: string, origin: string | null) {
   const ids = [...flats.keys()];
   const props = ids.length ? await sql`SELECT id, project, locality, bhk, status, config FROM crm_properties WHERE tenant_id = ${m.tenantId} AND id IN ${sql(ids)}` : [];
   const pById = new Map((props as any[]).map(p => [p.id, p]));
+  const loc = await localeOf(m.tenantId);
   return [...flats.values()].map(s => ({
     ...s, devices: s.devices.size,
-    title: pById.has(s.propertyId) ? flatLabel(pById.get(s.propertyId)) : null,
+    title: pById.has(s.propertyId) ? flatLabel(pById.get(s.propertyId), loc) : null,
     available: pById.has(s.propertyId) ? isAvailable(pById.get(s.propertyId)) : false,
   })).sort((a, b) => new Date(b.lastOpenedAt || b.sentAt || 0).getTime() - new Date(a.lastOpenedAt || a.sentAt || 0).getTime());
 }
@@ -1066,7 +1076,7 @@ export async function tapToLead(code: string, input: any) {
   const tz = (await deskConfigOf(m.tenantId)).timezone;
   await addTimelineEvent({
     record_id: lead.id, type: 'share', title: tap.kind === 'talk' ? 'Asked about an expired link' : 'Interested',
-    description: [tap.kind === 'talk' ? `Asked about ${flatIds.length} home${flatIds.length === 1 ? '' : 's'}` : `Interested in ${flatLabel(p)}`, link && `from the link sent ${sentOn(link.created_at, tz)}`].filter(Boolean).join(' · '),
+    description: [tap.kind === 'talk' ? `Asked about ${flatIds.length} home${flatIds.length === 1 ? '' : 's'}` : `Interested in ${flatLabel(p, await localeOf(m.tenantId))}`, link && `from the link sent ${sentOn(link.created_at, tz)}`].filter(Boolean).join(' · '),
     author: m.userId, metadata: { tapCode: c, shareLinkId: tap.link_id, propertyId: tap.property_id },
   });
   audit({
