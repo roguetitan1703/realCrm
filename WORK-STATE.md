@@ -10,6 +10,8 @@ Catalog: shared links + public catalogue, built to `docs/specs/listing-pages.md`
 
 ## Later
 - A firm's weekly off for "days worked" — waits on how the firms actually work
+- Alerts are stamped with the app's clock and links/events with the database's; on a skewed host (this PC: DB 2.5s ahead) "a fresh link after the alert" closes a tap made right after a send — waits on checking the AWS host's skew
+- Idle-owner sweep threw after its first owner since 23 Sep (fixed in review 3) — waits on a read-only prod check of which firms had `owner_reassign_idle_enabled`
 - Meta integration (WhatsApp + Instagram) — waits on Om's go and a spec
 - US date order in SQL-built strings (agreement_ending's `to_char(end_date, 'DD Mon')`) — waits on a US firm going live
 - A firm provisioned outside India has its roster phones stored +91 until settings carry `locale` — waits on provisioning taking a locale
