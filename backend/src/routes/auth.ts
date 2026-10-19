@@ -20,6 +20,10 @@ import {
   revokeSession, listSessions,
 } from '../services/auth.js';
 import type { TenantTokenClaims } from '../services/auth.js';
+import { sql } from '../services/db.js';
+import { normalizePhone } from '../services/roster.js';
+import { localeOf } from '../services/store.js';
+import { audit } from '../services/audit.js';
 
 export const authRouter = Router();
 
@@ -190,4 +194,45 @@ authRouter.get('/me', async (req: Request, res: Response) => {
   const u = await getUserById(claims.tenant_id, claims.user_id);
   if (!u) return res.status(401).json({ error: 'User no longer exists' });
   return res.status(200).json({ success: true, kind: 'user', tenant_id: claims.tenant_id, user: publicUser(u) });
+});
+
+/**
+ * PATCH /api/v1/auth/me { phone } — my own mobile number.
+ *
+ * Sending homes needs the sender's number on file, because the buyer's
+ * WhatsApp opens to it (listing-pages.md §A.4); an agent without one is asked
+ * for it in place, once. The Team screen's edit is for owners and managers
+ * changing other people, so it could not serve here. Normalised the way every
+ * other writer stores a phone (roster.ts normalizePhone); one number per
+ * person in a firm (idx_users_tenant_phone).
+ */
+authRouter.patch('/me', async (req: Request, res: Response) => {
+  const u = req.user as any;
+  if (!u?.id || !u?.tenant_id) return res.status(401).json({ error: 'Not authenticated' });
+  // /auth/me is open to a must-change-password token so it can say who it is;
+  // that token may read, not write.
+  if ((userClaims(req) as any)?.mc) return res.status(403).json({ error: 'Change your password first.' });
+  const raw = String(req.body?.phone ?? '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length < 10 || digits.length > 13) return res.status(400).json({ error: 'phone_invalid', message: 'A 10-digit mobile number is needed.' });
+  try {
+    const phone = normalizePhone(raw, await localeOf(u.tenant_id));
+    const clash = await sql`SELECT 1 FROM users WHERE tenant_id = ${u.tenant_id} AND phone = ${phone} AND id <> ${u.id} AND deleted_at IS NULL LIMIT 1`;
+    if (clash.length) return res.status(409).json({ error: 'phone_taken', message: 'Someone on this team already uses that number.' });
+    const [before] = await sql`SELECT phone FROM users WHERE tenant_id = ${u.tenant_id} AND id = ${u.id} LIMIT 1`;
+    await sql`UPDATE users SET phone = ${phone}, metadata = coalesce(metadata, '{}'::jsonb) || ${sql.json({ phone })}
+               WHERE tenant_id = ${u.tenant_id} AND id = ${u.id}`;
+    await sql`UPDATE crm_agents SET metadata = coalesce(metadata, '{}'::jsonb) || ${sql.json({ phone })}
+               WHERE tenant_id = ${u.tenant_id} AND id = ${u.id}`;
+    audit({
+      tenant_id: u.tenant_id, actor_type: 'user', actor_id: u.id, actor_label: null, action: 'user.phone_changed',
+      target_type: 'user', target_id: u.id, summary: 'Changed their own mobile number',
+      metadata: { from: before?.phone || null, to: phone },
+      ip: req.ip || null, user_agent: (req.headers['user-agent'] as string) || null,
+    });
+    const fresh = await getUserById(u.tenant_id, u.id);
+    return res.status(200).json({ success: true, user: fresh ? publicUser(fresh) : null });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Could not save the number', message: err.message });
+  }
 });

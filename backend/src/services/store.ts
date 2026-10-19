@@ -26,6 +26,7 @@ import { followUpKindOf } from '../../../src/data/followUpKinds.js';
 import { galleryPath } from './gallery.js';
 import { planRoster, normalizePhone, RosterRow } from './roster.js';
 import { assertLeadWrite, ForbiddenError } from '../lib/permissions.js';
+import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
 // and three copies of that rule would drift.
@@ -508,6 +509,10 @@ function rowToProperty(r: any): any {
     // the link is turned off.
     galleryPath: galleryPath(r),
     galleryOff: !!r.gallery_off,
+    // In the firm's public catalogue (listing-pages.md §A). Shown there only
+    // while Available; the tick stays when it is let and comes back.
+    inCatalogue: !!r.in_catalogue,
+    catalogueSlug: r.catalogue_slug || null,
   };
 }
 
@@ -2500,6 +2505,8 @@ export async function deleteLead(id: string, ctx: ActorCtx = SYSTEM_CTX): Promis
   const res = await sql`DELETE FROM crm_leads WHERE id = ${id} AND tenant_id = ${tid()}`;
   const ok = res.count > 0;
   if (ok) await detachAgreementsFromLeads([id]);
+  // Its shared links turn off with it (listing-pages.md §A.1).
+  if (ok) await shareLeadsDeleted(tid(), [id], ctx.actorId ?? who?.userId ?? null);
   if (ok) {
     audit({
       tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
@@ -2540,6 +2547,7 @@ export async function bulkDeleteLeads(ids: string[], ctx: ActorCtx = SYSTEM_CTX)
 
   const res = await sql`DELETE FROM crm_leads WHERE tenant_id = ${t} AND id IN ${sql(allowed)}`;
   await detachAgreementsFromLeads(allowed);
+  await shareLeadsDeleted(t, allowed, ctx.actorId ?? who?.userId ?? null);
   audit({
     tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'lead.bulk_delete', target_type: 'lead', target_id: null,
@@ -2598,6 +2606,9 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
     description: `Merged inquiry from ${duplicate.name} (${duplicate.phone}, Source: ${duplicate.source}).`,
   });
 
+  // The duplicate's shared links follow the surviving lead — before the delete
+  // below, which would otherwise turn them off.
+  await shareLeadMerged(t, duplicateId, primaryId);
   await deleteLead(duplicateId);
   return await getLeadById(primaryId);
 }
@@ -4769,6 +4780,7 @@ export async function listProperties(opts: {
   verified?: string; tower?: string; media?: string;
   excludeId?: string;
   tab?: string; unit?: string;
+  catalogue?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
   const t = tid();
   const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
@@ -4873,6 +4885,9 @@ function propertyWhere(t: string, opts: PropertyListOpts = {}, omit: { tab?: boo
   const tower = many(opts.tower);
   if (tower.length) where.push(sql`lower(coalesce(nullif(wing, ''), tower, '')) IN ${sql(tower.map(x => x.toLowerCase()))}`);
   if (verified.length === 1) where.push(verified[0] === 'yes' ? sql`verified_at IS NOT NULL` : sql`verified_at IS NULL`);
+  // In the public catalogue, or not. Both picked is no filter.
+  const catalogue = many(opts.catalogue);
+  if (catalogue.length === 1) where.push(catalogue[0] === 'yes' ? sql`in_catalogue = TRUE` : sql`coalesce(in_catalogue, FALSE) = FALSE`);
   // Photos / video / none yet: what an agent checks before sending a listing
   // to a client, and could only learn by opening each one. Any of the picked.
   const media = many(opts.media).filter(m => PROP_MEDIA[m]);
@@ -5011,6 +5026,61 @@ export async function setPropertyGallery(id: string, action: 'off' | 'on' | 'new
     summary: `Photo link: ${action}`, metadata: {}, ip: ctx.ip, user_agent: ctx.userAgent,
   });
   return getPropertyById(id);
+}
+
+/**
+ * SHOW IN CATALOGUE, one flat or many (listing-pages.md §A, §A.4). Returns how
+ * many changed and how many of the ones now on have no photos — the bulk
+ * action says so and ticks them anyway; the catalogue lists them last.
+ *
+ * A flat gets its catalogue address the first time it is ticked and keeps it,
+ * so a page someone bookmarked still opens after it is unticked and ticked
+ * again. The address names the size, type and locality, never the building:
+ * the firm can hide project names from the catalogue (`sharing.
+ * catalogueShowsProject`), and an address cannot be taken back once shared.
+ */
+export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = SYSTEM_CTX): Promise<{ changed: number; withoutPhotos: number }> {
+  const t = tid();
+  const clean = [...new Set((ids || []).map(String).filter(Boolean))].slice(0, 1000);
+  if (!clean.length) return { changed: 0, withoutPhotos: 0 };
+  const rows = await sql`
+    UPDATE crm_properties SET in_catalogue = ${on}, updated_at = NOW()
+     WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND coalesce(in_catalogue, FALSE) <> ${on}
+     RETURNING id, bhk, subtype, locality, catalogue_slug, media`;
+  if (on) {
+    for (const r of rows as any[]) {
+      if (r.catalogue_slug) continue;
+      const base = [r.bhk, r.subtype, r.locality].filter(Boolean).join(' ').toLowerCase()
+        .normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '') || 'home';
+      for (let i = 0; i < 5; i++) {
+        const slug = `${base}-${slugSuffix()}`;
+        const done = await sql`
+          UPDATE crm_properties SET catalogue_slug = ${slug}
+           WHERE tenant_id = ${t} AND id = ${r.id} AND catalogue_slug IS NULL
+             AND NOT EXISTS (SELECT 1 FROM crm_properties WHERE tenant_id = ${t} AND catalogue_slug = ${slug})
+          RETURNING id`;
+        if (done.length) break;
+      }
+    }
+  }
+  const withoutPhotos = on
+    ? (await sql`SELECT count(*)::int AS n FROM crm_properties
+                  WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND in_catalogue = TRUE
+                    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(media, '[]'::jsonb)) m WHERE m->>'kind' IS DISTINCT FROM 'video')`)[0].n
+    : 0;
+  for (const r of rows as any[]) {
+    await propertyEvent(r.id, ctx, 'catalogue', 'Catalogue', on ? 'Shown in the catalogue' : 'Taken out of the catalogue');
+  }
+  if (rows.length) {
+    audit({
+      tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null, actor_label: ctx.actorLabel ?? null,
+      action: on ? 'property.catalogue_on' : 'property.catalogue_off', target_type: 'property',
+      target_id: rows.length === 1 ? rows[0].id : null,
+      summary: `${rows.length} listing${rows.length === 1 ? '' : 's'} ${on ? 'shown in' : 'taken out of'} the catalogue`,
+      metadata: { ids: rows.map((r: any) => r.id) }, ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+  }
+  return { changed: rows.length, withoutPhotos };
 }
 
 /**
@@ -5468,7 +5538,7 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   const config: Record<string, any> = { ...(row.config || {}) };
   if (patch.config && typeof patch.config === 'object') Object.assign(config, patch.config);
   for (const [k, v] of Object.entries(patch)) {
-    if (k === 'config' || k === 'id') continue;
+    if (k === 'config' || k === 'id' || k === 'inCatalogue' || k === 'in_catalogue') continue;
     if (!PROPERTY_COLUMNS.has(k) && !C4_CLIENT_KEYS.has(k)) config[k] = v;
   }
 
@@ -5508,6 +5578,9 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
     WHERE id = ${id} AND tenant_id = ${tid()} RETURNING *;
   `;
   await applyC4Fields(id, patch);
+  // Show in catalogue, the single-listing form of POST /properties/catalogue.
+  const catalogueFlag = patch.inCatalogue ?? patch.in_catalogue;
+  if (typeof catalogueFlag === 'boolean') await setCatalogue([id], catalogueFlag, ctx);
   // Same as the create path: an owner typed onto a listing is a person to call.
   // Only when the owner fields actually changed — a price edit must not touch
   // the calling queue.
@@ -6018,7 +6091,72 @@ export async function updateBrand(patch: any): Promise<any> {
 // --- SETTINGS & INTEGRATIONS ---
 export async function getSettings(): Promise<any> {
   const rows = await sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${tid()}`;
-  return rows[0]?.value || DEFAULT_SETTINGS;
+  const value = rows[0]?.value || DEFAULT_SETTINGS;
+  return { ...value, sharing: { ...SHARING_DEFAULTS, ...(value.sharing || {}) } };
+}
+
+/**
+ * SHARED LINKS AND THE CATALOGUE, the firm's choices (listing-pages.md §A.5).
+ *   linkExpiryDays         7 | 15 | 30, fixed on a link when it is made
+ *   replyToPhone           where a buyer's WhatsApp goes when nobody holds them
+ *   showPriceOnCatalogue   the catalogue's prices; a link's own tick defaults to it
+ *   catalogueShowsProject  off: the catalogue names the locality, not the building
+ *   stopped                null, or the moment the owner stopped every link made
+ *                          up to then. Only moves forward: a leaked link must not
+ *                          come back because someone tidied a setting.
+ */
+export const SHARING_DEFAULTS = {
+  linkExpiryDays: 15, replyToPhone: null as string | null,
+  showPriceOnCatalogue: false, catalogueShowsProject: true, stopped: null as string | null,
+};
+export const LINK_EXPIRY_CHOICES = [7, 15, 30];
+
+/** The sharing settings of a firm, defaults filled in. For callers with no request context. */
+export async function sharingOf(tenantId: string): Promise<typeof SHARING_DEFAULTS> {
+  const rows = await sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${tenantId} LIMIT 1`;
+  return { ...SHARING_DEFAULTS, ...(rows[0]?.value?.sharing || {}) };
+}
+
+/**
+ * A `sharing` patch, checked against what is stored. Returns the value to
+ * store. Throws a plain Error for a bad value (400) and a ForbiddenError when
+ * anyone but an owner tries to stop links.
+ */
+async function cleanSharingPatch(patch: any, current: any, ctx: ActorCtx | null): Promise<any> {
+  const cur = { ...SHARING_DEFAULTS, ...(current || {}) };
+  const p = patch && typeof patch === 'object' ? patch : {};
+  const next = { ...cur };
+  if (p.linkExpiryDays !== undefined) {
+    const d = Number(p.linkExpiryDays);
+    if (!LINK_EXPIRY_CHOICES.includes(d)) throw new Error('Links can last 7, 15 or 30 days.');
+    next.linkExpiryDays = d;
+  }
+  if (p.replyToPhone !== undefined) {
+    const raw = String(p.replyToPhone ?? '').trim();
+    if (!raw) next.replyToPhone = null;
+    else {
+      if (raw.replace(/\D/g, '').length < 10) throw new Error('The reply-to number needs 10 digits.');
+      next.replyToPhone = normalizePhone(raw, await localeOf(tid()));
+    }
+  }
+  if (p.showPriceOnCatalogue !== undefined) next.showPriceOnCatalogue = p.showPriceOnCatalogue === true;
+  if (p.catalogueShowsProject !== undefined) next.catalogueShowsProject = p.catalogueShowsProject !== false;
+  // `stopped`: true stamps now. The stored stamp sent back unchanged is no
+  // change (the settings screen saves the whole object). Anything else —
+  // false, null, another date — would bring stopped links back, and is refused.
+  if (p.stopped !== undefined && p.stopped !== cur.stopped) {
+    if (p.stopped !== true) throw new Error('Stopped links cannot be turned back on. Send new ones.');
+    const role = getContext()?.role;
+    if (role !== 'owner') throw new ForbiddenError('Only an owner can stop every link.');
+    next.stopped = new Date().toISOString();
+    audit({
+      tenant_id: tid(), actor_type: ctx?.actorType || 'user', actor_id: ctx?.actorId ?? getContext()?.userId ?? null,
+      actor_label: ctx?.actorLabel ?? null, action: 'sharing.stopped', target_type: 'settings', target_id: 'sharing',
+      summary: 'Every shared link made until now was stopped', metadata: { stopped: next.stopped, previous: cur.stopped },
+      ip: ctx?.ip ?? getContext()?.ip ?? null, user_agent: ctx?.userAgent ?? getContext()?.userAgent ?? null,
+    });
+  }
+  return next;
 }
 
 export async function updateSettings(patch: any): Promise<any> {
@@ -6082,6 +6220,9 @@ export async function updateSettings(patch: any): Promise<any> {
       ...patch.ownerStages.filter((s: string) => s && !OWNER_TERMINAL_STATUSES.includes(s)),
       ...OWNER_TERMINAL_STATUSES,
     ];
+  }
+  if (patch.sharing !== undefined) {
+    patch.sharing = await cleanSharingPatch(patch.sharing, before.sharing, null);
   }
   if (patch.firmName) {
     await sql`UPDATE tenants SET name = ${patch.firmName}, pwa_config = NULL WHERE id = ${tid()} OR slug = ${tid()};`;

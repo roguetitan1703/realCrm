@@ -46,7 +46,7 @@ export interface NotifyInput {
    * (alertLifecycle.ts). Read from `link` when not given, which covers every
    * single-record alert; a batch passes its ids.
    */
-  record?: { kind: 'lead' | 'owner' | 'agreement'; ids: string[] };
+  record?: { kind: 'lead' | 'owner' | 'agreement' | 'share_tap'; ids: string[] };
   /** For an alert about a booking: the follow_up.at it was about. */
   subjectAt?: string | null;
   tenantId?: string;            // defaults to the request tenant
