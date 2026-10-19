@@ -35,6 +35,7 @@ import { randomBytes } from 'crypto';
 import { sql, DEFAULT_TENANT_ID } from './db.js';
 import { getContext } from './context.js';
 import { audit } from './audit.js';
+import { notifyOrDesk } from './notifications.js';
 import { createOwnersBatch, createLead, createProperty, localeOf, type ActorCtx, type Locale } from './store.js';
 import {
   OWNER_FIELDS, LEAD_FIELDS, PROPERTY_FIELDS, readField, normPhone,
@@ -432,6 +433,19 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
   } catch (e: any) {
     await sql`UPDATE crm_import_jobs SET status = 'failed', finished_at = NOW(), error = ${String(e?.message || e).slice(0, 300)} WHERE id = ${id} AND tenant_id = ${t}`;
     throw e;
+  }
+
+  // ONE "arrived unassigned" FOR THE FILE, not one push per row: createLead
+  // stays quiet for an import's rows, and a firm that leaves leads unassigned
+  // gets a single alert naming every lead this import left with nobody on it.
+  if (kind === 'clients') {
+    const loose = await sql`SELECT id FROM crm_leads WHERE tenant_id = ${t} AND import_batch_id = ${id} AND agent_id IS NULL`;
+    if (loose.length) {
+      await notifyOrDesk(null, {
+        tenantId: t, type: 'lead_unrouted', data: { count: loose.length, source: 'Import' }, link: '?screen=leads', push: true,
+        record: { kind: 'lead', ids: (loose as any[]).map(r => r.id) },
+      }).catch(err => console.warn('[Notify] import lead_unrouted failed:', err?.message));
+    }
   }
 
   // ONE audit entry for the job, not one per row — a 1,380-row import wrote

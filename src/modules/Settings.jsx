@@ -11,7 +11,7 @@ import MessageTemplates from '../components/MessageTemplates.jsx'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { isDeskRole } from '../lib/permissions.js'
 import { firmLocale, phoneSpaced } from '../lib/locale.js'
-import { canWork, notWorkableReason } from '../lib/workforce.js'
+import { canWork, notWorkableReason, shownStrategy } from '../lib/workforce.js'
 
 // `everyone: true` is a section an agent may open. The rest are the desk's.
 // An agent reaches this screen for one reason — the intro message they are
@@ -496,7 +496,10 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
     if (ok) setDraft({})
   }
 
-  const strategy = val(f.strategy, sideKey === 'leads' ? 'round_robin' : 'manual')
+  // A legacy lead strategy ('weighted', 'strict_territory') is dealt by the
+  // rota on the server (store.ts autoAssigns), so it is shown as what it does:
+  // round-robin, lit, with its controls. It read as neither option before.
+  const strategy = shownStrategy(sideKey, val(f.strategy, sideKey === 'leads' ? 'round_robin' : 'manual'))
   const rota = val(f.rota, [])
 
   // How many open records each agent is carrying, counted in SQL. This read the
@@ -583,7 +586,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
             {/* The dot follows the DRAFT, like everything else here — a tab that
                 still showed the saved state while the panel under it showed the
                 edit would be two answers to one question. */}
-            <span className={'rt-dot' + ((s.key in draft || s.f.strategy in draft
+            <span className={'rt-dot' + (shownStrategy(s.key, s.f.strategy in draft
               ? draft[s.f.strategy] ?? routing?.[s.f.strategy]
               : routing?.[s.f.strategy]) === 'round_robin' ? ' on' : '')} />
           </button>

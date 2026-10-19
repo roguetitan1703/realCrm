@@ -38,7 +38,9 @@ import { notify, notifyOrDesk } from './notifications.js';
 import { audit } from './audit.js';
 import { landEnquiry } from './ingestion.js';
 import { assertLeadWrite } from '../lib/permissions.js';
-import { normalizePhone } from './roster.js';
+// A buyer's number is kept by the same rule as every lead's (locale.js), not
+// roster.ts normalizePhone, which keeps the last ten digits of a foreign one.
+import { phoneAsStored } from '../../../src/lib/locale.js';
 import { CATALOGUE_WHERE, HAS_PHOTO } from './catalogueRules.js';
 import { canTakeWork } from './workforce.js';
 import { BHK } from '../../../src/data/propertyFields.js';
@@ -275,15 +277,25 @@ async function recordEvent(tenantId: string, e: {
 async function recordView(tenantId: string, e: {
   linkId: string | null; propertyId: string | null; kind: 'view' | 'expired_view'; deviceId: string | null; leadId: string | null;
 }): Promise<boolean> {
+  // A count that fails must not take the page down with it: logged, and the
+  // buyer still sees their homes (the same rule as maybeReturned's catch).
+  try {
   const tz = (await deskConfigOf(tenantId)).timezone;
   const at = new Date();
   const rows = await sql`
     INSERT INTO crm_share_events (id, tenant_id, link_id, property_id, kind, device_id, lead_id, created_at, view_day)
     VALUES (${rid('sev')}, ${tenantId}, ${e.linkId}, ${e.propertyId}, ${e.kind}, ${e.deviceId}, ${e.leadId}, ${at},
             (${at}::timestamptz AT TIME ZONE ${tz})::date)
-    ON CONFLICT (tenant_id, kind, (coalesce(link_id, '')), (coalesce(property_id, '')), device_id, view_day) DO NOTHING
-    RETURNING id`;
-  return rows.length > 0;
+    ON CONFLICT (tenant_id, kind, (coalesce(link_id, '')), (coalesce(property_id, '')), device_id, view_day)
+      DO UPDATE SET seen_at = EXCLUDED.created_at
+    RETURNING (xmax = 0) AS counted`;
+  // The same page again today does not count again, but it is when they were
+  // last there: "Last opened" reads 18:00, not the 10:02 of the first visit.
+  return !!rows[0]?.counted;
+  } catch (err: any) {
+    console.warn(`[Share] view not recorded for tenant ${tenantId} (${e.kind}):`, err?.message);
+    return false;
+  }
 }
 
 /** The key of a view (recordView), as SQL over an event aliased `e`; any other event is its own key. */
@@ -294,11 +306,13 @@ const viewKey = (tz: string) => sql`(CASE WHEN e.kind IN ('view', 'expired_view'
 
 /**
  * Share events as they COUNT: every tap, talk and enquiry, and each view once
- * by recordView's rule (the first of its key). The one source My links and a
+ * by recordView's rule (the first of its key), carrying `last_at`, the latest
+ * moment that key was seen — the count from the first, the time from the last. The one source My links and a
  * lead's shares count from, so the two cannot disagree about what an open is.
  */
 const countedEvents = (tenantId: string, tz: string, where: any) => sql`
-  SELECT DISTINCT ON (k.key) e.* FROM crm_share_events e, LATERAL (SELECT ${viewKey(tz)} AS key) k
+  SELECT DISTINCT ON (k.key) e.*, max(coalesce(e.seen_at, e.created_at)) OVER (PARTITION BY k.key) AS last_at
+    FROM crm_share_events e, LATERAL (SELECT ${viewKey(tz)} AS key) k
    WHERE e.tenant_id = ${tenantId} AND ${where}
    ORDER BY k.key, e.created_at`;
 
@@ -731,7 +745,7 @@ export async function catalogueEnquiry(f: Firm, input: { name?: string; phone?: 
     console.warn(`[Share] catalogue enquiry cap reached for tenant ${f.id}: ${today} today`);
     throw new ShareError(429, 'slow_down', 'Too many requests. Try again in a few minutes.');
   }
-  const phone = normalizePhone(digits, loc);
+  const phone = phoneAsStored(input.phone, loc) || null;
   const name = String(input.name || '').trim().slice(0, 80) || null;
   const message = String(input.message || '').trim().slice(0, 1000) || null;
   const flat: any = (flatRows as any[])[0] || null;
@@ -819,7 +833,7 @@ const ctxOf = (m: ReturnType<typeof me>): ActorCtx => ({ actorType: 'user', acto
 async function leadForNumber(m: ReturnType<typeof me>, phoneRaw: string, name: string | null, source: string): Promise<{ lead: any; created: boolean }> {
   const digits = String(phoneRaw || '').replace(/\D/g, '');
   if (digits.length < 10 || digits.length > 13) throw new ShareError(400, 'phone_required', 'A 10-digit mobile number is needed.');
-  const phone = normalizePhone(digits, await localeOf(m.tenantId));
+  const phone = phoneAsStored(phoneRaw, await localeOf(m.tenantId)) || null;
   const existing = await findLeadByPhone(phone!, m.tenantId);
   if (existing) {
     if (isDeskRole(m.role) || existing.agent_id === m.userId || existing.created_by === m.userId) return { lead: existing, created: false };
@@ -979,7 +993,7 @@ async function linkCounts(tenantId: string, linkIds: string[]) {
            count(*) FILTER (WHERE kind IN ('view', 'expired_view'))::int AS views,
            count(DISTINCT device_id) FILTER (WHERE kind IN ('view', 'expired_view', 'interested'))::int AS devices,
            count(*) FILTER (WHERE kind = 'interested')::int AS interested,
-           max(created_at) FILTER (WHERE kind IN ('view', 'expired_view')) AS last_opened
+           max(last_at) FILTER (WHERE kind IN ('view', 'expired_view')) AS last_opened
       FROM (${countedEvents(tenantId, tz, sql`e.link_id IN ${sql(linkIds)}`)}) c
      GROUP BY link_id`;
   return new Map((rows as any[]).map(r => [r.link_id, r]));
@@ -1133,7 +1147,7 @@ export async function leadShares(leadId: string, origin: string | null) {
       const s = slot(pid);
       if (isView && e.property_id) {
         s.opens++;
-        if (!s.lastOpenedAt || new Date(e.created_at) > new Date(s.lastOpenedAt)) s.lastOpenedAt = e.created_at;
+        if (!s.lastOpenedAt || new Date(e.last_at) > new Date(s.lastOpenedAt)) s.lastOpenedAt = e.last_at;
       }
       if (listOpen) s.linkOpens++;
       if (isView && e.link_id) s.why.add('link');
@@ -1192,7 +1206,7 @@ export async function tapToLead(code: string, input: any) {
     let target: string | null = input?.leadId ? String(input.leadId) : null;
     if (!target && input?.phone) {
       const digits = String(input.phone).replace(/\D/g, '');
-      const found = digits.length >= 10 ? await findLeadByPhone(normalizePhone(digits, await localeOf(m.tenantId))!, m.tenantId) : null;
+      const found = digits.length >= 10 ? await findLeadByPhone(phoneAsStored(input.phone, await localeOf(m.tenantId)), m.tenantId) : null;
       target = found?.id || null;
     }
     if (target !== tap.lead_id) throw new ShareError(409, 'tap_has_lead', 'This tap already belongs to another lead.');

@@ -37,3 +37,11 @@ export const assignFailed = (store, err, fallback = 'Could not assign') => {
   store.toast(err?.message || fallback, 'warn')
   return false
 }
+
+/** What a side's saved strategy DOES, mirroring store.ts autoAssigns(): leads
+ *  are dealt by the rota unless 'manual' (a legacy 'weighted' deals too);
+ *  owners only on 'round_robin'. */
+export function shownStrategy(side, v) {
+  if (side === 'leads') return v === 'manual' ? 'manual' : 'round_robin'
+  return v === 'round_robin' ? 'round_robin' : 'manual'
+}

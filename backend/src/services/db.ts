@@ -1240,6 +1240,8 @@ export async function migrateSharing(): Promise<void> {
   // firm's calendar day, set on views only; rows written before it exist carry
   // NULL, which never conflicts, so nothing already stored is touched or
   // refused. Gated: a unique index is a migration, not DDL to re-run on boot.
+  // The last time a counted view's page was opened again that day (recordView).
+  await sql`ALTER TABLE crm_share_events ADD COLUMN IF NOT EXISTS seen_at TIMESTAMPTZ`;
   await runOnce('share_events_one_view_per_day', async () => {
     await sql`ALTER TABLE crm_share_events ADD COLUMN IF NOT EXISTS view_day DATE`;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_share_events_one_view ON crm_share_events

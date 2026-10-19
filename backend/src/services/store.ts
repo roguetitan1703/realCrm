@@ -18,7 +18,7 @@ import { audit } from './audit.js';
 import { fileTicket } from './media.js';
 import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, lastPersonActivity, lastRemark, lastRemarkAt, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
-import { notify, notifyRoles } from './notifications.js';
+import { notify, notifyRoles, notifyOrDesk } from './notifications.js';
 import { firstRunAlertLifecycle } from './alertLifecycle.js';
 import { suggestPassword } from './auth.js';
 import { followUpKind } from './followUp.js';
@@ -2160,7 +2160,7 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // failed read from becoming an unhandled rejection if the insert throws first.
   const nameIds = [agentId, createdBy].filter(Boolean) as string[];
   const namesP: Promise<any[]> = nameIds.length
-    ? sql`SELECT id, name FROM users WHERE tenant_id = ${t} AND id IN ${sql(nameIds)}`.then(r => r as any[], (err: any) => {
+    ? sql`SELECT id, coalesce(nullif(btrim(name), ''), nullif(login_id, ''), 'a team member') AS name FROM users WHERE tenant_id = ${t} AND id IN ${sql(nameIds)} AND deleted_at IS NULL`.then(r => r as any[], (err: any) => {
         console.warn(`[Leads] name lookup failed for ${nameIds.join(',')} in ${t}:`, err?.message);
         return [];
       })
@@ -2225,9 +2225,15 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // nobody took it.
   // PUSH: nobody was assigned, so this lead is sitting with no owner and no
   // one is coming for it. That is an exception, not a routine arrival.
-  if (!agentId) {
-    notifyRoles(['owner', 'manager'], {
-      type: 'lead_unrouted', data: { name: notifName, source }, link, push: true,
+  // notifyOrDesk, not notifyRoles: a firm with no active owner or manager is
+  // logged, not delivered to an empty list in silence. Not raised when the
+  // desk itself chose Unassigned (it knows), nor per row of an import: the
+  // import sends one for the whole file (imports.ts).
+  const deskChoseNobody = sentAgent === null && isDeskRole(getContext()?.role);
+  if (!agentId && !deskChoseNobody && !importBatchId) {
+    notifyOrDesk(null, {
+      tenantId: t, type: 'lead_unrouted', data: { name: notifName, source }, link, push: true,
+      record: { kind: 'lead', ids: [newId] },
     }).catch(err => console.warn('[Notify] lead_unrouted failed:', err?.message));
   }
   return created;
@@ -3236,18 +3242,19 @@ async function recordAssignments(entries: AssignmentEntry[], q: any = sql): Prom
     const ids = [...new Set(list.flatMap(e => [e.prevAgentId, e.agentId]).filter(Boolean))] as string[];
     const names = new Map<string, string>();
     if (ids.length) {
+      // A member still here reads by name, or by login id when the name is
+      // empty. Only someone missing, or deleted with no name left, reads "a
+      // former member" — never "null": "Siddharth Varma → null" was a hand-off
+      // to an id that no longer resolved, and read as if the lead was dropped.
       const rows = await q`
-        SELECT id, name FROM users WHERE id IN ${sql(ids)}
-        UNION
-        SELECT id, name FROM crm_agents WHERE id IN ${sql(ids)} AND tenant_id = ${t}`;
-      // users wins where both carry the id -- same precedence as the two
-      // sequential lookups this replaces, which only consulted crm_agents when
-      // users had nothing.
-      for (const r of rows as any[]) if (!names.has(r.id) || r.name) names.set(r.id, r.name);
+        SELECT x.id,
+               coalesce(nullif(btrim(u.name), ''), nullif(btrim(a.name), ''),
+                        CASE WHEN u.id IS NOT NULL AND u.deleted_at IS NULL THEN coalesce(nullif(u.login_id, ''), 'a team member') END) AS name
+          FROM unnest(${ids}::text[]) AS x(id)
+          LEFT JOIN users u ON u.id = x.id AND u.tenant_id = ${t}
+          LEFT JOIN crm_agents a ON a.id = x.id AND a.tenant_id = ${t}`;
+      for (const r of rows as any[]) if (r.name) names.set(r.id, r.name);
     }
-    // An id with no name behind it is a person who has left — said so, never
-    // printed as "null". "Siddharth Varma → null" was a hand-off to an id that
-    // no longer resolved, and it read as if the lead had been dropped.
     const nameOf = (id?: string | null) => (id ? names.get(id) || 'a former member' : null);
 
     const now = new Date().toISOString();
