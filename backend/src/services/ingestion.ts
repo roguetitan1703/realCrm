@@ -384,13 +384,38 @@ export async function processInboxRow(
     return { status: 'failed', reason: why };
   }
 
+  return await landEnquiry({
+    tenantId: integration.tenant_id, provider: integration.provider, integrationId: integration.id,
+    inboxId, lead: parsed.lead, body, desk,
+  });
+}
+
+/**
+ * AN ENQUIRY WITH A NUMBER → A LEAD, or a repeat on the lead that number
+ * already is. The one path every inbound enquiry takes: a portal push (above)
+ * and the firm's public catalogue form (routes/public.ts, source "Catalogue").
+ * Duplicate by phone, the merge rules, routing, the enquiry session and its
+ * alert are all here, once. `inboxId` is set only for a push, whose inbox row
+ * is marked with the outcome.
+ */
+export async function landEnquiry(args: {
+  tenantId: string; provider: string; integrationId: string | null; inboxId: string | null;
+  lead: any; body: any; desk?: Awaited<ReturnType<typeof deskConfigOf>>;
+}): Promise<{ status: string; leadId?: string | null; reason?: string }> {
+  const { tenantId, inboxId } = args;
+  const integration = { id: args.integrationId || `${args.provider.toLowerCase()}:${tenantId}`, tenant_id: tenantId, provider: args.provider };
+  const desk = args.desk || await deskConfigOf(tenantId);
+  const body = args.body;
+  const mark = async (status: 'parsed' | 'merged' | 'failed' | 'ignored', extra: { leadId?: string | null; error?: string | null } = {}) => {
+    if (inboxId) await markInbox(inboxId, status, extra);
+  };
   return await runWithContext(
     {
-      tenantId: integration.tenant_id, userId: null, role: 'system',
+      tenantId, userId: null, role: 'system',
       actorType: 'system', actorLabel: `ingest:${integration.provider}`,
     } as any,
     async () => {
-      const lead = parsed.lead;
+      const lead = args.lead;
       const cleanPhone = String(lead.phone || '').replace(/[^0-9+]/g, '');
 
       // Idempotency: a portal that retries because our ack was slow must not
@@ -418,7 +443,7 @@ export async function processInboxRow(
       // retry and a double-tap, short enough that coming back later counts.
       const lockTtl = providerId ? 604800 : 900;
       if (queueManager.checkIdempotencyLock(lockKey)) {
-        await markInbox(inboxId, 'ignored', { error: 'Duplicate of a push already processed' });
+        await mark('ignored', { error: 'Duplicate of a push already processed' });
         return { status: 'ignored', reason: 'idempotent retry' };
       }
       queueManager.setIdempotencyLock(lockKey, lockTtl);
@@ -523,7 +548,7 @@ export async function processInboxRow(
         // — see docs/specs/desk-rework.md §2.
         const session = await recordEnquiry({
           leadId: existing.id, at: (lead as any).receivedAt || undefined,
-          source: integration.provider, integrationId: integration.id,
+          source: integration.provider, integrationId: args.integrationId,
           req: lead.req, enquiryId: (lead as any).external_id || null, rawRef: inboxId,
         });
 
@@ -583,7 +608,7 @@ export async function processInboxRow(
             }).catch(() => {});
           }
         }
-        await markInbox(inboxId, 'merged', { leadId: existing.id });
+        await mark('merged', { leadId: existing.id });
         return { status: 'merged', leadId: existing.id };
       }
 
@@ -609,11 +634,11 @@ export async function processInboxRow(
       if (created?.id) {
         await recordEnquiry({
           leadId: created.id, at: (lead as any).receivedAt || undefined,
-          source: leadFields.source || integration.provider, integrationId: integration.id,
+          source: leadFields.source || integration.provider, integrationId: args.integrationId,
           req: lead.req, enquiryId: external_id || null, rawRef: inboxId,
         });
       }
-      await markInbox(inboxId, 'parsed', { leadId: created?.id || null });
+      await mark('parsed', { leadId: created?.id || null });
       return { status: 'ingested', leadId: created?.id || null };
     },
   );
