@@ -63,15 +63,22 @@ export function PublicShell({ firm: raw, tenant, children, embed = embedded(), b
 /** The firm's mark. Its box is always there; the initials hold it until the
  *  logo has loaded, and stay if the logo never does. */
 function FirmMark({ firm }) {
-  const [state, setState] = useState('loading') // loading | ok | failed
-  useEffect(() => { setState('loading') }, [firm?.logo])
+  // The state belongs to one URL, so a new logo starts over without an effect
+  // resetting it after a cached image has already fired onLoad (which left
+  // the initials over a logo that was there). A cached image may also be
+  // complete before React attaches onLoad: the ref reads that.
+  const logo = firm?.logo || ''
+  const [seen, setSeen] = useState({ url: '', state: 'loading' })
+  const state = seen.url === logo ? seen.state : 'loading' // loading | ok | failed
+  const mark = (s) => setSeen({ url: logo, state: s })
+  const ref = (el) => { if (el && el.complete && el.naturalWidth > 0 && state !== 'ok') mark('ok') }
   const initials = String(firm?.name || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('')
   return (
     <span className="pv-markbox">
       {state !== 'ok' && <span className={'pv-mono' + (initials ? '' : ' pv-mono-wait')}>{initials}</span>}
       {firm?.logo && state !== 'failed' && (
-        <img className={'pv-logo' + (state === 'ok' ? '' : ' is-loading')} src={firm.logo} alt=""
-          onLoad={() => setState('ok')} onError={() => setState('failed')} />
+        <img key={logo} ref={ref} className={'pv-logo' + (state === 'ok' ? '' : ' is-loading')} src={logo} alt=""
+          onLoad={() => mark('ok')} onError={() => mark('failed')} />
       )}
     </span>
   )
@@ -442,9 +449,17 @@ export function CataloguePage({ tenant }) {
   }
 
   const facets = d.facets || {}
-  const deals = (facets.deal || []).filter(x => x === 'sale' || x === 'rent')
-  const bhks = (facets.config || []).slice().sort(bhkSort)
-  const areas = facets.locality || []
+  // A choice that is switched on is always among the options, and its
+  // control always shows, even when the results narrow to one option or the
+  // value came from a URL the facets do not know: a filter nobody can see
+  // is a filter nobody can take off.
+  const withActive = (list, v) => (v && !list.some(x => String(x).toLowerCase() === String(v).toLowerCase()) ? [...list, v] : list)
+  const deals = withActive((facets.deal || []).filter(x => x === 'sale' || x === 'rent'), f.deal)
+  const bhks = withActive((facets.config || []).slice(), f.bhk).sort(bhkSort)
+  const areas = withActive(facets.locality || [], f.area)
+  const showDeal = deals.length > 1 || !!f.deal
+  const showBhk = bhks.length > 1 || !!f.bhk
+  const showArea = areas.length > 1 || !!f.area
   // How many each choice would show, with the other filters as they are.
   const counts = d.facetCounts || {}
   const nOf = (k, v) => (Number(counts[k]?.[v]) >= 0 && counts[k]?.[v] != null ? Number(counts[k][v]) : null)
@@ -458,26 +473,26 @@ export function CataloguePage({ tenant }) {
         <h1>Homes</h1>
         {!firstLoad && <span>{total} {total === 1 ? 'home' : 'homes'}</span>}
       </div>
-      {(deals.length > 1 || bhks.length > 1 || areas.length > 1) && (
+      {(showDeal || showBhk || showArea) && (
         <div className="pv-filters">
-          {deals.length > 1 && (
+          {showDeal && (
             <div className="pv-seg" role="group" aria-label="Sale or rent">
               {[['', 'All'], ['sale', 'Sale'], ['rent', 'Rent']].map(([v, l]) => (
                 <button key={l} type="button" className={f.deal === v ? 'on' : ''} aria-pressed={f.deal === v} onClick={() => set({ deal: v })}>{l}{v && nOf('deal', v) != null && <span className="pv-n">{nOf('deal', v)}</span>}</button>
               ))}
             </div>
           )}
-          {bhks.length > 1 && (
+          {showBhk && (
             <div className="pv-chips" role="group" aria-label="Bedrooms">
               {bhks.map(b => (
                 <button key={b} type="button" className={'pv-chip' + (f.bhk === b ? ' on' : '')} aria-pressed={f.bhk === b} onClick={() => set({ bhk: f.bhk === b ? '' : b })}>{roomLabel(b)}{nOf('config', b) != null && <span className="pv-n">{nOf('config', b)}</span>}</button>
               ))}
             </div>
           )}
-          {areas.length > 1 && (
+          {showArea && (
             <label className="pv-area">
               <Icon name="mapPin" size={15} />
-              <select value={f.area} onChange={e => set({ area: e.target.value })} aria-label="Area">
+              <select value={areas.find(a => String(a).toLowerCase() === String(f.area).toLowerCase()) || f.area} onChange={e => set({ area: e.target.value })} aria-label="Area">
                 <option value="">All areas</option>
                 {areas.map(a => <option key={a} value={a}>{nOf('locality', a) != null ? `${a} (${nOf('locality', a)})` : a}</option>)}
               </select>

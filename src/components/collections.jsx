@@ -106,16 +106,32 @@ export function ModuleListView({
   // `facets` are the option lists the SERVER counted, under every other active
   // filter. A module that has none still gets the second argument as undefined
   // and falls back to whatever it derived itself, so nothing else had to change.
-  const fields = typeof def.filterFields === 'function' ? def.filterFields(store, facets) : (def.filterFields || [])
+  // EVERY ACTIVE FILTER HAS A CONTROL. A field a module hides (`hidden`) still
+  // shows while it is switched on, and a value that arrived in a URL but is
+  // not among today's options is added to them, so a filter that narrows the
+  // list is always on screen to be seen and taken off.
+  const fields = (typeof def.filterFields === 'function' ? def.filterFields(store, facets) : (def.filterFields || []))
+    .filter(f => !f.hidden || (filters?.[f.key] || []).length > 0)
+    .map(f => {
+      const on = [].concat(filters?.[f.key] || [])
+      const known = new Set((f.options || []).map(o => String(o.value).toLowerCase()))
+      const extra = on.filter(v => !known.has(String(v).toLowerCase()))
+      return extra.length ? { ...f, options: [...(f.options || []), ...extra.map(v => ({ value: v, label: String(v) }))] } : f
+    })
   const sortOptions = def.sortOptions.map(s => ({ value: s.key, label: s.label }))
 
   // Lean in-page header: module KPIs (left) + scope segments (right). NOT the breadcrumb.
   // KPIs are dropped on a phone: a row of numbers costs a third of the screen
   // and the segment pills below already carry the same counts, tappable.
-  const header = ((!phone && kpis?.length) || segments || leftAddon)
+  // A TAB IS A FILTER. Switching one while rows are ticked dropped the ticks
+  // under a bar that said filters were paused; tabs pause with them, in every
+  // module, until the selection is finished or cleared.
+  const paused = selection?.count > 0
+  const segs = paused && segments ? segments.map(s => (s.on ? s : { ...s, disabled: true })) : segments
+  const header = ((!phone && kpis?.length) || segs || leftAddon)
     // [] not null — a default parameter only fills in for undefined, so null
     // sailed past `kpis = []` and PageHeader read .length off it.
-    ? <PageHeader kpis={phone ? [] : kpis} segments={segments} leftAddon={leftAddon} />
+    ? <PageHeader kpis={phone ? [] : kpis} segments={segs} leftAddon={leftAddon} />
     : null
 
   // On a phone the desktop bar does not shrink — it wraps into three rows of
@@ -872,7 +888,7 @@ export function FilterBar({ fields = [], value = {}, onChange, search, left, rig
     return (
       <div className="fbar fbar-sel">
         <span className="fsel-n">{selection.count} selected</span>
-        <span className="fsel-hint">Filters and sort are paused while rows are selected</span>
+        <span className="fsel-hint">Tabs, filters and sort are paused while rows are selected</span>
         <div className="u-spring" />
         {/* `tone` so a destructive bulk action does not render as the primary
             button beside a harmless one — the two must not look alike when
