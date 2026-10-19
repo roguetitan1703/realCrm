@@ -24,6 +24,9 @@ import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../
 import { FOLLOW_UP_ACTIONS, followUpKindOf } from '../data/followUpKinds.js'
 import { ActivityRecords } from '../components/ActivityDay.jsx'
 import { CloseDealModal, AgreementModal } from '../components/Agreements.jsx'
+import SendSheet from './SendSheet.jsx'
+import { AttachLinkModal } from '../components/MyLinks.jsx'
+import { AddFromTapModal } from '../components/AddFromTap.jsx'
 import { copyText } from '../lib/clipboard.js'
 import { currencySymbol, firmLocale, phoneLabel, phonePlaceholder, roomsText } from '../lib/locale.js'
 
@@ -108,7 +111,11 @@ export default function Modals({ store, go }) {
       {m?.kind === 'rejectOwner' && <RejectOwnerModal store={store} ownerId={m.ownerId} status={m.status} />}
       {m?.kind === 'confirm' && <ConfirmModal store={store} {...m} />}
       {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} only={m.only} />}
-      {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
+      {/* One sheet for every send: the lead's shortlist, the Properties
+          selection and a property's own Share (listing-pages.md §A). */}
+      {m?.kind === 'addFromTap' && <AddFromTapModal store={store} go={go} Modal={Modal} code={m.code} />}
+      {m?.kind === 'attachLink' && <AttachLinkModal store={store} Modal={Modal} linkId={m.linkId} onDone={m.onDone} />}
+      {m?.kind === 'send' && <SendSheet store={store} Modal={Modal} homes={m.homes} leadId={m.leadId} lead={m.lead} suggested={m.suggested} onSent={m.onSent} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
       {m?.kind === 'scheduleFollowUp' && <ScheduleFollowUpModal store={store} leadId={m.leadId} />}
       {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} recordType={m.recordType} recordId={m.recordId} record={m.record} />}
@@ -616,39 +623,6 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) 
 }
 
 // ---- Pick which matched BUYER to WhatsApp a property to (from the system) ----
-function PickBuyerModal({ store, propId }) {
-  const p = store.lookup('property', propId)
-  // The server narrows to the plausible buyers (deal, locality, budget band);
-  // the scorer that produces the fit line then runs over those few rows instead
-  // of over every lead in the firm. Same pattern as the lead-side matches.
-  const { data: candidates } = useServerData(() => api.getPropertyBuyers(propId).then(r => r?.buyers || []), [propId], [])
-  if (!p) return null
-  const buyers = leadsForProperty(p, candidates || [])
-  const send = (leadId) => { store.closeModal(); store.openWhatsApp(propId, leadId) }
-  return (
-    <Modal title="Send this listing on WhatsApp" onClose={store.closeModal} width={440}>
-      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
-        Interested {p.deal === 'rent' ? 'tenants' : 'buyers'} for <b style={{ color: 'var(--ink)' }}>{p.society}</b>, found by matching. Or send it to nobody in particular.
-      </div>
-      {buyers.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '4px 0 12px' }}>No matching contacts yet. You can still write the message.</div>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-        {buyers.map((b, i) => (
-          <button key={b.lead.id} onClick={() => send(b.lead.id)}
-            style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-            <span className="av av-md" style={{ background: 'var(--chrome)' }}>{initials(personLabel(b.lead))}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 13.5 }}>{personLabel(b.lead)}{i === 0 && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-wash)', borderRadius: 4, padding: '2px 6px', marginLeft: 7 }}>BEST FIT</span>}</div>
-              <div className="u-muted" style={{ fontSize: 12 }}>{[latestPlus(b.lead.req.config), latestPlus(b.lead.req.locality), b.fitLine].filter(Boolean).join(' · ')}</div>
-            </div>
-            <Icon name="wa" size={18} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-          </button>
-        ))}
-      </div>
-      <Button block onClick={() => send(undefined)} icon="wa">Continue without a recipient</Button>
-    </Modal>
-  )
-}
-
 // ---- New / edit lead ----
 // A THIRD hardcoded list of Pune localities used to live here, disagreeing with
 // the two in definitions.jsx. Locality is free text with suggestions drawn from
@@ -700,6 +674,13 @@ function NewLeadModal({ store, leadId }) {
     notes: ''
   })
   const set = (k, v) => setF(s => ({ ...s, [k]: v }))
+  // CAME FROM: one of my recent links with nobody on it — the person who
+  // wrote after seeing a link in a group (listing-pages.md §A.1c, I2r). Saved
+  // by attaching the link to the new lead, which moves its history across.
+  const [cameFrom, setCameFrom] = useState('')
+  const { data: myLinks } = useServerData(
+    () => (edit ? Promise.resolve([]) : api.myShareLinks().then(r => (r?.data || []).filter(l => !l.lead).slice(0, 12))),
+    [], [])
 
   const save = () => {
     if (!f.name.trim()) { store.toast('Lead Name is required', 'warn'); return }
@@ -779,7 +760,11 @@ function NewLeadModal({ store, leadId }) {
         overdue: false,
         followUp: null,
       }
-      store.addLead(lead)
+      const link = cameFrom
+      store.addLead(lead).then(res => {
+        const id = (res?.data || res?.lead || res?.record)?.id
+        if (link && id) api.attachShareLink(link, id).then(() => store.touched?.()).catch(() => store.toast('The lead is saved, but the link could not be attached.', 'warn'))
+      })
       store.toast('New lead created successfully')
     }
     store.closeModal()
@@ -866,6 +851,20 @@ function NewLeadModal({ store, leadId }) {
             </select>
           </div>
         </div>
+
+        {!edit && (myLinks || []).length > 0 && (
+          <div className="field">
+            <label htmlFor="lead-came-from">Came from</label>
+            <select id="lead-came-from" className="input" value={cameFrom} onChange={e => setCameFrom(e.target.value)} style={{ width: '100%' }}>
+              <option value="">Not from a link</option>
+              {myLinks.map(l => (
+                <option key={l.id} value={l.id}>
+                  {[`${l.flats?.length || 0} ${l.flats?.length === 1 ? 'home' : 'homes'}`, (l.flats || []).slice(0, 2).map(x => x.title).join(', '), l.createdAt ? `sent ${new Date(l.createdAt).toLocaleDateString(firmLocale().numberLocale, { day: 'numeric', month: 'short' })}` : ''].filter(Boolean).join(' · ')}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <Field label="Requirement Notes & Purpose"><Textarea value={f.notes} onChange={e => set('notes', e.target.value)} placeholder="Specific buyer preferences, budget flexibility, timeline notes..." rows={3} /></Field>
         <Button variant="primary" block onClick={save} icon="check">{edit ? 'Save Changes' : 'Create Lead Record'}</Button>
@@ -2217,8 +2216,13 @@ export function NotifModal({ store, go }) {
     const leadId = p.get('lead')
     const agent = p.getAll('agent')
     const alert = p.get('alert')
+    // AN I'M INTERESTED TAP WITH NOBODY ON IT opens Add as lead, holding the
+    // link, the home and the tap (listing-pages.md §A.1d). The tap's code is
+    // `?tap=` on the alert's link, or the ref link itself (/<firm>/<code>).
+    const tap = p.get('tap') || (/^share_/.test(n.type || '') ? (String(n.link || '').match(/^\/[a-z0-9-]+\/([a-z0-9]{6})(?:[/?#]|$)/) || [])[1] : null)
     close()
-    if (leadId) go('leads', { leadId, leadOpen: true })
+    if (!leadId && tap) store.openModal({ kind: 'addFromTap', code: tap })
+    else if (leadId) go('leads', { leadId, leadOpen: true })
     else if (alert) go('leads', { leadFilters: { alert: [alert] }, leadOpen: false, leadId: undefined })
     else if (agent.length) go('leads', { leadFilters: { agent }, leadOpen: false, leadId: undefined })
     else go('leads')

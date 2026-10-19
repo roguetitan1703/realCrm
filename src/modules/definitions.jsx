@@ -38,6 +38,7 @@ import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 
 import { canAssignLead, canEditLead, canUpdateLeadStatus, canEditListing } from '../lib/permissions.js'
 import { api } from '../lib/api.js'
+import { openSend } from './SendSheet.jsx'
 import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
 // out again here — that duplication is exactly what broke property filtering.
@@ -994,8 +995,8 @@ export const PROPERTIES_DEF = {
   ],
 
   actions: [
-    { id: 'share', tier: 'quick', icon: 'wa', tone: 'accent', label: 'Share',
-      run: (store, p) => store.openModal({ kind: 'pickBuyer', propId: p.id }) },
+    { id: 'share', tier: 'quick', icon: 'wa', tone: 'accent', label: 'Send',
+      run: (store, p) => openSend(store, [p]) },
     // Both owner actions are gated on there BEING an owner to reach. The owner
     // is optional now, so an ungated "Call owner" opened a dialer on an
     // undefined number, and "Owner update" composed a WhatsApp addressed to

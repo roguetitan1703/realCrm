@@ -28,6 +28,7 @@ import Modals from './modules/Modals.jsx'
 import Phone from './modules/Phone.jsx'
 import PhoneToday from './modules/phone/PhoneToday.jsx'
 import Performance from './modules/Performance.jsx'
+import Me from './modules/Me.jsx'
 import { firmLocale } from './lib/locale.js'
 
 const NAV = [
@@ -67,6 +68,8 @@ const SCREENS = {
   dashboard: Dashboard, leads: Leads, calling: Owners, properties: Properties, clients: Clients,
   calendar: Calendar, import: ImportPage, team: Team, settings: Settings, integrations: Integrations,
   today: (props) => <PhoneToday {...props} phone={false} />, performance: Performance,
+  // Your number and the links you have shared — from the profile menu only.
+  me: Me,
 }
 
 // Deep-link parsing lives in lib/nav.js now — it is the same parser the URL
@@ -246,7 +249,7 @@ export default function App() {
   // Profile menu carries only real product actions. Role comes from the signed-in
   // user (real RBAC) — no dev toggle; workspace provisioning + data reset are
   // Delpat/superadmin operations and live in the /admin console, not here.
-  const profileItems = []
+  const profileItems = [{ icon: 'person', label: 'Your profile', onClick: () => go('me') }]
   if (isDeskRole(state.role)) {
     profileItems.push(
       { icon: 'settings', label: 'Settings', onClick: () => go('settings') },

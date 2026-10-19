@@ -824,7 +824,7 @@ export function FilterBar({ fields = [], value = {}, onChange, search, left, rig
             they sit a few pixels apart and one cannot be undone. */}
         {(selection.actions || []).map(a => (
           <button key={a.label}
-            className={'btn btn-sm ' + (a.tone === 'danger' ? 'btn-danger' : 'btn-primary')}
+            className={'btn btn-sm ' + (a.tone === 'danger' ? 'btn-danger' : a.tone === 'quiet' ? 'btn-ghost' : 'btn-primary')}
             onClick={a.onClick}>
             {a.icon && <Icon name={a.icon} size={15} />}{a.label}
           </button>

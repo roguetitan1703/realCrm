@@ -432,7 +432,8 @@ async function request(endpoint, options = {}) {
       // open leads first", "last active owner", duplicate email, all of it —
       // silently dropped its reason and showed a bare "400 Bad Request".
       let detail = '';
-      try { const body = await res.clone().json(); detail = body?.message || body?.error || ''; } catch { /* not json */ }
+      let body = null;
+      try { body = await res.clone().json(); detail = body?.message || body?.error || ''; } catch { /* not json */ }
       // ANY call may be the one that discovers the session is over — not just
       // the boot read. See noteSessionExpired().
       // ONLY 401 ENDS A SESSION. A 403 is "you may not do this" (a manager's
@@ -441,7 +442,13 @@ async function request(endpoint, options = {}) {
       // session always answers 401 (middleware/auth.ts), so nothing relied on
       // 403 for it; a refusal now shows its reason and leaves them signed in.
       if (res.status === 401) noteSessionExpired(endpoint);
-      throw new Error(`API Error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
+      // The status and the body travel with the error, so a caller that has a
+      // plain answer for one refusal (422 sender_phone_missing, 409
+      // lead_held_by) can give it instead of parsing a sentence.
+      const failure = new Error(`API Error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
+      failure.status = res.status;
+      failure.body = body;
+      throw failure;
     }
     const data = await res.json();
     // ONE PLACE, because the answer must not depend on which call happened to
@@ -493,6 +500,7 @@ if (typeof window !== 'undefined') {
 // leads list and its counts so the two cannot serialise the same filters
 // differently — which is one keystroke away from a count that describes a
 // different question than the rows beneath it.
+const deviceHeader = (device) => (device ? { 'X-Device-Id': device } : {})
 const qs = (params = {}) => {
   const p = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') p.set(k, String(v))
@@ -778,6 +786,28 @@ export const api = {
   verifyProperty: (id, on) => request(`/properties/${encodeURIComponent(id)}/verify`, { method: 'POST', body: JSON.stringify({ on }) }),
   setPropertyGallery: (id, action) => request(`/properties/${encodeURIComponent(id)}/gallery`, { method: 'POST', body: JSON.stringify({ action }) }),
   // No sign-in: what a client sees on a photo link.
+  // ── Sharing (docs/specs/listing-pages.md §A.5) ──────────────────────────
+  // A link is a set of homes, optionally bound to a lead, with an expiry fixed
+  // when it is made. Sending again makes a new link; there is nothing to edit.
+  createShareLink: (body) => request('/share-links', { method: 'POST', body: JSON.stringify(body) }),
+  myShareLinks: () => request('/share-links/mine', { fresh: true }),
+  turnOffShareLink: (id) => request(`/share-links/${encodeURIComponent(id)}/off`, { method: 'POST', body: '{}' }),
+  attachShareLink: (id, leadId) => request(`/share-links/${encodeURIComponent(id)}/attach`, { method: 'POST', body: JSON.stringify({ leadId }) }),
+  leadShares: (leadId) => request(`/leads/${encodeURIComponent(leadId)}/shares`, { fresh: true }),
+  leadFromTap: (code, body) => request(`/share-taps/${encodeURIComponent(code)}/lead`, { method: 'POST', body: JSON.stringify(body) }),
+  // Your own mobile number — Send needs it, because a buyer's tap opens
+  // WhatsApp to the person who sent them the link.
+  updateMyPhone: (userId, phone) => request(`/team/users/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify({ phone }) }),
+  setCatalogue: (ids, on) => request('/properties/catalogue', { method: 'POST', body: JSON.stringify({ ids, on }) }),
+  // The buyer's pages. No sign-in; a signed-in member of the firm still sends
+  // their session (request() does that on any path under /<tenant>), which is
+  // how the server answers `staff` and leaves them out of the counts.
+  publicShare: (tenant, code, device) => request(`/public/s/${encodeURIComponent(tenant)}/${encodeURIComponent(code)}`, { fresh: true, headers: deviceHeader(device) }),
+  publicInterested: (tenant, code, propertyId, device) => request(`/public/s/${encodeURIComponent(tenant)}/${encodeURIComponent(code)}/interested`, { method: 'POST', headers: deviceHeader(device), body: JSON.stringify({ propertyId }) }),
+  publicTalk: (tenant, code, device) => request(`/public/s/${encodeURIComponent(tenant)}/${encodeURIComponent(code)}/talk`, { method: 'POST', headers: deviceHeader(device), body: '{}' }),
+  publicCatalogue: (tenant, filters, device) => request(`/public/catalogue/${encodeURIComponent(tenant)}${qs(filters)}`, { fresh: true, headers: deviceHeader(device) }),
+  publicCatalogueHome: (tenant, slug, device) => request(`/public/catalogue/${encodeURIComponent(tenant)}/${encodeURIComponent(slug)}`, { fresh: true, headers: deviceHeader(device) }),
+  publicEnquiry: (tenant, body, device) => request(`/public/catalogue/${encodeURIComponent(tenant)}/enquiry`, { method: 'POST', headers: deviceHeader(device), body: JSON.stringify(body) }),
   publicGallery: (slug, ref) => request(`/public/gallery/${encodeURIComponent(slug)}/${encodeURIComponent(ref)}`, { fresh: true }),
   updateProperty: (id, patch) => request(`/modules/properties/records/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
