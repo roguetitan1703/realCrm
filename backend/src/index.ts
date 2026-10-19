@@ -138,9 +138,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.method !== 'GET' && req.method !== 'OPTIONS') {
     // Public pages (no session) name their firm in the URL; routes/public.ts
     // sets publicTenantId. Never the header or the default tenant for those.
+    // originalUrl, not path: by 'finish' a mounted router has stripped its
+    // prefix from req.url/req.path, so `path` never began with /api/v1/public.
     res.on('finish', () => {
       if (res.statusCode >= 400) return;
-      const isPublic = req.path.startsWith('/api/v1/public/');
+      const isPublic = String(req.originalUrl || '').startsWith('/api/v1/public/');
       const t = isPublic ? (req as any).publicTenantId : req.tenantId;
       if (t) scheduleCloseSettled(t);
     });
