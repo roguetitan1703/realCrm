@@ -633,7 +633,10 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
       id: 'inventory',
       title: 'Shortlisted and matching flats',
       right: <button className="btn btn-secondary btn-sm" onClick={() => store.openModal({ kind: 'attachProp', leadId: l.id })}><Icon name="plus" size={14} /> Attach property</button>,
-      render: () => propRows.length === 0
+      // A list row has no shortlist: wait for the record rather than show
+      // (and offer to send) the wrong homes.
+      render: () => l.__partial ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
+        : propRows.length === 0
         ? <div className="detail-empty">None yet.</div>
         : <>
           {/* Tick one, some or all, then Send — the lead is the recipient.
@@ -694,7 +697,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     {
       id: 'timeline',
       title: 'Inquiry interaction timeline',
-      render: () => <Timeline events={l.timeline} agents={store.state.agents} currentUserId={store.state.activeAgentId}
+      render: () => l.__partial ? <div className="list-spin" role="status" aria-label="Loading"><span /></div> : <Timeline events={l.timeline} agents={store.state.agents} currentUserId={store.state.activeAgentId}
         onEditRemark={(eventId, text, outcome) => store.editRemark('lead', l.id, eventId, text, outcome)} />,
     },
   ]

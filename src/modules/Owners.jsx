@@ -310,7 +310,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     : { ...OWNERS_DEF, columns: OWNERS_DEF.columns.filter(c => c.key !== 'callback') }), [tab])
 
   const open = (o) => {
-    store.cacheRecords('owner', [o])
+    store.cacheRecords('owner', [o], true)
     // ON TOP OF the list's state, not instead of it. These replaced the whole
     // selection, so the open project went with it and Back landed on the
     // project cards instead of the project's list.

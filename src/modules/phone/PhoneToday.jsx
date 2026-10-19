@@ -279,7 +279,7 @@ function TodoList({ store, go, feed }) {
   const oc = feed.owners?.counts || {}
 
   const openLead = (l) => go('leads', { leadId: l.id, leadOpen: true })
-  const openOwner = (o) => { store.cacheRecords('owner', [o]); go('calling', { ownerId: o.id, ownerOpen: true }) }
+  const openOwner = (o) => { store.cacheRecords('owner', [o], true); go('calling', { ownerId: o.id, ownerOpen: true }) }
   // A renewal row is an agreement: open its flat, or the lead when the flat is
   // not one of ours.
   const openAgreement = (a) => (a.propertyId

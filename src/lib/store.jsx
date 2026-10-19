@@ -33,6 +33,14 @@ const clone = (x) => JSON.parse(JSON.stringify(x))
 // grow back into the whole book.
 const CACHE_LIMIT = 500
 
+// What only the record request reads, per kind. A list row never carries these,
+// so it never writes them into the cache (CACHE_RECORDS).
+const DETAIL_ONLY = {
+  lead: ['shortlist', 'feedback', 'timeline', 'shortlistProps'],
+  property: ['timeline'],
+  owner: ['timeline'],
+}
+
 // ── Cache helpers ───────────────────────────────────────────────────────────
 // The record cache replaced two arrays holding every lead and every property in
 // the firm. A write goes to the server; these keep the copy on screen in step
@@ -395,14 +403,22 @@ function reducer(state, action) {
       // to this cache at all — and why opening any row costs a fetch the cache
       // exists to avoid. Marking them lets both be true: a partial is enough to
       // paint the record instantly, and useRecord still goes for the rest.
+      //
+      // A list row also never REPLACES those parts. An API from before list rows
+      // stopped sending them still sends `timeline: []` and the legacy shortlist
+      // column, and those landed over the record's own (DETAIL_ONLY).
+      const keep = DETAIL_ONLY[kind] || []
       for (const r of action.records || []) if (r?.id) {
         const prev = next[r.id]
         delete next[r.id]
-        next[r.id] = !action.partial ? r
+        if (!action.partial) { next[r.id] = r; continue }
+        const row = { ...r }
+        for (const k of keep) delete row[k]
+        next[r.id] = (prev && !prev.__partial)
           // a list row refreshing a record we already hold in full: take its
           // updated columns, keep the parts a list response cannot carry.
-          : (prev && !prev.__partial) ? { ...prev, ...r }
-          : { ...r, __partial: true }
+          ? { ...prev, ...row }
+          : { ...prev, ...row, __partial: true }
       }
       const keys = Object.keys(next)
       if (keys.length > CACHE_LIMIT) for (const k of keys.slice(0, keys.length - CACHE_LIMIT)) delete next[k]
@@ -1160,18 +1176,45 @@ export function StoreProvider({ children }) {
   // and the cached lead only moves once the server answers — so a second
   // attach clicked before the first returned sent a list without the first,
   // and it was dropped. Each change now builds on the one queued before it.
+  //
+  // AND BUILT ON THE WHOLE LIST. The base was the cached lead's shortlist, and a
+  // lead opened from a list is cached as its list row, which carries no
+  // shortlist (or, from an older API, a stale one): attaching one home sent a
+  // list of one, and the server deleted the rest. The base is now the full
+  // record, fetched when the cache holds only a row; if it cannot be read,
+  // nothing is sent.
+  // The whole lead: the cached one when it is the full record, otherwise read.
+  const fullLead = (leadId) => {
+    const c = api.lookup('lead', leadId)
+    if (c && !c.__partial) return Promise.resolve(c)
+    return apiClient.getLead(leadId).then(r => {
+      const rec = r?.lead || r?.record || null
+      if (rec?.id) dispatch({ type: 'CACHE_RECORDS', kind: 'lead', records: [rec] })
+      return rec
+    }).catch(() => null)
+  }
   const changeShortlist = (leadId, next, send) => {
-    const q = shortlistQueue.get(leadId) || { list: null, chain: Promise.resolve() }
-    const list = next(q.list || api.lookup('lead', leadId)?.shortlist || [])
-    if (!list) return Promise.resolve(null)
-    q.list = list
+    const q = shortlistQueue.get(leadId) || { list: null, chain: Promise.resolve(), pending: 0 }
     shortlistQueue.set(leadId, q)
-    q.chain = q.chain.then(() => send(list)).then(res => {
-      // Failed, or nothing newer queued: the cached lead is the truth again.
-      if (!res || q.list === list) shortlistQueue.delete(leadId)
-      return res
+    q.pending++
+    const mine = q.chain.then(async () => {
+      try {
+        const base = q.list || (await fullLead(leadId))?.shortlist
+        if (!Array.isArray(base)) { toast('Could not read this lead’s shortlist. Try again.', 'warn'); return null }
+        const list = next(base)
+        if (!list) return null
+        q.list = list
+        const res = await send(list)
+        // Failed: the next change starts from the server's list, not this one.
+        if (!res) q.list = null
+        return res
+      } finally {
+        // Nothing newer queued: the cached lead is the truth again.
+        if (--q.pending === 0) shortlistQueue.delete(leadId)
+      }
     })
-    return q.chain
+    q.chain = mine.catch(() => null)
+    return mine
   }
 
   const write = useCallback((what, call, apply, okMsg) => call()
@@ -1187,9 +1230,11 @@ export function StoreProvider({ children }) {
   // A write that answers with the record it wrote should not be followed by a
   // read asking what it wrote. Chain this onto the call: `.then(adopt('lead'))`.
   // Returns the response untouched so `rejected()` still sees it.
-  const adopt = useCallback((kind) => (res) => {
+  // `partial` when the write answers with the row, not the record: a property
+  // update returns its columns without its history.
+  const adopt = useCallback((kind, partial) => (res) => {
     const rec = res?.data
-    if (rec?.id) dispatch({ type: 'CACHE_RECORDS', kind, records: [rec] })
+    if (rec?.id) dispatch({ type: 'CACHE_RECORDS', kind, records: [rec], partial })
     return res
   }, [])
 
@@ -1276,7 +1321,7 @@ export function StoreProvider({ children }) {
         () => run)
     },
     updateProp: (propId, patch) => write('Update property',
-      () => apiClient.updateProperty(propId, patch).then(adopt('property')),
+      () => apiClient.updateProperty(propId, patch).then(adopt('property', true)),
       () => dispatch({ type: 'UPDATE_PROP', propId, patch }),
       'Property details updated'),
     // Optimistic: a stage change is a drag, and a card that hangs mid-air until
@@ -1425,15 +1470,17 @@ export function StoreProvider({ children }) {
     // Visit feedback was purely local — the verdict that is supposed to refine
     // this lead's matches never reached the server, so it was forgotten on
     // reload and no teammate ever saw why a flat was rejected.
-    visitFeedback: (leadId, propId, verdict, reason, society) => {
-      const lead = api.lookup('lead', leadId)
-      const feedback = { ...(lead?.feedback || {}), [propId]: { verdict, reason: reason || null } }
-      const cur = lead?.shortlist || []
+    // Sends the whole shortlist and feedback, so it reads them from the whole
+    // record, not a list row (see changeShortlist).
+    visitFeedback: (leadId, propId, verdict, reason, society) => fullLead(leadId).then(lead => {
+      if (!Array.isArray(lead?.shortlist)) { toast('Could not read this lead’s shortlist. Try again.', 'warn'); return null }
+      const feedback = { ...(lead.feedback || {}), [propId]: { verdict, reason: reason || null } }
+      const cur = lead.shortlist
       return write('Visit feedback',
         () => apiClient.updateLead(leadId, { feedback, shortlist: cur.includes(propId) ? cur : [...cur, propId] }),
         () => dispatch({ type: 'VISIT_FEEDBACK', leadId, propId, verdict, reason, society }),
         verdict === 'liked' ? 'Marked as liked' : 'Rejection saved')
-    },
+    }),
     // Same reason `addProperty` below resolves the server's row: the form data
     // carries no id (the server mints it), so an optimistic prepend produced an
     // unclickable card that then duplicated against the real row on hydrate.

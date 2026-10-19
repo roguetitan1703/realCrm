@@ -614,7 +614,8 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
       id: 'history',
       title: 'History',
       right: <button className="btn btn-ghost btn-sm" onClick={() => store.openModal({ kind: 'ownerUpdate', propId: p.id })}><Icon name="wa" size={13} />Update owner</button>,
-      render: () => (p.timeline && p.timeline.length)
+      render: () => p.__partial ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
+        : (p.timeline && p.timeline.length)
         ? <Timeline events={p.timeline} agents={store.state.agents} currentUserId={store.state.activeAgentId}
             onEditRemark={(eventId, text, outcome) => store.editRemark('property', p.id, eventId, text, outcome)} />
         : <div className="detail-empty">Nothing yet.</div>,

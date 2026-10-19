@@ -595,13 +595,19 @@ function collapseStatusMirrors(events: TimelineEvent[]): TimelineEvent[] {
   });
 }
 
-function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = []): any {
+// WHAT A CALLER DID NOT READ IS LEFT OUT, not filled in. A list reads the lead
+// row alone; with no events and no lead_shortlist rows passed, this used to send
+// `timeline: []` and the shortlist from the legacy JSONB column. The browser
+// merged those rows over the record it held, so a lead opened from the list
+// showed one shortlisted home where it had six, and the next shortlist write was
+// built from that list. `undefined` here means "not loaded", `[]` means "none".
+function rowToLead(r: any, events?: TimelineEvent[], shortlistRows?: any[]): any {
   const createdMs = r.created_at ? new Date(r.created_at).getTime() : Date.now();
   const minsAgo = Math.max(0, Math.floor((Date.now() - createdMs) / 60000));
 
   // Format timeline events for lead object
-  const leadEvents = collapseStatusMirrors(events.filter(e => e.record_id === r.id))
-    .map(mapEventForClient);
+  const leadEvents = events ? collapseStatusMirrors(events.filter(e => e.record_id === r.id))
+    .map(mapEventForClient) : [];
 
   // Columns are source of truth; fall back to the req JSONB when a column is null.
   const jreq = r.req || {};
@@ -622,9 +628,12 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
 
   // lead_shortlist rows are the source of truth once they exist; fall back to
   // the JSONB columns for leads that haven't been backfilled/touched yet.
-  let shortlist: string[];
-  let feedback: Record<string, any>;
-  if (shortlistRows && shortlistRows.length > 0) {
+  let shortlist: string[] | undefined;
+  let feedback: Record<string, any> | undefined;
+  if (!shortlistRows) {
+    shortlist = undefined;
+    feedback = undefined;
+  } else if (shortlistRows.length > 0) {
     shortlist = shortlistRows.map(sr => sr.property_id);
     feedback = {};
     for (const sr of shortlistRows) {
@@ -693,7 +702,8 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     // different question and stops being useful after a week.
     createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
     minsAgo,
-    timeline: leadEvents.length > 0 ? leadEvents : (r.notes || []).map((n: string) => ({ type: 'note', label: n, ago: 'just now' })),
+    timeline: !events ? undefined
+      : leadEvents.length > 0 ? leadEvents : (r.notes || []).map((n: string) => ({ type: 'note', label: n, ago: 'just now' })),
   };
 }
 
@@ -4872,7 +4882,14 @@ export async function listProperties(opts: {
   // the listings grid needed the leads in memory at all. One join, bounded to
   // the page that is actually being rendered.
   const demand = await demandFor(t, rows.map((r: any) => r.id));
-  const mapped = rows.map((r: any) => ({ ...rowToProperty(r), demandCount: demand.get(r.id) ?? 0 }));
+  // A list row carries no history (only the record reads the shared timeline)
+  // and cannot name an author the record finds in the ledger — left out rather
+  // than sent as [] and null, which overwrote both on the open record.
+  const mapped = rows.map((r: any) => {
+    const { timeline: _history, ...p } = rowToProperty(r);
+    if (p.createdBy == null) delete p.createdBy;
+    return { ...p, demandCount: demand.get(r.id) ?? 0 };
+  });
   return { rows: mapped, total: countRows[0]?.n ?? 0, page, limit };
 }
 
@@ -5320,7 +5337,7 @@ export async function getPropertyBuyers(propertyId: string, limit = 50): Promise
   const rows = await sql`SELECT * FROM crm_leads WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit}`;
   const shortlistRows = await sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(rows.map(r => r.id).length ? rows.map(r => r.id) : [''])}`;
   const byLead = groupShortlistByLead(shortlistRows);
-  return rows.map(r => rowToLead(r, [], byLead.get(r.id) || []));
+  return rows.map(r => rowToLead(r, undefined, byLead.get(r.id) || []));
 }
 
 /**
