@@ -2140,11 +2140,14 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
     await syncLeadShortlist(newId, shortlist, feedback, t);
   }
 
+  // A person's name, never their user id ("Assigned to agent u_team_…"), and
+  // nothing at all when nobody was assigned (it read "agent null").
+  const [assignee] = agentId ? await sql`SELECT name FROM users WHERE tenant_id = ${t} AND id = ${agentId} LIMIT 1` : [];
   await addTimelineEvent({
     record_id: newId,
     type: 'creation',
     title: 'New Lead Created',
-    description: `Lead created via API (Source: ${source}). Assigned to agent ${agentId}.`,
+    description: `Lead created via API (Source: ${source}).${agentId ? ` Assigned to ${assignee?.name || 'a former member'}.` : ''}`,
   });
 
   const created = await getLeadById(newId);
