@@ -12,8 +12,9 @@
 import { Router, Request, Response } from 'express';
 import { CallActionSchema, WhatsAppActionSchema, StageChangeSchema, MergeSchema } from '../models';
 import { requireTenantAuth, requireModuleEnabled, requireQuotaAvailable } from '../middleware/auth';
-import { getLeads, createLead, getAgents, getLeadById, listLeads, getLeadsSummary, getLeadCandidates, bulkAssignLeads, bulkDeleteLeads, splitAssign } from '../services/store';
+import { getLeads, createLead, getLeadById, listLeads, getLeadsSummary, getLeadCandidates, bulkAssignLeads, bulkDeleteLeads, splitAssign } from '../services/store';
 import { sql } from '../services/db';
+import { onDutyWorkers } from '../services/workforce';
 import { leadShares } from '../services/sharing';
 import { shareFail } from './sharing';
 
@@ -282,9 +283,10 @@ leadsRouter.post('/:id/actions/schedule-visit', async (req: Request, res: Respon
 leadsRouter.post('/:id/actions/assign-round-robin', async (req: Request, res: Response) => {
   try {
     const recordId = req.params.id;
-    const agents = await getAgents();
-    const activeAgents = agents.filter(a => a.duty_status !== 'OFF_DUTY');
-    const selectedAgentId = activeAgents.length > 0 ? activeAgents[0].id : (agents[0]?.id || 'usr_default');
+    // Who can take work and is on duty (workforce.ts). This filtered on a
+    // field the agent rows never carry and fell back to a made-up id.
+    const [selectedAgentId] = await onDutyWorkers(req.tenantId!);
+    if (!selectedAgentId) return res.status(409).json({ error: 'nobody_available', message: 'Nobody on duty can take this lead.' });
 
     await sql`UPDATE crm_leads SET agent_id = ${selectedAgentId} WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
     console.log(`[Leads Router - Round Robin] Assigned Lead ${recordId} to Agent ${selectedAgentId} in DB`);

@@ -39,6 +39,7 @@ import { audit } from './audit.js';
 import { landEnquiry } from './ingestion.js';
 import { assertLeadWrite } from '../lib/permissions.js';
 import { normalizePhone } from './roster.js';
+import { canTakeWork } from './workforce.js';
 import { BHK } from '../../../src/data/propertyFields.js';
 import { isDeskRole } from '../lib/permissions.js';
 import {
@@ -124,7 +125,7 @@ async function activeUser(tenantId: string, id: string | null | undefined): Prom
   if (!id) return null;
   const [u] = await sql`
     SELECT id, name, phone, role FROM users
-     WHERE tenant_id = ${tenantId} AND id = ${id} AND deleted_at IS NULL AND status ILIKE 'active' LIMIT 1`;
+     WHERE tenant_id = ${tenantId} AND id = ${id} AND ${canTakeWork(tenantId, sql`users.id`)} LIMIT 1`;
   return u || null;
 }
 

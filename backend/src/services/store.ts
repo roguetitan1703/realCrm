@@ -27,6 +27,7 @@ import { galleryPath } from './gallery.js';
 import { planRoster, normalizePhone, RosterRow } from './roster.js';
 import { assertLeadWrite, ForbiddenError, isDeskRole } from '../lib/permissions.js';
 import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js';
+import { canTakeWork, workableIds, onDutyWorkers } from './workforce.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
 // and three copies of that rule would drift.
@@ -392,6 +393,9 @@ function rowToAgent(r: any): any {
     // Comes from users.status, which is where suspension is decided.
     suspended: String(r.user_status || '').toLowerCase() === 'suspended',
     ...(r.metadata || {}),
+    // CAN BE GIVEN WORK (workforce.ts): the rota skips anyone who cannot, so a
+    // picker offers only these. After metadata, which must not override it.
+    canTakeWork: r.can_take_work === true,
     // After metadata, which carries a stored `initials` of its own.
     ...nameParts(r.name, r.first, r.initials),
   };
@@ -1389,7 +1393,7 @@ export async function getBootstrap(): Promise<any> {
   // exactly what the ten queries returned.
   const [row] = await sql`
     WITH agents AS (
-      SELECT a.*, (u.deleted_at IS NOT NULL) AS departed FROM crm_agents a
+      SELECT a.*, (u.deleted_at IS NOT NULL) AS departed, ${canTakeWork(t, sql`a.id`)} AS can_take_work FROM crm_agents a
         LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
        WHERE a.tenant_id = ${t}
     ),
@@ -4160,7 +4164,7 @@ export async function distributeWork(opts: {
   const live = await sql`
     SELECT id, name FROM users
      WHERE tenant_id = ${t} AND id IN ${sql([...new Set(opts.targets.filter(Boolean))])}
-       AND deleted_at IS NULL AND lower(coalesce(status, 'active')) = 'active'`;
+       AND ${canTakeWork(t, sql`users.id`)}`;
   if (!live.length) throw new ForbiddenError('Pick at least one active person to hand the work to.');
   // The order the caller gave, keeping only the people who may hold work — so
   // the split is predictable and a suspended name silently dropped cannot
@@ -4246,7 +4250,7 @@ export async function splitAssign(
   const live = await sql`
     SELECT id, name FROM users
      WHERE tenant_id = ${t} AND id IN ${sql([...new Set((targets || []).filter(Boolean))])}
-       AND deleted_at IS NULL AND lower(coalesce(status, 'active')) = 'active'`;
+       AND ${canTakeWork(t, sql`users.id`)}`;
   if (!clean.length || !live.length) return { assigned: 0, perTarget: [] };
   const order = targets.filter(id => live.some((u: any) => u.id === id));
 
@@ -4314,9 +4318,7 @@ export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SY
   // once for the whole backlog — the same trick the import uses.
   let pool: (string | null)[];
   if (Array.isArray(agentIds) && agentIds.length) {
-    const ok = (await sql`SELECT id FROM users WHERE tenant_id = ${t} AND id IN ${sql(agentIds.map(String))}
-                           AND deleted_at IS NULL AND lower(coalesce(status, 'active')) <> 'suspended'`).map((r: any) => r.id);
-    const chosen = agentIds.map(String).filter(id => ok.includes(id));
+    const chosen = await workableIds(t, agentIds.map(String));
     if (!chosen.length) throw new ForbiddenError('None of those people can be given work.');
     pool = ids.map((_, i) => chosen[i % chosen.length]);
   } else {
@@ -5735,8 +5737,7 @@ async function dealRota(pool: 'leads' | 'owners', n: number): Promise<string[]> 
         FROM crm_routing_rules WHERE tenant_id = ${t} AND jsonb_array_length(${col}) > 0
          FOR UPDATE
     ), live AS (
-      SELECT u.id FROM users u, r
-       WHERE u.tenant_id = ${t} AND u.deleted_at IS NULL AND u.status ILIKE 'active' AND r.ids ? u.id
+      SELECT x.id FROM r, jsonb_array_elements_text(r.ids) AS x(id) WHERE ${canTakeWork(t, sql`x.id`)}
     ), picks AS (
       SELECT k, (r.i + k) % r.len AS pos, r.ids ->> ((r.i + k) % r.len) AS id
         FROM r, generate_series(1, r.len * ${n}) AS k
@@ -5754,14 +5755,13 @@ export async function nextRoutedAgent(): Promise<string | null> {
   const [next] = await dealRota('leads', 1);
   if (next) return next;
 
-  // The pool has never been configured for this tenant (no row, or an empty
-  // active_agent_ids) — fall back to every on-duty agent that actually
-  // exists, so "nobody ticked the checkboxes in Settings yet" degrades to
-  // real distribution instead of one hardcoded id. Still a plain read here,
-  // but this only runs for a genuinely unconfigured tenant, not the
-  // steady-state case a portal integration hits on every push.
-  const agents = await getAgents();
-  const pool = agents.filter(a => a.duty_status !== 'OFF_DUTY').map(a => a.id);
+  // No rota, or nobody on it who can take work — fall back to everyone who
+  // can take work and is on duty (workforce.ts), so "nobody ticked the
+  // checkboxes in Settings yet" degrades to real distribution instead of one
+  // hardcoded id. This filtered on `a.duty_status`, a field the agent rows
+  // never carry (it is dutyStatus), so it removed nobody — suspended people
+  // and agents with no account included.
+  const pool = await onDutyWorkers(tid());
   if (!pool.length) return null;
   const picked = pool[Math.floor(Math.random() * pool.length)];
   return picked;
@@ -5795,7 +5795,7 @@ export async function getAgents(): Promise<any[]> {
   // crm_agents row is kept so historical lead attribution still resolves. A
   // LEFT JOIN keeps any legacy agent that has no users row at all.
   const rows = await sql`
-    SELECT a.*, u.status AS user_status FROM crm_agents a
+    SELECT a.*, u.status AS user_status, ${canTakeWork(tid(), sql`a.id`)} AS can_take_work FROM crm_agents a
     LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
     WHERE a.tenant_id = ${tid()} AND u.deleted_at IS NULL
   `;
@@ -6588,10 +6588,8 @@ export function isPlaceholderName(name: any): boolean {
  */
 export async function activeOwnerOf(agentId: string | null | undefined): Promise<string | null> {
   if (!agentId) return null;
-  const rows = await sql`
-    SELECT id FROM users
-     WHERE id = ${agentId} AND tenant_id = ${tid()} AND status ILIKE 'active' LIMIT 1`;
-  return rows.length ? String(rows[0].id) : null;
+  const [row] = await sql`SELECT ${canTakeWork(tid(), agentId)} AS ok`;
+  return row?.ok ? String(agentId) : null;
 }
 
 /**
