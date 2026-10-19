@@ -6070,6 +6070,7 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
   `;
   let n = 0;
   const tally = new Map<string, string[]>();
+  const movedNow: { recordId: string; toName: string | null }[] = [];
   for (const owner of rows) {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${owner.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
     const agentId = await nextRoutedOwnerAgent();
