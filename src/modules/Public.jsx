@@ -382,7 +382,11 @@ function StaffBar({ tenant, staff, flats, tapDone, onTapDone }) {
         <span className="pv-staff-who">
           {lead
             ? (lead.visible === false ? 'Another agent’s lead'
-              : tapLine ? <><b>{who}</b> {tapLine}</>
+              // From a browser not known to be theirs the tap is someone's on
+              // their link, as the alert says; never stated as them.
+              : tapLine ? (staff.tap.tapFrom === 'someone'
+                ? <>Someone on <b>{who}</b>’s link {tapLine}</>
+                : <><b>{who}</b> {tapLine}</>)
               : <>{word} · <b>{who}</b></>)
             : 'No recipient'}
           {dead && <span className="pv-staff-dead"> · {state === 'expired' ? 'Expired' : state === 'off' ? 'Turned off' : 'Stopped'}</span>}
