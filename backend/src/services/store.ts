@@ -5055,11 +5055,11 @@ function assertCatalogueRole() {
   if (role && role !== 'system' && !isDeskRole(role)) throw new ForbiddenError('Only an owner or a manager can change what is in the catalogue.');
 }
 
-export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = SYSTEM_CTX): Promise<{ changed: number; withoutPhotos: number }> {
+export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = SYSTEM_CTX): Promise<{ changed: number; live: number; waiting: number; withoutPhotos: number }> {
   assertCatalogueRole();
   const t = tid();
   const clean = [...new Set((ids || []).map(String).filter(Boolean))].slice(0, 1000);
-  if (!clean.length) return { changed: 0, withoutPhotos: 0 };
+  if (!clean.length) return { changed: 0, live: 0, waiting: 0, withoutPhotos: 0 };
   const rows = await sql`
     UPDATE crm_properties SET in_catalogue = ${on}, updated_at = NOW()
      WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND coalesce(in_catalogue, FALSE) <> ${on}
@@ -5089,11 +5089,18 @@ export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = S
       }
     }
   }
-  const withoutPhotos = on
-    ? (await sql`SELECT count(*)::int AS n FROM crm_properties
-                  WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND in_catalogue = TRUE
-                    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(media, '[]'::jsonb)) m WHERE m->>'kind' IS DISTINCT FROM 'video')`)[0].n
-    : 0;
+  // Of the ticked homes: `live` are on the page now (Available, the
+  // catalogue's own rule); `waiting` are ticked but not Available, and appear
+  // when they are; `withoutPhotos` counts live ones only — a sold flat with no
+  // photos is not a photo job.
+  const [tally] = on
+    ? await sql`SELECT
+          count(*) FILTER (WHERE ${LIVE})::int AS live,
+          count(*) FILTER (WHERE NOT (${LIVE}))::int AS waiting,
+          count(*) FILTER (WHERE ${LIVE} AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(media, '[]'::jsonb)) m WHERE m->>'kind' IS DISTINCT FROM 'video'))::int AS without
+        FROM crm_properties WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND in_catalogue = TRUE`
+    : [{ live: 0, waiting: 0, without: 0 }];
+  const withoutPhotos = tally.without;
   for (const r of rows as any[]) {
     await propertyEvent(r.id, ctx, 'catalogue', 'Catalogue', on ? 'Shown in the catalogue' : 'Taken out of the catalogue');
   }
@@ -5106,8 +5113,9 @@ export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = S
       metadata: { ids: rows.map((r: any) => r.id) }, ip: ctx.ip, user_agent: ctx.userAgent,
     });
   }
-  return { changed: rows.length, withoutPhotos };
+  return { changed: rows.length, live: tally.live, waiting: tally.waiting, withoutPhotos };
 }
+const LIVE = sql`coalesce(status, 'Available') ILIKE 'available'`;
 
 /**
  * The numbers the stat strip and the filter menus need, counted in Postgres.
