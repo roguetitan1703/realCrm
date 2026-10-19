@@ -591,7 +591,9 @@ export async function landEnquiry(args: {
         // four buzzes would have taught the desk to ignore the fifth. A payload
         // folded into a session already open says nothing new.
         if (session?.isNewSession) {
-          const owner = (reassign as any).agentId || existing.agent_id;
+          // Who holds it NOW: the keeper, or whoever the rota just gave it to.
+          // Never the old holder who cannot take work — with nobody, the desk.
+          const owner = keeper || (reassign as any).agentId || null;
           // A LEAD WHO COMES BACK IS A LIVE LEAD, whatever it was closed as.
           //
           // This used to branch on the rejection REASON: anything reading as
@@ -630,17 +632,15 @@ export async function landEnquiry(args: {
           // `/leads/<id>` -- a path this app does not have, so tapping it went
           // nowhere. The rejection is carried as data on the repeat alert
           // below, which the person holding the lead actually receives.
-          if (owner) {
-            await notify({
-              userId: owner, type: 'lead_repeat',
-              data: {
-                name: existing.name || existing.phone, source: integration.provider,
-                changed: conflicts.length,
-                previousStage: terminal ? existing.stage : null,
-              },
-              link: `?screen=leads&lead=${existing.id}`,
-            }).catch(() => {});
-          }
+          await notifyOrDesk(owner, {
+            tenantId: integration.tenant_id, type: 'lead_repeat',
+            data: {
+              name: existing.name || existing.phone, source: integration.provider,
+              changed: conflicts.length,
+              previousStage: terminal ? existing.stage : null,
+            },
+            link: `?screen=leads&lead=${existing.id}`,
+          }).catch(() => {});
         }
         await mark('merged', { leadId: existing.id });
         return { status: 'merged', leadId: existing.id };

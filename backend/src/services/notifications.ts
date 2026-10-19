@@ -118,7 +118,10 @@ export async function notify(n: NotifyInput): Promise<void> {
      WHERE ${canTakeWork(t, n.userId)}
     RETURNING id
   `;
-  if (!filed.length) return;
+  if (!filed.length) {
+    console.warn(`[Notify] ${n.type} for tenant ${t} not filed: ${n.userId} is not an active member`);
+    return;
+  }
   // Due now (outside the night window, urgent enough): push it straight away.
   // Anything else waits for dispatchDue(), which the sweep runs every minute.
   if (sendAfter && sendAfter.getTime() <= Date.now()) {
@@ -343,7 +346,8 @@ export async function processScheduledNotifications(
     for (const { tenant_id: t } of tenants) {
       // 1. followup_due & site_visit_reminder
       const dueLeads = await sql`
-        SELECT id, name, agent_id, locality, follow_up
+        SELECT id, name, agent_id, locality, follow_up,
+               ${canTakeWork(t, sql`agent_id`)} AS holder_ok
         FROM crm_leads
         WHERE tenant_id = ${t}
           AND follow_up IS NOT NULL
@@ -383,8 +387,9 @@ export async function processScheduledNotifications(
         if (l.agent_id) {
           const action = l.follow_up?.action || l.follow_up?.label || 'Follow-up';
           const isVisit = /visit/i.test(action);
-          notify({
-            userId: l.agent_id,
+          // The holder; the desk when they have left or been suspended, so a
+          // booking whose holder is gone is still somebody's to keep.
+          notifyOrDesk(l.holder_ok ? l.agent_id : null, {
             tenantId: t,
             type: isVisit ? 'site_visit_reminder' : 'followup_due',
             data: { name: l.name, locality: l.locality, action: followUpKind(l.follow_up), when: l.follow_up?.time },
@@ -431,7 +436,8 @@ export async function processScheduledNotifications(
       // people has how many untouched, all day, without buzzing anyone.
       const lookbackHours = agentHours * 6;
       const staleLeads = await sql`
-        SELECT l.id, l.name, l.agent_id, l.locality, l.created_at
+        SELECT l.id, l.name, l.agent_id, l.locality, l.created_at,
+               ${canTakeWork(t, sql`l.agent_id`)} AS holder_ok
         FROM crm_leads l
         WHERE l.tenant_id = ${t}
           AND l.stage = ${arrivalStage}
@@ -443,8 +449,8 @@ export async function processScheduledNotifications(
       `;
 
       for (const l of staleLeads) {
-        notify({
-          userId: l.agent_id,
+        // The holder; the desk when they cannot take work (see followup_due).
+        notifyOrDesk(l.holder_ok ? l.agent_id : null, {
           tenantId: t,
           type: 'lead_untouched',
           data: { name: l.name, hours: agentHours },
