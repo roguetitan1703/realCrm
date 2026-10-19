@@ -5691,13 +5691,33 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
  * round-robin actually needs.
  */
 export async function nextRoutedAgent(): Promise<string | null> {
-  const rows = await sql`
-    UPDATE crm_routing_rules
-    SET last_assigned_index = (last_assigned_index + 1) % GREATEST(jsonb_array_length(active_agent_ids), 1)
-    WHERE tenant_id = ${tid()} AND jsonb_array_length(active_agent_ids) > 0
-    RETURNING active_agent_ids -> last_assigned_index AS agent_id
-  `;
-  if (rows.length && rows[0].agent_id) return String(rows[0].agent_id).replace(/^"|"$/g, '');
+  // THE NEXT ACTIVE PERSON ON THE ROTA. The stored list can name someone who
+  // was suspended, deleted, or never had a user row; handing a lead to that id
+  // filed it under "a former member" until the sweep moved it. So the rota
+  // steps forward from where it stood to the first id that is an active user
+  // of this firm, and stops there — the same rotation over the people who can
+  // take a lead. The stored list is not rewritten. One statement.
+  const t = tid();
+  const [row] = await sql`
+    WITH r AS (
+      SELECT active_agent_ids AS ids, last_assigned_index AS i, jsonb_array_length(active_agent_ids) AS len
+        FROM crm_routing_rules WHERE tenant_id = ${t} AND jsonb_array_length(active_agent_ids) > 0
+         FOR UPDATE
+    ), pick AS (
+      SELECT (r.i + k) % r.len AS idx, r.ids ->> ((r.i + k) % r.len) AS agent_id
+        FROM r, generate_series(1, r.len) AS k
+       WHERE EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = ${t} AND u.id = r.ids ->> ((r.i + k) % r.len)
+                        AND u.deleted_at IS NULL AND u.status ILIKE 'active')
+       ORDER BY k LIMIT 1
+    ), moved AS (
+      UPDATE crm_routing_rules c SET last_assigned_index = pick.idx FROM pick
+       WHERE c.tenant_id = ${t} RETURNING pick.agent_id
+    )
+    SELECT (SELECT agent_id FROM moved) AS agent_id, EXISTS (SELECT 1 FROM r) AS configured`;
+  if (row?.agent_id) return String(row.agent_id);
+  // A rota is set but nobody on it can take a lead: unassigned, like an empty
+  // rota of real people — the unassigned alert and the sweep take it from there.
+  if (row?.configured) return null;
 
   // The pool has never been configured for this tenant (no row, or an empty
   // active_agent_ids) — fall back to every on-duty agent that actually
