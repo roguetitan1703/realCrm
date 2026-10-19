@@ -110,10 +110,18 @@ const areaOf = (h) => {
 // With the project name hidden, "Wakad" over "Wakad" told two homes apart by
 // nothing: the title is then what the home is (size, type, area), and the
 // line under it where it is and how it comes. Never the flat number.
+// "Floor 4 of 12": tells two flats in one building apart without naming one.
+const floorOf = (h) => {
+  const f = String(h.config?.floor ?? '').trim()
+  if (!f) return ''
+  if (/^(0|g|ground)/i.test(f)) return 'Ground floor'
+  const of = Number(h.config?.totalFloors) > 0 ? ` of ${h.config.totalFloors}` : ''
+  return /^\d+$/.test(f) ? `Floor ${f}${of}` : `Floor ${f}`
+}
 const homeTitle = (h) => h.project || [kindOf(h), areaOf(h)].filter(Boolean).join(' · ') || h.locality || h.title || 'Home'
 const subOf = (h) => (h.project
-  ? [kindOf(h), areaOf(h), h.locality]
-  : [h.locality, h.config?.furnishing ? labelOf(FURNISH, h.config.furnishing) : '', h.config?.possession ? labelOf(POSSESSION, h.config.possession) : '']
+  ? [kindOf(h), areaOf(h), floorOf(h), h.locality]
+  : [h.locality, floorOf(h), h.config?.furnishing ? labelOf(FURNISH, h.config.furnishing) : '', h.config?.possession ? labelOf(POSSESSION, h.config.possession) : '']
 ).filter(Boolean).join(' · ')
 const dealWord = (d) => (d === 'rent' ? 'For rent' : d === 'sale' ? 'For sale' : '')
 const priceOf = (h) => (Number(h.price) > 0 ? formatMoney(Number(h.price), { perMonth: h.deal === 'rent' }) : '')
@@ -320,7 +328,7 @@ export function SharedLinkPage({ tenant, code }) {
           <>
             <div className="pv-list-h">
               {/* Not "for you": a link without a recipient goes to groups. */}
-              <h1>{flats.length} homes</h1>
+              <h1>{flats.length === 1 ? '1 home' : `${flats.length} homes`}{d.forRecipient ? ' for you' : ''}</h1>
               {live < flats.length && <span>{live} available</span>}
             </div>
             <div className="pv-grid">
@@ -437,6 +445,9 @@ export function CataloguePage({ tenant }) {
   const deals = (facets.deal || []).filter(x => x === 'sale' || x === 'rent')
   const bhks = (facets.config || []).slice().sort(bhkSort)
   const areas = facets.locality || []
+  // How many each choice would show, with the other filters as they are.
+  const counts = d.facetCounts || {}
+  const nOf = (k, v) => (Number(counts[k]?.[v]) >= 0 && counts[k]?.[v] != null ? Number(counts[k][v]) : null)
   const filtered = !!(f.deal || f.bhk || f.area)
   const total = d.total ?? s.rows.length
   const firstLoad = s.loading && page === 1
@@ -452,14 +463,14 @@ export function CataloguePage({ tenant }) {
           {deals.length > 1 && (
             <div className="pv-seg" role="group" aria-label="Sale or rent">
               {[['', 'All'], ['sale', 'Sale'], ['rent', 'Rent']].map(([v, l]) => (
-                <button key={l} type="button" className={f.deal === v ? 'on' : ''} aria-pressed={f.deal === v} onClick={() => set({ deal: v })}>{l}</button>
+                <button key={l} type="button" className={f.deal === v ? 'on' : ''} aria-pressed={f.deal === v} onClick={() => set({ deal: v })}>{l}{v && nOf('deal', v) != null && <span className="pv-n">{nOf('deal', v)}</span>}</button>
               ))}
             </div>
           )}
           {bhks.length > 1 && (
             <div className="pv-chips" role="group" aria-label="Bedrooms">
               {bhks.map(b => (
-                <button key={b} type="button" className={'pv-chip' + (f.bhk === b ? ' on' : '')} aria-pressed={f.bhk === b} onClick={() => set({ bhk: f.bhk === b ? '' : b })}>{roomLabel(b)}</button>
+                <button key={b} type="button" className={'pv-chip' + (f.bhk === b ? ' on' : '')} aria-pressed={f.bhk === b} onClick={() => set({ bhk: f.bhk === b ? '' : b })}>{roomLabel(b)}{nOf('config', b) != null && <span className="pv-n">{nOf('config', b)}</span>}</button>
               ))}
             </div>
           )}
@@ -468,7 +479,7 @@ export function CataloguePage({ tenant }) {
               <Icon name="mapPin" size={15} />
               <select value={f.area} onChange={e => set({ area: e.target.value })} aria-label="Area">
                 <option value="">All areas</option>
-                {areas.map(a => <option key={a} value={a}>{a}</option>)}
+                {areas.map(a => <option key={a} value={a}>{nOf('locality', a) != null ? `${a} (${nOf('locality', a)})` : a}</option>)}
               </select>
               <Icon name="chevDown" size={14} />
             </label>
