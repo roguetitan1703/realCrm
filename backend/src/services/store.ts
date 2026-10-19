@@ -1394,7 +1394,7 @@ export async function getBootstrap(): Promise<any> {
   // exactly what the ten queries returned.
   const [row] = await sql`
     WITH agents AS (
-      SELECT a.*, (u.deleted_at IS NOT NULL) AS departed, ${canTakeWork(t, sql`a.id`)} AS can_take_work FROM crm_agents a
+      SELECT a.*, (u.deleted_at IS NOT NULL) AS departed, u.status AS user_status, ${canTakeWork(t, sql`a.id`)} AS can_take_work FROM crm_agents a
         LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
        WHERE a.tenant_id = ${t}
     ),
