@@ -184,6 +184,18 @@ export function phoneLabel(raw, loc = current) {
   return ten ? `+1 ${ten.slice(0, 3)}-${ten.slice(3, 6)}-${ten.slice(6)}` : raw
 }
 
+/**
+ * Why a typed mobile number cannot be saved yet, in words a person can act
+ * on, or '' when it can (or nothing is typed). The same ten-digit rule as
+ * phoneE164 and looksLikePhone; said aloud, because a Save that is simply
+ * disabled does not tell anyone what is wrong.
+ */
+export function phoneProblem(raw, loc = current) {
+  const d = String(raw || '').replace(/\D/g, '')
+  if (!d || d.length >= 10) return ''
+  return loc.phoneCountry === '1' ? 'Enter a 10-digit phone number' : 'Enter a 10-digit mobile number'
+}
+
 /** What a phone field's example shows. `india` is the field's own Indian
  *  example, kept as it was; `national` asks for the number without its code. */
 export function phonePlaceholder(india, { national = false } = {}, loc = current) {

@@ -35,13 +35,13 @@ import { openSend } from './SendSheet.jsx'
 // from the UI), so the two lists are near-identical but not the same thing.
 export const PROP_FILTER_KEYS = [
   'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
-  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'unit',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'unit', 'catalogue',
 ]
 
 const API_FILTERS = [
   'status', 'deal', 'type', 'locality', 'project',
   'category', 'bhk', 'subtype', 'furnishing', 'facing',
-  'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'tab', 'unit',
+  'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'tab', 'unit', 'catalogue',
 ]
 function toQuery({ page, limit, q, ...filters }) {
   const out = { page, limit, q }
@@ -602,7 +602,10 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
             <div key={b.lead.id} className={'relrow' + (i ? ' relrow-div' : '')}>
               <button className="relrow-main" onClick={() => go('leads', { leadId: b.lead.id, leadOpen: true })}>
                 <div className="relrow-name">{b.lead.name}</div>
-                <div className="relrow-sub">{[latestPlus(b.lead.req.config), latestPlus(b.lead.req.locality), b.fitLine].filter(Boolean).join(' · ')}</div>
+                {/* The fit line names the matched BHK and locality, which the
+                    requirement already says: once each. */}
+                <div className="relrow-sub">{[latestPlus(b.lead.req.config), latestPlus(b.lead.req.locality), ...String(b.fitLine || '').split(' · ')]
+                  .filter(Boolean).filter((x, i, a) => a.findIndex(y => y.toLowerCase() === x.toLowerCase()) === i).join(' · ')}</div>
               </button>
               <Button variant="secondary" size="sm" icon="wa" onClick={() => share(b.lead)}>Send</Button>
             </div>

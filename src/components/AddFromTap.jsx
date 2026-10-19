@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
 import { Button, Input } from './primitives.jsx'
 import { api, currentTenant } from '../lib/api.js'
-import { phonePlaceholder } from '../lib/locale.js'
+import { phonePlaceholder, phoneProblem } from '../lib/locale.js'
 import { canPaste, canPickContact, pasteNumber, pickContact, looksLikePhone, refusal, heldText } from '../lib/share.js'
 
 // ============================================================================
@@ -28,6 +28,8 @@ export default function AddFromTap({ tap, home, via = 'interested', onDone, onCa
   const [phone, setPhone] = useState('')
   const [busy, setBusy] = useState(false)
   const [state, setState] = useState(null) // null | { kind: 'held'|'denied'|'error'|'nopaste', ... }
+  const [tried, setTried] = useState(false)
+  const problem = tried ? phoneProblem(phone) : ''
 
   const paste = async () => {
     const n = await pasteNumber()
@@ -41,6 +43,7 @@ export default function AddFromTap({ tap, home, via = 'interested', onDone, onCa
   }
 
   const save = async () => {
+    setTried(true)
     if (!looksLikePhone(phone) || busy) return
     setBusy(true); setState(null)
     try {
@@ -88,8 +91,9 @@ export default function AddFromTap({ tap, home, via = 'interested', onDone, onCa
         <div className="field">
           <label htmlFor="aft-phone">Mobile number</label>
           <Input id="aft-phone" value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel"
-            placeholder={phonePlaceholder('98xxx xxxxx')} onKeyDown={e => { if (e.key === 'Enter') save() }} />
+            placeholder={phonePlaceholder('98xxx xxxxx')} onBlur={() => setTried(true)} onKeyDown={e => { if (e.key === 'Enter') save() }} />
         </div>
+        {problem && <div className="snd-err" role="alert">{problem}</div>}
         {(canPaste() || canPickContact()) && (
           <div className="snd-ways">
             {canPaste() && <button type="button" className="chipo" onClick={paste}><Icon name="copy" size={14} />Paste</button>}
@@ -106,7 +110,7 @@ export default function AddFromTap({ tap, home, via = 'interested', onDone, onCa
       </div>
       <div className={footClass}>
         {onCancel && <Button onClick={onCancel}>Cancel</Button>}
-        <Button variant="primary" icon="userPlus" disabled={!looksLikePhone(phone) || busy} onClick={save}>{busy ? 'Adding…' : 'Add as lead'}</Button>
+        <Button variant="primary" icon="userPlus" disabled={!phone.trim() || busy} onClick={save}>{busy ? 'Adding…' : 'Add as lead'}</Button>
       </div>
     </>
   )

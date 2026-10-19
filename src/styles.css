@@ -969,6 +969,7 @@ button.btn-ghost.fu-done{color:var(--accent)}
 .pcard .pc-id{flex:1;min-width:0}
 .pcard .pc-title{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .unit-tag{margin-left:7px;font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.02em;color:var(--ink-2);background:var(--line-2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;white-space:nowrap}
+.unit-cat{display:inline-flex;align-items:center;gap:3px;vertical-align:1px}
 /* 7.1 Verified on a visit: a badge beside the record's name, a tick in the list */
 .vbadge{display:inline-flex;align-items:center;gap:4px;margin-left:9px;vertical-align:middle;font-family:var(--sans);font-size:11.5px;font-weight:700;letter-spacing:.01em;color:#1f6b45;background:#e6f2ea;border:1px solid #c5e0cf;border-radius:6px;padding:2px 7px}
 .vtick{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:6px;vertical-align:middle;border-radius:50%;color:#1f6b45;background:#e6f2ea;border:1px solid #c5e0cf}

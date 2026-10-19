@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api.js'
 import { fileUrl } from '../lib/media.js'
-import { formatMoney, phonePlaceholder, roomLabel, firmLocale } from '../lib/locale.js'
+import { formatMoney, phonePlaceholder, phoneProblem, roomLabel, firmLocale, setFirmLocale } from '../lib/locale.js'
 import { SUBTYPES, FURNISH, FACING, POSSESSION, SOCIETY_AMENITIES, labelOf } from '../data/propertyFields.js'
 import { deviceId, openWa, looksLikePhone } from '../lib/share.js'
 import Icon from '../components/Icon.jsx'
@@ -34,6 +34,10 @@ const withEmbed = (path) => (embedded() ? `${path}${path.includes('?') ? '&' : '
 
 /** The firm's frame: its mark and name on top, the privacy link below. */
 export function PublicShell({ firm: raw, tenant, children, embed = embedded(), bar, waiting }) {
+  // The firm's currency, numbers, phone rules and room words, before anything
+  // under the frame renders a price. A public page is one firm, mounted on its
+  // own (main.jsx), so the browser's locale is this firm's for the tab.
+  if (raw?.locale) setFirmLocale(raw.locale)
   const firm = firmOf(raw)
   useEffect(() => { document.documentElement.classList.add('pv-root'); return () => document.documentElement.classList.remove('pv-root') }, [])
   return (
@@ -520,8 +524,11 @@ function EnquiryForm({ tenant, device, firm, propertyId }) {
   const [st, setSt] = useState({ busy: false, done: false, err: '', talk: '' })
   const set = (k) => (e) => setV(x => ({ ...x, [k]: e.target.value }))
   const ok = looksLikePhone(v.phone)
+  const [tried, setTried] = useState(false)
+  const problem = tried ? phoneProblem(v.phone) : ''
   const submit = (e) => {
     e.preventDefault()
+    setTried(true)
     if (!ok || st.busy) return
     setSt({ busy: true, done: false, err: '' })
     api.publicEnquiry(tenant, {
@@ -552,13 +559,14 @@ function EnquiryForm({ tenant, device, firm, propertyId }) {
   return (
     <form className="pv-enq" onSubmit={submit} noValidate>
       <label className="pv-field"><span>Name</span><input id="enq-name" value={v.name} onChange={set('name')} autoComplete="name" /></label>
-      <label className="pv-field"><span>Mobile number</span><input value={v.phone} onChange={set('phone')} inputMode="tel" autoComplete="tel" placeholder={phonePlaceholder('98xxx xxxxx')} required /></label>
+      <label className="pv-field"><span>Mobile number</span><input value={v.phone} onChange={set('phone')} inputMode="tel" autoComplete="tel" placeholder={phonePlaceholder('98xxx xxxxx')} onBlur={() => setTried(true)} required /></label>
+      {problem && <div className="pv-err" role="alert">{problem}</div>}
       <label className="pv-field"><span>Message</span><textarea value={v.message} onChange={set('message')} rows={3} placeholder="Optional" /></label>
       {/* Not for people. A bot fills every field it finds. */}
       <input className="pv-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={v.website} onChange={set('website')} name="website" />
       {st.err && <div className="pv-err" role="alert">{st.err}</div>}
       {st.talk && <button type="button" className="pv-btn pv-btn-alt pv-btn-wide" onClick={() => openWa(waTo(st.talk))}><Icon name="wa" size={18} fill />Talk to us</button>}
-      <button type="submit" className="pv-btn pv-btn-main pv-btn-wide" disabled={!ok || st.busy}>{st.busy ? 'Sending…' : 'Send'}</button>
+      <button type="submit" className="pv-btn pv-btn-main pv-btn-wide" disabled={!v.phone.trim() || st.busy}>{st.busy ? 'Sending…' : 'Send'}</button>
       <p className="pv-consent">We use your number only to contact you about homes. <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a></p>
     </form>
   )

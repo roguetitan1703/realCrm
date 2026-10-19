@@ -3,7 +3,7 @@ import Icon from '../components/Icon.jsx'
 import { Button, Input, Toggle } from '../components/primitives.jsx'
 import { api } from '../lib/api.js'
 import { configLabel, personLabel, unitLabel } from '../lib/format.js'
-import { phoneLabel, phonePlaceholder } from '../lib/locale.js'
+import { phoneLabel, phonePlaceholder, phoneProblem } from '../lib/locale.js'
 import { copyText } from '../lib/clipboard.js'
 import { canPickWhatsApp, openWhatsAppChat } from '../lib/matching.js'
 import { canPickContact, pickContact, looksLikePhone, refusal, expiryLabel, heldText } from '../lib/share.js'
@@ -329,7 +329,10 @@ export function SenderPhone({ store, me, onSaved, onCancel, saveLabel = 'Save an
   const [phone, setPhone] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [tried, setTried] = useState(false)
+  const problem = tried ? phoneProblem(phone) : ''
   const save = async () => {
+    setTried(true)
     if (!looksLikePhone(phone) || busy) return
     setBusy(true); setErr('')
     try {
@@ -349,13 +352,14 @@ export function SenderPhone({ store, me, onSaved, onCancel, saveLabel = 'Save an
     <>
       <div className="field">
         <label htmlFor="snd-me-phone">Mobile number</label>
-        <Input id="snd-me-phone" value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" autoFocus
-          placeholder={phonePlaceholder('98xxx xxxxx')} onKeyDown={e => { if (e.key === 'Enter') save() }} />
+        <Input id="snd-me-phone" value={phone} onChange={e => { setPhone(e.target.value); setErr('') }} inputMode="tel" autoFocus
+          placeholder={phonePlaceholder('98xxx xxxxx')} onBlur={() => setTried(true)} onKeyDown={e => { if (e.key === 'Enter') save() }} />
       </div>
-      {err && <div className="snd-err" role="alert">{err}</div>}
+      {(problem || err) && <div className="snd-err" role="alert">{problem || err}</div>}
       <div className="mfm-foot">
         {onCancel && <Button onClick={onCancel}>Back</Button>}
-        <Button variant="primary" disabled={!looksLikePhone(phone) || busy} onClick={save}>{busy ? 'Saving…' : saveLabel}</Button>
+        {/* Pressable with a short number: pressing it is how a person finds out why. */}
+        <Button variant="primary" disabled={!phone.trim() || busy} onClick={save}>{busy ? 'Saving…' : saveLabel}</Button>
       </div>
     </>
   )
