@@ -27,7 +27,7 @@ import { galleryPath } from './gallery.js';
 import { planRoster, normalizePhone, RosterRow } from './roster.js';
 import { assertLeadWrite, ForbiddenError, isDeskRole } from '../lib/permissions.js';
 import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js';
-import { canTakeWork, workableIds, onDutyWorkers } from './workforce.js';
+import { canTakeWork, onDutyWorkers, assertWorkable } from './workforce.js';
 import { IS_AVAILABLE, HAS_PHOTO } from './catalogueRules.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
@@ -2073,10 +2073,11 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // Apply round-robin assignment if agentId not provided. One atomic
   // statement (nextRoutedAgent) — see its doc comment for why the previous
   // read-then-write version could send an entire batch to one person.
+  // A person the caller NAMED must be able to take it; the rota only deals
+  // people who can.
   let agentId = leadData.agentId || leadData.agent_id;
-  if (!agentId) {
-    agentId = await nextRoutedAgent();
-  }
+  if (agentId) await assertWorkable(tid(), [agentId]);
+  else agentId = await nextRoutedAgent();
 
   // NO INVENTED NAME. This defaulted to 'New Inquiry', which is a fact about
   // the payload dressed up as the person's name: it sorted under N, it was
@@ -2229,6 +2230,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   const stage = patch.stage !== undefined ? patch.stage : oldLead.stage;
   const source = patch.source !== undefined ? patch.source : oldLead.source;
   const agentId = patch.agentId !== undefined ? patch.agentId : (patch.agent_id !== undefined ? patch.agent_id : oldLead.agentId);
+  if (agentId && agentId !== oldLead.agentId) await assertWorkable(tid(), [agentId]);
   const req = patch.req !== undefined ? patch.req : oldLead.req;
   const notes = patch.notes !== undefined ? patch.notes : oldLead.notes;
   const shortlist = patch.shortlist !== undefined ? patch.shortlist : oldLead.shortlist;
@@ -3336,6 +3338,7 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
   if (clean.length === 0) return 0;
 
   const t = tid();
+  await assertWorkable(t, [agentId]);
   // WHO HELD THEM BEFORE, read before the update overwrites it — a timeline
   // that cannot say where a lead came from is a timeline that cannot answer
   // "why is this mine?".
@@ -3531,6 +3534,7 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
   // already named an agent for this row.
   let agentId = data.agentId || null;
   let autoRouted = false;
+  if (agentId) await assertWorkable(t, [agentId]);
   if (!agentId) {
     const rules = await getRoutingRules();
     if (rules.owner_strategy === 'round_robin') {
@@ -3968,10 +3972,11 @@ export async function assignProjectOwners(opts: {
   const who = getContext();
   if (who?.role === 'agent') throw new ForbiddenError('Assigning a project is done from the desk.');
   const t = tid();
+  await assertWorkable(t, opts.targets || []);
   const live = await sql`
     SELECT id, name FROM users
      WHERE tenant_id = ${t} AND id IN ${sql([...new Set((opts.targets || []).filter(Boolean))])}
-       AND deleted_at IS NULL AND lower(coalesce(status, 'active')) = 'active'`;
+       AND ${canTakeWork(t, sql`users.id`)}`;
   if (!live.length) throw new ForbiddenError('Pick at least one active person.');
   const targets = (opts.targets || []).filter(id => live.some((u: any) => u.id === id));
 
@@ -4037,6 +4042,7 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
   if (c?.role === 'agent' && patch.agentId !== undefined && patch.agentId !== c.userId) {
     patch = { ...patch }; delete patch.agentId;
   }
+  if (patch.agentId && patch.agentId !== existing.agentId) await assertWorkable(t, [patch.agentId]);
   const next = {
     name: patch.name !== undefined ? patch.name : existing.name,
     phone: patch.phone !== undefined ? patch.phone : existing.phone,
@@ -4166,6 +4172,7 @@ export async function distributeWork(opts: {
   const t = tid();
   const kinds = opts.kinds?.length ? opts.kinds : ['leads', 'owners'];
 
+  await assertWorkable(t, opts.targets || []);
   const live = await sql`
     SELECT id, name FROM users
      WHERE tenant_id = ${t} AND id IN ${sql([...new Set(opts.targets.filter(Boolean))])}
@@ -4252,6 +4259,7 @@ export async function splitAssign(
 ): Promise<{ assigned: number; perTarget: { id: string; name: string | null; n: number }[] }> {
   const t = tid();
   const clean = [...new Set((ids || []).filter(Boolean))];
+  await assertWorkable(t, targets || []);
   const live = await sql`
     SELECT id, name FROM users
      WHERE tenant_id = ${t} AND id IN ${sql([...new Set((targets || []).filter(Boolean))])}
@@ -4305,6 +4313,8 @@ export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SY
   const who = getContext();
   if (who?.role === 'agent') throw new ForbiddenError('Handing out work is done from the desk.');
   const t = tid();
+  const chosen = [...new Set((Array.isArray(agentIds) ? agentIds : []).map(String).filter(Boolean))];
+  await assertWorkable(t, chosen);
   const rows = side === 'leads'
     ? await sql`SELECT l.id FROM crm_leads l
                  LEFT JOIN users u ON u.id = l.agent_id AND u.tenant_id = l.tenant_id AND u.deleted_at IS NULL
@@ -4317,14 +4327,12 @@ export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SY
   if (!rows.length) return { assigned: 0, perTarget: [] };
 
   const ids = (rows as any[]).map(r => r.id);
-  // THE PEOPLE THE DESK TICKED, when it chose: dealt in turn, one each. Only
-  // members of this firm who can be given work; anyone else in the list is
-  // dropped, never trusted. Without a choice, the saved rota decides, claimed
-  // once for the whole backlog — the same trick the import uses.
+  // THE PEOPLE THE DESK TICKED, when it chose: dealt in turn, one each. Every
+  // one must be able to take work — a name that cannot is refused, not
+  // dropped. Without a choice, the saved rota decides, claimed once for the
+  // whole backlog — the same trick the import uses.
   let pool: (string | null)[];
-  if (Array.isArray(agentIds) && agentIds.length) {
-    const chosen = await workableIds(t, agentIds.map(String));
-    if (!chosen.length) throw new ForbiddenError('None of those people can be given work.');
+  if (chosen.length) {
     pool = ids.map((_, i) => chosen[i % chosen.length]);
   } else {
     pool = side === 'leads'
@@ -4373,6 +4381,7 @@ export async function bulkAssignOwners(ids: string[], agentId: string | null, ct
   const clean = [...new Set((ids || []).filter(Boolean))];
   if (clean.length === 0) return 0;
   const t = tid();
+  await assertWorkable(t, [agentId]);
   // WHO HELD THEM BEFORE, read before the update overwrites it — the same
   // thing bulkAssignLeads does, and the owner side did not: an owner moved
   // between callers changed hands with nothing on the record saying so, and

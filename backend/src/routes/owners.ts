@@ -10,6 +10,7 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
+import { notWorkableBody } from '../services/workforce';
 import { convertOwner } from '../services/agreements';
 import { holds, sendError } from './agreements';
 import {
@@ -97,6 +98,7 @@ ownersRouter.post('/bulk-assign', async (req: Request, res: Response) => {
     const n = await bulkAssignOwners(ids, one, ctx);
     return res.status(200).json({ success: true, updated: n });
   } catch (err: any) {
+    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
     if (err?.status === 403) return res.status(403).json({ success: false, error: 'Forbidden', message: err.message });
     return res.status(500).json({ error: 'Bulk assign failed', message: err.message });
   }
@@ -119,6 +121,7 @@ ownersRouter.post('/assign-project', async (req: Request, res: Response) => {
     });
     return res.status(200).json({ success: true, ...out });
   } catch (err: any) {
+    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
     const code = err?.name === 'ForbiddenError' || err?.status === 403 ? 403 : 500;
     return res.status(code).json({ error: 'Could not assign the project', message: err.message });
   }
@@ -142,6 +145,7 @@ ownersRouter.post('/', async (req: Request, res: Response) => {
     });
     return res.status(201).json({ success: true, owner: created });
   } catch (err: any) {
+    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
     return res.status(500).json({ error: 'Failed to create owner', message: err.message });
   }
 });
@@ -155,6 +159,7 @@ ownersRouter.patch('/:id', async (req: Request, res: Response) => {
     if (!updated) return res.status(404).json({ success: false, error: 'Not found' });
     return res.status(200).json({ success: true, owner: updated });
   } catch (err: any) {
+    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
     return res.status(500).json({ error: 'Failed to update owner', message: err.message });
   }
 });

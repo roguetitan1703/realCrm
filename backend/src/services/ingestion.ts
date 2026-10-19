@@ -646,19 +646,14 @@ export async function landEnquiry(args: {
         return { status: 'merged', leadId: existing.id };
       }
 
-      // Round-robin among agents actually on duty. One atomic statement, not
-      // a separate read-then-write — this used to be its own copy of the
-      // same logic createLead() has, and both copies raced the same way: a
-      // batch of pushes arriving close together would all read the counter
-      // before any of their writes landed, so they'd all pick the same
-      // person. See nextRoutedAgent()'s doc comment.
-      const agentId = await nextRoutedAgent();
-
+      // No agent: createLead deals the rota itself (nextRoutedAgent, one
+      // atomic statement), so a payload never names who gets the lead and a
+      // named agent in createLead always means a person chose one.
       const { external_id, ...leadFields } = lead;
       const created = await createLead({
         ...leadFields,
+        agentId: undefined, agent_id: undefined,
         stage: 'New',
-        agentId,
         source: leadFields.source || integration.provider,
       } as any);
 

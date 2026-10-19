@@ -28,13 +28,39 @@ export const canTakeWork = (tenantId: unknown, id: unknown) => sql`EXISTS (
 /** SQL over a crm_agents row aliased `a`: not off duty, not on leave. */
 export const ON_DUTY = sql`coalesce(a.duty_status, 'ACTIVE') NOT IN ('OFF_DUTY', 'ON_LEAVE')`;
 
-/** Which of these ids can take work, in the order given. */
-export async function workableIds(tenantId: string, ids: string[]): Promise<string[]> {
-  const clean = [...new Set(ids.map(String).filter(Boolean))];
-  if (!clean.length) return [];
-  const rows = await sql`SELECT x.id FROM unnest(${clean}::text[]) AS x(id) WHERE ${canTakeWork(tenantId, sql`x.id`)}`;
-  const ok = new Set((rows as any[]).map(r => r.id));
-  return ids.map(String).filter(id => ok.has(id));
+/**
+ * Handing work to a NAMED person who cannot take it is refused, never quietly
+ * done or quietly dropped: a lead given to someone suspended or removed sits
+ * with nobody who can open it. Routes answer 422 `not_workable` with the name.
+ */
+export class NotWorkableError extends Error {
+  status = 422;
+  code = 'not_workable';
+  constructor(public personId: string, public personName: string | null) {
+    super(`${personName || 'That person'} cannot be given work.`);
+    this.name = 'NotWorkableError';
+  }
+}
+
+/** Throws NotWorkableError for the first of these ids (in the order given) that cannot take work. */
+export async function assertWorkable(tenantId: string, ids: (string | null | undefined)[]): Promise<void> {
+  const clean = [...new Set(ids.filter(Boolean).map(String))];
+  if (!clean.length) return;
+  const bad = await sql`
+    SELECT x.id, coalesce(u.name, a.name) AS name FROM unnest(${clean}::text[]) AS x(id)
+      LEFT JOIN users u ON u.tenant_id = ${tenantId} AND u.id = x.id
+      LEFT JOIN crm_agents a ON a.tenant_id = ${tenantId} AND a.id = x.id
+     WHERE NOT ${canTakeWork(tenantId, sql`x.id`)}`;
+  if (!bad.length) return;
+  const first = clean.find(id => (bad as any[]).some(r => r.id === id))!;
+  throw new NotWorkableError(first, (bad as any[]).find(r => r.id === first)?.name ?? null);
+}
+
+/** The 422 body for a NotWorkableError, or null for any other error. */
+export function notWorkableBody(err: any): { success: false; error: 'not_workable'; name: string | null; message: string } | null {
+  return err instanceof NotWorkableError
+    ? { success: false, error: 'not_workable', name: err.personName, message: err.message }
+    : null;
 }
 
 /** Everyone who can take work and is on duty: the pool when a firm has no rota. */
