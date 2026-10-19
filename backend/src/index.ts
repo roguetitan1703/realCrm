@@ -136,7 +136,14 @@ app.use(express.urlencoded({ extended: true }));
 // response, so it costs the request nothing.
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.method !== 'GET' && req.method !== 'OPTIONS') {
-    res.on('finish', () => { if (res.statusCode < 400) scheduleCloseSettled(req.tenantId); });
+    // Public pages (no session) name their firm in the URL; routes/public.ts
+    // sets publicTenantId. Never the header or the default tenant for those.
+    res.on('finish', () => {
+      if (res.statusCode >= 400) return;
+      const isPublic = req.path.startsWith('/api/v1/public/');
+      const t = isPublic ? (req as any).publicTenantId : req.tenantId;
+      if (t) scheduleCloseSettled(t);
+    });
   }
   next();
 });

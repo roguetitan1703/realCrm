@@ -16,7 +16,7 @@ import { prepareListing,
   listProjects, getProject, getPropertyBuyers,
   setPropertyVerified, setPropertyGallery, setCatalogue,
 } from '../services/store';
-import { canAddListing, canEditListing } from '../lib/permissions';
+import { canAddListing, canEditListing, isDeskRole } from '../lib/permissions';
 
 export const propertiesRouter = Router();
 propertiesRouter.use(requireTenantAuth);
@@ -103,12 +103,13 @@ propertiesRouter.get('/summary', async (_req: Request, res: Response) => {
 /**
  * SHOW IN CATALOGUE, for a selection (listing-pages.md §A.5)
  * POST /api/v1/properties/catalogue { ids, on } → { changed, withoutPhotos }
- * Same rule as editing a listing (canEditListing): the single-listing form is
- * the `inCatalogue` field on the ordinary update, and the two must agree.
+ * Owners and managers only (store.ts assertCatalogueRole): the catalogue is
+ * what the firm shows the public. The single-listing form is the `inCatalogue`
+ * field on the ordinary update, held to the same rule.
  */
 propertiesRouter.post('/catalogue', async (req: Request, res: Response) => {
-  if (!canEditListing(req.user?.role)) {
-    return res.status(403).json({ error: 'Forbidden', message: 'Sign in to change a listing.', code: 'ROLE_REQUIRED' });
+  if (!isDeskRole(req.user?.role)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Only an owner or a manager can change what is in the catalogue.', code: 'ROLE_REQUIRED' });
   }
   const { ids, on } = req.body || {};
   if (!Array.isArray(ids) || !ids.length || typeof on !== 'boolean') {

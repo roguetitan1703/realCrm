@@ -42,10 +42,18 @@ export const ROUTE_WORDS = new Set([
   'catalog', 'catalogue', 'gallery', 'reports', 'deals', 'tasks', 'visits', 'calendar',
 ]);
 
+// Rejection sampling: a byte at or above the largest multiple of the
+// alphabet's length is thrown away, so every character is equally likely.
+const BYTE_CEILING = 256 - (256 % CODE_ALPHABET.length);
 const randomCode = (): string => {
-  const bytes = crypto.randomBytes(CODE_LEN);
   let out = '';
-  for (let i = 0; i < CODE_LEN; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  while (out.length < CODE_LEN) {
+    for (const b of crypto.randomBytes(CODE_LEN * 2)) {
+      if (b >= BYTE_CEILING) continue;
+      out += CODE_ALPHABET[b % CODE_ALPHABET.length];
+      if (out.length === CODE_LEN) break;
+    }
+  }
   return out;
 };
 

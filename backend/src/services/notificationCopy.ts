@@ -148,8 +148,11 @@ export const COPY: Builders = {
     title: `${d.name || 'A buyer'} is back on your link`,
     body: facts(d.sentOn && `sent ${d.sentOn}`),
   }),
+  // `unheld`: nobody active holds the lead, so the desk is asked to place it.
   share_number_held: (d) => ({
-    title: d.sender ? `${d.sender} tried to send homes to your lead` : 'Someone tried to send homes to your lead',
+    title: d.unheld
+      ? (d.sender ? `${d.sender} wants to send homes to an unassigned lead` : 'Someone wants to send homes to an unassigned lead')
+      : (d.sender ? `${d.sender} tried to send homes to your lead` : 'Someone tried to send homes to your lead'),
     body: facts(d.name),
   }),
   // Same fault, same fix: identical to `owner_assigned` in both branches.

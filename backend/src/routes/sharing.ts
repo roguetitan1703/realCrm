@@ -15,6 +15,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
+import { hit } from '../services/rateLimit';
 import { createShareLink, myLinks, turnOff, attachLink, tapToLead, ShareError } from '../services/sharing';
 
 export const shareLinksRouter = Router();
@@ -51,6 +52,10 @@ shareLinksRouter.post('/:id/attach', async (req: Request, res: Response) => {
 });
 
 shareTapsRouter.post('/:code/lead', async (req: Request, res: Response) => {
+  // Thirty a minute per person: a tap is added by hand, so more is a script.
+  if (!hit(`taplead:${(req.user as any)?.id || req.ip}`, 30, 60_000)) {
+    return res.status(429).json({ success: false, error: 'slow_down', message: 'Too many requests. Try again in a minute.' });
+  }
   try { return res.json({ success: true, ...(await tapToLead(String(req.params.code), req.body || {})) }); }
   catch (err) { return shareFail(res, err); }
 });

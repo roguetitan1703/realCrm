@@ -25,7 +25,7 @@ import { followUpKind } from './followUp.js';
 import { followUpKindOf } from '../../../src/data/followUpKinds.js';
 import { galleryPath } from './gallery.js';
 import { planRoster, normalizePhone, RosterRow } from './roster.js';
-import { assertLeadWrite, ForbiddenError } from '../lib/permissions.js';
+import { assertLeadWrite, ForbiddenError, isDeskRole } from '../lib/permissions.js';
 import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
@@ -1724,7 +1724,11 @@ export async function revertImportBatch(batchId: string): Promise<{ leads: numbe
     sql`DELETE FROM crm_owners WHERE tenant_id = ${t} AND import_batch_id = ${batchId} RETURNING id`,
   ]);
   const leadIds = leadRows.map((r: any) => r.id);
-  if (leadIds.length) await sql`DELETE FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(leadIds)}`;
+  if (leadIds.length) {
+    await sql`DELETE FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(leadIds)}`;
+    // Their shared links die with them, like any other lead delete.
+    await shareLeadsDeleted(t, leadIds, getContext()?.userId ?? null);
+  }
   return { leads: leadRows.length, properties: propRows.length, owners: ownerRows.length };
 }
 
@@ -5041,7 +5045,14 @@ export async function setPropertyGallery(id: string, action: 'off' | 'on' | 'new
  * the firm can hide project names from the catalogue (`sharing.
  * catalogueShowsProject`), and an address cannot be taken back once shared.
  */
+/** Owners and managers only; system callers (no signed-in role) pass. */
+function assertCatalogueRole() {
+  const role = getContext()?.role;
+  if (role && role !== 'system' && !isDeskRole(role)) throw new ForbiddenError('Only an owner or a manager can change what is in the catalogue.');
+}
+
 export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = SYSTEM_CTX): Promise<{ changed: number; withoutPhotos: number }> {
+  assertCatalogueRole();
   const t = tid();
   const clean = [...new Set((ids || []).map(String).filter(Boolean))].slice(0, 1000);
   if (!clean.length) return { changed: 0, withoutPhotos: 0 };
@@ -5056,12 +5067,18 @@ export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = S
         .normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '') || 'home';
       for (let i = 0; i < 5; i++) {
         const slug = `${base}-${slugSuffix()}`;
-        const done = await sql`
-          UPDATE crm_properties SET catalogue_slug = ${slug}
-           WHERE tenant_id = ${t} AND id = ${r.id} AND catalogue_slug IS NULL
-             AND NOT EXISTS (SELECT 1 FROM crm_properties WHERE tenant_id = ${t} AND catalogue_slug = ${slug})
-          RETURNING id`;
-        if (done.length) break;
+        try {
+          const done = await sql`
+            UPDATE crm_properties SET catalogue_slug = ${slug}
+             WHERE tenant_id = ${t} AND id = ${r.id} AND catalogue_slug IS NULL
+               AND NOT EXISTS (SELECT 1 FROM crm_properties WHERE tenant_id = ${t} AND catalogue_slug = ${slug})
+            RETURNING id`;
+          if (done.length) break;
+        } catch (err: any) {
+          // Two flats ticked at once drew the same slug: the unique index
+          // refused the second. Draw again.
+          if (err?.code !== '23505') throw err;
+        }
       }
     }
   }
@@ -5528,6 +5545,11 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   if (old.length === 0) return null;
   const row = old[0];
   const before = rowToProperty(row);
+  // Show in catalogue is the desk's call (owners and managers). Refused before
+  // anything is written, and only when the flag would actually change, so an
+  // agent's form that echoes the current value back still saves.
+  const flagAsked = patch.inCatalogue ?? patch.in_catalogue;
+  if (typeof flagAsked === 'boolean' && flagAsked !== !!row.in_catalogue) assertCatalogueRole();
 
   const title = patch.title !== undefined ? patch.title : row.title;
   const status = patch.status !== undefined ? patch.status : row.status;
@@ -5587,7 +5609,7 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   await applyC4Fields(id, patch);
   // Show in catalogue, the single-listing form of POST /properties/catalogue.
   const catalogueFlag = patch.inCatalogue ?? patch.in_catalogue;
-  if (typeof catalogueFlag === 'boolean') await setCatalogue([id], catalogueFlag, ctx);
+  if (typeof catalogueFlag === 'boolean' && catalogueFlag !== !!row.in_catalogue) await setCatalogue([id], catalogueFlag, ctx);
   // Same as the create path: an owner typed onto a listing is a person to call.
   // Only when the owner fields actually changed — a price edit must not touch
   // the calling queue.

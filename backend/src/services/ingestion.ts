@@ -401,6 +401,9 @@ export async function processInboxRow(
 export async function landEnquiry(args: {
   tenantId: string; provider: string; integrationId: string | null; inboxId: string | null;
   lead: any; body: any; desk?: Awaited<ReturnType<typeof deskConfigOf>>;
+  /** A public form anyone can type any number into (the catalogue): on an
+   *  existing lead, record and tell, never change the lead. */
+  unverified?: boolean;
 }): Promise<{ status: string; leadId?: string | null; reason?: string }> {
   const { tenantId, inboxId } = args;
   const integration = { id: args.integrationId || `${args.provider.toLowerCase()}:${tenantId}`, tenant_id: tenantId, provider: args.provider };
@@ -460,6 +463,38 @@ export async function landEnquiry(args: {
       // left in the product. It also read every lead in the tenant into memory
       // to do it — the full-collection scan removed everywhere else.
       const existing = await findLeadByPhone(cleanPhone);
+      if (existing && args.unverified) {
+        // NOBODY HAS PROVED THIS IS THEM. A portal vouches for its buyer; a
+        // public form does not — anyone can type a lead's number into it. So
+        // the enquiry is history and news, never an edit: no reopening a
+        // closed lead, no merged requirement, no note, no new holder. What was
+        // said goes on the timeline, written by System so it is not contact.
+        const r = lead.req || {};
+        const said = [r.notes, r.interest && `Interested in: ${Array.isArray(r.interest) ? r.interest.join(', ') : r.interest}`].filter(Boolean).join(' · ');
+        const session = await recordEnquiry({
+          leadId: existing.id, at: (lead as any).receivedAt || undefined,
+          source: integration.provider, integrationId: args.integrationId,
+          req: lead.req, enquiryId: (lead as any).external_id || null, rawRef: inboxId,
+        });
+        await addTimelineEvent({
+          record_id: existing.id, type: 'enquiry', title: `Enquiry via ${integration.provider}`,
+          description: [lead.name && `As ${lead.name}`, said || 'Enquired again'].filter(Boolean).join(' · '),
+          author: 'System', metadata: { source: integration.provider, unverified: true },
+        });
+        if (session?.isNewSession) {
+          const terminal = existing.stage === REJECTED_STATUS || existing.stage === WON_STATUS;
+          const n = {
+            tenantId, type: 'lead_repeat',
+            data: { name: existing.name || existing.phone, source: integration.provider, changed: 0, previousStage: terminal ? existing.stage : null },
+            link: `?screen=leads&lead=${existing.id}`,
+          };
+          const keeper = await activeOwnerOf(existing.agent_id);
+          if (keeper) await notify({ ...n, userId: existing.agent_id }).catch(() => {});
+          else await notifyRoles(['owner', 'manager'], n).catch(() => {});
+        }
+        await mark('merged', { leadId: existing.id });
+        return { status: 'merged', leadId: existing.id };
+      }
       if (existing) {
         const note = `[Repeat enquiry via ${integration.provider}] ${new Date().toLocaleString(desk.locale.numberLocale, { timeZone: desk.timezone })}`;
         // A repeat enquiry is usually RICHER than the first, and merging used
