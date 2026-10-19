@@ -666,6 +666,9 @@ export async function createShareLink(input: any, origin: string | null) {
   if (!sender) throw new ShareError(401, 'auth_required');
   // Senders need a number (Om, §A.4): the buyer's WhatsApp opens to it.
   if (String(sender.phone || '').replace(/\D/g, '').length < 10) throw new ShareError(422, 'sender_phone_missing', 'Add your mobile number first.');
+  // Stopped by the owner: no new links until they allow sharing again.
+  const sharing = await sharingOf(m.tenantId);
+  if (sharing.stopped) throw new ShareError(422, 'sharing_stopped', 'Sharing is stopped. An owner can allow it again in Settings.');
 
   const ids: string[] = [...new Set((Array.isArray(input?.propertyIds) ? input.propertyIds : []).map(String).filter(Boolean))] as string[];
   if (!ids.length) throw new ShareError(400, 'flats_required', 'Pick at least one home.');
@@ -693,7 +696,6 @@ export async function createShareLink(input: any, origin: string | null) {
     if (priv.length) throw new ShareError(422, 'private_flats_without_recipient', 'Homes not in the catalogue can only be sent to a named buyer.', { ids: priv });
   }
 
-  const sharing = await sharingOf(m.tenantId);
   const showPrice = typeof input?.showPrice === 'boolean' ? input.showPrice : !!sharing.showPriceOnCatalogue;
   const code = await freshCode(m.tenantId);
   const id = rid('shl');

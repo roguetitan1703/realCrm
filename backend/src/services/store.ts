@@ -6101,9 +6101,12 @@ export async function getSettings(): Promise<any> {
  *   replyToPhone           where a buyer's WhatsApp goes when nobody holds them
  *   showPriceOnCatalogue   the catalogue's prices; a link's own tick defaults to it
  *   catalogueShowsProject  off: the catalogue names the locality, not the building
- *   stopped                null, or the moment the owner stopped every link made
- *                          up to then. Only moves forward: a leaked link must not
- *                          come back because someone tidied a setting.
+ *   stopped                null, or when the owner stopped sharing. Stopping turns
+ *                          off every link the firm has, for good (the leak case),
+ *                          and refuses new ones until the owner allows sharing
+ *                          again. Allowing it again never revives an old link: a
+ *                          leaked link must not come back because someone tidied
+ *                          a setting. The catalogue is not affected.
  */
 export const SHARING_DEFAULTS = {
   linkExpiryDays: 15, replyToPhone: null as string | null,
@@ -6141,18 +6144,31 @@ async function cleanSharingPatch(patch: any, current: any, ctx: ActorCtx | null)
   }
   if (p.showPriceOnCatalogue !== undefined) next.showPriceOnCatalogue = p.showPriceOnCatalogue === true;
   if (p.catalogueShowsProject !== undefined) next.catalogueShowsProject = p.catalogueShowsProject !== false;
-  // `stopped`: true stamps now. The stored stamp sent back unchanged is no
-  // change (the settings screen saves the whole object). Anything else —
-  // false, null, another date — would bring stopped links back, and is refused.
+  // `stopped`: true stops sharing and turns off every link; null (or false)
+  // allows sharing again. The stored stamp sent back unchanged is no change
+  // (the settings screen saves the whole object). Owner only, both ways.
   if (p.stopped !== undefined && p.stopped !== cur.stopped) {
-    if (p.stopped !== true) throw new Error('Stopped links cannot be turned back on. Send new ones.');
+    const stop = p.stopped === true;
+    const resume = p.stopped === null || p.stopped === false;
+    if (!stop && !resume) throw new Error('Send stopped: true to stop sharing, or null to allow it again.');
+    if (stop === !!cur.stopped) return next;
     const role = getContext()?.role;
-    if (role !== 'owner') throw new ForbiddenError('Only an owner can stop every link.');
-    next.stopped = new Date().toISOString();
+    if (role !== 'owner') throw new ForbiddenError('Only an owner can stop or allow sharing.');
+    const actor = ctx?.actorId ?? getContext()?.userId ?? null;
+    let turnedOff = 0;
+    if (stop) {
+      next.stopped = new Date().toISOString();
+      const off = await sql`UPDATE crm_share_links SET turned_off_at = NOW(), turned_off_by = ${actor}
+        WHERE tenant_id = ${tid()} AND turned_off_at IS NULL RETURNING id`;
+      turnedOff = off.length;
+    } else {
+      next.stopped = null;
+    }
     audit({
-      tenant_id: tid(), actor_type: ctx?.actorType || 'user', actor_id: ctx?.actorId ?? getContext()?.userId ?? null,
-      actor_label: ctx?.actorLabel ?? null, action: 'sharing.stopped', target_type: 'settings', target_id: 'sharing',
-      summary: 'Every shared link made until now was stopped', metadata: { stopped: next.stopped, previous: cur.stopped },
+      tenant_id: tid(), actor_type: ctx?.actorType || 'user', actor_id: actor,
+      actor_label: ctx?.actorLabel ?? null, action: stop ? 'sharing.stopped' : 'sharing.resumed', target_type: 'settings', target_id: 'sharing',
+      summary: stop ? `Sharing stopped; ${turnedOff} shared link${turnedOff === 1 ? '' : 's'} turned off` : 'Sharing allowed again; old links stay off',
+      metadata: { stopped: next.stopped, previous: cur.stopped, turnedOff },
       ip: ctx?.ip ?? getContext()?.ip ?? null, user_agent: ctx?.userAgent ?? getContext()?.userAgent ?? null,
     });
   }
