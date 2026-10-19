@@ -104,9 +104,12 @@ function SharingSection({ store, settings }) {
     onConfirm: () => put({ stopped: null }, 'Sharing allowed. Old links stay off.'),
   })
   const isOwner = store.state.role === 'owner'
-  const [reply, setReply] = useState(sh.replyToPhone || '')
-  useEffect(() => { setReply(sh.replyToPhone || '') }, [sh.replyToPhone])
-  const replyDirty = reply.trim() !== (sh.replyToPhone || '')
+  // Shown spaced, like every number on screen; changed only when its digits are.
+  const savedReply = sh.replyToPhone ? phoneSpaced(sh.replyToPhone) : ''
+  const [reply, setReply] = useState(savedReply)
+  useEffect(() => { setReply(savedReply) }, [savedReply])
+  const digits = (v) => String(v || '').replace(/\D/g, '')
+  const replyDirty = digits(reply) !== digits(sh.replyToPhone)
   // The empty box shows the number buyers reach instead, and whose it is (an
   // owner's, per the server's rule): "Akash Patel · +91 98765 43210".
   const fbDigits = String(sh.replyToFallback || '').replace(/\D/g, '').slice(-10)
@@ -434,9 +437,6 @@ const ROUTING_SIDES = {
       idleOn: 'reassign_idle_enabled', idleDays: 'reassign_idle_days',
       loopCount: 'reassign_alert_count',
     },
-    autoSub: 'Share new leads evenly, one agent at a time.',
-    manualSub: 'New leads land in a shared pool. A manager picks who takes each one.',
-    idleSub: 'Nobody has recorded anything on it for this long and no visit is booked, so it goes to the next agent in turn. The record shows why.',
   },
   owners: {
     key: 'owners', label: 'Calling', noun: 'owner', article: 'an', arrival: 'When a new owner is imported',
@@ -446,9 +446,6 @@ const ROUTING_SIDES = {
       idleOn: 'owner_reassign_idle_enabled', idleDays: 'owner_reassign_idle_days',
       loopCount: 'owner_reassign_alert_count',
     },
-    autoSub: 'Share them evenly, one caller at a time, as each row is imported.',
-    manualSub: 'Imported owners land in a shared pool. A manager picks who calls each one.',
-    idleSub: 'Nobody has recorded anything on it for this long, so it goes to the next caller in turn. The record shows why. Rows marked Not interested or Do not call are never moved.',
   },
 }
 
@@ -569,7 +566,6 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
         <div className="rt-backlog">
           <div className="rt-backlog-t">
             {waiting} {side.noun}{waiting === 1 ? '' : 's'} {waiting === 1 ? 'has' : 'have'} nobody on {waiting === 1 ? 'it' : 'them'}
-            <span className="rt-backlog-s">Taking turns only applies to new {side.noun}s. These were here before it was switched on.</span>
           </div>
           <Button variant="primary" size="sm" disabled={handing || !!dirty} onClick={handOut}>
             {handing ? 'Handing out…' : `Hand out ${waiting}`}
@@ -599,11 +595,11 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
         <div className="opt-list">
           <button className={'opt' + (strategy === 'round_robin' ? ' on' : '')} onClick={() => setStrategy('round_robin')}>
             <span className="opt-radio" />
-            <span><span className="opt-t">Auto-assign · round-robin</span><span className="opt-s">{side.autoSub}</span></span>
+            <span><span className="opt-t">Auto-assign · round-robin</span></span>
           </button>
           <button className={'opt' + (strategy === 'manual' ? ' on' : '')} onClick={() => setStrategy('manual')}>
             <span className="opt-radio" />
-            <span><span className="opt-t">Leave unassigned</span><span className="opt-s">{side.manualSub}</span></span>
+            <span><span className="opt-t">Leave unassigned</span></span>
           </button>
         </div>
       </Panel>
@@ -664,7 +660,6 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
           <div className="rt-rule-h">
             <div>
               <div className="rt-rule-t">Assign {side.noun}s that have no agent</div>
-              <div className="rt-rule-s">Nobody on it. Never assigned, or the person on it left the firm.</div>
             </div>
             {/* No hours field. Nothing ever sets agent_id back to NULL, so a
                 record is unowned only at arrival — the number was asking how
@@ -677,7 +672,6 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
           <div className="rt-rule-h">
             <div>
               <div className="rt-rule-t">Reassign {side.article} {side.noun} if no activity on it</div>
-              <div className="rt-rule-s">{side.idleSub}</div>
             </div>
             {/* THE NUMBER STAYS ON SCREEN WHEN THE RULE IS OFF, greyed. It is
                 what the rule WOULD do, and hiding it made the row jump and left
@@ -697,7 +691,6 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
           <div className="rt-rule-h">
             <div>
               <div className="rt-rule-t">Tell a manager if {side.article} {side.noun} is reassigned too often</div>
-              <div className="rt-rule-s">It keeps being reassigned. The manager is told each time after that.</div>
             </div>
             <NumField value={Number(val(f.loopCount, 3))} suffix="times" disabled={!loaded}
               onChange={(v) => set({ [f.loopCount]: Math.max(1, v) })} />

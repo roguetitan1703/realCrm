@@ -143,7 +143,6 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
   if (step === 'phone') {
     return (
       <Modal title="Your mobile number" onClose={close} width={440}>
-        <div className="snd-note">Buyers’ replies come to this number.</div>
         <SenderPhone store={store} me={me}
           onSaved={() => { setStep('form'); setTimeout(() => send(), 0) }}
           onCancel={() => setStep('form')} />

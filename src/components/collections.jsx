@@ -342,14 +342,15 @@ export function useSelection() {
 // bar. A phone has no table, so a module offers Select; the cards become tick
 // targets and this bar sits above the tab bar, where the thumb is, with the
 // same actions the desk bar has. Done leaves the mode.
+//
+// ONE ROW. It was a count row over a wrapping row of actions, ~160px that with
+// the tab bar left about 240px of list to pick from. The actions now scroll
+// sideways between the count and Done.
 export function PhoneSelectBar({ selection }) {
   const n = selection.count || 0
   return (
     <div className="psel" role="toolbar" aria-label="Selection">
-      <div className="psel-top">
-        <span className="psel-n">{n} selected</span>
-        <button type="button" className="psel-done" onClick={selection.onClear}>Done</button>
-      </div>
+      <span className="psel-n">{n} selected</span>
       <div className="psel-acts">
         {(selection.actions || []).map(a => (
           <button key={a.label} type="button" disabled={!n}
@@ -359,6 +360,7 @@ export function PhoneSelectBar({ selection }) {
           </button>
         ))}
       </div>
+      <button type="button" className="psel-done" onClick={selection.onClear}>Done</button>
     </div>
   )
 }
@@ -888,7 +890,6 @@ export function FilterBar({ fields = [], value = {}, onChange, search, left, rig
     return (
       <div className="fbar fbar-sel">
         <span className="fsel-n">{selection.count} selected</span>
-        <span className="fsel-hint">Tabs, filters and sort are paused while rows are selected</span>
         <div className="u-spring" />
         {/* `tone` so a destructive bulk action does not render as the primary
             button beside a harmless one — the two must not look alike when
@@ -1150,7 +1151,7 @@ export function MediaNote({ p }) {
 
 // `picked` (true/false) turns the card into a tick target for a selection on
 // a phone, where there is no table to tick rows in; undefined is the ordinary card.
-export function PropertyCard({ p, onClick, matchCount, picked }) {
+export function PropertyCard({ p, onClick, matchCount, picked, showCatalogue }) {
   const facts = [
     p.carpet || p.area ? `${p.carpet || p.area} sqft` : null,
     p.type !== 'Plot' && p.totalFloors ? `${p.floor || '-'}/${p.totalFloors} flr` : p.floor ? `${p.floor} flr` : null,
@@ -1173,6 +1174,8 @@ export function PropertyCard({ p, onClick, matchCount, picked }) {
             </span>
           )}
           {p.tower && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Tower {p.tower}{p.unit ? ` · #${p.unit}` : ''}</span>}
+          {/* The same marker as the table row: what the firm shows the public. */}
+          {showCatalogue && p.inCatalogue && <span className="unit-tag unit-cat" style={{ margin: 0 }}><Icon name="eye" size={11} />Catalogue</span>}
         </div>
         <StatusTag status={p.status || 'Available'} />
       </div>

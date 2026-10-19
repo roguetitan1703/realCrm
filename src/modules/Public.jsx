@@ -60,8 +60,8 @@ export function PublicShell({ firm: raw, tenant, children, embed = embedded(), b
   )
 }
 
-/** The firm's mark. Its box is always there; the initials hold it until the
- *  logo has loaded, and stay if the logo never does. */
+/** The firm's mark. Its box is always there; it shows the logo, or the
+ *  initials when there is no logo or it failed to load. */
 function FirmMark({ firm }) {
   // The state belongs to one URL, so a new logo starts over without an effect
   // resetting it after a cached image has already fired onLoad (which left
@@ -75,7 +75,12 @@ function FirmMark({ firm }) {
   const initials = String(firm?.name || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('')
   return (
     <span className="pv-markbox">
-      {state !== 'ok' && <span className={'pv-mono' + (initials ? '' : ' pv-mono-wait')}>{initials}</span>}
+      {/* Initials only when there is no logo to wait for, or it failed: shown
+          while the logo loaded, they flashed a different mark first. Until
+          then the box holds its place, blank. */}
+      {state !== 'ok' && (firm && (!logo || state === 'failed') && initials
+        ? <span className="pv-mono">{initials}</span>
+        : <span className="pv-mono pv-mono-wait" />)}
       {firm?.logo && state !== 'failed' && (
         <img key={logo} ref={ref} className={'pv-logo' + (state === 'ok' ? '' : ' is-loading')} src={logo} alt=""
           onLoad={() => mark('ok')} onError={() => mark('failed')} />
@@ -125,10 +130,18 @@ const floorOf = (h) => {
   const of = Number(h.config?.totalFloors) > 0 ? ` of ${h.config.totalFloors}` : ''
   return /^\d+$/.test(f) ? `Floor ${f}${of}` : `Floor ${f}`
 }
+// What tells one flat in a building from the next without naming it: floor,
+// furnishing, facing. Three "Lakeview Residency 1 BHK · 520 sq.ft" cards with
+// prices off were otherwise identical.
+const unitFacts = (h) => [
+  floorOf(h),
+  h.config?.furnishing ? labelOf(FURNISH, h.config.furnishing) : '',
+  h.config?.facing ? `${labelOf(FACING, h.config.facing)} facing` : '',
+]
 const homeTitle = (h) => h.project || [kindOf(h), areaOf(h)].filter(Boolean).join(' · ') || h.locality || h.title || 'Home'
 const subOf = (h) => (h.project
-  ? [kindOf(h), areaOf(h), floorOf(h), h.locality]
-  : [h.locality, floorOf(h), h.config?.furnishing ? labelOf(FURNISH, h.config.furnishing) : '', h.config?.possession ? labelOf(POSSESSION, h.config.possession) : '']
+  ? [kindOf(h), areaOf(h), ...unitFacts(h), h.locality]
+  : [h.locality, ...unitFacts(h), h.config?.possession ? labelOf(POSSESSION, h.config.possession) : '']
 ).filter(Boolean).join(' · ')
 const dealWord = (d) => (d === 'rent' ? 'For rent' : d === 'sale' ? 'For sale' : '')
 const priceOf = (h) => (Number(h.price) > 0 ? formatMoney(Number(h.price), { perMonth: h.deal === 'rent' }) : '')
