@@ -117,7 +117,9 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
     }
   }
 
-  const title = sendable === 1 ? 'Send 1 home' : `Send ${sendable} homes`
+  // What can go, not what was picked; none at all names the picked ones.
+  const shownN = sendable > 0 ? sendable : homes.length
+  const title = shownN === 1 ? 'Send 1 home' : `Send ${shownN} homes`
 
   if (step === 'phone') {
     return (
