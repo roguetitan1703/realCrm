@@ -277,31 +277,6 @@ leadsRouter.post('/:id/actions/schedule-visit', async (req: Request, res: Respon
 });
 
 /**
- * 4. RUN ROUND-ROBIN ASSIGNMENT ACTION (Live duty roster rotation)
- * POST /api/v1/leads/:id/actions/assign-round-robin
- */
-leadsRouter.post('/:id/actions/assign-round-robin', async (req: Request, res: Response) => {
-  try {
-    const recordId = req.params.id;
-    // Who can take work and is on duty (workforce.ts). This filtered on a
-    // field the agent rows never carry and fell back to a made-up id.
-    const [selectedAgentId] = await onDutyWorkers(req.tenantId!);
-    if (!selectedAgentId) return res.status(409).json({ error: 'nobody_available', message: 'Nobody on duty can take this lead.' });
-
-    await sql`UPDATE crm_leads SET agent_id = ${selectedAgentId} WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
-    console.log(`[Leads Router - Round Robin] Assigned Lead ${recordId} to Agent ${selectedAgentId} in DB`);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Lead routed to next active sales agent in rotation.',
-      assigned_user_id: selectedAgentId,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Round Robin Assignment Failed', message: err.message });
-  }
-});
-
-/**
  * 5. CONVERT TO CLIENT ACTION (Live stage progression & unit booking)
  * POST /api/v1/leads/:id/actions/convert-to-client
  */

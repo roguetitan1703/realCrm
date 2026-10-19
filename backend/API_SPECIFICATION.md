@@ -23,8 +23,6 @@ Every module has its own **Core Locked Fields** (mandatory SQL columns required 
     * *Safety Check:* Verifies template is Meta-approved (`status == 'APPROVED'`) and substitutes variables (`{{buyer_name}}`, `{{project_name}}`).
   * `POST /api/v1/modules/leads/records/:id/actions/schedule-visit` $\rightarrow$ Schedules a physical Site Visit.
     * *Safety Check:* Automatically updates stage to *"Site Visit Scheduled"*, logs calendar invite in timeline, and triggers confirmation WhatsApp to buyer.
-  * `POST /api/v1/modules/leads/records/:id/actions/assign-round-robin` $\rightarrow$ Triggers automated rotation assignment.
-    * *Safety Check:* Checks `routing_rules` and skips any sales agent whose status is `OFF_DUTY` or `ON_LEAVE`.
   * `POST /api/v1/modules/leads/records/:id/actions/convert-to-client` $\rightarrow$ Converts a *"Closed Won"* lead into a permanent Client / Booking record.
 
 ---
