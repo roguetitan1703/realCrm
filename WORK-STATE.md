@@ -1,11 +1,12 @@
 # Work state
 
 ## Now
-The US film demo is ready for cutroom: /demo-film is Limestone & Laurel Realty (Austin), built from `film-us`; cutroom's BRIEF.md and RUN.md say how to rebuild and record it.
+Catalog: shared links + public catalogue, built to `docs/specs/listing-pages.md` §A (builder A backend, builder B frontend).
 
 ## Next
-1. Cutroom records; rebuild /demo-film between 10:00 and 16:00 Austin time on the shoot day (RUN.md)
-2. Om re-tests on the dev preview, then release (`docs/releases/2026-10-13.md`)
+1. Review and merge both builders' work; drive it on phone and desk
+2. Cutroom records the US film (RUN.md); Om re-tests the dev preview for Release 1
+3. Help desk: report a problem, then the help centre
 
 ## Later
 - A firm's weekly off for "days worked" — waits on how the firms actually work
