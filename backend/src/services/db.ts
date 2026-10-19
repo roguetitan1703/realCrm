@@ -601,6 +601,7 @@ export async function initSchema(): Promise<void> {
     //   failed          any other error from the push service
     //   no_subscription the recipient has no device opted in
     //   not_signed_in   no live session, so we deliberately withhold
+    //   not_a_member    the person is suspended or removed from the firm
     //   push_disabled   no VAPID keys configured on this server
     await sql`
       CREATE TABLE IF NOT EXISTS push_deliveries (
