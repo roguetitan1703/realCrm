@@ -801,6 +801,7 @@ async function preparePhotos(firmName: string): Promise<Record<string, { buf: Bu
         const m = await import('/src/lib/media.js' as any);
         const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
         const res = await m.processListingImage(new Blob([bytes], { type: 'image/jpeg' }), firm);
+        // eslint-disable-next-line no-undef -- runs in the browser (page.evaluate)
         const dataUrl: string = await new Promise(ok => { const fr = new FileReader(); fr.onload = () => ok(fr.result as string); fr.readAsDataURL(res.blob); });
         return { b64: dataUrl.split(',')[1], w: res.width, h: res.height };
       }, { b64: raw.toString('base64'), firm: firmName });
