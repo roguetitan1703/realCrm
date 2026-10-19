@@ -13,12 +13,12 @@
  * against the development database. Writes nothing.
  *
  * When to run: once Om approves production reads — to size how many portal
- * leads were affected, and after anyone edits a rota by hand.
+ * leads were affected, and after anyone edits a rota by hand. Also prints each
+ * firm's saved strategies: a saved 'manual' was never read before 20 Oct.
  *
- * Usage (from the repo root, production DATABASE_URL in the environment):
- *   npx tsx backend/src/scripts/stale-rota-ids.ts
+ * Usage (from the repo root):
+ *   npx tsx --env-file=.env backend/src/scripts/stale-rota-ids.ts
  */
-import 'dotenv/config';
 import postgres from 'postgres';
 
 const url = process.env.DATABASE_URL;
@@ -26,9 +26,12 @@ if (!url) throw new Error('DATABASE_URL (production) is not set.');
 if (process.env.DEV_DATABASE_URL && url === process.env.DEV_DATABASE_URL) {
   throw new Error('DATABASE_URL is the development database. This script is for production.');
 }
-const sql = postgres(url, { max: 1, ssl: 'require', connection: { default_transaction_read_only: true } as any });
+// READ ONLY inside the transaction: the Supabase pooler drops the
+// default_transaction_read_only startup parameter, so it never protected anything.
+const sql = postgres(url, { max: 1, ssl: 'require' });
 
 try {
+  await sql.begin('READ ONLY', async (sql) => {
   const rows = await sql`
     WITH ids AS (
       SELECT r.tenant_id, 'leads' AS pool, x.id
@@ -46,6 +49,18 @@ try {
     console.log(`${r.tenant_id} ${r.pool}: ${r.stale} stale of ${r.on_rota}${r.stale ? ` (${r.stale_ids.join(', ')})` : ''}`);
   }
   if (!rows.length) console.log('No rota rows.');
+
+  // Whether each firm's saved strategy will hand out work once "Leave
+  // unassigned" is honoured (before, a saved 'manual' was never read).
+  const rules = await sql`
+    SELECT tenant_id, strategy, sweep_unassigned_enabled, reassign_idle_enabled,
+           owner_strategy, owner_sweep_unassigned_enabled, owner_reassign_idle_enabled
+      FROM crm_routing_rules ORDER BY tenant_id`;
+  for (const r of rules as any[]) {
+    console.log(`${r.tenant_id} leads=${r.strategy} sweep=${r.sweep_unassigned_enabled} idle=${r.reassign_idle_enabled}`
+      + ` | owners=${r.owner_strategy} sweep=${r.owner_sweep_unassigned_enabled} idle=${r.owner_reassign_idle_enabled}`);
+  }
+  });
 } finally {
   await sql.end();
 }

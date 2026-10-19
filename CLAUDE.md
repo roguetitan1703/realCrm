@@ -79,7 +79,8 @@ npm run seed:dev       # synthetic leads into the development db
 Reusable tools go in `backend/src/scripts/` with a header saying when to run them.
 Supabase has a low connection cap: `postgres(url, { max: 1, ssl: 'require' })`,
 and stop the dev backend on `too many clients`. A production read adds
-`connection: { default_transaction_read_only: true }`. Production has
+`sql.begin('READ ONLY', …)` — the pooler drops the
+`default_transaction_read_only` startup parameter, so it protects nothing. Production has
 `crm_agents` (no `agents`); a firm's settings row is keyed `default`.
 
 ---

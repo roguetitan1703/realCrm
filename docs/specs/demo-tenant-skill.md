@@ -102,7 +102,7 @@ their own reset (`tutorial-videos`), or anything on `bhumi` or `mahalaxmi`.
 | Money and phones | any | the market's currency and phone format everywhere; `crm_settings.locale` holds the preset's (US needs the app to read it, spec §8.2) |
 
 Measure, do not eyeball: count rows per tab with a read-only query
-(`default_transaction_read_only`) and compare with the screen.
+(`sql.begin('READ ONLY', …)`) and compare with the screen.
 
 ## Report
 
