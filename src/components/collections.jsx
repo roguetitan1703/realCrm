@@ -1,11 +1,12 @@
 // Collection components: Toolbar (the ONE filter/sort bar), Table, ListRow, Card grid.
 import { stageLabel } from '../data/pipelineRoles.js'
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, NewTag, Quoted, PageHeader, ViewSwitch, Pager, Button } from './primitives.jsx'
 import { quotedLine, unitLabel, dealWord } from '../lib/format.js'
 import { priceRangeLabel } from '../lib/projects.js'
+import { formatMoney } from '../lib/locale.js'
 import { getNestedValue } from './ModuleFields.jsx'
 
 // ---- SearchField: a text input that reports value AFTER a short pause. ----
@@ -296,6 +297,30 @@ function PhoneToolbar({
   )
 }
 
+// ---- A selection that outlives the page ----
+// Ticks are kept by id WITH their rows, so ticking eight across three pages
+// and pressing a bulk action acts on all eight: the page on screen only holds
+// its own twenty. ModuleTable hands back the rows it was showing beside the
+// new id set; a phone card toggles its own row.
+export function useSelection() {
+  const [byId, setById] = useState(() => new Map())
+  const ids = useMemo(() => new Set(byId.keys()), [byId])
+  const rowId = (r) => r.id || r._id
+  const set = (nextIds, pageRows = []) => setById(prev => {
+    const seen = new Map(pageRows.map(r => [rowId(r), r]))
+    const m = new Map()
+    for (const id of nextIds) m.set(id, seen.get(id) || prev.get(id) || { id })
+    return m
+  })
+  const toggle = (row) => setById(prev => {
+    const m = new Map(prev); const id = rowId(row)
+    if (m.has(id)) m.delete(id); else m.set(id, row)
+    return m
+  })
+  const clear = () => setById(new Map())
+  return { ids, rows: [...byId.values()], count: byId.size, set, toggle, clear, has: (id) => byId.has(id) }
+}
+
 // ---- The selection on a phone ----
 // The desk ticks rows in the table and the filter bar becomes the selection
 // bar. A phone has no table, so a module offers Select; the cards become tick
@@ -397,9 +422,12 @@ export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort
   const allOn = selectable && rows.length > 0 && rows.every(r => selected.has(r.id || r._id))
   const someOn = selectable && rows.some(r => selected.has(r.id || r._id))
 
+  // The header box ticks or unticks THIS page; ticks on other pages stay.
   const toggleAll = () => {
     if (!onSelectionChange) return
-    onSelectionChange(allOn ? new Set() : new Set(rows.map(r => r.id || r._id)))
+    const next = new Set(selected)
+    for (const r of rows) { const id = r.id || r._id; if (allOn) next.delete(id); else next.add(id) }
+    onSelectionChange(next, rows)
   }
   // Shift-click extends the last click into a range, same on/off state as the
   // row that was shift-clicked — the affordance every spreadsheet-like table
@@ -419,7 +447,7 @@ export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort
       next.has(id) ? next.delete(id) : next.add(id)
     }
     lastIndex.current = idx
-    onSelectionChange(next)
+    onSelectionChange(next, rows)
   }
 
   const columns = [
@@ -1154,7 +1182,7 @@ export function PropertyCard({ p, onClick, matchCount, picked }) {
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <span style={{ fontSize: 10.5, textTransform: 'uppercase', color: 'var(--faint)', fontWeight: 600, letterSpacing: '0.04em' }}>Quoted Price</span>
           <span style={{ fontFamily: 'var(--disp)', fontSize: 17, fontWeight: 600, color: 'var(--ink)' }}>
-            {p.priceLabel || p.price || 'Price on request'}
+            {p.priceLabel || (Number(p.price) > 0 ? formatMoney(Number(p.price), { perMonth: p.deal === 'rent' }) : 'Price on request')}
           </span>
         </div>
         {matchCount > 0 && (

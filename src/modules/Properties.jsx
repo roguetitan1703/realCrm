@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { useServerList } from '../lib/serverList.js'
 import { useRecord } from '../lib/useRecord.js'
 import { api } from '../lib/api.js'
-import { ModuleListView, ModuleTable, PropertyCard, ProjectCard, MediaNote } from '../components/collections.jsx'
+import { ModuleListView, ModuleTable, PropertyCard, ProjectCard, MediaNote, useSelection } from '../components/collections.jsx'
 import { priceRangeLabel } from '../lib/projects.js'
 import { useServerData } from '../lib/useServerData.js'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
@@ -115,11 +115,12 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   const [view, setView] = useState(filtered ? 'list' : 'projects')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const [selected, setSelected] = useState(new Set())
+  const selection = useSelection()
+  const selected = selection.ids
   // A phone has no table to tick: Select turns the cards into tick targets.
   const [picking, setPicking] = useState(false)
   const mayCatalogue = canChangeCatalogue(state.role)
-  const endPick = () => { setSelected(new Set()); setPicking(false) }
+  const endPick = () => { selection.clear(); setPicking(false) }
 
   // Any change to what's being asked for invalidates whatever page you were on —
   // page 3 of "3BHK in Baner" is a different page 3 once the filter changes.
@@ -134,7 +135,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
       }
       return { ...s, propFilters: Object.keys(next).length ? next : undefined }
     })
-    setPage(1); setSelected(new Set())
+    setPage(1); selection.clear()
   }
   // The panel hands back the WHOLE bag, so replace the filter keys wholesale
   // and keep the sort, the tab and the project, which live in the same bag but
@@ -174,8 +175,9 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   const setSortKeyP = (v) => patchBag({ sortKey: v })
   const setSortDirP = (v) => patchBag({ sortDir: v })
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
-  const setPageP = (v) => { setPage(v); setSelected(new Set()) }
-  useEffect(() => { setSelected(new Set()) }, [view, projectSel])
+  // Changing page keeps the ticks (useSelection); what is being asked for does not.
+  const setPageP = (v) => setPage(v)
+  useEffect(() => { selection.clear() }, [view, projectSel])
 
   const open = (id) => go('properties', { propId: id, propOpen: true })
 
@@ -212,7 +214,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   // filled in, where its own flat number and photos are added. Several is a
   // batch of copies made at once, each without a flat number until somebody
   // adds it — a firm lists the flats it has, and a floor is not all one owner.
-  const picked = (source.rows || []).filter(p => selected.has(p.id))
+  const picked = selection.rows
   const duplicate = () => {
     if (picked.length === 1) { go('properties', { propAdd: true, propId: null, propCopyOf: picked[0].id, propCopyBack: 'list' }); return }
     store.openModal({
@@ -222,7 +224,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
       confirmLabel: `Duplicate ${picked.length}`,
       onConfirm: () => {
         const rows = picked.map(p => { const f = fromCopy(p); return { ...f, completeness: scoreOf(f), copiedFrom: p.id } })
-        setSelected(new Set())
+        selection.clear()
         store.addProperties(rows).then(() => store.touched?.())
       },
     })
@@ -306,10 +308,10 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
       : v === 'grid'
         ? <div className="grid-cards">{list.map(p => picking
             ? <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} picked={selected.has(p.id)}
-                onClick={() => setSelected(s => { const n = new Set(s); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n })} />
+                onClick={() => selection.toggle(p)} />
             : <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} onClick={() => open(p.id)} />)}</div>
         : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open}
-            selectable selectedIds={selected} onSelectionChange={setSelected} />,
+            selectable selectedIds={selected} onSelectionChange={selection.set} />,
   })
 
   // The project's facts, above its list: what the page for it used to show,
