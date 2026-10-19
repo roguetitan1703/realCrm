@@ -985,8 +985,22 @@ export async function leadShares(leadId: string, origin: string | null) {
   const base = `${appBase(origin)}/${await firmSlug(m.tenantId)}`;
   const flats = new Map<string, any>();
   const slot = (pid: string) => {
-    if (!flats.has(pid)) flats.set(pid, { propertyId: pid, sentAt: null, opens: 0, lastOpenedAt: null, interested: 0, enquiries: 0, devices: new Set<string>(), link: null });
+    if (!flats.has(pid)) flats.set(pid, { propertyId: pid, sentAt: null, opens: 0, linkOpens: 0, lastOpenedAt: null, interested: 0, enquiries: 0, devices: new Set<string>(), link: null });
     return flats.get(pid);
+  };
+  // WHAT AN OPEN IS. A home is opened only by a view that names it; opening
+  // the list page is an open of the link, not of every home on it (it was
+  // counted once per home, so a three-home link opened once read "Opened 3×"
+  // on each). Both count one per browser per firm day: reloading is the same
+  // person looking. A view with no browser ID counts on its own.
+  const tz = (await deskConfigOf(m.tenantId)).timezone;
+  const dayOf = (at: any) => new Date(at).toLocaleDateString('en-CA', { timeZone: tz });
+  const seen = new Set<string>();
+  const firstToday = (scope: string, e: any) => {
+    const key = `${scope}|${e.device_id || e.id}|${dayOf(e.created_at)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   };
   for (const l of links as any[]) {
     for (const pid of l.property_ids || []) {
@@ -997,12 +1011,16 @@ export async function leadShares(leadId: string, origin: string | null) {
   }
   for (const e of events as any[]) {
     const targets: string[] = e.property_id ? [e.property_id] : (e.link_props || []);
+    const isView = e.kind === 'view' || e.kind === 'expired_view';
+    // A list open, once per browser per day per link, on every home it carried.
+    const listOpen = isView && !e.property_id && firstToday(`link:${e.link_id}`, e);
     for (const pid of targets) {
       const s = slot(pid);
-      if (e.kind === 'view' || e.kind === 'expired_view') {
+      if (isView && e.property_id && firstToday(`flat:${pid}`, e)) {
         s.opens++;
         if (!s.lastOpenedAt || new Date(e.created_at) > new Date(s.lastOpenedAt)) s.lastOpenedAt = e.created_at;
       }
+      if (listOpen) s.linkOpens++;
       if (e.kind === 'interested') s.interested++;
       if (e.kind === 'enquiry') s.enquiries++;
       if (e.device_id) s.devices.add(e.device_id);
