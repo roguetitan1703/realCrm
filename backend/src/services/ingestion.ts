@@ -17,7 +17,7 @@ import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
 import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS, WON_STATUS } from './store';
-import { notify, notifyRoles } from './notifications';
+import { notify, notifyOrDesk } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
 import { hashKey, lockKey, keyState, currentLock } from './integrationKeys';
@@ -489,8 +489,7 @@ export async function landEnquiry(args: {
             link: `?screen=leads&lead=${existing.id}`,
           };
           const keeper = await activeOwnerOf(existing.agent_id);
-          if (keeper) await notify({ ...n, userId: existing.agent_id }).catch(() => {});
-          else await notifyRoles(['owner', 'manager'], n).catch(() => {});
+          await notifyOrDesk(keeper, n).catch(() => 0);
         }
         await mark('merged', { leadId: existing.id });
         return { status: 'merged', leadId: existing.id };

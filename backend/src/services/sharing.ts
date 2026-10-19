@@ -34,7 +34,7 @@ import crypto from 'crypto';
 import { sql } from './db.js';
 import { getContext, runWithContext } from './context.js';
 import { freshCode, CODE_RE } from './shareCodes.js';
-import { notify, notifyRoles } from './notifications.js';
+import { notify, notifyOrDesk } from './notifications.js';
 import { audit } from './audit.js';
 import { landEnquiry } from './ingestion.js';
 import { assertLeadWrite } from '../lib/permissions.js';
@@ -389,18 +389,9 @@ async function maybeReturned(f: Firm, link: any) {
   });
 }
 
-/**
- * One alert, to a person, or to the desk when nobody can receive it. Returns
- * how many people it went to. Delivering to nobody is not an error anywhere
- * downstream, so it is said out loud here (CLAUDE.md §4).
- */
+/** One alert, to a person, or to the desk when nobody can receive it (notifyOrDesk counts and logs). */
 async function alert(tenantId: string, recipient: any | null, n: { type: string; data: any; link: string; record: any }): Promise<number> {
-  const input = { ...n, tenantId };
-  if (recipient) { await notify({ ...input, userId: recipient.id }); return 1; }
-  const [{ k }] = await sql`SELECT count(*)::int AS k FROM users WHERE tenant_id = ${tenantId} AND role IN ('owner', 'manager') AND status ILIKE 'active' AND deleted_at IS NULL`;
-  if (!k) { console.warn(`[Share] ${n.type} for tenant ${tenantId} reached nobody: no holder, creator or active owner/manager`); return 0; }
-  await notifyRoles(['owner', 'manager'], input);
-  return k;
+  return notifyOrDesk(recipient?.id || null, { ...n, tenantId });
 }
 
 /**
@@ -735,12 +726,20 @@ async function leadForNumber(m: ReturnType<typeof me>, phoneRaw: string, name: s
     // NOBODY ACTIVE HOLDS IT: unassigned, or its holder has left. An agent
     // typing the number does not make it theirs: assigning leads is the
     // desk's job. The desk is told someone wants it.
-    const [sender] = await sql`SELECT name FROM users WHERE tenant_id = ${m.tenantId} AND id = ${m.userId} LIMIT 1`;
-    await notifyRoles(['owner', 'manager'], {
-      tenantId: m.tenantId, type: 'share_number_held',
-      data: { name: existing.name || existing.phone, sender: sender?.name || null, unheld: true },
-      link: `?screen=leads&lead=${existing.id}`, record: { kind: 'lead', ids: [existing.id] },
-    }).catch(() => {});
+    // Once per lead per firm day: five agents trying the same number is one
+    // question for the desk, not five.
+    const tz = (await deskConfigOf(m.tenantId)).timezone;
+    const [told] = await sql`
+      SELECT 1 FROM notifications WHERE tenant_id = ${m.tenantId} AND type = 'share_number_held'
+         AND ${existing.id} = ANY(record_ids) AND created_at >= ${firmDayStart(tz)} LIMIT 1`;
+    if (!told) {
+      const [sender] = await sql`SELECT name FROM users WHERE tenant_id = ${m.tenantId} AND id = ${m.userId} LIMIT 1`;
+      await alert(m.tenantId, null, {
+        type: 'share_number_held',
+        data: { name: existing.name || existing.phone, sender: sender?.name || null, unheld: true },
+        link: `?screen=leads&lead=${existing.id}`, record: { kind: 'lead', ids: [existing.id] },
+      }).catch(() => 0);
+    }
     throw new ShareError(409, 'lead_held_by', 'This number is already a lead. The office decides who takes it.', { holderName: 'the office' });
   }
   // The normal lead-creation path. The requirement stays empty: what they were
