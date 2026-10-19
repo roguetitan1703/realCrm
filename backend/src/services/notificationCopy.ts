@@ -136,10 +136,16 @@ export const COPY: Builders = {
   // A buyer on a shared link (listing-pages.md §A). "Rahul is interested" when
   // the link was sent to Rahul; "Someone on Rahul's link" when the tap came
   // from another browser (forwarded); "Someone on your link" with no lead.
-  share_interested: (d) => ({
-    title: d.name ? (d.someoneOn ? `Someone on ${d.name}'s link is interested` : `${d.name} is interested`) : 'Someone on your link is interested',
-    body: facts(d.flat, d.sentOn && `from the link sent ${d.sentOn}`, d.previousStage && `was ${d.previousStage}`),
-  }),
+  // `homes`: this alert supersedes the open ones on the same lead, so it names
+  // all of them — "Sneha is interested in 2 homes · Maple Court 1 BHK and 1 more".
+  share_interested: (d) => {
+    const many = Number(d.homes) > 1;
+    const what = many ? ` in ${plural(d.homes, 'home')}` : '';
+    return {
+      title: d.name ? (d.someoneOn ? `Someone on ${d.name}'s link is interested${what}` : `${d.name} is interested${what}`) : `Someone on your link is interested${what}`,
+      body: facts(many ? `${d.flat} and ${d.homes - 1} more` : d.flat, d.sentOn && `from the link sent ${d.sentOn}`, d.previousStage && `was ${d.previousStage}`),
+    };
+  },
   share_expired_open: (d) => ({
     title: d.name ? `${d.name} opened an expired link` : 'Someone opened an expired link',
     body: facts(d.n && plural(d.n, 'home'), d.sentOn && `sent ${d.sentOn}`),

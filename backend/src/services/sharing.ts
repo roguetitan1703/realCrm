@@ -460,10 +460,27 @@ export async function interested(f: Firm, code: string, propertyId: string, r: P
       someoneOn = !!first && first.device_id !== r.deviceId;
     }
     const lead = who.lead;
+    // THE SURVIVOR SAYS HOW MANY. A newer alert on the same lead supersedes
+    // the open one (alertLifecycle.ts), so it must carry the homes the older
+    // ones named: every home this lead tapped since the oldest alert still open.
+    let homes = 1;
+    if (lead) {
+      const [open] = await sql`SELECT min(created_at) AS since FROM notifications
+        WHERE tenant_id = ${f.id} AND type = 'share_interested' AND closed_at IS NULL AND record_ids = ${[lead.id]}::text[]`;
+      if (open?.since) {
+        const [{ n }] = await sql`
+          SELECT count(DISTINCT e.property_id)::int AS n FROM crm_share_events e
+            LEFT JOIN crm_share_links l ON l.tenant_id = e.tenant_id AND l.id = e.link_id
+           WHERE e.tenant_id = ${f.id} AND e.kind = 'interested' AND e.property_id IS NOT NULL
+             AND (e.lead_id = ${lead.id} OR l.lead_id = ${lead.id})
+             AND (e.property_id = ${propertyId} OR e.created_at >= ${open.since}::timestamptz - interval '1 minute')`;
+        homes = Math.max(n, 1);
+      }
+    }
     await alert(f.id, who.recipient, {
       type: 'share_interested',
       data: {
-        name: lead ? (lead.name || lead.phone) : null, someoneOn, flat: flatLabel(flat, await localeOf(f.id)),
+        name: lead ? (lead.name || lead.phone) : null, someoneOn, flat: flatLabel(flat, await localeOf(f.id)), homes,
         sentOn: sentOn(link.created_at, tz),
         previousStage: lead && String(lead.stage || '').toLowerCase() === REJECTED_STATUS.toLowerCase() ? lead.stage : null,
       },
