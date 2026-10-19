@@ -790,19 +790,19 @@ export const api = {
   // A link is a set of homes, optionally bound to a lead, with an expiry fixed
   // when it is made. Sending again makes a new link; there is nothing to edit.
   createShareLink: (body) => request('/share-links', { method: 'POST', body: JSON.stringify(body) }),
-  myShareLinks: () => request('/share-links/mine', { fresh: true }),
+  myShareLinks: ({ page = 1, limit = 10, recipient } = {}) => request(`/share-links/mine${qs({ page, limit, recipient })}`, { fresh: true }),
   turnOffShareLink: (id) => request(`/share-links/${encodeURIComponent(id)}/off`, { method: 'POST', body: '{}' }),
   attachShareLink: (id, leadId) => request(`/share-links/${encodeURIComponent(id)}/attach`, { method: 'POST', body: JSON.stringify({ leadId }) }),
   leadShares: (leadId) => request(`/leads/${encodeURIComponent(leadId)}/shares`, { fresh: true }),
   leadFromTap: (code, body) => request(`/share-taps/${encodeURIComponent(code)}/lead`, { method: 'POST', body: JSON.stringify(body) }),
   // Your own mobile number — Send needs it, because a buyer's tap opens
   // WhatsApp to the person who sent them the link.
-  updateMyPhone: (userId, phone) => request(`/team/users/${encodeURIComponent(userId)}`, { method: 'PATCH', body: JSON.stringify({ phone }) }),
+  updateMyPhone: (phone) => request('/auth/me', { method: 'PATCH', body: JSON.stringify({ phone }) }),
   setCatalogue: (ids, on) => request('/properties/catalogue', { method: 'POST', body: JSON.stringify({ ids, on }) }),
   // The buyer's pages. No sign-in; a signed-in member of the firm still sends
   // their session (request() does that on any path under /<tenant>), which is
   // how the server answers `staff` and leaves them out of the counts.
-  publicShare: (tenant, code, device) => request(`/public/s/${encodeURIComponent(tenant)}/${encodeURIComponent(code)}`, { fresh: true, headers: deviceHeader(device) }),
+  publicShare: (tenant, code, device, flat) => request(`/public/s/${encodeURIComponent(tenant)}/${encodeURIComponent(code)}${qs({ flat })}`, { fresh: true, headers: deviceHeader(device) }),
   publicInterested: (tenant, code, propertyId, device) => request(`/public/s/${encodeURIComponent(tenant)}/${encodeURIComponent(code)}/interested`, { method: 'POST', headers: deviceHeader(device), body: JSON.stringify({ propertyId }) }),
   publicTalk: (tenant, code, device) => request(`/public/s/${encodeURIComponent(tenant)}/${encodeURIComponent(code)}/talk`, { method: 'POST', headers: deviceHeader(device), body: '{}' }),
   publicCatalogue: (tenant, filters, device) => request(`/public/catalogue/${encodeURIComponent(tenant)}${qs(filters)}`, { fresh: true, headers: deviceHeader(device) }),

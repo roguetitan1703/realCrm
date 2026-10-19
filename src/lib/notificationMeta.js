@@ -33,10 +33,13 @@ const META = {
   owner_assigned: { icon: 'userPlus', tone: 'info' },
   owner_reassigned: { icon: 'switch', tone: 'info' },
   // A buyer on a shared link (listing-pages.md §A.5): tapped I'm interested,
-  // opened a link after it expired, or came back to it on a new day.
+  // pressed Talk to us on an expired link, or came back to it on a new day;
+  // and a colleague who tried to send homes to your lead's number. The words
+  // are the server's (notificationCopy.ts).
   share_interested: { icon: 'wa', tone: 'urgent' },
   share_expired_open: { icon: 'clock', tone: 'attention' },
   share_returned: { icon: 'eye', tone: 'info' },
+  share_number_held: { icon: 'shield', tone: 'info' },
   // RETIRED TYPES KEEP THEIR FACE. Nothing sends these any more, but every row
   // already in a drawer still carries the type, and a live desk should not see
   // its history turn into a column of generic bells. Removed 26 Aug: lead_new

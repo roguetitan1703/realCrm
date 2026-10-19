@@ -82,7 +82,10 @@ function SecHead({ title, sub }) {
 // ---- Sharing --------------------------------------------------------------
 // Who: the owner or manager, at a desk. What they want: to set how long a
 // sent link works, what the public catalogue shows, to get the catalogue onto
-// the firm's website — and, if a link has leaked, to stop every link at once.
+// the firm's website — and, if a link has leaked, to stop sharing: every link
+// the firm has sent stops working for good, and no new ones can be made until
+// the owner allows sharing again. Old links never come back; the catalogue is
+// not affected.
 // crm_settings `sharing` (listing-pages.md §A.5).
 const EXPIRY_DAYS = [7, 15, 30]
 
@@ -92,6 +95,13 @@ function SharingSection({ store, settings }) {
   const showPrice = !!sh.showPriceOnCatalogue
   const showProject = sh.catalogueShowsProject !== false
   const stopped = !!sh.stopped
+  const allow = () => store.openModal({
+    kind: 'confirm',
+    title: 'Allow sharing again?',
+    lines: ['Your team can send new links.', 'Links sent before you stopped stay off.'],
+    confirmLabel: 'Allow sharing',
+    onConfirm: () => put({ stopped: null }, 'Sharing allowed. Old links stay off.'),
+  })
   const isOwner = store.state.role === 'owner'
   const [reply, setReply] = useState(sh.replyToPhone || '')
   useEffect(() => { setReply(sh.replyToPhone || '') }, [sh.replyToPhone])
@@ -108,9 +118,9 @@ function SharingSection({ store, settings }) {
   const stop = () => store.openModal({
     kind: 'confirm',
     title: 'Stop all sharing?',
-    lines: ['Every link stops working now.', 'The catalogue is taken down.'],
+    lines: ['Every link your team has sent stops working now, for good.', 'No one can send new links until you allow sharing again.', 'The catalogue stays up.'],
     confirmLabel: 'Stop all sharing',
-    onConfirm: () => put({ stopped: true }, 'All sharing stopped'),
+    onConfirm: () => put({ stopped: true }, 'Sharing stopped. Every link is off.'),
   })
 
   return (
@@ -119,8 +129,8 @@ function SharingSection({ store, settings }) {
       {stopped && (
         <div className="shr-stopped">
           <Icon name="alert" size={16} />
-          <span>All sharing is stopped</span>
-          {isOwner && <Button size="sm" onClick={() => put({ stopped: false }, 'Sharing is back on')}>Turn sharing back on</Button>}
+          <span>Sharing is stopped</span>
+          {isOwner && <Button size="sm" onClick={allow}>Allow sharing</Button>}
         </div>
       )}
       <Panel>

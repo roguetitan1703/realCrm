@@ -510,7 +510,7 @@ const EDITABLE_TYPES = new Set(['remark', 'call', 'wa', 'sms', 'followup'])
 const LOCKED_TEXT_TYPES = new Set(['followup'])
 // Exported: the record header shows the latest of these at the top, and a
 // second copy of this map would be two vocabularies drifting apart.
-export const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit', followup: 'Follow-up' }
+export const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit', followup: 'Follow-up', share: 'Shared link' }
 // B4 outcomes are stored as stable keys; these are what a person reads. Derived
 // from the one list rather than typed a second time — the map and the list used
 // to be separate literals that agreed only by luck.

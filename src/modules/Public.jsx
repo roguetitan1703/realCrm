@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api.js'
 import { fileUrl } from '../lib/media.js'
-import { formatMoney, phonePlaceholder } from '../lib/locale.js'
+import { formatMoney, phonePlaceholder, roomLabel, firmLocale } from '../lib/locale.js'
+import { SUBTYPES, FURNISH, FACING, POSSESSION, SOCIETY_AMENITIES, labelOf } from '../data/propertyFields.js'
 import { deviceId, openWa, looksLikePhone } from '../lib/share.js'
 import Icon from '../components/Icon.jsx'
 import PhotoViewer from '../components/PhotoViewer.jsx'
@@ -16,8 +17,8 @@ import AddFromTap from '../components/AddFromTap.jsx'
 // one tap to WhatsApp — or, on the firm's catalogue, to leave a number.
 //
 // Everything here wears the FIRM's brand (logo, accent, name), never Delpat's.
-// Nothing here is ever a dead end: an expired or turned-off link still names
-// the firm, offers Talk to us and the catalogue.
+// Nothing here is ever a dead end: a link that no longer works still names
+// the firm and offers Talk to us, and the catalogue when it has homes.
 //
 // Three routes, mounted on their own by main.jsx (no workspace, no sign-in):
 //   /<firm>/<code>          a shared link (one home or several), or a tap's
@@ -78,14 +79,21 @@ export function Gone({ title, onTalk, talkBusy, phone, catalogueUrl, offline, on
 }
 
 // ── One home ───────────────────────────────────────────────────────────────
-const homeTitle = (h) => h.project || h.title || h.locality || h.config || 'Home'
-const dealWord = (d) => (d === 'rent' ? 'For rent' : d === 'sale' ? 'For sale' : '')
-function priceOf(h) {
-  if (h.price == null || h.price === '') return ''
-  const n = Number(h.price)
-  return Number.isFinite(n) && n > 0 ? formatMoney(n, { perMonth: h.deal === 'rent' }) : String(h.price)
+// The server sends the stored tokens (config.bhk "2", config.subtype
+// "apartment"); the words come from the property vocabulary, the same as the
+// desk's, read in the firm's terms ("2 BHK" / "2 bed").
+const ALL_SUBTYPES = [...SUBTYPES.residential, ...SUBTYPES.commercial]
+const kindOf = (h) => [h.config?.bhk ? roomLabel(h.config.bhk) : '', labelOf(ALL_SUBTYPES, h.config?.subtype)].filter(Boolean).join(' ')
+const homeTitle = (h) => h.project || h.locality || kindOf(h) || h.title || 'Home'
+const areaOf = (h) => {
+  const a = Number(h.config?.carpetSqft) || Number(h.config?.builtupSqft) || Number(h.config?.superBuiltupSqft)
+  return a > 0 ? `${Math.round(a).toLocaleString(firmLocale().numberLocale)} sq.ft` : ''
 }
-const subOf = (h) => [h.config, h.project ? h.locality : null].filter(Boolean).join(' · ')
+const subOf = (h) => [kindOf(h), areaOf(h), h.project ? h.locality : null].filter(Boolean).join(' · ')
+const dealWord = (d) => (d === 'rent' ? 'For rent' : d === 'sale' ? 'For sale' : '')
+const priceOf = (h) => (Number(h.price) > 0 ? formatMoney(Number(h.price), { perMonth: h.deal === 'rent' }) : '')
+const waTo = (phone, text) => (phone ? `https://wa.me/${String(phone).replace(/\D/g, '')}${text ? `?text=${encodeURIComponent(text)}` : ''}` : '')
+const pathOf = (url) => { try { return url ? new URL(url, window.location.origin).pathname : null } catch { return null } }
 
 function HomeCard({ h, href, onOpen }) {
   const cover = (h.media || []).find(m => m.kind !== 'video')
@@ -113,6 +121,31 @@ function HomeCard({ h, href, onOpen }) {
   )
 }
 
+/** The facts a buyer asks before they ask anything else. Only what is filled. */
+function Facts({ h }) {
+  const c = h.config || {}
+  const rows = [
+    ['Carpet', Number(c.carpetSqft) > 0 ? `${Math.round(c.carpetSqft).toLocaleString(firmLocale().numberLocale)} sq.ft` : ''],
+    ['Built-up', Number(c.builtupSqft) > 0 ? `${Math.round(c.builtupSqft).toLocaleString(firmLocale().numberLocale)} sq.ft` : ''],
+    ['Bathrooms', c.bathrooms ? String(c.bathrooms) : ''],
+    ['Furnishing', c.furnishing ? labelOf(FURNISH, c.furnishing) : ''],
+    ['Facing', c.facing ? labelOf(FACING, c.facing) : ''],
+    ['Possession', c.possession ? labelOf(POSSESSION, c.possession) : ''],
+  ].filter(([, v]) => v)
+  const amen = (c.amenities || []).map(a => labelOf(SOCIETY_AMENITIES, a)).filter(Boolean)
+  if (!rows.length && !amen.length) return null
+  return (
+    <>
+      {rows.length > 0 && (
+        <dl className="pvh-facts">
+          {rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
+        </dl>
+      )}
+      {amen.length > 0 && <div className="pvh-amen">{amen.map(a => <span key={a}>{a}</span>)}</div>}
+    </>
+  )
+}
+
 function HomeDetail({ h, onBack, backLabel, children }) {
   const price = priceOf(h)
   const taken = h.available === false
@@ -130,6 +163,7 @@ function HomeDetail({ h, onBack, backLabel, children }) {
         {(price || dealWord(h.deal)) && (
           <div className="pvh-p">{price && <b>{price}</b>}{dealWord(h.deal) && <span>{dealWord(h.deal)}</span>}</div>
         )}
+        <Facts h={h} />
         {children}
       </div>
     </article>
@@ -137,6 +171,17 @@ function HomeDetail({ h, onBack, backLabel, children }) {
 }
 
 // ── A shared link ──────────────────────────────────────────────────────────
+// A wrong, expired, turned-off or stopped code all answer one identical body,
+// `state: 'unavailable'`, so a code cannot be probed. The buyer always gets
+// Talk to us (the server routes an expired link's press to its holder, any
+// other to the firm) and the catalogue when there is one. Only a signed-in
+// member of the firm learns which it was, from `staff.link.state`.
+const STAFF_DEAD = {
+  expired: 'This link has expired',
+  off: 'This link was turned off',
+  stopped: 'Sharing was stopped. This link no longer works.',
+}
+
 export function SharedLinkPage({ tenant, code }) {
   const device = useMemo(() => deviceId(tenant), [tenant])
   const [s, setS] = useState({ loading: true })
@@ -149,11 +194,11 @@ export function SharedLinkPage({ tenant, code }) {
   useEffect(() => {
     let live = true
     setS(x => ({ ...x, loading: true }))
-    api.publicShare(tenant, code, device)
+    api.publicShare(tenant, code, device, open || undefined)
       .then(r => { if (live) setS({ loading: false, data: r }) })
-      .catch(e => { if (live) setS({ loading: false, data: e?.body?.state ? e.body : null, offline: e instanceof TypeError || !e?.body }) })
+      .catch(e => { if (live) setS({ loading: false, data: null, offline: e instanceof TypeError || !e?.body }) })
     return () => { live = false }
-  }, [tenant, code, tries])
+  }, [tenant, code, tries]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ?h=<home> is the home open on a several-home link, so Back on the phone
   // returns to the list rather than leaving the page.
@@ -164,9 +209,12 @@ export function SharedLinkPage({ tenant, code }) {
   }, [])
   const show = (id) => {
     const u = new URL(window.location.href)
-    if (id) u.searchParams.set('h', id); else u.searchParams.delete('h')
-    if (id) window.history.pushState(null, '', u.pathname + u.search)
-    else window.history.back()
+    if (id) {
+      u.searchParams.set('h', id)
+      window.history.pushState(null, '', u.pathname + u.search)
+      // The view is counted against the home the buyer opened (`?flat=`).
+      api.publicShare(tenant, code, device, id).catch(() => {})
+    } else window.history.back()
     setOpen(id)
     window.scrollTo(0, 0)
   }
@@ -178,21 +226,20 @@ export function SharedLinkPage({ tenant, code }) {
   const interested = (h) => {
     if (busy) return
     setBusy(h.id)
+    const fallback = waTo(d?.cta?.phone, `Hi, I'm interested in ${homeTitle(h)}`)
     api.publicInterested(tenant, code, h.id, device)
-      .then(r => {
-        if (r?.waUrl) openWa(r.waUrl)
-        else if (d?.cta?.phone) openWa(`https://wa.me/${String(d.cta.phone).replace(/\D/g, '')}?text=${encodeURIComponent(`Hi, I'm interested in ${homeTitle(h)}`)}`)
-      })
-      // The tap could not be recorded (no signal). The buyer still reaches the
-      // agent: WhatsApp opens on the firm's number with the home named.
-      .catch(() => { if (d?.cta?.phone) openWa(`https://wa.me/${String(d.cta.phone).replace(/\D/g, '')}?text=${encodeURIComponent(`Hi, I'm interested in ${homeTitle(h)}`)}`) })
+      .then(r => openWa(r?.waUrl || fallback))
+      // The tap could not be recorded (no signal, or the link died meanwhile).
+      // The buyer still reaches someone: WhatsApp on the number the page has.
+      .catch(() => openWa(fallback))
       .finally(() => setTimeout(() => setBusy(null), 1200))
   }
   const talk = () => {
+    if (talkBusy) return
     setTalkBusy(true)
     api.publicTalk(tenant, code, device)
-      .then(r => openWa(r?.waUrl || (d?.cta?.phone ? `https://wa.me/${String(d.cta.phone).replace(/\D/g, '')}` : '')))
-      .catch(() => { if (d?.cta?.phone) openWa(`https://wa.me/${String(d.cta.phone).replace(/\D/g, '')}`) })
+      .then(r => openWa(r?.waUrl || waTo(d?.cta?.phone)))
+      .catch(() => openWa(waTo(d?.cta?.phone)))
       .finally(() => setTimeout(() => setTalkBusy(false), 1200))
   }
 
@@ -200,24 +247,22 @@ export function SharedLinkPage({ tenant, code }) {
   if (!d) return <PublicShell firm={null} tenant={tenant}><Gone offline onRetry={() => setTries(t => t + 1)} /></PublicShell>
 
   const staff = d.staff
-  const staffBar = staff ? <StaffBar tenant={tenant} staff={staff} flats={d.flats || []} tapDone={tapDone} onTapDone={setTapDone} /> : null
+  const flats = d.flats || []
+  const catalogue = pathOf(d.catalogueUrl)
+  const staffBar = staff ? <StaffBar tenant={tenant} staff={staff} flats={flats} tapDone={tapDone} onTapDone={setTapDone} /> : null
 
   if (d.state !== 'active') {
-    const title = d.state === 'expired' ? 'This link has expired' : 'This link is no longer active'
+    const real = staff?.link?.state
     return (
       <PublicShell firm={firm} tenant={tenant} bar={staffBar}>
-        <Gone title={title}
-          onTalk={d.state === 'expired' ? talk : null} talkBusy={talkBusy}
-          phone={d.cta?.phone}
-          catalogueUrl={d.state === 'stopped' ? null : (d.catalogueUrl ? new URL(d.catalogueUrl, window.location.origin).pathname : `/${tenant}/homes`)} />
+        <Gone title={(real && STAFF_DEAD[real]) || 'This link is no longer active'}
+          onTalk={staff ? null : talk} talkBusy={talkBusy} catalogueUrl={catalogue} />
       </PublicShell>
     )
   }
 
-  const flats = d.flats || []
   const single = flats.length === 1
   const current = single ? flats[0] : flats.find(f => f.id === open)
-  const catalogue = d.catalogueUrl ? new URL(d.catalogueUrl, window.location.origin).pathname : `/${tenant}/homes`
 
   if (current) {
     const taken = current.available === false
@@ -227,7 +272,9 @@ export function SharedLinkPage({ tenant, code }) {
         {!staff && <div className="pv-cta">
           {taken ? (
             single
-              ? <a className="pv-btn pv-btn-alt pv-btn-wide" href={catalogue}>See our other homes</a>
+              ? (catalogue
+                ? <a className="pv-btn pv-btn-alt pv-btn-wide" href={catalogue}>See our other homes</a>
+                : <button type="button" className="pv-btn pv-btn-main pv-btn-wide" disabled={talkBusy} onClick={talk}><Icon name="wa" size={19} fill />Talk to us</button>)
               : <button type="button" className="pv-btn pv-btn-alt pv-btn-wide" onClick={() => show(null)}>See the other homes</button>
           ) : (
             <button type="button" className="pv-btn pv-btn-main pv-btn-wide" disabled={busy === current.id} onClick={() => interested(current)}>
@@ -242,46 +289,59 @@ export function SharedLinkPage({ tenant, code }) {
   const live = flats.filter(f => f.available !== false).length
   return (
     <PublicShell firm={firm} tenant={tenant} bar={staffBar}>
-      <div className="pv-list-h">
-        <h1>{flats.length} homes for you</h1>
-        {live < flats.length && <span>{live} available</span>}
-      </div>
       {flats.length === 0
-        ? <Gone title="These homes are no longer available" phone={d.cta?.phone} catalogueUrl={catalogue} />
+        ? <Gone title="These homes are no longer available" onTalk={staff ? null : talk} talkBusy={talkBusy} catalogueUrl={catalogue} />
         : (
-          <div className="pv-grid">
-            {flats.map(h => <HomeCard key={h.id} h={h} onOpen={() => show(h.id)} />)}
-          </div>
+          <>
+            <div className="pv-list-h">
+              <h1>{flats.length} homes for you</h1>
+              {live < flats.length && <span>{live} available</span>}
+            </div>
+            <div className="pv-grid">
+              {flats.map(h => <HomeCard key={h.id} h={h} onOpen={() => show(h.id)} />)}
+            </div>
+          </>
         )}
     </PublicShell>
   )
 }
 
-/** A member of the firm, signed in, on a link: who it went to, or — on a
- *  tap's ref link — Add as lead, holding the link, the home and the tap. */
+/** A member of the firm, signed in, on a link: who it went to and whether it
+ *  still works, or — on a tap's or a Talk to us ref link — Add as lead,
+ *  holding the link, the home and the tap. */
 function StaffBar({ tenant, staff, flats, tapDone, onTapDone }) {
   const [closed, setClosed] = useState(false)
   if (closed) return null
   const leadHref = (id) => `/${tenant}?screen=leads&lead=${encodeURIComponent(id)}`
   const lead = tapDone?.lead || staff.lead
   if (staff.tap && !lead) {
-    const h = flats.find(f => f.id === staff.tap.propertyId) || flats[0]
+    const talk = !staff.tap.propertyId
+    const h = talk ? null : (flats.find(f => f.id === staff.tap.propertyId) || flats[0])
+    const home = talk ? (flats.length === 1 ? flats[0].title : `${flats.length} homes`) : (h?.title || '')
     return (
       <div className="pv-staff pv-staff-tap">
         <div className="pv-staff-in">
           <div className="pv-staff-h">Add as lead</div>
-          <AddFromTap tap={staff.tap} home={h ? [homeTitle(h), h.config].filter(Boolean).join(' · ') : ''} footClass="pv-staff-foot"
+          <AddFromTap tap={staff.tap} home={home} via={talk ? 'talk' : 'interested'} footClass="pv-staff-foot"
             onDone={(r) => onTapDone(r)} onCancel={() => setClosed(true)} />
         </div>
       </div>
     )
   }
-  if (!lead) return null
+  const state = staff.link?.state
+  const dead = state && state !== 'active'
+  if (!lead && !dead) return null
+  const word = tapDone ? (tapDone.matched ? 'Already a lead' : 'Lead added') : staff.tap ? 'Tap by' : 'Sent to'
   return (
     <div className="pv-staff">
       <div className="pv-staff-in pv-staff-row">
-        <span className="pv-staff-who">{tapDone ? (tapDone.matched ? 'Already a lead' : 'Lead added') : 'Sent to'} · <b>{lead.name || 'Lead'}</b></span>
-        <a className="pv-staff-go" href={leadHref(lead.id)}>Open lead<Icon name="chevRight" size={14} /></a>
+        <span className="pv-staff-who">
+          {lead
+            ? (lead.visible === false ? 'Another agent’s lead' : <>{word} · <b>{lead.name || lead.phone || 'Lead'}</b></>)
+            : 'No recipient'}
+          {dead && <span className="pv-staff-dead"> · {state === 'expired' ? 'Expired' : state === 'off' ? 'Turned off' : 'Stopped'}</span>}
+        </span>
+        {lead && lead.visible !== false && <a className="pv-staff-go" href={leadHref(lead.id)}>Open lead<Icon name="chevRight" size={14} /></a>}
       </div>
     </div>
   )
@@ -296,77 +356,71 @@ function Skeleton() {
 }
 
 // ── The public catalogue ───────────────────────────────────────────────────
-const bhkOf = (cfg) => (String(cfg || '').match(/^\s*(\d+)\s*(?:BHK|RK|Bed)/i)?.[0] || '').replace(/\s+/g, ' ').trim()
-
+// The filter lives in the address (?deal=&bhk=&area=), replaced rather than
+// pushed. The server filters, counts and pages; `facets` are the choices the
+// firm's whole catalogue offers, so a choice never leads to nothing.
 function readFilters() {
   const p = new URLSearchParams(window.location.search)
   return { deal: p.get('deal') || '', bhk: p.get('bhk') || '', area: p.get('area') || '' }
 }
+const bhkSort = (a, b) => (parseFloat(a) || (a === '1rk' ? 0.5 : 99)) - (parseFloat(b) || (b === '1rk' ? 0.5 : 99))
 
 export function CataloguePage({ tenant }) {
   const device = useMemo(() => deviceId(tenant), [tenant])
   const [f, setF] = useState(readFilters)
-  const [all, setAll] = useState({ loading: true })
-  const [rows, setRows] = useState(null)
+  const [page, setPage] = useState(1)
+  const [s, setS] = useState({ loading: true, rows: [] })
   const [tries, setTries] = useState(0)
 
-  // The unfiltered book once, for the firm, the state and the filter choices;
-  // then the filtered rows from the server as the choices change.
   useEffect(() => {
     let live = true
-    api.publicCatalogue(tenant, {}, device)
-      .then(r => { if (live) setAll({ loading: false, data: r }) })
-      .catch(e => { if (live) setAll({ loading: false, data: e?.body?.firm ? e.body : null, offline: e instanceof TypeError || !e?.body }) })
+    setS(x => ({ ...x, loading: true, failed: false }))
+    api.publicCatalogue(tenant, { deal: f.deal, config: f.bhk, locality: f.area, page, limit: PAGE_SIZE }, device)
+      .then(r => { if (live) setS(x => ({ loading: false, data: r, rows: page === 1 ? (r?.flats || []) : [...x.rows, ...(r?.flats || [])] })) })
+      .catch(e => { if (live) setS(x => ({ ...x, loading: false, failed: true, offline: e instanceof TypeError || !e?.body, body: e?.body || null })) })
     return () => { live = false }
-  }, [tenant, tries])
+  }, [tenant, f.deal, f.bhk, f.area, page, tries]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filtered = !!(f.deal || f.bhk || f.area)
-  useEffect(() => {
-    if (!filtered) { setRows(null); return }
-    let live = true
-    api.publicCatalogue(tenant, { deal: f.deal || undefined, config: f.bhk || undefined, locality: f.area || undefined }, device)
-      .then(r => { if (live) setRows(r?.flats || []) })
-      .catch(() => { if (live) setRows([]) })
-    return () => { live = false }
-  }, [tenant, f.deal, f.bhk, f.area])
-
-  // The filter lives in the address, replaced rather than pushed.
   const set = (patch) => {
     const next = { ...f, ...patch }
-    setF(next)
+    setF(next); setPage(1)
     const u = new URL(window.location.href)
     for (const k of ['deal', 'bhk', 'area']) { if (next[k]) u.searchParams.set(k, next[k]); else u.searchParams.delete(k) }
     window.history.replaceState(null, '', u.pathname + u.search)
   }
 
-  const d = all.data
-  useEffect(() => { if (d?.firm?.name) document.title = `Homes · ${d.firm.name}` }, [d?.firm?.name])
+  const d = s.data
+  const firm = d?.firm || s.body?.firm || null
+  useEffect(() => { if (firm?.name) document.title = `Homes · ${firm.name}` }, [firm?.name])
 
-  if (all.loading) return <PublicShell firm={null} tenant={tenant} waiting><Skeleton /></PublicShell>
-  if (!d) return <PublicShell firm={null} tenant={tenant}><Gone offline={all.offline} onRetry={() => setTries(t => t + 1)} title="These homes are not available" /></PublicShell>
-  if (d.state && d.state !== 'active') {
-    return <PublicShell firm={d.firm} tenant={tenant}><Gone title="These homes are not available right now" phone={d.cta?.phone} /></PublicShell>
+  if (!d && s.loading) return <PublicShell firm={null} tenant={tenant} waiting><Skeleton /></PublicShell>
+  if (!d) {
+    return (
+      <PublicShell firm={firm} tenant={tenant}>
+        <Gone offline={s.offline} onRetry={() => setTries(t => t + 1)} title="These homes could not be loaded" phone={s.body?.cta?.phone} />
+      </PublicShell>
+    )
   }
 
-  const book = d.flats || []
   const facets = d.facets || {}
-  const deals = facets.deal || [...new Set(book.map(h => h.deal).filter(Boolean))]
-  const bhks = (facets.config || [...new Set(book.map(h => bhkOf(h.config)).filter(Boolean))]).slice().sort((a, b) => parseInt(a) - parseInt(b))
-  const areas = (facets.locality || [...new Set(book.map(h => h.locality).filter(Boolean))]).slice().sort()
-  const list = filtered ? (rows || []) : book
-  const loadingRows = filtered && rows === null
+  const deals = (facets.deal || []).filter(x => x === 'sale' || x === 'rent')
+  const bhks = (facets.config || []).slice().sort(bhkSort)
+  const areas = facets.locality || []
+  const filtered = !!(f.deal || f.bhk || f.area)
+  const total = d.total ?? s.rows.length
+  const firstLoad = s.loading && page === 1
 
   return (
-    <PublicShell firm={d.firm} tenant={tenant}>
+    <PublicShell firm={firm} tenant={tenant}>
       <div className="pv-list-h">
         <h1>Homes</h1>
-        {!loadingRows && <span>{list.length} {list.length === 1 ? 'home' : 'homes'}</span>}
+        {!firstLoad && <span>{total} {total === 1 ? 'home' : 'homes'}</span>}
       </div>
-      {book.length > 0 && (deals.length > 1 || bhks.length > 1 || areas.length > 1) && (
+      {(deals.length > 1 || bhks.length > 1 || areas.length > 1) && (
         <div className="pv-filters">
           {deals.length > 1 && (
             <div className="pv-seg" role="group" aria-label="Sale or rent">
-              {[['', 'All'], ['sale', 'Sale'], ['rent', 'Rent']].filter(([v]) => !v || deals.includes(v)).map(([v, l]) => (
+              {[['', 'All'], ['sale', 'Sale'], ['rent', 'Rent']].map(([v, l]) => (
                 <button key={l} type="button" className={f.deal === v ? 'on' : ''} aria-pressed={f.deal === v} onClick={() => set({ deal: v })}>{l}</button>
               ))}
             </div>
@@ -374,7 +428,7 @@ export function CataloguePage({ tenant }) {
           {bhks.length > 1 && (
             <div className="pv-chips" role="group" aria-label="Bedrooms">
               {bhks.map(b => (
-                <button key={b} type="button" className={'pv-chip' + (f.bhk === b ? ' on' : '')} aria-pressed={f.bhk === b} onClick={() => set({ bhk: f.bhk === b ? '' : b })}>{b}</button>
+                <button key={b} type="button" className={'pv-chip' + (f.bhk === b ? ' on' : '')} aria-pressed={f.bhk === b} onClick={() => set({ bhk: f.bhk === b ? '' : b })}>{roomLabel(b)}</button>
               ))}
             </div>
           )}
@@ -390,23 +444,33 @@ export function CataloguePage({ tenant }) {
           )}
         </div>
       )}
-      {loadingRows ? <Skeleton /> : list.length === 0 ? (
+      {firstLoad ? <Skeleton /> : s.rows.length === 0 ? (
         <div className="pv-empty">
-          <div className="pv-empty-t">{book.length ? 'No homes match' : 'No homes listed right now'}</div>
+          <div className="pv-empty-t">{filtered ? 'No homes match' : 'No homes listed right now'}</div>
           {filtered && <button type="button" className="pv-btn pv-btn-alt" onClick={() => set({ deal: '', bhk: '', area: '' })}>Clear filters</button>}
         </div>
       ) : (
-        <div className="pv-grid">
-          {list.map(h => <HomeCard key={h.id} h={h} href={withEmbed(`/${tenant}/homes/${encodeURIComponent(h.slug || h.id)}`)} />)}
-        </div>
+        <>
+          <div className="pv-grid">
+            {s.rows.map(h => <HomeCard key={h.id} h={h} href={withEmbed(`/${tenant}/homes/${encodeURIComponent(h.slug || h.id)}`)} />)}
+          </div>
+          {s.rows.length < total && (
+            <button type="button" className="pv-btn pv-btn-alt pv-more" disabled={s.loading} onClick={() => setPage(p => p + 1)}>
+              {s.loading ? 'Loading…' : `Show more · ${total - s.rows.length}`}
+            </button>
+          )}
+          {s.failed && <div className="pv-err" role="alert">{s.offline ? 'No connection.' : 'Could not load more.'} <button type="button" className="pv-link" onClick={() => setTries(t => t + 1)}>Try again</button></div>}
+        </>
       )}
       <section className="pv-enq-wrap" id="enquire">
         <h2>Tell us what you're looking for</h2>
-        <EnquiryForm tenant={tenant} device={device} firm={d.firm} />
+        <EnquiryForm tenant={tenant} device={device} firm={firm} />
       </section>
     </PublicShell>
   )
 }
+
+const PAGE_SIZE = 24
 
 export function CatalogueHomePage({ tenant, slug }) {
   const device = useMemo(() => deviceId(tenant), [tenant])
@@ -421,18 +485,18 @@ export function CatalogueHomePage({ tenant, slug }) {
   }, [tenant, slug, tries])
 
   const d = s.data
-  const h = d?.flat || d?.flats?.[0]
+  const h = d?.flat
   useEffect(() => { if (h && d?.firm?.name) document.title = `${homeTitle(h)} · ${d.firm.name}` }, [h, d?.firm?.name])
 
   if (s.loading) return <PublicShell firm={null} tenant={tenant} waiting><Skeleton /></PublicShell>
-  if (!h || (d.state && d.state !== 'active')) {
-    const firm = d?.firm || s.body?.firm || null
+  if (!h) {
+    // Sold, removed or never there answer alike (404 with the firm, its
+    // number and the catalogue when it has anything in it).
     return (
-      <PublicShell firm={firm} tenant={tenant}>
+      <PublicShell firm={s.body?.firm || null} tenant={tenant}>
         <Gone offline={s.offline} onRetry={() => setTries(t => t + 1)}
           title="This home is no longer available"
-          phone={d?.cta?.phone || s.body?.cta?.phone}
-          catalogueUrl={d?.state === 'stopped' ? null : `/${tenant}/homes`} />
+          phone={s.body?.cta?.phone} catalogueUrl={pathOf(s.body?.catalogueUrl)} />
       </PublicShell>
     )
   }
@@ -453,7 +517,7 @@ export function CatalogueHomePage({ tenant, slug }) {
  *  the firm's normal lead intake, source Catalogue. */
 function EnquiryForm({ tenant, device, firm, propertyId }) {
   const [v, setV] = useState({ name: '', phone: '', message: '', website: '' })
-  const [st, setSt] = useState({ busy: false, done: false, err: '' })
+  const [st, setSt] = useState({ busy: false, done: false, err: '', talk: '' })
   const set = (k) => (e) => setV(x => ({ ...x, [k]: e.target.value }))
   const ok = looksLikePhone(v.phone)
   const submit = (e) => {
@@ -467,9 +531,13 @@ function EnquiryForm({ tenant, device, firm, propertyId }) {
       website: v.website,
     }, device)
       .then(() => setSt({ busy: false, done: true, err: '' }))
+      // 429 is the firm's daily limit or too many tries from here: nothing the
+      // buyer did wrong, so it says later, and offers WhatsApp when the
+      // server sent a number.
       .catch(err => setSt({ busy: false, done: false,
+        talk: err?.status === 429 ? (err?.body?.cta?.phone || '') : '',
         err: err instanceof TypeError ? 'No connection. Try again.'
-          : err?.status === 429 ? 'Too many tries. Try again in a minute.'
+          : err?.status === 429 ? 'We could not take this just now. Try again later.'
           : err?.status === 400 ? 'Check the number and try again.'
           : 'Could not send. Try again.' }))
   }
@@ -489,6 +557,7 @@ function EnquiryForm({ tenant, device, firm, propertyId }) {
       {/* Not for people. A bot fills every field it finds. */}
       <input className="pv-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={v.website} onChange={set('website')} name="website" />
       {st.err && <div className="pv-err" role="alert">{st.err}</div>}
+      {st.talk && <button type="button" className="pv-btn pv-btn-alt pv-btn-wide" onClick={() => openWa(waTo(st.talk))}><Icon name="wa" size={18} fill />Talk to us</button>}
       <button type="submit" className="pv-btn pv-btn-main pv-btn-wide" disabled={!ok || st.busy}>{st.busy ? 'Sending…' : 'Send'}</button>
       <p className="pv-consent">We use your number only to contact you about homes. <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a></p>
     </form>

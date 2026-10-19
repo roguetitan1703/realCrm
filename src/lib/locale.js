@@ -200,7 +200,8 @@ export function phonePlaceholder(india, { national = false } = {}, loc = current
 
 /** A bedroom token → its label: '3' → "3 BHK" / "3 bed". */
 export function roomLabel(value, loc = current) {
-  const v = String(value)
+  // Older rows carry "2 BHK" as text; without this they read "2 BHK BHK".
+  const v = String(value).trim().replace(/\s*bhk$/i, '').toLowerCase()
   if (loc.rooms === 'bed') {
     if (v === '1rk') return 'Studio'
     if (v === '5plus') return '5+ bed'

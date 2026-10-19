@@ -47,10 +47,13 @@ export function MePhone({ store }) {
 export function MyLinks({ store, go }) {
   const tick = store.state.mutationTick || 0
   const [bump, setBump] = useState(0)
+  // Ten at a time; Show more asks the server for the next ten.
+  const [shown, setShown] = useState(PAGE)
   const { data, loading, error } = useServerData(
-    () => api.myShareLinks().then(r => r?.data || []),
-    [tick, bump], null)
-  const rows = data || []
+    () => api.myShareLinks({ limit: shown }),
+    [tick, bump, shown], null)
+  const rows = data?.data || []
+  const total = data?.total ?? rows.length
   const reload = () => setBump(b => b + 1)
 
   const turnOff = (l) => store.openModal({
@@ -67,7 +70,7 @@ export function MyLinks({ store, go }) {
 
   return (
     <div className="mylinks">
-      <div className="msgt-h mylinks-h">Links I've shared{rows.length ? <span className="mylinks-n">{rows.length}</span> : null}</div>
+      <div className="msgt-h mylinks-h">Links I've shared{total ? <span className="mylinks-n">{total}</span> : null}</div>
       {loading && data === null ? (
         <div className="mylinks-empty"><span className="snd-spin" aria-label="Loading" /></div>
       ) : error ? (
@@ -103,11 +106,18 @@ export function MyLinks({ store, go }) {
               </div>
             )
           })}
+          {total > rows.length && (
+            <button type="button" className="btn btn-ghost btn-block mylinks-more" disabled={loading} onClick={() => setShown(n => Math.min(n + PAGE, 100))}>
+              {loading ? 'Loading…' : `Show more · ${total - rows.length}`}
+            </button>
+          )}
         </div>
       )}
     </div>
   )
 }
+
+const PAGE = 10
 
 const homesWord = (l) => {
   const n = l.flats?.length ?? l.homes ?? 0

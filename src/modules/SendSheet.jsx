@@ -6,7 +6,7 @@ import { configLabel, personLabel, unitLabel } from '../lib/format.js'
 import { phoneLabel, phonePlaceholder } from '../lib/locale.js'
 import { copyText } from '../lib/clipboard.js'
 import { canPickWhatsApp, openWhatsAppChat } from '../lib/matching.js'
-import { canPickContact, pickContact, looksLikePhone, refusal, expiryLabel } from '../lib/share.js'
+import { canPickContact, pickContact, looksLikePhone, refusal, expiryLabel, heldText } from '../lib/share.js'
 import WaSend from '../components/WaSend.jsx'
 
 // ============================================================================
@@ -91,6 +91,19 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
       const why = refusal(e)
       if (why.status === 422 && /sender_phone_missing/.test(why.code || e.message)) setStep('phone')
       else if (why.status === 409 && /lead_held_by/.test(why.code || e.message)) { setHeld(why.holderName); setStep('held') }
+      else if (why.code === 'private_flats_without_recipient') {
+        // The server's word on which homes are not in the catalogue wins over
+        // what the list row said when the sheet opened.
+        const out = new Set(e.body?.ids || [])
+        setHomes(hs => hs.map(h => (out.has(h.id) ? { ...h, inCatalogue: false } : h)))
+        setErr(out.size === 1 ? '1 home is not in the catalogue. Send it to a named buyer.' : `${out.size} homes are not in the catalogue. Send them to a named buyer.`)
+      }
+      else if (why.code === 'flats_not_available') {
+        const gone = new Set(e.body?.ids || [])
+        if (gone.size < homes.length) setHomes(hs => hs.filter(h => !gone.has(h.id)))
+        setErr(gone.size >= homes.length ? 'These homes are no longer available.' : gone.size === 1 ? '1 home is no longer available and was left out.' : `${gone.size} homes are no longer available and were left out.`)
+      }
+      else if (why.code === 'sharing_stopped') setErr('Sharing is stopped. An owner can allow it again in Settings.')
       else if (e instanceof TypeError) setErr('No connection. Nothing was sent.')
       else setErr(e?.body?.message && !/^[a-z_]+$/.test(e.body.message) ? e.body.message : 'Could not make the link. Try again.')
     } finally {
@@ -116,8 +129,8 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
         <div className="snd-held">
           <Icon name="alert" size={18} />
           <div>
-            <div className="snd-held-t">{held ? `This number is ${held}'s lead` : 'This number is another agent’s lead'}</div>
-            <div className="snd-held-s">{held ? `${held.split(' ')[0]} has been told.` : 'They have been told.'}</div>
+            <div className="snd-held-t">{heldText(held).title}</div>
+            <div className="snd-held-s">{heldText(held).sub}</div>
           </div>
         </div>
         <div className="mfm-foot">
@@ -320,12 +333,16 @@ export function SenderPhone({ store, me, onSaved, onCancel, saveLabel = 'Save an
     if (!looksLikePhone(phone) || busy) return
     setBusy(true); setErr('')
     try {
-      await api.updateMyPhone(me?.id || store.state.activeAgentId, phone.trim())
+      await api.updateMyPhone(phone.trim())
       store.touched?.()
       await store.loadServerState?.()
       onSaved?.()
     } catch (e) {
-      setErr(e?.status === 403 ? 'Your number could not be saved. Ask your manager to add it.' : 'Could not save. Try again.')
+      const code = refusal(e).code
+      setErr(code === 'phone_invalid' ? 'A 10-digit mobile number is needed.'
+        : code === 'phone_taken' ? 'Someone on this team already uses that number.'
+        : e instanceof TypeError ? 'No connection. Nothing was saved.'
+        : 'Could not save. Try again.')
     } finally { setBusy(false) }
   }
   return (

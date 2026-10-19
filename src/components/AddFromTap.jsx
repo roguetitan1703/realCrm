@@ -3,7 +3,7 @@ import Icon from './Icon.jsx'
 import { Button, Input } from './primitives.jsx'
 import { api, currentTenant } from '../lib/api.js'
 import { phonePlaceholder } from '../lib/locale.js'
-import { canPaste, canPickContact, pasteNumber, pickContact, looksLikePhone, refusal } from '../lib/share.js'
+import { canPaste, canPickContact, pasteNumber, pickContact, looksLikePhone, refusal, heldText } from '../lib/share.js'
 
 // ============================================================================
 // ADD AS LEAD — from a buyer's I'm interested tap (listing-pages.md §A.1d)
@@ -23,7 +23,7 @@ import { canPaste, canPickContact, pasteNumber, pickContact, looksLikePhone, ref
  * `staff.tap`; `home` is the title of the home tapped, when known.
  * `onDone(result)` gets `{ lead, matched }`.
  */
-export default function AddFromTap({ tap, home, onDone, onCancel, footClass = 'mfm-foot' }) {
+export default function AddFromTap({ tap, home, via = 'interested', onDone, onCancel, footClass = 'mfm-foot' }) {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [busy, setBusy] = useState(false)
@@ -49,6 +49,7 @@ export default function AddFromTap({ tap, home, onDone, onCancel, footClass = 'm
     } catch (e) {
       const why = refusal(e)
       if (why.status === 409) setState({ kind: 'held', holder: why.holderName })
+      else if (why.status === 403) setState({ kind: 'error', text: 'Only the person who sent this link, the lead’s holder or a manager can add it.' })
       else if (e instanceof TypeError) setState({ kind: 'error', text: 'No connection. Nothing was saved.' })
       else setState({ kind: 'error', text: 'Could not add the lead. Try again.' })
     } finally { setBusy(false) }
@@ -60,8 +61,8 @@ export default function AddFromTap({ tap, home, onDone, onCancel, footClass = 'm
         <div className="snd-held">
           <Icon name="alert" size={18} />
           <div>
-            <div className="snd-held-t">{state.holder ? `This number is ${state.holder}'s lead` : 'This number is another agent’s lead'}</div>
-            <div className="snd-held-s">{state.holder ? `${state.holder.split(' ')[0]} has been told.` : 'They have been told.'}</div>
+            <div className="snd-held-t">{heldText(state.holder).title}</div>
+            <div className="snd-held-s">{heldText(state.holder).sub}</div>
           </div>
         </div>
         <div className={footClass}>
@@ -79,7 +80,7 @@ export default function AddFromTap({ tap, home, onDone, onCancel, footClass = 'm
           <span className="aft-home-ic"><Icon name="building" size={15} /></span>
           <div className="aft-home-main">
             <div className="aft-home-t">{home}</div>
-            <div className="aft-home-s">Tapped I'm interested</div>
+            <div className="aft-home-s">{via === 'talk' ? 'Pressed Talk to us on an expired link' : "Tapped I'm interested"}</div>
           </div>
         </div>
       )}
@@ -129,8 +130,12 @@ export function AddFromTapModal({ store, go, Modal, code }) {
 
   const d = info.data
   const tap = d?.staff?.tap || { code }
-  const home = d?.flats?.find(f => f.id === tap.propertyId) || d?.flats?.[0]
-  const homeTitle = home ? [home.project || home.title, home.config].filter(Boolean).join(' · ') : ''
+  // A tap names one home; Talk to us on an expired link names none (it asks
+  // for the link's homes again).
+  const via = d?.staff?.tap && !d.staff.tap.propertyId ? 'talk' : 'interested'
+  const flats = d?.flats || []
+  const home = via === 'talk' ? null : (flats.find(f => f.id === tap.propertyId) || flats[0])
+  const homeTitle = via === 'talk' ? (flats.length === 1 ? flats[0].title : `${flats.length} homes`) : (home?.title || '')
   const lead = d?.staff?.lead
   const openLead = (id) => { store.closeModal(); go('leads', { leadId: id, leadOpen: true }) }
 
@@ -143,17 +148,21 @@ export function AddFromTapModal({ store, go, Modal, code }) {
           <div className="snd-done">
             <span className="snd-done-ic"><Icon name="check" size={18} /></span>
             <div className="snd-done-main">
-              <div className="snd-done-url">{lead.name || 'Already a lead'}</div>
+              <div className="snd-done-url">{lead.visible === false ? 'Another agent’s lead' : (lead.name || 'Already a lead')}</div>
               {homeTitle && <div className="snd-done-s">{homeTitle}</div>}
             </div>
           </div>
           <div className="mfm-foot">
-            <Button onClick={store.closeModal}>Close</Button>
-            <Button variant="primary" onClick={() => openLead(lead.id)}>Open lead</Button>
+            {lead.visible === false
+              ? <Button variant="primary" onClick={store.closeModal}>Close</Button>
+              : <>
+                <Button onClick={store.closeModal}>Close</Button>
+                <Button variant="primary" onClick={() => openLead(lead.id)}>Open lead</Button>
+              </>}
           </div>
         </>
       ) : (
-        <AddFromTap tap={tap} home={homeTitle} onCancel={store.closeModal}
+        <AddFromTap tap={tap} home={homeTitle} via={via} onCancel={store.closeModal}
           onDone={({ lead: made, matched }) => {
             store.touched?.()
             store.toast(matched ? 'Already a lead · the tap is on it' : 'Lead added')

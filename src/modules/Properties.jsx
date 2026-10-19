@@ -19,7 +19,7 @@ import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
 import PropertyWizard, { fromCopy, scoreOf } from './PropertyWizard.jsx'
-import { canEditListing, canAddListing } from '../lib/permissions.js'
+import { canEditListing, canAddListing, canChangeCatalogue } from '../lib/permissions.js'
 import { openSend } from './SendSheet.jsx'
 
 // The filter bar speaks in arrays ({ status: ['Available','Blocked'] }) because
@@ -116,6 +116,10 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selected, setSelected] = useState(new Set())
+  // A phone has no table to tick: Select turns the cards into tick targets.
+  const [picking, setPicking] = useState(false)
+  const mayCatalogue = canChangeCatalogue(state.role)
+  const endPick = () => { setSelected(new Set()); setPicking(false) }
 
   // Any change to what's being asked for invalidates whatever page you were on —
   // page 3 of "3BHK in Baner" is a different page 3 once the filter changes.
@@ -228,12 +232,12 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   // Send is for everyone — an agent sends flats all day. Putting flats in the
   // public catalogue changes what the firm shows the world, so it is the
   // listing editors' call, like any other change to a listing.
-  const send = () => openSend(store, picked, { onSent: () => setSelected(new Set()) })
+  const send = () => openSend(store, picked, { onSent: endPick })
   const catalogue = (on) => {
     const ids = picked.map(p => p.id)
     api.setCatalogue(ids, on)
       .then(r => {
-        setSelected(new Set())
+        endPick()
         store.touched?.()
         const n = r?.changed ?? ids.length
         const bare = on && r?.withoutPhotos > 0 ? ` · ${r.withoutPhotos} have no photos` : ''
@@ -241,15 +245,15 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
           ? `${n} ${n === 1 ? 'home' : 'homes'} added to the catalogue${bare}`
           : `${n} ${n === 1 ? 'home' : 'homes'} taken out of the catalogue`)
       })
-      .catch(() => store.toast('Could not change the catalogue. Try again.', 'warn'))
+      .catch(e => store.toast(e?.status === 403 ? 'Only an owner or manager can change the catalogue.' : 'Could not change the catalogue. Try again.', 'warn'))
   }
   const selActions = [
     { label: 'Send', icon: 'wa', onClick: send },
-    ...(mayEdit ? [
+    ...(mayCatalogue ? [
       { label: 'Show in catalogue', icon: 'eye', tone: 'quiet', onClick: () => catalogue(true) },
       { label: 'Remove from catalogue', icon: 'eyeOff', tone: 'quiet', onClick: () => catalogue(false) },
     ] : []),
-    ...(mayAdd ? [{ label: 'Duplicate', icon: 'copy', tone: 'quiet', onClick: duplicate }] : []),
+    ...(mayAdd && !phone ? [{ label: 'Duplicate', icon: 'copy', tone: 'quiet', onClick: duplicate }] : []),
   ]
 
   const paginated = view !== 'projects'
@@ -265,10 +269,10 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
     page, onPage: paginated ? setPageP : undefined, pageSize, onPageSize: paginated ? setPageSizeP : undefined,
     // Grid/list toggle only applies to the flat unit views, hide it in project view.
     showViewSwitch: view !== 'projects',
-    selection: (view !== 'projects' && selected.size > 0) ? {
+    selection: (view !== 'projects' && (phone ? picking : selected.size > 0)) ? {
       count: selected.size,
       actions: selActions,
-      onClear: () => setSelected(new Set()),
+      onClear: endPick,
     } : null,
     // GROUP BY PROJECT, first in the bar — the same control Calling has. Inside
     // a project it becomes that project's chip, and × goes back to the cards.
@@ -279,10 +283,18 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
         <button type="button" aria-label="Back to all projects" onClick={leaveProject}><Icon name="x" size={13} /></button>
       </span>
     ) : (
-      <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
-        onClick={() => setView(view === 'projects' ? 'list' : 'projects')}>
-        <Icon name="building" size={14} />Group by project
-      </button>
+      <>
+        <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
+          onClick={() => { endPick(); setView(view === 'projects' ? 'list' : 'projects') }}>
+          <Icon name="building" size={14} />Group by project
+        </button>
+        {phone && view !== 'projects' && (
+          <button className={'grp-toggle' + (picking ? ' on' : '')} aria-pressed={picking}
+            onClick={() => (picking ? endPick() : setPicking(true))}>
+            <Icon name="check" size={14} />Select
+          </button>
+        )}
+      </>
     ),
     cta: mayAdd ? {
       label: projectSel ? 'Add unit' : 'Add property',
@@ -292,7 +304,10 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
     renderTable: (list, v) => v === 'projects'
       ? <ProjectGrid onOpen={toProject} />
       : v === 'grid'
-        ? <div className="grid-cards">{list.map(p => <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} onClick={() => open(p.id)} />)}</div>
+        ? <div className="grid-cards">{list.map(p => picking
+            ? <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} picked={selected.has(p.id)}
+                onClick={() => setSelected(s => { const n = new Set(s); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n })} />
+            : <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} onClick={() => open(p.id)} />)}</div>
         : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open}
             selectable selectedIds={selected} onSelectionChange={setSelected} />,
   })
@@ -475,8 +490,8 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
         ? (r?.withoutPhotos ? 'In the catalogue · no photos yet' : 'In the catalogue')
         : 'Taken out of the catalogue')
     })
-    .catch(() => store.toast('Could not change the catalogue. Try again.', 'warn'))
-  const linkTools = mayEdit ? (
+    .catch(e => store.toast(e?.status === 403 ? 'Only an owner or manager can change the catalogue.' : 'Could not change the catalogue. Try again.', 'warn'))
+  const linkTools = canChangeCatalogue(store.state.role) ? (
     <label className="pcat">
       <span>{inCat && (p.status || 'Available') !== 'Available' ? `In catalogue when Available` : 'In catalogue'}</span>
       <Toggle type="button" on={inCat} aria-pressed={inCat} aria-label="Show in catalogue" onClick={setCat} />

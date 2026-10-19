@@ -74,8 +74,33 @@ function Modal({ title, onClose, children, width = 440 }) {
   )
 }
 
+// AN ALERT'S `?tap=<code>` OPENED FROM OUTSIDE THE APP — a push tapped with
+// the app closed, or with it open (the worker posts the URL). The bell opens
+// Add as lead itself (openNotif); these two never passed through it, and the
+// router drops `tap` because it is not a place. Read before the router
+// rewrites the address.
+const tapIn = (search) => {
+  const p = new URLSearchParams(search)
+  const t = p.get('tap')
+  return t && !p.get('lead') && /^[a-z0-9]{6}$/.test(t) ? t : null
+}
+const BOOT_TAP = typeof window !== 'undefined' ? tapIn(window.location.search) : null
+
 export default function Modals({ store, go }) {
   const m = store.state.modal
+  useEffect(() => {
+    if (BOOT_TAP) store.openModal({ kind: 'addFromTap', code: BOOT_TAP })
+    if (!('serviceWorker' in navigator)) return
+    const onMsg = (e) => {
+      if (e.data?.type !== 'notification-navigate' || !e.data.url) return
+      let code = null
+      try { code = tapIn(new URL(e.data.url, window.location.origin).search) } catch { return }
+      if (code) setTimeout(() => store.openModal({ kind: 'addFromTap', code }), 0)
+    }
+    navigator.serviceWorker.addEventListener('message', onMsg)
+    return () => navigator.serviceWorker.removeEventListener('message', onMsg)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   return (
     <>
       {store.state.searchOpen && <SearchModal store={store} go={go} />}
@@ -679,7 +704,7 @@ function NewLeadModal({ store, leadId }) {
   // by attaching the link to the new lead, which moves its history across.
   const [cameFrom, setCameFrom] = useState('')
   const { data: myLinks } = useServerData(
-    () => (edit ? Promise.resolve([]) : api.myShareLinks().then(r => (r?.data || []).filter(l => !l.lead).slice(0, 12))),
+    () => (edit ? Promise.resolve([]) : api.myShareLinks({ recipient: 'none', limit: 12 }).then(r => r?.data || [])),
     [], [])
 
   const save = () => {

@@ -49,9 +49,9 @@ export default function Gallery({ slug, refId }) {
     const firm = f.firm || null
     return (
       <PublicShell firm={firm} tenant={slug}>
-        <Gone tenant={slug} firm={firm} offline={!!f.offline}
+        <Gone offline={!!f.offline}
           title="This home is no longer available"
-          catalogueUrl={f.catalogueUrl || `/${slug}/homes`} />
+          phone={f.cta?.phone} catalogueUrl={f.catalogueUrl || null} />
       </PublicShell>
     )
   }

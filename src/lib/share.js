@@ -98,6 +98,15 @@ export function sentHomeLine(s) {
   return parts.join(' · ')
 }
 
+/** 409 lead_held_by, in words. `holderName` is a person, or "the office" for a
+ *  number that is an unassigned lead or held by someone no longer active. */
+export function heldText(holderName) {
+  const h = String(holderName || '').trim()
+  if (!h) return { title: 'This number is another agent’s lead', sub: 'They have been told.' }
+  if (/^the office$/i.test(h)) return { title: 'This number is already a lead with the office', sub: 'Ask your manager to assign it.' }
+  return { title: `This number is ${h}'s lead`, sub: `${h.split(' ')[0]} has been told.` }
+}
+
 /** Refusals the share screens answer in words of their own. */
 export const refusal = (err) => {
   const code = err?.body?.error || err?.body?.code || ''

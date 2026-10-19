@@ -3822,3 +3822,26 @@ html.pv-root,html.pv-root body{background:#f5f4f0}
 .pv-staff-tap .pv-staff-in{max-width:560px;padding:14px 16px 16px}
 .pv-staff-h{font-size:16px;font-weight:700;margin-bottom:10px}
 .pv-staff-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.pv-staff-dead{color:#e8b4a0;font-weight:600}
+.pvh-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px 16px;margin:16px 0 0;padding:14px 0 0;border-top:1px solid #e3e0d8}
+.pvh-facts div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.pvh-facts dt{font-size:12px;color:#6b7570}
+.pvh-facts dd{margin:0;font-size:14.5px;font-weight:600;color:#1a1d1a}
+.pvh-amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.pvh-amen span{padding:4px 10px;border-radius:12px;background:#ebe8e1;font-size:12.5px;color:#3d443f}
+.pv-more{display:flex;width:100%;max-width:360px;margin:18px auto 0}
+.pv-link{border:none;background:none;padding:0 4px;min-height:40px;font:inherit;font-weight:600;text-decoration:underline;color:inherit;cursor:pointer}
+.mylinks-more{margin-top:8px;min-height:40px}
+
+/* The selection on a phone: cards become tick targets, the bar sits above the tab bar. */
+.pcard.is-picked{outline:2px solid var(--accent);outline-offset:-2px}
+.pcard-pick{position:absolute;top:6px;right:6px;z-index:1;margin:0;pointer-events:none}
+.psel{position:sticky;bottom:8px;z-index:20;margin:10px 0 0;padding:10px 12px 12px;border-radius:14px;background:var(--ink);color:#fff;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.app-mobile:has(.psel) .pa-fab{display:none}
+.psel-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.psel-n{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.psel-done{min-height:40px;padding:0 12px;border:none;border-radius:10px;background:rgba(255,255,255,.12);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+.psel-acts{display:flex;flex-wrap:wrap;gap:8px}
+.psel-acts .btn{min-height:40px;flex:1 1 auto}
+.psel-acts .btn-ghost{background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.2)}
+.psel-acts .btn:disabled{opacity:.45}

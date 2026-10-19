@@ -37,7 +37,15 @@ export default function PhotoViewer({ media = [], title = '', keyboard = true })
       const x = media[((i % n) + n) % n]
       if (x && x.kind !== 'video') { const img = new Image(); img.src = fileUrl(x.key) }
     }
-    strip.current?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' })
+    // Scroll the strip only. scrollIntoView also scrolls the page, so a phone
+    // opening a link whose strip sat below the fold landed 148px down, past
+    // the firm's header and the agent's Add as lead form.
+    const s = strip.current
+    const el = s?.querySelector('[aria-current="true"]')
+    if (s && el) {
+      const a = el.getBoundingClientRect(), b = s.getBoundingClientRect()
+      s.scrollTo({ left: s.scrollLeft + (a.left - b.left) - (s.clientWidth - a.width) / 2, behavior: 'smooth' })
+    }
   }, [at, n]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const onTouchStart = (e) => { touch.current = e.touches[0].clientX }
