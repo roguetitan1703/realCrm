@@ -243,10 +243,12 @@ every row has `tenant_id`):
 (default 15; anything else is a 400), `replyToPhone` (null = an active owner's
 phone), `showPriceOnCatalogue` (default false), `catalogueShowsProject`
 (default true), `stopped`. **(changed)** `stopped` is `null` or an ISO time.
-Send `stopped: true` to set it; owner only (403 otherwise), written to the
-audit ledger as `sharing.stopped`, and it cannot be undone (any other value
-afterwards is a 400). Links made before that time read as stopped; links made
-after it work.
+Send `stopped: true` to stop and `stopped: null` to allow sharing again; owner
+only, both ways (403 otherwise), audited. **(changed, review 2)** Stopping
+turns off every live link and refuses new ones (`422 sharing_stopped`). A link
+being made while the owner stops cannot survive: the save sweeps live links
+again after it is written, and a new link re-reads `stopped` after its insert
+and turns itself off.
 
 **Device ID.** Public pages are on the app's domain and the API is on another,
 so a cookie would be third-party. Instead, the page keeps a random ID
@@ -262,7 +264,8 @@ recorded and raise nothing. Its browser is remembered as staff.
 `{error, message}`; rate-limited per IP, 429 `slow_down`). Everything that
 resolves a code — the page, Talk to us, I'm interested and the preview card —
 shares one limit (120 a minute) and one miss budget (30 unmatched codes per 10
-minutes), after which even a real code answers 429:
+minutes), after which even a real code answers 429 — except the preview
+card, which then answers the firm's card without resolving the code (below):
 - `GET /public/s/:tenant/:code[?flat=<propertyId>]` — a link or a tap code.
   - **(changed)** `{ kind: link|tap, state: active|unavailable, firm{name,
     logo, accent}, flats[Flat], showPrice, cta{phone}, catalogueUrl }`. A
@@ -312,7 +315,12 @@ minutes), after which even a real code answers 429:
   link per firm day, decided under a lock).
 - **(changed)** `GET /public/catalogue/:tenant?deal=&config=&locality=&page=
   &limit=` → `{ firm, showPrice, flats[Flat], total, page, limit,
-  facets{deal[], config[], locality[]} }`. `config` is a prefix ("2 BHK");
+  facets{deal[], config[], locality[]} }`. **(changed, review 2)** `config`
+  holds bedroom tokens (`1rk`, `2`, `3.5`, `5plus`), in the vocabulary's
+  order: each stored value is read through `bhkTokenOf` (the token itself, or
+  `normaliseBhk` in the firm's locale), so "2", "2 BHK" and "2 BHK Apartment"
+  are one chip. The filter takes a token and matches exactly the stored values
+  that read as it. The page labels it with the firm's words (`roomLabel`).
   `deal` and `locality` are exact. Available flats only, flats with photos
   first. Limit default 24, max 60. Stopping sharing does not touch the
   catalogue; unticking flats does.
@@ -327,8 +335,8 @@ minutes), after which even a real code answers 429:
   type it): the enquiry is recorded, what they wrote goes on the timeline
   (type `enquiry`, by System) and the holder (else the desk) gets
   `lead_repeat` — but the lead is not reopened, its requirement and notes are
-  not touched, and the browser is not attached. The flat goes on the shortlist
-  either way. Returns `{ ok: true }` whatever happened. 5 per 10 minutes per
+  not touched, the browser is not attached, and **(changed, review 2)** the
+  flat does not go on its shortlist. A lead the enquiry created gets the flat. Returns `{ ok: true }` whatever happened. 5 per 10 minutes per
   IP, 3 per hour per phone, 100 per firm per day (then 429, logged).
 - Catalogue views count at most once per browser per flat (or per list) per
   firm day.
@@ -339,7 +347,13 @@ minutes), after which even a real code answers 429:
   `/share/homes/:slug/:flat`, `/share/gallery/:slug/:ref`) and `vercel.json`
   plus `vercel.development.json` cover `/<tenant>/<code>` and
   `/<tenant>/homes[/<slug>]` for preview user-agents (`?app=1` bypasses). A
-  dead or empty link gets the firm's card.
+  dead or empty link gets the firm's card. Catalogue addresses are
+  `listingKind` + locality in the firm's words (`2-bhk-apartment-wakad-xxxxxx`).
+  **(changed, review 2)** The card is limited by `req.ip`, which behind Vercel
+  → Caddy is Vercel's egress address (Caddy does not trust an incoming
+  X-Forwarded-For, and any other header is typeable by a direct caller), so
+  many buyers share one budget. A spent budget answers the firm's card
+  (no-store) without resolving the code, never a 429.
 
 **Signed-in API** (`{success: true, …}`; errors `{success:false, error,
 message, …}`):
@@ -350,7 +364,8 @@ message, …}`):
     is assigned to the sender, and has an empty requirement. **(changed)** A
     number that is a lead nobody active holds (unassigned, or its holder left)
     is not given to an agent: `409 lead_held_by {holderName: "the office"}`,
-    and the desk gets `share_number_held`. Desk roles use any lead.
+    and the desk gets `share_number_held` — **(changed, review 2)** once per
+    lead per firm day. Desk roles use any lead.
   - The flats go on `lead_shortlist`, and a timeline event of type `share`
     ("Homes sent", "Sent 3 homes") is logged with the link. **(changed)** It is
     not `whatsapp`: nothing has been sent yet, so it is not contact and the
@@ -368,6 +383,8 @@ message, …}`):
 - `POST /share-links/:id/attach {leadId}` → **(changed)** `{ ok, events,
   devices }` (counts moved). Only events on no lead yet move; an event already
   on another lead stays there. Staff browsers are never attached.
+  **(changed, review 2)** Two attaches at once: the second gets `409
+  link_has_lead`.
 - `GET /leads/:id/shares` → `{ data: [{propertyId,title,available,sentAt,
   opens,lastOpenedAt,interested,enquiries,devices,link{id,code,url,state,
   expiresAt}|null}] }`, most recent first. Same visibility as the lead.
@@ -377,7 +394,10 @@ message, …}`):
   lead and the flat (a talk: the link's flats) on its shortlist. **(changed)** A link with no recipient stays
   unbound: the next tap on it may be somebody else. **(changed)** Only the
   link's sender, the holder of the lead the tap is on, or a desk role may do
-  it (403 otherwise); 30 a minute per person (then 429).
+  it (403 otherwise); 30 a minute per person (then 429). **(changed, review
+  2)** A tap already on a lead answers `409 tap_has_lead` for any other lead,
+  checked before a number can become a new lead; two adds at once, the second
+  gets the same 409.
 - `POST /properties/catalogue {ids, on}` → `{ changed, withoutPhotos }`. The
   single-property update takes `inCatalogue`. **(changed)** Owners and managers
   only, both ways (403 for agents; an agent's update that sends the current
@@ -393,7 +413,10 @@ yet; the other two link `?screen=leads&lead=<id>`. Closing (`share_work`): on
 a lead, when contact is logged after the alert or a fresh link is sent to that
 lead; on a tap (no lead yet), when Add as lead or attach puts it on a lead, or
 when the link's sender makes a newer link carrying that flat (a talk: any of
-its flats). An alert that would reach nobody is logged with tenant and type:
+its flats). A public page's write closes its own firm's settled alerts
+(`publicTenantId`). Every share alert, and the catalogue's unverified repeat,
+goes through `notifyOrDesk`: an alert that would reach nobody is logged with
+tenant and type:
 - `share_interested` — urgency now, to the lead's holder (else the link's
   creator). At most one per flat per link per firm day; a different device on
   the same link reads "Someone on <name>'s link".
