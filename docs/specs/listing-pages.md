@@ -167,6 +167,20 @@ always comes through the agent. Both flows keep that to one paste or one pick.
 5. With no alert to start from (the buyer deleted the prefilled text), Add lead
    offers "Came from" with the agent's recent links.
 
+**The ref is a link (Om, 19 Oct).** Each I'm interested tap gets its own code,
+and the prefilled message carries it as a link: "Hi, I'm interested in this
+home: realestate.delpat.in/bhumi/k7m2qx". The same link behaves differently
+depending on who opens it:
+- **The buyer, or anyone else,** sees the flat.
+- **A signed-in member of that firm** — the agent tapping it in the WhatsApp
+  chat — gets **Add as lead**, already holding the link, the flat, the tap and
+  its device, so the device's earlier and later views join the lead.
+
+WhatsApp's preview turns it into a flat card in the agent's chat, so the agent
+sees which home before tapping. The number still comes from Paste or Pick from
+contacts, because WhatsApp does not hand a link the sender's number. Steps 2–5
+above stay as the fallback.
+
 Once the integration exists, step 3 disappears: the message arrives with its
 ref and number, and attaches by itself.
 
