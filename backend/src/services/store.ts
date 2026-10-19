@@ -2000,9 +2000,10 @@ export async function getLeadById(id: string): Promise<any | undefined> {
   // ONE ROUND TRIP, NOT FIVE. The row, its timeline, its shortlist, its
   // enquiries and its activities do not depend on each other; awaited in turn
   // they were five trips (~150ms each on dev) on every record open and every
-  // lead created. Settled, not all: a lead outside this person's scope still
-  // answers undefined without looking at the rest, and an error in a part
-  // surfaces exactly where it did before (enquiries are optional, the rest not).
+  // lead created. All five run every time; only the answer is gated: a lead
+  // outside this person's scope still returns undefined (the other reads are
+  // discarded, and their errors with them), and for a visible lead an error in
+  // a part surfaces as before (enquiries are optional, the rest are not).
   const [rowsR, timelineR, shortlistR, enquiriesR, actsR] = await Promise.allSettled([
     sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`,
     sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} AND tenant_id = ${t} ORDER BY timestamp DESC`,
@@ -2145,7 +2146,10 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // `.then` starts it now (a postgres.js query is lazy until then) and keeps a
   // failed read from becoming an unhandled rejection if the insert throws first.
   const assigneeP: Promise<any[]> = agentId
-    ? sql`SELECT name FROM users WHERE tenant_id = ${t} AND id = ${agentId} LIMIT 1`.then(r => r as any[], () => [])
+    ? sql`SELECT name FROM users WHERE tenant_id = ${t} AND id = ${agentId} LIMIT 1`.then(r => r as any[], (err: any) => {
+        console.warn(`[Leads] assignee name lookup failed for ${agentId} in ${t}:`, err?.message);
+        return [];
+      })
     : Promise.resolve([]);
   const rows = await sql`
     INSERT INTO crm_leads (

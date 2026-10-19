@@ -1054,7 +1054,7 @@ export async function leadShares(leadId: string, origin: string | null) {
     sharingOf(m.tenantId),
     sql`SELECT * FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND lead_id = ${leadId} ORDER BY created_at ASC`,
     sql`
-      SELECT e.*, l.property_ids AS link_props, l.lead_id AS link_lead FROM crm_share_events e
+      SELECT e.*, l.property_ids AS link_props FROM crm_share_events e
         LEFT JOIN crm_share_links l ON l.id = e.link_id AND l.tenant_id = e.tenant_id
        WHERE e.tenant_id = ${m.tenantId} AND (e.lead_id = ${leadId} OR e.link_id IN (SELECT id FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND lead_id = ${leadId}))`,
     firmSlug(m.tenantId),
