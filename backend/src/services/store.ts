@@ -1449,6 +1449,7 @@ export async function getBootstrap(): Promise<any> {
       -- which read agents, can never offer someone who no longer works here.
       (SELECT coalesce(json_agg(a ORDER BY a.name), '[]'::json) FROM agents a WHERE a.departed) AS former,
       (SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}) AS settings,
+      ${REPLY_FALLBACK(t)} AS reply_fallback,
       (SELECT row_to_json(r) FROM crm_routing_rules r WHERE r.tenant_id = ${t} LIMIT 1) AS routing,
       (SELECT row_to_json(x) FROM (
          SELECT id, slug, name, brand_config FROM tenants
@@ -1496,7 +1497,7 @@ export async function getBootstrap(): Promise<any> {
     // `sources` is overwritten with the derived list — settings may still
     // carry a stale curated array from before this was derived, and the one
     // that matches the records has to win.
-    settings: { ...(settingsRows[0]?.value || {}), sources: sourceRows.map((r: any) => r.v) },
+    settings: withReplyFallback({ ...(settingsRows[0]?.value || {}), sources: sourceRows.map((r: any) => r.v) }, row?.reply_fallback ?? null),
     routing_rules: routingRows[0] || null,
     brand,
     // THE SEGMENT CATALOGUE, SERVED. Key, label, surface and tone come from
@@ -2139,11 +2140,14 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
     await syncLeadShortlist(newId, shortlist, feedback, t);
   }
 
+  // A person's name, never their user id ("Assigned to agent u_team_…"), and
+  // nothing at all when nobody was assigned (it read "agent null").
+  const [assignee] = agentId ? await sql`SELECT name FROM users WHERE tenant_id = ${t} AND id = ${agentId} LIMIT 1` : [];
   await addTimelineEvent({
     record_id: newId,
     type: 'creation',
     title: 'New Lead Created',
-    description: `Lead created via API (Source: ${source}). Assigned to agent ${agentId}.`,
+    description: `Lead created via API (Source: ${source}).${agentId ? ` Assigned to ${assignee?.name || 'a former member'}.` : ''}`,
   });
 
   const created = await getLeadById(newId);
@@ -6070,6 +6074,7 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
   `;
   let n = 0;
   const tally = new Map<string, string[]>();
+  const movedNow: { recordId: string; toName: string | null }[] = [];
   for (const owner of rows) {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${owner.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
     const agentId = await nextRoutedOwnerAgent();
@@ -6168,6 +6173,23 @@ export async function sharingOf(tenantId: string): Promise<typeof SHARING_DEFAUL
  * store. Throws a plain Error for a bad value (400) and a ForbiddenError when
  * anyone but an owner tries to stop links.
  */
+/**
+ * THE NUMBER A BUYER REACHES WHEN THE REPLY-TO IS EMPTY: an active owner's
+ * phone. One rule, read by sharing.ts firmPhone and served to Settings as
+ * `sharing.replyToFallback` (so the empty box shows the number buyers really
+ * get). Derived, never stored: cleanSharingPatch drops it if it is sent back.
+ */
+const REPLY_FALLBACK = (t: string) => sql`(SELECT phone FROM users WHERE tenant_id = ${t} AND role = 'owner'
+     AND deleted_at IS NULL AND status ILIKE 'active' AND coalesce(phone, '') <> ''
+   ORDER BY created_at NULLS LAST LIMIT 1)`;
+export async function replyFallbackOf(tenantId: string): Promise<string | null> {
+  const [r] = await sql`SELECT ${REPLY_FALLBACK(tenantId)} AS phone`;
+  return r?.phone || null;
+}
+export function withReplyFallback(settings: any, fallback: string | null): any {
+  return { ...settings, sharing: { ...SHARING_DEFAULTS, ...(settings?.sharing || {}), replyToFallback: fallback } };
+}
+
 async function cleanSharingPatch(patch: any, current: any, ctx: ActorCtx | null): Promise<any> {
   const cur = { ...SHARING_DEFAULTS, ...(current || {}) };
   const p = patch && typeof patch === 'object' ? patch : {};

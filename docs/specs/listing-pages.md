@@ -242,7 +242,10 @@ every row has `tenant_id`):
 `POST /workspace/settings {sharing:{…}}`): `linkExpiryDays` 7 / 15 / 30
 (default 15; anything else is a 400), `replyToPhone` (null = an active owner's
 phone), `showPriceOnCatalogue` (default false), `catalogueShowsProject`
-(default true), `stopped`. **(changed)** `stopped` is `null` or an ISO time.
+(default true), `stopped`. **(changed, review 3)** Reads (bootstrap and the
+settings save) also carry `replyToFallback`: the number buyers reach when
+`replyToPhone` is empty (an active owner's phone). Derived, never stored.
+**(changed)** `stopped` is `null` or an ISO time.
 Send `stopped: true` to stop and `stopped: null` to allow sharing again; owner
 only, both ways (403 otherwise), audited. **(changed, review 2)** Stopping
 turns off every live link and refuses new ones (`422 sharing_stopped`). A link
@@ -268,9 +271,11 @@ minutes), after which even a real code answers 429 — except the preview
 card, which then answers the firm's card without resolving the code (below):
 - `GET /public/s/:tenant/:code[?flat=<propertyId>]` — a link or a tap code.
   - **(changed)** `{ kind: link|tap, state: active|unavailable, firm{name,
-    logo, accent}, flats[Flat], showPrice, cta{phone}, catalogueUrl }`. A
-    wrong, off, expired or stopped code returns the **identical** body:
-    `state: unavailable`, `flats: []`, `cta.phone` = the firm's reply-to. The
+    logo, accent}, flats[Flat], showPrice, forRecipient, cta{phone},
+    catalogueUrl }`. **(changed, review 3)** `forRecipient` is true on an
+    active link sent to one buyer ("2 homes for you"), false on a group link.
+    A wrong, off, expired or stopped code returns the **identical** body:
+    `state: unavailable`, `flats: []`, `forRecipient: false`, `cta.phone` = the firm's reply-to. The
     real state is only in `staff.link.state`.
   - `?flat=` says which flat the buyer opened, so the view is recorded
     against it.
@@ -295,7 +300,7 @@ card, which then answers the firm's card without resolving the code (below):
   expired link the server also records it and alerts the holder.
 - **Flat** = `{ id, title ("2 BHK Apartment in <project or locality>"),
   config{bhk,subtype,category,carpetSqft,superBuiltupSqft,builtupSqft,
-  furnishing,bathrooms,facing,possession,amenities[]}, deal, locality,
+  furnishing,bathrooms,facing,possession,floor,totalFloors,amenities[]}, deal, locality,
   project?, price?, media[{key,kind: photo|video,w?,h?}], available, slug? }`.
   `project` only when shown; `price` is a number, only when allowed and above
   0 (the page formats it, "/month" for rent); `slug` only when in the
@@ -321,7 +326,10 @@ card, which then answers the firm's card without resolving the code (below):
   `normaliseBhk` in the firm's locale), so "2", "2 BHK" and "2 BHK Apartment"
   are one chip. The filter takes a token and matches exactly the stored values
   that read as it. The page labels it with the firm's words (`roomLabel`).
-  `deal` and `locality` are exact. Available flats only, flats with photos
+  `deal` and `locality` are exact. **(changed, review 3)** The facets narrow
+  each other: each one's options are the flats passing every *other* active
+  filter, and `facetCounts{deal{v:n}, config{v:n}, locality{v:n}}` says how
+  many each option would show. Available flats only, flats with photos
   first. Limit default 24, max 60. Stopping sharing does not touch the
   catalogue; unticking flats does.
 - `GET /public/catalogue/:tenant/:slug` → `{ firm, showPrice, flat, catalogueUrl }`,
@@ -386,8 +394,11 @@ message, …}`):
   **(changed, review 2)** Two attaches at once: the second gets `409
   link_has_lead`.
 - `GET /leads/:id/shares` → `{ data: [{propertyId,title,available,sentAt,
-  opens,lastOpenedAt,interested,enquiries,devices,link{id,code,url,state,
+  opens,linkOpens,lastOpenedAt,interested,enquiries,devices,link{id,code,url,state,
   expiresAt}|null}] }`, most recent first. Same visibility as the lead.
+  **(changed, review 3)** `opens` counts only views that name the home;
+  `linkOpens` counts opens of the list page of the links that carried it.
+  Both count once per browser per firm day.
 - `POST /share-taps/:code/lead {phone, name?} | {leadId}` → `{ lead{id,name,
   created}, matched, deviceAttached }` (`matched` = the number was already a
   lead). Takes a tap code or a talk code. Puts the event and its device on the
@@ -419,7 +430,9 @@ goes through `notifyOrDesk`: an alert that would reach nobody is logged with
 tenant and type:
 - `share_interested` — urgency now, to the lead's holder (else the link's
   creator). At most one per flat per link per firm day; a different device on
-  the same link reads "Someone on <name>'s link".
+  the same link reads "Someone on <name>'s link". **(changed, review 3)** A
+  newer one on the same lead supersedes the open one, so it names them all:
+  "Sneha is interested in 2 homes · Maple Court 1 BHK and 1 more".
 - `share_expired_open` — now, to the holder (else creator, else the desk).
 - `share_returned` — drawer. A known lead back on their link on a new day, at
   most one per lead per day.
