@@ -28,6 +28,7 @@ import { planRoster, normalizePhone, RosterRow } from './roster.js';
 import { assertLeadWrite, ForbiddenError, isDeskRole } from '../lib/permissions.js';
 import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js';
 import { canTakeWork, workableIds, onDutyWorkers } from './workforce.js';
+import { IS_AVAILABLE, HAS_PHOTO } from './catalogueRules.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
 // and three copies of that rule would drift.
@@ -5103,16 +5104,19 @@ export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = S
       }
     }
   }
-  // Of the ticked homes: `live` are on the page now (Available, the
-  // catalogue's own rule); `waiting` are ticked but not Available, and appear
-  // when they are; `withoutPhotos` counts live ones only — a sold flat with no
-  // photos is not a photo job.
-  const [tally] = on
+  // ONE SET: the homes THIS request put in (`changed`), split by the
+  // catalogue's own rule (catalogueRules.ts) — `live` are on the page now,
+  // `waiting` are not Available and appear when they are, `withoutPhotos`
+  // counts live ones only (a sold flat with no photos is not a photo job).
+  // live + waiting = changed, so "2 added · 1 waiting · 1 has no photos" is
+  // about the same homes.
+  const flipped = (rows as any[]).map(r => r.id);
+  const [tally] = on && flipped.length
     ? await sql`SELECT
-          count(*) FILTER (WHERE ${LIVE})::int AS live,
-          count(*) FILTER (WHERE NOT (${LIVE}))::int AS waiting,
-          count(*) FILTER (WHERE ${LIVE} AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(media, '[]'::jsonb)) m WHERE m->>'kind' IS DISTINCT FROM 'video'))::int AS without
-        FROM crm_properties WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND in_catalogue = TRUE`
+          count(*) FILTER (WHERE ${IS_AVAILABLE})::int AS live,
+          count(*) FILTER (WHERE NOT (${IS_AVAILABLE}))::int AS waiting,
+          count(*) FILTER (WHERE ${IS_AVAILABLE} AND NOT ${HAS_PHOTO})::int AS without
+        FROM crm_properties WHERE tenant_id = ${t} AND id IN ${sql(flipped)}`
     : [{ live: 0, waiting: 0, without: 0 }];
   const withoutPhotos = tally.without;
   for (const r of rows as any[]) {
@@ -5129,7 +5133,6 @@ export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = S
   }
   return { changed: rows.length, live: tally.live, waiting: tally.waiting, withoutPhotos };
 }
-const LIVE = sql`coalesce(status, 'Available') ILIKE 'available'`;
 
 /**
  * The numbers the stat strip and the filter menus need, counted in Postgres.

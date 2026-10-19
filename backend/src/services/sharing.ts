@@ -39,6 +39,7 @@ import { audit } from './audit.js';
 import { landEnquiry } from './ingestion.js';
 import { assertLeadWrite } from '../lib/permissions.js';
 import { normalizePhone } from './roster.js';
+import { CATALOGUE_WHERE, HAS_PHOTO } from './catalogueRules.js';
 import { canTakeWork } from './workforce.js';
 import { BHK } from '../../../src/data/propertyFields.js';
 import { isDeskRole } from '../lib/permissions.js';
@@ -265,7 +266,7 @@ async function linkRows(tenantId: string, link: any): Promise<any[]> {
 
 async function catalogueUrlOf(f: Firm): Promise<string | null> {
   const [hit] = await sql`
-    SELECT 1 FROM crm_properties WHERE tenant_id = ${f.id} AND in_catalogue = TRUE AND coalesce(status, 'Available') ILIKE 'available' LIMIT 1`;
+    SELECT 1 FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)} LIMIT 1`;
   return hit ? `/${f.slug}/homes` : null;
 }
 
@@ -555,9 +556,6 @@ export async function talk(f: Firm, code: string, r: PublicReq): Promise<{ waUrl
 
 // ── The catalogue ───────────────────────────────────────────────────────────
 
-const CATALOGUE_WHERE = (tenantId: string) =>
-  sql`tenant_id = ${tenantId} AND in_catalogue = TRUE AND coalesce(status, 'Available') ILIKE 'available'`;
-const HAS_PHOTO = sql`EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(media, '[]'::jsonb)) m WHERE m->>'kind' IS DISTINCT FROM 'video')`;
 
 /**
  * A catalogue view, at most one per browser per flat (or per list) per firm

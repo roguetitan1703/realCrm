@@ -417,9 +417,11 @@ message, …}`):
   checked before a number can become a new lead; two adds at once, the second
   gets the same 409.
 - `POST /properties/catalogue {ids, on}` → **(changed, review 4)** `{ changed,
-  live, waiting, withoutPhotos }`: of the ticked homes, `live` are Available
-  (on the page), `waiting` are ticked but not Available, and `withoutPhotos`
-  counts live ones only. The
+  live, waiting, withoutPhotos }`, all four about one set: the homes THIS
+  request put in the catalogue (`changed`; already-ticked homes are not
+  counted). Of those, `live` are Available (on the page), `waiting` are not
+  Available yet, `withoutPhotos` counts live ones only; `live + waiting =
+  changed`. Taking homes out returns `changed` and three zeros. The
   single-property update takes `inCatalogue`. **(changed)** Owners and managers
   only, both ways (403 for agents; an agent's update that sends the current
   value unchanged still saves). `GET /properties?catalogue=yes|no`
