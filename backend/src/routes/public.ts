@@ -90,7 +90,7 @@ publicRouter.get('/s/:tenant/:code', async (req: Request, res: Response) => {
 
 publicRouter.post('/s/:tenant/:code/interested', async (req: Request, res: Response) => {
   const ip = ipOf(req);
-  if (!hit(`tap:${ip}`, 20, 60_000)) return res.status(429).json(SLOW);
+  if (!codeGate(ip) || !hit(`tap:${ip}`, 20, 60_000)) return res.status(429).json(SLOW);
   try {
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
