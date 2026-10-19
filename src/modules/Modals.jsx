@@ -1196,7 +1196,6 @@ function AssignModal({ store, leadId }) {
   const sugg = desk ? [...store.activeAgents()].sort((a, b) => openFor(a.id) - openFor(b.id))[0] : null
   return (
     <Modal title="Assign lead" onClose={store.closeModal} width={400}>
-      <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 14 }}>Route <b>{l?.name}</b> to an agent:</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {store.activeAgents().map(a => (
           <button key={a.id} onClick={() => { store.assign(leadId, a.id); store.closeModal() }}
@@ -1353,7 +1352,7 @@ function AssignProjectModal({ store, project }) {
         <>
           <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 12 }}>
             {project?.counts?.total} owner{project?.counts?.total === 1 ? '' : 's'} in this project
-            {project?.counts?.unassigned ? `, ${project.counts.unassigned} unassigned` : ''}. Closed rows stay where they are.
+            {project?.counts?.unassigned ? `, ${project.counts.unassigned} unassigned` : ''}.
           </div>
           <button onClick={() => setOnlyUnassigned(v => !v)}
             style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 11px', marginBottom: 14,
@@ -1449,7 +1448,7 @@ function ReassignModal({ store, fromId }) {
       ) : (
         <>
           <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 12 }}>
-            Hand <b>{from?.first || from?.name}</b>&rsquo;s open work to the team. Closed and rejected records stay where they are.
+            Hand <b>{from?.first || from?.name}</b>&rsquo;s open work to the team.
           </div>
 
           {/* WHAT MOVES. Two different jobs; a firm may want only one handed on. */}

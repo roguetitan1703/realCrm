@@ -19,7 +19,7 @@ import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
 import PropertyWizard, { fromCopy, scoreOf } from './PropertyWizard.jsx'
-import { canEditListing, canAddListing, canChangeCatalogue } from '../lib/permissions.js'
+import { canEditListing, canAddListing, canChangeCatalogue, isDeskRole } from '../lib/permissions.js'
 import { catalogueToast } from '../lib/share.js'
 import { openSend } from './SendSheet.jsx'
 
@@ -304,9 +304,9 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
       ? <ProjectGrid onOpen={toProject} />
       : v === 'grid'
         ? <div className="grid-cards">{list.map(p => picking
-            ? <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} picked={selected.has(p.id)}
+            ? <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} picked={selected.has(p.id)} showCatalogue={isDeskRole(state.role)}
                 onClick={() => selection.toggle(p)} />
-            : <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} onClick={() => open(p.id)} />)}</div>
+            : <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} showCatalogue={isDeskRole(state.role)} onClick={() => open(p.id)} />)}</div>
         : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open}
             selectable selectedIds={selected} onSelectionChange={selection.set} />,
   })
