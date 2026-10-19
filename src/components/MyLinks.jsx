@@ -3,7 +3,7 @@ import Icon from './Icon.jsx'
 import { Button } from './primitives.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import { phoneLabel } from '../lib/locale.js'
+import { phoneSpaced } from '../lib/locale.js'
 import { copyText } from '../lib/clipboard.js'
 import { LINK_STATE_LABEL, expiryLabel } from '../lib/share.js'
 import { SenderPhone, LeadSearch } from '../modules/SendSheet.jsx'
@@ -29,7 +29,7 @@ export function MePhone({ store }) {
         <span className="devrow-ic"><Icon name="phone" size={15} /></span>
         <div className="mel-body">
           <div className="mel-t">Your mobile number</div>
-          <div className={'mel-v mono-num' + (phone ? '' : ' is-none')}>{phone ? phoneLabel(phone) : 'Not added'}</div>
+          <div className={'mel-v mono-num' + (phone ? '' : ' is-none')}>{phone ? phoneSpaced(phone) : 'Not added'}</div>
         </div>
         {!editing && <Button size="sm" onClick={() => setEditing(true)}>{phone ? 'Change' : 'Add'}</Button>}
       </div>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api.js'
 import { fileUrl } from '../lib/media.js'
-import { formatMoney, phonePlaceholder, phoneProblem, roomLabel, firmLocale, setFirmLocale } from '../lib/locale.js'
+import { formatMoney, phoneLabel, phonePlaceholder, phoneProblem, roomLabel, firmLocale, setFirmLocale } from '../lib/locale.js'
 import { SUBTYPES, FURNISH, FACING, POSSESSION, SOCIETY_AMENITIES, labelOf } from '../data/propertyFields.js'
 import { deviceId, openWa, looksLikePhone } from '../lib/share.js'
 import Icon from '../components/Icon.jsx'
@@ -46,9 +46,7 @@ export function PublicShell({ firm: raw, tenant, children, embed = embedded(), b
       {!embed && (
         <header className="pv-head">
           <a className="pv-brand" href={`/${tenant}/homes`}>
-            {firm?.logo
-              ? <img className="pv-logo" src={firm.logo} alt="" />
-              : firm?.name ? <span className="pv-mono">{firm.name.trim().slice(0, 1).toUpperCase()}</span> : waiting ? <span className="pv-mono pv-mono-wait" /> : null}
+            <FirmMark firm={firm} />
             <span className="pv-firm">{firm?.name || ''}</span>
           </a>
         </header>
@@ -59,6 +57,23 @@ export function PublicShell({ firm: raw, tenant, children, embed = embedded(), b
         <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>
       </footer>
     </div>
+  )
+}
+
+/** The firm's mark. Its box is always there; the initials hold it until the
+ *  logo has loaded, and stay if the logo never does. */
+function FirmMark({ firm }) {
+  const [state, setState] = useState('loading') // loading | ok | failed
+  useEffect(() => { setState('loading') }, [firm?.logo])
+  const initials = String(firm?.name || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('')
+  return (
+    <span className="pv-markbox">
+      {state !== 'ok' && <span className={'pv-mono' + (initials ? '' : ' pv-mono-wait')}>{initials}</span>}
+      {firm?.logo && state !== 'failed' && (
+        <img className={'pv-logo' + (state === 'ok' ? '' : ' is-loading')} src={firm.logo} alt=""
+          onLoad={() => setState('ok')} onError={() => setState('failed')} />
+      )}
+    </span>
   )
 }
 
@@ -88,12 +103,18 @@ export function Gone({ title, onTalk, talkBusy, phone, catalogueUrl, offline, on
 // desk's, read in the firm's terms ("2 BHK" / "2 bed").
 const ALL_SUBTYPES = [...SUBTYPES.residential, ...SUBTYPES.commercial]
 const kindOf = (h) => [h.config?.bhk ? roomLabel(h.config.bhk) : '', labelOf(ALL_SUBTYPES, h.config?.subtype)].filter(Boolean).join(' ')
-const homeTitle = (h) => h.project || h.locality || kindOf(h) || h.title || 'Home'
 const areaOf = (h) => {
   const a = Number(h.config?.carpetSqft) || Number(h.config?.builtupSqft) || Number(h.config?.superBuiltupSqft)
   return a > 0 ? `${Math.round(a).toLocaleString(firmLocale().numberLocale)} sq.ft` : ''
 }
-const subOf = (h) => [kindOf(h), areaOf(h), h.project ? h.locality : null].filter(Boolean).join(' · ')
+// With the project name hidden, "Wakad" over "Wakad" told two homes apart by
+// nothing: the title is then what the home is (size, type, area), and the
+// line under it where it is and how it comes. Never the flat number.
+const homeTitle = (h) => h.project || [kindOf(h), areaOf(h)].filter(Boolean).join(' · ') || h.locality || h.title || 'Home'
+const subOf = (h) => (h.project
+  ? [kindOf(h), areaOf(h), h.locality]
+  : [h.locality, h.config?.furnishing ? labelOf(FURNISH, h.config.furnishing) : '', h.config?.possession ? labelOf(POSSESSION, h.config.possession) : '']
+).filter(Boolean).join(' · ')
 const dealWord = (d) => (d === 'rent' ? 'For rent' : d === 'sale' ? 'For sale' : '')
 const priceOf = (h) => (Number(h.price) > 0 ? formatMoney(Number(h.price), { perMonth: h.deal === 'rent' }) : '')
 const waTo = (phone, text) => (phone ? `https://wa.me/${String(phone).replace(/\D/g, '')}${text ? `?text=${encodeURIComponent(text)}` : ''}` : '')
@@ -126,7 +147,7 @@ function HomeCard({ h, href, onOpen }) {
 }
 
 /** The facts a buyer asks before they ask anything else. Only what is filled. */
-function Facts({ h }) {
+function Facts({ h, shown = '' }) {
   const c = h.config || {}
   const rows = [
     ['Carpet', Number(c.carpetSqft) > 0 ? `${Math.round(c.carpetSqft).toLocaleString(firmLocale().numberLocale)} sq.ft` : ''],
@@ -135,7 +156,7 @@ function Facts({ h }) {
     ['Furnishing', c.furnishing ? labelOf(FURNISH, c.furnishing) : ''],
     ['Facing', c.facing ? labelOf(FACING, c.facing) : ''],
     ['Possession', c.possession ? labelOf(POSSESSION, c.possession) : ''],
-  ].filter(([, v]) => v)
+  ].filter(([, v]) => v && !shown.includes(v))
   const amen = (c.amenities || []).map(a => labelOf(SOCIETY_AMENITIES, a)).filter(Boolean)
   if (!rows.length && !amen.length) return null
   return (
@@ -167,7 +188,7 @@ function HomeDetail({ h, onBack, backLabel, children }) {
         {(price || dealWord(h.deal)) && (
           <div className="pvh-p">{price && <b>{price}</b>}{dealWord(h.deal) && <span>{dealWord(h.deal)}</span>}</div>
         )}
-        <Facts h={h} />
+        <Facts h={h} shown={`${homeTitle(h)} · ${subOf(h)}`} />
         {children}
       </div>
     </article>
@@ -298,7 +319,8 @@ export function SharedLinkPage({ tenant, code }) {
         : (
           <>
             <div className="pv-list-h">
-              <h1>{flats.length} homes for you</h1>
+              {/* Not "for you": a link without a recipient goes to groups. */}
+              <h1>{flats.length} homes</h1>
               {live < flats.length && <span>{live} available</span>}
             </div>
             <div className="pv-grid">
@@ -335,13 +357,18 @@ function StaffBar({ tenant, staff, flats, tapDone, onTapDone }) {
   const state = staff.link?.state
   const dead = state && state !== 'active'
   if (!lead && !dead) return null
-  const word = tapDone ? (tapDone.matched ? 'Already a lead' : 'Lead added') : staff.tap ? 'Tap by' : 'Sent to'
+  const word = tapDone ? (tapDone.matched ? 'Already a lead' : 'Lead added') : 'Sent to'
+  const who = lead ? (lead.name || phoneLabel(lead.phone) || 'Lead') : ''
+  // A tap reads as what the person did: "Sneha Kulkarni tapped I'm interested".
+  const tapLine = !tapDone && staff.tap ? (staff.tap.propertyId ? 'tapped I’m interested' : 'pressed Talk to us') : ''
   return (
     <div className="pv-staff">
       <div className="pv-staff-in pv-staff-row">
         <span className="pv-staff-who">
           {lead
-            ? (lead.visible === false ? 'Another agent’s lead' : <>{word} · <b>{lead.name || lead.phone || 'Lead'}</b></>)
+            ? (lead.visible === false ? 'Another agent’s lead'
+              : tapLine ? <><b>{who}</b> {tapLine}</>
+              : <>{word} · <b>{who}</b></>)
             : 'No recipient'}
           {dead && <span className="pv-staff-dead"> · {state === 'expired' ? 'Expired' : state === 'off' ? 'Turned off' : 'Stopped'}</span>}
         </span>
