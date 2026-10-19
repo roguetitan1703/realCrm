@@ -6280,6 +6280,13 @@ export async function updateSettings(patch: any): Promise<any> {
     INSERT INTO crm_settings (key, value, tenant_id) VALUES ('default', ${sql.json(next)}, ${tid()})
     ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value;
   `;
+  // Sharing was just stopped: sweep again now it is saved. A link inserted
+  // after cleanSharingPatch's sweep but before this save would otherwise
+  // survive; one inserted after the save re-reads `stopped` and refuses itself.
+  if (patch.sharing?.stopped && !before.sharing?.stopped) {
+    await sql`UPDATE crm_share_links SET turned_off_at = NOW(), turned_off_by = ${getContext()?.userId ?? null}
+               WHERE tenant_id = ${tid()} AND turned_off_at IS NULL`;
+  }
   return next;
 }
 

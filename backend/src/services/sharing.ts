@@ -805,6 +805,14 @@ export async function createShareLink(input: any, origin: string | null) {
     INSERT INTO crm_share_links (id, tenant_id, code, created_by, lead_id, property_ids, show_price, created_at, expires_at)
     VALUES (${id}, ${m.tenantId}, ${code}, ${m.userId}, ${lead?.id || null}, ${ids}, ${showPrice}, NOW(), NOW() + (${days}::text || ' days')::interval)
     RETURNING *`;
+  // THE STOP RACE. The owner may have stopped sharing between the check above
+  // and this insert. Read it again now the link exists: stopped means this
+  // link is turned off and refused. (updateSettings sweeps again after it
+  // saves, for a link inserted before the save; between them, none survives.)
+  if ((await sharingOf(m.tenantId)).stopped) {
+    await sql`UPDATE crm_share_links SET turned_off_at = NOW(), turned_off_by = ${m.userId} WHERE tenant_id = ${m.tenantId} AND id = ${id}`;
+    throw new ShareError(422, 'sharing_stopped', 'Sharing is stopped. An owner can allow it again in Settings.');
+  }
 
   const url = `${appBase(origin)}/${(await firmSlug(m.tenantId))}/${code}`;
   if (lead) {
