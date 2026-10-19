@@ -228,11 +228,15 @@ every row has `tenant_id`):
   set when known and filled by Add as lead / attach — `created_at`.
 - `crm_share_devices` — `tenant_id, device_id, lead_id, attached_at`. Primary
   key `(tenant_id, device_id)`.
+- **(added)** `crm_share_staff_devices` — `tenant_id, device_id, user_id,
+  seen_at`: a browser a member of the firm used while signed in. It is never
+  attached to a lead.
 - `crm_properties` — adds `in_catalogue BOOL DEFAULT FALSE` and
   `catalogue_slug TEXT` (unique per tenant; `<bhk>-<subtype>-<locality>-<4
   chars>`, never the project name; kept when the flat leaves the catalogue).
-- Deleting a lead turns its links off and drops its devices; merging moves
-  links, events and devices onto the surviving lead.
+- Deleting a lead (one, bulk, or reverting an import) turns its links off and
+  drops its devices; merging moves links, events and devices onto the
+  surviving lead.
 
 **Settings** (`crm_settings` default row, key `sharing`, via the existing
 `POST /workspace/settings {sharing:{…}}`): `linkExpiryDays` 7 / 15 / 30
@@ -251,10 +255,14 @@ sends it as `X-Device-Id`. Anything else is treated as no device.
 
 **Staff.** The public page sends the signed-in session's `Authorization`
 header when it has one for that tenant. A valid session of that firm is never
-counted as a view and gets the `staff` block.
+counted as a view, gets the `staff` block, and its taps and Talk presses are not
+recorded and raise nothing. Its browser is remembered as staff.
 
 **Public API** (no sign-in; responses carry no `success` envelope; errors are
-`{error, message}`; rate-limited per IP, 429 `slow_down`):
+`{error, message}`; rate-limited per IP, 429 `slow_down`). Everything that
+resolves a code — the page, Talk to us, I'm interested and the preview card —
+shares one limit (120 a minute) and one miss budget (30 unmatched codes per 10
+minutes), after which even a real code answers 429:
 - `GET /public/s/:tenant/:code[?flat=<propertyId>]` — a link or a tap code.
   - **(changed)** `{ kind: link|tap, state: active|unavailable, firm{name,
     logo, accent}, flats[Flat], showPrice, cta{phone}, catalogueUrl }`. A
@@ -279,8 +287,9 @@ counted as a view and gets the `staff` block.
 - **Why the dead-link body never names the agent.** `cta.phone` on an
   unavailable code is the firm's reply-to, never the holder's, because a
   holder's number would tell a prober the code is real. The page shows **Talk
-  to us** on every unavailable link: the server sends an expired link's press
-  to the holder (and alerts them) and every other press to the firm.
+  to us** on every unavailable link. Every press on an unusable code answers
+  the same `waUrl` (the firm's reply-to, "Hi, I'm looking for a home."); on an
+  expired link the server also records it and alerts the holder.
 - **Flat** = `{ id, title ("2 BHK Apartment in <project or locality>"),
   config{bhk,subtype,category,carpetSqft,superBuiltupSqft,builtupSqft,
   furnishing,bathrooms,facing,possession,amenities[]}, deal, locality,
@@ -291,13 +300,16 @@ counted as a view and gets the `staff` block.
 - `POST /public/s/:tenant/:code/interested {propertyId}` — active links only
   (404 otherwise). Makes the tap and its code, raises `share_interested`, and
   returns `{ waUrl }` to the holder → creator → firm. Message: "Hi, I'm
-  interested in this home: <app>/<tenant>/<tapcode>".
-- `POST /public/s/:tenant/:code/talk` → `{ waUrl }`. On an expired link it
-  records `talk` with its own code (like a tap), raises `share_expired_open`
-  (one per link per firm day) and goes to the holder → creator → firm, with
-  "Hi, I'd like to see these homes again: <app>/<tenant>/<talkcode>". **(changed)** On an off, stopped or
-  wrong code it goes to the firm's reply-to with "Hi, I'm looking for a
-  home." and records nothing, so it cannot be told apart.
+  interested in this home: <app>/<tenant>/<tapcode>". "First today for this
+  link and flat" is decided under a database lock, so two taps at once still
+  raise exactly one alert.
+- `POST /public/s/:tenant/:code/talk` → `{ waUrl }`. **(changed)** On an
+  active link: the holder → creator → firm, "Hi, about the homes you sent:
+  <link>". On any unusable code (expired, off, stopped, wrong): the firm's
+  reply-to with "Hi, I'm looking for a home.", identical for all four. On an
+  expired link the server additionally records `talk` with its own code (like
+  a tap) and raises `share_expired_open` to the holder → creator → desk (one per
+  link per firm day, decided under a lock).
 - **(changed)** `GET /public/catalogue/:tenant?deal=&config=&locality=&page=
   &limit=` → `{ firm, showPrice, flats[Flat], total, page, limit,
   facets{deal[], config[], locality[]} }`. `config` is a prefix ("2 BHK");
@@ -309,10 +321,17 @@ counted as a view and gets the `staff` block.
   unknown alike).
 - `POST /public/catalogue/:tenant/enquiry {name, phone, propertyId?, message?}`
   plus hidden fields `company` / `website` (filled = silently dropped). Goes
-  through the ingestion path (`ingestion.ts landEnquiry`), source `Catalogue`:
-  duplicate by phone, merge, routing, alerts. Then the flat goes on the
-  shortlist and the device attaches. Returns `{ ok: true }` whatever happened.
-  5 per 10 minutes per IP, 3 per hour per phone.
+  through the ingestion path (`ingestion.ts landEnquiry`), source `Catalogue`.
+  A new number is a new lead, routed as usual, and this browser is attached to
+  it. **(changed)** A number that is already a lead is *unverified* (anyone can
+  type it): the enquiry is recorded, what they wrote goes on the timeline
+  (type `enquiry`, by System) and the holder (else the desk) gets
+  `lead_repeat` — but the lead is not reopened, its requirement and notes are
+  not touched, and the browser is not attached. The flat goes on the shortlist
+  either way. Returns `{ ok: true }` whatever happened. 5 per 10 minutes per
+  IP, 3 per hour per phone, 100 per firm per day (then 429, logged).
+- Catalogue views count at most once per browser per flat (or per list) per
+  firm day.
 - `GET /public/gallery/:tenant/:ref` (old photo links, §A.4) → **(changed)**
   `{ success, redirect }` (a path to open) when the flat is in the catalogue,
   else 404 `{error, message, firm, cta{phone}, catalogueUrl}`.
@@ -328,10 +347,14 @@ message, …}`):
   showPrice?}` → 201 `{ link{id,code,url,expiresAt,showPrice},
   lead{id,name,created} | null, waUrl }`.
   - A new person: duplicate by phone; a new lead gets source `Shared link`,
-    is assigned to the sender, and has an empty requirement. **(changed)** An
-    existing unheld lead is assigned to the sender.
-  - The flats go on `lead_shortlist`, and a timeline `whatsapp` event "Sent 3
-    homes" is logged with the link. Audited.
+    is assigned to the sender, and has an empty requirement. **(changed)** A
+    number that is a lead nobody active holds (unassigned, or its holder left)
+    is not given to an agent: `409 lead_held_by {holderName: "the office"}`,
+    and the desk gets `share_number_held`. Desk roles use any lead.
+  - The flats go on `lead_shortlist`, and a timeline event of type `share`
+    ("Homes sent", "Sent 3 homes") is logged with the link. **(changed)** It is
+    not `whatsapp`: nothing has been sent yet, so it is not contact and the
+    lead stays in Not contacted. Audited.
   - Errors: `422 sender_phone_missing`; `422 flats_not_found`; `422
     flats_not_available` (sold/let); `422 private_flats_without_recipient
     {ids}` (a link with no lead may only hold catalogue flats); `409 lead_held_by
@@ -343,7 +366,8 @@ message, …}`):
   **(changed)** Links that are turned off are not listed.
 - `POST /share-links/:id/off` (creator, or owner) → `{ ok }`.
 - `POST /share-links/:id/attach {leadId}` → **(changed)** `{ ok, events,
-  devices }` (counts moved).
+  devices }` (counts moved). Only events on no lead yet move; an event already
+  on another lead stays there. Staff browsers are never attached.
 - `GET /leads/:id/shares` → `{ data: [{propertyId,title,available,sentAt,
   opens,lastOpenedAt,interested,enquiries,devices,link{id,code,url,state,
   expiresAt}|null}] }`, most recent first. Same visibility as the lead.
@@ -351,28 +375,34 @@ message, …}`):
   created}, matched, deviceAttached }` (`matched` = the number was already a
   lead). Takes a tap code or a talk code. Puts the event and its device on the
   lead and the flat (a talk: the link's flats) on its shortlist. **(changed)** A link with no recipient stays
-  unbound: the next tap on it may be somebody else.
+  unbound: the next tap on it may be somebody else. **(changed)** Only the
+  link's sender, the holder of the lead the tap is on, or a desk role may do
+  it (403 otherwise); 30 a minute per person (then 429).
 - `POST /properties/catalogue {ids, on}` → `{ changed, withoutPhotos }`. The
-  single-property update takes `inCatalogue`. `GET /properties?catalogue=yes|no`
+  single-property update takes `inCatalogue`. **(changed)** Owners and managers
+  only, both ways (403 for agents; an agent's update that sends the current
+  value unchanged still saves). `GET /properties?catalogue=yes|no`
   filters. Rows carry `inCatalogue` and `catalogueSlug`.
 - **(changed)** `PATCH /auth/me {phone}` → `{ success, user }` — the user's
-  own number, any signed-in role (`PATCH /team/users/:id` stays manager-only). 400 `phone_invalid`, 409 `phone_taken`. Audited.
+  own number, any signed-in role (`PATCH /team/users/:id` stays manager-only). 400 `phone_invalid`, 409 `phone_taken` (matched on the last 10 digits, deleted members included). Audited.
 
 **Alerts** (`notificationCatalogue.ts`, the lifecycle rules apply; close test
 `share_work`). `share_interested` and `share_expired_open` link
 `?screen=leads&lead=<id>&tap=<code>`, or `?tap=<code>` when there is no lead
-yet (the alert's record is then the tap, and it closes when Add as lead or
-attach puts the tap on a lead); the other two link `?screen=leads&lead=<id>`:
+yet; the other two link `?screen=leads&lead=<id>`. Closing (`share_work`): on
+a lead, when contact is logged after the alert or a fresh link is sent to that
+lead; on a tap (no lead yet), when Add as lead or attach puts it on a lead, or
+when the link's sender makes a newer link carrying that flat (a talk: any of
+its flats). An alert that would reach nobody is logged with tenant and type:
 - `share_interested` — urgency now, to the lead's holder (else the link's
   creator). At most one per flat per link per firm day; a different device on
-  the same link reads "Someone on <name>'s link". Closes when contact is
-  logged on the lead, or when Add as lead is done.
-- `share_expired_open` — now, to the holder (else creator). Closes when a fresh
-  link is sent or contact is logged.
+  the same link reads "Someone on <name>'s link".
+- `share_expired_open` — now, to the holder (else creator, else the desk).
 - `share_returned` — drawer. A known lead back on their link on a new day, at
   most one per lead per day.
-- **(added)** `share_number_held` — drawer, to the holder, when another member
-  tries to send to their lead's number. Closes when the lead is worked.
+- **(added)** `share_number_held` — drawer, to the holder when another member
+  tries to send to their lead's number, or to the desk when nobody active
+  holds it. Closes when the lead is worked.
 - `notificationMeta` on the frontend needs an icon for each.
 
 **Never in any public response:** the flat number, the owner, notes, key
