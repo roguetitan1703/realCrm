@@ -196,6 +196,18 @@ export function phoneProblem(raw, loc = current) {
   return loc.phoneCountry === '1' ? 'Enter a 10-digit phone number' : 'Enter a 10-digit mobile number'
 }
 
+/**
+ * A number read on its own (the sender's number, a recipient), grouped so it
+ * can be read back aloud: +91 98765 43210. Elsewhere phoneLabel; a number
+ * that is not a clean ten digits stays as stored.
+ */
+export function phoneSpaced(raw, loc = current) {
+  if (raw == null || loc.phoneCountry !== '91') return phoneLabel(raw, loc)
+  const d = String(raw).replace(/\D/g, '')
+  const ten = d.length === 12 && d.startsWith('91') ? d.slice(2) : d.length === 10 ? d : null
+  return ten ? `+91 ${ten.slice(0, 5)} ${ten.slice(5)}` : raw
+}
+
 /** What a phone field's example shows. `india` is the field's own Indian
  *  example, kept as it was; `national` asks for the number without its code. */
 export function phonePlaceholder(india, { national = false } = {}, loc = current) {

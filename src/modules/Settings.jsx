@@ -10,7 +10,7 @@ import ThisDevice from '../components/ThisDevice.jsx'
 import MessageTemplates from '../components/MessageTemplates.jsx'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { isDeskRole } from '../lib/permissions.js'
-import { firmLocale } from '../lib/locale.js'
+import { firmLocale, phoneSpaced } from '../lib/locale.js'
 
 // `everyone: true` is a section an agent may open. The rest are the desk's.
 // An agent reaches this screen for one reason — the intro message they are
@@ -108,7 +108,11 @@ function SharingSection({ store, settings }) {
   const replyDirty = reply.trim() !== (sh.replyToPhone || '')
 
   // The whole object, every time: the server stores the key as one value.
-  const put = (patch, note) => store.patchSettings({ sharing: { ...sh, ...patch } }, note)
+  // `replyToFallback` is the server's answer, not a setting: it is not sent back.
+  const put = (patch, note) => {
+    const { replyToFallback: _shown, ...stored } = sh
+    return store.patchSettings({ sharing: { ...stored, ...patch } }, note)
+  }
 
   const tenant = currentTenant()
   const catalogueUrl = `${window.location.origin}/${tenant}/homes`
@@ -144,7 +148,8 @@ function SharingSection({ store, settings }) {
           <div className="shr-row">
             <label className="shr-l" htmlFor="shr-reply">Reply-to number</label>
             <div className="shr-inline">
-              <Input id="shr-reply" value={reply} onChange={e => setReply(e.target.value)} inputMode="tel" placeholder="Firm's WhatsApp number"
+              <Input id="shr-reply" value={reply} onChange={e => setReply(e.target.value)} inputMode="tel"
+                placeholder={sh.replyToFallback ? phoneSpaced(sh.replyToFallback) : "Firm's WhatsApp number"}
                 onKeyDown={e => { if (e.key === 'Enter' && replyDirty) put({ replyToPhone: reply.trim() }, 'Reply-to number saved') }} />
               <Button variant={replyDirty ? 'primary' : 'ghost'} disabled={!replyDirty} onClick={() => put({ replyToPhone: reply.trim() }, 'Reply-to number saved')}>Save</Button>
             </div>
