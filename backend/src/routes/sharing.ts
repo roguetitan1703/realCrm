@@ -2,7 +2,7 @@
  * SENDING FLATS, signed in (docs/specs/listing-pages.md §A.5).
  *
  *   POST /api/v1/share-links                {leadId? | newPerson{name,phone}, propertyIds, showPrice?}
- *   GET  /api/v1/share-links/mine           ?page=&limit=
+ *   GET  /api/v1/share-links/mine           ?page=&limit=&recipient=none
  *   POST /api/v1/share-links/:id/off
  *   POST /api/v1/share-links/:id/attach     {leadId}
  *   POST /api/v1/share-taps/:code/lead      {phone, name?} | {leadId}
@@ -36,7 +36,7 @@ shareLinksRouter.post('/', async (req: Request, res: Response) => {
 });
 
 shareLinksRouter.get('/mine', async (req: Request, res: Response) => {
-  try { return res.json({ success: true, ...(await myLinks({ page: Number(req.query.page) || 1, limit: Number(req.query.limit) || 30 }, origin(req))) }); }
+  try { return res.json({ success: true, ...(await myLinks({ page: Number(req.query.page) || 1, limit: Number(req.query.limit) || 30, recipient: req.query.recipient === 'none' ? 'none' : undefined }, origin(req))) }); }
   catch (err) { return shareFail(res, err); }
 });
 

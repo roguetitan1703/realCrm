@@ -41,7 +41,7 @@ import { assertLeadWrite } from '../lib/permissions.js';
 import { normalizePhone } from './roster.js';
 import { isDeskRole } from '../lib/permissions.js';
 import {
-  findLeadByPhone, createLead, updateLead, addTimelineEvent, sharingOf, deskConfigOf, localeOf,
+  findLeadByPhone, createLead, updateLead, addTimelineEvent, sharingOf, deskConfigOf, localeOf, listingKind,
   REJECTED_STATUS, type ActorCtx,
 } from './store.js';
 
@@ -166,7 +166,7 @@ const isAvailable = (r: any) => /^available$/i.test(String(r.status || 'Availabl
  */
 export function publicFlat(r: any, o: { showPrice: boolean; showProject: boolean; loc: any }) {
   const project = o.showProject ? (r.project || r.config?.society || null) : null;
-  const kind = [r.bhk, r.subtype].filter(Boolean).join(' ');
+  const kind = listingKind(r.bhk, r.subtype);
   const where = project || r.locality || '';
   const media = (Array.isArray(r.media) ? r.media : []).filter((x: any) => x && x.key).map((x: any) => ({
     key: x.key, kind: x.kind === 'video' ? 'video' : 'photo',
@@ -380,7 +380,7 @@ async function alert(tenantId: string, recipient: any | null, n: { type: string;
 
 /** The flat's name in an alert: its project and size, the way an agent says it. */
 function flatLabel(r: any): string {
-  return [r?.project || r?.config?.society || r?.locality, r?.bhk].filter(Boolean).join(' ') || 'a home';
+  return [r?.project || r?.config?.society || r?.locality, listingKind(r?.bhk, null)].filter(Boolean).join(' ') || 'a home';
 }
 
 /**
@@ -492,8 +492,11 @@ export async function catalogueList(f: Firm, q: { deal?: string; config?: string
   const page = Math.max(Number(q.page) || 1, 1);
   const where = [CATALOGUE_WHERE(f.id)];
   if (q.deal) where.push(sql`lower(deal) = ${q.deal.toLowerCase()}`);
-  if (q.config) where.push(sql`lower(bhk) LIKE ${q.config.toLowerCase().replace(/[\\%_]/g, ch => '\\' + ch) + '%'}`);
-  if (q.locality) where.push(sql`lower(locality) = ${q.locality.toLowerCase()}`);
+  // Exact: the choices are the stored tokens from `facets.config`; a prefix
+  // would put 1 RK and 10 BHK under "1".
+  // Older rows carry "2 BHK" as text; the token is what is left without it.
+  if (q.config) where.push(sql`lower(regexp_replace(trim(bhk), '[[:space:]]*bhk$', '', 'i')) = ${bhkToken(q.config)}`);
+  if (q.locality) where.push(sql`lower(trim(locality)) = ${q.locality.trim().toLowerCase()}`);
   const clause = where.reduce((a, c) => sql`${a} AND ${c}`);
   const [rows, [{ n }], facets] = await Promise.all([
     // Flats with no photos are listed last (§A.4).
@@ -510,9 +513,20 @@ export async function catalogueList(f: Firm, q: { deal?: string; config?: string
     firm: firmPublic(f), showPrice: !!sharing.showPriceOnCatalogue,
     flats: (rows as any[]).map(x => publicFlat(x, { showPrice: !!sharing.showPriceOnCatalogue, showProject: sharing.catalogueShowsProject !== false, loc })),
     total: n, page, limit,
-    facets: { deal: (facets[0]?.deals || []).sort(), config: (facets[0]?.configs || []).sort(), locality: (facets[0]?.localities || []).sort() },
+    facets: {
+      deal: (facets[0]?.deals || []).sort(),
+      config: uniqBy((facets[0]?.configs || []).map(bhkToken).filter(Boolean), x => x).sort(),
+      // WAKAD and Wakad are one place: one chip, and the filter is case-blind.
+      locality: uniqBy((facets[0]?.localities || []).map((x: string) => x.trim()).filter(Boolean), (x: string) => x.toLowerCase()).sort(),
+    },
   };
 }
+
+const bhkToken = (v: unknown): string => String(v ?? '').trim().replace(/\s*bhk$/i, '').toLowerCase();
+const uniqBy = <T>(xs: T[], key: (x: T) => string): T[] => {
+  const seen = new Set<string>();
+  return xs.filter(x => { const k = key(x); if (seen.has(k)) return false; seen.add(k); return true; });
+};
 
 /** GET /public/catalogue/:tenant/:slug — one flat, or null (the same 404 whatever the reason). */
 export async function catalogueFlat(f: Firm, slug: string, r: PublicReq) {
@@ -750,11 +764,14 @@ async function linkCounts(tenantId: string, linkIds: string[]) {
 }
 
 /** GET /share-links/mine?page=&limit= — the links I made that are not turned off, newest first. */
-export async function myLinks(q: { page?: number; limit?: number }, origin: string | null) {
+export async function myLinks(q: { page?: number; limit?: number; recipient?: 'none' }, origin: string | null) {
   const m = me();
   const limit = Math.min(Math.max(Number(q.limit) || 30, 1), 100);
   const page = Math.max(Number(q.page) || 1, 1);
-  const where = sql`l.tenant_id = ${m.tenantId} AND l.created_by = ${m.userId} AND l.turned_off_at IS NULL`;
+  // recipient=none: the links still waiting for a lead (Add lead's "Came from").
+  const where = q.recipient === 'none'
+    ? sql`l.tenant_id = ${m.tenantId} AND l.created_by = ${m.userId} AND l.turned_off_at IS NULL AND l.lead_id IS NULL`
+    : sql`l.tenant_id = ${m.tenantId} AND l.created_by = ${m.userId} AND l.turned_off_at IS NULL`;
   const [rows, [{ n }]] = await Promise.all([
     sql`SELECT l.*, ld.name AS lead_name, ld.phone AS lead_phone FROM crm_share_links l
           LEFT JOIN crm_leads ld ON ld.id = l.lead_id AND ld.tenant_id = l.tenant_id

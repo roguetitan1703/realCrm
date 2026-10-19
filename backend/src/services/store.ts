@@ -528,6 +528,8 @@ function rowToProperty(r: any): any {
 function clientEventType(dbType: string): string {
   if (dbType === 'remark' || dbType === 'call' || dbType === 'sms') return dbType;
   if (dbType === 'whatsapp') return 'wa';
+  // Homes sent on a shared link (listing-pages.md §A): its own row, "Sent 3 homes".
+  if (dbType === 'share') return 'share';
   // Its own channel, deliberately outside the editable set: a closed
   // appointment is an observation, not a note somebody can rewrite.
   if (dbType === 'follow_up') return 'followup';
@@ -538,7 +540,7 @@ function clientEventType(dbType: string): string {
 
 // Types the Timeline UI shows a tag pill for (Remark / Call / WhatsApp / SMS)
 // — the label must NOT also repeat the title there, or the tag duplicates it.
-const TAGGED_TYPES = new Set(['remark', 'call', 'wa', 'sms']);
+const TAGGED_TYPES = new Set(['remark', 'call', 'wa', 'sms', 'share']);
 
 /** Rows whose description the system wrote and nobody may overwrite. */
 export const LOCKED_TEXT_TYPES = new Set(['follow_up']);
@@ -5232,16 +5234,21 @@ export async function getPropertyBuyers(propertyId: string, limit = 50): Promise
  * listing. Used by the property form's route AND by the two conversions
  * (services/agreements.ts), so a flat made either way reads the same.
  */
+/** "3 BHK Apartment" from the stored tokens. Also the kind on a buyer's page (sharing.ts publicFlat). */
+export function listingKind(bhk: string | null | undefined, subtype: string | null | undefined): string {
+  // Older rows carry "2 BHK" as text; without this they read "2 BHK BHK".
+  const t = bhk ? String(bhk).trim().replace(/\s*bhk$/i, '').toLowerCase() : '';
+  const bhkLabel = t === '1rk' ? '1 RK'
+    : t === '5plus' ? '5+ BHK'
+    : t ? `${t} BHK` : '';
+  const subLabel = subtype
+    ? String(subtype).split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+    : '';
+  return [bhkLabel, subLabel].filter(Boolean).join(' ').trim();
+}
+
 export function prepareListing(body: any): any {
-  if (!body.type && (body.bhk || body.subtype)) {
-    const bhkLabel = body.bhk === '1rk' ? '1 RK'
-      : body.bhk === '5plus' ? '5+ BHK'
-      : body.bhk ? `${body.bhk} BHK` : '';
-    const subLabel = body.subtype
-      ? String(body.subtype).split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-      : '';
-    body.type = [bhkLabel, subLabel].filter(Boolean).join(' ').trim();
-  }
+  if (!body.type && (body.bhk || body.subtype)) body.type = listingKind(body.bhk, body.subtype);
   if (!body.title) {
     body.title = [body.society || body.project, body.unit || body.flat].filter(Boolean).join(' - ')
       || body.type || 'Untitled property';
