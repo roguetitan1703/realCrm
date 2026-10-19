@@ -108,11 +108,14 @@ export async function firmBySlug(slug: string): Promise<Firm | null> {
   return { id: t.id, slug: t.slug || t.id, name: t.name, brand: t.brand_config || {} };
 }
 
-/** What a page may show of the firm: name, logo, colour. Same source as the photo link. */
-export const firmPublic = (f: Firm) => ({
+/** What a page may show of the firm: name, logo, colour — and, on a page,
+ *  its locale, so a price reads in the firm's currency and a number in its
+ *  phone rules rather than India's. Same source as the photo link. */
+export const firmPublic = (f: Firm, locale?: any) => ({
   name: f.brand.firmName || f.name || '',
   logo: f.brand.logoUrl ? `/pwa/${f.slug}/logo` : '',
   accent: f.brand.primaryColor || null,
+  ...(locale ? { locale } : {}),
 });
 
 /** A user who can still receive work: active and not deleted. */
@@ -269,7 +272,7 @@ async function catalogueUrlOf(f: Firm): Promise<string | null> {
 /** The one body every unusable code gets. Nothing in it depends on the code. */
 async function unavailableBody(f: Firm) {
   return {
-    kind: 'link', state: 'unavailable', firm: firmPublic(f), flats: [], showPrice: false,
+    kind: 'link', state: 'unavailable', firm: firmPublic(f, await localeOf(f.id)), flats: [], showPrice: false,
     cta: { phone: await firmPhone(f.id) }, catalogueUrl: await catalogueUrlOf(f),
   };
 }
@@ -322,7 +325,7 @@ export async function openCode(f: Firm, code: string, r: PublicReq, flatParam?: 
       .map(x => publicFlat(x, { showPrice, showProject: true, loc }));
     const who = await whoAnswers(f.id, link.lead_id, link.created_by);
     body = {
-      kind: tap ? 'tap' : 'link', state: state === 'active' ? 'active' : 'unavailable', firm: firmPublic(f), flats, showPrice,
+      kind: tap ? 'tap' : 'link', state: state === 'active' ? 'active' : 'unavailable', firm: firmPublic(f, loc), flats, showPrice,
       cta: { phone: who.phone }, catalogueUrl: await catalogueUrlOf(f),
     };
     if (state !== 'active') {
@@ -571,7 +574,7 @@ export async function catalogueList(f: Firm, q: { deal?: string; config?: string
   ]);
   await catalogueView(f, null, r);
   return {
-    firm: firmPublic(f), showPrice: !!sharing.showPriceOnCatalogue,
+    firm: firmPublic(f, await localeOf(f.id)), showPrice: !!sharing.showPriceOnCatalogue,
     flats: (rows as any[]).map(x => publicFlat(x, { showPrice: !!sharing.showPriceOnCatalogue, showProject: sharing.catalogueShowsProject !== false, loc })),
     total: n, page, limit,
     facets: {
@@ -598,7 +601,7 @@ export async function catalogueFlat(f: Firm, slug: string, r: PublicReq) {
   const sharing = await sharingOf(f.id);
   await catalogueView(f, row.id, r);
   return {
-    firm: firmPublic(f), showPrice: !!sharing.showPriceOnCatalogue,
+    firm: firmPublic(f, await localeOf(f.id)), showPrice: !!sharing.showPriceOnCatalogue,
     flat: publicFlat(row, { showPrice: !!sharing.showPriceOnCatalogue, showProject: sharing.catalogueShowsProject !== false, loc: await localeOf(f.id) }),
     catalogueUrl: `/${f.slug}/homes`,
   };
@@ -692,7 +695,7 @@ async function addToShortlist(tenantId: string, leadId: string, propertyIds: str
 export async function resolveOldPhotoLink(f: Firm, propertyId: string) {
   const [row] = await sql`SELECT ${SHOWN_COLUMNS} FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)} AND id = ${propertyId} LIMIT 1`;
   if (row?.catalogue_slug) return { redirect: `/${f.slug}/homes/${row.catalogue_slug}`, row };
-  return { unavailable: true, firm: firmPublic(f), catalogueUrl: await catalogueUrlOf(f), row: null };
+  return { unavailable: true, firm: firmPublic(f, await localeOf(f.id)), catalogueUrl: await catalogueUrlOf(f), row: null };
 }
 
 // ── Signed in ───────────────────────────────────────────────────────────────

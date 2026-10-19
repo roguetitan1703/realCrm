@@ -162,7 +162,7 @@ publicRouter.get('/catalogue/:tenant/:slug', async (req: Request, res: Response)
 
 /** A flat that is not there: the firm's card, its number and the catalogue, so the page is not a dead end. */
 async function goneBody(f: Firm) {
-  return { ...NOT_FOUND, firm: firmPublic(f), cta: { phone: await firmPhone(f.id) }, catalogueUrl: await catalogueUrlOf(f) };
+  return { ...NOT_FOUND, firm: firmPublic(f, await localeOf(f.id)), cta: { phone: await firmPhone(f.id) }, catalogueUrl: await catalogueUrlOf(f) };
 }
 
 // ── Old photo links (§A.4) ──────────────────────────────────────────────────
