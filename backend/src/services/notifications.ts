@@ -46,7 +46,7 @@ export interface NotifyInput {
    * (alertLifecycle.ts). Read from `link` when not given, which covers every
    * single-record alert; a batch passes its ids.
    */
-  record?: { kind: 'lead' | 'owner' | 'agreement'; ids: string[] };
+  record?: { kind: 'lead' | 'owner' | 'agreement' | 'share_tap'; ids: string[] };
   /** For an alert about a booking: the follow_up.at it was about. */
   subjectAt?: string | null;
   tenantId?: string;            // defaults to the request tenant
@@ -216,6 +216,26 @@ export async function dispatchDue(t: string): Promise<number> {
     }
   }
   return due.length;
+}
+
+/**
+ * ONE ALERT TO A PERSON, OR TO THE DESK WHEN THERE IS NOBODY: the one way to
+ * say "the holder, else owners and managers". Returns how many people it was
+ * addressed to. Fanning out to an empty desk is not an error anywhere below,
+ * so a zero is logged here with the tenant and type (CLAUDE.md §4: assert the
+ * recipient count).
+ */
+export async function notifyOrDesk(recipientId: string | null | undefined, n: Omit<NotifyInput, 'userId'> & { tenantId: string }): Promise<number> {
+  if (recipientId) { await notify({ ...n, userId: recipientId }); return 1; }
+  const [{ k }] = await sql`
+    SELECT count(*)::int AS k FROM users
+     WHERE tenant_id = ${n.tenantId} AND role IN ('owner', 'manager') AND status ILIKE 'active' AND deleted_at IS NULL`;
+  if (!k) {
+    console.warn(`[Notify] ${n.type} for tenant ${n.tenantId} reached nobody: no recipient and no active owner or manager`);
+    return 0;
+  }
+  await notifyRoles(['owner', 'manager'], n);
+  return k;
 }
 
 /** Fan out one alert to every ACTIVE user in the tenant holding one of the

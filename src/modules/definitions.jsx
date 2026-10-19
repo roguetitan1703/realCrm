@@ -36,8 +36,9 @@ import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 
-import { canAssignLead, canEditLead, canUpdateLeadStatus, canEditListing } from '../lib/permissions.js'
+import { canAssignLead, canEditLead, canUpdateLeadStatus, canEditListing, isDeskRole } from '../lib/permissions.js'
 import { api } from '../lib/api.js'
+import { openSend } from './SendSheet.jsx'
 import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
 // out again here — that duplication is exactly what broke property filtering.
@@ -889,6 +890,9 @@ export const PROPERTIES_DEF = {
         options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] },
       { key: 'media', label: 'Photos & video', icon: 'camera', group: 'State',
         options: [{ value: 'photos', label: 'Has photos' }, { value: 'video', label: 'Has video' }, { value: 'none', label: 'None yet' }] },
+      // The desk decides what is public; agents only send.
+      ...(isDeskRole(store?.state?.role) ? [{ key: 'catalogue', label: 'In catalogue', icon: 'eye', multi: false, group: 'State',
+        options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] }] : []),
       { key: 'furnishing', label: 'Furnishing', icon: 'home', group: 'Condition', options: optionsOf(FURNISH) },
       { key: 'facing', label: 'Facing', icon: 'tag', group: 'Condition', options: optionsOf(FACING) },
       { key: 'possession', label: 'Possession', icon: 'clock', group: 'State', options: optionsOf(POSSESSION) },
@@ -942,10 +946,10 @@ export const PROPERTIES_DEF = {
 
   // Property list uses a card view AND a table view. These columns drive the table.
   columns: [
-    { key: 'society', label: 'Property', render: (p) => (
+    { key: 'society', label: 'Property', render: (p, store) => (
       <div className="cell-prop">
         <div className="thumb-tile" style={{ background: thumbTint(p.id) }}><Icon name="building" size={19} strokeWidth={1.4} /></div>
-        <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}{!flatOf(p) && !isPlot(p.subtype ?? normaliseSubtype(p.type, p.category)) && <span className="unit-tag unit-missing">No flat no. yet</span>}{p.verifiedAt && <span className="vtick" title="Verified"><Icon name="check" size={11} /></span>}</div><div className="sub">{p.locality}{p.locality ? ' · ' : ''}<MediaNote p={p} /></div></div>
+        <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}{!flatOf(p) && !isPlot(p.subtype ?? normaliseSubtype(p.type, p.category)) && <span className="unit-tag unit-missing">No flat no. yet</span>}{p.verifiedAt && <span className="vtick" title="Verified"><Icon name="check" size={11} /></span>}{p.inCatalogue && isDeskRole(store?.state?.role) && <span className="unit-tag unit-cat" title="In catalogue"><Icon name="eye" size={11} />Catalogue</span>}</div><div className="sub">{p.locality}{p.locality ? ' · ' : ''}<MediaNote p={p} /></div></div>
       </div>
     ) },
     // These columns read the CANONICAL fields with a legacy fallback. They
@@ -994,8 +998,8 @@ export const PROPERTIES_DEF = {
   ],
 
   actions: [
-    { id: 'share', tier: 'quick', icon: 'wa', tone: 'accent', label: 'Share',
-      run: (store, p) => store.openModal({ kind: 'pickBuyer', propId: p.id }) },
+    { id: 'share', tier: 'quick', icon: 'wa', tone: 'accent', label: 'Send',
+      run: (store, p) => openSend(store, [p]) },
     // Both owner actions are gated on there BEING an owner to reach. The owner
     // is optional now, so an ungated "Call owner" opened a dialer on an
     // undefined number, and "Owner update" composed a WhatsApp addressed to

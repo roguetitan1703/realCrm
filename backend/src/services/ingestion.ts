@@ -17,7 +17,7 @@ import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
 import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS, WON_STATUS } from './store';
-import { notify, notifyRoles } from './notifications';
+import { notify, notifyOrDesk } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
 import { hashKey, lockKey, keyState, currentLock } from './integrationKeys';
@@ -384,13 +384,41 @@ export async function processInboxRow(
     return { status: 'failed', reason: why };
   }
 
+  return await landEnquiry({
+    tenantId: integration.tenant_id, provider: integration.provider, integrationId: integration.id,
+    inboxId, lead: parsed.lead, body, desk,
+  });
+}
+
+/**
+ * AN ENQUIRY WITH A NUMBER → A LEAD, or a repeat on the lead that number
+ * already is. The one path every inbound enquiry takes: a portal push (above)
+ * and the firm's public catalogue form (routes/public.ts, source "Catalogue").
+ * Duplicate by phone, the merge rules, routing, the enquiry session and its
+ * alert are all here, once. `inboxId` is set only for a push, whose inbox row
+ * is marked with the outcome.
+ */
+export async function landEnquiry(args: {
+  tenantId: string; provider: string; integrationId: string | null; inboxId: string | null;
+  lead: any; body: any; desk?: Awaited<ReturnType<typeof deskConfigOf>>;
+  /** A public form anyone can type any number into (the catalogue): on an
+   *  existing lead, record and tell, never change the lead. */
+  unverified?: boolean;
+}): Promise<{ status: string; leadId?: string | null; reason?: string }> {
+  const { tenantId, inboxId } = args;
+  const integration = { id: args.integrationId || `${args.provider.toLowerCase()}:${tenantId}`, tenant_id: tenantId, provider: args.provider };
+  const desk = args.desk || await deskConfigOf(tenantId);
+  const body = args.body;
+  const mark = async (status: 'parsed' | 'merged' | 'failed' | 'ignored', extra: { leadId?: string | null; error?: string | null } = {}) => {
+    if (inboxId) await markInbox(inboxId, status, extra);
+  };
   return await runWithContext(
     {
-      tenantId: integration.tenant_id, userId: null, role: 'system',
+      tenantId, userId: null, role: 'system',
       actorType: 'system', actorLabel: `ingest:${integration.provider}`,
     } as any,
     async () => {
-      const lead = parsed.lead;
+      const lead = args.lead;
       const cleanPhone = String(lead.phone || '').replace(/[^0-9+]/g, '');
 
       // Idempotency: a portal that retries because our ack was slow must not
@@ -418,7 +446,7 @@ export async function processInboxRow(
       // retry and a double-tap, short enough that coming back later counts.
       const lockTtl = providerId ? 604800 : 900;
       if (queueManager.checkIdempotencyLock(lockKey)) {
-        await markInbox(inboxId, 'ignored', { error: 'Duplicate of a push already processed' });
+        await mark('ignored', { error: 'Duplicate of a push already processed' });
         return { status: 'ignored', reason: 'idempotent retry' };
       }
       queueManager.setIdempotencyLock(lockKey, lockTtl);
@@ -435,6 +463,37 @@ export async function processInboxRow(
       // left in the product. It also read every lead in the tenant into memory
       // to do it — the full-collection scan removed everywhere else.
       const existing = await findLeadByPhone(cleanPhone);
+      if (existing && args.unverified) {
+        // NOBODY HAS PROVED THIS IS THEM. A portal vouches for its buyer; a
+        // public form does not — anyone can type a lead's number into it. So
+        // the enquiry is history and news, never an edit: no reopening a
+        // closed lead, no merged requirement, no note, no new holder. What was
+        // said goes on the timeline, written by System so it is not contact.
+        const r = lead.req || {};
+        const said = [r.notes, r.interest && `Interested in: ${Array.isArray(r.interest) ? r.interest.join(', ') : r.interest}`].filter(Boolean).join(' · ');
+        const session = await recordEnquiry({
+          leadId: existing.id, at: (lead as any).receivedAt || undefined,
+          source: integration.provider, integrationId: args.integrationId,
+          req: lead.req, enquiryId: (lead as any).external_id || null, rawRef: inboxId,
+        });
+        await addTimelineEvent({
+          record_id: existing.id, type: 'enquiry', title: `Enquiry via ${integration.provider}`,
+          description: [lead.name && `As ${lead.name}`, said || 'Enquired again'].filter(Boolean).join(' · '),
+          author: 'System', metadata: { source: integration.provider, unverified: true },
+        });
+        if (session?.isNewSession) {
+          const terminal = existing.stage === REJECTED_STATUS || existing.stage === WON_STATUS;
+          const n = {
+            tenantId, type: 'lead_repeat',
+            data: { name: existing.name || existing.phone, source: integration.provider, changed: 0, previousStage: terminal ? existing.stage : null },
+            link: `?screen=leads&lead=${existing.id}`,
+          };
+          const keeper = await activeOwnerOf(existing.agent_id);
+          await notifyOrDesk(keeper, n).catch(() => 0);
+        }
+        await mark('merged', { leadId: existing.id });
+        return { status: 'merged', leadId: existing.id };
+      }
       if (existing) {
         const note = `[Repeat enquiry via ${integration.provider}] ${new Date().toLocaleString(desk.locale.numberLocale, { timeZone: desk.timezone })}`;
         // A repeat enquiry is usually RICHER than the first, and merging used
@@ -523,7 +582,7 @@ export async function processInboxRow(
         // — see docs/specs/desk-rework.md §2.
         const session = await recordEnquiry({
           leadId: existing.id, at: (lead as any).receivedAt || undefined,
-          source: integration.provider, integrationId: integration.id,
+          source: integration.provider, integrationId: args.integrationId,
           req: lead.req, enquiryId: (lead as any).external_id || null, rawRef: inboxId,
         });
 
@@ -583,7 +642,7 @@ export async function processInboxRow(
             }).catch(() => {});
           }
         }
-        await markInbox(inboxId, 'merged', { leadId: existing.id });
+        await mark('merged', { leadId: existing.id });
         return { status: 'merged', leadId: existing.id };
       }
 
@@ -609,11 +668,11 @@ export async function processInboxRow(
       if (created?.id) {
         await recordEnquiry({
           leadId: created.id, at: (lead as any).receivedAt || undefined,
-          source: leadFields.source || integration.provider, integrationId: integration.id,
+          source: leadFields.source || integration.provider, integrationId: args.integrationId,
           req: lead.req, enquiryId: external_id || null, rawRef: inboxId,
         });
       }
-      await markInbox(inboxId, 'parsed', { leadId: created?.id || null });
+      await mark('parsed', { leadId: created?.id || null });
       return { status: 'ingested', leadId: created?.id || null };
     },
   );

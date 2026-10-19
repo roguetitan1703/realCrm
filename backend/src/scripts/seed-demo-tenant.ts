@@ -815,7 +815,7 @@ async function preparePhotos(firmName: string): Promise<Record<string, { buf: Bu
 
 async function build(sql: any) {
   const p = plan();
-  const { provisionTenant, updateSettings, createLead, createOwnersBatch, bulkAssignOwners, createProperty, prepareListing } = await import('../services/store.js');
+  const { provisionTenant, updateSettings, createLead, createOwnersBatch, bulkAssignOwners, createProperty, prepareListing, localeOf } = await import('../services/store.js');
   const { createAgreement } = await import('../services/agreements.js');
   const { createIntegration, setParserConfig } = await import('../services/ingestion.js');
   const { runWithContext } = await import('../services/context.js');
@@ -871,7 +871,8 @@ async function build(sql: any) {
       }
     }
     const agent = u.agent!;
-    const created = await as(agent, () => createProperty(prepareListing({ ...u.data, media: items }), ctxOf(agent)));
+    const loc = await localeOf(SLUG);
+    const created = await as(agent, () => createProperty(prepareListing({ ...u.data, media: items }, loc), ctxOf(agent)));
     unitId.set(u.key, created.id);
   });
   step(`${unitId.size} listings`);

@@ -3,7 +3,8 @@ import { Panel, SectionHead, StageTag, Button, Input, Segmented, Toggle, Avatar 
 import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES } from '../data/theme.js'
 import { finalStageOf, finalIsEditable, LABELLED_LEAD_STAGES, stageLabel } from '../data/pipelineRoles.js'
-import { api } from '../lib/api.js'
+import { api, currentTenant } from '../lib/api.js'
+import { copyText } from '../lib/clipboard.js'
 import { useServerData } from '../lib/useServerData.js'
 import ThisDevice from '../components/ThisDevice.jsx'
 import MessageTemplates from '../components/MessageTemplates.jsx'
@@ -22,6 +23,9 @@ const NAV = [
   // Key kept — it is in the URL of every Settings link anyone has sent.
   { key: 'followup', label: 'Response times', icon: 'clock' },
   { key: 'messages', label: 'Message templates', icon: 'wa', everyone: true },
+  // Links and the public catalogue (listing-pages.md §A): how long a link
+  // lives, what the catalogue shows, the embed code, and the owner's stop.
+  { key: 'sharing', label: 'Sharing', icon: 'share' },
   // { key: 'audit', label: 'Audit ledger', icon: 'shield' },
   // Alerts used to be a section of its own, one row above the install row in a
   // section called This device. Two headings for two facts about the same
@@ -60,6 +64,7 @@ export default function Settings({ store, topBar, sel }) {
               {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} draft={routingDraft} setDraft={setRoutingDraft} startSide={sel?.settingsSide} />}
               {section === 'followup' && <ResponseTimesSection store={store} settings={settings} />}
               {section === 'messages' && <MessagesSection store={store} />}
+              {section === 'sharing' && <SharingSection store={store} settings={settings} />}
               {/* {section === 'audit' && <AuditSection />} */}
               {section === 'system' && <SystemSection store={store} />}
             </div>
@@ -72,6 +77,120 @@ export default function Settings({ store, topBar, sel }) {
 
 function SecHead({ title, sub }) {
   return <div><div className="set-sec-h">{title}</div><div className="set-sec-sub">{sub}</div></div>
+}
+
+// ---- Sharing --------------------------------------------------------------
+// Who: the owner or manager, at a desk. What they want: to set how long a
+// sent link works, what the public catalogue shows, to get the catalogue onto
+// the firm's website — and, if a link has leaked, to stop sharing: every link
+// the firm has sent stops working for good, and no new ones can be made until
+// the owner allows sharing again. Old links never come back; the catalogue is
+// not affected.
+// crm_settings `sharing` (listing-pages.md §A.5).
+const EXPIRY_DAYS = [7, 15, 30]
+
+function SharingSection({ store, settings }) {
+  const sh = settings.sharing || {}
+  const expiry = EXPIRY_DAYS.includes(Number(sh.linkExpiryDays)) ? Number(sh.linkExpiryDays) : 15
+  const showPrice = !!sh.showPriceOnCatalogue
+  const showProject = sh.catalogueShowsProject !== false
+  const stopped = !!sh.stopped
+  const allow = () => store.openModal({
+    kind: 'confirm',
+    title: 'Allow sharing again?',
+    lines: ['Your team can send new links.', 'Links sent before you stopped stay off.'],
+    confirmLabel: 'Allow sharing',
+    onConfirm: () => put({ stopped: null }, 'Sharing allowed. Old links stay off.'),
+  })
+  const isOwner = store.state.role === 'owner'
+  const [reply, setReply] = useState(sh.replyToPhone || '')
+  useEffect(() => { setReply(sh.replyToPhone || '') }, [sh.replyToPhone])
+  const replyDirty = reply.trim() !== (sh.replyToPhone || '')
+
+  // The whole object, every time: the server stores the key as one value.
+  const put = (patch, note) => store.patchSettings({ sharing: { ...sh, ...patch } }, note)
+
+  const tenant = currentTenant()
+  const catalogueUrl = `${window.location.origin}/${tenant}/homes`
+  const embed = `<iframe src="${catalogueUrl}?embed=1" title="${(settings.firmName || 'Homes').replace(/"/g, '')}" style="width:100%;min-height:900px;border:0" loading="lazy"></iframe>`
+  const copy = (text, what) => copyText(text).then(ok => store.toast(ok ? `${what} copied` : 'Could not copy. Select it and copy it.', ok ? undefined : 'warn'))
+
+  const stop = () => store.openModal({
+    kind: 'confirm',
+    title: 'Stop all sharing?',
+    lines: ['Every link your team has sent stops working now, for good.', 'No one can send new links until you allow sharing again.', 'The catalogue stays up.'],
+    confirmLabel: 'Stop all sharing',
+    onConfirm: () => put({ stopped: true }, 'Sharing stopped. Every link is off.'),
+  })
+
+  return (
+    <>
+      <SecHead title="Sharing" />
+      {stopped && (
+        <div className="shr-stopped">
+          <Icon name="alert" size={16} />
+          <span>Sharing is stopped</span>
+          {isOwner && <Button size="sm" onClick={allow}>Allow sharing</Button>}
+        </div>
+      )}
+      <Panel>
+        <SectionHead title="Links" />
+        <div className="shr-rows">
+          <div className="shr-row">
+            <span className="shr-l">Links expire after</span>
+            <Segmented value={expiry} onChange={(v) => put({ linkExpiryDays: v }, `New links expire after ${v} days`)}
+              options={EXPIRY_DAYS.map(d => ({ value: d, label: `${d} days` }))} />
+          </div>
+          <div className="shr-row">
+            <label className="shr-l" htmlFor="shr-reply">Reply-to number</label>
+            <div className="shr-inline">
+              <Input id="shr-reply" value={reply} onChange={e => setReply(e.target.value)} inputMode="tel" placeholder="Firm's WhatsApp number"
+                onKeyDown={e => { if (e.key === 'Enter' && replyDirty) put({ replyToPhone: reply.trim() }, 'Reply-to number saved') }} />
+              <Button variant={replyDirty ? 'primary' : 'ghost'} disabled={!replyDirty} onClick={() => put({ replyToPhone: reply.trim() }, 'Reply-to number saved')}>Save</Button>
+            </div>
+          </div>
+        </div>
+      </Panel>
+      <Panel>
+        <SectionHead title="Catalogue" />
+        <div className="shr-rows">
+          <label className="shr-row shr-tog">
+            <span className="shr-l">Show prices</span>
+            <Toggle type="button" on={showPrice} aria-pressed={showPrice} aria-label="Show prices on catalogue"
+              onClick={() => put({ showPriceOnCatalogue: !showPrice }, showPrice ? 'Prices hidden on the catalogue' : 'Prices shown on the catalogue')} />
+          </label>
+          <label className="shr-row shr-tog">
+            <span className="shr-l">Show project name</span>
+            <Toggle type="button" on={showProject} aria-pressed={showProject} aria-label="Show project name on catalogue"
+              onClick={() => put({ catalogueShowsProject: !showProject }, showProject ? 'Catalogue shows the locality only' : 'Catalogue shows the project name')} />
+          </label>
+          <div className="shr-row shr-col">
+            <span className="shr-l">Catalogue link</span>
+            <div className="shr-inline">
+              <code className="shr-code">{catalogueUrl}</code>
+              <Button icon="copy" onClick={() => copy(catalogueUrl, 'Link')}>Copy</Button>
+              <a className="btn btn-ghost" href={catalogueUrl} target="_blank" rel="noopener noreferrer"><Icon name="eye" size={14} />Open</a>
+            </div>
+          </div>
+          <div className="shr-row shr-col">
+            <span className="shr-l">Embed on your website</span>
+            <div className="shr-inline">
+              <code className="shr-code shr-embed">{embed}</code>
+              <Button icon="copy" onClick={() => copy(embed, 'Embed code')}>Copy</Button>
+            </div>
+          </div>
+        </div>
+      </Panel>
+      {isOwner && !stopped && (
+        <Panel>
+          <div className="shr-row">
+            <span className="shr-l">Stop all sharing</span>
+            <Button className="btn-danger" onClick={stop}>Stop all sharing</Button>
+          </div>
+        </Panel>
+      )}
+    </>
+  )
 }
 
 // ---- Brand ----------------------------------------------------------------

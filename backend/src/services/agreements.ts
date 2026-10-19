@@ -254,7 +254,7 @@ export async function createAgreement(input: any, ctx: ActorCtx = {}, opts: { re
     if (!np.bhk && !np.subtype && !np.type) throw new AgreementError('Add what kind of flat it is.');
     const created = await createProperty(prepareListing({
       ...np, deal: kind, status: kind === 'rent' ? 'Leased' : 'Sold', price: amount, source: 'Agreement',
-    }), ctx);
+    }, await localeOf(t)), ctx);
     [property] = await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id = ${created.id}`;
   }
   const label = property ? null : (String(input.propertyLabel || '').trim() || null);
@@ -460,7 +460,7 @@ export async function convertOwner(ownerId: string, input: any, ctx: ActorCtx = 
       owner: o.name || null, ownerPhone: o.phone || null, ownerEmail: o.email || null,
       keyAccess: f.keyAccess || keyNote,
       source: 'Calling',
-    }), ctx);
+    }, await localeOf(t)), ctx);
     propertyId = created.id;
     // createProperty links the owner it finds by flat; this row IS the owner,
     // said explicitly so a near-miss in that lookup cannot pick someone else.

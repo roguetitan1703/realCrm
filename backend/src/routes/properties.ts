@@ -10,13 +10,13 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
-import { prepareListing,
+import { prepareListing, localeOf,
   createProperty, getUnits, blockUnit, releaseUnit,
   listProperties, getPropertyById, getPropertiesSummary, getPropertyTabs,
   listProjects, getProject, getPropertyBuyers,
-  setPropertyVerified, setPropertyGallery,
+  setPropertyVerified, setPropertyGallery, setCatalogue,
 } from '../services/store';
-import { canAddListing, canEditListing } from '../lib/permissions';
+import { canAddListing, canEditListing, isDeskRole } from '../lib/permissions';
 
 export const propertiesRouter = Router();
 propertiesRouter.use(requireTenantAuth);
@@ -56,6 +56,8 @@ const listOpts = (q: any) => {
     ownerId: str(q.ownerId),
     tab: str(q.tab),
     unit: str(q.unit),
+    // yes | no — in the public catalogue.
+    catalogue: str(q.catalogue),
   };
 };
 
@@ -95,6 +97,32 @@ propertiesRouter.get('/summary', async (_req: Request, res: Response) => {
     return res.status(200).json({ success: true, summary: await getPropertiesSummary() });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to summarise properties', message: err.message });
+  }
+});
+
+/**
+ * SHOW IN CATALOGUE, for a selection (listing-pages.md §A.5)
+ * POST /api/v1/properties/catalogue { ids, on } → { changed, withoutPhotos }
+ * Owners and managers only (store.ts assertCatalogueRole): the catalogue is
+ * what the firm shows the public. The single-listing form is the `inCatalogue`
+ * field on the ordinary update, held to the same rule.
+ */
+propertiesRouter.post('/catalogue', async (req: Request, res: Response) => {
+  if (!isDeskRole(req.user?.role)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Only an owner or a manager can change what is in the catalogue.', code: 'ROLE_REQUIRED' });
+  }
+  const { ids, on } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length || typeof on !== 'boolean') {
+    return res.status(400).json({ error: 'Pick at least one listing, and say on or off.' });
+  }
+  try {
+    const out = await setCatalogue(ids.map(String), on, {
+      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: null,
+      ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null,
+    });
+    return res.status(200).json({ success: true, ...out });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Could not change the catalogue', message: err.message });
   }
 });
 
@@ -215,7 +243,7 @@ propertiesRouter.post('/', async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
 
-    prepareListing(body);
+    prepareListing(body, await localeOf(req.tenantId!));
     if (!body.type) {
       return res.status(400).json({ error: 'Validation Error', message: 'A property type or configuration is required' });
     }

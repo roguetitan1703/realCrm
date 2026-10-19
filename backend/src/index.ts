@@ -20,6 +20,7 @@ import { activityRouter } from './routes/activity';
 import { agreementsRouter } from './routes/agreements';
 import { propertiesRouter } from './routes/properties';
 import { publicRouter, shareRouter } from './routes/public';
+import { shareLinksRouter, shareTapsRouter } from './routes/sharing';
 import { teamRouter } from './routes/team';
 import { actionsRouter } from './routes/actions';
 import { ingestRouter } from './routes/ingest';
@@ -135,7 +136,16 @@ app.use(express.urlencoded({ extended: true }));
 // response, so it costs the request nothing.
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.method !== 'GET' && req.method !== 'OPTIONS') {
-    res.on('finish', () => { if (res.statusCode < 400) scheduleCloseSettled(req.tenantId); });
+    // Public pages (no session) name their firm in the URL; routes/public.ts
+    // sets publicTenantId. Never the header or the default tenant for those.
+    // originalUrl, not path: by 'finish' a mounted router has stripped its
+    // prefix from req.url/req.path, so `path` never began with /api/v1/public.
+    res.on('finish', () => {
+      if (res.statusCode >= 400) return;
+      const isPublic = String(req.originalUrl || '').startsWith('/api/v1/public/');
+      const t = isPublic ? (req as any).publicTenantId : req.tenantId;
+      if (t) scheduleCloseSettled(t);
+    });
   }
   next();
 });
@@ -214,8 +224,11 @@ app.use('/api/v1/modules/:moduleKey/records', recordsRouter);
 app.use('/api/v1/leads', leadsRouter);
 app.use('/api/v1/owners', ownersRouter);
 app.use('/api/v1/properties', propertiesRouter);
-// No sign-in: a listing's photo link (7.5).
+// No sign-in: shared links, the catalogue, old photo links (listing-pages.md §A).
 app.use('/api/v1/public', publicRouter);
+// Signed in: sending flats, my links, Add as lead from a tap.
+app.use('/api/v1/share-links', shareLinksRouter);
+app.use('/api/v1/share-taps', shareTapsRouter);
 // The link-preview card for that photo link — HTML for crawlers only, routed
 // here by vercel.json on user agent. See routes/public.ts.
 app.use('/share', shareRouter);

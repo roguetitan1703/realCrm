@@ -637,6 +637,7 @@ export async function initSchema(): Promise<void> {
     await createLedgerTables();
     await migrateAuthV2();
     await migrateIngestionD1();
+    await migrateSharing();
 
     console.log('[Supabase DB] ✅ PostgreSQL schema initialization completed successfully.');
   } catch (err: any) {
@@ -1175,4 +1176,87 @@ export async function migrateIngestionD1(): Promise<void> {
   await sql`CREATE INDEX IF NOT EXISTS idx_rejects_at ON ingest_rejects (received_at DESC);`;
 
   console.log('[Supabase DB] D1 ingestion tables ready (integrations, webhook_inbox).');
+}
+
+
+/**
+ * ============================================================================
+ * SHARED LINKS AND THE CATALOGUE (docs/specs/listing-pages.md §A.5)
+ * ============================================================================
+ * New tables only, plus two columns on crm_properties that default to "not in
+ * the catalogue" — no existing row is rewritten (a constant default on ADD
+ * COLUMN is stored once, not written per row). Every row carries tenant_id.
+ *
+ *   crm_share_links    a custom view of flats, optionally bound to a lead
+ *   crm_share_events   what happened on a link or the catalogue: view,
+ *                      interested (with its own ref code), talk, expired_view,
+ *                      enquiry. `lead_id` is who it is known to be, when known.
+ *   crm_share_devices  a visitor's browser, once a number has come from it
+ *
+ * A code is unique per tenant across links AND taps, because /<firm>/<code>
+ * resolves either; services/shareCodes.ts checks both tables before handing
+ * one out, and each table's own unique index is the last word.
+ */
+export async function migrateSharing(): Promise<void> {
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_share_links (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      code TEXT NOT NULL,
+      created_by TEXT,
+      lead_id TEXT,
+      property_ids TEXT[] NOT NULL DEFAULT '{}',
+      show_price BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      turned_off_at TIMESTAMPTZ,
+      turned_off_by TEXT
+    );
+  `;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_share_links_code ON crm_share_links (tenant_id, code);`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_share_links_creator ON crm_share_links (tenant_id, created_by, created_at DESC);`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_share_links_lead ON crm_share_links (tenant_id, lead_id) WHERE lead_id IS NOT NULL;`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_share_events (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      link_id TEXT,
+      property_id TEXT,
+      kind TEXT NOT NULL,
+      code TEXT,
+      device_id TEXT,
+      lead_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_share_events_code ON crm_share_events (tenant_id, code) WHERE code IS NOT NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_share_events_link ON crm_share_events (tenant_id, link_id, created_at DESC);`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_share_events_lead ON crm_share_events (tenant_id, lead_id, created_at DESC) WHERE lead_id IS NOT NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_share_events_device ON crm_share_events (tenant_id, device_id) WHERE device_id IS NOT NULL;`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_share_devices (
+      tenant_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      lead_id TEXT NOT NULL,
+      attached_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (tenant_id, device_id)
+    );
+  `;
+  // Browsers the firm's own staff used while signed in: never tied to a lead.
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_share_staff_devices (
+      tenant_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (tenant_id, device_id)
+    );
+  `;
+
+  await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS in_catalogue BOOLEAN DEFAULT FALSE`);
+  await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS catalogue_slug TEXT`);
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_props_catalogue_slug ON crm_properties (tenant_id, catalogue_slug) WHERE catalogue_slug IS NOT NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_crm_props_catalogue ON crm_properties (tenant_id) WHERE in_catalogue = TRUE;`;
 }

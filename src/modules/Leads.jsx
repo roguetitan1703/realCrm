@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
-import { asList, thumbTint, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
+import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
@@ -16,6 +16,9 @@ import { LEADS_DEF } from './definitions.jsx'
 import { AgreementList } from '../components/Agreements.jsx'
 import { finalStageOf, stageLabel } from '../data/pipelineRoles.js'
 import { firmLocale } from '../lib/locale.js'
+import { useServerData } from '../lib/useServerData.js'
+import { openSend } from './SendSheet.jsx'
+import { sentHomeLine } from '../lib/share.js'
 
 // A scheduled appointment's action reads like "Site Visit — Anita Rao", so the
 // type is a prefix rather than its own field. Matched loosely because the
@@ -402,6 +405,15 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   // Above the early return: a hook cannot be called conditionally, and the
   // "record not loaded yet" branch below is exactly such a condition.
   const matches = useLeadMatches(l)
+  // WHAT THIS PERSON HAS BEEN SENT, per home: when, how often they opened it,
+  // and whether they tapped I'm interested (GET /leads/:id/shares). Folded into
+  // the shortlist rows below rather than a second list of the same homes.
+  const { data: shareRows } = useServerData(
+    () => (sel.leadId ? api.leadShares(sel.leadId).then(r => r?.data || []) : Promise.resolve([])),
+    [sel.leadId, store.state.mutationTick], [])
+  // Homes ticked for Send. Cleared when the lead changes.
+  const [ticked, setTicked] = useState(() => new Set())
+  useEffect(() => { setTicked(new Set()) }, [sel.leadId])
   // A record we cannot open is a dead end, not a screen — and the message it
   // used to park on ("This lead no longer exists") asserted a cause it does not
   // know. An id reaches here from a link someone pasted, a lead a colleague
@@ -455,6 +467,25 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     ...shortlistIds.map(byId).filter(Boolean).map(p => ({ p, shortlisted: true, line: quotedShort(p) })),
     ...matches.filter(m => !shortlistIds.includes(m.id)).map(m => ({ p: m, shortlisted: false, line: quotedShort(m) })),
   ].sort((a, b) => (fbMap[a.p.id]?.verdict === 'rejected' ? 1 : 0) - (fbMap[b.p.id]?.verdict === 'rejected' ? 1 : 0))
+
+  // One home's sends, folded: the latest send, every open, the last open, and
+  // whether any of them got an I'm interested.
+  const sentOf = {}
+  for (const r of shareRows || []) {
+    const cur = sentOf[r.propertyId]
+    sentOf[r.propertyId] = !cur ? { ...r } : {
+      ...cur,
+      sentAt: (r.sentAt > cur.sentAt ? r.sentAt : cur.sentAt),
+      opens: (cur.opens || 0) + (r.opens || 0),
+      lastOpenedAt: [cur.lastOpenedAt, r.lastOpenedAt].filter(Boolean).sort().pop() || null,
+      interested: cur.interested || r.interested,
+    }
+  }
+  const toggleTick = (id) => setTicked(t => { const n = new Set(t); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const allTicked = propRows.length > 0 && propRows.every(r => ticked.has(r.p.id))
+  const sendTicked = () => openSend(store, propRows.filter(r => ticked.has(r.p.id)).map(r => r.p), {
+    leadId: l.id, onSent: () => setTicked(new Set()),
+  })
 
   const openEdit = () => store.openModal({ kind: 'editRecord', moduleId: 'leads', recordId: l.id })
   // One way to open any channel, so the record screen and the list rows reach
@@ -592,29 +623,50 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
       right: <button className="btn btn-secondary btn-sm" onClick={() => store.openModal({ kind: 'attachProp', leadId: l.id })}><Icon name="plus" size={14} /> Attach property</button>,
       render: () => propRows.length === 0
         ? <div className="detail-empty">None yet.</div>
-        : <CappedList items={propRows} step={6} noun="properties">{(row, i) => {
+        : <>
+          {/* Tick one, some or all, then Send — the lead is the recipient.
+              The row sticks under the top bar while the list scrolls, so Send
+              is in reach from the tenth home as well as the first. */}
+          {(propRows.length > 1 || ticked.size > 0) && (
+            <div className={'inv-all' + (ticked.size ? ' is-on' : '')}>
+              {propRows.length > 1 && (
+                <button type="button" className={'pick-box' + (allTicked ? ' on' : '')} aria-pressed={allTicked} aria-label="Select all"
+                  onClick={() => setTicked(allTicked ? new Set() : new Set(propRows.map(r => r.p.id)))}><span><Icon name="check" size={13} /></span></button>
+              )}
+              <span className="inv-all-t">{ticked.size ? `${ticked.size} selected` : 'Select all'}</span>
+              {ticked.size > 0 && <button type="button" className="lnk inv-all-x" onClick={() => setTicked(new Set())}>Clear</button>}
+              {ticked.size > 0 && <Button variant="primary" size="sm" icon="wa" className="inv-all-send" onClick={sendTicked}>Send {ticked.size}</Button>}
+            </div>
+          )}
+          <CappedList items={propRows} step={6} noun="properties">{(row, i) => {
             const fb = (l.feedback || {})[row.p.id]
             const rejected = fb?.verdict === 'rejected'
+            const sent = sentOf[row.p.id]
+            const on = ticked.has(row.p.id)
             return (
-              <div key={row.p.id} className={'invrow' + (i ? ' relrow-div' : '') + (rejected ? ' invrow-rej' : '')}>
-                <div className="invrow-thumb" style={{ background: thumbTint(row.p.id) }}><Icon name="building" size={20} strokeWidth={1.4} /></div>
+              <div key={row.p.id} className={'invrow' + (i || propRows.length > 1 ? ' relrow-div' : '') + (rejected ? ' invrow-rej' : '')}>
+                <button type="button" className={'pick-box' + (on ? ' on' : '')} aria-pressed={on}
+                  aria-label={`${on ? 'Untick' : 'Tick'} ${row.p.society || 'this home'}`} onClick={() => toggleTick(row.p.id)}>
+                  <span><Icon name="check" size={13} /></span>
+                </button>
                 <button className="invrow-main" onClick={() => go('properties', { propId: row.p.id, propOpen: true })}>
                   <div className="invrow-title">
                     <span className={rejected ? 'invrow-strike' : ''}>{row.p.society}</span>
                     {/* Agent-side only — the unit no. is never in a client message,
                         but here it's what distinguishes two flats in one society. */}
                     {unitLabel(row.p) && <span className="unit-tag">{unitLabel(row.p)}</span>}
+                    {sent?.interested && <span className="fit int fit-tight">Interested</span>}
                     {fb?.verdict === 'liked' && <span className="fit ok fit-tight">👍 Liked</span>}
                     {rejected && <span className="fit no fit-tight">👎 {fb.reason}</span>}
-                    {!fb && row.shortlisted &&
+                    {!fb && !sent?.interested && row.shortlisted &&
                       <span className="fit ok fit-tight"><Icon name="check" size={11} />Shortlisted</span>}
                   </div>
                   {/* Joined, not templated. Hardcoding the separators printed a
                       trailing " · " whenever a property had no price, which on
                       imported inventory is most of them. */}
                   <div className="relrow-sub">{[row.p.type, row.p.locality, row.line].filter(Boolean).join(' · ')}</div>
+                  {sent && <div className={'inv-sent' + (sent.opens > 0 ? ' is-open' : '')}>{sentHomeLine(sent)}</div>}
                 </button>
-                <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(row.p.id, l.id)} icon="wa">Share</Button>
                 {/* Shortlisted by a person, so a person can take it off. A
                     matched row is the matcher's and is not removable here. */}
                 {row.shortlisted && (
@@ -623,7 +675,8 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                 )}
               </div>
             )
-          }}</CappedList>,
+          }}</CappedList>
+        </>,
     },
     {
       id: 'timeline',

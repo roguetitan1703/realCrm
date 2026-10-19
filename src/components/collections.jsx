@@ -154,6 +154,7 @@ export function ModuleListView({
             : <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>)
         : <>
             {renderTable ? renderTable(phoneList, 'grid') : <ModuleCards def={def} rows={phoneList} store={store} onOpen={onOpen} phone={phone} />}
+            {selection && <PhoneSelectBar selection={selection} />}
             {more > 0 && (
               <button className="btn btn-secondary btn-block loadmore" disabled={loading} onClick={() => onPage(page + 1)}>
                 {loading ? 'Loading…' : `Load ${Math.min(more, pageSize)} more`}
@@ -292,6 +293,32 @@ function PhoneToolbar({
         </>
       )}
     </>
+  )
+}
+
+// ---- The selection on a phone ----
+// The desk ticks rows in the table and the filter bar becomes the selection
+// bar. A phone has no table, so a module offers Select; the cards become tick
+// targets and this bar sits above the tab bar, where the thumb is, with the
+// same actions the desk bar has. Done leaves the mode.
+export function PhoneSelectBar({ selection }) {
+  const n = selection.count || 0
+  return (
+    <div className="psel" role="toolbar" aria-label="Selection">
+      <div className="psel-top">
+        <span className="psel-n">{n} selected</span>
+        <button type="button" className="psel-done" onClick={selection.onClear}>Done</button>
+      </div>
+      <div className="psel-acts">
+        {(selection.actions || []).map(a => (
+          <button key={a.label} type="button" disabled={!n}
+            className={'btn btn-sm ' + (a.tone === 'danger' ? 'btn-danger' : a.tone === 'quiet' ? 'btn-ghost' : 'btn-primary')}
+            onClick={a.onClick}>
+            {a.icon && <Icon name={a.icon} size={15} />}{a.label}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -824,7 +851,7 @@ export function FilterBar({ fields = [], value = {}, onChange, search, left, rig
             they sit a few pixels apart and one cannot be undone. */}
         {(selection.actions || []).map(a => (
           <button key={a.label}
-            className={'btn btn-sm ' + (a.tone === 'danger' ? 'btn-danger' : 'btn-primary')}
+            className={'btn btn-sm ' + (a.tone === 'danger' ? 'btn-danger' : a.tone === 'quiet' ? 'btn-ghost' : 'btn-primary')}
             onClick={a.onClick}>
             {a.icon && <Icon name={a.icon} size={15} />}{a.label}
           </button>
@@ -1077,7 +1104,9 @@ export function MediaNote({ p }) {
   return <span className={'media-note' + (bits.length ? '' : ' is-none')}><Icon name="camera" size={11} />{bits.length ? bits.join(' · ') : 'No photos'}</span>
 }
 
-export function PropertyCard({ p, onClick, matchCount }) {
+// `picked` (true/false) turns the card into a tick target for a selection on
+// a phone, where there is no table to tick rows in; undefined is the ordinary card.
+export function PropertyCard({ p, onClick, matchCount, picked }) {
   const facts = [
     p.carpet || p.area ? `${p.carpet || p.area} sqft` : null,
     p.type !== 'Plot' && p.totalFloors ? `${p.floor || '-'}/${p.totalFloors} flr` : p.floor ? `${p.floor} flr` : null,
@@ -1088,8 +1117,10 @@ export function PropertyCard({ p, onClick, matchCount }) {
   const societyName = p.society || p.project || (p.title ? p.title.split(' - ')[0] : 'Unnamed Property')
 
   return (
-    <button className="pcard" onClick={onClick} style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '16px', gap: 12, textAlign: 'left' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+    <button className={'pcard' + (picked ? ' is-picked' : '')} onClick={onClick} aria-pressed={picked === undefined ? undefined : picked}
+      style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '16px', gap: 12, textAlign: 'left', position: 'relative' }}>
+      {picked !== undefined && <span className={'pick-box pcard-pick' + (picked ? ' on' : '')} aria-hidden="true"><span><Icon name="check" size={13} /></span></span>}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: picked !== undefined ? 30 : 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span className="unit-tag" style={{ margin: 0 }}>{p.type || 'Property'}</span>
           {dealWord(p) && (

@@ -7,11 +7,10 @@ import { ModuleListView, ModuleTable, PropertyCard, ProjectCard, MediaNote } fro
 import { priceRangeLabel } from '../lib/projects.js'
 import { useServerData } from '../lib/useServerData.js'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
-import { StatusTag, Quoted, Button, KV, Timeline, MoreRows, useCap, CappedList, Panel, SectionHead } from '../components/primitives.jsx'
+import { StatusTag, Quoted, Button, KV, Timeline, MoreRows, useCap, CappedList, Panel, SectionHead, Toggle } from '../components/primitives.jsx'
 import { NbaBanner } from '../components/rail.jsx'
 import { leadsForProperty } from '../lib/matching.js'
 import { fileUrl } from '../lib/media.js'
-import { copyText } from '../lib/clipboard.js'
 import Lightbox from '../components/Lightbox.jsx'
 import MediaEditor from '../components/MediaEditor.jsx'
 import { latestPlus, quotedLine, unitLabel, fmtDate, configLabel } from '../lib/format.js'
@@ -20,7 +19,8 @@ import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
 import PropertyWizard, { fromCopy, scoreOf } from './PropertyWizard.jsx'
-import { canEditListing, canAddListing } from '../lib/permissions.js'
+import { canEditListing, canAddListing, canChangeCatalogue } from '../lib/permissions.js'
+import { openSend } from './SendSheet.jsx'
 
 // The filter bar speaks in arrays ({ status: ['Available','Blocked'] }) because
 // its controls are multi-select; the API speaks in comma-separated values. This
@@ -35,13 +35,13 @@ import { canEditListing, canAddListing } from '../lib/permissions.js'
 // from the UI), so the two lists are near-identical but not the same thing.
 export const PROP_FILTER_KEYS = [
   'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
-  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'unit',
+  'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'unit', 'catalogue',
 ]
 
 const API_FILTERS = [
   'status', 'deal', 'type', 'locality', 'project',
   'category', 'bhk', 'subtype', 'furnishing', 'facing',
-  'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'tab', 'unit',
+  'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'tab', 'unit', 'catalogue',
 ]
 function toQuery({ page, limit, q, ...filters }) {
   const out = { page, limit, q }
@@ -116,6 +116,10 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selected, setSelected] = useState(new Set())
+  // A phone has no table to tick: Select turns the cards into tick targets.
+  const [picking, setPicking] = useState(false)
+  const mayCatalogue = canChangeCatalogue(state.role)
+  const endPick = () => { setSelected(new Set()); setPicking(false) }
 
   // Any change to what's being asked for invalidates whatever page you were on —
   // page 3 of "3BHK in Baner" is a different page 3 once the filter changes.
@@ -224,6 +228,34 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
     })
   }
 
+  // SEND and THE CATALOGUE, from the same selection (listing-pages.md §A).
+  // Send is for everyone — an agent sends flats all day. Putting flats in the
+  // public catalogue changes what the firm shows the world, so it is the
+  // listing editors' call, like any other change to a listing.
+  const send = () => openSend(store, picked, { onSent: endPick })
+  const catalogue = (on) => {
+    const ids = picked.map(p => p.id)
+    api.setCatalogue(ids, on)
+      .then(r => {
+        endPick()
+        store.touched?.()
+        const n = r?.changed ?? ids.length
+        const bare = on && r?.withoutPhotos > 0 ? ` · ${r.withoutPhotos} have no photos` : ''
+        store.toast(on
+          ? `${n} ${n === 1 ? 'home' : 'homes'} added to the catalogue${bare}`
+          : `${n} ${n === 1 ? 'home' : 'homes'} taken out of the catalogue`)
+      })
+      .catch(e => store.toast(e?.status === 403 ? 'Only an owner or manager can change the catalogue.' : 'Could not change the catalogue. Try again.', 'warn'))
+  }
+  const selActions = [
+    { label: 'Send', icon: 'wa', onClick: send },
+    ...(mayCatalogue ? [
+      { label: 'Show in catalogue', icon: 'eye', tone: 'quiet', onClick: () => catalogue(true) },
+      { label: 'Remove from catalogue', icon: 'eyeOff', tone: 'quiet', onClick: () => catalogue(false) },
+    ] : []),
+    ...(mayAdd && !phone ? [{ label: 'Duplicate', icon: 'copy', tone: 'quiet', onClick: duplicate }] : []),
+  ]
+
   const paginated = view !== 'projects'
   const { header, toolbar, body } = ModuleListView({
     def: PROPERTIES_DEF, store,
@@ -237,10 +269,10 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
     page, onPage: paginated ? setPageP : undefined, pageSize, onPageSize: paginated ? setPageSizeP : undefined,
     // Grid/list toggle only applies to the flat unit views, hide it in project view.
     showViewSwitch: view !== 'projects',
-    selection: (mayAdd && view !== 'projects' && selected.size > 0) ? {
+    selection: (view !== 'projects' && (phone ? picking : selected.size > 0)) ? {
       count: selected.size,
-      actions: [{ label: 'Duplicate', icon: 'copy', onClick: duplicate }],
-      onClear: () => setSelected(new Set()),
+      actions: selActions,
+      onClear: endPick,
     } : null,
     // GROUP BY PROJECT, first in the bar — the same control Calling has. Inside
     // a project it becomes that project's chip, and × goes back to the cards.
@@ -251,10 +283,18 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
         <button type="button" aria-label="Back to all projects" onClick={leaveProject}><Icon name="x" size={13} /></button>
       </span>
     ) : (
-      <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
-        onClick={() => setView(view === 'projects' ? 'list' : 'projects')}>
-        <Icon name="building" size={14} />Group by project
-      </button>
+      <>
+        <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
+          onClick={() => { endPick(); setView(view === 'projects' ? 'list' : 'projects') }}>
+          <Icon name="building" size={14} />Group by project
+        </button>
+        {phone && view !== 'projects' && (
+          <button className={'grp-toggle' + (picking ? ' on' : '')} aria-pressed={picking}
+            onClick={() => (picking ? endPick() : setPicking(true))}>
+            <Icon name="check" size={14} />Select
+          </button>
+        )}
+      </>
     ),
     cta: mayAdd ? {
       label: projectSel ? 'Add unit' : 'Add property',
@@ -264,9 +304,12 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
     renderTable: (list, v) => v === 'projects'
       ? <ProjectGrid onOpen={toProject} />
       : v === 'grid'
-        ? <div className="grid-cards">{list.map(p => <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} onClick={() => open(p.id)} />)}</div>
+        ? <div className="grid-cards">{list.map(p => picking
+            ? <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} picked={selected.has(p.id)}
+                onClick={() => setSelected(s => { const n = new Set(s); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n })} />
+            : <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} onClick={() => open(p.id)} />)}</div>
         : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open}
-            selectable={mayAdd} selectedIds={selected} onSelectionChange={setSelected} />,
+            selectable selectedIds={selected} onSelectionChange={setSelected} />,
   })
 
   // The project's facts, above its list: what the page for it used to show,
@@ -410,6 +453,10 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
   // Edit reuses the add page (spec) — one form to maintain, not two.
   const openEdit = () => go('properties', { propAdd: true, propId: p.id, propOpen: false })
 
+  // Send, from this record: to a matched buyer when one is named, otherwise
+  // chosen in the sheet, where the matched buyers are offered first.
+  const share = (lead) => openSend(store, [p], lead ? { lead } : { suggested: buyers.map(b => b.lead) })
+
   // Rail: Next-Best-Action banner (renewal or share).
   const nba = ending
     ? <NbaBanner label="Renewal due" icon="clock"
@@ -419,7 +466,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
     : <NbaBanner label={buyers[0] ? `Interested ${p.deal === 'rent' ? 'tenant' : 'buyer'}` : 'Share listing'} icon="wa"
         title={buyers[0] ? `Send to ${buyers[0].lead.name.split(' ')[0]}` : 'Pick a recipient'}
         sub={buyers[0] ? `${p.type} · ${p.locality}` : 'No matched contacts yet'}
-        cta={{ label: 'WhatsApp', icon: 'wa', onClick: () => store.openModal({ kind: 'pickBuyer', propId: p.id }) }} />
+        cta={{ label: 'Send', icon: 'wa', onClick: () => share(buyers[0]?.lead) }} />
 
   // Photos sit directly under the identity band rather than four panels down.
   // A listing IS its photos — they are what gets forwarded, and burying them
@@ -428,28 +475,28 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
   // C8. Watermarked on the device before upload, so what's shown here is exactly
   // what a client receives if it's forwarded on.
   const media = (p.media || [])
-  // 7.5 The photo link: one tap copies it; it is also in every share message.
-  // Off, it can be turned back on; New makes a fresh one and the old stops.
-  const link = p.galleryPath ? `${window.location.origin}${p.galleryPath}` : ''
-  const copyLink = () => copyText(link).then(ok => store.toast(ok ? 'Photo link copied' : 'Could not copy. Your browser blocked it.', ok ? undefined : 'warn'))
-  // Nothing to link to without a photo, so no link controls until there is one.
-  const linkTools = !media.length || (!mayEdit && !link) ? null : (
-    <span className="pgal-tools">
-      {link ? (
-        <>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={copyLink}><Icon name="copy" size={13} />Copy photo link</button>
-          <a className="btn btn-ghost btn-sm" href={link} target="_blank" rel="noopener noreferrer"><Icon name="eye" size={13} />Open</a>
-          {mayEdit && <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
-            if (window.confirm('Turn off the photo link? Anyone who has it will see nothing.')) store.setPropertyGallery(p.id, 'off').then(r => r && store.toast('Photo link turned off'))
-          }}>Turn off</button>}
-        </>
-      ) : (
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => store.setPropertyGallery(p.id, 'new').then(r => r && store.toast('New photo link made'))}>
-          <Icon name="share" size={13} />Turn on photo link
-        </button>
-      )}
-    </span>
-  )
+  // SHOW IN CATALOGUE — whether this home is on the firm's public page. It
+  // replaced the per-listing photo link: a home now goes out through Send,
+  // and old photo links resolve to the catalogue page or say the home is no
+  // longer available (listing-pages.md §A.4). A home off the market leaves
+  // the catalogue by itself and returns when it is Available again; the tick
+  // stays.
+  const inCat = !!p.inCatalogue
+  const setCat = () => api.setCatalogue([p.id], !inCat)
+    .then(r => {
+      store.cacheRecords('property', [{ ...p, inCatalogue: !inCat }])
+      store.touched?.()
+      store.toast(!inCat
+        ? (r?.withoutPhotos ? 'In the catalogue · no photos yet' : 'In the catalogue')
+        : 'Taken out of the catalogue')
+    })
+    .catch(e => store.toast(e?.status === 403 ? 'Only an owner or manager can change the catalogue.' : 'Could not change the catalogue. Try again.', 'warn'))
+  const linkTools = canChangeCatalogue(store.state.role) ? (
+    <label className="pcat">
+      <span>{inCat && (p.status || 'Available') !== 'Available' ? `In catalogue when Available` : 'In catalogue'}</span>
+      <Toggle type="button" on={inCat} aria-pressed={inCat} aria-label="Show in catalogue" onClick={setCat} />
+    </label>
+  ) : inCat ? <span className="pcat pcat-ro">In catalogue</span> : null
   // Someone who may edit the listing arranges its photos here — order, cover,
   // remove, add — without opening the form. Everyone else sees the gallery.
   const photos = mayEdit ? (
@@ -555,9 +602,12 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
             <div key={b.lead.id} className={'relrow' + (i ? ' relrow-div' : '')}>
               <button className="relrow-main" onClick={() => go('leads', { leadId: b.lead.id, leadOpen: true })}>
                 <div className="relrow-name">{b.lead.name}</div>
-                <div className="relrow-sub">{[latestPlus(b.lead.req.config), latestPlus(b.lead.req.locality), b.fitLine].filter(Boolean).join(' · ')}</div>
+                {/* The fit line names the matched BHK and locality, which the
+                    requirement already says: once each. */}
+                <div className="relrow-sub">{[latestPlus(b.lead.req.config), latestPlus(b.lead.req.locality), ...String(b.fitLine || '').split(' · ')]
+                  .filter(Boolean).filter((x, i, a) => a.findIndex(y => y.toLowerCase() === x.toLowerCase()) === i).join(' · ')}</div>
               </button>
-              <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(p.id, b.lead.id)}>Share</Button>
+              <Button variant="secondary" size="sm" icon="wa" onClick={() => share(b.lead)}>Send</Button>
             </div>
           )}</CappedList>,
     },
@@ -579,7 +629,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
         <ModuleDetail
           def={PROPERTIES_DEF} record={p} store={store} onEdit={mayEdit ? openEdit : null} phone={phone}
           title={p.society}
-          primary={[{ label: 'WhatsApp', icon: 'wa', onClick: () => store.openModal({ kind: 'pickBuyer', propId: p.id }) }]}
+          primary={[{ label: 'Send', icon: 'wa', onClick: () => share() }]}
           nba={nba}
           beforeSheet={photos}
           sections={sections}
