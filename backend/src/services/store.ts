@@ -5063,7 +5063,9 @@ export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = S
   if (on) {
     for (const r of rows as any[]) {
       if (r.catalogue_slug) continue;
-      const base = [r.bhk, r.subtype, r.locality].filter(Boolean).join(' ').toLowerCase()
+      // Words as the page names them: "2 BHK Apartment Wakad", not the raw
+      // token "2", which read 2-apartment-wakad.
+      const base = [listingKind(r.bhk, r.subtype), r.locality].filter(Boolean).join(' ').toLowerCase()
         .normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '') || 'home';
       for (let i = 0; i < 5; i++) {
         const slug = `${base}-${slugSuffix()}`;
