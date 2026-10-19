@@ -5,6 +5,7 @@ import { StoreProvider } from './lib/store.jsx'
 import App from './App.jsx'
 import Admin from './modules/Admin.jsx'
 import Gallery from './modules/Gallery.jsx'
+import { SharedLinkPage, CataloguePage, CatalogueHomePage } from './modules/Public.jsx'
 import { registerServiceWorker, applyPwaIdentity, slugFromLocation } from './lib/pwa.js'
 import { captureSupport } from './lib/support.js'
 
@@ -36,10 +37,27 @@ if (galleryAt && new URLSearchParams(window.location.search).has('app')) {
   window.history.replaceState(null, '', u.pathname + u.search + u.hash)
 }
 
+// The buyer's pages (listing-pages.md §A), mounted the same way: the firm's
+// catalogue at /<firm>/homes[/<home>], and a shared link or a tap's ref at
+// /<firm>/<code>. Codes are six characters and never a word the app routes on.
+const catalogueAt = /^\/([a-z0-9-]+)\/homes(?:\/([^/?#]+))?\/?$/.exec(window.location.pathname)
+const shareAt = !catalogueAt && /^\/([a-z0-9-]+)\/([a-z0-9]{6})\/?$/.exec(window.location.pathname)
+if (shareAt && new URLSearchParams(window.location.search).has('app')) {
+  const u = new URL(window.location.href)
+  u.searchParams.delete('app')
+  window.history.replaceState(null, '', u.pathname + u.search + u.hash)
+}
+
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     {galleryAt ? (
       <Gallery slug={galleryAt[1]} refId={decodeURIComponent(galleryAt[2])} />
+    ) : catalogueAt ? (
+      catalogueAt[2]
+        ? <CatalogueHomePage tenant={catalogueAt[1]} slug={decodeURIComponent(catalogueAt[2])} />
+        : <CataloguePage tenant={catalogueAt[1]} />
+    ) : shareAt ? (
+      <SharedLinkPage tenant={shareAt[1]} code={shareAt[2]} />
     ) : isAdminRoute ? (
       <Admin />
     ) : (

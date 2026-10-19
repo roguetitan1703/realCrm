@@ -3714,3 +3714,111 @@ button.mp-makecover{pointer-events:auto;border:none;cursor:pointer;background:rg
 /* The property record's catalogue switch, in the Photos header. */
 .pcat{display:inline-flex;align-items:center;gap:10px;font-size:12.5px;font-weight:600;color:var(--ink-2);cursor:pointer;min-height:40px}
 .pcat-ro{cursor:default;color:var(--accent-ink);background:var(--accent-wash);border-radius:10px;padding:2px 9px;min-height:0}
+
+/* ── The buyer's pages (Public.jsx): the firm's brand, linen paper, one accent.
+   Fixed light palette — they open inside WhatsApp's browser, which follows
+   the phone's theme unpredictably. ───────────────────────────────────────── */
+html.pv-root,html.pv-root body{background:#f5f4f0}
+.pv{--pv-accent:#1a1d1a;--gv-accent:var(--pv-accent);min-height:100vh;min-height:100svh;display:flex;flex-direction:column;background:#f5f4f0;color:#1a1d1a;font-family:var(--sans);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+.pv *{box-sizing:border-box}
+.pv-head{max-width:1040px;width:100%;margin:0 auto;padding:14px 16px 4px}
+.pv-brand{display:inline-flex;align-items:center;gap:10px;min-height:40px;color:inherit;text-decoration:none}
+.pv-logo{width:34px;height:34px;border-radius:8px;object-fit:contain;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.06)}
+.pv-mono{width:34px;height:34px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:var(--pv-accent);color:#fff;font-weight:700;font-size:15px}
+.pv-mono-wait{background:#e3e1db}
+.pv-firm{font-size:15px;font-weight:650;color:#2b302c}
+.pv-main{flex:1;max-width:1040px;width:100%;margin:0 auto;padding:6px 16px 28px}
+.pv-foot{max-width:1040px;width:100%;margin:0 auto;padding:14px 16px calc(18px + env(safe-area-inset-bottom));display:flex;gap:14px;justify-content:center;align-items:center;font-size:12.5px;color:#7b827d}
+.pv-foot a{color:inherit;display:inline-flex;align-items:center;min-height:40px}
+.pv.is-embed .pv-main{padding-top:14px}
+
+.pv-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:0 20px;border-radius:12px;border:1px solid transparent;font:inherit;font-size:15.5px;font-weight:650;text-decoration:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pv-btn-main{background:var(--pv-accent);color:#fff}
+.pv-btn-main:disabled{opacity:.55;cursor:default}
+.pv-btn-alt{background:#fff;color:#1a1d1a;border-color:#d9d6ce}
+.pv-btn-wide{width:100%}
+
+.pv-gone{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:16vh 8px 8vh}
+.pv-gone h1{margin:4px 0 6px;font-family:var(--disp);font-size:22px;font-weight:600;letter-spacing:-.01em}
+.pv-gone-ic{width:46px;height:46px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#ebe8e1;color:#5b625d;flex:none}
+.pv-gone-acts{display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px}
+
+.pv-list-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:14px 0 12px}
+.pv-list-h h1{margin:0;font-family:var(--disp);font-size:24px;font-weight:600;letter-spacing:-.015em}
+.pv-list-h span{font-size:13px;color:#6b7570;font-variant-numeric:tabular-nums}
+.pv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.pv-card{display:flex;flex-direction:column;padding:0;border:none;border-radius:14px;overflow:hidden;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);color:inherit;text-decoration:none;text-align:left;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pv-card-img{position:relative;display:block;aspect-ratio:4/3;background:#e3e1db}
+.pv-card-img{overflow:hidden}
+.pv-card-img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.pv-noimg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#a3a69f}
+.pv-card-n{position:absolute;right:8px;bottom:8px;display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:rgba(0,0,0,.55);color:#fff;font-size:11.5px;font-variant-numeric:tabular-nums}
+.pv-card-body{display:flex;flex-direction:column;gap:3px;padding:11px 13px 13px}
+.pv-card-t{font-size:15.5px;font-weight:650;line-height:1.25}
+.pv-card-s{font-size:13px;color:#5f6762}
+.pv-card-p{display:flex;align-items:baseline;gap:8px;margin-top:4px;font-size:12.5px;color:#6b7570}
+.pv-card-p b{font-size:15px;color:#1a1d1a;font-variant-numeric:tabular-nums}
+.pv-card.is-taken .pv-card-img img{filter:grayscale(1);opacity:.55}
+.pv-card.is-taken .pv-card-body{opacity:.6}
+.pv-taken{position:absolute;left:8px;top:8px;padding:3px 9px;border-radius:10px;background:#1a1d1a;color:#fff;font-size:11.5px;font-weight:700;letter-spacing:.02em}
+.pv-taken-inline{position:static;display:inline-block;margin-left:10px;vertical-align:middle}
+
+.pv-back{display:inline-flex;align-items:center;gap:4px;min-height:40px;margin:2px 0 6px -4px;padding:0 6px;border:none;background:none;font:inherit;font-size:14px;font-weight:600;color:#3d443f;cursor:pointer}
+.pvh-photos{margin-top:4px}
+.pvh .gv-stage{aspect-ratio:4/3;max-height:68vh;flex:none;min-height:0}
+.pvh-nophoto{aspect-ratio:16/9;border-radius:14px;background:#e3e1db;display:flex;align-items:center;justify-content:center;color:#a3a69f}
+.pvh-body{padding:14px 0 0}
+.pvh-t{margin:0;font-family:var(--disp);font-size:24px;font-weight:600;letter-spacing:-.015em;line-height:1.2}
+.pvh-s{margin-top:4px;font-size:14.5px;color:#5f6762}
+.pvh-p{display:flex;align-items:baseline;gap:10px;margin-top:10px;font-size:13.5px;color:#6b7570}
+.pvh-p b{font-size:20px;color:#1a1d1a;font-variant-numeric:tabular-nums}
+
+/* The one action, pinned to the bottom on a phone where the thumb is. */
+.pv-cta{position:sticky;bottom:0;z-index:5;max-width:1040px;width:100%;margin:0 auto;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(rgba(245,244,240,0),#f5f4f0 30%)}
+@media (min-width:760px){.pv-cta{position:static;max-width:1040px;background:none;padding-top:4px}.pv-cta .pv-btn-wide{width:auto;min-width:280px}.pvh .gv-stage{max-height:56vh}}
+
+.pv-filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 14px}
+.pv-seg{display:inline-flex;padding:3px;border-radius:12px;background:#e9e6df}
+.pv-seg button{min-height:40px;min-width:56px;padding:0 12px;border:none;border-radius:9px;background:none;font:inherit;font-size:14px;font-weight:600;color:#4a504c;cursor:pointer}
+.pv-seg button.on{background:#fff;color:#1a1d1a;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.pv-chips{display:flex;flex-wrap:wrap;gap:6px}
+.pv-chip{min-height:40px;padding:0 14px;border-radius:20px;border:1px solid #d9d6ce;background:#fff;font:inherit;font-size:14px;font-weight:600;color:#3d443f;cursor:pointer}
+.pv-chip.on{background:var(--pv-accent);border-color:var(--pv-accent);color:#fff}
+.pv-area{position:relative;display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 12px;border-radius:20px;border:1px solid #d9d6ce;background:#fff;color:#4a504c;max-width:100%}
+.pv-area select{appearance:none;-webkit-appearance:none;border:none;background:none;font:inherit;font-size:14px;font-weight:600;color:#1a1d1a;min-height:38px;padding-right:2px;max-width:220px;outline:none}
+.pv-empty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px 0;text-align:center}
+.pv-empty-t{font-size:16px;font-weight:600;color:#3d443f}
+
+.pv-enq-wrap{margin-top:30px;padding:18px 16px;border-radius:14px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.06);scroll-margin-top:12px}
+.pv-enq-wrap h2{margin:0 0 12px;font-family:var(--disp);font-size:19px;font-weight:600}
+.pv-enq-in{margin-top:22px}
+.pv-enq{display:flex;flex-direction:column;gap:12px;max-width:480px}
+.pv-field{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:600;color:#4a504c}
+.pv-field input,.pv-field textarea{width:100%;min-height:46px;padding:11px 12px;border-radius:10px;border:1px solid #d3d0c7;background:#fbfaf7;font:inherit;font-size:16px;font-weight:400;color:#1a1d1a;resize:vertical}
+.pv-field input:focus,.pv-field textarea:focus{outline:2px solid var(--pv-accent);outline-offset:-1px;background:#fff}
+.pv-hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.pv-err{font-size:13.5px;color:#a3321e}
+.pv-consent{margin:0;font-size:12.5px;color:#6b7570;line-height:1.45}
+.pv-consent a{color:inherit;text-decoration:underline;display:inline-flex;align-items:center;min-height:40px}
+.pv-enq-done{display:flex;align-items:center;gap:12px}
+.pv-enq-done div{display:flex;flex-direction:column;gap:2px;font-size:14px;color:#5f6762}
+.pv-enq-done b{font-size:16px;color:#1a1d1a}
+
+.pv-skel{display:flex;flex-direction:column;gap:12px;margin-top:14px}
+.pv-skel span{display:block;border-radius:10px;background:#e8e6e0;animation:pvPulse 1.2s ease-in-out infinite}
+.pv-skel-img{aspect-ratio:4/3;max-height:56vh}
+.pv-skel-l{height:20px;width:60%}
+.pv-skel-s{width:35%}
+@keyframes pvPulse{50%{opacity:.55}}
+
+/* A member of the firm, signed in, on a buyer's page. Uses the desk's own
+   form controls, so it reads as the CRM, not the firm's page. */
+.pv-staff{background:#23231f;color:#f2f1ec}
+.pv-staff-in{max-width:1040px;margin:0 auto;padding:10px 16px}
+.pv-staff-row{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:14px}
+.pv-staff-who b{font-weight:650}
+.pv-staff-go{display:inline-flex;align-items:center;gap:4px;min-height:40px;padding:0 14px;border-radius:10px;background:#fff;color:#23231f;font-weight:650;font-size:14px;text-decoration:none;flex:none}
+.pv-staff-tap{background:#fff;color:var(--ink);border-bottom:1px solid var(--line)}
+.pv-staff-tap .pv-staff-in{max-width:560px;padding:14px 16px 16px}
+.pv-staff-h{font-size:16px;font-weight:700;margin-bottom:10px}
+.pv-staff-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
