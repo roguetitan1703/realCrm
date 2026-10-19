@@ -222,7 +222,7 @@ authRouter.patch('/me', async (req: Request, res: Response) => {
     // a removed member still holds would otherwise surface as a 500.
     const ten = String(phone || '').replace(/\D/g, '').slice(-10);
     const clash = await sql`SELECT 1 FROM users WHERE tenant_id = ${u.tenant_id} AND id <> ${u.id}
-      AND right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) = ${ten} LIMIT 1`;
+      AND right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) = ${ten} LIMIT 1`;
     if (clash.length) return res.status(409).json({ error: 'phone_taken', message: 'Someone on this team already uses that number.' });
     const [before] = await sql`SELECT phone FROM users WHERE tenant_id = ${u.tenant_id} AND id = ${u.id} LIMIT 1`;
     try {

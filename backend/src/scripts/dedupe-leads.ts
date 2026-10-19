@@ -70,7 +70,7 @@ function filledCount(r: any): number {
 
 async function main() {
   const args = parseArgs();
-  const P10 = sql`right(regexp_replace(coalesce(phone,''), '\D', '', 'g'), 10)`;
+  const P10 = sql`right(regexp_replace(coalesce(phone,''), '[^0-9]', '', 'g'), 10)`;
 
   const rows = await sql`
     SELECT *, ${P10} AS p10 FROM crm_leads

@@ -1766,11 +1766,11 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
   const names = (input.names || []).filter(Boolean).map(n => n.toLowerCase()).slice(0, 5000);
   if (phones.length || names.length) {
     const rows = await sql`
-      SELECT id, name, phone, right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) AS phone10
+      SELECT id, name, phone, right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) AS phone10
         FROM crm_leads
        WHERE tenant_id = ${t}
          AND (${phones.length
-              ? sql`right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) IN ${sql(phones)}`
+              ? sql`right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) IN ${sql(phones)}`
               : sql`false`}
            OR ${names.length ? sql`lower(name) IN ${sql(names)}` : sql`false`})`;
     for (const r of rows) {
@@ -1792,10 +1792,10 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
   // are recognised and skipped/merged instead of duplicated.
   if (phones.length) {
     const rows = await sql`
-      SELECT id, name, phone, right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) AS phone10
+      SELECT id, name, phone, right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) AS phone10
         FROM crm_owners
        WHERE tenant_id = ${t}
-         AND right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) IN ${sql(phones)}`;
+         AND right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) IN ${sql(phones)}`;
     for (const r of rows) {
       const hit = { id: r.id, name: r.name || r.phone };
       if (r.phone10) owners[r.phone10] = hit;
@@ -1984,7 +1984,7 @@ export async function findLeadByPhone(phone: string, tenantId?: string): Promise
   const rows = await sql`
     SELECT * FROM crm_leads
      WHERE tenant_id = ${t}
-       AND right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) = ${p10}
+       AND right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) = ${p10}
      ORDER BY created_at ASC LIMIT 1`;
   return rows[0];
 }
