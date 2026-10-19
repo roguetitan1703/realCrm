@@ -3,7 +3,7 @@ import Icon from '../components/Icon.jsx'
 import { Button, Input, Toggle } from '../components/primitives.jsx'
 import { api } from '../lib/api.js'
 import { configLabel, personLabel, unitLabel } from '../lib/format.js'
-import { phoneLabel, phonePlaceholder, phoneProblem } from '../lib/locale.js'
+import { phoneSpaced, phonePlaceholder, phoneProblem } from '../lib/locale.js'
 import { copyText } from '../lib/clipboard.js'
 import { canPickWhatsApp, openWhatsAppChat } from '../lib/matching.js'
 import { canPickContact, pickContact, looksLikePhone, refusal, expiryLabel, heldText } from '../lib/share.js'
@@ -53,6 +53,9 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
   const [result, setResult] = useState(null)
   const [held, setHeld] = useState('')
   const [err, setErr] = useState('')
+  // Whether WhatsApp already opened on its own after the link was made. Where
+  // it did not, the done sheet's Open WhatsApp is the way there.
+  const [opened, setOpened] = useState(false)
   const me = store.me()
 
   const close = store.closeModal
@@ -61,7 +64,7 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
   const ready = homes.length > 0 && sendable > 0 && (
     to.kind === 'lead' || to.kind === 'none' || (to.kind === 'new' && looksLikePhone(to.phone)))
 
-  const recipientName = to.kind === 'lead' ? personLabel(to.lead) : to.kind === 'new' ? (to.name?.trim() || phoneLabel(to.phone)) : ''
+  const recipientName = to.kind === 'lead' ? personLabel(to.lead) : to.kind === 'new' ? (to.name?.trim() || phoneSpaced(to.phone)) : ''
 
   const send = async (app) => {
     if (!ready || busy) return
@@ -84,8 +87,11 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
       store.touched?.()
       onSent?.(r)
       const wa = parseWa(r?.waUrl)
-      if (tab) { if (r?.waUrl) tab.location.href = r.waUrl; else tab.close() }
-      else if (wa) openWhatsAppChat(wa.text, wa.phone, app)
+      // Only the desk's pre-opened tab and an Android app intent survive the
+      // wait for the server. A new window opened now (iPhone Safari, a phone
+      // with no app choice) is blocked; the done sheet's button opens it.
+      if (tab) { if (r?.waUrl) { tab.location.href = r.waUrl; setOpened(true) } else tab.close() }
+      else if (wa && app && canPickWhatsApp()) { openWhatsAppChat(wa.text, wa.phone, app); setOpened(true) }
     } catch (e) {
       tab?.close()
       const why = refusal(e)
@@ -111,11 +117,12 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
     }
   }
 
-  const title = homes.length === 1 ? 'Send 1 home' : `Send ${homes.length} homes`
+  const title = sendable === 1 ? 'Send 1 home' : `Send ${sendable} homes`
 
   if (step === 'phone') {
     return (
       <Modal title="Your mobile number" onClose={close} width={440}>
+        <div className="snd-note">Buyers’ replies come to this number.</div>
         <SenderPhone store={store} me={me}
           onSaved={() => { setStep('form'); setTimeout(() => send(), 0) }}
           onCancel={() => setStep('form')} />
@@ -143,21 +150,27 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
 
   if (step === 'done') {
     const link = result?.link
+    // Nothing has reached anyone yet: the link exists, WhatsApp sends it.
+    const name = result?.lead?.name || recipientName
+    const openWa = () => { const wa = parseWa(result.waUrl); if (wa) openWhatsAppChat(wa.text, wa.phone) }
     return (
-      <Modal title={recipientName ? `Sent to ${recipientName}` : 'Link made'} onClose={close} width={440}>
+      <Modal title={name ? `Link ready for ${name}` : 'Link ready'} onClose={close} width={440}>
         <div className="snd-done">
           <span className="snd-done-ic"><Icon name="check" size={18} /></span>
           <div className="snd-done-main">
             <div className="snd-done-url mono-num">{link?.url || ''}</div>
-            <div className="snd-done-s">{[homes.length === 1 ? '1 home' : `${sendable} homes`, expiryLabel(link)].filter(Boolean).join(' · ')}</div>
+            <div className="snd-done-s">{[sendable === 1 ? '1 home' : `${sendable} homes`, expiryLabel(link)].filter(Boolean).join(' · ')}</div>
+            {result?.lead?.created && <div className="snd-done-s">{name ? `${name} added as a lead` : 'Added as a lead'}</div>}
           </div>
         </div>
         <div className="mfm-foot">
           <Button icon="copy" onClick={() => copyText(link?.url || '').then(ok => store.toast(ok ? 'Link copied' : 'Could not copy. Select the link and copy it.', ok ? undefined : 'warn'))}>Copy link</Button>
-          {result?.waUrl && (
-            <Button icon="wa" onClick={() => { const wa = parseWa(result.waUrl); if (wa) openWhatsAppChat(wa.text, wa.phone) }}>WhatsApp</Button>
-          )}
-          <Button variant="primary" onClick={close}>Done</Button>
+          {result?.waUrl && !opened
+            ? <><Button onClick={close}>Done</Button><Button variant="primary" icon="wa" onClick={openWa}>Open WhatsApp</Button></>
+            : <>
+              {result?.waUrl && <Button icon="wa" onClick={openWa}>WhatsApp</Button>}
+              <Button variant="primary" onClick={close}>Done</Button>
+            </>}
         </div>
       </Modal>
     )
@@ -190,6 +203,9 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
           <Toggle on={showPrice} type="button" aria-pressed={showPrice} aria-label="Show price" onClick={() => setShowPrice(v => !v)} />
         </label>
 
+        {privateOnes.length > 0 && sendable > 0 && (
+          <div className="snd-note">{privateOnes.length === 1 ? '1 left out: not in the catalogue' : `${privateOnes.length} left out: not in the catalogue`}</div>
+        )}
         {err && <div className="snd-err" role="alert">{err}</div>}
       </div>
       <div className="mfm-foot">
@@ -220,7 +236,7 @@ function Recipient({ store, to, setTo, fixed, suggested }) {
         <span className="snd-to-av">{(personLabel(to.lead)[0] || '?').toUpperCase()}</span>
         <div className="snd-to-main">
           <div className="snd-to-t">{personLabel(to.lead)}</div>
-          {to.lead.phone && <div className="snd-to-s mono-num">{phoneLabel(to.lead.phone)}</div>}
+          {to.lead.phone && <div className="snd-to-s mono-num">{phoneSpaced(to.lead.phone)}</div>}
         </div>
         {!fixed && <button type="button" className="inv-x" aria-label="Change recipient" onClick={() => setTo({ kind: 'pick' })}><Icon name="x" size={14} /></button>}
       </div>
@@ -311,7 +327,7 @@ export function LeadSearch({ q, setQ, onPick, suggested = [], autoFocus }) {
               <span className="snd-to-av">{(personLabel(l)[0] || '?').toUpperCase()}</span>
               <span className="snd-res-main">
                 <span className="snd-to-t">{personLabel(l)}</span>
-                {l.phone && <span className="snd-to-s mono-num">{phoneLabel(l.phone)}</span>}
+                {l.phone && <span className="snd-to-s mono-num">{phoneSpaced(l.phone)}</span>}
               </span>
             </button>
           ))}
