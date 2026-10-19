@@ -211,83 +211,169 @@ number too.
 
 ### A.5 Build contract (both builders work to this)
 
-**Tables** (in `initSchema()`, `CREATE … IF NOT EXISTS`, every row has `tenant_id`):
-- `crm_share_links` — `id, tenant_id, code` (unique per tenant: 6 characters,
-  lowercase letters and digits without look-alikes, never a routed word),
-  `created_by` (user id), `lead_id` (null = no recipient), `property_ids TEXT[]`
-  (in order), `show_price BOOL`, `created_at, expires_at, turned_off_at,
-  turned_off_by`.
+As built by Builder A, 19 Oct. Shapes below are what the server returns;
+changes from the first draft are marked **(changed)**.
+
+**Tables** (in `initSchema()` → `migrateSharing()`, `CREATE … IF NOT EXISTS`,
+every row has `tenant_id`):
+- `crm_share_links` — `id, tenant_id, code` (unique per tenant: 6 characters
+  from `abcdefghjkmnpqrstuvwxyz23456789`, never a routed word, never equal to
+  a tap code), `created_by` (user id), `lead_id` (null = no recipient),
+  `property_ids TEXT[]` (in order), `show_price BOOL`, `created_at,
+  expires_at, turned_off_at, turned_off_by`.
 - `crm_share_events` — `id, tenant_id, link_id` (null for the catalogue),
   `property_id, kind` (`view` · `interested` · `talk` · `expired_view` ·
-  `enquiry`), `code` (unique per tenant, set only on `interested`: the ref
-  link), `device_id, created_at`.
+  `enquiry`), `code` (unique per tenant, set on `interested` and on `talk`:
+  the ref link, and what Add as lead works from), `device_id`, **`lead_id` (added)** — the lead the event belongs to,
+  set when known and filled by Add as lead / attach — `created_at`.
 - `crm_share_devices` — `tenant_id, device_id, lead_id, attached_at`. Primary
   key `(tenant_id, device_id)`.
 - `crm_properties` — adds `in_catalogue BOOL DEFAULT FALSE` and
-  `catalogue_slug TEXT`.
+  `catalogue_slug TEXT` (unique per tenant; `<bhk>-<subtype>-<locality>-<4
+  chars>`, never the project name; kept when the flat leaves the catalogue).
+- Deleting a lead turns its links off and drops its devices; merging moves
+  links, events and devices onto the surviving lead.
 
-**Settings** (`crm_settings` default row, key `sharing`): `linkExpiryDays` 7 /
-15 / 30 (default 15), `replyToPhone`, `showPriceOnCatalogue` (default false),
-`catalogueShowsProject` (default true), `stopped` (owner only, recorded).
+**Settings** (`crm_settings` default row, key `sharing`, via the existing
+`POST /workspace/settings {sharing:{…}}`): `linkExpiryDays` 7 / 15 / 30
+(default 15; anything else is a 400), `replyToPhone` (null = an active owner's
+phone), `showPriceOnCatalogue` (default false), `catalogueShowsProject`
+(default true), `stopped`. **(changed)** `stopped` is `null` or an ISO time.
+Send `stopped: true` to set it; owner only (403 otherwise), written to the
+audit ledger as `sharing.stopped`, and it cannot be undone (any other value
+afterwards is a 400). Links made before that time read as stopped; links made
+after it work.
 
 **Device ID.** Public pages are on the app's domain and the API is on another,
-so a cookie would be third-party. Instead, the page keeps a random ID in
-`localStorage` under `nv_device_<tenant>` and sends it as `X-Device-Id`.
+so a cookie would be third-party. Instead, the page keeps a random ID
+(8–64 of `[A-Za-z0-9_-]`) in `localStorage` under `nv_device_<tenant>` and
+sends it as `X-Device-Id`. Anything else is treated as no device.
 
-**Public API** (no sign-in, rate-limited; a wrong, off or expired code answers
-the same body, so codes cannot be probed):
-- `GET /public/s/:tenant/:code` — a link or a tap code.
-  - Returns `{ kind, state: active|expired|off|stopped, firm{name,logo,accent},
-    flats[{id,title,config,deal,locality,project?,price?,media,available}],
-    showPrice, cta{ phone }, catalogueUrl }`.
-  - Records a view, except for the preview fetcher and firm staff.
-  - When the request carries a valid session of that firm, it also returns
-    `staff: { tap?, link, lead? }`, which is what opens **Add as lead**.
-- `POST /public/s/:tenant/:code/interested {propertyId}` — makes the tap and
-  its code, raises the alert, and returns `{ waUrl }`. The message is "Hi, I'm
+**Staff.** The public page sends the signed-in session's `Authorization`
+header when it has one for that tenant. A valid session of that firm is never
+counted as a view and gets the `staff` block.
+
+**Public API** (no sign-in; responses carry no `success` envelope; errors are
+`{error, message}`; rate-limited per IP, 429 `slow_down`):
+- `GET /public/s/:tenant/:code[?flat=<propertyId>]` — a link or a tap code.
+  - **(changed)** `{ kind: link|tap, state: active|unavailable, firm{name,
+    logo, accent}, flats[Flat], showPrice, cta{phone}, catalogueUrl }`. A
+    wrong, off, expired or stopped code returns the **identical** body:
+    `state: unavailable`, `flats: []`, `cta.phone` = the firm's reply-to. The
+    real state is only in `staff.link.state`.
+  - `?flat=` says which flat the buyer opened, so the view is recorded
+    against it.
+  - `catalogueUrl` is `/<tenant>/homes`, or null when the catalogue has no
+    available flat.
+  - `cta.phone` is the lead's current holder, else the link's creator, else
+    the firm's reply-to.
+  - Records a view (`expired_view` on an expired link). Not counted: preview
+    fetchers (WhatsApp, Facebook, Telegram, Slack, Twitter, Discord, Google,
+    LinkedIn, Skype, iMessage), firm staff, non-GET.
+  - With a staff session: `staff: { tap?{id,code,propertyId,deviceId,at,
+    leadId}, link{id,code,state: active|expired|off|stopped,createdBy,leadId,
+    createdAt,expiresAt,propertyIds,showPrice}, lead?{id,name,phone,stage,
+    agentId,holderName} | {id, visible:false} }`. On a dead link staff also get
+    its `flats`, for Send a fresh link.
+  - A link with no recipient only shows flats that are in the catalogue.
+- **Why the dead-link body never names the agent.** `cta.phone` on an
+  unavailable code is the firm's reply-to, never the holder's, because a
+  holder's number would tell a prober the code is real. The page shows **Talk
+  to us** on every unavailable link: the server sends an expired link's press
+  to the holder (and alerts them) and every other press to the firm.
+- **Flat** = `{ id, title ("2 BHK Apartment in <project or locality>"),
+  config{bhk,subtype,category,carpetSqft,superBuiltupSqft,builtupSqft,
+  furnishing,bathrooms,facing,possession,amenities[]}, deal, locality,
+  project?, price?, media[{key,kind: photo|video,w?,h?}], available, slug? }`.
+  `project` only when shown; `price` is a number, only when allowed and above
+  0 (the page formats it, "/month" for rent); `slug` only when in the
+  catalogue.
+- `POST /public/s/:tenant/:code/interested {propertyId}` — active links only
+  (404 otherwise). Makes the tap and its code, raises `share_interested`, and
+  returns `{ waUrl }` to the holder → creator → firm. Message: "Hi, I'm
   interested in this home: <app>/<tenant>/<tapcode>".
-- `POST /public/s/:tenant/:code/talk` — for an expired link: alerts the holder
-  and returns `{ waUrl }`.
-- `GET /public/catalogue/:tenant` (filters `deal, config, locality`) and
-  `GET /public/catalogue/:tenant/:slug`.
+- `POST /public/s/:tenant/:code/talk` → `{ waUrl }`. On an expired link it
+  records `talk` with its own code (like a tap), raises `share_expired_open`
+  (one per link per firm day) and goes to the holder → creator → firm, with
+  "Hi, I'd like to see these homes again: <app>/<tenant>/<talkcode>". **(changed)** On an off, stopped or
+  wrong code it goes to the firm's reply-to with "Hi, I'm looking for a
+  home." and records nothing, so it cannot be told apart.
+- **(changed)** `GET /public/catalogue/:tenant?deal=&config=&locality=&page=
+  &limit=` → `{ firm, showPrice, flats[Flat], total, page, limit,
+  facets{deal[], config[], locality[]} }`. `config` is a prefix ("2 BHK");
+  `deal` and `locality` are exact. Available flats only, flats with photos
+  first. Limit default 24, max 60. Stopping sharing does not touch the
+  catalogue; unticking flats does.
+- `GET /public/catalogue/:tenant/:slug` → `{ firm, showPrice, flat, catalogueUrl }`,
+  or 404 `{error, message, firm, cta{phone}, catalogueUrl}` (sold, removed or
+  unknown alike).
 - `POST /public/catalogue/:tenant/enquiry {name, phone, propertyId?, message?}`
-  plus a hidden field. It goes through the **existing ingestion path**, source
-  `Catalogue` (duplicate by phone, routing, alerts) and attaches the device.
-- Link previews: `shareRouter` and `vercel.json` cover `/<tenant>/<code>` and
-  `/<tenant>/homes[/<slug>]`.
-- Old photo links resolve as in §A.4.
+  plus hidden fields `company` / `website` (filled = silently dropped). Goes
+  through the ingestion path (`ingestion.ts landEnquiry`), source `Catalogue`:
+  duplicate by phone, merge, routing, alerts. Then the flat goes on the
+  shortlist and the device attaches. Returns `{ ok: true }` whatever happened.
+  5 per 10 minutes per IP, 3 per hour per phone.
+- `GET /public/gallery/:tenant/:ref` (old photo links, §A.4) → **(changed)**
+  `{ success, redirect }` (a path to open) when the flat is in the catalogue,
+  else 404 `{error, message, firm, cta{phone}, catalogueUrl}`.
+- Link previews: `shareRouter` (`/share/s/:slug/:code`, `/share/homes/:slug`,
+  `/share/homes/:slug/:flat`, `/share/gallery/:slug/:ref`) and `vercel.json`
+  plus `vercel.development.json` cover `/<tenant>/<code>` and
+  `/<tenant>/homes[/<slug>]` for preview user-agents (`?app=1` bypasses). A
+  dead or empty link gets the firm's card.
 
-**Signed-in API:**
-- `POST /share-links {leadId? | newPerson{name,phone}, propertyIds, showPrice}`.
-  - A new person goes through the normal lead-creation path: duplicate by
-    phone, assigned to the sender, timeline.
-  - The flats are added to `lead_shortlist`, and a timeline `whatsapp` event
-    "Sent 3 homes" is logged with the link.
-  - Returns `{ link{code,url,expiresAt}, waUrl }`.
-  - `422 sender_phone_missing` when the sender has no phone.
-  - `409 lead_held_by {holderName}` when the number is someone else's lead;
-    that holder is told.
-- `GET /share-links/mine` — per link: views, devices, interested, lead,
-  flats, expiresAt, state.
-- `POST /share-links/:id/off` (creator, or owner) and
-  `POST /share-links/:id/attach {leadId}`, which moves its events and devices
-  onto the lead.
-- `GET /leads/:id/shares` — per flat: sent at, opens, last opened,
-  interested, which link.
-- `POST /share-taps/:code/lead {phone, name?} | {leadId}` — Add as lead from a
-  tap. Creates or matches the lead and attaches the device and the link.
-- `POST /properties/catalogue {ids, on}` → `{ changed, withoutPhotos }`; also
-  the same flag on the single-property update.
-- The user's own phone through the existing profile update.
+**Signed-in API** (`{success: true, …}`; errors `{success:false, error,
+message, …}`):
+- `POST /share-links {leadId? | newPerson{name,phone}, propertyIds,
+  showPrice?}` → 201 `{ link{id,code,url,expiresAt,showPrice},
+  lead{id,name,created} | null, waUrl }`.
+  - A new person: duplicate by phone; a new lead gets source `Shared link`,
+    is assigned to the sender, and has an empty requirement. **(changed)** An
+    existing unheld lead is assigned to the sender.
+  - The flats go on `lead_shortlist`, and a timeline `whatsapp` event "Sent 3
+    homes" is logged with the link. Audited.
+  - Errors: `422 sender_phone_missing`; `422 flats_not_found`; `422
+    flats_not_available` (sold/let); `422 private_flats_without_recipient
+    {ids}` (a link with no lead may only hold catalogue flats); `409 lead_held_by
+    {holderName}` (the holder gets `share_number_held`); `404` for a lead the
+    sender cannot see.
+- `GET /share-links/mine?page=&limit=` → `{ data[{id,code,url,createdAt,
+  expiresAt,state,showPrice,lead{id,name}|null,flats[{id,title,available}],
+  views,devices,interested,lastOpenedAt}], total, page, limit }`.
+  **(changed)** Links that are turned off are not listed.
+- `POST /share-links/:id/off` (creator, or owner) → `{ ok }`.
+- `POST /share-links/:id/attach {leadId}` → **(changed)** `{ ok, events,
+  devices }` (counts moved).
+- `GET /leads/:id/shares` → `{ data: [{propertyId,title,available,sentAt,
+  opens,lastOpenedAt,interested,enquiries,devices,link{id,code,url,state,
+  expiresAt}|null}] }`, most recent first. Same visibility as the lead.
+- `POST /share-taps/:code/lead {phone, name?} | {leadId}` → `{ lead{id,name,
+  created}, matched, deviceAttached }` (`matched` = the number was already a
+  lead). Takes a tap code or a talk code. Puts the event and its device on the
+  lead and the flat (a talk: the link's flats) on its shortlist. **(changed)** A link with no recipient stays
+  unbound: the next tap on it may be somebody else.
+- `POST /properties/catalogue {ids, on}` → `{ changed, withoutPhotos }`. The
+  single-property update takes `inCatalogue`. `GET /properties?catalogue=yes|no`
+  filters. Rows carry `inCatalogue` and `catalogueSlug`.
+- **(changed)** `PATCH /auth/me {phone}` → `{ success, user }` — the user's
+  own number, any signed-in role (`PATCH /team/users/:id` stays manager-only). 400 `phone_invalid`, 409 `phone_taken`. Audited.
 
-**Alerts** (`notificationCatalogue.ts`, the lifecycle rules apply):
-- `share_interested` — urgency now, to the lead's holder (or the link's
-  creator when there is no lead). Closes when contact is logged on the lead,
-  or when Add as lead is done.
-- `share_expired_open` — to the holder. Closes when a fresh link is sent or
-  contact is logged.
-- `share_returned` — a known lead back on their link on a new day, at most one
-  per lead per day.
+**Alerts** (`notificationCatalogue.ts`, the lifecycle rules apply; close test
+`share_work`). `share_interested` and `share_expired_open` link
+`?screen=leads&lead=<id>&tap=<code>`, or `?tap=<code>` when there is no lead
+yet (the alert's record is then the tap, and it closes when Add as lead or
+attach puts the tap on a lead); the other two link `?screen=leads&lead=<id>`:
+- `share_interested` — urgency now, to the lead's holder (else the link's
+  creator). At most one per flat per link per firm day; a different device on
+  the same link reads "Someone on <name>'s link". Closes when contact is
+  logged on the lead, or when Add as lead is done.
+- `share_expired_open` — now, to the holder (else creator). Closes when a fresh
+  link is sent or contact is logged.
+- `share_returned` — drawer. A known lead back on their link on a new day, at
+  most one per lead per day.
+- **(added)** `share_number_held` — drawer, to the holder, when another member
+  tries to send to their lead's number. Closes when the lead is worked.
+- `notificationMeta` on the frontend needs an icon for each.
 
 **Never in any public response:** the flat number, the owner, notes, key
 details, the agent's name. Price only when allowed.
