@@ -16,7 +16,7 @@
 import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
-import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS, WON_STATUS } from './store';
+import { findLeadByPhone, createLead, updateLead, arrivalLeadAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS, WON_STATUS } from './store';
 import { notify, notifyOrDesk } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
@@ -563,9 +563,11 @@ export async function landEnquiry(args: {
         // one owned by someone who has left or been deactivated, is routed like
         // a new arrival — otherwise a repeat enquiry lands on a desk no one
         // reads. Every bhumi agent is currently active, so this is the case
-        // that has not happened yet rather than one that has.
+        // that has not happened yet rather than one that has. Routed by the
+        // firm's arrival rule: under "Leave unassigned" it goes to nobody and
+        // the desk is told (notifyOrDesk below).
         const keeper = await activeOwnerOf(existing.agent_id);
-        const reassign = keeper ? {} : { agentId: await nextRoutedAgent() };
+        const reassign = keeper ? {} : { agentId: await arrivalLeadAgent() };
 
         await updateLead(existing.id, {
           notes, req: merged,
@@ -646,8 +648,8 @@ export async function landEnquiry(args: {
         return { status: 'merged', leadId: existing.id };
       }
 
-      // No agent: createLead deals the rota itself (nextRoutedAgent, one
-      // atomic statement), so a payload never names who gets the lead and a
+      // No agent: createLead applies the firm's arrival rule itself
+      // (arrivalLeadAgent: the rota, or nobody under Leave unassigned), so a payload never names who gets the lead and a
       // named agent in createLead always means a person chose one.
       const { external_id, ...leadFields } = lead;
       const created = await createLead({

@@ -24,7 +24,7 @@
  * ============================================================================
  */
 
-import { parseMoneyText } from '../../../src/lib/locale.js';
+import { parseMoneyText, phoneAsStored, INDIA_LOCALE } from '../../../src/lib/locale.js';
 
 export type ParserConfig = {
   map?: Record<string, string>;
@@ -117,11 +117,7 @@ export const TRANSFORMS: Record<string, (v: any, loc?: any) => any> = {
    * The name says India because stored parser configs name it; the country
    * code is the firm's own (+1 for a US firm), India when none is passed.
    */
-  phone_in: (v, loc) => {
-    const d = String(v ?? '').replace(/\D/g, '');
-    const ten = d.length > 10 ? d.slice(-10) : d;
-    return ten.length === 10 ? `+${loc?.phoneCountry || '91'}${ten}` : String(v ?? '').trim();
-  },
+  phone_in: (v, loc) => phoneAsStored(v, loc?.phoneCountry ? loc : INDIA_LOCALE),
   /** "2 BHK Apartment in Wakad" → "2 BHK". Portals bury the config in prose. */
   bhk: (v) => {
     const m = String(v ?? '').match(/(\d+(?:\.5)?)\s*(?:bhk|bedroom)/i);

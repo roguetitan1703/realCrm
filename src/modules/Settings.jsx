@@ -656,6 +656,10 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
       <Panel>
         <SectionHead title={`${side.label === 'Calling' ? 'Owners' : 'Leads'} already on the desk`} />
 
+        {/* Both sweeps hand records to the rota, so they run only when the
+            rota does (store.ts autoAssigns). Shown under Leave unassigned they
+            were switches that did nothing. */}
+        {strategy === 'round_robin' && <>
         <div className="rt-rule">
           <div className="rt-rule-h">
             <div>
@@ -682,6 +686,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
             <Toggle on={!!val(f.idleOn, false)} disabled={!loaded} onClick={() => set({ [f.idleOn]: !val(f.idleOn, false) })} />
           </div>
         </div>
+        </>}
 
         {/* Both sides. An owner in the calling queue is passed around by the
             same sweep and it is the same problem — the threshold is the one

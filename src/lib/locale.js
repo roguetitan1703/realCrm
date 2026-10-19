@@ -173,6 +173,22 @@ export function phoneE164(raw, loc = current) {
 }
 
 /**
+ * A customer's number as it is kept on a lead or an owner: phoneE164 when what
+ * was typed is a whole mobile number of this firm's country (ten digits, after
+ * any leading 0 or the country code), and exactly as typed otherwise. A short
+ * number or a foreign one is not turned into a wrong +91 one — phoneE164 alone
+ * would keep the last ten digits of "+49 151 7537 1553". The one rule for a
+ * number typed on a form and one pushed by a portal (parser.ts phone_in).
+ */
+export function phoneAsStored(raw, loc = current) {
+  const typed = String(raw ?? '').trim()
+  const d = typed.replace(/\D/g, '').replace(/^0+/, '')
+  const cc = String(loc.phoneCountry)
+  const whole = d.length === 10 || (d.length === 10 + cc.length && d.startsWith(cc))
+  return whole ? phoneE164(d, loc) : typed
+}
+
+/**
  * A stored number as a person reads it. Indian numbers are shown as stored,
  * as they always were. A North American one reads +1 512-555-0143.
  */

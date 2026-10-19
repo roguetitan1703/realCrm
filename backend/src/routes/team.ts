@@ -15,6 +15,7 @@ import { sql } from '../services/db';
 import { localeOf } from '../services/store';
 import { normalizePhone } from '../services/roster';
 import { getContext } from '../services/context';
+import { isDeskRole } from '../lib/permissions';
 import { audit } from '../services/audit';
 import { adminSetPassword, suggestPassword, revokeUserSessions, passwordIssue } from '../services/auth';
 
@@ -588,7 +589,18 @@ teamRouter.post('/routing/assign-unowned', async (req: Request, res: Response) =
  * Update round-robin lead routing rules
  */
 teamRouter.put('/routing', async (req: Request, res: Response) => {
-  const patch = req.body;
+  // THE DESK'S, like Hand out below. This had no check at all, so any signed-in
+  // agent could switch the firm's lead routing off, or put only themselves on
+  // the rota.
+  if (!isDeskRole(getContext()?.role)) return res.status(403).json({ error: 'Only an owner or a manager can change how work is handed out.' });
+  const patch = { ...(req.body || {}) };
+  // Where the rota stands is the server's to move (dealRota), never a client's.
+  delete patch.last_assigned_index; delete patch.owner_last_assigned_index;
+  for (const k of ['strategy', 'owner_strategy']) {
+    if (patch[k] !== undefined && !['round_robin', 'manual'].includes(patch[k])) {
+      return res.status(400).json({ error: `${k} must be round_robin or manual` });
+    }
+  }
   const updated = await updateRoutingRules(patch);
   return res.status(200).json({
     success: true,

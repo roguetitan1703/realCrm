@@ -747,8 +747,10 @@ function NewLeadModal({ store, leadId }) {
         email: f.email.trim() || undefined,
         source: f.source,
         // Sent only when changed: re-sending a holder who has since been
-        // suspended would have the server refuse an edit to the name.
-        agentId: f.agentId && f.agentId !== edit.agentId ? f.agentId : undefined,
+        // suspended would have the server refuse an edit to the name. Picking
+        // Unassigned is a change too, sent as null; it was dropped here, so
+        // the lead stayed with whoever held it.
+        agentId: (f.agentId || null) !== (edit.agentId || null) ? (f.agentId || null) : undefined,
         deal: f.deal,
         requirement: f.config,
         locality: f.locality,
