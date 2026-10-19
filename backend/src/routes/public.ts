@@ -289,17 +289,36 @@ const gone = (f: Firm) => ({ title: 'This home is no longer available', desc: `H
 shareRouter.get('/s/:slug/:code', async (req: Request, res: Response) => {
   // Behind the same gate as the page: the card resolves a code too. Every
   // unusable code, and a miss, gets the one firm card below.
+  //
+  // WHICH ADDRESS. A card request comes browser/bot → Vercel (external
+  // rewrite) → Caddy → Express. Caddy (a bare reverse_proxy, no
+  // trusted_proxies) does not trust an incoming X-Forwarded-For and sets it
+  // to its own peer, so with trust proxy 1 req.ip is Vercel's egress address
+  // for a card fetched through the app's domain, and the client's own address
+  // for one fetched from the API directly. The address Vercel saw is not
+  // recoverable safely: Vercel's egress range is not fixed, so a header
+  // carrying it cannot be told from one a client typed when calling the API
+  // directly. req.ip is therefore the key — unspoofable, but shared by many
+  // buyers behind Vercel.
+  //
+  // So a spent budget does not refuse the card (that would let one prober
+  // blank every preview on a shared egress address); it answers the firm's
+  // card WITHOUT resolving the code, which teaches a prober nothing.
   const ip = ipOf(req);
-  if (!codeGate(ip)) return res.status(429).send('<!doctype html><title>Homes</title>');
   try {
     const f = await firmBySlug(String(req.params.slug));
     if (!f) return res.status(404).send('<!doctype html><title>Not found</title>');
+    if (!codeGate(ip)) {
+      res.set('Cache-Control', 'no-store');
+      const name = firmPublic(f).name;
+      return firmCard(req, res, f, `Homes from ${name}`, name, null);
+    }
     const found = await resolveCode(f.id, String(req.params.code));
     if (!found) codeMiss(ip);
     const sharing = await sharingOf(f.id);
     const firmName = firmPublic(f).name;
     const rows = found && linkState(found.link, sharing.stopped) === 'active' ? await linkRows(f.id, found.link) : [];
-    const shown = found?.tap ? rows.filter(r => r.id === found.tap.property_id) : rows;
+    const shown = found?.tap?.property_id ? rows.filter(r => r.id === found.tap.property_id) : rows;
     if (!shown.length) return firmCard(req, res, f, `Homes from ${firmName}`, firmName, null);
     if (shown.length === 1) return oneFlatCard(req, res, f, shown[0], true);
     const sample = shown.find(r => Array.isArray(r.media) && r.media.length) || null;
