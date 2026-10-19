@@ -1992,12 +1992,24 @@ export async function findLeadByPhone(phone: string, tenantId?: string): Promise
 
 export async function getLeadById(id: string): Promise<any | undefined> {
   const t = tid();
-  const rows = await sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`;
-  if (rows.length === 0) return undefined;
-  const [timelineRows, shortlistRows] = await Promise.all([
+  // ONE ROUND TRIP, NOT FIVE. The row, its timeline, its shortlist, its
+  // enquiries and its activities do not depend on each other; awaited in turn
+  // they were five trips (~150ms each on dev) on every record open and every
+  // lead created. Settled, not all: a lead outside this person's scope still
+  // answers undefined without looking at the rest, and an error in a part
+  // surfaces exactly where it did before (enquiries are optional, the rest not).
+  const [rowsR, timelineR, shortlistR, enquiriesR, actsR] = await Promise.allSettled([
+    sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`,
     sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} AND tenant_id = ${t} ORDER BY timestamp DESC`,
     sql`SELECT * FROM lead_shortlist WHERE lead_id = ${id} AND tenant_id = ${t}`,
+    getEnquiriesForLead(id),
+    getActivitiesForLead(id),
   ]);
+  const settled = <T,>(r: PromiseSettledResult<T>): T => { if (r.status === 'rejected') throw r.reason; return r.value; };
+  const rows = settled(rowsR);
+  if (rows.length === 0) return undefined;
+  const timelineRows = settled(timelineR);
+  const shortlistRows = settled(shortlistR);
   // author and metadata are NOT optional here. This projection listed six
   // fields and dropped both, so every event on a lead RECORD arrived with
   // authorId null and metadata {} — while the same events fetched through
@@ -2034,14 +2046,14 @@ export async function getLeadById(id: string): Promise<any | undefined> {
   // an implementation detail the agent should never have been able to feel.
   // The enquiry history. Read alongside the timeline so the record can show
   // what was asked for on each occasion rather than a prose note about it.
-  lead.enquiries = await getEnquiriesForLead(id).catch(() => []);
+  lead.enquiries = enquiriesR.status === 'fulfilled' ? enquiriesR.value : [];
   lead.enquiryCount = lead.enquiries.length;
   // Everything they have ever asked for, in one shape. The sheet reads the
   // sets off this, the header reads the latest and the count of the rest, and
   // the matcher reads the span — so none of them can describe the person
   // differently.
   lead.enquiryRollup = enquiryRollup(lead.enquiries);
-  const acts = await getActivitiesForLead(id);
+  const acts = settled(actsR);
   if (acts.length) {
     lead.timeline = [...(lead.timeline || []), ...acts]
       .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -2123,6 +2135,13 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const receivedAt = leadData.received_at ?? leadData.receivedAt ?? null;
 
   const t = tid();
+  // The assignee's name for the first timeline entry, read alongside the
+  // insert rather than after it (one round trip fewer).
+  // `.then` starts it now (a postgres.js query is lazy until then) and keeps a
+  // failed read from becoming an unhandled rejection if the insert throws first.
+  const assigneeP: Promise<any[]> = agentId
+    ? sql`SELECT name FROM users WHERE tenant_id = ${t} AND id = ${agentId} LIMIT 1`.then(r => r as any[], () => [])
+    : Promise.resolve([]);
   const rows = await sql`
     INSERT INTO crm_leads (
       id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback,
@@ -2142,7 +2161,7 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
 
   // A person's name, never their user id ("Assigned to agent u_team_…"), and
   // nothing at all when nobody was assigned (it read "agent null").
-  const [assignee] = agentId ? await sql`SELECT name FROM users WHERE tenant_id = ${t} AND id = ${agentId} LIMIT 1` : [];
+  const [assignee] = await assigneeP;
   await addTimelineEvent({
     record_id: newId,
     type: 'creation',
@@ -2167,13 +2186,6 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const notifName = name || phone || undefined;
   notify({ userId: agentId, type: 'lead_assigned', data: { name: notifName, locality, source }, link, push: true })
     .catch(err => console.warn('[Notify] lead_assigned failed:', err?.message));
-  // Name the agent, not their primary key. This read "routed to u_ms6oqbda",
-  // which tells the person reading it nothing and looks broken besides.
-  const agentName = agentId
-    ? (await sql`SELECT name FROM crm_agents WHERE id = ${agentId} AND tenant_id = ${tid()} LIMIT 1`)[0]?.name
-      ?? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name
-      ?? 'an agent'
-    : 'the queue';
   // NO lead_new. It fired on every arrival alongside lead_assigned -- 216 and
   // 216 over the SAME 216 links on bhumi in 14 days -- so one lead landing cost
   // two notifications, and the owner collected 233 in a fortnight. An owner
