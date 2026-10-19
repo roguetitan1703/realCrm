@@ -3194,7 +3194,7 @@ type AssignmentEntry = {
  * lookups are now one query for the whole set, the events one insert, and the
  * loop check one count.
  */
-async function recordAssignments(entries: AssignmentEntry[]): Promise<void> {
+async function recordAssignments(entries: AssignmentEntry[], q: any = sql): Promise<void> {
   // A no-op move is not history. Same test as before, applied set-wise.
   const list = entries.filter(e => (e.prevAgentId || null) !== (e.agentId || null));
   if (!list.length) return;
@@ -3209,7 +3209,7 @@ async function recordAssignments(entries: AssignmentEntry[]): Promise<void> {
     const ids = [...new Set(list.flatMap(e => [e.prevAgentId, e.agentId]).filter(Boolean))] as string[];
     const names = new Map<string, string>();
     if (ids.length) {
-      const rows = await sql`
+      const rows = await q`
         SELECT id, name FROM users WHERE id IN ${sql(ids)}
         UNION
         SELECT id, name FROM crm_agents WHERE id IN ${sql(ids)} AND tenant_id = ${t}`;
@@ -3242,7 +3242,7 @@ async function recordAssignments(entries: AssignmentEntry[]): Promise<void> {
     // One statement. addTimelineEvent is deliberately not reused here: it
     // inserts a single row and carries the lead-remark notification, which an
     // assignment must not send.
-    await sql`INSERT INTO crm_timeline_events ${sql(rows as any[],
+    await q`INSERT INTO crm_timeline_events ${sql(rows as any[],
       'id', 'record_id', 'type', 'title', 'description', 'author', 'timestamp', 'metadata', 'tenant_id')}
       ON CONFLICT (id) DO NOTHING`;
 
@@ -3254,6 +3254,9 @@ async function recordAssignments(entries: AssignmentEntry[]): Promise<void> {
     // alertOnReassignLoop, called from sweepIdleLeads / sweepIdleOwners).
     void nameOf;
   } catch (e: any) {
+    // Inside a transaction a failed statement has already aborted it, so the
+    // move cannot be kept without its history: say so rather than swallow.
+    if (q !== sql) throw e;
     console.warn('[Timeline] assignment event failed:', e?.message);
   }
 }
@@ -3331,44 +3334,84 @@ async function alertOnReassignLoop(batch: { recordId: string; toName: string | n
   }
 }
 
+/**
+ * ONE MOVE: the check, the write and its history, through `q` — `sql`, or a
+ * transaction when several moves must stand or fall together (splitAssign,
+ * distributeWork, assignUnowned, assignProjectOwners). What is said about it
+ * (audit, alerts) is afterMove(), run once the writes are committed, so a
+ * rolled-back move never told anybody anything.
+ */
+type Move = { kind: 'lead' | 'owner'; ids: string[]; agentId: string | null; n: number; before: { id: string; agent_id: string | null }[] };
+async function moveRecords(q: any, kind: 'lead' | 'owner', ids: string[], agentId: string | null, ctx: ActorCtx): Promise<Move> {
+  const clean = [...new Set((ids || []).filter(Boolean))];
+  const none: Move = { kind, ids: clean, agentId, n: 0, before: [] };
+  if (clean.length === 0) return none;
+  const t = tid();
+  await assertWorkable(t, [agentId], q);
+  const table = kind === 'lead' ? sql`crm_leads` : sql`crm_owners`;
+  // WHO HELD THEM BEFORE, read before the update overwrites it — a timeline
+  // that cannot say where a record came from is a timeline that cannot answer
+  // "why is this mine?".
+  const before = await q`
+    SELECT id, agent_id FROM ${table}
+    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
+      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
+  const res = await q`
+    UPDATE ${table} SET agent_id = ${agentId}, updated_at = NOW()
+    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
+      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
+  if (res.count === 0) return none;
+  // The whole selection's history in one go -- see recordAssignments().
+  await recordAssignments((before as any[]).map(row => ({
+    recordId: row.id, prevAgentId: row.agent_id, agentId,
+    reason: 'bulk assignment', author: ctx.actorId ?? null,
+  })), q);
+  return { kind, ids: clean, agentId, n: res.count, before: before as any[] };
+}
+
+/** The ledger line and the hand-over alert for a committed move. */
+async function afterMove(m: Move, ctx: ActorCtx): Promise<void> {
+  if (!m.n) return;
+  const t = tid();
+  const { n, agentId } = m;
+  if (m.kind === 'lead') {
+    const name = agentId
+      ? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name ?? 'a colleague'
+      : null;
+    audit({
+      tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+      actor_label: ctx.actorLabel ?? null, action: 'lead.bulk_assign', target_type: 'lead', target_id: null,
+      summary: agentId ? `${n} lead${n === 1 ? '' : 's'} assigned to ${name}` : `${n} lead${n === 1 ? '' : 's'} unassigned`,
+      metadata: { ids: m.ids, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+  } else {
+    audit({
+      tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+      actor_label: ctx.actorLabel ?? null, action: 'owner.bulk_assign', target_type: 'owner', target_id: null,
+      summary: agentId ? `${n} owner${n === 1 ? '' : 's'} assigned` : `${n} owner${n === 1 ? '' : 's'} unassigned`,
+      metadata: { ids: m.ids, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+  }
+  if (agentId) await notifyHandedOver(m.kind, agentId, m.before);
+}
+
+/** Several moves, all or nothing; then what is said about each. */
+async function moveAll(plan: { kind: 'lead' | 'owner'; ids: string[]; agentId: string }[], ctx: ActorCtx): Promise<Move[]> {
+  const moves: Move[] = await sql.begin(async (tx: any) => {
+    const out: Move[] = [];
+    for (const p of plan) if (p.ids.length) out.push(await moveRecords(tx, p.kind, p.ids, p.agentId, ctx));
+    return out;
+  }) as any;
+  for (const m of moves) await afterMove(m, ctx);
+  return moves;
+}
+
 export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
   const who = getContext();
   if (who?.role === 'agent') throw new ForbiddenError('Assigning leads is done from the desk.');
-  const clean = [...new Set((ids || []).filter(Boolean))];
-  if (clean.length === 0) return 0;
-
-  const t = tid();
-  await assertWorkable(t, [agentId]);
-  // WHO HELD THEM BEFORE, read before the update overwrites it — a timeline
-  // that cannot say where a lead came from is a timeline that cannot answer
-  // "why is this mine?".
-  const before = await sql`
-    SELECT id, agent_id FROM crm_leads
-    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
-      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
-  const res = await sql`
-    UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW()
-    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
-      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
-  const n = res.count;
-  if (n === 0) return 0;
-  // The whole selection's history in one go -- see recordAssignments().
-  await recordAssignments(before.map((row: any) => ({
-    recordId: row.id, prevAgentId: row.agent_id, agentId,
-    reason: 'bulk assignment', author: ctx.actorId ?? null,
-  })));
-
-  const name = agentId
-    ? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name ?? 'a colleague'
-    : null;
-  audit({
-    tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
-    actor_label: ctx.actorLabel ?? null, action: 'lead.bulk_assign', target_type: 'lead', target_id: null,
-    summary: agentId ? `${n} lead${n === 1 ? '' : 's'} assigned to ${name}` : `${n} lead${n === 1 ? '' : 's'} unassigned`,
-    metadata: { ids: clean, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
-  });
-  if (agentId) await notifyHandedOver('lead', agentId, before as any[]);
-  return n;
+  const m = await moveRecords(sql, 'lead', ids, agentId, ctx);
+  await afterMove(m, ctx);
+  return m.n;
 }
 
 /**
@@ -4003,12 +4046,10 @@ export async function assignProjectOwners(opts: {
   // one caller by accident of insertion order.
   const share = new Map<string, string[]>(targets.map(id => [id, []]));
   (rows as any[]).forEach((r, i) => share.get(targets[i % targets.length])!.push(r.id));
-  for (const [target, ids] of share) {
-    if (!ids.length) continue;
-    // Rows already on that person are a no-op — bulkAssignOwners does not
-    // rewrite history for a move that is not one — so this counts what MOVED.
-    assigned += await bulkAssignOwners(ids, target, ctx);
-  }
+  // All or nothing (moveAll). Rows already on that person are a no-op — a
+  // move that is not one writes no history — so this counts what MOVED.
+  const moves = await moveAll([...share].map(([target, ids]) => ({ kind: 'owner' as const, ids, agentId: target })), ctx);
+  for (const m of moves) assigned += m.n;
   // …and what each person now HOLDS in this project, which is the number the
   // screen should say. "Aniket 0" after splitting a project he already had half
   // of is true about the moves and wrong about the world.
@@ -4203,29 +4244,26 @@ export async function distributeWork(opts: {
   };
 
   let leads = 0, owners = 0;
+  const plan: { kind: 'lead' | 'owner'; ids: string[]; agentId: string }[] = [];
   if (kinds.includes('leads')) {
     const rows = await sql`
       SELECT id FROM crm_leads
        WHERE tenant_id = ${t} AND agent_id = ${opts.fromUserId} AND ${OPEN}
        ORDER BY created_at`;
-    for (const [target, ids] of deal(rows.map((r: any) => r.id))) {
-      if (!ids.length) continue;
-      const n = await bulkAssignLeads(ids, target, ctx);
-      leads += n;
-      const slot = perTarget.find(p => p.id === target); if (slot) slot.leads = n;
-    }
+    for (const [target, ids] of deal(rows.map((r: any) => r.id))) plan.push({ kind: 'lead', ids, agentId: target });
   }
   if (kinds.includes('owners')) {
     const rows = await sql`
       SELECT id FROM crm_owners
        WHERE tenant_id = ${t} AND agent_id = ${opts.fromUserId} AND ${OWNER_OPEN}
        ORDER BY created_at`;
-    for (const [target, ids] of deal(rows.map((r: any) => r.id))) {
-      if (!ids.length) continue;
-      const n = await bulkAssignOwners(ids, target, ctx);
-      owners += n;
-      const slot = perTarget.find(p => p.id === target); if (slot) slot.owners = n;
-    }
+    for (const [target, ids] of deal(rows.map((r: any) => r.id))) plan.push({ kind: 'owner', ids, agentId: target });
+  }
+  // All or nothing: a hand-over half done leaves the leaver holding the rest.
+  for (const m of await moveAll(plan, ctx)) {
+    const slot = perTarget.find(p => p.id === m.agentId);
+    if (m.kind === 'lead') { leads += m.n; if (slot) slot.leads = m.n; }
+    else { owners += m.n; if (slot) slot.owners = m.n; }
   }
 
   audit({
@@ -4280,11 +4318,11 @@ export async function splitAssign(
 
   const perTarget: { id: string; name: string | null; n: number }[] = [];
   let assigned = 0;
-  for (const [target, list] of share) {
-    if (!list.length) continue;
-    const n = kind === 'leads' ? await bulkAssignLeads(list, target, ctx) : await bulkAssignOwners(list, target, ctx);
-    assigned += n;
-    perTarget.push({ id: target, name: (live as any[]).find(u => u.id === target)?.name ?? null, n });
+  // All or nothing (moveAll).
+  const moves = await moveAll([...share].map(([target, list]) => ({ kind: kind === 'leads' ? 'lead' as const : 'owner' as const, ids: list, agentId: target })), ctx);
+  for (const m of moves) {
+    assigned += m.n;
+    perTarget.push({ id: m.agentId!, name: (live as any[]).find(u => u.id === m.agentId)?.name ?? null, n: m.n });
   }
   return { assigned, perTarget };
 }
@@ -4359,10 +4397,11 @@ export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SY
   const names = await sql`SELECT id, name FROM users WHERE tenant_id = ${t} AND id IN ${sql([...byTarget.keys()])}`;
   const perTarget: { id: string; name: string | null; n: number }[] = [];
   let assigned = 0;
-  for (const [target, list] of byTarget) {
-    const n = side === 'leads' ? await bulkAssignLeads(list, target, ctx) : await bulkAssignOwners(list, target, ctx);
-    assigned += n;
-    perTarget.push({ id: target, name: (names as any[]).find(u => u.id === target)?.name ?? null, n });
+  // All or nothing (moveAll).
+  const moves = await moveAll([...byTarget].map(([target, list]) => ({ kind: side === 'leads' ? 'lead' as const : 'owner' as const, ids: list, agentId: target })), ctx);
+  for (const m of moves) {
+    assigned += m.n;
+    perTarget.push({ id: m.agentId!, name: (names as any[]).find(u => u.id === m.agentId)?.name ?? null, n: m.n });
   }
   audit({
     tenant_id: t, actor_type: ctx.actorType || 'user', actor_id: ctx.actorId ?? null,
@@ -4386,37 +4425,11 @@ export async function heldWork(userId: string): Promise<{ leads: number; owners:
 export async function bulkAssignOwners(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
   const who = getContext();
   if (who?.role === 'agent') throw new ForbiddenError('Assigning owners is done from the desk.');
-  const clean = [...new Set((ids || []).filter(Boolean))];
-  if (clean.length === 0) return 0;
-  const t = tid();
-  await assertWorkable(t, [agentId]);
-  // WHO HELD THEM BEFORE, read before the update overwrites it — the same
-  // thing bulkAssignLeads does, and the owner side did not: an owner moved
-  // between callers changed hands with nothing on the record saying so, and
-  // nothing to count when asking whether one is being passed around.
-  const before = await sql`
-    SELECT id, agent_id FROM crm_owners
-    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
-      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
-  const res = await sql`
-    UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW()
-    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
-      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
-  const n = res.count;
-  if (n === 0) return 0;
-  // The whole selection's history in one go -- see recordAssignments().
-  await recordAssignments(before.map((row: any) => ({
-    recordId: row.id, prevAgentId: row.agent_id, agentId,
-    reason: 'bulk assignment', author: ctx.actorId ?? null,
-  })));
-  audit({
-    tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
-    actor_label: ctx.actorLabel ?? null, action: 'owner.bulk_assign', target_type: 'owner', target_id: null,
-    summary: agentId ? `${n} owner${n === 1 ? '' : 's'} assigned` : `${n} owner${n === 1 ? '' : 's'} unassigned`,
-    metadata: { ids: clean, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
-  });
-  if (agentId) await notifyHandedOver('owner', agentId, before as any[]);
-  return n;
+  // Same move as bulkAssignLeads, on the calling list (moveRecords): the
+  // previous holder read first, so an owner moved between callers carries it.
+  const m = await moveRecords(sql, 'owner', ids, agentId, ctx);
+  await afterMove(m, ctx);
+  return m.n;
 }
 
 /**

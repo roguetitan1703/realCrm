@@ -43,10 +43,12 @@ export class NotWorkableError extends Error {
 }
 
 /** Throws NotWorkableError for the first of these ids (in the order given) that cannot take work. */
-export async function assertWorkable(tenantId: string, ids: (string | null | undefined)[]): Promise<void> {
+export async function assertWorkable(tenantId: string, ids: (string | null | undefined)[], q: any = sql): Promise<void> {
   const clean = [...new Set(ids.filter(Boolean).map(String))];
   if (!clean.length) return;
-  const bad = await sql`
+  // `q` is a transaction when the check guards writes in one: re-checked there,
+  // a person suspended between the first check and the writes undoes them all.
+  const bad = await q`
     SELECT x.id, coalesce(u.name, a.name) AS name FROM unnest(${clean}::text[]) AS x(id)
       LEFT JOIN users u ON u.tenant_id = ${tenantId} AND u.id = x.id
       LEFT JOIN crm_agents a ON a.tenant_id = ${tenantId} AND a.id = x.id
