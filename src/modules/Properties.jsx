@@ -20,6 +20,7 @@ import Icon from '../components/Icon.jsx'
 import { PROPERTIES_DEF } from './definitions.jsx'
 import PropertyWizard, { fromCopy, scoreOf } from './PropertyWizard.jsx'
 import { canEditListing, canAddListing, canChangeCatalogue } from '../lib/permissions.js'
+import { catalogueToast } from '../lib/share.js'
 import { openSend } from './SendSheet.jsx'
 
 // The filter bar speaks in arrays ({ status: ['Available','Blocked'] }) because
@@ -241,11 +242,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
       .then(r => {
         endPick()
         store.touched?.()
-        const n = r?.changed ?? ids.length
-        const bare = on && r?.withoutPhotos > 0 ? ` · ${r.withoutPhotos} have no photos` : ''
-        store.toast(on
-          ? `${n} ${n === 1 ? 'home' : 'homes'} added to the catalogue${bare}`
-          : `${n} ${n === 1 ? 'home' : 'homes'} taken out of the catalogue`)
+        store.toast(catalogueToast(r, on, ids.length))
       })
       .catch(e => store.toast(e?.status === 403 ? 'Only an owner or manager can change the catalogue.' : 'Could not change the catalogue. Try again.', 'warn'))
   }

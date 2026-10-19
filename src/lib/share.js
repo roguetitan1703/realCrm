@@ -102,6 +102,21 @@ export function sentHomeLine(s) {
   return parts.join(' · ')
 }
 
+/** What a catalogue change did, from the server's own counts: "8 added ·
+ *  2 waiting until Available · 6 have no photos". `live` is on the public
+ *  page now; `waiting` is ticked but not Available, so not shown yet. */
+export function catalogueToast(r, on, asked) {
+  const n = Number(r?.changed ?? asked) || 0
+  if (!on) return `${n} ${n === 1 ? 'home' : 'homes'} taken out of the catalogue`
+  if (n === 0) return 'Already in the catalogue'
+  const waiting = Number(r?.waiting) || 0
+  const live = r?.live != null ? Number(r.live) : n - waiting
+  const parts = [live > 0 ? `${live} added to the catalogue` : '']
+  if (waiting > 0) parts.push(`${waiting} waiting until Available`)
+  if (Number(r?.withoutPhotos) > 0) parts.push(`${r.withoutPhotos} ${Number(r.withoutPhotos) === 1 ? 'has' : 'have'} no photos`)
+  return parts.filter(Boolean).join(' · ')
+}
+
 /** 409 lead_held_by, in words. `holderName` is a person, or "the office" for a
  *  number that is an unassigned lead or held by someone no longer active. */
 export function heldText(holderName) {
