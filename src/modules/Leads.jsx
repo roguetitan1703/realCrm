@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
-import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
+import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown, useSelection } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
 import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
@@ -119,7 +119,8 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   // Which rows are checked, on the page currently shown. A Set of lead ids.
-  const [selected, setSelected] = useState(new Set())
+  const selection = useSelection()
+  const selected = selection.ids
 
   // Any filter change is a new first page and drops a selection made against
   // rows that are about to be replaced.
@@ -133,13 +134,13 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
       return { ...s, leadFilters: Object.keys(next).length ? next : undefined }
     })
     setPage(1)
-    setSelected(new Set())
+    selection.clear()
   }
 
   const setFltP = (v) => patchFilters({
     source: v?.source, locality: v?.locality, agent: v?.agent, flag: v?.flag, alert: v?.alert,
   })
-  const setQP = (v) => { setQ(v); setPage(1); setSelected(new Set()) }
+  const setQP = (v) => { setQ(v); setPage(1); selection.clear() }
   const setSortKeyP = (v) => patchFilters({ sortKey: v })
   const setSortDirP = (v) => patchFilters({ sortDir: v })
   const setSegP = (v) => patchFilters({ seg: v })
@@ -150,7 +151,8 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const setIntentP = (v) => patchFilters({ intent: v })
   const setStageP = (v) => patchFilters({ stage: v })
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
-  const setPageP = (v) => { setPage(v); setSelected(new Set()) }
+  // Changing page keeps the ticks (useSelection); what is being asked for does not.
+  const setPageP = (v) => setPage(v)
 
   const role = state.role
   const canAssign = canAssignLead(role)
@@ -238,7 +240,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const bulkAssign = () => store.openModal({
     kind: 'bulkAssign',
     leadIds: [...selected],
-    onDone: () => setSelected(new Set()),
+    onDone: () => selection.clear(),
   })
 
   // Deleting a selection is the one bulk action with nothing to undo, so it
@@ -253,7 +255,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     try {
       const res = await api.bulkDeleteLeads([...selected])
       if (res?.success) {
-        setSelected(new Set())
+        selection.clear()
         store.toast(
           res.skipped
             ? `${res.deleted} deleted · ${res.skipped} skipped (not yours to delete)`
@@ -286,7 +288,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
         { label: 'Bulk assign', icon: 'userPlus', onClick: bulkAssign },
         ...(canDelete ? [{ label: 'Delete', icon: 'trash', tone: 'danger', onClick: bulkDelete }] : []),
       ],
-      onClear: () => setSelected(new Set()),
+      onClear: () => selection.clear(),
     } : null,
     page, onPage: setPageP, pageSize, onPageSize: setPageSizeP,
     leftAddon: (
@@ -332,7 +334,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} phone={phone} />
       : <ModuleTable def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP}
-          selectable={canAssign} selectedIds={selected} onSelectionChange={setSelected} />,
+          selectable={canAssign} selectedIds={selected} onSelectionChange={selection.set} />,
   })
 
   return (
@@ -466,6 +468,11 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   const propRows = [
     ...shortlistIds.map(byId).filter(Boolean).map(p => ({ p, shortlisted: true, line: quotedShort(p) })),
     ...matches.filter(m => !shortlistIds.includes(m.id)).map(m => ({ p: m, shortlisted: false, line: quotedShort(m) })),
+    // A home this person asked about from the catalogue is theirs to follow
+    // up even when nobody shortlisted it and the matcher did not pick it.
+    ...(shareRows || []).filter((r, i, a) => r.propertyId && !shortlistIds.includes(r.propertyId) && !matches.some(m => m.id === r.propertyId)
+      && a.findIndex(x => x.propertyId === r.propertyId) === i)
+      .map(r => { const p = byId(r.propertyId) || { id: r.propertyId, society: r.title || 'Property' }; return { p, shortlisted: false, line: quotedShort(p) } }),
   ].sort((a, b) => (fbMap[a.p.id]?.verdict === 'rejected' ? 1 : 0) - (fbMap[b.p.id]?.verdict === 'rejected' ? 1 : 0))
 
   // One home's sends, folded: the latest send, every open, the last open, and
