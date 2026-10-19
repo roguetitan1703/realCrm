@@ -105,6 +105,11 @@ gaps are in `specs/notifications.md` §1, not here.
 
 ## To verify
 
+- **Stale ids on production rotas** (dev delpat had `u_mue1klh4`): routing now
+  skips them, but how many firms carry them, and so how many portal leads went
+  to "a former member", is unmeasured. Run `backend/src/scripts/stale-rota-ids.ts`
+  (read-only) once Om approves production reads. The owner rota
+  (`nextRoutedOwnerAgent`) still hands out stale ids. *agent*
 - **A listing owner's Callback stays on To do after the call** (seen on the
   demo, 17 Oct): a lead's booked call closes on Call, an owner's did not.
   Check whether that is the rule or a gap. *agent*

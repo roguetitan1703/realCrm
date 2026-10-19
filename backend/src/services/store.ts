@@ -1992,12 +1992,24 @@ export async function findLeadByPhone(phone: string, tenantId?: string): Promise
 
 export async function getLeadById(id: string): Promise<any | undefined> {
   const t = tid();
-  const rows = await sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`;
-  if (rows.length === 0) return undefined;
-  const [timelineRows, shortlistRows] = await Promise.all([
+  // ONE ROUND TRIP, NOT FIVE. The row, its timeline, its shortlist, its
+  // enquiries and its activities do not depend on each other; awaited in turn
+  // they were five trips (~150ms each on dev) on every record open and every
+  // lead created. Settled, not all: a lead outside this person's scope still
+  // answers undefined without looking at the rest, and an error in a part
+  // surfaces exactly where it did before (enquiries are optional, the rest not).
+  const [rowsR, timelineR, shortlistR, enquiriesR, actsR] = await Promise.allSettled([
+    sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`,
     sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} AND tenant_id = ${t} ORDER BY timestamp DESC`,
     sql`SELECT * FROM lead_shortlist WHERE lead_id = ${id} AND tenant_id = ${t}`,
+    getEnquiriesForLead(id),
+    getActivitiesForLead(id),
   ]);
+  const settled = <T,>(r: PromiseSettledResult<T>): T => { if (r.status === 'rejected') throw r.reason; return r.value; };
+  const rows = settled(rowsR);
+  if (rows.length === 0) return undefined;
+  const timelineRows = settled(timelineR);
+  const shortlistRows = settled(shortlistR);
   // author and metadata are NOT optional here. This projection listed six
   // fields and dropped both, so every event on a lead RECORD arrived with
   // authorId null and metadata {} — while the same events fetched through
@@ -2034,14 +2046,14 @@ export async function getLeadById(id: string): Promise<any | undefined> {
   // an implementation detail the agent should never have been able to feel.
   // The enquiry history. Read alongside the timeline so the record can show
   // what was asked for on each occasion rather than a prose note about it.
-  lead.enquiries = await getEnquiriesForLead(id).catch(() => []);
+  lead.enquiries = enquiriesR.status === 'fulfilled' ? enquiriesR.value : [];
   lead.enquiryCount = lead.enquiries.length;
   // Everything they have ever asked for, in one shape. The sheet reads the
   // sets off this, the header reads the latest and the count of the rest, and
   // the matcher reads the span — so none of them can describe the person
   // differently.
   lead.enquiryRollup = enquiryRollup(lead.enquiries);
-  const acts = await getActivitiesForLead(id);
+  const acts = settled(actsR);
   if (acts.length) {
     lead.timeline = [...(lead.timeline || []), ...acts]
       .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -2123,6 +2135,13 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const receivedAt = leadData.received_at ?? leadData.receivedAt ?? null;
 
   const t = tid();
+  // The assignee's name for the first timeline entry, read alongside the
+  // insert rather than after it (one round trip fewer).
+  // `.then` starts it now (a postgres.js query is lazy until then) and keeps a
+  // failed read from becoming an unhandled rejection if the insert throws first.
+  const assigneeP: Promise<any[]> = agentId
+    ? sql`SELECT name FROM users WHERE tenant_id = ${t} AND id = ${agentId} LIMIT 1`.then(r => r as any[], () => [])
+    : Promise.resolve([]);
   const rows = await sql`
     INSERT INTO crm_leads (
       id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback,
@@ -2142,7 +2161,7 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
 
   // A person's name, never their user id ("Assigned to agent u_team_…"), and
   // nothing at all when nobody was assigned (it read "agent null").
-  const [assignee] = agentId ? await sql`SELECT name FROM users WHERE tenant_id = ${t} AND id = ${agentId} LIMIT 1` : [];
+  const [assignee] = await assigneeP;
   await addTimelineEvent({
     record_id: newId,
     type: 'creation',
@@ -2167,13 +2186,6 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const notifName = name || phone || undefined;
   notify({ userId: agentId, type: 'lead_assigned', data: { name: notifName, locality, source }, link, push: true })
     .catch(err => console.warn('[Notify] lead_assigned failed:', err?.message));
-  // Name the agent, not their primary key. This read "routed to u_ms6oqbda",
-  // which tells the person reading it nothing and looks broken besides.
-  const agentName = agentId
-    ? (await sql`SELECT name FROM crm_agents WHERE id = ${agentId} AND tenant_id = ${tid()} LIMIT 1`)[0]?.name
-      ?? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name
-      ?? 'an agent'
-    : 'the queue';
   // NO lead_new. It fired on every arrival alongside lead_assigned -- 216 and
   // 216 over the SAME 216 links on bhumi in 14 days -- so one lead landing cost
   // two notifications, and the owner collected 233 in a fortnight. An owner
@@ -5055,11 +5067,11 @@ function assertCatalogueRole() {
   if (role && role !== 'system' && !isDeskRole(role)) throw new ForbiddenError('Only an owner or a manager can change what is in the catalogue.');
 }
 
-export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = SYSTEM_CTX): Promise<{ changed: number; withoutPhotos: number }> {
+export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = SYSTEM_CTX): Promise<{ changed: number; live: number; waiting: number; withoutPhotos: number }> {
   assertCatalogueRole();
   const t = tid();
   const clean = [...new Set((ids || []).map(String).filter(Boolean))].slice(0, 1000);
-  if (!clean.length) return { changed: 0, withoutPhotos: 0 };
+  if (!clean.length) return { changed: 0, live: 0, waiting: 0, withoutPhotos: 0 };
   const rows = await sql`
     UPDATE crm_properties SET in_catalogue = ${on}, updated_at = NOW()
      WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND coalesce(in_catalogue, FALSE) <> ${on}
@@ -5089,11 +5101,18 @@ export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = S
       }
     }
   }
-  const withoutPhotos = on
-    ? (await sql`SELECT count(*)::int AS n FROM crm_properties
-                  WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND in_catalogue = TRUE
-                    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(media, '[]'::jsonb)) m WHERE m->>'kind' IS DISTINCT FROM 'video')`)[0].n
-    : 0;
+  // Of the ticked homes: `live` are on the page now (Available, the
+  // catalogue's own rule); `waiting` are ticked but not Available, and appear
+  // when they are; `withoutPhotos` counts live ones only — a sold flat with no
+  // photos is not a photo job.
+  const [tally] = on
+    ? await sql`SELECT
+          count(*) FILTER (WHERE ${LIVE})::int AS live,
+          count(*) FILTER (WHERE NOT (${LIVE}))::int AS waiting,
+          count(*) FILTER (WHERE ${LIVE} AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(media, '[]'::jsonb)) m WHERE m->>'kind' IS DISTINCT FROM 'video'))::int AS without
+        FROM crm_properties WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND in_catalogue = TRUE`
+    : [{ live: 0, waiting: 0, without: 0 }];
+  const withoutPhotos = tally.without;
   for (const r of rows as any[]) {
     await propertyEvent(r.id, ctx, 'catalogue', 'Catalogue', on ? 'Shown in the catalogue' : 'Taken out of the catalogue');
   }
@@ -5106,8 +5125,9 @@ export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = S
       metadata: { ids: rows.map((r: any) => r.id) }, ip: ctx.ip, user_agent: ctx.userAgent,
     });
   }
-  return { changed: rows.length, withoutPhotos };
+  return { changed: rows.length, live: tally.live, waiting: tally.waiting, withoutPhotos };
 }
+const LIVE = sql`coalesce(status, 'Available') ILIKE 'available'`;
 
 /**
  * The numbers the stat strip and the filter menus need, counted in Postgres.
@@ -5691,13 +5711,33 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
  * round-robin actually needs.
  */
 export async function nextRoutedAgent(): Promise<string | null> {
-  const rows = await sql`
-    UPDATE crm_routing_rules
-    SET last_assigned_index = (last_assigned_index + 1) % GREATEST(jsonb_array_length(active_agent_ids), 1)
-    WHERE tenant_id = ${tid()} AND jsonb_array_length(active_agent_ids) > 0
-    RETURNING active_agent_ids -> last_assigned_index AS agent_id
-  `;
-  if (rows.length && rows[0].agent_id) return String(rows[0].agent_id).replace(/^"|"$/g, '');
+  // THE NEXT ACTIVE PERSON ON THE ROTA. The stored list can name someone who
+  // was suspended, deleted, or never had a user row; handing a lead to that id
+  // filed it under "a former member" until the sweep moved it. So the rota
+  // steps forward from where it stood to the first id that is an active user
+  // of this firm, and stops there — the same rotation over the people who can
+  // take a lead. The stored list is not rewritten. One statement.
+  const t = tid();
+  const [row] = await sql`
+    WITH r AS (
+      SELECT active_agent_ids AS ids, last_assigned_index AS i, jsonb_array_length(active_agent_ids) AS len
+        FROM crm_routing_rules WHERE tenant_id = ${t} AND jsonb_array_length(active_agent_ids) > 0
+         FOR UPDATE
+    ), pick AS (
+      SELECT (r.i + k) % r.len AS idx, r.ids ->> ((r.i + k) % r.len) AS agent_id
+        FROM r, generate_series(1, r.len) AS k
+       WHERE EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = ${t} AND u.id = r.ids ->> ((r.i + k) % r.len)
+                        AND u.deleted_at IS NULL AND u.status ILIKE 'active')
+       ORDER BY k LIMIT 1
+    ), moved AS (
+      UPDATE crm_routing_rules c SET last_assigned_index = pick.idx FROM pick
+       WHERE c.tenant_id = ${t} RETURNING pick.agent_id
+    )
+    SELECT (SELECT agent_id FROM moved) AS agent_id, EXISTS (SELECT 1 FROM r) AS configured`;
+  if (row?.agent_id) return String(row.agent_id);
+  // A rota is set but nobody on it can take a lead: unassigned, like an empty
+  // rota of real people — the unassigned alert and the sweep take it from there.
+  if (row?.configured) return null;
 
   // The pool has never been configured for this tenant (no row, or an empty
   // active_agent_ids) — fall back to every on-duty agent that actually
