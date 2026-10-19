@@ -13,7 +13,7 @@
 import { Router, Request, Response } from 'express';
 import { appEnv } from '../services/env';
 import { requireTenantAuth } from '../middleware/auth';
-import { getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates, listContacts } from '../services/store';
+import { getPulse, resetDatabase, updateSettings, getSettings, withReplyFallback, replyFallbackOf, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates, listContacts } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { isDeskRole } from '../lib/permissions';
@@ -266,7 +266,7 @@ workspaceRouter.post('/settings', async (req: Request, res: Response) => {
   const patch = req.body;
   try {
     const updated = await updateSettings(patch);
-    res.status(200).json({ success: true, settings: updated });
+    res.status(200).json({ success: true, settings: withReplyFallback(updated, await replyFallbackOf(getContext()!.tenantId!)) });
   } catch (err: any) {
     // Stopping every shared link is an owner's call (store.ts cleanSharingPatch).
     if (err?.status === 403) return res.status(403).json({ error: 'FORBIDDEN', message: err.message });

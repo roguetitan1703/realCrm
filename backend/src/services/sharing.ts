@@ -42,7 +42,7 @@ import { normalizePhone } from './roster.js';
 import { BHK } from '../../../src/data/propertyFields.js';
 import { isDeskRole } from '../lib/permissions.js';
 import {
-  findLeadByPhone, createLead, updateLead, addTimelineEvent, sharingOf, deskConfigOf, localeOf, listingKind, bhkTokenOf, type Locale,
+  findLeadByPhone, createLead, updateLead, addTimelineEvent, sharingOf, deskConfigOf, localeOf, listingKind, replyFallbackOf, bhkTokenOf, type Locale,
   REJECTED_STATUS, type ActorCtx,
 } from './store.js';
 
@@ -132,11 +132,7 @@ async function activeUser(tenantId: string, id: string | null | undefined): Prom
 async function firmPhone(tenantId: string): Promise<string | null> {
   const s = await sharingOf(tenantId);
   if (s.replyToPhone) return s.replyToPhone;
-  const [o] = await sql`
-    SELECT phone FROM users WHERE tenant_id = ${tenantId} AND role = 'owner'
-       AND deleted_at IS NULL AND status ILIKE 'active' AND coalesce(phone, '') <> ''
-     ORDER BY created_at NULLS LAST LIMIT 1`;
-  return o?.phone || null;
+  return replyFallbackOf(tenantId);
 }
 
 /**
