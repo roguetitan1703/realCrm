@@ -287,7 +287,7 @@ card, which then answers the firm's card without resolving the code (below):
     fetchers (WhatsApp, Facebook, Telegram, Slack, Twitter, Discord, Google,
     LinkedIn, Skype, iMessage), firm staff, non-GET.
   - With a staff session: `staff: { tap?{id,code,propertyId,deviceId,at,
-    leadId}, link{id,code,state: active|expired|off|stopped,createdBy,leadId,
+    leadId,tapFrom}, link{id,code,state: active|expired|off|stopped,createdBy,leadId,
     createdAt,expiresAt,propertyIds,showPrice}, lead?{id,name,phone,stage,
     agentId,holderName} | {id, visible:false} }`. On a dead link staff also get
     its `flats`, for Send a fresh link.
@@ -398,7 +398,14 @@ message, …}`):
   expiresAt}|null}] }`, most recent first. Same visibility as the lead.
   **(changed, review 3)** `opens` counts only views that name the home;
   `linkOpens` counts opens of the list page of the links that carried it.
-  Both count once per browser per firm day.
+  Both count once per browser per firm day. **(changed, review 4)** Each row
+  says why the home is there: `via`, strongest first, from `tapped` (I'm
+  interested on it), `enquired` (a catalogue form for it), `sent` (on a link
+  sent to this lead), `link` (on a link they opened, not tapped). `tapFrom`
+  (`them` | `someone`, null with no tap) says whether a tap came from a
+  browser already attached to this lead; any other browser is `someone`, never
+  stated as them (CLAUDE.md §3.1). The staff block on a tap code carries the
+  same `tapFrom`.
 - `POST /share-taps/:code/lead {phone, name?} | {leadId}` → `{ lead{id,name,
   created}, matched, deviceAttached }` (`matched` = the number was already a
   lead). Takes a tap code or a talk code. Puts the event and its device on the
@@ -409,7 +416,10 @@ message, …}`):
   2)** A tap already on a lead answers `409 tap_has_lead` for any other lead,
   checked before a number can become a new lead; two adds at once, the second
   gets the same 409.
-- `POST /properties/catalogue {ids, on}` → `{ changed, withoutPhotos }`. The
+- `POST /properties/catalogue {ids, on}` → **(changed, review 4)** `{ changed,
+  live, waiting, withoutPhotos }`: of the ticked homes, `live` are Available
+  (on the page), `waiting` are ticked but not Available, and `withoutPhotos`
+  counts live ones only. The
   single-property update takes `inCatalogue`. **(changed)** Owners and managers
   only, both ways (403 for agents; an agent's update that sends the current
   value unchanged still saves). `GET /properties?catalogue=yes|no`
