@@ -147,6 +147,38 @@ What this shows: device IDs matter only for **I1f, I2, I3** (telling viewers
 apart). I1 needs none, and P needs none before the form. The one new idea it
 surfaced is **Attach to a lead** (I3), which also gives I2r its answer.
 
+### A.1d Getting people into leads without the WhatsApp integration (proposed, 19 Oct)
+
+Without the integration the CRM never sees a WhatsApp message, so the number
+always comes through the agent. Both flows keep that to one paste or one pick.
+
+**A WhatsApp reply from a link becomes a lead.**
+1. The buyer taps I'm interested. The CRM records the tap (link, flat, device)
+   and opens WhatsApp to the agent with "…Pride World City 2 BHK · ref k7m2qx".
+2. The agent gets the alert "Someone on your link is interested in Pride World
+   City 2 BHK". Tapping it opens **Add as lead** with the link and the flat
+   already attached.
+3. The only thing the agent provides is the number: **Paste** (copied from the
+   WhatsApp chat), or **Pick from contacts** on Android (Contact Picker; iPhone
+   has none, so paste there).
+4. The number is matched like every lead. If it is already the agent's lead,
+   the tap goes onto it as "came back". If it is someone else's lead, it is not
+   duplicated: that agent is told.
+5. With no alert to start from (the buyer deleted the prefilled text), Add lead
+   offers "Came from" with the agent's recent links.
+
+Once the integration exists, step 3 disappears: the message arrives with its
+ref and number, and attaches by itself.
+
+**Sending to someone who is not a lead creates the lead.**
+In Send, the recipient box searches leads and also takes **a new person**: name
+and number, typed or picked from contacts. Sending creates the lead assigned to
+the agent, binds the link to it, puts the sent flats on its shortlist, and opens
+WhatsApp straight to that number (as WhatsApp from a lead does today). The
+requirement is left empty, not guessed from the flats (CLAUDE.md §3.1); the
+shortlist already drives matching. A number that is already a lead is matched,
+as above.
+
 ### A.2 Needs that do not exist yet
 
 - A link table (code, creator, lead or none, flat ids, show price, created,
