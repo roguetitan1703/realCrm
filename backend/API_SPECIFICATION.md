@@ -88,3 +88,14 @@ Every module has its own **Core Locked Fields** (mandatory SQL columns required 
 2. **Idempotent Webhook Deduplication:** Primary phone and email are B-tree indexed columns on `module_records`, ensuring 0ms duplicate detection.
 3. **Double-Booking Row Locking:** Inventory unit reservation uses PostgreSQL transactional locking (`SELECT FOR UPDATE`) to prevent simultaneous sales agent bookings.
 4. **Runtime Zod Validation:** Custom field insertions are validated against dynamic schema rules before DB execution.
+
+## Assigning work to a named person — `422 not_workable`
+
+Every request that hands records to a person it names is refused when that person cannot take work (no users row in the firm, removed, or status not active): `POST /leads/bulk-assign`, `POST /owners/bulk-assign`, `POST /owners/assign-project`, `POST /team/users/:id/distribute`, `POST /team/routing/assign-unowned` (with `agentIds`), creating or updating a lead or an owner with an `agentId`. The answer is:
+
+```json
+HTTP 422
+{ "success": false, "error": "not_workable", "name": "Siddhi", "message": "Siddhi cannot be given work." }
+```
+
+`name` is the first such person in the order given (null when the id names nobody known). Requests with several targets are all or nothing: nothing is assigned. Spreadsheet imports are never refused for this: a row naming such a person is filed unassigned, with the reason on that row of the import report.
