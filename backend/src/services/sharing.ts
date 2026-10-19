@@ -647,11 +647,12 @@ export async function catalogueEnquiry(f: Firm, input: { name?: string; phone?: 
   const leadId = out.leadId || null;
   const createdLead = out.status === 'ingested';
   await recordEvent(f.id, { linkId: null, propertyId: flat?.id || null, kind: 'enquiry', deviceId: r.deviceId, leadId });
-  if (leadId) {
+  // The flat and the browser join the lead only when this enquiry made it:
+  // typing an existing lead's number must not change that lead's shortlist or
+  // file this browser under them (the flat is in the enquiry record anyway).
+  if (leadId && createdLead) {
     if (flat) await addToShortlist(f.id, leadId, [flat.id]);
-    // The browser joins the lead only when this enquiry made it: typing an
-    // existing lead's number must not file this browser under them.
-    if (createdLead && r.deviceId) await attachDevice(f.id, r.deviceId, leadId);
+    if (r.deviceId) await attachDevice(f.id, r.deviceId, leadId);
   }
   return { ok: true };
 }
