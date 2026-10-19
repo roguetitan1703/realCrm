@@ -115,19 +115,22 @@ export function sentHomeLine(s) {
   return parts.filter(Boolean).join(' · ')
 }
 
-/** What a catalogue change did, from the server's own counts: "8 added ·
- *  2 waiting until Available · 6 have no photos". `live` is on the public
- *  page now; `waiting` is ticked but not Available, so not shown yet. */
-export function catalogueToast(r, on, asked) {
-  const n = Number(r?.changed ?? asked) || 0
-  if (!on) return `${n} ${n === 1 ? 'home' : 'homes'} taken out of the catalogue`
+/** What a catalogue change did, from the server's counts for the homes in
+ *  THIS request: `changed` = `live` (on the public page now) + `waiting`
+ *  (ticked, not Available, so not shown yet); `withoutPhotos` among them. */
+export function catalogueToast(r, on) {
+  const n = Number(r?.changed) || 0
+  const homes = (k) => `${k} ${k === 1 ? 'home' : 'homes'}`
+  if (!on) return n ? `${homes(n)} taken out of the catalogue` : 'Not in the catalogue'
+  if (!n) return 'Already in the catalogue'
+  const live = Number(r?.live) || 0
   const waiting = Number(r?.waiting) || 0
-  if (n === 0 && !waiting) return 'Already in the catalogue'
-  const live = r?.live != null ? Number(r.live) : n - waiting
-  const parts = [live > 0 ? `${live} added to the catalogue` : '']
-  if (waiting > 0) parts.push(`${waiting} waiting until Available`)
-  if (Number(r?.withoutPhotos) > 0) parts.push(`${r.withoutPhotos} ${Number(r.withoutPhotos) === 1 ? 'has' : 'have'} no photos`)
-  return parts.filter(Boolean).join(' · ')
+  const bare = Number(r?.withoutPhotos) || 0
+  return [
+    live > 0 && `${live} added to the catalogue`,
+    waiting > 0 && `${waiting} waiting until Available`,
+    bare > 0 && `${bare} ${bare === 1 ? 'has' : 'have'} no photos`,
+  ].filter(Boolean).join(' · ')
 }
 
 /** 409 lead_held_by, in words. `holderName` is a person, or "the office" for a

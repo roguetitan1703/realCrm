@@ -363,9 +363,8 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
     const payload = { ...form, completeness: score, ...(copyId ? { copiedFrom: copyId } : {}) }
     try {
       if (editing) {
-        store.updateProp(editing.id, payload)
-        store.toast('Property updated')
-        close()
+        // Leave only once it is saved: a refusal keeps the edit on screen.
+        if (await store.updateProp(editing.id, payload)) close()
         return
       }
       if (ownerId) {

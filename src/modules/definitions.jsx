@@ -38,6 +38,7 @@ import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 
 import { canAssignLead, canEditLead, canUpdateLeadStatus, canEditListing, isDeskRole } from '../lib/permissions.js'
 import { api } from '../lib/api.js'
+import { assignFailed } from '../lib/workforce.js'
 import { openSend } from './SendSheet.jsx'
 import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
@@ -306,7 +307,7 @@ export const LEADS_DEF = {
             if (res?.success) { store.toast(agentId ? 'Lead assigned' : 'Lead unassigned'); store.settled?.() }
             else store.toast(res?.message || 'Could not assign', 'warn')
           })
-          .catch(err => store.toast(err.message || 'Could not assign', 'warn'))}
+          .catch(err => assignFailed(store, err))}
       />
     ) },
     { key: 'next', label: 'Next follow-up', render: (l) => {
@@ -696,7 +697,7 @@ export const OWNERS_DEF = {
             if (res?.success) { store.toast(agentId ? 'Owner assigned' : 'Owner unassigned'); store.settled?.() }
             else store.toast(res?.message || 'Could not assign', 'warn')
           })
-          .catch(err => store.toast(err.message || 'Could not assign', 'warn'))}
+          .catch(err => assignFailed(store, err))}
       />
     ) },
   ],

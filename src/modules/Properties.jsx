@@ -242,7 +242,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
       .then(r => {
         endPick()
         store.touched?.()
-        store.toast(catalogueToast(r, on, ids.length))
+        store.toast(catalogueToast(r, on))
       })
       .catch(e => store.toast(e?.status === 403 ? 'Only an owner or manager can change the catalogue.' : 'Could not change the catalogue. Try again.', 'warn'))
   }

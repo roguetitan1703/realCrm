@@ -18,6 +18,7 @@ import { messageLang } from '../data/vocabLocale.js'
 import { disablePush } from './push.js'
 import { readSupport, endSupport } from './support.js'
 import { isOpen } from '../data/leadStatus.js'
+import { canWork, isNotWorkable, notWorkableText } from './workforce.js'
 
 // Pending shortlist writes, per lead (see changeShortlist).
 const shortlistQueue = new Map()
@@ -1132,8 +1133,11 @@ export function StoreProvider({ children }) {
   }
   const failed = useCallback((err, what) => {
     console.warn(`[${what}]`, err?.message || err)
+    // The person was suspended or lost their login after this screen loaded:
+    // say so, and re-read the team so the picker stops offering them.
+    if (isNotWorkable(err)) { toast(notWorkableText(err), 'warn'); loadServerState(true); return }
     toast(cleanErrMsg(err) || `Could not save. ${what} failed.`, 'warn')
-  }, [toast])
+  }, [toast, loadServerState])
 
   // A 200 carrying `success: false` is still a refusal. Treat it as one.
   const rejected = (res) => res && res.success === false
@@ -1225,7 +1229,10 @@ export function StoreProvider({ children }) {
     // Who may be given work: on duty AND still employed. It excluded only the
     // off-duty ones, so a suspended person stayed pickable everywhere — and
     // the server took it, because a hidden option was the only guard.
-    activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id) && !a.suspended),
+    // canTakeWork is the server's own answer (services/workforce.ts): a login,
+    // not deleted, status active. `!a.suspended` let an invited or account-less
+    // person through, and the server now refuses them with 422 not_workable.
+    activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id) && canWork(a)),
     
     // ── Records ───────────────────────────────────────────────────────────
     // Look a record up. The cache holds what the app has already shown — every
@@ -1327,13 +1334,14 @@ export function StoreProvider({ children }) {
     },
     // Remark thread (B1) — real persistence, not the old client-only note echo.
     // kind = 'lead' | 'property' | 'owner'.
+    // Resolves true once saved, so a caller can keep its text on a refusal.
     addRemark: (kind, id, text) => {
-      apiClient.addRemark(id, text)
+      return apiClient.addRemark(id, text)
         .then(res => {
-          if (res?.success && res.timeline_event) { dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event }); toast('Remark added') }
-          else toast('Could not save the remark', 'warn')
+          if (res?.success && res.timeline_event) { dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event }); toast('Remark added'); return true }
+          toast('Could not save the remark', 'warn'); return false
         })
-        .catch(err => { console.warn('[Remark API] error:', err.message); toast('Could not save the remark. Try again.', 'warn') })
+        .catch(err => { console.warn('[Remark API] error:', err.message); toast('Could not save the remark. Try again.', 'warn'); return false })
     },
     // THE SERVER'S EVENT, WHOLE. This rebuilt the row from the two values it
     // had sent — so a locked row (a booking) took the agent's note as its
@@ -1435,7 +1443,9 @@ export function StoreProvider({ children }) {
         const created = res?.data || res?.lead || res?.record || null
         dispatch({ type: 'ADD_LEAD', lead: created?.id ? created : lead })
       },
-      'Lead saved and assigned'),
+      // It is saved; whether anyone has it is the record's own business — the
+      // form may have left it with nobody, or the rota picked someone.
+      'Lead saved'),
     // Resolves the SERVER's record, not the payload we sent. The old version
     // optimistically prepended the raw form data, which carries no id — the
     // server mints it — so the card was unclickable (open(undefined)) and
@@ -1577,7 +1587,7 @@ export function StoreProvider({ children }) {
     // resolves with the numbers rather than assuming them.
     distributeWork: (fromId, targets, kinds) => apiClient.distributeWork(fromId, targets, kinds)
       .then(res => { dispatch({ type: 'REASSIGN_ALL', fromId, toId: targets[0] }); settled(); return res })
-      .catch(err => { toast(err.message || 'Could not hand the work over', 'warn'); return null }),
+      .catch(err => { failed(err, 'Hand the work over'); return null }),
     // Real teammate creation — the server makes a login-capable user, so we take
     // the server's roster as truth rather than an optimistic local guess.
     // Create a login-capable teammate (password auth). Resolves to the API
