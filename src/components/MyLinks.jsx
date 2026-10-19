@@ -120,7 +120,11 @@ export function MyLinks({ store, go }) {
 const PAGE = 10
 
 const homesWord = (l) => {
+  // Which home, not only how many: twelve rows of "No recipient · 1 home"
+  // cannot be told apart.
   const n = l.flats?.length ?? l.homes ?? 0
+  const first = l.flats?.[0]?.title
+  if (first) return n > 1 ? `${first} + ${n - 1} more` : first
   return `${n} ${n === 1 ? 'home' : 'homes'}`
 }
 
