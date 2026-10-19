@@ -217,11 +217,22 @@ authRouter.patch('/me', async (req: Request, res: Response) => {
   if (digits.length < 10 || digits.length > 13) return res.status(400).json({ error: 'phone_invalid', message: 'A 10-digit mobile number is needed.' });
   try {
     const phone = normalizePhone(raw, await localeOf(u.tenant_id));
-    const clash = await sql`SELECT 1 FROM users WHERE tenant_id = ${u.tenant_id} AND phone = ${phone} AND id <> ${u.id} AND deleted_at IS NULL LIMIT 1`;
+    // The last ten digits, the same rule as findLeadByPhone, and deleted users
+    // too: the unique index (idx_users_tenant_phone) counts them, so a number
+    // a removed member still holds would otherwise surface as a 500.
+    const ten = String(phone || '').replace(/\D/g, '').slice(-10);
+    const clash = await sql`SELECT 1 FROM users WHERE tenant_id = ${u.tenant_id} AND id <> ${u.id}
+      AND right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) = ${ten} LIMIT 1`;
     if (clash.length) return res.status(409).json({ error: 'phone_taken', message: 'Someone on this team already uses that number.' });
     const [before] = await sql`SELECT phone FROM users WHERE tenant_id = ${u.tenant_id} AND id = ${u.id} LIMIT 1`;
-    await sql`UPDATE users SET phone = ${phone}, metadata = coalesce(metadata, '{}'::jsonb) || ${sql.json({ phone })}
-               WHERE tenant_id = ${u.tenant_id} AND id = ${u.id}`;
+    try {
+      await sql`UPDATE users SET phone = ${phone}, metadata = coalesce(metadata, '{}'::jsonb) || ${sql.json({ phone })}
+                 WHERE tenant_id = ${u.tenant_id} AND id = ${u.id}`;
+    } catch (e: any) {
+      // Two people saving the same number at once: the index decides.
+      if (e?.code === '23505') return res.status(409).json({ error: 'phone_taken', message: 'Someone on this team already uses that number.' });
+      throw e;
+    }
     await sql`UPDATE crm_agents SET metadata = coalesce(metadata, '{}'::jsonb) || ${sql.json({ phone })}
                WHERE tenant_id = ${u.tenant_id} AND id = ${u.id}`;
     audit({
