@@ -14,6 +14,8 @@ import { CallActionSchema, WhatsAppActionSchema, StageChangeSchema, MergeSchema 
 import { requireTenantAuth, requireModuleEnabled, requireQuotaAvailable } from '../middleware/auth';
 import { getLeads, createLead, getAgents, getLeadById, listLeads, getLeadsSummary, getLeadCandidates, bulkAssignLeads, bulkDeleteLeads, splitAssign } from '../services/store';
 import { sql } from '../services/db';
+import { leadShares } from '../services/sharing';
+import { shareFail } from './sharing';
 
 export const leadsRouter = Router();
 leadsRouter.use(requireTenantAuth);
@@ -157,6 +159,16 @@ leadsRouter.get('/:id/matches', async (req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to fetch matches', message: err.message });
   }
+});
+
+/**
+ * WHAT THIS LEAD WAS SENT, AND WHAT THEY DID WITH IT
+ * GET /api/v1/leads/:id/shares — per flat: sent at, opens, last opened,
+ * interested taps, devices, the latest link (listing-pages.md §A.5).
+ */
+leadsRouter.get('/:id/shares', async (req: Request, res: Response) => {
+  try { return res.status(200).json({ success: true, data: await leadShares(req.params.id, (req.headers.origin as string) || null) }); }
+  catch (err) { return shareFail(res, err); }
 });
 
 /**
