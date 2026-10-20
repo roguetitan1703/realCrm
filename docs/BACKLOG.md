@@ -106,6 +106,11 @@ gaps are in `specs/notifications.md` §1, not here.
   none, so nothing can say a callback is late. (Owners store one.) *agent*
 - **Booked site visits with no time** — bhumi 5 of 29 (typed text only).
 - **`/api/v1/ingest` has no rate limit** (code). A leaked key fills a desk.
+- **Owner phones not stored +91** (production, read-only, 20 Oct): bhumi 213
+  of 1,324, mahalaxmi 163 of 3,737; leads 7 of 952 and 1 of 477. Matching is
+  on the last 10 digits, so nothing is lost; display and tel/WhatsApp links
+  differ. New writes store +91 from the next deploy; old rows are not repaired.
+  One bhumi number is held by 2 leads in different formats.
 - **4 paying-firm users cannot sign in by phone code** (production, read-only,
   17 Oct): bhumi 1 of 4 and mahalaxmi 3 of 5 user phones are stored as bare 10
   digits, and the sign-in lookup matches `+91…` exactly. Older than the locale
@@ -119,16 +124,6 @@ gaps are in `specs/notifications.md` §1, not here.
 
 ## To verify
 
-- **Stale ids on production rotas** (dev delpat had `u_mue1klh4`): both rotas
-  now skip them, but how many firms carry them, and so how many portal leads
-  went to "a former member", is unmeasured. Run `backend/src/scripts/stale-rota-ids.ts`
-  (read-only) once Om approves production reads. *agent*
-- **Shortlists cut by a reopened lead** (dev, 20 Oct; fixed on `development`):
-  a lead reopened from the list showed the legacy column, and removing one home
-  rewrote `lead_shortlist` from it (5 rows → 1). Live since list rows were
-  merged over records; how many production shortlists shrank is unmeasured —
-  count `lead_shortlist`-removal timeline events that dropped more than one
-  home, read-only, with Om's yes. *agent*
 - **A listing owner's Callback stays on To do after the call** (seen on the
   demo, 17 Oct): a lead's booked call closes on Call, an owner's did not.
   Check whether that is the rule or a gap. *agent*

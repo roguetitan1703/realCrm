@@ -1,10 +1,10 @@
 # Work state
 
 ## Now
-Catalog release readiness: everything merged on `development` (cf81d05); waits on Om's yes to two read-only production runs (STATE.md).
+Catalog release readiness: concept review + on-screen QA of the whole `development` diff (production reads done 20 Oct: no paying firm changes).
 
 ## Next
-1. Run the two production reads once Om says yes; report per firm
+1. Fix what the review and QA find
 2. Om re-tests the dev preview (dev API redeploy first), then Release 1 + catalog
 3. Help desk: report a problem, then the help centre
 4. Cutroom records the US film (RUN.md)

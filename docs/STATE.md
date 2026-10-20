@@ -30,15 +30,6 @@ Not re-read this session; as of 17 Oct:
 
 ## Waiting on the user
 
-- **Yes/no on two read-only production runs**, which gate any release of
-  `development`:
-  1. `npx tsx --env-file=.env backend/src/scripts/stale-rota-ids.ts` — dead
-     ids on each firm's rotas, and each firm's saved strategies. A saved lead
-     `strategy='manual'` was never read before; it now leaves leads unassigned
-     and stops the lead sweeps. If bhumi or mahalaxmi have it, they change.
-  2. Phone formats per tenant (the script was in a scratchpad and is gone;
-     rewrite it read-only: messy phones in leads/owners/users, lead pairs newly
-     matching on the last 10 digits).
 - **Re-test on the dev preview** (dev API must be redeployed first), then the
   release. Re-run `alert-first-run-preview.ts` the morning of the deploy.
 - **`PLAN.md` §6** questions still open (Q1 and Q5 answered 19 Oct).
@@ -70,7 +61,17 @@ Not re-read this session; as of 17 Oct:
   shortlist matches `lead_shortlist`; routing reads `manual`). Every probe row
   removed by id; audit_log rows stay (hash-chained). delpat's lead strategy is
   `manual` with the sweep on — it was so before.
-- **Production:** nothing read this session.
+- **Production, read only (Om's yes, 20 Oct; `BEGIN READ ONLY`, confirmed
+  `transaction_read_only = on`):**
+  - Rotas: 0 stale ids at bhumi (7 leads, 7 owners) and mahalaxmi (4, 4).
+    Only `bhumi-propcity` (the phantom tenant) has one: `owner_bhumi-propcity`.
+  - Saved strategies: bhumi leads round_robin, owners manual, all sweeps off;
+    mahalaxmi round_robin both, sweeps off. **Honouring "Leave unassigned"
+    changes nothing at either paying firm.**
+  - Shortlist bug: 0 saves removed 2+ homes anywhere. bhumi has 4 removal
+    saves in all (5 and 10 Oct), each one home, none with an add in the same
+    save — no sign it ever fired in production.
+  - Phones: see BACKLOG Bugs (owner phones; 4 users who cannot sign in).
 
 ---
 
