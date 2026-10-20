@@ -44,6 +44,7 @@
     "express": "^5.2.1",
     "jpeg-js": "^0.4.4",
     "jsonwebtoken": "^9.0.3",
+    "libphonenumber-js": "1.13.14",
     "nodemailer": "^9.0.3",
     "postgres": "^3.4.9",
     "react": "^18.3.1",
