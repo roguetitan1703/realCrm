@@ -1,11 +1,11 @@
 # Work state
 
 ## Now
-Catalog release readiness: concept review + on-screen QA of the whole `development` diff (production reads done 20 Oct: no paying firm changes).
+Release readiness: phone model (A, `a-phone-model`, review fixes in progress) and buyer forms + view retention (B, `b-forms`) — both paused by the session limit until 23:20 IST 20 Oct, work saved in their worktrees.
 
 ## Next
-1. Fix what the review and QA find
-2. Om re-tests the dev preview (dev API redeploy first), then Release 1 + catalog
+1. Resume A and B; review; merge
+2. Om: dev preview re-test (dev API redeploy first), then the release (`docs/releases/2026-10-20.md`)
 3. Help desk: report a problem, then the help centre
 4. Cutroom records the US film (RUN.md)
 
