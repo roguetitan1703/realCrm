@@ -365,14 +365,32 @@ export async function requestPasswordReset(tenantId: string, handleRaw: string, 
   const u = rows[0];
   if (!u) return; // silent — don't reveal whether the account exists
 
+  // ONE LIVE LINK PER ACCOUNT, AT MOST ONE EMAIL EVERY 10 MINUTES. Anyone can
+  // ask for a reset for any handle, so each request made and mailed a new
+  // link: an inbox could be flooded. A cap on emails per handle would let a
+  // stranger use it up and keep the real person from getting a link. Now: a
+  // live link sent under 10 minutes ago means nothing happens; otherwise every
+  // live link is expired and a new one is made and sent. The newest email
+  // always works, about six an hour at most, and only hashes are stored.
+  // Decided under a lock on the account, so two requests at once send once.
   const token = randomBytes(24).toString('base64url');
-  const tokenHash = createHash('sha256').update(token).digest('hex');
-  const id = `pwr_${Date.now()}_${randomBytes(4).toString('hex')}`;
-  const expiresAt = new Date(Date.now() + 30 * 60000).toISOString();
-  await sql`
-    INSERT INTO password_resets (id, tenant_id, user_id, token_hash, expires_at)
-    VALUES (${id}, ${tenantId}, ${u.id}, ${tokenHash}, ${expiresAt})
-  `;
+  const made = await sql.begin(async (tx: any) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${`password-reset:${tenantId}:${u.id}`}))`;
+    const [recent] = await tx`SELECT 1 AS x FROM password_resets
+       WHERE tenant_id = ${tenantId} AND user_id = ${u.id} AND consumed = FALSE AND expires_at > NOW()
+         AND created_at > NOW() - interval '10 minutes' LIMIT 1`;
+    if (recent) return false;
+    await tx`UPDATE password_resets SET expires_at = NOW()
+       WHERE tenant_id = ${tenantId} AND user_id = ${u.id} AND consumed = FALSE AND expires_at > NOW()`;
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const id = `pwr_${Date.now()}_${randomBytes(4).toString('hex')}`;
+    const expiresAt = new Date(Date.now() + 30 * 60000).toISOString();
+    await tx`
+      INSERT INTO password_resets (id, tenant_id, user_id, token_hash, expires_at)
+      VALUES (${id}, ${tenantId}, ${u.id}, ${tokenHash}, ${expiresAt})`;
+    return true;
+  });
+  if (!made) return;
   const brand = await brandFor(tenantId);
   const base = (origin || APP_BASE_URL).replace(/\/+$/, '');
   const link = `${base}/${tenantId}/reset?token=${token}`;

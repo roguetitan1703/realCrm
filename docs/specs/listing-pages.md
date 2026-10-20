@@ -137,7 +137,7 @@ WhatsApp is for shared links. A link sent to someone is that someone's.
 | **I1. Sent to one buyer** (one flat or several) | The buyer | The lead it was sent to | Opens, flats opened, Interested per flat, expired-link Talk to us | The lead, its shortlist (`lead_shortlist`), alert lifecycle, WhatsApp logging | Link and tap tables; send from shortlist/Properties; alerts (Interested, expired, back on a new day) |
 | **I1f. …and the buyer forwards it** (family, a friend) | Several people on one link | Still the lead; the other people are unknown | Opens per device; "opened on another device" | — | Device ID (to tell devices apart) |
 | **I2. Sent to a group** (broker group, society group, WhatsApp status, Instagram story) | Many, unknown | Nobody | Opens, unique devices, Interested taps per flat | — | Device ID for unique counts; the link on "My links" with its numbers |
-| **I2r. …someone from the group writes on WhatsApp** | One of them | Their WhatsApp number, seen by the agent | The lead it became, credited to the link | Add lead | On Add lead, "came from" lists the agent's recent links, so the source is the link; later, automatic via the message's ref once WhatsApp is integrated |
+| **I2r. …someone from the group writes on WhatsApp** | One of them | Their WhatsApp number, seen by the agent | The lead it became, credited to the link | Add lead | **(changed)** On Add lead, "Came from" lists the agent's links with no recipient; picking one sets the source to `Shared link` and credits the lead (a timeline line, the link's homes on the shortlist). The link is **not** bound and no browser is attached: it stays the group's, so the others' opens, taps and alerts are not this person's (`POST /share-links/:id/came-from`). Later, automatic via the message's ref once WhatsApp is integrated |
 | **I3. Sent to one person not yet a lead** (a walk-in, a contact's number) | One person | The agent knows them; the CRM does not | As I2 | — | **Attach to a lead** on the link later, which moves its history onto the lead |
 | **I4. Sent to another broker** (co-broking) | The broker, then their client | Unknown | As I2 | Source "Broker" exists in lead sources | Nothing new; the agent marks the lead's source |
 | **I5. Sent by a manager for an agent's lead** | The buyer | The lead | As I1 | — | Taps go to the lead's holder, not the creator (already the rule) |
@@ -145,7 +145,9 @@ WhatsApp is for shared links. A link sent to someone is that someone's.
 
 What this shows: device IDs matter only for **I1f, I2, I3** (telling viewers
 apart). I1 needs none, and P needs none before the form. The one new idea it
-surfaced is **Attach to a lead** (I3), which also gives I2r its answer.
+surfaced is **Attach to a lead** (I3). **(changed)** It is not I2r's answer:
+attaching binds the link and every browser that opened it, which on a group
+link makes the whole group one person. I2r only credits the lead.
 
 ### A.1d Getting people into leads without the WhatsApp integration (proposed, 19 Oct)
 
@@ -262,13 +264,31 @@ sends it as `X-Device-Id`. Anything else is treated as no device.
 header when it has one for that tenant. A valid session of that firm is never
 counted as a view, gets the `staff` block, and its taps and Talk presses are not
 recorded and raise nothing. Its browser is remembered as staff.
+**(changed)** That memory is used: a browser in `crm_share_staff_devices` is
+staff on every later open even signed out — not a view, not a return, not a
+first-today, and its taps and Talk presses raise nothing. A usable tap code
+opened with no session carries `staffSignIn: true`, so the page can offer
+staff a Sign in that comes back to the same code.
 
 **Public API** (no sign-in; responses carry no `success` envelope; errors are
 `{error, message}`; rate-limited per IP, 429 `slow_down`). Everything that
 resolves a code — the page, Talk to us, I'm interested and the preview card —
-shares one limit (120 a minute) and one miss budget (30 unmatched codes per 10
-minutes), after which even a real code answers 429 — except the preview
-card, which then answers the firm's card without resolving the code (below):
+shares one limit and one miss budget (30 unusable codes per 10 minutes), after
+which even a real code answers 429 — except the preview card, which then
+answers the firm's card without resolving the code (below). **(changed)** The
+limit is on misses, not buyers: carriers put many buyers behind one address,
+so valid opens have a ceiling of 600 a minute per address (taps 60, Talk 30,
+catalogue 600, enquiries 10 per 10 minutes). A miss is any code that is no
+use — unknown, off, stopped **or expired**. On the API all of them spend it
+alike; staff opening their own dead links spend nothing. On the preview card
+a real-but-unusable code does not spend it for a preview user agent (the card
+arrives from Vercel's shared egress address, so a forwarded expired link would
+otherwise blank every buyer's previews); unknown codes always do. That list
+also matches scripts, so a script on the card route can tell an expired code
+from one that never existed; accepted, as it does not speed up guessing. **(changed)** Every 429 is `{ error: 'slow_down', message,
+firm{name,logo,accent,locale}, cta{phone}, catalogueUrl }` (the firm's
+reply-to; `firm`/`cta` absent only for an unknown firm), so the page can still
+offer WhatsApp and the catalogue:
 - `GET /public/s/:tenant/:code[?flat=<propertyId>]` — a link or a tap code.
   - **(changed)** `{ kind: link|tap, state: active|unavailable, firm{name,
     logo, accent}, flats[Flat], showPrice, forRecipient, cta{phone},
@@ -282,7 +302,9 @@ card, which then answers the firm's card without resolving the code (below):
   - `catalogueUrl` is `/<tenant>/homes`, or null when the catalogue has no
     available flat.
   - `cta.phone` is the lead's current holder, else the link's creator, else
-    the firm's reply-to.
+    the firm's reply-to. **(changed)** On a link with a lead, a holder with no
+    phone (or none active) answers with the reply-to, never the creator: the
+    creator may have handed the buyer on.
   - Records a view (`expired_view` on an expired link). Not counted: preview
     fetchers (WhatsApp, Facebook, Telegram, Slack, Twitter, Discord, Google,
     LinkedIn, Skype, iMessage), firm staff, non-GET.
@@ -393,9 +415,25 @@ message, …}`):
   on another lead stays there. Staff browsers are never attached.
   **(changed, review 2)** Two attaches at once: the second gets `409
   link_has_lead`.
+- **(added)** `POST /share-links/:id/came-from {leadId}` → `{ ok }`. I2r:
+  credits the lead (timeline `share` "Came from a link", the link's homes on
+  the shortlist, audited). Binds nothing. Creator or desk; 404 for an unknown
+  link or lead, 403 when the sender may not act on the lead. Once per link and
+  lead: a repeat answers `{ ok, already: true }` and writes nothing.
+- **(added)** `POST /share-taps/:code/fresh` (a talk or tap code, which is what
+  `share_expired_open` links to) → 201, the same body as `POST /share-links`
+  plus `text`: `{ link, lead|null, waUrl, text }`. A new link, same homes,
+  same recipient (the link's lead, else the lead the tap has since become),
+  same price setting, made by the person pressing it (the
+  link's sender, the lead's holder, or desk; 403 otherwise). Its refusals are
+  Send's: `422 flats_not_available {ids}` / `flats_not_found {ids}` for homes
+  sold or gone since, `sharing_stopped`, `sender_phone_missing`,
+  `private_flats_without_recipient {ids}`.
 - `GET /leads/:id/shares` → `{ data: [{propertyId,title,available,sentAt,
   opens,linkOpens,lastOpenedAt,interested,enquiries,devices,link{id,code,url,state,
-  expiresAt}|null}] }`, most recent first. Same visibility as the lead.
+  expiresAt}|null}], devices }`, most recent first. Same visibility as the lead.
+  **(changed)** `devices` (top level) is the distinct browsers that opened or
+  tapped any link that reached the lead ("Opened on 2 devices").
   **(changed, review 3)** `opens` counts only views that name the home;
   `linkOpens` counts opens of the list page of the links that carried it.
   Both count once per browser per firm day. **(changed, review 4)** Each row
@@ -415,7 +453,10 @@ message, …}`):
   it (403 otherwise); 30 a minute per person (then 429). **(changed, review
   2)** A tap already on a lead answers `409 tap_has_lead` for any other lead,
   checked before a number can become a new lead; two adds at once, the second
-  gets the same 409.
+  gets the same 409. **(changed)** The 409 carries `{ holderName, mine }`
+  (`holderName` the holder's name, "the office" when nobody active holds it;
+  `mine` true when it is the caller's own lead). Nobody is alerted: the tap is
+  already on a lead its holder works, so there is nothing for them to do.
 - `POST /properties/catalogue {ids, on}` → **(changed, review 4)** `{ changed,
   live, waiting, withoutPhotos }`, all four about one set: the homes THIS
   request put in the catalogue (`changed`; already-ticked homes are not

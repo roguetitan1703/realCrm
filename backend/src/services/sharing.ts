@@ -40,7 +40,7 @@ import { landEnquiry } from './ingestion.js';
 import { assertLeadWrite } from '../lib/permissions.js';
 // A buyer's number is kept by the same rule as every lead's (locale.js), not
 // roster.ts normalizePhone, which keeps the last ten digits of a foreign one.
-import { phoneAsStored } from '../../../src/lib/locale.js';
+import { phoneAsStored, waLink } from '../../../src/lib/locale.js';
 import { CATALOGUE_WHERE, HAS_PHOTO } from './catalogueRules.js';
 import { canTakeWork } from './workforce.js';
 import { BHK } from '../../../src/data/propertyFields.js';
@@ -81,11 +81,10 @@ export const deviceIdOf = (raw: unknown): string | null => {
   return /^[A-Za-z0-9_-]{8,64}$/.test(v) ? v : null;
 };
 
-/** wa.me wants the number with its country code and nothing else. No number: WhatsApp asks who. */
-export const waUrl = (phone: string | null | undefined, text: string) => {
-  const d = String(phone || '').replace(/\D/g, '');
-  return `https://wa.me/${d}?text=${encodeURIComponent(text)}`;
-};
+/** wa.me with the country code (locale.js waLink, the one builder). It
+ *  stripped non-digits and stopped, so a number stored as ten bare digits
+ *  opened "not on WhatsApp" for the buyer. No number: WhatsApp asks who. */
+export const waUrl = (phone: string | null | undefined, text: string, loc: Locale) => waLink(phone, text, loc);
 
 /**
  * The app's address, for links put inside messages. The browser's Origin is
@@ -141,9 +140,13 @@ async function firmPhone(tenantId: string): Promise<string | null> {
 
 /**
  * WHO A LINK'S BUYER REACHES, worked out when it is used, not when it was sent
- * (§A.1: Rahul's lead moves to Priya → Priya). `recipient` gets the alert;
- * `phone` is where WhatsApp opens: the lead's current holder, else the link's
- * creator, else the firm's reply-to number (else an owner's).
+ * (§A.1: Rahul's lead moves to Priya → Priya). `recipient` gets the alert:
+ * the holder, else the creator, else the desk. `phone` is where WhatsApp
+ * opens, in the spec's order (§A.1, §A.2 rule 3): on a link with a lead, its
+ * current holder; on a link with none, its sender; and when that person has
+ * left or has no phone, the firm's reply-to number (else an owner's). It fell
+ * back to the CREATOR's phone, so a lead moved to a phoneless Priya sent the
+ * buyer to the agent who no longer held them.
  */
 async function whoAnswers(tenantId: string, leadId: string | null, creatorId: string | null) {
   let lead: any = null;
@@ -153,7 +156,8 @@ async function whoAnswers(tenantId: string, leadId: string | null, creatorId: st
   // Independent reads, so one round trip, not two (each is ~150ms to the database).
   const [holder, creator] = await Promise.all([activeUser(tenantId, lead?.agent_id), activeUser(tenantId, creatorId)]);
   const recipient = holder || creator || null;
-  const phone = holder?.phone || creator?.phone || (await firmPhone(tenantId));
+  const answering = lead ? holder : creator;
+  const phone = answering?.phone || (await firmPhone(tenantId));
   return { lead: lead || null, recipient, phone: phone || null };
 }
 
@@ -350,7 +354,23 @@ export interface PublicReq {
 
 /** A session of THIS firm: the firm's own staff. Their opens are not counted. */
 const staffOf = (f: Firm, r: PublicReq) => (r.user && r.user.tenant_id === f.id ? r.user : null);
-const counted = (f: Firm, r: PublicReq) => !staffOf(f, r) && !isPreviewFetcher(r.userAgent) && r.method === 'GET';
+
+/**
+ * STAFF, SIGNED IN OR NOT: a session of this firm, or a browser a member of the
+ * firm has used while signed in (crm_share_staff_devices, written by
+ * markStaffDevice and until now never read for this). An agent tapping the
+ * ref link in a buyer's message opens it in a browser with no session, and
+ * that open was a view on the buyer's lead, a "back on your link" about their
+ * own tap, and a real Interested alert if they tried the button.
+ */
+async function staffBrowser(f: Firm, r: PublicReq): Promise<boolean> {
+  if (staffOf(f, r)) return true;
+  if (!r.deviceId) return false;
+  const [s] = await sql`SELECT 1 FROM crm_share_staff_devices WHERE tenant_id = ${f.id} AND device_id = ${r.deviceId} LIMIT 1`;
+  return !!s;
+}
+const counted = async (f: Firm, r: PublicReq) =>
+  !isPreviewFetcher(r.userAgent) && r.method === 'GET' && !(await staffBrowser(f, r));
 
 /**
  * GET /public/s/:tenant/:code — open a link or a tap.
@@ -363,10 +383,11 @@ export async function openCode(f: Firm, code: string, r: PublicReq, flatParam?: 
   const { link, tap } = found;
   const state = linkState(link, sharing.stopped);
   const loc = await localeOf(f.id);
+  const isCounted = await counted(f, r);
 
   // Who it is known to be: the link's lead, else whoever this browser became.
   const knownLead = link.lead_id || (await deviceLead(f.id, r.deviceId));
-  if (counted(f, r)) {
+  if (isCounted) {
     const propertyId = tap ? (tap.property_id || null)
       : (flatParam && (link.property_ids || []).includes(flatParam) ? flatParam
         : ((link.property_ids || []).length === 1 ? link.property_ids[0] : null));
@@ -404,7 +425,17 @@ export async function openCode(f: Firm, code: string, r: PublicReq, flatParam?: 
   }
 
   if (staff) body.staff = await staffView(f, staff, link, tap, state);
-  return { body, miss: false };
+  // A REF IS FOR STAFF. A tap's code reaches a person only inside the buyer's
+  // WhatsApp message, i.e. on an agent's phone, usually in a browser with no
+  // session. `staffSignIn` tells the page to offer a quiet Sign in that comes
+  // back to this same code. Only on a usable tap code: an unusable one still
+  // answers the identical body.
+  if (!staff && tap && state === 'active') body.staffSignIn = true;
+  // Every unusable state spends the miss allowance, like an unknown code (on
+  // this route; see codeGate for the preview card's exception). Not for
+  // staff, who open their own dead links to send fresh ones. (Previews do
+  // not come here: they fetch the /share card, which has its own rule.)
+  return { body, miss: state !== 'active' && !staff };
 }
 
 /**
@@ -520,11 +551,11 @@ export async function interested(f: Firm, code: string, propertyId: string, r: P
   // STAFF TRYING THEIR OWN LINK leave no trace: no tap, no code, no alert. A
   // staff tap that was written used to count as the day's first, so the
   // buyer's real tap after it raised nothing.
-  const staff = !!staffOf(f, r);
+  const staff = await staffBrowser(f, r);
   const [who, tapCode, loc] = await Promise.all([
     whoAnswers(f.id, leadId, link.created_by), staff ? Promise.resolve('') : freshCode(f.id), localeOf(f.id),
   ]);
-  if (staff) return { waUrl: waUrl(who.phone, `Hi, I'm interested in this home: ${appBase(r.origin)}/${f.slug}/${link.code}`) };
+  if (staff) return { waUrl: waUrl(who.phone, `Hi, I'm interested in this home: ${appBase(r.origin)}/${f.slug}/${link.code}`, loc) };
   const tz = (await deskConfigOf(f.id)).timezone;
 
   // ONE ALERT PER FLAT PER LINK PER DAY (§A.1). Five taps on the same flat are
@@ -570,7 +601,7 @@ export async function interested(f: Firm, code: string, propertyId: string, r: P
     });
   }
   const text = `Hi, I'm interested in this home: ${appBase(r.origin)}/${f.slug}/${tapCode}`;
-  return { waUrl: waUrl(who.phone, text) };
+  return { waUrl: waUrl(who.phone, text, loc) };
 }
 
 /**
@@ -585,15 +616,16 @@ export async function talk(f: Firm, code: string, r: PublicReq): Promise<{ waUrl
   // EVERY UNUSABLE CODE ANSWERS THE SAME: the firm's number and the same words.
   // An expired link still tells its holder, but on the server — a holder's
   // number in the answer would tell a prober the code is real.
-  const firmTalk = async (miss: boolean) => ({ waUrl: waUrl(await firmPhone(f.id), NEUTRAL_TALK), miss });
+  const firmTalk = async (miss: boolean) => ({ waUrl: waUrl(await firmPhone(f.id), NEUTRAL_TALK, await localeOf(f.id)), miss });
   if (!found) return firmTalk(true);
   const { link } = found;
   const state = linkState(link, sharing.stopped);
-  if (state === 'off' || state === 'stopped') return firmTalk(false);
+  // Off and stopped spend the miss allowance like an unknown code (C6).
+  if (state === 'off' || state === 'stopped') return firmTalk(true);
   const leadId = link.lead_id || (await deviceLead(f.id, r.deviceId));
   const who = await whoAnswers(f.id, leadId, link.created_by);
-  if (state === 'active') return { waUrl: waUrl(who.phone, `Hi, about the homes you sent: ${appBase(r.origin)}/${f.slug}/${link.code}`), miss: false };
-  if (staffOf(f, r)) return firmTalk(false);
+  if (state === 'active') return { waUrl: waUrl(who.phone, `Hi, about the homes you sent: ${appBase(r.origin)}/${f.slug}/${link.code}`, await localeOf(f.id)), miss: false };
+  if (await staffBrowser(f, r)) return firmTalk(false);
 
   // Like a tap, the press gets its own code: the handle Add as lead works from
   // when nobody is on the link yet. One alert per link per day, decided under a lock.
@@ -612,7 +644,8 @@ export async function talk(f: Firm, code: string, r: PublicReq): Promise<{ waUrl
       record: lead ? { kind: 'lead', ids: [lead.id] } : { kind: 'share_tap', ids: [ev.id] },
     });
   }
-  return firmTalk(false);
+  // An expired code is unusable too: the same miss as any other (C6).
+  return firmTalk(true);
 }
 
 // ── The catalogue ───────────────────────────────────────────────────────────
@@ -623,7 +656,7 @@ export async function talk(f: Firm, code: string, r: PublicReq): Promise<{ waUrl
  * day: paging, filtering and reloads are one person looking, not ten.
  */
 async function catalogueView(f: Firm, propertyId: string | null, r: PublicReq) {
-  if (!counted(f, r)) return;
+  if (!(await counted(f, r))) return;
   await recordView(f.id, { linkId: null, propertyId, kind: 'view', deviceId: r.deviceId, leadId: await deviceLead(f.id, r.deviceId) });
 }
 
@@ -743,7 +776,7 @@ export async function catalogueEnquiry(f: Firm, input: { name?: string; phone?: 
   ]);
   if (today >= CATALOGUE_ENQUIRIES_PER_DAY) {
     console.warn(`[Share] catalogue enquiry cap reached for tenant ${f.id}: ${today} today`);
-    throw new ShareError(429, 'slow_down', 'Too many requests. Try again in a few minutes.');
+    throw new ShareError(429, 'slow_down', 'Too many requests. Try again in a few minutes.', { cta: { phone: await firmPhone(f.id) } });
   }
   const phone = phoneAsStored(input.phone, loc) || null;
   const name = String(input.name || '').trim().slice(0, 80) || null;
@@ -885,7 +918,7 @@ function assertMayShare(m: ReturnType<typeof me>, lead: any) {
 /**
  * POST /share-links {leadId? | newPerson{name,phone}, propertyIds, showPrice?}
  */
-export async function createShareLink(input: any, origin: string | null) {
+export async function createShareLink(input: any, origin: string | null, opts: { freshOf?: string } = {}) {
   const m = me();
   const ids: string[] = [...new Set((Array.isArray(input?.propertyIds) ? input.propertyIds : []).map(String).filter(Boolean))] as string[];
   // ONE ROUND TRIP FOR EVERYTHING READ UP FRONT. These reads do not depend on
@@ -966,13 +999,14 @@ export async function createShareLink(input: any, origin: string | null) {
     tenant_id: m.tenantId, actor_type: 'user', actor_id: m.userId, actor_label: null,
     action: 'share_link.create', target_type: 'share_link', target_id: link.id,
     summary: `Shared ${ids.length} home${ids.length === 1 ? '' : 's'}${lead ? '' : ' without a recipient'}`,
-    metadata: { code, leadId: lead?.id || null, propertyIds: ids, showPrice, createdLead }, ip: m.ip, user_agent: m.userAgent,
+    metadata: { code, leadId: lead?.id || null, propertyIds: ids, showPrice, createdLead, freshOf: opts.freshOf || null }, ip: m.ip, user_agent: m.userAgent,
   });
   const text = ids.length === 1 ? `Here is a home you may like: ${url}` : `Here are ${ids.length} homes you may like: ${url}`;
   return {
     link: { id: link.id, code, url, expiresAt: link.expires_at, showPrice },
     lead: lead ? { id: lead.id, name: lead.name, created: createdLead } : null,
-    waUrl: waUrl(lead?.phone || null, text),
+    waUrl: waUrl(lead?.phone || null, text, await localeOf(m.tenantId)),
+    text,
   };
 }
 
@@ -1096,6 +1130,55 @@ export async function attachLink(id: string, leadId: string) {
 }
 
 /**
+ * POST /share-links/:id/came-from {leadId} — "Came from" on Add lead (§A.1c
+ * I2r). Someone the link reached wrote to the agent; the lead is credited to
+ * the link and nothing else. The link is NOT bound and no browser is attached:
+ * a group link stays everyone's, so the other 199 members' opens and taps do
+ * not become this lead's, the page does not tell them "for you", and their
+ * taps do not alert as this person. (It called attachLink, which did all of
+ * that.) Attach to a lead (I3) is the separate path for a link sent to one
+ * person.
+ */
+export async function creditLink(id: string, leadId: string) {
+  const m = me();
+  const [l] = await sql`SELECT * FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND id = ${id} LIMIT 1`;
+  if (!l) throw new ShareError(404, 'not_found');
+  if (l.created_by !== m.userId && !isDeskRole(m.role)) throw new ShareError(403, 'forbidden', 'Only the person who sent it can credit it.');
+  const [lead] = await sql`SELECT * FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${String(leadId || '')} LIMIT 1`;
+  if (!lead) throw new ShareError(404, 'lead_not_found', 'That lead no longer exists.');
+  assertMayShare(m, lead);
+  // ONCE PER LINK AND LEAD. A retry or a second save is not a second
+  // arrival: it wrote another "Came from a link" each time. Check and write
+  // the line in one transaction under a lock on the pair, so a double tap
+  // waits for the first to commit and then finds its line. Written on `tx`,
+  // not through addTimelineEvent (a `share` line carries nothing else), so
+  // the lock never waits on a second connection.
+  const tz = (await deskConfigOf(m.tenantId)).timezone;
+  const already = await sql.begin(async (tx: any) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${`came-from:${m.tenantId}:${id}:${lead.id}`}))`;
+    const [done] = await tx`SELECT 1 AS x FROM crm_timeline_events
+       WHERE tenant_id = ${m.tenantId} AND record_id = ${lead.id} AND type = 'share'
+         AND metadata->>'shareLinkId' = ${id} AND (metadata->>'cameFrom')::boolean IS TRUE LIMIT 1`;
+    if (done) return true;
+    await tx`INSERT INTO crm_timeline_events (id, record_id, type, title, description, author, timestamp, metadata, tenant_id)
+      VALUES (${`evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`}, ${lead.id}, 'share', 'Came from a link',
+              ${`Came from the link sent ${sentOn(l.created_at, tz)}`}, ${m.userId}, ${new Date().toISOString()},
+              ${tx.json({ shareLinkId: id, code: l.code, cameFrom: true })}, ${m.tenantId})`;
+    return false;
+  });
+  if (already) return { ok: true, already: true };
+  // What they were sent is on the shortlist (the same rule as a sent link;
+  // one row per home, so a repeat adds nothing).
+  await addToShortlist(m.tenantId, lead.id, l.property_ids || []);
+  audit({
+    tenant_id: m.tenantId, actor_type: 'user', actor_id: m.userId, actor_label: null,
+    action: 'share_link.came_from', target_type: 'share_link', target_id: id, summary: `A lead came from shared link ${l.code}`,
+    metadata: { leadId: lead.id }, ip: m.ip, user_agent: m.userAgent,
+  });
+  return { ok: true, already: false };
+}
+
+/**
  * GET /leads/:id/shares — per flat: when it was first sent, opens, last opened,
  * interested taps, devices, and the latest link carrying it. Opens of a whole
  * link count for every flat on it; an open of one flat counts for that flat.
@@ -1164,7 +1247,10 @@ export async function leadShares(leadId: string, origin: string | null) {
   const ids = [...flats.keys()];
   const props = ids.length ? await sql`SELECT id, project, locality, bhk, status, config FROM crm_properties WHERE tenant_id = ${m.tenantId} AND id IN ${sql(ids)}` : [];
   const pById = new Map((props as any[]).map(p => [p.id, p]));
-  return [...flats.values()].map(({ why, ...s }) => ({
+  // "Opened on 2 devices": distinct browsers that opened or tapped any link
+  // that reached this lead -- the same kinds My links counts devices by.
+  const openedOn = new Set((events as any[]).filter(e => e.link_id && e.device_id && ['view', 'expired_view', 'interested'].includes(e.kind)).map(e => e.device_id)).size;
+  const data = [...flats.values()].map(({ why, ...s }) => ({
     ...s, devices: s.devices.size,
     // WHY THIS HOME IS HERE, strongest first. `link` only for a home they
     // opened a link with and did not tap.
@@ -1172,6 +1258,7 @@ export async function leadShares(leadId: string, origin: string | null) {
     title: pById.has(s.propertyId) ? flatLabel(pById.get(s.propertyId), loc) : null,
     available: pById.has(s.propertyId) ? isAvailable(pById.get(s.propertyId)) : false,
   })).sort((a, b) => new Date(b.lastOpenedAt || b.sentAt || 0).getTime() - new Date(a.lastOpenedAt || a.sentAt || 0).getTime());
+  return { data, devices: openedOn };
 }
 
 const VIA_ORDER = ['tapped', 'enquired', 'sent', 'link'] as const;
@@ -1209,7 +1296,7 @@ export async function tapToLead(code: string, input: any) {
       const found = digits.length >= 10 ? await findLeadByPhone(phoneAsStored(input.phone, await localeOf(m.tenantId)), m.tenantId) : null;
       target = found?.id || null;
     }
-    if (target !== tap.lead_id) throw new ShareError(409, 'tap_has_lead', 'This tap already belongs to another lead.');
+    if (target !== tap.lead_id) throw new ShareError(409, 'tap_has_lead', 'This tap already belongs to another lead.', await tapHolder(m, tap.lead_id));
   }
   let lead: any; let created = false;
   if (input?.leadId) {
@@ -1224,7 +1311,10 @@ export async function tapToLead(code: string, input: any) {
   // and is told, instead of silently moving it.
   const won = await sql`UPDATE crm_share_events SET lead_id = ${lead.id}
      WHERE tenant_id = ${m.tenantId} AND id = ${tap.id} AND (lead_id IS NULL OR lead_id = ${lead.id}) RETURNING id`;
-  if (!won.length) throw new ShareError(409, 'tap_has_lead', 'Someone has just added this tap to another lead.');
+  if (!won.length) {
+    const [now] = await sql`SELECT lead_id FROM crm_share_events WHERE tenant_id = ${m.tenantId} AND id = ${tap.id}`;
+    throw new ShareError(409, 'tap_has_lead', 'Someone has just added this tap to another lead.', await tapHolder(m, now?.lead_id || null));
+  }
   let deviceAttached = false;
   if (tap.device_id) deviceAttached = await attachDevice(m.tenantId, tap.device_id, lead.id);
   const [link] = tap.link_id ? await sql`SELECT code, created_at, property_ids FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND id = ${tap.link_id}` : [null];
@@ -1243,6 +1333,65 @@ export async function tapToLead(code: string, input: any) {
     metadata: { tapId: tap.id, created, deviceAttached }, ip: m.ip, user_agent: m.userAgent,
   });
   return { lead: { id: lead.id, name: lead.name, created }, matched: !created, deviceAttached };
+}
+
+/**
+ * POST /share-taps/:code/fresh — "Send a fresh link" from the alert a buyer's
+ * Talk to us on an expired link raises (share_expired_open carries the talk
+ * code, not the link). A new link with the same homes, the same recipient and
+ * the same price setting, made by whoever pressed it -- the sender, the
+ * lead's holder or the desk, the same people tapToLead lets act on the tap.
+ * The ordinary Send path makes it, so every refusal is Send's: a home sold or
+ * gone since (422 flats_not_available / flats_not_found with `ids`), sharing
+ * stopped, no sender phone, a private home on a link with no recipient.
+ * Returns what Send returns: { link, lead, waUrl, text }.
+ */
+export async function freshLinkFromTap(code: string, origin: string | null) {
+  const m = me();
+  const c = String(code || '').toLowerCase();
+  if (!CODE_RE.test(c)) throw new ShareError(404, 'not_found');
+  const [tap] = await sql`SELECT * FROM crm_share_events WHERE tenant_id = ${m.tenantId} AND code = ${c} AND kind IN ('interested', 'talk') LIMIT 1`;
+  if (!tap?.link_id) throw new ShareError(404, 'not_found');
+  const [link] = await sql`SELECT * FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND id = ${tap.link_id} LIMIT 1`;
+  if (!link) throw new ShareError(404, 'not_found');
+  // The recipient: the link's lead, else the lead this tap has since become
+  // (Add as lead on a group link's tap) -- that person asked, not the group.
+  const leadId: string | null = link.lead_id || tap.lead_id || null;
+  if (!isDeskRole(m.role)) {
+    const [ld] = leadId ? await sql`SELECT name, phone, agent_id FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${leadId}` : [null];
+    if (link.created_by !== m.userId && ld?.agent_id !== m.userId) {
+      throw new ShareError(403, 'forbidden', 'Only the person who sent this link, or the office, can send it again.');
+    }
+    // THE SENDER, BUT SOMEONE ELSE'S LEAD NOW. Still refused: the holder owns
+    // the buyer and has the same alert. It was refused as "This lead belongs to
+    // another team member", which named nobody; the sender needs to know whom
+    // to tell. `holderName` is "the office" when nobody active holds it.
+    if (ld && ld.agent_id !== m.userId) {
+      const holder = await activeUser(m.tenantId, ld.agent_id);
+      // Name the buyer only to someone who sent them this link themselves; a
+      // group link's tap that became another agent's lead is not theirs to see
+      // (permissions.ts: a lead you neither made nor hold is not visible).
+      const who = link.lead_id === leadId ? (ld.name || ld.phone || 'This buyer') : 'This buyer';
+      throw new ShareError(403, 'lead_moved', holder ? `${who} is ${holder.name || 'a colleague'}'s lead now.` : `${who} is with the office now.`,
+        { holderName: holder?.name || 'the office' });
+    }
+  }
+  return createShareLink({ leadId: leadId || undefined, propertyIds: link.property_ids || [], showPrice: !!link.show_price }, origin, { freshOf: link.id });
+}
+
+/**
+ * WHO HAS THE TAP ALREADY, for the 409 tap_has_lead. Nobody is alerted: the
+ * tap is already on a lead its holder works, so there is nothing for them to
+ * do (a notification must name something doable today). The screen says
+ * whose it is instead of "They have been told", which was not true.
+ * `{ holderName, mine }`: the holder's name ("the office" when nobody active
+ * holds it), and whether it is the person asking.
+ */
+async function tapHolder(m: ReturnType<typeof me>, leadId: string | null): Promise<{ holderName: string; mine: boolean }> {
+  if (!leadId) return { holderName: 'the office', mine: false };
+  const [l] = await sql`SELECT agent_id FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${leadId} LIMIT 1`;
+  const holder = await activeUser(m.tenantId, l?.agent_id);
+  return { holderName: holder?.name || 'the office', mine: !!holder && holder.id === m.userId };
 }
 
 /** Exported for the link-preview cards (routes/public.ts). */

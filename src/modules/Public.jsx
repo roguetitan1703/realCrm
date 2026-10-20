@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api.js'
 import { fileUrl } from '../lib/media.js'
-import { formatMoney, phoneLabel, phonePlaceholder, phoneProblem, roomLabel, firmLocale, setFirmLocale } from '../lib/locale.js'
+import { formatMoney, phoneLabel, phonePlaceholder, phoneProblem, roomLabel, firmLocale, setFirmLocale, waLink } from '../lib/locale.js'
 import { SUBTYPES, FURNISH, FACING, POSSESSION, SOCIETY_AMENITIES, labelOf } from '../data/propertyFields.js'
 import { deviceId, openWa, looksLikePhone } from '../lib/share.js'
 import Icon from '../components/Icon.jsx'
@@ -91,7 +91,7 @@ function FirmMark({ firm }) {
 
 /** A link or home that cannot be shown: the firm, Talk to us, the catalogue. */
 export function Gone({ title, onTalk, talkBusy, phone, catalogueUrl, offline, onRetry }) {
-  const talk = onTalk || (phone ? () => openWa(`https://wa.me/${String(phone).replace(/\D/g, '')}`) : null)
+  const talk = onTalk || (phone ? () => openWa(waLink(phone)) : null)
   return (
     <div className="pv-gone">
       <span className="pv-gone-ic"><Icon name={offline ? 'alert' : 'clock'} size={22} /></span>
@@ -145,7 +145,7 @@ const subOf = (h) => (h.project
 ).filter(Boolean).join(' · ')
 const dealWord = (d) => (d === 'rent' ? 'For rent' : d === 'sale' ? 'For sale' : '')
 const priceOf = (h) => (Number(h.price) > 0 ? formatMoney(Number(h.price), { perMonth: h.deal === 'rent' }) : '')
-const waTo = (phone, text) => (phone ? `https://wa.me/${String(phone).replace(/\D/g, '')}${text ? `?text=${encodeURIComponent(text)}` : ''}` : '')
+const waTo = (phone, text) => (phone ? waLink(phone, text || undefined) : '')
 const pathOf = (url) => { try { return url ? new URL(url, window.location.origin).pathname : null } catch { return null } }
 
 function HomeCard({ h, href, onOpen }) {

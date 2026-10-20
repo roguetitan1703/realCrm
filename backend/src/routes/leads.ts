@@ -169,7 +169,7 @@ leadsRouter.get('/:id/matches', async (req: Request, res: Response) => {
  * interested taps, devices, the latest link (listing-pages.md §A.5).
  */
 leadsRouter.get('/:id/shares', async (req: Request, res: Response) => {
-  try { return res.status(200).json({ success: true, data: await leadShares(req.params.id, (req.headers.origin as string) || null) }); }
+  try { return res.status(200).json({ success: true, ...(await leadShares(req.params.id, (req.headers.origin as string) || null)) }); }
   catch (err) { return shareFail(res, err); }
 });
 

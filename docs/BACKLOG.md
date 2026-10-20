@@ -91,6 +91,11 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
   sections spinning instead of showing what the list row has. *agent*
 - The dev R2 bucket's CORS refuses `localhost:5190` (builder ports), so visit
   proof cannot upload from a builder's frontend.
+- `POST /team/roster` creates a user who can never sign in (no login ID or
+  password since code sign-in was retired).
+- Enquiry spam: one machine rotating numbers fills a firm's 100/day cap in
+  ~100 min, then real buyers are refused for the day. Needs a challenge (e.g.
+  Turnstile) or per-firm adaptive limits.
 
 ## Bugs
 

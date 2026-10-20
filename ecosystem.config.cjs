@@ -47,7 +47,7 @@ module.exports = {
       script: 'backend/src/index.ts',
       interpreter: 'node',
       interpreter_args: '--import tsx',
-      exec_mode: 'fork',
+      exec_mode: 'fork', // Rate limits (services/rateLimit.ts) live in this process's memory: cluster mode with N instances would loosen every limit N times.
 
       // Never in production. See (1) above.
       watch: false,
