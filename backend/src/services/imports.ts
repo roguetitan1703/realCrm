@@ -554,7 +554,13 @@ export class ImportUndoRefused extends Error {
  * alert lifecycle's own test (contactedAfter for a lead, personWorkedAfter for
  * an owner or a listing: a person's event, not System or Import); or, for a
  * lead or an owner, edited since (updated_at: an edit writes no event).
- * Once b-forms merges, a lead with a crm_buyer_asks row is used as well.
+ * Merged into since (a merge moves an older record's history onto this one
+ * with its old dates and writes only a System event) is used too: deleting it
+ * would erase the older record's history. A listing's own "Added" event is not
+ * work. Once b-forms merges, a lead with a crm_buyer_asks row is used as well.
+ *
+ * A job that stopped part-way (failed, or a run the server lost: see
+ * failAbandonedImports) can be undone like a finished one; it wrote rows.
  *
  * ONE TRANSACTION. The job is claimed first (reverted_at set where it was not,
  * on a finished job), so a running import cannot be undone and a second undo
@@ -567,24 +573,29 @@ export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ de
   const out = await sql.begin(async (tx: any) => {
     const [job] = await tx`
       UPDATE crm_import_jobs SET status = 'reverted', reverted_at = NOW(), reverted_by = ${ctx.actorId ?? null}
-       WHERE id = ${id} AND tenant_id = ${t} AND reverted_at IS NULL AND status = 'done'
+       WHERE id = ${id} AND tenant_id = ${t} AND reverted_at IS NULL AND status IN ('done', 'failed')
        RETURNING *`;
     if (!job) {
       const [now] = await tx`SELECT status, reverted_at FROM crm_import_jobs WHERE id = ${id} AND tenant_id = ${t}`;
       if (!now) throw new Error('No such import');
       throw new ImportUndoRefused(now.reverted_at ? 'This import has already been undone'
-        : now.status === 'running' ? 'This import is still running' : 'This import has not finished');
+        : now.status === 'running' ? 'This import is still running' : 'This import has not run');
     }
-    const since = job.finished_at;
+    const since = job.finished_at || job.started_at;
     const recorded = (await tx`SELECT record_id FROM crm_import_rows
       WHERE job_id = ${id} AND status = 'added' AND record_id IS NOT NULL`).map((r: any) => r.record_id);
-    const mine = recorded.length ? tx`AND r.id IN ${tx(recorded)}` : tx`AND FALSE`;
+    // = ANY of one array, not IN of one parameter per id: a 70k-row sheet must
+    // not exceed the protocol's parameter limit.
+    const mine = tx`AND r.id = ANY(${recorded}::text[])`;
+    const merged = tx`EXISTS (SELECT 1 FROM crm_timeline_events e
+      WHERE e.tenant_id = r.tenant_id AND e.record_id = r.id AND e.type = 'merge')`;
 
     const propsBefore = (await tx`SELECT count(*)::int AS n FROM crm_properties r
       WHERE r.tenant_id = ${t} AND r.config->>'importBatchId' = ${id} ${mine}`)[0].n;
     const props = await tx`DELETE FROM crm_properties r
       WHERE r.tenant_id = ${t} AND r.config->>'importBatchId' = ${id} ${mine}
-        AND NOT (${personWorkedAfter('r', since)}
+        AND NOT (${personWorkedAfter('r', since, ['creation'])}
+          OR ${merged}
           OR EXISTS (SELECT 1 FROM lead_shortlist x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
           OR EXISTS (SELECT 1 FROM crm_share_links x WHERE x.tenant_id = r.tenant_id AND r.id = ANY(x.property_ids))
           OR EXISTS (SELECT 1 FROM crm_agreements x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
@@ -598,6 +609,7 @@ export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ de
     const leads = await tx`DELETE FROM crm_leads r
       WHERE r.tenant_id = ${t} AND r.import_batch_id = ${id} ${mine}
         AND NOT (${contactedAfter('r', since)}
+          OR ${merged}
           OR r.updated_at > ${since}
           OR EXISTS (SELECT 1 FROM lead_shortlist x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
           OR EXISTS (SELECT 1 FROM crm_share_links x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
@@ -614,6 +626,7 @@ export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ de
     const owners = await tx`DELETE FROM crm_owners r
       WHERE r.tenant_id = ${t} AND r.import_batch_id = ${id}
         AND NOT (${personWorkedAfter('r', since)}
+          OR ${merged}
           OR r.updated_at > ${since}
           OR r.converted_property_id IS NOT NULL
           OR EXISTS (SELECT 1 FROM crm_properties x WHERE x.tenant_id = r.tenant_id AND x.owner_contact_id = r.id)
@@ -624,12 +637,12 @@ export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ de
     const gone = [...ids.properties, ...ids.leads, ...ids.owners];
     if (gone.length) {
       // Their own history goes with them: an undone import never happened.
-      await tx`DELETE FROM crm_timeline_events WHERE tenant_id = ${t} AND record_id IN ${tx(gone)}`;
+      await tx`DELETE FROM crm_timeline_events WHERE tenant_id = ${t} AND record_id = ANY(${gone}::text[])`;
     }
     if (ids.leads.length) {
       // As any lead delete: its devices are let go (shareLeadsDeleted). No link
       // or shortlist can name it -- those made it used.
-      await tx`DELETE FROM crm_share_devices WHERE tenant_id = ${t} AND lead_id IN ${tx(ids.leads)}`;
+      await tx`DELETE FROM crm_share_devices WHERE tenant_id = ${t} AND lead_id = ANY(${ids.leads}::text[])`;
     }
     const kept = propsBefore + leadsBefore + ownersBefore - gone.length;
     await tx`UPDATE crm_import_jobs SET reverted_kept = ${kept} WHERE id = ${id} AND tenant_id = ${t}`;
@@ -645,4 +658,19 @@ export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ de
     ip: ctx.ip, user_agent: ctx.userAgent,
   });
   return { deleted: out.deleted, kept: out.kept };
+}
+
+/**
+ * A run the server lost. runImport works in the process that started it; a
+ * restart or a deploy mid-run left the job 'running' for ever, which nothing
+ * swept, so it could neither finish nor be undone. At boot, a run started over
+ * an hour ago (another process on a shared database may own a younger one) is
+ * marked stopped, which the page shows and can undo.
+ */
+export async function failAbandonedImports(): Promise<number> {
+  const rows = await sql`UPDATE crm_import_jobs
+     SET status = 'failed', finished_at = NOW(), error = 'The server restarted during this import'
+   WHERE status = 'running' AND started_at < NOW() - INTERVAL '1 hour'
+   RETURNING id`;
+  return rows.length;
 }

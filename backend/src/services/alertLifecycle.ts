@@ -37,10 +37,11 @@ const OWNER_STILL_TO_CALL = (o: string) =>
 
 /** Owner calling rows have no contact allowlist: any person-written event is the call.
  *  Also what an import undo asks of an owner or a listing (imports.ts). */
-export const personWorkedAfter = (o: string, since: any) => sql`
+export const personWorkedAfter = (o: string, since: any, notTypes: string[] = []) => sql`
   EXISTS (SELECT 1 FROM crm_timeline_events e
            WHERE e.record_id = ${sql(o)}.id AND e.tenant_id = ${sql(o)}.tenant_id
              AND coalesce(e.author, 'System') NOT IN ('System', 'Import')
+             AND NOT (e.type = ANY(${notTypes}::text[]))
              AND e.timestamp >= ${since})`;
 
 interface Rule {

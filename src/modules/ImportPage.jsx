@@ -526,7 +526,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     {(job.skipped > 0 || job.failed > 0) && (
                       <Button variant="secondary" size="sm" onClick={() => downloadSkipped(job.id)}>Download the rows that did not import</Button>
                     )}
-                    {job.status === 'done' && (
+                    {(job.status === 'done' || (job.status === 'failed' && job.added > 0)) && (
                       <Button variant="secondary" size="sm" onClick={() => undo(job.id, job.added)}>Undo this import</Button>
                     )}
                     <Button variant="secondary" size="sm" onClick={restart}>Import another file</Button>
@@ -557,7 +557,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                       {log.sheetName ? ` · sheet "${log.sheetName}"` : ''}
                     </div>
                   </div>
-                  {log.status === 'done' ? (
+                  {log.status === 'done' || (log.status === 'failed' && log.added > 0) ? (
                     <button className="btn btn-ghost btn-sm imp-revert" onClick={() => undo(log.id, log.added)}><Icon name="refresh" size={13} />Undo import</button>
                   ) : log.status === 'reverted' ? <span className="imp-reverted">Undone{log.revertedKept ? ` · ${log.revertedKept} kept` : ''}</span>
                     : <span className="imp-reverted">{log.status}</span>}
