@@ -192,14 +192,14 @@ export default function ImportPage({ store, go, sel, topBar }) {
   }
 
   const undo = async (id, added) => {
-    if (!window.confirm(`Undo this import? The ${added} record${added === 1 ? '' : 's'} it created will be removed.`)) return
+    if (!window.confirm(`Undo this import? The ${added} record${added === 1 ? '' : 's'} it created will be removed; any in use since are kept.`)) return
     try {
       const out = await api.revertImport(id)
-      store.toast(`Removed ${out.deleted} record${out.deleted === 1 ? '' : 's'}`)
+      store.toast(`Removed ${out.deleted} record${out.deleted === 1 ? '' : 's'}${out.kept ? ` · ${out.kept} kept, in use` : ''}`)
       if (job?.id === id) setJob(out.import)
       reloadHistory()
     } catch (err) {
-      store.toast('Could not undo that import', 'warn')
+      store.toast(err?.status === 409 && err?.body?.message ? err.body.message : 'Could not undo that import', 'warn'); reloadHistory()
     }
   }
 
@@ -510,7 +510,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                   <div className="imp-done-t">
                     {job.status === 'done' ? 'Import complete'
                       : job.status === 'failed' ? 'The import stopped'
-                        : job.status === 'reverted' ? 'Import undone'
+                        : job.status === 'reverted' ? (job.revertedKept ? `Import undone · ${job.revertedKept} kept` : 'Import undone')
                           : 'Importing…'}
                   </div>
                   <div className="imp-done-d">
@@ -526,7 +526,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     {(job.skipped > 0 || job.failed > 0) && (
                       <Button variant="secondary" size="sm" onClick={() => downloadSkipped(job.id)}>Download the rows that did not import</Button>
                     )}
-                    {job.status === 'done' && (
+                    {(job.status === 'done' || (job.status === 'failed' && job.added > 0)) && (
                       <Button variant="secondary" size="sm" onClick={() => undo(job.id, job.added)}>Undo this import</Button>
                     )}
                     <Button variant="secondary" size="sm" onClick={restart}>Import another file</Button>
@@ -557,9 +557,9 @@ export default function ImportPage({ store, go, sel, topBar }) {
                       {log.sheetName ? ` · sheet "${log.sheetName}"` : ''}
                     </div>
                   </div>
-                  {log.status === 'done' ? (
+                  {log.status === 'done' || (log.status === 'failed' && log.added > 0) ? (
                     <button className="btn btn-ghost btn-sm imp-revert" onClick={() => undo(log.id, log.added)}><Icon name="refresh" size={13} />Undo import</button>
-                  ) : log.status === 'reverted' ? <span className="imp-reverted">Undone</span>
+                  ) : log.status === 'reverted' ? <span className="imp-reverted">Undone{log.revertedKept ? ` · ${log.revertedKept} kept` : ''}</span>
                     : <span className="imp-reverted">{log.status}</span>}
                 </div>
                 <div className="imp-log-stats">

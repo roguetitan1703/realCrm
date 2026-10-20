@@ -26,7 +26,7 @@ import { requireTenantAuth } from '../middleware/auth';
 import { getContext } from '../services/context';
 import {
   createImportJob, appendImportRows, previewImport, runImport,
-  getImportJob, listImportJobs, importRows, revertImport, type ImportKind,
+  getImportJob, listImportJobs, importRows, revertImport, ImportUndoRefused, type ImportKind,
 } from '../services/imports';
 
 export const importsRouter = Router();
@@ -159,6 +159,7 @@ importsRouter.post('/:id/revert', async (req: Request, res: Response) => {
     const out = await revertImport(req.params.id, actor(req));
     return res.json({ success: true, ...out, import: await getImportJob(req.params.id) });
   } catch (err: any) {
+    if (err instanceof ImportUndoRefused) return res.status(409).json({ error: 'undo_refused', message: err.message });
     return res.status(500).json({ error: 'Failed to undo the import', message: err.message });
   }
 });

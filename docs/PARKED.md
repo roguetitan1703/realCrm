@@ -325,8 +325,9 @@ Recorded so a later session does not mistake "not in BACKLOG" for "checked".
   reach that an agent cannot, and whether any route trusts a client-supplied
   role or tenant.
 - **Sessions** — sliding expiry, the 8-device cap, revocation on password change.
-- **The import and revert path** — `revertImportBatch` is known to leave timeline
-  events and notification links behind; the rest of the flow is unread.
+- **The import and revert path** — the undo (imports.ts `revertImport`) was
+  read on 21 Oct; it still leaves notification links (`notifications.record_ids`)
+  naming deleted records. The rest of the flow is unread.
 
 
 ---

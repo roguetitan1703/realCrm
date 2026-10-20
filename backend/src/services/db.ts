@@ -360,6 +360,9 @@ export async function initSchema(): Promise<void> {
       );
     `;
     await sql`CREATE INDEX IF NOT EXISTS idx_import_jobs_tenant ON crm_import_jobs (tenant_id, created_at DESC);`;
+    // What an undo left because it had been used since (imports.ts revertImport):
+    // History says "Undone · 2 kept", not that everything went.
+    await sql`ALTER TABLE crm_import_jobs ADD COLUMN IF NOT EXISTS reverted_kept INT;`;
     // The file itself, row by row, exactly as it was read. Kept so a run can be
     // re-checked, resumed or explained without asking for the file again.
     await sql`
