@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
-import { Button, Input, Toggle } from '../components/primitives.jsx'
+import { Button, Input, PhoneInput, Toggle } from '../components/primitives.jsx'
 import { api } from '../lib/api.js'
 import { configLabel, personLabel, unitLabel } from '../lib/format.js'
-import { phoneSpaced, phonePlaceholder, phoneProblem } from '../lib/locale.js'
+import { formatPhone, readPhone } from '../lib/phone.js'
 import { copyText } from '../lib/clipboard.js'
 import { canPickWhatsApp, openWhatsAppChat } from '../lib/matching.js'
-import { canPickContact, pickContact, looksLikePhone, refusal, expiryLabel, heldText, catalogueToast } from '../lib/share.js'
+import { canPickContact, pickContact, refusal, expiryLabel, heldText, catalogueToast } from '../lib/share.js'
 import { canChangeCatalogue } from '../lib/permissions.js'
 import WaSend from '../components/WaSend.jsx'
 
@@ -63,9 +63,9 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
   const privateOnes = to.kind === 'none' ? homes.filter(h => !h.inCatalogue) : []
   const sendable = to.kind === 'none' ? homes.length - privateOnes.length : homes.length
   const ready = homes.length > 0 && sendable > 0 && (
-    to.kind === 'lead' || to.kind === 'none' || (to.kind === 'new' && looksLikePhone(to.phone)))
+    to.kind === 'lead' || to.kind === 'none' || (to.kind === 'new' && readPhone(to.phone).ok))
 
-  const recipientName = to.kind === 'lead' ? personLabel(to.lead) : to.kind === 'new' ? (to.name?.trim() || phoneSpaced(to.phone)) : ''
+  const recipientName = to.kind === 'lead' ? personLabel(to.lead) : to.kind === 'new' ? (to.name?.trim() || formatPhone(to.phone)) : ''
 
   const send = async (app) => {
     if (!ready || busy) return
@@ -267,7 +267,7 @@ function Recipient({ store, to, setTo, fixed, suggested }) {
         <span className="snd-to-av">{(personLabel(to.lead)[0] || '?').toUpperCase()}</span>
         <div className="snd-to-main">
           <div className="snd-to-t">{personLabel(to.lead)}</div>
-          {to.lead.phone && <div className="snd-to-s mono-num">{phoneSpaced(to.lead.phone)}</div>}
+          {to.lead.phone && <div className="snd-to-s mono-num">{formatPhone(to.lead.phone)}</div>}
         </div>
         {!fixed && <button type="button" className="inv-x" aria-label="Change recipient" onClick={() => setTo({ kind: 'pick' })}><Icon name="x" size={14} /></button>}
       </div>
@@ -289,8 +289,8 @@ function Recipient({ store, to, setTo, fixed, suggested }) {
       <div className="snd-new">
         <div className="snd-new-grid">
           <Input value={to.name || ''} onChange={e => setTo({ ...to, name: e.target.value })} placeholder="Name" aria-label="Name" />
-          <Input value={to.phone || ''} onChange={e => setTo({ ...to, phone: e.target.value })} placeholder={phonePlaceholder('98xxx xxxxx')}
-            inputMode="tel" aria-label="Mobile number" autoFocus={!to.phone} />
+          <PhoneInput value={to.phone || ''} onChange={e => setTo({ ...to, phone: e.target.value })}
+            aria-label="Mobile number" autoFocus={!to.phone} />
         </div>
         <button type="button" className="lnk snd-lnk" onClick={() => setTo({ kind: 'pick' })}>Search leads instead</button>
       </div>
@@ -358,7 +358,7 @@ export function LeadSearch({ q, setQ, onPick, suggested = [], autoFocus }) {
               <span className="snd-to-av">{(personLabel(l)[0] || '?').toUpperCase()}</span>
               <span className="snd-res-main">
                 <span className="snd-to-t">{personLabel(l)}</span>
-                {l.phone && <span className="snd-to-s mono-num">{phoneSpaced(l.phone)}</span>}
+                {l.phone && <span className="snd-to-s mono-num">{formatPhone(l.phone)}</span>}
               </span>
             </button>
           ))}
@@ -377,10 +377,9 @@ export function SenderPhone({ store, me, onSaved, onCancel, saveLabel = 'Save an
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [tried, setTried] = useState(false)
-  const problem = tried ? phoneProblem(phone) : ''
   const save = async () => {
     setTried(true)
-    if (!looksLikePhone(phone) || busy) return
+    if (!readPhone(phone).ok || busy) return
     setBusy(true); setErr('')
     try {
       await api.updateMyPhone(phone.trim())
@@ -389,7 +388,7 @@ export function SenderPhone({ store, me, onSaved, onCancel, saveLabel = 'Save an
       onSaved?.()
     } catch (e) {
       const code = refusal(e).code
-      setErr(code === 'phone_invalid' ? 'A 10-digit mobile number is needed.'
+      setErr(code === 'phone_invalid' ? (e?.body?.message || 'Not a valid number.')
         : code === 'phone_taken' ? 'Someone on this team already uses that number.'
         : e instanceof TypeError ? 'No connection. Nothing was saved.'
         : 'Could not save. Try again.')
@@ -399,10 +398,10 @@ export function SenderPhone({ store, me, onSaved, onCancel, saveLabel = 'Save an
     <>
       <div className="field">
         <label htmlFor="snd-me-phone">Mobile number</label>
-        <Input id="snd-me-phone" value={phone} onChange={e => { setPhone(e.target.value); setErr('') }} inputMode="tel" autoFocus
-          placeholder={phonePlaceholder('98xxx xxxxx')} onBlur={() => setTried(true)} onKeyDown={e => { if (e.key === 'Enter') save() }} />
+        <PhoneInput id="snd-me-phone" value={phone} onChange={e => { setPhone(e.target.value); setErr('') }} autoFocus
+          showProblem={tried} onKeyDown={e => { if (e.key === 'Enter') save() }} />
       </div>
-      {(problem || err) && <div className="snd-err" role="alert">{problem || err}</div>}
+      {err && <div className="snd-err" role="alert">{err}</div>}
       <div className="mfm-foot">
         {onCancel && <Button onClick={onCancel}>Back</Button>}
         {/* Pressable with a short number: pressing it is how a person finds out why. */}
@@ -418,6 +417,8 @@ function parseWa(url) {
   if (!url) return null
   try {
     const u = new URL(url)
-    return { phone: u.pathname.replace(/\D/g, ''), text: u.searchParams.get('text') || '' }
+    // The server built it from a stored E.164 number (phoneLink.js waLink).
+    const digits = u.pathname.slice(1)
+    return { phone: digits ? `+${digits}` : '', text: u.searchParams.get('text') || '' }
   } catch { return null }
 }

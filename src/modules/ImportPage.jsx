@@ -4,6 +4,8 @@ import { Button, Panel, PageHeader } from '../components/primitives.jsx'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
+import { firmLocale } from '../lib/locale.js'
+import { phoneCountries } from '../lib/phone.js'
 import {
   PROPERTY_FIELDS, LEAD_FIELDS, OWNER_FIELDS, GROUP_LABEL,
   parseSpreadsheet, guessMapping, EXAMPLE_SHEETS, exampleSheetCsv,
@@ -72,6 +74,9 @@ export default function ImportPage({ store, go, sel, topBar }) {
   // sheet" with no society column in them, and pasting the same name into four
   // thousand rows is how somebody decides not to import at all.
   const [intoProject, setIntoProject] = useState('')
+  // The country a number written without its code is read in (a sheet of
+  // Dubai owners). The firm's own unless changed.
+  const [phoneCountry, setPhoneCountry] = useState(() => firmLocale().country)
   const [showAllFields, setShowAllFields] = useState(false)
   const [job, setJob] = useState(null)              // the server's job row
   const [preview, setPreview] = useState(null)      // { counts, reasons, sample }
@@ -151,7 +156,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
     if (!job) return
     setChecking(true); setError(null)
     try {
-      const out = await api.previewImport(job.id, mapping, mapping.project ? null : (intoProject.trim() || null))
+      const out = await api.previewImport(job.id, mapping, mapping.project ? null : (intoProject.trim() || null), phoneCountry)
       setPreview(out); setFilterStatus('all'); setStep('review')
     } catch (err) {
       setError('Could not check the file: ' + (err.message || err))
@@ -340,6 +345,15 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     </label>
                     <input className="input" value={intoProject} onChange={e => setIntoProject(e.target.value)}
                       placeholder="e.g. VTP Leonara" />
+                  </div>
+                )}
+
+                {(mapping.phone || mapping.ownerPhone) && (
+                  <div className="imp-project">
+                    <label className="imp-map-label" htmlFor="imp-cc">Numbers without a country code</label>
+                    <select id="imp-cc" className="input" value={phoneCountry} onChange={e => setPhoneCountry(e.target.value)}>
+                      {phoneCountries().map(c => <option key={c.code} value={c.code}>{c.name} {c.dial}</option>)}
+                    </select>
                   </div>
                 )}
 

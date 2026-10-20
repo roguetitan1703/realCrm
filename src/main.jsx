@@ -1,13 +1,17 @@
-import React from 'react'
+import React, { lazy, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
-import { StoreProvider } from './lib/store.jsx'
-import App from './App.jsx'
-import Admin from './modules/Admin.jsx'
 import Gallery from './modules/Gallery.jsx'
 import { SharedLinkPage, CataloguePage, CatalogueHomePage } from './modules/Public.jsx'
 import { registerServiceWorker, applyPwaIdentity, slugFromLocation } from './lib/pwa.js'
 import { captureSupport } from './lib/support.js'
+
+// THE DESK AND THE CONSOLE LOAD ON THEIR OWN. A buyer opening a shared link or
+// the catalogue gets the buyer's pages and nothing else: not the desk, and not
+// the phone-number reader the desk's forms use (~50 kB gzipped, lib/phone.js).
+const Desk = lazy(() => Promise.all([import('./lib/store.jsx'), import('./App.jsx')])
+  .then(([{ StoreProvider }, { default: App }]) => ({ default: () => <StoreProvider><App /></StoreProvider> })))
+const Admin = lazy(() => import('./modules/Admin.jsx'))
 
 // index.html already linked this tenant's manifest before the parser got here —
 // that is the only moment that decides what an install captures. This keeps the
@@ -59,11 +63,9 @@ createRoot(document.getElementById('root')).render(
     ) : shareAt ? (
       <SharedLinkPage tenant={shareAt[1]} code={shareAt[2]} />
     ) : isAdminRoute ? (
-      <Admin />
+      <Suspense fallback={null}><Admin /></Suspense>
     ) : (
-      <StoreProvider>
-        <App />
-      </StoreProvider>
+      <Suspense fallback={null}><Desk /></Suspense>
     )}
   </React.StrictMode>
 )

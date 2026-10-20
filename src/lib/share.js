@@ -7,7 +7,7 @@
 // the buyer's pages, so a link's state reads the same everywhere.
 // ============================================================================
 
-import { whenLabel } from './format.js'
+import { whenLabel } from './when.js'
 import { firmLocale } from './locale.js'
 
 // ── The visitor's device, on the buyer's pages ──────────────────────────────
@@ -74,9 +74,6 @@ export async function pasteNumber() {
 }
 
 export const canPaste = () => typeof navigator !== 'undefined' && !!navigator.clipboard?.readText
-
-/** Enough digits to be a phone number at all. The server normalises it. */
-export const looksLikePhone = (v) => String(v || '').replace(/\D/g, '').length >= 10
 
 // ── What a link is doing ────────────────────────────────────────────────────
 export const LINK_STATE_LABEL = { active: 'Live', expired: 'Expired', off: 'Turned off', stopped: 'Stopped' }

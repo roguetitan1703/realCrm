@@ -20,7 +20,7 @@ import {
 } from '../services/auth.js';
 import type { TenantTokenClaims } from '../services/auth.js';
 import { sql } from '../services/db.js';
-import { normalizePhone } from '../services/roster.js';
+import { requirePhone, phoneInvalidBody } from '../services/phone.js';
 import { localeOf } from '../services/store.js';
 import { audit } from '../services/audit.js';
 import { hit } from '../services/rateLimit.js';
@@ -200,9 +200,8 @@ authRouter.get('/me', async (req: Request, res: Response) => {
  * Sending homes needs the sender's number on file, because the buyer's
  * WhatsApp opens to it (listing-pages.md §A.4); an agent without one is asked
  * for it in place, once. The Team screen's edit is for owners and managers
- * changing other people, so it could not serve here. Normalised the way every
- * other writer stores a phone (roster.ts normalizePhone); one number per
- * person in a firm (idx_users_tenant_phone).
+ * changing other people, so it could not serve here. Stored as exact E.164
+ * (docs/specs/phone.md); one number per person in a firm (idx_users_tenant_phone).
  */
 authRouter.patch('/me', async (req: Request, res: Response) => {
   const u = req.user as any;
@@ -210,17 +209,21 @@ authRouter.patch('/me', async (req: Request, res: Response) => {
   // /auth/me is open to a must-change-password token so it can say who it is;
   // that token may read, not write.
   if ((userClaims(req) as any)?.mc) return res.status(403).json({ error: 'Change your password first.' });
-  const raw = String(req.body?.phone ?? '').trim();
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length < 10 || digits.length > 13) return res.status(400).json({ error: 'phone_invalid', message: 'A 10-digit mobile number is needed.' });
+  let phone: string | null;
   try {
-    const phone = normalizePhone(raw, await localeOf(u.tenant_id));
-    // The last ten digits, the same rule as findLeadByPhone, and deleted users
-    // too: the unique index (idx_users_tenant_phone) counts them, so a number
-    // a removed member still holds would otherwise surface as a 500.
-    const ten = String(phone || '').replace(/\D/g, '').slice(-10);
+    phone = requirePhone(req.body?.phone, (await localeOf(u.tenant_id)).country);
+  } catch (e) {
+    const body = phoneInvalidBody(e);
+    if (body) return res.status(422).json(body);
+    throw e;
+  }
+  if (!phone) return res.status(422).json({ success: false, error: 'phone_invalid', reason: 'empty', message: 'Enter your mobile number.' });
+  try {
+    // The exact number, and deleted users too: the unique index
+    // (idx_users_tenant_phone) counts them, so a number a removed member still
+    // holds would otherwise surface as a 500.
     const clash = await sql`SELECT 1 FROM users WHERE tenant_id = ${u.tenant_id} AND id <> ${u.id}
-      AND right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) = ${ten} LIMIT 1`;
+      AND phone = ${phone} LIMIT 1`;
     if (clash.length) return res.status(409).json({ error: 'phone_taken', message: 'Someone on this team already uses that number.' });
     const [before] = await sql`SELECT phone FROM users WHERE tenant_id = ${u.tenant_id} AND id = ${u.id} LIMIT 1`;
     try {

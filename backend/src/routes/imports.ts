@@ -20,6 +20,7 @@
  * the same gate reassignment and settings use. An agent has no import screen.
  * ============================================================================
  */
+import { isPhoneCountry } from '../../../src/lib/phone.js';
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { getContext } from '../services/context';
@@ -98,6 +99,8 @@ importsRouter.post('/:id/preview', async (req: Request, res: Response) => {
     // none of its own — see prepareRow.
     const out = await previewImport(req.params.id, req.body?.mapping || {}, {
       project: req.body?.project ? String(req.body.project).trim() : null,
+      // The country for numbers written without a code; the firm's when absent.
+      country: isPhoneCountry(req.body?.country) ? String(req.body.country) : null,
     });
     if (!out) return res.status(404).json({ error: 'No such import' });
     return res.json({ success: true, ...out });

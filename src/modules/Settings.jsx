@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Panel, SectionHead, StageTag, Button, Input, Segmented, Toggle, Avatar } from '../components/primitives.jsx'
+import { Panel, SectionHead, StageTag, Button, Input, PhoneInput, Segmented, Toggle, Avatar } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES } from '../data/theme.js'
 import { finalStageOf, finalIsEditable, LABELLED_LEAD_STAGES, stageLabel } from '../data/pipelineRoles.js'
@@ -10,7 +10,8 @@ import ThisDevice from '../components/ThisDevice.jsx'
 import MessageTemplates from '../components/MessageTemplates.jsx'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { isDeskRole } from '../lib/permissions.js'
-import { firmLocale, phoneSpaced } from '../lib/locale.js'
+import { firmLocale } from '../lib/locale.js'
+import { formatPhone } from '../lib/phone.js'
 import { canWork, notWorkableReason, shownStrategy } from '../lib/workforce.js'
 
 // `everyone: true` is a section an agent may open. The rest are the desk's.
@@ -104,17 +105,15 @@ function SharingSection({ store, settings }) {
     onConfirm: () => put({ stopped: null }, 'Sharing allowed. Old links stay off.'),
   })
   const isOwner = store.state.role === 'owner'
-  // Shown spaced, like every number on screen; changed only when its digits are.
-  const savedReply = sh.replyToPhone ? phoneSpaced(sh.replyToPhone) : ''
+  // The stored number (exact E.164); changed only when the number is.
+  const savedReply = sh.replyToPhone || ''
   const [reply, setReply] = useState(savedReply)
   useEffect(() => { setReply(savedReply) }, [savedReply])
-  const digits = (v) => String(v || '').replace(/\D/g, '')
-  const replyDirty = digits(reply) !== digits(sh.replyToPhone)
+  const replyDirty = reply !== savedReply
   // The empty box shows the number buyers reach instead, and whose it is (an
   // owner's, per the server's rule): "Akash Patel · +91 98765 43210".
-  const fbDigits = String(sh.replyToFallback || '').replace(/\D/g, '').slice(-10)
-  const fbOwner = fbDigits ? (store.state.agents || []).find(a => String(a.phone || '').replace(/\D/g, '').slice(-10) === fbDigits) : null
-  const replyFallbackLabel = sh.replyToFallback ? [fbOwner?.name, phoneSpaced(sh.replyToFallback)].filter(Boolean).join(' · ') : ''
+  const fbOwner = sh.replyToFallback ? (store.state.agents || []).find(a => a.phone === sh.replyToFallback) : null
+  const replyFallbackLabel = sh.replyToFallback ? [fbOwner?.name, formatPhone(sh.replyToFallback)].filter(Boolean).join(' · ') : ''
 
   // The whole object, every time: the server stores the key as one value.
   // `replyToFallback` is the server's answer, not a setting: it is not sent back.
@@ -157,7 +156,7 @@ function SharingSection({ store, settings }) {
           <div className="shr-row">
             <label className="shr-l" htmlFor="shr-reply">Reply-to number</label>
             <div className="shr-inline">
-              <Input id="shr-reply" value={reply} onChange={e => setReply(e.target.value)} inputMode="tel"
+              <PhoneInput id="shr-reply" value={reply} onChange={e => setReply(e.target.value)}
                 placeholder={replyFallbackLabel || "Firm's WhatsApp number"}
                 onKeyDown={e => { if (e.key === 'Enter' && replyDirty) put({ replyToPhone: reply.trim() }, 'Reply-to number saved') }} />
               <Button variant={replyDirty ? 'primary' : 'ghost'} disabled={!replyDirty} onClick={() => put({ replyToPhone: reply.trim() }, 'Reply-to number saved')}>Save</Button>

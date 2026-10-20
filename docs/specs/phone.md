@@ -1,6 +1,6 @@
 # Phone numbers
 
-Status: proposed (20 Oct). Om, 20 Oct: "we should have a country code field so
+Status: built (20 Oct), on `a-phone-model`; see "As built" at the end. Om, 20 Oct: "we should have a country code field so
 we know exactly what the number is." This replaces matching on the last ten
 digits, which made a UAE owner's number and an Indian one the same person.
 
@@ -24,13 +24,20 @@ digits, which made a UAE owner's number and an Indian one the same person.
 the bundle alike:
 
 - `readPhone(raw, country)` → `{ ok, e164, country }`, or
-  `{ ok: false, reason: 'empty' | 'letters' | 'invalid' }`
-- `toE164`, `formatPhone` (national format in the firm's country,
-  international otherwise), `waDigits`, `callingCode`
+  `{ ok: false, reason: 'empty' | 'letters' | 'too_short' | 'too_long' | 'invalid' }`
+- `phoneProblem` (the reason in words: "Too short for India"), `toE164`,
+  `keepPhone` (E.164, or as received when unreadable), `formatPhone`
+  (always international: "+91 98765 43210", "+971 50 123 4567"),
+  `callingCode`, `phoneCountries`, `isPhoneCountry`
+- links (`waLink`, `waDigits`, `telLink`) live in `src/lib/phoneLink.js` and
+  need no reader: a stored number is E.164 or unreadable, and an unreadable
+  one gets no number in the link
 
 It uses the "max" metadata (full per-country patterns). "min" checks little
-more than length, and accepted numbers max refuses. The cost is about 145 kB in
-the bundle. It replaces:
+more than length, and accepted numbers max refuses. The cost is about 52 kB
+gzipped. The buyer's pages do not pay it on first paint: the desk and the
+console load on their own (main.jsx), and the public pages load the phone box
+and Add as lead when they are shown. It replaces:
 
 - `phoneE164` (last ten digits behind the firm's code)
 - `phoneAsStored`
@@ -77,8 +84,10 @@ person's lead.
 
 ## The repair (one time)
 
-- **How it runs:** `runOnce('phones_e164', …)` inside `initSchema`, per tenant,
-  with that tenant's country.
+- **How it runs:** `migratePhones()` inside `initSchema`, per tenant, with that
+  tenant's country, gated on `schema_migrations` row `phones_e164` (its own
+  gate, not `runOnce`, so a refusal is not marked done). A failure rolls the
+  whole repair back, is logged, and does not stop the boot.
 - **What it converts:**
   - `users.phone`
   - `users.metadata.phone`
@@ -94,8 +103,10 @@ person's lead.
 - **Users are checked before anything is written.** If two user rows would
   become one number, the repair writes nothing at all and logs which ones;
   the unique index would otherwise stop the boot. The next boot tries again.
-- **Leads and owners that collide are left as they are.** They are duplicates
-  for the existing merge flow, and are reported.
+- **Leads and owners that collide are left as they are** (an owner typed
+  twice stays two records; nothing merges them) and are logged. Searching the
+  number in the owner or lead list shows both. Owners have no duplicate flag or
+  merge flow today.
 - **Run the dry run first:** `backend/src/scripts/phone-dry-run.ts`
   (read-only) says what the repair will do, in the categories production was
   measured in. Run it on development, then on production once Om approves a
@@ -106,3 +117,22 @@ person's lead.
 - Agreements' `party_phone` is already E.164 on both paying firms.
 - WhatsApp links use `waDigits` and send nothing for an unreadable number
   (WhatsApp then asks who).
+
+## As built (20 Oct)
+
+- Server: `backend/src/services/phone.ts` — `requirePhone` (a form: E.164 or
+  422 `phone_invalid` with `reason` and the words), `editedPhone` (an edit: a
+  number sent back exactly as stored passes, so a record received unreadable
+  can still be saved), `keepPhone` (portals, webhooks, a listing's owner taken
+  from an owner record), `phoneKey` (a lookup; null matches nobody).
+- A foreign number written without `+` ("447876011111") is not read as
+  foreign: it is unreadable, kept as sent, never matched. Only the firm's own
+  code without `+` ("919876543210") is read.
+- Import: the mapping step has "Numbers without a country code" (the firm's
+  country by default); rows key on exact E.164.
+- Onboarding (console): a roster number is read as Indian; one that cannot be
+  read is a roster issue that stops provisioning, with the reason.
+- Repair on development, 20 Oct: 61 written (delpat 43, skyline-realty 17,
+  test-org 1 probe row), 57 unreadable left (tutorial's 50 fixtures, delpat 7),
+  0 user collisions. The users-collision refusal was probed first: nothing
+  written, not marked.

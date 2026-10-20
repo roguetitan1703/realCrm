@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api.js'
 import { fileUrl } from '../lib/media.js'
-import { formatMoney, phoneLabel, phonePlaceholder, phoneProblem, roomLabel, firmLocale, setFirmLocale, waLink } from '../lib/locale.js'
+import { formatMoney, roomLabel, firmLocale, setFirmLocale } from '../lib/locale.js'
+import { waLink } from '../lib/phoneLink.js'
 import { SUBTYPES, FURNISH, FACING, POSSESSION, SOCIETY_AMENITIES, labelOf } from '../data/propertyFields.js'
-import { deviceId, openWa, looksLikePhone } from '../lib/share.js'
+import { deviceId, openWa } from '../lib/share.js'
 import Icon from '../components/Icon.jsx'
 import PhotoViewer from '../components/PhotoViewer.jsx'
-import AddFromTap from '../components/AddFromTap.jsx'
+// LOADED WHEN USED. The number reader (lib/phone.js, ~50 kB gzipped) comes
+// with the phone box and Add as lead; a buyer looking at homes never needs it,
+// so the page paints without it (docs/specs/phone.md).
+const AddFromTap = lazy(() => import('../components/AddFromTap.jsx'))
+const PhoneInput = lazy(() => import('../components/primitives.jsx').then(m => ({ default: m.PhoneInput })))
 
 // ============================================================================
 // THE BUYER'S PAGES (docs/specs/listing-pages.md §A)
@@ -376,8 +381,10 @@ function StaffBar({ tenant, staff, flats, tapDone, onTapDone }) {
       <div className="pv-staff pv-staff-tap">
         <div className="pv-staff-in">
           <div className="pv-staff-h">Add as lead</div>
-          <AddFromTap tap={staff.tap} home={home} via={talk ? 'talk' : 'interested'} footClass="pv-staff-foot"
-            onDone={(r) => onTapDone(r)} onCancel={() => setClosed(true)} />
+          <Suspense fallback={null}>
+            <AddFromTap tap={staff.tap} home={home} via={talk ? 'talk' : 'interested'} footClass="pv-staff-foot"
+              onDone={(r) => onTapDone(r)} onCancel={() => setClosed(true)} />
+          </Suspense>
         </div>
       </div>
     )
@@ -386,7 +393,7 @@ function StaffBar({ tenant, staff, flats, tapDone, onTapDone }) {
   const dead = state && state !== 'active'
   if (!lead && !dead) return null
   const word = tapDone ? (tapDone.matched ? 'Already a lead' : 'Lead added') : 'Sent to'
-  const who = lead ? (lead.name || phoneLabel(lead.phone) || 'Lead') : ''
+  const who = lead ? (lead.name || lead.phone || 'Lead') : ''
   // A tap reads as what the person did: "Sneha Kulkarni tapped I'm interested".
   const tapLine = !tapDone && staff.tap ? (staff.tap.propertyId ? 'tapped I’m interested' : 'pressed Talk to us') : ''
   return (
@@ -593,9 +600,11 @@ function EnquiryForm({ tenant, device, firm, propertyId }) {
   const [v, setV] = useState({ name: '', phone: '', message: '', website: '' })
   const [st, setSt] = useState({ busy: false, done: false, err: '', talk: '' })
   const set = (k) => (e) => setV(x => ({ ...x, [k]: e.target.value }))
-  const ok = looksLikePhone(v.phone)
+  // The phone box says why a number cannot be sent (PhoneInput); until it
+  // has loaded, the server's answer does.
+  const [phoneBad, setPhoneBad] = useState(false)
+  const ok = !!v.phone.trim() && !phoneBad
   const [tried, setTried] = useState(false)
-  const problem = tried ? phoneProblem(v.phone) : ''
   const submit = (e) => {
     e.preventDefault()
     setTried(true)
@@ -615,7 +624,7 @@ function EnquiryForm({ tenant, device, firm, propertyId }) {
         talk: err?.status === 429 ? (err?.body?.cta?.phone || '') : '',
         err: err instanceof TypeError ? 'No connection. Try again.'
           : err?.status === 429 ? 'We could not take this just now. Try again later.'
-          : err?.status === 400 ? 'Check the number and try again.'
+          : err?.status === 422 || err?.status === 400 ? (err?.body?.message || 'Check the number and try again.')
           : 'Could not send. Try again.' }))
   }
   if (st.done) {
@@ -629,8 +638,12 @@ function EnquiryForm({ tenant, device, firm, propertyId }) {
   return (
     <form className="pv-enq" onSubmit={submit} noValidate>
       <label className="pv-field"><span>Name</span><input id="enq-name" value={v.name} onChange={set('name')} autoComplete="name" /></label>
-      <label className="pv-field"><span>Mobile number</span><input value={v.phone} onChange={set('phone')} inputMode="tel" autoComplete="tel" placeholder={phonePlaceholder('98xxx xxxxx')} onBlur={() => setTried(true)} required /></label>
-      {problem && <div className="pv-err" role="alert">{problem}</div>}
+      <div className="pv-field"><label htmlFor="enq-phone">Mobile number</label>
+        <Suspense fallback={<input id="enq-phone" value={v.phone} onChange={set('phone')} inputMode="tel" autoComplete="tel" required />}>
+          <PhoneInput id="enq-phone" value={v.phone} showProblem={tried} required
+            onChange={e => { setV(x => ({ ...x, phone: e.target.value })); setPhoneBad(!!e.problem) }} />
+        </Suspense>
+      </div>
       <label className="pv-field"><span>Message</span><textarea value={v.message} onChange={set('message')} rows={3} placeholder="Optional" /></label>
       {/* Not for people. A bot fills every field it finds. */}
       <input className="pv-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={v.website} onChange={set('website')} name="website" />

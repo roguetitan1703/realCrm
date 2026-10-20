@@ -38,9 +38,10 @@ import { audit } from './audit.js';
 import { notifyOrDesk } from './notifications.js';
 import { createOwnersBatch, createLead, createProperty, localeOf, type ActorCtx, type Locale } from './store.js';
 import {
-  OWNER_FIELDS, LEAD_FIELDS, PROPERTY_FIELDS, readField, normPhone,
+  OWNER_FIELDS, LEAD_FIELDS, PROPERTY_FIELDS, readField,
 } from '../../../src/lib/importSchema.js';
 import { statusFromSheet } from '../../../src/data/ownerStatus.js';
+import { phoneProblem } from '../../../src/lib/phone.js';
 
 export type ImportKind = 'owners' | 'clients' | 'properties';
 
@@ -106,12 +107,15 @@ export type Prepared = {
  */
 export function prepareRow(
   kind: ImportKind, raw: Record<string, any>, mapping: Record<string, string>,
-  opts: { project?: string | null; locale?: Locale } = {},
+  opts: { project?: string | null; locale?: Locale; country?: string | null } = {},
 ): Prepared {
   const v: Record<string, any> = {};
+  // The country a number without a code is read in: the one picked on the
+  // mapping step (a sheet of Dubai owners), else the firm's.
+  const loc = (opts.country && opts.locale ? { ...opts.locale, country: opts.country } : opts.locale) as Locale | undefined;
   for (const f of FIELDS[kind]) {
-    // In the firm's formats: a US sheet's "450K" and 10-digit numbers are +1.
-    const got = readField(raw, mapping, f, opts.locale);
+    // In the firm's formats: a US sheet's "450K" and a bare number read as +1.
+    const got = readField(raw, mapping, f, loc);
     if (got !== null) v[f.key] = got;
   }
 
@@ -120,8 +124,8 @@ export function prepareRow(
   // through a spreadsheet for a blank that is not there.
   const unreadablePhone = (col?: string) => {
     const cell = col ? String(raw[col] ?? '').trim() : '';
-    return cell.replace(/\D/g, '').length
-      ? `Phone number could not be read ("${cell.slice(0, 24)}")`
+    return cell
+      ? `Phone number could not be read ("${cell.slice(0, 24)}": ${phoneProblem(cell, loc?.country || 'IN')})`
       : 'No phone number';
   };
 
@@ -145,7 +149,7 @@ export function prepareRow(
       // IDENTITY FOLLOWS WHAT THE ROW HAS. With a flat, the flat is the record
       // (one owner with three flats is three calls). Without one, the person is
       // — otherwise re-importing the same list would double every row in it.
-      key: v.unitNo ? unitKey(project, v.wing, v.unitNo) : (normPhone(v.phone) || null),
+      key: v.unitNo ? unitKey(project, v.wing, v.unitNo) : (v.phone || null),
       record: {
         // No name is a name nobody has. It stays empty.
         name: v.name || null,
@@ -174,7 +178,8 @@ export function prepareRow(
     if (!v.phone) return { ok: false, reason: unreadablePhone(mapping.phone) };
     return {
       ok: true,
-      key: normPhone(v.phone) || null,
+      // v.phone is exact E.164 (parsePhone), the same form every lead is stored in.
+      key: v.phone || null,
       record: {
         name: v.name || null, phone: v.phone, email: v.email || null,
         stage: v.stage || 'New', source: v.source || 'Spreadsheet import',
@@ -227,12 +232,13 @@ async function existingKeys(kind: ImportKind): Promise<Set<string>> {
       // keyed that way too, or re-importing the same list would add every one
       // of them a second time. It does not fold a second flat into the first:
       // a row that HAS a unit is matched on the unit.
-      const ph = normPhone(r.phone);
-      if (ph) out.add(ph);
+      // Exact E.164 (docs/specs/phone.md): a stored number that cannot be
+      // read never equals a row's key, so it matches nothing.
+      if (r.phone) out.add(r.phone);
     }
   } else if (kind === 'clients') {
     const rows = await sql`SELECT phone FROM crm_leads WHERE tenant_id = ${t} AND phone IS NOT NULL`;
-    for (const r of rows as any[]) { const k = normPhone(r.phone); if (k) out.add(k); }
+    for (const r of rows as any[]) out.add(r.phone);
   } else {
     const rows = await sql`SELECT project, wing, title FROM crm_properties WHERE tenant_id = ${t}`;
     for (const r of rows as any[]) { const k = unitKey(r.project, r.wing, r.title); if (k) out.add(k); }
@@ -314,7 +320,7 @@ function jobShape(r: any): any {
  * review table can show. The same prepareRow the run uses, so the number the
  * person approves is the number that happens.
  */
-export async function previewImport(id: string, mapping: Record<string, string>, options: { project?: string | null } = {}): Promise<any> {
+export async function previewImport(id: string, mapping: Record<string, string>, options: { project?: string | null; country?: string | null } = {}): Promise<any> {
   const t = tid();
   const [job] = await sql`SELECT * FROM crm_import_jobs WHERE id = ${id} AND tenant_id = ${t} LIMIT 1`;
   if (!job) return null;

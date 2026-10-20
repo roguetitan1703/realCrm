@@ -33,6 +33,7 @@ import {
   localeOf, timezoneOf, type ActorCtx, type Locale,
 } from './store.js';
 import { moneyFull } from '../../../src/lib/locale.js';
+import { editedPhone } from './phone.js';
 import { finalStageOf } from '../../../src/data/pipelineRoles.js';
 
 export type AgreementKind = 'rent' | 'sale';
@@ -238,7 +239,13 @@ export async function createAgreement(input: any, ctx: ActorCtx = {}, opts: { re
   // Who signed, copied onto the agreement — see rowToAgreement. The form fills
   // it from the lead and the person may correct it.
   const partyName = String(input.partyName ?? '').trim() || lead?.name || null;
-  const partyPhone = String(input.partyPhone ?? '').trim() || lead?.phone || null;
+  // Typed on the form: E.164 or refused with the reason. The lead's own number,
+  // or a renewal's copy of the old agreement's, is kept as it is stored.
+  const sentPhone = String(input.partyPhone ?? '').trim();
+  const keptPhone = opts.renews ? opts.renews.party?.phone : lead?.phone;
+  const partyPhone = sentPhone
+    ? editedPhone(sentPhone, keptPhone, (await localeOf(t)).country, 'partyPhone')
+    : lead?.phone || null;
   if (!partyName && !partyPhone) throw new AgreementError(`Add the ${kind === 'rent' ? 'tenant' : 'buyer'}'s name.`);
 
   let [property] = input.propertyId
@@ -327,7 +334,7 @@ export async function updateAgreement(id: string, patch: any, ctx: ActorCtx = {}
     if (!n) throw new AgreementError('The name cannot be empty.');
     next.party_name = n;
   }
-  if (patch.partyPhone !== undefined) next.party_phone = String(patch.partyPhone || '').trim() || null;
+  if (patch.partyPhone !== undefined) next.party_phone = editedPhone(patch.partyPhone, before.party?.phone, (await localeOf(tid())).country, 'partyPhone');
   if (!Object.keys(next).length) return before;
   const start = next.start_date ?? before.startDate;
   const end = next.end_date !== undefined ? next.end_date : before.endDate;
@@ -460,7 +467,7 @@ export async function convertOwner(ownerId: string, input: any, ctx: ActorCtx = 
       owner: o.name || null, ownerPhone: o.phone || null, ownerEmail: o.email || null,
       keyAccess: f.keyAccess || keyNote,
       source: 'Calling',
-    }, await localeOf(t)), ctx);
+    }, await localeOf(t)), ctx, { phoneAsReceived: true });
     propertyId = created.id;
     // createProperty links the owner it finds by flat; this row IS the owner,
     // said explicitly so a near-miss in that lookup cannot pick someone else.

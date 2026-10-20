@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Field, Input, Textarea, SuggestInput } from '../components/primitives.jsx'
+import { Button, Field, Input, PhoneInput, Textarea, SuggestInput } from '../components/primitives.jsx'
 import { projectNames } from '../lib/suggest.js'
 import Icon from '../components/Icon.jsx'
 import MediaEditor from '../components/MediaEditor.jsx'
@@ -12,7 +12,7 @@ import {
 } from '../data/propertyFields.js'
 import { api } from '../lib/api.js'
 import { unitLabel } from '../lib/format.js'
-import { phonePlaceholder, roomLabel } from '../lib/locale.js'
+import { roomLabel } from '../lib/locale.js'
 
 // ============================================================================
 // 🏗️ PropertyWizard — the stepped add/edit PAGE (spec: properties.md C-add)
@@ -762,7 +762,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                       <Input value={form.owner || ''} onChange={e => set('owner', e.target.value)} placeholder="Sneha Rane" />
                     </Field>
                     <Field label="Owner phone">
-                      <Input value={form.ownerPhone || ''} onChange={e => set('ownerPhone', e.target.value)} placeholder={phonePlaceholder('+91 98765 43210')} />
+                      <PhoneInput value={form.ownerPhone || ''} onChange={e => set('ownerPhone', e.target.value)} />
                     </Field>
                   </div>
                 </div>

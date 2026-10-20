@@ -24,7 +24,8 @@
  * ============================================================================
  */
 
-import { parseMoneyText, phoneAsStored, INDIA_LOCALE } from '../../../src/lib/locale.js';
+import { parseMoneyText, INDIA_LOCALE } from '../../../src/lib/locale.js';
+import { keepPhone } from '../../../src/lib/phone.js';
 
 export type ParserConfig = {
   map?: Record<string, string>;
@@ -115,9 +116,11 @@ export const TRANSFORMS: Record<string, (v: any, loc?: any) => any> = {
    * duplicate leads for one caller.
    *
    * The name says India because stored parser configs name it; the country
-   * code is the firm's own (+1 for a US firm), India when none is passed.
+   * is the firm's own (a US firm reads a bare number as +1), India when none
+   * is passed. Exact E.164 when it can be read; exactly as sent when it
+   * cannot, never guessed (docs/specs/phone.md).
    */
-  phone_in: (v, loc) => phoneAsStored(v, loc?.phoneCountry ? loc : INDIA_LOCALE),
+  phone_in: (v, loc) => keepPhone(v, (loc?.country || INDIA_LOCALE.country)),
   /** "2 BHK Apartment in Wakad" → "2 BHK". Portals bury the config in prose. */
   bhk: (v) => {
     const m = String(v ?? '').match(/(\d+(?:\.5)?)\s*(?:bhk|bedroom)/i);

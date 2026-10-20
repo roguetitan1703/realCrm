@@ -403,7 +403,7 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
   const [name, setName] = useState(user.name || '')
   const [loginId, setLoginId] = useState(user.login_id || '')
   const [email, setEmail] = useState(user.email || '')
-  const [phone, setPhone] = useState(String(user.phone || '').replace(new RegExp(`^\\+${firmLocale().phoneCountry}`), ''))
+  const [phone, setPhone] = useState(user.phone || '')
   const [role, setRole] = useState(user.role === 'owner' ? 'owner' : user.role)
   const [saving, setSaving] = useState(false)
   const canSetRole = canManage('owner') && user.role !== 'owner'  // only an owner reassigns roles; owner row is fixed here

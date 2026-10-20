@@ -24,7 +24,8 @@ import { suggestPassword } from './auth.js';
 import { followUpKind } from './followUp.js';
 import { followUpKindOf } from '../../../src/data/followUpKinds.js';
 import { galleryPath } from './gallery.js';
-import { planRoster, normalizePhone, RosterRow } from './roster.js';
+import { planRoster, rosterPhone, RosterRow } from './roster.js';
+import { requirePhone, editedPhone, keepPhone, phoneKey } from './phone.js';
 import { assertLeadWrite, ForbiddenError, isDeskRole } from '../lib/permissions.js';
 import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js';
 import { canTakeWork, onDutyWorkers, assertWorkable } from './workforce.js';
@@ -41,7 +42,7 @@ import {
 import { parsePayload } from './parser.js';
 // The firm's money, phone and bedroom words — one implementation, shared with
 // the screens. The server always passes the firm's locale (deskConfigOf).
-import { resolveLocale, moneyFull, roomLabel, phoneAsStored } from '../../../src/lib/locale.js';
+import { resolveLocale, moneyFull, roomLabel } from '../../../src/lib/locale.js';
 export type Locale = ReturnType<typeof resolveLocale>;
 
 /**
@@ -131,11 +132,11 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   // password is reset by email: without one the owner cannot get back in.
   const ownerEmail = input.ownerEmail ? String(input.ownerEmail).trim().toLowerCase() : '';
   if (!EMAIL_RE.test(ownerEmail)) throw new Error("The owner's email is needed to reset their password.");
-  const ownerPhone = normalizePhone(input.ownerPhone);
+  const ownerPhone = rosterPhone(input.ownerPhone).phone;
 
   // Every login id and password, planned before anything is written: a roster
   // that cannot be created must not leave a tenant row behind it.
-  const plan = planRoster({ ownerName: input.ownerName, ownerEmail, ownerPhone, ownerPassword: input.ownerPassword, team: input.initialTeam });
+  const plan = planRoster({ ownerName: input.ownerName, ownerEmail, ownerPhone: input.ownerPhone, ownerPassword: input.ownerPassword, team: input.initialTeam });
   if (plan.issues.length) throw new Error(`Roster is not valid. ${plan.issues.join(' ')}`);
 
   // Unique slug === tenant id (our convention). If taken, suffix -2, -3, …
@@ -1770,36 +1771,34 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
   const properties: Record<string, any> = {};
   const owners: Record<string, any> = {};
 
-  // A phone is compared as its LAST TEN DIGITS, on both sides, always.
-  //
-  // This is the whole bug behind an import that duplicated everything. Leads
-  // are stored normalised — "+919876543210", and on one tenant "+91 98765
-  // 43210" with spaces — while a spreadsheet holds "9876543210". The old query
-  // compared the stored column to the raw file value with `phone IN (...)`, so
-  // it matched nothing, and then keyed the result map by the stored "+91…"
-  // form, which the browser looked up with a bare ten digits. Two independent
-  // reasons for the same answer: never a duplicate, every re-import a fresh
-  // copy. It left 315 surplus rows on the live client desk — one number twelve
-  // times over — before anyone noticed the counts climbing.
-  const norm = (p: string) => String(p ?? '').replace(/\D/g, '').slice(-10);
-  const phones = [...new Set((input.phones || []).map(norm).filter(p => p.length === 10))].slice(0, 5000);
+  // A phone is compared as exact E.164 (docs/specs/phone.md): the file's
+  // number is read in the firm's country, and a number that cannot be read is
+  // never matched. It used to compare the last ten digits, which made a UAE
+  // owner and an Indian one the same person. Each hit is keyed by the E.164
+  // form AND by every raw value the file sent for it, so the caller can look a
+  // cell up as it is.
+  const country = (await localeOf(t)).country;
+  const rawsOf = new Map<string, string[]>();
+  for (const raw of (input.phones || []).slice(0, 5000)) {
+    const k = phoneKey(raw, country);
+    if (k) rawsOf.set(k, [...(rawsOf.get(k) || []), String(raw)]);
+  }
+  const phones = [...rawsOf.keys()];
+  const keyHit = (out: Record<string, any>, phone: string | null, hit: any) => {
+    if (!phone) return;
+    out[phone] = hit;
+    for (const raw of rawsOf.get(phone) || []) out[raw] = hit;
+  };
   const names = (input.names || []).filter(Boolean).map(n => n.toLowerCase()).slice(0, 5000);
   if (phones.length || names.length) {
     const rows = await sql`
-      SELECT id, name, phone, right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) AS phone10
-        FROM crm_leads
+      SELECT id, name, phone FROM crm_leads
        WHERE tenant_id = ${t}
-         AND (${phones.length
-              ? sql`right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) IN ${sql(phones)}`
-              : sql`false`}
+         AND (${phones.length ? sql`phone IN ${sql(phones)}` : sql`false`}
            OR ${names.length ? sql`lower(name) IN ${sql(names)}` : sql`false`})`;
     for (const r of rows) {
       const hit = { id: r.id, name: r.name };
-      // Keyed by the normalised number — the only form the caller can produce
-      // from a spreadsheet cell. The raw stored value is kept as a key too so
-      // an already-normalised file still matches.
-      if (r.phone10) leads[r.phone10] = hit;
-      if (r.phone) leads[r.phone] = hit;
+      keyHit(leads, r.phone, hit);
       if (r.name) leads[String(r.name).toLowerCase()] = hit;
     }
   }
@@ -1812,15 +1811,8 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
   // are recognised and skipped/merged instead of duplicated.
   if (phones.length) {
     const rows = await sql`
-      SELECT id, name, phone, right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) AS phone10
-        FROM crm_owners
-       WHERE tenant_id = ${t}
-         AND right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) IN ${sql(phones)}`;
-    for (const r of rows) {
-      const hit = { id: r.id, name: r.name || r.phone };
-      if (r.phone10) owners[r.phone10] = hit;
-      if (r.phone) owners[r.phone] = hit;
-    }
+      SELECT id, name, phone FROM crm_owners WHERE tenant_id = ${t} AND phone IN ${sql(phones)}`;
+    for (const r of rows) keyHit(owners, r.phone, { id: r.id, name: r.name || r.phone });
   }
 
   const titles = (input.titles || []).filter(Boolean).map(s => s.toLowerCase()).slice(0, 5000);
@@ -1984,12 +1976,12 @@ export async function getLeads(): Promise<any[]> {
 /**
  * The one place a phone number resolves to a person.
  *
- * Identity is the LAST TEN DIGITS, within the tenant — the same rule the
- * importer's checkDuplicates() uses, and for the same reason. Stored numbers
- * are "+919876543210" (and on one tenant "+91 98765 43210", with spaces);
- * portals send whatever they please. An exact string compare on the cleaned
- * value calls those different people, which is how one client desk ended up
- * with 315 surplus rows.
+ * Identity is the exact E.164 number, within the tenant (docs/specs/phone.md).
+ * What a caller passes is read in the firm's country, so "9876543210" and
+ * "+91 98765 43210" are one person and a UAE "+971 50…" is somebody else. A
+ * number that cannot be read matches nobody: it is never guessed into a match.
+ * It used to be the last ten digits, which made a foreign number and an
+ * Indian one with the same tail the same lead.
  *
  * Deliberately NOT scoped by leadScope(). This answers "does this tenant
  * already know this number", which must be true regardless of who is asking —
@@ -1999,12 +1991,10 @@ export async function getLeads(): Promise<any[]> {
  */
 export async function findLeadByPhone(phone: string, tenantId?: string): Promise<any | undefined> {
   const t = tenantId || tid();
-  const p10 = String(phone ?? '').replace(/\D/g, '').slice(-10);
-  if (p10.length !== 10) return undefined;
+  const key = phoneKey(phone, (await localeOf(t)).country);
+  if (!key) return undefined;
   const rows = await sql`
-    SELECT * FROM crm_leads
-     WHERE tenant_id = ${t}
-       AND right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) = ${p10}
+    SELECT * FROM crm_leads WHERE tenant_id = ${t} AND phone = ${key}
      ORDER BY created_at ASC LIMIT 1`;
   return rows[0];
 }
@@ -2081,7 +2071,9 @@ export async function getLeadById(id: string): Promise<any | undefined> {
   return lead;
 }
 
-export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
+/** opts.phoneAsReceived: a portal, webhook or share sent the number — an
+ *  unreadable one is kept as received rather than refused (docs/specs/phone.md). */
+export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts: { phoneAsReceived?: boolean } = {}): Promise<any> {
   const newId = leadData.id || `l_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
   // WHO GETS IT. A person the caller NAMED must be able to take it. NOT SENT
@@ -2112,10 +2104,10 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // Null, not a placeholder number. This defaulted to '+910000000000', which
   // the screens read as "this lead has a phone" — so Call and WhatsApp rendered
   // and dialled it. A lead with no number shows no way to ring one.
-  // KEPT THE WAY EVERY OTHER WRITER KEEPS IT (phoneAsStored): a lead typed on
-  // Add lead was stored "90000 12348" beside portal leads stored +91…, so the
-  // record, the dialler and WhatsApp each got a different shape of one number.
-  const phone = leadData.phone ? (await storedPhone(leadData.phone)) : null;
+  // EXACT E.164 (docs/specs/phone.md). Typed on a form, a number that cannot
+  // be read is refused with the reason; sent by a portal, it is kept as received.
+  const country = (await localeOf(tid())).country;
+  const phone = opts.phoneAsReceived ? keepPhone(leadData.phone, country) : requirePhone(leadData.phone, country);
   const email = leadData.email || null;
   const stage = leadData.stage || 'New';
   const source = leadData.source || 'Website';
@@ -2262,7 +2254,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   assertLeadWrite(who?.role, who?.userId, oldLead, patch);
 
   const name = patch.name !== undefined ? patch.name : oldLead.name;
-  const phone = patch.phone !== undefined ? (patch.phone ? await storedPhone(patch.phone) : patch.phone) : oldLead.phone;
+  const phone = patch.phone !== undefined ? editedPhone(patch.phone, oldLead.phone, (await localeOf(tid())).country) : oldLead.phone;
   const email = patch.email !== undefined ? patch.email : oldLead.email;
   const stage = patch.stage !== undefined ? patch.stage : oldLead.stage;
   const source = patch.source !== undefined ? patch.source : oldLead.source;
@@ -2955,9 +2947,9 @@ export async function timezoneOf(tenantId: string): Promise<string> {
 }
 
 /** The firm's locale, for callers that format money or phones for it. */
-/** A customer's number in this firm's stored form (locale.js phoneAsStored). */
-async function storedPhone(raw: any): Promise<string | null> {
-  return phoneAsStored(raw, await localeOf(tid())) || null;
+/** A number typed for this firm: E.164, or 422 phone_invalid (services/phone.ts). */
+async function typedPhone(raw: any, field = 'phone'): Promise<string | null> {
+  return requirePhone(raw, (await localeOf(tid())).country, field);
 }
 
 export async function localeOf(tenantId: string): Promise<Locale> {
@@ -3635,7 +3627,7 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
   const rows = await sql`
     INSERT INTO crm_owners (id, tenant_id, name, phone, email, project, tower, unit_no, config,
       carpet_area, saleable_area, unit_ref, locality, stage, source, agent_id, created_by, import_batch_id)
-    VALUES (${id}, ${t}, ${data.name || null}, ${data.phone ? await storedPhone(data.phone) : null}, ${data.email || null},
+    VALUES (${id}, ${t}, ${data.name || null}, ${await typedPhone(data.phone)}, ${data.email || null},
       ${data.project || null}, ${data.tower || null}, ${data.unitNo || null}, ${data.config || null},
       ${data.carpetArea ?? null}, ${data.saleableArea ?? null},
       ${data.unitRef || null}, ${data.locality || null},
@@ -3718,7 +3710,8 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
       id: data.id || `own_${Date.now()}_${i}_${randomBytes(3).toString('hex')}`,
       tenant_id: t,
       name: data.name || null,
-      phone: data.phone ? (phoneAsStored(data.phone, loc) || null) : null,
+      // Read before it got here (an import row, a listing's owner): kept as given.
+      phone: keepPhone(data.phone, loc.country),
       email: data.email || null,
       project: data.project || null,
       tower: data.tower || null,
@@ -4157,7 +4150,7 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
   if (patch.agentId && patch.agentId !== existing.agentId) await assertWorkable(t, [patch.agentId]);
   const next = {
     name: patch.name !== undefined ? patch.name : existing.name,
-    phone: patch.phone !== undefined ? (patch.phone ? await storedPhone(patch.phone) : patch.phone) : existing.phone,
+    phone: patch.phone !== undefined ? editedPhone(patch.phone, existing.phone, (await localeOf(t)).country) : existing.phone,
     email: patch.email !== undefined ? patch.email : existing.email,
     project: patch.project !== undefined ? patch.project : existing.project,
     unit_ref: patch.unitRef !== undefined ? patch.unitRef : existing.unitRef,
@@ -5420,7 +5413,9 @@ export function prepareListing(body: any, loc: Locale): any {
   return body;
 }
 
-export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
+/** opts.phoneAsReceived: the owner's number comes from a record already on file
+ *  (an owner converted to a listing), kept as it is stored. */
+export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX, opts: { phoneAsReceived?: boolean } = {}): Promise<any> {
   // A copy of another listing (7.4) says so in its history; the id is not a
   // fact about this flat, so it does not go into the row.
   const copiedFrom = propData.copiedFrom ? String(propData.copiedFrom) : null;
@@ -5480,7 +5475,10 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
   const builder = propData.builder ?? null;
   const reraNo = propData.rera ?? propData.rera_no ?? null;
   const ownerName = propData.owner ?? propData.owner_name ?? null;
-  const ownerPhone = propData.ownerPhone ?? propData.owner_phone ?? null;
+  const ownerPhoneSent = propData.ownerPhone ?? propData.owner_phone ?? null;
+  const ownerPhone = opts.phoneAsReceived
+    ? keepPhone(ownerPhoneSent, (await localeOf(tid())).country)
+    : await typedPhone(ownerPhoneSent, 'ownerPhone');
   const ownerEmail = propData.ownerEmail ?? propData.owner_email ?? null;
   const floor = propData.floor != null ? String(propData.floor) : null;
   const carpetSqft = digits(propData.carpet ?? propData.area ?? propData.carpet_sqft);
@@ -5564,7 +5562,8 @@ export async function linkListingOwner(propertyId: string, data: {
   // inventing a record for it is what filled Contacts with rows nobody could use.
   if (!phone) return null;
   const t = tid();
-  const ten = phone.replace(/\D/g, '').slice(-10);
+  // Exact E.164 (docs/specs/phone.md): an unreadable number matches nobody.
+  const key = phoneKey(phone, (await localeOf(t)).country);
 
   const [byUnit] = data.unitNo
     ? await sql`SELECT id FROM crm_owners
@@ -5580,9 +5579,9 @@ export async function linkListingOwner(propertyId: string, data: {
   // their OTHER flat, and a call about 1802 would be logged against 1603.
   // (One person still appearing as several rows is what Phase B of the
   // Contacts rethink resolves — see docs/specs/contacts-leads.md.)
-  const [byPhone] = (byUnit || data.unitNo) ? [] : await sql`
+  const [byPhone] = (byUnit || data.unitNo || !key) ? [] : await sql`
     SELECT id FROM crm_owners
-     WHERE tenant_id = ${t} AND right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) = ${ten}
+     WHERE tenant_id = ${t} AND phone = ${key}
        AND coalesce(unit_no, '') = ''
      ORDER BY created_at LIMIT 1`;
   const existing = byUnit || byPhone;
@@ -5730,7 +5729,10 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   const builder = patch.builder !== undefined ? patch.builder : row.builder;
   const reraNo = patch.rera !== undefined ? patch.rera : (patch.rera_no !== undefined ? patch.rera_no : row.rera_no);
   const ownerName = patch.owner !== undefined ? patch.owner : (patch.owner_name !== undefined ? patch.owner_name : row.owner_name);
-  const ownerPhone = patch.ownerPhone !== undefined ? patch.ownerPhone : (patch.owner_phone !== undefined ? patch.owner_phone : row.owner_phone);
+  const ownerPhoneSent = patch.ownerPhone !== undefined ? patch.ownerPhone : patch.owner_phone;
+  const ownerPhone = ownerPhoneSent !== undefined
+    ? editedPhone(ownerPhoneSent, row.owner_phone, (await localeOf(tid())).country, 'ownerPhone')
+    : row.owner_phone;
   const ownerEmail = patch.ownerEmail !== undefined ? patch.ownerEmail : (patch.owner_email !== undefined ? patch.owner_email : row.owner_email);
   const floor = patch.floor !== undefined ? (patch.floor != null ? String(patch.floor) : null) : row.floor;
   const carpetSqft = (patch.carpet !== undefined || patch.area !== undefined || patch.carpet_sqft !== undefined)
@@ -6430,12 +6432,7 @@ async function cleanSharingPatch(patch: any, current: any, ctx: ActorCtx | null)
     next.linkExpiryDays = d;
   }
   if (p.replyToPhone !== undefined) {
-    const raw = String(p.replyToPhone ?? '').trim();
-    if (!raw) next.replyToPhone = null;
-    else {
-      if (raw.replace(/\D/g, '').length < 10) throw new Error('The reply-to number needs 10 digits.');
-      next.replyToPhone = normalizePhone(raw, await localeOf(tid()));
-    }
+    next.replyToPhone = editedPhone(p.replyToPhone, cur.replyToPhone, (await localeOf(tid())).country, 'replyToPhone');
   }
   if (p.showPriceOnCatalogue !== undefined) next.showPriceOnCatalogue = p.showPriceOnCatalogue === true;
   if (p.catalogueShowsProject !== undefined) next.catalogueShowsProject = p.catalogueShowsProject !== false;

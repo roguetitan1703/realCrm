@@ -28,7 +28,8 @@ import SendSheet from './SendSheet.jsx'
 import { AttachLinkModal } from '../components/MyLinks.jsx'
 import { AddFromTapModal } from '../components/AddFromTap.jsx'
 import { copyText } from '../lib/clipboard.js'
-import { currencySymbol, firmLocale, phoneLabel, phonePlaceholder, roomsText } from '../lib/locale.js'
+import { currencySymbol, firmLocale, roomsText } from '../lib/locale.js'
+import { formatPhone, telLink } from '../lib/phone.js'
 import { notWorkableReason, assignFailed, shownStrategy } from '../lib/workforce.js'
 import { canAssignLead } from '../lib/permissions.js'
 
@@ -343,7 +344,7 @@ function OwnerEditModal({ store, propId }) {
         <Input value={owner} onChange={e => setOwner(e.target.value)} placeholder="Sneha Rane" autoFocus />
       </Field>
       <Field label="Phone">
-        <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder={phonePlaceholder('+91 98765 43210')} />
+        <PhoneInput value={phone} onChange={e => setPhone(e.target.value)} />
       </Field>
       <Field label="Email">
         <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="Optional" />
@@ -368,13 +369,12 @@ function OwnerUpdateModal({ store, propId }) {
     setText(ownerUpdateMessage(p, buyers || [], store.state.settings.firmName))
   }, [p?.id, buyers, edited])
   if (!p) return null
-  const digits = String(p.ownerPhone || '').replace(/\D/g, '')
   // Used to only call store.logEvent (client-only — the "logged" claim in the
   // helper text below was false; it vanished on refresh) and never actually
   // opened WhatsApp. Now it really sends and really persists (B5 pattern):
   // log a 'wa' event, then attach the composed text as its remark.
   const send = (app) => {
-    if (digits) openWhatsAppChat(text, digits, app)
+    if (p.ownerPhone) openWhatsAppChat(text, p.ownerPhone, app)
     store.logContactAction('property', p.id, 'wa').then(res => {
       if (res?.timeline_event?.id) store.editRemark('property', p.id, res.timeline_event.id, text)
     })
@@ -628,7 +628,7 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) 
   return (
     <Modal title={`Record call · ${(l.name || l.phone || '').split(' ')[0]}`} onClose={store.closeModal} width={430}>
       <div className="lc-who">
-        <span className="mono-num">{phoneLabel(l.phone) || '—'}</span>
+        <span className="mono-num">{formatPhone(l.phone) || '—'}</span>
         <StageTag stage={l.stage || 'New'} />
       </div>
       <Field label="What happened">
@@ -832,7 +832,7 @@ function NewLeadModal({ store, leadId }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
           <Field label="Full Name *"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Client Name" autoFocus /></Field>
-          <Field label="Phone Number *"><Input value={f.phone} onChange={e => set('phone', e.target.value)} placeholder={phonePlaceholder('+91 98xxx xxxxx')} /></Field>
+          <Field label="Phone Number *"><PhoneInput value={f.phone} onChange={e => set('phone', e.target.value)} /></Field>
         </div>
         <Field label="Email Address (Optional)"><Input value={f.email} onChange={e => set('email', e.target.value)} placeholder="client@domain.com" /></Field>
 
@@ -983,7 +983,7 @@ function NewOwnerModal({ store, ownerId }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
           <Field label="Owner Name"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Optional" autoFocus /></Field>
-          <Field label="Phone *"><Input value={f.phone} onChange={e => set('phone', e.target.value)} placeholder={phonePlaceholder('+91 98xxx xxxxx')} /></Field>
+          <Field label="Phone *"><PhoneInput value={f.phone} onChange={e => set('phone', e.target.value)} /></Field>
         </div>
         <Field label="Email"><Input value={f.email} onChange={e => set('email', e.target.value)} placeholder="Optional" /></Field>
         {/* THE FLAT, IN ITS OWN BOXES. This was one free-text "unit reference"
@@ -1626,14 +1626,14 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
   const [text, setText] = useState('')
   const [outcome, setOutcome] = useState('')
   const first = (name || 'them').split(' ')[0]
-  const digits = String(phone || '').replace(/\D/g, '')
+  const stored = String(phone || '').trim()
   const ch = CHANNELS[channel] || CHANNELS.call
   const label = ch.noun
 
   const proceed = (app) => {
     if (channel === 'email') {
       if (email) window.location.href = `mailto:${email}`
-    } else if (digits) {
+    } else if (stored) {
       if (channel === 'wa') {
         let msg = waText || ''
         if (!msg && recordType === 'lead' && recordId) {
@@ -1644,9 +1644,11 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
             })
           }
         }
-        openWhatsAppChat(msg, digits, app)
+        openWhatsAppChat(msg, stored, app)
       } else {
-        window.location.href = `tel:+${digits.length > 10 ? digits : firmLocale().phoneCountry + digits}`
+        // The stored number: exact E.164, or exactly as received when it
+        // could not be read (the dialler shows it; nothing is guessed).
+        window.location.href = telLink(stored) || `tel:${stored}`
       }
     }
     if (recordType && recordId) {

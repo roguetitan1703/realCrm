@@ -28,7 +28,8 @@ import { finalStageOf } from '../data/pipelineRoles.js'
 import { getNestedValue } from '../components/ModuleFields.jsx'
 import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, dayLabel, arrivedOn, flatOf, dealWord, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
 import { getPref } from '../lib/prefs.js'
-import { moneyFull, phoneLabel } from '../lib/locale.js'
+import { moneyFull } from '../lib/locale.js'
+import { formatPhone } from '../lib/phone.js'
 import { copyText } from '../lib/clipboard.js'
 import { messageLang } from '../data/vocabLocale.js'
 import { generateMessage } from '../lib/matching.js'
@@ -121,7 +122,7 @@ export const LEADS_DEF = {
   // reads as a place, and sale/rent is a small tag rather than plain text — a
   // sentence like "3 BHK · rent · Wakad" made the deal type invisible.
   headerFacts: (l) => [
-    phoneLabel(l.phone),
+    formatPhone(l.phone),
     l.email || null,
     reqConfigLabel(l.req) || l.requirement || null,
     latestPlus(l.req?.locality || l.locality)
@@ -266,7 +267,7 @@ export const LEADS_DEF = {
         </div>
         {/* Not twice. With no name on the lead the title above IS the phone
             number, and this line repeated it under itself. */}
-        {l.name ? <div className="sub mono-num">{phoneLabel(l.phone)}</div> : null}
+        {l.name ? <div className="sub mono-num">{formatPhone(l.phone)}</div> : null}
       </div>
     ) },
     { key: 'req', label: 'Requirement', render: (l) => reqShort(l.req) },
@@ -573,7 +574,7 @@ export const LEADS_DEF = {
             onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
           />
         </div>
-        <div className="rc-sub mono-num">{phoneLabel(l.phone)}</div>
+        <div className="rc-sub mono-num">{formatPhone(l.phone)}</div>
         <div className="rc-facts"><span>{reqShort(l.req)}</span></div>
         <RowNote record={l} />
         <div className="rc-foot">
@@ -629,7 +630,7 @@ export const OWNERS_DEF = {
   headerFacts: (o) => {
     const cb = callbackSignal(o.callbackAt)
     return [
-      phoneLabel(o.phone),
+      formatPhone(o.phone),
       o.email || null,
       o.project ? <span className="rh-loc"><Icon name="building" size={12} className="ic" />{o.project}</span> : null,
       o.unitLabel || o.unitRef || null,
@@ -676,7 +677,7 @@ export const OWNERS_DEF = {
 
   columns: [
     { key: 'name', label: 'Name', sortable: true, render: (o) => (
-      <div><div className="name">{o.name || '—'}</div><div className="sub mono-num">{phoneLabel(o.phone)}</div></div>
+      <div><div className="name">{o.name || '—'}</div><div className="sub mono-num">{formatPhone(o.phone)}</div></div>
     ) },
     { key: 'project', label: 'Project', render: (o) => o.project || '—' },
     // Tower + flat, from the columns the import now writes — falling back to
@@ -722,7 +723,7 @@ export const OWNERS_DEF = {
         <div className="rc-title">{o.name || 'Unnamed owner'}</div>
         {ownerStageCell(o, store)}
       </div>
-      <div className="rc-sub mono-num">{phoneLabel(o.phone)}</div>
+      <div className="rc-sub mono-num">{formatPhone(o.phone)}</div>
       <div className="rc-facts"><span>{[o.project, o.unitLabel || o.unitRef].filter(Boolean).join(' · ') || '—'}</span></div>
       <RowNote record={o} />
       <div className="rc-foot">
@@ -1112,7 +1113,7 @@ export function partiesDef(kind) {
       { key: 'name', label: rent ? 'Tenant' : 'Buyer', render: (a) => (
         <div className="cell-prop">
           <span className="av av-sm av-demand">{initials(a.party?.name || '?')}</span>
-          <div><div className="name">{a.party?.name || '—'}</div><div className="sub mono-num">{phoneLabel(a.party?.phone) || ''}</div></div>
+          <div><div className="name">{a.party?.name || '—'}</div><div className="sub mono-num">{formatPhone(a.party?.phone) || ''}</div></div>
         </div>
       ) },
       { key: 'flat', label: 'Flat', render: (a) => <span className="cell-txt">{a.flat}</span> },
@@ -1160,7 +1161,7 @@ export const CLIENTS_DEF = {
 
   // Contacts are a directory, not a pipeline — no `progression`. The standard
   // header simply omits the stepper. Facts strip still applies.
-  headerFacts: (r) => [phoneLabel(r.phone), r.role, r.locality].filter(Boolean),
+  headerFacts: (r) => [formatPhone(r.phone), r.role, r.locality].filter(Boolean),
 
   searchFields: ['name', 'detail', 'phone'],
 
@@ -1188,7 +1189,7 @@ export const CLIENTS_DEF = {
     { key: 'name', label: 'Name', sortable: true, render: (r) => (
       <div className="cell-prop">
         <span className={'av av-sm ' + (r.kind === 'supply' ? 'av-supply' : 'av-demand')}>{initials(r.name)}</span>
-        <div><div className="name">{r.name}</div><div className="sub mono-num">{phoneLabel(r.phone)}</div></div>
+        <div><div className="name">{r.name}</div><div className="sub mono-num">{formatPhone(r.phone)}</div></div>
       </div>
     ) },
     { key: 'role', label: 'Role', sortable: true, render: (r) => <span className="source">{r.role}</span> },
@@ -1232,7 +1233,7 @@ export const CLIENTS_DEF = {
         <span className={'av av-sm ' + (r.kind === 'supply' ? 'av-supply' : 'av-demand')}>{initials(r.name)}</span>
         <div className="rc-title rc-title-flex">{r.name}</div>
       </div>
-      <div className="rc-sub mono-num">{phoneLabel(r.phone)}</div>
+      <div className="rc-sub mono-num">{formatPhone(r.phone)}</div>
       <div className="rc-facts"><span>{r.detail}</span>{flatsLine(r.flats) && <span>{flatsLine(r.flats)}</span>}</div>
       <div className="rc-foot">
         <span className="source">{r.role}</span>

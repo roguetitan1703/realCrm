@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
-import { Button, Input } from './primitives.jsx'
+import { Button, Input, PhoneInput } from './primitives.jsx'
 import { api, currentTenant } from '../lib/api.js'
-import { phonePlaceholder, phoneProblem } from '../lib/locale.js'
-import { canPaste, canPickContact, pasteNumber, pickContact, looksLikePhone, refusal, heldText } from '../lib/share.js'
+import { readPhone } from '../lib/phone.js'
+import { canPaste, canPickContact, pasteNumber, pickContact, refusal, heldText } from '../lib/share.js'
 
 // ============================================================================
 // ADD AS LEAD — from a buyer's I'm interested tap (listing-pages.md §A.1d)
@@ -29,7 +29,6 @@ export default function AddFromTap({ tap, home, via = 'interested', onDone, onCa
   const [busy, setBusy] = useState(false)
   const [state, setState] = useState(null) // null | { kind: 'held'|'denied'|'error'|'nopaste', ... }
   const [tried, setTried] = useState(false)
-  const problem = tried ? phoneProblem(phone) : ''
 
   const paste = async () => {
     const n = await pasteNumber()
@@ -44,7 +43,7 @@ export default function AddFromTap({ tap, home, via = 'interested', onDone, onCa
 
   const save = async () => {
     setTried(true)
-    if (!looksLikePhone(phone) || busy) return
+    if (!readPhone(phone).ok || busy) return
     setBusy(true); setState(null)
     try {
       const r = await api.leadFromTap(tap.code, { phone: phone.trim(), ...(name.trim() ? { name: name.trim() } : {}) })
@@ -53,6 +52,7 @@ export default function AddFromTap({ tap, home, via = 'interested', onDone, onCa
       const why = refusal(e)
       if (why.status === 409) setState({ kind: 'held', holder: why.holderName })
       else if (why.status === 403) setState({ kind: 'error', text: 'Only the person who sent this link, the lead’s holder or a manager can add it.' })
+      else if (why.code === 'phone_invalid') setState({ kind: 'error', text: e?.body?.message || 'Not a valid number.' })
       else if (e instanceof TypeError) setState({ kind: 'error', text: 'No connection. Nothing was saved.' })
       else setState({ kind: 'error', text: 'Could not add the lead. Try again.' })
     } finally { setBusy(false) }
@@ -90,10 +90,9 @@ export default function AddFromTap({ tap, home, via = 'interested', onDone, onCa
       <div className="aft">
         <div className="field">
           <label htmlFor="aft-phone">Mobile number</label>
-          <Input id="aft-phone" value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel"
-            placeholder={phonePlaceholder('98xxx xxxxx')} onBlur={() => setTried(true)} onKeyDown={e => { if (e.key === 'Enter') save() }} />
+          <PhoneInput id="aft-phone" value={phone} onChange={e => setPhone(e.target.value)}
+            showProblem={tried} onKeyDown={e => { if (e.key === 'Enter') save() }} />
         </div>
-        {problem && <div className="snd-err" role="alert">{problem}</div>}
         {(canPaste() || canPickContact()) && (
           <div className="snd-ways">
             {canPaste() && <button type="button" className="chipo" onClick={paste}><Icon name="copy" size={14} />Paste</button>}

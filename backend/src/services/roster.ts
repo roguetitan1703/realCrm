@@ -14,7 +14,7 @@
  * what the screen showed is what gets created.
  */
 import { passwordIssue } from './auth.js';
-import { phoneE164, INDIA_LOCALE } from '../../../src/lib/locale.js';
+import { readPhone, phoneProblem } from '../../../src/lib/phone.js';
 
 /**
  * ONBOARDING ONLY: the handle and password a new firm's people are handed.
@@ -47,7 +47,7 @@ export interface PlannedMember {
   name: string;
   loginId: string;
   email: string | null;
-  phone: string | null;   // +<country><ten digits>, the form every other writer stores
+  phone: string | null;   // E.164 (docs/specs/phone.md)
   role: 'agent' | 'manager';
   password: string;
 }
@@ -64,10 +64,15 @@ function loginIdFromName(name: string, fallback = 'agent'): string {
   return firstName(name).slice(0, 16) || fallback;
 }
 
-/** A typed number in the form every writer stores. A firm being provisioned has
- *  no settings yet, so its roster is read as Indian unless a locale is given. */
-export function normalizePhone(raw: string | null | undefined, loc = INDIA_LOCALE): string | null {
-  return phoneE164(raw, loc) || null;
+/** A firm being provisioned has no settings yet, so its roster's numbers
+ *  without a country code are read as Indian (docs/specs/phone.md). */
+const ROSTER_COUNTRY = 'IN';
+
+/** A roster number as stored (E.164), null when blank, or the reason it cannot be. */
+export function rosterPhone(raw: string | null | undefined): { phone: string | null; problem: string | null } {
+  const r = readPhone(raw, ROSTER_COUNTRY);
+  if (r.ok) return { phone: r.e164, problem: null };
+  return { phone: null, problem: r.reason === 'empty' ? null : `"${String(raw).trim()}": ${phoneProblem(raw, ROSTER_COUNTRY)}` };
 }
 
 /** `base`, else `base2`, `base3`… — the first one not in `taken`. Claims it. */
@@ -117,9 +122,11 @@ export function planRoster(input: { ownerName?: string; ownerEmail?: string; own
     const pwIssue = passwordIssue(password);
     if (pwIssue) issues.push(`${name}: ${pwIssue}`);
 
+    const ph = rosterPhone(row.phone);
+    if (ph.problem) issues.push(`${name}: ${ph.problem}`);
     team.push({
       name, loginId, email,
-      phone: normalizePhone(row.phone),
+      phone: ph.phone,
       role: row.role === 'manager' ? 'manager' : 'agent',
       password,
     });
@@ -131,7 +138,9 @@ export function planRoster(input: { ownerName?: string; ownerEmail?: string; own
   }
   // A phone is one person per firm (users has a unique (tenant_id, phone)), so
   // two rows with one number would fail halfway through creating the firm.
-  const phones = [normalizePhone(input.ownerPhone), ...team.map(t => t.phone)].filter(Boolean) as string[];
+  const ownerPh = rosterPhone(input.ownerPhone);
+  if (ownerPh.problem) issues.push(`Owner: ${ownerPh.problem}`);
+  const phones = [ownerPh.phone, ...team.map(t => t.phone)].filter(Boolean) as string[];
   for (const ph of new Set(phones)) {
     if (phones.filter(x => x === ph).length > 1) issues.push(`${ph} is on more than one person.`);
   }

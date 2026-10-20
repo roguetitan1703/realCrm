@@ -38,9 +38,8 @@ import { notify, notifyOrDesk } from './notifications.js';
 import { audit } from './audit.js';
 import { landEnquiry } from './ingestion.js';
 import { assertLeadWrite } from '../lib/permissions.js';
-// A buyer's number is kept by the same rule as every lead's (locale.js), not
-// roster.ts normalizePhone, which keeps the last ten digits of a foreign one.
-import { phoneAsStored, waLink } from '../../../src/lib/locale.js';
+// A buyer's number is exact E.164, read in the firm's country (docs/specs/phone.md).
+import { readPhone, toE164, phoneProblem, waLink } from '../../../src/lib/phone.js';
 import { CATALOGUE_WHERE, HAS_PHOTO } from './catalogueRules.js';
 import { canTakeWork } from './workforce.js';
 import { BHK } from '../../../src/data/propertyFields.js';
@@ -81,10 +80,19 @@ export const deviceIdOf = (raw: unknown): string | null => {
   return /^[A-Za-z0-9_-]{8,64}$/.test(v) ? v : null;
 };
 
-/** wa.me with the country code (locale.js waLink, the one builder). It
+/** wa.me with the country code (phone.js waLink, the one builder). It
  *  stripped non-digits and stopped, so a number stored as ten bare digits
  *  opened "not on WhatsApp" for the buyer. No number: WhatsApp asks who. */
-export const waUrl = (phone: string | null | undefined, text: string, loc: Locale) => waLink(phone, text, loc);
+export const waUrl = (phone: string | null | undefined, text: string, _loc?: Locale) => waLink(phone, text);
+
+/** A buyer's number as typed into a form: E.164, or 422 phone_invalid with the
+ *  reason. Never guessed, so it is never matched to somebody else's lead. */
+async function buyerPhone(tenantId: string, raw: unknown): Promise<string> {
+  const country = (await localeOf(tenantId)).country;
+  const r = readPhone(raw, country);
+  if (r.ok) return r.e164;
+  throw new ShareError(422, 'phone_invalid', r.reason === 'empty' ? 'Enter their mobile number.' : phoneProblem(raw, country), { reason: r.reason });
+}
 
 /**
  * The app's address, for links put inside messages. The browser's Origin is
@@ -760,8 +768,7 @@ export async function catalogueFlat(f: Firm, slug: string, r: PublicReq) {
  */
 export async function catalogueEnquiry(f: Firm, input: { name?: string; phone?: string; propertyId?: string; message?: string }, r: PublicReq) {
   const loc = await localeOf(f.id);
-  const digits = String(input.phone || '').replace(/\D/g, '');
-  if (digits.length < 10 || digits.length > 13) throw new ShareError(400, 'phone_required', 'A 10-digit mobile number is needed.');
+  const phone = await buyerPhone(f.id, input.phone);
   // A firm's form takes at most 100 enquiries a day. Above that it is a flood,
   // not buyers, and every one would be an alert.
   const tz = (await deskConfigOf(f.id)).timezone;
@@ -778,7 +785,6 @@ export async function catalogueEnquiry(f: Firm, input: { name?: string; phone?: 
     console.warn(`[Share] catalogue enquiry cap reached for tenant ${f.id}: ${today} today`);
     throw new ShareError(429, 'slow_down', 'Too many requests. Try again in a few minutes.', { cta: { phone: await firmPhone(f.id) } });
   }
-  const phone = phoneAsStored(input.phone, loc) || null;
   const name = String(input.name || '').trim().slice(0, 80) || null;
   const message = String(input.message || '').trim().slice(0, 1000) || null;
   const flat: any = (flatRows as any[])[0] || null;
@@ -864,10 +870,8 @@ const ctxOf = (m: ReturnType<typeof me>): ActorCtx => ({ actorType: 'user', acto
  * holder is told.
  */
 async function leadForNumber(m: ReturnType<typeof me>, phoneRaw: string, name: string | null, source: string): Promise<{ lead: any; created: boolean }> {
-  const digits = String(phoneRaw || '').replace(/\D/g, '');
-  if (digits.length < 10 || digits.length > 13) throw new ShareError(400, 'phone_required', 'A 10-digit mobile number is needed.');
-  const phone = phoneAsStored(phoneRaw, await localeOf(m.tenantId)) || null;
-  const existing = await findLeadByPhone(phone!, m.tenantId);
+  const phone = await buyerPhone(m.tenantId, phoneRaw);
+  const existing = await findLeadByPhone(phone, m.tenantId);
   if (existing) {
     if (isDeskRole(m.role) || existing.agent_id === m.userId || existing.created_by === m.userId) return { lead: existing, created: false };
     const holder = await activeUser(m.tenantId, existing.agent_id);
@@ -936,7 +940,8 @@ export async function createShareLink(input: any, origin: string | null, opts: {
   ]);
   if (!sender) throw new ShareError(401, 'auth_required');
   // Senders need a number (Om, §A.4): the buyer's WhatsApp opens to it.
-  if (String(sender.phone || '').replace(/\D/g, '').length < 10) throw new ShareError(422, 'sender_phone_missing', 'Add your mobile number first.');
+  // A number that cannot be read opens nobody's WhatsApp, so it counts as none.
+  if (!toE164(sender.phone, (await localeOf(m.tenantId)).country)) throw new ShareError(422, 'sender_phone_missing', 'Add your mobile number first.');
   // Stopped by the owner: no new links until they allow sharing again.
   if (sharing.stopped) throw new ShareError(422, 'sharing_stopped', 'Sharing is stopped. An owner can allow it again in Settings.');
 
@@ -1292,8 +1297,7 @@ export async function tapToLead(code: string, input: any) {
   if (tap.lead_id) {
     let target: string | null = input?.leadId ? String(input.leadId) : null;
     if (!target && input?.phone) {
-      const digits = String(input.phone).replace(/\D/g, '');
-      const found = digits.length >= 10 ? await findLeadByPhone(phoneAsStored(input.phone, await localeOf(m.tenantId)), m.tenantId) : null;
+      const found = await findLeadByPhone(await buyerPhone(m.tenantId, input.phone), m.tenantId);
       target = found?.id || null;
     }
     if (target !== tap.lead_id) throw new ShareError(409, 'tap_has_lead', 'This tap already belongs to another lead.', await tapHolder(m, tap.lead_id));
