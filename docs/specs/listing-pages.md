@@ -1,7 +1,7 @@
 # Listing pages — sending flats, and the firm's catalogue
 
-**Status:** reopened 19 Oct by Om with a new model (§A). Nothing built. §A is
-the design; §0–§8 below are the 12–13 Oct thinking, kept for its reasoning and
+**Status:** §A built on `development` (19–20 Oct, not deployed); §A.5 is the
+as-built contract. §A is the design; §0–§8 below are the 12–13 Oct thinking, kept for its reasoning and
 superseded wherever §A says otherwise (notably: one page per buyer is replaced
 by a link per send with an expiry).
 
