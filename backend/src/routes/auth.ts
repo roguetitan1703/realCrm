@@ -23,6 +23,7 @@ import { sql } from '../services/db.js';
 import { normalizePhone } from '../services/roster.js';
 import { localeOf } from '../services/store.js';
 import { audit } from '../services/audit.js';
+import { hit } from '../services/rateLimit.js';
 
 export const authRouter = Router();
 
@@ -51,6 +52,16 @@ function reqCtx(req: Request) {
   return { ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null };
 }
 
+/**
+ * PER-ADDRESS LIMITS on the public auth doors. There were none: a script
+ * could try passwords as fast as the server answered (the per-account lockout
+ * only slows one account at a time), and forgot-password could mail an inbox
+ * without end. The numbers are set so a whole office behind one address never
+ * meets them: 30 sign-ins a minute is a person every two seconds.
+ */
+const SLOW_AUTH = { error: 'slow_down', message: 'Too many attempts. Try again in a few minutes.' };
+const ipKey = (req: Request) => req.ip || req.socket?.remoteAddress || 'unknown';
+
 /** Read + verify the bearer token, returning tenant-user claims (or null). */
 function userClaims(req: Request): TenantTokenClaims | null {
   const auth = req.headers.authorization || '';
@@ -70,6 +81,7 @@ authRouter.post(['/otp/request', '/otp/verify'], (_req: Request, res: Response) 
 // Tenant comes from the selected-workspace header (login is pre-token). The
 // handle is an email (owner/manager) or an assigned login_id (agent).
 authRouter.post('/login', async (req: Request, res: Response) => {
+  if (!hit(`auth-login:${ipKey(req)}`, 30, 60_000)) return res.status(429).json(SLOW_AUTH);
   try {
     const { handle, identifier, password } = req.body || {};
     const h = handle || identifier;
@@ -102,6 +114,7 @@ authRouter.post('/password/change', async (req: Request, res: Response) => {
 
 // Always 200 (no account enumeration) whether or not the email maps to a user.
 authRouter.post('/password/forgot', async (req: Request, res: Response) => {
+  if (!hit(`auth-forgot:${ipKey(req)}`, 10, 10 * 60_000)) return res.status(429).json(SLOW_AUTH);
   try {
     // `handle` is what the sign-in form calls it; `email` is what this endpoint
     // used to be. Both accepted so an older deployed client keeps working —
@@ -113,7 +126,11 @@ authRouter.post('/password/forgot', async (req: Request, res: Response) => {
     // emailed link points back to THIS app — localhost in dev, the app origin in
     // the split-origin deploy (the browser's Origin is the app, not the API host).
     const origin = (req.headers.origin as string) || `${req.protocol}://${req.get('host')}`;
-    if (identifier) await requestPasswordReset(tenantFromHeader(req), identifier, origin);
+    // Three emails an hour per account handle, whoever asks: an inbox cannot
+    // be flooded from many addresses. Past it the answer is the same 200, so
+    // the limit says nothing about whether the handle exists.
+    const handleKey = `auth-forgot-handle:${tenantFromHeader(req)}:${String(identifier || '').trim().toLowerCase()}`;
+    if (identifier && hit(handleKey, 3, 60 * 60_000)) await requestPasswordReset(tenantFromHeader(req), identifier, origin);
   } catch (err: any) {
     console.warn('[Auth] forgot-password error:', err.message);
   }
@@ -147,6 +164,8 @@ authRouter.post('/sessions/:id/revoke', async (req: Request, res: Response) => {
 });
 
 authRouter.post('/superadmin/login', async (req: Request, res: Response) => {
+  // Tighter: one person signs in here, and it reaches every firm.
+  if (!hit(`auth-sa:${ipKey(req)}`, 10, 60_000)) return res.status(429).json(SLOW_AUTH);
   try {
     const { email, password } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
