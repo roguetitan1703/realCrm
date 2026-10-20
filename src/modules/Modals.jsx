@@ -28,6 +28,7 @@ import { CloseDealModal, AgreementModal } from '../components/Agreements.jsx'
 import SendSheet, { SenderPhone } from './SendSheet.jsx'
 import { AttachLinkModal } from '../components/MyLinks.jsx'
 import { AddFromTapModal } from '../components/AddFromTap.jsx'
+import BuyerAskModal from '../components/BuyerAsk.jsx'
 import { copyText } from '../lib/clipboard.js'
 import { currencySymbol, firmLocale, roomsText } from '../lib/locale.js'
 import { formatPhone, telLink, personLabel } from '../lib/phone.js'
@@ -52,7 +53,7 @@ import { canAssignLead } from '../lib/permissions.js'
  * below: any input or change event inside the frame bubbles to this div, which
  * is exactly the thing that means "somebody typed something".
  */
-function Modal({ title, onClose, children, width = 440 }) {
+export function Modal({ title, onClose, children, width = 440 }) {
   const [dirty, setDirty] = useState(false)
   const [nudge, setNudge] = useState(false)
 
@@ -87,21 +88,24 @@ function Modal({ title, onClose, children, width = 440 }) {
 // an I'm interested tap on a lead has nothing left to add.
 const tapIn = (search) => {
   const p = new URLSearchParams(search)
+  // A buyer's form (`?ask=`): what they asked, with its one-tap answer.
+  const ask = p.get('ask')
+  if (ask && /^ask_[a-z0-9]+$/i.test(ask)) return { kind: 'buyerAsk', id: ask }
   const t = p.get('tap')
-  return t && /^[a-z0-9]{6}$/.test(t) ? { code: t, onlyTalk: !!p.get('lead') } : null
+  return t && /^[a-z0-9]{6}$/.test(t) ? { kind: 'addFromTap', code: t, onlyTalk: !!p.get('lead') } : null
 }
 const BOOT_TAP = typeof window !== 'undefined' ? tapIn(window.location.search) : null
 
 export default function Modals({ store, go }) {
   const m = store.state.modal
   useEffect(() => {
-    if (BOOT_TAP) store.openModal({ kind: 'addFromTap', ...BOOT_TAP })
+    if (BOOT_TAP) store.openModal(BOOT_TAP)
     if (!('serviceWorker' in navigator)) return
     const onMsg = (e) => {
       if (e.data?.type !== 'notification-navigate' || !e.data.url) return
       let tap = null
       try { tap = tapIn(new URL(e.data.url, window.location.origin).search) } catch { return }
-      if (tap) setTimeout(() => store.openModal({ kind: 'addFromTap', ...tap }), 0)
+      if (tap) setTimeout(() => store.openModal(tap), 0)
     }
     navigator.serviceWorker.addEventListener('message', onMsg)
     return () => navigator.serviceWorker.removeEventListener('message', onMsg)
@@ -145,6 +149,7 @@ export default function Modals({ store, go }) {
       {/* One sheet for every send: the lead's shortlist, the Properties
           selection and a property's own Share (listing-pages.md §A). */}
       {m?.kind === 'addFromTap' && <AddFromTapModal store={store} go={go} Modal={Modal} code={m.code} onlyTalk={!!m.onlyTalk} PhoneStep={SenderPhone} />}
+      {m?.kind === 'buyerAsk' && <BuyerAskModal store={store} go={go} Modal={Modal} id={m.id} />}
       {m?.kind === 'attachLink' && <AttachLinkModal store={store} Modal={Modal} linkId={m.linkId} onDone={m.onDone} />}
       {m?.kind === 'send' && <SendSheet store={store} Modal={Modal} homes={m.homes} leadId={m.leadId} lead={m.lead} suggested={m.suggested} onSent={m.onSent} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
@@ -693,7 +698,7 @@ function NewLeadModal({ store, leadId }) {
     interest: listText(edit.req?.interest),
     // Never shown in this form: kept as stored, never invented.
     timeline: edit.req?.timeline || '',
-    source: edit.source || 'Website',
+    source: edit.source || '',
     agentId: edit.agentId || null,
     // 'Self Use' and 'Lease' were written by this form when nobody typed a
     // note (see save); they are not the person's words.
@@ -711,7 +716,8 @@ function NewLeadModal({ store, leadId }) {
     // NOT STATED. 'Within 60 days' was saved on every new lead though the form
     // never asks it (CLAUDE.md §3.1).
     timeline: '',
-    source: 'Website',
+    // Not stated until someone picks one: 'Website' was saved on every lead.
+    source: '',
     // WHO TAKES IT. An agent adding a lead is taking it: themselves. The desk
     // (owner, manager) is entering it for the team: the firm's rule — "Next in
     // turn" under the rota (not sent, so the server deals it), "Unassigned"
@@ -764,7 +770,7 @@ function NewLeadModal({ store, leadId }) {
         name: f.name.trim(),
         phone: f.phone.trim(),
         email: f.email.trim() || undefined,
-        source: f.source,
+        source: f.source || null,
         // Sent only when changed: re-sending a holder who has since been
         // suspended would have the server refuse an edit to the name. Picking
         // Unassigned is a change too, sent as null; it was dropped here, so
@@ -795,7 +801,7 @@ function NewLeadModal({ store, leadId }) {
         phone: f.phone.trim(),
         email: f.email.trim() || undefined,
         // Came from a link: the link is where they came from (§A.1c I2r).
-        source: cameFrom ? 'Shared link' : (f.source || 'Website'),
+        source: cameFrom ? 'Shared link' : (f.source || undefined),
         stage: 'New',
         minsAgo: 0,
         // undefined is left out of the body: not sent, the firm's rule decides.
@@ -902,6 +908,8 @@ function NewLeadModal({ store, leadId }) {
           <div className="field">
             <label>Source</label>
             <select className="input" value={f.source} onChange={e => set('source', e.target.value)} style={{ width: '100%' }}>
+              <option value="">Not stated</option>
+              {f.source && !store.state.settings.sources.includes(f.source) && <option value={f.source}>{f.source}</option>}
               {store.state.settings.sources.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
@@ -2313,9 +2321,12 @@ export function NotifModal({ store, go }) {
     // link, the home and the tap (listing-pages.md §A.1d). The tap's code is
     // `?tap=` on the alert's link, or the ref link itself (/<firm>/<code>).
     const tap = p.get('tap') || (/^share_/.test(n.type || '') ? (String(n.link || '').match(/^\/[a-z0-9-]+\/([a-z0-9]{6})(?:[/?#]|$)/) || [])[1] : null)
+    const ask = p.get('ask')
     close()
+    // A buyer's form opens on what they asked, with its one-tap answer.
+    if (ask) store.openModal({ kind: 'buyerAsk', id: ask })
     // Talk to us on an expired link opens on its Send a fresh link, lead or not.
-    if (tap && (!leadId || n.type === 'share_expired_open')) store.openModal({ kind: 'addFromTap', code: tap })
+    else if (tap && (!leadId || n.type === 'share_expired_open')) store.openModal({ kind: 'addFromTap', code: tap })
     else if (leadId) go('leads', { leadId, leadOpen: true })
     else if (alert) go('leads', { leadFilters: { alert: [alert] }, leadOpen: false, leadId: undefined })
     else if (agent.length) go('leads', { leadFilters: { agent }, leadOpen: false, leadId: undefined })

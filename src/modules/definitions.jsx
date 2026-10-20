@@ -227,7 +227,8 @@ export const LEADS_DEF = {
 
   // Per-key filter logic (mirrors the module's normalized predicates).
   rowMatch(l, key, vals) {
-    if (key === 'source') return vals.some(s => eqi(l.source, s))
+    // '_none' is "Not stated" (store.ts SOURCE_NONE).
+    if (key === 'source') return vals.some(s => (s === '_none' ? !l.source : eqi(l.source, s)))
     if (key === 'agent') return vals.includes(l.agentId || '_none')
     if (key === 'locality') {
       return vals.some(loc => {
@@ -290,7 +291,10 @@ export const LEADS_DEF = {
     // `+N` is the same shorthand the header and the phone card use for an
     // accumulating field; the record sheet lists every one of them by name.
     { key: 'source', label: 'Source', render: (l) => (
-      <Source>{l.source}{l.otherSourceCount > 0 ? ` +${l.otherSourceCount}` : ''}</Source>
+      // No source is said as such, never as an empty chip (CLAUDE.md §3.1).
+      l.source
+        ? <Source>{l.source}{l.otherSourceCount > 0 ? ` +${l.otherSourceCount}` : ''}</Source>
+        : <span className="u-muted">Not stated</span>
     ) },
     // WHO HAS THIS LEAD, and the way to change it — the same cell. It used to
     // render only a bare + button for anyone who could assign, so the column

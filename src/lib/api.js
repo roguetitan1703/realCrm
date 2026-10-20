@@ -817,6 +817,11 @@ export const api = {
   publicTalk: (tenant, code, device) => request(`/public/s/${encodeURIComponent(tenant)}/${encodeURIComponent(code)}/talk`, { method: 'POST', headers: deviceHeader(device), body: '{}' }),
   publicCatalogue: (tenant, filters, device) => request(`/public/catalogue/${encodeURIComponent(tenant)}${qs(filters)}`, { fresh: true, headers: deviceHeader(device) }),
   publicCatalogueHome: (tenant, slug, device) => request(`/public/catalogue/${encodeURIComponent(tenant)}/${encodeURIComponent(slug)}`, { fresh: true, headers: deviceHeader(device) }),
+  // The buyer forms (listing-pages.md §A.6): the visit times, and one ask.
+  publicAskSlots: (tenant) => request(`/public/forms/${encodeURIComponent(tenant)}/slots`, { fresh: true }),
+  publicAsk: (tenant, body, device) => request(`/public/forms/${encodeURIComponent(tenant)}/ask`, { method: 'POST', headers: deviceHeader(device), body: JSON.stringify(body) }),
+  buyerAsk: (id) => request(`/buyer-asks/${encodeURIComponent(id)}`, { fresh: true }),
+  confirmBuyerVisit: (id, { replace = false } = {}) => request(`/buyer-asks/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: JSON.stringify({ replace }) }),
   publicEnquiry: (tenant, body, device) => request(`/public/catalogue/${encodeURIComponent(tenant)}/enquiry`, { method: 'POST', headers: deviceHeader(device), body: JSON.stringify(body) }),
   publicGallery: (slug, ref) => request(`/public/gallery/${encodeURIComponent(slug)}/${encodeURIComponent(ref)}`, { fresh: true }),
   updateProperty: (id, patch) => request(`/modules/properties/records/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),

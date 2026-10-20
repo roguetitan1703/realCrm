@@ -127,8 +127,8 @@ export function MyLinks({ store, go }) {
 const PAGE = 10
 
 // A link's opens in the lead's terms: opens of a home's page, and opens of the
-// list. `listOpens` is the API's split of `views`; until it sends it, every
-// view is counted as a home open.
+// list. `listOpens` is the part of `views` that opened the list page
+// (sharing.ts linkCounts, the same countedEvents rule).
 const linkOpens = (l) => {
   const list = Number(l.listOpens) || 0
   return { via: ['sent'], sentAt: l.createdAt, opens: Math.max(0, (l.views || 0) - list), lastOpenedAt: l.lastOpenedAt, linkOpens: list }

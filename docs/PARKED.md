@@ -13,6 +13,16 @@ recorded, update it in place rather than adding a second entry.
 
 ---
 
+## Leads stored as Website with no source given — Later (21 Oct)
+
+`crm_leads.source` defaulted to `'Website'` until 21 Oct, so a lead created
+with no source was filed as Website. The default is dropped and no source now
+shows as Not stated, but rows already stored as Website cannot be told apart
+from real website leads. Dev, 21 Oct: 116 rows stored as Website across 8 tenants (delpat 4, demo-showcase 40, demo-vadodara 30). Production not read. A repair would need
+a second signal (the ingestion provider, the timeline's first event) per row.
+
+---
+
 ## Declined for now — the plan of 17 Oct (`PLAN.md` §2)
 
 No number from either firm asks for these; reopen with one.

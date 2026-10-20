@@ -3834,6 +3834,27 @@ html.pv-root,html.pv-root body{background:#f5f4f0}
 .pv-enq-done div{display:flex;flex-direction:column;gap:2px;font-size:14px;color:#5f6762}
 .pv-enq-done b{font-size:16px;color:#1a1d1a}
 
+/* The buyer's three asks: call back, visit, homes like these. */
+.pv-asks{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.pv-asks .pv-btn{flex:1 1 140px;min-height:44px;font-size:14.5px}
+.pv-ask-more{margin-top:18px;display:flex;justify-content:center}
+.pv-sheet-bg{position:fixed;inset:0;z-index:60;background:rgba(20,22,20,.45);display:flex;align-items:flex-end;justify-content:center}
+.pv-sheet{width:100%;max-width:480px;max-height:92vh;overflow:auto;background:#f5f4f0;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+@media (min-width:760px){.pv-sheet-bg{align-items:center}.pv-sheet{border-radius:16px}}
+.pv-sheet-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.pv-sheet-h h2{margin:0;font-family:var(--disp);font-size:19px;font-weight:600}
+.pv-sheet-x{width:40px;height:40px;border:none;border-radius:50%;background:#e9e6df;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:#3d443f}
+.pv-sheet-s{font-size:13.5px;color:#5f6762;margin:-4px 0 10px}
+.pv-slots{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+.pv-slots .pv-chip{flex:none;font-variant-numeric:tabular-nums}
+.pv-sheet-done{margin-top:14px}
+
+.bask{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.bask-row{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink)}
+.bask-row svg{flex:none;color:var(--ink-3, #6b7570)}
+.bask-home{font-size:13.5px;padding:8px 10px;border-radius:8px;background:var(--surface-2, #f3f1ec)}
+.bask-sub{color:var(--ink-3, #6b7570)}
+
 .pv-skel{display:flex;flex-direction:column;gap:12px;margin-top:14px}
 .pv-skel span{display:block;border-radius:10px;background:#e8e6e0;animation:pvPulse 1.2s ease-in-out infinite}
 .pv-skel-img{aspect-ratio:4/3;max-height:56vh}

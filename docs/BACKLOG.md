@@ -61,6 +61,8 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 
 ## Small
 
+- Visit slots on the buyer forms ignore the firm's days off: every day of the
+  next week offers working hours (`buyerAsks.ts visitSlots`).
 - Schedule follow-up has no busy guard; a double tap sends two writes (the
   server drops an identical one, `sameBooking`).
 - Boot sends four requests (bootstrap, desk-summary, owners summary, unread
@@ -91,7 +93,8 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 - `POST /team/roster` creates a user who can never sign in (no login ID or
   password since code sign-in was retired).
 - Enquiry spam: one machine rotating numbers fills a firm's 100/day cap in
-  ~100 min, then real buyers are refused for the day. Needs a challenge (e.g.
+  ~100 min, then real buyers are refused for the day. The buyer forms (Call me
+  back, Book a visit, New homes like these) now share that one pool. Needs a challenge (e.g.
   Turnstile) or per-firm adaptive limits.
 
 ## Bugs

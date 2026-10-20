@@ -8,6 +8,8 @@
  *   POST /api/v1/share-links/:id/came-from  {leadId}   (I2r: credits the lead; the link stays unbound)
  *   POST /api/v1/share-taps/:code/fresh                 (a new link with the same homes and recipient)
  *   POST /api/v1/share-taps/:code/lead      {phone, name?} | {leadId}
+ *   GET  /api/v1/buyer-asks/:id                         (what a buyer's form alert opens)
+ *   POST /api/v1/buyer-asks/:id/confirm {replace?}      (a requested visit → the lead's booked site visit; 409 booking_exists if something else is booked)
  *
  * Also, in their own routers: GET /leads/:id/shares (routes/leads.ts),
  * POST /properties/catalogue (routes/properties.ts), PATCH /auth/me (routes/auth.ts).
@@ -19,11 +21,14 @@ import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { hit } from '../services/rateLimit';
 import { createShareLink, myLinks, turnOff, attachLink, creditLink, tapToLead, freshLinkFromTap, ShareError } from '../services/sharing';
+import { getAsk, confirmVisit } from '../services/buyerAsks';
 
 export const shareLinksRouter = Router();
 export const shareTapsRouter = Router();
+export const buyerAsksRouter = Router();
 shareLinksRouter.use(requireTenantAuth);
 shareTapsRouter.use(requireTenantAuth);
+buyerAsksRouter.use(requireTenantAuth);
 
 export function shareFail(res: Response, err: any) {
   if (err instanceof ShareError) return res.status(err.status).json({ success: false, error: err.code, message: err.message, ...err.extra });
@@ -72,5 +77,15 @@ shareTapsRouter.post('/:code/lead', async (req: Request, res: Response) => {
     return res.status(429).json({ success: false, error: 'slow_down', message: 'Too many requests. Try again in a minute.' });
   }
   try { return res.json({ success: true, ...(await tapToLead(String(req.params.code), req.body || {})) }); }
+  catch (err) { return shareFail(res, err); }
+});
+
+buyerAsksRouter.get('/:id', async (req: Request, res: Response) => {
+  try { return res.json({ success: true, ...(await getAsk(String(req.params.id))) }); }
+  catch (err) { return shareFail(res, err); }
+});
+
+buyerAsksRouter.post('/:id/confirm', async (req: Request, res: Response) => {
+  try { return res.json({ success: true, ...(await confirmVisit(String(req.params.id), { replace: req.body?.replace === true })) }); }
   catch (err) { return shareFail(res, err); }
 });

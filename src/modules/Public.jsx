@@ -262,6 +262,7 @@ export function SharedLinkPage({ tenant, code }) {
   const [busy, setBusy] = useState(null)
   const [talkBusy, setTalkBusy] = useState(false)
   const [tapDone, setTapDone] = useState(null)
+  const [ask, setAsk] = useState(null)
 
   useEffect(() => {
     let live = true
@@ -340,7 +341,10 @@ export function SharedLinkPage({ tenant, code }) {
     const taken = current.available === false
     return (
       <PublicShell firm={firm} tenant={tenant} bar={staffBar}>
-        <HomeDetail h={current} onBack={single ? null : () => show(null)} backLabel={`All ${flats.length} homes`} />
+        <HomeDetail h={current} onBack={single ? null : () => show(null)} backLabel={`All ${flats.length} homes`}>
+          {!staff && !taken && <AskButtons onAsk={k => setAsk({ kind: k, propertyId: current.id })} />}
+          {!staff && single && <HomesLikeThese onAsk={() => setAsk({ kind: 'homes' })} />}
+        </HomeDetail>
         {!staff && <div className="pv-cta">
           {taken ? (
             single
@@ -354,6 +358,7 @@ export function SharedLinkPage({ tenant, code }) {
             </button>
           )}
         </div>}
+        {ask && <AskSheet tenant={tenant} device={device} firm={firm} kind={ask.kind} code={code} propertyId={ask.propertyId} onClose={() => setAsk(null)} />}
       </PublicShell>
     )
   }
@@ -373,8 +378,10 @@ export function SharedLinkPage({ tenant, code }) {
             <div className="pv-grid">
               {flats.map(h => <HomeCard key={h.id} h={h} onOpen={() => show(h.id)} />)}
             </div>
+            {!staff && <HomesLikeThese onAsk={() => setAsk({ kind: 'homes' })} />}
           </>
         )}
+      {ask && <AskSheet tenant={tenant} device={device} firm={firm} kind={ask.kind} code={code} onClose={() => setAsk(null)} />}
     </PublicShell>
   )
 }
@@ -471,6 +478,7 @@ export function CataloguePage({ tenant }) {
       .catch(e => { if (live) setS(x => ({ ...x, loading: false, failed: true, offline: e instanceof TypeError || !e?.body, body: e?.body || null })) })
     return () => { live = false }
   }, [tenant, f.deal, f.bhk, f.area, page, tries]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [ask, setAsk] = useState(null)
 
   const set = (patch) => {
     const next = { ...f, ...patch }
@@ -564,6 +572,9 @@ export function CataloguePage({ tenant }) {
           {s.failed && <div className="pv-err" role="alert">{s.offline ? 'No connection.' : 'Could not load more.'} <button type="button" className="pv-link" onClick={() => setTries(t => t + 1)}>Try again</button></div>}
         </>
       )}
+      {/* An ask needs a deal, a size or a place: with no filter set there is nothing to match. */}
+      {filtered && <HomesLikeThese onAsk={() => setAsk({ kind: 'homes' })} />}
+      {ask && <AskSheet tenant={tenant} device={device} firm={firm} kind="homes" filters={{ deal: f.deal, config: f.bhk, locality: f.area }} onClose={() => setAsk(null)} />}
       <section className="pv-enq-wrap" id="enquire">
         <h2>Tell us what you're looking for</h2>
         <EnquiryForm tenant={tenant} device={device} firm={firm} />
@@ -585,6 +596,7 @@ export function CatalogueHomePage({ tenant, slug }) {
       .catch(e => { if (live) setS({ loading: false, data: null, body: e?.body || null, offline: e instanceof TypeError }) })
     return () => { live = false }
   }, [tenant, slug, tries])
+  const [ask, setAsk] = useState(null)
 
   const d = s.data
   const h = d?.flat
@@ -605,11 +617,13 @@ export function CatalogueHomePage({ tenant, slug }) {
   return (
     <PublicShell firm={d.firm} tenant={tenant}>
       <HomeDetail h={h} onBack={() => { window.location.href = withEmbed(`/${tenant}/homes`) }} backLabel="All homes">
+        <AskButtons onAsk={k => setAsk({ kind: k })} />
         <section className="pv-enq-wrap pv-enq-in" id="enquire">
           <h2>Ask about this home</h2>
           <EnquiryForm tenant={tenant} device={device} firm={d.firm} propertyId={h.id} />
         </section>
       </HomeDetail>
+      {ask && <AskSheet tenant={tenant} device={device} firm={d.firm} kind={ask.kind} propertyId={h.id} onClose={() => setAsk(null)} />}
     </PublicShell>
   )
 }
@@ -673,5 +687,147 @@ function EnquiryForm({ tenant, device, firm, propertyId }) {
       <button type="submit" className="pv-btn pv-btn-main pv-btn-wide" disabled={!v.phone.trim() || st.busy}>{st.busy ? 'Sending…' : 'Send'}</button>
       <p className="pv-consent">We use your number only to contact you about homes. <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a></p>
     </form>
+  )
+}
+
+// ── What a buyer can ask for besides WhatsApp (listing-pages.md §A.6) ───────
+// Who: the buyer on a phone, one thumb. A name and a number, and for a visit
+// a day and an hour inside the firm's working hours; nothing else. The line
+// under each form is the consent: what the number will be used for.
+const ASK = {
+  callback: { title: 'Call me back', done: (n) => `${n || 'We'} will call you.`, consent: 'We use your number only to call you back about this home.' },
+  visit: { title: 'Book a visit', done: (n) => `${n || 'We'} will confirm the visit.`, consent: 'We use your number only to arrange this visit.' },
+  homes: { title: 'New homes like these', done: (n) => `${n || 'We'} will tell you when one comes in.`, consent: 'We use your number only to contact you about homes like these.' },
+}
+const hourLabel = (t) => { const h = Number(String(t).slice(0, 2)); return `${h % 12 || 12} ${h < 12 ? 'am' : 'pm'}` }
+
+/** Call me back · Book a visit, under a home that is still available. */
+function AskButtons({ onAsk }) {
+  return (
+    <div className="pv-asks">
+      <button type="button" className="pv-btn pv-btn-alt" onClick={() => onAsk('callback')}><Icon name="phone" size={17} />Call me back</button>
+      <button type="button" className="pv-btn pv-btn-alt" onClick={() => onAsk('visit')}><Icon name="calendar" size={17} />Book a visit</button>
+    </div>
+  )
+}
+
+function HomesLikeThese({ onAsk }) {
+  return (
+    <div className="pv-ask-more">
+      <button type="button" className="pv-btn pv-btn-alt" onClick={() => onAsk('homes')}><Icon name="bell" size={17} />New homes like these</button>
+    </div>
+  )
+}
+
+function AskSheet({ tenant, device, firm, kind, code, propertyId, filters, onClose }) {
+  const meta = ASK[kind]
+  const [v, setV] = useState({ name: '', phone: '', website: '' })
+  const [slots, setSlots] = useState(kind === 'visit' ? { loading: true, days: [] } : null)
+  const [pick, setPick] = useState({ date: '', time: '' })
+  const [st, setSt] = useState({ busy: false, done: false, err: '', talk: '' })
+  const [tried, setTried] = useState(false)
+  const set = (k) => (e) => setV(x => ({ ...x, [k]: e.target.value }))
+  // The phone box says why a number cannot be sent (PhoneInput, the one
+  // number reader); until it has loaded, the server's answer does.
+  const [phoneBad, setPhoneBad] = useState(false)
+  // Once anything is typed, a stray tap outside does not throw it away.
+  const typed = !!(v.name.trim() || v.phone.trim()) && !st.done
+
+  useEffect(() => {
+    if (kind !== 'visit') return
+    let live = true
+    api.publicAskSlots(tenant)
+      .then(r => { if (!live) return; const days = r?.days || []; setSlots({ loading: false, days }); if (days[0]) setPick({ date: days[0].date, time: '' }) })
+      .catch(e => { if (live) setSlots({ loading: false, days: [], offline: e instanceof TypeError }) })
+    return () => { live = false }
+  }, [tenant, kind])
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !typed) onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  const day = slots?.days.find(d => d.date === pick.date)
+  const ready = !!v.phone.trim() && !phoneBad && (kind !== 'visit' || (pick.date && pick.time))
+
+  const submit = (e) => {
+    e.preventDefault()
+    setTried(true)
+    if (!ready || st.busy) return
+    setSt({ busy: true, done: false, err: '', talk: '' })
+    api.publicAsk(tenant, {
+      kind, name: v.name.trim(), phone: v.phone.trim(), website: v.website,
+      ...(code ? { code } : {}),
+      ...(propertyId ? { propertyId } : {}),
+      ...(kind === 'visit' ? { date: pick.date, time: pick.time } : {}),
+      ...(kind === 'homes' && filters ? { filters } : {}),
+    }, device)
+      .then(() => setSt({ busy: false, done: true, err: '', talk: '' }))
+      .catch(err => {
+        // A time that went while the sheet was open: the times are fetched again.
+        if (err?.body?.error === 'slot_taken') {
+          setPick(p => ({ ...p, time: '' }))
+          api.publicAskSlots(tenant).then(r => setSlots({ loading: false, days: r?.days || [] })).catch(() => {})
+        }
+        setSt({ busy: false, done: false,
+          talk: err?.status === 429 ? (err?.body?.cta?.phone || '') : '',
+          err: err instanceof TypeError ? 'No connection. Try again.'
+            : err?.status === 429 ? 'We could not take this just now. Try again later.'
+            : err?.status === 404 ? 'This is no longer available.'
+            : err?.status === 422 || err?.status === 400 ? (err?.body?.message || 'Check the number and try again.')
+            : 'Could not send. Try again.' })
+      })
+  }
+
+  return (
+    <div className="pv-sheet-bg" onMouseDown={e => { if (e.target === e.currentTarget && !typed) onClose() }}>
+      <div className="pv-sheet" role="dialog" aria-modal="true" aria-label={meta.title}>
+        <div className="pv-sheet-h">
+          <h2>{meta.title}</h2>
+          <button type="button" className="pv-sheet-x" aria-label="Close" onClick={onClose}><Icon name="x" size={18} /></button>
+        </div>
+        {st.done ? (
+          <>
+            <div className="pv-enq-done" role="status">
+              <span className="pv-gone-ic"><Icon name="check" size={20} /></span>
+              <div><b>Sent</b><span>{meta.done(firm?.name)}</span></div>
+            </div>
+            <button type="button" className="pv-btn pv-btn-alt pv-btn-wide pv-sheet-done" onClick={onClose}>Done</button>
+          </>
+        ) : (
+          <form className="pv-enq" onSubmit={submit} noValidate>
+            {kind === 'visit' && (
+              slots.loading ? <div className="pv-skel"><span className="pv-skel-l" /></div>
+              : !slots.days.length ? <div className="pv-err" role="alert">{slots.offline ? 'No connection.' : 'No times free this week.'}</div>
+              : <>
+                <div className="pv-field"><span>Day</span>
+                  <div className="pv-slots">
+                    {slots.days.map(d => <button key={d.date} type="button" className={'pv-chip' + (pick.date === d.date ? ' on' : '')} aria-pressed={pick.date === d.date} onClick={() => setPick({ date: d.date, time: '' })}>{d.label}</button>)}
+                  </div>
+                </div>
+                {day && <div className="pv-field"><span>Time</span>
+                  <div className="pv-chips">
+                    {day.times.map(t => <button key={t} type="button" className={'pv-chip' + (pick.time === t ? ' on' : '')} aria-pressed={pick.time === t} onClick={() => setPick(p => ({ ...p, time: t }))}>{hourLabel(t)}</button>)}
+                  </div>
+                </div>}
+              </>
+            )}
+            <label className="pv-field"><span>Name</span><input value={v.name} onChange={set('name')} autoComplete="name" /></label>
+            <div className="pv-field"><label htmlFor="ask-phone">Mobile number</label>
+              <PhoneOrPlain plain={<input id="ask-phone" value={v.phone} onChange={set('phone')} inputMode="tel" autoComplete="tel" required />}>
+                <PhoneInput id="ask-phone" value={v.phone} showProblem={tried} required
+                  onChange={e => { setV(x => ({ ...x, phone: e.target.value })); setPhoneBad(!!e.problem) }} />
+              </PhoneOrPlain>
+            </div>
+            {/* Not for people. A bot fills every field it finds. */}
+            <input className="pv-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={v.website} onChange={set('website')} name="website" />
+            {st.err && <div className="pv-err" role="alert">{st.err}</div>}
+            {st.talk && <button type="button" className="pv-btn pv-btn-alt pv-btn-wide" onClick={() => openWa(waTo(st.talk))}><Icon name="wa" size={18} fill />Talk to us</button>}
+            <button type="submit" className="pv-btn pv-btn-main pv-btn-wide" disabled={!v.phone.trim() || (kind === 'visit' && !pick.time) || st.busy}>{st.busy ? 'Sending…' : 'Send'}</button>
+            <p className="pv-consent">{meta.consent} <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a></p>
+          </form>
+        )}
+      </div>
+    </div>
   )
 }

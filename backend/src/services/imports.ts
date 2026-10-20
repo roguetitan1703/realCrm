@@ -550,14 +550,15 @@ export class ImportUndoRefused extends Error {
  * USED SINCE IS KEPT, and counted. Deleting such a record left shortlists,
  * share links and agreements pointing at nothing, and threw away someone's
  * work. Used: referenced by a shortlist, a share link, an agreement, a unit,
- * an activity or a conversion; or worked since the import finished, by the
+ * an activity, a conversion or a buyer's ask (crm_buyer_asks: the lead, the
+ * home asked about, or a home New homes like these has matched or named); or worked since the import finished, by the
  * alert lifecycle's own test (contactedAfter for a lead, personWorkedAfter for
  * an owner or a listing: a person's event, not System or Import); or, for a
  * lead or an owner, edited since (updated_at: an edit writes no event).
  * Merged into since (a merge moves an older record's history onto this one
  * with its old dates and writes only a System event) is used too: deleting it
  * would erase the older record's history. A listing's own "Added" event is not
- * work. Once b-forms merges, a lead with a crm_buyer_asks row is used as well.
+ * work.
  *
  * A job that stopped part-way (failed, or a run the server lost: see
  * failAbandonedImports) can be undone like a finished one; it wrote rows.
@@ -601,7 +602,9 @@ export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ de
           OR EXISTS (SELECT 1 FROM crm_agreements x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
           OR EXISTS (SELECT 1 FROM crm_units x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
           OR EXISTS (SELECT 1 FROM activities x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
-          OR EXISTS (SELECT 1 FROM crm_owners x WHERE x.tenant_id = r.tenant_id AND x.converted_property_id = r.id))
+          OR EXISTS (SELECT 1 FROM crm_owners x WHERE x.tenant_id = r.tenant_id AND x.converted_property_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_buyer_asks x WHERE x.tenant_id = r.tenant_id
+                       AND (x.property_id = r.id OR r.id = ANY(x.seen_ids) OR r.id = ANY(x.alerted_ids))))
       RETURNING r.id`;
 
     const leadsBefore = (await tx`SELECT count(*)::int AS n FROM crm_leads r
@@ -615,7 +618,8 @@ export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ de
           OR EXISTS (SELECT 1 FROM crm_share_links x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
           OR EXISTS (SELECT 1 FROM crm_agreements x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
           OR EXISTS (SELECT 1 FROM crm_lead_enquiries x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
-          OR EXISTS (SELECT 1 FROM activities x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id))
+          OR EXISTS (SELECT 1 FROM activities x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_buyer_asks x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id))
       RETURNING r.id`;
 
     // Owners: the job's own, from an owners sheet or made from its listings

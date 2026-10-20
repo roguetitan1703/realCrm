@@ -20,7 +20,7 @@ import { activityRouter } from './routes/activity';
 import { agreementsRouter } from './routes/agreements';
 import { propertiesRouter } from './routes/properties';
 import { publicRouter, shareRouter } from './routes/public';
-import { shareLinksRouter, shareTapsRouter } from './routes/sharing';
+import { shareLinksRouter, shareTapsRouter, buyerAsksRouter } from './routes/sharing';
 import { teamRouter } from './routes/team';
 import { actionsRouter } from './routes/actions';
 import { ingestRouter } from './routes/ingest';
@@ -230,6 +230,7 @@ app.use('/api/v1/public', publicRouter);
 // Signed in: sending flats, my links, Add as lead from a tap.
 app.use('/api/v1/share-links', shareLinksRouter);
 app.use('/api/v1/share-taps', shareTapsRouter);
+app.use('/api/v1/buyer-asks', buyerAsksRouter);
 // The link-preview card for that photo link — HTML for crawlers only, routed
 // here by vercel.json on user agent. See routes/public.ts.
 app.use('/share', shareRouter);
