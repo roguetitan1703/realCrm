@@ -372,7 +372,11 @@ if (isMain || process.env.START_SERVER === 'true') {
     // once, which is how one lead collected two reassignments in the same
     // minute. On a server that is every tenant swept N times per interval by
     // processes nobody knows are running.
-    setInterval(() => { runRoutingSweeps().catch(err => console.warn('[Routing Sweep] run failed:', err?.message)); }, 5 * 60 * 1000);
+    // CRM_NO_SWEEPS=1: a probe or builder API on the shared dev database must
+    // not hand out work. One did, and moved 349 owners of a member QA had
+    // suspended on purpose.
+    if (process.env.CRM_NO_SWEEPS === '1') console.log('⏸  Routing sweeps off (CRM_NO_SWEEPS=1)');
+    else setInterval(() => { runRoutingSweeps().catch(err => console.warn('[Routing Sweep] run failed:', err?.message)); }, 5 * 60 * 1000);
     // The alert sweep on a clock of its own. It ran only when an open tab
     // polled /pulse, so an alert held for 09:00 waited for the first person to
     // open the app — the one moment it was meant to reach them before.

@@ -3,6 +3,7 @@ import Icon from './Icon.jsx'
 import { Button, Input } from './primitives.jsx'
 import { api, currentTenant } from '../lib/api.js'
 import { phonePlaceholder, phoneProblem } from '../lib/locale.js'
+import FreshLink from './FreshLink.jsx'
 import { canPaste, canPickContact, pasteNumber, pickContact, looksLikePhone, refusal, heldText } from '../lib/share.js'
 
 // ============================================================================
@@ -122,15 +123,16 @@ export default function AddFromTap({ tap, home, via = 'interested', onDone, onCa
  * the home and any lead it already landed on are known before anything is
  * typed.
  */
-export function AddFromTapModal({ store, go, Modal, code }) {
+export function AddFromTapModal({ store, go, Modal, code, PhoneStep, onlyTalk = false }) {
   const [info, setInfo] = useState({ loading: true })
+  const [reload, setReload] = useState(0)
   useEffect(() => {
     let live = true
     api.publicShare(currentTenant(), code)
       .then(r => { if (live) setInfo({ loading: false, data: r }) })
       .catch(() => { if (live) setInfo({ loading: false, data: null }) })
     return () => { live = false }
-  }, [code])
+  }, [code, reload])
 
   const d = info.data
   const tap = d?.staff?.tap || { code }
@@ -142,9 +144,13 @@ export function AddFromTapModal({ store, go, Modal, code }) {
   const homeTitle = via === 'talk' ? (flats.length === 1 ? flats[0].title : `${flats.length} homes`) : (home?.title || '')
   const lead = d?.staff?.lead
   const openLead = (id) => { store.closeModal(); go('leads', { leadId: id, leadOpen: true }) }
+  // Opened over a lead from a push: only Talk to us has anything left to do.
+  const nothingToDo = onlyTalk && !info.loading && !(via === 'talk' && lead && lead.visible !== false)
+  useEffect(() => { if (nothingToDo) store.closeModal() }, [nothingToDo]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (nothingToDo) return null
 
   return (
-    <Modal title="Add as lead" onClose={store.closeModal} width={440}>
+    <Modal title={via === 'talk' && lead ? 'Pressed Talk to us' : 'Add as lead'} onClose={store.closeModal} width={440}>
       {info.loading ? (
         <div className="mylinks-empty"><span className="snd-spin" aria-label="Loading" /></div>
       ) : lead ? (
@@ -156,21 +162,28 @@ export function AddFromTapModal({ store, go, Modal, code }) {
               {homeTitle && <div className="snd-done-s">{homeTitle}</div>}
             </div>
           </div>
-          <div className="mfm-foot">
+          {/* Talk to us on an expired link: the same homes, again, in one tap. */}
+          {via === 'talk' && lead.visible !== false ? (
+            <FreshLink store={store} code={code} PhoneStep={PhoneStep} footClass="mfm-foot">
+              <Button onClick={() => openLead(lead.id)}>Open lead</Button>
+            </FreshLink>
+          ) : <div className="mfm-foot">
             {lead.visible === false
               ? <Button variant="primary" onClick={store.closeModal}>Close</Button>
               : <>
                 <Button onClick={store.closeModal}>Close</Button>
                 <Button variant="primary" onClick={() => openLead(lead.id)}>Open lead</Button>
               </>}
-          </div>
+          </div>}
         </>
       ) : (
         <AddFromTap tap={tap} home={homeTitle} via={via} onCancel={store.closeModal}
           onDone={({ lead: made, matched }) => {
             store.touched?.()
             store.toast(matched ? 'Already a lead · the tap is on it' : 'Lead added')
-            if (made?.id) openLead(made.id); else store.closeModal()
+            // Talk to us stays open on the lead, so the fresh link is one tap on.
+            if (via === 'talk' && made?.id) setReload(n => n + 1)
+            else if (made?.id) openLead(made.id); else store.closeModal()
           }} />
       )}
     </Modal>

@@ -649,6 +649,10 @@ function reducer(state, action) {
         }
       })
 
+    // A shortlist put back as it was (an optimistic removal the server refused).
+    case 'SET_SHORTLIST':
+      return patchRecord(state, 'lead', action.leadId, l => ({ ...l, shortlist: action.shortlist }))
+
     case 'DETACH_PROP':
       return patchRecord(state, 'lead', action.leadId, l => ({
         ...l, shortlist: (l.shortlist || []).filter(id => id !== action.propId),
@@ -1461,12 +1465,21 @@ export function StoreProvider({ children }) {
         () => apiClient.updateLead(leadId, { shortlist: list }),
         () => dispatch({ type: 'ATTACH_PROP', leadId, propId, label }),
         'Shortlisted')),
-    detachProp: (leadId, propId) => changeShortlist(leadId,
-      (cur) => cur.filter(x => x !== propId),
-      (list) => write('Remove from shortlist',
-        () => apiClient.updateLead(leadId, { shortlist: list }),
-        () => dispatch({ type: 'DETACH_PROP', leadId, propId }),
-        'Taken off the shortlist')),
+    // OPTIMISTIC, like the other quick actions: the row goes at once and comes
+    // back if the server refuses. It waited for the round trip (~2.5s), so the
+    // x looked broken and got tapped again.
+    detachProp: (leadId, propId) => {
+      const before = api.lookup('lead', leadId)?.shortlist
+      dispatch({ type: 'DETACH_PROP', leadId, propId })
+      toast('Taken off the shortlist')
+      const undo = () => { if (Array.isArray(before)) dispatch({ type: 'SET_SHORTLIST', leadId, shortlist: before }) }
+      return changeShortlist(leadId,
+        (cur) => cur.filter(x => x !== propId),
+        (list) => apiClient.updateLead(leadId, { shortlist: list })
+          .then(res => { if (rejected(res)) throw new Error(res.error || 'rejected'); settled(); return res })
+          .catch(err => { undo(); failed(err, 'Remove from shortlist'); settled(); return null }))
+        .then(res => { if (!res) undo(); return res })
+    },
     // Visit feedback was purely local — the verdict that is supposed to refine
     // this lead's matches never reached the server, so it was forgotten on
     // reload and no teammate ever saw why a flat was rejected.

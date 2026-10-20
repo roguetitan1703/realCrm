@@ -32,13 +32,23 @@ function useContactFilters(sel, setSel, setPage) {
   const filters = {}
   if (bag.project) filters.project = [bag.project]
   if (bag.locality) filters.locality = [bag.locality]
+  // The search box rides in the same bag, so Back from a flat keeps it.
+  const q = bag.q || ''
+  const onSearch = (v) => {
+    setSel(s => {
+      const next = { ...(s?.contactFilters || {}), q: v || undefined }
+      if (!next.q) delete next.q
+      return { ...s, contactFilters: Object.keys(next).length ? next : undefined }
+    })
+    setPage(1)
+  }
   const onFilters = (v) => {
-    const next = { project: v?.project?.[0], locality: v?.locality?.[0] }
+    const next = { project: v?.project?.[0], locality: v?.locality?.[0], q: bag.q }
     for (const k of Object.keys(next)) if (!next[k]) delete next[k]
     setSel(s => ({ ...s, contactFilters: Object.keys(next).length ? next : undefined }))
     setPage(1)
   }
-  return { bag, filters, onFilters }
+  return { bag, filters, onFilters, q, onSearch }
 }
 const asOptions = (list) => (list || []).map(f => ({ value: f.v, label: f.v, count: f.n }))
 
@@ -56,9 +66,8 @@ export default function Clients(props) {
 function Parties({ store, go, sel, setSel, topBar, phone, kind }) {
   const { state } = store
   const def = partiesDef(kind)
-  const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
-  const { bag, filters, onFilters } = useContactFilters(sel, setSel, setPage)
+  const { bag, filters, onFilters, q, onSearch } = useContactFilters(sel, setSel, setPage)
   const [pageSize, setPageSize] = useState(20)
   // Tenants: two tabs, everyone and the rents that need a renewal call. Buyers
   // have none: a sale does not end, so "current" and "ended" meant nothing.
@@ -89,7 +98,7 @@ function Parties({ store, go, sel, setSel, topBar, phone, kind }) {
   const { header, toolbar, body } = ModuleListView({
     def, source, store, onOpen: open, phone,
     segments, filters, onFilters, facets,
-    search: q, onSearch: (v) => { setQ(v); setPage(1) },
+    search: q, onSearch,
     sortKey, onSortKey: (v) => { setSortKey(v); setPage(1) }, sortDir, onSortDir: (v) => { setSortDir(v); setPage(1) },
     view: 'list', showViewSwitch: false,
     page, onPage: setPage, pageSize, onPageSize: (v) => { setPageSize(v); setPage(1) },
@@ -113,15 +122,13 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
   // WHAT THEY GAVE US, as tabs: Landlords first, because a flat to let is the
   // work that comes back every eleven months.
   const [seg, setSeg] = useState('Landlord')
-  const [q, setQ] = useState('')
   const [sortKey, setSortKey] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
   const [view, setView] = useState('list')
   const [selClient, setSelClient] = useState(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const { bag, filters: flt, onFilters: setFltP } = useContactFilters(sel, setSel, setPage)
-  const setQP = (v) => { setQ(v); setPage(1) }
+  const { bag, filters: flt, onFilters: setFltP, q, onSearch: setQP } = useContactFilters(sel, setSel, setPage)
   const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
   const setSortDirP = (v) => { setSortDir(v); setPage(1) }
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }

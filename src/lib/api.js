@@ -337,8 +337,20 @@ function getHeaders(customHeaders = {}) {
 // person just did, and then un-reverts a few seconds later. Counting writes in
 // the one place every call passes through means the refresh loop can simply
 // wait, rather than every mutation having to remember to announce itself.
-let inFlightWrites = 0;
-export function hasPendingWrites() { return inFlightWrites > 0; }
+//
+// PER RECORD, when the question is about one record. A record screen asked
+// "is ANY write in the air?", so the first lead opened after launch threw its
+// full data away because the push-permission report happened to be in flight,
+// and sat on a list row with a spinner until something else moved the desk. A
+// write to a record names it, in its URL or its body; only those hold it back.
+// `background` writes (the device's push state) change nothing on the desk and
+// are not counted at all.
+const inFlightWrites = new Set(); // { endpoint, body }
+export function hasPendingWrites(recordId) {
+  if (!recordId) return inFlightWrites.size > 0;
+  for (const w of inFlightWrites) if (w.endpoint.includes(recordId) || w.body.includes(recordId)) return true;
+  return false;
+}
 
 // ── Read cache ──────────────────────────────────────────────────────────────
 // Screens read what they show, which is right — but it meant leaving a screen
@@ -363,7 +375,12 @@ const RETRY_MS = 600;       // one silent re-try for a read that could not reach
 const reads = new Map();    // url -> { at, data }
 const inflight = new Map(); // url -> Promise
 
-export function invalidateReads() { reads.clear(); }
+// A WRITE ENDS EVERY READ BEFORE IT: the cache, and the reads still in the
+// air. One that left before the write and landed after it was stored as the
+// answer for 30 seconds, and joined by every read asked in the meantime — a
+// link just turned off read Live on the reload that followed.
+let readGen = 0;
+export function invalidateReads() { reads.clear(); inflight.clear(); readGen++; }
 /** The cached value for a GET, or undefined. Lets a screen render on the first frame. */
 export function peekRead(endpoint) {
   const hit = reads.get(`${currentTenant()}|${endpoint}`);
@@ -375,8 +392,8 @@ async function request(endpoint, options = {}) {
   // cache. For a read whose whole point is that the answer CHANGES while you
   // watch it: an import job's progress polled every second returned the same
   // cached row every time, so a run that had finished still read "0 of 0".
-  const { queueable, fresh, ...fetchOptions } = options;
-  const isWrite = !!fetchOptions.method && fetchOptions.method.toUpperCase() !== 'GET';
+  const { queueable, fresh, background, ...fetchOptions } = options;
+  const isWrite = !background && !!fetchOptions.method && fetchOptions.method.toUpperCase() !== 'GET';
   // KEYED BY WORKSPACE AS WELL AS URL. The tenant travels in a header, not the
   // path, so `/leads?page=1` names a different set of rows per firm and the two
   // shared one cache slot. Nothing reaches it today — every workspace change is
@@ -393,7 +410,9 @@ async function request(endpoint, options = {}) {
     if (pending) return pending;
   }
 
-  if (isWrite) inFlightWrites++;
+  const pending = isWrite ? { endpoint, body: typeof fetchOptions.body === 'string' ? fetchOptions.body : '' } : null;
+  const gen = readGen;
+  if (pending) inFlightWrites.add(pending);
   const run = (async () => {
   try {
     let res;
@@ -450,14 +469,18 @@ async function request(endpoint, options = {}) {
       failure.body = body;
       throw failure;
     }
-    const data = await res.json();
+    // A 204, or a 200 with nothing in it, is an answer with no body — not a
+    // failure. Parsing it threw "Unexpected end of JSON input" on every report
+    // of the device's push state.
+    const text = res.status === 204 ? '' : await res.text();
+    const data = text ? JSON.parse(text) : null;
     // ONE PLACE, because the answer must not depend on which call happened to
     // be made. Any response that names its environment records it — the
     // unauthenticated workspace resolve does, so it is known before sign-in,
     // and the boot read does, so it stays known after.
     if (data?.env) setServerEnv(data.env);
     if (isWrite) invalidateReads();
-    else reads.set(key, { at: Date.now(), data });
+    else if (gen === readGen) reads.set(key, { at: Date.now(), data });
     return data;
   } catch (err) {
     if (err instanceof TypeError) {
@@ -476,7 +499,7 @@ async function request(endpoint, options = {}) {
     console.warn(`[API Client Warning] Request to ${endpoint} failed:`, err.message);
     throw err;
   } finally {
-    if (isWrite) inFlightWrites--;
+    if (pending) inFlightWrites.delete(pending);
   }
   })();
 
@@ -781,6 +804,7 @@ export const api = {
   myShareLinks: ({ page = 1, limit = 10, recipient } = {}) => request(`/share-links/mine${qs({ page, limit, recipient })}`, { fresh: true }),
   turnOffShareLink: (id) => request(`/share-links/${encodeURIComponent(id)}/off`, { method: 'POST', body: '{}' }),
   attachShareLink: (id, leadId) => request(`/share-links/${encodeURIComponent(id)}/attach`, { method: 'POST', body: JSON.stringify({ leadId }) }),
+  freshShareLink: (tapCode) => request(`/share-taps/${encodeURIComponent(tapCode)}/fresh`, { method: 'POST' }),
   leadShares: (leadId) => request(`/leads/${encodeURIComponent(leadId)}/shares`, { fresh: true }),
   leadFromTap: (code, body) => request(`/share-taps/${encodeURIComponent(code)}/lead`, { method: 'POST', body: JSON.stringify(body) }),
   // Your own mobile number — Send needs it, because a buyer's tap opens
@@ -864,9 +888,10 @@ export const api = {
 
   // Web Push (phone alerts even when the app is closed)
   getVapid: () => request('/notifications/vapid'),
-  subscribePush: (subscription) => request('/notifications/subscribe', { method: 'POST', body: JSON.stringify({ subscription }) }),
-  unsubscribePush: (endpoint) => request('/notifications/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
-  reportPushState: (state) => request('/notifications/device-state', { method: 'POST', body: JSON.stringify({ state }) }),
+  // Background: the device's push wiring, not desk data (see hasPendingWrites).
+  subscribePush: (subscription) => request('/notifications/subscribe', { method: 'POST', body: JSON.stringify({ subscription }), background: true }),
+  unsubscribePush: (endpoint) => request('/notifications/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }), background: true }),
+  reportPushState: (state) => request('/notifications/device-state', { method: 'POST', body: JSON.stringify({ state }), background: true }),
   getAlertReach: () => request('/notifications/reach'),
 
   // Composable Actions
