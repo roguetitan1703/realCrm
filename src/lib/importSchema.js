@@ -56,10 +56,11 @@ export function parseNum(raw) {
  * (lib/phone.js, docs/specs/phone.md), or null.
  *
  * "9881204471" | "+91 98812 04471" | 9881204471 → "+919881204471"
- * "971526377771" (Dubai) → "+971526377771", NOT "+911526377771".
+ * "971526377771" (Dubai) → "+971526377771", NOT "+911526377771": a value the
+ * firm's country cannot read, 11-15 digits, valid once "+" is put back.
  *
  * Null for anything that cannot be read with confidence — a UAE mobile that
- * lost its +971, two numbers in one cell, letters — and the import reports
+ * lost its +971 AND its 971, two numbers in one cell, letters — and the import reports
  * the row with the cell's own text so it can be fixed and re-imported. A
  * stored number that dials nowhere is worse than a reported blank. (It once
  * took the last ten digits and stamped +91 on them, which turned 73 NRI owners

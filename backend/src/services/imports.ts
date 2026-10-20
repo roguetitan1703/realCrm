@@ -200,6 +200,11 @@ export function prepareRow(
   // Sale or rent is never guessed: a blank read as "sale" prices a rental at
   // eighty-five lakh and nobody questions a filled-in field.
   if (!v.deal) return { ok: false, reason: 'Not marked sale or rent' };
+  // An owner number is optional, but one the sheet HAS and we cannot read was
+  // dropped without a word: the listing came in with no owner to ring and
+  // nobody knew why. The row is reported with the cell, like a calling row.
+  const ownerCell = mapping.ownerPhone ? String(raw[mapping.ownerPhone] ?? '').trim() : '';
+  if (ownerCell && !v.ownerPhone) return { ok: false, reason: `Owner ${unreadablePhone(mapping.ownerPhone).replace(/^Phone/, 'phone')}` };
   return {
     ok: true,
     key: unitKey(project, v.wing, v.title),

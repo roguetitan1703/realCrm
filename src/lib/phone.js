@@ -30,6 +30,15 @@ export function readPhone(raw, country = firmLocale().country) {
   const s = typed.replace(/^\s*00/, '+')
   const p = parsePhoneNumberFromString(s, country)
   if (p && p.isValid()) return { ok: true, e164: p.number, country: p.country || null }
+  // A FOREIGN NUMBER THAT LOST ITS "+". Sheets and portals drop it
+  // ("971526377771"). Only when the firm's country cannot read it, it is
+  // 11-15 digits (a full international number's length), and it is a valid
+  // number once "+" is put back -- never a guess between two readings.
+  const digits = s.replace(/\D/g, '')
+  if (!s.startsWith('+') && digits.length >= 11 && digits.length <= 15) {
+    const intl = parsePhoneNumberFromString('+' + digits)
+    if (intl && intl.isValid()) return { ok: true, e164: intl.number, country: intl.country || null }
+  }
   let len
   try { len = validatePhoneNumberLength(s, country) } catch { len = undefined }
   const reason = len === 'TOO_SHORT' ? 'too_short' : len === 'TOO_LONG' ? 'too_long' : 'invalid'
