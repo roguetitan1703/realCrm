@@ -20,6 +20,11 @@ const Admin = lazy(() => import('./modules/Admin.jsx'))
 // the reload does not help; it is cleared once a page has run for a while.
 const RELOADED = 'chunk-reload-at'
 window.addEventListener('vite:preloadError', (event) => {
+  // Never over someone's typing: a form with text in it handles its own
+  // missing piece (Public.jsx's phone box falls back to a plain field).
+  const typed = [...document.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea')]
+    .some(el => el.value && el.value.trim())
+  if (typed) return
   let last = null
   try { last = sessionStorage.getItem(RELOADED) } catch { /* storage blocked */ }
   if (last) return

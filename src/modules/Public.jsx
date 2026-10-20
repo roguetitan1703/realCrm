@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { Component, lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api.js'
 import { fileUrl } from '../lib/media.js'
 import { formatMoney, roomLabel, firmLocale, setFirmLocale } from '../lib/locale.js'
@@ -13,6 +13,19 @@ import FreshLink from '../components/FreshLink.jsx'
 // so the page paints without it (docs/specs/phone.md).
 const AddFromTap = lazy(() => import('../components/AddFromTap.jsx'))
 const PhoneInput = lazy(() => import('../components/PhoneInput.jsx'))
+
+/** The buyer's number box when the phone box's chunk will not load (a deploy
+ *  since the page opened): the plain field, so what was typed stays and the
+ *  server's answer says what is wrong with the number. Not a page reload. */
+class PhoneOrPlain extends Component {
+  constructor(props) { super(props); this.state = { failed: false } }
+  static getDerivedStateFromError() { return { failed: true } }
+  componentDidCatch(err) { console.warn('[Public] phone box did not load:', err) }
+  render() {
+    const { plain, children } = this.props
+    return this.state.failed ? plain : <Suspense fallback={plain}>{children}</Suspense>
+  }
+}
 
 // ============================================================================
 // THE BUYER'S PAGES (docs/specs/listing-pages.md §A)
@@ -647,10 +660,10 @@ function EnquiryForm({ tenant, device, firm, propertyId }) {
     <form className="pv-enq" onSubmit={submit} noValidate>
       <label className="pv-field"><span>Name</span><input id="enq-name" value={v.name} onChange={set('name')} autoComplete="name" /></label>
       <div className="pv-field"><label htmlFor="enq-phone">Mobile number</label>
-        <Suspense fallback={<input id="enq-phone" value={v.phone} onChange={set('phone')} inputMode="tel" autoComplete="tel" required />}>
+        <PhoneOrPlain plain={<input id="enq-phone" value={v.phone} onChange={set('phone')} inputMode="tel" autoComplete="tel" required />}>
           <PhoneInput id="enq-phone" value={v.phone} showProblem={tried} required
             onChange={e => { setV(x => ({ ...x, phone: e.target.value })); setPhoneBad(!!e.problem) }} />
-        </Suspense>
+        </PhoneOrPlain>
       </div>
       <label className="pv-field"><span>Message</span><textarea value={v.message} onChange={set('message')} rows={3} placeholder="Optional" /></label>
       {/* Not for people. A bot fills every field it finds. */}
