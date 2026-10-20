@@ -1583,6 +1583,24 @@ export async function getBootstrap(): Promise<any> {
 }
 
 /**
+ * A NUMBER TYPED INTO A SEARCH BOX, compared digit for digit. Numbers are
+ * stored as E.164 ("+919876543210"), so the box's own text -- "+91 98765
+ * 43210" pasted from WhatsApp, "98765 43210" typed the way it is said --
+ * found nothing: it was a substring test on the stored text. Only for a
+ * search that is all phone characters with at least four digits, so "A-1203"
+ * or "2 BHK" never turns into a phone search. A trunk "0" or "00" is dropped.
+ * Unindexed by choice: a leading-wildcard LIKE cannot use a b-tree, the scan is
+ * one firm's rows (tenant_id is indexed), and the old text test was no better.
+ */
+function phoneLike(column: string, q: string) {
+  const term = String(q || '').trim();
+  if (!/^[\d\s+\-().]+$/.test(term)) return sql`FALSE`;
+  const digits = term.replace(/\D/g, '').replace(/^00?/, '');
+  if (digits.length < 4) return sql`FALSE`;
+  return sql`regexp_replace(coalesce(${sql(column)}, ''), '\\D', '', 'g') LIKE ${'%' + digits + '%'}`;
+}
+
+/**
  * Global search, run in Postgres.
  *
  * The command palette used to filter two in-memory arrays. That was the last
@@ -1599,7 +1617,7 @@ export async function searchWorkspace(q: string, limit = 8): Promise<{ leads: an
   const [leadRows, propRows] = await Promise.all([
     sql`SELECT id, name, phone, stage, locality, agent_id FROM crm_leads
          WHERE tenant_id = ${t} AND (lower(coalesce(name, '')) LIKE ${like}
-            OR coalesce(phone, '') LIKE ${like}
+            OR ${phoneLike('phone', term)}
             OR lower(coalesce(email, '')) LIKE ${like})
          ORDER BY created_at DESC LIMIT ${n}`,
     sql`SELECT id, title, locality, project, status, deal, price FROM crm_properties
@@ -1915,7 +1933,7 @@ export async function listContacts(opts: {
   // (linkListingOwner). One person per record; their listings are counted
   // through the link.
   const where: any[] = [sql`o.tenant_id = ${t}`];
-  if (q) where.push(sql`(lower(coalesce(o.name, '')) LIKE ${like} OR coalesce(o.phone, '') LIKE ${like} OR lower(coalesce(o.project, '')) LIKE ${like} OR lower(coalesce(o.unit_no, '')) LIKE ${like})`);
+  if (q) where.push(sql`(lower(coalesce(o.name, '')) LIKE ${like} OR ${phoneLike('o.phone', q)} OR lower(coalesce(o.project, '')) LIKE ${like} OR lower(coalesce(o.unit_no, '')) LIKE ${like})`);
   // WHICH BUILDING, WHICH AREA — through the listings that make them a contact:
   // an owner is in a project if a flat of theirs we hold is.
   if (opts.project) where.push(sql`EXISTS (SELECT 1 FROM crm_properties x WHERE x.tenant_id = o.tenant_id AND x.owner_contact_id = o.id
@@ -2044,6 +2062,36 @@ export async function findLeadByPhone(phone: string, tenantId?: string): Promise
   const rows = await sql`
     SELECT * FROM crm_leads WHERE tenant_id = ${t} AND phone = ${key}
      ORDER BY created_at ASC LIMIT 1`;
+  return rows[0];
+}
+
+/**
+ * A PORTAL NUMBER NOBODY CAN READ, sent again by the same portal. Ingestion
+ * only (forms refuse such a number; an import reports it). findLeadByPhone
+ * matches nobody on it, so every repeat from a portal that sends a number in
+ * a shape we cannot read made a new lead. The identical string from the same
+ * portal is the same buyer -- but only when the string still names one
+ * person: no letters ("N/A"), no masking ("98XXXXXX10", "*"), at least seven
+ * digits, and not one digit repeated ("0000000000").
+ */
+export function rawPhoneMatchable(raw: unknown): raw is string {
+  if (typeof raw !== 'string') return false;
+  const s = raw.trim();
+  if (!s || /[a-z*]/i.test(s)) return false;
+  const digits = s.replace(/\D/g, '');
+  return digits.length >= 7 && !/^(\d)\1*$/.test(digits);
+}
+
+export async function findLeadByRawPhone(raw: string, provider: string, tenantId?: string): Promise<any | undefined> {
+  const t = tenantId || tid();
+  if (!provider || !rawPhoneMatchable(raw)) return undefined;
+  if (phoneKey(raw, (await localeOf(t)).country)) return undefined; // readable: findLeadByPhone's job
+  const rows = await sql`
+    SELECT l.* FROM crm_leads l
+     WHERE l.tenant_id = ${t} AND l.phone = ${raw.trim()}
+       AND EXISTS (SELECT 1 FROM crm_lead_enquiries e
+                    WHERE e.tenant_id = l.tenant_id AND e.lead_id = l.id AND e.source = ${provider})
+     ORDER BY l.created_at ASC LIMIT 1`;
   return rows[0];
 }
 
@@ -3049,7 +3097,7 @@ function leadFilterParts(t: string, opts: LeadFilterOpts, SEGMENTS: Record<strin
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
-    base.push(sql`(lower(name) LIKE ${like} OR phone LIKE ${like}
+    base.push(sql`(lower(name) LIKE ${like} OR ${phoneLike('phone', q)}
       OR lower(coalesce(email, '')) LIKE ${like} OR lower(coalesce(locality, '')) LIKE ${like})`);
   }
   if (opts.agentId) base.push(sql`agent_id = ${opts.agentId}`);
@@ -3895,7 +3943,7 @@ async function ownerWhere(t: string, opts: OwnerListOpts, omit: { segment?: bool
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
-    where.push(sql`(lower(coalesce(name, '')) LIKE ${like} OR phone LIKE ${like} OR lower(coalesce(project, '')) LIKE ${like})`);
+    where.push(sql`(lower(coalesce(name, '')) LIKE ${like} OR ${phoneLike('phone', q)} OR lower(coalesce(project, '')) LIKE ${like})`);
   }
   // coalesce: a row with no stage is New everywhere else (OWNER_OPEN, the
   // counts), so the New tab has to find it too.

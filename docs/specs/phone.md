@@ -125,14 +125,28 @@ person's lead.
   number sent back exactly as stored passes, so a record received unreadable
   can still be saved), `keepPhone` (portals, webhooks, a listing's owner taken
   from an owner record), `phoneKey` (a lookup; null matches nobody).
-- A foreign number written without `+` ("447876011111") is not read as
-  foreign: it is unreadable, kept as sent, never matched. Only the firm's own
-  code without `+` ("919876543210") is read.
+- A foreign number written without `+` ("971526377771", "447876011111") is
+  read as that number when the firm's country cannot read it, it is 11-15
+  digits, and it is valid once `+` is put back (review, 21 Oct). Consequence:
+  an 11-digit "12345678901" reads as a US number.
+- An unreadable portal number matches the identical string from the same
+  portal (`findLeadByRawPhone`, ingestion only), when it has no letters, no
+  masking (`X`, `*`), at least 7 digits and is not one digit repeated.
+- Search compares digits (`phoneLike` in store.ts): "+91 98765 43210" and
+  "98765 43210" find "+919876543210". Only for an all-phone-characters search
+  with 4+ digits; a trunk 0 is dropped. Unindexed: a tenant-scoped scan.
+- Properties import: an owner phone cell that cannot be read refuses the row
+  with the cell and the reason; it was dropped silently.
 - Import: the mapping step has "Numbers without a country code" (the firm's
   country by default); rows key on exact E.164.
 - Onboarding (console): a roster number is read as Indian; one that cannot be
   read is a roster issue that stops provisioning, with the reason.
 - Repair on development, 20 Oct: 61 written (delpat 43, skyline-realty 17,
   test-org 1 probe row), 57 unreadable left (tutorial's 50 fixtures, delpat 7),
-  0 user collisions. The users-collision refusal was probed first: nothing
-  written, not marked.
+  0 user collisions.
+- Users who would share a number (unique index) are held back with their
+  metadata copies and named at boot as an error; everything else converts and
+  the repair is not marked done until they are fixed (review, 21 Oct; probed
+  on test-org: owner converted, both users left, marker unset).
+- The phone box is `components/PhoneInput.jsx`, never primitives.jsx, and
+  `personLabel` lives in phone.js: both shared modules reach the buyer's entry.

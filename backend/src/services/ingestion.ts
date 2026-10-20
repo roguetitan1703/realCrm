@@ -16,7 +16,7 @@
 import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
-import { findLeadByPhone, createLead, updateLead, arrivalLeadAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS, WON_STATUS } from './store';
+import { findLeadByPhone, findLeadByRawPhone, createLead, updateLead, arrivalLeadAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS, WON_STATUS } from './store';
 import { notify, notifyOrDesk } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
@@ -454,9 +454,11 @@ export async function landEnquiry(args: {
       // twice is one lead with two enquiries, not two leads.
       //
       // Exact E.164, read in the firm's country (findLeadByPhone,
-      // docs/specs/phone.md). A number that cannot be read matches nobody: the
-      // lead is still made, with the number kept as the portal sent it.
-      const existing = await findLeadByPhone(lead.phone);
+      // docs/specs/phone.md). A number that cannot be read is kept as the
+      // portal sent it, and matches only the identical string from the same
+      // portal, when that string still names one person (findLeadByRawPhone).
+      const existing = (await findLeadByPhone(lead.phone))
+        || (await findLeadByRawPhone(lead.phone, integration.provider));
       if (existing && args.unverified) {
         // NOBODY HAS PROVED THIS IS THEM. A portal vouches for its buyer; a
         // public form does not — anyone can type a lead's number into it. So
