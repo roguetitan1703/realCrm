@@ -659,9 +659,6 @@ export const api = {
   getDeskSummary: () => request('/workspace/desk-summary'),
   // One request for a whole file's worth of duplicate checks.
   checkDuplicates: (body) => request('/workspace/dedupe-check', { method: 'POST', body: JSON.stringify(body) }),
-  // Every record created by one import, deleted where it lives. Kept for the
-  // batches written by the old browser-side import, whose ids are not jobs.
-  revertImportBatch: (batchId) => request(`/workspace/import-batches/${encodeURIComponent(batchId)}`, { method: 'DELETE' }),
 
   // ---- Imports, as a job the server runs (services/imports.ts) -------------
   // The file is uploaded once and the rows are written HERE, not by the browser

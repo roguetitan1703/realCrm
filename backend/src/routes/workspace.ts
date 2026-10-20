@@ -14,7 +14,7 @@ import { Router, Request, Response } from 'express';
 import { appEnv } from '../services/env';
 import { requireTenantAuth } from '../middleware/auth';
 import { phoneInvalidBody } from '../services/phone';
-import { getPulse, resetDatabase, updateSettings, getSettings, withReplyFallback, replyFallbackOf, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates, listContacts } from '../services/store';
+import { getPulse, resetDatabase, updateSettings, getSettings, withReplyFallback, replyFallbackOf, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, checkDuplicates, listContacts } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { isDeskRole } from '../lib/permissions';
@@ -105,14 +105,13 @@ workspaceRouter.get('/desk-summary', requireTenantAuth, async (_req: Request, re
   }
 });
 
-workspaceRouter.delete('/import-batches/:batchId', requireTenantAuth, async (req: Request, res: Response) => {
-  try {
-    const out = await revertImportBatch(req.params.batchId);
-    return res.status(200).json({ success: true, ...out });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to revert import', message: err.message });
-  }
-});
+// UNDOING A DESK IMPORT BATCH IS RETIRED. It was behind sign-in alone, so any
+// agent could delete a whole batch -- worked-on leads included -- with no
+// audit, and no screen has called it since imports became jobs. An import is
+// undone from Import history (POST /imports/:id/revert: desk roles, audited).
+// Older batches with no job have no undo. Gone, not fixed.
+workspaceRouter.delete('/import-batches/:batchId', (_req: Request, res: Response) =>
+  res.status(410).json({ error: 'retired', message: 'Undo an import from Import history.' }));
 
 workspaceRouter.post('/dedupe-check', requireTenantAuth, async (req: Request, res: Response) => {
   try {

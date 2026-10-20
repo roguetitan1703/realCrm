@@ -1798,30 +1798,6 @@ export async function getDeskSummary(): Promise<any> {
 }
 
 /**
- * Delete everything one import created. The desk used to do this by scanning
- * its in-memory arrays for matching ids and firing a delete per row, so it
- * could only ever revert what the browser happened to be holding.
- *
- * Leads carry the batch id in a column; properties carry it in `config`, which
- * is where every non-column property field lives.
- */
-export async function revertImportBatch(batchId: string): Promise<{ leads: number; properties: number; owners: number }> {
-  const t = tid();
-  const [leadRows, propRows, ownerRows] = await Promise.all([
-    sql`DELETE FROM crm_leads WHERE tenant_id = ${t} AND import_batch_id = ${batchId} RETURNING id`,
-    sql`DELETE FROM crm_properties WHERE tenant_id = ${t} AND config->>'importBatchId' = ${batchId} RETURNING id`,
-    sql`DELETE FROM crm_owners WHERE tenant_id = ${t} AND import_batch_id = ${batchId} RETURNING id`,
-  ]);
-  const leadIds = leadRows.map((r: any) => r.id);
-  if (leadIds.length) {
-    await sql`DELETE FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(leadIds)}`;
-    // Their shared links die with them, like any other lead delete.
-    await shareLeadsDeleted(t, leadIds, getContext()?.userId ?? null);
-  }
-  return { leads: leadRows.length, properties: propRows.length, owners: ownerRows.length };
-}
-
-/**
  * Import dedupe, answered for a whole file in one request.
  *
  * The import preview marked a row "duplicate" by scanning the in-memory

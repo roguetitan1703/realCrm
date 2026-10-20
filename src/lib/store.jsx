@@ -704,19 +704,6 @@ function reducer(state, action) {
     case 'DELETE_PROPERTIES':
       return dropRecords(state, 'property', Array.isArray(action.ids) ? action.ids : [action.ids])
 
-    // The import history used to be kept HERE, in this tab's memory, which is
-    // why an undo vanished on a reload. It lives on the server now (Import →
-    // History), so the only thing left to do locally is forget the records an
-    // undo removed.
-    case 'REVERT_IMPORT_BATCH': {
-      // The server deleted the rows. Drop whatever copies the cache holds so a
-      // stale one can't be opened from a screen still on the page.
-      const { batchId } = action
-      const gone = (kind) => Object.values(state.cache?.[kind] || {})
-        .filter(r => r.importBatchId === batchId).map(r => r.id)
-      return dropRecords(dropRecords(dropRecords(state, 'lead', gone('lead')), 'property', gone('property')), 'owner', gone('owner'))
-    }
-
     case 'PROP_STATUS':
       return patchRecord(state, 'property', action.propId, p => ({ ...p, status: action.status }))
 
@@ -1607,14 +1594,6 @@ export function StoreProvider({ children }) {
           return gone
         })
     },
-    // The batch is deleted where it lives. The old version scanned the
-    // in-memory collections for matching ids and fired a delete per row — which
-    // meant it could only ever revert what the browser happened to be holding,
-    // and reverted nothing at all once those arrays went away.
-    revertImportBatch: (batchId) => write('Revert import',
-      () => apiClient.revertImportBatch(batchId),
-      () => dispatch({ type: 'REVERT_IMPORT_BATCH', batchId }),
-      'Import undone. Its records are removed.'),
     // OPTIMISTIC, like a lead's stage. This went through write(), so the patch
     // landed only after the server answered — measured at 1.2s from a tap,
     // against 48ms for the identical control one module over. It is the same
