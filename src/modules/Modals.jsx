@@ -24,7 +24,7 @@ import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../
 import { FOLLOW_UP_ACTIONS, followUpKindOf } from '../data/followUpKinds.js'
 import { ActivityRecords } from '../components/ActivityDay.jsx'
 import { CloseDealModal, AgreementModal } from '../components/Agreements.jsx'
-import SendSheet from './SendSheet.jsx'
+import SendSheet, { SenderPhone } from './SendSheet.jsx'
 import { AttachLinkModal } from '../components/MyLinks.jsx'
 import { AddFromTapModal } from '../components/AddFromTap.jsx'
 import { copyText } from '../lib/clipboard.js'
@@ -80,24 +80,26 @@ function Modal({ title, onClose, children, width = 440 }) {
 // the app closed, or with it open (the worker posts the URL). The bell opens
 // Add as lead itself (openNotif); these two never passed through it, and the
 // router drops `tap` because it is not a place. Read before the router
-// rewrites the address.
+// rewrites the address. With a lead in it the lead opens underneath, and the
+// modal stays only for Talk to us on an expired link (its Send a fresh link);
+// an I'm interested tap on a lead has nothing left to add.
 const tapIn = (search) => {
   const p = new URLSearchParams(search)
   const t = p.get('tap')
-  return t && !p.get('lead') && /^[a-z0-9]{6}$/.test(t) ? t : null
+  return t && /^[a-z0-9]{6}$/.test(t) ? { code: t, onlyTalk: !!p.get('lead') } : null
 }
 const BOOT_TAP = typeof window !== 'undefined' ? tapIn(window.location.search) : null
 
 export default function Modals({ store, go }) {
   const m = store.state.modal
   useEffect(() => {
-    if (BOOT_TAP) store.openModal({ kind: 'addFromTap', code: BOOT_TAP })
+    if (BOOT_TAP) store.openModal({ kind: 'addFromTap', ...BOOT_TAP })
     if (!('serviceWorker' in navigator)) return
     const onMsg = (e) => {
       if (e.data?.type !== 'notification-navigate' || !e.data.url) return
-      let code = null
-      try { code = tapIn(new URL(e.data.url, window.location.origin).search) } catch { return }
-      if (code) setTimeout(() => store.openModal({ kind: 'addFromTap', code }), 0)
+      let tap = null
+      try { tap = tapIn(new URL(e.data.url, window.location.origin).search) } catch { return }
+      if (tap) setTimeout(() => store.openModal({ kind: 'addFromTap', ...tap }), 0)
     }
     navigator.serviceWorker.addEventListener('message', onMsg)
     return () => navigator.serviceWorker.removeEventListener('message', onMsg)
@@ -140,7 +142,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} only={m.only} />}
       {/* One sheet for every send: the lead's shortlist, the Properties
           selection and a property's own Share (listing-pages.md §A). */}
-      {m?.kind === 'addFromTap' && <AddFromTapModal store={store} go={go} Modal={Modal} code={m.code} />}
+      {m?.kind === 'addFromTap' && <AddFromTapModal store={store} go={go} Modal={Modal} code={m.code} onlyTalk={!!m.onlyTalk} PhoneStep={SenderPhone} />}
       {m?.kind === 'attachLink' && <AttachLinkModal store={store} Modal={Modal} linkId={m.linkId} onDone={m.onDone} />}
       {m?.kind === 'send' && <SendSheet store={store} Modal={Modal} homes={m.homes} leadId={m.leadId} lead={m.lead} suggested={m.suggested} onSent={m.onSent} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
@@ -348,7 +350,7 @@ function OwnerEditModal({ store, propId }) {
       <Field label="Email">
         <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="Optional" />
       </Field>
-      <Button variant="primary" block style={{ marginTop: 14 }} onClick={save}>Save owner</Button>
+      <div className="lc-foot"><Button variant="primary" block onClick={save}>Save owner</Button></div>
     </Modal>
   )
 }
@@ -665,6 +667,8 @@ const CONFIG_OPTIONS = [
 ];
 
 const NOBODY = '__nobody'
+// What this form wrote as `purpose` when the notes box was empty.
+const INVENTED_PURPOSE = ['Self Use', 'Lease']
 
 function NewLeadModal({ store, leadId }) {
   const edit = leadId ? store.lookup('lead', leadId) : null
@@ -675,7 +679,7 @@ function NewLeadModal({ store, leadId }) {
     name: edit.name || '',
     phone: edit.phone || '',
     email: edit.email || '',
-    deal: edit.req?.deal || edit.deal || (edit.req?.purpose === 'Lease' ? 'rent' : 'sale'),
+    deal: edit.req?.deal || edit.deal || (edit.req?.purpose === 'Lease' ? 'rent' : ''),
     config: edit.req?.config || edit.requirement || '',
     locality: edit.req?.locality || edit.locality || '',
     minBudget: edit.req?.minBudget ?? edit.req?.budgetMin ?? '',
@@ -686,28 +690,35 @@ function NewLeadModal({ store, leadId }) {
     // and pressing Save destroyed the accumulation without anybody typing.
     // Shown as "A, B" and read back through the same separator.
     interest: listText(edit.req?.interest),
-    timeline: edit.req?.timeline || 'Immediate',
+    // Never shown in this form: kept as stored, never invented.
+    timeline: edit.req?.timeline || '',
     source: edit.source || 'Website',
     agentId: edit.agentId || null,
-    notes: edit.req?.notes || edit.req?.purpose || ''
+    // 'Self Use' and 'Lease' were written by this form when nobody typed a
+    // note (see save); they are not the person's words.
+    notes: edit.req?.notes || (INVENTED_PURPOSE.includes(edit.req?.purpose) ? '' : edit.req?.purpose) || ''
   } : {
     name: '',
     phone: '',
     email: '',
-    deal: 'sale',
+    deal: '',
     config: '',
     locality: '',
     minBudget: '',
     maxBudget: '',
     interest: '',
-    timeline: 'Within 60 days',
+    // NOT STATED. 'Within 60 days' was saved on every new lead though the form
+    // never asks it (CLAUDE.md §3.1).
+    timeline: '',
     source: 'Website',
-    // The person adding it, when they can take work; otherwise NOT SENT, so the
-    // firm's rule decides (the rota, or nobody under Leave unassigned). It was
-    // null, which the server now reads as "the desk chose Unassigned", so an
-    // owner's untouched Add lead stopped reaching the rota. The first name on
-    // the roster was a guess, and the server refuses one that is suspended.
-    agentId: store.activeAgents().some(a => a.id === store.state.activeAgentId) ? store.state.activeAgentId : undefined,
+    // WHO TAKES IT. An agent adding a lead is taking it: themselves. The desk
+    // (owner, manager) is entering it for the team: the firm's rule — "Next in
+    // turn" under the rota (not sent, so the server deals it), "Unassigned"
+    // under Leave unassigned (null: the desk chose it, so no "nobody has it"
+    // alert). It defaulted to whoever was signed in, so an owner's lead landed
+    // on the owner.
+    agentId: (!canAssignLead(store.state.role) && store.activeAgents().some(a => a.id === store.state.activeAgentId))
+      ? store.state.activeAgentId : (rota ? undefined : null),
     notes: ''
   })
   const set = (k, v) => setF(s => ({ ...s, [k]: v }))
@@ -758,19 +769,19 @@ function NewLeadModal({ store, leadId }) {
         // Unassigned is a change too, sent as null; it was dropped here, so
         // the lead stayed with whoever held it.
         agentId: (f.agentId || null) !== (edit.agentId || null) ? (f.agentId || null) : undefined,
-        deal: f.deal,
+        deal: f.deal || undefined,
         requirement: f.config,
         locality: f.locality,
         budgetMin: budgetObj.minBudget,
         budgetMax: budgetObj.maxBudget,
         req: {
           ...edit.req,
-          deal: f.deal,
+          deal: f.deal || undefined,
           config: f.config,
           locality: f.locality,
           interest: textList(f.interest),
-          timeline: f.timeline,
-          purpose: f.notes.trim() || (f.deal === 'rent' ? 'Lease' : 'Self Use'),
+          timeline: f.timeline || undefined,
+          purpose: f.notes.trim() || undefined,
           notes: f.notes.trim() || undefined,
           ...budgetObj
         }
@@ -788,19 +799,19 @@ function NewLeadModal({ store, leadId }) {
         minsAgo: 0,
         // undefined is left out of the body: not sent, the firm's rule decides.
         agentId: f.agentId,
-        deal: f.deal,
+        deal: f.deal || undefined,
         requirement: f.config,
         locality: f.locality,
         budgetMin: budgetObj.minBudget,
         budgetMax: budgetObj.maxBudget,
         req: {
-          deal: f.deal,
+          deal: f.deal || undefined,
           config: f.config,
           locality: f.locality,
           interest: textList(f.interest),
-          purpose: f.notes.trim() || (f.deal === 'rent' ? 'Lease' : 'Self Use'),
+          purpose: f.notes.trim() || undefined,
           notes: f.notes.trim() || undefined,
-          timeline: f.timeline,
+          timeline: f.timeline || undefined,
           ...budgetObj
         },
         notes: [],
@@ -895,12 +906,14 @@ function NewLeadModal({ store, leadId }) {
           </div>
           <div className="field">
             <label>Assign Owner</label>
-            {/* New lead: the empty choice is "not sent" and is named by the
-                firm's rule; Unassigned is its own choice where that differs. */}
-            <select className="input" value={f.agentId === undefined ? '' : f.agentId === null ? (edit ? '' : NOBODY) : f.agentId}
-              onChange={e => set('agentId', e.target.value === NOBODY ? null : (e.target.value || (edit ? null : undefined)))} style={{ width: '100%' }}>
-              <option value="">{edit || !rota ? 'Unassigned' : 'Next in turn'}</option>
-              {!edit && rota && canAssignLead(store.state.role) && <option value={NOBODY}>Unassigned</option>}
+            {/* "Next in turn" (rota only) is not sent: the server deals it.
+                "Unassigned" is a choice, sent as null. Under Leave unassigned it
+                was the not-sent option, so the server read "nobody decided" and
+                alerted both managers about a lead the desk had just placed. */}
+            <select className="input" value={f.agentId === undefined ? '' : f.agentId === null ? NOBODY : f.agentId}
+              onChange={e => set('agentId', e.target.value === NOBODY ? null : (e.target.value || undefined))} style={{ width: '100%' }}>
+              {!edit && rota && <option value="">Next in turn</option>}
+              {(edit || !rota || canAssignLead(store.state.role)) && <option value={NOBODY}>Unassigned</option>}
               {store.activeAgents().map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               {/* The person holding it now, if they can no longer take work —
                   shown so the field says who it is, not offered. */}
@@ -926,7 +939,7 @@ function NewLeadModal({ store, leadId }) {
         )}
 
         <Field label="Requirement Notes & Purpose"><Textarea value={f.notes} onChange={e => set('notes', e.target.value)} placeholder="Specific buyer preferences, budget flexibility, timeline notes..." rows={3} /></Field>
-        <Button variant="primary" block disabled={saving} onClick={save} icon="check">{saving ? 'Saving…' : edit ? 'Save Changes' : 'Create Lead Record'}</Button>
+        <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={save} icon="check">{saving ? 'Saving…' : edit ? 'Save Changes' : 'Create Lead Record'}</Button></div>
       </div>
     </Modal>
   )
@@ -1016,7 +1029,7 @@ function NewOwnerModal({ store, ownerId }) {
             </select>
           </div>
         </div>
-        <Button variant="primary" block disabled={saving} onClick={save} icon="check">{saving ? 'Saving…' : edit ? 'Save Changes' : 'Add Owner'}</Button>
+        <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={save} icon="check">{saving ? 'Saving…' : edit ? 'Save Changes' : 'Add Owner'}</Button></div>
       </div>
     </Modal>
   )
@@ -1300,13 +1313,13 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
       </div>
       {/* Pick one and it all goes there; pick several and it is split between
           them. Either way the button says which. */}
-      <Button variant="primary" block disabled={busy || !picked.length} style={{ marginTop: 12 }}
+      <div className="lc-foot"><Button variant="primary" block disabled={busy || !picked.length}
         onClick={() => send(picked.length > 1 ? picked : undefined, picked[0])}>
         {busy ? 'Assigning…'
           : picked.length > 1 ? `Split ${n} between ${picked.length}`
             : picked.length ? `Give all ${n} to ${store.agentById(picked[0])?.first || 'them'}`
               : `Pick who takes ${n === 1 ? 'it' : 'them'}`}
-      </Button>
+      </Button></div>
       {/* Taking work off the desk is a different intent from handing it to
           someone, so it does not sit in the same list as the people. */}
       <button className="pick-unassign" disabled={busy} onClick={() => send(undefined, null)}>
@@ -1400,9 +1413,9 @@ function AssignProjectModal({ store, project }) {
             })}
             {!people.length && <div className="detail-empty">Nobody active to assign to.</div>}
           </div>
-          <Button variant="primary" block disabled={busy || !picked.length || !total} onClick={go}>
+          <div className="lc-foot"><Button variant="primary" block disabled={busy || !picked.length || !total} onClick={go}>
             {busy ? 'Assigning…' : total ? `Assign ${total} owner${total === 1 ? '' : 's'}` : 'Nothing to assign'}
-          </Button>
+          </Button></div>
         </>
       )}
     </Modal>
@@ -1500,9 +1513,9 @@ function ReassignModal({ store, fromId }) {
             {!others.length && <div className="detail-empty">Nobody else is active to take it.</div>}
           </div>
 
-          <Button variant="primary" block disabled={busy || !picked.length || !movingN} onClick={doIt}>
+          <div className="lc-foot"><Button variant="primary" block disabled={busy || !picked.length || !movingN} onClick={doIt}>
             {busy ? 'Moving…' : movingN ? `Reassign ${movingN} record${movingN === 1 ? '' : 's'}` : 'Nothing to move'}
-          </Button>
+          </Button></div>
         </>
       )}
     </Modal>
@@ -1594,7 +1607,7 @@ function AddAgentModal({ store }) {
           ? 'A manager signs in with their email + password and can self-reset by email. Managers see the whole desk.'
           : "A sales executive signs in with their ID + password. We'll create a starter password to hand over; the admin resets it if forgotten. Sales executives see only their own leads."}
       </div>
-      <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Adding…' : 'Add to team'}</Button>
+      <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>{saving ? 'Adding…' : 'Add to team'}</Button></div>
     </Modal>
   )
 }
@@ -1812,7 +1825,7 @@ function RemarkModal({ store, recordType, recordId }) {
   return (
     <Modal title="Add remark" onClose={store.closeModal} width={400}>
       <Textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a remark to this record…" autoFocus />
-      <Button variant="primary" block style={{ marginTop: 14 }} onClick={submit}>Add remark</Button>
+      <div className="lc-foot"><Button variant="primary" block onClick={submit}>Add remark</Button></div>
     </Modal>
   )
 }
@@ -2034,9 +2047,9 @@ function VisitProofModal({ store, leadId, propId }) {
             <Textarea value={remark} onChange={e => setRemark(e.target.value)} placeholder="What happened on the visit?" />
           </Field>
 
-          <Button variant="primary" block disabled={busy} onClick={submit}>
+          <div className="lc-foot"><Button variant="primary" block disabled={busy} onClick={submit}>
             {busy ? 'Saving…' : 'Log visit'}
-          </Button>
+          </Button></div>
         </div>
       )}
     </Modal>
@@ -2129,9 +2142,9 @@ function AmenitiesModal({ store, value = {}, onDone, only = 'all' }) {
           </div>
         </div>
       </div>
-      <Button variant="primary" block style={{ marginTop: 14 }} onClick={done}>
+      <div className="lc-foot"><Button variant="primary" block onClick={done}>
         {total ? `Done · ${total} selected` : 'Done'}
-      </Button>
+      </Button></div>
     </Modal>
   )
 }
@@ -2192,7 +2205,7 @@ function VisitFeedbackModal({ store, leadId, propId }) {
           </div>
         </>
       )}
-      <Button variant="primary" block style={{ marginTop: 18 }} onClick={save}>Save outcome</Button>
+      <div className="lc-foot"><Button variant="primary" block onClick={save}>Save outcome</Button></div>
     </Modal>
   )
 }
@@ -2298,7 +2311,8 @@ export function NotifModal({ store, go }) {
     // `?tap=` on the alert's link, or the ref link itself (/<firm>/<code>).
     const tap = p.get('tap') || (/^share_/.test(n.type || '') ? (String(n.link || '').match(/^\/[a-z0-9-]+\/([a-z0-9]{6})(?:[/?#]|$)/) || [])[1] : null)
     close()
-    if (!leadId && tap) store.openModal({ kind: 'addFromTap', code: tap })
+    // Talk to us on an expired link opens on its Send a fresh link, lead or not.
+    if (tap && (!leadId || n.type === 'share_expired_open')) store.openModal({ kind: 'addFromTap', code: tap })
     else if (leadId) go('leads', { leadId, leadOpen: true })
     else if (alert) go('leads', { leadFilters: { alert: [alert] }, leadOpen: false, leadId: undefined })
     else if (agent.length) go('leads', { leadFilters: { agent }, leadOpen: false, leadId: undefined })
@@ -2575,9 +2589,9 @@ function ScheduleFollowUpModal({ store, leadId }) {
           <Input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Meet at Hinjewadi Phase 3 sales lounge" />
         </Field>
 
-        <Button variant="primary" block onClick={saveAppointment} icon="calendar" style={{ padding: 12, fontWeight: 600 }}>
+        <div className="lc-foot"><Button variant="primary" block onClick={saveAppointment} icon="calendar" style={{ padding: 12, fontWeight: 600 }}>
           Confirm Appointment
-        </Button>
+        </Button></div>
       </div>
     </Modal>
   )

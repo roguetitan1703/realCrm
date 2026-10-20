@@ -7,6 +7,7 @@ import { deviceId, openWa, looksLikePhone } from '../lib/share.js'
 import Icon from '../components/Icon.jsx'
 import PhotoViewer from '../components/PhotoViewer.jsx'
 import AddFromTap from '../components/AddFromTap.jsx'
+import FreshLink from '../components/FreshLink.jsx'
 
 // ============================================================================
 // THE BUYER'S PAGES (docs/specs/listing-pages.md §A)
@@ -389,6 +390,8 @@ function StaffBar({ tenant, staff, flats, tapDone, onTapDone }) {
   const who = lead ? (lead.name || phoneLabel(lead.phone) || 'Lead') : ''
   // A tap reads as what the person did: "Sneha Kulkarni tapped I'm interested".
   const tapLine = !tapDone && staff.tap ? (staff.tap.propertyId ? 'tapped I’m interested' : 'pressed Talk to us') : ''
+  // Talk to us on an expired link: the same homes back to them, in one tap.
+  const fresh = staff.tap && !staff.tap.propertyId && lead && lead.visible !== false
   return (
     <div className="pv-staff">
       <div className="pv-staff-in pv-staff-row">
@@ -406,6 +409,7 @@ function StaffBar({ tenant, staff, flats, tapDone, onTapDone }) {
         </span>
         {lead && lead.visible !== false && <a className="pv-staff-go" href={leadHref(lead.id)}>Open lead<Icon name="chevRight" size={14} /></a>}
       </div>
+      {fresh && <div className="pv-staff-in pv-staff-fresh"><FreshLink code={staff.tap.code} footClass="pv-staff-foot" /></div>}
     </div>
   )
 }

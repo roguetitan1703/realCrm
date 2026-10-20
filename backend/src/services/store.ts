@@ -554,13 +554,60 @@ const TAGGED_TYPES = new Set(['remark', 'call', 'wa', 'sms', 'share']);
 /** Rows whose description the system wrote and nobody may overwrite. */
 export const LOCKED_TEXT_TYPES = new Set(['follow_up']);
 
-export function mapEventForClient(e: TimelineEvent) {
+// OLD ROWS, SAID THE NEW WAY, when they are read. Nothing is rewritten: the
+// ledger keeps what was written, the record stops saying it badly.
+//   "Lead created via API (Source: Test). Assigned to agent usr_…"
+//      → "Arrived from Test. Assigned to <name>."
+//   "Kavish Deshmukh → null — …" (a name lookup that missed when it was
+//      written; metadata still names who) → "Kavish Deshmukh → <name> — …"
+// `names` (legacyEventNames) holds the people these rows name by id.
+const LEGACY_CREATED = /^Lead created via API \(Source: ([^)]*)\)\.(?:\s*Assigned to agent (\S+?)\.)?\s*$/;
+function legacyDescription(e: TimelineEvent, names?: Map<string, string>): string | undefined {
+  const d = e.description;
+  if (!d) return d;
+  const nameOf = (id?: string | null) => (id && names?.get(id)) || 'a former member';
+  const made = e.type === 'creation' ? LEGACY_CREATED.exec(d) : null;
+  if (made) return `Arrived from ${made[1] || 'an unknown source'}. ${made[2] ? `Assigned to ${nameOf(made[2])}` : 'Unassigned'}.`;
+  if (e.type === 'assignment' && /(^|\s)null(\s|$)/.test(d)) {
+    const m: any = e.metadata || {};
+    return d.replace(/→ null(?=\s|$|:)/, `→ ${nameOf(m.agentId)}`).replace(/^null →/, `${nameOf(m.previousAgentId)} →`);
+  }
+  return d;
+}
+
+/** The people old rows name only by id (see legacyDescription), by name. */
+export async function legacyEventNames(events: TimelineEvent[]): Promise<Map<string, string>> {
+  const ids = new Set<string>();
+  for (const e of events) {
+    const d = e.description || '';
+    const made = e.type === 'creation' ? LEGACY_CREATED.exec(d) : null;
+    if (made?.[2]) ids.add(made[2]);
+    if (e.type === 'assignment' && /(^|\s)null(\s|$)/.test(d)) {
+      const m: any = e.metadata || {};
+      if (m.agentId) ids.add(m.agentId);
+      if (m.previousAgentId) ids.add(m.previousAgentId);
+    }
+  }
+  const names = new Map<string, string>();
+  if (!ids.size) return names;
+  const t = tid();
+  const rows = await sql`
+    SELECT x.id, coalesce(nullif(btrim(u.name), ''), nullif(btrim(a.name), '')) AS name
+      FROM unnest(${[...ids]}::text[]) AS x(id)
+      LEFT JOIN users u ON u.id = x.id AND u.tenant_id = ${t}
+      LEFT JOIN crm_agents a ON a.id = x.id AND a.tenant_id = ${t}`;
+  for (const r of rows as any[]) if (r.name) names.set(r.id, r.name);
+  return names;
+}
+
+export function mapEventForClient(e: TimelineEvent, names?: Map<string, string>) {
   const ct = clientEventType(e.type);
   const tagged = TAGGED_TYPES.has(ct);
+  const description = legacyDescription(e, names);
   return {
     id: e.id,
     type: ct,
-    label: tagged ? e.description : (e.title && e.title !== e.description ? `${e.title}: ${e.description}` : e.description),
+    label: tagged ? description : (e.title && e.title !== description ? `${e.title}: ${description}` : description),
     authorId: e.author || null,
     // The name the author had when this happened, when their seat has since
     // gone to somebody else. Absent normally, and the screen then asks the
@@ -605,13 +652,13 @@ function collapseStatusMirrors(events: TimelineEvent[]): TimelineEvent[] {
 // merged those rows over the record it held, so a lead opened from the list
 // showed one shortlisted home where it had six, and the next shortlist write was
 // built from that list. `undefined` here means "not loaded", `[]` means "none".
-function rowToLead(r: any, events?: TimelineEvent[], shortlistRows?: any[]): any {
+function rowToLead(r: any, events?: TimelineEvent[], shortlistRows?: any[], names?: Map<string, string>): any {
   const createdMs = r.created_at ? new Date(r.created_at).getTime() : Date.now();
   const minsAgo = Math.max(0, Math.floor((Date.now() - createdMs) / 60000));
 
   // Format timeline events for lead object
   const leadEvents = events ? collapseStatusMirrors(events.filter(e => e.record_id === r.id))
-    .map(mapEventForClient) : [];
+    .map(e => mapEventForClient(e, names)) : [];
 
   // Columns are source of truth; fall back to the req JSONB when a column is null.
   const jreq = r.req || {};
@@ -1978,7 +2025,8 @@ export async function getLeads(): Promise<any[]> {
     description: r.description, timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp)
   }));
   const shortlistByLead = groupShortlistByLead(shortlistRows);
-  return leadsRows.map(r => rowToLead(r, events, shortlistByLead.get(r.id) || []));
+  const names = await legacyEventNames(events as any);
+  return leadsRows.map(r => rowToLead(r, events, shortlistByLead.get(r.id) || [], names));
 }
 
 /**
@@ -2045,7 +2093,7 @@ export async function getLeadById(id: string): Promise<any | undefined> {
     description: r.description, author: r.author, metadata: r.metadata,
     timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp)
   }));
-  const lead = rowToLead(rows[0], events, shortlistRows);
+  const lead = rowToLead(rows[0], events, shortlistRows, await legacyEventNames(events as any));
 
   // THE SHORTLISTED PROPERTIES THEMSELVES, not only their ids. The record screen
   // resolved each id through the browser's property cache, which holds whatever
@@ -3411,7 +3459,9 @@ async function moveRecords(q: any, kind: 'lead' | 'owner', ids: string[], agentI
   // The whole selection's history in one go -- see recordAssignments().
   await recordAssignments((before as any[]).map(row => ({
     recordId: row.id, prevAgentId: row.agent_id, agentId,
-    reason: 'bulk assignment', author: ctx.actorId ?? null,
+    // "bulk assignment" only when it was one: a single lead reassigned from
+    // the record read as if it had been swept up in a batch.
+    reason: clean.length > 1 ? 'bulk assignment' : undefined, author: ctx.actorId ?? null,
   })), q);
   return { kind, ids: clean, agentId, n: res.count, before: before as any[] };
 }
@@ -4142,7 +4192,8 @@ export async function getOwnerById(id: string): Promise<any | null> {
   const rows = await sql`SELECT * FROM crm_owners WHERE id = ${id} AND tenant_id = ${tid()} AND ${ownerScope()} LIMIT 1`;
   if (!rows[0]) return null;
   const events = await getTimelineEvents(id);
-  return { ...rowToOwner(rows[0]), timeline: events.map(mapEventForClient) };
+  const names = await legacyEventNames(events);
+  return { ...rowToOwner(rows[0]), timeline: events.map(e => mapEventForClient(e, names)) };
 }
 
 export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any | null> {
@@ -5097,7 +5148,8 @@ export async function getPropertyById(id: string): Promise<any | null> {
   // agreements, verification). It read only the old `timeline` column, so all
   // of that was saved and shown until the page was reloaded, then never again.
   // The old column's entries (demo notes) follow, then when it was added.
-  const history: any[] = (events as any[]).map(mapEventForClient);
+  const names = await legacyEventNames(events as any);
+  const history: any[] = (events as any[]).map(e => mapEventForClient(e, names));
   history.push(...(Array.isArray(row.timeline) ? row.timeline : []));
   if (!(events as any[]).some(e => e.type === 'creation')) {
     history.push({ id: null, type: 'note', label: 'Added', authorId: createdBy, timestamp: row.created_at, metadata: {} });
@@ -5949,7 +6001,7 @@ export async function getRoutingRules(): Promise<RoutingRule> {
   return {
     strategy: rows[0].strategy as any,
     active_agent_ids: rows[0].active_agent_ids || [],
-    last_assigned_index: rows[0].last_assigned_index || -1,
+    last_assigned_index: rows[0].last_assigned_index ?? -1,
     sweep_unassigned_enabled: rows[0].sweep_unassigned_enabled ?? false,
     reassign_idle_enabled: rows[0].reassign_idle_enabled ?? false,
     reassign_idle_days: rows[0].reassign_idle_days ?? 3,
