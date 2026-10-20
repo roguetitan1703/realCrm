@@ -6050,13 +6050,14 @@ const UNOWNED_GRACE_MINUTES = 1;
 export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
   if (!rules.sweep_unassigned_enabled || !autoAssigns(rules, 'leads')) return 0;
-  // "Unowned" includes an agent_id that no longer resolves to a live user —
-  // the same orphaned state the desk sees as "Former owner" on the row.
+  // "UNOWNED" IS THE WORKFORCE RULE (workforce.ts canTakeWork): nobody, or a
+  // holder who cannot take work -- removed, or suspended. It tested only
+  // "removed", so a suspended agent's leads sat with someone who cannot open
+  // the app, and the sweep that exists to catch exactly that walked past them.
   const rows = await sql`
-    SELECT l.id, l.name, l.created_at FROM crm_leads l
-    LEFT JOIN users u ON u.id = l.agent_id AND u.tenant_id = l.tenant_id AND u.deleted_at IS NULL
+    SELECT l.id, l.name, l.agent_id, l.created_at FROM crm_leads l
     WHERE l.tenant_id = ${tenantId} AND ${OPEN}
-      AND (l.agent_id IS NULL OR u.id IS NULL)
+      AND NOT ${canTakeWork(tenantId, sql`l.agent_id`)}
       AND l.created_at < NOW() - (${UNOWNED_GRACE_MINUTES}::text || ' minutes')::interval
   `;
   let n = 0;
@@ -6064,12 +6065,18 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
   for (const lead of rows) {
     const agentId = await nextRoutedAgent();
     if (!agentId) break;
-    await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${lead.id} AND tenant_id = ${tenantId}`;
-    const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
-    await addTimelineEvent({
-      record_id: lead.id, type: 'assignment', title: 'Auto-assigned',
-      description: `Nobody had picked it up, so it went to ${name}`,
-      author: 'System', metadata: { agentId, reason: 'sweep_unassigned' },
+    // Only if it is still where this pass found it: a person who assigned it
+    // in the meantime wins.
+    const moved = await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW()
+      WHERE id = ${lead.id} AND tenant_id = ${tenantId} AND agent_id IS NOT DISTINCT FROM ${lead.agent_id} RETURNING id`;
+    if (!moved.length) continue;
+    // recordAssignment, like every other change of hands (CLAUDE.md §4): it
+    // wrote its own "Auto-assigned" line, which never named the holder it
+    // was taken from.
+    await recordAssignment({
+      recordId: lead.id, prevAgentId: lead.agent_id, agentId,
+      reason: lead.agent_id ? 'its holder cannot take work' : 'nobody had picked it up',
+      author: 'System', metadata: { reason: 'sweep_unassigned' },
     });
     tally.set(agentId, [...(tally.get(agentId) || []), lead.id]);
     n++;
@@ -6112,7 +6119,10 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${lead.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
     const agentId = await nextRoutedAgent();
     if (!agentId || agentId === lead.agent_id) continue;
-    await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${lead.id} AND tenant_id = ${tenantId}`;
+    // Still with the holder this pass found: a hand-over in the meantime wins.
+    const moved = await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW()
+      WHERE id = ${lead.id} AND tenant_id = ${tenantId} AND agent_id = ${lead.agent_id} RETURNING id`;
+    if (!moved.length) continue;
     const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
     await recordAssignment({
       recordId: lead.id, prevAgentId: lead.agent_id, agentId,
@@ -6146,11 +6156,11 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
 export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
   if (!rules.owner_sweep_unassigned_enabled || !autoAssigns(rules, 'owners')) return 0;
+  // Unowned by the workforce rule, as sweepUnassignedLeads.
   const rows = await sql`
-    SELECT o.id FROM crm_owners o
-    LEFT JOIN users u ON u.id = o.agent_id AND u.tenant_id = o.tenant_id AND u.deleted_at IS NULL
+    SELECT o.id, o.agent_id FROM crm_owners o
     WHERE o.tenant_id = ${tenantId} AND coalesce(o.stage, '') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}
-      AND (o.agent_id IS NULL OR u.id IS NULL)
+      AND NOT ${canTakeWork(tenantId, sql`o.agent_id`)}
       AND o.created_at < NOW() - (${UNOWNED_GRACE_MINUTES}::text || ' minutes')::interval
   `;
   let n = 0;
@@ -6159,10 +6169,12 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
   for (const owner of rows) {
     const agentId = await nextRoutedOwnerAgent();
     if (!agentId) break;
-    await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${owner.id} AND tenant_id = ${tenantId}`;
+    const moved = await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW()
+      WHERE id = ${owner.id} AND tenant_id = ${tenantId} AND agent_id IS NOT DISTINCT FROM ${owner.agent_id} RETURNING id`;
+    if (!moved.length) continue;
     await recordAssignment({
-      recordId: owner.id, prevAgentId: null, agentId,
-      reason: 'nobody had picked it up',
+      recordId: owner.id, prevAgentId: owner.agent_id, agentId,
+      reason: owner.agent_id ? 'its holder cannot take work' : 'nobody had picked it up',
       author: 'System', metadata: { reason: 'sweep_unassigned' },
     });
     tally.set(agentId, [...(tally.get(agentId) || []), owner.id]);
@@ -6247,7 +6259,9 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${owner.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
     const agentId = await nextRoutedOwnerAgent();
     if (!agentId || agentId === owner.agent_id) continue;
-    await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${owner.id} AND tenant_id = ${tenantId}`;
+    const moved = await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW()
+      WHERE id = ${owner.id} AND tenant_id = ${tenantId} AND agent_id = ${owner.agent_id} RETURNING id`;
+    if (!moved.length) continue;
     // recordAssignment, not a timeline row written here. This wrote its own,
     // which is why the owner side had a different sentence for the same event —
     // and why the manager alert, which lives in recordAssignment because that is
