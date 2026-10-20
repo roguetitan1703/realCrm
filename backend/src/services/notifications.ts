@@ -337,7 +337,7 @@ export async function processScheduledNotifications(
   if (throttle) {
     // CRM_NO_SWEEPS=1 (a test API on a shared database) leaves the scheduled
     // alerts off too: the minute timer and every /pulse land here.
-    if (process.env.CRM_NO_SWEEPS === '1') return;
+    if (process.env.CRM_NO_SWEEPS === '1' && process.env.APP_ENV !== 'production') return;
     if (now - lastScanAt < SCAN_INTERVAL_MS) return;
     lastScanAt = now;
   }
