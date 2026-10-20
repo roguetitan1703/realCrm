@@ -25,7 +25,7 @@ import { sharingOf } from '../services/store';
 import {
   firmBySlug, firmPublic, openCode, interested, talk, catalogueList, catalogueFlat, catalogueEnquiry,
   resolveOldPhotoLink, deviceIdOf, ShareError, publicFlat, resolveCode, linkRows, linkState, markStaffDevice,
-  SHOWN_COLUMNS, CATALOGUE_WHERE, catalogueUrlOf, firmPhone, type Firm, type PublicReq,
+  SHOWN_COLUMNS, CATALOGUE_WHERE, catalogueUrlOf, firmPhone, isPreviewFetcher, type Firm, type PublicReq,
 } from '../services/sharing';
 import { localeOf } from '../services/store';
 
@@ -153,7 +153,7 @@ publicRouter.post('/catalogue/:tenant/enquiry', async (req: Request, res: Respon
   const ip = ipOf(req);
   // Per address only as a flood ceiling (a shared carrier address is many
   // buyers); the real limits are per number (below) and the firm's daily cap.
-  if (!hit(`enq:${ip}`, 30, 10 * 60_000)) return slow(res, String(req.params.tenant));
+  if (!hit(`enq:${ip}`, 10, 10 * 60_000)) return slow(res, String(req.params.tenant));
   try {
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
@@ -337,8 +337,15 @@ shareRouter.get('/s/:slug/:code', async (req: Request, res: Response) => {
     }
     const found = await resolveCode(f.id, String(req.params.code));
     const sharing = await sharingOf(f.id);
-    // Unknown, off, stopped or expired: the same miss (see codeGate).
-    if (!found || linkState(found.link, sharing.stopped) !== 'active') codeMiss(ip);
+    // An unknown code is always a miss (see codeGate). Off, stopped or
+    // expired is a miss too, except for a preview fetcher: those arrive
+    // through Vercel, so `ip` is its shared egress address, and an expired
+    // link forwarded around a few groups would spend every buyer's allowance
+    // and blank their previews. The preview UA list also matches scripts
+    // (curl, python), which is why unknown codes still spend: guessing stays
+    // slow whatever the client calls itself.
+    const usable = found && linkState(found.link, sharing.stopped) === 'active';
+    if (!found || (!usable && !isPreviewFetcher(req.headers['user-agent'] as string))) codeMiss(ip);
     const firmName = firmPublic(f).name;
     const rows = found && linkState(found.link, sharing.stopped) === 'active' ? await linkRows(f.id, found.link) : [];
     const shown = found?.tap?.property_id ? rows.filter(r => r.id === found.tap.property_id) : rows;

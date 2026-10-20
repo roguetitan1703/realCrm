@@ -127,10 +127,10 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
   const city = String(input.city || '').trim();
   if (!firmName || !city) throw new Error('Firm name and city are required.');
 
-  // The owner signs in by OTP, delivered ONLY by email (no SMS channel), so the
-  // owner's email is required — a phone-only owner could never receive a code.
+  // The owner signs in with their email and a password, and a forgotten
+  // password is reset by email: without one the owner cannot get back in.
   const ownerEmail = input.ownerEmail ? String(input.ownerEmail).trim().toLowerCase() : '';
-  if (!EMAIL_RE.test(ownerEmail)) throw new Error("The owner's email is needed. Sign-in codes are sent by email.");
+  if (!EMAIL_RE.test(ownerEmail)) throw new Error("The owner's email is needed to reset their password.");
   const ownerPhone = normalizePhone(input.ownerPhone);
 
   // Every login id and password, planned before anything is written: a roster
@@ -6047,6 +6047,15 @@ export async function nextRoutedOwnerAgents(n: number): Promise<(string | null)[
  */
 const UNOWNED_GRACE_MINUTES = 1;
 
+/**
+ * AT MOST THIS MANY RECORDS PER SWEEP, PER TENANT, PER PASS (CLAUDE.md:
+ * throttle background work). Each record is a rota turn, an update, a
+ * history row and an alert; a firm that switches auto-assign on over a
+ * backlog of thousands would otherwise do them all in one pass. Oldest first;
+ * the rest wait for the next pass.
+ */
+const SWEEP_CAP = 50;
+
 export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
   if (!rules.sweep_unassigned_enabled || !autoAssigns(rules, 'leads')) return 0;
@@ -6059,6 +6068,7 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
     WHERE l.tenant_id = ${tenantId} AND ${OPEN}
       AND NOT ${canTakeWork(tenantId, sql`l.agent_id`)}
       AND l.created_at < NOW() - (${UNOWNED_GRACE_MINUTES}::text || ' minutes')::interval
+    ORDER BY l.created_at LIMIT ${SWEEP_CAP}
   `;
   let n = 0;
   const tally = new Map<string, string[]>();
@@ -6109,6 +6119,7 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
       AND ${noPersonActivitySince(days)}
       AND ${notHandedOnSince(days)}
       AND NOT ${FOLLOWUP_UPCOMING}
+    ORDER BY created_at LIMIT ${SWEEP_CAP}
   `;
   let n = 0;
   const tally = new Map<string, string[]>();
@@ -6162,6 +6173,7 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
     WHERE o.tenant_id = ${tenantId} AND coalesce(o.stage, '') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}
       AND NOT ${canTakeWork(tenantId, sql`o.agent_id`)}
       AND o.created_at < NOW() - (${UNOWNED_GRACE_MINUTES}::text || ' minutes')::interval
+    ORDER BY o.created_at LIMIT ${SWEEP_CAP}
   `;
   let n = 0;
   const tally = new Map<string, string[]>();
@@ -6251,6 +6263,7 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
     WHERE tenant_id = ${tenantId} AND coalesce(stage, '') NOT IN ${sql(OWNER_TERMINAL_STATUSES)} AND agent_id IS NOT NULL
       AND ${noPersonActivitySince(days, 'crm_owners')}
       AND ${notHandedOnSince(days, 'crm_owners')}
+    ORDER BY created_at LIMIT ${SWEEP_CAP}
   `;
   let n = 0;
   const tally = new Map<string, string[]>();

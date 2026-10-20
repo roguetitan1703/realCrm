@@ -433,7 +433,8 @@ export async function openCode(f: Firm, code: string, r: PublicReq, flatParam?: 
   if (!staff && tap && state === 'active') body.staffSignIn = true;
   // Every unusable state spends the miss allowance, like an unknown code, so
   // the allowance cannot tell a prober which codes once existed. Not for
-  // staff, who open their own dead links to send fresh ones.
+  // staff, who open their own dead links to send fresh ones. (Previews do
+  // not come here: they fetch the /share card, which has its own rule.)
   return { body, miss: state !== 'active' && !staff };
 }
 
@@ -1146,6 +1147,12 @@ export async function creditLink(id: string, leadId: string) {
   const [lead] = await sql`SELECT * FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${String(leadId || '')} LIMIT 1`;
   if (!lead) throw new ShareError(404, 'lead_not_found', 'That lead no longer exists.');
   assertMayShare(m, lead);
+  // ONCE PER LINK AND LEAD. A retry or a second save is not a second
+  // arrival: it wrote another "Came from a link" each time.
+  const [done] = await sql`SELECT 1 AS x FROM crm_timeline_events
+     WHERE tenant_id = ${m.tenantId} AND record_id = ${lead.id} AND type = 'share'
+       AND metadata->>'shareLinkId' = ${id} AND (metadata->>'cameFrom')::boolean IS TRUE LIMIT 1`;
+  if (done) return { ok: true, already: true };
   // What they were sent is on the shortlist (the same rule as a sent link).
   await addToShortlist(m.tenantId, lead.id, l.property_ids || []);
   await addTimelineEvent({
@@ -1158,7 +1165,7 @@ export async function creditLink(id: string, leadId: string) {
     action: 'share_link.came_from', target_type: 'share_link', target_id: id, summary: `A lead came from shared link ${l.code}`,
     metadata: { leadId: lead.id }, ip: m.ip, user_agent: m.userAgent,
   });
-  return { ok: true };
+  return { ok: true, already: false };
 }
 
 /**
@@ -1337,13 +1344,16 @@ export async function freshLinkFromTap(code: string, origin: string | null) {
   if (!tap?.link_id) throw new ShareError(404, 'not_found');
   const [link] = await sql`SELECT * FROM crm_share_links WHERE tenant_id = ${m.tenantId} AND id = ${tap.link_id} LIMIT 1`;
   if (!link) throw new ShareError(404, 'not_found');
+  // The recipient: the link's lead, else the lead this tap has since become
+  // (Add as lead on a group link's tap) -- that person asked, not the group.
+  const leadId: string | null = link.lead_id || tap.lead_id || null;
   if (!isDeskRole(m.role)) {
-    const [ld] = link.lead_id ? await sql`SELECT agent_id FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${link.lead_id}` : [null];
+    const [ld] = leadId ? await sql`SELECT agent_id FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${leadId}` : [null];
     if (link.created_by !== m.userId && ld?.agent_id !== m.userId) {
       throw new ShareError(403, 'forbidden', 'Only the person who sent this link, or the office, can send it again.');
     }
   }
-  return createShareLink({ leadId: link.lead_id || undefined, propertyIds: link.property_ids || [], showPrice: !!link.show_price }, origin, { freshOf: link.id });
+  return createShareLink({ leadId: leadId || undefined, propertyIds: link.property_ids || [], showPrice: !!link.show_price }, origin, { freshOf: link.id });
 }
 
 /**

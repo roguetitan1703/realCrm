@@ -278,10 +278,12 @@ which even a real code answers 429 — except the preview card, which then
 answers the firm's card without resolving the code (below). **(changed)** The
 limit is on misses, not buyers: carriers put many buyers behind one address,
 so valid opens have a ceiling of 600 a minute per address (taps 60, Talk 30,
-catalogue 600, enquiries 30 per 10 minutes). A miss is any code that is no
+catalogue 600, enquiries 10 per 10 minutes). A miss is any code that is no
 use — unknown, off, stopped **or expired** — so the budget cannot tell a
-prober which codes once existed; staff opening their own dead links spend
-nothing. **(changed)** Every 429 is `{ error: 'slow_down', message,
+prober which codes once existed; staff opening their own dead links and
+preview fetchers spend nothing (the preview card arrives from Vercel's shared
+egress address, so a forwarded expired link would otherwise blank every
+buyer's previews). **(changed)** Every 429 is `{ error: 'slow_down', message,
 firm{name,logo,accent,locale}, cta{phone}, catalogueUrl }` (the firm's
 reply-to; `firm`/`cta` absent only for an unknown firm), so the page can still
 offer WhatsApp and the catalogue:
@@ -414,11 +416,13 @@ message, …}`):
 - **(added)** `POST /share-links/:id/came-from {leadId}` → `{ ok }`. I2r:
   credits the lead (timeline `share` "Came from a link", the link's homes on
   the shortlist, audited). Binds nothing. Creator or desk; 404 for an unknown
-  link or lead, 403 when the sender may not act on the lead.
+  link or lead, 403 when the sender may not act on the lead. Once per link and
+  lead: a repeat answers `{ ok, already: true }` and writes nothing.
 - **(added)** `POST /share-taps/:code/fresh` (a talk or tap code, which is what
   `share_expired_open` links to) → 201, the same body as `POST /share-links`
   plus `text`: `{ link, lead|null, waUrl, text }`. A new link, same homes,
-  same recipient, same price setting, made by the person pressing it (the
+  same recipient (the link's lead, else the lead the tap has since become),
+  same price setting, made by the person pressing it (the
   link's sender, the lead's holder, or desk; 403 otherwise). Its refusals are
   Send's: `422 flats_not_available {ids}` / `flats_not_found {ids}` for homes
   sold or gone since, `sharing_stopped`, `sender_phone_missing`,
