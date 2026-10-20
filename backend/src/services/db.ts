@@ -1284,10 +1284,11 @@ export async function migrateSharing(): Promise<void> {
  * -- and logged; searching the number lists both.
  *
  * Not runOnce: if two USERS would end up on one number, the unique
- * (tenant_id, phone) index would stop the boot, so the repair writes nothing,
- * says which users, and is not marked done -- the next boot tries again after
- * someone fixes them. Every write is conditional on the row still holding the
- * value that was read, all in one transaction with the marker. A failure rolls
+ * (tenant_id, phone) index would stop the boot, so those users' numbers are
+ * held back and named as an error, the rest is converted, and the repair is not
+ * marked done -- the next boot converts them after someone fixes the clash.
+ * Every write is conditional on the row still holding the value that was
+ * read, all in one transaction with the marker. A failure rolls
  * the whole repair back and is logged; it does not stop the boot.
  */
 export async function migratePhones(): Promise<void> {
@@ -1308,19 +1309,26 @@ async function repairPhones(): Promise<void> {
   for (const c of plan.otherCollisions) {
     console.warn(`[Phones] same number after the repair, both kept: ${c.tenant_id} ${c.table} ${c.e164} ${c.ids.join(', ')}`);
   }
-  if (plan.userCollisions.length) {
-    for (const c of plan.userCollisions) console.error(`[Phones] NOT RUN: users ${c.ids.join(', ')} in ${c.tenant_id} would share ${c.e164}`);
-    return;
+  // USERS WHO WOULD SHARE A NUMBER are held back, with their copies of it
+  // (users.metadata, crm_agents.metadata, same id), and named; everything else
+  // is converted. The marker is not written while any are held, so the next
+  // boot converts them once someone has fixed the clash.
+  const USER_TABLES = new Set(['users.phone', 'users.metadata.phone', 'crm_agents.metadata.phone']);
+  const held = new Set(plan.userCollisions.flatMap(c => c.ids.map(id => `${c.tenant_id}\u0000${id}`)));
+  for (const c of plan.userCollisions) {
+    console.error(`[Phones] ERROR users ${c.ids.join(', ')} in ${c.tenant_id} would share ${c.e164}: their numbers are left as they are until one is changed`);
   }
+  const converts = plan.converts.filter(c => !(USER_TABLES.has(c.table.name) && held.has(`${c.tenant_id}\u0000${c.id}`)));
   let written = 0; let skipped = 0;
   const byTenant = new Map<string, number>();
   await sql.begin(async (tx: any) => {
-    for (const c of plan.converts) {
+    for (const c of converts) {
       const n = await c.table.write(tx, c);
       if (n) { written += n; byTenant.set(c.tenant_id, (byTenant.get(c.tenant_id) || 0) + n); } else skipped++;
     }
-    await tx`INSERT INTO schema_migrations (name) VALUES (${NAME}) ON CONFLICT DO NOTHING`;
+    if (!held.size) await tx`INSERT INTO schema_migrations (name) VALUES (${NAME}) ON CONFLICT DO NOTHING`;
   });
   console.log(`[Phones] E.164 repair: ${written} written${skipped ? `, ${skipped} changed since read and skipped` : ''}, ${plan.unreadable.length} unreadable left, ${plan.otherCollisions.length} lead/owner collisions left`
+    + (held.size ? `, ${plan.converts.length - converts.length} user numbers held back (not marked done)` : '')
     + (byTenant.size ? ` · ${[...byTenant].map(([t, n]) => `${t} ${n}`).join(', ')}` : ''));
 }
