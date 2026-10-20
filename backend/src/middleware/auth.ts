@@ -73,11 +73,13 @@ export async function withRequestContext(req: Request, res: Response, next: Next
   if (claims && claims.kind === 'user') {
     // Auth v2: a token carrying a session id (jti) is only valid while that
     // session is live — this is what makes revoke / force-logout / expiry real.
-    // Legacy tokens (no jti, from the dormant OTP flow) still pass. A transient DB
+    // A user token with no jti came only from the retired code sign-in and can
+    // never be revoked, so it is refused (treated as anonymous). A transient DB
     // hiccup fails OPEN (don't log everyone out); only a definitively gone session
     // is rejected.
     let sessionAlive = true;
-    if (claims.jti) {
+    if (!claims.jti) sessionAlive = false;
+    else {
       try {
         sessionAlive = !!(await touchSession(claims.jti));
       } catch (e: any) {
