@@ -126,11 +126,14 @@ authRouter.post('/password/forgot', async (req: Request, res: Response) => {
     // emailed link points back to THIS app — localhost in dev, the app origin in
     // the split-origin deploy (the browser's Origin is the app, not the API host).
     const origin = (req.headers.origin as string) || `${req.protocol}://${req.get('host')}`;
-    // Three emails an hour per account handle, whoever asks: an inbox cannot
-    // be flooded from many addresses. Past it the answer is the same 200, so
-    // the limit says nothing about whether the handle exists.
-    const handleKey = `auth-forgot-handle:${tenantFromHeader(req)}:${String(identifier || '').trim().toLowerCase()}`;
-    if (identifier && hit(handleKey, 3, 60 * 60_000)) await requestPasswordReset(tenantFromHeader(req), identifier, origin);
+    // NOT AWAITED. The lookup and the email ran inside the request, so a real
+    // account answered measurably slower than an unknown one. Flooding is
+    // bounded in requestPasswordReset (one live link, a new one at most every
+    // 10 minutes).
+    if (identifier) {
+      requestPasswordReset(tenantFromHeader(req), identifier, origin)
+        .catch((err: any) => console.warn('[Auth] forgot-password error:', err?.message));
+    }
   } catch (err: any) {
     console.warn('[Auth] forgot-password error:', err.message);
   }
