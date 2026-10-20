@@ -254,7 +254,10 @@ export async function buyerAsk(f: Firm, input: any, r: PublicReq): Promise<{ ok:
     // folds into the open ask and its open alert: "(3×)", no push. The
     // NEWEST choice wins: a visit at another time, or New homes like these
     // with other filters, replaces what the ask said (a call back keeps its
-    // time: it is "call me", not a slot).
+    // time: it is "call me", not a slot) -- but only from the lead's own
+    // bound link. A typed number or an unbound link is anyone: it may count
+    // as asking again, never change the slot the agent is about to confirm.
+    const trusted = !!link?.lead_id && link.lead_id === leadId;
     const { row, folded } = await sql.begin(async (tx: any) => {
       const [again] = await tx`
         SELECT id FROM crm_buyer_asks
@@ -265,10 +268,10 @@ export async function buyerAsk(f: Firm, input: any, r: PublicReq): Promise<{ ok:
       if (again) {
         const [row] = await tx`UPDATE crm_buyer_asks
             SET count = count + 1, updated_at = NOW(),
-                name = coalesce(${name}, name), phone = ${phone},
-                at = ${kind === 'visit' ? visitAt : tx`at`},
-                ask = ${ask ? tx.json(ask) : tx`ask`},
-                seen_ids = ${ask ? seen : tx`seen_ids`}
+                name = ${trusted ? tx`coalesce(${name}, name)` : tx`name`}, phone = ${trusted ? phone : tx`phone`},
+                at = ${trusted && kind === 'visit' ? visitAt : tx`at`},
+                ask = ${trusted && ask ? tx.json(ask) : tx`ask`},
+                seen_ids = ${trusted && ask ? seen : tx`seen_ids`}
           WHERE tenant_id = ${f.id} AND id = ${again.id} RETURNING *`;
         return { row, folded: true };
       }
@@ -343,8 +346,10 @@ async function alertData(tenantId: string, a: any, lead: any) {
  * Everything after the buyer's answer: the timeline line, the booking (only
  * on a lead this ask made), and THE ONE ALERT. Run from the request, and by
  * tellUntold for an ask a restart cut off. CLAIMED FIRST (told_at set where
- * it is still empty): two runs cannot both send. A crash after the claim
- * loses this ask's alert — one lost beats two sent.
+ * it is still empty): two runs cannot both send. An error before the alert
+ * goes out releases the claim, so the sweep tries again (the timeline line
+ * may then be written twice); only a crash in that window loses the alert --
+ * one lost beats two sent.
  * Runs in the firm's own context (asSystem): from the sweep there is none,
  * and the timeline and the booking read the tenant from it.
  */
@@ -355,6 +360,15 @@ async function tellTheFirmNow(tenantId: string, a: any, req: { ip?: string | nul
   const [claimed] = await sql`UPDATE crm_buyer_asks SET told_at = NOW()
                                WHERE tenant_id = ${tenantId} AND id = ${a.id} AND told_at IS NULL RETURNING id`;
   if (!claimed) return;
+  try {
+    await tellClaimed(tenantId, a, req);
+  } catch (err) {
+    await sql`UPDATE crm_buyer_asks SET told_at = NULL WHERE tenant_id = ${tenantId} AND id = ${a.id} AND told_at IS NOT NULL`
+      .catch(() => {});
+    throw err;
+  }
+}
+async function tellClaimed(tenantId: string, a: any, req: { ip?: string | null; userAgent?: string | null }) {
   const [desk, loc] = await Promise.all([deskConfigOf(tenantId), localeOf(tenantId)]);
   const tz = desk.timezone;
   const [link] = a.link_id ? await sql`SELECT created_by FROM crm_share_links WHERE tenant_id = ${tenantId} AND id = ${a.link_id}` : [null];
@@ -396,12 +410,12 @@ async function tellTheFirmNow(tenantId: string, a: any, req: { ip?: string | nul
     ...(kind === 'visit' && at ? { subjectAt: at.toISOString() } : {}),
   });
   if (!reached) console.warn(`[Asks] ${kind} ${a.id} for tenant ${tenantId} reached nobody`);
-  audit({
+  try { audit({
     tenant_id: tenantId, actor_type: 'system', actor_id: null, actor_label: 'Buyer form',
     action: `buyer_ask.${kind}`, target_type: 'lead', target_id: a.lead_id, summary: `Buyer asked: ${kind}`,
     metadata: { askId: a.id, created: !!a.made_lead, linkId: a.link_id || null, propertyId: a.property_id || null, recipients: reached },
     ip: req.ip || null, user_agent: req.userAgent || null,
-  });
+  }); } catch (err: any) { console.warn(`[Asks] ${a.id}: audit failed after the alert:`, err?.message); }
 }
 
 /** The same ask again today: its open alert says how many times, in place. No new row, no push. */
