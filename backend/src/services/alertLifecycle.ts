@@ -35,8 +35,9 @@ const LEAD_OPEN = (l: string) => sql`coalesce(${sql(l)}.stage, '') NOT IN ${sql(
 const OWNER_STILL_TO_CALL = (o: string) =>
   sql`coalesce(${sql(o)}.stage, 'New') NOT IN ${sql([...OWNER_TERMINAL_STATUSES, OWNER_WALK_END])}`;
 
-/** Owner calling rows have no contact allowlist: any person-written event is the call. */
-const ownerWorkedAfter = (o: string, since: any) => sql`
+/** Owner calling rows have no contact allowlist: any person-written event is the call.
+ *  Also what an import undo asks of an owner or a listing (imports.ts). */
+export const personWorkedAfter = (o: string, since: any) => sql`
   EXISTS (SELECT 1 FROM crm_timeline_events e
            WHERE e.record_id = ${sql(o)}.id AND e.tenant_id = ${sql(o)}.tenant_id
              AND coalesce(e.author, 'System') NOT IN ('System', 'Import')
@@ -107,10 +108,10 @@ function rule(test: CloseTest, tz: string): Rule | null {
       pending: sql`EXISTS (SELECT 1 FROM crm_owners o
         WHERE o.tenant_id = n.tenant_id AND o.id = ANY(n.record_ids)
           AND ${OWNER_STILL_TO_CALL('o')} AND o.agent_id = n.user_id
-          AND NOT ${ownerWorkedAfter('o', sql`n.created_at`)})`,
+          AND NOT ${personWorkedAfter('o', sql`n.created_at`)})`,
       done: sql`EXISTS (SELECT 1 FROM crm_owners o
         WHERE o.tenant_id = n.tenant_id AND o.id = ANY(n.record_ids)
-          AND ${ownerWorkedAfter('o', sql`n.created_at`)})`,
+          AND ${personWorkedAfter('o', sql`n.created_at`)})`,
     };
     // A rent ending: open while the agreement is still active and still ends
     // within the 30 days it was raised for. Renewed or ended → done.

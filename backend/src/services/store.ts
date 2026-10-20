@@ -5591,6 +5591,7 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX, 
   // The owner on the form becomes a real owner record, linked to this flat.
   const ownerRecordId = await linkListingOwner(newId, {
     ownerName, ownerPhone, ownerEmail, project, tower: wing, unitNo, config: type,
+    importBatchId: propData.importBatchId || null,
   }, ctx);
   if (ownerRecordId) await sql`UPDATE crm_properties SET owner_contact_id = ${ownerRecordId} WHERE id = ${newId} AND tenant_id = ${tid()}`;
   const refreshed = await sql`SELECT * FROM crm_properties WHERE id = ${newId} AND tenant_id = ${tid()}`;
@@ -5636,6 +5637,9 @@ export async function linkListingOwner(propertyId: string, data: {
   project?: string | null; tower?: string | null; unitNo?: string | null; config?: string | null;
   /** what this listing said the owner was called before this edit, if anything */
   prevName?: string | null;
+  /** the import that brought the listing: an owner it creates carries it, so
+   *  undoing the import takes the owner back too (imports.ts revertImport) */
+  importBatchId?: string | null;
 }, ctx: ActorCtx): Promise<string | null> {
   const phone = String(data.ownerPhone || '').trim();
   const name = String(data.ownerName || '').trim();
@@ -5694,6 +5698,7 @@ export async function linkListingOwner(propertyId: string, data: {
     name: name || null, phone, email: data.ownerEmail || null,
     project: data.project || null, tower: data.tower || null, unitNo: data.unitNo || null,
     config: data.config || null, source: 'Property record',
+    importBatchId: data.importBatchId || null,
   }], ctx);
   return made?.id || null;
 }

@@ -37,6 +37,8 @@ import { getContext } from './context.js';
 import { audit } from './audit.js';
 import { notifyOrDesk } from './notifications.js';
 import { createOwnersBatch, createLead, createProperty, localeOf, type ActorCtx, type Locale } from './store.js';
+import { contactedAfter } from './leadSegments.js';
+import { personWorkedAfter } from './alertLifecycle.js';
 import {
   OWNER_FIELDS, LEAD_FIELDS, PROPERTY_FIELDS, readField,
 } from '../../../src/lib/importSchema.js';
@@ -325,6 +327,7 @@ function jobShape(r: any): any {
     status: r.status, total: r.total, added: r.added, skipped: r.skipped, failed: r.failed,
     error: r.error || null, createdBy: r.created_by, createdAt: r.created_at,
     startedAt: r.started_at, finishedAt: r.finished_at, revertedAt: r.reverted_at,
+    revertedKept: r.reverted_kept ?? 0,
   };
 }
 
@@ -393,12 +396,17 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
   const [job] = await sql`SELECT * FROM crm_import_jobs WHERE id = ${id} AND tenant_id = ${t} LIMIT 1`;
   if (!job) throw new Error('No such import');
   if (job.status === 'running') return jobShape(job);
-  if (job.status === 'done' || job.status === 'reverted') throw new Error('This import has already run');
+  if (job.status === 'done' || job.status === 'reverted' || job.reverted_at) throw new Error('This import has already run');
   const kind = job.kind as ImportKind;
   const mapping = job.mapping || {};
   const options = job.options || {};
 
-  await sql`UPDATE crm_import_jobs SET status = 'running', started_at = NOW(), error = NULL WHERE id = ${id} AND tenant_id = ${t}`;
+  // CLAIMED, not set: two starts at once run it once, and a job that has been
+  // undone never starts again (revertImport claims the same row).
+  const [claimed] = await sql`UPDATE crm_import_jobs SET status = 'running', started_at = NOW(), error = NULL
+     WHERE id = ${id} AND tenant_id = ${t} AND status NOT IN ('running', 'done', 'reverted') AND reverted_at IS NULL
+     RETURNING id`;
+  if (!claimed) throw new Error('This import has already run');
 
   const onFile = await existingKeys(kind);
   const seen = new Set<string>();
@@ -449,9 +457,9 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
       await sql`UPDATE crm_import_jobs SET added = ${added}, skipped = ${skipped}, failed = ${failed} WHERE id = ${id} AND tenant_id = ${t}`;
     }
 
-    await sql`UPDATE crm_import_jobs SET status = 'done', finished_at = NOW(), added = ${added}, skipped = ${skipped}, failed = ${failed} WHERE id = ${id} AND tenant_id = ${t}`;
+    await sql`UPDATE crm_import_jobs SET status = 'done', finished_at = NOW(), added = ${added}, skipped = ${skipped}, failed = ${failed} WHERE id = ${id} AND tenant_id = ${t} AND status = 'running'`;
   } catch (e: any) {
-    await sql`UPDATE crm_import_jobs SET status = 'failed', finished_at = NOW(), error = ${String(e?.message || e).slice(0, 300)} WHERE id = ${id} AND tenant_id = ${t}`;
+    await sql`UPDATE crm_import_jobs SET status = 'failed', finished_at = NOW(), error = ${String(e?.message || e).slice(0, 300)} WHERE id = ${id} AND tenant_id = ${t} AND status = 'running'`;
     throw e;
   }
 
@@ -524,26 +532,117 @@ export async function importRows(id: string, status?: string): Promise<any[]> {
   return (rows as any[]).map(r => ({ rowNo: r.row_no, raw: r.raw, status: r.status, reason: r.reason, recordId: r.record_id }));
 }
 
+export class ImportUndoRefused extends Error {
+  status = 409;
+  constructor(message: string) { super(message); }
+}
+
 /**
- * Undo — delete what this job created, and say how many.
+ * UNDO AN IMPORT: take back what this job added that nobody has used since.
  *
- * Scoped by tenant and by batch id, and it deletes only rows this job wrote
- * (record ids it recorded), so an owner edited since is still that owner's row
- * and nothing outside the batch can be caught by it.
+ * WHERE THE LINK IS. Leads and owners carry the job in import_batch_id; a
+ * property carries it in config.importBatchId (every non-column property field
+ * lives there) -- the undo looked for a property column that does not exist
+ * and threw. An owner made from an imported listing carries it too
+ * (linkListingOwner). Leads and listings are also limited to the record ids
+ * this job recorded writing. A row with no link is never reached.
+ *
+ * USED SINCE IS KEPT, and counted. Deleting such a record left shortlists,
+ * share links and agreements pointing at nothing, and threw away someone's
+ * work. Used: referenced by a shortlist, a share link, an agreement, a unit,
+ * an activity or a conversion; or worked since the import finished, by the
+ * alert lifecycle's own test (contactedAfter for a lead, personWorkedAfter for
+ * an owner or a listing: a person's event, not System or Import); or, for a
+ * lead or an owner, edited since (updated_at: an edit writes no event).
+ * Once b-forms merges, a lead with a crm_buyer_asks row is used as well.
+ *
+ * ONE TRANSACTION. The job is claimed first (reverted_at set where it was not,
+ * on a finished job), so a running import cannot be undone and a second undo
+ * at the same moment is refused rather than run twice; the used test is part
+ * of each DELETE, so nothing can become used between the look and the delete;
+ * any failure leaves every row where it was.
  */
-export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ deleted: number }> {
+export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ deleted: number; kept: number }> {
   const t = tid();
-  const [job] = await sql`SELECT * FROM crm_import_jobs WHERE id = ${id} AND tenant_id = ${t} LIMIT 1`;
-  if (!job) throw new Error('No such import');
-  if (job.reverted_at) return { deleted: 0 };
-  const table = job.kind === 'owners' ? sql`crm_owners` : job.kind === 'clients' ? sql`crm_leads` : sql`crm_properties`;
-  const gone = await sql`DELETE FROM ${table} WHERE tenant_id = ${t} AND import_batch_id = ${id} RETURNING id`;
-  await sql`UPDATE crm_import_jobs SET status = 'reverted', reverted_at = NOW(), reverted_by = ${ctx.actorId ?? null} WHERE id = ${id} AND tenant_id = ${t}`;
+  const out = await sql.begin(async (tx: any) => {
+    const [job] = await tx`
+      UPDATE crm_import_jobs SET status = 'reverted', reverted_at = NOW(), reverted_by = ${ctx.actorId ?? null}
+       WHERE id = ${id} AND tenant_id = ${t} AND reverted_at IS NULL AND status = 'done'
+       RETURNING *`;
+    if (!job) {
+      const [now] = await tx`SELECT status, reverted_at FROM crm_import_jobs WHERE id = ${id} AND tenant_id = ${t}`;
+      if (!now) throw new Error('No such import');
+      throw new ImportUndoRefused(now.reverted_at ? 'This import has already been undone'
+        : now.status === 'running' ? 'This import is still running' : 'This import has not finished');
+    }
+    const since = job.finished_at;
+    const recorded = (await tx`SELECT record_id FROM crm_import_rows
+      WHERE job_id = ${id} AND status = 'added' AND record_id IS NOT NULL`).map((r: any) => r.record_id);
+    const mine = recorded.length ? tx`AND r.id IN ${tx(recorded)}` : tx`AND FALSE`;
+
+    const propsBefore = (await tx`SELECT count(*)::int AS n FROM crm_properties r
+      WHERE r.tenant_id = ${t} AND r.config->>'importBatchId' = ${id} ${mine}`)[0].n;
+    const props = await tx`DELETE FROM crm_properties r
+      WHERE r.tenant_id = ${t} AND r.config->>'importBatchId' = ${id} ${mine}
+        AND NOT (${personWorkedAfter('r', since)}
+          OR EXISTS (SELECT 1 FROM lead_shortlist x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_share_links x WHERE x.tenant_id = r.tenant_id AND r.id = ANY(x.property_ids))
+          OR EXISTS (SELECT 1 FROM crm_agreements x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_units x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
+          OR EXISTS (SELECT 1 FROM activities x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_owners x WHERE x.tenant_id = r.tenant_id AND x.converted_property_id = r.id))
+      RETURNING r.id`;
+
+    const leadsBefore = (await tx`SELECT count(*)::int AS n FROM crm_leads r
+      WHERE r.tenant_id = ${t} AND r.import_batch_id = ${id} ${mine}`)[0].n;
+    const leads = await tx`DELETE FROM crm_leads r
+      WHERE r.tenant_id = ${t} AND r.import_batch_id = ${id} ${mine}
+        AND NOT (${contactedAfter('r', since)}
+          OR r.updated_at > ${since}
+          OR EXISTS (SELECT 1 FROM lead_shortlist x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_share_links x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_agreements x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_lead_enquiries x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
+          OR EXISTS (SELECT 1 FROM activities x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id))
+      RETURNING r.id`;
+
+    // Owners: the job's own, from an owners sheet or made from its listings
+    // (a listing job records the listing's id, not its owner's). After the
+    // listings, so an owner whose listing just went is no longer held by it.
+    const ownersBefore = (await tx`SELECT count(*)::int AS n FROM crm_owners r
+      WHERE r.tenant_id = ${t} AND r.import_batch_id = ${id}`)[0].n;
+    const owners = await tx`DELETE FROM crm_owners r
+      WHERE r.tenant_id = ${t} AND r.import_batch_id = ${id}
+        AND NOT (${personWorkedAfter('r', since)}
+          OR r.updated_at > ${since}
+          OR r.converted_property_id IS NOT NULL
+          OR EXISTS (SELECT 1 FROM crm_properties x WHERE x.tenant_id = r.tenant_id AND x.owner_contact_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_agreements x WHERE x.tenant_id = r.tenant_id AND x.owner_id = r.id))
+      RETURNING r.id`;
+
+    const ids = { properties: props.map((r: any) => r.id), leads: leads.map((r: any) => r.id), owners: owners.map((r: any) => r.id) };
+    const gone = [...ids.properties, ...ids.leads, ...ids.owners];
+    if (gone.length) {
+      // Their own history goes with them: an undone import never happened.
+      await tx`DELETE FROM crm_timeline_events WHERE tenant_id = ${t} AND record_id IN ${tx(gone)}`;
+    }
+    if (ids.leads.length) {
+      // As any lead delete: its devices are let go (shareLeadsDeleted). No link
+      // or shortlist can name it -- those made it used.
+      await tx`DELETE FROM crm_share_devices WHERE tenant_id = ${t} AND lead_id IN ${tx(ids.leads)}`;
+    }
+    const kept = propsBefore + leadsBefore + ownersBefore - gone.length;
+    await tx`UPDATE crm_import_jobs SET reverted_kept = ${kept} WHERE id = ${id} AND tenant_id = ${t}`;
+    return { job, ids, deleted: gone.length, kept };
+  });
   audit({
     tenant_id: t, actor_type: ctx.actorType || 'user', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'import.revert', target_type: 'import', target_id: id,
-    summary: `Undid the import of "${job.file_name || 'a spreadsheet'}": ${gone.length} ${job.kind} removed`,
-    metadata: { kind: job.kind, deleted: gone.length }, ip: ctx.ip, user_agent: ctx.userAgent,
+    summary: `Undid the import of "${out.job.file_name || 'a spreadsheet'}": ${out.deleted} removed${out.kept ? `, ${out.kept} kept (used since)` : ''}`,
+    // The ids, as bulkDeleteLeads keeps them: after an undo there is nothing
+    // left to inspect, so the ledger has to say what went.
+    metadata: { kind: out.job.kind, deleted: out.deleted, kept: out.kept, ids: out.ids },
+    ip: ctx.ip, user_agent: ctx.userAgent,
   });
-  return { deleted: gone.length };
+  return { deleted: out.deleted, kept: out.kept };
 }
