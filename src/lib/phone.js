@@ -96,3 +96,12 @@ export function phoneCountries() {
     .map(code => ({ code, name: COUNTRY_NAME(code), dial: callingCode(code) }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }
+
+/** A person as a list shows them: their name, else their number (format.js's
+ *  comment above the old copy says why a number and never an invented name). */
+export function personLabel(p) {
+  if (!p) return '—'
+  const n = String(p.name || '').trim()
+  if (n) return n
+  return formatPhone(p.phone) || '—'
+}

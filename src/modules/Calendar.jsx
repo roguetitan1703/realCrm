@@ -3,7 +3,8 @@ import { Empty, PageHeader } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import { followUpOverdue, followUpAction, personLabel } from '../lib/format.js'
+import { followUpOverdue, followUpAction } from '../lib/format.js'
+import { personLabel } from '../lib/phone.js'
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Panel, SectionHead, StageTag, Button, Input, PhoneInput, Segmented, Toggle, Avatar } from '../components/primitives.jsx'
+import { Panel, SectionHead, StageTag, Button, Input, Segmented, Toggle, Avatar } from '../components/primitives.jsx'
+import PhoneInput from '../components/PhoneInput.jsx'
 import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES } from '../data/theme.js'
 import { finalStageOf, finalIsEditable, LABELLED_LEAD_STAGES, stageLabel } from '../data/pipelineRoles.js'

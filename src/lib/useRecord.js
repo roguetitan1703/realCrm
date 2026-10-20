@@ -71,7 +71,10 @@ export function useRecord(store, kind, id) {
         // what it is: applied, it paints over an optimistic change the person
         // just made — a photo removed came back. The write's own completion
         // moves the tick, and that read is the one that counts.
-        if (rec && known && hasPendingWrites()) { setState({ loading: false, error: null }); return }
+        // Only a write to THIS record, and only over the full record: a list
+        // row has no detail to protect, and keeping it meant a spinner until
+        // something else moved the desk.
+        if (rec && full && hasPendingWrites(id)) { setState({ loading: false, error: null }); return }
         if (rec) store.cacheRecords(kind, [rec])
         // A real 404 is a deleted record, not a failure — the screen says
         // "Not found", which is the truth.

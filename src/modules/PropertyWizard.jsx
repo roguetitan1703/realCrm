@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Field, Input, PhoneInput, Textarea, SuggestInput } from '../components/primitives.jsx'
+import { Button, Field, Input, Textarea, SuggestInput } from '../components/primitives.jsx'
+import PhoneInput from '../components/PhoneInput.jsx'
 import { projectNames } from '../lib/suggest.js'
 import Icon from '../components/Icon.jsx'
 import MediaEditor from '../components/MediaEditor.jsx'

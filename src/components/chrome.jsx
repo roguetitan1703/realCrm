@@ -107,7 +107,7 @@ export function TopBar({ title, eyebrow, onBack, onSearch, onBell, unread, actio
       {actions}
       <ConnectionBadge />
       {onBell && (
-        <button className="bell" onClick={onBell}><Icon name="bell" />{unread ? <span className="bdot">{unread}</span> : null}</button>
+        <button className="bell" onClick={onBell} aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'}><Icon name="bell" />{unread ? <span className="bdot">{unread}</span> : null}</button>
       )}
       {profile && <ProfileMenu {...profile} />}
     </div>

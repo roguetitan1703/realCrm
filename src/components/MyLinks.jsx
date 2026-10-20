@@ -5,7 +5,7 @@ import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { formatPhone as phoneSpaced } from '../lib/phone.js'
 import { copyText } from '../lib/clipboard.js'
-import { LINK_STATE_LABEL, expiryLabel } from '../lib/share.js'
+import { LINK_STATE_LABEL, expiryLabel, sentHomeLine } from '../lib/share.js'
 import { SenderPhone, LeadSearch } from '../modules/SendSheet.jsx'
 
 // ============================================================================
@@ -55,6 +55,9 @@ export function MyLinks({ store, go }) {
   const rows = data?.data || []
   const total = data?.total ?? rows.length
   const reload = () => setBump(b => b + 1)
+  // Links turned off here, shown off at once. The reload alone once left a
+  // link reading Live until the page was reloaded.
+  const [offIds, setOffIds] = useState(() => new Set())
 
   const turnOff = (l) => store.openModal({
     kind: 'confirm',
@@ -62,7 +65,7 @@ export function MyLinks({ store, go }) {
     lines: [l.lead ? l.lead.name : 'No recipient', homesWord(l)],
     confirmLabel: 'Turn off',
     onConfirm: () => api.turnOffShareLink(l.id)
-      .then(() => { store.toast('Link turned off'); reload() })
+      .then(() => { setOffIds(s => new Set(s).add(l.id)); store.toast('Link turned off'); reload() })
       .catch(() => store.toast('Could not turn it off. Try again.', 'warn')),
   })
   const attach = (l) => store.openModal({ kind: 'attachLink', linkId: l.id, onDone: reload })
@@ -82,7 +85,8 @@ export function MyLinks({ store, go }) {
         <div className="mylinks-empty">No links yet</div>
       ) : (
         <div className="mylinks-list">
-          {rows.map(l => {
+          {rows.map(row => {
+            const l = offIds.has(row.id) && row.state === 'active' ? { ...row, state: 'off' } : row
             const live = l.state === 'active'
             return (
               <div key={l.id} className={'myl' + (live ? '' : ' is-dead')}>
@@ -93,9 +97,12 @@ export function MyLinks({ store, go }) {
                   <span className={'myl-state s-' + (l.state || 'active')}>{LINK_STATE_LABEL[l.state] || l.state}</span>
                 </div>
                 <div className="myl-sub">{[homesWord(l), expiryLabel(l)].filter(Boolean).join(' · ')}</div>
+                {/* The same line, in the same words, the lead's record shows
+                    for a home it was sent (sentHomeLine): "Sent 3 Oct · Opened
+                    2× · last today · list opened 1×". */}
+                <div className="myl-opens">{sentHomeLine(linkOpens(l))}</div>
                 <div className="myl-nums mono-num">
-                  <span><b>{l.views ?? 0}</b> {l.views === 1 ? 'view' : 'views'}</span>
-                  <span><b>{l.devices ?? 0}</b> {l.devices === 1 ? 'person' : 'people'}</span>
+                  <span><b>{l.devices ?? 0}</b> {l.devices === 1 ? 'device' : 'devices'}</span>
                   <span className={l.interested ? 'is-int' : ''}><b>{l.interested ?? 0}</b> interested</span>
                 </div>
                 <div className="myl-foot">
@@ -118,6 +125,14 @@ export function MyLinks({ store, go }) {
 }
 
 const PAGE = 10
+
+// A link's opens in the lead's terms: opens of a home's page, and opens of the
+// list. `listOpens` is the API's split of `views`; until it sends it, every
+// view is counted as a home open.
+const linkOpens = (l) => {
+  const list = Number(l.listOpens) || 0
+  return { via: ['sent'], sentAt: l.createdAt, opens: Math.max(0, (l.views || 0) - list), lastOpenedAt: l.lastOpenedAt, linkOpens: list }
+}
 
 const homesWord = (l) => {
   // Which home, not only how many: twelve rows of "No recipient · 1 home"

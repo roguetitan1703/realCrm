@@ -55,7 +55,8 @@ export const RECORD_KEYS = [
 // no chip rendered, so clicking a stage on the dashboard did NOTHING. It is one
 // object now, and it lives in the query string, which is the only place that
 // survives all four.
-const FILTER_SCALARS = ['seg', 'intent', 'stage', 'sortKey', 'sortDir']
+// `q` is the search box: a filter like the rest, so Back from a record keeps it.
+const FILTER_SCALARS = ['seg', 'intent', 'stage', 'sortKey', 'sortDir', 'q']
 const FILTER_LISTS = ['source', 'locality', 'agent', 'flag', 'alert']
 
 // THE SAME BAG, FOR THE OTHER LIST SCREEN. Properties kept its filters in a
@@ -67,7 +68,7 @@ const FILTER_LISTS = ['source', 'locality', 'agent', 'flag', 'alert']
 // every TAKEOVER key on any navigation that is not record-only, so two list
 // screens are never filtered at once. It also keeps the URL readable —
 // ?screen=properties&status=Available rather than a prefixed dialect.
-const PROP_SCALARS = ['sortKey', 'sortDir', 'tab']
+const PROP_SCALARS = ['sortKey', 'sortDir', 'tab', 'q']
 const PROP_LISTS = [
   'project', 'deal', 'category', 'bhk', 'subtype', 'locality',
   'status', 'furnishing', 'facing', 'possession', 'ownership', 'transaction', 'verified', 'media', 'tower', 'unit', 'catalogue',
@@ -114,10 +115,10 @@ const writePropFilters = (p, f) => {
 // switched on that nothing on screen explained. Read and written only on the
 // calling screen, so `tab`, `status` and `caller` cannot leak into the other
 // two bags; the project is `in-project` for the reason PROP_URL_NAME gives.
-const OWNER_URL = { tab: 'tab', step: 'step', status: 'status', caller: 'caller', config: 'config', project: 'in-project', tower: 'tower', sortKey: 'sortKey', sortDir: 'sortDir' }
+const OWNER_URL = { tab: 'tab', step: 'step', status: 'status', caller: 'caller', config: 'config', project: 'in-project', tower: 'tower', sortKey: 'sortKey', sortDir: 'sortDir', q: 'q' }
 // THE CONTACTS BAG: which building, which area, on whichever Contacts tab is
 // open. Its own screen only, like the calling bag.
-const CONTACT_URL = { project: 'in-project', locality: 'locality' }
+const CONTACT_URL = { project: 'in-project', locality: 'locality', q: 'q' }
 const readContactFilters = (p) => {
   const f = {}
   for (const [k, u] of Object.entries(CONTACT_URL)) { const v = p.get(u); if (v) f[k] = v }

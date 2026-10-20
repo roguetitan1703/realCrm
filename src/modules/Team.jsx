@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Avatar, Button, Field, Input, PhoneInput, SectionHead, PageHeader, Segmented, RowMenu, Pager } from '../components/primitives.jsx'
+import { Avatar, Button, Field, Input, SectionHead, PageHeader, Segmented, RowMenu, Pager } from '../components/primitives.jsx'
+import PhoneInput from '../components/PhoneInput.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -136,8 +137,7 @@ function AccessPanel({ store }) {
 
   return (
     <div className="panel acc-panel">
-      <SectionHead title="Manage access"
-        right={<span className="u-muted acc-hint">Add, edit, and control who can sign in</span>} />
+      <SectionHead title="Manage access" />
       {users == null ? (
         <div className="acc-tbl-wrap"><table className="tbl acc-tbl"><tbody>
           {[0, 1, 2].map(i => (
@@ -386,7 +386,7 @@ function SeatModal({ store, user, onClose, onDone }) {
           )}
           <Field label={needsEmail ? 'Email' : 'Email (optional)'}><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@firm.com" type="email" /></Field>
           <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} /></Field>
-          <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Reassigning…' : 'Reassign seat'}</Button>
+          <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>{saving ? 'Reassigning…' : 'Reassign seat'}</Button></div>
         </div>
       </div>
     </div>
@@ -443,7 +443,7 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
               <Segmented value={role} onChange={setRole} options={[{ value: 'agent', label: 'Sales agent' }, { value: 'manager', label: 'Manager' }]} />
             </Field>
           )}
-          <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Saving…' : 'Save changes'}</Button>
+          <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>{saving ? 'Saving…' : 'Save changes'}</Button></div>
         </div>
       </div>
     </div>
@@ -464,7 +464,7 @@ function SessionsPanel({ store }) {
   const sessions = data?.sessions || []
   return (
     <div className="panel acc-panel">
-      <SectionHead title="Your sessions" right={<span className="u-muted acc-hint">Devices signed in as you</span>} />
+      <SectionHead title="Your sessions" />
       {data == null ? (
         <div className="acc-sess">
           {[0, 1].map(i => (
@@ -606,9 +606,9 @@ function ResetPasswordModal({ store, user, onClose, onDone }) {
             </label>
           </div>
 
-          <Button variant="primary" block disabled={saving} onClick={submit}>
+          <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>
             {saving ? 'Resetting Password…' : 'Set New Password'}
-          </Button>
+          </Button></div>
         </div>
       </div>
     </div>

@@ -7,11 +7,12 @@ import { SUBTYPES, FURNISH, FACING, POSSESSION, SOCIETY_AMENITIES, labelOf } fro
 import { deviceId, openWa } from '../lib/share.js'
 import Icon from '../components/Icon.jsx'
 import PhotoViewer from '../components/PhotoViewer.jsx'
+import FreshLink from '../components/FreshLink.jsx'
 // LOADED WHEN USED. The number reader (lib/phone.js, ~50 kB gzipped) comes
 // with the phone box and Add as lead; a buyer looking at homes never needs it,
 // so the page paints without it (docs/specs/phone.md).
 const AddFromTap = lazy(() => import('../components/AddFromTap.jsx'))
-const PhoneInput = lazy(() => import('../components/primitives.jsx').then(m => ({ default: m.PhoneInput })))
+const PhoneInput = lazy(() => import('../components/PhoneInput.jsx'))
 
 // ============================================================================
 // THE BUYER'S PAGES (docs/specs/listing-pages.md §A)
@@ -370,6 +371,10 @@ export function SharedLinkPage({ tenant, code }) {
  *  holding the link, the home and the tap. */
 function StaffBar({ tenant, staff, flats, tapDone, onTapDone }) {
   const [closed, setClosed] = useState(false)
+  // The number as the desk shows it, once the reader has loaded (only staff
+  // see this bar, so the buyer's first paint does not wait for it).
+  const [fmt, setFmt] = useState(null)
+  useEffect(() => { import('../lib/phone.js').then(m => setFmt(() => m.formatPhone)).catch(() => {}) }, [])
   if (closed) return null
   const leadHref = (id) => `/${tenant}?screen=leads&lead=${encodeURIComponent(id)}`
   const lead = tapDone?.lead || staff.lead
@@ -393,9 +398,11 @@ function StaffBar({ tenant, staff, flats, tapDone, onTapDone }) {
   const dead = state && state !== 'active'
   if (!lead && !dead) return null
   const word = tapDone ? (tapDone.matched ? 'Already a lead' : 'Lead added') : 'Sent to'
-  const who = lead ? (lead.name || lead.phone || 'Lead') : ''
+  const who = lead ? (lead.name || (fmt ? fmt(lead.phone) : lead.phone) || 'Lead') : ''
   // A tap reads as what the person did: "Sneha Kulkarni tapped I'm interested".
   const tapLine = !tapDone && staff.tap ? (staff.tap.propertyId ? 'tapped I’m interested' : 'pressed Talk to us') : ''
+  // Talk to us on an expired link: the same homes back to them, in one tap.
+  const fresh = staff.tap && !staff.tap.propertyId && lead && lead.visible !== false
   return (
     <div className="pv-staff">
       <div className="pv-staff-in pv-staff-row">
@@ -413,6 +420,7 @@ function StaffBar({ tenant, staff, flats, tapDone, onTapDone }) {
         </span>
         {lead && lead.visible !== false && <a className="pv-staff-go" href={leadHref(lead.id)}>Open lead<Icon name="chevRight" size={14} /></a>}
       </div>
+      {fresh && <div className="pv-staff-in pv-staff-fresh"><FreshLink code={staff.tap.code} footClass="pv-staff-foot" /></div>}
     </div>
   )
 }

@@ -6,7 +6,6 @@ import {
 import {
   firmLocale, formatMoney, formatMoneyRange, moneyFull, parseMoneyText, roomsText,
 } from './locale.js'
-import { formatPhone } from './phone.js'
 
 /**
  * "3 BHK Apartment" — the display config, rebuilt from the two canonical
@@ -397,12 +396,8 @@ export function reqShort(req, { budget = true } = {}) {
 // The phone number is what we actually know about them, so that is the label.
 // Never a made-up name like "Unknown Buyer" - nobody could then tell a lead
 // that gave no name from one actually called that.
-export function personLabel(p) {
-  if (!p) return '—'
-  const n = String(p.name || '').trim()
-  if (n) return n
-  return formatPhone(p.phone) || '—'
-}
+// personLabel lives in phone.js: it shows the number, and this file is loaded
+// by the buyer's pages, which do not load the number reader.
 
 export function initials(name) {
   if (!name) return '??';

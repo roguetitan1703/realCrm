@@ -303,7 +303,6 @@ input,textarea,select{font-family:inherit}
 
 /* team — manage access + your sessions */
 .acc-panel{margin-top:22px}
-.acc-hint{font-size:12px}
 .acc-empty{padding:22px 4px;color:var(--muted);font-size:13px}
 .acc-tbl-wrap{overflow-x:auto;margin-top:6px}
 .acc-tbl{width:100%;min-width:720px}
@@ -1943,7 +1942,7 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 /* Attach property: an attached row stays, marked; a shortlisted flat on a lead can be taken off */
 .ap-row.added{opacity:.75;border-color:#c5e0cf !important}
 .ap-added{display:inline-flex;align-items:center;gap:4px;flex:none;font-size:12.5px;font-weight:700;color:#1f6b45}
-.inv-x{flex:none;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;margin-left:4px;border:1px solid transparent;border-radius:7px;background:none;color:var(--faint);cursor:pointer}
+.inv-x{flex:none;display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;margin-left:0;border:1px solid transparent;border-radius:7px;background:none;color:var(--faint);cursor:pointer}
 .inv-x:hover{border-color:var(--line);color:var(--alert)}
 /* The photo link's controls, in the Photos header (7.5) */
 .pgal-tools{display:inline-flex;align-items:center;gap:2px;flex-wrap:wrap}
@@ -3690,6 +3689,8 @@ button.myl-who{min-height:40px;margin:-10px 0}
 .myl-nums b{font-weight:700;color:var(--ink)}
 .myl-nums .is-int b,.myl-nums .is-int{color:#7A5410}
 .myl-sub{font-size:12px;color:var(--muted);margin-top:1px}
+.myl-opens{font-size:12.5px;color:var(--ink-2);margin-top:4px}
+.myl.is-dead .myl-opens{color:var(--faint)}
 .myl-foot{display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin:4px 0 0 -9px}
 .myl-foot:empty{display:none}
 .myl.is-dead{padding-bottom:12px}
@@ -3803,7 +3804,7 @@ html.pv-root,html.pv-root body{background:#f5f4f0}
 .pv-n{margin-left:6px;font-weight:500;opacity:.6;font-variant-numeric:tabular-nums}
 .pv-chip.on{background:var(--pv-accent);border-color:var(--pv-accent);color:#fff}
 .pv-area{position:relative;display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 12px;border-radius:20px;border:1px solid #d9d6ce;background:#fff;color:#4a504c;max-width:100%}
-.pv-area select{appearance:none;-webkit-appearance:none;border:none;background:none;font:inherit;font-size:14px;font-weight:600;color:#1a1d1a;min-height:38px;padding-right:2px;max-width:220px;outline:none}
+.pv-area select{appearance:none;-webkit-appearance:none;border:none;background:none;font:inherit;font-size:14px;font-weight:600;color:#1a1d1a;min-height:40px;padding-right:2px;max-width:220px;outline:none}
 .pv-empty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px 0;text-align:center}
 .pv-empty-t{font-size:16px;font-weight:600;color:#3d443f}
 
@@ -3848,6 +3849,10 @@ html.pv-root,html.pv-root body{background:#f5f4f0}
 .pv-staff-h{font-size:16px;font-weight:700;margin-bottom:10px}
 .pv-staff-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
 .pv-staff-dead{color:#e8b4a0;font-weight:600}
+.pv-staff-fresh{padding-top:0}
+.pv-staff-fresh .pv-staff-foot{margin-top:0}
+.pv-staff-fresh .pv-staff-foot button{min-height:40px}
+.pv-staff-fresh .snd-err{margin-bottom:8px}
 .pvh-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px 16px;margin:16px 0 0;padding:14px 0 0;border-top:1px solid #e3e0d8}
 .pvh-facts div{display:flex;flex-direction:column;gap:2px;min-width:0}
 .pvh-facts dt{font-size:12px;color:#6b7570}
@@ -3879,7 +3884,6 @@ html.pv-root,html.pv-root body{background:#f5f4f0}
 .m-top .m-back,.m-top .m-bell{width:40px;height:40px}
 .app-mobile .rh-exit{min-height:40px}
 @media (max-width:760px){
-  .inv-x{width:40px;height:40px;margin-left:0}
   .inv-all-x{min-height:40px;padding:0 8px}
   .inv-all-send{min-height:40px}
 }

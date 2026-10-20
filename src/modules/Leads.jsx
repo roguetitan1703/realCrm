@@ -3,7 +3,8 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown, useSelection } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
-import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
+import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
+import { personLabel } from '../lib/phone.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
@@ -114,7 +115,8 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     return o
   }, [JSON.stringify(f), canFilterByAgent])
 
-  const [q, setQ] = useState('')
+  // In the URL with the other filters, so Back from a lead keeps the search.
+  const q = f.q || ''
   const [view, setView] = useState('list')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
@@ -140,7 +142,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const setFltP = (v) => patchFilters({
     source: v?.source, locality: v?.locality, agent: v?.agent, flag: v?.flag, alert: v?.alert,
   })
-  const setQP = (v) => { setQ(v); setPage(1); selection.clear() }
+  const setQP = (v) => patchFilters({ q: v || undefined })
   const setSortKeyP = (v) => patchFilters({ sortKey: v })
   const setSortDirP = (v) => patchFilters({ sortDir: v })
   const setSegP = (v) => patchFilters({ seg: v })

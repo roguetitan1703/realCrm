@@ -79,6 +79,12 @@ Not re-read this session; as of 17 Oct:
     leads 1, owners 6, property owner phones 7. Not convertible: 3 bhumi
     MagicBricks leads with 9 digits (UAE without +971), 2 bhumi rows with a
     letter. Users colliding after conversion: 0.
+  - Phone repair dry run (`scripts/phone-dry-run.ts`, read-only, 20 Oct):
+    bhumi users 1 / leads 4 / owners 52 / property owner phones 55 convert;
+    mahalaxmi users 3 / leads 1 / owners 6 / property owner phones 7.
+    Unreadable, left and listed: bhumi leads 4, owners 6, properties 1;
+    mahalaxmi owners 14. Users colliding after conversion: 0. Owners that
+    become the same number (an owner entered twice): bhumi 10, mahalaxmi 6.
   - Code (OTP) sign-in: `auth_otp` has never held a row in production — the
     open endpoints were never used. Retired on `development` (b60a54e).
 

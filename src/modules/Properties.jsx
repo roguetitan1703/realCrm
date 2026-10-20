@@ -94,8 +94,9 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   // change: 20 rows filtered to 14, open a listing, come back to 20 with no
   // chip and nothing in the URL saying what had happened.
   //
-  // `q`, the page, the view and the selection stay local, same as Leads: a
-  // history entry per keystroke is not navigation.
+  // The page, the view and the selection stay local. The search (`q`) is in
+  // the bag: kept local, it was gone on Back from a listing. A filter change
+  // REPLACES the history entry, so typing adds none.
   const bag = sel.propFilters || {}
   const sortKey = bag.sortKey || 'recent'
   const sortDir = bag.sortDir || 'asc'
@@ -107,7 +108,6 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   }, [JSON.stringify(bag)])
   const projectSel = flt.project?.length === 1 ? flt.project[0] : null
 
-  const [q, setQ] = useState('')
   // GROUPED BY PROJECT IS WHERE THE DESK STARTS: a firm's inventory is
   // townships, and a flat is found by its building first. Arriving with a
   // filter, a tab or a project already chosen means the list. The same on a
@@ -172,7 +172,9 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   const { data: project } = useServerData(
     () => (projectSel ? api.getProject(projectSel).then(r => r?.project || null) : Promise.resolve(null)),
     [projectSel, state.dataAsOf], null)
-  const setQP = (v) => { setQ(v); setPage(1) }
+  // In the URL with the other filters, so Back from a listing keeps the search.
+  const q = bag.q || ''
+  const setQP = (v) => patchBag({ q: v || undefined })
   const setSortKeyP = (v) => patchBag({ sortKey: v })
   const setSortDirP = (v) => patchBag({ sortDir: v })
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }

@@ -165,6 +165,8 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // `q`, the page, the view and the selection stay local: a history entry per
   // keystroke is not navigation.
   const bag = sel.ownerFilters || {}
+  // In the URL with the other filters, so Back from an owner keeps the search.
+  const q = bag.q || ''
   // TWO CONTROLS, ONE QUESTION EACH. The tab row is where a caller works from —
   // everyone, the scheduled callbacks, the first two steps of the walk (`step`),
   // nobody's rows. The Status dropdown (`status`) is any status, on top of
@@ -185,7 +187,6 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const sortKey = bag.sortKey || (tab === 'callbacks' ? 'callback' : 'name')
   const sortDir = bag.sortDir || 'asc'
 
-  const [q, setQ] = useState('')
   // GROUPED BY PROJECT is where Calling opens, on a phone too: a calling list
   // is townships, and a caller picks the building before the flat. Arriving
   // with a tab, a project or a caller already chosen means the list.
@@ -349,7 +350,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const { header, toolbar, body } = ModuleListView({
     def, source, store, onOpen: open,
     filters: { ...(towerSel ? { tower: [towerSel] } : {}), ...(configSel ? { config: configSel.split(',') } : {}) }, onFilters, facets,
-    search: q, onSearch: (v) => { setQ(v); setPage(1) },
+    search: q, onSearch: (v) => patchBag({ q: v }),
     sortKey, onSortKey: (v) => patchBag({ sortKey: v }), sortDir, onSortDir: (v) => patchBag({ sortDir: v }),
     segments: segs, view, onView: setView,
     phone,
