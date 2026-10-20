@@ -57,7 +57,7 @@ export function parseNum(raw) {
  *
  * "9881204471" | "+91 98812 04471" | 9881204471 → "+919881204471"
  * "971526377771" (Dubai) → "+971526377771", NOT "+911526377771": a value the
- * firm's country cannot read, 11-15 digits, valid once "+" is put back.
+ * firm's country cannot read, 12-15 digits, valid once "+" is put back.
  *
  * Null for anything that cannot be read with confidence — a UAE mobile that
  * lost its +971 AND its 971, two numbers in one cell, letters — and the import reports
@@ -67,7 +67,7 @@ export function parseNum(raw) {
  * on one Bhumi sheet into Indian numbers that dial nobody.)
  */
 export function parsePhone(raw, loc = firmLocale()) {
-  return toE164(raw, loc.country)
+  return toE164(raw, loc.country, { received: true })
 }
 
 /**

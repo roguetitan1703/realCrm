@@ -99,6 +99,10 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 Measured on production, read-only, 12 Oct, unless marked. Alert delivery
 gaps are in `specs/notifications.md` §1, not here.
 
+- **Undo of a properties import fails** (dev, 21 Oct): `revertImport` deletes
+  `crm_properties WHERE import_batch_id`, a column crm_properties does not
+  have ("column import_batch_id does not exist"); properties imports are not
+  stamped with their batch either.
 - **"Going cold" is most of the book** — bhumi 493 of 585 open (84%, at their
   7-day setting), mahalaxmi 168 of 231 (73%, 1-day). 19 and 35 crossed the line
   in the last day. Likely our model, not the agents: real portal leads may not
@@ -122,6 +126,9 @@ gaps are in `specs/notifications.md` §1, not here.
   owners, 55 properties; mahalaxmi 3, 1, 6, 7) and names no user collision.
   The desk's phone boxes (lead, owner, team, profile, reply-to, listing owner,
   console roster) were not driven in a browser; the catalogue form was.
+  The dry run's counts predate the received/typed reader and placeholders
+  (21 Oct): re-run before the deploy. The enquiry form's plain-field fallback
+  when the phone box chunk fails was not driven in a browser.
 
 - **A listing owner's Callback stays on To do after the call** (seen on the
   demo, 17 Oct): a lead's booked call closes on Call, an owner's did not.

@@ -456,9 +456,9 @@ export async function landEnquiry(args: {
       // Exact E.164, read in the firm's country (findLeadByPhone,
       // docs/specs/phone.md). A number that cannot be read is kept as the
       // portal sent it, and matches only the identical string from the same
-      // portal, when that string still names one person (findLeadByRawPhone).
+      // integration, when that string still names one person (findLeadByRawPhone).
       const existing = (await findLeadByPhone(lead.phone))
-        || (await findLeadByRawPhone(lead.phone, integration.provider));
+        || (await findLeadByRawPhone(lead.phone, args.integrationId));
       if (existing && args.unverified) {
         // NOBODY HAS PROVED THIS IS THEM. A portal vouches for its buyer; a
         // public form does not — anyone can type a lead's number into it. So

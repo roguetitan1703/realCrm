@@ -125,18 +125,26 @@ person's lead.
   number sent back exactly as stored passes, so a record received unreadable
   can still be saved), `keepPhone` (portals, webhooks, a listing's owner taken
   from an owner record), `phoneKey` (a lookup; null matches nobody).
-- A foreign number written without `+` ("971526377771", "447876011111") is
-  read as that number when the firm's country cannot read it, it is 11-15
-  digits, and it is valid once `+` is put back (review, 21 Oct). Consequence:
-  an 11-digit "12345678901" reads as a US number.
+- A foreign number written without `+` ("971526377771") is read as that
+  number only when RECEIVED (`readPhone(..., { received: true })`: keepPhone,
+  phoneKey, the import reader, the repair), the firm's country cannot read it,
+  it is 12-15 digits and valid once `+` is put back. Never for typed input
+  (forms, PhoneInput, requirePhone): a person has `+` and a picker, and an
+  Indian mobile with one extra digit read as "+7". 11 digits stay unreadable.
+- Placeholders (`isPlaceholderPhone`): on the national digits (country code
+  and leading zeros stripped), fewer than 7, fewer than 4 distinct, a run of
+  5 of one digit, or a straight run up or down ("1234567890", "+910000000001").
+  Stored as sent, never matched: phoneKey returns null, import rows do not key
+  on them.
 - An unreadable portal number matches the identical string from the same
-  portal (`findLeadByRawPhone`, ingestion only), when it has no letters, no
-  masking (`X`, `*`), at least 7 digits and is not one digit repeated.
-- Search compares digits (`phoneLike` in store.ts): "+91 98765 43210" and
-  "98765 43210" find "+919876543210". Only for an all-phone-characters search
-  with 4+ digits; a trunk 0 is dropped. Unindexed: a tenant-scoped scan.
-- Properties import: an owner phone cell that cannot be read refuses the row
-  with the cell and the reason; it was dropped silently.
+  INTEGRATION (`findLeadByRawPhone`, ingestion only; a source label is shared
+  by integrations), when it has no letters, no masking (`X`, `*`), and is not
+  a placeholder.
+- Search compares digits as typed (`phoneLike` in store.ts, also agreements):
+  "+91 98765 43210", "98765 43210" and "0011" find "+919876500011". Only for an
+  all-phone-characters search with 4+ digits. Unindexed: a tenant-scoped scan.
+- Properties import: an owner phone cell that cannot be read is kept as
+  written and the row is added with a note; it was dropped silently.
 - Import: the mapping step has "Numbers without a country code" (the firm's
   country by default); rows key on exact E.164.
 - Onboarding (console): a roster number is read as Indian; one that cannot be
@@ -147,6 +155,8 @@ person's lead.
 - Users who would share a number (unique index) are held back with their
   metadata copies and named at boot as an error; everything else converts and
   the repair is not marked done until they are fixed (review, 21 Oct; probed
-  on test-org: owner converted, both users left, marker unset).
+  on test-org: owner converted, both users left, marker unset). While unmarked,
+  rows are listed on the first boot only (`phones_e164_listed`) or with
+  `CRM_PHONES_LIST=1`; later boots print one summary line.
 - The phone box is `components/PhoneInput.jsx`, never primitives.jsx, and
   `personLabel` lives in phone.js: both shared modules reach the buyer's entry.

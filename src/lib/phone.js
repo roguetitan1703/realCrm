@@ -21,8 +21,13 @@ export { isE164, waDigits, waLink, telLink } from './phoneLink.js'
  * own (the firm's: locale.country). A number with "+" or "00" keeps its own.
  * A number written with the country code but no "+" ("919876543210") is read
  * as that country's when the digits do not make a valid national number.
+ *
+ * opts.received: the number came from a portal, a sheet or storage, not from
+ * a person at a phone box. Only then is a foreign number that lost its "+"
+ * read (see below). A person typing has "+" and a country picker; read for
+ * them, an Indian mobile with one digit too many became a Russian number.
  */
-export function readPhone(raw, country = firmLocale().country) {
+export function readPhone(raw, country = firmLocale().country, opts = {}) {
   const typed = String(raw ?? '').trim()
   if (!typed) return { ok: false, reason: 'empty', raw: typed }
   // Letters are never a phone number ("98765 4321v"); a guess would invent one.
@@ -30,12 +35,12 @@ export function readPhone(raw, country = firmLocale().country) {
   const s = typed.replace(/^\s*00/, '+')
   const p = parsePhoneNumberFromString(s, country)
   if (p && p.isValid()) return { ok: true, e164: p.number, country: p.country || null }
-  // A FOREIGN NUMBER THAT LOST ITS "+". Sheets and portals drop it
+  // A FOREIGN NUMBER THAT LOST ITS "+", from a sheet or a portal
   // ("971526377771"). Only when the firm's country cannot read it, it is
-  // 11-15 digits (a full international number's length), and it is a valid
-  // number once "+" is put back -- never a guess between two readings.
+  // 12-15 digits, and it is a valid number once "+" is put back. Not 11: an
+  // 11-digit mistyped Indian number reads as a valid "+7" or "+1" one.
   const digits = s.replace(/\D/g, '')
-  if (!s.startsWith('+') && digits.length >= 11 && digits.length <= 15) {
+  if (opts.received && !s.startsWith('+') && digits.length >= 12 && digits.length <= 15) {
     const intl = parsePhoneNumberFromString('+' + digits)
     if (intl && intl.isValid()) return { ok: true, e164: intl.number, country: intl.country || null }
   }
@@ -65,13 +70,43 @@ export function phoneProblem(raw, country = firmLocale().country) {
 export function keepPhone(raw, country = firmLocale().country) {
   const typed = String(raw ?? '').trim()
   if (!typed) return null
-  return toE164(typed, country) || typed
+  return toE164(typed, country, { received: true }) || typed
 }
 
-/** The E.164 form, or null when the number cannot be read with confidence. */
-export function toE164(raw, country = firmLocale().country) {
-  const r = readPhone(raw, country)
+/** The E.164 form, or null when the number cannot be read with confidence.
+ *  opts.received as readPhone. */
+export function toE164(raw, country = firmLocale().country, opts = {}) {
+  const r = readPhone(raw, country, opts)
   return r.ok ? r.e164 : null
+}
+
+/**
+ * A NUMBER THAT NAMES NOBODY: "1234567890", "9999999999", "+910000000001".
+ * Portals and forms send these when a buyer would not give a number, and an
+ * exact match on one merged every such buyer into one lead. A placeholder is
+ * stored as sent and never matched. Read on the national digits (the country
+ * code and leading zeros stripped): fewer than seven, fewer than four distinct
+ * digits, a run of five of one digit, or a straight run up or down.
+ */
+const UP = '01234567890123456789'
+const DOWN = '98765432109876543210'
+export function isPlaceholderPhone(raw, country = firmLocale().country) {
+  const s = String(raw ?? '').trim()
+  let d
+  const r = readPhone(s, country, { received: true })
+  if (r.ok) d = String(parsePhoneNumberFromString(r.e164).nationalNumber)
+  else {
+    d = s.replace(/\D/g, '')
+    const cc = callingCode(country).slice(1)
+    const intl = /^(\+|00|\(\s*\+)/.test(s)
+    if (intl) d = d.replace(/^00/, '')
+    if (cc && d.startsWith(cc) && (intl || d.length > 10)) d = d.slice(cc.length)
+  }
+  d = d.replace(/^0+/, '')
+  if (d.length < 7) return true
+  if (new Set(d).size < 4) return true
+  if (/(\d)\1{4}/.test(d)) return true
+  return UP.includes(d) || DOWN.includes(d)
 }
 
 /**
@@ -84,7 +119,7 @@ export function toE164(raw, country = firmLocale().country) {
 export function formatPhone(stored, country = firmLocale().country) {
   const s = String(stored ?? '').trim()
   if (!s) return ''
-  const r = readPhone(s, country)
+  const r = readPhone(s, country, { received: true })
   if (!r.ok) return s
   return parsePhoneNumberFromString(r.e164).formatInternational()
 }

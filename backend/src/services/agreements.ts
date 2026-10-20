@@ -30,7 +30,7 @@ import { audit } from './audit.js';
 import { fileTicket } from './media.js';
 import {
   createProperty, prepareListing, updateLead, getLeadById, addTimelineEvent, getSettings, projectNorm,
-  localeOf, timezoneOf, type ActorCtx, type Locale,
+  localeOf, timezoneOf, phoneLike, type ActorCtx, type Locale,
 } from './store.js';
 import { moneyFull } from '../../../src/lib/locale.js';
 import { editedPhone } from './phone.js';
@@ -149,7 +149,7 @@ export async function listAgreements(opts: {
   const q = String(opts.q || '').trim().toLowerCase();
   if (q) {
     const like = `%${q}%`;
-    const match = sql`(lower(coalesce(a.party_name, l.name, '')) LIKE ${like} OR coalesce(a.party_phone, l.phone, '') LIKE ${like}
+    const match = sql`(lower(coalesce(a.party_name, l.name, '')) LIKE ${like} OR ${phoneLike(sql`coalesce(a.party_phone, l.phone)`, q)}
       OR lower(coalesce(p.project, a.property_label, '')) LIKE ${like} OR lower(coalesce(p.unit_no, '')) LIKE ${like})`;
     where.push(match); base.push(match);
   }

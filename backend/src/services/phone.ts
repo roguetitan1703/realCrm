@@ -11,7 +11,7 @@
  *
  * Each takes the firm's country (locale.country) for a number with no code.
  */
-import { readPhone, toE164, keepPhone as keep, phoneProblem } from '../../../src/lib/phone.js';
+import { readPhone, toE164, keepPhone as keep, phoneProblem, isPlaceholderPhone } from '../../../src/lib/phone.js';
 
 export class PhoneInvalidError extends Error {
   status = 422;
@@ -37,7 +37,12 @@ export function editedPhone(raw: unknown, stored: string | null | undefined, cou
 
 export const keepPhone = (raw: unknown, country: string): string | null => keep(raw, country);
 
-export const phoneKey = (raw: unknown, country: string): string | null => toE164(raw, country);
+// Read as received (a lookup's value came from a portal, a sheet or a record),
+// and a placeholder ("1234567890") is no key: it is stored, never matched.
+export const phoneKey = (raw: unknown, country: string): string | null => {
+  const k = toE164(raw, country, { received: true });
+  return k && !isPlaceholderPhone(k, country) ? k : null;
+};
 
 /** The 422 body for a refused number, or null when `err` is something else. */
 export function phoneInvalidBody(err: any) {

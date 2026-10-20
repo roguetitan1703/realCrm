@@ -1303,11 +1303,27 @@ async function repairPhones(): Promise<void> {
   const NAME = 'phones_e164';
   if ((await sql`SELECT 1 FROM schema_migrations WHERE name = ${NAME} LIMIT 1`).length) return;
   const plan = await planPhones(sql);
-  for (const u of plan.unreadable) {
-    console.warn(`[Phones] left as is (${u.reason}): ${u.tenant_id} ${u.table} ${u.id} ${JSON.stringify(u.raw)}`);
-  }
-  for (const c of plan.otherCollisions) {
-    console.warn(`[Phones] same number after the repair, both kept: ${c.tenant_id} ${c.table} ${c.e164} ${c.ids.join(', ')}`);
+  // EVERY ROW ONCE. While users are held the repair runs on every boot, and
+  // re-listing every unreadable row each time buries the one line that
+  // matters. Rows are listed on the first run (LISTED marker) or with
+  // CRM_PHONES_LIST=1; after that, a summary.
+  const LISTED = 'phones_e164_listed';
+  const listRows = process.env.CRM_PHONES_LIST === '1'
+    || !(await sql`SELECT 1 FROM schema_migrations WHERE name = ${LISTED} LIMIT 1`).length;
+  if (listRows) {
+    for (const u of plan.unreadable) {
+      console.warn(`[Phones] left as is (${u.reason}): ${u.tenant_id} ${u.table} ${u.id} ${JSON.stringify(u.raw)}`);
+    }
+    for (const c of plan.otherCollisions) {
+      console.warn(`[Phones] same number after the repair, both kept: ${c.tenant_id} ${c.table} ${c.e164} ${c.ids.join(', ')}`);
+    }
+  } else {
+    const per = (xs: { table: any }[]) => {
+      const m = new Map<string, number>();
+      for (const x of xs) { const n = typeof x.table === 'string' ? x.table : x.table.name; m.set(n, (m.get(n) || 0) + 1); }
+      return [...m].map(([t, n]) => `${t} ${n}`).join(', ') || 'none';
+    };
+    console.warn(`[Phones] unreadable left: ${per(plan.unreadable)}; to convert: ${per(plan.converts)}; lead/owner collisions ${plan.otherCollisions.length} (CRM_PHONES_LIST=1 lists the rows)`);
   }
   // USERS WHO WOULD SHARE A NUMBER are held back, with their copies of it
   // (users.metadata, crm_agents.metadata, same id), and named; everything else
@@ -1327,6 +1343,7 @@ async function repairPhones(): Promise<void> {
       if (n) { written += n; byTenant.set(c.tenant_id, (byTenant.get(c.tenant_id) || 0) + n); } else skipped++;
     }
     if (!held.size) await tx`INSERT INTO schema_migrations (name) VALUES (${NAME}) ON CONFLICT DO NOTHING`;
+    else if (listRows) await tx`INSERT INTO schema_migrations (name) VALUES (${LISTED}) ON CONFLICT DO NOTHING`;
   });
   console.log(`[Phones] E.164 repair: ${written} written${skipped ? `, ${skipped} changed since read and skipped` : ''}, ${plan.unreadable.length} unreadable left, ${plan.otherCollisions.length} lead/owner collisions left`
     + (held.size ? `, ${plan.converts.length - converts.length} user numbers held back (not marked done)` : '')

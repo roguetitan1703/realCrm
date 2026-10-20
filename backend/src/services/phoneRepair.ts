@@ -83,7 +83,7 @@ export type RowVerdict =
 export function verdict(raw: string | null, country: string): RowVerdict {
   const s = String(raw ?? '').trim();
   if (!s) return { kind: 'empty' };
-  const p = readPhone(s, country);
+  const p = readPhone(s, country, { received: true });
   if (!p.ok) return { kind: 'unreadable', reason: p.reason };
   const foreign = p.country !== country;
   return s === p.e164 ? { kind: 'same', e164: p.e164, foreign } : { kind: 'convert', e164: p.e164, foreign };
@@ -92,7 +92,7 @@ export function verdict(raw: string | null, country: string): RowVerdict {
 export type PhonePlan = {
   converts: { table: PhoneTable; tenant_id: string; id: string; from: string; to: string }[];
   unreadable: { table: string; tenant_id: string; id: string; raw: string; reason: string }[];
-  /** Users who would share one number after the repair: it writes nothing while any exist. */
+  /** Users who would share one number after the repair: their numbers are held back. */
   userCollisions: { tenant_id: string; e164: string; ids: string[] }[];
   /** Leads and owners that would share a number BECAUSE of the repair: both kept, nothing merged. */
   otherCollisions: { table: string; tenant_id: string; e164: string; ids: string[] }[];

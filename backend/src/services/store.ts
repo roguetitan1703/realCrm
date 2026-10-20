@@ -26,6 +26,7 @@ import { followUpKindOf } from '../../../src/data/followUpKinds.js';
 import { galleryPath } from './gallery.js';
 import { planRoster, rosterPhone, RosterRow } from './roster.js';
 import { requirePhone, editedPhone, keepPhone, phoneKey } from './phone.js';
+import { toE164, isPlaceholderPhone } from '../../../src/lib/phone.js';
 import { assertLeadWrite, ForbiddenError, isDeskRole } from '../lib/permissions.js';
 import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js';
 import { canTakeWork, onDutyWorkers, assertWorkable } from './workforce.js';
@@ -1588,16 +1589,18 @@ export async function getBootstrap(): Promise<any> {
  * 43210" pasted from WhatsApp, "98765 43210" typed the way it is said --
  * found nothing: it was a substring test on the stored text. Only for a
  * search that is all phone characters with at least four digits, so "A-1203"
- * or "2 BHK" never turns into a phone search. A trunk "0" or "00" is dropped.
+ * or "2 BHK" never turns into a phone search. The digits are kept as typed: a
+ * fragment's leading 0 ("0011") is part of what is being looked for.
  * Unindexed by choice: a leading-wildcard LIKE cannot use a b-tree, the scan is
  * one firm's rows (tenant_id is indexed), and the old text test was no better.
  */
-function phoneLike(column: string, q: string) {
+export function phoneLike(column: string | any, q: string) {
   const term = String(q || '').trim();
   if (!/^[\d\s+\-().]+$/.test(term)) return sql`FALSE`;
-  const digits = term.replace(/\D/g, '').replace(/^00?/, '');
+  const digits = term.replace(/\D/g, '');
   if (digits.length < 4) return sql`FALSE`;
-  return sql`regexp_replace(coalesce(${sql(column)}, ''), '\\D', '', 'g') LIKE ${'%' + digits + '%'}`;
+  const col = typeof column === 'string' ? sql(column) : column;
+  return sql`regexp_replace(coalesce(${col}, ''), '\\D', '', 'g') LIKE ${'%' + digits + '%'}`;
 }
 
 /**
@@ -2070,27 +2073,29 @@ export async function findLeadByPhone(phone: string, tenantId?: string): Promise
  * only (forms refuse such a number; an import reports it). findLeadByPhone
  * matches nobody on it, so every repeat from a portal that sends a number in
  * a shape we cannot read made a new lead. The identical string from the same
- * portal is the same buyer -- but only when the string still names one
- * person: no letters ("N/A"), no masking ("98XXXXXX10", "*"), at least seven
- * digits, and not one digit repeated ("0000000000").
+ * integration is the same buyer -- but only when the string still names one
+ * person: no letters ("N/A"), no masking ("98XXXXXX10", "*"), and not a
+ * placeholder (isPlaceholderPhone: "+910000000001", "0123456789").
+ * The same INTEGRATION, not the same source label: a lead's source is often
+ * the integration's default ("Website"), shared by several.
  */
-export function rawPhoneMatchable(raw: unknown): raw is string {
+export function rawPhoneMatchable(raw: unknown, country: string): raw is string {
   if (typeof raw !== 'string') return false;
   const s = raw.trim();
   if (!s || /[a-z*]/i.test(s)) return false;
-  const digits = s.replace(/\D/g, '');
-  return digits.length >= 7 && !/^(\d)\1*$/.test(digits);
+  return !isPlaceholderPhone(s, country);
 }
 
-export async function findLeadByRawPhone(raw: string, provider: string, tenantId?: string): Promise<any | undefined> {
+export async function findLeadByRawPhone(raw: string, integrationId: string | null, tenantId?: string): Promise<any | undefined> {
   const t = tenantId || tid();
-  if (!provider || !rawPhoneMatchable(raw)) return undefined;
-  if (phoneKey(raw, (await localeOf(t)).country)) return undefined; // readable: findLeadByPhone's job
+  const country = (await localeOf(t)).country;
+  if (!integrationId || !rawPhoneMatchable(raw, country)) return undefined;
+  if (toE164(raw, country, { received: true })) return undefined; // readable: findLeadByPhone's job
   const rows = await sql`
     SELECT l.* FROM crm_leads l
      WHERE l.tenant_id = ${t} AND l.phone = ${raw.trim()}
        AND EXISTS (SELECT 1 FROM crm_lead_enquiries e
-                    WHERE e.tenant_id = l.tenant_id AND e.lead_id = l.id AND e.source = ${provider})
+                    WHERE e.tenant_id = l.tenant_id AND e.lead_id = l.id AND e.integration_id = ${integrationId})
      ORDER BY l.created_at ASC LIMIT 1`;
   return rows[0];
 }
