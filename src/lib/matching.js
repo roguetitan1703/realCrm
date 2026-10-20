@@ -2,8 +2,7 @@ import { isOpen } from '../data/leadStatus.js'
 import { askedFor, budgetOf, facetFit, latestOf, localityFit, dayLabel } from './format.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
-import { parsePhone } from './importSchema.js'
-import { formatMoney, roomsText } from './locale.js'
+import { formatMoney, roomsText, waLink } from './locale.js'
 import {
   AREA_UNITS, BHK, COUNTED_ITEMS, FACING, FIXTURES, FURNISH, OWNERSHIP,
   LOCKIN_OPTIONS, PAINTING_CHARGES, POSSESSION, SOCIETY_AMENITIES, SUBTYPES,
@@ -546,13 +545,12 @@ const PACKS = {
 // If we know the recipient's number the chat opens directly on them; otherwise
 // WhatsApp asks the user to pick a contact — both are valid, real hand-offs.
 export function whatsappLink(message, phone) {
-  const digits = waDigits(phone)
-  const text = encodeURIComponent(message || '')
-  return digits ? `https://wa.me/${digits}?text=${text}` : `https://wa.me/?text=${text}`
+  return waLink(phone, message || '')
 }
 
-// With its country code: wa.me refuses a bare 10-digit Indian number.
-const waDigits = (phone) => (parsePhone(phone) || String(phone || '')).replace(/\D/g, '')
+// With its country code: wa.me refuses a bare 10-digit Indian number. The same
+// rule as the server's links (locale.js waLink / phoneAsStored).
+const waDigits = (phone) => waLink(phone).slice('https://wa.me/'.length)
 
 // WHICH WHATSAPP. An agent's phone often carries both WhatsApp and WhatsApp
 // Business, and a wa.me link is claimed by WhatsApp alone, so it always opened

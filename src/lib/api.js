@@ -781,6 +781,8 @@ export const api = {
   myShareLinks: ({ page = 1, limit = 10, recipient } = {}) => request(`/share-links/mine${qs({ page, limit, recipient })}`, { fresh: true }),
   turnOffShareLink: (id) => request(`/share-links/${encodeURIComponent(id)}/off`, { method: 'POST', body: '{}' }),
   attachShareLink: (id, leadId) => request(`/share-links/${encodeURIComponent(id)}/attach`, { method: 'POST', body: JSON.stringify({ leadId }) }),
+  creditShareLink: (id, leadId) => request(`/share-links/${encodeURIComponent(id)}/came-from`, { method: 'POST', body: JSON.stringify({ leadId }) }),
+  freshShareLink: (tapCode) => request(`/share-taps/${encodeURIComponent(tapCode)}/fresh`, { method: 'POST' }),
   leadShares: (leadId) => request(`/leads/${encodeURIComponent(leadId)}/shares`, { fresh: true }),
   leadFromTap: (code, body) => request(`/share-taps/${encodeURIComponent(code)}/lead`, { method: 'POST', body: JSON.stringify(body) }),
   // Your own mobile number — Send needs it, because a buyer's tap opens

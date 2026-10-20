@@ -782,7 +782,8 @@ function NewLeadModal({ store, leadId }) {
         name: f.name.trim(),
         phone: f.phone.trim(),
         email: f.email.trim() || undefined,
-        source: f.source || 'Website',
+        // Came from a link: the link is where they came from (§A.1c I2r).
+        source: cameFrom ? 'Shared link' : (f.source || 'Website'),
         stage: 'New',
         minsAgo: 0,
         // undefined is left out of the body: not sent, the firm's rule decides.
@@ -812,7 +813,9 @@ function NewLeadModal({ store, leadId }) {
       const res = await store.addLead(lead)
       if (!res) { setSaving(false); return }
       const id = (res?.data || res?.lead || res?.record)?.id
-      if (link && id) api.attachShareLink(link, id).then(() => store.touched?.()).catch(() => store.toast('The lead is saved, but the link could not be attached.', 'warn'))
+      // Credits the lead only. Attaching would bind a group link to this one
+      // person: every member's opens and taps would become theirs (C2).
+      if (link && id) api.creditShareLink(link, id).then(() => store.touched?.()).catch(() => store.toast('The lead is saved, but the link could not be credited.', 'warn'))
     }
     store.closeModal()
   }

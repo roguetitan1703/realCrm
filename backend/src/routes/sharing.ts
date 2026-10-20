@@ -4,7 +4,9 @@
  *   POST /api/v1/share-links                {leadId? | newPerson{name,phone}, propertyIds, showPrice?}
  *   GET  /api/v1/share-links/mine           ?page=&limit=&recipient=none
  *   POST /api/v1/share-links/:id/off
- *   POST /api/v1/share-links/:id/attach     {leadId}
+ *   POST /api/v1/share-links/:id/attach     {leadId}   (I3: a link sent to one person becomes theirs)
+ *   POST /api/v1/share-links/:id/came-from  {leadId}   (I2r: credits the lead; the link stays unbound)
+ *   POST /api/v1/share-taps/:code/fresh                 (a new link with the same homes and recipient)
  *   POST /api/v1/share-taps/:code/lead      {phone, name?} | {leadId}
  *
  * Also, in their own routers: GET /leads/:id/shares (routes/leads.ts),
@@ -16,7 +18,7 @@
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { hit } from '../services/rateLimit';
-import { createShareLink, myLinks, turnOff, attachLink, tapToLead, ShareError } from '../services/sharing';
+import { createShareLink, myLinks, turnOff, attachLink, creditLink, tapToLead, freshLinkFromTap, ShareError } from '../services/sharing';
 
 export const shareLinksRouter = Router();
 export const shareTapsRouter = Router();
@@ -48,6 +50,19 @@ shareLinksRouter.post('/:id/off', async (req: Request, res: Response) => {
 
 shareLinksRouter.post('/:id/attach', async (req: Request, res: Response) => {
   try { return res.json({ success: true, ...(await attachLink(String(req.params.id), String(req.body?.leadId || ''))) }); }
+  catch (err) { return shareFail(res, err); }
+});
+
+shareLinksRouter.post('/:id/came-from', async (req: Request, res: Response) => {
+  try { return res.json({ success: true, ...(await creditLink(String(req.params.id), String(req.body?.leadId || ''))) }); }
+  catch (err) { return shareFail(res, err); }
+});
+
+shareTapsRouter.post('/:code/fresh', async (req: Request, res: Response) => {
+  if (!hit(`tapfresh:${(req.user as any)?.id || req.ip}`, 30, 60_000)) {
+    return res.status(429).json({ success: false, error: 'slow_down', message: 'Too many requests. Try again in a minute.' });
+  }
+  try { return res.status(201).json({ success: true, ...(await freshLinkFromTap(String(req.params.code), origin(req))) }); }
   catch (err) { return shareFail(res, err); }
 });
 

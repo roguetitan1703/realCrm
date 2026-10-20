@@ -61,10 +61,30 @@ async function asFirm<T>(req: Request, f: Firm, fn: () => Promise<T>): Promise<T
  * match nothing, so guessing is slow long before it is fruitful — on every
  * door, not just the page.
  */
-const codeGate = (ip: string) => hit(`s:${ip}`, 120, 60_000) && !spent(`miss:${ip}`, 30, 10 * 60_000);
+// THE LIMIT IS ON MISSES, NOT ON BUYERS. Indian mobile carriers put many
+// people behind one public address (CGNAT), so a tight per-address limit on
+// real opens answered 429 to real buyers. Valid opens get a generous ceiling;
+// what is tight is the allowance for codes that are no use — unknown, off,
+// stopped or expired alike, so the allowance cannot tell a prober which codes
+// once existed.
+const codeGate = (ip: string) => hit(`s:${ip}`, 600, 60_000) && !spent(`miss:${ip}`, 30, 10 * 60_000);
 const codeMiss = (ip: string) => { hit(`miss:${ip}`, 1_000_000, 10 * 60_000); };
 
 const SLOW = { error: 'slow_down', message: 'Too many requests. Try again in a few minutes.' };
+/**
+ * A 429 a page can still act on: the firm's card, its number and the
+ * catalogue, the same fields as the unavailable body, so the buyer is offered
+ * WhatsApp to the firm rather than "No connection". Shape:
+ *   { error: 'slow_down', message, firm: {name, logo, accent, locale}, cta: { phone }, catalogueUrl }
+ * `firm` and `cta` are absent only when the firm in the URL does not exist.
+ */
+async function slow(res: Response, tenant: string) {
+  const f = await firmBySlug(tenant).catch(() => null);
+  if (!f) return res.status(429).json(SLOW);
+  return res.status(429).json({
+    ...SLOW, firm: firmPublic(f, await localeOf(f.id)), cta: { phone: await firmPhone(f.id) }, catalogueUrl: await catalogueUrlOf(f),
+  });
+}
 const NOT_FOUND = { error: 'not_found', message: 'This page does not exist.' };
 
 function shareFail(res: Response, err: any) {
@@ -77,7 +97,7 @@ function shareFail(res: Response, err: any) {
 
 publicRouter.get('/s/:tenant/:code', async (req: Request, res: Response) => {
   const ip = ipOf(req);
-  if (!codeGate(ip)) return res.status(429).json(SLOW);
+  if (!codeGate(ip)) return slow(res, String(req.params.tenant));
   try {
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
@@ -90,7 +110,7 @@ publicRouter.get('/s/:tenant/:code', async (req: Request, res: Response) => {
 
 publicRouter.post('/s/:tenant/:code/interested', async (req: Request, res: Response) => {
   const ip = ipOf(req);
-  if (!codeGate(ip) || !hit(`tap:${ip}`, 20, 60_000)) return res.status(429).json(SLOW);
+  if (!codeGate(ip) || !hit(`tap:${ip}`, 60, 60_000)) return slow(res, String(req.params.tenant));
   try {
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
@@ -102,7 +122,7 @@ publicRouter.post('/s/:tenant/:code/interested', async (req: Request, res: Respo
 
 publicRouter.post('/s/:tenant/:code/talk', async (req: Request, res: Response) => {
   const ip = ipOf(req);
-  if (!codeGate(ip) || !hit(`talk:${ip}`, 10, 60_000)) return res.status(429).json(SLOW);
+  if (!codeGate(ip) || !hit(`talk:${ip}`, 30, 60_000)) return slow(res, String(req.params.tenant));
   try {
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
@@ -115,7 +135,7 @@ publicRouter.post('/s/:tenant/:code/talk', async (req: Request, res: Response) =
 // ── The catalogue ───────────────────────────────────────────────────────────
 
 publicRouter.get('/catalogue/:tenant', async (req: Request, res: Response) => {
-  if (!hit(`cat:${ipOf(req)}`, 120, 60_000)) return res.status(429).json(SLOW);
+  if (!hit(`cat:${ipOf(req)}`, 600, 60_000)) return slow(res, String(req.params.tenant));
   try {
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
@@ -131,7 +151,9 @@ publicRouter.get('/catalogue/:tenant', async (req: Request, res: Response) => {
 
 publicRouter.post('/catalogue/:tenant/enquiry', async (req: Request, res: Response) => {
   const ip = ipOf(req);
-  if (!hit(`enq:${ip}`, 5, 10 * 60_000)) return res.status(429).json(SLOW);
+  // Per address only as a flood ceiling (a shared carrier address is many
+  // buyers); the real limits are per number (below) and the firm's daily cap.
+  if (!hit(`enq:${ip}`, 30, 10 * 60_000)) return slow(res, String(req.params.tenant));
   try {
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
@@ -140,7 +162,7 @@ publicRouter.post('/catalogue/:tenant/enquiry', async (req: Request, res: Respon
     // every box. Answered exactly like a real enquiry, and nothing is made.
     if (String(b.company || b.website || '').trim()) return res.json({ ok: true });
     const digits = String(b.phone || '').replace(/\D/g, '').slice(-10);
-    if (digits.length === 10 && !hit(`enq-phone:${f.id}:${digits}`, 3, 60 * 60_000)) return res.status(429).json(SLOW);
+    if (digits.length === 10 && !hit(`enq-phone:${f.id}:${digits}`, 3, 60 * 60_000)) return slow(res, f.slug);
     const out = await asFirm(req, f, () => catalogueEnquiry(f, {
       name: b.name, phone: b.phone, propertyId: b.propertyId, message: b.message,
     }, pubReq(req)));
@@ -149,7 +171,7 @@ publicRouter.post('/catalogue/:tenant/enquiry', async (req: Request, res: Respon
 });
 
 publicRouter.get('/catalogue/:tenant/:slug', async (req: Request, res: Response) => {
-  if (!hit(`cat:${ipOf(req)}`, 120, 60_000)) return res.status(429).json(SLOW);
+  if (!hit(`cat:${ipOf(req)}`, 600, 60_000)) return slow(res, String(req.params.tenant));
   try {
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
@@ -314,8 +336,9 @@ shareRouter.get('/s/:slug/:code', async (req: Request, res: Response) => {
       return firmCard(req, res, f, `Homes from ${name}`, name, null);
     }
     const found = await resolveCode(f.id, String(req.params.code));
-    if (!found) codeMiss(ip);
     const sharing = await sharingOf(f.id);
+    // Unknown, off, stopped or expired: the same miss (see codeGate).
+    if (!found || linkState(found.link, sharing.stopped) !== 'active') codeMiss(ip);
     const firmName = firmPublic(f).name;
     const rows = found && linkState(found.link, sharing.stopped) === 'active' ? await linkRows(f.id, found.link) : [];
     const shown = found?.tap?.property_id ? rows.filter(r => r.id === found.tap.property_id) : rows;

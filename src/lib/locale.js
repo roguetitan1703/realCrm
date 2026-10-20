@@ -189,6 +189,19 @@ export function phoneAsStored(raw, loc = current) {
 }
 
 /**
+ * A wa.me link to a number, by the same rule a number is stored by. wa.me
+ * wants the country code and nothing else, and refuses a bare ten digits, so a
+ * person stored "9876543210" (some agents on the paying firms are) opened
+ * "not on WhatsApp". The one builder of these links: the server (sharing.ts
+ * waUrl) and every screen (matching.js whatsappLink, the public pages).
+ * No number: WhatsApp asks who.
+ */
+export function waLink(phone, text, loc = current) {
+  const d = String(phoneAsStored(phone, loc) || '').replace(/\D/g, '')
+  return `https://wa.me/${d}${text != null ? `?text=${encodeURIComponent(text)}` : ''}`
+}
+
+/**
  * A stored number as a person reads it. Indian numbers are shown as stored,
  * as they always were. A North American one reads +1 512-555-0143.
  */
