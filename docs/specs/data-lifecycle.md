@@ -32,6 +32,7 @@ a per-feature afterthought.
 | `webhook_inbox` raw bodies | every inbound push | **30 d** then purge **body**; keep metadata + `lead_id` (tiny) forever. |
 | unknown-key ingest log | abuse/misconfig attempts | **7 d**, minimal metadata only (no body); rate-limited. |
 | `audit_log` | every audited action | **Append-only + hash-chained — do NOT delete** (breaks verification). Keep (rows are small text). If it ever gets large: **archive** a verified segment to cold storage + re-genesis, never silent delete. |
+| `crm_share_events` views, `crm_share_devices` | every link or catalogue open | views and expired views **> 180 d** deleted monthly; devices unseen 180 d deleted; taps and enquiries stay (lead history). Om, 20 Oct. |
 | `notifications` | every alert | purge **read** notifications > **60 d**; unread kept. |
 | `sessions` | every login (A2) | purge **expired/revoked** > **30 d** past expiry. |
 | `password_resets` | every reset request (A1) | purge **consumed/expired** > **7 d**. |

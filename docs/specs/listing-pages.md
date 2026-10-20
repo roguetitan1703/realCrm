@@ -459,6 +459,32 @@ tenant and type:
 **Never in any public response:** the flat number, the owner, notes, key
 details, the agent's name. Price only when allowed.
 
+### A.6 Three buyer forms, and keeping view logs (Om, 20 Oct)
+
+Om, 20 Oct: build Call me back, Book a visit and New homes like these; keep
+view logs 180 days, cleaned monthly; old photo links retire on deploy (§A.4).
+
+Each form asks a name and a number, says in one line what is done with the
+number, and lands through `landEnquiry` like the catalogue form (unverified
+path: never reopens or merges, daily cap). Who it reaches: a link bound to a
+buyer → that lead; a link with no recipient → a lead for the link's sender,
+source Shared link; the catalogue → the firm's arrival rule, source Catalogue.
+
+| Form | Where | What it makes | Alert |
+|---|---|---|---|
+| **Call me back** | every home on a link or the catalogue, beside I'm interested | a callback on the lead, due now if inside working hours, else at the next opening | the holder: "Rahul asked for a call back · <home>" |
+| **Book a visit** | every home | a *requested* visit: a day and a slot inside the firm's working hours (Settings → working hours), never in the past | the holder: "Rahul asked to visit <home> · Sat 11:00 · Confirm"; Confirm makes it a booked site visit, Another time opens the visit sheet |
+| **New homes like these** | once per page, under the homes | the ask (deal, BHK, area from the homes shown, or the catalogue's filters) saved on the lead | the holder, when a matching home is added to the catalogue or becomes Available: "2 new homes match Rahul · Send", at most once a day per lead |
+
+New homes like these alerts **the agent, not the buyer**: nothing can message a
+buyer before the Meta integration. When it exists, the same ask messages the
+buyer.
+
+**View logs** (`crm_share_events` kind view / expired_view, and devices not
+seen since): deleted after 180 days by a monthly job. Taps, enquiries and
+anything tied to a lead are the lead's history and stay. /privacy says so in
+one line. Policy row in `specs/data-lifecycle.md`.
+
 ### A.2 Needs that do not exist yet
 
 - A link table (code, creator, lead or none, flat ids, show price, created,
