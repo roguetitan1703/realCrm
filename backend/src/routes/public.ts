@@ -28,6 +28,7 @@ import {
   SHOWN_COLUMNS, CATALOGUE_WHERE, catalogueUrlOf, firmPhone, isPreviewFetcher, type Firm, type PublicReq,
 } from '../services/sharing';
 import { localeOf } from '../services/store';
+import { phoneKey } from '../services/phone';
 
 export const publicRouter = Router();
 
@@ -165,8 +166,10 @@ publicRouter.post('/catalogue/:tenant/enquiry', async (req: Request, res: Respon
     // THE HIDDEN FIELD. A person never sees `company`; a form-filling bot fills
     // every box. Answered exactly like a real enquiry, and nothing is made.
     if (String(b.company || b.website || '').trim()) return res.json({ ok: true });
-    const digits = String(b.phone || '').replace(/\D/g, '').slice(-10);
-    if (digits.length === 10 && !hit(`enq-phone:${f.id}:${digits}`, 3, 60 * 60_000)) return slow(res, f.slug);
+    // Keyed by the exact number (docs/specs/phone.md); one that cannot be read
+    // is refused by catalogueEnquiry before it reaches anything.
+    const key = phoneKey(b.phone, (await localeOf(f.id)).country);
+    if (key && !hit(`enq-phone:${f.id}:${key}`, 3, 60 * 60_000)) return slow(res, f.slug);
     const out = await asFirm(req, f, () => catalogueEnquiry(f, {
       name: b.name, phone: b.phone, propertyId: b.propertyId, message: b.message,
     }, pubReq(req)));

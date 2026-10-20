@@ -34,7 +34,8 @@ import { Segmented } from './primitives.jsx'
 import Icon from './Icon.jsx'
 import { useStore } from '../lib/store.jsx'
 import { stageLabel } from '../data/pipelineRoles.js'
-import { firmLocale, phoneLabel } from '../lib/locale.js'
+import { firmLocale } from '../lib/locale.js'
+import { formatPhone } from '../lib/phone.js'
 
 // ── Reading one person's counts ─────────────────────────────────────────────
 export const fmt = (n) => Number(n || 0).toLocaleString(firmLocale().numberLocale)
@@ -387,8 +388,8 @@ export function ActivityRecords({ store, go, side, date, from, person, measure, 
               {rows.map((r, i) => (
                 <button key={`${r.id}-${i}`} type="button" className="ad-row" onClick={() => openRecord(r)}>
                   <span className="ad-row-main">
-                    <span className="ad-row-name">{r.name || phoneLabel(r.phone) || 'No name'}</span>
-                    <span className="ad-row-sub">{[r.unit, what(r)].filter(Boolean).join(' · ') || phoneLabel(r.phone)}</span>
+                    <span className="ad-row-name">{r.name || formatPhone(r.phone) || 'No name'}</span>
+                    <span className="ad-row-sub">{[r.unit, what(r)].filter(Boolean).join(' · ') || formatPhone(r.phone)}</span>
                   </span>
                   <span className="ad-row-at">{r.at ? whenLabel(r.at) : ''}</span>
                 </button>

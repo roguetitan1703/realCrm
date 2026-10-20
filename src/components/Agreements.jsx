@@ -21,7 +21,8 @@ import { BHK_COMMON, BHK_MORE, SUBTYPES } from '../data/propertyFields.js'
 import { Button, Field, Input, Segmented, SuggestInput } from './primitives.jsx'
 import { projectNames } from '../lib/suggest.js'
 import Icon from './Icon.jsx'
-import { currencySymbol, moneyFull, phoneLabel, roomLabel, roomsHeading } from '../lib/locale.js'
+import { currencySymbol, moneyFull, roomLabel, roomsHeading } from '../lib/locale.js'
+import { formatPhone } from '../lib/phone.js'
 
 const rupees = (n) => (n == null ? '' : moneyFull(n))
 const today = () => new Date().toISOString().slice(0, 10)
@@ -70,7 +71,7 @@ export function AgreementCard({ a, store, onChanged, show = {} }) {
         {soon && <span className="agr-soon">{a.daysLeft === 0 ? 'Ends today' : `Ends in ${a.daysLeft} days`}</span>}
       </div>
       <div className="agr-facts">
-        {show.party !== false && a.party?.name && <span><b>{a.party.name}</b>{a.party.phone ? ` · ${phoneLabel(a.party.phone)}` : ''}</span>}
+        {show.party !== false && a.party?.name && <span><b>{a.party.name}</b>{a.party.phone ? ` · ${formatPhone(a.party.phone)}` : ''}</span>}
         {a.amount != null && <span><b>{rupees(a.amount)}</b>{a.kind === 'rent' ? '/month' : ''}</span>}
         {a.deposit != null && <span>Deposit <b>{rupees(a.deposit)}</b></span>}
         <span>{a.kind === 'rent'

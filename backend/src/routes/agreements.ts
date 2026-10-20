@@ -12,6 +12,7 @@
  * A refusal is 422, not 403: the client reads any 403 as a dead session and
  * signs the person out (api.js noteSessionExpired).
  */
+import { phoneInvalidBody } from '../services/phone';
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { getContext } from '../services/context';
@@ -39,6 +40,7 @@ export async function holds(table: 'crm_leads' | 'crm_owners', id: string | null
 }
 
 export function sendError(res: Response, err: any) {
+  const pi = phoneInvalidBody(err); if (pi) return res.status(422).json({ ...pi, error: pi.message });
   if (err instanceof AgreementError) {
     return res.status(err.status).json({ error: err.message, message: err.message, existingId: err.existingId });
   }

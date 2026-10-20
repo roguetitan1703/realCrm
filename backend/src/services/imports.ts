@@ -38,9 +38,10 @@ import { audit } from './audit.js';
 import { notifyOrDesk } from './notifications.js';
 import { createOwnersBatch, createLead, createProperty, localeOf, type ActorCtx, type Locale } from './store.js';
 import {
-  OWNER_FIELDS, LEAD_FIELDS, PROPERTY_FIELDS, readField, normPhone,
+  OWNER_FIELDS, LEAD_FIELDS, PROPERTY_FIELDS, readField,
 } from '../../../src/lib/importSchema.js';
 import { statusFromSheet } from '../../../src/data/ownerStatus.js';
+import { phoneProblem, isPlaceholderPhone } from '../../../src/lib/phone.js';
 
 export type ImportKind = 'owners' | 'clients' | 'properties';
 
@@ -90,6 +91,8 @@ export type Prepared = {
   /** what makes it the same record as another row; see unitKey */
   key?: string | null;
   record?: Record<string, any>;
+  /** saved, but something on the row was not taken as given: said on the row */
+  note?: string;
 };
 
 /**
@@ -106,12 +109,15 @@ export type Prepared = {
  */
 export function prepareRow(
   kind: ImportKind, raw: Record<string, any>, mapping: Record<string, string>,
-  opts: { project?: string | null; locale?: Locale } = {},
+  opts: { project?: string | null; locale?: Locale; country?: string | null } = {},
 ): Prepared {
   const v: Record<string, any> = {};
+  // The country a number without a code is read in: the one picked on the
+  // mapping step (a sheet of Dubai owners), else the firm's.
+  const loc = (opts.country && opts.locale ? { ...opts.locale, country: opts.country } : opts.locale) as Locale | undefined;
   for (const f of FIELDS[kind]) {
-    // In the firm's formats: a US sheet's "450K" and 10-digit numbers are +1.
-    const got = readField(raw, mapping, f, opts.locale);
+    // In the firm's formats: a US sheet's "450K" and a bare number read as +1.
+    const got = readField(raw, mapping, f, loc);
     if (got !== null) v[f.key] = got;
   }
 
@@ -120,10 +126,13 @@ export function prepareRow(
   // through a spreadsheet for a blank that is not there.
   const unreadablePhone = (col?: string) => {
     const cell = col ? String(raw[col] ?? '').trim() : '';
-    return cell.replace(/\D/g, '').length
-      ? `Phone number could not be read ("${cell.slice(0, 24)}")`
+    return cell
+      ? `Phone number could not be read ("${cell.slice(0, 24)}": ${phoneProblem(cell, loc?.country || 'IN')})`
       : 'No phone number';
   };
+  // A placeholder ("1234567890") is imported but is nobody's identity: two
+  // rows carrying it are two people (isPlaceholderPhone).
+  const personKey = (phone?: string | null) => (phone && !isPlaceholderPhone(phone, loc?.country || 'IN') ? phone : null);
 
   if (kind === 'owners') {
     // THE ONLY THING A CALLING ROW CANNOT DO WITHOUT is a number to ring.
@@ -145,7 +154,7 @@ export function prepareRow(
       // IDENTITY FOLLOWS WHAT THE ROW HAS. With a flat, the flat is the record
       // (one owner with three flats is three calls). Without one, the person is
       // — otherwise re-importing the same list would double every row in it.
-      key: v.unitNo ? unitKey(project, v.wing, v.unitNo) : (normPhone(v.phone) || null),
+      key: v.unitNo ? unitKey(project, v.wing, v.unitNo) : personKey(v.phone),
       record: {
         // No name is a name nobody has. It stays empty.
         name: v.name || null,
@@ -174,7 +183,8 @@ export function prepareRow(
     if (!v.phone) return { ok: false, reason: unreadablePhone(mapping.phone) };
     return {
       ok: true,
-      key: normPhone(v.phone) || null,
+      // v.phone is exact E.164 (parsePhone), the same form every lead is stored in.
+      key: personKey(v.phone),
       record: {
         name: v.name || null, phone: v.phone, email: v.email || null,
         stage: v.stage || 'New', source: v.source || 'Spreadsheet import',
@@ -195,7 +205,15 @@ export function prepareRow(
   // Sale or rent is never guessed: a blank read as "sale" prices a rental at
   // eighty-five lakh and nobody questions a filled-in field.
   if (!v.deal) return { ok: false, reason: 'Not marked sale or rent' };
+  // An owner number is optional, but one the sheet HAS and we cannot read was
+  // dropped without a word: the listing came in with no owner to ring and
+  // nobody knew why. It is not a reason to refuse the listing (a "Contact:
+  // Ramesh 98..." column would refuse the whole sheet): the listing comes in,
+  // the cell is kept exactly as written (as keepPhone does), and the row says so.
+  const ownerCell = mapping.ownerPhone ? String(raw[mapping.ownerPhone] ?? '').trim() : '';
+  const ownerUnread = Boolean(ownerCell && !v.ownerPhone);
   return {
+    ...(ownerUnread ? { note: `Owner ${unreadablePhone(mapping.ownerPhone).replace(/^Phone/, 'phone')}; kept as written` } : {}),
     ok: true,
     key: unitKey(project, v.wing, v.title),
     record: {
@@ -205,7 +223,7 @@ export function prepareRow(
       totalFloors: v.totalFloors ?? null, facing: v.facing || null, furnishing: v.furnishing || null,
       parking: v.parking || null, possession: v.possession || null, age: v.age ?? null,
       builder: v.builder || null, rera: v.rera || null,
-      owner: v.owner || null, ownerPhone: v.ownerPhone || null, ownerEmail: v.ownerEmail || null,
+      owner: v.owner || null, ownerPhone: v.ownerPhone || (ownerUnread ? ownerCell : null), ownerEmail: v.ownerEmail || null,
       notes: v.notes || null,
     },
   };
@@ -227,12 +245,13 @@ async function existingKeys(kind: ImportKind): Promise<Set<string>> {
       // keyed that way too, or re-importing the same list would add every one
       // of them a second time. It does not fold a second flat into the first:
       // a row that HAS a unit is matched on the unit.
-      const ph = normPhone(r.phone);
-      if (ph) out.add(ph);
+      // Exact E.164 (docs/specs/phone.md): a stored number that cannot be
+      // read never equals a row's key, so it matches nothing.
+      if (r.phone) out.add(r.phone);
     }
   } else if (kind === 'clients') {
     const rows = await sql`SELECT phone FROM crm_leads WHERE tenant_id = ${t} AND phone IS NOT NULL`;
-    for (const r of rows as any[]) { const k = normPhone(r.phone); if (k) out.add(k); }
+    for (const r of rows as any[]) out.add(r.phone);
   } else {
     const rows = await sql`SELECT project, wing, title FROM crm_properties WHERE tenant_id = ${t}`;
     for (const r of rows as any[]) { const k = unitKey(r.project, r.wing, r.title); if (k) out.add(k); }
@@ -314,7 +333,7 @@ function jobShape(r: any): any {
  * review table can show. The same prepareRow the run uses, so the number the
  * person approves is the number that happens.
  */
-export async function previewImport(id: string, mapping: Record<string, string>, options: { project?: string | null } = {}): Promise<any> {
+export async function previewImport(id: string, mapping: Record<string, string>, options: { project?: string | null; country?: string | null } = {}): Promise<any> {
   const t = tid();
   const [job] = await sql`SELECT * FROM crm_import_jobs WHERE id = ${id} AND tenant_id = ${t} LIMIT 1`;
   if (!job) return null;
@@ -341,6 +360,7 @@ export async function previewImport(id: string, mapping: Record<string, string>,
     else if (p.key && onFile.has(p.key)) { status = 'alreadyOnFile'; reason = 'Already on file'; counts.alreadyOnFile++; }
     else {
       status = 'new'; counts.new++; if (p.key) seen.add(p.key);
+      if (p.note) { reason = p.note; reasons[p.note] = (reasons[p.note] || 0) + 1; }
       if (p.record?.stage) statuses[p.record.stage] = (statuses[p.record.stage] || 0) + 1;
       else if (p.record?.sheetStatus) statusUnknown++;
     }
@@ -394,7 +414,7 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
     const locale = await localeOf(t);
     for (let i = 0; i < pending.length; i += BATCH) {
       const chunk = pending.slice(i, i + BATCH) as any[];
-      const toWrite: { rowNo: number; record: any }[] = [];
+      const toWrite: { rowNo: number; record: any; note?: string }[] = [];
       const outcomes: { rowNo: number; status: RowOutcome; reason: string | null; recordId: string | null }[] = [];
 
       for (const r of chunk) {
@@ -403,7 +423,7 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
         if (p.key && seen.has(p.key)) { outcomes.push({ rowNo: r.row_no, status: 'skipped', reason: 'Same unit earlier in this file', recordId: null }); skipped++; continue; }
         if (p.key && onFile.has(p.key)) { outcomes.push({ rowNo: r.row_no, status: 'skipped', reason: 'Already on file', recordId: null }); skipped++; continue; }
         if (p.key) seen.add(p.key);
-        toWrite.push({ rowNo: r.row_no, record: { ...p.record, importBatchId: id } });
+        toWrite.push({ rowNo: r.row_no, record: { ...p.record, importBatchId: id }, note: p.note });
       }
 
       if (toWrite.length) {
@@ -413,7 +433,7 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
             const rec = saved[n];
             // Added, with the reason when something on the row was not taken
             // as given (a named holder who cannot take work: createOwnersBatch).
-            if (rec?.id) { outcomes.push({ rowNo: w.rowNo, status: 'added', reason: rec.unassignedReason ?? null, recordId: rec.id }); added++; }
+            if (rec?.id) { outcomes.push({ rowNo: w.rowNo, status: 'added', reason: [rec.unassignedReason, w.note].filter(Boolean).join('; ') || null, recordId: rec.id }); added++; }
             else { outcomes.push({ rowNo: w.rowNo, status: 'failed', reason: 'The server did not save this row', recordId: null }); failed++; }
           });
         } catch (e: any) {
@@ -466,8 +486,10 @@ async function writeRecords(kind: ImportKind, records: any[], ctx: ActorCtx): Pr
   // import must not skip (person resolution, routing, the property vocabulary),
   // and these files are tens of rows, not thousands. Written in parallel within
   // the batch, so a chunk is one wait rather than 500.
-  const write = kind === 'clients' ? createLead : createProperty;
-  const out = await Promise.allSettled(records.map(r => write(r, ctx)));
+  // A sheet's owner number is received, not typed: kept as written when it
+  // cannot be read (prepareRow notes the row), never a 422 for the listing.
+  const write = kind === 'clients' ? (r: any) => createLead(r, ctx) : (r: any) => createProperty(r, ctx, { phoneAsReceived: true });
+  const out = await Promise.allSettled(records.map(r => write(r)));
   return out.map(r => (r.status === 'fulfilled' ? r.value : null));
 }
 

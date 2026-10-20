@@ -16,7 +16,7 @@
 import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
-import { findLeadByPhone, createLead, updateLead, arrivalLeadAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS, WON_STATUS } from './store';
+import { findLeadByPhone, findLeadByRawPhone, createLead, updateLead, arrivalLeadAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS, WON_STATUS } from './store';
 import { notify, notifyOrDesk } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
@@ -419,7 +419,6 @@ export async function landEnquiry(args: {
     } as any,
     async () => {
       const lead = args.lead;
-      const cleanPhone = String(lead.phone || '').replace(/[^0-9+]/g, '');
 
       // Idempotency: a portal that retries because our ack was slow must not
       // create the lead twice. Keyed on the provider's own id when they send
@@ -454,15 +453,12 @@ export async function landEnquiry(args: {
       // Dedup on the phone number within the tenant: the same buyer enquiring
       // twice is one lead with two enquiries, not two leads.
       //
-      // This compared the CLEANED STRINGS — "+919876543210" against whatever
-      // the portal sent — so a push carrying a bare "9876543210" matched
-      // nothing and created a second copy of a person already on file. The
-      // importer was moved onto the last-ten-digits rule when that bug cost a
-      // client desk 315 surplus rows; this path was missed, and once imports
-      // stopped and every lead arrived by webhook it became the ONLY dedupe
-      // left in the product. It also read every lead in the tenant into memory
-      // to do it — the full-collection scan removed everywhere else.
-      const existing = await findLeadByPhone(cleanPhone);
+      // Exact E.164, read in the firm's country (findLeadByPhone,
+      // docs/specs/phone.md). A number that cannot be read is kept as the
+      // portal sent it, and matches only the identical string from the same
+      // integration, when that string still names one person (findLeadByRawPhone).
+      const existing = (await findLeadByPhone(lead.phone))
+        || (await findLeadByRawPhone(lead.phone, args.integrationId));
       if (existing && args.unverified) {
         // NOBODY HAS PROVED THIS IS THEM. A portal vouches for its buyer; a
         // public form does not — anyone can type a lead's number into it. So
@@ -657,7 +653,7 @@ export async function landEnquiry(args: {
         agentId: undefined, agent_id: undefined,
         stage: 'New',
         source: leadFields.source || integration.provider,
-      } as any);
+      } as any, undefined, { phoneAsReceived: true });
 
       // The FIRST enquiry gets a row too, so the table is the whole history
       // rather than "everything after the first one" — otherwise a lead that

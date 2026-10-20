@@ -8,6 +8,7 @@
  * ============================================================================
  */
 
+import { phoneInvalidBody } from '../services/phone';
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { prepareListing, localeOf,
@@ -258,6 +259,7 @@ propertiesRouter.post('/', async (req: Request, res: Response) => {
     });
     return res.status(201).json({ success: true, data: newProperty });
   } catch (err: any) {
+    const pi = phoneInvalidBody(err); if (pi) return res.status(422).json(pi);
     return res.status(500).json({ error: 'Failed to create property', message: err.message });
   }
 });

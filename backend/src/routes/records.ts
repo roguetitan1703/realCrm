@@ -12,6 +12,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { requireTenantAuth } from '../middleware/auth';
 import { notWorkableBody } from '../services/workforce';
+import { phoneInvalidBody } from '../services/phone';
 import {
   getLeads, getLeadById, createLead, updateLead, deleteLead,
   getProperties, createProperty, updateProperty, deleteProperty,
@@ -108,7 +109,7 @@ recordsRouter.post('/', async (req: Request, res: Response) => {
       data: created,
     });
   } catch (err: any) {
-    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
+    const nw = notWorkableBody(err) || phoneInvalidBody(err); if (nw) return res.status(422).json(nw);
     return res.status(500).json({ error: 'Record Creation Failed', message: err.message });
   }
 });
@@ -181,7 +182,7 @@ const updateHandler = async (req: Request, res: Response) => {
       data: updated,
     });
   } catch (err: any) {
-    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
+    const nw = notWorkableBody(err) || phoneInvalidBody(err); if (nw) return res.status(422).json(nw);
     // A refused write is a 403 with the reason, not a 500. The client shows this
     // message verbatim, so it has to say which part of the edit was refused.
     if (err?.status === 403) {

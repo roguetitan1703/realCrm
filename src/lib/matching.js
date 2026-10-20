@@ -2,7 +2,8 @@ import { isOpen } from '../data/leadStatus.js'
 import { askedFor, budgetOf, facetFit, latestOf, localityFit, dayLabel } from './format.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
-import { formatMoney, roomsText, waLink } from './locale.js'
+import { formatMoney, roomsText } from './locale.js'
+import { waLink, waDigits } from './phoneLink.js'
 import {
   AREA_UNITS, BHK, COUNTED_ITEMS, FACING, FIXTURES, FURNISH, OWNERSHIP,
   LOCKIN_OPTIONS, PAINTING_CHARGES, POSSESSION, SOCIETY_AMENITIES, SUBTYPES,
@@ -548,9 +549,6 @@ export function whatsappLink(message, phone) {
   return waLink(phone, message || '')
 }
 
-// With its country code: wa.me refuses a bare 10-digit Indian number. The same
-// rule as the server's links (locale.js waLink / phoneAsStored).
-const waDigits = (phone) => waLink(phone).slice('https://wa.me/'.length)
 
 // WHICH WHATSAPP. An agent's phone often carries both WhatsApp and WhatsApp
 // Business, and a wa.me link is claimed by WhatsApp alone, so it always opened

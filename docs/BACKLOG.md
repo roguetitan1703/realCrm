@@ -81,12 +81,9 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
   assign. *agent*
 - "Back on their link" (`maybeReturned`) is check-then-insert; two parallel
   opens can raise it twice.
-- Property `owner_phone` is still stored as typed (dev: delpat 20 of 26);
-  only owner records made from it are normalised.
-- Staff numbers (team, profile, sign-in lookup, reply-to) still use
-  `normalizePhone`, which cuts a foreign number to +91 and its last 10 —
-  the second phone rule beside `phoneAsStored`; moving it needs the sign-in
-  lookup migrated with it.
+- **Owners have no duplicate flag or merge** (specs/phone.md). After the phone
+  repair, owners on one number: bhumi 10 new + 31 already, mahalaxmi 6 + 127
+  (production dry run, 20 Oct). Only a search by the number shows them. *owner*
 - A lead whose full record never loads (offline) keeps its homes and history
   sections spinning instead of showing what the list row has. *agent*
 - The dev R2 bucket's CORS refuses `localhost:5190` (builder ports), so visit
@@ -102,6 +99,10 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 Measured on production, read-only, 12 Oct, unless marked. Alert delivery
 gaps are in `specs/notifications.md` §1, not here.
 
+- **Undo of a properties import fails** (dev, 21 Oct): `revertImport` deletes
+  `crm_properties WHERE import_batch_id`, a column crm_properties does not
+  have ("column import_batch_id does not exist"); properties imports are not
+  stamped with their batch either.
 - **"Going cold" is most of the book** — bhumi 493 of 585 open (84%, at their
   7-day setting), mahalaxmi 168 of 231 (73%, 1-day). 19 and 35 crossed the line
   in the last day. Likely our model, not the agents: real portal leads may not
@@ -111,15 +112,6 @@ gaps are in `specs/notifications.md` §1, not here.
   none, so nothing can say a callback is late. (Owners store one.) *agent*
 - **Booked site visits with no time** — bhumi 5 of 29 (typed text only).
 - **`/api/v1/ingest` has no rate limit** (code). A leaked key fills a desk.
-- **Owner phones not stored +91** (production, read-only, 20 Oct): bhumi 213
-  of 1,324, mahalaxmi 163 of 3,737; leads 7 of 952 and 1 of 477. Matching is
-  on the last 10 digits, so nothing is lost; display and tel/WhatsApp links
-  differ. New writes store +91 from the next deploy; old rows are not repaired.
-  One bhumi number is held by 2 leads in different formats.
-- **4 paying-firm users cannot sign in by phone code** (production, read-only,
-  17 Oct): bhumi 1 of 4 and mahalaxmi 3 of 5 user phones are stored as bare 10
-  digits, and the sign-in lookup matches `+91…` exactly. Older than the locale
-  work. *agent*
 - **A column header sorts one way only** (code, dev). Clicking Last enquiry
   again does not flip it (`Table` calls `onSort(key)`, never the direction);
   only the toolbar arrow does. Newest-first takes two controls. *manager*
@@ -128,6 +120,15 @@ gaps are in `specs/notifications.md` §1, not here.
   duplicate" shows only when `duplicateOf` is set, and nothing sets it. *owner*
 
 ## To verify
+
+- **After the API deploy — phones** (specs/phone.md): the boot log's
+  `[Phones] E.164 repair` line matches the dry run (bhumi 1 user, 4 leads, 52
+  owners, 55 properties; mahalaxmi 3, 1, 6, 7) and names no user collision.
+  The desk's phone boxes (lead, owner, team, profile, reply-to, listing owner,
+  console roster) were not driven in a browser; the catalogue form was.
+  The dry run's counts predate the received/typed reader and placeholders
+  (21 Oct): re-run before the deploy. The enquiry form's plain-field fallback
+  when the phone box chunk fails was not driven in a browser.
 
 - **A listing owner's Callback stays on To do after the call** (seen on the
   demo, 17 Oct): a lead's booked call closes on Call, an owner's did not.

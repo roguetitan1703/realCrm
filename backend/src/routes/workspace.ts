@@ -13,6 +13,7 @@
 import { Router, Request, Response } from 'express';
 import { appEnv } from '../services/env';
 import { requireTenantAuth } from '../middleware/auth';
+import { phoneInvalidBody } from '../services/phone';
 import { getPulse, resetDatabase, updateSettings, getSettings, withReplyFallback, replyFallbackOf, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates, listContacts } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
@@ -270,6 +271,7 @@ workspaceRouter.post('/settings', async (req: Request, res: Response) => {
   } catch (err: any) {
     // Stopping every shared link is an owner's call (store.ts cleanSharingPatch).
     if (err?.status === 403) return res.status(403).json({ error: 'FORBIDDEN', message: err.message });
+    const pi = phoneInvalidBody(err); if (pi) return res.status(422).json(pi);
     // A refused change (removing the final status, say) is the firm's to
     // correct, and says why — it is not a server fault.
     res.status(400).json({ error: 'Not saved', message: err?.message || 'Could not save the settings.' });

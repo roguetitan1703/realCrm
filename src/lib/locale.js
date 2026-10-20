@@ -162,88 +162,9 @@ const SCALE_WORDS = {
 }
 
 // ---- Phone numbers -------------------------------------------------------------
-// Both markets this supports have a 10-digit national number (India's mobiles,
-// the North American plan), which is also why matching a lead by its last ten
-// digits (findLeadByPhone) holds for either.
-
-/** Any typed number → +<country><last ten digits>. '' when there are no digits. */
-export function phoneE164(raw, loc = current) {
-  const digits = String(raw || '').replace(/\D/g, '')
-  return digits ? `+${loc.phoneCountry}${digits.slice(-10)}` : ''
-}
-
-/**
- * A customer's number as it is kept on a lead or an owner: phoneE164 when what
- * was typed is a whole mobile number of this firm's country (ten digits, after
- * any leading 0 or the country code), and exactly as typed otherwise. A short
- * number or a foreign one is not turned into a wrong +91 one — phoneE164 alone
- * would keep the last ten digits of "+49 151 7537 1553". The one rule for a
- * number typed on a form and one pushed by a portal (parser.ts phone_in).
- */
-export function phoneAsStored(raw, loc = current) {
-  const typed = String(raw ?? '').trim()
-  const d = typed.replace(/\D/g, '').replace(/^0+/, '')
-  const cc = String(loc.phoneCountry)
-  const whole = d.length === 10 || (d.length === 10 + cc.length && d.startsWith(cc))
-  return whole ? phoneE164(d, loc) : typed
-}
-
-/**
- * A wa.me link to a number, by the same rule a number is stored by. wa.me
- * wants the country code and nothing else, and refuses a bare ten digits, so a
- * person stored "9876543210" (some agents on the paying firms are) opened
- * "not on WhatsApp". The one builder of these links: the server (sharing.ts
- * waUrl) and every screen (matching.js whatsappLink, the public pages).
- * No number: WhatsApp asks who.
- */
-export function waLink(phone, text, loc = current) {
-  const d = String(phoneAsStored(phone, loc) || '').replace(/\D/g, '')
-  return `https://wa.me/${d}${text != null ? `?text=${encodeURIComponent(text)}` : ''}`
-}
-
-/**
- * A stored number as a person reads it. Indian numbers are shown as stored,
- * as they always were. A North American one reads +1 512-555-0143.
- */
-export function phoneLabel(raw, loc = current) {
-  if (raw == null) return raw
-  if (loc.phoneCountry !== '1') return raw
-  const d = String(raw).replace(/\D/g, '')
-  const ten = d.length === 11 && d.startsWith('1') ? d.slice(1) : d.length === 10 ? d : null
-  return ten ? `+1 ${ten.slice(0, 3)}-${ten.slice(3, 6)}-${ten.slice(6)}` : raw
-}
-
-/**
- * Why a typed mobile number cannot be saved yet, in words a person can act
- * on, or '' when it can (or nothing is typed). The same ten-digit rule as
- * phoneE164 and looksLikePhone; said aloud, because a Save that is simply
- * disabled does not tell anyone what is wrong.
- */
-export function phoneProblem(raw, loc = current) {
-  const d = String(raw || '').replace(/\D/g, '')
-  if (!d || d.length >= 10) return ''
-  return loc.phoneCountry === '1' ? 'Enter a 10-digit phone number' : 'Enter a 10-digit mobile number'
-}
-
-/**
- * A number read on its own (the sender's number, a recipient), grouped so it
- * can be read back aloud: +91 98765 43210. Elsewhere phoneLabel; a number
- * that is not a clean ten digits stays as stored.
- */
-export function phoneSpaced(raw, loc = current) {
-  if (raw == null || loc.phoneCountry !== '91') return phoneLabel(raw, loc)
-  const d = String(raw).replace(/\D/g, '')
-  const ten = d.length === 12 && d.startsWith('91') ? d.slice(2) : d.length === 10 ? d : null
-  return ten ? `+91 ${ten.slice(0, 5)} ${ten.slice(5)}` : raw
-}
-
-/** What a phone field's example shows. `india` is the field's own Indian
- *  example, kept as it was; `national` asks for the number without its code. */
-export function phonePlaceholder(india, { national = false } = {}, loc = current) {
-  if (loc.phoneCountry === '91') return india
-  if (loc.phoneCountry === '1') return national ? '512 555 0143' : '+1 512 555 0143'
-  return national ? '' : `+${loc.phoneCountry}`
-}
+// Not here: lib/phone.js reads, stores and shows them (docs/specs/phone.md), in
+// the firm's `country`. This file stays free of the number reader so the
+// buyer's pages can format money without loading it.
 
 // ---- Bedrooms --------------------------------------------------------------------
 // The STORED token never changes ('1rk', '2', '5plus', and legacy text like

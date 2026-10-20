@@ -46,11 +46,12 @@ async function main() {
   const boot: any = await (await fetch(`${API}/workspace/bootstrap`, { headers: A })).json();
   const us = boot?.state?.settings?.locale?.phoneCountry === '1';
   const all: any = await (await fetch(`${API}/leads?limit=5000`, { headers: A })).json();
-  const taken = new Set((all.leads || all.data || []).map((l: any) => String(l.phone || '').replace(/\D/g, '').slice(-10)));
+  // Stored as exact E.164, as the pool below is written (docs/specs/phone.md).
+  const taken = new Set((all.leads || all.data || []).map((l: any) => String(l.phone || '')));
   const pool = us
     ? ['512', '737'].flatMap(ac => Array.from({ length: 100 }, (_, i) => `+1${ac}55501${String(i).padStart(2, '0')}`))
     : Array.from({ length: 2000 }, () => `+9199555${String(Math.floor(Math.random() * 1e5)).padStart(5, '0')}`);
-  const free = pool.filter(p => !taken.has(p.replace(/\D/g, '').slice(-10)));
+  const free = pool.filter(p => !taken.has(p));
   if (!free.length) throw new Error('every fiction number is already on a lead; delete a test lead first');
   const phone = free[Math.floor(Math.random() * free.length)];
   const name = arg('name') || (us ? 'Megan Brooks' : 'Neha Kapoor');
