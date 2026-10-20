@@ -3,6 +3,8 @@ import { Avatar, Button, Field, Input, SectionHead, PageHeader, Segmented, RowMe
 import PhoneInput from '../components/PhoneInput.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
+// The shared frame: a backdrop tap stops closing once anything is typed (CLAUDE.md §5).
+import { Modal } from './Modals.jsx'
 import { useServerData } from '../lib/useServerData.js'
 import { buildRoster } from '../components/roster.jsx'
 import { whenLabel } from '../lib/format.js'
@@ -270,10 +272,7 @@ function SuspendModal({ store, user, onClose, onHandOver, onConfirm }) {
   const owners = held?.owners ?? 0
   const total = leads + owners
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
-        <div className="m-head"><h3>Suspend {user.name}</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
-        <div className="m-content">
+    <Modal title={`Suspend ${user.name}`} onClose={onClose} width={420}>
           <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
             They are signed out everywhere and stop receiving new work. Their history stays theirs, and this can be undone.
           </div>
@@ -294,9 +293,7 @@ function SuspendModal({ store, user, onClose, onHandOver, onConfirm }) {
               <Button variant="primary" block onClick={() => onConfirm(user)}>Suspend {user.name}</Button>
             </>
           )}
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -371,10 +368,7 @@ function SeatModal({ store, user, onClose, onDone }) {
       .catch(err => { store.toast(cleanErr(err), 'warn'); setSaving(false) })
   }
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
-        <div className="m-head"><h3>Reassign seat</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
-        <div className="m-content">
+    <Modal title="Reassign seat" onClose={onClose} width={420}>
           <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
             The seat keeps its work{held && (held.leads || held.owners) ? `: ${[held.leads && `${held.leads} open lead${held.leads === 1 ? '' : 's'}`, held.owners && `${held.owners} calling record${held.owners === 1 ? '' : 's'}`].filter(Boolean).join(' and ')}` : ''}. <b style={{ color: 'var(--ink)' }}>{user.name}</b> is signed out, and what they logged stays under their name.
           </div>
@@ -387,9 +381,7 @@ function SeatModal({ store, user, onClose, onDone }) {
           <Field label={needsEmail ? 'Email' : 'Email (optional)'}><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@firm.com" type="email" /></Field>
           <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} /></Field>
           <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>{saving ? 'Reassigning…' : 'Reassign seat'}</Button></div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -424,10 +416,7 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
       .catch(err => { store.toast(cleanErr(err), 'warn'); setSaving(false) })
   }
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
-        <div className="m-head"><h3>Edit {user.name}</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
-        <div className="m-content">
+    <Modal title={`Edit ${user.name}`} onClose={onClose} width={420}>
           {user.login_id ? (
             <Field label="User ID (used to sign in)" hint="Changing it signs them out; nothing else moves.">
               <Input value={loginId} onChange={e => setLoginId(e.target.value)} placeholder="e.g. siddhi" />
@@ -444,9 +433,7 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
             </Field>
           )}
           <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>{saving ? 'Saving…' : 'Save changes'}</Button></div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -579,13 +566,7 @@ function ResetPasswordModal({ store, user, onClose, onDone }) {
   }
 
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
-        <div className="m-head">
-          <h3>Reset password: {user.name}</h3>
-          <button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button>
-        </div>
-        <div className="m-content">
+    <Modal title={`Reset password: ${user.name}`} onClose={onClose} width={420}>
           <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>
             Set a custom new password for <b style={{ color: 'var(--ink)' }}>{user.name}</b> ({user.login_id || user.email}).
           </div>
@@ -609,8 +590,6 @@ function ResetPasswordModal({ store, user, onClose, onDone }) {
           <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>
             {saving ? 'Resetting Password…' : 'Set New Password'}
           </Button></div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

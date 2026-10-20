@@ -676,28 +676,13 @@ export async function catalogueList(f: Firm, q: { deal?: string; config?: string
   const page = Math.max(Number(q.page) || 1, 1);
   // Every (deal, size, place) the catalogue holds, with how many flats: small
   // (one row per combination), and enough to build every facet below.
-  const groups = await sql`SELECT deal, bhk, trim(locality) AS locality, count(*)::int AS n
-          FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)} GROUP BY 1, 2, 3`;
-  // THE SIZE. One token per stored value (bhkTokenOf: "2", "2 BHK" and
-  // "2 BHK Apartment" are all 2), so the chips and the filter agree on what
-  // "2" means. The filter is the stored values that read as the chosen token;
-  // exact, so 1 RK and 10 BHK never land under "1".
+  const keyed = await catalogueKeyed(f.id, loc);
   const want = {
     deal: q.deal ? q.deal.toLowerCase() : null,
     config: q.config ? bhkTokenOf(q.config, loc) || '(no such size)' : null,
     locality: q.locality ? q.locality.trim().toLowerCase() : null,
   };
-  const keyed = (groups as any[]).map(g => ({
-    deal: g.deal ? String(g.deal) : null, config: bhkTokenOf(g.bhk, loc), raw: g.bhk as string | null,
-    locality: g.locality ? String(g.locality) : null, n: g.n as number,
-  }));
-  const where = [CATALOGUE_WHERE(f.id)];
-  if (want.deal) where.push(sql`lower(deal) = ${want.deal}`);
-  if (want.config) {
-    const raws = [...new Set(keyed.filter(x => x.config === want.config && x.raw != null).map(x => x.raw as string))];
-    where.push(raws.length ? sql`bhk IN ${sql(raws)}` : sql`FALSE`);
-  }
-  if (want.locality) where.push(sql`lower(trim(locality)) = ${want.locality}`);
+  const where = [CATALOGUE_WHERE(f.id), ...askClauses(keyed, { deal: [want.deal], config: [want.config], locality: [want.locality] })];
   // THE FACETS NARROW EACH OTHER (the tab-count rule): each one's options and
   // counts are the flats that pass every OTHER active filter, so a chip never
   // offers a combination that returns nothing, and its own choice stays listed.
@@ -741,6 +726,42 @@ export async function catalogueList(f: Firm, q: { deal?: string; config?: string
       locality: Object.fromEntries(localityF.map(x => [x.value, x.n])),
     },
   };
+}
+
+/**
+ * The catalogue's (deal, size, place) groups with how many flats each: small,
+ * one row per combination. THE SIZE is one token per stored value (bhkTokenOf:
+ * "2", "2 BHK" and "2 BHK Apartment" are all 2), so a chip, a filter and a
+ * buyer's ask agree on what "2" means.
+ */
+export async function catalogueKeyed(tenantId: string, loc: Locale) {
+  const groups = await sql`SELECT deal, bhk, trim(locality) AS locality, count(*)::int AS n
+          FROM crm_properties WHERE ${CATALOGUE_WHERE(tenantId)} GROUP BY 1, 2, 3`;
+  return (groups as any[]).map(g => ({
+    deal: g.deal ? String(g.deal) : null, config: bhkTokenOf(g.bhk, loc), raw: g.bhk as string | null,
+    locality: g.locality ? String(g.locality) : null, n: g.n as number,
+  }));
+}
+
+/**
+ * WHICH CATALOGUE HOMES A CHOICE MEANS, as WHERE clauses: the catalogue's own
+ * filters (one value each) and a buyer's New homes like these (any of several,
+ * buyerAsks.ts) are one rule. Deal and place are case-blind; size is the
+ * stored values that read as the chosen token, exact, so 1 RK and 10 BHK
+ * never land under "1".
+ */
+export function askClauses(keyed: Awaited<ReturnType<typeof catalogueKeyed>>, ask: { deal?: (string | null)[]; config?: (string | null)[]; locality?: (string | null)[] }) {
+  const out: any[] = [];
+  const deal = (ask.deal || []).filter(Boolean).map(v => String(v).toLowerCase());
+  if (deal.length) out.push(sql`lower(deal) IN ${sql(deal)}`);
+  const cfg = (ask.config || []).filter(Boolean) as string[];
+  if (cfg.length) {
+    const raws = [...new Set(keyed.filter(x => x.config && cfg.includes(x.config) && x.raw != null).map(x => x.raw as string))];
+    out.push(raws.length ? sql`bhk IN ${sql(raws)}` : sql`FALSE`);
+  }
+  const place = (ask.locality || []).filter(Boolean).map(v => String(v).trim().toLowerCase());
+  if (place.length) out.push(sql`lower(trim(locality)) IN ${sql(place)}`);
+  return out;
 }
 
 const BHK_ORDER = ['1rk', ...BHK.map((b: any) => b.value).filter((v: string) => v !== '1rk' && v !== '5plus').sort((a: string, b: string) => Number(a) - Number(b)), '5plus'];
@@ -1030,6 +1051,8 @@ async function linkCounts(tenantId: string, linkIds: string[]) {
   const rows = await sql`
     SELECT link_id,
            count(*) FILTER (WHERE kind IN ('view', 'expired_view'))::int AS views,
+           -- Of those, the list page (no flat): the lead's "list opened" for this link.
+           count(*) FILTER (WHERE kind IN ('view', 'expired_view') AND property_id IS NULL)::int AS list_opens,
            count(DISTINCT device_id) FILTER (WHERE kind IN ('view', 'expired_view', 'interested'))::int AS devices,
            count(*) FILTER (WHERE kind = 'interested')::int AS interested,
            max(last_at) FILTER (WHERE kind IN ('view', 'expired_view')) AS last_opened
@@ -1073,7 +1096,7 @@ export async function myLinks(q: { page?: number; limit?: number; recipient?: 'n
           const p = pById.get(id);
           return p ? { id, title: flatLabel(p, loc), available: isAvailable(p) } : { id, title: null, available: false };
         }),
-        views: c.views || 0, devices: c.devices || 0, interested: c.interested || 0, lastOpenedAt: c.last_opened || null,
+        views: c.views || 0, listOpens: c.list_opens || 0, devices: c.devices || 0, interested: c.interested || 0, lastOpenedAt: c.last_opened || null,
       };
     }),
     total: n, page, limit,
@@ -1400,3 +1423,5 @@ async function tapHolder(m: ReturnType<typeof me>, leadId: string | null): Promi
 
 /** Exported for the link-preview cards (routes/public.ts). */
 export { resolveCode, linkRows, firmPhone, catalogueUrlOf, SHOWN_COLUMNS, CATALOGUE_WHERE };
+/** For buyerAsks.ts: the buyer forms answer the way a tap does. */
+export { whoAnswers, flatLabel, recordEvent, staffBrowser, attachDevice, addToShortlist, firmDayStart, rid };

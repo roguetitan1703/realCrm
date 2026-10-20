@@ -705,7 +705,9 @@ function rowToLead(r: any, events?: TimelineEvent[], shortlistRows?: any[], name
     phone: r.phone,
     email: r.email || '',
     stage: r.stage || 'New',
-    source: r.source || 'Website',
+    // Not stated stays not stated (CLAUDE.md §3.1): this read every lead with
+    // no source as 'Website'.
+    source: r.source || null,
     agentId: r.agent_id,
     req,
     notes: r.notes || [],
@@ -2187,7 +2189,9 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts
   const phone = opts.phoneAsReceived ? keepPhone(leadData.phone, country) : requirePhone(leadData.phone, country);
   const email = leadData.email || null;
   const stage = leadData.stage || 'New';
-  const source = leadData.source || 'Website';
+  // Where they came from, only when someone said: 'Website' was written on
+  // every lead added without one.
+  const source = leadData.source || null;
   // No invented requirement. This defaulted to { locality: 'Wakad', config:
   // '2 BHK', budgetLabel: '₹80L' } — so every lead captured without one (a
   // webhook, a quick add, a phone number jotted down mid-call) was born
@@ -2269,7 +2273,7 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts
   // event counts as a person working the lead (leadSegments.ts — Going cold,
   // the idle sweep), and creating a lead is not working it.
   const names = new Map((await namesP).map((r: any) => [r.id, r.name]));
-  const by = createdBy ? `Added by ${names.get(createdBy) || 'a former member'}` : `Arrived from ${source}`;
+  const by = createdBy ? `Added by ${names.get(createdBy) || 'a former member'}` : (source ? `Arrived from ${source}` : 'Arrived');
   const to = agentId ? `Assigned to ${names.get(agentId) || 'a former member'}` : 'Unassigned';
   await addTimelineEvent({
     record_id: newId,
@@ -2283,7 +2287,7 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts
   audit({
     tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'lead.create', target_type: 'lead', target_id: newId,
-    summary: `Lead "${name || phone || 'unnamed'}" created (source: ${source})`, metadata: { after: created },
+    summary: `Lead "${name || phone || 'unnamed'}" created (source: ${source || 'not stated'})`, metadata: { after: created },
     ip: ctx.ip, user_agent: ctx.userAgent,
   });
   // Alert the assigned agent, and give owners/managers team-wide visibility.

@@ -32,7 +32,9 @@ a per-feature afterthought.
 | `webhook_inbox` raw bodies | every inbound push | **30 d** then purge **body**; keep metadata + `lead_id` (tiny) forever. |
 | unknown-key ingest log | abuse/misconfig attempts | **7 d**, minimal metadata only (no body); rate-limited. |
 | `audit_log` | every audited action | **Append-only + hash-chained — do NOT delete** (breaks verification). Keep (rows are small text). If it ever gets large: **archive** a verified segment to cold storage + re-genesis, never silent delete. |
-| `crm_share_events` views, `crm_share_devices` | every link or catalogue open | views and expired views **> 180 d** deleted monthly; devices unseen 180 d deleted; taps and enquiries stay (lead history). Om, 20 Oct. |
+| `crm_share_events` views, `crm_share_devices` | every link or catalogue open | views and expired views **> 180 d** deleted monthly per firm (`services/retention.ts`, `crm_job_runs` decides the month, not boot), except a lead's views (event `lead_id`, or a link bound to a lead); devices attached > 180 d with no event since deleted; taps and enquiries stay. Om, 20 Oct. |
+| `crm_buyer_asks` | Call me back / Book a visit / New homes like these | **keep** (the lead's history); capped at 100 a day per firm. |
+| `crm_job_runs` | one row per job per firm per run | **keep** (≈12 rows a firm a year). |
 | `notifications` | every alert | purge **read** notifications > **60 d**; unread kept. |
 | `sessions` | every login (A2) | purge **expired/revoked** > **30 d** past expiry. |
 | `password_resets` | every reset request (A1) | purge **consumed/expired** > **7 d**. |

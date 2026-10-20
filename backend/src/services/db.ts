@@ -1262,6 +1262,47 @@ export async function migrateSharing(): Promise<void> {
       PRIMARY KEY (tenant_id, device_id)
     );
   `;
+  // WHAT A BUYER ASKED on a link or the catalogue (buyerAsks.ts): a call back,
+  // a visit (requested until the holder confirms it), or new homes like these
+  // (`ask` the deal/size/place, `seen_ids` the homes already matching,
+  // `alerted_ids` the ones the last alert named). Kept: the lead's history,
+  // one row per ask, capped at 100 a day per firm (data-lifecycle.md).
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_buyer_asks (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      lead_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      link_id TEXT,
+      property_id TEXT,
+      name TEXT,
+      phone TEXT,
+      at TIMESTAMPTZ,
+      ask JSONB,
+      seen_ids TEXT[] NOT NULL DEFAULT '{}',
+      alerted_ids TEXT[] NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'open',
+      last_alert_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_buyer_asks_lead ON crm_buyer_asks (tenant_id, lead_id, created_at DESC);`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_buyer_asks_open_homes ON crm_buyer_asks (tenant_id) WHERE kind = 'homes' AND status = 'open';`;
+
+  // WHEN A PERIODIC JOB LAST RAN, per firm, and what it did (retention.ts). The
+  // gate for "once a month", so a restart is not a run. Small: one row per
+  // job per firm per run.
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_job_runs (
+      job TEXT NOT NULL,
+      tenant_id TEXT NOT NULL,
+      ran_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      detail JSONB
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_job_runs ON crm_job_runs (job, tenant_id, ran_at DESC);`;
+
   // Browsers the firm's own staff used while signed in: never tied to a lead.
   await sql`
     CREATE TABLE IF NOT EXISTS crm_share_staff_devices (

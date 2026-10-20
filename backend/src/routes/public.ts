@@ -8,6 +8,8 @@
  *   GET  /api/v1/public/catalogue/:tenant/:slug      one flat
  *   POST /api/v1/public/catalogue/:tenant/enquiry    {name, phone, propertyId?, message?}
  *   GET  /api/v1/public/gallery/:slug/:ref           an old photo link (§A.4)
+ *   GET  /api/v1/public/forms/:tenant/slots          the visit times a buyer may pick
+ *   POST /api/v1/public/forms/:tenant/ask            Call me back / Book a visit / New homes like these (§A.6)
  *
  * services/sharing.ts decides what is shown, so a page cannot show more. A
  * code that is wrong, off, stopped or expired answers one identical body.
@@ -29,6 +31,7 @@ import {
 } from '../services/sharing';
 import { localeOf } from '../services/store';
 import { phoneKey } from '../services/phone';
+import { buyerAsk, slotsFor } from '../services/buyerAsks';
 
 export const publicRouter = Router();
 
@@ -193,6 +196,43 @@ publicRouter.get('/catalogue/:tenant/:slug', async (req: Request, res: Response)
 async function goneBody(f: Firm) {
   return { ...NOT_FOUND, firm: firmPublic(f, await localeOf(f.id)), cta: { phone: await firmPhone(f.id) }, catalogueUrl: await catalogueUrlOf(f) };
 }
+
+// ── The buyer forms (§A.6) ──────────────────────────────────────────────────
+
+publicRouter.get('/forms/:tenant/slots', async (req: Request, res: Response) => {
+  if (!hit(`cat:${ipOf(req)}`, 600, 60_000)) return slow(res, String(req.params.tenant));
+  try {
+    const f = await firmBySlug(String(req.params.tenant));
+    if (!f) return res.status(404).json(NOT_FOUND);
+    res.set('Cache-Control', 'private, no-store');
+    return res.json(await slotsFor(f));
+  } catch (err) { return shareFail(res, err); }
+});
+
+publicRouter.post('/forms/:tenant/ask', async (req: Request, res: Response) => {
+  const ip = ipOf(req);
+  // The catalogue form's limits: a flood ceiling per address (a carrier
+  // address is many buyers), three an hour per number, and the firm's daily
+  // cap in buyerAsks.ts. A code that resolves nothing spends the miss allowance.
+  if (!hit(`ask:${ip}`, 10, 10 * 60_000) || (req.body?.code && !codeGate(ip))) return slow(res, String(req.params.tenant));
+  try {
+    const f = await firmBySlug(String(req.params.tenant));
+    if (!f) return res.status(404).json(NOT_FOUND);
+    const b = req.body || {};
+    // The hidden field: a bot fills it, a person never sees it. Answered like a real ask.
+    if (String(b.company || b.website || '').trim()) return res.json({ ok: true });
+    const digits = String(b.phone || '').replace(/\D/g, '').slice(-10);
+    if (digits.length === 10 && !hit(`ask-phone:${f.id}:${digits}`, 3, 60 * 60_000)) return slow(res, f.slug);
+    const out = await asFirm(req, f, () => buyerAsk(f, {
+      kind: b.kind, name: b.name, phone: b.phone, code: b.code, propertyId: b.propertyId,
+      date: b.date, time: b.time, filters: b.filters,
+    }, pubReq(req)));
+    return res.json(out);
+  } catch (err: any) {
+    if (err instanceof ShareError && err.status === 404 && req.body?.code) codeMiss(ip);
+    return shareFail(res, err);
+  }
+});
 
 // ── Old photo links (§A.4) ──────────────────────────────────────────────────
 // The photo link's own page is gone. A link already in a buyer's chat resolves

@@ -22,6 +22,12 @@ import { copyFor, COPY, summaryCopy } from './notificationCopy.js';
 import { recordFromLink, closeSettled } from './alertLifecycle.js';
 import { followUpKind } from './followUp.js';
 import { deskConfigOf, type DeskConfig } from './store.js';
+import { runShareRetention } from './retention.js';
+import { matchNewHomes } from './buyerAsks.js';
+
+/** New homes like these is matched at most hourly per firm (buyerAsks.ts). */
+const lastHomesMatch = new Map<string, number>();
+const HOMES_MATCH_MS = 60 * 60 * 1000;
 
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
@@ -517,6 +523,13 @@ export async function processScheduledNotifications(
       }
       if (ending.length) console.log(`[ScheduledNotify] ${t}: ${ending.length} agreement(s) ending within 30 days notified`);
 
+      // A buyer's New homes like these: new matches, once a day per lead.
+      if (onlySlug || Date.now() - (lastHomesMatch.get(t) || 0) > HOMES_MATCH_MS) {
+        lastHomesMatch.set(t, Date.now());
+        const n = await matchNewHomes(t).catch(err => { console.warn(`[Asks] ${t}: match failed:`, err?.message); return 0; });
+        if (n) console.log(`[Asks] ${t}: ${n} buyer(s) told of new homes`);
+      }
+
       // Close what has been done, then send what has come due — held for the
       // morning, or through the night. Here because this is the one sweep.
       await dispatchDue(t).catch(err => console.warn(`[Alerts] ${t}: dispatch failed:`, err?.message));
@@ -531,6 +544,8 @@ export async function processScheduledNotifications(
       const gone = await pruneDeliveryLog().catch(() => 0);
       if (gone) console.log(`[Push] delivery log: pruned ${gone} rows older than 90 days.`);
     }
+    // View logs past 180 days, once a month per firm (retention.ts decides).
+    if (!onlySlug) await runShareRetention().catch(err => console.warn('[Retention] run failed:', err?.message));
   } catch (err: any) {
     console.warn('[ScheduledNotify] Scanner iteration failed:', err?.message);
   }

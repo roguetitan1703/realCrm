@@ -175,6 +175,18 @@ export const NOTIFICATIONS: NotifKind[] = [
       // To the desk instead when nobody active holds it; contact by anyone closes it.
       trigger: "Send or Add as lead used a number that is already a lead (this person's, or nobody active's)", urgency: 'drawer', closesWhen: 'lead_worked_desk', gate: null }),
 
+  // ---- A buyer's form on a link or the catalogue (listing-pages.md §A.6) ---
+  // To the lead's holder, else the link's sender, else the desk (buyerAsks.ts,
+  // which logs a zero). `share_work` closes them like the other share alerts:
+  // contact logged after it (a call, a confirmed visit), or a link sent.
+  K({ key: 'buyer_callback', label: 'A buyer asked for a call back', audience: 'assignee',
+      trigger: 'Call me back sent on a shared link or the catalogue; the lead is booked a call for now, or the next opening', urgency: 'now', closesWhen: 'share_work', gate: null }),
+  K({ key: 'buyer_visit', label: 'A buyer asked to visit', audience: 'assignee',
+      trigger: 'Book a visit sent on a shared link or the catalogue: a requested slot inside working hours, to confirm', urgency: 'now', closesWhen: 'share_work', gate: null }),
+  K({ key: 'buyer_new_homes', label: 'New homes match a buyer', audience: 'assignee',
+      // A sales opening, not a fire: the morning summary.
+      trigger: "a home matching a buyer's New homes like these enters the catalogue or becomes Available — at most once a day per lead", urgency: 'morning', closesWhen: 'share_work', gate: null }),
+
   K({ key: 'remark_added', label: 'Someone left a remark', audience: 'assignee',
       // Demoted to the drawer. Somebody typing a note on your record is worth
       // knowing and is not worth a buzz.

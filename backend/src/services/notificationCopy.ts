@@ -154,6 +154,18 @@ export const COPY: Builders = {
     title: d.name ? `${d.name} opened an expired link` : 'Someone opened an expired link',
     body: facts(d.n && plural(d.n, 'home'), d.sentOn && `sent ${d.sentOn}`),
   }),
+  // A buyer's form (listing-pages.md §A.6). The name is the lead's, else what they typed.
+  buyer_callback: (d) => ({
+    title: `${d.name || 'A buyer'} asked for a call back`,
+    body: facts(d.flat),
+  }),
+  buyer_visit: (d, desk) => ({
+    title: `${d.name || 'A buyer'} asked to visit`,
+    body: facts(d.flat, whenLabel(d.at, desk)),
+  }),
+  buyer_new_homes: (d) => ({
+    title: `${plural(Number(d.n) || 1, 'new home')} ${Number(d.n) === 1 ? 'matches' : 'match'} ${d.name || 'a buyer'}`,
+  }),
   share_returned: (d) => ({
     title: `${d.name || 'A buyer'} is back on your link`,
     body: facts(d.sentOn && `sent ${d.sentOn}`),
@@ -194,6 +206,9 @@ const PHRASE: Record<string, (n: number) => string> = {
   lead_reassign_loop: (n) => `${plural(n, 'lead')} keeps being handed on`,
   share_interested: (n) => `${plural(n, 'buyer')} interested`,
   share_expired_open: (n) => `${plural(n, 'expired link')} opened`,
+  buyer_callback: (n) => `${plural(n, 'call back')} asked for`,
+  buyer_visit: (n) => `${plural(n, 'visit')} asked for`,
+  buyer_new_homes: (n) => `new homes for ${plural(n, 'buyer')}`,
   owner_reassign_loop: (n) => `${plural(n, 'owner')} keeps being handed on`,
 };
 

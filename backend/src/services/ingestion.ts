@@ -404,6 +404,9 @@ export async function landEnquiry(args: {
   /** A public form anyone can type any number into (the catalogue): on an
    *  existing lead, record and tell, never change the lead. */
   unverified?: boolean;
+  /** Who a NEW lead goes to instead of the arrival rule: the sender of a
+   *  shared link with no recipient (buyerAsks.ts). Never moves an existing one. */
+  agentId?: string | null;
 }): Promise<{ status: string; leadId?: string | null; reason?: string }> {
   const { tenantId, inboxId } = args;
   const integration = { id: args.integrationId || `${args.provider.toLowerCase()}:${tenantId}`, tenant_id: tenantId, provider: args.provider };
@@ -650,7 +653,7 @@ export async function landEnquiry(args: {
       const { external_id, ...leadFields } = lead;
       const created = await createLead({
         ...leadFields,
-        agentId: undefined, agent_id: undefined,
+        agentId: args.agentId || undefined, agent_id: undefined,
         stage: 'New',
         source: leadFields.source || integration.provider,
       } as any, undefined, { phoneAsReceived: true });
