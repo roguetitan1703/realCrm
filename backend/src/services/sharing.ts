@@ -1368,7 +1368,10 @@ export async function freshLinkFromTap(code: string, origin: string | null) {
     // to tell. `holderName` is "the office" when nobody active holds it.
     if (ld && ld.agent_id !== m.userId) {
       const holder = await activeUser(m.tenantId, ld.agent_id);
-      const who = ld.name || ld.phone || 'This buyer';
+      // Name the buyer only to someone who sent them this link themselves; a
+      // group link's tap that became another agent's lead is not theirs to see
+      // (permissions.ts: a lead you neither made nor hold is not visible).
+      const who = link.lead_id === leadId ? (ld.name || ld.phone || 'This buyer') : 'This buyer';
       throw new ShareError(403, 'lead_moved', holder ? `${who} is ${holder.name || 'a colleague'}'s lead now.` : `${who} is with the office now.`,
         { holderName: holder?.name || 'the office' });
     }
