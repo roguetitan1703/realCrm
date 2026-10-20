@@ -71,7 +71,16 @@ Not re-read this session; as of 17 Oct:
   - Shortlist bug: 0 saves removed 2+ homes anywhere. bhumi has 4 removal
     saves in all (5 and 10 Oct), each one home, none with an add in the same
     save — no sign it ever fired in production.
-  - Phones: see BACKLOG Bugs (owner phones; 4 users who cannot sign in).
+  - Phones by format (second read, same day): about 160 bhumi and 157
+    mahalaxmi owners are real foreign numbers (NRI: +971, +44, +1 …), so
+    last-10 matching is wrong by design; Om chose exact E.164 with a country
+    field (Builder A, `a-phone-model`). Convertible bare/0/91 forms: bhumi
+    users 1, leads 4, owners 58, property owner phones 55; mahalaxmi users 3,
+    leads 1, owners 6, property owner phones 7. Not convertible: 3 bhumi
+    MagicBricks leads with 9 digits (UAE without +971), 2 bhumi rows with a
+    letter. Users colliding after conversion: 0.
+  - Code (OTP) sign-in: `auth_otp` has never held a row in production — the
+    open endpoints were never used. Retired on `development` (b60a54e).
 
 ---
 
