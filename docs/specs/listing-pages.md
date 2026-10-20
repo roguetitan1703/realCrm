@@ -279,11 +279,13 @@ answers the firm's card without resolving the code (below). **(changed)** The
 limit is on misses, not buyers: carriers put many buyers behind one address,
 so valid opens have a ceiling of 600 a minute per address (taps 60, Talk 30,
 catalogue 600, enquiries 10 per 10 minutes). A miss is any code that is no
-use — unknown, off, stopped **or expired** — so the budget cannot tell a
-prober which codes once existed; staff opening their own dead links and
-preview fetchers spend nothing (the preview card arrives from Vercel's shared
-egress address, so a forwarded expired link would otherwise blank every
-buyer's previews). **(changed)** Every 429 is `{ error: 'slow_down', message,
+use — unknown, off, stopped **or expired**. On the API all of them spend it
+alike; staff opening their own dead links spend nothing. On the preview card
+a real-but-unusable code does not spend it for a preview user agent (the card
+arrives from Vercel's shared egress address, so a forwarded expired link would
+otherwise blank every buyer's previews); unknown codes always do. That list
+also matches scripts, so a script on the card route can tell an expired code
+from one that never existed; accepted, as it does not speed up guessing. **(changed)** Every 429 is `{ error: 'slow_down', message,
 firm{name,logo,accent,locale}, cta{phone}, catalogueUrl }` (the firm's
 reply-to; `firm`/`cta` absent only for an unknown firm), so the page can still
 offer WhatsApp and the catalogue:

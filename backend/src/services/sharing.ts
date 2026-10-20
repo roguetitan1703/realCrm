@@ -431,8 +431,8 @@ export async function openCode(f: Firm, code: string, r: PublicReq, flatParam?: 
   // back to this same code. Only on a usable tap code: an unusable one still
   // answers the identical body.
   if (!staff && tap && state === 'active') body.staffSignIn = true;
-  // Every unusable state spends the miss allowance, like an unknown code, so
-  // the allowance cannot tell a prober which codes once existed. Not for
+  // Every unusable state spends the miss allowance, like an unknown code (on
+  // this route; see codeGate for the preview card's exception). Not for
   // staff, who open their own dead links to send fresh ones. (Previews do
   // not come here: they fetch the /share card, which has its own rule.)
   return { body, miss: state !== 'active' && !staff };
@@ -1148,18 +1148,28 @@ export async function creditLink(id: string, leadId: string) {
   if (!lead) throw new ShareError(404, 'lead_not_found', 'That lead no longer exists.');
   assertMayShare(m, lead);
   // ONCE PER LINK AND LEAD. A retry or a second save is not a second
-  // arrival: it wrote another "Came from a link" each time.
-  const [done] = await sql`SELECT 1 AS x FROM crm_timeline_events
-     WHERE tenant_id = ${m.tenantId} AND record_id = ${lead.id} AND type = 'share'
-       AND metadata->>'shareLinkId' = ${id} AND (metadata->>'cameFrom')::boolean IS TRUE LIMIT 1`;
-  if (done) return { ok: true, already: true };
-  // What they were sent is on the shortlist (the same rule as a sent link).
-  await addToShortlist(m.tenantId, lead.id, l.property_ids || []);
-  await addTimelineEvent({
-    record_id: lead.id, type: 'share', title: 'Came from a link',
-    description: `Came from the link sent ${sentOn(l.created_at, (await deskConfigOf(m.tenantId)).timezone)}`,
-    author: m.userId, metadata: { shareLinkId: id, code: l.code, cameFrom: true },
+  // arrival: it wrote another "Came from a link" each time. Check and write
+  // the line in one transaction under a lock on the pair, so a double tap
+  // waits for the first to commit and then finds its line. Written on `tx`,
+  // not through addTimelineEvent (a `share` line carries nothing else), so
+  // the lock never waits on a second connection.
+  const tz = (await deskConfigOf(m.tenantId)).timezone;
+  const already = await sql.begin(async (tx: any) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${`came-from:${m.tenantId}:${id}:${lead.id}`}))`;
+    const [done] = await tx`SELECT 1 AS x FROM crm_timeline_events
+       WHERE tenant_id = ${m.tenantId} AND record_id = ${lead.id} AND type = 'share'
+         AND metadata->>'shareLinkId' = ${id} AND (metadata->>'cameFrom')::boolean IS TRUE LIMIT 1`;
+    if (done) return true;
+    await tx`INSERT INTO crm_timeline_events (id, record_id, type, title, description, author, timestamp, metadata, tenant_id)
+      VALUES (${`evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`}, ${lead.id}, 'share', 'Came from a link',
+              ${`Came from the link sent ${sentOn(l.created_at, tz)}`}, ${m.userId}, ${new Date().toISOString()},
+              ${tx.json({ shareLinkId: id, code: l.code, cameFrom: true })}, ${m.tenantId})`;
+    return false;
   });
+  if (already) return { ok: true, already: true };
+  // What they were sent is on the shortlist (the same rule as a sent link;
+  // one row per home, so a repeat adds nothing).
+  await addToShortlist(m.tenantId, lead.id, l.property_ids || []);
   audit({
     tenant_id: m.tenantId, actor_type: 'user', actor_id: m.userId, actor_label: null,
     action: 'share_link.came_from', target_type: 'share_link', target_id: id, summary: `A lead came from shared link ${l.code}`,
@@ -1348,9 +1358,19 @@ export async function freshLinkFromTap(code: string, origin: string | null) {
   // (Add as lead on a group link's tap) -- that person asked, not the group.
   const leadId: string | null = link.lead_id || tap.lead_id || null;
   if (!isDeskRole(m.role)) {
-    const [ld] = leadId ? await sql`SELECT agent_id FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${leadId}` : [null];
+    const [ld] = leadId ? await sql`SELECT name, phone, agent_id FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${leadId}` : [null];
     if (link.created_by !== m.userId && ld?.agent_id !== m.userId) {
       throw new ShareError(403, 'forbidden', 'Only the person who sent this link, or the office, can send it again.');
+    }
+    // THE SENDER, BUT SOMEONE ELSE'S LEAD NOW. Still refused: the holder owns
+    // the buyer and has the same alert. It was refused as "This lead belongs to
+    // another team member", which named nobody; the sender needs to know whom
+    // to tell. `holderName` is "the office" when nobody active holds it.
+    if (ld && ld.agent_id !== m.userId) {
+      const holder = await activeUser(m.tenantId, ld.agent_id);
+      const who = ld.name || ld.phone || 'This buyer';
+      throw new ShareError(403, 'lead_moved', holder ? `${who} is ${holder.name || 'a colleague'}'s lead now.` : `${who} is with the office now.`,
+        { holderName: holder?.name || 'the office' });
     }
   }
   return createShareLink({ leadId: leadId || undefined, propertyIds: link.property_ids || [], showPrice: !!link.show_price }, origin, { freshOf: link.id });

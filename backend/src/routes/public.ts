@@ -65,8 +65,12 @@ async function asFirm<T>(req: Request, f: Firm, fn: () => Promise<T>): Promise<T
 // people behind one public address (CGNAT), so a tight per-address limit on
 // real opens answered 429 to real buyers. Valid opens get a generous ceiling;
 // what is tight is the allowance for codes that are no use — unknown, off,
-// stopped or expired alike, so the allowance cannot tell a prober which codes
-// once existed.
+// stopped or expired — so guessing stays slow. On the API every one of them
+// spends it alike. On the /share preview card a real-but-unusable code does
+// not spend it for a preview user agent (see that route), and that list also
+// matches scripts (curl, python): a script there can tell an expired code
+// from one that never existed by watching the allowance. Accepted: it does
+// not make guessing faster, since unknown codes still spend it.
 const codeGate = (ip: string) => hit(`s:${ip}`, 600, 60_000) && !spent(`miss:${ip}`, 30, 10 * 60_000);
 const codeMiss = (ip: string) => { hit(`miss:${ip}`, 1_000_000, 10 * 60_000); };
 

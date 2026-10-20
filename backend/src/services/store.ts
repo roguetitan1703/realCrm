@@ -6056,6 +6056,35 @@ const UNOWNED_GRACE_MINUTES = 1;
  */
 const SWEEP_CAP = 50;
 
+/**
+ * WHO THE ROTA CAN HAND TO on this side: its members who can take work, or,
+ * for leads with nobody on the rota, everyone on duty (nextRoutedAgent's own
+ * fallback). The idle sweeps use it to leave out, in SQL, the records the rota
+ * cannot move: with one person in the pool, that person's own records. Picked
+ * and then skipped in the loop, those used up the 50 every pass -- a one-person
+ * rota holding 50 old idle leads starved everyone else's for ever.
+ */
+async function sweepPool(tenantId: string, side: 'leads' | 'owners'): Promise<string[]> {
+  const col = sql(side === 'leads' ? 'active_agent_ids' : 'owner_active_agent_ids');
+  const rows = await sql`
+    SELECT DISTINCT x.id FROM crm_routing_rules r, jsonb_array_elements_text(r.${col}) AS x(id)
+     WHERE r.tenant_id = ${tenantId} AND ${canTakeWork(tenantId, sql`x.id`)}`;
+  if (rows.length) return (rows as any[]).map(r => r.id);
+  return side === 'leads' ? onDutyWorkers(tenantId) : [];
+}
+
+/** SQL: the record's holder is not the pool's only person, so the rota can move it. */
+const movable = (pool: string[]) => (pool.length === 1 ? sql`agent_id <> ${pool[0]}` : sql`TRUE`);
+
+/** The rota's next person who is not `holder`: one more turn when it lands on them. */
+async function nextOtherThan(holder: string, pool: string[], deal: () => Promise<string | null>): Promise<string | null> {
+  for (let i = 0; i <= pool.length + 1; i++) {
+    const next = await deal();
+    if (!next || next !== holder) return next;
+  }
+  return null;
+}
+
 export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
   if (!rules.sweep_unassigned_enabled || !autoAssigns(rules, 'leads')) return 0;
@@ -6105,6 +6134,8 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
   if (!rules.reassign_idle_enabled || !autoAssigns(rules, 'leads')) return 0;
   const days = Math.max(Number(rules.reassign_idle_days) || 3, 1);
+  const pool = await sweepPool(tenantId, 'leads');
+  if (!pool.length) return 0;
   // "No activity" is the §1 predicate — something a PERSON did on the record —
   // not `updated_at`, which a portal push, a sweep or any background stamp
   // moves without anyone having gone near the lead. So a lead could be reported
@@ -6119,6 +6150,7 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
       AND ${noPersonActivitySince(days)}
       AND ${notHandedOnSince(days)}
       AND NOT ${FOLLOWUP_UPCOMING}
+      AND ${movable(pool)}
     ORDER BY created_at LIMIT ${SWEEP_CAP}
   `;
   let n = 0;
@@ -6128,8 +6160,8 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
   const movedNow: { recordId: string; toName: string | null }[] = [];
   for (const lead of rows) {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${lead.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
-    const agentId = await nextRoutedAgent();
-    if (!agentId || agentId === lead.agent_id) continue;
+    const agentId = await nextOtherThan(lead.agent_id, pool, nextRoutedAgent);
+    if (!agentId) continue;
     // Still with the holder this pass found: a hand-over in the meantime wins.
     const moved = await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW()
       WHERE id = ${lead.id} AND tenant_id = ${tenantId} AND agent_id = ${lead.agent_id} RETURNING id`;
@@ -6257,12 +6289,15 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
   if (!rules.owner_reassign_idle_enabled || !autoAssigns(rules, 'owners')) return 0;
   const days = Math.max(Number(rules.owner_reassign_idle_days) || 3, 1);
+  const pool = await sweepPool(tenantId, 'owners');
+  if (!pool.length) return 0;
   // Same two predicates as the lead sweep, against the owner's own timeline.
   const rows = await sql`
     SELECT id, agent_id FROM crm_owners
     WHERE tenant_id = ${tenantId} AND coalesce(stage, '') NOT IN ${sql(OWNER_TERMINAL_STATUSES)} AND agent_id IS NOT NULL
       AND ${noPersonActivitySince(days, 'crm_owners')}
       AND ${notHandedOnSince(days, 'crm_owners')}
+      AND ${movable(pool)}
     ORDER BY created_at LIMIT ${SWEEP_CAP}
   `;
   let n = 0;
@@ -6270,8 +6305,8 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
   const movedNow: { recordId: string; toName: string | null }[] = [];
   for (const owner of rows) {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${owner.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
-    const agentId = await nextRoutedOwnerAgent();
-    if (!agentId || agentId === owner.agent_id) continue;
+    const agentId = await nextOtherThan(owner.agent_id, pool, nextRoutedOwnerAgent);
+    if (!agentId) continue;
     const moved = await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW()
       WHERE id = ${owner.id} AND tenant_id = ${tenantId} AND agent_id = ${owner.agent_id} RETURNING id`;
     if (!moved.length) continue;
