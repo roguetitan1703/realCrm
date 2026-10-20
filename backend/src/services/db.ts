@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import postgres from 'postgres';
 import { databaseUrl, assertEnvMatchesDatabase, assertRequiredConfig, appEnv } from './env';
+import { planPhones } from './phoneRepair';
 
 // 1. Zero-dependency .env loader
 
@@ -639,6 +640,7 @@ export async function initSchema(): Promise<void> {
     await migrateAuthV2();
     await migrateIngestionD1();
     await migrateSharing();
+    await migratePhones();
 
     console.log('[Supabase DB] ✅ PostgreSQL schema initialization completed successfully.');
   } catch (err: any) {
@@ -1272,4 +1274,53 @@ export async function migrateSharing(): Promise<void> {
   await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS catalogue_slug TEXT`);
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_props_catalogue_slug ON crm_properties (tenant_id, catalogue_slug) WHERE catalogue_slug IS NOT NULL;`;
   await sql`CREATE INDEX IF NOT EXISTS idx_crm_props_catalogue ON crm_properties (tenant_id) WHERE in_catalogue = TRUE;`;
+}
+
+/**
+ * EVERY STORED PHONE TO EXACT E.164 (docs/specs/phone.md), once. Read in each
+ * firm's own country; a number that cannot be read with confidence is left
+ * exactly as it is and logged, never guessed. Leads and owners that end up on
+ * one number are left as they are -- two records of one person, nothing merged
+ * -- and logged; searching the number lists both.
+ *
+ * Not runOnce: if two USERS would end up on one number, the unique
+ * (tenant_id, phone) index would stop the boot, so the repair writes nothing,
+ * says which users, and is not marked done -- the next boot tries again after
+ * someone fixes them. Every write is conditional on the row still holding the
+ * value that was read, all in one transaction with the marker. A failure rolls
+ * the whole repair back and is logged; it does not stop the boot.
+ */
+export async function migratePhones(): Promise<void> {
+  try {
+    await repairPhones();
+  } catch (err: any) {
+    console.error(`[Phones] NOT RUN, nothing written: ${err?.message || err}`);
+  }
+}
+
+async function repairPhones(): Promise<void> {
+  const NAME = 'phones_e164';
+  if ((await sql`SELECT 1 FROM schema_migrations WHERE name = ${NAME} LIMIT 1`).length) return;
+  const plan = await planPhones(sql);
+  for (const u of plan.unreadable) {
+    console.warn(`[Phones] left as is (${u.reason}): ${u.tenant_id} ${u.table} ${u.id} ${JSON.stringify(u.raw)}`);
+  }
+  for (const c of plan.otherCollisions) {
+    console.warn(`[Phones] same number after the repair, both kept: ${c.tenant_id} ${c.table} ${c.e164} ${c.ids.join(', ')}`);
+  }
+  if (plan.userCollisions.length) {
+    for (const c of plan.userCollisions) console.error(`[Phones] NOT RUN: users ${c.ids.join(', ')} in ${c.tenant_id} would share ${c.e164}`);
+    return;
+  }
+  let written = 0; let skipped = 0;
+  const byTenant = new Map<string, number>();
+  await sql.begin(async (tx: any) => {
+    for (const c of plan.converts) {
+      const n = await c.table.write(tx, c);
+      if (n) { written += n; byTenant.set(c.tenant_id, (byTenant.get(c.tenant_id) || 0) + n); } else skipped++;
+    }
+    await tx`INSERT INTO schema_migrations (name) VALUES (${NAME}) ON CONFLICT DO NOTHING`;
+  });
+  console.log(`[Phones] E.164 repair: ${written} written${skipped ? `, ${skipped} changed since read and skipped` : ''}, ${plan.unreadable.length} unreadable left, ${plan.otherCollisions.length} lead/owner collisions left`
+    + (byTenant.size ? ` · ${[...byTenant].map(([t, n]) => `${t} ${n}`).join(', ')}` : ''));
 }

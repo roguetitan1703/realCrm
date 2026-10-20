@@ -35,7 +35,7 @@
  * --list=all prints every unreadable row; by default at most 25 per table.
  */
 import postgres from 'postgres';
-import { readPhone } from '../../../src/lib/phone.js';
+import { PHONE_TABLES, firmCountries, verdict, type PhoneRow } from '../services/phoneRepair.js';
 import { getCountryCallingCode } from 'libphonenumber-js/max';
 
 const arg = (k: string) => process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1];
@@ -46,20 +46,6 @@ if (!url) throw new Error(`${env === 'production' ? 'DATABASE_URL' : 'DEV_DATABA
 if (env === 'production' && url === process.env.DEV_DATABASE_URL) throw new Error('DATABASE_URL is the development database.');
 const onlyTenant = arg('tenant');
 const listAll = arg('list') === 'all';
-
-type Row = { tenant_id: string; id: string; raw: string | null; extra?: string };
-type Table = { name: string; read: (q: any) => Promise<Row[]>; unique?: boolean };
-
-const TABLES: Table[] = [
-  { name: 'users.phone', unique: true, read: q => q`SELECT tenant_id, id, phone AS raw, CASE WHEN deleted_at IS NOT NULL THEN 'deleted' ELSE status END AS extra FROM users` },
-  { name: 'users.metadata.phone', read: q => q`SELECT tenant_id, id, metadata->>'phone' AS raw FROM users WHERE metadata ? 'phone'` },
-  { name: 'crm_agents.metadata.phone', read: q => q`SELECT tenant_id, id, metadata->>'phone' AS raw FROM crm_agents WHERE metadata ? 'phone'` },
-  { name: 'crm_leads.phone', read: q => q`SELECT tenant_id, id, phone AS raw FROM crm_leads` },
-  { name: 'crm_owners.phone', read: q => q`SELECT tenant_id, id, phone AS raw FROM crm_owners` },
-  { name: 'crm_properties.owner_phone', read: q => q`SELECT tenant_id, id, owner_phone AS raw FROM crm_properties` },
-  { name: 'crm_agreements.party_phone', read: q => q`SELECT tenant_id, id, party_phone AS raw FROM crm_agreements` },
-  { name: 'settings.replyToPhone', read: q => q`SELECT tenant_id, key AS id, value->'sharing'->>'replyToPhone' AS raw FROM crm_settings WHERE key = 'default'` },
-];
 
 /** How a number that converts was stored. */
 function shape(raw: string, cc: string): string {
@@ -77,16 +63,16 @@ function shape(raw: string, cc: string): string {
 const sql = postgres(url, { max: 1, ssl: 'require' });
 try {
   await sql.begin('READ ONLY', async (q: any) => {
-    const settings = await q`SELECT tenant_id, value->'locale'->>'country' AS country FROM crm_settings WHERE key = 'default'`;
-    const countryOf = new Map<string, string>((settings as any[]).map(s => [s.tenant_id, String(s.country || 'IN').toUpperCase()]));
+    // The same tables, country and verdict the repair uses (services/phoneRepair.ts).
+    const countryOf = await firmCountries(q);
     const tenants = (await q`SELECT id FROM tenants ORDER BY id`).map((t: any) => t.id).filter((t: string) => !onlyTenant || t === onlyTenant);
     console.log(`PHONE DRY RUN · ${env} · ${new Date().toISOString()} · read-only\n`);
     for (const tenant of tenants) {
       const country = countryOf.get(tenant) || 'IN';
       const cc = String(getCountryCallingCode(country as any));
       console.log(`══ ${tenant} (country ${country}, +${cc})`);
-      for (const t of TABLES) {
-        const rows = ((await t.read(q)) as Row[]).filter(r => r.tenant_id === tenant);
+      for (const t of PHONE_TABLES) {
+        const rows = ((await t.read(q)) as PhoneRow[]).filter(r => r.tenant_id === tenant);
         const c = { rows: rows.length, empty: 0, already: 0, alreadyForeign: 0, converts: 0, convertsForeign: 0, unreadable: 0 };
         const shapes = new Map<string, number>();
         const notMobile = { valid: 0, invalid: 0 };
@@ -98,16 +84,17 @@ try {
           if (!raw) { c.empty++; continue; }
           const d = raw.replace(/\D/g, '');
           const ccNotMobile = cc === '91' && d.length === 12 && d.startsWith('91') && !/^[6-9]/.test(d.slice(2));
-          const p = readPhone(raw, country);
-          if (ccNotMobile) p.ok ? notMobile.valid++ : notMobile.invalid++;
-          if (!p.ok) {
+          const v = verdict(raw, country);
+          if (ccNotMobile) v.kind === 'unreadable' ? notMobile.invalid++ : notMobile.valid++;
+          if (v.kind === 'empty') { c.empty++; continue; }
+          if (v.kind === 'unreadable') {
             c.unreadable++;
-            const why = p.reason === 'invalid' ? (d.length < 10 ? `invalid, ${d.length} digits` : 'invalid') : p.reason;
+            const why = v.reason === 'invalid' ? (d.length < 10 ? `invalid, ${d.length} digits` : 'invalid') : v.reason;
             bad.push(`${r.id}  ${JSON.stringify(raw)}  ${why}${r.extra ? `  (${r.extra})` : ''}`);
             continue;
           }
-          const foreign = p.country !== country;
-          if (raw === p.e164) { c.already++; if (foreign) c.alreadyForeign++; }
+          const p = v; const foreign = v.foreign;
+          if (v.kind === 'same') { c.already++; if (foreign) c.alreadyForeign++; }
           else {
             c.converts++; if (foreign) c.convertsForeign++;
             const s = shape(raw, cc); shapes.set(s, (shapes.get(s) || 0) + 1);
