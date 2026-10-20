@@ -523,18 +523,6 @@ export const api = {
   setTenantId: () => {},
 
   // ── Auth ──────────────────────────────────────────────────────────────────
-  // Tenant users sign in by phone OTP; the returned JWT is stored and attached
-  // to every subsequent request by getHeaders().
-  // identifier is a phone or an email; the backend delivers the code accordingly.
-  requestOtp: (identifier) => request('/auth/otp/request', { method: 'POST', body: JSON.stringify({ identifier }) }),
-  verifyOtp: async (identifier, code) => {
-    const res = await request('/auth/otp/verify', { method: 'POST', body: JSON.stringify({ identifier, code }) });
-    // Through setToken so OTP lands in the same per-workspace key password
-    // sign-in uses. It wrote only the global one, which nothing reads now —
-    // OTP is legacy and being retired, and it would have retired itself.
-    if (res?.token) api.setToken(res.token);
-    return res;
-  },
   me: () => request('/auth/me'),
   // Same resolution the request headers use, so "are we signed in?" and "what
   // do we send?" can never answer differently. App.jsx boots the desk on this,
