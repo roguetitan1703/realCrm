@@ -572,7 +572,8 @@ export function CataloguePage({ tenant }) {
           {s.failed && <div className="pv-err" role="alert">{s.offline ? 'No connection.' : 'Could not load more.'} <button type="button" className="pv-link" onClick={() => setTries(t => t + 1)}>Try again</button></div>}
         </>
       )}
-      <HomesLikeThese onAsk={() => setAsk({ kind: 'homes' })} />
+      {/* An ask needs a deal, a size or a place: with no filter set there is nothing to match. */}
+      {filtered && <HomesLikeThese onAsk={() => setAsk({ kind: 'homes' })} />}
       {ask && <AskSheet tenant={tenant} device={device} firm={firm} kind="homes" filters={{ deal: f.deal, config: f.bhk, locality: f.area }} onClose={() => setAsk(null)} />}
       <section className="pv-enq-wrap" id="enquire">
         <h2>Tell us what you're looking for</h2>
@@ -726,7 +727,9 @@ function AskSheet({ tenant, device, firm, kind, code, propertyId, filters, onClo
   const [st, setSt] = useState({ busy: false, done: false, err: '', talk: '' })
   const [tried, setTried] = useState(false)
   const set = (k) => (e) => setV(x => ({ ...x, [k]: e.target.value }))
-  const problem = tried ? phoneProblem(v.phone) : ''
+  // The phone box says why a number cannot be sent (PhoneInput, the one
+  // number reader); until it has loaded, the server's answer does.
+  const [phoneBad, setPhoneBad] = useState(false)
   // Once anything is typed, a stray tap outside does not throw it away.
   const typed = !!(v.name.trim() || v.phone.trim()) && !st.done
 
@@ -745,7 +748,7 @@ function AskSheet({ tenant, device, firm, kind, code, propertyId, filters, onClo
   })
 
   const day = slots?.days.find(d => d.date === pick.date)
-  const ready = looksLikePhone(v.phone) && (kind !== 'visit' || (pick.date && pick.time))
+  const ready = !!v.phone.trim() && !phoneBad && (kind !== 'visit' || (pick.date && pick.time))
 
   const submit = (e) => {
     e.preventDefault()
@@ -770,8 +773,8 @@ function AskSheet({ tenant, device, firm, kind, code, propertyId, filters, onClo
           talk: err?.status === 429 ? (err?.body?.cta?.phone || '') : '',
           err: err instanceof TypeError ? 'No connection. Try again.'
             : err?.status === 429 ? 'We could not take this just now. Try again later.'
-            : err?.status === 410 ? 'This link is no longer active.'
-            : err?.status === 400 ? (err?.body?.message || 'Check the number and try again.')
+            : err?.status === 404 ? 'This is no longer available.'
+            : err?.status === 422 || err?.status === 400 ? (err?.body?.message || 'Check the number and try again.')
             : 'Could not send. Try again.' })
       })
   }
@@ -810,8 +813,12 @@ function AskSheet({ tenant, device, firm, kind, code, propertyId, filters, onClo
               </>
             )}
             <label className="pv-field"><span>Name</span><input value={v.name} onChange={set('name')} autoComplete="name" /></label>
-            <label className="pv-field"><span>Mobile number</span><input value={v.phone} onChange={set('phone')} inputMode="tel" autoComplete="tel" placeholder={phonePlaceholder('98xxx xxxxx')} onBlur={() => setTried(true)} required /></label>
-            {problem && <div className="pv-err" role="alert">{problem}</div>}
+            <div className="pv-field"><label htmlFor="ask-phone">Mobile number</label>
+              <PhoneOrPlain plain={<input id="ask-phone" value={v.phone} onChange={set('phone')} inputMode="tel" autoComplete="tel" required />}>
+                <PhoneInput id="ask-phone" value={v.phone} showProblem={tried} required
+                  onChange={e => { setV(x => ({ ...x, phone: e.target.value })); setPhoneBad(!!e.problem) }} />
+              </PhoneOrPlain>
+            </div>
             {/* Not for people. A bot fills every field it finds. */}
             <input className="pv-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={v.website} onChange={set('website')} name="website" />
             {st.err && <div className="pv-err" role="alert">{st.err}</div>}

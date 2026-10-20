@@ -227,7 +227,8 @@ export const LEADS_DEF = {
 
   // Per-key filter logic (mirrors the module's normalized predicates).
   rowMatch(l, key, vals) {
-    if (key === 'source') return vals.some(s => eqi(l.source, s))
+    // '_none' is "Not stated" (store.ts SOURCE_NONE).
+    if (key === 'source') return vals.some(s => (s === '_none' ? !l.source : eqi(l.source, s)))
     if (key === 'agent') return vals.includes(l.agentId || '_none')
     if (key === 'locality') {
       return vals.some(loc => {

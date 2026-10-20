@@ -149,7 +149,7 @@ export async function initSchema(): Promise<void> {
         phone TEXT,
         email TEXT,
         stage TEXT DEFAULT 'New',
-        source TEXT DEFAULT 'Website',
+        source TEXT,
         agent_id TEXT,
         req JSONB DEFAULT '{}'::jsonb,
         notes JSONB DEFAULT '[]'::jsonb,
@@ -166,6 +166,10 @@ export async function initSchema(): Promise<void> {
     // Without these, every lead silently loses its follow-up and nothing is ever
     // overdue — which empties the agent's Today screen and the Overdue KPI.
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS follow_up JSONB;`;
+    // No source is not "Website" (CLAUDE.md §3.1): a row written without one
+    // stays empty and reads "Not stated". Rows already stored as Website stay
+    // (PARKED.md: they cannot be told from real ones). Idempotent.
+    await sql`ALTER TABLE crm_leads ALTER COLUMN source DROP DEFAULT;`;
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS overdue BOOLEAN DEFAULT FALSE;`;
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS import_batch_id TEXT;`;
     // A CHANGE STAMP THE DESK CAN POLL. It existed only in migrations/010, a
@@ -1265,8 +1269,12 @@ export async function migrateSharing(): Promise<void> {
   // WHAT A BUYER ASKED on a link or the catalogue (buyerAsks.ts): a call back,
   // a visit (requested until the holder confirms it), or new homes like these
   // (`ask` the deal/size/place, `seen_ids` the homes already matching,
-  // `alerted_ids` the ones the last alert named). Kept: the lead's history,
-  // one row per ask, capped at 100 a day per firm (data-lifecycle.md).
+  // `alerted_ids` the ones the last alert named). `count`: the same ask again
+  // the same day folds into this row. `told_at`: when its alert went, so a
+  // restart between the answer and the alert is caught on the next sweep.
+  // `made_lead`: this ask created the lead (only then is a call back booked).
+  // Kept: the lead's history; with the catalogue enquiries, at most 100 a day
+  // per firm (data-lifecycle.md).
   await sql`
     CREATE TABLE IF NOT EXISTS crm_buyer_asks (
       id TEXT PRIMARY KEY,
@@ -1283,12 +1291,19 @@ export async function migrateSharing(): Promise<void> {
       alerted_ids TEXT[] NOT NULL DEFAULT '{}',
       status TEXT NOT NULL DEFAULT 'open',
       last_alert_at TIMESTAMPTZ,
+      count INT NOT NULL DEFAULT 1,
+      told_at TIMESTAMPTZ,
+      made_lead BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ
     );
   `;
+  await sql`ALTER TABLE crm_buyer_asks ADD COLUMN IF NOT EXISTS count INT NOT NULL DEFAULT 1;`;
+  await sql`ALTER TABLE crm_buyer_asks ADD COLUMN IF NOT EXISTS told_at TIMESTAMPTZ;`;
+  await sql`ALTER TABLE crm_buyer_asks ADD COLUMN IF NOT EXISTS made_lead BOOLEAN NOT NULL DEFAULT FALSE;`;
   await sql`CREATE INDEX IF NOT EXISTS idx_buyer_asks_lead ON crm_buyer_asks (tenant_id, lead_id, created_at DESC);`;
   await sql`CREATE INDEX IF NOT EXISTS idx_buyer_asks_open_homes ON crm_buyer_asks (tenant_id) WHERE kind = 'homes' AND status = 'open';`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_buyer_asks_untold ON crm_buyer_asks (tenant_id, created_at) WHERE told_at IS NULL;`;
 
   // WHEN A PERIODIC JOB LAST RAN, per firm, and what it did (retention.ts). The
   // gate for "once a month", so a restart is not a run. Small: one row per

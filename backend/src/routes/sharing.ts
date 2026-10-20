@@ -9,7 +9,7 @@
  *   POST /api/v1/share-taps/:code/fresh                 (a new link with the same homes and recipient)
  *   POST /api/v1/share-taps/:code/lead      {phone, name?} | {leadId}
  *   GET  /api/v1/buyer-asks/:id                         (what a buyer's form alert opens)
- *   POST /api/v1/buyer-asks/:id/confirm                 (a requested visit → the lead's booked site visit)
+ *   POST /api/v1/buyer-asks/:id/confirm {replace?}      (a requested visit → the lead's booked site visit; 409 booking_exists if something else is booked)
  *
  * Also, in their own routers: GET /leads/:id/shares (routes/leads.ts),
  * POST /properties/catalogue (routes/properties.ts), PATCH /auth/me (routes/auth.ts).
@@ -86,6 +86,6 @@ buyerAsksRouter.get('/:id', async (req: Request, res: Response) => {
 });
 
 buyerAsksRouter.post('/:id/confirm', async (req: Request, res: Response) => {
-  try { return res.json({ success: true, ...(await confirmVisit(String(req.params.id))) }); }
+  try { return res.json({ success: true, ...(await confirmVisit(String(req.params.id), { replace: req.body?.replace === true })) }); }
   catch (err) { return shareFail(res, err); }
 });

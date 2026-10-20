@@ -407,7 +407,11 @@ export async function landEnquiry(args: {
   /** Who a NEW lead goes to instead of the arrival rule: the sender of a
    *  shared link with no recipient (buyerAsks.ts). Never moves an existing one. */
   agentId?: string | null;
-}): Promise<{ status: string; leadId?: string | null; reason?: string }> {
+  /** false: the caller sends the one alert about this enquiry itself (the
+   *  buyer forms name what was asked), so no lead_assigned, lead_unrouted or
+   *  lead_repeat goes out beside it. The return says what happened. */
+  announce?: boolean;
+}): Promise<{ status: string; leadId?: string | null; reason?: string; previousStage?: string | null }> {
   const { tenantId, inboxId } = args;
   const integration = { id: args.integrationId || `${args.provider.toLowerCase()}:${tenantId}`, tenant_id: tenantId, provider: args.provider };
   const desk = args.desk || await deskConfigOf(tenantId);
@@ -480,8 +484,8 @@ export async function landEnquiry(args: {
           description: [lead.name && `As ${lead.name}`, said || 'Enquired again'].filter(Boolean).join(' · '),
           author: 'System', metadata: { source: integration.provider, unverified: true },
         });
-        if (session?.isNewSession) {
-          const terminal = existing.stage === REJECTED_STATUS || existing.stage === WON_STATUS;
+        const terminal = existing.stage === REJECTED_STATUS || existing.stage === WON_STATUS;
+        if (session?.isNewSession && args.announce !== false) {
           const n = {
             tenantId, type: 'lead_repeat',
             data: { name: existing.name || existing.phone, source: integration.provider, changed: 0, previousStage: terminal ? existing.stage : null },
@@ -491,7 +495,7 @@ export async function landEnquiry(args: {
           await notifyOrDesk(keeper, n).catch(() => 0);
         }
         await mark('merged', { leadId: existing.id });
-        return { status: 'merged', leadId: existing.id };
+        return { status: 'merged', leadId: existing.id, previousStage: terminal ? existing.stage : null };
       }
       if (existing) {
         const note = `[Repeat enquiry via ${integration.provider}] ${new Date().toLocaleString(desk.locale.numberLocale, { timeZone: desk.timezone })}`;
@@ -648,15 +652,17 @@ export async function landEnquiry(args: {
       }
 
       // No agent: createLead applies the firm's arrival rule itself
-      // (arrivalLeadAgent: the rota, or nobody under Leave unassigned), so a payload never names who gets the lead and a
-      // named agent in createLead always means a person chose one.
+      // (arrivalLeadAgent: the rota, or nobody under Leave unassigned). A
+      // payload never names who gets the lead. The one named agent is
+      // `args.agentId`: a buyer form on a shared link with no recipient hands
+      // the new lead to the link's sender (buyerAsks.ts), not a person's choice.
       const { external_id, ...leadFields } = lead;
       const created = await createLead({
         ...leadFields,
         agentId: args.agentId || undefined, agent_id: undefined,
         stage: 'New',
         source: leadFields.source || integration.provider,
-      } as any, undefined, { phoneAsReceived: true });
+      } as any, undefined, { phoneAsReceived: true, announce: args.announce });
 
       // The FIRST enquiry gets a row too, so the table is the whole history
       // rather than "everything after the first one" — otherwise a lead that

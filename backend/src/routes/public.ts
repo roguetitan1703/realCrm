@@ -211,25 +211,33 @@ publicRouter.get('/forms/:tenant/slots', async (req: Request, res: Response) => 
 
 publicRouter.post('/forms/:tenant/ask', async (req: Request, res: Response) => {
   const ip = ipOf(req);
-  // The catalogue form's limits: a flood ceiling per address (a carrier
-  // address is many buyers), three an hour per number, and the firm's daily
-  // cap in buyerAsks.ts. A code that resolves nothing spends the miss allowance.
-  if (!hit(`ask:${ip}`, 10, 10 * 60_000) || (req.body?.code && !codeGate(ip))) return slow(res, String(req.params.tenant));
+  // The limits: a flood ceiling per address (a carrier address is many
+  // buyers), three an hour per number, and the firm's one public budget
+  // (sharing.ts PUBLIC_FORMS_PER_DAY, shared with the catalogue enquiry).
+  // An ask naming a code or a home goes through the code gate: probing for
+  // codes or homes through this form costs what probing the page does.
+  const probes = !!(req.body?.code || req.body?.propertyId);
+  if (!hit(`ask:${ip}`, 10, 10 * 60_000) || (probes && !codeGate(ip))) return slow(res, String(req.params.tenant));
   try {
     const f = await firmBySlug(String(req.params.tenant));
     if (!f) return res.status(404).json(NOT_FOUND);
     const b = req.body || {};
     // The hidden field: a bot fills it, a person never sees it. Answered like a real ask.
     if (String(b.company || b.website || '').trim()) return res.json({ ok: true });
-    const digits = String(b.phone || '').replace(/\D/g, '').slice(-10);
-    if (digits.length === 10 && !hit(`ask-phone:${f.id}:${digits}`, 3, 60 * 60_000)) return slow(res, f.slug);
+    // Keyed by the exact number (docs/specs/phone.md); one that cannot be read
+    // is refused by buyerAsk (buyerPhone) before it reaches anything.
+    const key = phoneKey(b.phone, (await localeOf(f.id)).country);
+    if (key && !hit(`ask-phone:${f.id}:${key}`, 3, 60 * 60_000)) return slow(res, f.slug);
     const out = await asFirm(req, f, () => buyerAsk(f, {
       kind: b.kind, name: b.name, phone: b.phone, code: b.code, propertyId: b.propertyId,
       date: b.date, time: b.time, filters: b.filters,
     }, pubReq(req)));
     return res.json(out);
   } catch (err: any) {
-    if (err instanceof ShareError && err.status === 404 && req.body?.code) codeMiss(ip);
+    // EVERY UNUSABLE CODE OR HOME ANSWERS THE SAME: wrong, a tap's, off,
+    // stopped, expired, or a home not on that page — the page's one body, and
+    // the miss allowance spent, so the form cannot tell a prober which it was.
+    if (err instanceof ShareError && err.status === 404) { codeMiss(ip); return res.status(404).json(NOT_FOUND); }
     return shareFail(res, err);
   }
 });

@@ -61,6 +61,8 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 
 ## Small
 
+- Visit slots on the buyer forms ignore the firm's days off: every day of the
+  next week offers working hours (`buyerAsks.ts visitSlots`).
 - Schedule follow-up has no busy guard; a double tap sends two writes (the
   server drops an identical one, `sameBooking`).
 - Boot sends four requests (bootstrap, desk-summary, owners summary, unread

@@ -148,6 +148,16 @@ function rule(test: CloseTest, tz: string): Rule | null {
         done: sql`((n.record_kind = 'lead' AND (${lw.done} OR ${freshToLead})) OR ${tap(tapDone)})`,
       };
     }
+    // A buyer's form (buyerAsks.ts): share_work, and — when the alert went to
+    // someone who does not hold the lead (the desk, for a lead that arrived
+    // unassigned) — somebody now holding it hands it to them.
+    case 'buyer_ask': {
+      const sw = rule('share_work', tz)!;
+      const heldByOther = sql`EXISTS (SELECT 1 FROM crm_leads l
+          WHERE l.tenant_id = n.tenant_id AND l.id = ANY(n.record_ids)
+            AND l.agent_id IS NOT NULL AND l.agent_id <> n.user_id)`;
+      return { pending: sql`(${sw.pending} AND NOT ${heldByOther})`, done: sw.done };
+    }
     case 'opened': return null;
   }
 }

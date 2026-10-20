@@ -38,15 +38,21 @@ export default function BuyerAskModal({ store, go, Modal, id }) {
     : `${a.homes.length === 1 ? '1 new home matches' : `${a.homes.length} new homes match`} ${who}`
   const openLead = () => { store.closeModal(); go('leads', { leadId: a.lead.id, leadOpen: true }) }
 
+  // A lead has one booking. Confirm never replaces another silently: the
+  // server answers 409 booking_exists with what is booked, shown here, and
+  // the button becomes Replace it.
+  const [clash, setClash] = useState('')
   const confirm = async () => {
     if (busy) return
     setBusy(true); setErr('')
     try {
-      await api.confirmBuyerVisit(a.id)
+      await api.confirmBuyerVisit(a.id, { replace: !!(clash || a.booked) })
       store.touched?.()
       store.toast('Site visit booked')
-      setS(x => ({ ...x, a: { ...x.a, status: 'confirmed' } }))
+      setClash('')
+      setS(x => ({ ...x, a: { ...x.a, status: 'confirmed', booked: null } }))
     } catch (e) {
+      if (e?.status === 409 && e?.body?.error === 'booking_exists') { setClash(e.body.booked || e.body.message || 'Something'); return }
       setErr(e?.status === 409 ? 'That time has passed. Pick another time.'
         : e?.status === 403 ? (e?.body?.message || 'Only the person holding this lead, or the office, can confirm it.')
         : e instanceof TypeError ? 'No connection. Nothing was booked.' : 'Could not book it. Try again.')
@@ -85,11 +91,13 @@ export default function BuyerAskModal({ store, go, Modal, id }) {
             {a.home && <div className="bask-row"><Icon name="building" size={15} /><span>{a.home.title}</span></div>}
             {a.kind === 'visit' && <div className="bask-row"><Icon name="calendar" size={15} /><span>{when(a.at)}</span></div>}
             {a.kind === 'callback' && a.at && new Date(a.at) > new Date() && <div className="bask-row"><Icon name="clock" size={15} /><span>{when(a.at)}</span></div>}
+            {a.kind === 'visit' && a.status !== 'confirmed' && (clash || a.booked)
+              && <div className="bask-row bask-sub"><Icon name="calendar" size={15} /><span>Booked: {clash || a.booked}</span></div>}
             {a.kind === 'homes' && a.ask && <div className="bask-row"><Icon name="search" size={15} /><span>{a.ask}</span></div>}
             {a.kind === 'homes' && a.homes.map(h => <div key={h.id} className="bask-home">{h.title}</div>)}
             {/* What they typed, when it is not what the lead already says. */}
             {a.name && a.name !== a.lead.name && <div className="bask-row bask-sub"><Icon name="person" size={15} /><span>{a.name}</span></div>}
-            {a.phone && a.lead.phone && String(a.phone).replace(/\D/g, '').slice(-10) !== String(a.lead.phone).replace(/\D/g, '').slice(-10)
+            {a.phone && a.lead.phone && a.phone !== a.lead.phone
               && <div className="bask-row bask-sub"><Icon name="phone" size={15} /><span className="mono-num">{a.phone}</span></div>}
           </div>
           {err && <div className="snd-err" role="alert">{err}</div>}
@@ -102,7 +110,7 @@ export default function BuyerAskModal({ store, go, Modal, id }) {
               ? <Button variant="primary" icon="check" disabled>Booked</Button>
               : <>
                 <Button disabled={busy} onClick={anotherTime}>Another time</Button>
-                <Button variant="primary" disabled={busy} onClick={confirm}>{busy ? 'Booking…' : 'Confirm'}</Button>
+                <Button variant="primary" disabled={busy} onClick={confirm}>{busy ? 'Booking…' : (clash || a.booked) ? 'Replace it' : 'Confirm'}</Button>
               </>)}
             {a.kind === 'homes' && a.homes.length > 0 && (
               <Button variant="primary" icon="wa" disabled={busy} onClick={sendHomes}>Send</Button>

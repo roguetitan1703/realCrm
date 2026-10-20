@@ -47,6 +47,11 @@ const whenLabel = (at: string | null | undefined, desk: CopyDesk) => {
 const facts = (...parts: (string | null | undefined | false)[]) =>
   parts.filter(Boolean).join(' · ') || undefined;
 
+/** A buyer's form, asked again the same day: " (3×)". */
+const askedAgain = (d: any) => (Number(d.count) > 1 ? ` (${d.count}×)` : '');
+/** What the arrival alert would have said: new, nobody holding it, or a closed lead back. */
+const askFacts = (d: any): (string | false)[] => [!!d.newLead && 'new lead', !!d.unassigned && 'nobody has it yet', !!d.previousStage && `was ${d.previousStage}`];
+
 type Builders = Record<string, (d: any, desk: CopyDesk) => NotifCopy>;
 
 export const COPY: Builders = {
@@ -154,14 +159,21 @@ export const COPY: Builders = {
     title: d.name ? `${d.name} opened an expired link` : 'Someone opened an expired link',
     body: facts(d.n && plural(d.n, 'home'), d.sentOn && `sent ${d.sentOn}`),
   }),
-  // A buyer's form (listing-pages.md §A.6). The name is the lead's, else what they typed.
+  // A buyer's form (listing-pages.md §A.6). The name is the lead's, else what
+  // they typed. It is the only alert about this arrival, so it says what
+  // lead_assigned / lead_unrouted / lead_repeat would have: a new lead, nobody
+  // holding it, a closed lead asking again. `count`: the same ask again today.
   buyer_callback: (d) => ({
-    title: `${d.name || 'A buyer'} asked for a call back`,
-    body: facts(d.flat),
+    title: `${d.name || 'A buyer'} asked for a call back${askedAgain(d)}`,
+    body: facts(d.flat, ...askFacts(d)),
   }),
   buyer_visit: (d, desk) => ({
-    title: `${d.name || 'A buyer'} asked to visit`,
-    body: facts(d.flat, whenLabel(d.at, desk)),
+    title: `${d.name || 'A buyer'} asked to visit${askedAgain(d)}`,
+    body: facts(d.flat, whenLabel(d.at, desk), ...askFacts(d)),
+  }),
+  buyer_homes: (d) => ({
+    title: `${d.name || 'A buyer'} asked for homes like these${askedAgain(d)}`,
+    body: facts(d.ask, ...askFacts(d)),
   }),
   buyer_new_homes: (d) => ({
     title: `${plural(Number(d.n) || 1, 'new home')} ${Number(d.n) === 1 ? 'matches' : 'match'} ${d.name || 'a buyer'}`,
@@ -208,6 +220,7 @@ const PHRASE: Record<string, (n: number) => string> = {
   share_expired_open: (n) => `${plural(n, 'expired link')} opened`,
   buyer_callback: (n) => `${plural(n, 'call back')} asked for`,
   buyer_visit: (n) => `${plural(n, 'visit')} asked for`,
+  buyer_homes: (n) => `${plural(n, 'buyer')} asked for homes like these`,
   buyer_new_homes: (n) => `new homes for ${plural(n, 'buyer')}`,
   owner_reassign_loop: (n) => `${plural(n, 'owner')} keeps being handed on`,
 };

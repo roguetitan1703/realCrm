@@ -60,7 +60,19 @@ export class ShareError extends Error {
 // ── Small helpers ───────────────────────────────────────────────────────────
 
 const NEUTRAL_TALK = "Hi, I'm looking for a home.";
-const CATALOGUE_ENQUIRIES_PER_DAY = 100;
+/** ONE PUBLIC BUDGET PER FIRM: the catalogue's enquiry form and the buyer
+ *  forms (buyerAsks.ts) together take at most this many a firm-day. Above it
+ *  is a flood, not buyers, and every one would be an alert. */
+export const PUBLIC_FORMS_PER_DAY = 100;
+
+/** What the firm's public forms have taken today: catalogue enquiries and buyer asks, one count. */
+export async function publicFormsToday(tenantId: string, tz: string): Promise<number> {
+  const day = firmDayStart(tz);
+  const [r] = await sql`SELECT
+      (SELECT count(*) FROM crm_share_events WHERE tenant_id = ${tenantId} AND kind = 'enquiry' AND link_id IS NULL AND created_at >= ${day})
+    + (SELECT coalesce(sum(count), 0) FROM crm_buyer_asks WHERE tenant_id = ${tenantId} AND created_at >= ${day}) AS n`;
+  return Number(r?.n) || 0;
+}
 
 const rid = (p: string) => `${p}_${Date.now().toString(36)}${crypto.randomBytes(4).toString('hex')}`;
 
@@ -87,7 +99,7 @@ export const waUrl = (phone: string | null | undefined, text: string, _loc?: Loc
 
 /** A buyer's number as typed into a form: E.164, or 422 phone_invalid with the
  *  reason. Never guessed, so it is never matched to somebody else's lead. */
-async function buyerPhone(tenantId: string, raw: unknown): Promise<string> {
+export async function buyerPhone(tenantId: string, raw: unknown): Promise<string> {
   const country = (await localeOf(tenantId)).country;
   const r = readPhone(raw, country);
   if (r.ok) return r.e164;
@@ -794,15 +806,14 @@ export async function catalogueEnquiry(f: Firm, input: { name?: string; phone?: 
   // not buyers, and every one would be an alert.
   const tz = (await deskConfigOf(f.id)).timezone;
   // The cap, the flat and the settings are independent reads: one round trip.
-  const [[{ today }], flatRows, sharing] = await Promise.all([
-    sql`SELECT count(*)::int AS today FROM crm_share_events
-         WHERE tenant_id = ${f.id} AND kind = 'enquiry' AND link_id IS NULL AND created_at >= ${firmDayStart(tz)}`,
+  const [today, flatRows, sharing] = await Promise.all([
+    publicFormsToday(f.id, tz),
     input.propertyId
       ? sql`SELECT ${SHOWN_COLUMNS} FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)} AND id = ${String(input.propertyId)} LIMIT 1`
       : Promise.resolve([]),
     sharingOf(f.id),
   ]);
-  if (today >= CATALOGUE_ENQUIRIES_PER_DAY) {
+  if (today >= PUBLIC_FORMS_PER_DAY) {
     console.warn(`[Share] catalogue enquiry cap reached for tenant ${f.id}: ${today} today`);
     throw new ShareError(429, 'slow_down', 'Too many requests. Try again in a few minutes.', { cta: { phone: await firmPhone(f.id) } });
   }

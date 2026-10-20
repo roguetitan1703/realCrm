@@ -648,6 +648,10 @@ function collapseStatusMirrors(events: TimelineEvent[]): TimelineEvent[] {
   });
 }
 
+/** The source filter's "Not stated": a lead with no source (stored null or ''). */
+export const SOURCE_NONE = '_none';
+const sourceKey = (v: string) => (v === SOURCE_NONE ? '' : String(v).toLowerCase());
+
 // WHAT A CALLER DID NOT READ IS LEFT OUT, not filled in. A list reads the lead
 // row alone; with no events and no lead_shortlist rows passed, this used to send
 // `timeline: []` and the shortlist from the legacy JSONB column. The browser
@@ -1005,7 +1009,7 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
     const createdAt = new Date(Date.now() - (l.minsAgo ?? 60) * 60000).toISOString();
     await sql`
       INSERT INTO crm_leads (id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback, duplicate_of, follow_up, overdue, created_at, tenant_id)
-      VALUES (${l.id}, ${l.name}, ${l.phone}, ${l.email || null}, ${l.stage}, ${l.source || 'Website'}, ${l.agentId ?? null}, ${sql.json(l.req || {})}, ${sql.json(l.notes || [])}, ${sql.json(l.shortlist || [])}, ${sql.json(l.feedback || {})}, ${l.duplicateOf || null}, ${sql.json((l as any).followUp || null)}, ${Boolean((l as any).overdue)}, ${createdAt}, ${DEFAULT_TENANT_ID})
+      VALUES (${l.id}, ${l.name}, ${l.phone}, ${l.email || null}, ${l.stage}, ${l.source || null}, ${l.agentId ?? null}, ${sql.json(l.req || {})}, ${sql.json(l.notes || [])}, ${sql.json(l.shortlist || [])}, ${sql.json(l.feedback || {})}, ${l.duplicateOf || null}, ${sql.json((l as any).followUp || null)}, ${Boolean((l as any).overdue)}, ${createdAt}, ${DEFAULT_TENANT_ID})
       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, stage = EXCLUDED.stage, agent_id = EXCLUDED.agent_id, follow_up = EXCLUDED.follow_up, overdue = EXCLUDED.overdue, created_at = EXCLUDED.created_at, tenant_id = EXCLUDED.tenant_id;
     `;
 
@@ -1702,7 +1706,7 @@ export async function getDeskSummary(): Promise<any> {
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine}),
     by_stage AS (SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
          WHERE tenant_id = ${t} AND ${mine} GROUP BY 1),
-    by_source AS (SELECT coalesce(source, 'Website') AS k, count(*)::int AS n FROM crm_leads
+    by_source AS (SELECT coalesce(nullif(source, ''), 'Not stated') AS k, count(*)::int AS n FROM crm_leads
          WHERE tenant_id = ${t} AND ${mine} GROUP BY 1),
     per_agent AS (SELECT agent_id AS k,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
@@ -2152,7 +2156,12 @@ export async function getLeadById(id: string): Promise<any | undefined> {
 
 /** opts.phoneAsReceived: a portal, webhook or share sent the number — an
  *  unreadable one is kept as received rather than refused (docs/specs/phone.md). */
-export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts: { phoneAsReceived?: boolean } = {}): Promise<any> {
+/**
+ * `announce: false` — the caller sends the one alert about this arrival itself
+ * (a buyer's form: buyerAsks.ts names what they asked), so neither "assigned
+ * to you" nor "arrived unassigned" goes out beside it.
+ */
+export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts: { phoneAsReceived?: boolean; announce?: boolean } = {}): Promise<any> {
   const newId = leadData.id || `l_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
   // WHO GETS IT. A person the caller NAMED must be able to take it. NOT SENT
@@ -2298,7 +2307,7 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts
   // client makes -- otherwise an alert about a nameless enquiry reads
   // "Mahalunge - via MagicBricks" and names nobody at all.
   const notifName = name || phone || undefined;
-  notify({ userId: agentId, type: 'lead_assigned', data: { name: notifName, locality, source }, link, push: true })
+  if (opts.announce !== false) notify({ userId: agentId, type: 'lead_assigned', data: { name: notifName, locality, source }, link, push: true })
     .catch(err => console.warn('[Notify] lead_assigned failed:', err?.message));
   // NO lead_new. It fired on every arrival alongside lead_assigned -- 216 and
   // 216 over the SAME 216 links on bhumi in 14 days -- so one lead landing cost
@@ -2313,7 +2322,7 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts
   // desk itself chose Unassigned (it knows), nor per row of an import: the
   // import sends one for the whole file (imports.ts).
   const deskChoseNobody = sentAgent === null && isDeskRole(getContext()?.role);
-  if (!agentId && !deskChoseNobody && !importBatchId) {
+  if (!agentId && !deskChoseNobody && !importBatchId && opts.announce !== false) {
     notifyOrDesk(null, {
       tenantId: t, type: 'lead_unrouted', data: { name: notifName, source }, link, push: true,
       record: { kind: 'lead', ids: [newId] },
@@ -3130,7 +3139,7 @@ function leadFilterParts(t: string, opts: LeadFilterOpts, SEGMENTS: Record<strin
       : opts.intent === 'rent' ? LEAD_RENT : null,
     segment: SEGMENTS[opts.segment as LeadSegment] ?? null,
     source: sources.length
-      ? sql`lower(coalesce(source, '')) IN ${sql(sources.map(s => s.toLowerCase()))}` : null,
+      ? sql`lower(coalesce(source, '')) IN ${sql(sources.map(sourceKey))}` : null,
     // Matched on the NORMALISED key, not loosely. It used to be a LIKE on the
     // first path segment, so "Wakad" also matched "Wakad / Hinjewadi" — right
     // for the desk, where the same place is typed two ways, but a count that
@@ -3966,7 +3975,7 @@ async function ownerWhere(t: string, opts: OwnerListOpts, omit: { segment?: bool
     if (parts.length) where.push(anyOf(parts));
   }
   const sources = many(opts.source);
-  if (sources.length) where.push(sql`lower(coalesce(source, '')) IN ${sql(sources.map(s => s.toLowerCase()))}`);
+  if (sources.length) where.push(sql`lower(coalesce(source, '')) IN ${sql(sources.map(sourceKey))}`);
   return where;
 }
 const andAll = (where: any[]) => where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
@@ -4717,8 +4726,11 @@ export async function getLeadsSummary(opts: LeadFilterOpts = {}): Promise<any> {
     by_intent AS (SELECT count(*) FILTER (WHERE ${LEAD_SALE})::int AS buy,
                count(*) FILTER (WHERE ${LEAD_RENT})::int AS rent
         FROM crm_leads WHERE ${whereExcept('intent')}),
-    by_source AS (SELECT lower(coalesce(source, '')) AS value, min(source) AS label, count(*)::int AS n
-        FROM crm_leads WHERE ${whereExcept('source')} AND coalesce(source, '') <> ''
+    -- A lead with no source is a choice of its own, "Not stated" (SOURCE_NONE),
+    -- not left out of the menu where nobody can find it.
+    by_source AS (SELECT CASE WHEN coalesce(source, '') = '' THEN ${SOURCE_NONE} ELSE lower(source) END AS value,
+               coalesce(min(nullif(source, '')), 'Not stated') AS label, count(*)::int AS n
+        FROM crm_leads WHERE ${whereExcept('source')}
         GROUP BY 1 ORDER BY 3 DESC, 1),
     by_locality AS (SELECT ${LOCALITY_KEY} AS value, min(locality) AS label, count(*)::int AS n
         FROM crm_leads WHERE ${whereExcept('locality')} AND ${LOCALITY_KEY} <> ''

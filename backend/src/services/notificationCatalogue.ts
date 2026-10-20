@@ -91,7 +91,7 @@ export interface NotifKind {
 export type Urgency = 'now' | 'at_time' | 'morning' | 'drawer';
 
 /** The close tests alertLifecycle.ts knows. */
-export const CLOSE_TESTS = ['lead_worked', 'lead_worked_desk', 'lead_routed', 'booking', 'owner_worked', 'agreement', 'share_work', 'opened'] as const;
+export const CLOSE_TESTS = ['lead_worked', 'lead_worked_desk', 'lead_routed', 'booking', 'owner_worked', 'agreement', 'share_work', 'buyer_ask', 'opened'] as const;
 export type CloseTest = typeof CLOSE_TESTS[number];
 
 /**
@@ -105,7 +105,7 @@ export type CloseTest = typeof CLOSE_TESTS[number];
  * their unanswered interested alert, leaving the weaker one in the bell.
  * listing-pages.md §A.5 supersedes interested by interested only.
  */
-export const SUPERSEDES_SAME_TYPE_ONLY: ReadonlySet<CloseTest> = new Set<CloseTest>(['share_work']);
+export const SUPERSEDES_SAME_TYPE_ONLY: ReadonlySet<CloseTest> = new Set<CloseTest>(['share_work', 'buyer_ask']);
 
 const K = (k: NotifKind): NotifKind => ({ ...k, push: k.urgency !== 'drawer' });
 
@@ -177,15 +177,22 @@ export const NOTIFICATIONS: NotifKind[] = [
 
   // ---- A buyer's form on a link or the catalogue (listing-pages.md §A.6) ---
   // To the lead's holder, else the link's sender, else the desk (buyerAsks.ts,
-  // which logs a zero). `share_work` closes them like the other share alerts:
-  // contact logged after it (a call, a confirmed visit), or a link sent.
+  // which logs a zero). ONE ARRIVAL, ONE ALERT: a form that makes or names a
+  // lead sends this alert only — no lead_assigned, lead_unrouted or
+  // lead_repeat beside it (landEnquiry announce: false) — so it says whether
+  // the lead is new, unassigned or was closed. `buyer_ask` closes it: what
+  // share_work closes, and, for a lead that arrived with nobody holding it,
+  // somebody now holding it (the desk's assign-me lifecycle). The same buyer
+  // asking again the same day folds into the open alert ("asked 3×").
   K({ key: 'buyer_callback', label: 'A buyer asked for a call back', audience: 'assignee',
-      trigger: 'Call me back sent on a shared link or the catalogue; the lead is booked a call for now, or the next opening', urgency: 'now', closesWhen: 'share_work', gate: null }),
+      trigger: 'Call me back sent on a shared link or the catalogue; a lead the form made is booked a call for now, or the next opening', urgency: 'now', closesWhen: 'buyer_ask', gate: null }),
   K({ key: 'buyer_visit', label: 'A buyer asked to visit', audience: 'assignee',
-      trigger: 'Book a visit sent on a shared link or the catalogue: a requested slot inside working hours, to confirm', urgency: 'now', closesWhen: 'share_work', gate: null }),
+      trigger: 'Book a visit sent on a shared link or the catalogue: a requested slot inside working hours, to confirm', urgency: 'now', closesWhen: 'buyer_ask', gate: null }),
+  K({ key: 'buyer_homes', label: 'A buyer asked for homes like these', audience: 'assignee',
+      trigger: 'New homes like these sent on a shared link or the catalogue', urgency: 'now', closesWhen: 'buyer_ask', gate: null }),
   K({ key: 'buyer_new_homes', label: 'New homes match a buyer', audience: 'assignee',
       // A sales opening, not a fire: the morning summary.
-      trigger: "a home matching a buyer's New homes like these enters the catalogue or becomes Available — at most once a day per lead", urgency: 'morning', closesWhen: 'share_work', gate: null }),
+      trigger: "a home matching a buyer's New homes like these enters the catalogue or becomes Available again — at most once a day per lead", urgency: 'morning', closesWhen: 'share_work', gate: null }),
 
   K({ key: 'remark_added', label: 'Someone left a remark', audience: 'assignee',
       // Demoted to the drawer. Somebody typing a note on your record is worth
