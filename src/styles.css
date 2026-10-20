@@ -92,6 +92,10 @@ input,textarea,select{font-family:inherit}
 .input-group .prefix{display:flex;align-items:center;padding:0 12px;background:var(--card-2);border-right:1px solid var(--line);color:var(--muted);font-weight:600;font-size:13px}
 .input-group input{flex:1;border:none;outline:none;padding:10px 12px;font-family:var(--sans);font-size:14px;background:transparent;color:var(--ink)}
 .phone-in{display:flex;flex-direction:column;gap:4px;min-width:0}
+/* 16px: iOS zooms the page into any smaller input. 44px: a thumb's target. */
+.phone-in .input-group{min-height:44px}
+.phone-in .input-group input{font-size:16px}
+.phone-in .input-group .phone-cc{min-width:76px;font-size:15px}
 .input-group.err{border-color:var(--alert)}
 .input-group .phone-cc{position:relative;gap:4px;cursor:pointer}
 .input-group .phone-cc select{position:absolute;inset:0;width:100%;opacity:0;cursor:pointer;font-size:16px}

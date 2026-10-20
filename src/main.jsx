@@ -13,6 +13,41 @@ const Desk = lazy(() => Promise.all([import('./lib/store.jsx'), import('./App.js
   .then(([{ StoreProvider }, { default: App }]) => ({ default: () => <StoreProvider><App /></StoreProvider> })))
 const Admin = lazy(() => import('./modules/Admin.jsx'))
 
+// A DEPLOY BETWEEN TWO TAPS. A page left open (a catalogue in WhatsApp's
+// browser, a desk tab overnight) asks for a chunk the new deploy no longer
+// has; the host answers with index.html, the import fails, and the page went
+// white. Reload once to pick up the new deploy. The guard stops a loop when
+// the reload does not help; it is cleared once a page has run for a while.
+const RELOADED = 'chunk-reload-at'
+window.addEventListener('vite:preloadError', (event) => {
+  let last = null
+  try { last = sessionStorage.getItem(RELOADED) } catch { /* storage blocked */ }
+  if (last) return
+  try { sessionStorage.setItem(RELOADED, String(Date.now())) } catch { return }
+  event.preventDefault()
+  window.location.reload()
+})
+setTimeout(() => { try { sessionStorage.removeItem(RELOADED) } catch { /* storage blocked */ } }, 30_000)
+
+/** Anything that still fails to render shows a way back, not a blank page. */
+class Recover extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false } }
+  static getDerivedStateFromError() { return { failed: true } }
+  componentDidCatch(err) { console.error('[App] render failed:', err) }
+  render() {
+    if (!this.state.failed) return this.props.children
+    return (
+      <div style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 16, background: 'var(--bg, #f4f3ef)' }}>
+        <div style={{ display: 'grid', gap: 14, justifyItems: 'center', textAlign: 'center' }}>
+          <div style={{ fontSize: 18, fontWeight: 600 }}>This page did not load</div>
+          <button type="button" className="btn btn-primary" style={{ minHeight: 44, padding: '10px 22px' }}
+            onClick={() => window.location.reload()}>Reload</button>
+        </div>
+      </div>
+    )
+  }
+}
+
 // index.html already linked this tenant's manifest before the parser got here —
 // that is the only moment that decides what an install captures. This keeps the
 // links in step for the rest of the session, from the same single reader.
@@ -54,6 +89,7 @@ if (shareAt && new URLSearchParams(window.location.search).has('app')) {
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
+    <Recover>
     {galleryAt ? (
       <Gallery slug={galleryAt[1]} refId={decodeURIComponent(galleryAt[2])} />
     ) : catalogueAt ? (
@@ -67,5 +103,6 @@ createRoot(document.getElementById('root')).render(
     ) : (
       <Suspense fallback={null}><Desk /></Suspense>
     )}
+    </Recover>
   </React.StrictMode>
 )
