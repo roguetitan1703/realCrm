@@ -1305,6 +1305,18 @@ export async function migrateSharing(): Promise<void> {
   await sql`CREATE INDEX IF NOT EXISTS idx_buyer_asks_open_homes ON crm_buyer_asks (tenant_id) WHERE kind = 'homes' AND status = 'open';`;
   await sql`CREATE INDEX IF NOT EXISTS idx_buyer_asks_untold ON crm_buyer_asks (tenant_id, created_at) WHERE told_at IS NULL;`;
 
+  // THE FIRM'S ONE PUBLIC BUDGET (sharing.ts spendPublicForm): how many public
+  // forms (catalogue enquiries and buyer asks) it has taken on a firm-local
+  // day. One row per firm per day that saw a form; a counter, not a record.
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_public_form_days (
+      tenant_id TEXT NOT NULL,
+      day DATE NOT NULL,
+      used INT NOT NULL DEFAULT 0,
+      PRIMARY KEY (tenant_id, day)
+    );
+  `;
+
   // WHEN A PERIODIC JOB LAST RAN, per firm, and what it did (retention.ts). The
   // gate for "once a month", so a restart is not a run. Small: one row per
   // job per firm per run.

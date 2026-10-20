@@ -93,7 +93,8 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 - `POST /team/roster` creates a user who can never sign in (no login ID or
   password since code sign-in was retired).
 - Enquiry spam: one machine rotating numbers fills a firm's 100/day cap in
-  ~100 min, then real buyers are refused for the day. Needs a challenge (e.g.
+  ~100 min, then real buyers are refused for the day. The buyer forms (Call me
+  back, Book a visit, New homes like these) now share that one pool. Needs a challenge (e.g.
   Turnstile) or per-firm adaptive limits.
 
 ## Bugs

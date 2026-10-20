@@ -202,8 +202,8 @@ export default function Dashboard({ store, go, topBar }) {
             <SectionHead title="Leads by source" right={desk ? `${sources.length} live` : ''} />
             {sources.length === 0
               ? <div className="detail-empty">No leads yet.</div>
-              : <Distribution rows={sources.map(sn => ({ name: sn, n: bySource[sn] }))}
-                  onPick={(r) => toLeads({ source: [r.name] })} />}
+              : <Distribution rows={sources.map(sn => ({ name: sn === '_none' ? 'Not stated' : sn, key: sn, n: bySource[sn] }))}
+                  onPick={(r) => toLeads({ source: [r.key] })} />}
           </Panel>
         </div>
 

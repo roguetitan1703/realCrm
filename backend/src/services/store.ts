@@ -1706,7 +1706,9 @@ export async function getDeskSummary(): Promise<any> {
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine}),
     by_stage AS (SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
          WHERE tenant_id = ${t} AND ${mine} GROUP BY 1),
-    by_source AS (SELECT coalesce(nullif(source, ''), 'Not stated') AS k, count(*)::int AS n FROM crm_leads
+    -- No source is SOURCE_NONE, the key the Leads filter reads: the bar's
+    -- count and the list it opens are one expression (labelled Not stated).
+    by_source AS (SELECT CASE WHEN coalesce(source, '') = '' THEN ${SOURCE_NONE} ELSE source END AS k, count(*)::int AS n FROM crm_leads
          WHERE tenant_id = ${t} AND ${mine} GROUP BY 1),
     per_agent AS (SELECT agent_id AS k,
                count(*) FILTER (WHERE ${OPEN})::int AS open,

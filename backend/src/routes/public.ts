@@ -213,7 +213,7 @@ publicRouter.post('/forms/:tenant/ask', async (req: Request, res: Response) => {
   const ip = ipOf(req);
   // The limits: a flood ceiling per address (a carrier address is many
   // buyers), three an hour per number, and the firm's one public budget
-  // (sharing.ts PUBLIC_FORMS_PER_DAY, shared with the catalogue enquiry).
+  // (sharing.ts spendPublicForm, shared with the catalogue enquiry).
   // An ask naming a code or a home goes through the code gate: probing for
   // codes or homes through this form costs what probing the page does.
   const probes = !!(req.body?.code || req.body?.propertyId);

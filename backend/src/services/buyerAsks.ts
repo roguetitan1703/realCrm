@@ -28,7 +28,7 @@
  * on an existing lead the alert is the whole action.
  *
  * LIMITS: per address and per number at the route (routes/public.ts), and the
- * firm's one public budget (sharing.ts PUBLIC_FORMS_PER_DAY, shared with the
+ * firm's one public budget (sharing.ts spendPublicForm, shared with the
  * catalogue enquiry). Staff trying their own page leave no trace. The asks are
  * kept with the lead (crm_buyer_asks): a lead's history, small.
  * ============================================================================
@@ -45,7 +45,7 @@ import { CATALOGUE_WHERE } from './catalogueRules.js';
 import { deskConfigOf, localeOf, updateLead, addTimelineEvent, bhkTokenOf, listingKind, sharingOf, type DeskConfig } from './store.js';
 import {
   ShareError, resolveCode, linkRows, linkState, whoAnswers, flatLabel, recordEvent, staffBrowser, attachDevice,
-  addToShortlist, firmDayStart, rid, catalogueKeyed, askClauses, buyerPhone, publicFormsToday, PUBLIC_FORMS_PER_DAY,
+  addToShortlist, firmDayStart, rid, catalogueKeyed, askClauses, buyerPhone, spendPublicForm,
   firmPhone, SHOWN_COLUMNS, type Firm, type PublicReq,
 } from './sharing.js';
 
@@ -213,15 +213,12 @@ export async function buyerAsk(f: Firm, input: any, r: PublicReq): Promise<{ ok:
     if (!hasFacet(ask)) throw new ShareError(400, 'ask_empty', 'Pick what you are looking for first.');
   }
 
-  // STAFF TRYING THEIR OWN PAGE leave no trace, like a tap. THE FIRM'S ONE
-  // PUBLIC BUDGET, shared with the catalogue enquiry. Both reads in one wait.
+  // STAFF TRYING THEIR OWN PAGE leave no trace, like a tap. Anyone else
+  // spends one of THE FIRM'S ONE PUBLIC BUDGET (shared with the catalogue
+  // enquiry), atomically and before anything is written.
   const tz = desk.timezone;
-  const [isStaff, today] = await Promise.all([staffBrowser(f, r), publicFormsToday(f.id, tz)]);
-  if (isStaff) return { ok: true };
-  if (today >= PUBLIC_FORMS_PER_DAY) {
-    console.warn(`[Asks] public forms cap reached for tenant ${f.id}: ${today} today`);
-    throw new ShareError(429, 'slow_down', 'Too many requests. Try again in a few minutes.', { cta: { phone: await firmPhone(f.id) } });
-  }
+  if (await staffBrowser(f, r)) return { ok: true };
+  await spendPublicForm(f.id, tz);
 
   // WHO IT IS. A bound link names them; anything else goes through the one
   // enquiry path, unverified (an existing lead is told, never edited) and
@@ -247,37 +244,48 @@ export async function buyerAsk(f: Firm, input: any, r: PublicReq): Promise<{ ok:
   }
   if (!leadId) throw new ShareError(500, 'failed', 'Could not send. Try again.');
 
-  return await runWithContext({
-    ...(getContext() || {}), tenantId: f.id, userId: null, role: 'system', actorType: 'system', actorLabel: 'Buyer form',
-  } as any, async () => {
+  return await asSystem(f.id, async () => {
+    const at = kind === 'callback' ? callbackDue(desk) : visitAt;
+    const seen = ask ? await matchesNow(f.id, ask) : [];
+    const id = rid('ask');
     // THE SAME ASK AGAIN TODAY — this lead, this form, this home — is one
     // ask asked more than once, not another alert. A forwarded bound link
     // pressed all day would otherwise buzz its holder a hundred times. It
-    // folds into the open ask and its open alert: "(3×)", no push.
-    const [again] = await sql`
-      SELECT id FROM crm_buyer_asks
-       WHERE tenant_id = ${f.id} AND lead_id = ${leadId} AND kind = ${kind}
-         AND coalesce(property_id, '') = ${flat?.id || ''} AND status = 'open'
-         AND created_at >= ${firmDayStart(tz)}
-       ORDER BY created_at DESC LIMIT 1`;
-    if (again) {
-      const [row] = await sql`UPDATE crm_buyer_asks SET count = count + 1, updated_at = NOW()
-                               WHERE tenant_id = ${f.id} AND id = ${again.id} RETURNING *`;
+    // folds into the open ask and its open alert: "(3×)", no push. The
+    // NEWEST choice wins: a visit at another time, or New homes like these
+    // with other filters, replaces what the ask said (a call back keeps its
+    // time: it is "call me", not a slot).
+    const { row, folded } = await sql.begin(async (tx: any) => {
+      const [again] = await tx`
+        SELECT id FROM crm_buyer_asks
+         WHERE tenant_id = ${f.id} AND lead_id = ${leadId} AND kind = ${kind}
+           AND coalesce(property_id, '') = ${flat?.id || ''} AND status = 'open'
+           AND created_at >= ${firmDayStart(tz)}
+         ORDER BY created_at DESC LIMIT 1`;
+      if (again) {
+        const [row] = await tx`UPDATE crm_buyer_asks
+            SET count = count + 1, updated_at = NOW(),
+                name = coalesce(${name}, name), phone = ${phone},
+                at = ${kind === 'visit' ? visitAt : tx`at`},
+                ask = ${ask ? tx.json(ask) : tx`ask`},
+                seen_ids = ${ask ? seen : tx`seen_ids`}
+          WHERE tenant_id = ${f.id} AND id = ${again.id} RETURNING *`;
+        return { row, folded: true };
+      }
+      // A lead keeps one New homes like these: a new one replaces it.
+      if (kind === 'homes') await tx`UPDATE crm_buyer_asks SET status = 'replaced', updated_at = NOW() WHERE tenant_id = ${f.id} AND lead_id = ${leadId} AND kind = 'homes' AND status = 'open'`;
+      const [row] = await tx`
+        INSERT INTO crm_buyer_asks (id, tenant_id, lead_id, kind, link_id, property_id, name, phone, at, ask, seen_ids, status, made_lead, created_at)
+        VALUES (${id}, ${f.id}, ${leadId}, ${kind}, ${link?.id || null}, ${flat?.id || null}, ${name}, ${phone}, ${at},
+                ${ask ? tx.json(ask) : null}, ${seen}, 'open', ${created}, NOW())
+        RETURNING *`;
+      return { row, folded: false };
+    });
+    if (folded) {
       await recordEvent(f.id, { linkId: link?.id || null, propertyId: flat?.id || null, kind: `ask_${kind}`, deviceId: r.deviceId, leadId });
-      void foldIntoAlert(f.id, row).catch(err => console.warn(`[Asks] ${again.id} (tenant ${f.id}): could not update its alert:`, err?.message));
+      void foldIntoAlert(f.id, row).catch(err => console.warn(`[Asks] ${row.id} (tenant ${f.id}): could not update its alert:`, err?.message));
       return { ok: true as const };
     }
-
-    const id = rid('ask');
-    const at = kind === 'callback' ? callbackDue(desk) : visitAt;
-    const seen = ask ? await matchesNow(f.id, ask) : [];
-    // A lead keeps one New homes like these: a new one replaces it.
-    if (kind === 'homes') await sql`UPDATE crm_buyer_asks SET status = 'replaced', updated_at = NOW() WHERE tenant_id = ${f.id} AND lead_id = ${leadId} AND kind = 'homes' AND status = 'open'`;
-    const [row] = await sql`
-      INSERT INTO crm_buyer_asks (id, tenant_id, lead_id, kind, link_id, property_id, name, phone, at, ask, seen_ids, status, made_lead, created_at)
-      VALUES (${id}, ${f.id}, ${leadId}, ${kind}, ${link?.id || null}, ${flat?.id || null}, ${name}, ${phone}, ${at},
-              ${ask ? sql.json(ask) : null}, ${seen}, 'open', ${created}, NOW())
-      RETURNING *`;
     // The home and the browser join the lead only when this ask made it
     // (catalogueEnquiry's rule): typing a lead's number changes nothing on it.
     // Independent writes, so one round trip's wait, not three.
@@ -304,7 +312,14 @@ const ASK_WORDS: Record<AskKind, string> = {
   homes: 'Asked for new homes like these',
 };
 const ALERT_TYPE: Record<AskKind, string> = { callback: 'buyer_callback', visit: 'buyer_visit', homes: 'buyer_homes' };
-const TERMINAL = new Set<string>(TERMINAL_STATUSES);
+/** A closed stage, compared without case (CLAUDE.md: status is compared with ILIKE). */
+const TERMINAL = new Set<string>(TERMINAL_STATUSES.map(s => s.toLowerCase()));
+const isTerminal = (stage: unknown) => TERMINAL.has(String(stage || '').toLowerCase());
+
+/** The sweep and the after-answer work run outside any request: they set their own firm context, or tid() falls back to the demo tenant. */
+const asSystem = <T>(tenantId: string, fn: () => Promise<T>) => runWithContext({
+  ...(getContext() || {}), tenantId, userId: null, role: 'system', actorType: 'system', actorLabel: 'Buyer form',
+} as any, fn);
 
 /** What the one alert about an ask says: the lead, the home or the ask, the time, and the arrival facts. */
 async function alertData(tenantId: string, a: any, lead: any) {
@@ -319,17 +334,27 @@ async function alertData(tenantId: string, a: any, lead: any) {
     unassigned: !lead?.agent_id,
     // A closed lead asking again: unverified, so the lead stays closed and
     // the alert says so (what lead_repeat said before).
-    previousStage: lead && TERMINAL.has(String(lead.stage || '')) ? lead.stage : null,
+    previousStage: lead && isTerminal(lead.stage) ? lead.stage : null,
     count: Number(a.count) || 1,
   };
 }
 
 /**
  * Everything after the buyer's answer: the timeline line, the booking (only
- * on a lead this ask made), and THE ONE ALERT. Idempotent on told_at: run
- * once from the request, and again by tellUntold only if that never finished.
+ * on a lead this ask made), and THE ONE ALERT. Run from the request, and by
+ * tellUntold for an ask a restart cut off. CLAIMED FIRST (told_at set where
+ * it is still empty): two runs cannot both send. A crash after the claim
+ * loses this ask's alert — one lost beats two sent.
+ * Runs in the firm's own context (asSystem): from the sweep there is none,
+ * and the timeline and the booking read the tenant from it.
  */
-async function tellTheFirm(tenantId: string, a: any, req: { ip?: string | null; userAgent?: string | null } = {}) {
+function tellTheFirm(tenantId: string, a: any, req: { ip?: string | null; userAgent?: string | null } = {}) {
+  return asSystem(tenantId, () => tellTheFirmNow(tenantId, a, req));
+}
+async function tellTheFirmNow(tenantId: string, a: any, req: { ip?: string | null; userAgent?: string | null }) {
+  const [claimed] = await sql`UPDATE crm_buyer_asks SET told_at = NOW()
+                               WHERE tenant_id = ${tenantId} AND id = ${a.id} AND told_at IS NULL RETURNING id`;
+  if (!claimed) return;
   const [desk, loc] = await Promise.all([deskConfigOf(tenantId), localeOf(tenantId)]);
   const tz = desk.timezone;
   const [link] = a.link_id ? await sql`SELECT created_by FROM crm_share_links WHERE tenant_id = ${tenantId} AND id = ${a.link_id}` : [null];
@@ -371,7 +396,6 @@ async function tellTheFirm(tenantId: string, a: any, req: { ip?: string | null; 
     ...(kind === 'visit' && at ? { subjectAt: at.toISOString() } : {}),
   });
   if (!reached) console.warn(`[Asks] ${kind} ${a.id} for tenant ${tenantId} reached nobody`);
-  await sql`UPDATE crm_buyer_asks SET told_at = NOW() WHERE tenant_id = ${tenantId} AND id = ${a.id}`;
   audit({
     tenant_id: tenantId, actor_type: 'system', actor_id: null, actor_label: 'Buyer form',
     action: `buyer_ask.${kind}`, target_type: 'lead', target_id: a.lead_id, summary: `Buyer asked: ${kind}`,
@@ -385,7 +409,9 @@ async function foldIntoAlert(tenantId: string, a: any) {
   const [desk, lead] = await Promise.all([deskConfigOf(tenantId), sql`SELECT name, phone, stage, agent_id FROM crm_leads WHERE tenant_id = ${tenantId} AND id = ${a.lead_id}`.then((x: any) => x[0])]);
   const c = copyFor(ALERT_TYPE[a.kind as AskKind], await alertData(tenantId, a, lead), desk);
   if (!c?.title) return;
-  await sql`UPDATE notifications SET title = ${c.title}, body = ${c.body ?? null}
+  const at = a.kind === 'visit' && a.at ? new Date(a.at).toISOString() : null;
+  await sql`UPDATE notifications SET title = ${c.title}, body = ${c.body ?? null},
+                   subject_at = ${at ? at : sql`subject_at`}
              WHERE tenant_id = ${tenantId} AND closed_at IS NULL AND type = ${ALERT_TYPE[a.kind as AskKind]}
                AND link LIKE ${'%ask=' + a.id}`;
 }
@@ -416,8 +442,9 @@ async function askFor(m: ReturnType<typeof me>, id: string) {
       FROM crm_buyer_asks a JOIN crm_leads l ON l.tenant_id = a.tenant_id AND l.id = a.lead_id
      WHERE a.tenant_id = ${m.tenantId} AND a.id = ${id} LIMIT 1`;
   if (!a) throw new ShareError(404, 'not_found');
-  // The lead's own visibility: an agent sees an ask on a lead they hold or made.
-  if (m.role === 'agent' && a.agent_id !== m.userId && a.created_by !== m.userId) throw new ShareError(404, 'not_found');
+  // The lead's own visibility: anyone off the desk (an agent today) sees an
+  // ask on a lead they hold or made.
+  if (!isDeskRole(m.role) && a.agent_id !== m.userId && a.created_by !== m.userId) throw new ShareError(404, 'not_found');
   return a;
 }
 
@@ -505,7 +532,7 @@ export async function matchNewHomes(tenantId: string, max = HOMES_PER_RUN): Prom
     SELECT a.*, l.name AS lead_name, l.phone AS lead_phone, l.agent_id
       FROM crm_buyer_asks a JOIN crm_leads l ON l.tenant_id = a.tenant_id AND l.id = a.lead_id
      WHERE a.tenant_id = ${tenantId} AND a.kind = 'homes' AND a.status = 'open'
-       AND coalesce(l.stage, '') NOT IN ${sql(TERMINAL_STATUSES)}
+       AND lower(coalesce(l.stage, '')) NOT IN ${sql(TERMINAL_STATUSES.map(s => s.toLowerCase()))}
      ORDER BY a.updated_at ASC NULLS FIRST LIMIT ${max}`;
   if (!asks.length) return 0;
   const keyed = await catalogueKeyed(tenantId, await localeOf(tenantId));
@@ -551,13 +578,18 @@ export async function buyerAskSweep(tenantId: string, { force = false }: { force
   if (running.has(tenantId)) return;
   running.add(tenantId);
   try {
-    const late = await tellUntold(tenantId);
-    if (late) console.log(`[Asks] ${tenantId}: ${late} ask(s) told late`);
-    if (force || Date.now() - (lastHomesMatch.get(tenantId) || 0) > HOMES_MATCH_MS) {
-      lastHomesMatch.set(tenantId, Date.now());
-      const n = await matchNewHomes(tenantId);
-      if (n) console.log(`[Asks] ${tenantId}: ${n} buyer(s) told of new homes`);
-    }
+    // The sweep runs from a bare timer: no request context, so this firm's
+    // is set here, or anything reading the tenant from it (the timeline, a
+    // lead read) would fall back to the demo tenant.
+    await asSystem(tenantId, async () => {
+      const late = await tellUntold(tenantId);
+      if (late) console.log(`[Asks] ${tenantId}: ${late} ask(s) told late`);
+      if (force || Date.now() - (lastHomesMatch.get(tenantId) || 0) > HOMES_MATCH_MS) {
+        lastHomesMatch.set(tenantId, Date.now());
+        const n = await matchNewHomes(tenantId);
+        if (n) console.log(`[Asks] ${tenantId}: ${n} buyer(s) told of new homes`);
+      }
+    });
   } catch (err: any) {
     console.warn(`[Asks] ${tenantId}: sweep failed:`, err?.message);
   } finally {

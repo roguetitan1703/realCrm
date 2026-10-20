@@ -65,13 +65,24 @@ const NEUTRAL_TALK = "Hi, I'm looking for a home.";
  *  is a flood, not buyers, and every one would be an alert. */
 export const PUBLIC_FORMS_PER_DAY = 100;
 
-/** What the firm's public forms have taken today: catalogue enquiries and buyer asks, one count. */
-export async function publicFormsToday(tenantId: string, tz: string): Promise<number> {
-  const day = firmDayStart(tz);
-  const [r] = await sql`SELECT
-      (SELECT count(*) FROM crm_share_events WHERE tenant_id = ${tenantId} AND kind = 'enquiry' AND link_id IS NULL AND created_at >= ${day})
-    + (SELECT coalesce(sum(count), 0) FROM crm_buyer_asks WHERE tenant_id = ${tenantId} AND created_at >= ${day}) AS n`;
-  return Number(r?.n) || 0;
+/**
+ * Spends one from the firm's public budget, or refuses (429), BEFORE anything
+ * is written: one statement on a per-firm-day counter, so requests landing
+ * together cannot each see 99 and all go in, and a refused request leaves no
+ * lead behind. Counting the asks and events after the fact did both.
+ * Every accepted form spends one, including the same ask again (it is
+ * another request; the flood is what this caps).
+ */
+export async function spendPublicForm(tenantId: string, tz: string): Promise<void> {
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+  const [r] = await sql`
+    INSERT INTO crm_public_form_days (tenant_id, day, used) VALUES (${tenantId}, ${day}, 1)
+    ON CONFLICT (tenant_id, day) DO UPDATE SET used = crm_public_form_days.used + 1
+     WHERE crm_public_form_days.used < ${PUBLIC_FORMS_PER_DAY}
+    RETURNING used`;
+  if (r) return;
+  console.warn(`[Share] public forms cap reached for tenant ${tenantId} on ${day}`);
+  throw new ShareError(429, 'slow_down', 'Too many requests. Try again in a few minutes.', { cta: { phone: await firmPhone(tenantId) } });
 }
 
 const rid = (p: string) => `${p}_${Date.now().toString(36)}${crypto.randomBytes(4).toString('hex')}`;
@@ -802,21 +813,16 @@ export async function catalogueFlat(f: Firm, slug: string, r: PublicReq) {
 export async function catalogueEnquiry(f: Firm, input: { name?: string; phone?: string; propertyId?: string; message?: string }, r: PublicReq) {
   const loc = await localeOf(f.id);
   const phone = await buyerPhone(f.id, input.phone);
-  // A firm's form takes at most 100 enquiries a day. Above that it is a flood,
-  // not buyers, and every one would be an alert.
+  // The firm's one public budget (spendPublicForm), spent before anything is
+  // written. The flat and the settings are independent reads: one round trip.
   const tz = (await deskConfigOf(f.id)).timezone;
-  // The cap, the flat and the settings are independent reads: one round trip.
-  const [today, flatRows, sharing] = await Promise.all([
-    publicFormsToday(f.id, tz),
+  const [, flatRows, sharing] = await Promise.all([
+    spendPublicForm(f.id, tz),
     input.propertyId
       ? sql`SELECT ${SHOWN_COLUMNS} FROM crm_properties WHERE ${CATALOGUE_WHERE(f.id)} AND id = ${String(input.propertyId)} LIMIT 1`
       : Promise.resolve([]),
     sharingOf(f.id),
   ]);
-  if (today >= PUBLIC_FORMS_PER_DAY) {
-    console.warn(`[Share] catalogue enquiry cap reached for tenant ${f.id}: ${today} today`);
-    throw new ShareError(429, 'slow_down', 'Too many requests. Try again in a few minutes.', { cta: { phone: await firmPhone(f.id) } });
-  }
   const name = String(input.name || '').trim().slice(0, 80) || null;
   const message = String(input.message || '').trim().slice(0, 1000) || null;
   const flat: any = (flatRows as any[])[0] || null;
