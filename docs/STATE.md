@@ -7,11 +7,14 @@ a live database so the next session neither re-derives it nor assumes it.
 
 The work itself is in `docs/BACKLOG.md`; set-aside work in `docs/PARKED.md`.
 
-**Last session: 2026-10-19 → 20.** The catalog (Work OS #131, spec
-`specs/listing-pages.md` §A) was built end to end by two builders, reviewed
-four times and walked fresh twice. On the way: work goes only to people who
-can take it; "Leave unassigned" is honoured; list rows no longer overwrite a
-lead's shortlist. All on `development`, nothing deployed.
+**Last session: 2026-10-19 → 21.** The catalog (Work OS #131,
+`specs/listing-pages.md` §A, §A.6) is complete on `development` (f28f5fb):
+shared links, the public catalogue, the three buyer forms, work only to people
+who can take it, the phone model (E.164), code sign-in retired, the import
+undo and the retired batch delete. Every merge was reviewed; a final walk on
+dev (phone and desk) found no blocker and its two bugs are fixed. What the
+firms will notice and the deploy order: `releases/2026-10-20.md`. Nothing
+deployed.
 
 ---
 
@@ -22,71 +25,52 @@ Not re-read this session; as of 17 Oct:
 | | at | how |
 |---|---|---|
 | Backend — AWS EC2 (PM2 runs prod and dev) | `78458b6` (5 Oct) | `scripts/deploy-api.sh` on the box, `main` only |
-| Dev API (`api.dev.re.delpat.in`) | `0eb1c5c` — far behind `development` | pull + `npm i` + `pm2 restart re-api-dev` |
+| Dev API (`api.dev.re.delpat.in`) | `0eb1c5c` — far behind `development` | pull + `npm ci` + `pm2 restart re-api-dev` |
 | `main` | `820514e` (6 Oct) | |
-| `development` | `cf81d05` and the doc commit after it | |
+| `development` | `f28f5fb` (21 Oct) | |
 
 ---
 
 ## Waiting on the user
 
-- **Re-test on the dev preview** (dev API must be redeployed first), then the
-  release. Re-run `alert-first-run-preview.ts` the morning of the deploy.
-- **`PLAN.md` §6** questions still open (Q1 and Q5 answered 19 Oct).
-- Decided 12 Oct and still standing: onboarding keeps `vijay@123`; the audit
-  ledger stays hidden from firm owners.
-
----
-
-## Changes a paying firm will notice on deploy
-
-- Rota members who cannot take work (suspended, no login, left) are skipped,
-  and Settings → Assigning shows them greyed with Remove.
-- A saved "Leave unassigned" takes effect (leads and owners), and the desk
-  gets `lead_unrouted`.
-- Routing settings save for owner/manager only; strategies round_robin/manual.
-- Typed and imported lead/owner phones store +91…; foreign numbers stay as
-  typed. Staff numbers still use `normalizePhone` (BACKLOG Small).
-- `crm_share_events` gains `view_day` + a unique index (runOnce) and `seen_at`.
-- The lead and property list endpoints stop sending timeline/shortlist/history.
-  The browser guards against the old API too, so the order of deploys is safe.
+- **Redeploy the dev API, re-test on the dev preview,** then the release
+  (`releases/2026-10-20.md`: API first, `npm ci`, read the boot log, then the
+  frontend). Re-run the phone dry run and `alert-first-run-preview.ts` the
+  morning of the deploy.
+- **AWS security group:** ports 5000 and 5001 must have no inbound rule.
+- **A hotfix off `main`** for the two live holes (code sign-in; any agent
+  deleting an import batch): yes or no. Recommended no if the release goes
+  within days; neither was ever used in production (21 Oct).
+- **`PLAN.md` §6** questions still open.
 
 ---
 
 ## Checked this session
 
-- **Dev database** (`delpat`): builders' scenario probes (A: 28/28 and 10/10
-  on the last round), two fresh-eyes walks on iPhone 13 and desk, a merged-API
-  smoke on :5131 (paged list rows carry no shortlist/history; a full lead's
-  shortlist matches `lead_shortlist`; routing reads `manual`). Every probe row
-  removed by id; audit_log rows stay (hash-chained). delpat's lead strategy is
-  `manual` with the sweep on — it was so before.
-- **Production, read only (Om's yes, 20 Oct; `BEGIN READ ONLY`, confirmed
-  `transaction_read_only = on`):**
-  - Rotas: 0 stale ids at bhumi (7 leads, 7 owners) and mahalaxmi (4, 4).
-    Only `bhumi-propcity` (the phantom tenant) has one: `owner_bhumi-propcity`.
-  - Saved strategies: bhumi leads round_robin, owners manual, all sweeps off;
-    mahalaxmi round_robin both, sweeps off. **Honouring "Leave unassigned"
-    changes nothing at either paying firm.**
-  - Shortlist bug: 0 saves removed 2+ homes anywhere. bhumi has 4 removal
-    saves in all (5 and 10 Oct), each one home, none with an add in the same
-    save — no sign it ever fired in production.
-  - Phones by format (second read, same day): about 160 bhumi and 157
-    mahalaxmi owners are real foreign numbers (NRI: +971, +44, +1 …), so
-    last-10 matching is wrong by design; Om chose exact E.164 with a country
-    field (Builder A, `a-phone-model`). Convertible bare/0/91 forms: bhumi
-    users 1, leads 4, owners 58, property owner phones 55; mahalaxmi users 3,
-    leads 1, owners 6, property owner phones 7. Not convertible: 3 bhumi
-    MagicBricks leads with 9 digits (UAE without +971), 2 bhumi rows with a
-    letter. Users colliding after conversion: 0.
-  - Phone repair dry run (`scripts/phone-dry-run.ts`, read-only, 20 Oct):
-    bhumi users 1 / leads 4 / owners 52 / property owner phones 55 convert;
-    mahalaxmi users 3 / leads 1 / owners 6 / property owner phones 7.
-    Unreadable, left and listed: bhumi leads 4, owners 6, properties 1;
-    mahalaxmi owners 14. Users colliding after conversion: 0. Owners that
-    become the same number (an owner entered twice): bhumi 10, mahalaxmi 6.
-  - Code (OTP) sign-in: `auth_otp` has never held a row in production — the
-    open endpoints were never used. Retired on `development` (b60a54e).
+- **Production, read only (`BEGIN READ ONLY`, `transaction_read_only = on`):**
+  - Rotas: 0 stale ids at bhumi and mahalaxmi. Strategies: bhumi leads
+    round_robin, owners manual, sweeps off; mahalaxmi round_robin both,
+    sweeps off. Honouring "Leave unassigned" changes nothing for them.
+  - Shortlist bug: never fired. `auth_otp`: never held a row.
+  - Phone repair dry run (final reader, 21 Oct): bhumi users 1 / leads 4 /
+    owners 52 / property owner phones 55; mahalaxmi 3 / 1 / 6 / 7. Left as
+    they are: bhumi 11, mahalaxmi 14. User collisions 0; owners on one number
+    after it: bhumi 10, mahalaxmi 6.
+  - Imports (21 Oct): bhumi 2 owner imports (1,271 owners), mahalaxmi 7
+    (3,731; 1,034 worked by a person) plus 4 uploads never run; no lead or
+    property imports. Every batch still holds what it added: the batch-delete
+    endpoint was never used. The only undo ever was our own, 7 Aug, 494 bhumi
+    leads, archived first.
+  - No `crm_share_*`, `crm_buyer_asks` or `crm_job_runs` tables yet, so the
+    first 180-day view cleanup deletes nothing.
+- **Dev database** (`delpat`): final walk of f05dc8d on iPhone 13 and desk:
+  links, the three forms, catalogue, one alert per arrival, "Replace it", a
+  stranger cannot move a visit, greyed rota members, "Not stated" bar, phones,
+  import + undo ("Undone · 1 kept"), one reset mail per 10 minutes, OTP 410.
+  The Edit-owner picker fix (f28f5fb) was not driven in a browser. Probe rows
+  removed and counted; 61 audit rows stay (hash-chained); 3 properties'
+  `updated_at` moved. The 349 owners a probe sweep moved off Mohit are back,
+  rota indices reset.
 
 ---
 

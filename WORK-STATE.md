@@ -1,13 +1,12 @@
 # Work state
 
 ## Now
-Release readiness: phone model (A, `a-phone-model`, review fixes in progress) and buyer forms + view retention (B, `b-forms`) — both paused by the session limit until 23:20 IST 20 Oct, work saved in their worktrees.
+Release 1 (catalog, buyer forms, phones, sign-in, import undo) is complete on `development` (f28f5fb) and waits on Om's dev-preview re-test and deploy.
 
 ## Next
-1. Resume A and B; review; merge
-2. Om: dev preview re-test (dev API redeploy first), then the release (`docs/releases/2026-10-20.md`)
-3. Help desk: report a problem, then the help centre
-4. Cutroom records the US film (RUN.md)
+1. Om: dev API redeploy + re-test, then the release (`docs/releases/2026-10-20.md`); answers on ports 5000/5001 and the hotfix
+2. Help desk: report a problem, then the help centre
+3. Cutroom records the US film (RUN.md)
 
 ## Later
 - A firm's weekly off for "days worked" — waits on how the firms actually work
@@ -18,4 +17,6 @@ Release readiness: phone model (A, `a-phone-model`, review fixes in progress) an
 - A firm provisioned outside India has its roster phones stored +91 until settings carry `locale` — waits on provisioning taking a locale
 - Production holds a `crm_settings` row for `bhumi-propcity`, a tenant that does not exist (9 rows, 8 tenants) — waits on Om
 - Homeowner calling stages carry India's default words ("Key Received") for a US firm — waits on stages joining the market preset
+- "Call not received" moves a listing owner to Contacted (`routes/actions.ts:135`), waits on Om saying whether a no-answer is first outreach
+- Abandoning the import wizard at the map step leaves an "uploaded, 0 created" job in History, waits on a cleanup rule
 - Daily demo refresh (`--tick`) — waits on Om choosing dev or prod for demos
