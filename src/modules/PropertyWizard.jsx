@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Field, Input, Textarea, SuggestInput } from '../components/primitives.jsx'
+import PhoneInput from '../components/PhoneInput.jsx'
 import { projectNames } from '../lib/suggest.js'
 import Icon from '../components/Icon.jsx'
 import MediaEditor from '../components/MediaEditor.jsx'
@@ -12,6 +13,7 @@ import {
 } from '../data/propertyFields.js'
 import { api } from '../lib/api.js'
 import { unitLabel } from '../lib/format.js'
+import { roomLabel } from '../lib/locale.js'
 
 // ============================================================================
 // 🏗️ PropertyWizard — the stepped add/edit PAGE (spec: properties.md C-add)
@@ -133,7 +135,7 @@ function BhkPicker({ value, onChange }) {
         <button key={o.value} type="button" className={'pwc' + (value === o.value ? ' on' : '')}
           onClick={() => onChange(value === o.value ? '' : o.value)}>{o.label}</button>
       ))}
-      {value === '5plus' && <button type="button" className="pwc on">5+ BHK</button>}
+      {value === '5plus' && <button type="button" className="pwc on">{roomLabel('5plus')}</button>}
     </div>
   )
 }
@@ -362,9 +364,8 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
     const payload = { ...form, completeness: score, ...(copyId ? { copiedFrom: copyId } : {}) }
     try {
       if (editing) {
-        store.updateProp(editing.id, payload)
-        store.toast('Property updated')
-        close()
+        // Leave only once it is saved: a refusal keeps the edit on screen.
+        if (await store.updateProp(editing.id, payload)) close()
         return
       }
       if (ownerId) {
@@ -762,7 +763,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                       <Input value={form.owner || ''} onChange={e => set('owner', e.target.value)} placeholder="Sneha Rane" />
                     </Field>
                     <Field label="Owner phone">
-                      <Input value={form.ownerPhone || ''} onChange={e => set('ownerPhone', e.target.value)} placeholder="+91 98765 43210" />
+                      <PhoneInput value={form.ownerPhone || ''} onChange={e => set('ownerPhone', e.target.value)} />
                     </Field>
                   </div>
                 </div>

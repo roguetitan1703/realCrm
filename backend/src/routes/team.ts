@@ -9,9 +9,13 @@
 
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
+import { notWorkableBody } from '../services/workforce';
 import { getAgents, getRoutingRules, updateRoutingRules, getAgentPerformance, distributeWork, heldWork, unownedBacklog, assignUnowned, agentLoads } from '../services/store';
 import { sql } from '../services/db';
+import { localeOf } from '../services/store';
+import { requirePhone, editedPhone, phoneInvalidBody } from '../services/phone';
 import { getContext } from '../services/context';
+import { isDeskRole } from '../lib/permissions';
 import { audit } from '../services/audit';
 import { adminSetPassword, suggestPassword, revokeUserSessions, passwordIssue } from '../services/auth';
 
@@ -19,6 +23,33 @@ export const teamRouter = Router();
 teamRouter.use(requireTenantAuth);
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * A team member's number: exact E.164 (docs/specs/phone.md), refused with the
+ * reason when it cannot be read, and one number per person in the firm. The
+ * clash is the exact number, deleted users included, because the unique index
+ * (idx_users_tenant_phone) counts them. It used to strip the "+" first, so a
+ * foreign number lost its country and became an Indian one.
+ * `stored`: an edit, where the number sent back unchanged passes as it is.
+ */
+class PhoneTakenError extends Error {}
+async function teamPhone(tenantId: string, raw: unknown, opts: { exceptId?: string; stored?: string | null } = {}): Promise<string | null> {
+  const country = (await localeOf(tenantId)).country;
+  const phone = 'stored' in opts ? editedPhone(raw, opts.stored, country) : requirePhone(raw, country);
+  if (phone && phone !== opts.stored) {
+    const clash = await sql`SELECT 1 FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone}
+      AND id <> ${opts.exceptId || ''} LIMIT 1`;
+    if (clash.length) throw new PhoneTakenError('Someone on this team already uses that number.');
+  }
+  return phone;
+}
+/** The answer for a refused number, or null when `err` is something else. */
+function phoneRefusal(res: Response, err: any) {
+  const body = phoneInvalidBody(err);
+  if (body) return res.status(422).json(body);
+  if (err instanceof PhoneTakenError) return res.status(409).json({ error: 'phone_taken', message: err.message });
+  return null;
+}
 
 // ── RBAC for user management ────────────────────────────────────────────────
 // owner: manages everyone. manager: agents only. agent: no user management.
@@ -126,8 +157,7 @@ teamRouter.post('/users', async (req: Request, res: Response) => {
     const cleanName = String(name || '').trim();
     if (!cleanName) return res.status(400).json({ error: 'Name is required' });
 
-    const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
-    const normPhone = cleanPhone ? `+91${cleanPhone.slice(-10)}` : null;
+    const normPhone = await teamPhone(req.tenantId!, phone);
     const normEmail = email ? String(email).trim().toLowerCase() : null;
 
     let loginIdVal: string | null = String(loginId || '').trim() || await deriveLoginId(req.tenantId!, cleanName);
@@ -168,6 +198,7 @@ teamRouter.post('/users', async (req: Request, res: Response) => {
     });
     return res.status(201).json({ success: true, userId: id, loginId: loginIdVal, initialPassword: initial, agents: await getAgents() });
   } catch (err: any) {
+    if (phoneRefusal(res, err)) return;
     return res.status(500).json({ error: 'Failed to create user', message: err.message });
   }
 });
@@ -190,7 +221,7 @@ teamRouter.patch('/users/:id', async (req: Request, res: Response) => {
       }
     }
     const cleanName = name != null ? String(name).trim() : u.name;
-    const normPhone = phone != null ? (String(phone).replace(/\D/g, '') ? `+91${String(phone).replace(/\D/g, '').slice(-10)}` : null) : u.phone;
+    const normPhone = phone != null ? await teamPhone(req.tenantId!, phone, { exceptId: u.id, stored: u.phone }) : u.phone;
     const normEmail = email != null ? (String(email).trim().toLowerCase() || null) : u.email;
     if (newRole !== 'agent' && (!normEmail || !EMAIL_RE.test(normEmail))) {
       return res.status(400).json({ error: 'An owner or manager needs a valid email.' });
@@ -245,6 +276,7 @@ teamRouter.patch('/users/:id', async (req: Request, res: Response) => {
     });
     return res.status(200).json({ success: true, loginId: nextLogin, agents: await getAgents() });
   } catch (err: any) {
+    if (phoneRefusal(res, err)) return;
     return res.status(500).json({ error: 'Failed to update user', message: err.message });
   }
 });
@@ -311,8 +343,7 @@ teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) 
     const { name, phone, email, password, loginId } = req.body || {};
     const cleanName = String(name || '').trim();
     if (!cleanName) return res.status(400).json({ error: 'New person name is required' });
-    const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
-    const normPhone = cleanPhone ? `+91${cleanPhone.slice(-10)}` : null;
+    const normPhone = await teamPhone(req.tenantId!, phone, { exceptId: u.id });
     const normEmail = email ? String(email).trim().toLowerCase() : null;
     if (u.role !== 'agent' && (!normEmail || !EMAIL_RE.test(normEmail))) {
       return res.status(400).json({ error: 'An owner/manager seat needs a valid email.' });
@@ -375,6 +406,7 @@ teamRouter.post('/users/:id/reassign-seat', async (req: Request, res: Response) 
       keptLeads: held.leads, keptOwners: held.owners, agents: await getAgents(),
     });
   } catch (err: any) {
+    if (phoneRefusal(res, err)) return;
     return res.status(500).json({ error: 'Failed to reassign seat', message: err.message });
   }
 });
@@ -475,14 +507,13 @@ teamRouter.post('/roster', async (req: Request, res: Response) => {
     const { name, phone, email, role } = req.body;
     const cleanName = (name || '').trim();
     if (!cleanName) return res.status(400).json({ error: 'Name is required' });
-    // A teammate signs in by OTP, and OTP is delivered ONLY by email today (there
-    // is no SMS channel). So email is required — without it the person could be
-    // created but never actually log in. Phone stays optional (used for tel:/wa).
-    const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
-    const normPhone = cleanPhone ? `+91${cleanPhone.slice(-10)}` : null;
+    // Email is required: a forgotten password is reset by email. Code sign-in
+    // is retired, so this path still gives no login ID or password (BACKLOG).
+    // Phone stays optional (used for tel:/wa).
+    const normPhone = await teamPhone(req.tenantId!, phone);
     const normEmail = email ? String(email).trim().toLowerCase() : null;
     if (!normEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normEmail)) {
-      return res.status(400).json({ error: 'A valid email is needed. Sign-in codes are sent by email.' });
+      return res.status(400).json({ error: 'A valid email is needed to reset their password.' });
     }
     const teamRole = role === 'manager' ? 'manager' : 'agent';
     const id = `u_${Date.now().toString(36)}`;
@@ -503,6 +534,7 @@ teamRouter.post('/roster', async (req: Request, res: Response) => {
     const agents = await getAgents();
     return res.status(201).json({ success: true, agents, newAgentId: id });
   } catch (err: any) {
+    if (phoneRefusal(res, err)) return;
     return res.status(500).json({ error: 'Failed to add agent', message: err.message });
   }
 });
@@ -574,6 +606,7 @@ teamRouter.post('/routing/assign-unowned', async (req: Request, res: Response) =
     } as any, Array.isArray(req.body?.agentIds) ? req.body.agentIds : undefined);
     return res.status(200).json({ success: true, ...out });
   } catch (err: any) {
+    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
     const code = err?.name === 'ForbiddenError' ? 403 : 500;
     return res.status(code).json({ error: 'Could not hand them out', message: err.message });
   }
@@ -584,7 +617,18 @@ teamRouter.post('/routing/assign-unowned', async (req: Request, res: Response) =
  * Update round-robin lead routing rules
  */
 teamRouter.put('/routing', async (req: Request, res: Response) => {
-  const patch = req.body;
+  // THE DESK'S, like Hand out below. This had no check at all, so any signed-in
+  // agent could switch the firm's lead routing off, or put only themselves on
+  // the rota.
+  if (!isDeskRole(getContext()?.role)) return res.status(403).json({ error: 'Only an owner or a manager can change how work is handed out.' });
+  const patch = { ...(req.body || {}) };
+  // Where the rota stands is the server's to move (dealRota), never a client's.
+  delete patch.last_assigned_index; delete patch.owner_last_assigned_index;
+  for (const k of ['strategy', 'owner_strategy']) {
+    if (patch[k] !== undefined && !['round_robin', 'manual'].includes(patch[k])) {
+      return res.status(400).json({ error: `${k} must be round_robin or manual` });
+    }
+  }
   const updated = await updateRoutingRules(patch);
   return res.status(200).json({
     success: true,
@@ -680,6 +724,7 @@ teamRouter.post('/users/:id/distribute', async (req: Request, res: Response) => 
     } as any);
     return res.status(200).json({ success: true, ...out, agents: await getAgents() });
   } catch (err: any) {
+    const nw = notWorkableBody(err); if (nw) return res.status(422).json(nw);
     const code = err?.name === 'ForbiddenError' ? 403 : 500;
     return res.status(code).json({ error: 'Failed to hand the work over', message: err.message });
   }

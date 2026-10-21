@@ -29,12 +29,16 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
  * Formatting here rather than at the call site is the point of this module —
  * a "when" phrased at each site is how one fact ends up worded four ways.
  */
-const whenLabel = (at?: string | null) => {
+/** The firm's clock and words — a DeskConfig (store.ts deskConfigOf) fits. */
+export type CopyDesk = { timezone: string; locale: { numberLocale: string } };
+const INDIA_DESK: CopyDesk = { timezone: 'Asia/Kolkata', locale: { numberLocale: 'en-IN' } };
+
+const whenLabel = (at: string | null | undefined, desk: CopyDesk) => {
   if (!at) return undefined;
   const d = new Date(at);
   if (isNaN(d.getTime())) return undefined;
-  return d.toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short',
+  return d.toLocaleString(desk.locale.numberLocale, {
+    timeZone: desk.timezone, weekday: 'short', day: 'numeric', month: 'short',
     hour: 'numeric', minute: '2-digit',
   });
 };
@@ -43,7 +47,12 @@ const whenLabel = (at?: string | null) => {
 const facts = (...parts: (string | null | undefined | false)[]) =>
   parts.filter(Boolean).join(' · ') || undefined;
 
-type Builders = Record<string, (d: any) => NotifCopy>;
+/** A buyer's form, asked again the same day: " (3×)". */
+const askedAgain = (d: any) => (Number(d.count) > 1 ? ` (${d.count}×)` : '');
+/** What the arrival alert would have said: new, nobody holding it, or a closed lead back. */
+const askFacts = (d: any): (string | false)[] => [!!d.newLead && 'new lead', !!d.unassigned && 'nobody has it yet', !!d.previousStage && `was ${d.previousStage}`];
+
+type Builders = Record<string, (d: any, desk: CopyDesk) => NotifCopy>;
 
 export const COPY: Builders = {
   lead_assigned: (d) => ({
@@ -53,7 +62,11 @@ export const COPY: Builders = {
   lead_assigned_bulk: (d) => ({
     title: `${plural(d.n, 'lead')} assigned to you`,
   }),
-  lead_unrouted: (d) => ({
+  lead_unrouted: (d) => (d.count ? {
+    // One for a whole import (imports.ts), naming how many.
+    title: `${plural(d.count, 'lead')} arrived unassigned`,
+    body: facts(d.source && `from ${d.source}`),
+  } : {
     title: 'Lead arrived unassigned',
     body: facts(d.name, d.source && `nobody is set to receive ${d.source}`),
   }),
@@ -116,9 +129,9 @@ export const COPY: Builders = {
     title: 'Site visit due now',
     body: facts(d.name, d.when, d.locality),
   }),
-  calendar_task_assigned: (d) => ({
+  calendar_task_assigned: (d, desk) => ({
     title: d.isVisit ? 'Site visit assigned to you' : 'Task assigned to you',
-    body: facts(d.name, whenLabel(d.at) || d.when),
+    body: facts(d.name, whenLabel(d.at, desk) || d.when),
   }),
   remark_added: (d) => ({
     title: 'Note added',
@@ -128,6 +141,54 @@ export const COPY: Builders = {
   owner_assigned: (d) => ({
     title: `${plural(d.n, 'owner')} assigned to you`,
   }),
+
+  // A buyer on a shared link (listing-pages.md §A). "Rahul is interested" when
+  // the link was sent to Rahul; "Someone on Rahul's link" when the tap came
+  // from another browser (forwarded); "Someone on your link" with no lead.
+  // `homes`: this alert supersedes the open ones on the same lead, so it names
+  // all of them — "Sneha is interested in 2 homes · Maple Court 1 BHK and 1 more".
+  share_interested: (d) => {
+    const many = Number(d.homes) > 1;
+    const what = many ? ` in ${plural(d.homes, 'home')}` : '';
+    return {
+      title: d.name ? (d.someoneOn ? `Someone on ${d.name}'s link is interested${what}` : `${d.name} is interested${what}`) : `Someone on your link is interested${what}`,
+      body: facts(many ? `${d.flat} and ${d.homes - 1} more` : d.flat, d.sentOn && `from the link sent ${d.sentOn}`, d.previousStage && `was ${d.previousStage}`),
+    };
+  },
+  share_expired_open: (d) => ({
+    title: d.name ? `${d.name} opened an expired link` : 'Someone opened an expired link',
+    body: facts(d.n && plural(d.n, 'home'), d.sentOn && `sent ${d.sentOn}`),
+  }),
+  // A buyer's form (listing-pages.md §A.6). The name is the lead's, else what
+  // they typed. It is the only alert about this arrival, so it says what
+  // lead_assigned / lead_unrouted / lead_repeat would have: a new lead, nobody
+  // holding it, a closed lead asking again. `count`: the same ask again today.
+  buyer_callback: (d) => ({
+    title: `${d.name || 'A buyer'} asked for a call back${askedAgain(d)}`,
+    body: facts(d.flat, ...askFacts(d)),
+  }),
+  buyer_visit: (d, desk) => ({
+    title: `${d.name || 'A buyer'} asked to visit${askedAgain(d)}`,
+    body: facts(d.flat, whenLabel(d.at, desk), ...askFacts(d)),
+  }),
+  buyer_homes: (d) => ({
+    title: `${d.name || 'A buyer'} asked for homes like these${askedAgain(d)}`,
+    body: facts(d.ask, ...askFacts(d)),
+  }),
+  buyer_new_homes: (d) => ({
+    title: `${plural(Number(d.n) || 1, 'new home')} ${Number(d.n) === 1 ? 'matches' : 'match'} ${d.name || 'a buyer'}`,
+  }),
+  share_returned: (d) => ({
+    title: `${d.name || 'A buyer'} is back on your link`,
+    body: facts(d.sentOn && `sent ${d.sentOn}`),
+  }),
+  // `unheld`: nobody active holds the lead, so the desk is asked to place it.
+  share_number_held: (d) => ({
+    title: d.unheld
+      ? (d.sender ? `${d.sender} wants to send homes to an unassigned lead` : 'Someone wants to send homes to an unassigned lead')
+      : (d.sender ? `${d.sender} tried to send homes to your lead` : 'Someone tried to send homes to your lead'),
+    body: facts(d.name),
+  }),
   // Same fault, same fix: identical to `owner_assigned` in both branches.
   owner_reassigned: (d) =>
     d.n != null
@@ -136,15 +197,52 @@ export const COPY: Builders = {
 };
 
 /**
+ * THE MORNING SUMMARY (spec §4): several alerts held overnight, or held for
+ * the morning, reach the phone as ONE notification. Each type says its count
+ * as a short phrase; the title is the total. Only alerts still open are in it,
+ * so work done in the meantime is never announced.
+ */
+const PHRASE: Record<string, (n: number) => string> = {
+  lead_assigned: (n) => `${plural(n, 'new lead')}`,
+  lead_assigned_bulk: (n) => `${plural(n, 'batch', 'batches')} of leads`,
+  lead_reassigned: (n) => `${plural(n, 'lead')} moved to you`,
+  lead_unrouted: (n) => `${plural(n, 'lead')} with nobody on ${n === 1 ? 'it' : 'them'}`,
+  lead_untouched: (n) => `${plural(n, 'lead')} still waiting`,
+  lead_repeat: (n) => `${n} came back`,
+  followup_due: (n) => `${plural(n, 'follow-up')} due`,
+  site_visit_reminder: (n) => `${plural(n, 'site visit')}`,
+  calendar_task_assigned: (n) => `${plural(n, 'booking')} made for you`,
+  owner_assigned: (n) => `${plural(n, 'batch', 'batches')} of owners to call`,
+  owner_reassigned: (n) => `${plural(n, 'batch', 'batches')} of owners moved to you`,
+  agreement_ending: (n) => `${plural(n, 'tenancy', 'tenancies')} ending`,
+  lead_reassign_loop: (n) => `${plural(n, 'lead')} keeps being handed on`,
+  share_interested: (n) => `${plural(n, 'buyer')} interested`,
+  share_expired_open: (n) => `${plural(n, 'expired link')} opened`,
+  buyer_callback: (n) => `${plural(n, 'call back')} asked for`,
+  buyer_visit: (n) => `${plural(n, 'visit')} asked for`,
+  buyer_homes: (n) => `${plural(n, 'buyer')} asked for homes like these`,
+  buyer_new_homes: (n) => `new homes for ${plural(n, 'buyer')}`,
+  owner_reassign_loop: (n) => `${plural(n, 'owner')} keeps being handed on`,
+};
+
+export function summaryCopy(byType: Record<string, number>): NotifCopy {
+  const total = Object.values(byType).reduce((a, b) => a + b, 0);
+  const parts = Object.entries(byType)
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, n]) => (PHRASE[t] ? PHRASE[t](n) : null));
+  return { title: `${plural(total, 'thing')} waiting for you`, body: facts(...parts) };
+}
+
+/**
  * Words for a type. Returns null for a type with no entry so the caller can
  * fall back to whatever it passed — a type added without copy still delivers
  * rather than sending an empty notification.
  */
-export function copyFor(type: string, data: any): NotifCopy | null {
+export function copyFor(type: string, data: any, desk: CopyDesk = INDIA_DESK): NotifCopy | null {
   const build = COPY[type];
   if (!build) return null;
   try {
-    const c = build(data || {});
+    const c = build(data || {}, desk);
     return c?.title ? c : null;
   } catch {
     return null;

@@ -5,6 +5,7 @@ import { supportFragment } from '../../lib/support.js'
 import { Button } from '../../components/primitives.jsx'
 import Icon from '../../components/Icon.jsx'
 import Ledger, { fmtWhen } from './Ledger.jsx'
+import { REACH_LABEL, PUSH_STATE_LABEL, shownLabel, reachWarn } from '../../lib/alertReach.js'
 
 // ============================================================================
 // ONE FIRM, AS DELPAT SEES IT
@@ -161,8 +162,14 @@ Continue?`)) return
                     <td>{flags.map(([f, tone]) => <span key={f} className={'adm-flag ' + tone}>{f}</span>)}</td>
                     <td>{u.last_login ? fmtWhen(u.last_login) : 'Never'}</td>
                     <td>{u.live_sessions ? `${u.live_sessions} ${u.live_sessions === 1 ? 'device' : 'devices'}` : 'Nowhere'}</td>
-                    <td className={u.alerts_failed_7d ? 'adm-warn' : ''}>
-                      {u.devices ? `${u.devices} on` : 'Off'}{u.last_alert_ok ? `, last reached ${ago(u.last_alert_ok).toLowerCase()}` : ''}{u.alerts_failed_7d ? `, ${u.alerts_failed_7d} failed this week` : ''}
+                    <td className={u.reach && (reachWarn(u) || u.alerts_failed_7d) ? 'adm-warn' : ''}>
+                      {u.reach ? [
+                        u.reach === 'on' ? `${u.devices} on` : REACH_LABEL[u.reach],
+                        u.devices_signed_out ? `${u.devices_signed_out} signed out` : '',
+                        shownLabel(u),
+                        u.last_reached_at ? `last shown ${ago(u.last_reached_at).toLowerCase()}` : '',
+                        u.alerts_failed_7d ? `${u.alerts_failed_7d} failed` : '',
+                      ].filter(Boolean).join(', ') : '—'}
                     </td>
                     <td className="adm-acts">
                       {!suspended && u.live_sessions > 0 && <button disabled={busy === u.id} onClick={() => signOut(u)}>Sign out</button>}
@@ -177,11 +184,12 @@ Continue?`)) return
             <Panel title="Signed in now">
               {!d.sessions.length ? <div className="adm-empty">Nobody.</div> : (
                 <table className="adm-tbl">
-                  <thead><tr><th>Person</th><th>Device</th><th>Last seen</th></tr></thead>
+                  <thead><tr><th>Person</th><th>Device</th><th>Alerts</th><th>Last seen</th></tr></thead>
                   <tbody>{d.sessions.map(s => (
                     <tr key={s.id}>
                       <td>{s.name || nameOf.get(s.user_id) || 'Unknown'}{s.support_by && <span className="adm-flag">Delpat support</span>}</td>
                       <td>{deviceOf(s.user_agent)}<span className="adm-dim">{s.ip || ''}</span></td>
+                      <td>{PUSH_STATE_LABEL[s.push_state] || '—'}</td>
                       <td>{fmtWhen(s.last_seen_at)}</td>
                     </tr>
                   ))}</tbody>
@@ -208,6 +216,8 @@ Continue?`)) return
 
       {tab === 'ledger' && <Panel title="Audit log"><Ledger firmId={firmId} /></Panel>}
 
+      {tab === 'alerts' && <AlertOutcomes rows={d.alerts || []} />}
+
       {shown && (
         <div className="modal-overlay adm-overlay" onClick={() => setShown(null)}>
           <div className="adm-modal" onClick={e => e.stopPropagation()}>
@@ -223,5 +233,35 @@ Continue?`)) return
         </div>
       )}
     </div>
+  )
+}
+
+// THE ALERTS EARN THEIR PUSH (docs/specs/notifications.md §6). Per type, last
+// 14 days, since the lifecycle began: what was raised, what reached a screen,
+// what got done — and, of the ones done inside 2 hours, the share when the
+// push was shown against when it was not. Matching shares mean the push is
+// changing nothing, and the type moves down a tier in notificationCatalogue.ts.
+const pct = (n, of) => (of > 0 ? `${Math.round((100 * n) / of)}%` : '—')
+function AlertOutcomes({ rows }) {
+  return (
+    <Panel title="Alerts, last 14 days">
+      {!rows.length ? <div className="adm-empty">None raised yet.</div> : (
+        <table className="adm-tbl">
+          <thead><tr>
+            <th>Type</th><th>Raised</th><th>Shown</th><th>Opened</th><th>Done</th><th>Moved away</th><th>Open</th>
+            <th>Done in 2h, shown</th><th>Done in 2h, not shown</th><th>Median to done</th>
+          </tr></thead>
+          <tbody>{rows.map(r => (
+            <tr key={r.type}>
+              <td className="adm-mono">{r.type}</td>
+              <td>{r.raised}</td><td>{r.shown}</td><td>{r.opened}</td><td>{r.done}</td><td>{r.not_yours}</td><td>{r.open}</td>
+              <td>{pct(r.done_2h_shown, r.base_shown)}</td>
+              <td>{pct(r.done_2h_unshown, r.base_unshown)}</td>
+              <td>{r.median_done_min == null ? '—' : r.median_done_min < 60 ? `${r.median_done_min} min` : `${Math.round(r.median_done_min / 60)} h`}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+    </Panel>
   )
 }

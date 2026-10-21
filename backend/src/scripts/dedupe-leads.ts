@@ -6,8 +6,10 @@
  * "+919876543210" and "98765 43210" were three people. Importing the same sheet
  * twice therefore doubled it. This folds those rows back together.
  *
- * Identity is the LAST TEN DIGITS of the phone number, within one tenant. Not
- * the name — two people genuinely share a name, and a sheet spells the same
+ * Identity is the exact E.164 phone number, within one tenant
+ * (docs/specs/phone.md; the phone repair in initSchema stores every readable
+ * number that way). A number that cannot be read is never grouped. Not the
+ * name — two people genuinely share a name, and a sheet spells the same
  * person three ways. The phone is what an agent actually dials.
  *
  * Which row survives, in order:
@@ -36,6 +38,7 @@
  */
 
 import { sql } from '../services/db';
+import { toE164 } from '../../../src/lib/phone.js';
 
 const REJECTED = 'Rejected';
 
@@ -70,17 +73,17 @@ function filledCount(r: any): number {
 
 async function main() {
   const args = parseArgs();
-  const P10 = sql`right(regexp_replace(coalesce(phone,''), '\D', '', 'g'), 10)`;
-
-  const rows = await sql`
-    SELECT *, ${P10} AS p10 FROM crm_leads
-     WHERE tenant_id = ${args.tenant} AND length(${P10}) = 10
+  // Only numbers already stored as exact E.164: one is the same person as
+  // another only when the strings are equal.
+  const all = await sql`
+    SELECT * FROM crm_leads WHERE tenant_id = ${args.tenant} AND phone LIKE '+%'
      ORDER BY created_at ASC`;
+  const rows = (all as any[]).filter(r => toE164(r.phone) === r.phone);
 
   const groups = new Map<string, any[]>();
   for (const r of rows) {
-    const g = groups.get(r.p10) || [];
-    g.push(r); groups.set(r.p10, g);
+    const g = groups.get(r.phone) || [];
+    g.push(r); groups.set(r.phone, g);
   }
   const dupGroups = [...groups.entries()].filter(([, g]) => g.length > 1);
 
@@ -95,7 +98,7 @@ async function main() {
   let fieldsGained = 0;
   let remarksMoved = 0;
 
-  for (const [p10, group] of dupGroups) {
+  for (const [phone, group] of dupGroups) {
     const sorted = [...group].sort((a, b) =>
       stageRank(b.stage) - stageRank(a.stage)
       || Number(Boolean(b.agent_id)) - Number(Boolean(a.agent_id))
@@ -133,7 +136,7 @@ async function main() {
 
     if (shown < args.show) {
       shown++;
-      console.log(`+91${p10}  keep ${keep.name} [${keep.stage}${keep.agent_id ? ', assigned' : ', unassigned'}]  ` +
+      console.log(`${phone}  keep ${keep.name} [${keep.stage}${keep.agent_id ? ', assigned' : ', unassigned'}]  ` +
         `drop ${drop.length}: ${drop.map(d => `${d.name} [${d.stage}]`).join(', ')}` +
         (Object.keys(patch).length || notes.length > (keep.notes || []).length
           ? `\n    gains ${[...Object.keys(patch), ...(notes.length > (keep.notes || []).length ? [`${notes.length - (keep.notes || []).length} remarks`] : [])].join(', ')}`

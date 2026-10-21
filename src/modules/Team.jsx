@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Avatar, Button, Field, Input, PhoneInput, SectionHead, PageHeader, Segmented, RowMenu, Pager } from '../components/primitives.jsx'
+import { Avatar, Button, Field, Input, SectionHead, PageHeader, Segmented, RowMenu, Pager } from '../components/primitives.jsx'
+import PhoneInput from '../components/PhoneInput.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
+// The shared frame: a backdrop tap stops closing once anything is typed (CLAUDE.md §5).
+import { Modal } from './Modals.jsx'
 import { useServerData } from '../lib/useServerData.js'
 import { buildRoster } from '../components/roster.jsx'
 import { whenLabel } from '../lib/format.js'
 import { copyText } from '../lib/clipboard.js'
+import { firmLocale } from '../lib/locale.js'
+import { REACH_LABEL, shownLabel, reachWarn } from '../lib/alertReach.js'
 
 const ROLE_LABEL = { admin: 'Owner / Admin', owner: 'Owner', agent: 'Sales Advisor', manager: 'Sales Manager' }
 const roleLabel = (r) => ROLE_LABEL[r] || (r ? r[0].toUpperCase() + r.slice(1) : 'Sales Advisor')
@@ -85,6 +90,9 @@ function AccessPanel({ store }) {
 
   const load = () => api.getUsers().then(r => setUsers(r.users || [])).catch(() => setUsers([]))
   useEffect(() => { load() }, [])
+  // Can each person be reached by alerts — the manager's "who do I talk to".
+  const { data: reachData } = useServerData(() => api.getAlertReach(), [], null, '/notifications/reach')
+  const reachOf = new Map((reachData?.reach || []).map(r => [r.id, r]))
 
   const pageCount = Math.max(1, Math.ceil((users?.length || 0) / pageSize))
   // A row acted on could move the person off the page they were on (a
@@ -131,8 +139,7 @@ function AccessPanel({ store }) {
 
   return (
     <div className="panel acc-panel">
-      <SectionHead title="Manage access"
-        right={<span className="u-muted acc-hint">Add, edit, and control who can sign in</span>} />
+      <SectionHead title="Manage access" />
       {users == null ? (
         <div className="acc-tbl-wrap"><table className="tbl acc-tbl"><tbody>
           {[0, 1, 2].map(i => (
@@ -142,6 +149,7 @@ function AccessPanel({ store }) {
               <td><span className="skel skel-line" style={{ width: 150 }} /></td>
               <td><span className="skel skel-line" style={{ width: 60 }} /></td>
               <td><span className="skel skel-line" style={{ width: 50 }} /></td>
+              <td><span className="skel skel-line" style={{ width: 60 }} /></td>
               <td className="acc-actcol"><span className="skel skel-line" style={{ width: 180 }} /></td>
             </tr>
           ))}
@@ -150,7 +158,7 @@ function AccessPanel({ store }) {
         <div className="acc-tbl-wrap">
           <table className="tbl acc-tbl">
             <thead>
-              <tr><th>Person</th><th>User ID</th><th>Email</th><th>Status</th><th>Last active</th><th className="acc-actcol">Actions</th></tr>
+              <tr><th>Person</th><th>User ID</th><th>Email</th><th>Status</th><th>Last active</th><th>Alerts</th><th className="acc-actcol">Actions</th></tr>
             </thead>
             <tbody>
               {pageRows.map(u => {
@@ -184,6 +192,16 @@ function AccessPanel({ store }) {
                       {u.must_change_password && <span className="acc-mustchg" title="They set their own password on first sign-in">first-login password pending</span>}
                     </td>
                     <td className="u-muted acc-last">{timeAgo(u.last_active)}</td>
+                    <td className="acc-reach">
+                      {(() => {
+                        const r = reachOf.get(u.id)
+                        if (!r || isSuspended(u)) return <span className="u-muted">—</span>
+                        return (<>
+                          <span className={'acc-reach-v' + (reachWarn(r) ? ' warn' : '')}>{REACH_LABEL[r.reach]}</span>
+                          {shownLabel(r) && <span className="u-muted acc-reach-s">{shownLabel(r)}</span>}
+                        </>)
+                      })()}
+                    </td>
                     <td className="acc-actcol">
                       {mine ? (
                         <div className="acc-actions">
@@ -254,10 +272,7 @@ function SuspendModal({ store, user, onClose, onHandOver, onConfirm }) {
   const owners = held?.owners ?? 0
   const total = leads + owners
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
-        <div className="m-head"><h3>Suspend {user.name}</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
-        <div className="m-content">
+    <Modal title={`Suspend ${user.name}`} onClose={onClose} width={420}>
           <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
             They are signed out everywhere and stop receiving new work. Their history stays theirs, and this can be undone.
           </div>
@@ -278,9 +293,7 @@ function SuspendModal({ store, user, onClose, onHandOver, onConfirm }) {
               <Button variant="primary" block onClick={() => onConfirm(user)}>Suspend {user.name}</Button>
             </>
           )}
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -355,10 +368,7 @@ function SeatModal({ store, user, onClose, onDone }) {
       .catch(err => { store.toast(cleanErr(err), 'warn'); setSaving(false) })
   }
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
-        <div className="m-head"><h3>Reassign seat</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
-        <div className="m-content">
+    <Modal title="Reassign seat" onClose={onClose} width={420}>
           <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
             The seat keeps its work{held && (held.leads || held.owners) ? `: ${[held.leads && `${held.leads} open lead${held.leads === 1 ? '' : 's'}`, held.owners && `${held.owners} calling record${held.owners === 1 ? '' : 's'}`].filter(Boolean).join(' and ')}` : ''}. <b style={{ color: 'var(--ink)' }}>{user.name}</b> is signed out, and what they logged stays under their name.
           </div>
@@ -369,11 +379,9 @@ function SeatModal({ store, user, onClose, onDone }) {
             </Field>
           )}
           <Field label={needsEmail ? 'Email' : 'Email (optional)'}><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@firm.com" type="email" /></Field>
-          <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
-          <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Reassigning…' : 'Reassign seat'}</Button>
-        </div>
-      </div>
-    </div>
+          <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} /></Field>
+          <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>{saving ? 'Reassigning…' : 'Reassign seat'}</Button></div>
+    </Modal>
   )
 }
 
@@ -387,7 +395,7 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
   const [name, setName] = useState(user.name || '')
   const [loginId, setLoginId] = useState(user.login_id || '')
   const [email, setEmail] = useState(user.email || '')
-  const [phone, setPhone] = useState(String(user.phone || '').replace(/^\+91/, ''))
+  const [phone, setPhone] = useState(user.phone || '')
   const [role, setRole] = useState(user.role === 'owner' ? 'owner' : user.role)
   const [saving, setSaving] = useState(false)
   const canSetRole = canManage('owner') && user.role !== 'owner'  // only an owner reassigns roles; owner row is fixed here
@@ -408,10 +416,7 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
       .catch(err => { store.toast(cleanErr(err), 'warn'); setSaving(false) })
   }
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
-        <div className="m-head"><h3>Edit {user.name}</h3><button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button></div>
-        <div className="m-content">
+    <Modal title={`Edit ${user.name}`} onClose={onClose} width={420}>
           {user.login_id ? (
             <Field label="User ID (used to sign in)" hint="Changing it signs them out; nothing else moves.">
               <Input value={loginId} onChange={e => setLoginId(e.target.value)} placeholder="e.g. siddhi" />
@@ -421,16 +426,14 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
           )}
           <Field label="Full name"><Input value={name} onChange={e => setName(e.target.value)} autoFocus /></Field>
           <Field label={needsEmail ? 'Email' : 'Email (optional)'}><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="name@firm.com" type="email" /></Field>
-          <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
+          <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} /></Field>
           {canSetRole && (
             <Field label="Access level">
               <Segmented value={role} onChange={setRole} options={[{ value: 'agent', label: 'Sales agent' }, { value: 'manager', label: 'Manager' }]} />
             </Field>
           )}
-          <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Saving…' : 'Save changes'}</Button>
-        </div>
-      </div>
-    </div>
+          <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>{saving ? 'Saving…' : 'Save changes'}</Button></div>
+    </Modal>
   )
 }
 
@@ -448,7 +451,7 @@ function SessionsPanel({ store }) {
   const sessions = data?.sessions || []
   return (
     <div className="panel acc-panel">
-      <SectionHead title="Your sessions" right={<span className="u-muted acc-hint">Devices signed in as you</span>} />
+      <SectionHead title="Your sessions" />
       {data == null ? (
         <div className="acc-sess">
           {[0, 1].map(i => (
@@ -563,13 +566,7 @@ function ResetPasswordModal({ store, user, onClose, onDone }) {
   }
 
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
-        <div className="m-head">
-          <h3>Reset password: {user.name}</h3>
-          <button className="btn btn-icon btn-quiet" onClick={onClose}><Icon name="x" /></button>
-        </div>
-        <div className="m-content">
+    <Modal title={`Reset password: ${user.name}`} onClose={onClose} width={420}>
           <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>
             Set a custom new password for <b style={{ color: 'var(--ink)' }}>{user.name}</b> ({user.login_id || user.email}).
           </div>
@@ -590,11 +587,9 @@ function ResetPasswordModal({ store, user, onClose, onDone }) {
             </label>
           </div>
 
-          <Button variant="primary" block disabled={saving} onClick={submit}>
+          <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>
             {saving ? 'Resetting Password…' : 'Set New Password'}
-          </Button>
-        </div>
-      </div>
-    </div>
+          </Button></div>
+    </Modal>
   )
 }

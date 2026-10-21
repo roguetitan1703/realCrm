@@ -5,117 +5,106 @@ the handoff. Only what git cannot tell you belongs here: what is *deployed* (as
 opposed to committed), what is waiting on the user, and what was checked against
 a live database so the next session neither re-derives it nor assumes it.
 
-Open bugs go in `docs/KNOWN-ISSUES.md`, not here. Point at them. The working
-plan for the Mahalaxmi batch is `docs/specs/mahalaxmi-batch.md` (latest: part E).
+The work itself is in `docs/BACKLOG.md`; set-aside work in `docs/PARKED.md`.
 
-**Last session: 2026-09-30.**
+**Last session: 2026-10-19 → 21.** The catalog (Work OS #131,
+`specs/listing-pages.md` §A, §A.6) is complete on `development` (f28f5fb):
+shared links, the public catalogue, the three buyer forms, work only to people
+who can take it, the phone model (E.164), code sign-in retired, the import
+undo and the retired batch delete. Every merge was reviewed; a final walk on
+dev (phone and desk) found no blocker and its two bugs are fixed. What the
+firms will notice and the deploy order: `releases/2026-10-20.md`. Nothing
+deployed.
 
 ---
 
 ## Deployed
 
+Not re-read this session; as of 17 Oct:
+
 | | at | how |
 |---|---|---|
-| Backend — AWS EC2, **by hand** | `f03dcd1` when last read (24 Sep, `/health`) | `scripts/deploy-api.sh` on the box — refuses a dirty tree or a branch other than `main` |
-| Frontend — Vercel | not recorded | **Branch Tracking is OFF** — a push to `main` does not deploy; the user deploys by hand |
-| `main` | `a3b51c0` | |
-| `development` | 41 commits ahead of `main` | agreements and conversion (D), the activity report, contacts tabs, the copy sweep, Today / My work / Performance, Properties Part 7, the superadmin console, the per-firm ledger, the build's name check, tutorials, and (28 Sep) calling tabs, property tabs + project list + duplicate, the photo editor, the import switch, listings added |
-
-**What this release is, for the clients and for the deploy: `docs/releases/2026-09-28.md`.** `development` is pushed to origin (28 Sep).
-
-**Deploy order: API first, then frontend.** The new frontend calls
-`/agreements`, `/public/gallery`, the `contact` counts and fields the old API
-does not have.
-
-What the API deploy runs on production, once:
-- additive schema: `crm_agreements` and its columns, the index
-  `idx_crm_timeline_day (tenant_id, timestamp)`, four property columns
-  (`verified_at`, `verified_by`, `gallery_off`, `gallery_version`),
-  `sessions.support_by`, `superadmins.failed_logins / locked_until`,
-  `audit_log.chain` with its index, the `audit_checks` table and its `reason`
-  column;
-- `runOnce 2026_09_25_intro_message_no_dashes`: a firm's saved intro message
-  loses its em dash (the old default becomes the new one); logs which firms
-  (user's OK for all firms, 25 Sep);
-- `runOnce 2026_09_25_agreement_party_copy`: fills an agreement's own tenant or
-  buyer name and phone from its lead where empty. Production had one agreement
-  (urban, a demo firm) with the name already set; nothing on bhumi or mahalaxmi.
-
-After the API deploy:
-- the superadmin console signs out once (its old 30-day token has no session);
-- the first ledger check reads the whole legacy chain once (about 8,000 rows,
-  paged); after that only new rows;
-- `npm run link:owners -- --env=production` (report, then `--apply`) to join
-  listing owners to calling rows — not yet run on production.
+| Backend — AWS EC2 (PM2 runs prod and dev) | `78458b6` (5 Oct) | `scripts/deploy-api.sh` on the box, `main` only |
+| Dev API (`api.dev.re.delpat.in`) | `0eb1c5c` — far behind `development` | pull + `npm ci` + `pm2 restart re-api-dev` |
+| `main` | `820514e` (6 Oct) | |
+| `development` | `f28f5fb` (21 Oct) | |
 
 ---
 
 ## Waiting on the user
 
-- **Review on dev, merge `development` → `main`, deploy** (API, then frontend).
-- **Production, read only, 28–30 Sep (nothing written):** 0 listings at flat
-  A-101 in any firm; 5 at flat 101 in another wing (bhumi 3, mahalaxmi 1,
-  urban 1), not provably typed or defaulted, left alone. No paying firm's
-  listing carries the invented "2 BHK" / "Pune"; our own `delpat` org has 747
-  imported listings saved as sale in Pune by the old default. Bhumi: 39 of 39
-  calling rows have nobody on them. The audit ledger: 10,809 of 10,809 verify
-  with the fixed checker (9994f29), so it reads clean after the deploy and
-  nothing is re-sealed on production.
-- Default passwords are **not** an open item: the user, 30 Sep (sign-in no
-  longer forces a change, by choice).
-- **Superadmin console built** (mahalaxmi-batch.md, "Superadmin — as built"):
-  console session, support view, firm page, per-firm ledger, setup email.
-  Worth a look on dev at `/admin` before deploying.
-- **Properties Part 7** built (mahalaxmi-batch.md Part 7). 7.6 still wants the
-  production count of shortlist use; reading it needs the user's OK.
-- **Photo links on production** are `https://<app>/<firm>/photos/<project>-<code>`; the Vercel rewrite
-  already sends every path to the app. The page reads `/api/v1/public/gallery`,
-  so it needs the API deployed first like everything else.
-- **Production timing of the dashboard** after the deploy: the only number is
-  from before (Bhumi's leads report 2 s). A read-only check was blocked by the
-  permission tool; ask before retrying.
+- **Redeploy the dev API, re-test on the dev preview,** then the release
+  (`releases/2026-10-20.md`: API first, `npm ci`, read the boot log, then the
+  frontend). Re-run the phone dry run and `alert-first-run-preview.ts` the
+  morning of the deploy.
+- **AWS security group:** ports 5000 and 5001 must have no inbound rule.
+- **A hotfix off `main`** for the two live holes (code sign-in; any agent
+  deleting an import batch): yes or no. Recommended no if the release goes
+  within days; neither was ever used in production (21 Oct).
+- **`PLAN.md` §6** questions still open.
 
 ---
 
 ## Checked this session
 
-- **Dev only, `delpat`, desk 1440 and iPhone 13, no page errors.**
-- Calling: every tab's count equals its list total, firm-wide and inside
-  Godrej Green Vistas (All 726 · Callbacks 7 · New 709 · Interested 4 · Key
-  Received 4 · Closed 9); a reload and a record round trip keep the tab; × goes
-  to the 13 project cards with the URL cleared. The phone shows the signed-in
-  person's own list; with the owner signed in (holds none) every tab read 0 and
-  matched. Not checked: an agent who holds rows, on the phone (no agent password).
-- Properties: tab counts equal list totals firm-wide (23) and in Oakridge
-  Towers; project band, Add unit, filter menu (Tower, Flat no.; no Project or
-  Status); bulk duplicate → confirm → copies with "No flat no. yet", found by
-  Flat no. → Not added yet; single duplicate → form → "Save without a flat
-  number?" on desk and phone; old `?project=` links land on the filtered list.
-  Every probe listing deleted by id (listings back to 23).
-- Photos, on `p_1790420338574_60jw` (6 items): Make cover moves in 35 ms desk /
-  105 ms phone and saves; drag reorders; remove + Undo leaves 6 on screen and
-  on the server; a refused save puts the tiles back. Order restored; the 19
-  "Photos" history lines the runs wrote were deleted.
-- Listings added: a probe listing by akashpatel showed in Performance (Listings
-  1), his day, and Team today; deleted.
+- **Production, read only (`BEGIN READ ONLY`, `transaction_read_only = on`):**
+  - Rotas: 0 stale ids at bhumi and mahalaxmi. Strategies: bhumi leads
+    round_robin, owners manual, sweeps off; mahalaxmi round_robin both,
+    sweeps off. Honouring "Leave unassigned" changes nothing for them.
+  - Shortlist bug: never fired. `auth_otp`: never held a row.
+  - Phone repair dry run (final reader, 21 Oct): bhumi users 1 / leads 4 /
+    owners 52 / property owner phones 55; mahalaxmi 3 / 1 / 6 / 7. Left as
+    they are: bhumi 11, mahalaxmi 14. User collisions 0; owners on one number
+    after it: bhumi 10, mahalaxmi 6.
+  - Imports (21 Oct): bhumi 2 owner imports (1,271 owners), mahalaxmi 7
+    (3,731; 1,034 worked by a person) plus 4 uploads never run; no lead or
+    property imports. Every batch still holds what it added: the batch-delete
+    endpoint was never used. The only undo ever was our own, 7 Aug, 494 bhumi
+    leads, archived first.
+  - No `crm_share_*`, `crm_buyer_asks` or `crm_job_runs` tables yet, so the
+    first 180-day view cleanup deletes nothing.
+- **Dev database** (`delpat`): final walk of f05dc8d on iPhone 13 and desk:
+  links, the three forms, catalogue, one alert per arrival, "Replace it", a
+  stranger cannot move a visit, greyed rota members, "Not stated" bar, phones,
+  import + undo ("Undone · 1 kept"), one reset mail per 10 minutes, OTP 410.
+  The Edit-owner picker fix (f28f5fb) was not driven in a browser. Probe rows
+  removed and counted; 61 audit rows stay (hash-chained); 3 properties'
+  `updated_at` moved. The 349 owners a probe sweep moved off Mohit are back,
+  rota indices reset.
 
 ---
 
 ## Do not repeat
 
-- Dev has demo data on `delpat`:
-  - `npm run seed:dev:activity` (rerun 25 Sep): three days of agent work.
-    `-- --clear` removes it and restores what it moved.
-  - `npm run seed:dev:inventory`: 19 flats (`p_demo_`), 22 owners (`own_demo_`),
-    4 agreements, 2 leads. `-- --clear` removes them.
-- The dev activity seed writes call events but not `crm_owners.last_call_at`,
-  so on dev the dashboard's "People called today" reads 0 beside Team today's
-  calls. A real logged call sets both.
-- Left in place on dev because the user converted it: the calling row "zeta
-  probe heights" (`own_1790258291624_0_7945dd`) and the flat made from it.
-- Playwright's WebKit build is not downloaded; phone checks ran in Chromium with
-  the iPhone 13 descriptor.
+- **The motion-graphics engine is not here.** It is `Delpat-Tech/cutroom`
+  (`D:\Work\Delpat\projects\cutroom`, DESIGN.md + HANDOFF.md). This repo keeps
+  only `marketing/demo/` (tutorials, snapshot scripts, the demo profile), which
+  cutroom will bake from. Do not add film code to `tutorial-videos` or here.
+- **Demo recordings and snapshots use `demo-showcase` only**, never a client
+  firm; shoot in working hours (Today and Performance count today's activity);
+  take the walkthrough straight after a reset (it saves a call). The end
+  snapshot once captured "Saving…"; the recorder now waits for the save.
+- Dev has demo data on `delpat`: `npm run seed:dev:activity` (three days of
+  agent work; `-- --clear` removes it) and `npm run seed:dev:inventory` (19
+  flats `p_demo_`, 22 owners `own_demo_`, 4 agreements, 2 leads; `-- --clear`).
+  The activity seed does not set `crm_owners.last_call_at`.
+- Left on dev because the user converted it: calling row "zeta probe heights"
+  (`own_1790258291624_0_7945dd`) and the flat made from it.
 - The dev database is shared with the user's own preview testing. Delete only
   your own probe rows, by id.
-- Read-only scripts that import `services/store.ts` must set `CRM_NO_BOOT=1`,
-  or importing the store runs `initSchema()` against whatever database it names.
+- Read-only scripts that import `services/store.ts` must set `CRM_NO_BOOT=1`.
+- **Read-only means `sql.begin('READ ONLY', …)`.** The pooler drops the
+  `default_transaction_read_only` startup parameter (shown on dev, 20 Oct: a
+  write went through). Every earlier production read was plain SELECTs.
+- `DEV_DATABASE_URL` and `JWT_SECRET` are in `.env`, not `.env.development`;
+  a scratch script reading only the latter connects to localhost and gets
+  ECONNRESET.
+- No Playwright browser is downloaded on this machine: launch with
+  `chromium.launch({ channel: 'msedge' })` and the iPhone 13 descriptor.
+- `npm run build` needs `VITE_API_URL` set locally (no production env file
+  here): `VITE_API_URL=http://localhost:5001 npm run build`.
+- Caddy overwrites `X-Forwarded-Host` on the API box, so `og:url` was removed
+  from the share card; do not put it back from the request host.
+- Remotion leaves a webpack bundle per render in `%TEMP%`; thirty of them once
+  filled `C:`. The installed tutorial-videos deletes them; check `C:` before
+  rendering anything.

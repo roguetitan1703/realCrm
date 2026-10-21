@@ -21,8 +21,10 @@ import { BHK_COMMON, BHK_MORE, SUBTYPES } from '../data/propertyFields.js'
 import { Button, Field, Input, Segmented, SuggestInput } from './primitives.jsx'
 import { projectNames } from '../lib/suggest.js'
 import Icon from './Icon.jsx'
+import { currencySymbol, moneyFull, roomLabel, roomsHeading } from '../lib/locale.js'
+import { formatPhone } from '../lib/phone.js'
 
-const rupees = (n) => (n == null ? '' : `₹${Math.round(Number(n)).toLocaleString('en-IN')}`)
+const rupees = (n) => (n == null ? '' : moneyFull(n))
 const today = () => new Date().toISOString().slice(0, 10)
 /** The reason the server gave, without the transport around it. */
 const reason = (e) => String(e?.message || e).replace(/^API Error: \d+ [^—]*— ?/, '') || 'Could not save.'
@@ -30,7 +32,7 @@ const flatName = (p) => [p.project || p.society, unitLabel(p)].filter(Boolean).j
 
 /** One flat in the pick list: name and area, then what it is. */
 function FlatOption({ p, onPick }) {
-  const what = [p.bhk && p.subtype !== 'plot' ? `${p.bhk} BHK` : null, p.deal === 'rent' ? 'Rent' : p.deal === 'sale' ? 'Sale' : null, p.status].filter(Boolean).join(' · ')
+  const what = [p.bhk && p.subtype !== 'plot' ? roomLabel(p.bhk) : null, p.deal === 'rent' ? 'Rent' : p.deal === 'sale' ? 'Sale' : null, p.status].filter(Boolean).join(' · ')
   return (
     <button type="button" onClick={() => onPick(p)}>
       <span className="cd-opt-main"><b>{flatName(p)}</b><span>{p.locality}</span></span>
@@ -69,7 +71,7 @@ export function AgreementCard({ a, store, onChanged, show = {} }) {
         {soon && <span className="agr-soon">{a.daysLeft === 0 ? 'Ends today' : `Ends in ${a.daysLeft} days`}</span>}
       </div>
       <div className="agr-facts">
-        {show.party !== false && a.party?.name && <span><b>{a.party.name}</b>{a.party.phone ? ` · ${a.party.phone}` : ''}</span>}
+        {show.party !== false && a.party?.name && <span><b>{a.party.name}</b>{a.party.phone ? ` · ${formatPhone(a.party.phone)}` : ''}</span>}
         {a.amount != null && <span><b>{rupees(a.amount)}</b>{a.kind === 'rent' ? '/month' : ''}</span>}
         {a.deposit != null && <span>Deposit <b>{rupees(a.deposit)}</b></span>}
         <span>{a.kind === 'rent'
@@ -203,7 +205,7 @@ function OutsideFlat({ v, set, store }) {
             {TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </Field></Half>
-        {v.subtype !== 'plot' && <div style={{ width: 110 }}><Field label="BHK">
+        {v.subtype !== 'plot' && <div style={{ width: 110 }}><Field label={roomsHeading()}>
           <select className="input" value={v.bhk} onChange={e => set('bhk', e.target.value)}>
             <option value="">Not known</option>
             {BHKS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
@@ -311,10 +313,10 @@ export function CloseDealModal({ store, leadId, Modal }) {
         )}
       </Field>
       <Row>
-        <Half><Field label={kind === 'rent' ? 'Rent per month (₹)' : 'Sale price (₹)'} required>
+        <Half><Field label={kind === 'rent' ? `Rent per month (${currencySymbol()})` : `Sale price (${currencySymbol()})`} required>
           <Input inputMode="numeric" value={f.amount} onChange={e => set('amount', e.target.value)} placeholder={kind === 'rent' ? '30000' : '8500000'} />
         </Field></Half>
-        {kind === 'rent' && <Half><Field label="Deposit (₹)">
+        {kind === 'rent' && <Half><Field label={`Deposit (${currencySymbol()})`}>
           <Input inputMode="numeric" value={f.deposit} onChange={e => set('deposit', e.target.value)} placeholder="100000" />
         </Field></Half>}
       </Row>
@@ -384,10 +386,10 @@ export function AgreementModal({ store, mode, agreementId, propertyId, onDone, M
             </>
           )}
           <Row>
-            <Half><Field label={kind === 'rent' ? 'Rent per month (₹)' : 'Sale price (₹)'} required>
+            <Half><Field label={kind === 'rent' ? `Rent per month (${currencySymbol()})` : `Sale price (${currencySymbol()})`} required>
               <Input inputMode="numeric" value={f.amount} onChange={e => set('amount', e.target.value)} />
             </Field></Half>
-            {kind === 'rent' && <Half><Field label="Deposit (₹)"><Input inputMode="numeric" value={f.deposit} onChange={e => set('deposit', e.target.value)} /></Field></Half>}
+            {kind === 'rent' && <Half><Field label={`Deposit (${currencySymbol()})`}><Input inputMode="numeric" value={f.deposit} onChange={e => set('deposit', e.target.value)} /></Field></Half>}
           </Row>
           <Row>
             <Half><Field label={kind === 'rent' ? 'Starts' : 'Date of sale'} required>

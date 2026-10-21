@@ -12,8 +12,12 @@
 import { Router, Request, Response } from 'express';
 import { CallActionSchema, WhatsAppActionSchema, StageChangeSchema, MergeSchema } from '../models';
 import { requireTenantAuth, requireModuleEnabled, requireQuotaAvailable } from '../middleware/auth';
-import { getLeads, createLead, getAgents, getLeadById, listLeads, getLeadsSummary, getLeadCandidates, bulkAssignLeads, bulkDeleteLeads, splitAssign } from '../services/store';
+import { getLeads, createLead, getLeadById, listLeads, getLeadsSummary, getLeadCandidates, bulkAssignLeads, bulkDeleteLeads, splitAssign } from '../services/store';
 import { sql } from '../services/db';
+import { notWorkableBody } from '../services/workforce';
+import { phoneInvalidBody } from '../services/phone';
+import { leadShares } from '../services/sharing';
+import { shareFail } from './sharing';
 
 export const leadsRouter = Router();
 leadsRouter.use(requireTenantAuth);
@@ -51,6 +55,7 @@ leadsRouter.get('/page', async (req: Request, res: Response) => {
       segment: str(q.segment), intent: str(q.intent),
       // The filter panel's fields, forwarded rather than dropped.
       source: str(q.source), locality: str(q.locality), agent: str(q.agent), flag: str(q.flag),
+      alert: str(q.alert),
       sortKey: str(q.sortKey), sortDir: str(q.sortDir),
     });
     return res.status(200).json({
@@ -78,6 +83,7 @@ leadsRouter.get('/summary', async (req: Request, res: Response) => {
       q: str(q.q), stage: str(q.stage), agentId: str(q.agentId),
       segment: str(q.segment), intent: str(q.intent),
       source: str(q.source), locality: str(q.locality), agent: str(q.agent), flag: str(q.flag),
+      alert: str(q.alert),
     });
     return res.status(200).json({ success: true, summary });
   } catch (err: any) {
@@ -111,6 +117,7 @@ leadsRouter.post('/bulk-assign', async (req: Request, res: Response) => {
     const assigned = await bulkAssignLeads(ids, one, ctx);
     return res.status(200).json({ success: true, assigned });
   } catch (err: any) {
+    const nw = notWorkableBody(err) || phoneInvalidBody(err); if (nw) return res.status(422).json(nw);
     if (err?.status === 403) {
       return res.status(403).json({ success: false, error: 'Forbidden', message: err.message, code: err.code });
     }
@@ -158,6 +165,16 @@ leadsRouter.get('/:id/matches', async (req: Request, res: Response) => {
 });
 
 /**
+ * WHAT THIS LEAD WAS SENT, AND WHAT THEY DID WITH IT
+ * GET /api/v1/leads/:id/shares — per flat: sent at, opens, last opened,
+ * interested taps, devices, the latest link (listing-pages.md §A.5).
+ */
+leadsRouter.get('/:id/shares', async (req: Request, res: Response) => {
+  try { return res.status(200).json({ success: true, ...(await leadShares(req.params.id, (req.headers.origin as string) || null)) }); }
+  catch (err) { return shareFail(res, err); }
+});
+
+/**
  * ONE LEAD, IN FULL
  * GET /api/v1/leads/:id
  * The detail screen's own read, so opening a lead no longer requires the whole
@@ -175,14 +192,16 @@ leadsRouter.get('/:id', async (req: Request, res: Response) => {
 });
 
 leadsRouter.post('/', async (req: Request, res: Response) => {
-  const newLead = await createLead(req.body, {
-    actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
-    ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null,
-  });
-  return res.status(201).json({
-    success: true,
-    data: newLead,
-  });
+  try {
+    const newLead = await createLead(req.body, {
+      actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
+      ip: req.ip || req.socket?.remoteAddress || null, userAgent: (req.headers['user-agent'] as string) || null,
+    });
+    return res.status(201).json({ success: true, data: newLead });
+  } catch (err: any) {
+    const nw = notWorkableBody(err) || phoneInvalidBody(err); if (nw) return res.status(422).json(nw);
+    throw err;
+  }
 });
 
 /**
@@ -258,30 +277,6 @@ leadsRouter.post('/:id/actions/schedule-visit', async (req: Request, res: Respon
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Schedule Visit Failed', message: err.message });
-  }
-});
-
-/**
- * 4. RUN ROUND-ROBIN ASSIGNMENT ACTION (Live duty roster rotation)
- * POST /api/v1/leads/:id/actions/assign-round-robin
- */
-leadsRouter.post('/:id/actions/assign-round-robin', async (req: Request, res: Response) => {
-  try {
-    const recordId = req.params.id;
-    const agents = await getAgents();
-    const activeAgents = agents.filter(a => a.duty_status !== 'OFF_DUTY');
-    const selectedAgentId = activeAgents.length > 0 ? activeAgents[0].id : (agents[0]?.id || 'usr_default');
-
-    await sql`UPDATE crm_leads SET agent_id = ${selectedAgentId} WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
-    console.log(`[Leads Router - Round Robin] Assigned Lead ${recordId} to Agent ${selectedAgentId} in DB`);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Lead routed to next active sales agent in rotation.',
-      assigned_user_id: selectedAgentId,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Round Robin Assignment Failed', message: err.message });
   }
 });
 

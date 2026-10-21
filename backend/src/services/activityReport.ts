@@ -4,7 +4,7 @@
  * ============================================================================
  * The owner asked to see each agent's work every day; the agents asked to see
  * their own. Everything below counts ACTIONS A PERSON TOOK, and nothing else.
- * The spec, and why each rule is there: docs/specs/mahalaxmi-batch.md,
+ * The spec, and why each rule is there: docs/archive/mahalaxmi-batch.md,
  * "Agent activity — the business first" and "Activity — the calling side".
  *
  * ONE LIST OF FACTS. Every number on either screen is a count over `facts()`,
@@ -24,10 +24,11 @@
  * gets people writing them down.
  *
  * A STATUS CHANGE is told as what the customer BECAME, per person per record
- * per day: the last status they set, and nothing if that is where the record
- * started the day — a status flipped and flipped back counts 0.
+ * over the days read: the last status they set, and nothing if that is where
+ * the record started — a status flipped and flipped back counts 0.
  *
- * THE DAY is the firm's, midnight to midnight in its own timezone (dayStart).
+ * THE DAY is the firm's, midnight to midnight in its own timezone (dayStart);
+ * a week or a month is the same, from the first day's midnight to the last's.
  * Things that are only true NOW (a follow-up missed, one due today or
  * tomorrow) are answered for today only; a past day's report does not pretend
  * to know what was missed on it.
@@ -101,11 +102,20 @@ const dueForHolder = (t: string, at: any) => sql`greatest(${at}, coalesce((SELEC
 
 type Bounds = { d0: any; d1: any; d2: any; isToday: any };
 
-/** The day asked for, as the firm's [start, end). `date` is YYYY-MM-DD or null for today. */
-function dayBounds(tz: string, date: string | null): Bounds {
+/**
+ * The days asked for, as the firm's [start, end). `date` is the LAST day
+ * (YYYY-MM-DD, or null for today); `from`, when given, is the first — a week or
+ * a month is the same report over more days, so every number and every list
+ * it opens still come from one query. Without `from` it is the one day.
+ *
+ * What is only true NOW (missed, due today, due tomorrow) is answered when the
+ * range ends today, and never for a range that ended in the past.
+ */
+function dayBounds(tz: string, date: string | null, from: string | null = null): Bounds {
   const day = date ? sql`${date}::date` : sql`(now() AT TIME ZONE ${tz})::date`;
+  const first = from ? sql`${from}::date` : day;
   return {
-    d0: sql`((${day})::timestamp AT TIME ZONE ${tz})`,
+    d0: sql`((${first})::timestamp AT TIME ZONE ${tz})`,
     d1: sql`(((${day}) + 1)::timestamp AT TIME ZONE ${tz})`,
     d2: sql`(((${day}) + 2)::timestamp AT TIME ZONE ${tz})`,
     isToday: sql`((${day}) = (now() AT TIME ZONE ${tz})::date)`,
@@ -131,6 +141,14 @@ const contactOf = (f: any) => sql`
   SELECT DISTINCT ON (person, record_id) person, record_id, at, 'contact' AS measure, detail
     FROM (${f}) c WHERE measure IN ('call', 'whatsapp')
    ORDER BY person, record_id, ${CONTACT_RANK}, at DESC`;
+/**
+ * The same rule, once per person per record per FIRM DAY: the range's per-day
+ * series, so a day's bar is exactly what that day's own report says.
+ */
+const contactByDay = (f: any, tz: string) => sql`
+  SELECT DISTINCT ON (person, record_id, day) person, record_id, day, detail
+    FROM (SELECT c.*, (c.at AT TIME ZONE ${tz})::date AS day FROM (${f}) c WHERE measure IN ('call', 'whatsapp')) c
+   ORDER BY person, record_id, day, ${CONTACT_RANK}, at DESC`;
 
 /**
  * Every fact for one side of the desk on one day. The single source of every
@@ -266,17 +284,40 @@ function allowedPerson(person: string | null): string | null {
 
 const validDate = (d: any) => (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null);
 
+/** The longest range the report reads: a quarter. */
+const MAX_DAYS = 92;
+/**
+ * A first day that makes sense against the last: on or before it, and no more
+ * than MAX_DAYS back. Null (one day) when absent, malformed or the same day.
+ */
+function validFrom(from: any, to: string | null, today: string): string | null {
+  const f = validDate(from);
+  if (!f) return null;
+  const end = to || today;
+  if (f >= end) return null;
+  const earliest = new Date(`${end}T12:00:00Z`);
+  earliest.setUTCDate(earliest.getUTCDate() - (MAX_DAYS - 1));
+  const min = earliest.toISOString().slice(0, 10);
+  return f < min ? min : f;
+}
+
+/** Today in the firm's zone, as YYYY-MM-DD. */
+const todayIn = (tz: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+
 /**
  * The day, for one person or for the whole desk.
  * Returns one row per person: every count by measure and detail, and the
- * number of distinct records behind each.
+ * number of distinct records behind each. Over a range, each person also
+ * carries `days`: [{ day, people, calls, answered }] for the days they
+ * contacted anybody (a day missing from it is a day with nobody contacted).
  */
-export async function activityDay(opts: { side: Side; date?: string | null; person?: string | null }) {
+export async function activityDay(opts: { side: Side; date?: string | null; from?: string | null; person?: string | null }) {
   const t = getContext()!.tenantId;
   const tz = await timezoneOf(t);
   const date = validDate(opts.date);
+  const from = validFrom(opts.from, date, todayIn(tz));
   const person = allowedPerson(opts.person ?? null);
-  const f = facts(opts.side, t, tz, dayBounds(tz, date));
+  const f = facts(opts.side, t, tz, dayBounds(tz, date, from));
 
   // `people` is the calls again, counted by person rather than by tap: five
   // calls to one number is five calls and one person. Summing the per-outcome
@@ -305,12 +346,28 @@ export async function activityDay(opts: { side: Side; date?: string | null; pers
 
   const clockQ = sql`
     SELECT to_char(${date ? sql`${date}::date` : sql`(now() AT TIME ZONE ${tz})::date`}, 'YYYY-MM-DD') AS day,
+           ${from}::text AS "from",
            to_char((now() AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') AS today,
            extract(hour FROM now() AT TIME ZONE ${tz})::int AS hour`;
 
-  // Three independent reads, sent together: the report is on the dashboard,
-  // and each one waited for the last to come back before it set out.
-  const [counts, people, [clock]] = await Promise.all([countsQ, peopleQ, clockQ]) as any[];
+  // A RANGE also answers day by day: per person per firm day, the people
+  // contacted (distinct records), the calls, and how many of those people
+  // picked up (contactOf's rule, per day). Same facts, same request, so a bar
+  // is that day's own report and a total is the range's. A day has no series.
+  const seriesQ = from ? sql`
+    WITH f AS (SELECT * FROM (${f}) x WHERE person IS NOT NULL ${person ? sql`AND person = ${person}` : sql``}
+                 AND measure IN ('call', 'whatsapp'))
+    SELECT k.person, to_char(k.day, 'YYYY-MM-DD') AS day, count(*)::int AS people,
+           count(*) FILTER (WHERE k.detail = 'answered')::int AS answered,
+           coalesce(max(c.calls), 0)::int AS calls
+      FROM (${contactByDay(sql`SELECT * FROM f`, tz)}) k
+      LEFT JOIN (SELECT person, (at AT TIME ZONE ${tz})::date AS day, count(*) AS calls
+                   FROM f WHERE measure = 'call' GROUP BY 1, 2) c ON c.person = k.person AND c.day = k.day
+     GROUP BY 1, 2 ORDER BY 2` : null;
+
+  // Independent reads, sent together: the report is on the dashboard, and
+  // each one waited for the last to come back before it set out.
+  const [counts, people, [clock], series] = await Promise.all([countsQ, peopleQ, clockQ, seriesQ || Promise.resolve(null)]) as any[];
 
   const byPerson = new Map<string, any>();
   for (const p of people as any[]) {
@@ -332,18 +389,23 @@ export async function activityDay(opts: { side: Side; date?: string | null; pers
     }
     byPerson.get(c.person).counts.push({ measure: c.measure, detail: c.detail, n: c.n, records: c.records });
   }
-  return { side: opts.side, day: clock.day, today: clock.today, hour: clock.hour, timezone: tz, people: [...byPerson.values()] };
+  if (series) {
+    for (const p of byPerson.values()) p.days = [];
+    for (const d of series as any[]) byPerson.get(d.person)?.days.push({ day: d.day, people: d.people, calls: d.calls, answered: d.answered });
+  }
+  return { side: opts.side, day: clock.day, from: clock.from || null, today: clock.today, hour: clock.hour, timezone: tz, people: [...byPerson.values()] };
 }
 
 /**
  * The people behind one number: the same facts, filtered to that number.
  * `detail` narrows a measure (a call's reach, the status a record became).
  */
-export async function activityRecords(opts: { side: Side; date?: string | null; person?: string | null; measure: string; detail?: string | null }) {
+export async function activityRecords(opts: { side: Side; date?: string | null; from?: string | null; person?: string | null; measure: string; detail?: string | null }) {
   const t = getContext()!.tenantId;
   const tz = await timezoneOf(t);
   const person = allowedPerson(opts.person ?? null);
-  const f = facts(opts.side, t, tz, dayBounds(tz, validDate(opts.date)));
+  const date = validDate(opts.date);
+  const f = facts(opts.side, t, tz, dayBounds(tz, date, validFrom(opts.from, date, todayIn(tz))));
   // The listings behind "listings added" are listings, not calling rows.
   if (opts.measure === 'listing') {
     const rows = await sql`

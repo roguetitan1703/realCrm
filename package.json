@@ -23,12 +23,14 @@
     "test:tutorials": "tutorial-videos test",
     "seed:dev:activity": "tsx backend/src/scripts/seed-dev-activity.ts",
     "seed:dev:inventory": "tsx backend/src/scripts/seed-dev-inventory.ts",
+    "seed:dev:alerts": "tsx backend/src/scripts/seed-alert-cases.ts",
     "keys:check": "tsx backend/src/scripts/integration-keys.ts",
     "link:owners": "tsx backend/src/scripts/link-listing-owners.ts",
     "stages:calling": "tsx backend/src/scripts/calling-stages.ts",
     "media:dev": "npx -y wrangler@4 dev --config workers/media/wrangler.toml --local --port 8787",
     "media:deploy": "npx -y wrangler@4 deploy --config workers/media/wrangler.toml",
-    "check:names": "eslint src scripts"
+    "check:names": "eslint src scripts",
+    "check:api": "eslint -c eslint.api.config.js backend/src"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1098.0",
@@ -42,6 +44,7 @@
     "express": "^5.2.1",
     "jpeg-js": "^0.4.4",
     "jsonwebtoken": "^9.0.3",
+    "libphonenumber-js": "1.13.14",
     "nodemailer": "^9.0.3",
     "postgres": "^3.4.9",
     "react": "^18.3.1",
@@ -61,6 +64,8 @@
     "globals": "^15.15.0",
     "playwright": "^1.61.1",
     "tsx": "^4.23.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.2",
     "vite": "^6.0.7"
   }
 }

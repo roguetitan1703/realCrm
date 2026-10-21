@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import postgres from 'postgres';
 import { databaseUrl, assertEnvMatchesDatabase, assertRequiredConfig, appEnv } from './env';
+import { planPhones } from './phoneRepair';
 
 // 1. Zero-dependency .env loader
 
@@ -58,6 +59,21 @@ export const LEGACY_TENANT_IDS = ['bhumi-propcity', 'org_bhumi_109'];
 /**
  * Initialize idempotent Supabase PostgreSQL database tables.
  */
+/**
+ * Run a one-time repair exactly once, ever, per database.
+ *
+ * The boot chain re-ran every historical migration on every restart. For DDL
+ * that is harmless. For a migration that rewrites ROWS BY VALUE it is not: it
+ * has no way to tell "this row was never migrated" from "someone deliberately
+ * set it to that value afterwards", so it keeps undoing the second one.
+ */
+export async function runOnce(name: string, fn: () => Promise<void>): Promise<void> {
+  const done = await sql`SELECT 1 FROM schema_migrations WHERE name = ${name} LIMIT 1`;
+  if (done.length) return;
+  await fn();
+  await sql`INSERT INTO schema_migrations (name) VALUES (${name}) ON CONFLICT DO NOTHING`;
+}
+
 export async function initSchema(): Promise<void> {
   console.log('[Supabase DB] ⚙️ Verifying PostgreSQL schema and DDL tables...');
   try {
@@ -133,7 +149,7 @@ export async function initSchema(): Promise<void> {
         phone TEXT,
         email TEXT,
         stage TEXT DEFAULT 'New',
-        source TEXT DEFAULT 'Website',
+        source TEXT,
         agent_id TEXT,
         req JSONB DEFAULT '{}'::jsonb,
         notes JSONB DEFAULT '[]'::jsonb,
@@ -150,6 +166,10 @@ export async function initSchema(): Promise<void> {
     // Without these, every lead silently loses its follow-up and nothing is ever
     // overdue — which empties the agent's Today screen and the Overdue KPI.
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS follow_up JSONB;`;
+    // No source is not "Website" (CLAUDE.md §3.1): a row written without one
+    // stays empty and reads "Not stated". Rows already stored as Website stay
+    // (PARKED.md: they cannot be told from real ones). Idempotent.
+    await sql`ALTER TABLE crm_leads ALTER COLUMN source DROP DEFAULT;`;
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS overdue BOOLEAN DEFAULT FALSE;`;
     await sql`ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS import_batch_id TEXT;`;
     // A CHANGE STAMP THE DESK CAN POLL. It existed only in migrations/010, a
@@ -344,6 +364,9 @@ export async function initSchema(): Promise<void> {
       );
     `;
     await sql`CREATE INDEX IF NOT EXISTS idx_import_jobs_tenant ON crm_import_jobs (tenant_id, created_at DESC);`;
+    // What an undo left because it had been used since (imports.ts revertImport):
+    // History says "Undone · 2 kept", not that everything went.
+    await sql`ALTER TABLE crm_import_jobs ADD COLUMN IF NOT EXISTS reverted_kept INT;`;
     // The file itself, row by row, exactly as it was read. Kept so a run can be
     // re-checked, resumed or explained without asking for the file again.
     await sql`
@@ -549,6 +572,26 @@ export async function initSchema(): Promise<void> {
     // answer. Recorded at subscribe time from the request's User-Agent.
     await sql`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS user_agent TEXT;`;
     await sql`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ;`;
+    // WHICH SIGN-IN. A subscription outlived the session that made it, and the
+    // send asked only "is this person signed in ANYWHERE" -- so an iPhone nobody
+    // was signed in to went on showing lead names because its owner was signed
+    // in on a laptop (Siddhi: 20 sent, 0 shown, no iPhone session; prod 12 Oct).
+    // Bound on every signed-in app open (autoEnablePush re-uploads). Rows from
+    // before this column are NULL -- which session made them was never recorded
+    // -- and get a grace week from the marker below to be re-bound by use.
+    await sql`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS session_id TEXT;`;
+    await sql`INSERT INTO schema_migrations (name) VALUES ('push_subscription_session') ON CONFLICT DO NOTHING`;
+    // ENDPOINTS A PUSH SERVICE HAS SAID ARE GONE (404/410). The row was deleted
+    // on the 410 and the app re-uploaded the same endpoint on its next open, so
+    // a dead device came back every day: one VivoBrowser endpoint took 38 410s
+    // from 23 Sep and was re-created again on 12 Oct (prod). Remembered here so
+    // /subscribe can refuse it and the browser is told to subscribe afresh.
+    await sql`
+      CREATE TABLE IF NOT EXISTS push_gone_endpoints (
+        endpoint TEXT PRIMARY KEY,
+        gone_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `;
 
     // ── Push delivery log ────────────────────────────────────────────────────
     // WHY THIS EXISTS: for months the only evidence a push had been sent was
@@ -566,6 +609,7 @@ export async function initSchema(): Promise<void> {
     //   failed          any other error from the push service
     //   no_subscription the recipient has no device opted in
     //   not_signed_in   no live session, so we deliberately withhold
+    //   not_a_member    the person is suspended or removed from the firm
     //   push_disabled   no VAPID keys configured on this server
     await sql`
       CREATE TABLE IF NOT EXISTS push_deliveries (
@@ -591,11 +635,19 @@ export async function initSchema(): Promise<void> {
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_push_deliv_ack ON push_deliveries (ack_token) WHERE ack_token IS NOT NULL;`;
     await sql`CREATE INDEX IF NOT EXISTS idx_push_deliv_tenant ON push_deliveries (tenant_id, created_at DESC);`;
     await sql`CREATE INDEX IF NOT EXISTS idx_push_deliv_user ON push_deliveries (tenant_id, user_id, created_at DESC);`;
+    // A summary push covers several alerts; a failure below HTTP keeps what it
+    // sent so the retry can send it again (push.ts retryFailedPushes).
+    await sql`ALTER TABLE push_deliveries ADD COLUMN IF NOT EXISTS notification_ids TEXT[];`;
+    await sql`ALTER TABLE push_deliveries ADD COLUMN IF NOT EXISTS payload JSONB;`;
+    await sql`ALTER TABLE push_deliveries ADD COLUMN IF NOT EXISTS attempt INT DEFAULT 1;`;
+    await sql`ALTER TABLE push_deliveries ADD COLUMN IF NOT EXISTS retried_at TIMESTAMPTZ;`;
 
     await migrateProperColumns();
     await createLedgerTables();
     await migrateAuthV2();
     await migrateIngestionD1();
+    await migrateSharing();
+    await migratePhones();
 
     console.log('[Supabase DB] ✅ PostgreSQL schema initialization completed successfully.');
   } catch (err: any) {
@@ -644,6 +696,13 @@ export async function migrateAuthV2(): Promise<void> {
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (tenant_id, user_id);`;
+  // WHAT THIS SIGN-IN'S BROWSER SAYS ABOUT ALERTS: on, off, default (not yet
+  // asked), denied, unsupported. A refusal left no trace on the server, so a
+  // desk could not tell "blocked them" from "browser cannot" from "never asked"
+  // (bhumi: two agents, 0 of 73 alerts shown, no answer which). Reported by the
+  // app on every signed-in open; NULL until it has.
+  await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS push_state TEXT;`;
+  await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS push_state_at TIMESTAMPTZ;`;
   // A SUPPORT SESSION: Delpat looking at a firm's desk, read only, as its
   // owner. Who opened it; never slides (auth.ts touchSession).
   await sql.unsafe(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS support_by TEXT`);
@@ -891,6 +950,27 @@ async function createLedgerTables(): Promise<void> {
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (tenant_id, user_id, read);`;
+  // WHEN it was read. A bare boolean could say 6 of 299 alerts were read and
+  // nothing about when, or how long after the push. Rows read before this
+  // column existed keep NULL: the time was never recorded, and inventing one
+  // would be a fact nobody can tell from a real one.
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;`;
+  // AN ALERT IS OPEN WORK (docs/specs/notifications.md). What it is about, so
+  // it can close when that work is done; when it was shown on a screen; when
+  // and why it closed; and when its push may go out. `subject_at` is the
+  // booking an alert about a follow-up was about, as written in follow_up.at,
+  // so a rescheduled booking closes the alert for the old one.
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS record_kind TEXT;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS record_ids TEXT[];`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS subject_at TEXT;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS shown_at TIMESTAMPTZ;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS close_reason TEXT;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS urgency TEXT;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS send_after TIMESTAMPTZ;`;
+  await sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS pushed_at TIMESTAMPTZ;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_notifications_open ON notifications (tenant_id, user_id) WHERE closed_at IS NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_notifications_due ON notifications (tenant_id, send_after) WHERE pushed_at IS NULL AND send_after IS NOT NULL AND closed_at IS NULL;`;
 
   // Append-only, tamper-evident. seq gives a monotonic order; prev_hash/hash
   // form a chain so no past row can be altered or removed undetected. Never
@@ -1106,4 +1186,237 @@ export async function migrateIngestionD1(): Promise<void> {
   await sql`CREATE INDEX IF NOT EXISTS idx_rejects_at ON ingest_rejects (received_at DESC);`;
 
   console.log('[Supabase DB] D1 ingestion tables ready (integrations, webhook_inbox).');
+}
+
+
+/**
+ * ============================================================================
+ * SHARED LINKS AND THE CATALOGUE (docs/specs/listing-pages.md §A.5)
+ * ============================================================================
+ * New tables only, plus two columns on crm_properties that default to "not in
+ * the catalogue" — no existing row is rewritten (a constant default on ADD
+ * COLUMN is stored once, not written per row). Every row carries tenant_id.
+ *
+ *   crm_share_links    a custom view of flats, optionally bound to a lead
+ *   crm_share_events   what happened on a link or the catalogue: view,
+ *                      interested (with its own ref code), talk, expired_view,
+ *                      enquiry. `lead_id` is who it is known to be, when known.
+ *   crm_share_devices  a visitor's browser, once a number has come from it
+ *
+ * A code is unique per tenant across links AND taps, because /<firm>/<code>
+ * resolves either; services/shareCodes.ts checks both tables before handing
+ * one out, and each table's own unique index is the last word.
+ */
+export async function migrateSharing(): Promise<void> {
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_share_links (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      code TEXT NOT NULL,
+      created_by TEXT,
+      lead_id TEXT,
+      property_ids TEXT[] NOT NULL DEFAULT '{}',
+      show_price BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      turned_off_at TIMESTAMPTZ,
+      turned_off_by TEXT
+    );
+  `;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_share_links_code ON crm_share_links (tenant_id, code);`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_share_links_creator ON crm_share_links (tenant_id, created_by, created_at DESC);`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_share_links_lead ON crm_share_links (tenant_id, lead_id) WHERE lead_id IS NOT NULL;`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_share_events (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      link_id TEXT,
+      property_id TEXT,
+      kind TEXT NOT NULL,
+      code TEXT,
+      device_id TEXT,
+      lead_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_share_events_code ON crm_share_events (tenant_id, code) WHERE code IS NOT NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_share_events_link ON crm_share_events (tenant_id, link_id, created_at DESC);`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_share_events_lead ON crm_share_events (tenant_id, lead_id, created_at DESC) WHERE lead_id IS NOT NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_share_events_device ON crm_share_events (tenant_id, device_id) WHERE device_id IS NOT NULL;`;
+  // ONE VIEW PER BROWSER, PER PAGE, PER FIRM DAY, decided by this index rather
+  // than by a read before the insert (sharing.ts recordView). `view_day` is the
+  // firm's calendar day, set on views only; rows written before it exist carry
+  // NULL, which never conflicts, so nothing already stored is touched or
+  // refused. Gated: a unique index is a migration, not DDL to re-run on boot.
+  // The last time a counted view's page was opened again that day (recordView).
+  await sql`ALTER TABLE crm_share_events ADD COLUMN IF NOT EXISTS seen_at TIMESTAMPTZ`;
+  await runOnce('share_events_one_view_per_day', async () => {
+    await sql`ALTER TABLE crm_share_events ADD COLUMN IF NOT EXISTS view_day DATE`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_share_events_one_view ON crm_share_events
+      (tenant_id, kind, (coalesce(link_id, '')), (coalesce(property_id, '')), device_id, view_day)`;
+  });
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_share_devices (
+      tenant_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      lead_id TEXT NOT NULL,
+      attached_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (tenant_id, device_id)
+    );
+  `;
+  // WHAT A BUYER ASKED on a link or the catalogue (buyerAsks.ts): a call back,
+  // a visit (requested until the holder confirms it), or new homes like these
+  // (`ask` the deal/size/place, `seen_ids` the homes already matching,
+  // `alerted_ids` the ones the last alert named). `count`: the same ask again
+  // the same day folds into this row. `told_at`: when its alert went, so a
+  // restart between the answer and the alert is caught on the next sweep.
+  // `made_lead`: this ask created the lead (only then is a call back booked).
+  // Kept: the lead's history; with the catalogue enquiries, at most 100 a day
+  // per firm (data-lifecycle.md).
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_buyer_asks (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      lead_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      link_id TEXT,
+      property_id TEXT,
+      name TEXT,
+      phone TEXT,
+      at TIMESTAMPTZ,
+      ask JSONB,
+      seen_ids TEXT[] NOT NULL DEFAULT '{}',
+      alerted_ids TEXT[] NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'open',
+      last_alert_at TIMESTAMPTZ,
+      count INT NOT NULL DEFAULT 1,
+      told_at TIMESTAMPTZ,
+      made_lead BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ
+    );
+  `;
+  await sql`ALTER TABLE crm_buyer_asks ADD COLUMN IF NOT EXISTS count INT NOT NULL DEFAULT 1;`;
+  await sql`ALTER TABLE crm_buyer_asks ADD COLUMN IF NOT EXISTS told_at TIMESTAMPTZ;`;
+  await sql`ALTER TABLE crm_buyer_asks ADD COLUMN IF NOT EXISTS made_lead BOOLEAN NOT NULL DEFAULT FALSE;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_buyer_asks_lead ON crm_buyer_asks (tenant_id, lead_id, created_at DESC);`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_buyer_asks_open_homes ON crm_buyer_asks (tenant_id) WHERE kind = 'homes' AND status = 'open';`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_buyer_asks_untold ON crm_buyer_asks (tenant_id, created_at) WHERE told_at IS NULL;`;
+
+  // THE FIRM'S ONE PUBLIC BUDGET (sharing.ts spendPublicForm): how many public
+  // forms (catalogue enquiries and buyer asks) it has taken on a firm-local
+  // day. One row per firm per day that saw a form; a counter, not a record.
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_public_form_days (
+      tenant_id TEXT NOT NULL,
+      day DATE NOT NULL,
+      used INT NOT NULL DEFAULT 0,
+      PRIMARY KEY (tenant_id, day)
+    );
+  `;
+
+  // WHEN A PERIODIC JOB LAST RAN, per firm, and what it did (retention.ts). The
+  // gate for "once a month", so a restart is not a run. Small: one row per
+  // job per firm per run.
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_job_runs (
+      job TEXT NOT NULL,
+      tenant_id TEXT NOT NULL,
+      ran_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      detail JSONB
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_job_runs ON crm_job_runs (job, tenant_id, ran_at DESC);`;
+
+  // Browsers the firm's own staff used while signed in: never tied to a lead.
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_share_staff_devices (
+      tenant_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (tenant_id, device_id)
+    );
+  `;
+
+  await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS in_catalogue BOOLEAN DEFAULT FALSE`);
+  await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS catalogue_slug TEXT`);
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_props_catalogue_slug ON crm_properties (tenant_id, catalogue_slug) WHERE catalogue_slug IS NOT NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_crm_props_catalogue ON crm_properties (tenant_id) WHERE in_catalogue = TRUE;`;
+}
+
+/**
+ * EVERY STORED PHONE TO EXACT E.164 (docs/specs/phone.md), once. Read in each
+ * firm's own country; a number that cannot be read with confidence is left
+ * exactly as it is and logged, never guessed. Leads and owners that end up on
+ * one number are left as they are -- two records of one person, nothing merged
+ * -- and logged; searching the number lists both.
+ *
+ * Not runOnce: if two USERS would end up on one number, the unique
+ * (tenant_id, phone) index would stop the boot, so those users' numbers are
+ * held back and named as an error, the rest is converted, and the repair is not
+ * marked done -- the next boot converts them after someone fixes the clash.
+ * Every write is conditional on the row still holding the value that was
+ * read, all in one transaction with the marker. A failure rolls
+ * the whole repair back and is logged; it does not stop the boot.
+ */
+export async function migratePhones(): Promise<void> {
+  try {
+    await repairPhones();
+  } catch (err: any) {
+    console.error(`[Phones] NOT RUN, nothing written: ${err?.message || err}`);
+  }
+}
+
+async function repairPhones(): Promise<void> {
+  const NAME = 'phones_e164';
+  if ((await sql`SELECT 1 FROM schema_migrations WHERE name = ${NAME} LIMIT 1`).length) return;
+  const plan = await planPhones(sql);
+  // EVERY ROW ONCE. While users are held the repair runs on every boot, and
+  // re-listing every unreadable row each time buries the one line that
+  // matters. Rows are listed on the first run (LISTED marker) or with
+  // CRM_PHONES_LIST=1; after that, a summary.
+  const LISTED = 'phones_e164_listed';
+  const listRows = process.env.CRM_PHONES_LIST === '1'
+    || !(await sql`SELECT 1 FROM schema_migrations WHERE name = ${LISTED} LIMIT 1`).length;
+  if (listRows) {
+    for (const u of plan.unreadable) {
+      console.warn(`[Phones] left as is (${u.reason}): ${u.tenant_id} ${u.table} ${u.id} ${JSON.stringify(u.raw)}`);
+    }
+    for (const c of plan.otherCollisions) {
+      console.warn(`[Phones] same number after the repair, both kept: ${c.tenant_id} ${c.table} ${c.e164} ${c.ids.join(', ')}`);
+    }
+  } else {
+    const per = (xs: { table: any }[]) => {
+      const m = new Map<string, number>();
+      for (const x of xs) { const n = typeof x.table === 'string' ? x.table : x.table.name; m.set(n, (m.get(n) || 0) + 1); }
+      return [...m].map(([t, n]) => `${t} ${n}`).join(', ') || 'none';
+    };
+    console.warn(`[Phones] unreadable left: ${per(plan.unreadable)}; to convert: ${per(plan.converts)}; lead/owner collisions ${plan.otherCollisions.length} (CRM_PHONES_LIST=1 lists the rows)`);
+  }
+  // USERS WHO WOULD SHARE A NUMBER are held back, with their copies of it
+  // (users.metadata, crm_agents.metadata, same id), and named; everything else
+  // is converted. The marker is not written while any are held, so the next
+  // boot converts them once someone has fixed the clash.
+  const USER_TABLES = new Set(['users.phone', 'users.metadata.phone', 'crm_agents.metadata.phone']);
+  const held = new Set(plan.userCollisions.flatMap(c => c.ids.map(id => `${c.tenant_id}\u0000${id}`)));
+  for (const c of plan.userCollisions) {
+    console.error(`[Phones] ERROR users ${c.ids.join(', ')} in ${c.tenant_id} would share ${c.e164}: their numbers are left as they are until one is changed`);
+  }
+  const converts = plan.converts.filter(c => !(USER_TABLES.has(c.table.name) && held.has(`${c.tenant_id}\u0000${c.id}`)));
+  let written = 0; let skipped = 0;
+  const byTenant = new Map<string, number>();
+  await sql.begin(async (tx: any) => {
+    for (const c of converts) {
+      const n = await c.table.write(tx, c);
+      if (n) { written += n; byTenant.set(c.tenant_id, (byTenant.get(c.tenant_id) || 0) + n); } else skipped++;
+    }
+    if (!held.size) await tx`INSERT INTO schema_migrations (name) VALUES (${NAME}) ON CONFLICT DO NOTHING`;
+    else if (listRows) await tx`INSERT INTO schema_migrations (name) VALUES (${LISTED}) ON CONFLICT DO NOTHING`;
+  });
+  console.log(`[Phones] E.164 repair: ${written} written${skipped ? `, ${skipped} changed since read and skipped` : ''}, ${plan.unreadable.length} unreadable left, ${plan.otherCollisions.length} lead/owner collisions left`
+    + (held.size ? `, ${plan.converts.length - converts.length} user numbers held back (not marked done)` : '')
+    + (byTenant.size ? ` · ${[...byTenant].map(([t, n]) => `${t} ${n}`).join(', ')}` : ''));
 }

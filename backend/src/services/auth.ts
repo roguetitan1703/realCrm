@@ -1,9 +1,9 @@
 /**
  * ============================================================================
- * 🔐 AUTH SERVICE — tokens, phone OTP, superadmin password
+ * 🔐 AUTH SERVICE — tokens, passwords, sessions
  * ============================================================================
  * Two audiences, two mechanisms, one token format:
- *   • Tenant users (owner/manager/agent) log in by PHONE OTP.
+ *   • Tenant users (owner/manager/agent) log in by ID or email + PASSWORD.
  *   • Superadmins (Delpat staff) log in by EMAIL + PASSWORD.
  * Both receive a signed JWT; downstream middleware trusts the token, never the
  * client-supplied X-Tenant-ID header.
@@ -15,7 +15,7 @@ import bcrypt from 'bcryptjs';
 import { randomBytes, createHash } from 'crypto';
 import { sql, DEFAULT_TENANT_ID } from './db.js';
 import { audit } from './audit.js';
-import { emailConfigured, sendOtpEmail, sendPasswordResetEmail } from './email.js';
+import { emailConfigured, sendPasswordResetEmail } from './email.js';
 
 export interface RequestCtx {
   ip?: string | null;
@@ -24,10 +24,6 @@ export interface RequestCtx {
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-me';
 const TOKEN_TTL = '30d';
-const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
-// Demo mode returns the OTP in the response so a live demo never waits on an
-// SMS. Off by default; turn on with DEMO_OTP=true.
-const DEMO_OTP = process.env.DEMO_OTP === 'true';
 
 export interface TenantTokenClaims {
   kind: 'user';
@@ -77,38 +73,10 @@ export function verifyToken(token: string): TokenClaims | null {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Phone OTP (tenant users)
-// ---------------------------------------------------------------------------
 
-function normalizePhone(raw: string): string {
-  const digits = String(raw || '').replace(/\D/g, '');
-  return digits ? `+91${digits.slice(-10)}` : '';
-}
 
 function isEmail(raw: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(raw || '').trim());
-}
-
-/** One key for the OTP challenge whether the user gave a phone or an email, so
- *  the same auth_otp row is looked up on verify. Emails are lowercased; phones
- *  are normalized to +91XXXXXXXXXX. */
-function normalizeIdentifier(raw: string): { key: string; email: string | null; phone: string | null } {
-  const s = String(raw || '').trim();
-  if (isEmail(s)) {
-    const email = s.toLowerCase();
-    return { key: email, email, phone: null };
-  }
-  const phone = normalizePhone(s);
-  return { key: phone, email: null, phone: phone || null };
-}
-
-/** Hide most of an email for a "sent to j••••@gmail.com" hint. */
-function maskEmail(email: string): string {
-  const [name, domain] = email.split('@');
-  if (!domain) return email;
-  const head = name.slice(0, Math.min(2, name.length));
-  return `${head}${'•'.repeat(Math.max(1, name.length - head.length))}@${domain}`;
 }
 
 async function brandFor(tenantId: string): Promise<{ name: string; color: string }> {
@@ -118,120 +86,6 @@ async function brandFor(tenantId: string): Promise<{ name: string; color: string
     return { name: r?.name || 'your workspace', color: r?.brand_config?.primaryColor || '#1E6F52' };
   } catch { return { name: 'your workspace', color: '#1E6F52' }; }
 }
-
-/**
- * Issue an OTP for a phone within a tenant. Returns the code only when DEMO_OTP
- * is on. Silent on unknown numbers (no user enumeration) — the response looks
- * identical whether or not the number belongs to a user.
- */
-export async function issueOtp(tenantId: string, identifierRaw: string): Promise<{ sent: boolean; demoCode?: string; delivery: 'email' | 'demo' | 'sms' | 'none'; sentTo?: string }> {
-  const { key, email, phone } = normalizeIdentifier(identifierRaw);
-  if (!key) return { sent: false, delivery: DEMO_OTP ? 'demo' : 'none' };
-
-  // Find the recipient's email. If they logged in with an email, that's it; if
-  // with a phone, use the email on their user record (may be absent).
-  let recipientEmail: string | null = email;
-  if (!recipientEmail && phone) {
-    const rows = await sql`SELECT email FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status ILIKE 'active' LIMIT 1`;
-    recipientEmail = rows[0]?.email || null;
-  }
-
-  // Anti-enumeration: in production (no demo, no email channel) don't reveal
-  // whether an identifier exists — claim sent without issuing anything.
-  if (!DEMO_OTP && !(emailConfigured() && recipientEmail)) {
-    return { sent: true, delivery: 'none' };
-  }
-
-  const code = String(Math.floor(1000 + Math.random() * 9000));
-  const id = `otp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString();
-  // The auth_otp `phone` column doubles as the challenge key (email or phone).
-  await sql`
-    INSERT INTO auth_otp (id, tenant_id, phone, code, expires_at)
-    VALUES (${id}, ${tenantId}, ${key}, ${code}, ${expiresAt});
-  `;
-
-  // Deliver by email when we can; otherwise fall back to the on-screen demo code.
-  let delivered: 'email' | null = null;
-  let sentTo: string | undefined;
-  if (emailConfigured() && recipientEmail) {
-    try {
-      const brand = await brandFor(tenantId);
-      await sendOtpEmail(recipientEmail, code, brand.name, brand.color);
-      delivered = 'email';
-      sentTo = maskEmail(recipientEmail);
-    } catch (e: any) {
-      console.warn('[Auth] OTP email send failed:', e?.message);
-    }
-  }
-
-  const delivery: 'email' | 'demo' | 'none' = delivered || (DEMO_OTP ? 'demo' : 'none');
-  console.log(`[Auth] OTP issued for ${key} @ ${tenantId} via ${delivery}${DEMO_OTP ? ` = ${code}` : ''}`);
-  return {
-    sent: delivery !== 'none',
-    demoCode: DEMO_OTP ? code : undefined,
-    delivery,
-    sentTo,
-  };
-}
-
-/** Verify an OTP and, on success, return a tenant-user token. */
-export async function verifyOtp(tenantId: string, identifierRaw: string, code: string, ctx: RequestCtx = {}): Promise<{ token: string; user: any } | null> {
-  const { key, email, phone } = normalizeIdentifier(identifierRaw);
-  if (!key || !code) return null;
-
-  const rows = await sql`
-    SELECT * FROM auth_otp
-    WHERE tenant_id = ${tenantId} AND phone = ${key} AND code = ${code}
-      AND consumed = FALSE AND expires_at > NOW()
-    ORDER BY created_at DESC LIMIT 1
-  `;
-  if (rows.length === 0) {
-    audit({
-      tenant_id: tenantId, actor_type: 'user', actor_id: null, actor_label: key,
-      action: 'auth.login_failed', target_type: 'user', target_id: null,
-      summary: `OTP verify failed for ${key}`, metadata: { identifier: key }, ip: ctx.ip, user_agent: ctx.userAgent,
-    });
-    return null;
-  }
-
-  await sql`UPDATE auth_otp SET consumed = TRUE WHERE id = ${rows[0].id}`;
-
-  // Match the user by whichever identifier they used.
-  const users = email
-    ? await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND lower(email) = ${email} AND status ILIKE 'active' LIMIT 1`
-    : await sql`SELECT * FROM users WHERE tenant_id = ${tenantId} AND phone = ${phone} AND status ILIKE 'active' LIMIT 1`;
-  let u = users[0];
-  if (!u && DEMO_OTP) {
-    // Demo: an unknown number logs into the workspace owner's desk so testing
-    // never dead-ends on "that number isn't a user".
-    const owner = await sql`
-      SELECT * FROM users WHERE tenant_id = ${tenantId} AND status ILIKE 'active'
-      ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END LIMIT 1
-    `;
-    u = owner[0];
-  }
-  if (!u) {
-    audit({
-      tenant_id: tenantId, actor_type: 'user', actor_id: null, actor_label: phone,
-      action: 'auth.login_failed', target_type: 'user', target_id: null,
-      summary: `OTP valid but no active user for ${phone}`, metadata: { phone }, ip: ctx.ip, user_agent: ctx.userAgent,
-    });
-    return null;
-  }
-
-  const token = signToken({ kind: 'user', tenant_id: tenantId, user_id: u.id, role: u.role });
-  audit({
-    tenant_id: tenantId, actor_type: 'user', actor_id: u.id, actor_label: u.name || phone,
-    action: 'auth.login', target_type: 'user', target_id: u.id,
-    summary: `${u.name || phone} logged in`, metadata: { phone }, ip: ctx.ip, user_agent: ctx.userAgent,
-  });
-  return { token, user: publicUser(u) };
-}
-
-// ---------------------------------------------------------------------------
-// Superadmin (email + password)
-// ---------------------------------------------------------------------------
 
 export async function superadminLogin(email: string, password: string, ctx: RequestCtx = {}): Promise<{ token: string; superadmin: any } | null> {
   const normEmail = String(email || '').toLowerCase();
@@ -306,7 +160,7 @@ export async function getUserById(tenantId: string, userId: string): Promise<any
 // AUTH V2 — password login, sessions, resets (spec: docs/specs/auth.md)
 // One secret per user: a password. Owner/manager log in by email, agents by an
 // assigned login_id. Sessions are server-tracked (30d sliding) so they can be
-// listed + revoked. OTP above is kept dormant for one release, then removed.
+// listed + revoked. Code (OTP) sign-in is retired; routes/auth.ts answers 410.
 // ---------------------------------------------------------------------------
 
 const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS) || 30;
@@ -511,14 +365,32 @@ export async function requestPasswordReset(tenantId: string, handleRaw: string, 
   const u = rows[0];
   if (!u) return; // silent — don't reveal whether the account exists
 
+  // ONE LIVE LINK PER ACCOUNT, AT MOST ONE EMAIL EVERY 10 MINUTES. Anyone can
+  // ask for a reset for any handle, so each request made and mailed a new
+  // link: an inbox could be flooded. A cap on emails per handle would let a
+  // stranger use it up and keep the real person from getting a link. Now: a
+  // live link sent under 10 minutes ago means nothing happens; otherwise every
+  // live link is expired and a new one is made and sent. The newest email
+  // always works, about six an hour at most, and only hashes are stored.
+  // Decided under a lock on the account, so two requests at once send once.
   const token = randomBytes(24).toString('base64url');
-  const tokenHash = createHash('sha256').update(token).digest('hex');
-  const id = `pwr_${Date.now()}_${randomBytes(4).toString('hex')}`;
-  const expiresAt = new Date(Date.now() + 30 * 60000).toISOString();
-  await sql`
-    INSERT INTO password_resets (id, tenant_id, user_id, token_hash, expires_at)
-    VALUES (${id}, ${tenantId}, ${u.id}, ${tokenHash}, ${expiresAt})
-  `;
+  const made = await sql.begin(async (tx: any) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${`password-reset:${tenantId}:${u.id}`}))`;
+    const [recent] = await tx`SELECT 1 AS x FROM password_resets
+       WHERE tenant_id = ${tenantId} AND user_id = ${u.id} AND consumed = FALSE AND expires_at > NOW()
+         AND created_at > NOW() - interval '10 minutes' LIMIT 1`;
+    if (recent) return false;
+    await tx`UPDATE password_resets SET expires_at = NOW()
+       WHERE tenant_id = ${tenantId} AND user_id = ${u.id} AND consumed = FALSE AND expires_at > NOW()`;
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const id = `pwr_${Date.now()}_${randomBytes(4).toString('hex')}`;
+    const expiresAt = new Date(Date.now() + 30 * 60000).toISOString();
+    await tx`
+      INSERT INTO password_resets (id, tenant_id, user_id, token_hash, expires_at)
+      VALUES (${id}, ${tenantId}, ${u.id}, ${tokenHash}, ${expiresAt})`;
+    return true;
+  });
+  if (!made) return;
   const brand = await brandFor(tenantId);
   const base = (origin || APP_BASE_URL).replace(/\/+$/, '');
   const link = `${base}/${tenantId}/reset?token=${token}`;

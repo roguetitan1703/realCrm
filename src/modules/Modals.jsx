@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import Icon from '../components/Icon.jsx'
-import { Button, Field, Input, PhoneInput, Textarea, Segmented, Avatar, Source, StageTag, Money, SuggestInput } from '../components/primitives.jsx'
+import { Button, Field, Input, Textarea, Segmented, Avatar, Source, StageTag, Money, SuggestInput, OutcomeForm } from '../components/primitives.jsx'
+import PhoneInput from '../components/PhoneInput.jsx'
 import { theme } from '../data/theme.js'
 // parseBudgetNum was USED in three places here and imported in none of them —
 // every money field's onBlur and the lead form's save were one ReferenceError
 // waiting for someone to type a budget. Plain JSX, so the build never said a
 // word about it.
-import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho, personLabel, unitLabel } from '../lib/format.js'
+import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho, unitLabel, followUpAction, followUpLabel } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, openWhatsAppChat, followUpMessage } from '../lib/matching.js'
 import WaSend from '../components/WaSend.jsx'
 import { api } from '../lib/api.js'
@@ -21,9 +22,18 @@ import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities, projectNames } from '../lib/suggest.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
+import { FOLLOW_UP_ACTIONS, followUpKindOf } from '../data/followUpKinds.js'
 import { ActivityRecords } from '../components/ActivityDay.jsx'
 import { CloseDealModal, AgreementModal } from '../components/Agreements.jsx'
+import SendSheet, { SenderPhone } from './SendSheet.jsx'
+import { AttachLinkModal } from '../components/MyLinks.jsx'
+import { AddFromTapModal } from '../components/AddFromTap.jsx'
+import BuyerAskModal from '../components/BuyerAsk.jsx'
 import { copyText } from '../lib/clipboard.js'
+import { currencySymbol, firmLocale, roomsText } from '../lib/locale.js'
+import { formatPhone, telLink, personLabel } from '../lib/phone.js'
+import { notWorkableReason, assignFailed, shownStrategy } from '../lib/workforce.js'
+import { canAssignLead } from '../lib/permissions.js'
 
 /**
  * Generic modal frame.
@@ -43,7 +53,7 @@ import { copyText } from '../lib/clipboard.js'
  * below: any input or change event inside the frame bubbles to this div, which
  * is exactly the thing that means "somebody typed something".
  */
-function Modal({ title, onClose, children, width = 440 }) {
+export function Modal({ title, onClose, children, width = 440 }) {
   const [dirty, setDirty] = useState(false)
   const [nudge, setNudge] = useState(false)
 
@@ -69,8 +79,38 @@ function Modal({ title, onClose, children, width = 440 }) {
   )
 }
 
+// AN ALERT'S `?tap=<code>` OPENED FROM OUTSIDE THE APP — a push tapped with
+// the app closed, or with it open (the worker posts the URL). The bell opens
+// Add as lead itself (openNotif); these two never passed through it, and the
+// router drops `tap` because it is not a place. Read before the router
+// rewrites the address. With a lead in it the lead opens underneath, and the
+// modal stays only for Talk to us on an expired link (its Send a fresh link);
+// an I'm interested tap on a lead has nothing left to add.
+const tapIn = (search) => {
+  const p = new URLSearchParams(search)
+  // A buyer's form (`?ask=`): what they asked, with its one-tap answer.
+  const ask = p.get('ask')
+  if (ask && /^ask_[a-z0-9]+$/i.test(ask)) return { kind: 'buyerAsk', id: ask }
+  const t = p.get('tap')
+  return t && /^[a-z0-9]{6}$/.test(t) ? { kind: 'addFromTap', code: t, onlyTalk: !!p.get('lead') } : null
+}
+const BOOT_TAP = typeof window !== 'undefined' ? tapIn(window.location.search) : null
+
 export default function Modals({ store, go }) {
   const m = store.state.modal
+  useEffect(() => {
+    if (BOOT_TAP) store.openModal(BOOT_TAP)
+    if (!('serviceWorker' in navigator)) return
+    const onMsg = (e) => {
+      if (e.data?.type !== 'notification-navigate' || !e.data.url) return
+      let tap = null
+      try { tap = tapIn(new URL(e.data.url, window.location.origin).search) } catch { return }
+      if (tap) setTimeout(() => store.openModal(tap), 0)
+    }
+    navigator.serviceWorker.addEventListener('message', onMsg)
+    return () => navigator.serviceWorker.removeEventListener('message', onMsg)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   return (
     <>
       {store.state.searchOpen && <SearchModal store={store} go={go} />}
@@ -99,13 +139,19 @@ export default function Modals({ store, go }) {
       {m?.kind === 'propStatus' && <StatusModal store={store} propId={m.propId} />}
       {m?.kind === 'visitFeedback' && <VisitFeedbackModal store={store} leadId={m.leadId} propId={m.propId} />}
       {m?.kind === 'visitProof' && <VisitProofModal store={store} leadId={m.leadId} propId={m.propId} />}
+      {m?.kind === 'followUpDone' && <FollowUpDoneModal store={store} leadId={m.leadId} />}
       {m?.kind === 'rejectLead' && <RejectLeadModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'activityRecords' && <ActivityRecords store={store} go={go} Modal={Modal} side={m.side} date={m.date}
+      {m?.kind === 'activityRecords' && <ActivityRecords store={store} go={go} Modal={Modal} side={m.side} date={m.date} from={m.from}
         person={m.person} measure={m.measure} detail={m.detail} title={m.title} />}
       {m?.kind === 'rejectOwner' && <RejectOwnerModal store={store} ownerId={m.ownerId} status={m.status} />}
       {m?.kind === 'confirm' && <ConfirmModal store={store} {...m} />}
       {m?.kind === 'amenities' && <AmenitiesModal store={store} value={m.value} onDone={m.onDone} only={m.only} />}
-      {m?.kind === 'pickBuyer' && <PickBuyerModal store={store} propId={m.propId} />}
+      {/* One sheet for every send: the lead's shortlist, the Properties
+          selection and a property's own Share (listing-pages.md §A). */}
+      {m?.kind === 'addFromTap' && <AddFromTapModal store={store} go={go} Modal={Modal} code={m.code} onlyTalk={!!m.onlyTalk} PhoneStep={SenderPhone} />}
+      {m?.kind === 'buyerAsk' && <BuyerAskModal store={store} go={go} Modal={Modal} id={m.id} />}
+      {m?.kind === 'attachLink' && <AttachLinkModal store={store} Modal={Modal} linkId={m.linkId} onDone={m.onDone} />}
+      {m?.kind === 'send' && <SendSheet store={store} Modal={Modal} homes={m.homes} leadId={m.leadId} lead={m.lead} suggested={m.suggested} onSent={m.onSent} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
       {m?.kind === 'scheduleFollowUp' && <ScheduleFollowUpModal store={store} leadId={m.leadId} />}
       {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} recordType={m.recordType} recordId={m.recordId} record={m.record} />}
@@ -159,7 +205,8 @@ function ModuleFormModal({ store, moduleId, recordId }) {
   const optionsOf = (f) => (typeof f.options === 'function' ? f.options(store, record) : f.options || [])
     .map(o => (o && typeof o === 'object') ? o : { value: o, label: o })
 
-  const save = () => {
+  // Closes only on a saved record; a refusal leaves the form as typed.
+  const save = async () => {
     const patch = {}
     for (const f of fields) {
       const v = f.fromForm ? f.fromForm(getNestedValue(form, f.key)) : getNestedValue(form, f.key)
@@ -180,9 +227,8 @@ function ModuleFormModal({ store, moduleId, recordId }) {
         patch[f.key] = v
       }
     }
-    if (moduleId === 'properties') store.updateProp(record.id, patch)
-    else store.updateLead(record.id, patch)
-    store.closeModal()
+    const ok = moduleId === 'properties' ? await store.updateProp(record.id, patch) : await store.updateLead(record.id, patch)
+    if (ok) store.closeModal()
   }
 
   const renderInput = (f) => {
@@ -288,12 +334,13 @@ function OwnerEditModal({ store, propId }) {
   const [email, setEmail] = useState(p?.ownerEmail || '')
   if (!p) return null
 
-  const save = () => {
+  const save = async () => {
     // Empty stays empty. Writing '' rather than a placeholder is what keeps a
     // nameless owner out of the Contacts list.
-    store.updateProp(p.id, {
+    const ok = await store.updateProp(p.id, {
       owner: owner.trim(), ownerPhone: phone.trim(), ownerEmail: email.trim(),
     })
+    if (!ok) return
     store.toast(owner.trim() ? `Owner saved · ${owner.trim()}` : 'Owner cleared')
     store.closeModal()
   }
@@ -305,12 +352,12 @@ function OwnerEditModal({ store, propId }) {
         <Input value={owner} onChange={e => setOwner(e.target.value)} placeholder="Sneha Rane" autoFocus />
       </Field>
       <Field label="Phone">
-        <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98765 43210" />
+        <PhoneInput value={phone} onChange={e => setPhone(e.target.value)} />
       </Field>
       <Field label="Email">
         <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="Optional" />
       </Field>
-      <Button variant="primary" block style={{ marginTop: 14 }} onClick={save}>Save owner</Button>
+      <div className="lc-foot"><Button variant="primary" block onClick={save}>Save owner</Button></div>
     </Modal>
   )
 }
@@ -330,13 +377,12 @@ function OwnerUpdateModal({ store, propId }) {
     setText(ownerUpdateMessage(p, buyers || [], store.state.settings.firmName))
   }, [p?.id, buyers, edited])
   if (!p) return null
-  const digits = String(p.ownerPhone || '').replace(/\D/g, '')
   // Used to only call store.logEvent (client-only — the "logged" claim in the
   // helper text below was false; it vanished on refresh) and never actually
   // opened WhatsApp. Now it really sends and really persists (B5 pattern):
   // log a 'wa' event, then attach the composed text as its remark.
   const send = (app) => {
-    if (digits) openWhatsAppChat(text, digits, app)
+    if (p.ownerPhone) openWhatsAppChat(text, p.ownerPhone, app)
     store.logContactAction('property', p.id, 'wa').then(res => {
       if (res?.timeline_event?.id) store.editRemark('property', p.id, res.timeline_event.id, text)
     })
@@ -590,7 +636,7 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) 
   return (
     <Modal title={`Record call · ${(l.name || l.phone || '').split(' ')[0]}`} onClose={store.closeModal} width={430}>
       <div className="lc-who">
-        <span className="mono-num">{l.phone || '—'}</span>
+        <span className="mono-num">{formatPhone(l.phone) || '—'}</span>
         <StageTag stage={l.stage || 'New'} />
       </div>
       <Field label="What happened">
@@ -613,39 +659,6 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) 
 }
 
 // ---- Pick which matched BUYER to WhatsApp a property to (from the system) ----
-function PickBuyerModal({ store, propId }) {
-  const p = store.lookup('property', propId)
-  // The server narrows to the plausible buyers (deal, locality, budget band);
-  // the scorer that produces the fit line then runs over those few rows instead
-  // of over every lead in the firm. Same pattern as the lead-side matches.
-  const { data: candidates } = useServerData(() => api.getPropertyBuyers(propId).then(r => r?.buyers || []), [propId], [])
-  if (!p) return null
-  const buyers = leadsForProperty(p, candidates || [])
-  const send = (leadId) => { store.closeModal(); store.openWhatsApp(propId, leadId) }
-  return (
-    <Modal title="Send this listing on WhatsApp" onClose={store.closeModal} width={440}>
-      <div className="u-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 12 }}>
-        Interested {p.deal === 'rent' ? 'tenants' : 'buyers'} for <b style={{ color: 'var(--ink)' }}>{p.society}</b>, found by matching. Or send it to nobody in particular.
-      </div>
-      {buyers.length === 0 && <div className="u-muted" style={{ fontSize: 13, padding: '4px 0 12px' }}>No matching contacts yet. You can still write the message.</div>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-        {buyers.map((b, i) => (
-          <button key={b.lead.id} onClick={() => send(b.lead.id)}
-            style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 11px', border: '1px solid var(--line)', background: '#fff', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-            <span className="av av-md" style={{ background: 'var(--chrome)' }}>{initials(personLabel(b.lead))}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 13.5 }}>{personLabel(b.lead)}{i === 0 && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-wash)', borderRadius: 4, padding: '2px 6px', marginLeft: 7 }}>BEST FIT</span>}</div>
-              <div className="u-muted" style={{ fontSize: 12 }}>{[latestPlus(b.lead.req.config), latestPlus(b.lead.req.locality), b.fitLine].filter(Boolean).join(' · ')}</div>
-            </div>
-            <Icon name="wa" size={18} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-          </button>
-        ))}
-      </div>
-      <Button block onClick={() => send(undefined)} icon="wa">Continue without a recipient</Button>
-    </Modal>
-  )
-}
-
 // ---- New / edit lead ----
 // A THIRD hardcoded list of Pune localities used to live here, disagreeing with
 // the two in definitions.jsx. Locality is free text with suggestions drawn from
@@ -659,13 +672,20 @@ const CONFIG_OPTIONS = [
   '4 BHK+ Villa', 'Commercial Office', 'Plot'
 ];
 
+const NOBODY = '__nobody'
+// What this form wrote as `purpose` when the notes box was empty.
+const INVENTED_PURPOSE = ['Self Use', 'Lease']
+
 function NewLeadModal({ store, leadId }) {
   const edit = leadId ? store.lookup('lead', leadId) : null
+  // Does the firm deal new leads to the rota (store.ts autoAssigns)?
+  const rota = shownStrategy('leads', store.state.routing?.strategy) === 'round_robin'
+  const inr = firmLocale().currency === 'INR'
   const [f, setF] = useState(edit ? {
     name: edit.name || '',
     phone: edit.phone || '',
     email: edit.email || '',
-    deal: edit.req?.deal || edit.deal || (edit.req?.purpose === 'Lease' ? 'rent' : 'sale'),
+    deal: edit.req?.deal || edit.deal || (edit.req?.purpose === 'Lease' ? 'rent' : ''),
     config: edit.req?.config || edit.requirement || '',
     locality: edit.req?.locality || edit.locality || '',
     minBudget: edit.req?.minBudget ?? edit.req?.budgetMin ?? '',
@@ -676,28 +696,53 @@ function NewLeadModal({ store, leadId }) {
     // and pressing Save destroyed the accumulation without anybody typing.
     // Shown as "A, B" and read back through the same separator.
     interest: listText(edit.req?.interest),
-    timeline: edit.req?.timeline || 'Immediate',
-    source: edit.source || 'Website',
+    // Never shown in this form: kept as stored, never invented.
+    timeline: edit.req?.timeline || '',
+    source: edit.source || '',
     agentId: edit.agentId || null,
-    notes: edit.req?.notes || edit.req?.purpose || ''
+    // 'Self Use' and 'Lease' were written by this form when nobody typed a
+    // note (see save); they are not the person's words.
+    notes: edit.req?.notes || (INVENTED_PURPOSE.includes(edit.req?.purpose) ? '' : edit.req?.purpose) || ''
   } : {
     name: '',
     phone: '',
     email: '',
-    deal: 'sale',
+    deal: '',
     config: '',
     locality: '',
     minBudget: '',
     maxBudget: '',
     interest: '',
-    timeline: 'Within 60 days',
-    source: 'Website',
-    agentId: store.state.agents[0]?.id || null,
+    // NOT STATED. 'Within 60 days' was saved on every new lead though the form
+    // never asks it (CLAUDE.md §3.1).
+    timeline: '',
+    // Not stated until someone picks one: 'Website' was saved on every lead.
+    source: '',
+    // WHO TAKES IT. An agent adding a lead is taking it: themselves. The desk
+    // (owner, manager) is entering it for the team: the firm's rule — "Next in
+    // turn" under the rota (not sent, so the server deals it), "Unassigned"
+    // under Leave unassigned (null: the desk chose it, so no "nobody has it"
+    // alert). It defaulted to whoever was signed in, so an owner's lead landed
+    // on the owner.
+    agentId: (!canAssignLead(store.state.role) && store.activeAgents().some(a => a.id === store.state.activeAgentId))
+      ? store.state.activeAgentId : (rota ? undefined : null),
     notes: ''
   })
   const set = (k, v) => setF(s => ({ ...s, [k]: v }))
+  // CAME FROM: one of my recent links with nobody on it — the person who
+  // wrote after seeing a link in a group (listing-pages.md §A.1c, I2r). Saved
+  // by attaching the link to the new lead, which moves its history across.
+  const [cameFrom, setCameFrom] = useState('')
+  const { data: myLinks } = useServerData(
+    () => (edit ? Promise.resolve([]) : api.myShareLinks({ recipient: 'none', limit: 12 }).then(r => r?.data || [])),
+    [], [])
 
-  const save = () => {
+  // The modal closes only on a saved record. It closed whatever the server
+  // said, beside a "created" toast, and a refused lead was gone with everything
+  // typed into it.
+  const [saving, setSaving] = useState(false)
+  const save = async () => {
+    if (saving) return
     if (!f.name.trim()) { store.toast('Lead Name is required', 'warn'); return }
     if (!f.phone.trim()) { store.toast('Phone Number is required', 'warn'); return }
 
@@ -719,54 +764,61 @@ function NewLeadModal({ store, leadId }) {
       maxBudget: isNaN(maxB) ? undefined : maxB,
     }
 
+    setSaving(true)
     if (edit) {
-      store.updateLead(edit.id, {
+      const ok = await store.updateLead(edit.id, {
         name: f.name.trim(),
         phone: f.phone.trim(),
         email: f.email.trim() || undefined,
-        source: f.source,
-        agentId: f.agentId || undefined,
-        deal: f.deal,
+        source: f.source || null,
+        // Sent only when changed: re-sending a holder who has since been
+        // suspended would have the server refuse an edit to the name. Picking
+        // Unassigned is a change too, sent as null; it was dropped here, so
+        // the lead stayed with whoever held it.
+        agentId: (f.agentId || null) !== (edit.agentId || null) ? (f.agentId || null) : undefined,
+        deal: f.deal || undefined,
         requirement: f.config,
         locality: f.locality,
         budgetMin: budgetObj.minBudget,
         budgetMax: budgetObj.maxBudget,
         req: {
           ...edit.req,
-          deal: f.deal,
+          deal: f.deal || undefined,
           config: f.config,
           locality: f.locality,
           interest: textList(f.interest),
-          timeline: f.timeline,
-          purpose: f.notes.trim() || (f.deal === 'rent' ? 'Lease' : 'Self Use'),
+          timeline: f.timeline || undefined,
+          purpose: f.notes.trim() || undefined,
           notes: f.notes.trim() || undefined,
           ...budgetObj
         }
       })
-      store.toast('Lead details updated successfully')
+      if (!ok) { setSaving(false); return }
     } else {
       const lead = {
         id: 'l_' + Date.now(),
         name: f.name.trim(),
         phone: f.phone.trim(),
         email: f.email.trim() || undefined,
-        source: f.source || 'Website',
+        // Came from a link: the link is where they came from (§A.1c I2r).
+        source: cameFrom ? 'Shared link' : (f.source || undefined),
         stage: 'New',
         minsAgo: 0,
-        agentId: f.agentId || store.state.agents[0]?.id || 'a1',
-        deal: f.deal,
+        // undefined is left out of the body: not sent, the firm's rule decides.
+        agentId: f.agentId,
+        deal: f.deal || undefined,
         requirement: f.config,
         locality: f.locality,
         budgetMin: budgetObj.minBudget,
         budgetMax: budgetObj.maxBudget,
         req: {
-          deal: f.deal,
+          deal: f.deal || undefined,
           config: f.config,
           locality: f.locality,
           interest: textList(f.interest),
-          purpose: f.notes.trim() || (f.deal === 'rent' ? 'Lease' : 'Self Use'),
+          purpose: f.notes.trim() || undefined,
           notes: f.notes.trim() || undefined,
-          timeline: f.timeline,
+          timeline: f.timeline || undefined,
           ...budgetObj
         },
         notes: [],
@@ -775,8 +827,13 @@ function NewLeadModal({ store, leadId }) {
         overdue: false,
         followUp: null,
       }
-      store.addLead(lead)
-      store.toast('New lead created successfully')
+      const link = cameFrom
+      const res = await store.addLead(lead)
+      if (!res) { setSaving(false); return }
+      const id = (res?.data || res?.lead || res?.record)?.id
+      // Credits the lead only. Attaching would bind a group link to this one
+      // person: every member's opens and taps would become theirs (C2).
+      if (link && id) api.creditShareLink(link, id).then(() => store.touched?.()).catch(() => store.toast('The lead is saved, but the link could not be credited.', 'warn'))
     }
     store.closeModal()
   }
@@ -793,7 +850,7 @@ function NewLeadModal({ store, leadId }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
           <Field label="Full Name *"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Client Name" autoFocus /></Field>
-          <Field label="Phone Number *"><Input value={f.phone} onChange={e => set('phone', e.target.value)} placeholder="+91 98xxx xxxxx" /></Field>
+          <Field label="Phone Number *"><PhoneInput value={f.phone} onChange={e => set('phone', e.target.value)} /></Field>
         </div>
         <Field label="Email Address (Optional)"><Input value={f.email} onChange={e => set('email', e.target.value)} placeholder="client@domain.com" /></Field>
 
@@ -807,11 +864,11 @@ function NewLeadModal({ store, leadId }) {
           <Input
             value={f.config}
             onChange={e => set('config', e.target.value)}
-            placeholder="e.g. 2 BHK Apartment, 3 BHK, Plot..."
+            placeholder={roomsText('e.g. 2 BHK Apartment, 3 BHK, Plot...')}
             style={{ marginBottom: 8 }}
           />
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-            {['1 BHK', '2 BHK', '3 BHK', '4 BHK+ Villa', 'Commercial Office', 'Plot'] /* vocab-ok */.map(t =>
+            {['1 BHK', '2 BHK', '3 BHK', '4 BHK+ Villa', 'Commercial Office', 'Plot'] /* vocab-ok */.map(t => roomsText(t)).map(t =>
               chip(f.config === t || f.config?.toLowerCase().startsWith(t.toLowerCase()), () => set('config', t), t)
             )}
           </div>
@@ -837,12 +894,12 @@ function NewLeadModal({ store, leadId }) {
           {/* Both echo the figure back in full while it is typed — 4500 and
               45L abbreviate to ₹4.5k and ₹45L downstream, and neither tells the
               person typing which one the box understood. */}
-          <Field label={f.deal === 'rent' ? 'Min Budget (₹/mo)' : 'Min Budget (e.g. 80L or 1.2Cr)'}>
-            <Input value={f.minBudget} onChange={e => set('minBudget', e.target.value)} placeholder={f.deal === 'rent' ? '25000' : '80L'} />
+          <Field label={f.deal === 'rent' ? `Min Budget (${currencySymbol()}/mo)` : inr ? 'Min Budget (e.g. 80L or 1.2Cr)' : 'Min Budget (e.g. 450K or 1.2M)'}>
+            <Input value={f.minBudget} onChange={e => set('minBudget', e.target.value)} placeholder={f.deal === 'rent' ? (inr ? '25000' : '2500') : inr ? '80L' : '450K'} />
             {moneyEcho(f.minBudget) && <span className="money-echo">{moneyEcho(f.minBudget)}</span>}
           </Field>
-          <Field label={f.deal === 'rent' ? 'Max Budget (₹/mo)' : 'Max Budget (e.g. 1.4Cr)'}>
-            <Input value={f.maxBudget} onChange={e => set('maxBudget', e.target.value)} placeholder={f.deal === 'rent' ? '45000' : '1.4Cr'} />
+          <Field label={f.deal === 'rent' ? `Max Budget (${currencySymbol()}/mo)` : inr ? 'Max Budget (e.g. 1.4Cr)' : 'Max Budget (e.g. 1.5M)'}>
+            <Input value={f.maxBudget} onChange={e => set('maxBudget', e.target.value)} placeholder={f.deal === 'rent' ? (inr ? '45000' : '4000') : inr ? '1.4Cr' : '1.5M'} />
             {moneyEcho(f.maxBudget) && <span className="money-echo">{moneyEcho(f.maxBudget)}</span>}
           </Field>
         </div>
@@ -851,20 +908,47 @@ function NewLeadModal({ store, leadId }) {
           <div className="field">
             <label>Source</label>
             <select className="input" value={f.source} onChange={e => set('source', e.target.value)} style={{ width: '100%' }}>
+              <option value="">Not stated</option>
+              {f.source && !store.state.settings.sources.includes(f.source) && <option value={f.source}>{f.source}</option>}
               {store.state.settings.sources.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div className="field">
             <label>Assign Owner</label>
-            <select className="input" value={f.agentId || ''} onChange={e => set('agentId', e.target.value || null)} style={{ width: '100%' }}>
-              <option value="">Unassigned</option>
-              {store.state.agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {/* "Next in turn" (rota only) is not sent: the server deals it.
+                "Unassigned" is a choice, sent as null. Under Leave unassigned it
+                was the not-sent option, so the server read "nobody decided" and
+                alerted both managers about a lead the desk had just placed. */}
+            <select className="input" value={f.agentId === undefined ? '' : f.agentId === null ? NOBODY : f.agentId}
+              onChange={e => set('agentId', e.target.value === NOBODY ? null : (e.target.value || undefined))} style={{ width: '100%' }}>
+              {!edit && rota && <option value="">Next in turn</option>}
+              {(edit || !rota || canAssignLead(store.state.role)) && <option value={NOBODY}>Unassigned</option>}
+              {store.activeAgents().map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {/* The person holding it now, if they can no longer take work —
+                  shown so the field says who it is, not offered. */}
+              {f.agentId && !store.activeAgents().some(a => a.id === f.agentId) && (
+                <option value={f.agentId} disabled>{(store.agentById(f.agentId)?.name || 'Former member')} · {notWorkableReason(store.agentById(f.agentId))}</option>
+              )}
             </select>
           </div>
         </div>
 
+        {!edit && (myLinks || []).length > 0 && (
+          <div className="field">
+            <label htmlFor="lead-came-from">Came from</label>
+            <select id="lead-came-from" className="input" value={cameFrom} onChange={e => setCameFrom(e.target.value)} style={{ width: '100%' }}>
+              <option value="">Not from a link</option>
+              {myLinks.map(l => (
+                <option key={l.id} value={l.id}>
+                  {[`${l.flats?.length || 0} ${l.flats?.length === 1 ? 'home' : 'homes'}`, (l.flats || []).slice(0, 2).map(x => x.title).join(', '), l.createdAt ? `sent ${new Date(l.createdAt).toLocaleDateString(firmLocale().numberLocale, { day: 'numeric', month: 'short' })}` : ''].filter(Boolean).join(' · ')}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <Field label="Requirement Notes & Purpose"><Textarea value={f.notes} onChange={e => set('notes', e.target.value)} placeholder="Specific buyer preferences, budget flexibility, timeline notes..." rows={3} /></Field>
-        <Button variant="primary" block onClick={save} icon="check">{edit ? 'Save Changes' : 'Create Lead Record'}</Button>
+        <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={save} icon="check">{saving ? 'Saving…' : edit ? 'Save Changes' : 'Create Lead Record'}</Button></div>
       </div>
     </Modal>
   )
@@ -886,23 +970,31 @@ function NewOwnerModal({ store, ownerId }) {
   })
   const set = (k, v) => setF(s => ({ ...s, [k]: v }))
 
-  const save = () => {
+  // Closes only on a saved record; a refusal leaves the form as typed.
+  const [saving, setSaving] = useState(false)
+  const save = async () => {
+    if (saving) return
     if (!f.phone.trim()) { store.toast('Phone is required', 'warn'); return }
+    setSaving(true)
     if (edit) {
-      store.updateOwner(edit.id, {
+      const ok = await store.updateOwner(edit.id, {
         name: f.name.trim() || undefined, phone: f.phone.trim(), email: f.email.trim() || undefined,
         project: f.project.trim() || undefined, tower: f.tower.trim() || undefined,
         unitNo: f.unitNo.trim() || undefined, config: f.config.trim() || undefined,
-        locality: f.locality.trim() || undefined, agentId: f.agentId || null,
+        locality: f.locality.trim() || undefined,
+        // Sent only when changed: re-sending a holder who has since been
+        // suspended would have the server refuse an edit to the phone.
+        ...(f.agentId !== (edit.agentId || null) ? { agentId: f.agentId || null } : {}),
       })
-      store.toast('Owner updated')
+      if (!ok) { setSaving(false); return }
     } else {
-      store.addOwner({
+      const ok = await store.addOwner({
         name: f.name.trim() || undefined, phone: f.phone.trim(), email: f.email.trim() || undefined,
         project: f.project.trim() || undefined, tower: f.tower.trim() || undefined,
         unitNo: f.unitNo.trim() || undefined, config: f.config.trim() || undefined,
         locality: f.locality.trim() || undefined, agentId: f.agentId || undefined, source: 'Manual entry',
       })
+      if (!ok) { setSaving(false); return }
       store.toast('Owner added')
     }
     store.closeModal()
@@ -913,7 +1005,7 @@ function NewOwnerModal({ store, ownerId }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
           <Field label="Owner Name"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Optional" autoFocus /></Field>
-          <Field label="Phone *"><Input value={f.phone} onChange={e => set('phone', e.target.value)} placeholder="+91 98xxx xxxxx" /></Field>
+          <Field label="Phone *"><PhoneInput value={f.phone} onChange={e => set('phone', e.target.value)} /></Field>
         </div>
         <Field label="Email"><Input value={f.email} onChange={e => set('email', e.target.value)} placeholder="Optional" /></Field>
         {/* THE FLAT, IN ITS OWN BOXES. This was one free-text "unit reference"
@@ -924,7 +1016,7 @@ function NewOwnerModal({ store, ownerId }) {
           <Field label="Project / Society"><SuggestInput value={f.project} onChange={v => set('project', v)} options={projectNames(store)} placeholder="e.g. Godrej Green Vistas" /></Field>
           <Field label="Tower"><Input value={f.tower} onChange={e => set('tower', e.target.value)} placeholder="B" /></Field>
           <Field label="Unit no."><Input value={f.unitNo} onChange={e => set('unitNo', e.target.value)} placeholder="1603" /></Field>
-          <Field label="Configuration"><Input value={f.config} onChange={e => set('config', e.target.value)} placeholder="2 BHK" /></Field>
+          <Field label="Configuration"><Input value={f.config} onChange={e => set('config', e.target.value)} placeholder={roomsText('2 BHK')} /></Field>
         </div>
         {edit?.unitRef && !edit?.unitNo && (
           <div className="imp-unmapped">On file as: {edit.unitRef}</div>
@@ -940,10 +1032,13 @@ function NewOwnerModal({ store, ownerId }) {
             <select className="input" value={f.agentId || ''} onChange={e => set('agentId', e.target.value || null)} style={{ width: '100%' }}>
               <option value="">Unassigned</option>
               {store.activeAgents().map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {f.agentId && !store.activeAgents().some(a => a.id === f.agentId) && (
+                <option value={f.agentId} disabled>{(store.agentById(f.agentId)?.name || 'Former member')} · {notWorkableReason(store.agentById(f.agentId))}</option>
+              )}
             </select>
           </div>
         </div>
-        <Button variant="primary" block onClick={save} icon="check">{edit ? 'Save Changes' : 'Add Owner'}</Button>
+        <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={save} icon="check">{saving ? 'Saving…' : edit ? 'Save Changes' : 'Add Owner'}</Button></div>
       </div>
     </Modal>
   )
@@ -997,9 +1092,9 @@ function RejectLeadModal({ store, leadId }) {
     // second entry — a remark saying "Rejected: …" a second after the status
     // line said the same — which the record showed twice and the activity
     // report would have counted as a note the agent wrote.
-    await store.updateLead(leadId, { stage: REJECTED_STATUS, rejectionReason: reason, stageNote: text })
+    const ok = await store.updateLead(leadId, { stage: REJECTED_STATUS, rejectionReason: reason, stageNote: text })
     setBusy(false)
-    store.closeModal()
+    if (ok) store.closeModal()
   }
 
   return (
@@ -1092,7 +1187,8 @@ function RejectOwnerModal({ store, ownerId, status }) {
   const save = async () => {
     setBusy(true)
     const text = note.trim() ? `${pick.reason}: ${note.trim()}` : pick.reason
-    await store.updateOwner(ownerId, { stage: pick.status, rejectionReason: pick.reason, callbackAt: null })
+    const ok = await store.updateOwner(ownerId, { stage: pick.status, rejectionReason: pick.reason, callbackAt: null })
+    if (!ok) { setBusy(false); return }
     await store.addRemark('owner', ownerId, `Closed: ${text}`)
     setBusy(false)
     store.closeModal()
@@ -1139,9 +1235,8 @@ function AssignModal({ store, leadId }) {
   const sugg = desk ? [...store.activeAgents()].sort((a, b) => openFor(a.id) - openFor(b.id))[0] : null
   return (
     <Modal title="Assign lead" onClose={store.closeModal} width={400}>
-      <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 14 }}>Route <b>{l?.name}</b> to an agent:</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {store.state.agents.map(a => (
+        {store.activeAgents().map(a => (
           <button key={a.id} onClick={() => { store.assign(leadId, a.id); store.closeModal() }}
             style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', border: '1px solid ' + (l?.agentId === a.id ? 'var(--accent)' : 'var(--line)'), background: l?.agentId === a.id ? 'var(--accent-wash)' : '#fff', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit' }}>
             <Avatar agent={a} size="sm" />
@@ -1199,7 +1294,10 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
           setBusy(false)
         }
       })
-      .catch(err => { store.toast(err.message || 'Could not assign', 'warn'); setBusy(false) })
+      .catch(err => {
+        if (assignFailed(store, err)) setPicked([])
+        setBusy(false)
+      })
   }
 
   return (
@@ -1224,13 +1322,13 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
       </div>
       {/* Pick one and it all goes there; pick several and it is split between
           them. Either way the button says which. */}
-      <Button variant="primary" block disabled={busy || !picked.length} style={{ marginTop: 12 }}
+      <div className="lc-foot"><Button variant="primary" block disabled={busy || !picked.length}
         onClick={() => send(picked.length > 1 ? picked : undefined, picked[0])}>
         {busy ? 'Assigning…'
           : picked.length > 1 ? `Split ${n} between ${picked.length}`
             : picked.length ? `Give all ${n} to ${store.agentById(picked[0])?.first || 'them'}`
               : `Pick who takes ${n === 1 ? 'it' : 'them'}`}
-      </Button>
+      </Button></div>
       {/* Taking work off the desk is a different intent from handing it to
           someone, so it does not sit in the same list as the people. */}
       <button className="pick-unassign" disabled={busy} onClick={() => send(undefined, null)}>
@@ -1272,7 +1370,7 @@ function AssignProjectModal({ store, project }) {
       setResult(res)
       store.settled?.()
     } catch (err) {
-      store.toast(err.message || 'Could not assign the project', 'warn')
+      if (assignFailed(store, err, 'Could not assign the project')) setPicked([])
     }
     setBusy(false)
   }
@@ -1293,7 +1391,7 @@ function AssignProjectModal({ store, project }) {
         <>
           <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 12 }}>
             {project?.counts?.total} owner{project?.counts?.total === 1 ? '' : 's'} in this project
-            {project?.counts?.unassigned ? `, ${project.counts.unassigned} unassigned` : ''}. Closed rows stay where they are.
+            {project?.counts?.unassigned ? `, ${project.counts.unassigned} unassigned` : ''}.
           </div>
           <button onClick={() => setOnlyUnassigned(v => !v)}
             style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 11px', marginBottom: 14,
@@ -1324,9 +1422,9 @@ function AssignProjectModal({ store, project }) {
             })}
             {!people.length && <div className="detail-empty">Nobody active to assign to.</div>}
           </div>
-          <Button variant="primary" block disabled={busy || !picked.length || !total} onClick={go}>
+          <div className="lc-foot"><Button variant="primary" block disabled={busy || !picked.length || !total} onClick={go}>
             {busy ? 'Assigning…' : total ? `Assign ${total} owner${total === 1 ? '' : 's'}` : 'Nothing to assign'}
-          </Button>
+          </Button></div>
         </>
       )}
     </Modal>
@@ -1389,7 +1487,7 @@ function ReassignModal({ store, fromId }) {
       ) : (
         <>
           <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 12 }}>
-            Hand <b>{from?.first || from?.name}</b>&rsquo;s open work to the team. Closed and rejected records stay where they are.
+            Hand <b>{from?.first || from?.name}</b>&rsquo;s open work to the team.
           </div>
 
           {/* WHAT MOVES. Two different jobs; a firm may want only one handed on. */}
@@ -1424,9 +1522,9 @@ function ReassignModal({ store, fromId }) {
             {!others.length && <div className="detail-empty">Nobody else is active to take it.</div>}
           </div>
 
-          <Button variant="primary" block disabled={busy || !picked.length || !movingN} onClick={doIt}>
+          <div className="lc-foot"><Button variant="primary" block disabled={busy || !picked.length || !movingN} onClick={doIt}>
             {busy ? 'Moving…' : movingN ? `Reassign ${movingN} record${movingN === 1 ? '' : 's'}` : 'Nothing to move'}
-          </Button>
+          </Button></div>
         </>
       )}
     </Modal>
@@ -1512,13 +1610,13 @@ function AddAgentModal({ store }) {
       ) : (
         <Field label="Email"><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="kiran@firm.com" type="email" /></Field>
       )}
-      <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} placeholder="98xxx xxxxx" /></Field>
+      <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} /></Field>
       <div className="u-muted" style={{ fontSize: 12, margin: '2px 0 4px' }}>
         {role === 'manager'
           ? 'A manager signs in with their email + password and can self-reset by email. Managers see the whole desk.'
           : "A sales executive signs in with their ID + password. We'll create a starter password to hand over; the admin resets it if forgotten. Sales executives see only their own leads."}
       </div>
-      <Button variant="primary" block disabled={saving} style={{ marginTop: 12 }} onClick={submit}>{saving ? 'Adding…' : 'Add to team'}</Button>
+      <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>{saving ? 'Adding…' : 'Add to team'}</Button></div>
     </Modal>
   )
 }
@@ -1550,14 +1648,14 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
   const [text, setText] = useState('')
   const [outcome, setOutcome] = useState('')
   const first = (name || 'them').split(' ')[0]
-  const digits = String(phone || '').replace(/\D/g, '')
+  const stored = String(phone || '').trim()
   const ch = CHANNELS[channel] || CHANNELS.call
   const label = ch.noun
 
   const proceed = (app) => {
     if (channel === 'email') {
       if (email) window.location.href = `mailto:${email}`
-    } else if (digits) {
+    } else if (stored) {
       if (channel === 'wa') {
         let msg = waText || ''
         if (!msg && recordType === 'lead' && recordId) {
@@ -1568,9 +1666,11 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
             })
           }
         }
-        openWhatsAppChat(msg, digits, app)
+        openWhatsAppChat(msg, stored, app)
       } else {
-        window.location.href = `tel:+${digits.length > 10 ? digits : '91' + digits}`
+        // The stored number: exact E.164, or exactly as received when it
+        // could not be read (the dialler shows it; nothing is guessed).
+        window.location.href = telLink(stored) || `tel:${stored}`
       }
     }
     if (recordType && recordId) {
@@ -1724,15 +1824,45 @@ function OwnerCallbackModal({ store, ownerId }) {
 // ---- Add remark (B1): a threaded, timestamped note on a lead or property ----
 function RemarkModal({ store, recordType, recordId }) {
   const [text, setText] = useState('')
-  const submit = () => {
+  const [busy, setBusy] = useState(false)
+  const submit = async () => {
+    if (busy) return
     if (!text.trim()) { store.toast('Type a remark first', 'warn'); return }
-    store.addRemark(recordType, recordId, text.trim())
-    store.closeModal()
+    setBusy(true)
+    const ok = await store.addRemark(recordType, recordId, text.trim())
+    setBusy(false)
+    if (ok) store.closeModal()
   }
   return (
     <Modal title="Add remark" onClose={store.closeModal} width={400}>
       <Textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a remark to this record…" autoFocus />
-      <Button variant="primary" block style={{ marginTop: 14 }} onClick={submit}>Add remark</Button>
+      <div className="lc-foot"><Button variant="primary" block onClick={submit}>Add remark</Button></div>
+    </Modal>
+  )
+}
+
+// A booked meeting, demo or other follow-up: how it went, and saving that is
+// what finishes it (completeFollowUp, server-side — the same write the
+// history's "Add outcome" makes). The form is the history's own (OutcomeForm).
+// A site visit never comes here: it is logged with proof (VisitProofModal).
+function FollowUpDoneModal({ store, leadId }) {
+  const l = store.lookup('lead', leadId)
+  const [outcome, setOutcome] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!l?.followUp) return null
+  const save = async () => {
+    if (!outcome) { store.toast('Pick how it went', 'warn'); return }
+    setBusy(true)
+    const res = await store.completeFollowUp(l.id, outcome, note.trim())
+    setBusy(false)
+    if (res) store.closeModal()
+  }
+  return (
+    <Modal title={`${followUpAction(l.followUp) || 'Follow-up'}: ${personLabel(l)}`} onClose={busy ? () => {} : store.closeModal} width={420}>
+      <OutcomeForm line={followUpLabel(l.followUp)} outcomes={VISIT_OUTCOMES} blank="How did it go?"
+        outcome={outcome} onOutcome={setOutcome} text={note} onText={setNote} placeholder="What happened?"
+        autoFocus={false} saving={busy} footClass="mfm-foot" onCancel={store.closeModal} onSave={save} />
     </Modal>
   )
 }
@@ -1820,7 +1950,9 @@ function VisitProofModal({ store, leadId, propId }) {
       // the CRM. Stamped before upload; the stored bytes are the marked ones.
       const stamped = await processImage(shot.blob, [
         store.state.settings.firmName || 'Site visit',
-        new Date().toLocaleString(),
+        // In the firm's date order, like every other date in the app. It was
+        // the phone's own setting, so one firm's proofs read in two orders.
+        new Date().toLocaleString(firmLocale().numberLocale),
         `${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)} · ±${Math.round(geo.accuracy || 0)}m`,
       ])
       const photoKey = await uploadMedia(stamped, 'visit-proof')
@@ -1926,9 +2058,9 @@ function VisitProofModal({ store, leadId, propId }) {
             <Textarea value={remark} onChange={e => setRemark(e.target.value)} placeholder="What happened on the visit?" />
           </Field>
 
-          <Button variant="primary" block disabled={busy} onClick={submit}>
+          <div className="lc-foot"><Button variant="primary" block disabled={busy} onClick={submit}>
             {busy ? 'Saving…' : 'Log visit'}
-          </Button>
+          </Button></div>
         </div>
       )}
     </Modal>
@@ -2021,9 +2153,9 @@ function AmenitiesModal({ store, value = {}, onDone, only = 'all' }) {
           </div>
         </div>
       </div>
-      <Button variant="primary" block style={{ marginTop: 14 }} onClick={done}>
+      <div className="lc-foot"><Button variant="primary" block onClick={done}>
         {total ? `Done · ${total} selected` : 'Done'}
-      </Button>
+      </Button></div>
     </Modal>
   )
 }
@@ -2084,7 +2216,7 @@ function VisitFeedbackModal({ store, leadId, propId }) {
           </div>
         </>
       )}
-      <Button variant="primary" block style={{ marginTop: 18 }} onClick={save}>Save outcome</Button>
+      <div className="lc-foot"><Button variant="primary" block onClick={save}>Save outcome</Button></div>
     </Modal>
   )
 }
@@ -2175,11 +2307,29 @@ export function NotifModal({ store, go }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Opening one alert reads THAT alert. It called mark-all, so a single tap
+  // cleared the whole pile and the pile stopped meaning anything.
+  // A bulk-assign alert links `?screen=leads&agent=<id>`; reading only `lead=`
+  // dropped the agent and landed on the whole book.
   const openNotif = (n) => {
-    if (!n.read) store.markAllNotifsRead()
-    const m = (n.link || '').match(/lead=([^&]+)/)
+    if (!n.read) store.markNotifRead(n.id)
+    const p = new URLSearchParams(String(n.link || '').replace(/^[^?]*\?/, ''))
+    const leadId = p.get('lead')
+    const agent = p.getAll('agent')
+    const alert = p.get('alert')
+    // AN I'M INTERESTED TAP WITH NOBODY ON IT opens Add as lead, holding the
+    // link, the home and the tap (listing-pages.md §A.1d). The tap's code is
+    // `?tap=` on the alert's link, or the ref link itself (/<firm>/<code>).
+    const tap = p.get('tap') || (/^share_/.test(n.type || '') ? (String(n.link || '').match(/^\/[a-z0-9-]+\/([a-z0-9]{6})(?:[/?#]|$)/) || [])[1] : null)
+    const ask = p.get('ask')
     close()
-    if (m) go('leads', { leadId: m[1], leadOpen: true })
+    // A buyer's form opens on what they asked, with its one-tap answer.
+    if (ask) store.openModal({ kind: 'buyerAsk', id: ask })
+    // Talk to us on an expired link opens on its Send a fresh link, lead or not.
+    else if (tap && (!leadId || n.type === 'share_expired_open')) store.openModal({ kind: 'addFromTap', code: tap })
+    else if (leadId) go('leads', { leadId, leadOpen: true })
+    else if (alert) go('leads', { leadFilters: { alert: [alert] }, leadOpen: false, leadId: undefined })
+    else if (agent.length) go('leads', { leadFilters: { agent }, leadOpen: false, leadId: undefined })
     else go('leads')
   }
 
@@ -2194,7 +2344,10 @@ export function NotifModal({ store, go }) {
 
   const filteredNotifs = notifs.filter(n => {
     if (filter === 'unread') return !n.read
-    if (filter === 'assigned') return (n.title || '').toLowerCase().includes('assign') || (n.body || '').toLowerCase().includes('assign')
+    // The same test as the tab's count: by type. The list matched the title
+    // text while the count matched the type, so the tab promised one number
+    // and opened onto another.
+    if (filter === 'assigned') return isAssignment(n)
     return true
   })
 
@@ -2317,7 +2470,7 @@ const nextDow = (dow) => {
 }
 const dayChips = () => {
   const now = new Date()
-  const short = (d) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  const short = (d) => d.toLocaleDateString(firmLocale().numberLocale, { day: 'numeric', month: 'short' })
   return [
     { ymd: ymdOf(now), label: 'Today' },
     { ymd: ymdOf(addDays(now, 1)), label: 'Tomorrow' },
@@ -2342,7 +2495,14 @@ const instantOf = (ymd, timeStr) => {
 
 function ScheduleFollowUpModal({ store, leadId }) {
   const l = store.lookup('lead', leadId)
-  const [action, setAction] = useState('Site Visit')
+  // A reschedule keeps what was booked. This opened on Site Visit every time,
+  // so moving a meeting by an hour quietly turned it into a visit.
+  const [action, setAction] = useState(() => {
+    const cur = followUpAction(l?.followUp).toLowerCase()
+    return FOLLOW_UP_ACTIONS.find(a => a.toLowerCase() === cur)
+      || (cur && FOLLOW_UP_ACTIONS.find(a => followUpKindOf(a) === followUpKindOf(cur)))
+      || 'Site Visit'
+  })
   const chips = dayChips()
   const [day, setDay] = useState(chips[1].ymd)
   const [customDate, setCustomDate] = useState(chips[1].ymd)
@@ -2385,7 +2545,7 @@ function ScheduleFollowUpModal({ store, leadId }) {
         <div className="field">
           <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Activity Type</label>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 5 }}>
-            {['Site Visit', 'Client Meeting', 'Follow-up Call', 'Online Demo'].map(t =>
+            {FOLLOW_UP_ACTIONS.map(t =>
               pill(action === t, () => setAction(t), t)
             )}
           </div>
@@ -2443,9 +2603,9 @@ function ScheduleFollowUpModal({ store, leadId }) {
           <Input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Meet at Hinjewadi Phase 3 sales lounge" />
         </Field>
 
-        <Button variant="primary" block onClick={saveAppointment} icon="calendar" style={{ padding: 12, fontWeight: 600 }}>
+        <div className="lc-foot"><Button variant="primary" block onClick={saveAppointment} icon="calendar" style={{ padding: 12, fontWeight: 600 }}>
           Confirm Appointment
-        </Button>
+        </Button></div>
       </div>
     </Modal>
   )

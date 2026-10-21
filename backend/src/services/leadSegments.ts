@@ -67,6 +67,27 @@ export const CONTACTED = sql`(
 )`;
 
 /**
+ * CONTACTED AFTER A MOMENT — the same allowlist as CONTACTED, from `since` on.
+ *
+ * What closes an alert about a lead (alertLifecycle.ts): the alert said "this
+ * one is yours to work", and the answer is that somebody worked it after the
+ * alert was raised. One definition of contact, asked with a start time, so the
+ * bell and Today's "Not yet contacted" cannot mean different things by it.
+ * `lead` is the alias of a crm_leads row in the caller's query.
+ */
+export const contactedAfter = (lead: string, since: any) => sql`(
+  EXISTS (SELECT 1 FROM crm_timeline_events e
+           WHERE e.record_id = ${sql(lead)}.id AND e.tenant_id = ${sql(lead)}.tenant_id
+             AND coalesce(e.author, 'System') <> 'System'
+             AND e.type IN ${sql(CONTACT_EVENT_TYPES)}
+             AND e.timestamp >= ${since})
+  OR EXISTS (SELECT 1 FROM activities a
+              WHERE a.lead_id = ${sql(lead)}.id AND a.tenant_id = ${sql(lead)}.tenant_id
+                AND a.type IN ${sql(CONTACT_ACTIVITY_TYPES)}
+                AND a.at >= ${since})
+)`;
+
+/**
  * Nothing a person has done on this record for `days` days.
  *
  * Drives Going cold, and — since Settings → Assignment started asking the

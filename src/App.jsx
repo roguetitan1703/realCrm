@@ -28,6 +28,8 @@ import Modals from './modules/Modals.jsx'
 import Phone from './modules/Phone.jsx'
 import PhoneToday from './modules/phone/PhoneToday.jsx'
 import Performance from './modules/Performance.jsx'
+import Me from './modules/Me.jsx'
+import { firmLocale } from './lib/locale.js'
 
 const NAV = [
   { section: 'Workspace' },
@@ -66,6 +68,8 @@ const SCREENS = {
   dashboard: Dashboard, leads: Leads, calling: Owners, properties: Properties, clients: Clients,
   calendar: Calendar, import: ImportPage, team: Team, settings: Settings, integrations: Integrations,
   today: (props) => <PhoneToday {...props} phone={false} />, performance: Performance,
+  // Your number and the links you have shared — from the profile menu only.
+  me: Me,
 }
 
 // Deep-link parsing lives in lib/nav.js now — it is the same parser the URL
@@ -100,11 +104,12 @@ export default function App() {
   // without knowing what any of them are. All three are separate pieces of
   // store state: the modal stack, the search panel and the alerts drawer.
   const overlay = useMemo(() => ({
-    isOpen: () => Boolean(store.state.modal || store.state.searchOpen || store.state.notifOpen),
+    isOpen: () => Boolean(store.state.modal || store.state.searchOpen || store.state.notifOpen || store.state.rangeOpen),
     close: () => {
       if (store.state.modal) store.closeModal()
       if (store.state.searchOpen) store.setSearch(false)
       if (store.state.notifOpen) store.setNotif(false)
+      if (store.state.rangeOpen) store.setRangeOpen(false)
     },
   }), [store])
   // SEARCH FROM THE KEYBOARD: Ctrl/Cmd+K anywhere, and "/" when nothing is
@@ -244,7 +249,7 @@ export default function App() {
   // Profile menu carries only real product actions. Role comes from the signed-in
   // user (real RBAC) — no dev toggle; workspace provisioning + data reset are
   // Delpat/superadmin operations and live in the /admin console, not here.
-  const profileItems = []
+  const profileItems = [{ icon: 'person', label: 'Your profile', onClick: () => go('me') }]
   if (isDeskRole(state.role)) {
     profileItems.push(
       { icon: 'settings', label: 'Settings', onClick: () => go('settings') },
@@ -301,7 +306,7 @@ export default function App() {
  */
 function SupportBar({ support, onClose }) {
   const until = support.expiresAt
-    ? new Date(support.expiresAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
+    ? new Date(support.expiresAt).toLocaleTimeString(firmLocale().numberLocale, { hour: 'numeric', minute: '2-digit' })
     : ''
   return (
     <div className="supbar" role="status">

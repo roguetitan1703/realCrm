@@ -12,6 +12,11 @@
 //   • AgentWork mode="self": "My work" on Today, the agent's own day and what
 //     is pending with them. Simpler: no breakdown chart, no team.
 //
+// A RANGE IS NOT A BIGGER DAY (docs/specs/performance.md). Over 7 or 30 days
+// each view leads with the days themselves and the change on the period
+// before, agents are read by how regularly they worked, and what is open NOW
+// folds to one line. The parts are in components/RangeView.jsx.
+//
 // PEOPLE, NOT CALLS, lead. Three calls to one number is one person, and the
 // contact status is per person (services/activityReport.ts `contactOf`):
 // picked up if any call that day was answered, otherwise the last call. So the
@@ -31,16 +36,18 @@ import { useServerData } from '../lib/useServerData.js'
 import { Segmented } from './primitives.jsx'
 import Icon from './Icon.jsx'
 import { stageLabel } from '../data/pipelineRoles.js'
-import { tally, fmt, word, fuWord, dayName, useSide, DayPicker, MEASURE_TITLE, DETAIL_TITLE, titleOf } from './ActivityDay.jsx'
+import { tally, fmt, word, fuWord, useSide, RangeControl, periodName, MEASURE_TITLE, DETAIL_TITLE, titleOf } from './ActivityDay.jsx'
+import { daysOf, seriesOf, rateOf, usePrevious, Change, Trend, Totals, CameIn, RangeAgents, Folded, workedDays } from './RangeView.jsx'
 
 /**
- * The day a view shows. Performance and the phone's Team tab keep it in the
- * URL (`day`), so opening an agent from a past day opens that agent on that
- * day, and Back returns to it; My work keeps its own. Null is today.
+ * The days a view shows: `day` the last (null is today), `from` the first
+ * (null is just the one day). Performance and the phone's Team tab keep both in
+ * the URL, so an agent opened from last week opens on last week, and Back
+ * returns to it; My work keeps its own.
  */
-function useViewDay(date, onDate) {
-  const [own, setOwn] = useState(null)
-  return onDate ? [date || null, onDate] : [own, setOwn]
+function useViewRange(date, from, onRange) {
+  const [own, setOwn] = useState({ day: null, from: null })
+  return onRange ? [{ day: date || null, from: from || null }, onRange] : [own, setOwn]
 }
 
 // What a person's calls came to, in the order a manager reads it.
@@ -72,13 +79,13 @@ function teamTally(people) {
 
 /** Titles for the list a number opens. */
 const listTitle = (who, day, measure, detail) => titleOf([
-  who, dayName(day?.day, day?.today),
+  who, periodName(day),
   measure === 'contact' ? (detail === 'retry' ? 'To try again' : CONTACT_LABEL[detail]) : MEASURE_TITLE[measure],
   measure === 'contact' ? '' : (DETAIL_TITLE[detail] || (measure === 'status' ? stageLabel(detail) : '')),
 ])
 
 // ── The head: which side, which day ─────────────────────────────────────────
-function Head({ title, hasCalling, side, onSide, day, onDay, actions }) {
+function Head({ title, hasCalling, side, onSide, day, onRange, actions }) {
   return (
     <div className="pv-head">
       {title && <h2 className="aw-title">{title}</h2>}
@@ -86,12 +93,15 @@ function Head({ title, hasCalling, side, onSide, day, onDay, actions }) {
         <Segmented options={[{ value: 'leads', label: 'Leads' }, { value: 'calling', label: 'Calling' }]} value={side} onChange={onSide} />
       )}
       <span className="pv-head-r">
-        {day && <DayPicker className="pv-day" day={day.day} today={day.today} onDay={onDay} />}
+        <RangeControl data={day} onRange={onRange} />
         {actions}
       </span>
     </div>
   )
 }
+
+/** A section's item count, as a small badge in its heading. Nothing when there are none. */
+const count = (n) => n > 0 ? <span className="pv-count">{n}</span> : null
 
 function Section({ title, className = '', right, children }) {
   return (
@@ -198,8 +208,7 @@ function OtherActivity({ t, side, open }) {
 }
 
 // ── 5. What is still open, for one person ───────────────────────────────────
-function Pending({ t, side, isToday, open, book, onBook }) {
-  const rows = [
+const pendingRows = ({ t, side, isToday, open, book, onBook }) => [
     side === 'leads' && book?.neverContacted > 0 && { n: book.neverContacted, label: 'Leads not yet contacted', tone: 'alert', go: () => onBook?.('never_contacted') },
     side === 'leads' && t.notCalled > 0 && { n: t.notCalled, label: 'New leads not called', tone: 'alert', go: () => open('came_in', 'not_called') },
     isToday && t.missed > 0 && { n: t.missed, label: `Missed ${fuWord(side, t.missed)}`, tone: 'alert', go: () => open('followup_missed') },
@@ -208,7 +217,9 @@ function Pending({ t, side, isToday, open, book, onBook }) {
     (t.n('contact', 'no_answer') + t.n('contact', 'unreachable')) > 0 && {
       n: t.n('contact', 'no_answer') + t.n('contact', 'unreachable'), label: 'People to try again', go: () => open('contact', 'retry'),
     },
-  ].filter(Boolean)
+].filter(Boolean)
+
+function Pending({ rows }) {
   if (!rows.length) return <div className="pv-clear"><Icon name="check" size={15} />Nothing pending.</div>
   return (
     <div className="pv-pend">
@@ -222,28 +233,60 @@ function Pending({ t, side, isToday, open, book, onBook }) {
 }
 
 // ── One agent: their own day ("self") or opened from the team ("drill") ─────
-export function AgentWork({ store, person, title, heading = true, mode = 'self', hasCalling, defaultSide = 'leads', book, ownerBook, onBook, actions, date: viewDate, onDate }) {
+export function AgentWork({ store, person, title, heading = true, mode = 'self', hasCalling, defaultSide = 'leads', book, ownerBook, onBook, actions, date: viewDate, from: viewFrom, onRange: onViewRange }) {
   const { state } = store
   const [side, setSide] = useSide(hasCalling ? defaultSide : 'leads')
   const eff = hasCalling ? side : 'leads'
-  const [date, setDate] = useViewDay(viewDate, onDate)
+  const [range, setRange] = useViewRange(viewDate, viewFrom, onViewRange)
+  const { day: date, from } = range
   const { data: day } = useServerData(
-    () => api.getActivity({ side: eff, date, person }), [eff, date, person, state.dataAsOf], null)
+    () => api.getActivity({ side: eff, date, from, person }), [eff, date, from, person, state.dataAsOf], null)
   const me = (day?.people || []).find(p => p.id === person) || (day?.people || [])[0]
   const t = tally(me)
   const isToday = !day || day.day === day.today
   const self = mode === 'self'
   const open = (measure, detail) => store.openModal({
-    kind: 'activityRecords', side: eff, date: day?.day, person, measure, detail,
+    kind: 'activityRecords', side: eff, date: day?.day, from: day?.from, person, measure, detail,
     title: listTitle(self ? '' : title, day, measure, detail),
   })
   const b = eff === 'calling' ? ownerBook : book
+  const pending = pendingRows({ t, side: eff, isToday, open, book: b, onBook })
+  const isRange = !!day?.from
+  const prev = usePrevious({ side: eff, data: day, person, dataAsOf: state.dataAsOf })
+  const dates = isRange ? daysOf(day.from, day.day) : []
+  const byDay = isRange ? seriesOf(me ? [me] : []) : {}
+  const toDay = (d) => setRange({ from: null, day: d === day?.today ? null : d })
+  const prevMe = prev ? tally((prev.people || []).find(p => p.id === person) || (prev.people || [])[0]) : null
 
   return (
     <div className="pv">
       <Head title={heading ? title : null} hasCalling={hasCalling} side={side} onSide={setSide}
-        day={day} onDay={(d) => setDate(d === day?.today ? null : d)} actions={actions} />
-      {!day ? <div className="ad-wait tall" aria-busy="true" /> : (
+        day={day} onRange={setRange} actions={actions} />
+      {!day ? <div className="ad-wait tall" aria-busy="true" /> : isRange ? (
+        <>
+          <Section title={self ? 'My performance' : 'Summary'}>
+            <div className="pv-trend">
+              <Trend dates={dates} byDay={byDay} onDay={toDay} />
+              <Totals t={t} prev={prevMe} loading={!prev} n={dates.length} open={open}
+                worked={{ n: workedDays(dates, byDay), of: dates.length }} />
+            </div>
+          </Section>
+          {!self && (
+            <div className="pv-pair">
+              <Section title="How the calls went" right={<Change now={rateOf(t)} before={prevMe ? rateOf(prevMe) : null} points loading={!prev} />}>
+                <ContactStatus t={t} open={open} />
+              </Section>
+              <Section title="What came of it">
+                <Outcomes t={t} open={open} />
+                {eff === 'leads' && <CameIn t={t} open={open} />}
+              </Section>
+            </div>
+          )}
+          {self && eff === 'leads' && t.n('came_in') > 0 && <Section title="New leads"><CameIn t={t} open={open} /></Section>}
+          <Section title={self ? 'My activity' : 'Other activity'}><OtherActivity t={t} side={eff} open={open} /></Section>
+          <Folded title={self ? 'My pending work' : 'Pending work'} n={pending.length}><Pending rows={pending} /></Folded>
+        </>
+      ) : (
         <>
           <Section title={self ? 'My performance' : 'Summary'}>
             <Summary t={t} open={open} self={self} />
@@ -262,8 +305,8 @@ export function AgentWork({ store, person, title, heading = true, mode = 'self',
             </div>
           )}
           <Section title={self ? 'My activity' : 'Other activity'}><OtherActivity t={t} side={eff} open={open} /></Section>
-          <Section title={self ? 'My pending work' : 'Pending work'} className="pv-attn">
-            <Pending t={t} side={eff} isToday={isToday} open={open} book={b} onBook={onBook} />
+          <Section title={self ? 'My pending work' : 'Pending work'} right={count(pending.length)}>
+            <Pending rows={pending} />
           </Section>
         </>
       )}
@@ -277,12 +320,13 @@ export function AgentWork({ store, person, title, heading = true, mode = 'self',
  * holding (never contacted), `onOpenPerson` opens an agent's drill-down, and
  * `onBook(agentId, seg)` opens their leads.
  */
-export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, books = {}, onBook, date: viewDate, onDate }) {
+export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, books = {}, onBook, date: viewDate, from: viewFrom, onRange: onViewRange }) {
   const { state } = store
   const [side, setSide] = useSide('leads')
   const eff = hasCalling ? side : 'leads'
-  const [date, setDate] = useViewDay(viewDate, onDate)
-  const { data: day } = useServerData(() => api.getActivity({ side: eff, date }), [eff, date, state.dataAsOf], null)
+  const [range, setRange] = useViewRange(viewDate, viewFrom, onViewRange)
+  const { day: date, from } = range
+  const { data: day } = useServerData(() => api.getActivity({ side: eff, date, from }), [eff, date, from, state.dataAsOf], null)
   const isToday = !day || day.day === day.today
 
   const people = (day?.people || [])
@@ -294,8 +338,14 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
     .sort((a, b) => ((a.gone || a.duty === 'OFF_DUTY') - (b.gone || b.duty === 'OFF_DUTY'))
       || String(a.name || '~').localeCompare(String(b.name || '~')))
   const team = teamTally(people)
+  const isRange = !!day?.from
+  const prev = usePrevious({ side: eff, data: day, person: null, dataAsOf: state.dataAsOf })
+  const prevTeam = prev ? teamTally(prev.people || []) : null
+  const dates = isRange ? daysOf(day.from, day.day) : []
+  const byDay = isRange ? seriesOf(people) : {}
+  const toDay = (d) => setRange({ from: null, day: d === day?.today ? null : d })
   const open = (measure, detail, who) => store.openModal({
-    kind: 'activityRecords', side: eff, date: day?.day, person: who?.id || null, measure, detail,
+    kind: 'activityRecords', side: eff, date: day?.day, from: day?.from, person: who?.id || null, measure, detail,
     title: listTitle(who?.name || 'Team', day, measure, detail),
   })
 
@@ -315,11 +365,50 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
     .map(a => ({ ...a, by: a.by.filter(x => x.n > 0), total: a.by.reduce((s, x) => s + x.n, 0) }))
     .filter(a => a.total > 0)
 
+  const attnList = !attn.length ? <div className="pv-clear"><Icon name="check" size={15} />Nothing unresolved.</div> : (
+    <div className="pv-pend">
+      {attn.map(a => (
+        <div key={a.key} className={'pv-attn-r' + (a.tone ? ` ${a.tone}` : '')}>
+          <span className="pv-attn-l"><b>{fmt(a.total)}</b><span>{a.label}</span></span>
+          <span className="pv-attn-who">
+            {a.by.map(x => (
+              <button type="button" key={x.p.id} className="pv-who" onClick={() => a.go(x.p)}>
+                {(x.p.name || 'Left').split(' ')[0]} <b>{fmt(x.n)}</b>
+              </button>
+            ))}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+
   return (
     <div className="pv">
       <Head title={heading ? 'Team' : null} hasCalling={hasCalling} side={side} onSide={setSide}
-        day={day} onDay={(d) => setDate(d === day?.today ? null : d)} />
-      {!day ? <div className="ad-wait tall" aria-busy="true" /> : (
+        day={day} onRange={setRange} />
+      {!day ? <div className="ad-wait tall" aria-busy="true" /> : isRange ? (
+        <>
+          <Section title="Team summary">
+            <div className="pv-trend">
+              <Trend dates={dates} byDay={byDay} onDay={toDay} />
+              <Totals t={team} prev={prevTeam} loading={!prev} n={dates.length} open={(m, d) => open(m, d)} />
+            </div>
+          </Section>
+          <Section title="Agents">
+            <RangeAgents people={people} dates={dates} prev={prev} loading={!prev} onOpenPerson={onOpenPerson} />
+          </Section>
+          <div className="pv-pair">
+            <Section title="How the calls went" right={<Change now={rateOf(team)} before={prevTeam ? rateOf(prevTeam) : null} points loading={!prev} />}>
+              <ContactStatus t={team} open={(m, d) => open(m, d)} />
+            </Section>
+            <Section title="What came of it">
+              <Outcomes t={team} open={(m, d) => open(m, d)} />
+              {eff === 'leads' && <CameIn t={team} open={(m, d) => open(m, d)} />}
+            </Section>
+          </div>
+          <Folded title="Needs attention" n={attn.length}>{attnList}</Folded>
+        </>
+      ) : (
         <>
           <Section title="Team summary"><Summary t={team} open={(m, d) => open(m, d)} /></Section>
           <div className="pv-pair">
@@ -357,23 +446,8 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
             </div>
           </Section>
 
-          <Section title="Needs attention" className="pv-attn">
-            {!attn.length ? <div className="pv-clear"><Icon name="check" size={15} />Nothing unresolved.</div> : (
-              <div className="pv-pend">
-                {attn.map(a => (
-                  <div key={a.key} className={'pv-attn-r' + (a.tone ? ` ${a.tone}` : '')}>
-                    <span className="pv-attn-l"><b>{fmt(a.total)}</b><span>{a.label}</span></span>
-                    <span className="pv-attn-who">
-                      {a.by.map(x => (
-                        <button type="button" key={x.p.id} className="pv-who" onClick={() => a.go(x.p)}>
-                          {(x.p.name || 'Left').split(' ')[0]} <b>{fmt(x.n)}</b>
-                        </button>
-                      ))}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+          <Section title="Needs attention" right={count(attn.length)}>
+            {attnList}
           </Section>
         </>
       )}

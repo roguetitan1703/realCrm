@@ -13,7 +13,8 @@
 import { Router, Request, Response } from 'express';
 import { appEnv } from '../services/env';
 import { requireTenantAuth } from '../middleware/auth';
-import { getPulse, resetDatabase, updateSettings, getSettings, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, revertImportBatch, checkDuplicates, listContacts } from '../services/store';
+import { phoneInvalidBody } from '../services/phone';
+import { getPulse, resetDatabase, updateSettings, getSettings, withReplyFallback, replyFallbackOf, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, checkDuplicates, listContacts } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { isDeskRole } from '../lib/permissions';
@@ -104,14 +105,13 @@ workspaceRouter.get('/desk-summary', requireTenantAuth, async (_req: Request, re
   }
 });
 
-workspaceRouter.delete('/import-batches/:batchId', requireTenantAuth, async (req: Request, res: Response) => {
-  try {
-    const out = await revertImportBatch(req.params.batchId);
-    return res.status(200).json({ success: true, ...out });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to revert import', message: err.message });
-  }
-});
+// UNDOING A DESK IMPORT BATCH IS RETIRED. It was behind sign-in alone, so any
+// agent could delete a whole batch -- worked-on leads included -- with no
+// audit, and no screen has called it since imports became jobs. An import is
+// undone from Import history (POST /imports/:id/revert: desk roles, audited).
+// Older batches with no job have no undo. Gone, not fixed.
+workspaceRouter.delete('/import-batches/:batchId', (_req: Request, res: Response) =>
+  res.status(410).json({ error: 'retired', message: 'Undo an import from Import history.' }));
 
 workspaceRouter.post('/dedupe-check', requireTenantAuth, async (req: Request, res: Response) => {
   try {
@@ -266,8 +266,11 @@ workspaceRouter.post('/settings', async (req: Request, res: Response) => {
   const patch = req.body;
   try {
     const updated = await updateSettings(patch);
-    res.status(200).json({ success: true, settings: updated });
+    res.status(200).json({ success: true, settings: withReplyFallback(updated, await replyFallbackOf(getContext()!.tenantId!)) });
   } catch (err: any) {
+    // Stopping every shared link is an owner's call (store.ts cleanSharingPatch).
+    if (err?.status === 403) return res.status(403).json({ error: 'FORBIDDEN', message: err.message });
+    const pi = phoneInvalidBody(err); if (pi) return res.status(422).json(pi);
     // A refused change (removing the final status, say) is the firm's to
     // correct, and says why — it is not a server fault.
     res.status(400).json({ error: 'Not saved', message: err?.message || 'Could not save the settings.' });

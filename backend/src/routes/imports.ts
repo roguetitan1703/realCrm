@@ -20,12 +20,13 @@
  * the same gate reassignment and settings use. An agent has no import screen.
  * ============================================================================
  */
+import { isPhoneCountry } from '../../../src/lib/phone.js';
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { getContext } from '../services/context';
 import {
   createImportJob, appendImportRows, previewImport, runImport,
-  getImportJob, listImportJobs, importRows, revertImport, type ImportKind,
+  getImportJob, listImportJobs, importRows, revertImport, ImportUndoRefused, type ImportKind,
 } from '../services/imports';
 
 export const importsRouter = Router();
@@ -98,6 +99,8 @@ importsRouter.post('/:id/preview', async (req: Request, res: Response) => {
     // none of its own — see prepareRow.
     const out = await previewImport(req.params.id, req.body?.mapping || {}, {
       project: req.body?.project ? String(req.body.project).trim() : null,
+      // The country for numbers written without a code; the firm's when absent.
+      country: isPhoneCountry(req.body?.country) ? String(req.body.country) : null,
     });
     if (!out) return res.status(404).json({ error: 'No such import' });
     return res.json({ success: true, ...out });
@@ -156,6 +159,7 @@ importsRouter.post('/:id/revert', async (req: Request, res: Response) => {
     const out = await revertImport(req.params.id, actor(req));
     return res.json({ success: true, ...out, import: await getImportJob(req.params.id) });
   } catch (err: any) {
+    if (err instanceof ImportUndoRefused) return res.status(409).json({ error: 'undo_refused', message: err.message });
     return res.status(500).json({ error: 'Failed to undo the import', message: err.message });
   }
 });

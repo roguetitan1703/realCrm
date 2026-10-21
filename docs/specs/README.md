@@ -1,9 +1,7 @@
 # Specs — running build plans
 
-These are the **detailed, buildable plans** behind [ROADMAP.md](../ROADMAP.md).
-One spec per roadmap block. We **plan every point here first** (revising as we
-work through the roadmap), and **develop once** the plans are settled — rather
-than design-and-build one point at a time.
+Designs for the bigger pieces in [BACKLOG.md](../BACKLOG.md), written before
+building. Once a spec ships it keeps a short as-built note, not the build log.
 
 **Status per spec:** 🧭 planning · 🔒 locked (ready to build) · 🏗️ building · ✅ built
 
@@ -17,6 +15,10 @@ than design-and-build one point at a time.
 | [branding.md](./branding.md) | E5 + platform identity, themes, URL, landing/login | 🔒 locked (landing parked) |
 | [pwa.md](./pwa.md) | E3/E4 PWA & app-shell audit | 🔒 locked (one big overhaul) |
 | [enquiries.md](./enquiries.md) | F. Enquiries: a person is not an enquiry | 🧭 planning (decisions locked, 4 opens) |
+| [listing-pages.md](./listing-pages.md) | Sending flats to a lead, the buyer's page, the firm's catalogue | 🅿️ parked 13 Oct (model in §0); PLAN proposes steps 1–2 |
+| [notifications.md](./notifications.md) | An alert is open work: lifecycle, urgency, working hours | ✅ built, on `development` |
+| [performance.md](./performance.md) | What a day answers vs a range | ✅ built, on `development` |
+| [desk-rework.md](./desk-rework.md), [lead-sources.md](./lead-sources.md), [demo-tenants.md](./demo-tenants.md) | — | not reviewed in this list |
 
 > Each spec carries: **Decisions** (locked), **Data model**, **Flows/API**,
 > **Migration/rollback**, and a **Build checklist** (executed later, once locked).

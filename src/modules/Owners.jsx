@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
-import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
+import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown, useSelection } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Overdue, Timeline } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
@@ -165,6 +165,8 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // `q`, the page, the view and the selection stay local: a history entry per
   // keystroke is not navigation.
   const bag = sel.ownerFilters || {}
+  // In the URL with the other filters, so Back from an owner keeps the search.
+  const q = bag.q || ''
   // TWO CONTROLS, ONE QUESTION EACH. The tab row is where a caller works from —
   // everyone, the scheduled callbacks, the first two steps of the walk (`step`),
   // nobody's rows. The Status dropdown (`status`) is any status, on top of
@@ -185,14 +187,14 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const sortKey = bag.sortKey || (tab === 'callbacks' ? 'callback' : 'name')
   const sortDir = bag.sortDir || 'asc'
 
-  const [q, setQ] = useState('')
   // GROUPED BY PROJECT is where Calling opens, on a phone too: a calling list
   // is townships, and a caller picks the building before the flat. Arriving
   // with a tab, a project or a caller already chosen means the list.
   const [view, setView] = useState(bag.tab || bag.step || bag.status || bag.project || bag.caller || bag.config ? 'list' : 'projects')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const [selected, setSelected] = useState(new Set())
+  const selection = useSelection()
+  const selected = selection.ids
   // The open record lives in the URL too — see Leads and Properties.
   const openId = sel?.ownerOpen ? sel.ownerId : null
 
@@ -207,7 +209,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
       for (const k of Object.keys(next)) if (next[k] === undefined || next[k] === null || next[k] === '' || next[k] === 'all') delete next[k]
       return { ...s, ownerFilters: Object.keys(next).length ? next : undefined }
     })
-    setPage(1); setSelected(new Set())
+    setPage(1); selection.clear()
   }
   // A tab is its own order: a sort picked on another tab does not follow it.
   const pickTab = (key) => {
@@ -233,10 +235,11 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     patchBag({ project: undefined, tower: undefined, config: undefined, tab: undefined, step: undefined, status: undefined, sortKey: undefined, sortDir: undefined })
     setView('projects')
   }
-  const setPageP = (v) => { setPage(v); setSelected(new Set()) }
+  // Changing page keeps the ticks (useSelection); what is being asked for does not.
+  const setPageP = (v) => setPage(v)
 
   // A checked row belongs to the list it was checked in.
-  useEffect(() => { setSelected(new Set()) }, [view, projectSel])
+  useEffect(() => { selection.clear() }, [view, projectSel])
 
   // ONE SET OF PARAMETERS for the rows and for the tab counts, so a tab can
   // never promise rows its list cannot find.
@@ -308,7 +311,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     : { ...OWNERS_DEF, columns: OWNERS_DEF.columns.filter(c => c.key !== 'callback') }), [tab])
 
   const open = (o) => {
-    store.cacheRecords('owner', [o])
+    store.cacheRecords('owner', [o], true)
     // ON TOP OF the list's state, not instead of it. These replaced the whole
     // selection, so the open project went with it and Back landed on the
     // project cards instead of the project's list.
@@ -322,7 +325,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
 
   const bulkAssign = () => store.openModal({
     kind: 'bulkAssign', leadIds: [...selected], isOwner: true,
-    onDone: () => setSelected(new Set()),
+    onDone: () => selection.clear(),
   })
 
   if (openId) {
@@ -347,7 +350,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const { header, toolbar, body } = ModuleListView({
     def, source, store, onOpen: open,
     filters: { ...(towerSel ? { tower: [towerSel] } : {}), ...(configSel ? { config: configSel.split(',') } : {}) }, onFilters, facets,
-    search: q, onSearch: (v) => { setQ(v); setPage(1) },
+    search: q, onSearch: (v) => patchBag({ q: v }),
     sortKey, onSortKey: (v) => patchBag({ sortKey: v }), sortDir, onSortDir: (v) => patchBag({ sortDir: v }),
     segments: segs, view, onView: setView,
     phone,
@@ -372,7 +375,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     selection: (canAssign && view === 'list' && selected.size > 0) ? {
       count: selected.size,
       actions: [{ label: 'Bulk assign', icon: 'userPlus', onClick: bulkAssign }],
-      onClear: () => setSelected(new Set()),
+      onClear: () => selection.clear(),
     } : null,
     page, onPage: view === 'projects' ? undefined : setPageP, pageSize, onPageSize: view === 'projects' ? undefined : setPageSize,
     showViewSwitch: false,
@@ -391,7 +394,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
       : v === 'grid'
         ? <ModuleCards def={def} rows={list} store={store} onOpen={open} phone={phone} />
         : <ModuleTable def={def} rows={list} store={store} onOpen={open} sortKey={sortKey} sortDir={sortDir} onSort={(v) => patchBag({ sortKey: v })}
-            selectable={canAssign} selectedIds={selected} onSelectionChange={setSelected} />,
+            selectable={canAssign} selectedIds={selected} onSelectionChange={selection.set} />,
   })
 
   return (

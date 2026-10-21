@@ -1,6 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
+    { "source": "/privacy", "destination": "/legal/privacy.html" },
+    { "source": "/terms", "destination": "/legal/terms.html" },
+    { "source": "/data-deletion", "destination": "/legal/data-deletion.html" },
     {
       "source": "/pwa/:path*",
       "destination": "https://api.dev.re.delpat.in/pwa/:path*"
@@ -36,6 +39,108 @@
         }
       ],
       "destination": "https://api.dev.re.delpat.in/share/gallery/:slug/:ref",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
+    },
+    {
+      "source": "/:slug/homes",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
+        }
+      ],
+      "destination": "https://api.dev.re.delpat.in/share/homes/:slug",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
+    },
+    {
+      "source": "/:slug/homes/",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
+        }
+      ],
+      "destination": "https://api.dev.re.delpat.in/share/homes/:slug",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
+    },
+    {
+      "source": "/:slug/homes/:flat",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
+        }
+      ],
+      "destination": "https://api.dev.re.delpat.in/share/homes/:slug/:flat",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
+    },
+    {
+      "source": "/:slug/homes/:flat/",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
+        }
+      ],
+      "destination": "https://api.dev.re.delpat.in/share/homes/:slug/:flat",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
+    },
+    {
+      "source": "/:slug/:code([a-hjkmnp-z2-9]{6})",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
+        }
+      ],
+      "destination": "https://api.dev.re.delpat.in/share/s/:slug/:code",
+      "missing": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ]
+    },
+    {
+      "source": "/:slug/:code([a-hjkmnp-z2-9]{6})/",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(?i).*(bot|crawler|spider|scraper|preview|externalhit|externalagent|externalfetcher|unfurl|embed|whatsapp|telegram|viber|snapchat|kakaotalk|zalo|skypeuri|microsoftpreview|teams|slack|discord|mattermost|rocket.chat|mastodon|pleroma|misskey|cardyb|tumblr|vkshare|iframely|metainspector|curl|wget|python|okhttp|go-http-client|java/|node-fetch|undici|axios|http.rb|libwww|httpclient).*"
+        }
+      ],
+      "destination": "https://api.dev.re.delpat.in/share/s/:slug/:code",
       "missing": [
         {
           "type": "query",

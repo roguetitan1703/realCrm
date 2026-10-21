@@ -1,14 +1,19 @@
 import { useState, useEffect } from 'react'
 import { Panel, SectionHead, StageTag, Button, Input, Segmented, Toggle, Avatar } from '../components/primitives.jsx'
+import PhoneInput from '../components/PhoneInput.jsx'
 import Icon from '../components/Icon.jsx'
 import { theme, PROTECTED_STAGES } from '../data/theme.js'
 import { finalStageOf, finalIsEditable, LABELLED_LEAD_STAGES, stageLabel } from '../data/pipelineRoles.js'
-import { api } from '../lib/api.js'
+import { api, currentTenant } from '../lib/api.js'
+import { copyText } from '../lib/clipboard.js'
 import { useServerData } from '../lib/useServerData.js'
 import ThisDevice from '../components/ThisDevice.jsx'
 import MessageTemplates from '../components/MessageTemplates.jsx'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { isDeskRole } from '../lib/permissions.js'
+import { firmLocale } from '../lib/locale.js'
+import { formatPhone } from '../lib/phone.js'
+import { canWork, notWorkableReason, shownStrategy } from '../lib/workforce.js'
 
 // `everyone: true` is a section an agent may open. The rest are the desk's.
 // An agent reaches this screen for one reason — the intro message they are
@@ -21,6 +26,9 @@ const NAV = [
   // Key kept — it is in the URL of every Settings link anyone has sent.
   { key: 'followup', label: 'Response times', icon: 'clock' },
   { key: 'messages', label: 'Message templates', icon: 'wa', everyone: true },
+  // Links and the public catalogue (listing-pages.md §A): how long a link
+  // lives, what the catalogue shows, the embed code, and the owner's stop.
+  { key: 'sharing', label: 'Sharing', icon: 'share' },
   // { key: 'audit', label: 'Audit ledger', icon: 'shield' },
   // Alerts used to be a section of its own, one row above the install row in a
   // section called This device. Two headings for two facts about the same
@@ -59,6 +67,7 @@ export default function Settings({ store, topBar, sel }) {
               {section === 'routing' && <RoutingSection store={store} agents={agents} routing={routing} inactiveAgentIds={inactiveAgentIds} draft={routingDraft} setDraft={setRoutingDraft} startSide={sel?.settingsSide} />}
               {section === 'followup' && <ResponseTimesSection store={store} settings={settings} />}
               {section === 'messages' && <MessagesSection store={store} />}
+              {section === 'sharing' && <SharingSection store={store} settings={settings} />}
               {/* {section === 'audit' && <AuditSection />} */}
               {section === 'system' && <SystemSection store={store} />}
             </div>
@@ -71,6 +80,131 @@ export default function Settings({ store, topBar, sel }) {
 
 function SecHead({ title, sub }) {
   return <div><div className="set-sec-h">{title}</div><div className="set-sec-sub">{sub}</div></div>
+}
+
+// ---- Sharing --------------------------------------------------------------
+// Who: the owner or manager, at a desk. What they want: to set how long a
+// sent link works, what the public catalogue shows, to get the catalogue onto
+// the firm's website — and, if a link has leaked, to stop sharing: every link
+// the firm has sent stops working for good, and no new ones can be made until
+// the owner allows sharing again. Old links never come back; the catalogue is
+// not affected.
+// crm_settings `sharing` (listing-pages.md §A.5).
+const EXPIRY_DAYS = [7, 15, 30]
+
+function SharingSection({ store, settings }) {
+  const sh = settings.sharing || {}
+  const expiry = EXPIRY_DAYS.includes(Number(sh.linkExpiryDays)) ? Number(sh.linkExpiryDays) : 15
+  const showPrice = !!sh.showPriceOnCatalogue
+  const showProject = sh.catalogueShowsProject !== false
+  const stopped = !!sh.stopped
+  const allow = () => store.openModal({
+    kind: 'confirm',
+    title: 'Allow sharing again?',
+    lines: ['Your team can send new links.', 'Links sent before you stopped stay off.'],
+    confirmLabel: 'Allow sharing',
+    onConfirm: () => put({ stopped: null }, 'Sharing allowed. Old links stay off.'),
+  })
+  const isOwner = store.state.role === 'owner'
+  // The stored number (exact E.164); changed only when the number is.
+  const savedReply = sh.replyToPhone || ''
+  const [reply, setReply] = useState(savedReply)
+  useEffect(() => { setReply(savedReply) }, [savedReply])
+  const replyDirty = reply !== savedReply
+  // The empty box shows the number buyers reach instead, and whose it is (an
+  // owner's, per the server's rule): "Akash Patel · +91 98765 43210".
+  const fbOwner = sh.replyToFallback ? (store.state.agents || []).find(a => a.phone === sh.replyToFallback) : null
+  const replyFallbackLabel = sh.replyToFallback ? [fbOwner?.name, formatPhone(sh.replyToFallback)].filter(Boolean).join(' · ') : ''
+
+  // The whole object, every time: the server stores the key as one value.
+  // `replyToFallback` is the server's answer, not a setting: it is not sent back.
+  const put = (patch, note) => {
+    const { replyToFallback: _shown, ...stored } = sh
+    return store.patchSettings({ sharing: { ...stored, ...patch } }, note)
+  }
+
+  const tenant = currentTenant()
+  const catalogueUrl = `${window.location.origin}/${tenant}/homes`
+  const embed = `<iframe src="${catalogueUrl}?embed=1" title="${(settings.firmName || 'Homes').replace(/"/g, '')}" style="width:100%;min-height:900px;border:0" loading="lazy"></iframe>`
+  const copy = (text, what) => copyText(text).then(ok => store.toast(ok ? `${what} copied` : 'Could not copy. Select it and copy it.', ok ? undefined : 'warn'))
+
+  const stop = () => store.openModal({
+    kind: 'confirm',
+    title: 'Stop all sharing?',
+    lines: ['Every link your team has sent stops working now, for good.', 'No one can send new links until you allow sharing again.', 'The catalogue stays up.'],
+    confirmLabel: 'Stop all sharing',
+    onConfirm: () => put({ stopped: true }, 'Sharing stopped. Every link is off.'),
+  })
+
+  return (
+    <>
+      <SecHead title="Sharing" />
+      {stopped && (
+        <div className="shr-stopped">
+          <Icon name="alert" size={16} />
+          <span>Sharing is stopped</span>
+          {isOwner && <Button size="sm" onClick={allow}>Allow sharing</Button>}
+        </div>
+      )}
+      <Panel>
+        <SectionHead title="Links" />
+        <div className="shr-rows">
+          <div className="shr-row">
+            <span className="shr-l">Links expire after</span>
+            <Segmented value={expiry} onChange={(v) => put({ linkExpiryDays: v }, `New links expire after ${v} days`)}
+              options={EXPIRY_DAYS.map(d => ({ value: d, label: `${d} days` }))} />
+          </div>
+          <div className="shr-row">
+            <label className="shr-l" htmlFor="shr-reply">Reply-to number</label>
+            <div className="shr-inline">
+              <PhoneInput id="shr-reply" value={reply} onChange={e => setReply(e.target.value)}
+                placeholder={replyFallbackLabel || "Firm's WhatsApp number"}
+                onKeyDown={e => { if (e.key === 'Enter' && replyDirty) put({ replyToPhone: reply.trim() }, 'Reply-to number saved') }} />
+              <Button variant={replyDirty ? 'primary' : 'ghost'} disabled={!replyDirty} onClick={() => put({ replyToPhone: reply.trim() }, 'Reply-to number saved')}>Save</Button>
+            </div>
+          </div>
+        </div>
+      </Panel>
+      <Panel>
+        <SectionHead title="Catalogue" />
+        <div className="shr-rows">
+          <label className="shr-row shr-tog">
+            <span className="shr-l">Show prices</span>
+            <Toggle type="button" on={showPrice} aria-pressed={showPrice} aria-label="Show prices on catalogue"
+              onClick={() => put({ showPriceOnCatalogue: !showPrice }, showPrice ? 'Prices hidden on the catalogue' : 'Prices shown on the catalogue')} />
+          </label>
+          <label className="shr-row shr-tog">
+            <span className="shr-l">Show project name</span>
+            <Toggle type="button" on={showProject} aria-pressed={showProject} aria-label="Show project name on catalogue"
+              onClick={() => put({ catalogueShowsProject: !showProject }, showProject ? 'Catalogue shows the locality only' : 'Catalogue shows the project name')} />
+          </label>
+          <div className="shr-row shr-col">
+            <span className="shr-l">Catalogue link</span>
+            <div className="shr-inline">
+              <code className="shr-code">{catalogueUrl}</code>
+              <Button icon="copy" onClick={() => copy(catalogueUrl, 'Link')}>Copy</Button>
+              <a className="btn btn-ghost" href={catalogueUrl} target="_blank" rel="noopener noreferrer"><Icon name="eye" size={14} />Open</a>
+            </div>
+          </div>
+          <div className="shr-row shr-col">
+            <span className="shr-l">Embed on your website</span>
+            <div className="shr-inline">
+              <code className="shr-code shr-embed">{embed}</code>
+              <Button icon="copy" onClick={() => copy(embed, 'Embed code')}>Copy</Button>
+            </div>
+          </div>
+        </div>
+      </Panel>
+      {isOwner && !stopped && (
+        <Panel>
+          <div className="shr-row">
+            <span className="shr-l">Stop all sharing</span>
+            <Button className="btn-danger" onClick={stop}>Stop all sharing</Button>
+          </div>
+        </Panel>
+      )}
+    </>
+  )
 }
 
 // ---- Brand ----------------------------------------------------------------
@@ -303,9 +437,6 @@ const ROUTING_SIDES = {
       idleOn: 'reassign_idle_enabled', idleDays: 'reassign_idle_days',
       loopCount: 'reassign_alert_count',
     },
-    autoSub: 'Share new leads evenly, one agent at a time.',
-    manualSub: 'New leads land in a shared pool. A manager picks who takes each one.',
-    idleSub: 'Nobody has recorded anything on it for this long and no visit is booked, so it goes to the next agent in turn. The record shows why.',
   },
   owners: {
     key: 'owners', label: 'Calling', noun: 'owner', article: 'an', arrival: 'When a new owner is imported',
@@ -315,9 +446,6 @@ const ROUTING_SIDES = {
       idleOn: 'owner_reassign_idle_enabled', idleDays: 'owner_reassign_idle_days',
       loopCount: 'owner_reassign_alert_count',
     },
-    autoSub: 'Share them evenly, one caller at a time, as each row is imported.',
-    manualSub: 'Imported owners land in a shared pool. A manager picks who calls each one.',
-    idleSub: 'Nobody has recorded anything on it for this long, so it goes to the next caller in turn. The record shows why. Rows marked Not interested or Do not call are never moved.',
   },
 }
 
@@ -368,7 +496,10 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
     if (ok) setDraft({})
   }
 
-  const strategy = val(f.strategy, sideKey === 'leads' ? 'round_robin' : 'manual')
+  // A legacy lead strategy ('weighted', 'strict_territory') is dealt by the
+  // rota on the server (store.ts autoAssigns), so it is shown as what it does:
+  // round-robin, lit, with its controls. It read as neither option before.
+  const strategy = shownStrategy(sideKey, val(f.strategy, sideKey === 'leads' ? 'round_robin' : 'manual'))
   const rota = val(f.rota, [])
 
   // How many open records each agent is carrying, counted in SQL. This read the
@@ -408,7 +539,15 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
   const setStrategy = (v) => set({ [f.strategy]: v })
   const setRota = (next) => set({ [f.rota]: next })
   const toggleAgent = (id) => setRota(rota.includes(id) ? rota.filter(x => x !== id) : [...rota, id])
-  const allOn = agents.length > 0 && rota.length === agents.length
+  // ONLY PEOPLE WHO CAN TAKE WORK ARE OFFERED. The rota skips anyone the
+  // server would refuse (services/workforce.ts), so ticking them here did
+  // nothing — the owner saw a name on the rota and that person got no leads.
+  const workable = agents.filter(canWork)
+  // Ids already on the rota who can no longer take work. Shown with why and a
+  // way off, never dropped quietly: Select all and Clear all leave them alone.
+  const stuck = rota.filter(id => !workable.some(a => a.id === id))
+  const onCount = rota.length - stuck.length
+  const allOn = workable.length > 0 && workable.every(a => rota.includes(a.id))
 
   return (
     <>
@@ -430,7 +569,6 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
         <div className="rt-backlog">
           <div className="rt-backlog-t">
             {waiting} {side.noun}{waiting === 1 ? '' : 's'} {waiting === 1 ? 'has' : 'have'} nobody on {waiting === 1 ? 'it' : 'them'}
-            <span className="rt-backlog-s">Taking turns only applies to new {side.noun}s. These were here before it was switched on.</span>
           </div>
           <Button variant="primary" size="sm" disabled={handing || !!dirty} onClick={handOut}>
             {handing ? 'Handing out…' : `Hand out ${waiting}`}
@@ -448,7 +586,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
             {/* The dot follows the DRAFT, like everything else here — a tab that
                 still showed the saved state while the panel under it showed the
                 edit would be two answers to one question. */}
-            <span className={'rt-dot' + ((s.key in draft || s.f.strategy in draft
+            <span className={'rt-dot' + (shownStrategy(s.key, s.f.strategy in draft
               ? draft[s.f.strategy] ?? routing?.[s.f.strategy]
               : routing?.[s.f.strategy]) === 'round_robin' ? ' on' : '')} />
           </button>
@@ -460,11 +598,11 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
         <div className="opt-list">
           <button className={'opt' + (strategy === 'round_robin' ? ' on' : '')} onClick={() => setStrategy('round_robin')}>
             <span className="opt-radio" />
-            <span><span className="opt-t">Auto-assign · round-robin</span><span className="opt-s">{side.autoSub}</span></span>
+            <span><span className="opt-t">Auto-assign · round-robin</span></span>
           </button>
           <button className={'opt' + (strategy === 'manual' ? ' on' : '')} onClick={() => setStrategy('manual')}>
             <span className="opt-radio" />
-            <span><span className="opt-t">Leave unassigned</span><span className="opt-s">{side.manualSub}</span></span>
+            <span><span className="opt-t">Leave unassigned</span></span>
           </button>
         </div>
       </Panel>
@@ -476,17 +614,17 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
             right={
               // Ticking eleven names one at a time to say "everyone" is the
               // common case, and it was the slowest thing on this screen.
-              <button className="rt-all" onClick={() => setRota(allOn ? [] : agents.map(a => a.id))}>
+              <button className="rt-all" disabled={!workable.length} onClick={() => setRota(allOn ? stuck : [...stuck, ...workable.map(a => a.id)])}>
                 {allOn ? 'Clear all' : 'Select all'}
               </button>
             }
           />
-          <div className="set-sec-sub">{rota.length} of {agents.length} receive auto-assigned {side.noun}s</div>
+          <div className="set-sec-sub">{onCount} of {workable.length} receive auto-assigned {side.noun}s</div>
           {/* A grid of chips, not a vertical checklist. Eleven agents was
               eleven full-width rows and half a screen of scrolling to answer
               "who is on". */}
           <div className="rot-grid">
-            {agents.map(a => {
+            {workable.map(a => {
               const on = rota.includes(a.id)
               const off = inactiveAgentIds.includes(a.id)
               return (
@@ -499,8 +637,19 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
                 </button>
               )
             })}
+            {stuck.map(id => {
+              const a = store.agentById(id)
+              const name = a?.first || a?.name || 'Former member'
+              return (
+                <div key={id} className="rot-chip stuck">
+                  <Avatar agent={a || { id, name, first: name }} size="sm" />
+                  <span className="rot-name">{name}<span className="rot-why">{notWorkableReason(a)}</span></span>
+                  <button className="rot-remove" onClick={() => setRota(rota.filter(x => x !== id))}>Remove</button>
+                </div>
+              )
+            })}
           </div>
-          {!agents.length && <div className="detail-empty">No team members yet.</div>}
+          {!workable.length && !stuck.length && <div className="detail-empty">{agents.length ? 'No one on the team can take work.' : 'No team members yet.'}</div>}
         </Panel>
       )}
 
@@ -510,11 +659,14 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
       <Panel>
         <SectionHead title={`${side.label === 'Calling' ? 'Owners' : 'Leads'} already on the desk`} />
 
+        {/* Both sweeps hand records to the rota, so they run only when the
+            rota does (store.ts autoAssigns). Shown under Leave unassigned they
+            were switches that did nothing. */}
+        {strategy === 'round_robin' && <>
         <div className="rt-rule">
           <div className="rt-rule-h">
             <div>
               <div className="rt-rule-t">Assign {side.noun}s that have no agent</div>
-              <div className="rt-rule-s">Nobody on it. Never assigned, or the person on it left the firm.</div>
             </div>
             {/* No hours field. Nothing ever sets agent_id back to NULL, so a
                 record is unowned only at arrival — the number was asking how
@@ -527,7 +679,6 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
           <div className="rt-rule-h">
             <div>
               <div className="rt-rule-t">Reassign {side.article} {side.noun} if no activity on it</div>
-              <div className="rt-rule-s">{side.idleSub}</div>
             </div>
             {/* THE NUMBER STAYS ON SCREEN WHEN THE RULE IS OFF, greyed. It is
                 what the rule WOULD do, and hiding it made the row jump and left
@@ -538,6 +689,7 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
             <Toggle on={!!val(f.idleOn, false)} disabled={!loaded} onClick={() => set({ [f.idleOn]: !val(f.idleOn, false) })} />
           </div>
         </div>
+        </>}
 
         {/* Both sides. An owner in the calling queue is passed around by the
             same sweep and it is the same problem — the threshold is the one
@@ -547,7 +699,6 @@ function RoutingSection({ store, agents, routing, inactiveAgentIds, draft, setDr
           <div className="rt-rule-h">
             <div>
               <div className="rt-rule-t">Tell a manager if {side.article} {side.noun} is reassigned too often</div>
-              <div className="rt-rule-s">It keeps being reassigned. The manager is told each time after that.</div>
             </div>
             <NumField value={Number(val(f.loopCount, 3))} suffix="times" disabled={!loaded}
               onChange={(v) => set({ [f.loopCount]: Math.max(1, v) })} />
@@ -578,9 +729,23 @@ function ResponseTimesSection({ store, settings }) {
   const segLabel = (key, fallback) =>
     (store.state.leadSegments || []).find(s => s.key === key)?.label || fallback
   const coldLabel = segLabel('going_cold', 'Going cold')
+  // WORKING HOURS: outside them alerts wait, and go out as one summary at the
+  // opening hour (backend/src/services/notifications.ts releaseAt). Whole
+  // hours; the server falls back to 9 to 21 on anything it cannot read.
+  const hours = settings.workHours || { start: 9, end: 21 }
+  const setHours = (h) => h.start < h.end && store.patchSettings({ workHours: h }, 'Working hours updated')
   return (
     <>
       <SecHead title="Response times" />
+      <Panel>
+        <SectionHead title="Working hours" />
+        <div className="set-sec-sub">Alerts reach phones only in these hours. The rest wait for the start of the day.</div>
+        <div className="set-hours">
+          <HourPick label="From" value={hours.start} max={hours.end - 1} onChange={(v) => setHours({ ...hours, start: v })} />
+          <span className="numsuffix">to</span>
+          <HourPick label="To" value={hours.end} min={hours.start + 1} onChange={(v) => setHours({ ...hours, end: v })} />
+        </div>
+      </Panel>
       <Panel>
         <SectionHead title="A new lead should hear back within" />
         <div className="set-sec-sub">Alerts the assignee, then escalates to a manager.</div>
@@ -605,6 +770,16 @@ function MessagesSection({ store }) {
       <SecHead title="Message templates" />
       <MessageTemplates store={store} />
     </>
+  )
+}
+
+const hourLabel = (h) => (h === 24 ? 'midnight' : h === 0 ? '12 am' : h === 12 ? '12 pm' : h < 12 ? `${h} am` : `${h - 12} pm`)
+function HourPick({ label, value, min = 0, max = 24, onChange }) {
+  const opts = Array.from({ length: 25 }, (_, h) => h).filter(h => h >= min && h <= max)
+  return (
+    <select className="input set-hour" aria-label={label} value={value} onChange={e => onChange(Number(e.target.value))}>
+      {opts.map(h => <option key={h} value={h}>{hourLabel(h)}</option>)}
+    </select>
   )
 }
 
@@ -635,7 +810,7 @@ function auditAgo(ts) {
   if (mins < 60) return `${mins}m ago`
   const hrs = Math.floor(mins / 60)
   if (hrs < 24) return `${hrs}h ago`
-  return new Date(ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+  return new Date(ts).toLocaleDateString(firmLocale().numberLocale, { day: 'numeric', month: 'short' })
 }
 
 function AuditSection() {

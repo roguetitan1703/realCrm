@@ -16,8 +16,8 @@
 import crypto from 'crypto';
 import { sql } from './db';
 import { parsePayload, sanitizeConfig } from './parser';
-import { findLeadByPhone, createLead, updateLead, nextRoutedAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS, WON_STATUS } from './store';
-import { notify, notifyRoles } from './notifications';
+import { findLeadByPhone, findLeadByRawPhone, createLead, updateLead, arrivalLeadAgent, addTimelineEvent, recordEnquiry, mergeRepeatReq, isPlaceholderName, activeOwnerOf, deskConfigOf, REJECTED_STATUS, WON_STATUS } from './store';
+import { notify, notifyOrDesk } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
 import { hashKey, lockKey, keyState, currentLock } from './integrationKeys';
@@ -373,7 +373,9 @@ export async function processInboxRow(
   // the same error forever, until someone happened to reopen the mapper and
   // re-save. This way the very next push after the fix ships parses clean.
   const { clean } = sanitizeConfig(integration.parser_config as any);
-  const parsed = parsePayload(body, clean);
+  // The firm's phone country and currency: +1 and $450K for a US firm.
+  const desk = await deskConfigOf(integration.tenant_id);
+  const parsed = parsePayload(body, clean, { locale: desk.locale });
   if (!parsed.ok) {
     const why = parsed.errors.length
       ? parsed.errors.join(' ')
@@ -382,14 +384,48 @@ export async function processInboxRow(
     return { status: 'failed', reason: why };
   }
 
+  return await landEnquiry({
+    tenantId: integration.tenant_id, provider: integration.provider, integrationId: integration.id,
+    inboxId, lead: parsed.lead, body, desk,
+  });
+}
+
+/**
+ * AN ENQUIRY WITH A NUMBER → A LEAD, or a repeat on the lead that number
+ * already is. The one path every inbound enquiry takes: a portal push (above)
+ * and the firm's public catalogue form (routes/public.ts, source "Catalogue").
+ * Duplicate by phone, the merge rules, routing, the enquiry session and its
+ * alert are all here, once. `inboxId` is set only for a push, whose inbox row
+ * is marked with the outcome.
+ */
+export async function landEnquiry(args: {
+  tenantId: string; provider: string; integrationId: string | null; inboxId: string | null;
+  lead: any; body: any; desk?: Awaited<ReturnType<typeof deskConfigOf>>;
+  /** A public form anyone can type any number into (the catalogue): on an
+   *  existing lead, record and tell, never change the lead. */
+  unverified?: boolean;
+  /** Who a NEW lead goes to instead of the arrival rule: the sender of a
+   *  shared link with no recipient (buyerAsks.ts). Never moves an existing one. */
+  agentId?: string | null;
+  /** false: the caller sends the one alert about this enquiry itself (the
+   *  buyer forms name what was asked), so no lead_assigned, lead_unrouted or
+   *  lead_repeat goes out beside it. The return says what happened. */
+  announce?: boolean;
+}): Promise<{ status: string; leadId?: string | null; reason?: string; previousStage?: string | null }> {
+  const { tenantId, inboxId } = args;
+  const integration = { id: args.integrationId || `${args.provider.toLowerCase()}:${tenantId}`, tenant_id: tenantId, provider: args.provider };
+  const desk = args.desk || await deskConfigOf(tenantId);
+  const body = args.body;
+  const mark = async (status: 'parsed' | 'merged' | 'failed' | 'ignored', extra: { leadId?: string | null; error?: string | null } = {}) => {
+    if (inboxId) await markInbox(inboxId, status, extra);
+  };
   return await runWithContext(
     {
-      tenantId: integration.tenant_id, userId: null, role: 'system',
+      tenantId, userId: null, role: 'system',
       actorType: 'system', actorLabel: `ingest:${integration.provider}`,
     } as any,
     async () => {
-      const lead = parsed.lead;
-      const cleanPhone = String(lead.phone || '').replace(/[^0-9+]/g, '');
+      const lead = args.lead;
 
       // Idempotency: a portal that retries because our ack was slow must not
       // create the lead twice. Keyed on the provider's own id when they send
@@ -416,7 +452,7 @@ export async function processInboxRow(
       // retry and a double-tap, short enough that coming back later counts.
       const lockTtl = providerId ? 604800 : 900;
       if (queueManager.checkIdempotencyLock(lockKey)) {
-        await markInbox(inboxId, 'ignored', { error: 'Duplicate of a push already processed' });
+        await mark('ignored', { error: 'Duplicate of a push already processed' });
         return { status: 'ignored', reason: 'idempotent retry' };
       }
       queueManager.setIdempotencyLock(lockKey, lockTtl);
@@ -424,17 +460,45 @@ export async function processInboxRow(
       // Dedup on the phone number within the tenant: the same buyer enquiring
       // twice is one lead with two enquiries, not two leads.
       //
-      // This compared the CLEANED STRINGS — "+919876543210" against whatever
-      // the portal sent — so a push carrying a bare "9876543210" matched
-      // nothing and created a second copy of a person already on file. The
-      // importer was moved onto the last-ten-digits rule when that bug cost a
-      // client desk 315 surplus rows; this path was missed, and once imports
-      // stopped and every lead arrived by webhook it became the ONLY dedupe
-      // left in the product. It also read every lead in the tenant into memory
-      // to do it — the full-collection scan removed everywhere else.
-      const existing = await findLeadByPhone(cleanPhone);
+      // Exact E.164, read in the firm's country (findLeadByPhone,
+      // docs/specs/phone.md). A number that cannot be read is kept as the
+      // portal sent it, and matches only the identical string from the same
+      // integration, when that string still names one person (findLeadByRawPhone).
+      const existing = (await findLeadByPhone(lead.phone))
+        || (await findLeadByRawPhone(lead.phone, args.integrationId));
+      if (existing && args.unverified) {
+        // NOBODY HAS PROVED THIS IS THEM. A portal vouches for its buyer; a
+        // public form does not — anyone can type a lead's number into it. So
+        // the enquiry is history and news, never an edit: no reopening a
+        // closed lead, no merged requirement, no note, no new holder. What was
+        // said goes on the timeline, written by System so it is not contact.
+        const r = lead.req || {};
+        const said = [r.notes, r.interest && `Interested in: ${Array.isArray(r.interest) ? r.interest.join(', ') : r.interest}`].filter(Boolean).join(' · ');
+        const session = await recordEnquiry({
+          leadId: existing.id, at: (lead as any).receivedAt || undefined,
+          source: integration.provider, integrationId: args.integrationId,
+          req: lead.req, enquiryId: (lead as any).external_id || null, rawRef: inboxId,
+        });
+        await addTimelineEvent({
+          record_id: existing.id, type: 'enquiry', title: `Enquiry via ${integration.provider}`,
+          description: [lead.name && `As ${lead.name}`, said || 'Enquired again'].filter(Boolean).join(' · '),
+          author: 'System', metadata: { source: integration.provider, unverified: true },
+        });
+        const terminal = existing.stage === REJECTED_STATUS || existing.stage === WON_STATUS;
+        if (session?.isNewSession && args.announce !== false) {
+          const n = {
+            tenantId, type: 'lead_repeat',
+            data: { name: existing.name || existing.phone, source: integration.provider, changed: 0, previousStage: terminal ? existing.stage : null },
+            link: `?screen=leads&lead=${existing.id}`,
+          };
+          const keeper = await activeOwnerOf(existing.agent_id);
+          await notifyOrDesk(keeper, n).catch(() => 0);
+        }
+        await mark('merged', { leadId: existing.id });
+        return { status: 'merged', leadId: existing.id, previousStage: terminal ? existing.stage : null };
+      }
       if (existing) {
-        const note = `[Repeat enquiry via ${integration.provider}] ${new Date().toLocaleString('en-IN')}`;
+        const note = `[Repeat enquiry via ${integration.provider}] ${new Date().toLocaleString(desk.locale.numberLocale, { timeZone: desk.timezone })}`;
         // A repeat enquiry is usually RICHER than the first, and merging used
         // to keep only the note. MagicBricks' early pushes carried name, phone
         // and locality; the ones arriving now carry the budget, the deal type,
@@ -502,9 +566,11 @@ export async function processInboxRow(
         // one owned by someone who has left or been deactivated, is routed like
         // a new arrival — otherwise a repeat enquiry lands on a desk no one
         // reads. Every bhumi agent is currently active, so this is the case
-        // that has not happened yet rather than one that has.
+        // that has not happened yet rather than one that has. Routed by the
+        // firm's arrival rule: under "Leave unassigned" it goes to nobody and
+        // the desk is told (notifyOrDesk below).
         const keeper = await activeOwnerOf(existing.agent_id);
-        const reassign = keeper ? {} : { agentId: await nextRoutedAgent() };
+        const reassign = keeper ? {} : { agentId: await arrivalLeadAgent() };
 
         await updateLead(existing.id, {
           notes, req: merged,
@@ -521,7 +587,7 @@ export async function processInboxRow(
         // — see docs/specs/desk-rework.md §2.
         const session = await recordEnquiry({
           leadId: existing.id, at: (lead as any).receivedAt || undefined,
-          source: integration.provider, integrationId: integration.id,
+          source: integration.provider, integrationId: args.integrationId,
           req: lead.req, enquiryId: (lead as any).external_id || null, rawRef: inboxId,
         });
 
@@ -530,7 +596,9 @@ export async function processInboxRow(
         // four buzzes would have taught the desk to ignore the fifth. A payload
         // folded into a session already open says nothing new.
         if (session?.isNewSession) {
-          const owner = (reassign as any).agentId || existing.agent_id;
+          // Who holds it NOW: the keeper, or whoever the rota just gave it to.
+          // Never the old holder who cannot take work — with nobody, the desk.
+          const owner = keeper || (reassign as any).agentId || null;
           // A LEAD WHO COMES BACK IS A LIVE LEAD, whatever it was closed as.
           //
           // This used to branch on the rejection REASON: anything reading as
@@ -569,37 +637,32 @@ export async function processInboxRow(
           // `/leads/<id>` -- a path this app does not have, so tapping it went
           // nowhere. The rejection is carried as data on the repeat alert
           // below, which the person holding the lead actually receives.
-          if (owner) {
-            await notify({
-              userId: owner, type: 'lead_repeat',
-              data: {
-                name: existing.name || existing.phone, source: integration.provider,
-                changed: conflicts.length,
-                previousStage: terminal ? existing.stage : null,
-              },
-              link: `?screen=leads&lead=${existing.id}`,
-            }).catch(() => {});
-          }
+          await notifyOrDesk(owner, {
+            tenantId: integration.tenant_id, type: 'lead_repeat',
+            data: {
+              name: existing.name || existing.phone, source: integration.provider,
+              changed: conflicts.length,
+              previousStage: terminal ? existing.stage : null,
+            },
+            link: `?screen=leads&lead=${existing.id}`,
+          }).catch(() => {});
         }
-        await markInbox(inboxId, 'merged', { leadId: existing.id });
+        await mark('merged', { leadId: existing.id });
         return { status: 'merged', leadId: existing.id };
       }
 
-      // Round-robin among agents actually on duty. One atomic statement, not
-      // a separate read-then-write — this used to be its own copy of the
-      // same logic createLead() has, and both copies raced the same way: a
-      // batch of pushes arriving close together would all read the counter
-      // before any of their writes landed, so they'd all pick the same
-      // person. See nextRoutedAgent()'s doc comment.
-      const agentId = await nextRoutedAgent();
-
+      // No agent: createLead applies the firm's arrival rule itself
+      // (arrivalLeadAgent: the rota, or nobody under Leave unassigned). A
+      // payload never names who gets the lead. The one named agent is
+      // `args.agentId`: a buyer form on a shared link with no recipient hands
+      // the new lead to the link's sender (buyerAsks.ts), not a person's choice.
       const { external_id, ...leadFields } = lead;
       const created = await createLead({
         ...leadFields,
+        agentId: args.agentId || undefined, agent_id: undefined,
         stage: 'New',
-        agentId,
         source: leadFields.source || integration.provider,
-      } as any);
+      } as any, undefined, { phoneAsReceived: true, announce: args.announce });
 
       // The FIRST enquiry gets a row too, so the table is the whole history
       // rather than "everything after the first one" — otherwise a lead that
@@ -607,11 +670,11 @@ export async function processInboxRow(
       if (created?.id) {
         await recordEnquiry({
           leadId: created.id, at: (lead as any).receivedAt || undefined,
-          source: leadFields.source || integration.provider, integrationId: integration.id,
+          source: leadFields.source || integration.provider, integrationId: args.integrationId,
           req: lead.req, enquiryId: external_id || null, rawRef: inboxId,
         });
       }
-      await markInbox(inboxId, 'parsed', { leadId: created?.id || null });
+      await mark('parsed', { leadId: created?.id || null });
       return { status: 'ingested', leadId: created?.id || null };
     },
   );

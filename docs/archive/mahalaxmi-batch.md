@@ -29,7 +29,7 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
 
 ## Part 1 — Broken today on a paying client (fix first)
 
-### 1.1 ⏸ Today screen does not scroll on iPhone (installed app) — PARKED
+### 1.1 ✅ Today screen does not scroll on iPhone (installed app) — done (user, 12 Oct)
 - **23 Sep:** "it's not that simple, we will talk about it later." Parked at the
   user's request; the diagnosis below stands for when it comes back.
 - **Know (23 Sep):** the user describes the app being drawn TALLER than the
@@ -147,7 +147,7 @@ Status marks: ⬜ open · 🟡 discussing · 🔨 building · ✅ shipped (commi
   demo and redistributed the leads by hand. Nothing to fix. (Onboarding still
   leaves new agents out of routing by default. That is covered in 2.5.)
 
-### 1.7 🔨 iPhone alerts failing with no reason recorded — step 1 shipped `a44afd3`
+### 1.7 ❓ iPhone alerts failing with no reason recorded — step 1 shipped `a44afd3`; the user only suspects step 2 is needed — verify against production `push_deliveries` before building anything
 - **Know (22 Sep):** last 3 days, deliveries to `web.push.apple.com` show
   `failed` **27 × bhumi, 16 × mahalaxmi**, with **no status code and no error
   text**. In the same period 42 and 28 alerts reached a screen.

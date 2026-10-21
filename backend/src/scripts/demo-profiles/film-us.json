@@ -1,0 +1,138 @@
+{
+  "_about": "17 Oct 2026. The US firm for the Delpat product film (cutroom, films/demos/real-estate-crm): an invented residential brokerage in Austin, TX, on the `us` market preset. It replaces the Indian film firm (film.json, same slug) when built. Development database only. The firm, its people and its three buildings are invented and were searched for: no Austin business or building with these names turned up (web search, not a TREC licence check). Neighbourhoods are real public names.",
+  "slug": "demo-film",
+  "seed": 20261017,
+  "firm": {
+    "name": "Limestone & Laurel Realty",
+    "city": "Austin",
+    "state": "TX",
+    "color": "#3F6B4E"
+  },
+  "_sources": [
+    { "what": "Austin chosen: a mid-size metro (city about 980,000, July 2023 estimate) with a deep resale and rental market, published MLS data (Unlock MLS) and a clear spread between central and suburban prices", "url": "https://www.census.gov/quickfacts/fact/table/austincitytexas/PST045224" },
+    { "what": "City of Austin median sale $560,000 (Aug 2026, Unlock MLS); metro $412,000; Redfin: average 57 days on market", "url": "https://hoodline.com/2026/09/austin-home-sales-slide-10-in-august-as-prices-keep-sinking/" },
+    { "what": "Single-family median $582,500 and condo median $390,000, Austin, 2026 year to date (Unlock MLS, via a brokerage)", "url": "https://neuhausre.com/condo-guide-austin/", "note": "search-result text; the page refused our fetch. priceIndex 1.0 is the $582,500 single-family median" },
+    { "what": "Rents, citywide, 16 Oct 2026: studio $1,198, 1 bed $1,372, 2 bed $1,918, 3 bed $2,532, 4+ bed $3,350", "url": "https://www.rentometer.com/average-rent-in/tx/austin-tx", "note": "cross-checked: Zumper Sept 2026 1 bed $1,269, 2 bed $1,600 (https://theclose.com/news-austin-rent-data-agents/); RentHop June 2026 1 bed $1,199, 2 bed $1,700, 3 bed $2,400" },
+    { "what": "Neighbourhood priceIndex: single-family median close by ZIP, trailing 12 months to 22 Sep 2026 (Unlock MLS), over $582,500. 78703 Tarrytown/Clarksville $1,691,000; 78704 Zilker/Bouldin Creek $1,113,918; 78751 Hyde Park $700,000; 78756 Allandale $797,500; 78702 East Austin $700,000; 78749 Circle C $586,000; 78660 Pflugerville $390,000; 78613 Cedar Park $500,500; 78681 Round Rock $505,000", "url": "https://johnnyronca.com/blog/austin-home-prices-by-zip-code-2026" },
+    { "what": "Coordinates of each neighbourhood", "url": "https://en.wikipedia.org/wiki/Tarrytown,_Austin,_Texas", "note": "and the Wikipedia page of each of Clarksville, Zilker, Bouldin Creek, Hyde Park, Allandale, Crestview, Circle C Ranch, Pflugerville, Cedar Park, Round Rock, The Domain. East Austin and Mueller coordinates are ESTIMATES (no page found)" },
+    { "what": "Crestview, Mueller and North Burnet have no price source: priceIndex left at 1.0", "url": null, "note": "ESTIMATE" },
+    { "what": "Price bands by bedroom count and type, around the medians above; townhouse bands; the sale/rent mix of listings and leads; the share of listings in buildings", "url": null, "note": "ESTIMATE: no by-bedroom sale data or townhouse median was found" },
+    { "what": "No commercial stock: 70% of NAR members are primarily residential. For a profile that wants offices: Austin full-service office asking rent $50.47/sq ft/yr (Cushman & Wakefield, Q3 2026); retail NNN about $26-27/sq ft/yr (Partners, Transwestern, Q1 2026, search text only)", "url": "https://www.cushmanwakefield.com/en/united-states/insights/us-marketbeats/austin-marketbeats/office" }
+  ],
+  "market": {
+    "preset": "us",
+    "summary": "A residential resale brokerage across central Austin and its northern and southern suburbs. Buyers and sellers are most of the book; a leasing agent works rentals. Condos sit in a few buildings; houses and townhouses stand on their own.",
+    "deal": { "sale": 0.65, "rent": 0.35 },
+    "leadDeal": { "sale": 0.6, "rent": 0.4 },
+    "stock": { "commercial": 0, "residential": 1 },
+    "demand": { "commercial": 0, "residential": 1 },
+    "calling": { "residential": 1, "commercial": 0 },
+    "inProject": 0.35,
+    "segment": "resale"
+  },
+  "team": [
+    { "name": "Rachel Moore", "role": "owner", "email": "rachel@limestonelaurel.example" },
+    { "name": "Daniel Garcia", "role": "manager" },
+    { "name": "Lauren Martinez", "role": "agent", "works": "buyers" },
+    { "name": "Ryan Thompson", "role": "agent", "works": "listings, and buyers" },
+    { "name": "Justin Harris", "role": "agent", "works": "rentals" }
+  ],
+  "localities": [
+    { "name": "Tarrytown", "kind": "central", "lat": 30.30, "lng": -97.77, "priceIndex": 2.9, "weight": 0.6 },
+    { "name": "Clarksville", "kind": "central", "lat": 30.28083, "lng": -97.76222, "priceIndex": 2.9, "weight": 0.4 },
+    { "name": "Zilker", "kind": "central", "lat": 30.250, "lng": -97.767, "priceIndex": 1.91, "weight": 0.8 },
+    { "name": "Bouldin Creek", "kind": "central", "lat": 30.249344, "lng": -97.755253, "priceIndex": 1.91, "weight": 0.7 },
+    { "name": "Hyde Park", "kind": "central", "lat": 30.30583, "lng": -97.73, "priceIndex": 1.2, "weight": 1 },
+    { "name": "Allandale", "kind": "central", "lat": 30.342, "lng": -97.744, "priceIndex": 1.37, "weight": 1 },
+    { "name": "Crestview", "kind": "central", "lat": 30.339917, "lng": -97.730856, "weight": 1 },
+    { "name": "East Austin", "kind": "central", "lat": 30.253, "lng": -97.725, "priceIndex": 1.2, "weight": 1.2 },
+    { "name": "Mueller", "kind": "central", "lat": 30.298, "lng": -97.705, "weight": 0.8 },
+    { "name": "North Burnet", "kind": "central", "lat": 30.401233, "lng": -97.72626, "weight": 0.5 },
+    { "name": "Circle C", "kind": "suburb", "lat": 30.197, "lng": -97.904, "priceIndex": 1.0, "weight": 1 },
+    { "name": "Pflugerville", "kind": "suburb", "lat": 30.4575, "lng": -97.64, "priceIndex": 0.67, "weight": 1.5 },
+    { "name": "Cedar Park", "kind": "suburb", "lat": 30.50667, "lng": -97.83028, "priceIndex": 0.86, "weight": 1.2 },
+    { "name": "Round Rock", "kind": "suburb", "lat": 30.50861, "lng": -97.67889, "priceIndex": 0.87, "weight": 1.3 }
+  ],
+  "homes": {
+    "single_family": {
+      "subtype": "independent_house", "label": "Single-family", "share": 0.6, "leadShare": 0.6, "storeys": [1, 1, 2],
+      "sqft": { "2": [1000, 1300], "3": [1400, 2100], "4": [2100, 3000] },
+      "configs": {
+        "2 bed": { "share": 1, "sale": [400000, 520000], "rent": [1700, 2100] },
+        "3 bed": { "share": 3, "sale": [480000, 650000], "rent": [2300, 2800] },
+        "4 bed": { "share": 2, "sale": [600000, 820000], "rent": [2900, 3700] }
+      }
+    },
+    "townhouse": {
+      "subtype": "townhouse", "label": "Townhouse", "share": 0.25, "leadShare": 0.15, "storeys": [2, 2, 3],
+      "sqft": { "2": [1100, 1400], "3": [1450, 1900] },
+      "configs": {
+        "2 bed": { "share": 1, "sale": [340000, 450000], "rent": [1800, 2200] },
+        "3 bed": { "share": 1, "sale": [400000, 540000], "rent": [2200, 2700] }
+      }
+    },
+    "condo": {
+      "subtype": "apartment", "label": "Condo", "share": 0.15, "leadShare": 0.25, "localities": ["central"], "storeys": [1],
+      "sqft": { "1": [650, 850], "2": [950, 1250] },
+      "configs": {
+        "1 bed": { "share": 1, "sale": [260000, 340000], "rent": [1250, 1550] },
+        "2 bed": { "share": 1, "sale": [360000, 480000], "rent": [1750, 2150] }
+      }
+    }
+  },
+  "projects": [
+    {
+      "name": "Halberd Lofts", "locality": "North Burnet", "kind": "residential", "subtype": "condo",
+      "towers": ["A"], "floors": 9, "perFloor": 8,
+      "configs": {
+        "1 bed": { "rent": [1350, 1700], "sale": [300000, 380000] },
+        "2 bed": { "rent": [1900, 2500], "sale": [420000, 560000] }
+      }
+    },
+    {
+      "name": "Quillmark Residences", "locality": "Mueller", "kind": "residential", "subtype": "condo",
+      "towers": ["A", "B"], "floors": 5, "perFloor": 9,
+      "configs": {
+        "1 bed": { "rent": [1300, 1650], "sale": [280000, 360000] },
+        "2 bed": { "rent": [1800, 2300], "sale": [380000, 500000] }
+      }
+    },
+    {
+      "name": "Tansy Row Townhomes", "locality": "Pflugerville", "kind": "residential", "subtype": "townhouse",
+      "towers": ["Bldg 1", "Bldg 2", "Bldg 3", "Bldg 4"], "floors": 2, "perFloor": 6,
+      "configs": {
+        "2 bed": { "rent": [1700, 2000], "sale": [300000, 380000] },
+        "3 bed": { "rent": [2000, 2400], "sale": [350000, 440000] }
+      }
+    }
+  ],
+  "demand": {
+    "residential": {
+      "sale": [
+        "Pre-approved {budget}, wants {config} in {locality}",
+        "Relocating from California for a tech job, pre-approved {budget}",
+        "First-time buyer, wants to tour this weekend",
+        "Needs to close before school starts, {config}",
+        "Downsizing, wants less upkeep"
+      ],
+      "rent": [
+        "Moving for work, needs a {config} by the 1st",
+        "Lease ends next month, up to {budget}/mo",
+        "Has a dog, needs a pet-friendly place",
+        "Wants to rent before buying, {config} near {locality}"
+      ]
+    }
+  },
+  "volume": { "leads": 180, "owners": 140, "units": 120 },
+  "phones": "fiction",
+  "photos": {
+    "source": "free stock interiors (photos.json, Openverse CC0 / CC BY)",
+    "kinds": ["flat"],
+    "rule": "interiors only, never a building's outside"
+  },
+  "story": {
+    "idleToday": "Justin Harris",
+    "offDays": { "Justin Harris": [2, 4] },
+    "slow": { "Justin Harris": { "keep": 0.35, "days": 7 } }
+  }
+}

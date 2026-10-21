@@ -14,6 +14,7 @@ import { api } from '../lib/api.js'
 import { copyText } from '../lib/clipboard.js'
 import { AppShell } from '../layouts/layouts.jsx'
 import { Button, Field, Input } from '../components/primitives.jsx'
+import PhoneInput from '../components/PhoneInput.jsx'
 import Icon from '../components/Icon.jsx'
 import FirmPage from './admin/FirmPage.jsx'
 import Ledger from './admin/Ledger.jsx'
@@ -32,6 +33,7 @@ const FIRM_NAV = [
   { key: 'overview', label: 'Overview', icon: 'grid' },
   { key: 'people', label: 'People and sign-ins', icon: 'people' },
   { key: 'ledger', label: 'Audit log', icon: 'note' },
+  { key: 'alerts', label: 'Alerts', icon: 'bell' },
 ]
 
 const DAY_MS = 86400000
@@ -232,7 +234,9 @@ export default function Admin() {
 const TEAM_COLS = '1.3fr 1fr 1.2fr 1fr 1.3fr 0.8fr 24px'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const isPhone = (c) => /^\+?[\d\s-]{10,15}$/.test(c) && c.replace(/\D/g, '').length >= 10
+// Which pasted cell is the number. Kept as pasted: the server reads it
+// (roster.ts rosterPhone) and names any it cannot.
+const isPhone = (c) => /^\+?[\d\s()-]{7,20}$/.test(c)
 const isRole = (c) => /^(agent|manager)$/i.test(c)
 
 /**
@@ -259,7 +263,7 @@ function parseRoster(text) {
         const rest = []
         for (const c of cells) {
           if (EMAIL_RE.test(c)) firm.ownerEmail = c
-          else if (isPhone(c)) firm.ownerPhone = c.replace(/\D/g, '').slice(-10)
+          else if (isPhone(c)) firm.ownerPhone = c
           else rest.push(c)
         }
         if (rest[0]) firm.ownerName = rest[0]
@@ -273,7 +277,7 @@ function parseRoster(text) {
     for (const c of cells) {
       if (!c) continue
       if (EMAIL_RE.test(c)) row.email = c
-      else if (isPhone(c)) row.phone = c.replace(/\D/g, '').slice(-10)
+      else if (isPhone(c)) row.phone = c
       else if (isRole(c)) row.role = c.toLowerCase()
       else rest.push(c)
     }
@@ -498,7 +502,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
               <Field label="Owner Phone">
-                <Input value={form.ownerPhone} onChange={e => setF('ownerPhone', e.target.value)} placeholder="9876543210" />
+                <PhoneInput value={form.ownerPhone} onChange={e => setF('ownerPhone', e.target.value)} />
               </Field>
               <Field label="Owner Password">
                 <Input value={form.ownerPassword} onChange={e => setF('ownerPassword', e.target.value)} onBlur={() => plan()} style={{ fontWeight: 600 }} />
@@ -586,7 +590,7 @@ function OnboardWorkspaceModal({ onClose, onSuccess }) {
                   <Input value={row.name} onChange={e => updateTeamRow(i, 'name', e.target.value)} onBlur={() => plan()} placeholder="Full name" style={{ fontSize: 12.5 }} />
                   <Input value={row.loginId} onChange={e => updateTeamRow(i, 'loginId', e.target.value)} onBlur={() => plan()} style={{ fontSize: 12.5, fontFamily: 'monospace' }} />
                   <Input value={row.password} onChange={e => updateTeamRow(i, 'password', e.target.value)} onBlur={() => plan()} style={{ fontSize: 12.5, fontFamily: 'monospace', fontWeight: 600 }} />
-                  <Input value={row.phone} onChange={e => updateTeamRow(i, 'phone', e.target.value)} placeholder="Phone" style={{ fontSize: 12.5 }} />
+                  <PhoneInput value={row.phone} onChange={e => updateTeamRow(i, 'phone', e.target.value)} />
                   <Input type="email" value={row.email} onChange={e => updateTeamRow(i, 'email', e.target.value)} onBlur={() => plan()} placeholder="Email" style={{ fontSize: 12.5 }} />
                   <select value={row.role} onChange={e => updateTeamRow(i, 'role', e.target.value)} style={{ padding: '8px 6px', borderRadius: 6, border: '1px solid var(--line)', fontSize: 12, background: '#fff' }}>
                     <option value="agent">Agent</option>

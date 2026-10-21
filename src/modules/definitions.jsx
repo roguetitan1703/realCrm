@@ -26,8 +26,10 @@ import { OwnerCell, StageCell, MediaNote, mediaCount } from '../components/colle
 import { FinishLead, FinishOwner } from '../components/Agreements.jsx'
 import { finalStageOf } from '../data/pipelineRoles.js'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, dayLabel, arrivedOn, flatOf, dealWord, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
+import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, dayLabel, arrivedOn, flatOf, dealWord, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
 import { getPref } from '../lib/prefs.js'
+import { moneyFull } from '../lib/locale.js'
+import { formatPhone, personLabel } from '../lib/phone.js'
 import { copyText } from '../lib/clipboard.js'
 import { messageLang } from '../data/vocabLocale.js'
 import { generateMessage } from '../lib/matching.js'
@@ -35,8 +37,10 @@ import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 
-import { canAssignLead, canEditLead, canUpdateLeadStatus, canEditListing } from '../lib/permissions.js'
+import { canAssignLead, canEditLead, canUpdateLeadStatus, canEditListing, isDeskRole } from '../lib/permissions.js'
 import { api } from '../lib/api.js'
+import { assignFailed } from '../lib/workforce.js'
+import { openSend } from './SendSheet.jsx'
 import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
 // out again here — that duplication is exactly what broke property filtering.
@@ -118,7 +122,7 @@ export const LEADS_DEF = {
   // reads as a place, and sale/rent is a small tag rather than plain text — a
   // sentence like "3 BHK · rent · Wakad" made the deal type invisible.
   headerFacts: (l) => [
-    l.phone,
+    formatPhone(l.phone),
     l.email || null,
     reqConfigLabel(l.req) || l.requirement || null,
     latestPlus(l.req?.locality || l.locality)
@@ -216,11 +220,15 @@ export const LEADS_DEF = {
   filterFields: (store, facets) => [
     { key: 'source', label: 'Source', icon: 'trend', options: facets?.bySource || [] },
     { key: 'locality', label: 'Locality', icon: 'building', options: facets?.byLocality || [] },
+    // Only ever arrives from an alert ("3 leads assigned to you"): a chip to
+    // see and clear, never a choice in the Filter menu.
+    { key: 'alert', label: 'From alert', icon: 'bell', options: [], addable: false, valueLabel: () => 'these leads' },
   ],
 
   // Per-key filter logic (mirrors the module's normalized predicates).
   rowMatch(l, key, vals) {
-    if (key === 'source') return vals.some(s => eqi(l.source, s))
+    // '_none' is "Not stated" (store.ts SOURCE_NONE).
+    if (key === 'source') return vals.some(s => (s === '_none' ? !l.source : eqi(l.source, s)))
     if (key === 'agent') return vals.includes(l.agentId || '_none')
     if (key === 'locality') {
       return vals.some(loc => {
@@ -260,7 +268,7 @@ export const LEADS_DEF = {
         </div>
         {/* Not twice. With no name on the lead the title above IS the phone
             number, and this line repeated it under itself. */}
-        {l.name ? <div className="sub mono-num">{l.phone}</div> : null}
+        {l.name ? <div className="sub mono-num">{formatPhone(l.phone)}</div> : null}
       </div>
     ) },
     { key: 'req', label: 'Requirement', render: (l) => reqShort(l.req) },
@@ -283,7 +291,10 @@ export const LEADS_DEF = {
     // `+N` is the same shorthand the header and the phone card use for an
     // accumulating field; the record sheet lists every one of them by name.
     { key: 'source', label: 'Source', render: (l) => (
-      <Source>{l.source}{l.otherSourceCount > 0 ? ` +${l.otherSourceCount}` : ''}</Source>
+      // No source is said as such, never as an empty chip (CLAUDE.md §3.1).
+      l.source
+        ? <Source>{l.source}{l.otherSourceCount > 0 ? ` +${l.otherSourceCount}` : ''}</Source>
+        : <span className="u-muted">Not stated</span>
     ) },
     // WHO HAS THIS LEAD, and the way to change it — the same cell. It used to
     // render only a bare + button for anyone who could assign, so the column
@@ -301,7 +312,7 @@ export const LEADS_DEF = {
             if (res?.success) { store.toast(agentId ? 'Lead assigned' : 'Lead unassigned'); store.settled?.() }
             else store.toast(res?.message || 'Could not assign', 'warn')
           })
-          .catch(err => store.toast(err.message || 'Could not assign', 'warn'))}
+          .catch(err => assignFailed(store, err))}
       />
     ) },
     { key: 'next', label: 'Next follow-up', render: (l) => {
@@ -567,7 +578,7 @@ export const LEADS_DEF = {
             onReject={(rec) => store.openModal({ kind: 'rejectLead', leadId: rec.id })}
           />
         </div>
-        <div className="rc-sub mono-num">{l.phone}</div>
+        <div className="rc-sub mono-num">{formatPhone(l.phone)}</div>
         <div className="rc-facts"><span>{reqShort(l.req)}</span></div>
         <RowNote record={l} />
         <div className="rc-foot">
@@ -623,7 +634,7 @@ export const OWNERS_DEF = {
   headerFacts: (o) => {
     const cb = callbackSignal(o.callbackAt)
     return [
-      o.phone,
+      formatPhone(o.phone),
       o.email || null,
       o.project ? <span className="rh-loc"><Icon name="building" size={12} className="ic" />{o.project}</span> : null,
       o.unitLabel || o.unitRef || null,
@@ -670,7 +681,7 @@ export const OWNERS_DEF = {
 
   columns: [
     { key: 'name', label: 'Name', sortable: true, render: (o) => (
-      <div><div className="name">{o.name || '—'}</div><div className="sub mono-num">{o.phone}</div></div>
+      <div><div className="name">{o.name || '—'}</div><div className="sub mono-num">{formatPhone(o.phone)}</div></div>
     ) },
     { key: 'project', label: 'Project', render: (o) => o.project || '—' },
     // Tower + flat, from the columns the import now writes — falling back to
@@ -691,7 +702,7 @@ export const OWNERS_DEF = {
             if (res?.success) { store.toast(agentId ? 'Owner assigned' : 'Owner unassigned'); store.settled?.() }
             else store.toast(res?.message || 'Could not assign', 'warn')
           })
-          .catch(err => store.toast(err.message || 'Could not assign', 'warn'))}
+          .catch(err => assignFailed(store, err))}
       />
     ) },
   ],
@@ -716,7 +727,7 @@ export const OWNERS_DEF = {
         <div className="rc-title">{o.name || 'Unnamed owner'}</div>
         {ownerStageCell(o, store)}
       </div>
-      <div className="rc-sub mono-num">{o.phone}</div>
+      <div className="rc-sub mono-num">{formatPhone(o.phone)}</div>
       <div className="rc-facts"><span>{[o.project, o.unitLabel || o.unitRef].filter(Boolean).join(' · ') || '—'}</span></div>
       <RowNote record={o} />
       <div className="rc-foot">
@@ -885,6 +896,10 @@ export const PROPERTIES_DEF = {
         options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] },
       { key: 'media', label: 'Photos & video', icon: 'camera', group: 'State',
         options: [{ value: 'photos', label: 'Has photos' }, { value: 'video', label: 'Has video' }, { value: 'none', label: 'None yet' }] },
+      // The desk decides what is public; agents only send. Hidden from them
+      // unless a link switched it on, so it can still be seen and taken off.
+      { key: 'catalogue', label: 'In catalogue', icon: 'eye', multi: false, group: 'State', hidden: !isDeskRole(store?.state?.role),
+        options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] },
       { key: 'furnishing', label: 'Furnishing', icon: 'home', group: 'Condition', options: optionsOf(FURNISH) },
       { key: 'facing', label: 'Facing', icon: 'tag', group: 'Condition', options: optionsOf(FACING) },
       { key: 'possession', label: 'Possession', icon: 'clock', group: 'State', options: optionsOf(POSSESSION) },
@@ -938,10 +953,10 @@ export const PROPERTIES_DEF = {
 
   // Property list uses a card view AND a table view. These columns drive the table.
   columns: [
-    { key: 'society', label: 'Property', render: (p) => (
+    { key: 'society', label: 'Property', render: (p, store) => (
       <div className="cell-prop">
         <div className="thumb-tile" style={{ background: thumbTint(p.id) }}><Icon name="building" size={19} strokeWidth={1.4} /></div>
-        <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}{!flatOf(p) && !isPlot(p.subtype ?? normaliseSubtype(p.type, p.category)) && <span className="unit-tag unit-missing">No flat no. yet</span>}{p.verifiedAt && <span className="vtick" title="Verified"><Icon name="check" size={11} /></span>}</div><div className="sub">{p.locality}{p.locality ? ' · ' : ''}<MediaNote p={p} /></div></div>
+        <div><div className="name">{p.society}{unitLabel(p) && <span className="unit-tag">{unitLabel(p)}</span>}{!flatOf(p) && !isPlot(p.subtype ?? normaliseSubtype(p.type, p.category)) && <span className="unit-tag unit-missing">No flat no. yet</span>}{p.verifiedAt && <span className="vtick" title="Verified"><Icon name="check" size={11} /></span>}{p.inCatalogue && isDeskRole(store?.state?.role) && <span className="unit-tag unit-cat" title="In catalogue"><Icon name="eye" size={11} />Catalogue</span>}</div><div className="sub">{p.locality}{p.locality ? ' · ' : ''}<MediaNote p={p} /></div></div>
       </div>
     ) },
     // These columns read the CANONICAL fields with a legacy fallback. They
@@ -990,8 +1005,8 @@ export const PROPERTIES_DEF = {
   ],
 
   actions: [
-    { id: 'share', tier: 'quick', icon: 'wa', tone: 'accent', label: 'Share',
-      run: (store, p) => store.openModal({ kind: 'pickBuyer', propId: p.id }) },
+    { id: 'share', tier: 'quick', icon: 'wa', tone: 'accent', label: 'Send',
+      run: (store, p) => openSend(store, [p]) },
     // Both owner actions are gated on there BEING an owner to reach. The owner
     // is optional now, so an ungated "Call owner" opened a dialer on an
     // undefined number, and "Owner update" composed a WhatsApp addressed to
@@ -1057,7 +1072,7 @@ export const PROPERTIES_DEF = {
  * which flat, how much, until when. Opening one opens the lead they closed as
  * (where the agreement card lives), or the flat when there was no lead.
  */
-const rupeesOf = (n) => (n == null ? '—' : `₹${Math.round(Number(n)).toLocaleString('en-IN')}`)
+const rupeesOf = (n) => (n == null ? '—' : moneyFull(n))
 // A call to a tenant or buyer goes on the lead they came from, else the flat.
 const partyContact = (a, channel) => ({
   kind: 'contact', channel, name: a.party?.name, phone: a.party?.phone,
@@ -1102,7 +1117,7 @@ export function partiesDef(kind) {
       { key: 'name', label: rent ? 'Tenant' : 'Buyer', render: (a) => (
         <div className="cell-prop">
           <span className="av av-sm av-demand">{initials(a.party?.name || '?')}</span>
-          <div><div className="name">{a.party?.name || '—'}</div><div className="sub mono-num">{a.party?.phone || ''}</div></div>
+          <div><div className="name">{a.party?.name || '—'}</div><div className="sub mono-num">{formatPhone(a.party?.phone) || ''}</div></div>
         </div>
       ) },
       { key: 'flat', label: 'Flat', render: (a) => <span className="cell-txt">{a.flat}</span> },
@@ -1150,7 +1165,7 @@ export const CLIENTS_DEF = {
 
   // Contacts are a directory, not a pipeline — no `progression`. The standard
   // header simply omits the stepper. Facts strip still applies.
-  headerFacts: (r) => [r.phone, r.role, r.locality].filter(Boolean),
+  headerFacts: (r) => [formatPhone(r.phone), r.role, r.locality].filter(Boolean),
 
   searchFields: ['name', 'detail', 'phone'],
 
@@ -1178,7 +1193,7 @@ export const CLIENTS_DEF = {
     { key: 'name', label: 'Name', sortable: true, render: (r) => (
       <div className="cell-prop">
         <span className={'av av-sm ' + (r.kind === 'supply' ? 'av-supply' : 'av-demand')}>{initials(r.name)}</span>
-        <div><div className="name">{r.name}</div><div className="sub mono-num">{r.phone}</div></div>
+        <div><div className="name">{r.name}</div><div className="sub mono-num">{formatPhone(r.phone)}</div></div>
       </div>
     ) },
     { key: 'role', label: 'Role', sortable: true, render: (r) => <span className="source">{r.role}</span> },
@@ -1222,7 +1237,7 @@ export const CLIENTS_DEF = {
         <span className={'av av-sm ' + (r.kind === 'supply' ? 'av-supply' : 'av-demand')}>{initials(r.name)}</span>
         <div className="rc-title rc-title-flex">{r.name}</div>
       </div>
-      <div className="rc-sub mono-num">{r.phone}</div>
+      <div className="rc-sub mono-num">{formatPhone(r.phone)}</div>
       <div className="rc-facts"><span>{r.detail}</span>{flatsLine(r.flats) && <span>{flatsLine(r.flats)}</span>}</div>
       <div className="rc-foot">
         <span className="source">{r.role}</span>

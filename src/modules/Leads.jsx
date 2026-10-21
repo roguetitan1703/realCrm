@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
-import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown } from '../components/collections.jsx'
+import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown, useSelection } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
-import { asList, thumbTint, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf, personLabel } from '../lib/format.js'
+import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
+import { personLabel } from '../lib/phone.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
@@ -15,6 +16,10 @@ import Icon from '../components/Icon.jsx'
 import { LEADS_DEF } from './definitions.jsx'
 import { AgreementList } from '../components/Agreements.jsx'
 import { finalStageOf, stageLabel } from '../data/pipelineRoles.js'
+import { firmLocale } from '../lib/locale.js'
+import { useServerData } from '../lib/useServerData.js'
+import { openSend } from './SendSheet.jsx'
+import { sentHomeLine } from '../lib/share.js'
 
 // A scheduled appointment's action reads like "Site Visit — Anita Rao", so the
 // type is a prefix rather than its own field. Matched loosely because the
@@ -103,19 +108,21 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const canFilterByAgent = canAssignLead(state.role)
   const flt = useMemo(() => {
     const o = {}
-    for (const k of ['source', 'locality', 'agent', 'flag']) {
+    for (const k of ['source', 'locality', 'agent', 'flag', 'alert']) {
       if (k === 'agent' && !canFilterByAgent) continue
       if (f[k]?.length) o[k] = f[k]
     }
     return o
   }, [JSON.stringify(f), canFilterByAgent])
 
-  const [q, setQ] = useState('')
+  // In the URL with the other filters, so Back from a lead keeps the search.
+  const q = f.q || ''
   const [view, setView] = useState('list')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   // Which rows are checked, on the page currently shown. A Set of lead ids.
-  const [selected, setSelected] = useState(new Set())
+  const selection = useSelection()
+  const selected = selection.ids
 
   // Any filter change is a new first page and drops a selection made against
   // rows that are about to be replaced.
@@ -129,13 +136,13 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
       return { ...s, leadFilters: Object.keys(next).length ? next : undefined }
     })
     setPage(1)
-    setSelected(new Set())
+    selection.clear()
   }
 
   const setFltP = (v) => patchFilters({
-    source: v?.source, locality: v?.locality, agent: v?.agent, flag: v?.flag,
+    source: v?.source, locality: v?.locality, agent: v?.agent, flag: v?.flag, alert: v?.alert,
   })
-  const setQP = (v) => { setQ(v); setPage(1); setSelected(new Set()) }
+  const setQP = (v) => patchFilters({ q: v || undefined })
   const setSortKeyP = (v) => patchFilters({ sortKey: v })
   const setSortDirP = (v) => patchFilters({ sortDir: v })
   const setSegP = (v) => patchFilters({ seg: v })
@@ -146,7 +153,8 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const setIntentP = (v) => patchFilters({ intent: v })
   const setStageP = (v) => patchFilters({ stage: v })
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
-  const setPageP = (v) => { setPage(v); setSelected(new Set()) }
+  // Changing page keeps the ticks (useSelection); what is being asked for does not.
+  const setPageP = (v) => setPage(v)
 
   const role = state.role
   const canAssign = canAssignLead(role)
@@ -169,7 +177,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
       // they used to stop here, so Source / Locality / Sales Executive / Needs
       // attention changed the chip and nothing else.
       source: params.source, locality: params.locality,
-      agent: params.agent, flag: params.flag,
+      agent: params.agent, flag: params.flag, alert: params.alert,
       // Ordering is done in SQL, so the sort headers have to reach SQL. They
       // did not: clicking one flipped the arrow and re-fetched the same order.
       sortKey: params.sortKey, sortDir: params.sortDir,
@@ -194,7 +202,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     segment: seg === 'all' ? undefined : seg,
     intent: intent === 'all' ? undefined : intent,
     stage: stage === 'all' ? undefined : stage,
-    source: flt.source, locality: flt.locality, agent: flt.agent, flag: flt.flag,
+    source: flt.source, locality: flt.locality, agent: flt.agent, flag: flt.flag, alert: flt.alert,
   }), [q, seg, intent, stage, flt])
 
   const onOpen = (l) => go('leads', { leadId: l.id, leadOpen: true })
@@ -234,7 +242,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const bulkAssign = () => store.openModal({
     kind: 'bulkAssign',
     leadIds: [...selected],
-    onDone: () => setSelected(new Set()),
+    onDone: () => selection.clear(),
   })
 
   // Deleting a selection is the one bulk action with nothing to undo, so it
@@ -249,7 +257,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     try {
       const res = await api.bulkDeleteLeads([...selected])
       if (res?.success) {
-        setSelected(new Set())
+        selection.clear()
         store.toast(
           res.skipped
             ? `${res.deleted} deleted · ${res.skipped} skipped (not yours to delete)`
@@ -282,7 +290,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
         { label: 'Bulk assign', icon: 'userPlus', onClick: bulkAssign },
         ...(canDelete ? [{ label: 'Delete', icon: 'trash', tone: 'danger', onClick: bulkDelete }] : []),
       ],
-      onClear: () => setSelected(new Set()),
+      onClear: () => selection.clear(),
     } : null,
     page, onPage: setPageP, pageSize, onPageSize: setPageSizeP,
     leftAddon: (
@@ -328,7 +336,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} phone={phone} />
       : <ModuleTable def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP}
-          selectable={canAssign} selectedIds={selected} onSelectionChange={setSelected} />,
+          selectable={canAssign} selectedIds={selected} onSelectionChange={selection.set} />,
   })
 
   return (
@@ -369,14 +377,14 @@ function sessionSpan(e) {
   if (!e.lastAt || e.lastAt === e.at) return open
   const a = new Date(e.at), b = new Date(e.lastAt)
   if (isNaN(a.getTime()) || isNaN(b.getTime()) || b.getTime() - a.getTime() < 60000) return open
-  return `${open} – ${b.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`
+  return `${open} – ${b.toLocaleTimeString(firmLocale().numberLocale, { hour: 'numeric', minute: '2-digit' })}`
 }
 
 // The clock time of one payload inside its sitting. The date is on the session
 // header above it; repeating it on every line says nothing new.
 function payloadTime(iso) {
   const d = new Date(iso)
-  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
+  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString(firmLocale().numberLocale, { hour: 'numeric', minute: '2-digit' })
 }
 
 // What one payload said: what they wanted, for how much, and which project it
@@ -401,6 +409,15 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   // Above the early return: a hook cannot be called conditionally, and the
   // "record not loaded yet" branch below is exactly such a condition.
   const matches = useLeadMatches(l)
+  // WHAT THIS PERSON HAS BEEN SENT, per home: when, how often they opened it,
+  // and whether they tapped I'm interested (GET /leads/:id/shares). Folded into
+  // the shortlist rows below rather than a second list of the same homes.
+  const { data: shareRows } = useServerData(
+    () => (sel.leadId ? api.leadShares(sel.leadId).then(r => r?.data || []) : Promise.resolve([])),
+    [sel.leadId, store.state.mutationTick], [])
+  // Homes ticked for Send. Cleared when the lead changes.
+  const [ticked, setTicked] = useState(() => new Set())
+  useEffect(() => { setTicked(new Set()) }, [sel.leadId])
   // A record we cannot open is a dead end, not a screen — and the message it
   // used to park on ("This lead no longer exists") asserted a cause it does not
   // know. An id reaches here from a link someone pasted, a lead a colleague
@@ -453,7 +470,36 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   const propRows = [
     ...shortlistIds.map(byId).filter(Boolean).map(p => ({ p, shortlisted: true, line: quotedShort(p) })),
     ...matches.filter(m => !shortlistIds.includes(m.id)).map(m => ({ p: m, shortlisted: false, line: quotedShort(m) })),
+    // A home this person asked about from the catalogue is theirs to follow
+    // up even when nobody shortlisted it and the matcher did not pick it.
+    ...(shareRows || []).filter((r, i, a) => r.propertyId && !shortlistIds.includes(r.propertyId) && !matches.some(m => m.id === r.propertyId)
+      && a.findIndex(x => x.propertyId === r.propertyId) === i)
+      .map(r => { const p = byId(r.propertyId) || { id: r.propertyId, society: r.title || 'Property' }; return { p, shortlisted: false, line: quotedShort(p) } }),
   ].sort((a, b) => (fbMap[a.p.id]?.verdict === 'rejected' ? 1 : 0) - (fbMap[b.p.id]?.verdict === 'rejected' ? 1 : 0))
+
+  // One home's sends, folded: the latest send, every open, the last open, and
+  // whether any of them got an I'm interested.
+  const sentOf = {}
+  for (const r of shareRows || []) {
+    const cur = sentOf[r.propertyId]
+    sentOf[r.propertyId] = !cur ? { ...r } : {
+      ...cur,
+      sentAt: (r.sentAt > cur.sentAt ? r.sentAt : cur.sentAt),
+      opens: (cur.opens || 0) + (r.opens || 0),
+      linkOpens: (cur.linkOpens || 0) + (r.linkOpens || 0),
+      lastOpenedAt: [cur.lastOpenedAt, r.lastOpenedAt].filter(Boolean).sort().pop() || null,
+      interested: (cur.interested || 0) + (r.interested || 0),
+      via: [...new Set([...(cur.via || []), ...(r.via || [])])],
+      tapFrom: cur.tapFrom === 'them' || r.tapFrom === 'them' ? 'them' : (cur.tapFrom || r.tapFrom || null),
+      enquiries: (cur.enquiries || 0) + (r.enquiries || 0),
+      link: cur.link || r.link,
+    }
+  }
+  const toggleTick = (id) => setTicked(t => { const n = new Set(t); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const allTicked = propRows.length > 0 && propRows.every(r => ticked.has(r.p.id))
+  const sendTicked = () => openSend(store, propRows.filter(r => ticked.has(r.p.id)).map(r => r.p), {
+    leadId: l.id, onSent: () => setTicked(new Set()),
+  })
 
   const openEdit = () => store.openModal({ kind: 'editRecord', moduleId: 'leads', recordId: l.id })
   // One way to open any channel, so the record screen and the list rows reach
@@ -589,31 +635,56 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
       id: 'inventory',
       title: 'Shortlisted and matching flats',
       right: <button className="btn btn-secondary btn-sm" onClick={() => store.openModal({ kind: 'attachProp', leadId: l.id })}><Icon name="plus" size={14} /> Attach property</button>,
-      render: () => propRows.length === 0
+      // A list row has no shortlist: wait for the record rather than show
+      // (and offer to send) the wrong homes.
+      render: () => l.__partial ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
+        : propRows.length === 0
         ? <div className="detail-empty">None yet.</div>
-        : <CappedList items={propRows} step={6} noun="properties">{(row, i) => {
+        : <>
+          {/* Tick one, some or all, then Send — the lead is the recipient.
+              The row sticks under the top bar while the list scrolls, so Send
+              is in reach from the tenth home as well as the first. */}
+          {(propRows.length > 1 || ticked.size > 0) && (
+            <div className={'inv-all' + (ticked.size ? ' is-on' : '')}>
+              {propRows.length > 1 && (
+                <button type="button" className={'pick-box' + (allTicked ? ' on' : '')} aria-pressed={allTicked} aria-label="Select all"
+                  onClick={() => setTicked(allTicked ? new Set() : new Set(propRows.map(r => r.p.id)))}><span><Icon name="check" size={13} /></span></button>
+              )}
+              <span className="inv-all-t">{ticked.size ? `${ticked.size} selected` : 'Select all'}</span>
+              {ticked.size > 0 && <button type="button" className="lnk inv-all-x" onClick={() => setTicked(new Set())}>Clear</button>}
+              {ticked.size > 0 && <Button variant="primary" size="sm" icon="wa" className="inv-all-send" onClick={sendTicked}>Send {ticked.size}</Button>}
+            </div>
+          )}
+          <CappedList items={propRows} step={6} noun="properties">{(row, i) => {
             const fb = (l.feedback || {})[row.p.id]
             const rejected = fb?.verdict === 'rejected'
+            const sent = sentOf[row.p.id]
+            const on = ticked.has(row.p.id)
             return (
-              <div key={row.p.id} className={'invrow' + (i ? ' relrow-div' : '') + (rejected ? ' invrow-rej' : '')}>
-                <div className="invrow-thumb" style={{ background: thumbTint(row.p.id) }}><Icon name="building" size={20} strokeWidth={1.4} /></div>
+              <div key={row.p.id} className={'invrow' + (i || propRows.length > 1 ? ' relrow-div' : '') + (rejected ? ' invrow-rej' : '')}>
+                <button type="button" className={'pick-box' + (on ? ' on' : '')} aria-pressed={on}
+                  aria-label={`${on ? 'Untick' : 'Tick'} ${row.p.society || 'this home'}`} onClick={() => toggleTick(row.p.id)}>
+                  <span><Icon name="check" size={13} /></span>
+                </button>
                 <button className="invrow-main" onClick={() => go('properties', { propId: row.p.id, propOpen: true })}>
                   <div className="invrow-title">
                     <span className={rejected ? 'invrow-strike' : ''}>{row.p.society}</span>
                     {/* Agent-side only — the unit no. is never in a client message,
                         but here it's what distinguishes two flats in one society. */}
                     {unitLabel(row.p) && <span className="unit-tag">{unitLabel(row.p)}</span>}
+                    {/* Only a tap known to be theirs says they are interested. */}
+                    {sent?.interested > 0 && sent?.tapFrom !== 'someone' && <span className="fit int fit-tight">Interested</span>}
                     {fb?.verdict === 'liked' && <span className="fit ok fit-tight">👍 Liked</span>}
                     {rejected && <span className="fit no fit-tight">👎 {fb.reason}</span>}
-                    {!fb && row.shortlisted &&
+                    {!fb && !(sent?.interested > 0 && sent?.tapFrom !== 'someone') && row.shortlisted &&
                       <span className="fit ok fit-tight"><Icon name="check" size={11} />Shortlisted</span>}
                   </div>
                   {/* Joined, not templated. Hardcoding the separators printed a
                       trailing " · " whenever a property had no price, which on
                       imported inventory is most of them. */}
                   <div className="relrow-sub">{[row.p.type, row.p.locality, row.line].filter(Boolean).join(' · ')}</div>
+                  {sent && <div className={'inv-sent' + (sent.opens > 0 ? ' is-open' : '')}>{sentHomeLine(sent)}</div>}
                 </button>
-                <Button variant="secondary" size="sm" onClick={() => store.openWhatsApp(row.p.id, l.id)} icon="wa">Share</Button>
                 {/* Shortlisted by a person, so a person can take it off. A
                     matched row is the matcher's and is not removable here. */}
                 {row.shortlisted && (
@@ -622,12 +693,13 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                 )}
               </div>
             )
-          }}</CappedList>,
+          }}</CappedList>
+        </>,
     },
     {
       id: 'timeline',
       title: 'Inquiry interaction timeline',
-      render: () => <Timeline events={l.timeline} agents={store.state.agents} currentUserId={store.state.activeAgentId}
+      render: () => l.__partial ? <div className="list-spin" role="status" aria-label="Loading"><span /></div> : <Timeline events={l.timeline} agents={store.state.agents} currentUserId={store.state.activeAgentId}
         onEditRemark={(eventId, text, outcome) => store.editRemark('lead', l.id, eventId, text, outcome)} />,
     },
   ]

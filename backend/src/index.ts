@@ -20,6 +20,7 @@ import { activityRouter } from './routes/activity';
 import { agreementsRouter } from './routes/agreements';
 import { propertiesRouter } from './routes/properties';
 import { publicRouter, shareRouter } from './routes/public';
+import { shareLinksRouter, shareTapsRouter, buyerAsksRouter } from './routes/sharing';
 import { teamRouter } from './routes/team';
 import { actionsRouter } from './routes/actions';
 import { ingestRouter } from './routes/ingest';
@@ -31,6 +32,9 @@ import { pwaRouter } from './routes/pwa';
 import { filesRouter, mediaRouter } from './routes/files';
 import { withRequestContext } from './middleware/auth';
 import { getTenantForIngest, runRoutingSweeps } from './services/store';
+import { failAbandonedImports } from './services/imports';
+import { scheduleCloseSettled } from './services/alertLifecycle';
+import { processScheduledNotifications } from './services/notifications';
 import { envBanner, appEnv, runningCode } from './services/env';
 import { checkIntegrationKeys } from './services/ingestion';
 
@@ -127,6 +131,25 @@ app.use(express.json({
   verify: (req: any, _res, buf) => { req.rawBody = buf.toString('utf8'); },
 }));
 app.use(express.urlencoded({ extended: true }));
+// THE BELL FOLLOWS THE WORK. After any write that succeeded, close the alerts
+// whose work it may have finished (alertLifecycle.ts). One hook for every write
+// path, so a new route cannot forget; debounced per tenant, and after the
+// response, so it costs the request nothing.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method !== 'GET' && req.method !== 'OPTIONS') {
+    // Public pages (no session) name their firm in the URL; routes/public.ts
+    // sets publicTenantId. Never the header or the default tenant for those.
+    // originalUrl, not path: by 'finish' a mounted router has stripped its
+    // prefix from req.url/req.path, so `path` never began with /api/v1/public.
+    res.on('finish', () => {
+      if (res.statusCode >= 400) return;
+      const isPublic = String(req.originalUrl || '').startsWith('/api/v1/public/');
+      const t = isPublic ? (req as any).publicTenantId : req.tenantId;
+      if (t) scheduleCloseSettled(t);
+    });
+  }
+  next();
+});
 // text/plain and XML arrive from senders that never set a content-type properly.
 // Parsed as text so /ingest can still read them (payloadOf) instead of landing
 // an empty object and losing a real enquiry.
@@ -202,8 +225,12 @@ app.use('/api/v1/modules/:moduleKey/records', recordsRouter);
 app.use('/api/v1/leads', leadsRouter);
 app.use('/api/v1/owners', ownersRouter);
 app.use('/api/v1/properties', propertiesRouter);
-// No sign-in: a listing's photo link (7.5).
+// No sign-in: shared links, the catalogue, old photo links (listing-pages.md §A).
 app.use('/api/v1/public', publicRouter);
+// Signed in: sending flats, my links, Add as lead from a tap.
+app.use('/api/v1/share-links', shareLinksRouter);
+app.use('/api/v1/share-taps', shareTapsRouter);
+app.use('/api/v1/buyer-asks', buyerAsksRouter);
 // The link-preview card for that photo link — HTML for crawlers only, routed
 // here by vercel.json on user agent. See routes/public.ts.
 app.use('/share', shareRouter);
@@ -347,7 +374,19 @@ if (isMain || process.env.START_SERVER === 'true') {
     // once, which is how one lead collected two reassignments in the same
     // minute. On a server that is every tenant swept N times per interval by
     // processes nobody knows are running.
-    setInterval(() => { runRoutingSweeps().catch(err => console.warn('[Routing Sweep] run failed:', err?.message)); }, 5 * 60 * 1000);
+    // CRM_NO_SWEEPS=1: a probe or builder API on the shared dev database must
+    // not hand out work. One did, and moved 349 owners of a member QA had
+    // suspended on purpose.
+    // Never honoured in production: an env file copied from a builder must not
+    // stop the paying firms' sweeps.
+    if (process.env.CRM_NO_SWEEPS === '1' && process.env.APP_ENV !== 'production') console.log('⏸  Routing sweeps off (CRM_NO_SWEEPS=1)');
+    else setInterval(() => { runRoutingSweeps().catch(err => console.warn('[Routing Sweep] run failed:', err?.message)); }, 5 * 60 * 1000);
+    failAbandonedImports().then(n => { if (n) console.log(`[Imports] ${n} run(s) lost to a restart marked stopped`); })
+      .catch(err => console.warn('[Imports] abandoned-run check failed:', err?.message));
+    // The alert sweep on a clock of its own. It ran only when an open tab
+    // polled /pulse, so an alert held for 09:00 waited for the first person to
+    // open the app — the one moment it was meant to reach them before.
+    setInterval(() => { processScheduledNotifications().catch(() => {}); }, 60 * 1000);
     // CAN THIS SERVER STILL OPEN THE PORTALS' KEYS?
     //
     // Replacing the demo JWT_SECRET in August silently replaced the lock on

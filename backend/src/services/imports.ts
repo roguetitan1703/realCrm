@@ -35,11 +35,15 @@ import { randomBytes } from 'crypto';
 import { sql, DEFAULT_TENANT_ID } from './db.js';
 import { getContext } from './context.js';
 import { audit } from './audit.js';
-import { createOwnersBatch, createLead, createProperty, type ActorCtx } from './store.js';
+import { notifyOrDesk } from './notifications.js';
+import { createOwnersBatch, createLead, createProperty, localeOf, type ActorCtx, type Locale } from './store.js';
+import { contactedAfter } from './leadSegments.js';
+import { personWorkedAfter } from './alertLifecycle.js';
 import {
-  OWNER_FIELDS, LEAD_FIELDS, PROPERTY_FIELDS, readField, normPhone,
+  OWNER_FIELDS, LEAD_FIELDS, PROPERTY_FIELDS, readField,
 } from '../../../src/lib/importSchema.js';
 import { statusFromSheet } from '../../../src/data/ownerStatus.js';
+import { phoneProblem, isPlaceholderPhone } from '../../../src/lib/phone.js';
 
 export type ImportKind = 'owners' | 'clients' | 'properties';
 
@@ -89,6 +93,8 @@ export type Prepared = {
   /** what makes it the same record as another row; see unitKey */
   key?: string | null;
   record?: Record<string, any>;
+  /** saved, but something on the row was not taken as given: said on the row */
+  note?: string;
 };
 
 /**
@@ -105,11 +111,15 @@ export type Prepared = {
  */
 export function prepareRow(
   kind: ImportKind, raw: Record<string, any>, mapping: Record<string, string>,
-  opts: { project?: string | null } = {},
+  opts: { project?: string | null; locale?: Locale; country?: string | null } = {},
 ): Prepared {
   const v: Record<string, any> = {};
+  // The country a number without a code is read in: the one picked on the
+  // mapping step (a sheet of Dubai owners), else the firm's.
+  const loc = (opts.country && opts.locale ? { ...opts.locale, country: opts.country } : opts.locale) as Locale | undefined;
   for (const f of FIELDS[kind]) {
-    const got = readField(raw, mapping, f);
+    // In the firm's formats: a US sheet's "450K" and a bare number read as +1.
+    const got = readField(raw, mapping, f, loc);
     if (got !== null) v[f.key] = got;
   }
 
@@ -118,10 +128,13 @@ export function prepareRow(
   // through a spreadsheet for a blank that is not there.
   const unreadablePhone = (col?: string) => {
     const cell = col ? String(raw[col] ?? '').trim() : '';
-    return cell.replace(/\D/g, '').length
-      ? `Phone number could not be read ("${cell.slice(0, 24)}")`
+    return cell
+      ? `Phone number could not be read ("${cell.slice(0, 24)}": ${phoneProblem(cell, loc?.country || 'IN')})`
       : 'No phone number';
   };
+  // A placeholder ("1234567890") is imported but is nobody's identity: two
+  // rows carrying it are two people (isPlaceholderPhone).
+  const personKey = (phone?: string | null) => (phone && !isPlaceholderPhone(phone, loc?.country || 'IN') ? phone : null);
 
   if (kind === 'owners') {
     // THE ONLY THING A CALLING ROW CANNOT DO WITHOUT is a number to ring.
@@ -143,7 +156,7 @@ export function prepareRow(
       // IDENTITY FOLLOWS WHAT THE ROW HAS. With a flat, the flat is the record
       // (one owner with three flats is three calls). Without one, the person is
       // — otherwise re-importing the same list would double every row in it.
-      key: v.unitNo ? unitKey(project, v.wing, v.unitNo) : (normPhone(v.phone) || null),
+      key: v.unitNo ? unitKey(project, v.wing, v.unitNo) : personKey(v.phone),
       record: {
         // No name is a name nobody has. It stays empty.
         name: v.name || null,
@@ -172,7 +185,8 @@ export function prepareRow(
     if (!v.phone) return { ok: false, reason: unreadablePhone(mapping.phone) };
     return {
       ok: true,
-      key: normPhone(v.phone) || null,
+      // v.phone is exact E.164 (parsePhone), the same form every lead is stored in.
+      key: personKey(v.phone),
       record: {
         name: v.name || null, phone: v.phone, email: v.email || null,
         stage: v.stage || 'New', source: v.source || 'Spreadsheet import',
@@ -193,7 +207,15 @@ export function prepareRow(
   // Sale or rent is never guessed: a blank read as "sale" prices a rental at
   // eighty-five lakh and nobody questions a filled-in field.
   if (!v.deal) return { ok: false, reason: 'Not marked sale or rent' };
+  // An owner number is optional, but one the sheet HAS and we cannot read was
+  // dropped without a word: the listing came in with no owner to ring and
+  // nobody knew why. It is not a reason to refuse the listing (a "Contact:
+  // Ramesh 98..." column would refuse the whole sheet): the listing comes in,
+  // the cell is kept exactly as written (as keepPhone does), and the row says so.
+  const ownerCell = mapping.ownerPhone ? String(raw[mapping.ownerPhone] ?? '').trim() : '';
+  const ownerUnread = Boolean(ownerCell && !v.ownerPhone);
   return {
+    ...(ownerUnread ? { note: `Owner ${unreadablePhone(mapping.ownerPhone).replace(/^Phone/, 'phone')}; kept as written` } : {}),
     ok: true,
     key: unitKey(project, v.wing, v.title),
     record: {
@@ -203,7 +225,7 @@ export function prepareRow(
       totalFloors: v.totalFloors ?? null, facing: v.facing || null, furnishing: v.furnishing || null,
       parking: v.parking || null, possession: v.possession || null, age: v.age ?? null,
       builder: v.builder || null, rera: v.rera || null,
-      owner: v.owner || null, ownerPhone: v.ownerPhone || null, ownerEmail: v.ownerEmail || null,
+      owner: v.owner || null, ownerPhone: v.ownerPhone || (ownerUnread ? ownerCell : null), ownerEmail: v.ownerEmail || null,
       notes: v.notes || null,
     },
   };
@@ -225,12 +247,13 @@ async function existingKeys(kind: ImportKind): Promise<Set<string>> {
       // keyed that way too, or re-importing the same list would add every one
       // of them a second time. It does not fold a second flat into the first:
       // a row that HAS a unit is matched on the unit.
-      const ph = normPhone(r.phone);
-      if (ph) out.add(ph);
+      // Exact E.164 (docs/specs/phone.md): a stored number that cannot be
+      // read never equals a row's key, so it matches nothing.
+      if (r.phone) out.add(r.phone);
     }
   } else if (kind === 'clients') {
     const rows = await sql`SELECT phone FROM crm_leads WHERE tenant_id = ${t} AND phone IS NOT NULL`;
-    for (const r of rows as any[]) { const k = normPhone(r.phone); if (k) out.add(k); }
+    for (const r of rows as any[]) out.add(r.phone);
   } else {
     const rows = await sql`SELECT project, wing, title FROM crm_properties WHERE tenant_id = ${t}`;
     for (const r of rows as any[]) { const k = unitKey(r.project, r.wing, r.title); if (k) out.add(k); }
@@ -304,6 +327,7 @@ function jobShape(r: any): any {
     status: r.status, total: r.total, added: r.added, skipped: r.skipped, failed: r.failed,
     error: r.error || null, createdBy: r.created_by, createdAt: r.created_at,
     startedAt: r.started_at, finishedAt: r.finished_at, revertedAt: r.reverted_at,
+    revertedKept: r.reverted_kept ?? 0,
   };
 }
 
@@ -312,7 +336,7 @@ function jobShape(r: any): any {
  * review table can show. The same prepareRow the run uses, so the number the
  * person approves is the number that happens.
  */
-export async function previewImport(id: string, mapping: Record<string, string>, options: { project?: string | null } = {}): Promise<any> {
+export async function previewImport(id: string, mapping: Record<string, string>, options: { project?: string | null; country?: string | null } = {}): Promise<any> {
   const t = tid();
   const [job] = await sql`SELECT * FROM crm_import_jobs WHERE id = ${id} AND tenant_id = ${t} LIMIT 1`;
   if (!job) return null;
@@ -330,14 +354,16 @@ export async function previewImport(id: string, mapping: Record<string, string>,
   /** How many rows of each group the review table gets to show. */
   const PER_STATUS = 50;
   const perStatus = new Map<string, number>();
+  const locale = await localeOf(t);
   for (const r of rows as any[]) {
-    const p = prepareRow(kind, r.raw, mapping, options);
+    const p = prepareRow(kind, r.raw, mapping, { ...options, locale });
     let status: string, reason: string | null = null;
     if (!p.ok) { status = 'unusable'; reason = p.reason || 'Unusable row'; counts.unusable++; reasons[reason] = (reasons[reason] || 0) + 1; }
     else if (p.key && seen.has(p.key)) { status = 'repeatedInFile'; reason = 'Same unit earlier in this file'; counts.repeatedInFile++; }
     else if (p.key && onFile.has(p.key)) { status = 'alreadyOnFile'; reason = 'Already on file'; counts.alreadyOnFile++; }
     else {
       status = 'new'; counts.new++; if (p.key) seen.add(p.key);
+      if (p.note) { reason = p.note; reasons[p.note] = (reasons[p.note] || 0) + 1; }
       if (p.record?.stage) statuses[p.record.stage] = (statuses[p.record.stage] || 0) + 1;
       else if (p.record?.sheetStatus) statusUnknown++;
     }
@@ -370,12 +396,17 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
   const [job] = await sql`SELECT * FROM crm_import_jobs WHERE id = ${id} AND tenant_id = ${t} LIMIT 1`;
   if (!job) throw new Error('No such import');
   if (job.status === 'running') return jobShape(job);
-  if (job.status === 'done' || job.status === 'reverted') throw new Error('This import has already run');
+  if (job.status === 'done' || job.status === 'reverted' || job.reverted_at) throw new Error('This import has already run');
   const kind = job.kind as ImportKind;
   const mapping = job.mapping || {};
   const options = job.options || {};
 
-  await sql`UPDATE crm_import_jobs SET status = 'running', started_at = NOW(), error = NULL WHERE id = ${id} AND tenant_id = ${t}`;
+  // CLAIMED, not set: two starts at once run it once, and a job that has been
+  // undone never starts again (revertImport claims the same row).
+  const [claimed] = await sql`UPDATE crm_import_jobs SET status = 'running', started_at = NOW(), error = NULL
+     WHERE id = ${id} AND tenant_id = ${t} AND status NOT IN ('running', 'done', 'reverted') AND reverted_at IS NULL
+     RETURNING id`;
+  if (!claimed) throw new Error('This import has already run');
 
   const onFile = await existingKeys(kind);
   const seen = new Set<string>();
@@ -388,18 +419,19 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
       SELECT row_no, raw FROM crm_import_rows
        WHERE job_id = ${id} AND status IN ('pending', 'failed') ORDER BY row_no`;
 
+    const locale = await localeOf(t);
     for (let i = 0; i < pending.length; i += BATCH) {
       const chunk = pending.slice(i, i + BATCH) as any[];
-      const toWrite: { rowNo: number; record: any }[] = [];
+      const toWrite: { rowNo: number; record: any; note?: string }[] = [];
       const outcomes: { rowNo: number; status: RowOutcome; reason: string | null; recordId: string | null }[] = [];
 
       for (const r of chunk) {
-        const p = prepareRow(kind, r.raw, mapping, options);
+        const p = prepareRow(kind, r.raw, mapping, { ...options, locale });
         if (!p.ok) { outcomes.push({ rowNo: r.row_no, status: 'skipped', reason: p.reason || 'Unusable row', recordId: null }); skipped++; continue; }
         if (p.key && seen.has(p.key)) { outcomes.push({ rowNo: r.row_no, status: 'skipped', reason: 'Same unit earlier in this file', recordId: null }); skipped++; continue; }
         if (p.key && onFile.has(p.key)) { outcomes.push({ rowNo: r.row_no, status: 'skipped', reason: 'Already on file', recordId: null }); skipped++; continue; }
         if (p.key) seen.add(p.key);
-        toWrite.push({ rowNo: r.row_no, record: { ...p.record, importBatchId: id } });
+        toWrite.push({ rowNo: r.row_no, record: { ...p.record, importBatchId: id }, note: p.note });
       }
 
       if (toWrite.length) {
@@ -407,7 +439,9 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
           const saved = await writeRecords(kind, toWrite.map(w => w.record), ctx);
           toWrite.forEach((w, n) => {
             const rec = saved[n];
-            if (rec?.id) { outcomes.push({ rowNo: w.rowNo, status: 'added', reason: null, recordId: rec.id }); added++; }
+            // Added, with the reason when something on the row was not taken
+            // as given (a named holder who cannot take work: createOwnersBatch).
+            if (rec?.id) { outcomes.push({ rowNo: w.rowNo, status: 'added', reason: [rec.unassignedReason, w.note].filter(Boolean).join('; ') || null, recordId: rec.id }); added++; }
             else { outcomes.push({ rowNo: w.rowNo, status: 'failed', reason: 'The server did not save this row', recordId: null }); failed++; }
           });
         } catch (e: any) {
@@ -423,10 +457,23 @@ export async function runImport(id: string, ctx: ActorCtx = {}): Promise<any> {
       await sql`UPDATE crm_import_jobs SET added = ${added}, skipped = ${skipped}, failed = ${failed} WHERE id = ${id} AND tenant_id = ${t}`;
     }
 
-    await sql`UPDATE crm_import_jobs SET status = 'done', finished_at = NOW(), added = ${added}, skipped = ${skipped}, failed = ${failed} WHERE id = ${id} AND tenant_id = ${t}`;
+    await sql`UPDATE crm_import_jobs SET status = 'done', finished_at = NOW(), added = ${added}, skipped = ${skipped}, failed = ${failed} WHERE id = ${id} AND tenant_id = ${t} AND status = 'running'`;
   } catch (e: any) {
-    await sql`UPDATE crm_import_jobs SET status = 'failed', finished_at = NOW(), error = ${String(e?.message || e).slice(0, 300)} WHERE id = ${id} AND tenant_id = ${t}`;
+    await sql`UPDATE crm_import_jobs SET status = 'failed', finished_at = NOW(), error = ${String(e?.message || e).slice(0, 300)} WHERE id = ${id} AND tenant_id = ${t} AND status = 'running'`;
     throw e;
+  }
+
+  // ONE "arrived unassigned" FOR THE FILE, not one push per row: createLead
+  // stays quiet for an import's rows, and a firm that leaves leads unassigned
+  // gets a single alert naming every lead this import left with nobody on it.
+  if (kind === 'clients') {
+    const loose = await sql`SELECT id FROM crm_leads WHERE tenant_id = ${t} AND import_batch_id = ${id} AND agent_id IS NULL`;
+    if (loose.length) {
+      await notifyOrDesk(null, {
+        tenantId: t, type: 'lead_unrouted', data: { count: loose.length, source: 'Import' }, link: '?screen=leads', push: true,
+        record: { kind: 'lead', ids: (loose as any[]).map(r => r.id) },
+      }).catch(err => console.warn('[Notify] import lead_unrouted failed:', err?.message));
+    }
   }
 
   // ONE audit entry for the job, not one per row — a 1,380-row import wrote
@@ -447,8 +494,10 @@ async function writeRecords(kind: ImportKind, records: any[], ctx: ActorCtx): Pr
   // import must not skip (person resolution, routing, the property vocabulary),
   // and these files are tens of rows, not thousands. Written in parallel within
   // the batch, so a chunk is one wait rather than 500.
-  const write = kind === 'clients' ? createLead : createProperty;
-  const out = await Promise.allSettled(records.map(r => write(r, ctx)));
+  // A sheet's owner number is received, not typed: kept as written when it
+  // cannot be read (prepareRow notes the row), never a 422 for the listing.
+  const write = kind === 'clients' ? (r: any) => createLead(r, ctx) : (r: any) => createProperty(r, ctx, { phoneAsReceived: true });
+  const out = await Promise.allSettled(records.map(r => write(r)));
   return out.map(r => (r.status === 'fulfilled' ? r.value : null));
 }
 
@@ -483,26 +532,149 @@ export async function importRows(id: string, status?: string): Promise<any[]> {
   return (rows as any[]).map(r => ({ rowNo: r.row_no, raw: r.raw, status: r.status, reason: r.reason, recordId: r.record_id }));
 }
 
+export class ImportUndoRefused extends Error {
+  status = 409;
+  constructor(message: string) { super(message); }
+}
+
 /**
- * Undo — delete what this job created, and say how many.
+ * UNDO AN IMPORT: take back what this job added that nobody has used since.
  *
- * Scoped by tenant and by batch id, and it deletes only rows this job wrote
- * (record ids it recorded), so an owner edited since is still that owner's row
- * and nothing outside the batch can be caught by it.
+ * WHERE THE LINK IS. Leads and owners carry the job in import_batch_id; a
+ * property carries it in config.importBatchId (every non-column property field
+ * lives there) -- the undo looked for a property column that does not exist
+ * and threw. An owner made from an imported listing carries it too
+ * (linkListingOwner). Leads and listings are also limited to the record ids
+ * this job recorded writing. A row with no link is never reached.
+ *
+ * USED SINCE IS KEPT, and counted. Deleting such a record left shortlists,
+ * share links and agreements pointing at nothing, and threw away someone's
+ * work. Used: referenced by a shortlist, a share link, an agreement, a unit,
+ * an activity, a conversion or a buyer's ask (crm_buyer_asks: the lead, the
+ * home asked about, or a home New homes like these has matched or named); or worked since the import finished, by the
+ * alert lifecycle's own test (contactedAfter for a lead, personWorkedAfter for
+ * an owner or a listing: a person's event, not System or Import); or, for a
+ * lead or an owner, edited since (updated_at: an edit writes no event).
+ * Merged into since (a merge moves an older record's history onto this one
+ * with its old dates and writes only a System event) is used too: deleting it
+ * would erase the older record's history. A listing's own "Added" event is not
+ * work.
+ *
+ * A job that stopped part-way (failed, or a run the server lost: see
+ * failAbandonedImports) can be undone like a finished one; it wrote rows.
+ *
+ * ONE TRANSACTION. The job is claimed first (reverted_at set where it was not,
+ * on a finished job), so a running import cannot be undone and a second undo
+ * at the same moment is refused rather than run twice; the used test is part
+ * of each DELETE, so nothing can become used between the look and the delete;
+ * any failure leaves every row where it was.
  */
-export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ deleted: number }> {
+export async function revertImport(id: string, ctx: ActorCtx = {}): Promise<{ deleted: number; kept: number }> {
   const t = tid();
-  const [job] = await sql`SELECT * FROM crm_import_jobs WHERE id = ${id} AND tenant_id = ${t} LIMIT 1`;
-  if (!job) throw new Error('No such import');
-  if (job.reverted_at) return { deleted: 0 };
-  const table = job.kind === 'owners' ? sql`crm_owners` : job.kind === 'clients' ? sql`crm_leads` : sql`crm_properties`;
-  const gone = await sql`DELETE FROM ${table} WHERE tenant_id = ${t} AND import_batch_id = ${id} RETURNING id`;
-  await sql`UPDATE crm_import_jobs SET status = 'reverted', reverted_at = NOW(), reverted_by = ${ctx.actorId ?? null} WHERE id = ${id} AND tenant_id = ${t}`;
+  const out = await sql.begin(async (tx: any) => {
+    const [job] = await tx`
+      UPDATE crm_import_jobs SET status = 'reverted', reverted_at = NOW(), reverted_by = ${ctx.actorId ?? null}
+       WHERE id = ${id} AND tenant_id = ${t} AND reverted_at IS NULL AND status IN ('done', 'failed')
+       RETURNING *`;
+    if (!job) {
+      const [now] = await tx`SELECT status, reverted_at FROM crm_import_jobs WHERE id = ${id} AND tenant_id = ${t}`;
+      if (!now) throw new Error('No such import');
+      throw new ImportUndoRefused(now.reverted_at ? 'This import has already been undone'
+        : now.status === 'running' ? 'This import is still running' : 'This import has not run');
+    }
+    const since = job.finished_at || job.started_at;
+    const recorded = (await tx`SELECT record_id FROM crm_import_rows
+      WHERE job_id = ${id} AND status = 'added' AND record_id IS NOT NULL`).map((r: any) => r.record_id);
+    // = ANY of one array, not IN of one parameter per id: a 70k-row sheet must
+    // not exceed the protocol's parameter limit.
+    const mine = tx`AND r.id = ANY(${recorded}::text[])`;
+    const merged = tx`EXISTS (SELECT 1 FROM crm_timeline_events e
+      WHERE e.tenant_id = r.tenant_id AND e.record_id = r.id AND e.type = 'merge')`;
+
+    const propsBefore = (await tx`SELECT count(*)::int AS n FROM crm_properties r
+      WHERE r.tenant_id = ${t} AND r.config->>'importBatchId' = ${id} ${mine}`)[0].n;
+    const props = await tx`DELETE FROM crm_properties r
+      WHERE r.tenant_id = ${t} AND r.config->>'importBatchId' = ${id} ${mine}
+        AND NOT (${personWorkedAfter('r', since, ['creation'])}
+          OR ${merged}
+          OR EXISTS (SELECT 1 FROM lead_shortlist x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_share_links x WHERE x.tenant_id = r.tenant_id AND r.id = ANY(x.property_ids))
+          OR EXISTS (SELECT 1 FROM crm_agreements x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_units x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
+          OR EXISTS (SELECT 1 FROM activities x WHERE x.tenant_id = r.tenant_id AND x.property_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_owners x WHERE x.tenant_id = r.tenant_id AND x.converted_property_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_buyer_asks x WHERE x.tenant_id = r.tenant_id
+                       AND (x.property_id = r.id OR r.id = ANY(x.seen_ids) OR r.id = ANY(x.alerted_ids))))
+      RETURNING r.id`;
+
+    const leadsBefore = (await tx`SELECT count(*)::int AS n FROM crm_leads r
+      WHERE r.tenant_id = ${t} AND r.import_batch_id = ${id} ${mine}`)[0].n;
+    const leads = await tx`DELETE FROM crm_leads r
+      WHERE r.tenant_id = ${t} AND r.import_batch_id = ${id} ${mine}
+        AND NOT (${contactedAfter('r', since)}
+          OR ${merged}
+          OR r.updated_at > ${since}
+          OR EXISTS (SELECT 1 FROM lead_shortlist x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_share_links x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_agreements x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_lead_enquiries x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
+          OR EXISTS (SELECT 1 FROM activities x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_buyer_asks x WHERE x.tenant_id = r.tenant_id AND x.lead_id = r.id))
+      RETURNING r.id`;
+
+    // Owners: the job's own, from an owners sheet or made from its listings
+    // (a listing job records the listing's id, not its owner's). After the
+    // listings, so an owner whose listing just went is no longer held by it.
+    const ownersBefore = (await tx`SELECT count(*)::int AS n FROM crm_owners r
+      WHERE r.tenant_id = ${t} AND r.import_batch_id = ${id}`)[0].n;
+    const owners = await tx`DELETE FROM crm_owners r
+      WHERE r.tenant_id = ${t} AND r.import_batch_id = ${id}
+        AND NOT (${personWorkedAfter('r', since)}
+          OR ${merged}
+          OR r.updated_at > ${since}
+          OR r.converted_property_id IS NOT NULL
+          OR EXISTS (SELECT 1 FROM crm_properties x WHERE x.tenant_id = r.tenant_id AND x.owner_contact_id = r.id)
+          OR EXISTS (SELECT 1 FROM crm_agreements x WHERE x.tenant_id = r.tenant_id AND x.owner_id = r.id))
+      RETURNING r.id`;
+
+    const ids = { properties: props.map((r: any) => r.id), leads: leads.map((r: any) => r.id), owners: owners.map((r: any) => r.id) };
+    const gone = [...ids.properties, ...ids.leads, ...ids.owners];
+    if (gone.length) {
+      // Their own history goes with them: an undone import never happened.
+      await tx`DELETE FROM crm_timeline_events WHERE tenant_id = ${t} AND record_id = ANY(${gone}::text[])`;
+    }
+    if (ids.leads.length) {
+      // As any lead delete: its devices are let go (shareLeadsDeleted). No link
+      // or shortlist can name it -- those made it used.
+      await tx`DELETE FROM crm_share_devices WHERE tenant_id = ${t} AND lead_id = ANY(${ids.leads}::text[])`;
+    }
+    const kept = propsBefore + leadsBefore + ownersBefore - gone.length;
+    await tx`UPDATE crm_import_jobs SET reverted_kept = ${kept} WHERE id = ${id} AND tenant_id = ${t}`;
+    return { job, ids, deleted: gone.length, kept };
+  });
   audit({
     tenant_id: t, actor_type: ctx.actorType || 'user', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'import.revert', target_type: 'import', target_id: id,
-    summary: `Undid the import of "${job.file_name || 'a spreadsheet'}": ${gone.length} ${job.kind} removed`,
-    metadata: { kind: job.kind, deleted: gone.length }, ip: ctx.ip, user_agent: ctx.userAgent,
+    summary: `Undid the import of "${out.job.file_name || 'a spreadsheet'}": ${out.deleted} removed${out.kept ? `, ${out.kept} kept (used since)` : ''}`,
+    // The ids, as bulkDeleteLeads keeps them: after an undo there is nothing
+    // left to inspect, so the ledger has to say what went.
+    metadata: { kind: out.job.kind, deleted: out.deleted, kept: out.kept, ids: out.ids },
+    ip: ctx.ip, user_agent: ctx.userAgent,
   });
-  return { deleted: gone.length };
+  return { deleted: out.deleted, kept: out.kept };
+}
+
+/**
+ * A run the server lost. runImport works in the process that started it; a
+ * restart or a deploy mid-run left the job 'running' for ever, which nothing
+ * swept, so it could neither finish nor be undone. At boot, a run started over
+ * an hour ago (another process on a shared database may own a younger one) is
+ * marked stopped, which the page shows and can undo.
+ */
+export async function failAbandonedImports(): Promise<number> {
+  const rows = await sql`UPDATE crm_import_jobs
+     SET status = 'failed', finished_at = NOW(), error = 'The server restarted during this import'
+   WHERE status = 'running' AND started_at < NOW() - INTERVAL '1 hour'
+   RETURNING id`;
+  return rows.length;
 }

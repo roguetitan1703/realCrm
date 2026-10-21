@@ -337,8 +337,20 @@ function getHeaders(customHeaders = {}) {
 // person just did, and then un-reverts a few seconds later. Counting writes in
 // the one place every call passes through means the refresh loop can simply
 // wait, rather than every mutation having to remember to announce itself.
-let inFlightWrites = 0;
-export function hasPendingWrites() { return inFlightWrites > 0; }
+//
+// PER RECORD, when the question is about one record. A record screen asked
+// "is ANY write in the air?", so the first lead opened after launch threw its
+// full data away because the push-permission report happened to be in flight,
+// and sat on a list row with a spinner until something else moved the desk. A
+// write to a record names it, in its URL or its body; only those hold it back.
+// `background` writes (the device's push state) change nothing on the desk and
+// are not counted at all.
+const inFlightWrites = new Set(); // { endpoint, body }
+export function hasPendingWrites(recordId) {
+  if (!recordId) return inFlightWrites.size > 0;
+  for (const w of inFlightWrites) if (w.endpoint.includes(recordId) || w.body.includes(recordId)) return true;
+  return false;
+}
 
 // ── Read cache ──────────────────────────────────────────────────────────────
 // Screens read what they show, which is right — but it meant leaving a screen
@@ -363,7 +375,12 @@ const RETRY_MS = 600;       // one silent re-try for a read that could not reach
 const reads = new Map();    // url -> { at, data }
 const inflight = new Map(); // url -> Promise
 
-export function invalidateReads() { reads.clear(); }
+// A WRITE ENDS EVERY READ BEFORE IT: the cache, and the reads still in the
+// air. One that left before the write and landed after it was stored as the
+// answer for 30 seconds, and joined by every read asked in the meantime — a
+// link just turned off read Live on the reload that followed.
+let readGen = 0;
+export function invalidateReads() { reads.clear(); inflight.clear(); readGen++; }
 /** The cached value for a GET, or undefined. Lets a screen render on the first frame. */
 export function peekRead(endpoint) {
   const hit = reads.get(`${currentTenant()}|${endpoint}`);
@@ -375,8 +392,8 @@ async function request(endpoint, options = {}) {
   // cache. For a read whose whole point is that the answer CHANGES while you
   // watch it: an import job's progress polled every second returned the same
   // cached row every time, so a run that had finished still read "0 of 0".
-  const { queueable, fresh, ...fetchOptions } = options;
-  const isWrite = !!fetchOptions.method && fetchOptions.method.toUpperCase() !== 'GET';
+  const { queueable, fresh, background, ...fetchOptions } = options;
+  const isWrite = !background && !!fetchOptions.method && fetchOptions.method.toUpperCase() !== 'GET';
   // KEYED BY WORKSPACE AS WELL AS URL. The tenant travels in a header, not the
   // path, so `/leads?page=1` names a different set of rows per firm and the two
   // shared one cache slot. Nothing reaches it today — every workspace change is
@@ -393,7 +410,9 @@ async function request(endpoint, options = {}) {
     if (pending) return pending;
   }
 
-  if (isWrite) inFlightWrites++;
+  const pending = isWrite ? { endpoint, body: typeof fetchOptions.body === 'string' ? fetchOptions.body : '' } : null;
+  const gen = readGen;
+  if (pending) inFlightWrites.add(pending);
   const run = (async () => {
   try {
     let res;
@@ -432,7 +451,8 @@ async function request(endpoint, options = {}) {
       // open leads first", "last active owner", duplicate email, all of it —
       // silently dropped its reason and showed a bare "400 Bad Request".
       let detail = '';
-      try { const body = await res.clone().json(); detail = body?.message || body?.error || ''; } catch { /* not json */ }
+      let body = null;
+      try { body = await res.clone().json(); detail = body?.message || body?.error || ''; } catch { /* not json */ }
       // ANY call may be the one that discovers the session is over — not just
       // the boot read. See noteSessionExpired().
       // ONLY 401 ENDS A SESSION. A 403 is "you may not do this" (a manager's
@@ -441,16 +461,26 @@ async function request(endpoint, options = {}) {
       // session always answers 401 (middleware/auth.ts), so nothing relied on
       // 403 for it; a refusal now shows its reason and leaves them signed in.
       if (res.status === 401) noteSessionExpired(endpoint);
-      throw new Error(`API Error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
+      // The status and the body travel with the error, so a caller that has a
+      // plain answer for one refusal (422 sender_phone_missing, 409
+      // lead_held_by) can give it instead of parsing a sentence.
+      const failure = new Error(`API Error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`);
+      failure.status = res.status;
+      failure.body = body;
+      throw failure;
     }
-    const data = await res.json();
+    // A 204, or a 200 with nothing in it, is an answer with no body — not a
+    // failure. Parsing it threw "Unexpected end of JSON input" on every report
+    // of the device's push state.
+    const text = res.status === 204 ? '' : await res.text();
+    const data = text ? JSON.parse(text) : null;
     // ONE PLACE, because the answer must not depend on which call happened to
     // be made. Any response that names its environment records it — the
     // unauthenticated workspace resolve does, so it is known before sign-in,
     // and the boot read does, so it stays known after.
     if (data?.env) setServerEnv(data.env);
     if (isWrite) invalidateReads();
-    else reads.set(key, { at: Date.now(), data });
+    else if (gen === readGen) reads.set(key, { at: Date.now(), data });
     return data;
   } catch (err) {
     if (err instanceof TypeError) {
@@ -469,7 +499,7 @@ async function request(endpoint, options = {}) {
     console.warn(`[API Client Warning] Request to ${endpoint} failed:`, err.message);
     throw err;
   } finally {
-    if (isWrite) inFlightWrites--;
+    if (pending) inFlightWrites.delete(pending);
   }
   })();
 
@@ -493,6 +523,7 @@ if (typeof window !== 'undefined') {
 // leads list and its counts so the two cannot serialise the same filters
 // differently — which is one keystroke away from a count that describes a
 // different question than the rows beneath it.
+const deviceHeader = (device) => (device ? { 'X-Device-Id': device } : {})
 const qs = (params = {}) => {
   const p = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') p.set(k, String(v))
@@ -515,18 +546,6 @@ export const api = {
   setTenantId: () => {},
 
   // ── Auth ──────────────────────────────────────────────────────────────────
-  // Tenant users sign in by phone OTP; the returned JWT is stored and attached
-  // to every subsequent request by getHeaders().
-  // identifier is a phone or an email; the backend delivers the code accordingly.
-  requestOtp: (identifier) => request('/auth/otp/request', { method: 'POST', body: JSON.stringify({ identifier }) }),
-  verifyOtp: async (identifier, code) => {
-    const res = await request('/auth/otp/verify', { method: 'POST', body: JSON.stringify({ identifier, code }) });
-    // Through setToken so OTP lands in the same per-workspace key password
-    // sign-in uses. It wrote only the global one, which nothing reads now —
-    // OTP is legacy and being retired, and it would have retired itself.
-    if (res?.token) api.setToken(res.token);
-    return res;
-  },
   me: () => request('/auth/me'),
   // Same resolution the request headers use, so "are we signed in?" and "what
   // do we send?" can never answer differently. App.jsx boots the desk on this,
@@ -640,9 +659,6 @@ export const api = {
   getDeskSummary: () => request('/workspace/desk-summary'),
   // One request for a whole file's worth of duplicate checks.
   checkDuplicates: (body) => request('/workspace/dedupe-check', { method: 'POST', body: JSON.stringify(body) }),
-  // Every record created by one import, deleted where it lives. Kept for the
-  // batches written by the old browser-side import, whose ids are not jobs.
-  revertImportBatch: (batchId) => request(`/workspace/import-batches/${encodeURIComponent(batchId)}`, { method: 'DELETE' }),
 
   // ---- Imports, as a job the server runs (services/imports.ts) -------------
   // The file is uploaded once and the rows are written HERE, not by the browser
@@ -650,7 +666,7 @@ export const api = {
   listImports: () => request('/imports', { fresh: true }),
   createImport: (body) => request('/imports', { method: 'POST', body: JSON.stringify(body) }),
   appendImportRows: (id, rows) => request(`/imports/${encodeURIComponent(id)}/rows`, { method: 'POST', body: JSON.stringify({ rows }) }),
-  previewImport: (id, mapping, project) => request(`/imports/${encodeURIComponent(id)}/preview`, { method: 'POST', body: JSON.stringify({ mapping, project }) }),
+  previewImport: (id, mapping, project, country) => request(`/imports/${encodeURIComponent(id)}/preview`, { method: 'POST', body: JSON.stringify({ mapping, project, country }) }),
   runImport: (id) => request(`/imports/${encodeURIComponent(id)}/run`, { method: 'POST', body: JSON.stringify({}) }),
   // Polled while the job runs, so it must never come from the read cache.
   getImport: (id) => request(`/imports/${encodeURIComponent(id)}`, { fresh: true }),
@@ -778,6 +794,35 @@ export const api = {
   verifyProperty: (id, on) => request(`/properties/${encodeURIComponent(id)}/verify`, { method: 'POST', body: JSON.stringify({ on }) }),
   setPropertyGallery: (id, action) => request(`/properties/${encodeURIComponent(id)}/gallery`, { method: 'POST', body: JSON.stringify({ action }) }),
   // No sign-in: what a client sees on a photo link.
+  // ── Sharing (docs/specs/listing-pages.md §A.5) ──────────────────────────
+  // A link is a set of homes, optionally bound to a lead, with an expiry fixed
+  // when it is made. Sending again makes a new link; there is nothing to edit.
+  createShareLink: (body) => request('/share-links', { method: 'POST', body: JSON.stringify(body) }),
+  myShareLinks: ({ page = 1, limit = 10, recipient } = {}) => request(`/share-links/mine${qs({ page, limit, recipient })}`, { fresh: true }),
+  turnOffShareLink: (id) => request(`/share-links/${encodeURIComponent(id)}/off`, { method: 'POST', body: '{}' }),
+  attachShareLink: (id, leadId) => request(`/share-links/${encodeURIComponent(id)}/attach`, { method: 'POST', body: JSON.stringify({ leadId }) }),
+  creditShareLink: (id, leadId) => request(`/share-links/${encodeURIComponent(id)}/came-from`, { method: 'POST', body: JSON.stringify({ leadId }) }),
+  freshShareLink: (tapCode) => request(`/share-taps/${encodeURIComponent(tapCode)}/fresh`, { method: 'POST' }),
+  leadShares: (leadId) => request(`/leads/${encodeURIComponent(leadId)}/shares`, { fresh: true }),
+  leadFromTap: (code, body) => request(`/share-taps/${encodeURIComponent(code)}/lead`, { method: 'POST', body: JSON.stringify(body) }),
+  // Your own mobile number — Send needs it, because a buyer's tap opens
+  // WhatsApp to the person who sent them the link.
+  updateMyPhone: (phone) => request('/auth/me', { method: 'PATCH', body: JSON.stringify({ phone }) }),
+  setCatalogue: (ids, on) => request('/properties/catalogue', { method: 'POST', body: JSON.stringify({ ids, on }) }),
+  // The buyer's pages. No sign-in; a signed-in member of the firm still sends
+  // their session (request() does that on any path under /<tenant>), which is
+  // how the server answers `staff` and leaves them out of the counts.
+  publicShare: (tenant, code, device, flat) => request(`/public/s/${encodeURIComponent(tenant)}/${encodeURIComponent(code)}${qs({ flat })}`, { fresh: true, headers: deviceHeader(device) }),
+  publicInterested: (tenant, code, propertyId, device) => request(`/public/s/${encodeURIComponent(tenant)}/${encodeURIComponent(code)}/interested`, { method: 'POST', headers: deviceHeader(device), body: JSON.stringify({ propertyId }) }),
+  publicTalk: (tenant, code, device) => request(`/public/s/${encodeURIComponent(tenant)}/${encodeURIComponent(code)}/talk`, { method: 'POST', headers: deviceHeader(device), body: '{}' }),
+  publicCatalogue: (tenant, filters, device) => request(`/public/catalogue/${encodeURIComponent(tenant)}${qs(filters)}`, { fresh: true, headers: deviceHeader(device) }),
+  publicCatalogueHome: (tenant, slug, device) => request(`/public/catalogue/${encodeURIComponent(tenant)}/${encodeURIComponent(slug)}`, { fresh: true, headers: deviceHeader(device) }),
+  // The buyer forms (listing-pages.md §A.6): the visit times, and one ask.
+  publicAskSlots: (tenant) => request(`/public/forms/${encodeURIComponent(tenant)}/slots`, { fresh: true }),
+  publicAsk: (tenant, body, device) => request(`/public/forms/${encodeURIComponent(tenant)}/ask`, { method: 'POST', headers: deviceHeader(device), body: JSON.stringify(body) }),
+  buyerAsk: (id) => request(`/buyer-asks/${encodeURIComponent(id)}`, { fresh: true }),
+  confirmBuyerVisit: (id, { replace = false } = {}) => request(`/buyer-asks/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: JSON.stringify({ replace }) }),
+  publicEnquiry: (tenant, body, device) => request(`/public/catalogue/${encodeURIComponent(tenant)}/enquiry`, { method: 'POST', headers: deviceHeader(device), body: JSON.stringify(body) }),
   publicGallery: (slug, ref) => request(`/public/gallery/${encodeURIComponent(slug)}/${encodeURIComponent(ref)}`, { fresh: true }),
   updateProperty: (id, patch) => request(`/modules/properties/records/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
@@ -835,15 +880,22 @@ export const api = {
   // PWA home-screen icons (generated client-side, stored on the tenant)
 
   // Notifications (per-user alert feed)
-  getNotifications: () => request('/notifications'),
-  getNotifUnread: () => request('/notifications?count=1'),
+  // Fresh, like the count: the bell's list is open work, and it closes as work
+  // is done anywhere — a 30-second cached copy showed alerts already settled.
+  getNotifications: () => request('/notifications', { fresh: true }),
+  // Fresh: a count read after a mark-read joined a poll already in flight from
+  // before the write, and put the old number back on the bell.
+  getNotifUnread: () => request('/notifications?count=1', { fresh: true }),
   markNotificationRead: (id) => request(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }),
   markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
 
   // Web Push (phone alerts even when the app is closed)
   getVapid: () => request('/notifications/vapid'),
-  subscribePush: (subscription) => request('/notifications/subscribe', { method: 'POST', body: JSON.stringify({ subscription }) }),
-  unsubscribePush: (endpoint) => request('/notifications/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
+  // Background: the device's push wiring, not desk data (see hasPendingWrites).
+  subscribePush: (subscription) => request('/notifications/subscribe', { method: 'POST', body: JSON.stringify({ subscription }), background: true }),
+  unsubscribePush: (endpoint) => request('/notifications/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }), background: true }),
+  reportPushState: (state) => request('/notifications/device-state', { method: 'POST', body: JSON.stringify({ state }), background: true }),
+  getAlertReach: () => request('/notifications/reach'),
 
   // Composable Actions
   // callBridge() is gone with the route it called. It reported success for a
@@ -861,6 +913,8 @@ export const api = {
   // sendWhatsApp() is gone with the fabricated WABA route it called.
   // B4 — a structured activity on a LEAD (site visit with proof, meeting, …).
   // `propertyId` is a reference to the unit it concerned, never ownership.
+  // A booked meeting, demo or other follow-up, finished with how it went.
+  completeFollowUp: (leadId, outcome, remark) => request(`/records/${leadId}/actions/follow-up/done`, { method: 'POST', body: JSON.stringify({ outcome, remark }) }),
   logActivity: (leadId, payload) => request(`/records/${leadId}/actions/activity`, { method: 'POST', queueable: true, body: JSON.stringify(payload) }),
   // B4 media — asks the server to mint a presigned PUT. The bytes then go
   // browser→R2 directly (see uploadMedia in lib/media.js), never through here.

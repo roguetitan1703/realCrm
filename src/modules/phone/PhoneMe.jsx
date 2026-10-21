@@ -3,6 +3,7 @@ import ThisDevice from '../../components/ThisDevice.jsx'
 import Icon from '../../components/Icon.jsx'
 import MessageTemplates from '../../components/MessageTemplates.jsx'
 import { roleLabel } from '../../lib/permissions.js'
+import { MePhone, MyLinks } from '../../components/MyLinks.jsx'
 
 export default function PhoneMe({ store, me, topBar, go }) {
   const { state } = store
@@ -20,7 +21,6 @@ export default function PhoneMe({ store, me, topBar, go }) {
               <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--ink)' }}>{me?.name || state.settings?.firmName || 'User Profile'}</div>
               <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>
                 {roleLabel(state.role)}
-                {me?.phone ? ` · ${me.phone}` : ''}
               </div>
             </div>
           </div>
@@ -33,6 +33,11 @@ export default function PhoneMe({ store, me, topBar, go }) {
             <Icon name="x" size={14} /> Sign out
           </button>
         </div>
+
+        {/* Send needs the sender's own number; the links they have sent sit
+            here and nowhere else (listing-pages.md §A). */}
+        <MePhone store={store} />
+        <MyLinks store={store} go={go} />
 
         {/* What is booked, by day — the desk's Calendar, opened from here so the
             bottom bar stays five tabs. */}

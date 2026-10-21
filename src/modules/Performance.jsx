@@ -20,8 +20,10 @@ export default function Performance({ store, go, sel, topBar }) {
   const hasCalling = (ownerSummary?.summary?.queue?.total || 0) > 0
   const settled = !!ownerSummary || !loading
   const person = sel?.person
-  // The day lives in the URL, so an agent opened from a past day opens on it.
+  // The days live in the URL (`day` the last, `from` the first), so an agent
+  // opened from last week opens on last week.
   const day = sel?.day || null
+  const from = sel?.from || null
   const toLeads = (leadFilters) => go('leads', { leadFilters, leadOpen: false, leadId: undefined })
 
   if (person) {
@@ -30,11 +32,11 @@ export default function Performance({ store, go, sel, topBar }) {
     const canHand = who && ['agent', 'manager'].includes(who.role || 'agent')
     return (
       <>
-        {topBar({ eyebrow: 'Performance', title: name, onBack: () => go('performance', { person: undefined, day: day || undefined }) })}
+        {topBar({ eyebrow: 'Performance', title: name, onBack: () => go('performance', { person: undefined, day: day || undefined, from: from || undefined }) })}
         <div className="app-body pagewrap perf">
           {!settled ? <div className="ad-wait tall" aria-busy="true" /> : (
             <AgentWork store={store} person={person} title={name} heading={false} mode="drill" hasCalling={hasCalling}
-              date={day} onDate={(d) => go('performance', { person, day: d || undefined })}
+              date={day} from={from} onRange={(r) => go('performance', { person, day: r.day || undefined, from: r.from || undefined })}
               book={desk?.perAgent?.[person]} ownerBook={desk?.perAgentCalls?.[person]}
               onBook={(seg) => toLeads(seg ? { agent: [person], seg } : { agent: [person] })}
               actions={<>
@@ -52,8 +54,8 @@ export default function Performance({ store, go, sel, topBar }) {
       {topBar({ title: 'Performance' })}
       <div className="app-body pagewrap perf">
         {!settled ? <div className="ad-wait tall" aria-busy="true" /> : (
-          <TeamBoard store={store} hasCalling={hasCalling} onOpenPerson={(c) => go('performance', { person: c.id, day: day || undefined })}
-            date={day} onDate={(d) => go('performance', { day: d || undefined })}
+          <TeamBoard store={store} hasCalling={hasCalling} onOpenPerson={(c) => go('performance', { person: c.id, day: day || undefined, from: from || undefined })}
+            date={day} from={from} onRange={(r) => go('performance', { day: r.day || undefined, from: r.from || undefined })}
             books={desk?.perAgent || {}} onBook={(id, seg) => toLeads({ agent: [id], seg })} />
         )}
       </div>

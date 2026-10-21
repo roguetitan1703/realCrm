@@ -3,6 +3,7 @@ import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { canAssignLead } from '../lib/permissions.js'
 import { Button } from './primitives.jsx'
+import { firmLocale } from '../lib/locale.js'
 
 // ============================================================================
 // RECORDS WITH NOBODY ON THEM — said on the screen they are on
@@ -68,7 +69,7 @@ export default function UnassignedBar({ store, side, go, onShow }) {
 
   return (
     <div className="unas-bar">
-      <span className="unas-t"><b>{n.toLocaleString('en-IN')}</b> {word} {n === 1 ? 'is' : 'are'} unassigned</span>
+      <span className="unas-t"><b>{n.toLocaleString(firmLocale().numberLocale)}</b> {word} {n === 1 ? 'is' : 'are'} unassigned</span>
       <span className="unas-acts">
         {onShow && <Button variant="ghost" size="sm" onClick={onShow}>Show</Button>}
         <Button variant="primary" size="sm" disabled={busy || !team.length} onClick={ask}>{busy ? 'Assigning…' : 'Assign'}</Button>

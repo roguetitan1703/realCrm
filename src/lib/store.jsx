@@ -4,6 +4,7 @@
 // mutated via Express backend endpoints. Transient UI is managed in React state.
 // ============================================================================
 import { setStageLabels } from '../data/pipelineRoles.js'
+import { setFirmLocale } from './locale.js'
 import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react'
 import { DEFAULT_SETTINGS, DEFAULT_BRAND, PROTECTED_STAGES } from '../data/theme.js'
 import { initials } from './format.js'
@@ -17,6 +18,7 @@ import { messageLang } from '../data/vocabLocale.js'
 import { disablePush } from './push.js'
 import { readSupport, endSupport } from './support.js'
 import { isOpen } from '../data/leadStatus.js'
+import { canWork, isNotWorkable, notWorkableText } from './workforce.js'
 
 // Pending shortlist writes, per lead (see changeShortlist).
 const shortlistQueue = new Map()
@@ -30,6 +32,14 @@ const clone = (x) => JSON.parse(JSON.stringify(x))
 // list and opening rows from it never refetches, small enough that it can never
 // grow back into the whole book.
 const CACHE_LIMIT = 500
+
+// What only the record request reads, per kind. A list row never carries these,
+// so it never writes them into the cache (CACHE_RECORDS).
+const DETAIL_ONLY = {
+  lead: ['shortlist', 'feedback', 'timeline', 'shortlistProps'],
+  property: ['timeline'],
+  owner: ['timeline'],
+}
 
 // ── Cache helpers ───────────────────────────────────────────────────────────
 // The record cache replaced two arrays holding every lead and every property in
@@ -301,6 +311,7 @@ function freshState() {
     waState: null,
     searchOpen: false,
     notifOpen: false,
+    rangeOpen: false,
   }
 }
 
@@ -392,14 +403,22 @@ function reducer(state, action) {
       // to this cache at all — and why opening any row costs a fetch the cache
       // exists to avoid. Marking them lets both be true: a partial is enough to
       // paint the record instantly, and useRecord still goes for the rest.
+      //
+      // A list row also never REPLACES those parts. An API from before list rows
+      // stopped sending them still sends `timeline: []` and the legacy shortlist
+      // column, and those landed over the record's own (DETAIL_ONLY).
+      const keep = DETAIL_ONLY[kind] || []
       for (const r of action.records || []) if (r?.id) {
         const prev = next[r.id]
         delete next[r.id]
-        next[r.id] = !action.partial ? r
+        if (!action.partial) { next[r.id] = r; continue }
+        const row = { ...r }
+        for (const k of keep) delete row[k]
+        next[r.id] = (prev && !prev.__partial)
           // a list row refreshing a record we already hold in full: take its
           // updated columns, keep the parts a list response cannot carry.
-          : (prev && !prev.__partial) ? { ...prev, ...r }
-          : { ...r, __partial: true }
+          ? { ...prev, ...row }
+          : { ...prev, ...row, __partial: true }
       }
       const keys = Object.keys(next)
       if (keys.length > CACHE_LIMIT) for (const k of keys.slice(0, keys.length - CACHE_LIMIT)) delete next[k]
@@ -426,6 +445,11 @@ function reducer(state, action) {
       notifUnread: action.unread ?? 0,
     }
     case 'MARK_NOTIFS_READ': return { ...state, notifications: (state.notifications || []).map(n => ({ ...n, read: true })), notifUnread: 0 }
+    case 'MARK_NOTIF_READ': return {
+      ...state,
+      notifications: (state.notifications || []).map(n => n.id === action.id ? { ...n, read: true } : n),
+      notifUnread: Math.max(0, (state.notifUnread || 0) - 1),
+    }
 
     case 'PATCH_SETTINGS': return { ...state, settings: { ...state.settings, ...action.patch } }
     case 'SET_ROUTING': return { ...state, routing: { ...state.routing, ...action.patch } }
@@ -625,6 +649,10 @@ function reducer(state, action) {
         }
       })
 
+    // A shortlist put back as it was (an optimistic removal the server refused).
+    case 'SET_SHORTLIST':
+      return patchRecord(state, 'lead', action.leadId, l => ({ ...l, shortlist: action.shortlist }))
+
     case 'DETACH_PROP':
       return patchRecord(state, 'lead', action.leadId, l => ({
         ...l, shortlist: (l.shortlist || []).filter(id => id !== action.propId),
@@ -675,19 +703,6 @@ function reducer(state, action) {
 
     case 'DELETE_PROPERTIES':
       return dropRecords(state, 'property', Array.isArray(action.ids) ? action.ids : [action.ids])
-
-    // The import history used to be kept HERE, in this tab's memory, which is
-    // why an undo vanished on a reload. It lives on the server now (Import →
-    // History), so the only thing left to do locally is forget the records an
-    // undo removed.
-    case 'REVERT_IMPORT_BATCH': {
-      // The server deleted the rows. Drop whatever copies the cache holds so a
-      // stale one can't be opened from a screen still on the page.
-      const { batchId } = action
-      const gone = (kind) => Object.values(state.cache?.[kind] || {})
-        .filter(r => r.importBatchId === batchId).map(r => r.id)
-      return dropRecords(dropRecords(dropRecords(state, 'lead', gone('lead')), 'property', gone('property')), 'owner', gone('owner'))
-    }
 
     case 'PROP_STATUS':
       return patchRecord(state, 'property', action.propId, p => ({ ...p, status: action.status }))
@@ -781,6 +796,9 @@ export function StoreProvider({ children }) {
   // render rather than in an effect: every tag drawn in this same render must
   // already say "Booked", not flash "Deal Closed" first.
   setStageLabels(state.settings?.stageLabels)
+  // The firm's money, phone and bedroom words (lib/locale.js), the same way and
+  // for the same reason: India until the settings say otherwise.
+  setFirmLocale(state.settings?.locale)
   const timers = useRef({})
 
   // Pull the authoritative, tenant-scoped state from the backend. Called on
@@ -1122,8 +1140,11 @@ export function StoreProvider({ children }) {
   }
   const failed = useCallback((err, what) => {
     console.warn(`[${what}]`, err?.message || err)
+    // The person was suspended or lost their login after this screen loaded:
+    // say so, and re-read the team so the picker stops offering them.
+    if (isNotWorkable(err)) { toast(notWorkableText(err), 'warn'); loadServerState(true); return }
     toast(cleanErrMsg(err) || `Could not save. ${what} failed.`, 'warn')
-  }, [toast])
+  }, [toast, loadServerState])
 
   // A 200 carrying `success: false` is still a refusal. Treat it as one.
   const rejected = (res) => res && res.success === false
@@ -1146,18 +1167,45 @@ export function StoreProvider({ children }) {
   // and the cached lead only moves once the server answers — so a second
   // attach clicked before the first returned sent a list without the first,
   // and it was dropped. Each change now builds on the one queued before it.
+  //
+  // AND BUILT ON THE WHOLE LIST. The base was the cached lead's shortlist, and a
+  // lead opened from a list is cached as its list row, which carries no
+  // shortlist (or, from an older API, a stale one): attaching one home sent a
+  // list of one, and the server deleted the rest. The base is now the full
+  // record, fetched when the cache holds only a row; if it cannot be read,
+  // nothing is sent.
+  // The whole lead: the cached one when it is the full record, otherwise read.
+  const fullLead = (leadId) => {
+    const c = api.lookup('lead', leadId)
+    if (c && !c.__partial) return Promise.resolve(c)
+    return apiClient.getLead(leadId).then(r => {
+      const rec = r?.lead || r?.record || null
+      if (rec?.id) dispatch({ type: 'CACHE_RECORDS', kind: 'lead', records: [rec] })
+      return rec
+    }).catch(() => null)
+  }
   const changeShortlist = (leadId, next, send) => {
-    const q = shortlistQueue.get(leadId) || { list: null, chain: Promise.resolve() }
-    const list = next(q.list || api.lookup('lead', leadId)?.shortlist || [])
-    if (!list) return Promise.resolve(null)
-    q.list = list
+    const q = shortlistQueue.get(leadId) || { list: null, chain: Promise.resolve(), pending: 0 }
     shortlistQueue.set(leadId, q)
-    q.chain = q.chain.then(() => send(list)).then(res => {
-      // Failed, or nothing newer queued: the cached lead is the truth again.
-      if (!res || q.list === list) shortlistQueue.delete(leadId)
-      return res
+    q.pending++
+    const mine = q.chain.then(async () => {
+      try {
+        const base = q.list || (await fullLead(leadId))?.shortlist
+        if (!Array.isArray(base)) { toast('Could not read this lead’s shortlist. Try again.', 'warn'); return null }
+        const list = next(base)
+        if (!list) return null
+        q.list = list
+        const res = await send(list)
+        // Failed: the next change starts from the server's list, not this one.
+        if (!res) q.list = null
+        return res
+      } finally {
+        // Nothing newer queued: the cached lead is the truth again.
+        if (--q.pending === 0) shortlistQueue.delete(leadId)
+      }
     })
-    return q.chain
+    q.chain = mine.catch(() => null)
+    return mine
   }
 
   const write = useCallback((what, call, apply, okMsg) => call()
@@ -1173,9 +1221,11 @@ export function StoreProvider({ children }) {
   // A write that answers with the record it wrote should not be followed by a
   // read asking what it wrote. Chain this onto the call: `.then(adopt('lead'))`.
   // Returns the response untouched so `rejected()` still sees it.
-  const adopt = useCallback((kind) => (res) => {
+  // `partial` when the write answers with the row, not the record: a property
+  // update returns its columns without its history.
+  const adopt = useCallback((kind, partial) => (res) => {
     const rec = res?.data
-    if (rec?.id) dispatch({ type: 'CACHE_RECORDS', kind, records: [rec] })
+    if (rec?.id) dispatch({ type: 'CACHE_RECORDS', kind, records: [rec], partial })
     return res
   }, [])
 
@@ -1215,7 +1265,10 @@ export function StoreProvider({ children }) {
     // Who may be given work: on duty AND still employed. It excluded only the
     // off-duty ones, so a suspended person stayed pickable everywhere — and
     // the server took it, because a hidden option was the only guard.
-    activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id) && !a.suspended),
+    // canTakeWork is the server's own answer (services/workforce.ts): a login,
+    // not deleted, status active. `!a.suspended` let an invited or account-less
+    // person through, and the server now refuses them with 422 not_workable.
+    activeAgents: () => state.agents.filter(a => !state.inactiveAgentIds.includes(a.id) && canWork(a)),
     
     // ── Records ───────────────────────────────────────────────────────────
     // Look a record up. The cache holds what the app has already shown — every
@@ -1259,7 +1312,7 @@ export function StoreProvider({ children }) {
         () => run)
     },
     updateProp: (propId, patch) => write('Update property',
-      () => apiClient.updateProperty(propId, patch).then(adopt('property')),
+      () => apiClient.updateProperty(propId, patch).then(adopt('property', true)),
       () => dispatch({ type: 'UPDATE_PROP', propId, patch }),
       'Property details updated'),
     // Optimistic: a stage change is a drag, and a card that hangs mid-air until
@@ -1317,13 +1370,14 @@ export function StoreProvider({ children }) {
     },
     // Remark thread (B1) — real persistence, not the old client-only note echo.
     // kind = 'lead' | 'property' | 'owner'.
+    // Resolves true once saved, so a caller can keep its text on a refusal.
     addRemark: (kind, id, text) => {
-      apiClient.addRemark(id, text)
+      return apiClient.addRemark(id, text)
         .then(res => {
-          if (res?.success && res.timeline_event) { dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event }); toast('Remark added') }
-          else toast('Could not save the remark', 'warn')
+          if (res?.success && res.timeline_event) { dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event }); toast('Remark added'); return true }
+          toast('Could not save the remark', 'warn'); return false
         })
-        .catch(err => { console.warn('[Remark API] error:', err.message); toast('Could not save the remark. Try again.', 'warn') })
+        .catch(err => { console.warn('[Remark API] error:', err.message); toast('Could not save the remark. Try again.', 'warn'); return false })
     },
     // THE SERVER'S EVENT, WHOLE. This rebuilt the row from the two values it
     // had sent — so a locked row (a booking) took the agent's note as its
@@ -1344,6 +1398,9 @@ export function StoreProvider({ children }) {
       apiClient.logContactAction(id, channel)
         .then(res => {
           if (res?.success && res.timeline_event) dispatch({ type: 'ADD_TIMELINE_EVENT', kind, id, event: res.timeline_event })
+          // A logged call closes a booked call server-side (closeFollowUpFor),
+          // so Today's row for it has to go whether or not an outcome follows.
+          if (res?.success && channel === 'call') settled()
           resolve(res)
         })
         .catch(err => { console.warn('[Contact log API] error:', err.message); resolve(null) })
@@ -1362,6 +1419,15 @@ export function StoreProvider({ children }) {
     // contain it, and the agent saw their own logged visit only after refreshing
     // the browser. `settled()` bumps the token every list and record screen
     // watches, which re-reads the lead itself.
+    // A booked meeting or demo, finished from Today with how it went. The
+    // server clears the booking and writes its 'Completed' row; `settled()`
+    // re-reads Today, so the row leaves the To do list.
+    completeFollowUp: (leadId, outcome, remark) => apiClient.completeFollowUp(leadId, outcome, remark)
+      .then(res => {
+        if (res?.success) { settled(); toast('Saved'); return res }
+        toast('Could not save', 'warn'); return null
+      })
+      .catch(err => { toast(err.message || 'Could not save. Try again.', 'warn'); return null }),
     logActivity: (leadId, payload) => new Promise((resolve) => {
       apiClient.logActivity(leadId, payload)
         .then(res => {
@@ -1386,24 +1452,35 @@ export function StoreProvider({ children }) {
         () => apiClient.updateLead(leadId, { shortlist: list }),
         () => dispatch({ type: 'ATTACH_PROP', leadId, propId, label }),
         'Shortlisted')),
-    detachProp: (leadId, propId) => changeShortlist(leadId,
-      (cur) => cur.filter(x => x !== propId),
-      (list) => write('Remove from shortlist',
-        () => apiClient.updateLead(leadId, { shortlist: list }),
-        () => dispatch({ type: 'DETACH_PROP', leadId, propId }),
-        'Taken off the shortlist')),
+    // OPTIMISTIC, like the other quick actions: the row goes at once and comes
+    // back if the server refuses. It waited for the round trip (~2.5s), so the
+    // x looked broken and got tapped again.
+    detachProp: (leadId, propId) => {
+      const before = api.lookup('lead', leadId)?.shortlist
+      dispatch({ type: 'DETACH_PROP', leadId, propId })
+      toast('Taken off the shortlist')
+      const undo = () => { if (Array.isArray(before)) dispatch({ type: 'SET_SHORTLIST', leadId, shortlist: before }) }
+      return changeShortlist(leadId,
+        (cur) => cur.filter(x => x !== propId),
+        (list) => apiClient.updateLead(leadId, { shortlist: list })
+          .then(res => { if (rejected(res)) throw new Error(res.error || 'rejected'); settled(); return res })
+          .catch(err => { undo(); failed(err, 'Remove from shortlist'); settled(); return null }))
+        .then(res => { if (!res) undo(); return res })
+    },
     // Visit feedback was purely local — the verdict that is supposed to refine
     // this lead's matches never reached the server, so it was forgotten on
     // reload and no teammate ever saw why a flat was rejected.
-    visitFeedback: (leadId, propId, verdict, reason, society) => {
-      const lead = api.lookup('lead', leadId)
-      const feedback = { ...(lead?.feedback || {}), [propId]: { verdict, reason: reason || null } }
-      const cur = lead?.shortlist || []
+    // Sends the whole shortlist and feedback, so it reads them from the whole
+    // record, not a list row (see changeShortlist).
+    visitFeedback: (leadId, propId, verdict, reason, society) => fullLead(leadId).then(lead => {
+      if (!Array.isArray(lead?.shortlist)) { toast('Could not read this lead’s shortlist. Try again.', 'warn'); return null }
+      const feedback = { ...(lead.feedback || {}), [propId]: { verdict, reason: reason || null } }
+      const cur = lead.shortlist
       return write('Visit feedback',
         () => apiClient.updateLead(leadId, { feedback, shortlist: cur.includes(propId) ? cur : [...cur, propId] }),
         () => dispatch({ type: 'VISIT_FEEDBACK', leadId, propId, verdict, reason, society }),
         verdict === 'liked' ? 'Marked as liked' : 'Rejection saved')
-    },
+    }),
     // Same reason `addProperty` below resolves the server's row: the form data
     // carries no id (the server mints it), so an optimistic prepend produced an
     // unclickable card that then duplicated against the real row on hydrate.
@@ -1413,7 +1490,9 @@ export function StoreProvider({ children }) {
         const created = res?.data || res?.lead || res?.record || null
         dispatch({ type: 'ADD_LEAD', lead: created?.id ? created : lead })
       },
-      'Lead saved and assigned'),
+      // It is saved; whether anyone has it is the record's own business — the
+      // form may have left it with nobody, or the rota picked someone.
+      'Lead saved'),
     // Resolves the SERVER's record, not the payload we sent. The old version
     // optimistically prepended the raw form data, which carries no id — the
     // server mints it — so the card was unclickable (open(undefined)) and
@@ -1515,14 +1594,6 @@ export function StoreProvider({ children }) {
           return gone
         })
     },
-    // The batch is deleted where it lives. The old version scanned the
-    // in-memory collections for matching ids and fired a delete per row — which
-    // meant it could only ever revert what the browser happened to be holding,
-    // and reverted nothing at all once those arrays went away.
-    revertImportBatch: (batchId) => write('Revert import',
-      () => apiClient.revertImportBatch(batchId),
-      () => dispatch({ type: 'REVERT_IMPORT_BATCH', batchId }),
-      'Import undone. Its records are removed.'),
     // OPTIMISTIC, like a lead's stage. This went through write(), so the patch
     // landed only after the server answered — measured at 1.2s from a tap,
     // against 48ms for the identical control one module over. It is the same
@@ -1555,7 +1626,7 @@ export function StoreProvider({ children }) {
     // resolves with the numbers rather than assuming them.
     distributeWork: (fromId, targets, kinds) => apiClient.distributeWork(fromId, targets, kinds)
       .then(res => { dispatch({ type: 'REASSIGN_ALL', fromId, toId: targets[0] }); settled(); return res })
-      .catch(err => { toast(err.message || 'Could not hand the work over', 'warn'); return null }),
+      .catch(err => { failed(err, 'Hand the work over'); return null }),
     // Real teammate creation — the server makes a login-capable user, so we take
     // the server's roster as truth rather than an optimistic local guess.
     // Create a login-capable teammate (password auth). Resolves to the API
@@ -1639,11 +1710,17 @@ export function StoreProvider({ children }) {
     openWhatsApp, recompose,
     closeWhatsApp: () => dispatch({ type: 'WA_CLOSE' }),
     setSearch: (v) => dispatch({ type: 'SET', patch: { searchOpen: v } }),
+    setRangeOpen: (v) => dispatch({ type: 'SET', patch: { rangeOpen: v } }),
     setNotif: (v) => {
       dispatch({ type: 'SET', patch: { notifOpen: v } })
       if (v) loadNotifications() // refresh the feed whenever the drawer opens
     },
     loadNotifications,
+    markNotifRead: (id) => {
+      dispatch({ type: 'MARK_NOTIF_READ', id })
+      // Re-read the count once the server has it.
+      apiClient.markNotificationRead(id).then(loadNotifUnread).catch(err => console.warn('[Notifications] mark-read failed:', err.message))
+    },
     markAllNotifsRead: () => {
       dispatch({ type: 'MARK_NOTIFS_READ' })
       apiClient.markAllNotificationsRead().catch(err => console.warn('[Notifications] mark-all failed:', err.message))

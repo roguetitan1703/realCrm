@@ -1,8 +1,8 @@
 # RealEstate by Delpat — CRM
 
 > **📍 Now a production SaaS.** For the current plan and how the docs are
-> organized, start at **[docs/ROADMAP.md](./docs/ROADMAP.md)** and
-> **[docs/README.md](./docs/README.md)**. The note below is the original demo
+> organized, start at **[docs/STATE.md](./docs/STATE.md)**,
+> **[docs/BACKLOG.md](./docs/BACKLOG.md)** and **[docs/README.md](./docs/README.md)**. The note below is the original demo
 > README, kept for history.
 
 ---

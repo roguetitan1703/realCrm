@@ -10,7 +10,7 @@
 
 import bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
-import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_IDS, migrateProperColumns } from './db.js';
+import { sql, initSchema, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, LEGACY_TENANT_IDS, migrateProperColumns, runOnce } from './db.js';
 import { agents as seedAgents, properties as seedProps, leads as seedLeads } from '../data/defaultDataset.js';
 import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { finalStageOf, stageLabelIn, LABELLED_LEAD_STAGES } from '../../../src/data/pipelineRoles.js';
@@ -18,22 +18,33 @@ import { audit } from './audit.js';
 import { fileTicket } from './media.js';
 import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, lastPersonActivity, lastRemark, lastRemarkAt, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
-import { notify, notifyRoles } from './notifications.js';
+import { notify, notifyRoles, notifyOrDesk } from './notifications.js';
+import { firstRunAlertLifecycle } from './alertLifecycle.js';
 import { suggestPassword } from './auth.js';
 import { followUpKind } from './followUp.js';
+import { followUpKindOf } from '../../../src/data/followUpKinds.js';
 import { galleryPath } from './gallery.js';
-import { planRoster, normalizePhone, RosterRow } from './roster.js';
-import { assertLeadWrite, ForbiddenError } from '../lib/permissions.js';
+import { planRoster, rosterPhone, RosterRow } from './roster.js';
+import { requirePhone, editedPhone, keepPhone, phoneKey } from './phone.js';
+import { toE164, isPlaceholderPhone } from '../../../src/lib/phone.js';
+import { assertLeadWrite, ForbiddenError, isDeskRole } from '../lib/permissions.js';
+import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js';
+import { canTakeWork, onDutyWorkers, assertWorkable } from './workforce.js';
+import { IS_AVAILABLE, HAS_PHOTO } from './catalogueRules.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
 // form, the filters and this backfill must agree on what "4 BHK Villa" means,
 // and three copies of that rule would drift.
 import {
-  FURNISH, STATUS, labelOf,
+  FURNISH, STATUS, BHK, SUBTYPES, labelOf,
   normaliseBhk, normaliseSubtype, normaliseTo,
 } from '../../../src/data/propertyFields.js';
 // backfillEnquiries replays stored payloads through the SAME reader the live
 // ingest uses, so a rebuilt session says what the push said.
 import { parsePayload } from './parser.js';
+// The firm's money, phone and bedroom words — one implementation, shared with
+// the screens. The server always passes the firm's locale (deskConfigOf).
+import { resolveLocale, moneyFull, roomLabel } from '../../../src/lib/locale.js';
+export type Locale = ReturnType<typeof resolveLocale>;
 
 /**
  * The tenant to scope the current request's queries to. Comes from the request
@@ -44,7 +55,8 @@ import { parsePayload } from './parser.js';
 // Lead status is flat, not a pipeline — see src/data/leadStatus.js for why.
 // These two must stay in step with that file.
 export const LEAD_STATUSES = ['New', 'Follow-Up', 'Callback', 'Call Not Received', 'Interested', 'Site Visit', 'Deal Closed', 'Rejected'];
-export const TERMINAL_STATUSES = ['Deal Closed', 'Rejected'];
+import { TERMINAL_STATUSES, OWNER_TERMINAL_STATUSES } from './statuses.js';
+export { TERMINAL_STATUSES, OWNER_TERMINAL_STATUSES };
 export const WON_STATUS = 'Deal Closed';
 export const REJECTED_STATUS = 'Rejected';
 /**
@@ -107,26 +119,34 @@ export interface ProvisionResult {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// The first path segment is the firm, so a path the app serves itself must
+// never become one: /privacy, /terms and /data-deletion are the public legal
+// pages (vercel.json), /legal their files.
+const RESERVED_SLUGS = new Set(['admin', 'pwa', 'privacy', 'terms', 'data-deletion', 'legal']);
+
 export async function provisionTenant(input: ProvisionInput): Promise<ProvisionResult> {
   const firmName = String(input.firmName || '').trim();
   const city = String(input.city || '').trim();
   if (!firmName || !city) throw new Error('Firm name and city are required.');
 
-  // The owner signs in by OTP, delivered ONLY by email (no SMS channel), so the
-  // owner's email is required — a phone-only owner could never receive a code.
+  // The owner signs in with their email and a password, and a forgotten
+  // password is reset by email: without one the owner cannot get back in.
   const ownerEmail = input.ownerEmail ? String(input.ownerEmail).trim().toLowerCase() : '';
-  if (!EMAIL_RE.test(ownerEmail)) throw new Error("The owner's email is needed. Sign-in codes are sent by email.");
-  const ownerPhone = normalizePhone(input.ownerPhone);
+  if (!EMAIL_RE.test(ownerEmail)) throw new Error("The owner's email is needed to reset their password.");
+  const ownerPhone = rosterPhone(input.ownerPhone).phone;
 
   // Every login id and password, planned before anything is written: a roster
   // that cannot be created must not leave a tenant row behind it.
-  const plan = planRoster({ ownerName: input.ownerName, ownerEmail, ownerPhone, ownerPassword: input.ownerPassword, team: input.initialTeam });
+  const plan = planRoster({ ownerName: input.ownerName, ownerEmail, ownerPhone: input.ownerPhone, ownerPassword: input.ownerPassword, team: input.initialTeam });
   if (plan.issues.length) throw new Error(`Roster is not valid. ${plan.issues.join(' ')}`);
 
   // Unique slug === tenant id (our convention). If taken, suffix -2, -3, …
+  // The slug is the first path segment of the firm's address, so the paths the
+  // site itself serves count as taken: /admin is the console, /pwa the app
+  // manifests (vercel.json).
   const base = (input.slug || firmName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
   let cleanSlug = base;
-  for (let n = 2; (await sql`SELECT 1 FROM tenants WHERE id = ${cleanSlug} OR slug = ${cleanSlug} LIMIT 1`).length; n++) {
+  for (let n = 2; RESERVED_SLUGS.has(cleanSlug) || (await sql`SELECT 1 FROM tenants WHERE id = ${cleanSlug} OR slug = ${cleanSlug} LIMIT 1`).length; n++) {
     cleanSlug = `${base}-${n}`;
   }
   const tenantId = cleanSlug;
@@ -308,7 +328,11 @@ export interface TimelineEvent {
 }
 
 export interface RoutingRule {
-  strategy: 'round_robin' | 'weighted' | 'strict_territory';
+  // 'manual' is what Settings → Assigning writes for "Leave unassigned". It was
+  // missing from this type, and nothing on the lead side read it: a firm that
+  // chose to hand out leads by hand had every one dealt by the rota anyway.
+  // autoAssigns() below is the one reading of it.
+  strategy: 'round_robin' | 'weighted' | 'strict_territory' | 'manual';
   active_agent_ids: string[];
   last_assigned_index: number;
   // B — sweep leads nobody currently owns (never assigned, or the owner left).
@@ -376,6 +400,9 @@ function rowToAgent(r: any): any {
     // Comes from users.status, which is where suspension is decided.
     suspended: String(r.user_status || '').toLowerCase() === 'suspended',
     ...(r.metadata || {}),
+    // CAN BE GIVEN WORK (workforce.ts): the rota skips anyone who cannot, so a
+    // picker offers only these. After metadata, which must not override it.
+    canTakeWork: r.can_take_work === true,
     // After metadata, which carries a stored `initials` of its own.
     ...nameParts(r.name, r.first, r.initials),
   };
@@ -493,6 +520,10 @@ function rowToProperty(r: any): any {
     // the link is turned off.
     galleryPath: galleryPath(r),
     galleryOff: !!r.gallery_off,
+    // In the firm's public catalogue (listing-pages.md §A). Shown there only
+    // while Available; the tick stays when it is let and comes back.
+    inCatalogue: !!r.in_catalogue,
+    catalogueSlug: r.catalogue_slug || null,
   };
 }
 
@@ -508,6 +539,8 @@ function rowToProperty(r: any): any {
 function clientEventType(dbType: string): string {
   if (dbType === 'remark' || dbType === 'call' || dbType === 'sms') return dbType;
   if (dbType === 'whatsapp') return 'wa';
+  // Homes sent on a shared link (listing-pages.md §A): its own row, "Sent 3 homes".
+  if (dbType === 'share') return 'share';
   // Its own channel, deliberately outside the editable set: a closed
   // appointment is an observation, not a note somebody can rewrite.
   if (dbType === 'follow_up') return 'followup';
@@ -518,18 +551,65 @@ function clientEventType(dbType: string): string {
 
 // Types the Timeline UI shows a tag pill for (Remark / Call / WhatsApp / SMS)
 // — the label must NOT also repeat the title there, or the tag duplicates it.
-const TAGGED_TYPES = new Set(['remark', 'call', 'wa', 'sms']);
+const TAGGED_TYPES = new Set(['remark', 'call', 'wa', 'sms', 'share']);
 
 /** Rows whose description the system wrote and nobody may overwrite. */
 export const LOCKED_TEXT_TYPES = new Set(['follow_up']);
 
-export function mapEventForClient(e: TimelineEvent) {
+// OLD ROWS, SAID THE NEW WAY, when they are read. Nothing is rewritten: the
+// ledger keeps what was written, the record stops saying it badly.
+//   "Lead created via API (Source: Test). Assigned to agent usr_…"
+//      → "Arrived from Test. Assigned to <name>."
+//   "Kavish Deshmukh → null — …" (a name lookup that missed when it was
+//      written; metadata still names who) → "Kavish Deshmukh → <name> — …"
+// `names` (legacyEventNames) holds the people these rows name by id.
+const LEGACY_CREATED = /^Lead created via API \(Source: ([^)]*)\)\.(?:\s*Assigned to agent (\S+?)\.)?\s*$/;
+function legacyDescription(e: TimelineEvent, names?: Map<string, string>): string | undefined {
+  const d = e.description;
+  if (!d) return d;
+  const nameOf = (id?: string | null) => (id && names?.get(id)) || 'a former member';
+  const made = e.type === 'creation' ? LEGACY_CREATED.exec(d) : null;
+  if (made) return `Arrived from ${made[1] || 'an unknown source'}. ${made[2] ? `Assigned to ${nameOf(made[2])}` : 'Unassigned'}.`;
+  if (e.type === 'assignment' && /(^|\s)null(\s|$)/.test(d)) {
+    const m: any = e.metadata || {};
+    return d.replace(/→ null(?=\s|$|:)/, `→ ${nameOf(m.agentId)}`).replace(/^null →/, `${nameOf(m.previousAgentId)} →`);
+  }
+  return d;
+}
+
+/** The people old rows name only by id (see legacyDescription), by name. */
+export async function legacyEventNames(events: TimelineEvent[]): Promise<Map<string, string>> {
+  const ids = new Set<string>();
+  for (const e of events) {
+    const d = e.description || '';
+    const made = e.type === 'creation' ? LEGACY_CREATED.exec(d) : null;
+    if (made?.[2]) ids.add(made[2]);
+    if (e.type === 'assignment' && /(^|\s)null(\s|$)/.test(d)) {
+      const m: any = e.metadata || {};
+      if (m.agentId) ids.add(m.agentId);
+      if (m.previousAgentId) ids.add(m.previousAgentId);
+    }
+  }
+  const names = new Map<string, string>();
+  if (!ids.size) return names;
+  const t = tid();
+  const rows = await sql`
+    SELECT x.id, coalesce(nullif(btrim(u.name), ''), nullif(btrim(a.name), '')) AS name
+      FROM unnest(${[...ids]}::text[]) AS x(id)
+      LEFT JOIN users u ON u.id = x.id AND u.tenant_id = ${t}
+      LEFT JOIN crm_agents a ON a.id = x.id AND a.tenant_id = ${t}`;
+  for (const r of rows as any[]) if (r.name) names.set(r.id, r.name);
+  return names;
+}
+
+export function mapEventForClient(e: TimelineEvent, names?: Map<string, string>) {
   const ct = clientEventType(e.type);
   const tagged = TAGGED_TYPES.has(ct);
+  const description = legacyDescription(e, names);
   return {
     id: e.id,
     type: ct,
-    label: tagged ? e.description : (e.title && e.title !== e.description ? `${e.title}: ${e.description}` : e.description),
+    label: tagged ? description : (e.title && e.title !== description ? `${e.title}: ${description}` : description),
     authorId: e.author || null,
     // The name the author had when this happened, when their seat has since
     // gone to somebody else. Absent normally, and the screen then asks the
@@ -568,13 +648,23 @@ function collapseStatusMirrors(events: TimelineEvent[]): TimelineEvent[] {
   });
 }
 
-function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = []): any {
+/** The source filter's "Not stated": a lead with no source (stored null or ''). */
+export const SOURCE_NONE = '_none';
+const sourceKey = (v: string) => (v === SOURCE_NONE ? '' : String(v).toLowerCase());
+
+// WHAT A CALLER DID NOT READ IS LEFT OUT, not filled in. A list reads the lead
+// row alone; with no events and no lead_shortlist rows passed, this used to send
+// `timeline: []` and the shortlist from the legacy JSONB column. The browser
+// merged those rows over the record it held, so a lead opened from the list
+// showed one shortlisted home where it had six, and the next shortlist write was
+// built from that list. `undefined` here means "not loaded", `[]` means "none".
+function rowToLead(r: any, events?: TimelineEvent[], shortlistRows?: any[], names?: Map<string, string>): any {
   const createdMs = r.created_at ? new Date(r.created_at).getTime() : Date.now();
   const minsAgo = Math.max(0, Math.floor((Date.now() - createdMs) / 60000));
 
   // Format timeline events for lead object
-  const leadEvents = collapseStatusMirrors(events.filter(e => e.record_id === r.id))
-    .map(mapEventForClient);
+  const leadEvents = events ? collapseStatusMirrors(events.filter(e => e.record_id === r.id))
+    .map(e => mapEventForClient(e, names)) : [];
 
   // Columns are source of truth; fall back to the req JSONB when a column is null.
   const jreq = r.req || {};
@@ -595,9 +685,12 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
 
   // lead_shortlist rows are the source of truth once they exist; fall back to
   // the JSONB columns for leads that haven't been backfilled/touched yet.
-  let shortlist: string[];
-  let feedback: Record<string, any>;
-  if (shortlistRows && shortlistRows.length > 0) {
+  let shortlist: string[] | undefined;
+  let feedback: Record<string, any> | undefined;
+  if (!shortlistRows) {
+    shortlist = undefined;
+    feedback = undefined;
+  } else if (shortlistRows.length > 0) {
     shortlist = shortlistRows.map(sr => sr.property_id);
     feedback = {};
     for (const sr of shortlistRows) {
@@ -616,7 +709,9 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     phone: r.phone,
     email: r.email || '',
     stage: r.stage || 'New',
-    source: r.source || 'Website',
+    // Not stated stays not stated (CLAUDE.md §3.1): this read every lead with
+    // no source as 'Website'.
+    source: r.source || null,
     agentId: r.agent_id,
     req,
     notes: r.notes || [],
@@ -666,7 +761,8 @@ function rowToLead(r: any, events: TimelineEvent[] = [], shortlistRows: any[] = 
     // different question and stops being useful after a week.
     createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
     minsAgo,
-    timeline: leadEvents.length > 0 ? leadEvents : (r.notes || []).map((n: string) => ({ type: 'note', label: n, ago: 'just now' })),
+    timeline: !events ? undefined
+      : leadEvents.length > 0 ? leadEvents : (r.notes || []).map((n: string) => ({ type: 'note', label: n, ago: 'just now' })),
   };
 }
 
@@ -725,12 +821,7 @@ async function syncLeadShortlist(leadId: string, shortlist: string[], feedback: 
  * has no way to tell "this row was never migrated" from "someone deliberately
  * set it to that value afterwards", so it keeps undoing the second one.
  */
-async function runOnce(name: string, fn: () => Promise<void>): Promise<void> {
-  const done = await sql`SELECT 1 FROM schema_migrations WHERE name = ${name} LIMIT 1`;
-  if (done.length) return;
-  await fn();
-  await sql`INSERT INTO schema_migrations (name) VALUES (${name}) ON CONFLICT DO NOTHING`;
-}
+// Lives in db.ts now, so modules the store imports can gate their own repairs.
 
 export async function migrateLeadStatuses(): Promise<void> {
   const MAP: Record<string, string> = {
@@ -918,7 +1009,7 @@ export async function seedDatabase(forceReset = false): Promise<ServerState> {
     const createdAt = new Date(Date.now() - (l.minsAgo ?? 60) * 60000).toISOString();
     await sql`
       INSERT INTO crm_leads (id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback, duplicate_of, follow_up, overdue, created_at, tenant_id)
-      VALUES (${l.id}, ${l.name}, ${l.phone}, ${l.email || null}, ${l.stage}, ${l.source || 'Website'}, ${l.agentId ?? null}, ${sql.json(l.req || {})}, ${sql.json(l.notes || [])}, ${sql.json(l.shortlist || [])}, ${sql.json(l.feedback || {})}, ${l.duplicateOf || null}, ${sql.json((l as any).followUp || null)}, ${Boolean((l as any).overdue)}, ${createdAt}, ${DEFAULT_TENANT_ID})
+      VALUES (${l.id}, ${l.name}, ${l.phone}, ${l.email || null}, ${l.stage}, ${l.source || null}, ${l.agentId ?? null}, ${sql.json(l.req || {})}, ${sql.json(l.notes || [])}, ${sql.json(l.shortlist || [])}, ${sql.json(l.feedback || {})}, ${l.duplicateOf || null}, ${sql.json((l as any).followUp || null)}, ${Boolean((l as any).overdue)}, ${createdAt}, ${DEFAULT_TENANT_ID})
       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, stage = EXCLUDED.stage, agent_id = EXCLUDED.agent_id, follow_up = EXCLUDED.follow_up, overdue = EXCLUDED.overdue, created_at = EXCLUDED.created_at, tenant_id = EXCLUDED.tenant_id;
     `;
 
@@ -1120,7 +1211,7 @@ export async function backfillPropertyCanonicalFields(): Promise<void> {
     const patch: Record<string, any> = {
       category,
       subtype: normaliseSubtype(rawType, category),
-      bhk: normaliseBhk(rawType),
+      bhk: normaliseBhk(rawType, await localeOf(r.tenant_id)),
       furnish_type: normaliseTo(FURNISH, r.furnishing),
       // Legacy `parking` was one field; the schema separates covered from open.
       // With no way to tell which the old number meant, it becomes covered —
@@ -1306,6 +1397,10 @@ if (process.env.CRM_NO_BOOT !== '1') seedDatabase()
        RETURNING tenant_id`;
     console.log(`[Settings] intro message without em dashes: ${r.count} firm(s)${r.count ? ` (${(r as any[]).map(x => x.tenant_id).join(', ')})` : ''}`);
   }))
+  // AN ALERT IS OPEN WORK (docs/specs/notifications.md §10). Names the records
+  // on every existing alert from its link, then closes the ones whose work is
+  // already done. Writes only status columns on `notifications`.
+  .then(() => runOnce('2026_10_12_alert_lifecycle_first_run', () => firstRunAlertLifecycle()))
   .catch(err => console.error('[Supabase Boot Error]:', err.message));
 
 // ============================================================================
@@ -1368,7 +1463,7 @@ export async function getBootstrap(): Promise<any> {
   // exactly what the ten queries returned.
   const [row] = await sql`
     WITH agents AS (
-      SELECT a.*, (u.deleted_at IS NOT NULL) AS departed FROM crm_agents a
+      SELECT a.*, (u.deleted_at IS NOT NULL) AS departed, u.status AS user_status, ${canTakeWork(t, sql`a.id`)} AS can_take_work FROM crm_agents a
         LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
        WHERE a.tenant_id = ${t}
     ),
@@ -1428,6 +1523,7 @@ export async function getBootstrap(): Promise<any> {
       -- which read agents, can never offer someone who no longer works here.
       (SELECT coalesce(json_agg(a ORDER BY a.name), '[]'::json) FROM agents a WHERE a.departed) AS former,
       (SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${t}) AS settings,
+      ${REPLY_FALLBACK(t)} AS reply_fallback,
       (SELECT row_to_json(r) FROM crm_routing_rules r WHERE r.tenant_id = ${t} LIMIT 1) AS routing,
       (SELECT row_to_json(x) FROM (
          SELECT id, slug, name, brand_config FROM tenants
@@ -1475,7 +1571,7 @@ export async function getBootstrap(): Promise<any> {
     // `sources` is overwritten with the derived list — settings may still
     // carry a stale curated array from before this was derived, and the one
     // that matches the records has to win.
-    settings: { ...(settingsRows[0]?.value || {}), sources: sourceRows.map((r: any) => r.v) },
+    settings: withReplyFallback({ ...(settingsRows[0]?.value || {}), sources: sourceRows.map((r: any) => r.v) }, row?.reply_fallback ?? null),
     routing_rules: routingRows[0] || null,
     brand,
     // THE SEGMENT CATALOGUE, SERVED. Key, label, surface and tone come from
@@ -1491,6 +1587,26 @@ export async function getBootstrap(): Promise<any> {
     configs: configRows.map((r: any) => r.v),
     dealMix: dealRows[0] || { sale: 0, rent: 0 },
   };
+}
+
+/**
+ * A NUMBER TYPED INTO A SEARCH BOX, compared digit for digit. Numbers are
+ * stored as E.164 ("+919876543210"), so the box's own text -- "+91 98765
+ * 43210" pasted from WhatsApp, "98765 43210" typed the way it is said --
+ * found nothing: it was a substring test on the stored text. Only for a
+ * search that is all phone characters with at least four digits, so "A-1203"
+ * or "2 BHK" never turns into a phone search. The digits are kept as typed: a
+ * fragment's leading 0 ("0011") is part of what is being looked for.
+ * Unindexed by choice: a leading-wildcard LIKE cannot use a b-tree, the scan is
+ * one firm's rows (tenant_id is indexed), and the old text test was no better.
+ */
+export function phoneLike(column: string | any, q: string) {
+  const term = String(q || '').trim();
+  if (!/^[\d\s+\-().]+$/.test(term)) return sql`FALSE`;
+  const digits = term.replace(/\D/g, '');
+  if (digits.length < 4) return sql`FALSE`;
+  const col = typeof column === 'string' ? sql(column) : column;
+  return sql`regexp_replace(coalesce(${col}, ''), '\\D', '', 'g') LIKE ${'%' + digits + '%'}`;
 }
 
 /**
@@ -1510,7 +1626,7 @@ export async function searchWorkspace(q: string, limit = 8): Promise<{ leads: an
   const [leadRows, propRows] = await Promise.all([
     sql`SELECT id, name, phone, stage, locality, agent_id FROM crm_leads
          WHERE tenant_id = ${t} AND (lower(coalesce(name, '')) LIKE ${like}
-            OR coalesce(phone, '') LIKE ${like}
+            OR ${phoneLike('phone', term)}
             OR lower(coalesce(email, '')) LIKE ${like})
          ORDER BY created_at DESC LIMIT ${n}`,
     sql`SELECT id, title, locality, project, status, deal, price FROM crm_properties
@@ -1590,7 +1706,9 @@ export async function getDeskSummary(): Promise<any> {
           FROM crm_leads WHERE tenant_id = ${t} AND ${mine}),
     by_stage AS (SELECT coalesce(stage, 'New') AS k, count(*)::int AS n FROM crm_leads
          WHERE tenant_id = ${t} AND ${mine} GROUP BY 1),
-    by_source AS (SELECT coalesce(source, 'Website') AS k, count(*)::int AS n FROM crm_leads
+    -- No source is SOURCE_NONE, the key the Leads filter reads: the bar's
+    -- count and the list it opens are one expression (labelled Not stated).
+    by_source AS (SELECT CASE WHEN coalesce(source, '') = '' THEN ${SOURCE_NONE} ELSE source END AS k, count(*)::int AS n FROM crm_leads
          WHERE tenant_id = ${t} AND ${mine} GROUP BY 1),
     per_agent AS (SELECT agent_id AS k,
                count(*) FILTER (WHERE ${OPEN})::int AS open,
@@ -1688,26 +1806,6 @@ export async function getDeskSummary(): Promise<any> {
 }
 
 /**
- * Delete everything one import created. The desk used to do this by scanning
- * its in-memory arrays for matching ids and firing a delete per row, so it
- * could only ever revert what the browser happened to be holding.
- *
- * Leads carry the batch id in a column; properties carry it in `config`, which
- * is where every non-column property field lives.
- */
-export async function revertImportBatch(batchId: string): Promise<{ leads: number; properties: number; owners: number }> {
-  const t = tid();
-  const [leadRows, propRows, ownerRows] = await Promise.all([
-    sql`DELETE FROM crm_leads WHERE tenant_id = ${t} AND import_batch_id = ${batchId} RETURNING id`,
-    sql`DELETE FROM crm_properties WHERE tenant_id = ${t} AND config->>'importBatchId' = ${batchId} RETURNING id`,
-    sql`DELETE FROM crm_owners WHERE tenant_id = ${t} AND import_batch_id = ${batchId} RETURNING id`,
-  ]);
-  const leadIds = leadRows.map((r: any) => r.id);
-  if (leadIds.length) await sql`DELETE FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(leadIds)}`;
-  return { leads: leadRows.length, properties: propRows.length, owners: ownerRows.length };
-}
-
-/**
  * Import dedupe, answered for a whole file in one request.
  *
  * The import preview marked a row "duplicate" by scanning the in-memory
@@ -1725,36 +1823,34 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
   const properties: Record<string, any> = {};
   const owners: Record<string, any> = {};
 
-  // A phone is compared as its LAST TEN DIGITS, on both sides, always.
-  //
-  // This is the whole bug behind an import that duplicated everything. Leads
-  // are stored normalised — "+919876543210", and on one tenant "+91 98765
-  // 43210" with spaces — while a spreadsheet holds "9876543210". The old query
-  // compared the stored column to the raw file value with `phone IN (...)`, so
-  // it matched nothing, and then keyed the result map by the stored "+91…"
-  // form, which the browser looked up with a bare ten digits. Two independent
-  // reasons for the same answer: never a duplicate, every re-import a fresh
-  // copy. It left 315 surplus rows on the live client desk — one number twelve
-  // times over — before anyone noticed the counts climbing.
-  const norm = (p: string) => String(p ?? '').replace(/\D/g, '').slice(-10);
-  const phones = [...new Set((input.phones || []).map(norm).filter(p => p.length === 10))].slice(0, 5000);
+  // A phone is compared as exact E.164 (docs/specs/phone.md): the file's
+  // number is read in the firm's country, and a number that cannot be read is
+  // never matched. It used to compare the last ten digits, which made a UAE
+  // owner and an Indian one the same person. Each hit is keyed by the E.164
+  // form AND by every raw value the file sent for it, so the caller can look a
+  // cell up as it is.
+  const country = (await localeOf(t)).country;
+  const rawsOf = new Map<string, string[]>();
+  for (const raw of (input.phones || []).slice(0, 5000)) {
+    const k = phoneKey(raw, country);
+    if (k) rawsOf.set(k, [...(rawsOf.get(k) || []), String(raw)]);
+  }
+  const phones = [...rawsOf.keys()];
+  const keyHit = (out: Record<string, any>, phone: string | null, hit: any) => {
+    if (!phone) return;
+    out[phone] = hit;
+    for (const raw of rawsOf.get(phone) || []) out[raw] = hit;
+  };
   const names = (input.names || []).filter(Boolean).map(n => n.toLowerCase()).slice(0, 5000);
   if (phones.length || names.length) {
     const rows = await sql`
-      SELECT id, name, phone, right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) AS phone10
-        FROM crm_leads
+      SELECT id, name, phone FROM crm_leads
        WHERE tenant_id = ${t}
-         AND (${phones.length
-              ? sql`right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) IN ${sql(phones)}`
-              : sql`false`}
+         AND (${phones.length ? sql`phone IN ${sql(phones)}` : sql`false`}
            OR ${names.length ? sql`lower(name) IN ${sql(names)}` : sql`false`})`;
     for (const r of rows) {
       const hit = { id: r.id, name: r.name };
-      // Keyed by the normalised number — the only form the caller can produce
-      // from a spreadsheet cell. The raw stored value is kept as a key too so
-      // an already-normalised file still matches.
-      if (r.phone10) leads[r.phone10] = hit;
-      if (r.phone) leads[r.phone] = hit;
+      keyHit(leads, r.phone, hit);
       if (r.name) leads[String(r.name).toLowerCase()] = hit;
     }
   }
@@ -1767,15 +1863,8 @@ export async function checkDuplicates(input: { phones?: string[]; names?: string
   // are recognised and skipped/merged instead of duplicated.
   if (phones.length) {
     const rows = await sql`
-      SELECT id, name, phone, right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) AS phone10
-        FROM crm_owners
-       WHERE tenant_id = ${t}
-         AND right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) IN ${sql(phones)}`;
-    for (const r of rows) {
-      const hit = { id: r.id, name: r.name || r.phone };
-      if (r.phone10) owners[r.phone10] = hit;
-      if (r.phone) owners[r.phone] = hit;
-    }
+      SELECT id, name, phone FROM crm_owners WHERE tenant_id = ${t} AND phone IN ${sql(phones)}`;
+    for (const r of rows) keyHit(owners, r.phone, { id: r.id, name: r.name || r.phone });
   }
 
   const titles = (input.titles || []).filter(Boolean).map(s => s.toLowerCase()).slice(0, 5000);
@@ -1831,7 +1920,7 @@ export async function listContacts(opts: {
   // (linkListingOwner). One person per record; their listings are counted
   // through the link.
   const where: any[] = [sql`o.tenant_id = ${t}`];
-  if (q) where.push(sql`(lower(coalesce(o.name, '')) LIKE ${like} OR coalesce(o.phone, '') LIKE ${like} OR lower(coalesce(o.project, '')) LIKE ${like} OR lower(coalesce(o.unit_no, '')) LIKE ${like})`);
+  if (q) where.push(sql`(lower(coalesce(o.name, '')) LIKE ${like} OR ${phoneLike('o.phone', q)} OR lower(coalesce(o.project, '')) LIKE ${like} OR lower(coalesce(o.unit_no, '')) LIKE ${like})`);
   // WHICH BUILDING, WHICH AREA — through the listings that make them a contact:
   // an owner is in a project if a flat of theirs we hold is.
   if (opts.project) where.push(sql`EXISTS (SELECT 1 FROM crm_properties x WHERE x.tenant_id = o.tenant_id AND x.owner_contact_id = o.id
@@ -1933,18 +2022,19 @@ export async function getLeads(): Promise<any[]> {
     description: r.description, timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp)
   }));
   const shortlistByLead = groupShortlistByLead(shortlistRows);
-  return leadsRows.map(r => rowToLead(r, events, shortlistByLead.get(r.id) || []));
+  const names = await legacyEventNames(events as any);
+  return leadsRows.map(r => rowToLead(r, events, shortlistByLead.get(r.id) || [], names));
 }
 
 /**
  * The one place a phone number resolves to a person.
  *
- * Identity is the LAST TEN DIGITS, within the tenant — the same rule the
- * importer's checkDuplicates() uses, and for the same reason. Stored numbers
- * are "+919876543210" (and on one tenant "+91 98765 43210", with spaces);
- * portals send whatever they please. An exact string compare on the cleaned
- * value calls those different people, which is how one client desk ended up
- * with 315 surplus rows.
+ * Identity is the exact E.164 number, within the tenant (docs/specs/phone.md).
+ * What a caller passes is read in the firm's country, so "9876543210" and
+ * "+91 98765 43210" are one person and a UAE "+971 50…" is somebody else. A
+ * number that cannot be read matches nobody: it is never guessed into a match.
+ * It used to be the last ten digits, which made a foreign number and an
+ * Indian one with the same tail the same lead.
  *
  * Deliberately NOT scoped by leadScope(). This answers "does this tenant
  * already know this number", which must be true regardless of who is asking —
@@ -1954,24 +2044,67 @@ export async function getLeads(): Promise<any[]> {
  */
 export async function findLeadByPhone(phone: string, tenantId?: string): Promise<any | undefined> {
   const t = tenantId || tid();
-  const p10 = String(phone ?? '').replace(/\D/g, '').slice(-10);
-  if (p10.length !== 10) return undefined;
+  const key = phoneKey(phone, (await localeOf(t)).country);
+  if (!key) return undefined;
   const rows = await sql`
-    SELECT * FROM crm_leads
-     WHERE tenant_id = ${t}
-       AND right(regexp_replace(coalesce(phone, ''), '\D', '', 'g'), 10) = ${p10}
+    SELECT * FROM crm_leads WHERE tenant_id = ${t} AND phone = ${key}
      ORDER BY created_at ASC LIMIT 1`;
+  return rows[0];
+}
+
+/**
+ * A PORTAL NUMBER NOBODY CAN READ, sent again by the same portal. Ingestion
+ * only (forms refuse such a number; an import reports it). findLeadByPhone
+ * matches nobody on it, so every repeat from a portal that sends a number in
+ * a shape we cannot read made a new lead. The identical string from the same
+ * integration is the same buyer -- but only when the string still names one
+ * person: no letters ("N/A"), no masking ("98XXXXXX10", "*"), and not a
+ * placeholder (isPlaceholderPhone: "+910000000001", "0123456789").
+ * The same INTEGRATION, not the same source label: a lead's source is often
+ * the integration's default ("Website"), shared by several.
+ */
+export function rawPhoneMatchable(raw: unknown, country: string): raw is string {
+  if (typeof raw !== 'string') return false;
+  const s = raw.trim();
+  if (!s || /[a-z*]/i.test(s)) return false;
+  return !isPlaceholderPhone(s, country);
+}
+
+export async function findLeadByRawPhone(raw: string, integrationId: string | null, tenantId?: string): Promise<any | undefined> {
+  const t = tenantId || tid();
+  const country = (await localeOf(t)).country;
+  if (!integrationId || !rawPhoneMatchable(raw, country)) return undefined;
+  if (toE164(raw, country, { received: true })) return undefined; // readable: findLeadByPhone's job
+  const rows = await sql`
+    SELECT l.* FROM crm_leads l
+     WHERE l.tenant_id = ${t} AND l.phone = ${raw.trim()}
+       AND EXISTS (SELECT 1 FROM crm_lead_enquiries e
+                    WHERE e.tenant_id = l.tenant_id AND e.lead_id = l.id AND e.integration_id = ${integrationId})
+     ORDER BY l.created_at ASC LIMIT 1`;
   return rows[0];
 }
 
 export async function getLeadById(id: string): Promise<any | undefined> {
   const t = tid();
-  const rows = await sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`;
-  if (rows.length === 0) return undefined;
-  const [timelineRows, shortlistRows] = await Promise.all([
+  // ONE ROUND TRIP, NOT FIVE. The row, its timeline, its shortlist, its
+  // enquiries and its activities do not depend on each other; awaited in turn
+  // they were five trips (~150ms each on dev) on every record open and every
+  // lead created. All five run every time; only the answer is gated: a lead
+  // outside this person's scope still returns undefined (the other reads are
+  // discarded, and their errors with them), and for a visible lead an error in
+  // a part surfaces as before (enquiries are optional, the rest are not).
+  const [rowsR, timelineR, shortlistR, enquiriesR, actsR] = await Promise.allSettled([
+    sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`,
     sql`SELECT * FROM crm_timeline_events WHERE record_id = ${id} AND tenant_id = ${t} ORDER BY timestamp DESC`,
     sql`SELECT * FROM lead_shortlist WHERE lead_id = ${id} AND tenant_id = ${t}`,
+    getEnquiriesForLead(id),
+    getActivitiesForLead(id),
   ]);
+  const settled = <T,>(r: PromiseSettledResult<T>): T => { if (r.status === 'rejected') throw r.reason; return r.value; };
+  const rows = settled(rowsR);
+  if (rows.length === 0) return undefined;
+  const timelineRows = settled(timelineR);
+  const shortlistRows = settled(shortlistR);
   // author and metadata are NOT optional here. This projection listed six
   // fields and dropped both, so every event on a lead RECORD arrived with
   // authorId null and metadata {} — while the same events fetched through
@@ -1987,7 +2120,7 @@ export async function getLeadById(id: string): Promise<any | undefined> {
     description: r.description, author: r.author, metadata: r.metadata,
     timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp)
   }));
-  const lead = rowToLead(rows[0], events, shortlistRows);
+  const lead = rowToLead(rows[0], events, shortlistRows, await legacyEventNames(events as any));
 
   // THE SHORTLISTED PROPERTIES THEMSELVES, not only their ids. The record screen
   // resolved each id through the browser's property cache, which holds whatever
@@ -2008,14 +2141,14 @@ export async function getLeadById(id: string): Promise<any | undefined> {
   // an implementation detail the agent should never have been able to feel.
   // The enquiry history. Read alongside the timeline so the record can show
   // what was asked for on each occasion rather than a prose note about it.
-  lead.enquiries = await getEnquiriesForLead(id).catch(() => []);
+  lead.enquiries = enquiriesR.status === 'fulfilled' ? enquiriesR.value : [];
   lead.enquiryCount = lead.enquiries.length;
   // Everything they have ever asked for, in one shape. The sheet reads the
   // sets off this, the header reads the latest and the count of the rest, and
   // the matcher reads the span — so none of them can describe the person
   // differently.
   lead.enquiryRollup = enquiryRollup(lead.enquiries);
-  const acts = await getActivitiesForLead(id);
+  const acts = settled(actsR);
   if (acts.length) {
     lead.timeline = [...(lead.timeline || []), ...acts]
       .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -2023,16 +2156,29 @@ export async function getLeadById(id: string): Promise<any | undefined> {
   return lead;
 }
 
-export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
+/** opts.phoneAsReceived: a portal, webhook or share sent the number — an
+ *  unreadable one is kept as received rather than refused (docs/specs/phone.md). */
+/**
+ * `announce: false` — the caller sends the one alert about this arrival itself
+ * (a buyer's form: buyerAsks.ts names what they asked), so neither "assigned
+ * to you" nor "arrived unassigned" goes out beside it.
+ */
+export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts: { phoneAsReceived?: boolean; announce?: boolean } = {}): Promise<any> {
   const newId = leadData.id || `l_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-  // Apply round-robin assignment if agentId not provided. One atomic
-  // statement (nextRoutedAgent) — see its doc comment for why the previous
-  // read-then-write version could send an entire batch to one person.
-  let agentId = leadData.agentId || leadData.agent_id;
-  if (!agentId) {
-    agentId = await nextRoutedAgent();
-  }
+  // WHO GETS IT. A person the caller NAMED must be able to take it. NOT SENT
+  // is not the same as SENT EMPTY (CLAUDE.md §3.6): this read `agentId ||
+  // rota`, so the desk picking "Unassigned" on Add lead had the lead dealt to
+  // the next person anyway. An explicit null from someone who may assign —
+  // the desk, or a system caller — means unassigned. An agent may not decide
+  // who holds work (canAssignLead, assignUnowned), so an agent's null is
+  // treated as not sent: the firm's arrival rule decides, as it does for a
+  // portal enquiry. Nobody named → arrivalLeadAgent(), which is the rota or,
+  // under "Leave unassigned", nobody.
+  const sentAgent = leadData.agentId !== undefined ? leadData.agentId : leadData.agent_id;
+  let agentId: string | null = sentAgent || null;
+  if (agentId) await assertWorkable(tid(), [agentId]);
+  else if (sentAgent === undefined || getContext()?.role === 'agent') agentId = await arrivalLeadAgent();
 
   // NO INVENTED NAME. This defaulted to 'New Inquiry', which is a fact about
   // the payload dressed up as the person's name: it sorted under N, it was
@@ -2048,10 +2194,15 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // Null, not a placeholder number. This defaulted to '+910000000000', which
   // the screens read as "this lead has a phone" — so Call and WhatsApp rendered
   // and dialled it. A lead with no number shows no way to ring one.
-  const phone = leadData.phone || null;
+  // EXACT E.164 (docs/specs/phone.md). Typed on a form, a number that cannot
+  // be read is refused with the reason; sent by a portal, it is kept as received.
+  const country = (await localeOf(tid())).country;
+  const phone = opts.phoneAsReceived ? keepPhone(leadData.phone, country) : requirePhone(leadData.phone, country);
   const email = leadData.email || null;
   const stage = leadData.stage || 'New';
-  const source = leadData.source || 'Website';
+  // Where they came from, only when someone said: 'Website' was written on
+  // every lead added without one.
+  const source = leadData.source || null;
   // No invented requirement. This defaulted to { locality: 'Wakad', config:
   // '2 BHK', budgetLabel: '₹80L' } — so every lead captured without one (a
   // webhook, a quick add, a phone number jotted down mid-call) was born
@@ -2097,6 +2248,17 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   const receivedAt = leadData.received_at ?? leadData.receivedAt ?? null;
 
   const t = tid();
+  // The assignee's and the creator's names for the first timeline entry, read
+  // alongside the insert rather than after it (one round trip fewer).
+  // `.then` starts it now (a postgres.js query is lazy until then) and keeps a
+  // failed read from becoming an unhandled rejection if the insert throws first.
+  const nameIds = [agentId, createdBy].filter(Boolean) as string[];
+  const namesP: Promise<any[]> = nameIds.length
+    ? sql`SELECT id, coalesce(nullif(btrim(name), ''), nullif(login_id, ''), 'a team member') AS name FROM users WHERE tenant_id = ${t} AND id IN ${sql(nameIds)} AND deleted_at IS NULL`.then(r => r as any[], (err: any) => {
+        console.warn(`[Leads] name lookup failed for ${nameIds.join(',')} in ${t}:`, err?.message);
+        return [];
+      })
+    : Promise.resolve([]);
   const rows = await sql`
     INSERT INTO crm_leads (
       id, name, phone, email, stage, source, agent_id, req, notes, shortlist, feedback,
@@ -2114,18 +2276,29 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
     await syncLeadShortlist(newId, shortlist, feedback, t);
   }
 
+  // A person's name, never their user id ("Assigned to agent u_team_…"), and
+  // nothing at all when nobody was assigned (it read "agent null").
+  // WHO MADE IT, said. Every lead read "Lead created via API" — an agent who
+  // typed one in on Add lead and a portal push were the same line. The name
+  // goes in the words and the id in metadata, NOT in `author`: an authored
+  // event counts as a person working the lead (leadSegments.ts — Going cold,
+  // the idle sweep), and creating a lead is not working it.
+  const names = new Map((await namesP).map((r: any) => [r.id, r.name]));
+  const by = createdBy ? `Added by ${names.get(createdBy) || 'a former member'}` : (source ? `Arrived from ${source}` : 'Arrived');
+  const to = agentId ? `Assigned to ${names.get(agentId) || 'a former member'}` : 'Unassigned';
   await addTimelineEvent({
     record_id: newId,
     type: 'creation',
     title: 'New Lead Created',
-    description: `Lead created via API (Source: ${source}). Assigned to agent ${agentId}.`,
+    description: `${by}. ${to}.`,
+    metadata: { createdBy: createdBy ?? null, agentId: agentId ?? null, source },
   });
 
   const created = await getLeadById(newId);
   audit({
     tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'lead.create', target_type: 'lead', target_id: newId,
-    summary: `Lead "${name || phone || 'unnamed'}" created (source: ${source})`, metadata: { after: created },
+    summary: `Lead "${name || phone || 'unnamed'}" created (source: ${source || 'not stated'})`, metadata: { after: created },
     ip: ctx.ip, user_agent: ctx.userAgent,
   });
   // Alert the assigned agent, and give owners/managers team-wide visibility.
@@ -2136,15 +2309,8 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // client makes -- otherwise an alert about a nameless enquiry reads
   // "Mahalunge - via MagicBricks" and names nobody at all.
   const notifName = name || phone || undefined;
-  notify({ userId: agentId, type: 'lead_assigned', data: { name: notifName, locality, source }, link, push: true })
+  if (opts.announce !== false) notify({ userId: agentId, type: 'lead_assigned', data: { name: notifName, locality, source }, link, push: true })
     .catch(err => console.warn('[Notify] lead_assigned failed:', err?.message));
-  // Name the agent, not their primary key. This read "routed to u_ms6oqbda",
-  // which tells the person reading it nothing and looks broken besides.
-  const agentName = agentId
-    ? (await sql`SELECT name FROM crm_agents WHERE id = ${agentId} AND tenant_id = ${tid()} LIMIT 1`)[0]?.name
-      ?? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name
-      ?? 'an agent'
-    : 'the queue';
   // NO lead_new. It fired on every arrival alongside lead_assigned -- 216 and
   // 216 over the SAME 216 links on bhumi in 14 days -- so one lead landing cost
   // two notifications, and the owner collected 233 in a fortnight. An owner
@@ -2153,9 +2319,15 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX): Pro
   // nobody took it.
   // PUSH: nobody was assigned, so this lead is sitting with no owner and no
   // one is coming for it. That is an exception, not a routine arrival.
-  if (!agentId) {
-    notifyRoles(['owner', 'manager'], {
-      type: 'lead_unrouted', data: { name: notifName, source }, link, push: true,
+  // notifyOrDesk, not notifyRoles: a firm with no active owner or manager is
+  // logged, not delivered to an empty list in silence. Not raised when the
+  // desk itself chose Unassigned (it knows), nor per row of an import: the
+  // import sends one for the whole file (imports.ts).
+  const deskChoseNobody = sentAgent === null && isDeskRole(getContext()?.role);
+  if (!agentId && !deskChoseNobody && !importBatchId && opts.announce !== false) {
+    notifyOrDesk(null, {
+      tenantId: t, type: 'lead_unrouted', data: { name: notifName, source }, link, push: true,
+      record: { kind: 'lead', ids: [newId] },
     }).catch(err => console.warn('[Notify] lead_unrouted failed:', err?.message));
   }
   return created;
@@ -2174,11 +2346,13 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   assertLeadWrite(who?.role, who?.userId, oldLead, patch);
 
   const name = patch.name !== undefined ? patch.name : oldLead.name;
-  const phone = patch.phone !== undefined ? patch.phone : oldLead.phone;
+  const phone = patch.phone !== undefined ? editedPhone(patch.phone, oldLead.phone, (await localeOf(tid())).country) : oldLead.phone;
   const email = patch.email !== undefined ? patch.email : oldLead.email;
   const stage = patch.stage !== undefined ? patch.stage : oldLead.stage;
   const source = patch.source !== undefined ? patch.source : oldLead.source;
-  const agentId = patch.agentId !== undefined ? patch.agentId : (patch.agent_id !== undefined ? patch.agent_id : oldLead.agentId);
+  // '' is nobody, stored as null — not a value that reads as "someone".
+  const agentId = (patch.agentId !== undefined ? patch.agentId : (patch.agent_id !== undefined ? patch.agent_id : oldLead.agentId)) || null;
+  if (agentId && agentId !== oldLead.agentId) await assertWorkable(tid(), [agentId]);
   const req = patch.req !== undefined ? patch.req : oldLead.req;
   const notes = patch.notes !== undefined ? patch.notes : oldLead.notes;
   const shortlist = patch.shortlist !== undefined ? patch.shortlist : oldLead.shortlist;
@@ -2315,14 +2489,14 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       // The chip says what kind of entry this is; the title says what happened
       // to it; the description says which follow-up. Three jobs, one word each.
       title: hadFollowUp ? 'Rescheduled' : 'Scheduled',
-      description: [followUpKind(fu), followUpWhen(fu)].filter(Boolean).join(', '),
+      description: [followUpKind(fu), followUpWhen(fu, await deskConfigOf(tid()))].filter(Boolean).join(', '),
       author: getContext()?.userId || null,
     }).catch(() => {});
   }
 
   if (hadFollowUp && !followUp) {
     const action = String((hadFollowUp as any).action || 'Follow-up');
-    if (!/site\s*visit/i.test(action)) {
+    if (followUpKindOf(action) !== 'visit') {
       await addTimelineEvent({
         record_id: id,
         type: 'follow_up',
@@ -2437,6 +2611,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
         type: 'calendar_task_assigned',
         data: { name, at, isVisit },
         link,
+        subjectAt: at,
         push: true
       }).catch(err => console.warn('[Notify] calendar_task_assigned failed:', err?.message));
     }
@@ -2485,6 +2660,8 @@ export async function deleteLead(id: string, ctx: ActorCtx = SYSTEM_CTX): Promis
   const res = await sql`DELETE FROM crm_leads WHERE id = ${id} AND tenant_id = ${tid()}`;
   const ok = res.count > 0;
   if (ok) await detachAgreementsFromLeads([id]);
+  // Its shared links turn off with it (listing-pages.md §A.1).
+  if (ok) await shareLeadsDeleted(tid(), [id], ctx.actorId ?? who?.userId ?? null);
   if (ok) {
     audit({
       tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
@@ -2525,6 +2702,7 @@ export async function bulkDeleteLeads(ids: string[], ctx: ActorCtx = SYSTEM_CTX)
 
   const res = await sql`DELETE FROM crm_leads WHERE tenant_id = ${t} AND id IN ${sql(allowed)}`;
   await detachAgreementsFromLeads(allowed);
+  await shareLeadsDeleted(t, allowed, ctx.actorId ?? who?.userId ?? null);
   audit({
     tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
     actor_label: ctx.actorLabel ?? null, action: 'lead.bulk_delete', target_type: 'lead', target_id: null,
@@ -2583,6 +2761,9 @@ export async function mergeLeads(primaryId: string, duplicateId: string): Promis
     description: `Merged inquiry from ${duplicate.name} (${duplicate.phone}, Source: ${duplicate.source}).`,
   });
 
+  // The duplicate's shared links follow the surviving lead — before the delete
+  // below, which would otherwise turn them off.
+  await shareLeadMerged(t, duplicateId, primaryId);
   await deleteLead(duplicateId);
   return await getLeadById(primaryId);
 }
@@ -2646,12 +2827,12 @@ export const DEFAULT_QUIET_DAYS = 3;
  * appointment must not be phrased three ways.
  */
 
-function followUpWhen(fu: any): string {
+function followUpWhen(fu: any, desk: Pick<DeskConfig, 'timezone' | 'locale'>): string {
   if (fu?.at) {
     const d = new Date(fu.at);
     if (!isNaN(d.getTime())) {
-      return d.toLocaleString('en-IN', {
-        timeZone: DEFAULT_TIMEZONE, day: 'numeric', month: 'short',
+      return d.toLocaleString(desk.locale.numberLocale, {
+        timeZone: desk.timezone, day: 'numeric', month: 'short',
         hour: 'numeric', minute: '2-digit', hour12: true,
       });
     }
@@ -2659,6 +2840,12 @@ function followUpWhen(fu: any): string {
   // Rows saved before `at` existed carry only what a person typed. Shown as
   // stored rather than guessed at — see FOLLOWUP_PAST_DUE.
   return [fu?.date, fu?.time].filter(Boolean).join(' ');
+}
+
+/** An owner's callback as its timeline line names it, on the firm's clock. */
+async function callbackWhen(at: string): Promise<string> {
+  const desk = await deskConfigOf(tid());
+  return new Date(at).toLocaleString(desk.locale.numberLocale, { dateStyle: 'medium', timeStyle: 'short', timeZone: desk.timezone });
 }
 
 export const FOLLOWUP_PAST_DUE = sql`(CASE WHEN follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
@@ -2762,7 +2949,21 @@ const arrivalStageCache = new Map<string, { v: DeskConfig; at: number }>();
 const ARRIVAL_TTL_MS = 60_000;
 
 /** The settings every worklist question is asked against. */
-export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string; coldDays: number };
+export type DeskConfig = { arrivalStage: string; slaHours: number; timezone: string; coldDays: number; workStart: number; workEnd: number; locale: Locale };
+
+/**
+ * THE FIRM'S WORKING HOURS, whole hours on its own clock (Settings → Response
+ * times). Outside them no alert buzzes a phone; at the opening hour each person
+ * gets one summary of what is still open (services/notifications.ts
+ * releaseAt). Stored as `workHours: { start, end }`; anything unreadable is the
+ * default, 9 to 21, the window the alerts ran on before it was a setting.
+ */
+export const DEFAULT_WORK_HOURS = { start: 9, end: 21 };
+function workHoursOf(cfg: any): { start: number; end: number } {
+  const s = Number(cfg?.workHours?.start), e = Number(cfg?.workHours?.end);
+  const ok = Number.isInteger(s) && Number.isInteger(e) && s >= 0 && e <= 24 && s < e;
+  return ok ? { start: s, end: e } : DEFAULT_WORK_HOURS;
+}
 
 /**
  * HOW LONG SILENCE IS ALLOWED TO LAST, in days, for this firm.
@@ -2814,6 +3015,11 @@ export async function deskConfigOf(tenantId: string): Promise<DeskConfig> {
     // never consumed anywhere in the codebase. It is the number behind Going
     // cold now, so the control finally changes something.
     coldDays: quietDays(cfg),
+    workStart: workHoursOf(cfg).start,
+    workEnd: workHoursOf(cfg).end,
+    // Currency, phone country and bedroom words (src/lib/locale.js). India,
+    // field by field, for a firm that never set them.
+    locale: resolveLocale(cfg.locale),
   };
   arrivalStageCache.set(tenantId, { v, at: Date.now() });
   return v;
@@ -2832,12 +3038,24 @@ export async function timezoneOf(tenantId: string): Promise<string> {
   return (await deskConfigOf(tenantId)).timezone;
 }
 
+/** The firm's locale, for callers that format money or phones for it. */
+/** A number typed for this firm: E.164, or 422 phone_invalid (services/phone.ts). */
+async function typedPhone(raw: any, field = 'phone'): Promise<string | null> {
+  return requirePhone(raw, (await localeOf(tid())).country, field);
+}
+
+export async function localeOf(tenantId: string): Promise<Locale> {
+  return (await deskConfigOf(tenantId)).locale;
+}
+
 async function arrivalStageOf(tenantId: string): Promise<string> {
   return (await deskConfigOf(tenantId)).arrivalStage;
 }
 
 /** Everything the leads list can be narrowed by, from the query string. */
 export interface LeadFilterOpts {
+  /** A notification id: the records that alert named (a batch hand-over). */
+  alert?: string;
   q?: string; stage?: string; agentId?: string;
   segment?: string; intent?: string;
   source?: string; locality?: string; agent?: string; flag?: string;
@@ -2875,10 +3093,16 @@ function leadFilterParts(t: string, opts: LeadFilterOpts, SEGMENTS: Record<strin
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
-    base.push(sql`(lower(name) LIKE ${like} OR phone LIKE ${like}
+    base.push(sql`(lower(name) LIKE ${like} OR ${phoneLike('phone', q)}
       OR lower(coalesce(email, '')) LIKE ${like} OR lower(coalesce(locality, '')) LIKE ${like})`);
   }
   if (opts.agentId) base.push(sql`agent_id = ${opts.agentId}`);
+  // THE RECORDS ONE ALERT NAMED ("3 leads assigned to you"), and only for the
+  // person it was sent to: an alert id is not a way into anyone else's list.
+  if (opts.alert) {
+    base.push(sql`id IN (SELECT unnest(record_ids) FROM notifications
+                          WHERE id = ${opts.alert} AND tenant_id = ${t} AND user_id = ${getContext()?.userId ?? ''})`);
+  }
 
   const many = (v?: string) => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
   // OR binds LOOSER than AND, so any group of alternatives has to carry its own
@@ -2917,7 +3141,7 @@ function leadFilterParts(t: string, opts: LeadFilterOpts, SEGMENTS: Record<strin
       : opts.intent === 'rent' ? LEAD_RENT : null,
     segment: SEGMENTS[opts.segment as LeadSegment] ?? null,
     source: sources.length
-      ? sql`lower(coalesce(source, '')) IN ${sql(sources.map(s => s.toLowerCase()))}` : null,
+      ? sql`lower(coalesce(source, '')) IN ${sql(sources.map(sourceKey))}` : null,
     // Matched on the NORMALISED key, not loosely. It used to be a LIKE on the
     // first path segment, so "Wakad" also matched "Wakad / Hinjewadi" — right
     // for the desk, where the same place is typed two ways, but a count that
@@ -3097,7 +3321,7 @@ type AssignmentEntry = {
  * lookups are now one query for the whole set, the events one insert, and the
  * loop check one count.
  */
-async function recordAssignments(entries: AssignmentEntry[]): Promise<void> {
+async function recordAssignments(entries: AssignmentEntry[], q: any = sql): Promise<void> {
   // A no-op move is not history. Same test as before, applied set-wise.
   const list = entries.filter(e => (e.prevAgentId || null) !== (e.agentId || null));
   if (!list.length) return;
@@ -3112,16 +3336,20 @@ async function recordAssignments(entries: AssignmentEntry[]): Promise<void> {
     const ids = [...new Set(list.flatMap(e => [e.prevAgentId, e.agentId]).filter(Boolean))] as string[];
     const names = new Map<string, string>();
     if (ids.length) {
-      const rows = await sql`
-        SELECT id, name FROM users WHERE id IN ${sql(ids)}
-        UNION
-        SELECT id, name FROM crm_agents WHERE id IN ${sql(ids)} AND tenant_id = ${t}`;
-      // users wins where both carry the id -- same precedence as the two
-      // sequential lookups this replaces, which only consulted crm_agents when
-      // users had nothing.
-      for (const r of rows as any[]) if (!names.has(r.id) || r.name) names.set(r.id, r.name);
+      // A member still here reads by name, or by login id when the name is
+      // empty. Only someone missing, or deleted with no name left, reads "a
+      // former member" — never "null": "Siddharth Varma → null" was a hand-off
+      // to an id that no longer resolved, and read as if the lead was dropped.
+      const rows = await q`
+        SELECT x.id,
+               coalesce(nullif(btrim(u.name), ''), nullif(btrim(a.name), ''),
+                        CASE WHEN u.id IS NOT NULL AND u.deleted_at IS NULL THEN coalesce(nullif(u.login_id, ''), 'a team member') END) AS name
+          FROM unnest(${ids}::text[]) AS x(id)
+          LEFT JOIN users u ON u.id = x.id AND u.tenant_id = ${t}
+          LEFT JOIN crm_agents a ON a.id = x.id AND a.tenant_id = ${t}`;
+      for (const r of rows as any[]) if (r.name) names.set(r.id, r.name);
     }
-    const nameOf = (id?: string | null) => (id ? names.get(id) ?? null : null);
+    const nameOf = (id?: string | null) => (id ? names.get(id) || 'a former member' : null);
 
     const now = new Date().toISOString();
     const rows = list.map((e, i) => {
@@ -3145,7 +3373,7 @@ async function recordAssignments(entries: AssignmentEntry[]): Promise<void> {
     // One statement. addTimelineEvent is deliberately not reused here: it
     // inserts a single row and carries the lead-remark notification, which an
     // assignment must not send.
-    await sql`INSERT INTO crm_timeline_events ${sql(rows as any[],
+    await q`INSERT INTO crm_timeline_events ${sql(rows as any[],
       'id', 'record_id', 'type', 'title', 'description', 'author', 'timestamp', 'metadata', 'tenant_id')}
       ON CONFLICT (id) DO NOTHING`;
 
@@ -3157,6 +3385,9 @@ async function recordAssignments(entries: AssignmentEntry[]): Promise<void> {
     // alertOnReassignLoop, called from sweepIdleLeads / sweepIdleOwners).
     void nameOf;
   } catch (e: any) {
+    // Inside a transaction a failed statement has already aborted it, so the
+    // move cannot be kept without its history: say so rather than swallow.
+    if (q !== sql) throw e;
     console.warn('[Timeline] assignment event failed:', e?.message);
   }
 }
@@ -3234,51 +3465,120 @@ async function alertOnReassignLoop(batch: { recordId: string; toName: string | n
   }
 }
 
+/**
+ * ONE MOVE: the check, the write and its history, through `q` — `sql`, or a
+ * transaction when several moves must stand or fall together (splitAssign,
+ * distributeWork, assignUnowned, assignProjectOwners). What is said about it
+ * (audit, alerts) is afterMove(), run once the writes are committed, so a
+ * rolled-back move never told anybody anything.
+ */
+type Move = { kind: 'lead' | 'owner'; ids: string[]; agentId: string | null; n: number; before: { id: string; agent_id: string | null }[] };
+async function moveRecords(q: any, kind: 'lead' | 'owner', ids: string[], agentId: string | null, ctx: ActorCtx): Promise<Move> {
+  const clean = [...new Set((ids || []).filter(Boolean))];
+  const none: Move = { kind, ids: clean, agentId, n: 0, before: [] };
+  if (clean.length === 0) return none;
+  const t = tid();
+  await assertWorkable(t, [agentId], q);
+  const table = kind === 'lead' ? sql`crm_leads` : sql`crm_owners`;
+  // WHO HELD THEM BEFORE, read before the update overwrites it — a timeline
+  // that cannot say where a record came from is a timeline that cannot answer
+  // "why is this mine?".
+  const before = await q`
+    SELECT id, agent_id FROM ${table}
+    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
+      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
+  const res = await q`
+    UPDATE ${table} SET agent_id = ${agentId}, updated_at = NOW()
+    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
+      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
+  if (res.count === 0) return none;
+  // The whole selection's history in one go -- see recordAssignments().
+  await recordAssignments((before as any[]).map(row => ({
+    recordId: row.id, prevAgentId: row.agent_id, agentId,
+    // "bulk assignment" only when it was one: a single lead reassigned from
+    // the record read as if it had been swept up in a batch.
+    reason: clean.length > 1 ? 'bulk assignment' : undefined, author: ctx.actorId ?? null,
+  })), q);
+  return { kind, ids: clean, agentId, n: res.count, before: before as any[] };
+}
+
+/** The ledger line and the hand-over alert for a committed move. */
+async function afterMove(m: Move, ctx: ActorCtx): Promise<void> {
+  if (!m.n) return;
+  const t = tid();
+  const { n, agentId } = m;
+  if (m.kind === 'lead') {
+    const name = agentId
+      ? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name ?? 'a colleague'
+      : null;
+    audit({
+      tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+      actor_label: ctx.actorLabel ?? null, action: 'lead.bulk_assign', target_type: 'lead', target_id: null,
+      summary: agentId ? `${n} lead${n === 1 ? '' : 's'} assigned to ${name}` : `${n} lead${n === 1 ? '' : 's'} unassigned`,
+      metadata: { ids: m.ids, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+  } else {
+    audit({
+      tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
+      actor_label: ctx.actorLabel ?? null, action: 'owner.bulk_assign', target_type: 'owner', target_id: null,
+      summary: agentId ? `${n} owner${n === 1 ? '' : 's'} assigned` : `${n} owner${n === 1 ? '' : 's'} unassigned`,
+      metadata: { ids: m.ids, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+  }
+  if (agentId) await notifyHandedOver(m.kind, agentId, m.before);
+}
+
+/** Several moves, all or nothing; then what is said about each. */
+async function moveAll(plan: { kind: 'lead' | 'owner'; ids: string[]; agentId: string }[], ctx: ActorCtx): Promise<Move[]> {
+  const moves: Move[] = await sql.begin(async (tx: any) => {
+    const out: Move[] = [];
+    for (const p of plan) if (p.ids.length) out.push(await moveRecords(tx, p.kind, p.ids, p.agentId, ctx));
+    return out;
+  }) as any;
+  for (const m of moves) await afterMove(m, ctx);
+  return moves;
+}
+
 export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
   const who = getContext();
   if (who?.role === 'agent') throw new ForbiddenError('Assigning leads is done from the desk.');
-  const clean = [...new Set((ids || []).filter(Boolean))];
-  if (clean.length === 0) return 0;
+  const m = await moveRecords(sql, 'lead', ids, agentId, ctx);
+  await afterMove(m, ctx);
+  return m.n;
+}
 
+/**
+ * THE ALERT FOR WORK HANDED TO SOMEBODY BY HAND — bulk assign, reassign, the
+ * Assign menu. One record is that record, by name: "Lead moved to you · Rahul".
+ * It was always "1 lead assigned to you", nameless, because every hand-over
+ * went through the batch path — a reassigned lead could not be told from a new
+ * one, nor from anyone else. Several are one alert, naming the records, which
+ * opens exactly those (`?alert=` on the list) rather than the whole book.
+ * `moved` rows are the ones that actually changed hands, with who held them.
+ */
+async function notifyHandedOver(kind: 'lead' | 'owner', agentId: string, moved: { id: string; agent_id: string | null }[]): Promise<void> {
+  if (!moved.length) return;
   const t = tid();
-  // WHO HELD THEM BEFORE, read before the update overwrites it — a timeline
-  // that cannot say where a lead came from is a timeline that cannot answer
-  // "why is this mine?".
-  const before = await sql`
-    SELECT id, agent_id FROM crm_leads
-    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
-      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
-  const res = await sql`
-    UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW()
-    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
-      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
-  const n = res.count;
-  if (n === 0) return 0;
-  // The whole selection's history in one go -- see recordAssignments().
-  await recordAssignments(before.map((row: any) => ({
-    recordId: row.id, prevAgentId: row.agent_id, agentId,
-    reason: 'bulk assignment', author: ctx.actorId ?? null,
-  })));
-
-  const name = agentId
-    ? (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name ?? 'a colleague'
-    : null;
-  audit({
-    tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
-    actor_label: ctx.actorLabel ?? null, action: 'lead.bulk_assign', target_type: 'lead', target_id: null,
-    summary: agentId ? `${n} lead${n === 1 ? '' : 's'} assigned to ${name}` : `${n} lead${n === 1 ? '' : 's'} unassigned`,
-    metadata: { ids: clean, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
-  });
-  if (agentId) {
-    notify({
-      userId: agentId, type: 'lead_assigned_bulk',
-      data: { n },
-      // The recipient's own rows, not the whole desk's -- the alert says N
-      // leads are yours and the list it opened held everyone's.
-      link: `?screen=leads&agent=${encodeURIComponent(agentId)}`,
-    }).catch(err => console.warn('[Notify] bulk assign failed:', err?.message));
+  const ids = moved.map(m => m.id);
+  if (moved.length === 1) {
+    const m = moved[0];
+    const table = kind === 'lead' ? sql`crm_leads` : sql`crm_owners`;
+    const [row] = await sql`SELECT name, phone, locality, source FROM ${table} WHERE id = ${m.id} AND tenant_id = ${t}`;
+    const name = row?.name || row?.phone || undefined;
+    const type = kind === 'lead' ? (m.agent_id ? 'lead_reassigned' : 'lead_assigned') : (m.agent_id ? 'owner_reassigned' : 'owner_assigned');
+    await notify({
+      userId: agentId, type,
+      data: kind === 'lead' && !m.agent_id ? { name, locality: row?.locality, source: row?.source } : { name },
+      link: kind === 'lead' ? `?screen=leads&lead=${m.id}` : `?screen=calling&owner=${m.id}`,
+    }).catch(err => console.warn('[Notify] hand-over failed:', err?.message));
+    return;
   }
-  return n;
+  await notify({
+    userId: agentId, type: kind === 'lead' ? 'lead_assigned_bulk' : 'owner_reassigned',
+    data: { n: moved.length },
+    record: { kind, ids },
+    link: kind === 'lead' ? `?screen=leads&agent=${encodeURIComponent(agentId)}` : '?screen=calling',
+  }).catch(err => console.warn('[Notify] hand-over failed:', err?.message));
 }
 
 // ============================================================================
@@ -3297,7 +3597,6 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
 // and why the walk ends at Key Received. 'Callback' stays in the vocabulary so
 // the records written under it remain valid and filterable.
 export const OWNER_STAGES = ['New', 'Call Not Received', 'Incoming Not Available', 'Switch Off', 'Contacted', 'Interested', 'Key Received'];
-export const OWNER_TERMINAL_STATUSES = ['Not Interested', 'Do Not Call'];
 export const OWNER_STATUSES = [...OWNER_STAGES, 'Callback', ...OWNER_TERMINAL_STATUSES];
 
 /** Same rule as leadScope, over crm_owners: an agent sees what's assigned to
@@ -3371,9 +3670,9 @@ function rowToOwner(r: any): any {
  * timeline and the queue are the durable record, this is only the nudge.
  */
 const ARRIVAL_QUIET_MS = 20_000;
-const arrivalTally = new Map<string, { n: number; timer: NodeJS.Timeout }>();
+const arrivalTally = new Map<string, { ids: string[]; timer: NodeJS.Timeout }>();
 
-function queueOwnerArrivalNotice(agentId: string): void {
+function queueOwnerArrivalNotice(agentId: string, ownerId: string): void {
   // Read HERE and closed over. The tally is keyed by tenant AND agent because
   // it is process-wide: two firms importing at once would otherwise share a
   // counter and each be told the other's total. Capturing the actor is what
@@ -3384,19 +3683,21 @@ function queueOwnerArrivalNotice(agentId: string): void {
   const key = `${tenantId}:${agentId}`;
   const prev = arrivalTally.get(key);
   if (prev) clearTimeout(prev.timer);
-  const n = (prev?.n || 0) + 1;
+  const ids = [...(prev?.ids || []), ownerId];
+  const n = ids.length;
   const timer = setTimeout(() => {
     arrivalTally.delete(key);
     if (actorId === agentId) return;
     notify({
       userId: agentId, tenantId, type: 'owner_assigned',
       data: { n },
+      record: { kind: 'owner', ids },
       link: `?screen=calling&agent=${encodeURIComponent(agentId)}`,
       toSelf: true,   // the actor check above already ran, with real context
     }).catch(err => console.warn('[Notify] owner arrival failed:', err?.message));
   }, ARRIVAL_QUIET_MS);
   timer.unref?.();
-  arrivalTally.set(key, { n, timer });
+  arrivalTally.set(key, { ids, timer });
 }
 
 export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
@@ -3409,9 +3710,10 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
   // already named an agent for this row.
   let agentId = data.agentId || null;
   let autoRouted = false;
+  if (agentId) await assertWorkable(t, [agentId]);
   if (!agentId) {
     const rules = await getRoutingRules();
-    if (rules.owner_strategy === 'round_robin') {
+    if (autoAssigns(rules, 'owners')) {
       agentId = await nextRoutedOwnerAgent();
       autoRouted = Boolean(agentId);
     }
@@ -3419,7 +3721,7 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
   const rows = await sql`
     INSERT INTO crm_owners (id, tenant_id, name, phone, email, project, tower, unit_no, config,
       carpet_area, saleable_area, unit_ref, locality, stage, source, agent_id, created_by, import_batch_id)
-    VALUES (${id}, ${t}, ${data.name || null}, ${data.phone || null}, ${data.email || null},
+    VALUES (${id}, ${t}, ${data.name || null}, ${await typedPhone(data.phone)}, ${data.email || null},
       ${data.project || null}, ${data.tower || null}, ${data.unitNo || null}, ${data.config || null},
       ${data.carpetArea ?? null}, ${data.saleableArea ?? null},
       ${data.unitRef || null}, ${data.locality || null},
@@ -3434,7 +3736,7 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
   // that was 731 of 732 owners routed and not one notification sent. The
   // debounce is what makes this safe to widen: an import still produces one
   // alert per agent, not one per row.
-  if (agentId) queueOwnerArrivalNotice(agentId);
+  if (agentId) queueOwnerArrivalNotice(agentId, id);
   if (data.notes) {
     await addTimelineEvent({ record_id: id, type: 'note', title: 'Note', description: String(data.notes), author: 'Import' });
   }
@@ -3467,7 +3769,25 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
   const t = tid();
   const createdBy = ctx.actorId ?? getContext()?.userId ?? null;
   const rules = await getRoutingRules();
-  const routing = rules.owner_strategy === 'round_robin';
+  const routing = autoAssigns(rules, 'owners');
+
+  // A ROW THAT NAMES SOMEONE WHO CANNOT TAKE WORK is filed UNASSIGNED: not
+  // given to them, not dealt to the rota in their place (nobody chose that),
+  // and the batch is not refused for it. One read for the whole batch.
+  // Each such row comes back with `unassignedReason`, the sentence an import
+  // report shows ("Named Siddhi, who can't take work: left unassigned").
+  const named = [...new Set(list.map(d => d.agentId).filter(Boolean).map(String))];
+  const namedRows = named.length
+    ? await sql`SELECT x.id, coalesce(u.name, a.name) AS name, ${canTakeWork(t, sql`x.id`)} AS ok
+                  FROM unnest(${named}::text[]) AS x(id)
+                  LEFT JOIN users u ON u.tenant_id = ${t} AND u.id = x.id
+                  LEFT JOIN crm_agents a ON a.tenant_id = ${t} AND a.id = x.id` as any[]
+    : [];
+  const workable = new Set<string>(namedRows.filter(r => r.ok).map(r => r.id));
+  const droppedWhy = (id: any) => {
+    const r = namedRows.find(x => x.id === String(id));
+    return `Named ${r?.name || String(id)}, who can't take work: left unassigned`;
+  };
 
   // The rota is claimed ONCE for the whole batch (see nextRoutedOwnerAgents):
   // the same rotation, one round trip instead of one per row.
@@ -3475,15 +3795,17 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
   const rota = needRota ? await nextRoutedOwnerAgents(needRota) : [];
   let rotaAt = 0;
 
+  const loc = await localeOf(t);
   const rows: any[] = [];
   for (const [i, data] of list.entries()) {
-    let agentId = data.agentId || null;
-    if (!agentId && routing) agentId = rota[rotaAt++] ?? null;
+    let agentId = data.agentId ? (workable.has(String(data.agentId)) ? String(data.agentId) : null) : null;
+    if (!data.agentId && routing) agentId = rota[rotaAt++] ?? null;
     rows.push({
       id: data.id || `own_${Date.now()}_${i}_${randomBytes(3).toString('hex')}`,
       tenant_id: t,
       name: data.name || null,
-      phone: data.phone || null,
+      // Read before it got here (an import row, a listing's owner): kept as given.
+      phone: keepPhone(data.phone, loc.country),
       email: data.email || null,
       project: data.project || null,
       tower: data.tower || null,
@@ -3511,7 +3833,7 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
   // One notice per agent however many rows they got — the debounce in
   // queueOwnerArrivalNotice collapses the batch, and it is the same path a
   // single arrival takes, so the alert reads the same either way.
-  for (const r of rows) if (r.agent_id) queueOwnerArrivalNotice(r.agent_id);
+  for (const r of rows) if (r.agent_id) queueOwnerArrivalNotice(r.agent_id, r.id);
 
   // Notes as timeline entries, in one statement rather than one per row.
   //
@@ -3551,7 +3873,12 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
   }
 
   const byId = new Map((saved as any[]).map(r => [r.id, rowToOwner(r)]));
-  return rows.map(r => byId.get(r.id)).filter(Boolean);
+  return rows.map((r, i) => {
+    const o = byId.get(r.id);
+    if (!o) return null;
+    const asked = list[i].agentId;
+    return asked && !workable.has(String(asked)) ? { ...o, unassignedReason: droppedWhy(asked) } : o;
+  }).filter(Boolean);
 }
 
 /**
@@ -3612,7 +3939,7 @@ async function ownerWhere(t: string, opts: OwnerListOpts, omit: { segment?: bool
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
-    where.push(sql`(lower(coalesce(name, '')) LIKE ${like} OR phone LIKE ${like} OR lower(coalesce(project, '')) LIKE ${like})`);
+    where.push(sql`(lower(coalesce(name, '')) LIKE ${like} OR ${phoneLike('phone', q)} OR lower(coalesce(project, '')) LIKE ${like})`);
   }
   // coalesce: a row with no stage is New everywhere else (OWNER_OPEN, the
   // counts), so the New tab has to find it too.
@@ -3650,7 +3977,7 @@ async function ownerWhere(t: string, opts: OwnerListOpts, omit: { segment?: bool
     if (parts.length) where.push(anyOf(parts));
   }
   const sources = many(opts.source);
-  if (sources.length) where.push(sql`lower(coalesce(source, '')) IN ${sql(sources.map(s => s.toLowerCase()))}`);
+  if (sources.length) where.push(sql`lower(coalesce(source, '')) IN ${sql(sources.map(sourceKey))}`);
   return where;
 }
 const andAll = (where: any[]) => where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
@@ -3846,10 +4173,11 @@ export async function assignProjectOwners(opts: {
   const who = getContext();
   if (who?.role === 'agent') throw new ForbiddenError('Assigning a project is done from the desk.');
   const t = tid();
+  await assertWorkable(t, opts.targets || []);
   const live = await sql`
     SELECT id, name FROM users
      WHERE tenant_id = ${t} AND id IN ${sql([...new Set((opts.targets || []).filter(Boolean))])}
-       AND deleted_at IS NULL AND lower(coalesce(status, 'active')) = 'active'`;
+       AND ${canTakeWork(t, sql`users.id`)}`;
   if (!live.length) throw new ForbiddenError('Pick at least one active person.');
   const targets = (opts.targets || []).filter(id => live.some((u: any) => u.id === id));
 
@@ -3868,12 +4196,10 @@ export async function assignProjectOwners(opts: {
   // one caller by accident of insertion order.
   const share = new Map<string, string[]>(targets.map(id => [id, []]));
   (rows as any[]).forEach((r, i) => share.get(targets[i % targets.length])!.push(r.id));
-  for (const [target, ids] of share) {
-    if (!ids.length) continue;
-    // Rows already on that person are a no-op — bulkAssignOwners does not
-    // rewrite history for a move that is not one — so this counts what MOVED.
-    assigned += await bulkAssignOwners(ids, target, ctx);
-  }
+  // All or nothing (moveAll). Rows already on that person are a no-op — a
+  // move that is not one writes no history — so this counts what MOVED.
+  const moves = await moveAll([...share].map(([target, ids]) => ({ kind: 'owner' as const, ids, agentId: target })), ctx);
+  for (const m of moves) assigned += m.n;
   // …and what each person now HOLDS in this project, which is the number the
   // screen should say. "Aniket 0" after splitting a project he already had half
   // of is true about the moves and wrong about the world.
@@ -3903,7 +4229,8 @@ export async function getOwnerById(id: string): Promise<any | null> {
   const rows = await sql`SELECT * FROM crm_owners WHERE id = ${id} AND tenant_id = ${tid()} AND ${ownerScope()} LIMIT 1`;
   if (!rows[0]) return null;
   const events = await getTimelineEvents(id);
-  return { ...rowToOwner(rows[0]), timeline: events.map(mapEventForClient) };
+  const names = await legacyEventNames(events);
+  return { ...rowToOwner(rows[0]), timeline: events.map(e => mapEventForClient(e, names)) };
 }
 
 export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any | null> {
@@ -3915,9 +4242,10 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
   if (c?.role === 'agent' && patch.agentId !== undefined && patch.agentId !== c.userId) {
     patch = { ...patch }; delete patch.agentId;
   }
+  if (patch.agentId && patch.agentId !== existing.agentId) await assertWorkable(t, [patch.agentId]);
   const next = {
     name: patch.name !== undefined ? patch.name : existing.name,
-    phone: patch.phone !== undefined ? patch.phone : existing.phone,
+    phone: patch.phone !== undefined ? editedPhone(patch.phone, existing.phone, (await localeOf(t)).country) : existing.phone,
     email: patch.email !== undefined ? patch.email : existing.email,
     project: patch.project !== undefined ? patch.project : existing.project,
     unit_ref: patch.unitRef !== undefined ? patch.unitRef : existing.unitRef,
@@ -3958,7 +4286,7 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
       record_id: id, type: patch.callbackAt ? 'follow_up' : 'note',
       title: patch.callbackAt ? 'Callback scheduled' : 'Callback cleared',
       description: patch.callbackAt
-        ? `${new Date(patch.callbackAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}${patch.callbackNote ? `: ${patch.callbackNote}` : ''}`
+        ? `${await callbackWhen(patch.callbackAt)}${patch.callbackNote ? `: ${patch.callbackNote}` : ''}`
         : 'No callback scheduled',
       // By id, like every other timeline write — see the stage change above.
       author: ctx.actorId ?? getContext()?.userId ?? 'System',
@@ -4044,10 +4372,11 @@ export async function distributeWork(opts: {
   const t = tid();
   const kinds = opts.kinds?.length ? opts.kinds : ['leads', 'owners'];
 
+  await assertWorkable(t, opts.targets || []);
   const live = await sql`
     SELECT id, name FROM users
      WHERE tenant_id = ${t} AND id IN ${sql([...new Set(opts.targets.filter(Boolean))])}
-       AND deleted_at IS NULL AND lower(coalesce(status, 'active')) = 'active'`;
+       AND ${canTakeWork(t, sql`users.id`)}`;
   if (!live.length) throw new ForbiddenError('Pick at least one active person to hand the work to.');
   // The order the caller gave, keeping only the people who may hold work — so
   // the split is predictable and a suspended name silently dropped cannot
@@ -4066,29 +4395,26 @@ export async function distributeWork(opts: {
   };
 
   let leads = 0, owners = 0;
+  const plan: { kind: 'lead' | 'owner'; ids: string[]; agentId: string }[] = [];
   if (kinds.includes('leads')) {
     const rows = await sql`
       SELECT id FROM crm_leads
        WHERE tenant_id = ${t} AND agent_id = ${opts.fromUserId} AND ${OPEN}
        ORDER BY created_at`;
-    for (const [target, ids] of deal(rows.map((r: any) => r.id))) {
-      if (!ids.length) continue;
-      const n = await bulkAssignLeads(ids, target, ctx);
-      leads += n;
-      const slot = perTarget.find(p => p.id === target); if (slot) slot.leads = n;
-    }
+    for (const [target, ids] of deal(rows.map((r: any) => r.id))) plan.push({ kind: 'lead', ids, agentId: target });
   }
   if (kinds.includes('owners')) {
     const rows = await sql`
       SELECT id FROM crm_owners
        WHERE tenant_id = ${t} AND agent_id = ${opts.fromUserId} AND ${OWNER_OPEN}
        ORDER BY created_at`;
-    for (const [target, ids] of deal(rows.map((r: any) => r.id))) {
-      if (!ids.length) continue;
-      const n = await bulkAssignOwners(ids, target, ctx);
-      owners += n;
-      const slot = perTarget.find(p => p.id === target); if (slot) slot.owners = n;
-    }
+    for (const [target, ids] of deal(rows.map((r: any) => r.id))) plan.push({ kind: 'owner', ids, agentId: target });
+  }
+  // All or nothing: a hand-over half done leaves the leaver holding the rest.
+  for (const m of await moveAll(plan, ctx)) {
+    const slot = perTarget.find(p => p.id === m.agentId);
+    if (m.kind === 'lead') { leads += m.n; if (slot) slot.leads = m.n; }
+    else { owners += m.n; if (slot) slot.owners = m.n; }
   }
 
   audit({
@@ -4130,10 +4456,11 @@ export async function splitAssign(
 ): Promise<{ assigned: number; perTarget: { id: string; name: string | null; n: number }[] }> {
   const t = tid();
   const clean = [...new Set((ids || []).filter(Boolean))];
+  await assertWorkable(t, targets || []);
   const live = await sql`
     SELECT id, name FROM users
      WHERE tenant_id = ${t} AND id IN ${sql([...new Set((targets || []).filter(Boolean))])}
-       AND deleted_at IS NULL AND lower(coalesce(status, 'active')) = 'active'`;
+       AND ${canTakeWork(t, sql`users.id`)}`;
   if (!clean.length || !live.length) return { assigned: 0, perTarget: [] };
   const order = targets.filter(id => live.some((u: any) => u.id === id));
 
@@ -4142,11 +4469,11 @@ export async function splitAssign(
 
   const perTarget: { id: string; name: string | null; n: number }[] = [];
   let assigned = 0;
-  for (const [target, list] of share) {
-    if (!list.length) continue;
-    const n = kind === 'leads' ? await bulkAssignLeads(list, target, ctx) : await bulkAssignOwners(list, target, ctx);
-    assigned += n;
-    perTarget.push({ id: target, name: (live as any[]).find(u => u.id === target)?.name ?? null, n });
+  // All or nothing (moveAll).
+  const moves = await moveAll([...share].map(([target, list]) => ({ kind: kind === 'leads' ? 'lead' as const : 'owner' as const, ids: list, agentId: target })), ctx);
+  for (const m of moves) {
+    assigned += m.n;
+    perTarget.push({ id: m.agentId!, name: (live as any[]).find(u => u.id === m.agentId)?.name ?? null, n: m.n });
   }
   return { assigned, perTarget };
 }
@@ -4183,6 +4510,8 @@ export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SY
   const who = getContext();
   if (who?.role === 'agent') throw new ForbiddenError('Handing out work is done from the desk.');
   const t = tid();
+  const chosen = [...new Set((Array.isArray(agentIds) ? agentIds : []).map(String).filter(Boolean))];
+  await assertWorkable(t, chosen);
   const rows = side === 'leads'
     ? await sql`SELECT l.id FROM crm_leads l
                  LEFT JOIN users u ON u.id = l.agent_id AND u.tenant_id = l.tenant_id AND u.deleted_at IS NULL
@@ -4195,16 +4524,12 @@ export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SY
   if (!rows.length) return { assigned: 0, perTarget: [] };
 
   const ids = (rows as any[]).map(r => r.id);
-  // THE PEOPLE THE DESK TICKED, when it chose: dealt in turn, one each. Only
-  // members of this firm who can be given work; anyone else in the list is
-  // dropped, never trusted. Without a choice, the saved rota decides, claimed
-  // once for the whole backlog — the same trick the import uses.
+  // THE PEOPLE THE DESK TICKED, when it chose: dealt in turn, one each. Every
+  // one must be able to take work — a name that cannot is refused, not
+  // dropped. Without a choice, the saved rota decides, claimed once for the
+  // whole backlog — the same trick the import uses.
   let pool: (string | null)[];
-  if (Array.isArray(agentIds) && agentIds.length) {
-    const ok = (await sql`SELECT id FROM users WHERE tenant_id = ${t} AND id IN ${sql(agentIds.map(String))}
-                           AND deleted_at IS NULL AND lower(coalesce(status, 'active')) <> 'suspended'`).map((r: any) => r.id);
-    const chosen = agentIds.map(String).filter(id => ok.includes(id));
-    if (!chosen.length) throw new ForbiddenError('None of those people can be given work.');
+  if (chosen.length) {
     pool = ids.map((_, i) => chosen[i % chosen.length]);
   } else {
     pool = side === 'leads'
@@ -4223,10 +4548,11 @@ export async function assignUnowned(side: 'leads' | 'owners', ctx: ActorCtx = SY
   const names = await sql`SELECT id, name FROM users WHERE tenant_id = ${t} AND id IN ${sql([...byTarget.keys()])}`;
   const perTarget: { id: string; name: string | null; n: number }[] = [];
   let assigned = 0;
-  for (const [target, list] of byTarget) {
-    const n = side === 'leads' ? await bulkAssignLeads(list, target, ctx) : await bulkAssignOwners(list, target, ctx);
-    assigned += n;
-    perTarget.push({ id: target, name: (names as any[]).find(u => u.id === target)?.name ?? null, n });
+  // All or nothing (moveAll).
+  const moves = await moveAll([...byTarget].map(([target, list]) => ({ kind: side === 'leads' ? 'lead' as const : 'owner' as const, ids: list, agentId: target })), ctx);
+  for (const m of moves) {
+    assigned += m.n;
+    perTarget.push({ id: m.agentId!, name: (names as any[]).find(u => u.id === m.agentId)?.name ?? null, n: m.n });
   }
   audit({
     tenant_id: t, actor_type: ctx.actorType || 'user', actor_id: ctx.actorId ?? null,
@@ -4250,44 +4576,11 @@ export async function heldWork(userId: string): Promise<{ leads: number; owners:
 export async function bulkAssignOwners(ids: string[], agentId: string | null, ctx: ActorCtx = SYSTEM_CTX): Promise<number> {
   const who = getContext();
   if (who?.role === 'agent') throw new ForbiddenError('Assigning owners is done from the desk.');
-  const clean = [...new Set((ids || []).filter(Boolean))];
-  if (clean.length === 0) return 0;
-  const t = tid();
-  // WHO HELD THEM BEFORE, read before the update overwrites it — the same
-  // thing bulkAssignLeads does, and the owner side did not: an owner moved
-  // between callers changed hands with nothing on the record saying so, and
-  // nothing to count when asking whether one is being passed around.
-  const before = await sql`
-    SELECT id, agent_id FROM crm_owners
-    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
-      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
-  const res = await sql`
-    UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW()
-    WHERE tenant_id = ${t} AND id IN ${sql(clean)}
-      AND coalesce(agent_id, '') IS DISTINCT FROM coalesce(${agentId}, '')`;
-  const n = res.count;
-  if (n === 0) return 0;
-  // The whole selection's history in one go -- see recordAssignments().
-  await recordAssignments(before.map((row: any) => ({
-    recordId: row.id, prevAgentId: row.agent_id, agentId,
-    reason: 'bulk assignment', author: ctx.actorId ?? null,
-  })));
-  audit({
-    tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
-    actor_label: ctx.actorLabel ?? null, action: 'owner.bulk_assign', target_type: 'owner', target_id: null,
-    summary: agentId ? `${n} owner${n === 1 ? '' : 's'} assigned` : `${n} owner${n === 1 ? '' : 's'} unassigned`,
-    metadata: { ids: clean, agentId }, ip: ctx.ip, user_agent: ctx.userAgent,
-  });
-  if (agentId) {
-    notify({
-      userId: agentId, type: 'owner_reassigned', push: true,
-      data: { n },
-      // Calling, not Contacts: Contacts is the people whose property we manage,
-      // and a calling record handed over is work in the queue.
-      link: '?screen=calling',
-    }).catch(err => console.warn('[Notify] owner bulk assign failed:', err?.message));
-  }
-  return n;
+  // Same move as bulkAssignLeads, on the calling list (moveRecords): the
+  // previous holder read first, so an owner moved between callers carries it.
+  const m = await moveRecords(sql, 'owner', ids, agentId, ctx);
+  await afterMove(m, ctx);
+  return m.n;
 }
 
 /**
@@ -4435,8 +4728,11 @@ export async function getLeadsSummary(opts: LeadFilterOpts = {}): Promise<any> {
     by_intent AS (SELECT count(*) FILTER (WHERE ${LEAD_SALE})::int AS buy,
                count(*) FILTER (WHERE ${LEAD_RENT})::int AS rent
         FROM crm_leads WHERE ${whereExcept('intent')}),
-    by_source AS (SELECT lower(coalesce(source, '')) AS value, min(source) AS label, count(*)::int AS n
-        FROM crm_leads WHERE ${whereExcept('source')} AND coalesce(source, '') <> ''
+    -- A lead with no source is a choice of its own, "Not stated" (SOURCE_NONE),
+    -- not left out of the menu where nobody can find it.
+    by_source AS (SELECT CASE WHEN coalesce(source, '') = '' THEN ${SOURCE_NONE} ELSE lower(source) END AS value,
+               coalesce(min(nullif(source, '')), 'Not stated') AS label, count(*)::int AS n
+        FROM crm_leads WHERE ${whereExcept('source')}
         GROUP BY 1 ORDER BY 3 DESC, 1),
     by_locality AS (SELECT ${LOCALITY_KEY} AS value, min(locality) AS label, count(*)::int AS n
         FROM crm_leads WHERE ${whereExcept('locality')} AND ${LOCALITY_KEY} <> ''
@@ -4697,6 +4993,7 @@ export async function listProperties(opts: {
   verified?: string; tower?: string; media?: string;
   excludeId?: string;
   tab?: string; unit?: string;
+  catalogue?: string;
 } = {}): Promise<{ rows: any[]; total: number; page: number; limit: number }> {
   const t = tid();
   const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
@@ -4714,7 +5011,14 @@ export async function listProperties(opts: {
   // the listings grid needed the leads in memory at all. One join, bounded to
   // the page that is actually being rendered.
   const demand = await demandFor(t, rows.map((r: any) => r.id));
-  const mapped = rows.map((r: any) => ({ ...rowToProperty(r), demandCount: demand.get(r.id) ?? 0 }));
+  // A list row carries no history (only the record reads the shared timeline)
+  // and cannot name an author the record finds in the ledger — left out rather
+  // than sent as [] and null, which overwrote both on the open record.
+  const mapped = rows.map((r: any) => {
+    const { timeline: _history, ...p } = rowToProperty(r);
+    if (p.createdBy == null) delete p.createdBy;
+    return { ...p, demandCount: demand.get(r.id) ?? 0 };
+  });
   return { rows: mapped, total: countRows[0]?.n ?? 0, page, limit };
 }
 
@@ -4801,6 +5105,9 @@ function propertyWhere(t: string, opts: PropertyListOpts = {}, omit: { tab?: boo
   const tower = many(opts.tower);
   if (tower.length) where.push(sql`lower(coalesce(nullif(wing, ''), tower, '')) IN ${sql(tower.map(x => x.toLowerCase()))}`);
   if (verified.length === 1) where.push(verified[0] === 'yes' ? sql`verified_at IS NOT NULL` : sql`verified_at IS NULL`);
+  // In the public catalogue, or not. Both picked is no filter.
+  const catalogue = many(opts.catalogue);
+  if (catalogue.length === 1) where.push(catalogue[0] === 'yes' ? sql`in_catalogue = TRUE` : sql`coalesce(in_catalogue, FALSE) = FALSE`);
   // Photos / video / none yet: what an agent checks before sending a listing
   // to a client, and could only learn by opening each one. Any of the picked.
   const media = many(opts.media).filter(m => PROP_MEDIA[m]);
@@ -4881,7 +5188,8 @@ export async function getPropertyById(id: string): Promise<any | null> {
   // agreements, verification). It read only the old `timeline` column, so all
   // of that was saved and shown until the page was reloaded, then never again.
   // The old column's entries (demo notes) follow, then when it was added.
-  const history: any[] = (events as any[]).map(mapEventForClient);
+  const names = await legacyEventNames(events as any);
+  const history: any[] = (events as any[]).map(e => mapEventForClient(e, names));
   history.push(...(Array.isArray(row.timeline) ? row.timeline : []));
   if (!(events as any[]).some(e => e.type === 'creation')) {
     history.push({ id: null, type: 'note', label: 'Added', authorId: createdBy, timestamp: row.created_at, metadata: {} });
@@ -4897,9 +5205,10 @@ function propertyEvent(id: string, ctx: ActorCtx, type: string, title: string, d
   }).catch(err => console.warn('[Property history] could not write:', err?.message));
 }
 
-const rupees = (v: any) => {
+/** A price in a listing's history, in the firm's currency: ₹45,00,000 · $4,500,000. */
+const priceText = (v: any, loc: Locale) => {
   const n = Number(String(v ?? '').replace(/[^0-9.]/g, ''));
-  return n > 0 ? `₹${Math.round(n).toLocaleString('en-IN')}` : 'no price';
+  return n > 0 ? moneyFull(n, loc) : 'no price';
 };
 
 /** 7.1 A visit confirmed the listing, or that mark is taken off. */
@@ -4938,6 +5247,87 @@ export async function setPropertyGallery(id: string, action: 'off' | 'on' | 'new
     summary: `Photo link: ${action}`, metadata: {}, ip: ctx.ip, user_agent: ctx.userAgent,
   });
   return getPropertyById(id);
+}
+
+/**
+ * SHOW IN CATALOGUE, one flat or many (listing-pages.md §A, §A.4). Returns how
+ * many changed and how many of the ones now on have no photos — the bulk
+ * action says so and ticks them anyway; the catalogue lists them last.
+ *
+ * A flat gets its catalogue address the first time it is ticked and keeps it,
+ * so a page someone bookmarked still opens after it is unticked and ticked
+ * again. The address names the size, type and locality, never the building:
+ * the firm can hide project names from the catalogue (`sharing.
+ * catalogueShowsProject`), and an address cannot be taken back once shared.
+ */
+/** Owners and managers only; system callers (no signed-in role) pass. */
+function assertCatalogueRole() {
+  const role = getContext()?.role;
+  if (role && role !== 'system' && !isDeskRole(role)) throw new ForbiddenError('Only an owner or a manager can change what is in the catalogue.');
+}
+
+export async function setCatalogue(ids: string[], on: boolean, ctx: ActorCtx = SYSTEM_CTX): Promise<{ changed: number; live: number; waiting: number; withoutPhotos: number }> {
+  assertCatalogueRole();
+  const t = tid();
+  const clean = [...new Set((ids || []).map(String).filter(Boolean))].slice(0, 1000);
+  if (!clean.length) return { changed: 0, live: 0, waiting: 0, withoutPhotos: 0 };
+  const rows = await sql`
+    UPDATE crm_properties SET in_catalogue = ${on}, updated_at = NOW()
+     WHERE tenant_id = ${t} AND id IN ${sql(clean)} AND coalesce(in_catalogue, FALSE) <> ${on}
+     RETURNING id, bhk, subtype, locality, catalogue_slug, media`;
+  if (on) {
+    const loc = await localeOf(t);
+    for (const r of rows as any[]) {
+      if (r.catalogue_slug) continue;
+      // Words as the page names them: "2 BHK Apartment Wakad", not the raw
+      // token "2", which read 2-apartment-wakad.
+      const base = [listingKind(r.bhk, r.subtype, loc), r.locality].filter(Boolean).join(' ').toLowerCase()
+        .normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '') || 'home';
+      for (let i = 0; i < 5; i++) {
+        const slug = `${base}-${slugSuffix()}`;
+        try {
+          const done = await sql`
+            UPDATE crm_properties SET catalogue_slug = ${slug}
+             WHERE tenant_id = ${t} AND id = ${r.id} AND catalogue_slug IS NULL
+               AND NOT EXISTS (SELECT 1 FROM crm_properties WHERE tenant_id = ${t} AND catalogue_slug = ${slug})
+            RETURNING id`;
+          if (done.length) break;
+        } catch (err: any) {
+          // Two flats ticked at once drew the same slug: the unique index
+          // refused the second. Draw again.
+          if (err?.code !== '23505') throw err;
+        }
+      }
+    }
+  }
+  // ONE SET: the homes THIS request put in (`changed`), split by the
+  // catalogue's own rule (catalogueRules.ts) — `live` are on the page now,
+  // `waiting` are not Available and appear when they are, `withoutPhotos`
+  // counts live ones only (a sold flat with no photos is not a photo job).
+  // live + waiting = changed, so "2 added · 1 waiting · 1 has no photos" is
+  // about the same homes.
+  const flipped = (rows as any[]).map(r => r.id);
+  const [tally] = on && flipped.length
+    ? await sql`SELECT
+          count(*) FILTER (WHERE ${IS_AVAILABLE})::int AS live,
+          count(*) FILTER (WHERE NOT (${IS_AVAILABLE}))::int AS waiting,
+          count(*) FILTER (WHERE ${IS_AVAILABLE} AND NOT ${HAS_PHOTO})::int AS without
+        FROM crm_properties WHERE tenant_id = ${t} AND id IN ${sql(flipped)}`
+    : [{ live: 0, waiting: 0, without: 0 }];
+  const withoutPhotos = tally.without;
+  for (const r of rows as any[]) {
+    await propertyEvent(r.id, ctx, 'catalogue', 'Catalogue', on ? 'Shown in the catalogue' : 'Taken out of the catalogue');
+  }
+  if (rows.length) {
+    audit({
+      tenant_id: t, actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null, actor_label: ctx.actorLabel ?? null,
+      action: on ? 'property.catalogue_on' : 'property.catalogue_off', target_type: 'property',
+      target_id: rows.length === 1 ? rows[0].id : null,
+      summary: `${rows.length} listing${rows.length === 1 ? '' : 's'} ${on ? 'shown in' : 'taken out of'} the catalogue`,
+      metadata: { ids: rows.map((r: any) => r.id) }, ip: ctx.ip, user_agent: ctx.userAgent,
+    });
+  }
+  return { changed: rows.length, live: tally.live, waiting: tally.waiting, withoutPhotos };
 }
 
 /**
@@ -5077,7 +5467,7 @@ export async function getPropertyBuyers(propertyId: string, limit = 50): Promise
   const rows = await sql`SELECT * FROM crm_leads WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit}`;
   const shortlistRows = await sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(rows.map(r => r.id).length ? rows.map(r => r.id) : [''])}`;
   const byLead = groupShortlistByLead(shortlistRows);
-  return rows.map(r => rowToLead(r, [], byLead.get(r.id) || []));
+  return rows.map(r => rowToLead(r, undefined, byLead.get(r.id) || []));
 }
 
 /**
@@ -5089,16 +5479,32 @@ export async function getPropertyBuyers(propertyId: string, limit = 50): Promise
  * listing. Used by the property form's route AND by the two conversions
  * (services/agreements.ts), so a flat made either way reads the same.
  */
-export function prepareListing(body: any): any {
-  if (!body.type && (body.bhk || body.subtype)) {
-    const bhkLabel = body.bhk === '1rk' ? '1 RK'
-      : body.bhk === '5plus' ? '5+ BHK'
-      : body.bhk ? `${body.bhk} BHK` : '';
-    const subLabel = body.subtype
-      ? String(body.subtype).split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-      : '';
-    body.type = [bhkLabel, subLabel].filter(Boolean).join(' ').trim();
-  }
+/**
+ * A stored bedroom value → its one token ('2', '1rk', '5plus'). New rows hold
+ * the token itself; older rows hold text ("2 BHK", "3 BHK Apartment", "3 bed"),
+ * read by normaliseBhk (src/data/propertyFields.js) in the firm's words. Null
+ * when nothing in it names a size. The catalogue's chips, its filter, every
+ * page's name and its address all read the size through this.
+ */
+export function bhkTokenOf(raw: unknown, loc: Locale): string | null {
+  const s = raw == null ? '' : String(raw).trim().toLowerCase();
+  if (!s) return null;
+  if (BHK.some((b: any) => b.value === s)) return s;
+  return normaliseBhk(s, loc);
+}
+
+const SUBTYPE_LIST = Object.values(SUBTYPES).flat() as any[];
+
+/** "3 BHK Apartment" / "3 bed Apartment" from a row, in the firm's words. Also
+ *  the kind on a buyer's page (sharing.ts publicFlat) and the words of a page's
+ *  address (setCatalogue). */
+export function listingKind(bhk: string | null | undefined, subtype: string | null | undefined, loc: Locale): string {
+  const t = bhkTokenOf(bhk, loc);
+  return [t ? roomLabel(t, loc) : '', subtype ? labelOf(SUBTYPE_LIST, subtype) : ''].filter(Boolean).join(' ').trim();
+}
+
+export function prepareListing(body: any, loc: Locale): any {
+  if (!body.type && (body.bhk || body.subtype)) body.type = listingKind(body.bhk, body.subtype, loc);
   if (!body.title) {
     body.title = [body.society || body.project, body.unit || body.flat].filter(Boolean).join(' - ')
       || body.type || 'Untitled property';
@@ -5106,7 +5512,9 @@ export function prepareListing(body: any): any {
   return body;
 }
 
-export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any> {
+/** opts.phoneAsReceived: the owner's number comes from a record already on file
+ *  (an owner converted to a listing), kept as it is stored. */
+export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX, opts: { phoneAsReceived?: boolean } = {}): Promise<any> {
   // A copy of another listing (7.4) says so in its history; the id is not a
   // fact about this flat, so it does not go into the row.
   const copiedFrom = propData.copiedFrom ? String(propData.copiedFrom) : null;
@@ -5166,7 +5574,10 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
   const builder = propData.builder ?? null;
   const reraNo = propData.rera ?? propData.rera_no ?? null;
   const ownerName = propData.owner ?? propData.owner_name ?? null;
-  const ownerPhone = propData.ownerPhone ?? propData.owner_phone ?? null;
+  const ownerPhoneSent = propData.ownerPhone ?? propData.owner_phone ?? null;
+  const ownerPhone = opts.phoneAsReceived
+    ? keepPhone(ownerPhoneSent, (await localeOf(tid())).country)
+    : await typedPhone(ownerPhoneSent, 'ownerPhone');
   const ownerEmail = propData.ownerEmail ?? propData.owner_email ?? null;
   const floor = propData.floor != null ? String(propData.floor) : null;
   const carpetSqft = digits(propData.carpet ?? propData.area ?? propData.carpet_sqft);
@@ -5198,6 +5609,7 @@ export async function createProperty(propData: any, ctx: ActorCtx = SYSTEM_CTX):
   // The owner on the form becomes a real owner record, linked to this flat.
   const ownerRecordId = await linkListingOwner(newId, {
     ownerName, ownerPhone, ownerEmail, project, tower: wing, unitNo, config: type,
+    importBatchId: propData.importBatchId || null,
   }, ctx);
   if (ownerRecordId) await sql`UPDATE crm_properties SET owner_contact_id = ${ownerRecordId} WHERE id = ${newId} AND tenant_id = ${tid()}`;
   const refreshed = await sql`SELECT * FROM crm_properties WHERE id = ${newId} AND tenant_id = ${tid()}`;
@@ -5243,6 +5655,9 @@ export async function linkListingOwner(propertyId: string, data: {
   project?: string | null; tower?: string | null; unitNo?: string | null; config?: string | null;
   /** what this listing said the owner was called before this edit, if anything */
   prevName?: string | null;
+  /** the import that brought the listing: an owner it creates carries it, so
+   *  undoing the import takes the owner back too (imports.ts revertImport) */
+  importBatchId?: string | null;
 }, ctx: ActorCtx): Promise<string | null> {
   const phone = String(data.ownerPhone || '').trim();
   const name = String(data.ownerName || '').trim();
@@ -5250,7 +5665,8 @@ export async function linkListingOwner(propertyId: string, data: {
   // inventing a record for it is what filled Contacts with rows nobody could use.
   if (!phone) return null;
   const t = tid();
-  const ten = phone.replace(/\D/g, '').slice(-10);
+  // Exact E.164 (docs/specs/phone.md): an unreadable number matches nobody.
+  const key = phoneKey(phone, (await localeOf(t)).country);
 
   const [byUnit] = data.unitNo
     ? await sql`SELECT id FROM crm_owners
@@ -5266,9 +5682,9 @@ export async function linkListingOwner(propertyId: string, data: {
   // their OTHER flat, and a call about 1802 would be logged against 1603.
   // (One person still appearing as several rows is what Phase B of the
   // Contacts rethink resolves — see docs/specs/contacts-leads.md.)
-  const [byPhone] = (byUnit || data.unitNo) ? [] : await sql`
+  const [byPhone] = (byUnit || data.unitNo || !key) ? [] : await sql`
     SELECT id FROM crm_owners
-     WHERE tenant_id = ${t} AND right(regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g'), 10) = ${ten}
+     WHERE tenant_id = ${t} AND phone = ${key}
        AND coalesce(unit_no, '') = ''
      ORDER BY created_at LIMIT 1`;
   const existing = byUnit || byPhone;
@@ -5300,6 +5716,7 @@ export async function linkListingOwner(propertyId: string, data: {
     name: name || null, phone, email: data.ownerEmail || null,
     project: data.project || null, tower: data.tower || null, unitNo: data.unitNo || null,
     config: data.config || null, source: 'Property record',
+    importBatchId: data.importBatchId || null,
   }], ctx);
   return made?.id || null;
 }
@@ -5378,6 +5795,11 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   if (old.length === 0) return null;
   const row = old[0];
   const before = rowToProperty(row);
+  // Show in catalogue is the desk's call (owners and managers). Refused before
+  // anything is written, and only when the flag would actually change, so an
+  // agent's form that echoes the current value back still saves.
+  const flagAsked = patch.inCatalogue ?? patch.in_catalogue;
+  if (typeof flagAsked === 'boolean' && flagAsked !== !!row.in_catalogue) assertCatalogueRole();
 
   const title = patch.title !== undefined ? patch.title : row.title;
   const status = patch.status !== undefined ? patch.status : row.status;
@@ -5395,7 +5817,7 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   const config: Record<string, any> = { ...(row.config || {}) };
   if (patch.config && typeof patch.config === 'object') Object.assign(config, patch.config);
   for (const [k, v] of Object.entries(patch)) {
-    if (k === 'config' || k === 'id') continue;
+    if (k === 'config' || k === 'id' || k === 'inCatalogue' || k === 'in_catalogue') continue;
     if (!PROPERTY_COLUMNS.has(k) && !C4_CLIENT_KEYS.has(k)) config[k] = v;
   }
 
@@ -5411,7 +5833,10 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   const builder = patch.builder !== undefined ? patch.builder : row.builder;
   const reraNo = patch.rera !== undefined ? patch.rera : (patch.rera_no !== undefined ? patch.rera_no : row.rera_no);
   const ownerName = patch.owner !== undefined ? patch.owner : (patch.owner_name !== undefined ? patch.owner_name : row.owner_name);
-  const ownerPhone = patch.ownerPhone !== undefined ? patch.ownerPhone : (patch.owner_phone !== undefined ? patch.owner_phone : row.owner_phone);
+  const ownerPhoneSent = patch.ownerPhone !== undefined ? patch.ownerPhone : patch.owner_phone;
+  const ownerPhone = ownerPhoneSent !== undefined
+    ? editedPhone(ownerPhoneSent, row.owner_phone, (await localeOf(tid())).country, 'ownerPhone')
+    : row.owner_phone;
   const ownerEmail = patch.ownerEmail !== undefined ? patch.ownerEmail : (patch.owner_email !== undefined ? patch.owner_email : row.owner_email);
   const floor = patch.floor !== undefined ? (patch.floor != null ? String(patch.floor) : null) : row.floor;
   const carpetSqft = (patch.carpet !== undefined || patch.area !== undefined || patch.carpet_sqft !== undefined)
@@ -5435,6 +5860,9 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
     WHERE id = ${id} AND tenant_id = ${tid()} RETURNING *;
   `;
   await applyC4Fields(id, patch);
+  // Show in catalogue, the single-listing form of POST /properties/catalogue.
+  const catalogueFlag = patch.inCatalogue ?? patch.in_catalogue;
+  if (typeof catalogueFlag === 'boolean' && catalogueFlag !== !!row.in_catalogue) await setCatalogue([id], catalogueFlag, ctx);
   // Same as the create path: an owner typed onto a listing is a person to call.
   // Only when the owner fields actually changed — a price edit must not touch
   // the calling queue.
@@ -5452,7 +5880,8 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   const was = before.status || 'Available', now = updated.status || 'Available';
   if (was !== now) await propertyEvent(id, ctx, 'stage_change', `${was} → ${now}`, `${was} → ${now}`, { from: was, to: now });
   if (String(before.price ?? '') !== String(updated.price ?? '') && (before.price || updated.price)) {
-    await propertyEvent(id, ctx, 'price', 'Price', `${rupees(before.price)} → ${rupees(updated.price)}`);
+    const loc = await localeOf(tid());
+    await propertyEvent(id, ctx, 'price', 'Price', `${priceText(before.price, loc)} → ${priceText(updated.price, loc)}`);
   }
   if ((before.owner || '') !== (updated.owner || '') || (before.ownerPhone || '') !== (updated.ownerPhone || '')) {
     await propertyEvent(id, ctx, 'owner', 'Owner', updated.owner || updated.ownerPhone ? `Now ${updated.owner || updated.ownerPhone}` : 'Removed');
@@ -5496,23 +5925,78 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
  * one sees the PREVIOUS one's committed write, which is the one guarantee a
  * round-robin actually needs.
  */
-export async function nextRoutedAgent(): Promise<string | null> {
-  const rows = await sql`
-    UPDATE crm_routing_rules
-    SET last_assigned_index = (last_assigned_index + 1) % GREATEST(jsonb_array_length(active_agent_ids), 1)
-    WHERE tenant_id = ${tid()} AND jsonb_array_length(active_agent_ids) > 0
-    RETURNING active_agent_ids -> last_assigned_index AS agent_id
-  `;
-  if (rows.length && rows[0].agent_id) return String(rows[0].agent_id).replace(/^"|"$/g, '');
+/**
+ * THE NEXT N PEOPLE ON A ROTA, skipping anyone who cannot take work. Both rotas
+ * (leads: active_agent_ids, owners: owner_active_agent_ids) go through this,
+ * so they cannot disagree about who is on them.
+ *
+ * The stored list can name someone suspended, deleted, or with no user row at
+ * all; handing work to that id filed it under "a former member" until a sweep
+ * moved it. Such an id is treated as ABSENT: the rota steps forward from where
+ * it stood over the ids that are active users of this firm, in the stored
+ * order, and the index lands on the last one dealt. With no stale ids that is
+ * exactly the old step of +n. A rota with nobody active deals nothing — the
+ * caller then does what it does for an empty rota. The stored list is never
+ * rewritten. One statement, the row locked for its duration.
+ */
+async function dealRota(pool: 'leads' | 'owners', n: number): Promise<string[]> {
+  if (n <= 0) return [];
+  const t = tid();
+  const col = sql(pool === 'leads' ? 'active_agent_ids' : 'owner_active_agent_ids');
+  const idx = sql(pool === 'leads' ? 'last_assigned_index' : 'owner_last_assigned_index');
+  const [row] = await sql`
+    WITH r AS (
+      SELECT ${col} AS ids, ${idx} AS i, jsonb_array_length(${col}) AS len
+        FROM crm_routing_rules WHERE tenant_id = ${t} AND jsonb_array_length(${col}) > 0
+         FOR UPDATE
+    ), live AS (
+      SELECT x.id FROM r, jsonb_array_elements_text(r.ids) AS x(id) WHERE ${canTakeWork(t, sql`x.id`)}
+    ), picks AS (
+      SELECT k, (r.i + k) % r.len AS pos, r.ids ->> ((r.i + k) % r.len) AS id
+        FROM r, generate_series(1, r.len * ${n}) AS k
+       WHERE r.ids ->> ((r.i + k) % r.len) IN (SELECT id FROM live)
+       ORDER BY k LIMIT ${n}
+    ), moved AS (
+      UPDATE crm_routing_rules c SET ${idx} = (SELECT pos FROM picks ORDER BY k DESC LIMIT 1)
+       WHERE c.tenant_id = ${t} AND EXISTS (SELECT 1 FROM picks) RETURNING 1
+    )
+    SELECT coalesce((SELECT json_agg(id ORDER BY k) FROM picks), '[]'::json) AS ids, (SELECT count(*) FROM moved)::int AS moved`;
+  return ((row?.ids || []) as any[]).map(String);
+}
 
-  // The pool has never been configured for this tenant (no row, or an empty
-  // active_agent_ids) — fall back to every on-duty agent that actually
-  // exists, so "nobody ticked the checkboxes in Settings yet" degrades to
-  // real distribution instead of one hardcoded id. Still a plain read here,
-  // but this only runs for a genuinely unconfigured tenant, not the
-  // steady-state case a portal integration hits on every push.
-  const agents = await getAgents();
-  const pool = agents.filter(a => a.duty_status !== 'OFF_DUTY').map(a => a.id);
+/**
+ * DOES THIS FIRM HAND OUT NEW WORK BY ITSELF, on this side? The one reading of
+ * Settings → Assigning's "Leave unassigned". Every path that would give a
+ * record to somebody nobody chose — arrival, a repeat enquiry on an orphaned
+ * lead, the two sweeps on each side — asks this first, so the setting cannot
+ * be honoured in one place and ignored in the next.
+ *
+ * Leads default to on (a firm with no row, or a legacy strategy, deals the
+ * rota); owners default to off, because they arrive by the hundred from an
+ * import (see `owner_strategy`). A person pressing "Hand out" is choosing, so
+ * assignUnowned does not ask.
+ */
+export function autoAssigns(rules: RoutingRule, side: 'leads' | 'owners'): boolean {
+  return side === 'leads' ? rules.strategy !== 'manual' : rules.owner_strategy === 'round_robin';
+}
+
+/** Who a lead nobody named goes to: the rota's next person, or nobody when the firm leaves leads unassigned. */
+export async function arrivalLeadAgent(): Promise<string | null> {
+  if (!autoAssigns(await getRoutingRules(), 'leads')) return null;
+  return nextRoutedAgent();
+}
+
+async function nextRoutedAgent(): Promise<string | null> {
+  const [next] = await dealRota('leads', 1);
+  if (next) return next;
+
+  // No rota, or nobody on it who can take work — fall back to everyone who
+  // can take work and is on duty (workforce.ts), so "nobody ticked the
+  // checkboxes in Settings yet" degrades to real distribution instead of one
+  // hardcoded id. This filtered on `a.duty_status`, a field the agent rows
+  // never carry (it is dutyStatus), so it removed nobody — suspended people
+  // and agents with no account included.
+  const pool = await onDutyWorkers(tid());
   if (!pool.length) return null;
   const picked = pool[Math.floor(Math.random() * pool.length)];
   return picked;
@@ -5546,7 +6030,7 @@ export async function getAgents(): Promise<any[]> {
   // crm_agents row is kept so historical lead attribution still resolves. A
   // LEFT JOIN keeps any legacy agent that has no users row at all.
   const rows = await sql`
-    SELECT a.*, u.status AS user_status FROM crm_agents a
+    SELECT a.*, u.status AS user_status, ${canTakeWork(tid(), sql`a.id`)} AS can_take_work FROM crm_agents a
     LEFT JOIN users u ON u.id = a.id AND u.tenant_id = a.tenant_id
     WHERE a.tenant_id = ${tid()} AND u.deleted_at IS NULL
   `;
@@ -5571,7 +6055,7 @@ export async function getRoutingRules(): Promise<RoutingRule> {
   return {
     strategy: rows[0].strategy as any,
     active_agent_ids: rows[0].active_agent_ids || [],
-    last_assigned_index: rows[0].last_assigned_index || -1,
+    last_assigned_index: rows[0].last_assigned_index ?? -1,
     sweep_unassigned_enabled: rows[0].sweep_unassigned_enabled ?? false,
     reassign_idle_enabled: rows[0].reassign_idle_enabled ?? false,
     reassign_idle_days: rows[0].reassign_idle_days ?? 3,
@@ -5628,14 +6112,8 @@ export async function updateRoutingRules(patch: Partial<RoutingRule>): Promise<R
 /** Same round-robin as nextRoutedAgent(), against the owner pool instead of
  *  the lead pool — a firm may staff cold-calling differently from leads. */
 export async function nextRoutedOwnerAgent(): Promise<string | null> {
-  const rows = await sql`
-    UPDATE crm_routing_rules
-    SET owner_last_assigned_index = (owner_last_assigned_index + 1) % GREATEST(jsonb_array_length(owner_active_agent_ids), 1)
-    WHERE tenant_id = ${tid()} AND jsonb_array_length(owner_active_agent_ids) > 0
-    RETURNING owner_active_agent_ids -> owner_last_assigned_index AS agent_id
-  `;
-  if (rows.length && rows[0].agent_id) return String(rows[0].agent_id).replace(/^"|"$/g, '');
-  return null;
+  const [next] = await dealRota('owners', 1);
+  return next || null;
 }
 
 /**
@@ -5649,20 +6127,10 @@ export async function nextRoutedOwnerAgent(): Promise<string | null> {
  */
 export async function nextRoutedOwnerAgents(n: number): Promise<(string | null)[]> {
   if (n <= 0) return [];
-  const rows = await sql`
-    UPDATE crm_routing_rules
-    SET owner_last_assigned_index = (owner_last_assigned_index + ${n}) % GREATEST(jsonb_array_length(owner_active_agent_ids), 1)
-    WHERE tenant_id = ${tid()} AND jsonb_array_length(owner_active_agent_ids) > 0
-    RETURNING owner_active_agent_ids, owner_last_assigned_index AS after
-  `;
-  if (!rows.length) return new Array(n).fill(null);
-  const pool = (rows[0].owner_active_agent_ids as any[]).map(String);
-  if (!pool.length) return new Array(n).fill(null);
-  // Where the rota stood BEFORE this claim, recovered from where it now stands,
-  // so the sequence handed back is exactly the one those N steps cover.
-  const after = Number(rows[0].after);
-  const start = ((after - n) % pool.length + pool.length) % pool.length;
-  return Array.from({ length: n }, (_, i) => pool[(start + i + 1) % pool.length]);
+  const dealt = await dealRota('owners', n);
+  // Nobody active on the rota (or no rota): the same as an empty one.
+  if (!dealt.length) return new Array(n).fill(null);
+  return dealt;
 }
 
 /**
@@ -5685,31 +6153,77 @@ export async function nextRoutedOwnerAgents(n: number): Promise<(string | null)[
  */
 const UNOWNED_GRACE_MINUTES = 1;
 
+/**
+ * AT MOST THIS MANY RECORDS PER SWEEP, PER TENANT, PER PASS (CLAUDE.md:
+ * throttle background work). Each record is a rota turn, an update, a
+ * history row and an alert; a firm that switches auto-assign on over a
+ * backlog of thousands would otherwise do them all in one pass. Oldest first;
+ * the rest wait for the next pass.
+ */
+const SWEEP_CAP = 50;
+
+/**
+ * WHO THE ROTA CAN HAND TO on this side: its members who can take work, or,
+ * for leads with nobody on the rota, everyone on duty (nextRoutedAgent's own
+ * fallback). The idle sweeps use it to leave out, in SQL, the records the rota
+ * cannot move: with one person in the pool, that person's own records. Picked
+ * and then skipped in the loop, those used up the 50 every pass -- a one-person
+ * rota holding 50 old idle leads starved everyone else's for ever.
+ */
+async function sweepPool(tenantId: string, side: 'leads' | 'owners'): Promise<string[]> {
+  const col = sql(side === 'leads' ? 'active_agent_ids' : 'owner_active_agent_ids');
+  const rows = await sql`
+    SELECT DISTINCT x.id FROM crm_routing_rules r, jsonb_array_elements_text(r.${col}) AS x(id)
+     WHERE r.tenant_id = ${tenantId} AND ${canTakeWork(tenantId, sql`x.id`)}`;
+  if (rows.length) return (rows as any[]).map(r => r.id);
+  return side === 'leads' ? onDutyWorkers(tenantId) : [];
+}
+
+/** SQL: the record's holder is not the pool's only person, so the rota can move it. */
+const movable = (pool: string[]) => (pool.length === 1 ? sql`agent_id <> ${pool[0]}` : sql`TRUE`);
+
+/** The rota's next person who is not `holder`: one more turn when it lands on them. */
+async function nextOtherThan(holder: string, pool: string[], deal: () => Promise<string | null>): Promise<string | null> {
+  for (let i = 0; i <= pool.length + 1; i++) {
+    const next = await deal();
+    if (!next || next !== holder) return next;
+  }
+  return null;
+}
+
 export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
-  if (!rules.sweep_unassigned_enabled) return 0;
-  // "Unowned" includes an agent_id that no longer resolves to a live user —
-  // the same orphaned state the desk sees as "Former owner" on the row.
+  if (!rules.sweep_unassigned_enabled || !autoAssigns(rules, 'leads')) return 0;
+  // "UNOWNED" IS THE WORKFORCE RULE (workforce.ts canTakeWork): nobody, or a
+  // holder who cannot take work -- removed, or suspended. It tested only
+  // "removed", so a suspended agent's leads sat with someone who cannot open
+  // the app, and the sweep that exists to catch exactly that walked past them.
   const rows = await sql`
-    SELECT l.id, l.name, l.created_at FROM crm_leads l
-    LEFT JOIN users u ON u.id = l.agent_id AND u.tenant_id = l.tenant_id AND u.deleted_at IS NULL
+    SELECT l.id, l.name, l.agent_id, l.created_at FROM crm_leads l
     WHERE l.tenant_id = ${tenantId} AND ${OPEN}
-      AND (l.agent_id IS NULL OR u.id IS NULL)
+      AND NOT ${canTakeWork(tenantId, sql`l.agent_id`)}
       AND l.created_at < NOW() - (${UNOWNED_GRACE_MINUTES}::text || ' minutes')::interval
+    ORDER BY l.created_at LIMIT ${SWEEP_CAP}
   `;
   let n = 0;
-  const tally = new Map<string, number>();
+  const tally = new Map<string, string[]>();
   for (const lead of rows) {
     const agentId = await nextRoutedAgent();
     if (!agentId) break;
-    await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${lead.id} AND tenant_id = ${tenantId}`;
-    const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
-    await addTimelineEvent({
-      record_id: lead.id, type: 'assignment', title: 'Auto-assigned',
-      description: `Nobody had picked it up, so it went to ${name}`,
-      author: 'System', metadata: { agentId, reason: 'sweep_unassigned' },
+    // Only if it is still where this pass found it: a person who assigned it
+    // in the meantime wins.
+    const moved = await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW()
+      WHERE id = ${lead.id} AND tenant_id = ${tenantId} AND agent_id IS NOT DISTINCT FROM ${lead.agent_id} RETURNING id`;
+    if (!moved.length) continue;
+    // recordAssignment, like every other change of hands (CLAUDE.md §4): it
+    // wrote its own "Auto-assigned" line, which never named the holder it
+    // was taken from.
+    await recordAssignment({
+      recordId: lead.id, prevAgentId: lead.agent_id, agentId,
+      reason: lead.agent_id ? 'its holder cannot take work' : 'nobody had picked it up',
+      author: 'System', metadata: { reason: 'sweep_unassigned' },
     });
-    tally.set(agentId, (tally.get(agentId) || 0) + 1);
+    tally.set(agentId, [...(tally.get(agentId) || []), lead.id]);
     n++;
   }
   // The owner sweeps have always done this; the lead sweeps wrote a timeline
@@ -5724,8 +6238,10 @@ export async function sweepUnassignedLeads(tenantId: string): Promise<number> {
 
 export async function sweepIdleLeads(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
-  if (!rules.reassign_idle_enabled) return 0;
+  if (!rules.reassign_idle_enabled || !autoAssigns(rules, 'leads')) return 0;
   const days = Math.max(Number(rules.reassign_idle_days) || 3, 1);
+  const pool = await sweepPool(tenantId, 'leads');
+  if (!pool.length) return 0;
   // "No activity" is the §1 predicate — something a PERSON did on the record —
   // not `updated_at`, which a portal push, a sweep or any background stamp
   // moves without anyone having gone near the lead. So a lead could be reported
@@ -5740,24 +6256,29 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
       AND ${noPersonActivitySince(days)}
       AND ${notHandedOnSince(days)}
       AND NOT ${FOLLOWUP_UPCOMING}
+      AND ${movable(pool)}
+    ORDER BY created_at LIMIT ${SWEEP_CAP}
   `;
   let n = 0;
-  const tally = new Map<string, number>();
+  const tally = new Map<string, string[]>();
   const lost = new Map<string, number>();
   /** What the rota moved on this pass, for the loop check below. */
   const movedNow: { recordId: string; toName: string | null }[] = [];
   for (const lead of rows) {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${lead.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
-    const agentId = await nextRoutedAgent();
-    if (!agentId || agentId === lead.agent_id) continue;
-    await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${lead.id} AND tenant_id = ${tenantId}`;
+    const agentId = await nextOtherThan(lead.agent_id, pool, nextRoutedAgent);
+    if (!agentId) continue;
+    // Still with the holder this pass found: a hand-over in the meantime wins.
+    const moved = await sql`UPDATE crm_leads SET agent_id = ${agentId}, updated_at = NOW()
+      WHERE id = ${lead.id} AND tenant_id = ${tenantId} AND agent_id = ${lead.agent_id} RETURNING id`;
+    if (!moved.length) continue;
     const name = (await sql`SELECT name FROM users WHERE id = ${agentId} LIMIT 1`)[0]?.name || 'a colleague';
     await recordAssignment({
       recordId: lead.id, prevAgentId: lead.agent_id, agentId,
       reason: `no activity for ${days} days`,
       author: 'System', metadata: { reason: 'sweep_idle', days },
     });
-    tally.set(agentId, (tally.get(agentId) || 0) + 1);
+    tally.set(agentId, [...(tally.get(agentId) || []), lead.id]);
     lost.set(lead.agent_id, (lost.get(lead.agent_id) || 0) + 1);
     movedNow.push({ recordId: lead.id, toName: name });
     n++;
@@ -5783,27 +6304,30 @@ export async function sweepIdleLeads(tenantId: string): Promise<number> {
 // reasoning as TERMINAL_STATUSES for leads: nothing left to chase).
 export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
-  if (!rules.owner_sweep_unassigned_enabled) return 0;
+  if (!rules.owner_sweep_unassigned_enabled || !autoAssigns(rules, 'owners')) return 0;
+  // Unowned by the workforce rule, as sweepUnassignedLeads.
   const rows = await sql`
-    SELECT o.id FROM crm_owners o
-    LEFT JOIN users u ON u.id = o.agent_id AND u.tenant_id = o.tenant_id AND u.deleted_at IS NULL
+    SELECT o.id, o.agent_id FROM crm_owners o
     WHERE o.tenant_id = ${tenantId} AND coalesce(o.stage, '') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}
-      AND (o.agent_id IS NULL OR u.id IS NULL)
+      AND NOT ${canTakeWork(tenantId, sql`o.agent_id`)}
       AND o.created_at < NOW() - (${UNOWNED_GRACE_MINUTES}::text || ' minutes')::interval
+    ORDER BY o.created_at LIMIT ${SWEEP_CAP}
   `;
   let n = 0;
-  const tally = new Map<string, number>();
+  const tally = new Map<string, string[]>();
   const movedNow: { recordId: string; toName: string | null }[] = [];
   for (const owner of rows) {
     const agentId = await nextRoutedOwnerAgent();
     if (!agentId) break;
-    await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${owner.id} AND tenant_id = ${tenantId}`;
+    const moved = await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW()
+      WHERE id = ${owner.id} AND tenant_id = ${tenantId} AND agent_id IS NOT DISTINCT FROM ${owner.agent_id} RETURNING id`;
+    if (!moved.length) continue;
     await recordAssignment({
-      recordId: owner.id, prevAgentId: null, agentId,
-      reason: 'nobody had picked it up',
+      recordId: owner.id, prevAgentId: owner.agent_id, agentId,
+      reason: owner.agent_id ? 'its holder cannot take work' : 'nobody had picked it up',
       author: 'System', metadata: { reason: 'sweep_unassigned' },
     });
-    tally.set(agentId, (tally.get(agentId) || 0) + 1);
+    tally.set(agentId, [...(tally.get(agentId) || []), owner.id]);
     n++;
   }
   await notifyOwnerBatch(tenantId, tally, 'owner_assigned', 'to call');
@@ -5820,8 +6344,22 @@ export async function sweepUnassignedOwners(tenantId: string): Promise<number> {
  */
 interface AssignBatchCopy { type: string; noun: string; verb: string; body: string; link: string }
 
-async function notifyAssignBatch(tenantId: string, tally: Map<string, number>, c: AssignBatchCopy): Promise<void> {
-  for (const [agentId, count] of tally) {
+async function notifyAssignBatch(tenantId: string, tally: Map<string, string[]>, c: AssignBatchCopy): Promise<void> {
+  for (const [agentId, ids] of tally) {
+    const count = ids.length;
+    // One record is that record, by name — see notifyHandedOver.
+    if (count === 1) {
+      const isLead = c.noun !== 'owner';
+      const [row] = isLead
+        ? await sql`SELECT name, phone FROM crm_leads WHERE id = ${ids[0]} AND tenant_id = ${tenantId}`
+        : await sql`SELECT name, phone FROM crm_owners WHERE id = ${ids[0]} AND tenant_id = ${tenantId}`;
+      notify({
+        userId: agentId, tenantId, type: c.type, data: { name: row?.name || row?.phone || undefined },
+        link: isLead ? `?screen=leads&lead=${ids[0]}` : `?screen=calling&owner=${ids[0]}`,
+        toSelf: true,
+      }).catch(err => console.warn(`[Notify] ${c.type} failed:`, err?.message));
+      continue;
+    }
     notify({
       // tenantId passed EXPLICITLY rather than left to notify()'s fallback.
       // runRoutingSweeps does wrap each tenant in runWithContext, so the
@@ -5838,6 +6376,8 @@ async function notifyAssignBatch(tenantId: string, tally: Map<string, number>, c
       // which three were new. 27 of them went out on bhumi in a fortnight and
       // exactly one was read.
       link: `${c.link}&agent=${encodeURIComponent(agentId)}`,
+      // The records themselves: the alert closes when the last one is worked.
+      record: { kind: c.noun === 'owner' ? 'owner' : 'lead', ids },
       // A sweep has no human actor — its context carries userId: null — so
       // there is no "you did this yourself" case to suppress.
       toSelf: true,
@@ -5845,7 +6385,7 @@ async function notifyAssignBatch(tenantId: string, tally: Map<string, number>, c
   }
 }
 
-async function notifyOwnerBatch(tenantId: string, tally: Map<string, number>, type: string, verb: string): Promise<void> {
+async function notifyOwnerBatch(tenantId: string, tally: Map<string, string[]>, type: string, verb: string): Promise<void> {
   return notifyAssignBatch(tenantId, tally, {
     type, noun: 'owner', verb, body: 'Added to your calling queue.', link: '?screen=calling',
   });
@@ -5853,22 +6393,29 @@ async function notifyOwnerBatch(tenantId: string, tally: Map<string, number>, ty
 
 export async function sweepIdleOwners(tenantId: string): Promise<number> {
   const rules = await getRoutingRules();
-  if (!rules.owner_reassign_idle_enabled) return 0;
+  if (!rules.owner_reassign_idle_enabled || !autoAssigns(rules, 'owners')) return 0;
   const days = Math.max(Number(rules.owner_reassign_idle_days) || 3, 1);
+  const pool = await sweepPool(tenantId, 'owners');
+  if (!pool.length) return 0;
   // Same two predicates as the lead sweep, against the owner's own timeline.
   const rows = await sql`
     SELECT id, agent_id FROM crm_owners
     WHERE tenant_id = ${tenantId} AND coalesce(stage, '') NOT IN ${sql(OWNER_TERMINAL_STATUSES)} AND agent_id IS NOT NULL
       AND ${noPersonActivitySince(days, 'crm_owners')}
       AND ${notHandedOnSince(days, 'crm_owners')}
+      AND ${movable(pool)}
+    ORDER BY created_at LIMIT ${SWEEP_CAP}
   `;
   let n = 0;
-  const tally = new Map<string, number>();
+  const tally = new Map<string, string[]>();
+  const movedNow: { recordId: string; toName: string | null }[] = [];
   for (const owner of rows) {
     const prevOwner = (await sql`SELECT name FROM users WHERE id = ${owner.agent_id} LIMIT 1`)[0]?.name || 'previous owner';
-    const agentId = await nextRoutedOwnerAgent();
-    if (!agentId || agentId === owner.agent_id) continue;
-    await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW() WHERE id = ${owner.id} AND tenant_id = ${tenantId}`;
+    const agentId = await nextOtherThan(owner.agent_id, pool, nextRoutedOwnerAgent);
+    if (!agentId) continue;
+    const moved = await sql`UPDATE crm_owners SET agent_id = ${agentId}, updated_at = NOW()
+      WHERE id = ${owner.id} AND tenant_id = ${tenantId} AND agent_id = ${owner.agent_id} RETURNING id`;
+    if (!moved.length) continue;
     // recordAssignment, not a timeline row written here. This wrote its own,
     // which is why the owner side had a different sentence for the same event —
     // and why the manager alert, which lives in recordAssignment because that is
@@ -5881,7 +6428,7 @@ export async function sweepIdleOwners(tenantId: string): Promise<number> {
       reason: `no activity for ${days} days`,
       author: 'System', metadata: { reason: 'sweep_idle', days },
     });
-    tally.set(agentId, (tally.get(agentId) || 0) + 1);
+    tally.set(agentId, [...(tally.get(agentId) || []), owner.id]);
     movedNow.push({ recordId: owner.id, toName: null });
     n++;
   }
@@ -5928,7 +6475,100 @@ export async function updateBrand(patch: any): Promise<any> {
 // --- SETTINGS & INTEGRATIONS ---
 export async function getSettings(): Promise<any> {
   const rows = await sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${tid()}`;
-  return rows[0]?.value || DEFAULT_SETTINGS;
+  const value = rows[0]?.value || DEFAULT_SETTINGS;
+  return { ...value, sharing: { ...SHARING_DEFAULTS, ...(value.sharing || {}) } };
+}
+
+/**
+ * SHARED LINKS AND THE CATALOGUE, the firm's choices (listing-pages.md §A.5).
+ *   linkExpiryDays         7 | 15 | 30, fixed on a link when it is made
+ *   replyToPhone           where a buyer's WhatsApp goes when nobody holds them
+ *   showPriceOnCatalogue   the catalogue's prices; a link's own tick defaults to it
+ *   catalogueShowsProject  off: the catalogue names the locality, not the building
+ *   stopped                null, or when the owner stopped sharing. Stopping turns
+ *                          off every link the firm has, for good (the leak case),
+ *                          and refuses new ones until the owner allows sharing
+ *                          again. Allowing it again never revives an old link: a
+ *                          leaked link must not come back because someone tidied
+ *                          a setting. The catalogue is not affected.
+ */
+export const SHARING_DEFAULTS = {
+  linkExpiryDays: 15, replyToPhone: null as string | null,
+  showPriceOnCatalogue: false, catalogueShowsProject: true, stopped: null as string | null,
+};
+export const LINK_EXPIRY_CHOICES = [7, 15, 30];
+
+/** The sharing settings of a firm, defaults filled in. For callers with no request context. */
+export async function sharingOf(tenantId: string): Promise<typeof SHARING_DEFAULTS> {
+  const rows = await sql`SELECT value FROM crm_settings WHERE key = 'default' AND tenant_id = ${tenantId} LIMIT 1`;
+  return { ...SHARING_DEFAULTS, ...(rows[0]?.value?.sharing || {}) };
+}
+
+/**
+ * A `sharing` patch, checked against what is stored. Returns the value to
+ * store. Throws a plain Error for a bad value (400) and a ForbiddenError when
+ * anyone but an owner tries to stop links.
+ */
+/**
+ * THE NUMBER A BUYER REACHES WHEN THE REPLY-TO IS EMPTY: an active owner's
+ * phone. One rule, read by sharing.ts firmPhone and served to Settings as
+ * `sharing.replyToFallback` (so the empty box shows the number buyers really
+ * get). Derived, never stored: cleanSharingPatch drops it if it is sent back.
+ */
+const REPLY_FALLBACK = (t: string) => sql`(SELECT phone FROM users WHERE tenant_id = ${t} AND role = 'owner'
+     AND deleted_at IS NULL AND status ILIKE 'active' AND coalesce(phone, '') <> ''
+   ORDER BY created_at NULLS LAST LIMIT 1)`;
+export async function replyFallbackOf(tenantId: string): Promise<string | null> {
+  const [r] = await sql`SELECT ${REPLY_FALLBACK(tenantId)} AS phone`;
+  return r?.phone || null;
+}
+export function withReplyFallback(settings: any, fallback: string | null): any {
+  return { ...settings, sharing: { ...SHARING_DEFAULTS, ...(settings?.sharing || {}), replyToFallback: fallback } };
+}
+
+async function cleanSharingPatch(patch: any, current: any, ctx: ActorCtx | null): Promise<any> {
+  const cur = { ...SHARING_DEFAULTS, ...(current || {}) };
+  const p = patch && typeof patch === 'object' ? patch : {};
+  const next = { ...cur };
+  if (p.linkExpiryDays !== undefined) {
+    const d = Number(p.linkExpiryDays);
+    if (!LINK_EXPIRY_CHOICES.includes(d)) throw new Error('Links can last 7, 15 or 30 days.');
+    next.linkExpiryDays = d;
+  }
+  if (p.replyToPhone !== undefined) {
+    next.replyToPhone = editedPhone(p.replyToPhone, cur.replyToPhone, (await localeOf(tid())).country, 'replyToPhone');
+  }
+  if (p.showPriceOnCatalogue !== undefined) next.showPriceOnCatalogue = p.showPriceOnCatalogue === true;
+  if (p.catalogueShowsProject !== undefined) next.catalogueShowsProject = p.catalogueShowsProject !== false;
+  // `stopped`: true stops sharing and turns off every link; null (or false)
+  // allows sharing again. The stored stamp sent back unchanged is no change
+  // (the settings screen saves the whole object). Owner only, both ways.
+  if (p.stopped !== undefined && p.stopped !== cur.stopped) {
+    const stop = p.stopped === true;
+    const resume = p.stopped === null || p.stopped === false;
+    if (!stop && !resume) throw new Error('Send stopped: true to stop sharing, or null to allow it again.');
+    if (stop === !!cur.stopped) return next;
+    const role = getContext()?.role;
+    if (role !== 'owner') throw new ForbiddenError('Only an owner can stop or allow sharing.');
+    const actor = ctx?.actorId ?? getContext()?.userId ?? null;
+    let turnedOff = 0;
+    if (stop) {
+      next.stopped = new Date().toISOString();
+      const off = await sql`UPDATE crm_share_links SET turned_off_at = NOW(), turned_off_by = ${actor}
+        WHERE tenant_id = ${tid()} AND turned_off_at IS NULL RETURNING id`;
+      turnedOff = off.length;
+    } else {
+      next.stopped = null;
+    }
+    audit({
+      tenant_id: tid(), actor_type: ctx?.actorType || 'user', actor_id: actor,
+      actor_label: ctx?.actorLabel ?? null, action: stop ? 'sharing.stopped' : 'sharing.resumed', target_type: 'settings', target_id: 'sharing',
+      summary: stop ? `Sharing stopped; ${turnedOff} shared link${turnedOff === 1 ? '' : 's'} turned off` : 'Sharing allowed again; old links stay off',
+      metadata: { stopped: next.stopped, previous: cur.stopped, turnedOff },
+      ip: ctx?.ip ?? getContext()?.ip ?? null, user_agent: ctx?.userAgent ?? getContext()?.userAgent ?? null,
+    });
+  }
+  return next;
 }
 
 export async function updateSettings(patch: any): Promise<any> {
@@ -5993,6 +6633,9 @@ export async function updateSettings(patch: any): Promise<any> {
       ...OWNER_TERMINAL_STATUSES,
     ];
   }
+  if (patch.sharing !== undefined) {
+    patch.sharing = await cleanSharingPatch(patch.sharing, before.sharing, null);
+  }
   if (patch.firmName) {
     await sql`UPDATE tenants SET name = ${patch.firmName}, pwa_config = NULL WHERE id = ${tid()} OR slug = ${tid()};`;
   }
@@ -6002,6 +6645,13 @@ export async function updateSettings(patch: any): Promise<any> {
     INSERT INTO crm_settings (key, value, tenant_id) VALUES ('default', ${sql.json(next)}, ${tid()})
     ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value;
   `;
+  // Sharing was just stopped: sweep again now it is saved. A link inserted
+  // after cleanSharingPatch's sweep but before this save would otherwise
+  // survive; one inserted after the save re-reads `stopped` and refuses itself.
+  if (patch.sharing?.stopped && !before.sharing?.stopped) {
+    await sql`UPDATE crm_share_links SET turned_off_at = NOW(), turned_off_by = ${getContext()?.userId ?? null}
+               WHERE tenant_id = ${tid()} AND turned_off_at IS NULL`;
+  }
   return next;
 }
 
@@ -6053,11 +6703,15 @@ export async function addTimelineEvent(evt: Omit<TimelineEvent, 'id' | 'timestam
   // assign, and one of those would have told the agent their leads had been
   // "remarked on" once per row.
   if (evt.record_id?.startsWith('l') && (evt.type === 'note' || evt.type === 'remark')) {
-    sql`SELECT name, agent_id FROM crm_leads WHERE id = ${evt.record_id} AND tenant_id = ${t} LIMIT 1`
+    // `id` too: the link below is built from it, and without it every remark
+    // alert pointed at `lead=undefined` and opened nothing.
+    sql`SELECT id, name, agent_id FROM crm_leads WHERE id = ${evt.record_id} AND tenant_id = ${t} LIMIT 1`
       .then(rows => {
         const lead = rows[0];
         const ctx = getContext();
-        if (lead && lead.agent_id && ctx?.actorId && ctx.actorId !== lead.agent_id) {
+        // `userId` — the request context has no `actorId`, so this read
+        // undefined and a remark written from the record never told its holder.
+        if (lead && lead.agent_id && ctx?.userId && ctx.userId !== lead.agent_id) {
           notify({
             userId: lead.agent_id,
             tenantId: t,
@@ -6226,10 +6880,8 @@ export function isPlaceholderName(name: any): boolean {
  */
 export async function activeOwnerOf(agentId: string | null | undefined): Promise<string | null> {
   if (!agentId) return null;
-  const rows = await sql`
-    SELECT id FROM users
-     WHERE id = ${agentId} AND tenant_id = ${tid()} AND status ILIKE 'active' LIMIT 1`;
-  return rows.length ? String(rows[0].id) : null;
+  const [row] = await sql`SELECT ${canTakeWork(tid(), agentId)} AS ok`;
+  return row?.ok ? String(agentId) : null;
 }
 
 /**
@@ -6518,7 +7170,7 @@ export async function backfillEnquiries(): Promise<void> {
     const when = new Date(r.received_at);
     if (isNaN(when.getTime())) continue;
     const integration = r.integration_id ? configs.get(r.integration_id) : null;
-    const parsed = parsePayload(body, integration?.parser_config || null);
+    const parsed = parsePayload(body, integration?.parser_config || null, { locale: await localeOf(r.tenant_id) });
     // `lead.req` is what the live ingest hands recordEnquiry — same shape, same
     // derivations (deal type, commercial subtype, the "0 BHK" clean-up).
     const req = parsed.lead?.req || {};
@@ -6795,11 +7447,13 @@ export async function addActivity(input: ActivityInput): Promise<any> {
  * restored at 5s, cleared again at 9s. One write, on the side that owns the
  * row.
  */
-const FOLLOW_UP_CLOSED_BY: Record<string, RegExp> = {
-  site_visit: /site\s*visit/i,
-  visit: /site\s*visit/i,
-  call: /call|callback/i,
-  meeting: /meeting|demo/i,
+// Which logged activity finishes which kind of booking. The kinds themselves
+// are src/data/followUpKinds.js, which Today's row reads for its button.
+const FOLLOW_UP_CLOSED_BY: Record<string, string> = {
+  site_visit: 'visit',
+  visit: 'visit',
+  call: 'call',
+  meeting: 'meeting',
 };
 
 export async function closeFollowUpFor(leadId: string, activityType: string): Promise<void> {
@@ -6809,22 +7463,80 @@ export async function closeFollowUpFor(leadId: string, activityType: string): Pr
     SELECT follow_up FROM crm_leads
     WHERE id = ${leadId} AND tenant_id = ${tid()} AND follow_up IS NOT NULL LIMIT 1`;
   const action = String(rows[0]?.follow_up?.action || '');
-  if (!action || !match.test(action)) return;
-  await sql`
+  if (!action || followUpKindOf(action) !== match) return;
+  await endFollowUp(leadId, action);
+}
+
+/**
+ * The booking is over: clear it and say so. The one write every path that
+ * finishes a follow-up ends in, so Performance's `followup_done` (the
+ * 'Completed' row, activityReport.ts) and the `booking` alert close test
+ * (follow_up cleared, alertLifecycle.ts) see every one of them.
+ *
+ * A site visit writes its own proven record — photo, GPS, outcome — and a
+ * second line saying the appointment ended is the duplicate that used to sit
+ * on top of it; Performance counts it as a visit. Everything else gets the
+ * one event.
+ */
+async function endFollowUp(leadId: string, action: string, metadata?: Record<string, any>): Promise<boolean> {
+  // Only the write that actually cleared the booking says it ended: two at
+  // once (Today's Done and the history's outcome, or a retried request) both
+  // read a booking, and each wrote a 'Completed' — counted twice.
+  const cleared = await sql`
     UPDATE crm_leads SET follow_up = NULL, updated_at = NOW()
-    WHERE id = ${leadId} AND tenant_id = ${tid()}`;
-  // A site visit writes its own proven record — photo, GPS, outcome — and a
-  // second line saying the appointment ended is the duplicate that used to sit
-  // on top of it. Everything else gets the one event.
-  if (!/site\s*visit/i.test(action)) {
+    WHERE id = ${leadId} AND tenant_id = ${tid()} AND follow_up IS NOT NULL
+    RETURNING id`;
+  if (cleared.length && followUpKindOf(action) !== 'visit') {
     await addTimelineEvent({
       record_id: leadId,
       type: 'follow_up',
       title: 'Completed',
       description: followUpKind({ action }),
       author: getContext()?.userId || null,
+      ...(metadata ? { metadata } : {}),
     }).catch(() => {});
   }
+  return cleared.length > 0;
+}
+
+/** The row that booked the follow-up standing now: its latest Scheduled or Rescheduled line. */
+async function currentBookingEvent(leadId: string): Promise<string | null> {
+  const rows = await sql`
+    SELECT id FROM crm_timeline_events
+     WHERE record_id = ${leadId} AND tenant_id = ${tid()}
+       AND type = 'follow_up' AND title IN ('Scheduled', 'Rescheduled')
+     ORDER BY timestamp DESC LIMIT 1`;
+  return rows[0]?.id || null;
+}
+
+/**
+ * HOW IT WENT, AND THAT IS WHAT FINISHES IT — a meeting, a demo, or a booking
+ * that names no kind. The outcome and the note land on the booking's own row,
+ * as the history's "Add outcome" puts them (updateTimelineEvent keeps the
+ * booked sentence), then the booking ends through endFollowUp.
+ *
+ * `eventId` is the row the history edited. Recording an outcome on an OLDER
+ * booking — one since replaced — attaches it there and leaves the booking that
+ * stands now alone. Without an id (Today's row) it is the standing booking.
+ *
+ * Returns the edited row and whether the booking ended. A follow-up set before
+ * bookings were written to the history has no row to edit; its outcome goes on
+ * the 'Completed' row instead, so it is not lost.
+ */
+export async function completeFollowUp(
+  leadId: string, outcome: string, remark: string, eventId?: string,
+): Promise<{ event: TimelineEvent | null; ended: boolean }> {
+  const t = tid();
+  const rows = await sql`SELECT follow_up FROM crm_leads WHERE id = ${leadId} AND tenant_id = ${t} LIMIT 1`;
+  const fu = rows[0]?.follow_up || null;
+  const standing = fu ? await currentBookingEvent(leadId) : null;
+  const target = eventId || standing;
+  const event = target ? await updateTimelineEvent(target, t, remark, outcome) : null;
+  const ends = !!fu && (!eventId || eventId === standing || !standing);
+  if (!ends) return { event, ended: false };
+  const ended = await endFollowUp(leadId, String(fu.action || 'Follow-up'),
+    event ? undefined : { outcome, ...(remark ? { remark } : {}) });
+  return { event, ended };
 }
 
 async function closeSiteVisitAppointment(leadId: string): Promise<void> {

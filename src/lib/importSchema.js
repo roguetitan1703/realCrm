@@ -10,16 +10,26 @@
  */
 
 // ---------------------------------------------------------------------------
-// Value parsers — Indian formats, because that's what the files contain
+// Value parsers — in the firm's own formats (lib/locale.js). An Indian firm's
+// sheet says "95 Lakh" and 10-digit mobiles; a US firm's says "450K" and
+// (512) 555-0143. Each takes the locale last, and the server passes the firm's.
 // ---------------------------------------------------------------------------
+import { firmLocale, parseMoneyText } from './locale.js'
+import { toE164 } from './phone.js'
 
-/** "1.85 Cr" | "95 Lakh" | "₹18,50,000" | "45000/mo" | 18500000 → rupees (number) */
-export function parseMoney(raw) {
+/** "1.85 Cr" | "95 Lakh" | "₹18,50,000" | "45000/mo" | 18500000 → rupees (number).
+ *  Outside India: "$450,000" | "450K" | "1.2M" → the amount, a bare number as written. */
+export function parseMoney(raw, loc = firmLocale()) {
   if (raw === null || raw === undefined || raw === '') return null
-  if (typeof raw === 'number') return raw > 0 ? applyBareScale(raw) : null
-  const s = String(raw).toLowerCase().replace(/[₹,\s]/g, '').replace(/\/-?(mo|month|pm|p\.m\.)?$/, '')
+  const india = loc.currency === 'INR'
+  if (typeof raw === 'number') return raw > 0 ? (india ? applyBareScale(raw) : Math.round(raw)) : null
+  const s = String(raw).toLowerCase().replace(/[₹$,\s]/g, '').replace(/\/-?(mo|month|pm|p\.m\.)?$/, '')
   const num = parseFloat(s.replace(/[^0-9.]/g, ''))
   if (isNaN(num) || num <= 0) return null
+  if (!india) {
+    const n = parseMoneyText(s, loc)
+    return n > 0 ? Math.round(n) : null
+  }
   if (/cr|crore/.test(s)) return Math.round(num * 10000000)
   if (/l(ac|akh|k)?\b|lakh|lac/.test(s)) return Math.round(num * 100000)
   return applyBareScale(num)
@@ -42,44 +52,22 @@ export function parseNum(raw) {
 }
 
 /**
- * A NUMBER SOMEBODY CAN ACTUALLY RING.
+ * A NUMBER SOMEBODY CAN ACTUALLY RING: exact E.164, read in the firm's country
+ * (lib/phone.js, docs/specs/phone.md), or null.
  *
  * "9881204471" | "+91 98812 04471" | 9881204471 → "+919881204471"
- * "971526377771" (Dubai) → "+971526377771", NOT "+911526377771".
+ * "971526377771" (Dubai) → "+971526377771", NOT "+911526377771": a value the
+ * firm's country cannot read, 12-15 digits, valid once "+" is put back.
  *
- * IT USED TO TAKE THE LAST TEN DIGITS AND STAMP +91 ON THEM. On a real owner
- * list — Bhumi's 746-row Godrej Green Vistas sheet — that mangled 73 numbers:
- * every NRI owner's UAE, Dutch or UK number became an Indian one that dials
- * nowhere, and nothing in the import said a word about it. A wrong number is
- * worse than a missing one: nobody questions a filled-in field.
- *
- * The rules, in the order they are asked:
- *   • a leading 00 is the old way of writing + (00971… is +971…). Dropped first,
- *     then everything below applies to what is left.
- *   • 10 digits → Indian, +91.
- *   • 11 digits starting 0 → Indian with the trunk 0 (STD dialling), +91.
- *   • 12 digits starting 91 → Indian with its country code, +91.
- *   • anything else 11–15 digits → it already carries a country code that is
- *     not India's. Kept whole, with a +, because that is what it is.
- *   • anything else — 11 digits starting 91 (an Indian number with a digit
- *     missing), or longer than E.164 allows because two numbers share one cell
- *     — is NOT a number anyone can ring. Null, and the import reports the row
- *     with the cell's own text so it can be fixed and re-imported. A stored
- *     number that dials nowhere is worse than a reported blank.
+ * Null for anything that cannot be read with confidence — a UAE mobile that
+ * lost its +971 AND its 971, two numbers in one cell, letters — and the import reports
+ * the row with the cell's own text so it can be fixed and re-imported. A
+ * stored number that dials nowhere is worse than a reported blank. (It once
+ * took the last ten digits and stamped +91 on them, which turned 73 NRI owners
+ * on one Bhumi sheet into Indian numbers that dial nobody.)
  */
-export function parsePhone(raw) {
-  let digits = String(raw ?? '').replace(/\D/g, '')
-  if (digits.startsWith('00')) digits = digits.slice(2)
-  if (digits.length < 10) return null
-  if (digits.length === 10) return `+91${digits}`
-  if (digits.length === 11 && digits.startsWith('0')) return `+91${digits.slice(1)}`
-  if (digits.length === 12 && digits.startsWith('91')) return `+91${digits.slice(2)}`
-  if (digits.length > 15 || digits.startsWith('91')) return null
-  return `+${digits}`
-}
-
-export function normPhone(raw) {
-  return String(raw ?? '').replace(/\D/g, '').slice(-10)
+export function parsePhone(raw, loc = firmLocale()) {
+  return toE164(raw, loc.country, { received: true })
 }
 
 /**
@@ -269,12 +257,13 @@ export function isBlankCell(raw) {
   return v === '' || BLANKS.has(v.toLowerCase())
 }
 
-export function readField(row, mapping, field) {
+/** One cell through its field's parser, in the firm's locale (the server passes it). */
+export function readField(row, mapping, field, loc = firmLocale()) {
   const col = mapping[field.key]
   if (!col) return null
   const raw = row[col]
   if (isBlankCell(raw)) return null
-  return field.parse ? field.parse(raw) : String(raw).trim()
+  return field.parse ? field.parse(raw, loc) : String(raw).trim()
 }
 
 // ---------------------------------------------------------------------------

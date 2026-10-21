@@ -11,14 +11,19 @@
  */
 
 import { sql, DEFAULT_TENANT_ID } from './db.js';
-import { pushes, undeclared } from './notificationCatalogue.js';
+import { canTakeWork } from './workforce.js';
+import { undeclared, urgencyFor, type Urgency } from './notificationCatalogue.js';
 import { getContext } from './context.js';
-import { sendPushToUser, pruneDeliveryLog } from './push.js';
+import { sendPushToUser, pruneDeliveryLog, retryFailedPushes } from './push.js';
 // The retry window is shared with the dashboard tile and the Leads filter that
 // count the same leads. Three definitions of "not retried" would drift.
 // Every word a notification says, keyed on its type.
-import { copyFor, COPY } from './notificationCopy.js';
+import { copyFor, COPY, summaryCopy } from './notificationCopy.js';
+import { recordFromLink, closeSettled } from './alertLifecycle.js';
 import { followUpKind } from './followUp.js';
+import { deskConfigOf, type DeskConfig } from './store.js';
+import { runShareRetention } from './retention.js';
+import { buyerAskSweep } from './buyerAsks.js';
 
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
@@ -39,6 +44,14 @@ export interface NotifyInput {
   title?: string;
   body?: string | null;
   link?: string | null;
+  /**
+   * What the alert is about — the records whose work closes it
+   * (alertLifecycle.ts). Read from `link` when not given, which covers every
+   * single-record alert; a batch passes its ids.
+   */
+  record?: { kind: 'lead' | 'owner' | 'agreement' | 'share_tap'; ids: string[] };
+  /** For an alert about a booking: the follow_up.at it was about. */
+  subjectAt?: string | null;
   tenantId?: string;            // defaults to the request tenant
   /**
    * Buzz the person's devices, or just file it in the in-app feed?
@@ -76,52 +89,166 @@ export async function notify(n: NotifyInput): Promise<void> {
   if (!n.toSelf && getContext()?.userId && getContext()!.userId === n.userId) return;
   // Catalogue first, explicit text second. A call site that passes neither
   // has nothing to say and is dropped rather than filed blank.
-  const c = n.title ? null : copyFor(n.type, n.data);
+  const desk = await deskConfigOf(t);
+  const c = n.title ? null : copyFor(n.type, n.data, desk);
   const title = n.title ?? c?.title;
   const body = n.body ?? c?.body ?? null;
   if (!title) return;
   const id = `ntf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  await sql`
-    INSERT INTO notifications (id, tenant_id, user_id, type, title, body, link)
-    VALUES (${id}, ${t}, ${n.userId}, ${n.type}, ${title}, ${body}, ${n.link ?? null});
+  const record = n.record ?? recordFromLink(n.link);
+  // A batch opens exactly its records: `alert=` on the list resolves to this
+  // row's record_ids (store.ts leadFilterParts), not the agent's whole book.
+  const link = record && record.kind === 'lead' && record.ids.length > 1 ? `?screen=leads&alert=${id}` : (n.link ?? null);
+  // `push: false` from a call site still demotes; it can never promote.
+  const urgency: Urgency = n.push === false ? 'drawer' : urgencyFor(n.type);
+  // ONE CLOCK. The work that closes an alert is stamped by this process
+  // (addTimelineEvent writes the app's time), so the alert is too. Stamped by
+  // the database instead, a call logged seconds after an alert could read as
+  // earlier than it whenever the two clocks drifted — and never close it.
+  const now = new Date();
+  const sendAfter = releaseAt(urgency, now, desk);
+  // ONLY TO A MEMBER: a users row in this firm, not deleted, active — the
+  // workforce.ts rule. Every alert comes through here, so a recipient picked by
+  // any query (a lead's agent who has since left, a role fan-out) cannot reach a
+  // removed person's bell or devices. Checked in the insert: no extra trip.
+  const filed = await sql`
+    INSERT INTO notifications (id, tenant_id, user_id, type, title, body, link,
+                               record_kind, record_ids, subject_at, urgency, send_after, created_at)
+    SELECT ${id}, ${t}, ${n.userId}, ${n.type}, ${title}, ${body}, ${link},
+            ${record?.kind ?? null}, ${record?.ids?.length ? record.ids : null}, ${n.subjectAt ?? null},
+            ${urgency}, ${sendAfter}, ${now}
+     WHERE ${canTakeWork(t, n.userId)}
+    RETURNING id
   `;
-  // WHETHER THIS REACHES A POCKET IS A PROPERTY OF THE ALERT, NOT OF THE LINE
-  // THAT SENT IT. Every call site used to carry its own `push: true` -- 36 of
-  // them across three files -- so the answer to "does this buzz a phone" lived
-  // nowhere and could differ between two sites sending the same type. It is now
-  // one column in notificationCatalogue.ts. A caller may still pass `push:
-  // false` to suppress a normally-pushing alert; it can no longer promote one.
-  if (n.push === false || !pushes(n.type)) return;
-  sendPushToUser(t, n.userId, {
-    // The RENDERED text, not the raw input — a catalogue-driven call site
-    // passes no title at all, and this would have pushed `undefined`.
-    title,
-    body: body || '',
-    // Links are stored relative (`?screen=leads&lead=…`) because in-app they
-    // resolve against whatever page you are on. A push does not have a page: the
-    // service worker resolves against the origin, which turned every deep link
-    // into `/?screen=…` — outside the installed app's tenant scope, so tapping an
-    // alert dropped you onto the bare workspace prompt instead of the lead.
-    // Qualify it with the tenant so the link stands on its own.
-    // TRAILING SLASH, AND IT IS THE WHOLE BUG.
-    //
-    // The manifest sets `scope: "/<slug>/"` and the service worker registers at
-    // `/<slug>/`. This built `/<slug>?screen=...` -- no slash -- which is
-    // OUTSIDE that scope. With the app already open the click handler finds the
-    // window and focuses it, so it works; from a cold start there is no window,
-    // `clients.openWindow()` runs, the browser tries to match the URL against
-    // each installed manifest's scope, matches none, and opens a plain tab.
-    // Warm right, cold wrong, from one missing character.
-    //
-    // `routes/pwa.ts` states this exactly -- "a document at /<slug> would fall
-    // outside a /<slug>/ scope" -- and the push URL was built one file away
-    // without it.
-    url: `/${t}/${n.link ?? ''}`,
-    icon: `/pwa/${t}/icon-192.png`,
-  // The delivery log ties an attempt back to the feed row it came from, so
-  // "this alert" is one thing whether you are looking at the drawer or at what
-  // reached a device.
-  }, { notificationId: id, type: n.type }).catch(() => {});
+  if (!filed.length) {
+    console.warn(`[Notify] ${n.type} for tenant ${t} not filed: ${n.userId} is not an active member`);
+    return;
+  }
+  // Due now (outside the night window, urgent enough): push it straight away.
+  // Anything else waits for dispatchDue(), which the sweep runs every minute.
+  if (sendAfter && sendAfter.getTime() <= Date.now()) {
+    await sql`UPDATE notifications SET pushed_at = NOW() WHERE id = ${id}`;
+    sendPushToUser(t, n.userId, payloadFor(t, { title, body, link }), {
+      notificationId: id, type: n.type, urgent: urgency === 'now' || urgency === 'at_time',
+    }).catch(() => {});
+  }
+}
+
+// ── When a push may go out (spec §4) ─────────────────────────────────────────
+//
+// THE FIRM'S WORKING HOURS, on its own clock (Settings → Response times;
+// store.ts workHoursOf, default 9 to 21). Outside them nothing buzzes; the bell
+// is never held. `morning` alerts wait for the next opening hour, where every
+// held alert goes out as one summary (dispatchDue).
+//
+// It was one fixed window, 21:00–09:00 IST, with no setting: measured on
+// production over 30 days (12 Oct), 2.3% of bhumi's person-written work and
+// 0.0% of mahalaxmi's fell inside it, and of 56 tapped pushes none was tapped
+// there. Made a setting on 16 Oct because a window nobody can see is a phone
+// that "did not ring" with no reason anyone can find.
+type Hours = Pick<DeskConfig, 'timezone' | 'workStart' | 'workEnd'>;
+
+/** The wall clock in `tz` at `d`. */
+function clockIn(tz: string, d: Date) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
+  }).formatToParts(d).map(x => [x.type, x.value]));
+  return { y: +p.year, mo: +p.month, d: +p.day, h: +p.hour, mi: +p.minute };
+}
+
+/** The instant the firm's clock reads `hour`:00 on the firm's day of `d`. */
+function atHourOn(tz: string, d: Date, hour: number): Date {
+  const c = clockIn(tz, d);
+  const guess = Date.UTC(c.y, c.mo - 1, c.d, hour);
+  const g = clockIn(tz, new Date(guess));
+  const offset = Date.UTC(g.y, g.mo - 1, g.d, g.h, g.mi) - guess;
+  return new Date(guess - offset);
+}
+
+/** The next opening hour strictly after `d`. */
+function nextOpening(hrs: Hours, d: Date): Date {
+  const today = atHourOn(hrs.timezone, d, hrs.workStart);
+  return today > d ? today : atHourOn(hrs.timezone, new Date(d.getTime() + 86_400_000), hrs.workStart);
+}
+
+/** When an alert of this urgency, raised at `now`, may reach a phone. Null: never. */
+export function releaseAt(urgency: Urgency, now: Date, hrs: Hours): Date | null {
+  if (urgency === 'drawer') return null;
+  if (urgency === 'morning') return nextOpening(hrs, now);
+  const h = clockIn(hrs.timezone, now).h;
+  return h >= hrs.workStart && h < hrs.workEnd ? now : nextOpening(hrs, now);
+}
+
+/**
+ * What a push carries for one alert or a summary.
+ *
+ * Links are stored relative (`?screen=leads&lead=…`) because in-app they
+ * resolve against whatever page you are on. A push does not have a page: the
+ * service worker resolves against the origin. So the link is qualified with the
+ * tenant — and with a TRAILING SLASH: the manifest's scope is `/<slug>/`, and
+ * `/<slug>?screen=…` falls outside it, so a cold-start tap opened a plain
+ * browser tab instead of the installed app (routes/pwa.ts says the same).
+ */
+function payloadFor(t: string, a: { title: string; body: string | null; link: string | null }) {
+  return { title: a.title, body: a.body || '', url: `/${t}/${a.link ?? ''}`, icon: `/pwa/${t}/icon-192.png` };
+}
+
+/**
+ * Send what has come due: alerts held for the morning or through the night.
+ * Closes settled work FIRST, so nothing done in the meantime is announced.
+ * One alert reaches the phone as itself; several as one summary. Tenant-scoped.
+ */
+export async function dispatchDue(t: string): Promise<number> {
+  await closeSettled(t);
+  const due = await sql`
+    SELECT id, user_id, type, title, body, link, urgency FROM notifications
+    WHERE tenant_id = ${t} AND pushed_at IS NULL AND closed_at IS NULL
+      AND send_after IS NOT NULL AND send_after <= NOW()
+    ORDER BY created_at`;
+  // Overdue by more than a working day is not "this morning" any more: the
+  // alert is still in the bell, but it does not buzz a day late.
+  await sql`
+    UPDATE notifications SET pushed_at = NOW()
+    WHERE tenant_id = ${t} AND pushed_at IS NULL AND send_after IS NOT NULL
+      AND (closed_at IS NOT NULL OR send_after < NOW() - interval '12 hours')`;
+  const byUser = new Map<string, any[]>();
+  for (const a of due) byUser.set(a.user_id, [...(byUser.get(a.user_id) || []), a]);
+  for (const [userId, list] of byUser) {
+    const ids = list.map(a => a.id);
+    await sql`UPDATE notifications SET pushed_at = NOW() WHERE id = ANY(${ids}) AND pushed_at IS NULL`;
+    const urgent = list.some(a => a.urgency === 'now' || a.urgency === 'at_time');
+    if (list.length === 1) {
+      const a = list[0];
+      await sendPushToUser(t, userId, payloadFor(t, a), { notificationId: a.id, type: a.type, urgent }).catch(() => {});
+    } else {
+      const byType: Record<string, number> = {};
+      for (const a of list) byType[a.type] = (byType[a.type] || 0) + 1;
+      const c = summaryCopy(byType);
+      await sendPushToUser(t, userId, payloadFor(t, { title: c.title, body: c.body ?? null, link: '' }),
+        { notificationId: ids[0], notificationIds: ids, type: 'summary', urgent }).catch(() => {});
+    }
+  }
+  return due.length;
+}
+
+/**
+ * ONE ALERT TO A PERSON, OR TO THE DESK WHEN THERE IS NOBODY: the one way to
+ * say "the holder, else owners and managers". Returns how many people it was
+ * addressed to. Fanning out to an empty desk is not an error anywhere below,
+ * so a zero is logged here with the tenant and type (CLAUDE.md §4: assert the
+ * recipient count).
+ */
+export async function notifyOrDesk(recipientId: string | null | undefined, n: Omit<NotifyInput, 'userId'> & { tenantId: string }): Promise<number> {
+  if (recipientId) { await notify({ ...n, userId: recipientId }); return 1; }
+  const [{ k }] = await sql`
+    SELECT count(*)::int AS k FROM users
+     WHERE tenant_id = ${n.tenantId} AND role IN ('owner', 'manager') AND status ILIKE 'active' AND deleted_at IS NULL`;
+  if (!k) {
+    console.warn(`[Notify] ${n.type} for tenant ${n.tenantId} reached nobody: no recipient and no active owner or manager`);
+    return 0;
+  }
+  await notifyRoles(['owner', 'manager'], n);
+  return k;
 }
 
 /** Fan out one alert to every ACTIVE user in the tenant holding one of the
@@ -135,7 +262,8 @@ export async function notifyRoles(roles: string[], n: Omit<NotifyInput, 'userId'
   // "the desk" (a new lead captured, a lead that arrived with no one to take
   // it, the SLA escalation) was assembled, addressed and then delivered to an
   // empty list. Silently: fanning out to zero users is not an error.
-  const users = await sql`SELECT id FROM users WHERE tenant_id = ${t} AND role IN ${sql(roles)} AND status ILIKE 'active'`;
+  // Not deleted either: a removed owner kept status 'active' on some rows.
+  const users = await sql`SELECT id FROM users WHERE tenant_id = ${t} AND role IN ${sql(roles)} AND status ILIKE 'active' AND deleted_at IS NULL`;
   for (const u of users) await notify({ ...n, userId: u.id, tenantId: t });
 }
 
@@ -143,26 +271,30 @@ export async function notifyRoles(roles: string[], n: Omit<NotifyInput, 'userId'
 // window onto a pile rather than the pile. 100 covers every user on the live
 // tenant today; the actual fix is alerts that CLOSE when their work is done
 // (see ROADMAP-2 E5), not a bigger window.
+// THE BELL IS OPEN WORK. Closed alerts — the work was done, it moved to
+// someone else, or it was read and had no work behind it — leave the list.
+// The badge counts the open ones not yet opened.
 export async function listNotifications(userId: string, limit = 100): Promise<any[]> {
   return await sql`
     SELECT id, type, title, body, link, read, created_at
     FROM notifications
-    WHERE tenant_id = ${tid()} AND user_id = ${userId}
+    WHERE tenant_id = ${tid()} AND user_id = ${userId} AND closed_at IS NULL
     ORDER BY created_at DESC LIMIT ${limit}
   `;
 }
 
 export async function unreadCount(userId: string): Promise<number> {
-  const r = await sql`SELECT count(*)::int AS n FROM notifications WHERE tenant_id = ${tid()} AND user_id = ${userId} AND read = FALSE`;
+  const r = await sql`SELECT count(*)::int AS n FROM notifications
+    WHERE tenant_id = ${tid()} AND user_id = ${userId} AND closed_at IS NULL AND read = FALSE`;
   return r[0]?.n || 0;
 }
 
 export async function markRead(id: string, userId: string): Promise<void> {
-  await sql`UPDATE notifications SET read = TRUE WHERE id = ${id} AND user_id = ${userId} AND tenant_id = ${tid()}`;
+  await sql`UPDATE notifications SET read = TRUE, read_at = COALESCE(read_at, NOW()) WHERE id = ${id} AND user_id = ${userId} AND tenant_id = ${tid()}`;
 }
 
 export async function markAllRead(userId: string): Promise<void> {
-  await sql`UPDATE notifications SET read = TRUE WHERE user_id = ${userId} AND tenant_id = ${tid()} AND read = FALSE`;
+  await sql`UPDATE notifications SET read = TRUE, read_at = NOW() WHERE user_id = ${userId} AND tenant_id = ${tid()} AND read = FALSE AND closed_at IS NULL`;
 }
 
 /**
@@ -205,18 +337,22 @@ export async function processScheduledNotifications(
 ): Promise<void> {
   const now = Date.now();
   if (throttle) {
+    // CRM_NO_SWEEPS=1 (a test API on a shared database) leaves the scheduled
+    // alerts off too: the minute timer and every /pulse land here.
+    if (process.env.CRM_NO_SWEEPS === '1' && process.env.APP_ENV !== 'production') return;
     if (now - lastScanAt < SCAN_INTERVAL_MS) return;
     lastScanAt = now;
   }
   try {
     const tenants = onlySlug
       ? await sql`SELECT id AS tenant_id FROM tenants WHERE slug = ${onlySlug}`
-      : await sql`SELECT DISTINCT tenant_id FROM users WHERE status ILIKE 'active'`;
+      : await sql`SELECT DISTINCT tenant_id FROM users WHERE status ILIKE 'active' AND deleted_at IS NULL`;
     if (onlySlug && !tenants.length) throw new Error(`No tenant with slug "${onlySlug}" — refusing to fall back to all tenants.`);
     for (const { tenant_id: t } of tenants) {
       // 1. followup_due & site_visit_reminder
       const dueLeads = await sql`
-        SELECT id, name, agent_id, locality, follow_up
+        SELECT id, name, agent_id, locality, follow_up,
+               ${canTakeWork(t, sql`agent_id`)} AS holder_ok
         FROM crm_leads
         WHERE tenant_id = ${t}
           AND follow_up IS NOT NULL
@@ -227,7 +363,10 @@ export async function processScheduledNotifications(
           -- it, and the regex guard is that one: a follow_up can hold a typed
           -- string instead of a timestamp.
           AND follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
-          AND (follow_up->>'at')::timestamptz <= NOW()
+          -- A site visit is announced an hour before it; anything else when due.
+          AND (follow_up->>'at')::timestamptz <= NOW() + CASE
+                WHEN coalesce(follow_up->>'action', follow_up->>'label', '') ILIKE '%visit%'
+                THEN interval '1 hour' ELSE interval '0 minutes' END
           -- A LOWER BOUND, for the reason lead_stale_sla below already has one:
           -- the day this starts matching, it walks the desk's ENTIRE history.
           --
@@ -253,12 +392,15 @@ export async function processScheduledNotifications(
         if (l.agent_id) {
           const action = l.follow_up?.action || l.follow_up?.label || 'Follow-up';
           const isVisit = /visit/i.test(action);
-          notify({
-            userId: l.agent_id,
+          // The holder; the desk when they have left or been suspended, so a
+          // booking whose holder is gone is still somebody's to keep.
+          notifyOrDesk(l.holder_ok ? l.agent_id : null, {
             tenantId: t,
             type: isVisit ? 'site_visit_reminder' : 'followup_due',
             data: { name: l.name, locality: l.locality, action: followUpKind(l.follow_up), when: l.follow_up?.time },
             link: `?screen=leads&lead=${l.id}`,
+            // The booking it is about: rescheduled or given an outcome, it closes.
+            subjectAt: l.follow_up?.at ?? null,
             push: true,
             toSelf: true
           }).catch(() => {});
@@ -299,7 +441,8 @@ export async function processScheduledNotifications(
       // people has how many untouched, all day, without buzzing anyone.
       const lookbackHours = agentHours * 6;
       const staleLeads = await sql`
-        SELECT l.id, l.name, l.agent_id, l.locality, l.created_at
+        SELECT l.id, l.name, l.agent_id, l.locality, l.created_at,
+               ${canTakeWork(t, sql`l.agent_id`)} AS holder_ok
         FROM crm_leads l
         WHERE l.tenant_id = ${t}
           AND l.stage = ${arrivalStage}
@@ -311,8 +454,8 @@ export async function processScheduledNotifications(
       `;
 
       for (const l of staleLeads) {
-        notify({
-          userId: l.agent_id,
+        // The holder; the desk when they cannot take work (see followup_due).
+        notifyOrDesk(l.holder_ok ? l.agent_id : null, {
           tenantId: t,
           type: 'lead_untouched',
           data: { name: l.name, hours: agentHours },
@@ -341,6 +484,7 @@ export async function processScheduledNotifications(
       // (ending_notified_at), and only for one that has not already ended: the
       // day this ships, an agreement that ended last month is not news, and
       // a gate never set is a backlog with a fuse (see followup_due above).
+      const tz = (await deskConfigOf(t)).timezone;
       const ending = await sql`
         SELECT a.id, a.agent_id, a.lead_id, a.property_id, a.party_name,
                to_char(a.end_date, 'DD Mon') AS ends,
@@ -354,8 +498,8 @@ export async function processScheduledNotifications(
                            AND u.deleted_at IS NULL AND u.status ILIKE 'active'
          WHERE a.tenant_id = ${t} AND a.kind = 'rent' AND a.status = 'active'
            AND a.end_date IS NOT NULL
-           AND a.end_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date
-           AND a.end_date <= (now() AT TIME ZONE 'Asia/Kolkata')::date + 30
+           AND a.end_date >= (now() AT TIME ZONE ${tz})::date
+           AND a.end_date <= (now() AT TIME ZONE ${tz})::date + 30
            AND a.ending_notified_at IS NULL
          LIMIT 50`;
       for (const a of ending as any[]) {
@@ -363,6 +507,7 @@ export async function processScheduledNotifications(
           tenantId: t, type: 'agreement_ending',
           data: { name: a.who, flat: a.flat, ends: a.ends },
           link: a.property_id ? `?screen=properties&prop=${a.property_id}` : a.lead_id ? `?screen=leads&lead=${a.lead_id}` : `?screen=clients`,
+          record: { kind: 'agreement' as const, ids: [a.id] },
           toSelf: true,
         };
         // The agent on it; the desk when nobody is, or they have left. A
@@ -373,6 +518,17 @@ export async function processScheduledNotifications(
         await sql`UPDATE crm_agreements SET ending_notified_at = NOW() WHERE id = ${a.id} AND tenant_id = ${t}`;
       }
       if (ending.length) console.log(`[ScheduledNotify] ${t}: ${ending.length} agreement(s) ending within 30 days notified`);
+
+      // A buyer's forms (buyerAsks.ts): an alert a restart lost, and New homes
+      // like these. DETACHED: its work never holds this firm's dispatch below;
+      // it throttles and guards itself. A one-firm script run waits for it.
+      const asks = buyerAskSweep(t, { force: !!onlySlug });
+      if (onlySlug) await asks;
+
+      // Close what has been done, then send what has come due — held for the
+      // morning, or through the night. Here because this is the one sweep.
+      await dispatchDue(t).catch(err => console.warn(`[Alerts] ${t}: dispatch failed:`, err?.message));
+      await retryFailedPushes(t).catch(err => console.warn(`[Alerts] ${t}: retry failed:`, err?.message));
     }
 
     // Trim the delivery log at most once a day. Inside the sweep because there
@@ -383,6 +539,8 @@ export async function processScheduledNotifications(
       const gone = await pruneDeliveryLog().catch(() => 0);
       if (gone) console.log(`[Push] delivery log: pruned ${gone} rows older than 90 days.`);
     }
+    // View logs past 180 days, once a month per firm (retention.ts decides).
+    if (!onlySlug) await runShareRetention().catch(err => console.warn('[Retention] run failed:', err?.message));
   } catch (err: any) {
     console.warn('[ScheduledNotify] Scanner iteration failed:', err?.message);
   }

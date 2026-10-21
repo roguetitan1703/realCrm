@@ -26,15 +26,19 @@
 // Leads | Calling is a switch beside the title, never both on one screen, and
 // each side is its own set of facts: calls to leads, or calls to owners.
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { dayLabel, whenLabel } from '../lib/format.js'
 import { Segmented } from './primitives.jsx'
 import Icon from './Icon.jsx'
+import { useStore } from '../lib/store.jsx'
 import { stageLabel } from '../data/pipelineRoles.js'
+import { firmLocale } from '../lib/locale.js'
+import { formatPhone } from '../lib/phone.js'
 
 // ── Reading one person's counts ─────────────────────────────────────────────
-export const fmt = (n) => Number(n || 0).toLocaleString('en-IN')
+export const fmt = (n) => Number(n || 0).toLocaleString(firmLocale().numberLocale)
 export const word = (n, one, many) => (n === 1 ? one : many)
 
 /** What a call's written outcome says about whether anybody picked up. */
@@ -110,6 +114,115 @@ export function DayPicker({ day, today, onDay, className = '' }) {
       <input ref={ref} type="date" className="ad-day-in" tabIndex={-1} aria-hidden="true"
         value={day} max={today}
         onChange={(e) => { const v = e.target.value; if (v && v <= today) onDay(v) }} />
+    </span>
+  )
+}
+
+// ── A week, a month, or any stretch ─────────────────────────────────────────
+// The same report over more days: `from` is the first day, `day` the last.
+// Day / 7 days / 30 days / Custom is a switch beside the date, and the picker
+// beside it chooses the day, the first day of the week or month, or both ends.
+
+const DAYS = { 7: 7, 30: 30 }
+const short = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString(firmLocale().numberLocale, { day: 'numeric', month: 'short', timeZone: 'UTC' })
+export const spanOf = (from, to) => Math.round((new Date(`${to}T12:00:00Z`) - new Date(`${from}T12:00:00Z`)) / 86400000) + 1
+
+/** Which switch position a range is. */
+export const rangeMode = (from, to) => !from ? 'day' : DAYS[spanOf(from, to)] ? String(spanOf(from, to)) : 'custom'
+
+/** "Today", "Last 7 days", "6 Oct to 12 Oct". */
+export function periodName(data) {
+  if (!data?.day) return ''
+  if (!data.from) return dayName(data.day, data.today)
+  const n = spanOf(data.from, data.day)
+  if (data.day === data.today && DAYS[n]) return `Last ${n} days`
+  return `${short(data.from)} to ${short(data.day)}`
+}
+
+/** A date input opened from a label: the browser's own calendar. */
+function DatePick({ value, min, max, label, onPick, aria }) {
+  const ref = useRef(null)
+  const open = () => { const el = ref.current; if (!el) return; try { el.showPicker() } catch { el.focus(); el.click() } }
+  return (
+    <span className="ad-day">
+      <button type="button" className="ad-day-b" onClick={open} aria-label={aria}>
+        <Icon name="calendar" size={14} />
+        <span className="ad-day-l">{label}</span>
+      </button>
+      <input ref={ref} type="date" className="ad-day-in" tabIndex={-1} aria-hidden="true"
+        value={value} min={min} max={max} onChange={(e) => { const v = e.target.value; if (v) onPick(v) }} />
+    </span>
+  )
+}
+
+/**
+ * The switch and its picker. `data` is the report (day, from, today);
+ * `onRange({ from, day })` sets them — null `day` is today, null `from` one day.
+ */
+export function RangeControl({ data, onRange }) {
+  // Custom is a choice, not a length: a custom stretch that happens to be 30
+  // days long is still Custom while the person is setting it.
+  const [custom, setCustom] = useState(false)
+  // The open state lives in the store so useNav's overlay closes it on Back.
+  const store = useStore()
+  const open = Boolean(store?.state.rangeOpen)
+  const setOpen = (v) => store?.setRangeOpen(v)
+  useEffect(() => () => store?.setRangeOpen(false), []) // eslint-disable-line react-hooks/exhaustive-deps
+  // On a phone the sheet is drawn in the app frame, over the tab bar; a sheet
+  // left inside the scrolling screen slid under it. On a desk it stays a popover.
+  const anchor = useRef(null)
+  const inHost = (node) => {
+    const host = anchor.current?.closest('.app-mobile')
+    return host ? createPortal(node, host) : node
+  }
+  if (!data?.day) return null
+  const { today } = data
+  const to = data.day
+  const mode = custom && data.from ? 'custom' : rangeMode(data.from, to)
+  const set = (from, day) => onRange({ from: from || null, day: day === today ? null : day })
+  // A window of n days starting on `start`, kept inside today: a start too
+  // recent for a whole window becomes the last n days.
+  const windowFrom = (start, n) => {
+    const end = shiftDay(start, n - 1) > today ? today : shiftDay(start, n - 1)
+    return [shiftDay(end, -(n - 1)), end]
+  }
+  const pickMode = (m) => {
+    setCustom(m === 'custom')
+    if (m === 'day') return set(null, to)
+    if (DAYS[m]) return set(shiftDay(to, -(DAYS[m] - 1)), to)
+    return set(data.from || shiftDay(to, -6), to)
+  }
+  return (
+    <span className="ad-range">
+      <button type="button" ref={anchor} className="ad-range-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon name="calendar" size={14} />
+        <span className="ad-range-l">{periodName(data)}</span>
+        <Icon name="chevDown" size={14} />
+      </button>
+      {open && inHost(<>
+        <div className="ad-pop-back" onClick={() => setOpen(false)} />
+        <div className="ad-pop" role="dialog" aria-label="Period">
+          <div className="sheet-grab" />
+          <Segmented value={mode} onChange={pickMode} options={[
+            { value: 'day', label: 'Day' }, { value: '7', label: '7 days' },
+            { value: '30', label: '30 days' }, { value: 'custom', label: 'Custom' },
+          ]} />
+          <div className="ad-pop-pick">
+            {mode === 'day' && <>
+              <button type="button" className="ad-step" aria-label="Previous day" onClick={() => set(null, shiftDay(to, -1))}><Icon name="chevLeft" size={16} /></button>
+              <DatePick value={to} max={today} label={dayName(to, today)} aria="Pick a day" onPick={(v) => set(null, v)} />
+              <button type="button" className="ad-step" aria-label="Next day" disabled={to >= today} onClick={() => set(null, shiftDay(to, 1))}><Icon name="chevRight" size={16} /></button>
+            </>}
+            {DAYS[mode] && <DatePick value={data.from} max={today} label={periodName(data)} aria="Pick the first day"
+              onPick={(v) => { const [f, e] = windowFrom(v, DAYS[mode]); set(f, e) }} />}
+            {mode === 'custom' && <>
+              <DatePick value={data.from} max={to} label={short(data.from)} aria="First day" onPick={(v) => set(v, to)} />
+              <span className="ad-range-to">to</span>
+              <DatePick value={to} min={data.from} max={today} label={short(to)} aria="Last day" onPick={(v) => set(data.from, v)} />
+            </>}
+          </div>
+        </div>
+      </>)}
     </span>
   )
 }
@@ -232,12 +345,12 @@ export function TeamToday({ store, hasCalling, onOpen }) {
 }
 
 // ── The people behind a number ──────────────────────────────────────────────
-export function ActivityRecords({ store, go, side, date, person, measure, detail, title, Modal }) {
+export function ActivityRecords({ store, go, side, date, from, person, measure, detail, title, Modal }) {
   const [rows, setRows] = useState(null)
   useEffect(() => {
     let live = true
     // "People called" is the calls, one line per person.
-    api.getActivityRecords({ side, date, person, measure: measure === 'people' ? 'contact' : measure, detail })
+    api.getActivityRecords({ side, date, from, person, measure: measure === 'people' ? 'contact' : measure, detail })
       .then(r => {
         if (!live) return
         let list = r?.records || []
@@ -251,7 +364,7 @@ export function ActivityRecords({ store, go, side, date, person, measure, detail
       })
       .catch(() => { if (live) setRows([]) })
     return () => { live = false }
-  }, [side, date, person, measure, detail])
+  }, [side, date, from, person, measure, detail])
 
   const openRecord = (r) => {
     store.closeModal()
@@ -275,8 +388,8 @@ export function ActivityRecords({ store, go, side, date, person, measure, detail
               {rows.map((r, i) => (
                 <button key={`${r.id}-${i}`} type="button" className="ad-row" onClick={() => openRecord(r)}>
                   <span className="ad-row-main">
-                    <span className="ad-row-name">{r.name || r.phone || 'No name'}</span>
-                    <span className="ad-row-sub">{[r.unit, what(r)].filter(Boolean).join(' · ') || r.phone}</span>
+                    <span className="ad-row-name">{r.name || formatPhone(r.phone) || 'No name'}</span>
+                    <span className="ad-row-sub">{[r.unit, what(r)].filter(Boolean).join(' · ') || formatPhone(r.phone)}</span>
                   </span>
                   <span className="ad-row-at">{r.at ? whenLabel(r.at) : ''}</span>
                 </button>

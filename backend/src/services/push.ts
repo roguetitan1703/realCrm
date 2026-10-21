@@ -11,7 +11,23 @@
 
 import webpush from 'web-push';
 import { randomBytes } from 'crypto';
+import dns from 'node:dns';
+import net from 'node:net';
 import { sql } from './db.js';
+import { canTakeWork } from './workforce.js';
+
+// A QUARTER OF iPHONE PUSHES NEVER LEFT THE BOX. 110 of 458 sends to
+// web.push.apple.com in a fortnight failed as `ETIMEDOUT/ENETUNREACH` (prod,
+// 12 Oct): Node tries every address Apple's DNS returns, IPv6 and IPv4
+// interleaved, and gives each attempt 250 ms before moving on. The box has no
+// IPv6 route (ENETUNREACH, instantly) and a connect from India to Apple can
+// take longer than 250 ms, so every IPv4 attempt was abandoned too. IPv4 first,
+// and a connect is given 2.5 s. Process-wide — Node has no per-request knob for
+// web-push's agent — and harmless for the database and mail connections.
+dns.setDefaultResultOrder('ipv4first');
+if (typeof (net as any).setDefaultAutoSelectFamilyAttemptTimeout === 'function') {
+  (net as any).setDefaultAutoSelectFamilyAttemptTimeout(2500);
+}
 
 const PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
 const PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
@@ -39,21 +55,70 @@ const ACK_URL = process.env.PUBLIC_API_URL
   ? `${process.env.PUBLIC_API_URL.replace(/\/+$/, '')}/api/v1/notifications/ack`
   : '';
 
-// 6 hours. Every alert we push is about something to do TODAY.
-const TTL_SECONDS = 6 * 3600;
+// How long a push service may hold a message for a device that is offline.
+// Without one FCM keeps it four weeks, and a "not contacted" alert surfacing
+// eleven days late is worse than none, because the agent acts on it. An urgent
+// alert is stale after 6 hours; a morning summary is good for the working day.
+const TTL_URGENT_SECONDS = 6 * 3600;
+const TTL_SUMMARY_SECONDS = 12 * 3600;
+
+interface PushMeta {
+  notificationId?: string;
+  /** A summary covers several alerts; every one is marked shown with it. */
+  notificationIds?: string[];
+  type?: string;
+  /** `now` / `at_time` alerts: high priority, so an idle Android shows it. */
+  urgent?: boolean;
+}
 export function vapidPublicKey(): string { return PUBLIC; }
 
-export async function saveSubscription(tenantId: string, userId: string, sub: any, userAgent?: string): Promise<void> {
-  if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth || !tenantId || !userId) return;
+/** Saved, or false when the push service has already said this endpoint is gone. */
+export async function saveSubscription(tenantId: string, userId: string, sub: any, userAgent?: string, sessionId?: string): Promise<boolean> {
+  if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth || !tenantId || !userId) return true;
+  const [gone] = await sql`SELECT 1 FROM push_gone_endpoints WHERE endpoint = ${sub.endpoint}`;
+  if (gone) return false;
   const id = `sub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   await sql`
-    INSERT INTO push_subscriptions (id, tenant_id, user_id, endpoint, p256dh, auth, user_agent)
-    VALUES (${id}, ${tenantId}, ${userId}, ${sub.endpoint}, ${sub.keys.p256dh}, ${sub.keys.auth}, ${userAgent || null})
+    INSERT INTO push_subscriptions (id, tenant_id, user_id, endpoint, p256dh, auth, user_agent, session_id)
+    VALUES (${id}, ${tenantId}, ${userId}, ${sub.endpoint}, ${sub.keys.p256dh}, ${sub.keys.auth}, ${userAgent || null}, ${sessionId || null})
     ON CONFLICT (endpoint) DO UPDATE SET
       tenant_id = EXCLUDED.tenant_id, user_id = EXCLUDED.user_id,
       p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth,
-      user_agent = COALESCE(EXCLUDED.user_agent, push_subscriptions.user_agent)
+      user_agent = COALESCE(EXCLUDED.user_agent, push_subscriptions.user_agent),
+      session_id = COALESCE(EXCLUDED.session_id, push_subscriptions.session_id)
   `;
+  return true;
+}
+
+const PUSH_STATES = new Set(['on', 'off', 'default', 'denied', 'unsupported']);
+/** What this sign-in's browser reports about alerts. Its own session only. */
+export async function recordPushState(sessionId: string, userId: string, state: string): Promise<void> {
+  if (!sessionId || !userId || !PUSH_STATES.has(state)) return;
+  await sql`UPDATE sessions SET push_state = ${state}, push_state_at = NOW()
+            WHERE id = ${sessionId} AND user_id = ${userId}`;
+}
+
+/**
+ * CAN THIS DEVICE BE SENT TO -- the one definition, for the send and for every
+ * report that counts devices. A device is live while the sign-in that
+ * registered it is live; signing out, expiry and revocation all end it. A row
+ * from before devices were bound to a sign-in (session_id NULL) is treated as
+ * before -- live while its person is signed in anywhere -- for one week from the
+ * `push_subscription_session` marker, long enough for every device in use to
+ * re-bind on its next open. After that an unbound row is not sent to.
+ * A support session (Delpat on a firm's desk) never makes a device live.
+ * Reads the alias `p` for push_subscriptions.
+ */
+export function deviceIsLive() {
+  return sql`(
+    (p.session_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM sessions s WHERE s.id = p.session_id AND s.revoked = FALSE AND s.expires_at > NOW()))
+    OR (p.session_id IS NULL
+      AND EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = p.user_id AND s.revoked = FALSE
+                    AND s.expires_at > NOW() AND s.support_by IS NULL)
+      AND EXISTS (SELECT 1 FROM schema_migrations m WHERE m.name = 'push_subscription_session'
+                    AND m.applied_at > NOW() - INTERVAL '7 days'))
+  )`;
 }
 
 /**
@@ -68,15 +133,18 @@ export async function saveSubscription(tenantId: string, userId: string, sub: an
 async function logDelivery(row: {
   tenantId: string; userId: string; notificationId?: string | null; type?: string | null;
   endpoint?: string | null; status: string; statusCode?: number | null; error?: string | null;
-  ackToken?: string | null;
+  ackToken?: string | null; notificationIds?: string[] | null; payload?: any; attempt?: number;
 }): Promise<void> {
   try {
     const id = `pdl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     await sql`
-      INSERT INTO push_deliveries (id, tenant_id, user_id, notification_id, type, endpoint, status, status_code, error, ack_token)
+      INSERT INTO push_deliveries (id, tenant_id, user_id, notification_id, type, endpoint, status, status_code, error,
+                                   ack_token, notification_ids, payload, attempt)
       VALUES (${id}, ${row.tenantId}, ${row.userId}, ${row.notificationId ?? null}, ${row.type ?? null},
               ${row.endpoint ?? null}, ${row.status}, ${row.statusCode ?? null},
-              ${row.error ? String(row.error).slice(0, 300) : null}, ${row.ackToken ?? null})
+              ${row.error ? String(row.error).slice(0, 300) : null}, ${row.ackToken ?? null},
+              ${row.notificationIds?.length ? row.notificationIds : null},
+              ${row.payload ? sql.json(row.payload) : null}, ${row.attempt ?? 1})
     `;
   } catch (e: any) {
     console.warn('[Push] delivery log write failed:', e?.message);
@@ -131,11 +199,12 @@ export async function sendPushToUser(
   tenantId: string,
   userId: string,
   payload: any,
-  meta?: { notificationId?: string; type?: string },
+  meta: PushMeta = {},
 ): Promise<void> {
   if (!userId || !tenantId) return;
   const log = (status: string, extra: any = {}) => logDelivery({
-    tenantId, userId, notificationId: meta?.notificationId, type: meta?.type, status, ...extra,
+    tenantId, userId, notificationId: meta.notificationId, notificationIds: meta.notificationIds,
+    type: meta.type, status, ...extra,
   });
   if (!enabled) { await log('push_disabled'); return; }
   // A PUSH IS ONLY FOR SOMEONE WHO IS SIGNED IN.
@@ -150,45 +219,105 @@ export async function sendPushToUser(
   // revoked, not expired. Signed out everywhere means no push, whether or not
   // the browser managed to unsubscribe on the way out — which it cannot do at
   // all if the sign-out happened by timeout, or on a device that is offline.
+  // And only to a member of the firm (workforce.ts): removing or suspending
+  // someone revokes their sessions, but a push must not depend on that.
   const [live] = await sql`
-    SELECT count(*)::int AS n FROM sessions
+    SELECT count(*)::int AS n, ${canTakeWork(tenantId, userId)} AS member FROM sessions
     WHERE user_id = ${userId} AND revoked = FALSE AND expires_at > NOW()`;
+  if (!live?.member) { await log('not_a_member'); return; }
   if (!live?.n) { await log('not_signed_in'); return; }
-  const subs = await sql`SELECT * FROM push_subscriptions WHERE tenant_id = ${tenantId} AND user_id = ${userId}`;
-  if (!subs.length) { await log('no_subscription'); return; }
-  await Promise.all(subs.map(async (s: any) => {
-    // One token per DEVICE, not per alert: the same notification going to a
-    // phone and a laptop is two deliveries, and "it showed on one of them" is
-    // the answer that matters.
-    const ackToken = randomBytes(18).toString('base64url');
-    const body = JSON.stringify({
-      ...payload,
-      ...(ACK_URL ? { ack: { url: ACK_URL, token: ackToken } } : {}),
-    });
-    try {
-      // TTL: how long the push service may hold this if the device is offline.
-      // Without it FCM keeps a message for four weeks — and a "not contacted
-      // for 24h" alert surfacing eleven days late is worse than one that never
-      // arrives, because the agent acts on it.
-      const res = await webpush.sendNotification(
-        { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-        body,
-        { TTL: TTL_SECONDS },
-      );
-      await log('sent', { endpoint: s.endpoint, statusCode: res?.statusCode ?? null, ackToken });
-      await sql`UPDATE push_subscriptions SET last_success_at = NOW() WHERE id = ${s.id}`;
-    } catch (e: any) {
-      // 404/410 = the browser dropped this subscription; prune it.
-      if (e?.statusCode === 404 || e?.statusCode === 410) {
-        await sql`DELETE FROM push_subscriptions WHERE id = ${s.id}`;
-        await log('expired', { endpoint: s.endpoint, statusCode: e.statusCode });
-      } else {
-        const why = failureReason(e, s.endpoint);
-        console.warn('[Push] send failed:', e?.statusCode, why);
-        await log('failed', { endpoint: s.endpoint, statusCode: e?.statusCode ?? null, error: why });
-      }
+  // ...AND ONLY TO A DEVICE THAT IS ITSELF SIGNED IN. Being signed in on a
+  // laptop is not being signed in on the phone in a drawer. Each skipped device
+  // is logged, so "she has a phone, and it is signed out" is in the report.
+  const all = await sql`
+    SELECT p.*, ${deviceIsLive()} AS live
+    FROM push_subscriptions p WHERE p.tenant_id = ${tenantId} AND p.user_id = ${userId}`;
+  if (!all.length) { await log('no_subscription'); return; }
+  for (const s of all.filter((r: any) => !r.live)) await log('device_signed_out', { endpoint: s.endpoint });
+  const subs = all.filter((r: any) => r.live);
+  await Promise.all(subs.map((s: any) => sendToDevice(tenantId, userId, s, payload, meta, 1)));
+}
+
+/**
+ * One push to one device, logged. Shared by the first send and the retry, so a
+ * retry is the same send and lands in the same log.
+ */
+async function sendToDevice(tenantId: string, userId: string, s: any, payload: any, meta: PushMeta, attempt: number): Promise<void> {
+  const log = (status: string, extra: any = {}) => logDelivery({
+    tenantId, userId, notificationId: meta.notificationId, notificationIds: meta.notificationIds,
+    type: meta.type, status, attempt, endpoint: s.endpoint, ...extra,
+  });
+  // One token per DEVICE, not per alert: the same notification going to a
+  // phone and a laptop is two deliveries, and "it showed on one of them" is
+  // the answer that matters.
+  const ackToken = randomBytes(18).toString('base64url');
+  const body = JSON.stringify({
+    ...payload,
+    ...(ACK_URL ? { ack: { url: ACK_URL, token: ackToken } } : {}),
+  });
+  try {
+    // URGENCY. At the default (normal) an idle Android phone holds the message
+    // until it next wakes: 208 alerts in a fortnight were accepted and shown on
+    // no screen, after 20:00 sent outnumbered shown 85 to 23, and 85 arrived 5
+    // minutes to 6 hours late (prod, 12 Oct). An alert someone must act on now
+    // goes high; a morning summary does not need to wake anyone.
+    const res = await webpush.sendNotification(
+      { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+      body,
+      meta.urgent
+        ? { TTL: TTL_URGENT_SECONDS, urgency: 'high' }
+        : { TTL: TTL_SUMMARY_SECONDS, urgency: 'normal' },
+    );
+    await log('sent', { statusCode: res?.statusCode ?? null, ackToken });
+    await sql`UPDATE push_subscriptions SET last_success_at = NOW() WHERE id = ${s.id}`;
+  } catch (e: any) {
+    // 404/410 = the push service dropped this subscription. Remembered, so the
+    // app cannot re-register it (see push_gone_endpoints in db.ts).
+    if (e?.statusCode === 404 || e?.statusCode === 410) {
+      await sql`INSERT INTO push_gone_endpoints (endpoint) VALUES (${s.endpoint}) ON CONFLICT DO NOTHING`;
+      await sql`DELETE FROM push_subscriptions WHERE id = ${s.id}`;
+      await log('expired', { statusCode: e.statusCode });
+    } else {
+      const why = failureReason(e, s.endpoint);
+      console.warn('[Push] send failed:', e?.statusCode, why);
+      // The payload is kept only for a failure below HTTP — the one kind a
+      // retry can fix (retryFailedPushes). A refusal with a status code is an
+      // answer, not an accident.
+      await log('failed', { statusCode: e?.statusCode ?? null, error: why, payload: e?.statusCode ? null : payload });
     }
-  }));
+  }
+}
+
+/**
+ * RETRY WHAT NEVER LEFT THE BOX. A send that failed below HTTP — DNS, TCP,
+ * TLS; 110 of 458 sends to Apple in a fortnight before the IPv4 change — was
+ * lost for good. Now: up to two more attempts, a minute or more apart, to the
+ * same device, while it is still live and the alert still open. Run by the
+ * sweep, per tenant.
+ */
+export async function retryFailedPushes(tenantId: string): Promise<number> {
+  const rows = await sql`
+    SELECT d.id, d.user_id, d.notification_id, d.notification_ids, d.type, d.endpoint, d.payload, d.attempt
+      FROM push_deliveries d
+     WHERE d.tenant_id = ${tenantId} AND d.status = 'failed' AND d.status_code IS NULL
+       AND d.payload IS NOT NULL AND d.retried_at IS NULL AND coalesce(d.attempt, 1) < 3
+       AND d.created_at < NOW() - interval '1 minute' AND d.created_at > NOW() - interval '30 minutes'
+       AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.id = d.notification_id AND n.closed_at IS NOT NULL)
+     LIMIT 50`;
+  let n = 0;
+  for (const d of rows as any[]) {
+    await sql`UPDATE push_deliveries SET retried_at = NOW() WHERE id = ${d.id}`;
+    const [s] = await sql`
+      SELECT p.*, ${deviceIsLive()} AS live FROM push_subscriptions p
+       WHERE p.tenant_id = ${tenantId} AND p.endpoint = ${d.endpoint}`;
+    if (!s?.live) continue;
+    await sendToDevice(tenantId, d.user_id, s, d.payload, {
+      notificationId: d.notification_id ?? undefined, notificationIds: d.notification_ids ?? undefined,
+      type: d.type ?? undefined, urgent: true,
+    }, (d.attempt || 1) + 1);
+    n++;
+  }
+  return n;
 }
 
 /**
@@ -203,6 +332,7 @@ export async function pruneDeliveryLog(days = 90): Promise<number> {
     DELETE FROM push_deliveries
     WHERE created_at < NOW() - (${days}::text || ' days')::interval
     RETURNING id`;
+  await sql`DELETE FROM push_gone_endpoints WHERE gone_at < NOW() - (${days}::text || ' days')::interval`;
   return r.length;
 }
 
@@ -242,14 +372,38 @@ export async function listDeliveries(
  * carrying no subscription while every screen said notifications were on.
  */
 export async function deliveryReadiness(tenantId: string): Promise<any[]> {
+  // ONE ANSWER TO "CAN THIS PERSON BE REACHED", for the firm's Team screen and
+  // for Delpat's console alike. `reach`:
+  //   on          a live device to send to
+  //   blocked     a sign-in whose browser has alerts blocked
+  //   unsupported a sign-in whose browser cannot receive alerts at all
+  //   off         neither: never turned on, or nothing reported yet
+  // and "shown this week" counts alerts that reached a SCREEN, not ones a push
+  // service accepted — an idle or signed-out phone accepts them too.
   return await sql`
-    SELECT u.id, u.name, u.role,
-      (SELECT count(*)::int FROM push_subscriptions p WHERE p.user_id = u.id AND p.tenant_id = ${tenantId}) AS devices,
-      (SELECT count(*)::int FROM sessions s WHERE s.user_id = u.id AND s.revoked = FALSE AND s.expires_at > NOW()) AS live_sessions,
-      (SELECT max(p.last_success_at) FROM push_subscriptions p WHERE p.user_id = u.id AND p.tenant_id = ${tenantId}) AS last_reached_at
-    FROM users u
-    WHERE u.tenant_id = ${tenantId} AND u.status ILIKE 'active'
-    ORDER BY u.role, u.name
+    SELECT r.*,
+      CASE WHEN r.devices > 0 THEN 'on'
+           WHEN 'denied' = ANY(r.push_states) THEN 'blocked'
+           WHEN 'unsupported' = ANY(r.push_states) THEN 'unsupported'
+           ELSE 'off' END AS reach
+    FROM (
+      SELECT u.id, u.name, u.role,
+        (SELECT count(*)::int FROM push_subscriptions p WHERE p.user_id = u.id AND p.tenant_id = ${tenantId} AND ${deviceIsLive()}) AS devices,
+        (SELECT count(*)::int FROM push_subscriptions p WHERE p.user_id = u.id AND p.tenant_id = ${tenantId} AND NOT ${deviceIsLive()}) AS devices_signed_out,
+        (SELECT count(*)::int FROM sessions s WHERE s.user_id = u.id AND s.revoked = FALSE AND s.expires_at > NOW() AND s.support_by IS NULL) AS live_sessions,
+        coalesce((SELECT array_agg(DISTINCT s.push_state) FROM sessions s WHERE s.user_id = u.id AND s.revoked = FALSE
+                    AND s.expires_at > NOW() AND s.support_by IS NULL AND s.push_state IS NOT NULL), '{}') AS push_states,
+        (SELECT max(d.displayed_at) FROM push_deliveries d WHERE d.user_id = u.id AND d.tenant_id = ${tenantId}) AS last_reached_at,
+        (SELECT count(*)::int FROM notifications n WHERE n.tenant_id = ${tenantId} AND n.user_id = u.id
+            AND n.created_at > NOW() - INTERVAL '7 days' AND coalesce(n.urgency, '') <> 'drawer') AS alerts_7d,
+        (SELECT count(*)::int FROM notifications n WHERE n.tenant_id = ${tenantId} AND n.user_id = u.id
+            AND n.created_at > NOW() - INTERVAL '7 days' AND n.shown_at IS NOT NULL) AS alerts_shown_7d,
+        (SELECT count(*)::int FROM push_deliveries d WHERE d.tenant_id = ${tenantId} AND d.user_id = u.id
+            AND d.status = 'failed' AND d.created_at > NOW() - INTERVAL '7 days') AS alerts_failed_7d
+      FROM users u
+      WHERE u.tenant_id = ${tenantId} AND u.status ILIKE 'active' AND u.deleted_at IS NULL
+    ) r
+    ORDER BY r.role, r.name
   `;
 }
 
@@ -271,6 +425,25 @@ export async function recordAck(token: string, event: string): Promise<boolean> 
         UPDATE push_deliveries SET displayed_at = COALESCE(displayed_at, NOW()),
           status = CASE WHEN status = 'sent' THEN 'displayed' ELSE status END
         WHERE ack_token = ${token} RETURNING id`;
+  // SHOWN, and on a tap READ, for the alert(s) the delivery carried — a summary
+  // carries several. Scoped through the delivery row to its own recipient and
+  // tenant: the token is the only credential this path has. A tapped push was
+  // still unread in the bell for 20 of 21 taps before this (prod, 12 Oct).
+  if (rows.length) {
+    await sql`
+      UPDATE notifications n SET shown_at = COALESCE(n.shown_at, NOW())
+      FROM push_deliveries d
+      WHERE d.ack_token = ${token} AND n.tenant_id = d.tenant_id AND n.user_id = d.user_id
+        AND (n.id = d.notification_id OR n.id = ANY(coalesce(d.notification_ids, '{}')))`;
+  }
+  if (event === 'clicked' && rows.length) {
+    await sql`
+      UPDATE notifications n SET read = TRUE, read_at = COALESCE(n.read_at, NOW())
+      FROM push_deliveries d
+      WHERE d.ack_token = ${token} AND n.tenant_id = d.tenant_id AND n.user_id = d.user_id
+        AND (n.id = d.notification_id OR n.id = ANY(coalesce(d.notification_ids, '{}')))
+        AND n.read = FALSE`;
+  }
   return rows.length > 0;
 }
 
@@ -284,9 +457,10 @@ export async function recordAck(token: string, event: string): Promise<boolean> 
  */
 export async function rebindSubscription(oldEndpoint: string, sub: any): Promise<boolean> {
   if (!oldEndpoint || !sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) return false;
-  const [row] = await sql`SELECT tenant_id, user_id, user_agent FROM push_subscriptions WHERE endpoint = ${oldEndpoint}`;
+  const [row] = await sql`SELECT tenant_id, user_id, user_agent, session_id FROM push_subscriptions WHERE endpoint = ${oldEndpoint}`;
   if (!row) return false;
-  await saveSubscription(row.tenant_id, row.user_id, sub, row.user_agent || undefined);
+  // The browser rotated the endpoint; the device and its sign-in are the same.
+  if (!await saveSubscription(row.tenant_id, row.user_id, sub, row.user_agent || undefined, row.session_id || undefined)) return false;
   if (sub.endpoint !== oldEndpoint) await sql`DELETE FROM push_subscriptions WHERE endpoint = ${oldEndpoint}`;
   return true;
 }

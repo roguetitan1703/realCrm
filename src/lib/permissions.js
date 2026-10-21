@@ -57,6 +57,12 @@ export function isDeskRole(role) {
   return DESK_ROLES.includes(role) || role === 'superadmin'
 }
 
+/** Show in catalogue changes what the firm shows the world: the desk's call,
+ *  not an agent's (the server answers 403 to anyone else). */
+export function canChangeCatalogue(role) {
+  return isDeskRole(role)
+}
+
 // ── What a role is CALLED ───────────────────────────────────────────────────
 // One place, because the same person was reading "Sales Executive" on the web
 // top bar and "Field agent" on their phone, while the database said `agent` and

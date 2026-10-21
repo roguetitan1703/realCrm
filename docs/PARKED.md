@@ -1,14 +1,46 @@
 # Parked
 
-Things that are **understood and deliberately not built yet** — not a backlog of
-ideas. Every entry names what is actually wrong, what it costs today, and what
-the fix would take, so picking one up does not mean re-deriving it.
+Things **set aside** — either for later or declined. Every entry names what is
+actually wrong, what it costs today, and what the fix would take, so picking
+one up does not mean re-deriving it. Mark each **Later** or **Declined** in its
+heading when you touch it.
 
-`docs/ROADMAP.md` is what to build next. This is what we looked at, decided
-against doing right now, and want to stop rediscovering.
+`BACKLOG.md` is what we might do next. Picking an entry up moves it there and
+deletes it here.
 
 When an item ships, delete it from here. When one turns out to be worse than
 recorded, update it in place rather than adding a second entry.
+
+---
+
+## Leads stored as Website with no source given — Later (21 Oct)
+
+`crm_leads.source` defaulted to `'Website'` until 21 Oct, so a lead created
+with no source was filed as Website. The default is dropped and no source now
+shows as Not stated, but rows already stored as Website cannot be told apart
+from real website leads. Dev, 21 Oct: 116 rows stored as Website across 8 tenants (delpat 4, demo-showcase 40, demo-vadodara 30). Production not read. A repair would need
+a second signal (the ingestion provider, the timeline's first event) per row.
+
+---
+
+## Declined for now — the plan of 17 Oct (`PLAN.md` §2)
+
+No number from either firm asks for these; reopen with one.
+
+- **The "Phase 2" list** (Work OS note): qualifier bot, click-to-WhatsApp ads,
+  campaigns and broadcasts, drips, Instagram comment-to-DM, AI reply
+  suggestions, WhatsApp calling, Android call-to-lead card. Each waits on a
+  Meta approval Delpat does not have.
+- **Meta track B (build)** — Later, gated: no build before Meta verifies
+  Delpat. Track A (paperwork, #101–#106) runs on Om's time. This replaces the
+  30 Sep line below that ruled the WhatsApp Business API out because the firms
+  will not pay: the bet now is client #3 onwards, not the two firms.
+- **Skeletons, pagination restyle, group-by as kanban** — no number behind them.
+- **Property import: a default sale/rent for the file** — lead import is 0 at
+  both firms; no new work on import, agreements, units, calendar, email or
+  verification (0–3 uses ever). Keep them working; add nothing; remove nothing.
+- **Pushing bhumi to call its 1,324 imported owners** (0 calls) — ask once
+  whether they meant to.
 
 ---
 
@@ -89,14 +121,6 @@ for "not allowed", never 403 (a 403 no longer signs out, but 422 is the rule).
 
 ## Parked by the user, 25 Sep
 
-- **1.1 Today does not scroll on iPhone (installed app).** See
-  mahalaxmi-batch.md 1.1 for what is known.
-- **1.7 step 2, iPhone alerts failing.** Step 1 (recording the whole failure
-  reason) shipped in `a44afd3`; the next step is reading those reasons and the
-  EC2 checks listed in mahalaxmi-batch.md 1.7.
-- **9.4 env loader and CRLF.** Harmless unless the server's `.env` has CRLF;
-  check `grep -c $'
-' .env` on EC2 before touching it.
 - **A speed test of each step on production.** Time every screen's reads and
   every common write on the live API, per firm (the dashboard's summaries, Team
   today, Performance, the lead and calling lists, saving a lead, which takes
@@ -249,19 +273,7 @@ Until then the script is the interface, and it is read-only and safe on `bhumi`.
 `AuditSection` in `src/modules/Settings.jsx` is written and working; its nav
 entry and its render are both commented out. **That is deliberate — the client
 is not to have it yet.** Do not "fix" the dead code or restore the nav item.
-
----
-
-## Assignments tab: the count and the list disagree
-
-The tab counts by type (`isAssignment`, 6 types); the list it opens filters on
-the word "assign" appearing in the title or body. Measured 2026-08-20: bhumi's
-tab reads **276** and opens onto **290** rows — the 14 extras are all
-`lead_untouched` ("… · assigned to you"). delpat: 137 vs 139, the extras being
-one `lead_untouched` and one `lead_unrouted` ("Lead arrived **un**assigned").
-
-Fix is one line — filter by `isAssignment` — and it is parked only because the
-user asked for other work first.
+Confirmed again by the user on 12 Oct: keep it hidden for now.
 
 ---
 
@@ -309,7 +321,7 @@ A sweep on 26 Aug found a live owner password in the public JS bundle and stoppe
 there. These areas were **never opened**. Nothing here has been measured, so
 nothing here is safe or unsafe — it is unknown, which is worse than either.
 
-Recorded so a later session does not mistake "not in KNOWN-ISSUES" for "checked".
+Recorded so a later session does not mistake "not in BACKLOG" for "checked".
 
 - **Ingestion** — `services/ingestion.ts`, `parser.ts`, the webhook path and
   `/api/v1/ingest`. Known separately: no rate limit, and bhumi's Housing mapping
@@ -317,14 +329,15 @@ Recorded so a later session does not mistake "not in KNOWN-ISSUES" for "checked"
 - **The audit chain** — `verifyAuditChain()` fails at seq 227 and has not been
   diagnosed. The ledger is sold to clients as tamper-evident.
 - **The notification matrix** — which types actually send, to whom, and whether
-  the recipient list is ever empty. `docs/specs/notification-delivery.md`
+  the recipient list is ever empty. `docs/archive/notification-delivery.md`
   describes the intent; nobody has compared it to what production sent.
 - **Permissions beyond the password path** — RBAC on routes, what a manager can
   reach that an agent cannot, and whether any route trusts a client-supplied
   role or tenant.
 - **Sessions** — sliding expiry, the 8-device cap, revocation on password change.
-- **The import and revert path** — `revertImportBatch` is known to leave timeline
-  events and notification links behind; the rest of the flow is unread.
+- **The import and revert path** — the undo (imports.ts `revertImport`) was
+  read on 21 Oct; it still leaves notification links (`notifications.record_ids`)
+  naming deleted records. The rest of the flow is unread.
 
 
 ---
@@ -379,3 +392,11 @@ and support number wait for a Save button. Also: the caption *"PNG or SVG, under
 number an agent contacts when alerts are blocked — a typo is a dead end nobody
 discovers.
 
+---
+
+## Declined: dropping `archive_bhumi_*_20260806`
+
+517 archived leads from the reverted August imports, two of them `Deal Closed`.
+Do not drop without asking the user.
+
+---

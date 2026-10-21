@@ -1,162 +1,224 @@
-# Notifications — the pattern
+# Notifications — an alert is open work
 
-> Which alert reaches which device, and why one does not, is
-> `notification-delivery.md`. This file is about how they read.
+**Status:** ✅ built on `development` 12 Oct, all five steps — **not deployed**. See
+§13, as built. Replaces the old `notifications.md`
+(how an alert reads; its voice rules carry over in §8) and
+`notification-delivery.md` (whether it arrives; its mechanics carry over in §5).
 
-A plan, not a change. Nothing here deletes a notification: every row already in
-the table keeps existing and keeps rendering. The point is that they stop
-looking like eleven people wrote them.
-
----
-
-## 1. What is actually there
-
-Every distinct title in the system today:
-
-```
-lead_assigned        1   👤 New Lead Assigned to You
-lead_assigned      217   New lead assigned to you
-lead_reassigned     18   A lead was assigned to you
-lead_reassigned     17   1 lead assigned to you
-lead_reassigned      1   3 leads assigned to you
-lead_stale_sla     138   ⚠️ SLA Warning: Untouched Lead
-lead_stale_sla     174   🚨 SLA Escalation: Untouched Lead
-calendar_task…       8   📅 New Site Visit assigned to you
-remark_added         2   💬 New Note Added to Lead
-lead_retry_due      13   📞 No answer — try again
-```
-
-Five faults, and they are all the same fault — **the text is written at the
-call site**, so every call site invented its own:
-
-1. **One type, several titles.** `lead_assigned` has two. `lead_reassigned` has
-   three. Nothing keeps them in agreement because nothing holds them together.
-2. **Six emoji, no rule.** The drawer already draws its own dot and layout; an
-   emoji inside the title is a second icon competing with the first.
-3. **Title Case and sentence case, side by side.**
-4. **Internal jargon on a salesperson's screen.** Nobody thinks "SLA Warning".
-   They think "I haven't called this person."
-5. **One type carrying two meanings.** `lead_stale_sla` is both the agent's
-   warning and the manager's escalation, distinguishable only by reading the
-   string.
+**Who it is for.** The agent, on a phone between calls: tell me the moment
+something is mine to do, and stop telling me once I have done it. The manager,
+at a desk: tell me when the desk itself is stuck, and show me which agents
+cannot be reached.
 
 ---
+
+## 1. What the data said (production, read-only, 12 Oct, last 14 days)
+
+- **Agents act; the bell does not know.** Mahalaxmi agents worked 77% of
+  new-lead alerts within 24 h — and had read 0 of 463. `read` was set only by
+  the bell drawer, and one tap there marked everything read. Unread piles: 139–
+  296 per agent. A count that only grows is wallpaper (`CLAUDE.md` §1).
+- **The push works when it lands.** Action within 2 h on a new lead: 35% when
+  the push showed on a screen, 6% when it did not.
+- **A quarter of what we send never shows.**
+  - 110 of 458 iPhone sends failed to connect (Node gave each attempt 250 ms;
+    fixed `4fbfc20`).
+  - 208 alerts accepted by Google/Microsoft and shown nowhere; after 20:00 sent
+    outnumbered shown 85 to 23 — an idle Android phone holds normal-priority
+    messages, and our 6-hour expiry ran out overnight.
+  - Two bhumi agents have never had a subscription (0 of 73 shown); nothing on
+    any manager's screen says so.
+  - Phones keep receiving after their own sign-in ended (Siddhi's iPhone: 20
+    sent, 0 shown, no session on it) — the check is per person, not per device.
+  - A dead endpoint is re-registered on every app open (38 × 410 for one).
+- **Nothing judges an alert by its result.** "Enquired again" was acted on 15
+  times in 55; nothing would ever notice.
+
+Every one of these is the same mistake: **an alert was modelled as a message**
+— sent, sitting in an inbox, read or not — **when to an agent it is a piece of
+work**, open until it is done.
 
 ## 2. The rule
 
-**A notification is a typed event with data. It is not a formatted string.**
+**An alert announces an item of open work. It closes when that work is done,
+wherever it was done.** Almost every alert already has a twin in Today:
 
-Call sites pass a type and the facts. One catalogue turns that into words. The
-renderer turns the type into an icon. Nobody writes prose at a call site again.
+| Alert | Its item in Today | Closes when |
+|---|---|---|
+| `lead_assigned`, `lead_reassigned`, `lead_untouched` | Not yet contacted | the lead has person-authored contact after the alert, or is no longer the recipient's |
+| `lead_assigned_bulk` | Not yet contacted (each lead) | every lead in the batch is contacted or moved |
+| `followup_due`, `site_visit_reminder`, `calendar_task_assigned` | Overdue · Due today · Upcoming | the booking gets an outcome, is rescheduled, or is cleared |
+| `lead_repeat` | Came back today | contact after the repeat |
+| `owner_assigned`, `owner_reassigned` | Owners to call | the owner is called or moved |
+| `agreement_ending` | Tenancies expiring | the agreement is renewed or ended |
+| `lead_unrouted` *(desk)* | Nobody assigned | the lead has an agent |
+| `lead_reassign_loop`, `remark_added` | — | the recipient opens it |
 
----
+Plus, for every alert: the record is rejected or closed → closed, reason
+`not_yours`.
 
-## 3. Voice
+**The close test is the one Today already uses** (`services/leadSegments.ts`
+and the owner/agreement equivalents), called, never copied. So the bell and
+Today cannot disagree about the same work (`CLAUDE.md` §3.2, §3.3). The bell
+shows open alerts only; its count is a number someone can act on today.
 
-- **Sentence case.** No Title Case, no trailing full stop.
-- **No emoji, ever.** The icon is the icon.
-- **Title says what happened or what is needed. Body says which record.** The
-  body never repeats the title.
-- **The number goes in the title when the number is the point** — "No answer for
-  4 days" — and the name goes in the body.
-- **No system vocabulary.** No "SLA", no "stale", no "escalation", no type names.
-- **Plurals resolved in one place**, not with `n === 1 ? '' : 's'` at nine sites.
-- **Written for the person receiving it**, not about the record. An agent gets
-  "Not contacted for 2 days"; a manager gets the same fact with the agent named.
+## 3. Lifecycle
 
----
+One row per alert in `notifications`, gaining:
 
-## 4. The catalogue
-
-One entry per type. `{}` are facts the call site supplies.
-
-| type | icon | tone | title | body |
-|---|---|---|---|---|
-| `lead_assigned` | `userPlus` | info | Lead assigned to you | {name} · {locality} · via {source} |
-| `lead_assigned_bulk` | `userPlus` | info | {n} leads assigned to you | — |
-| `lead_new` | `leads` | info | New lead captured | {name} → {agent} |
-| `lead_unrouted` | `alert` | urgent | Lead arrived unassigned | {name} · nobody is set to receive {source} |
-| `lead_moved_away` | `switch` | info | {n} leads moved to another agent | — |
-| `lead_untouched` | `clock` | attention | Not contacted for {hours}h | {name} · assigned to you |
-| `lead_untouched_escalated` | `alert` | urgent | Not contacted for {hours}h | {name} · with {agent} |
-| `lead_retry_due` | `phone` | attention | No answer for {days} days | {name} · last tried {when} |
-| `followup_set` | `calendar` | info | Follow-up scheduled | {name} · {when} |
-| `followup_due` | `clock` | attention | Follow-up due now | {name} · {action} |
-| `site_visit_reminder` | `mapPin` | attention | Site visit due now | {name} · {when} |
-| `calendar_task_assigned` | `calendar` | info | Site visit assigned to you | {name} · {when} |
-| `remark_added` | `note` | info | Note added | {name} · by {author} |
-| `owner_assigned` | `userPlus` | info | {n} owners assigned to you | — |
-| `owner_reassigned` | `switch` | info | Owner assigned to you | {name} |
-
-**Tone drives colour, nothing else** — `info` muted, `attention` accent,
-`urgent` alert. It does not change the icon and it does not add a word.
-
-`lead_stale_sla` splits into `lead_untouched` and `lead_untouched_escalated`.
-Two audiences, two urgencies; one type could never be styled correctly for both.
-
----
-
-## 5. The back catalogue, without touching data
-
-312 existing rows have emoji baked into `title`. They are not rewritten and not
-deleted. The renderer strips leading decoration at display time:
-
-```js
-const cleanTitle = (t) => String(t || '').replace(/^[\p{Extended_Pictographic}️‍\s]+/u, '')
-```
-
-An emoji at the front of a title is decoration, not content, so removing it at
-render loses nothing — and every historic row immediately matches the new ones.
-Old titles keep their old wording; that is honest, because that is what was sent.
-
-**This is the whole visual win, and it needs no migration, no deploy of the
-backend, and no notification removed.**
-
----
-
-## 6. Files
-
-| File | Change |
+| Column | Meaning |
 |---|---|
-| `src/lib/notificationMeta.js` *(new)* | `type → { icon, tone }`, and `cleanTitle()`. The row already carries `type`, so the client needs nothing new from the server. |
-| `src/modules/Modals.jsx` | Draw the icon from type. Strip legacy decoration. **Fix the Assignments tab** — see below. |
-| `backend/src/services/notificationCopy.ts` *(new)* | The catalogue. Title/body built here and nowhere else. Push and in-app get one string. |
-| `backend/src/services/notifications.ts` | `notify()` takes `{ type, data }` and renders through the catalogue; `title`/`body` stay accepted for anything not yet migrated. Sweep call sites move over. |
-| `backend/src/services/store.ts` | ~10 call sites pass facts instead of prose. |
+| `record_kind`, `record_ids` | what it is about (`lead` / `owner` / `agreement`, one or many ids). Today it is only parseable from `link` |
+| `shown_at` | first time any device reported it on screen |
+| `read_at` | opened — tapped on the phone or in the drawer (exists since `4fbfc20`) |
+| `closed_at`, `close_reason` | `done` · `not_yours` · `opened` |
+| `send_after` | when the push may go out (§4); NULL once sent |
 
-### The dependency that will bite
+`read` stays as a derived convenience for the old client until it is retired.
 
-```js
-Assignments ({notifs.filter(n => (n.title || '').toLowerCase().includes('assign')).length})
-```
+**Who closes it.** One function, `closeSettled(tenant, record?)`: evaluates
+open alerts against their type's close test and stamps the ones that pass.
+Called (a) after any write to a record, scoped to that record — the bell is
+right within the request — and (b) by the existing sweep, tenant-wide, as the
+safety net. One implementation, two callers.
 
-That tab matches on the **title text**. Change the copy and it silently empties.
-It must key off type — `lead_assigned`, `lead_assigned_bulk`,
-`calendar_task_assigned`, `owner_assigned`, `owner_reassigned` — before any
-string moves.
+## 4. When it reaches the phone — urgency, decided in the catalogue
 
----
+| Urgency | Reaches the phone | Types |
+|---|---|---|
+| **now** | immediately, high priority — work handed to you | `lead_assigned`, `lead_assigned_bulk`, `lead_reassigned`, `lead_unrouted`, `lead_repeat`, `owner_assigned`, `owner_reassigned`, `calendar_task_assigned` (moved here 13 Oct: a lead assigned by hand was held for 9 am) |
+| **at its time** | when the thing is due | `followup_due`, `site_visit_reminder` (an hour before) |
+| **morning** | one notification at the opening hour, summarising | `agreement_ending`, `lead_untouched`, `lead_reassign_loop`, `owner_reassign_loop` |
+| **drawer** | never buzzes | `remark_added`, `lead_moved_away` |
 
-## 7. Order
+**The firm's working hours** — one setting, Settings → Response times, default
+9 am to 9 pm on the firm's clock. (Decided 12 Oct as a fixed window with no
+setting; reversed 16 Oct after testing: a window nobody can see is a phone that
+"did not ring" for no reason anyone can find.) Outside them nothing buzzes, with
+no exceptions; the bell is never held. At the opening hour, each
+person gets **one** push for whatever is **still open** — "3 new leads
+overnight" — and nothing for work already done. The window is ours to tune from
+when agents actually work; measure the hours of person-authored activity per
+firm before fixing it (starting point 21:00–08:00 IST).
 
-1. **Client only** — icon by type, strip legacy decoration, tab by type.
-   Every existing notification looks right. No deploy, no data change.
-2. **Catalogue** — add the module, route `notify()` through it, migrate the
-   sweep's four call sites. New notifications gain the new voice.
-3. **Remaining call sites** in `store.ts`.
-4. **Split `lead_stale_sla`** into the two types. Existing rows keep the old
-   type and keep rendering through a legacy entry in the meta map.
+Every alert enters the bell immediately whatever its urgency; urgency only
+decides the buzz.
 
-Each step stands alone and each is reversible.
+## 5. Delivery — a device, not an address
 
----
+A **device** is a push subscription plus the sign-in that registered it plus
+what its browser last reported. The rules:
 
-## 8. Not doing
+1. **Send only to a live device** — its own sign-in is live. Signing out,
+   expiry and revocation end its pushes. Rows from before binding get a grace
+   week to re-bind on their next open (the app re-uploads on every signed-in
+   open).
+2. **Record what the browser says** on every signed-in open: `on`, `off`,
+   `default` (not asked), `denied`, `unsupported`. A refusal leaves a trace.
+3. **A dead endpoint stays dead.** On 404/410 it is remembered; `/subscribe`
+   refuses it with 410, and the app drops the subscription and makes a new one.
+4. **Retry what failed below HTTP** (DNS, TCP, TLS): twice, a minute apart.
+   A refusal with a status code is not retried.
+5. **`now` and `at its time` go at `urgency: high`.**
+6. **Expiry follows urgency**: a `now` push expires after 6 h; a morning
+   summary at the end of the working day.
 
-- **No rewriting history.** Old rows keep their stored text.
-- **No new notification types.** The gaps are ROADMAP-2 E5; this is about how
-  the ones we have look and read.
-- **No emoji anywhere**, including in the new catalogue.
-- **No storing type + params instead of rendered text.** Push needs the string
-  server-side, and two representations of one message would drift — which is
-  the fault this whole document exists to remove.
+Carried over unchanged: the device receipt (`ack` token in the encrypted
+payload → `/notifications/ack` on display and on tap), `pushsubscriptionchange`
+rebinding, the 90-day log prune, `toSelf` off.
+
+## 6. Measurement — every type earns its push
+
+Per type, per firm, per week, from the lifecycle columns:
+sent → shown → opened → closed `done` (and median time to each), and action
+within 2 h **with** the push shown against **without**. Read in the superadmin
+console.
+
+A type whose action rate is no better with the push than without moves down a
+tier (now → morning → drawer). That is a one-line catalogue change, decided by
+the numbers — the catalogue improves with time instead of being rebuilt.
+
+## 7. Reachability, where the manager acts
+
+On Team and Performance, beside each agent: **Phone on** · **Blocked** ·
+**Browser can't** · **No device**, and "N of M shown this week". The manager's
+question is who to talk to today; "Anil's phone gets nothing" is an answer to
+it. The superadmin firm page shows the same, plus per sign-in state.
+
+## 8. Voice (carried over)
+
+Sentence case; no emoji; title says what happened, body says which record; no
+system words ("SLA", "stale"); text comes from `notificationCopy.ts`, never a
+call site. Plurals in one place.
+
+## 9. The catalogue entry
+
+`notificationCatalogue.ts` already holds key, label, audience, trigger, push,
+gate. It gains `closesWhen` (a named close test from §2) and `urgency` (§4);
+`push` becomes `urgency !== 'drawer'`. A new alert is one entry; the engine does
+lifecycle, delivery, retry and measurement for it. A type without `closesWhen`
+fails the boot check, like an undeclared type does today.
+
+## 10. First run
+
+Close every open alert whose work is already done, with reason `done` or
+`not_yours`, through `runOnce`. **Writes status columns on bhumi's and
+mahalaxmi's `notifications`.** Before running: the count it would close per
+tenant, per type, stated and confirmed by the user.
+
+## 11. Build order
+
+1. Columns + `record_kind/ids` on new alerts; back-fill ids from `link`.
+2. Close tests in the catalogue, `closeSettled()`, write-path and sweep callers.
+   Bell reads open alerts only. First-run measurement → user → run.
+3. Device model (§5 rules 1–3) — the held patches on
+   `stash@{0} notif-patches-pending-design` are its starting point.
+4. Urgency and the night window; morning summary; retries; priority.
+5. Measurement read-out; reachability on Team/Performance.
+
+Each step ships alone. Steps 1–2 end the piles; 3–4 end the lost pushes;
+5 makes the next change a decision instead of a guess.
+
+## 12. Open
+
+- The night window's hours — measure first (§4).
+- Whether `lead_untouched` survives at all once `lead_assigned` closes on
+  contact: it re-announces the same open item. Decide from §6's numbers.
+
+## 13. As built (12 Oct)
+
+- **Where:** `alertLifecycle.ts` (close tests, `closeSettled`, first run,
+  outcomes), `notificationCatalogue.ts` (`urgency`, `closesWhen`,
+  `LEGACY_CLOSE`), `notifications.ts` (`notify`, `releaseAt`, `dispatchDue`),
+  `push.ts` (devices, retries, `deliveryReadiness`), `statuses.ts`.
+- **Closing:** after every successful write (one hook in `index.ts`, debounced
+  a second per tenant) and every minute from the sweep, which now also runs on
+  a server timer — it used to run only when an open tab polled `/pulse`.
+- **Two reasons added** to §3: `superseded` — one open alert per piece of work
+  on one record, the newest stands — and `expired`, first run only, for old
+  alerts that name no record (batch alerts linking a filtered list).
+- **One clock:** an alert is stamped by the app, like the timeline it is
+  compared with. Stamped by the database, a call seconds after an alert read as
+  earlier than it on a machine whose clock drifted 25 s.
+- **Working hours, default 9 to 21 on the firm's clock** (`workHours` in
+  settings, `releaseAt()` in `notifications.ts`). The default was measured: 2.3% of bhumi's person-written
+  work and 0% of mahalaxmi's falls inside it over 30 days; no push was ever
+  tapped there.
+- **Urgency high** for `now` and `at_time` only; the morning summary goes at
+  normal priority with a 12-hour expiry.
+- **Retries:** a send that failed below HTTP keeps its payload and is resent by
+  the sweep, up to attempt 3, within 30 minutes.
+- **Reach** is one query (`deliveryReadiness`) read by the Team screen's Alerts
+  column (`GET /notifications/reach`, owners and managers) and the console.
+  **Outcomes** (§6) are the console's firm page → Alerts.
+- **Fixed on the way:** the Assignments tab listed by title and counted by
+  type; a remark written from a record never alerted its holder (the context
+  has no `actorId`) and, when it did, linked `lead=undefined`.
+- **First run on production, previewed read-only 12 Oct**
+  (`scripts/alert-first-run-preview.ts`): bhumi 2,177 of 2,202 open alerts
+  close (bell per agent 140–297 → 0–5), mahalaxmi 717 of 751 (141–181 → 4–14).
+- **Verified on dev:** 16 + 9 scenario checks through the API (assign, call,
+  reassign, bulk, summary dispatch, device state, dead endpoint, booking
+  reschedule and clear, remark opened, superseded, retry), 10 night-window
+  cases, and the phone bell, Team column and console pages in a browser.
+

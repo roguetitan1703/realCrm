@@ -36,8 +36,9 @@ is noise, and noise costs more than silence.
 
 | Slug | What it is | Rule |
 |---|---|---|
-| `bhumi` | **Bhumi PropCity — the paying client** | Read-only unless the user names them. Never write on your own initiative |
-| `delpat` | The user's own testing org | Safe. Its leads are webhook fixtures, not people |
+| `bhumi` | **Bhumi PropCity — paying client** | Production: read freely, never write unless the user names them |
+| `mahalaxmi` | **Mahalaxmi — paying client** | Same as `bhumi` |
+| `delpat` | The user's own testing org, in prod and dev | Safe. Its leads are webhook fixtures, not people |
 | `skyline-realty` | Demo tenant (`DEFAULT_TENANT_ID`) | Safe |
 | `test-org` | Scratch | Safe |
 
@@ -77,7 +78,10 @@ npm run seed:dev       # synthetic leads into the development db
 **Scratch scripts** go in `backend/src/` and are **deleted the same session**.
 Reusable tools go in `backend/src/scripts/` with a header saying when to run them.
 Supabase has a low connection cap: `postgres(url, { max: 1, ssl: 'require' })`,
-and stop the dev backend on `too many clients`.
+and stop the dev backend on `too many clients`. A production read adds
+`sql.begin('READ ONLY', …)` — the pooler drops the
+`default_transaction_read_only` startup parameter, so it protects nothing. Production has
+`crm_agents` (no `agents`); a firm's settings row is keyed `default`.
 
 ---
 
@@ -184,24 +188,28 @@ The user's standing complaint is agents asserting what they have not checked.
 ## 7. The documents, and what each one is for
 
 Read `docs/STATE.md` first — it is the only place that says where each half of
-the system is deployed. Then the one that matches what you are doing.
+the system is deployed. Then `docs/BACKLOG.md`.
 
 | File | Its job | Written when |
 |---|---|---|
 | `CLAUDE.md` | How to work here. Rules only, no incidents, no backlog | Rarely. Fold, don't append |
 | `docs/STATE.md` | **Where the last session left the system.** Deployed vs committed, what is waiting on the user, what was checked against the live database | **Overwritten every session** |
-| `docs/ROADMAP.md` | What to build next. Source of truth for priority | When priority changes |
-| `docs/KNOWN-ISSUES.md` | Broken or misleading, nobody building it. Every entry carries a measured number | When something is found or fixed |
-| `docs/PARKED.md` | Decided *against*, with the numbers, so it is not rediscovered or "fixed" | When something is declined |
+| `docs/PLAN.md` | **The order of work** for the next weeks, from the latest usage snapshot (`docs/usage-*.md`); its §6 holds the user's open decisions | When a plan is reviewed; BACKLOG follows it |
+| `docs/BACKLOG.md` | **The one list** — Now, Next, Small, Bugs, To verify, Bigger pieces. One line per item; detail lives in a spec or the commit | Every session that finds, picks or ships something |
+| `docs/PARKED.md` | Set aside — **Later** or **Declined** — with the numbers, so it is not rediscovered or "fixed" | When something is set aside; picking it up moves it to BACKLOG |
 | `docs/incidents.md` | What the six shapes actually cost | When a rule needs its evidence |
-| `docs/specs/` | Buildable plans: `auth`, `contacts-leads`, `properties`, `ingestion`, `enquiries`, `pwa`, `branding`, `data-lifecycle`, `notifications` (how an alert reads), `notification-delivery` (whether it arrives) | Before building |
+| `docs/specs/` | Designs for the bigger pieces: `auth`, `contacts-leads`, `properties`, `ingestion`, `enquiries`, `pwa`, `branding`, `data-lifecycle`, `listing-pages`, `notifications` (an alert is open work: lifecycle, urgency, delivery, measurement) | Before building; a short as-built note after |
 | `docs/architecture/`, `docs/ops/DEPLOY.md`, `backend/API_SPECIFICATION.md` | Reference | As needed |
 
-`docs/planning/` and `docs/demo-archive/` are historical. When they conflict with
-`ROADMAP.md`, ROADMAP wins.
+`docs/archive/` (old roadmaps, the Mahalaxmi batch, demo-era plans) is history.
+When it conflicts with the working set, the working set wins.
 
-**Do not put a finding in more than one of these.** A bug goes in KNOWN-ISSUES
-*or* ROADMAP, never both; STATE points at it rather than restating it. Duplicated
+The user's raw notes are triaged against the code before anything is written:
+what is already done is said once and dropped; only what is still open becomes
+a BACKLOG line. Old notes never land as prose.
+
+**Do not put a finding in more than one of these.** It is in BACKLOG *or*
+PARKED, never both; STATE points at it rather than restating it. Duplicated
 across two files, it will be fixed in one and stay open in the other.
 
 ---

@@ -4,6 +4,8 @@ import { Button, Panel, PageHeader } from '../components/primitives.jsx'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
+import { firmLocale } from '../lib/locale.js'
+import { phoneCountries } from '../lib/phone.js'
 import {
   PROPERTY_FIELDS, LEAD_FIELDS, OWNER_FIELDS, GROUP_LABEL,
   parseSpreadsheet, guessMapping, EXAMPLE_SHEETS, exampleSheetCsv,
@@ -72,6 +74,9 @@ export default function ImportPage({ store, go, sel, topBar }) {
   // sheet" with no society column in them, and pasting the same name into four
   // thousand rows is how somebody decides not to import at all.
   const [intoProject, setIntoProject] = useState('')
+  // The country a number written without its code is read in (a sheet of
+  // Dubai owners). The firm's own unless changed.
+  const [phoneCountry, setPhoneCountry] = useState(() => firmLocale().country)
   const [showAllFields, setShowAllFields] = useState(false)
   const [job, setJob] = useState(null)              // the server's job row
   const [preview, setPreview] = useState(null)      // { counts, reasons, sample }
@@ -151,7 +156,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
     if (!job) return
     setChecking(true); setError(null)
     try {
-      const out = await api.previewImport(job.id, mapping, mapping.project ? null : (intoProject.trim() || null))
+      const out = await api.previewImport(job.id, mapping, mapping.project ? null : (intoProject.trim() || null), phoneCountry)
       setPreview(out); setFilterStatus('all'); setStep('review')
     } catch (err) {
       setError('Could not check the file: ' + (err.message || err))
@@ -187,14 +192,14 @@ export default function ImportPage({ store, go, sel, topBar }) {
   }
 
   const undo = async (id, added) => {
-    if (!window.confirm(`Undo this import? The ${added} record${added === 1 ? '' : 's'} it created will be removed.`)) return
+    if (!window.confirm('Undo this import? What it created is removed; anything in use since is kept.')) return
     try {
       const out = await api.revertImport(id)
-      store.toast(`Removed ${out.deleted} record${out.deleted === 1 ? '' : 's'}`)
+      store.toast(`Removed ${out.deleted} record${out.deleted === 1 ? '' : 's'}${out.kept ? ` · ${out.kept} kept, in use` : ''}`)
       if (job?.id === id) setJob(out.import)
       reloadHistory()
     } catch (err) {
-      store.toast('Could not undo that import', 'warn')
+      store.toast(err?.status === 409 && err?.body?.message ? err.body.message : 'Could not undo that import', 'warn'); reloadHistory()
     }
   }
 
@@ -340,6 +345,15 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     </label>
                     <input className="input" value={intoProject} onChange={e => setIntoProject(e.target.value)}
                       placeholder="e.g. VTP Leonara" />
+                  </div>
+                )}
+
+                {(mapping.phone || mapping.ownerPhone) && (
+                  <div className="imp-project">
+                    <label className="imp-map-label" htmlFor="imp-cc">Numbers without a country code</label>
+                    <select id="imp-cc" className="input" value={phoneCountry} onChange={e => setPhoneCountry(e.target.value)}>
+                      {phoneCountries().map(c => <option key={c.code} value={c.code}>{c.name} {c.dial}</option>)}
+                    </select>
                   </div>
                 )}
 
@@ -496,7 +510,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                   <div className="imp-done-t">
                     {job.status === 'done' ? 'Import complete'
                       : job.status === 'failed' ? 'The import stopped'
-                        : job.status === 'reverted' ? 'Import undone'
+                        : job.status === 'reverted' ? (job.revertedKept ? `Import undone · ${job.revertedKept} kept` : 'Import undone')
                           : 'Importing…'}
                   </div>
                   <div className="imp-done-d">
@@ -512,7 +526,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
                     {(job.skipped > 0 || job.failed > 0) && (
                       <Button variant="secondary" size="sm" onClick={() => downloadSkipped(job.id)}>Download the rows that did not import</Button>
                     )}
-                    {job.status === 'done' && (
+                    {(job.status === 'done' || (job.status === 'failed' && job.added > 0)) && (
                       <Button variant="secondary" size="sm" onClick={() => undo(job.id, job.added)}>Undo this import</Button>
                     )}
                     <Button variant="secondary" size="sm" onClick={restart}>Import another file</Button>
@@ -543,9 +557,9 @@ export default function ImportPage({ store, go, sel, topBar }) {
                       {log.sheetName ? ` · sheet "${log.sheetName}"` : ''}
                     </div>
                   </div>
-                  {log.status === 'done' ? (
+                  {log.status === 'done' || (log.status === 'failed' && log.added > 0) ? (
                     <button className="btn btn-ghost btn-sm imp-revert" onClick={() => undo(log.id, log.added)}><Icon name="refresh" size={13} />Undo import</button>
-                  ) : log.status === 'reverted' ? <span className="imp-reverted">Undone</span>
+                  ) : log.status === 'reverted' ? <span className="imp-reverted">Undone{log.revertedKept ? ` · ${log.revertedKept} kept` : ''}</span>
                     : <span className="imp-reverted">{log.status}</span>}
                 </div>
                 <div className="imp-log-stats">

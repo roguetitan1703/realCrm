@@ -1,11 +1,12 @@
 // Collection components: Toolbar (the ONE filter/sort bar), Table, ListRow, Card grid.
 import { stageLabel } from '../data/pipelineRoles.js'
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { StageTag, StatusTag, Source, Overdue, Unassigned, Avatar, Money, NewTag, Quoted, PageHeader, ViewSwitch, Pager, Button } from './primitives.jsx'
 import { quotedLine, unitLabel, dealWord } from '../lib/format.js'
 import { priceRangeLabel } from '../lib/projects.js'
+import { formatMoney } from '../lib/locale.js'
 import { getNestedValue } from './ModuleFields.jsx'
 
 // ---- SearchField: a text input that reports value AFTER a short pause. ----
@@ -105,16 +106,32 @@ export function ModuleListView({
   // `facets` are the option lists the SERVER counted, under every other active
   // filter. A module that has none still gets the second argument as undefined
   // and falls back to whatever it derived itself, so nothing else had to change.
-  const fields = typeof def.filterFields === 'function' ? def.filterFields(store, facets) : (def.filterFields || [])
+  // EVERY ACTIVE FILTER HAS A CONTROL. A field a module hides (`hidden`) still
+  // shows while it is switched on, and a value that arrived in a URL but is
+  // not among today's options is added to them, so a filter that narrows the
+  // list is always on screen to be seen and taken off.
+  const fields = (typeof def.filterFields === 'function' ? def.filterFields(store, facets) : (def.filterFields || []))
+    .filter(f => !f.hidden || (filters?.[f.key] || []).length > 0)
+    .map(f => {
+      const on = [].concat(filters?.[f.key] || [])
+      const known = new Set((f.options || []).map(o => String(o.value).toLowerCase()))
+      const extra = on.filter(v => !known.has(String(v).toLowerCase()))
+      return extra.length ? { ...f, options: [...(f.options || []), ...extra.map(v => ({ value: v, label: String(v) }))] } : f
+    })
   const sortOptions = def.sortOptions.map(s => ({ value: s.key, label: s.label }))
 
   // Lean in-page header: module KPIs (left) + scope segments (right). NOT the breadcrumb.
   // KPIs are dropped on a phone: a row of numbers costs a third of the screen
   // and the segment pills below already carry the same counts, tappable.
-  const header = ((!phone && kpis?.length) || segments || leftAddon)
+  // A TAB IS A FILTER. Switching one while rows are ticked dropped the ticks
+  // under a bar that said filters were paused; tabs pause with them, in every
+  // module, until the selection is finished or cleared.
+  const paused = selection?.count > 0
+  const segs = paused && segments ? segments.map(s => (s.on ? s : { ...s, disabled: true })) : segments
+  const header = ((!phone && kpis?.length) || segs || leftAddon)
     // [] not null — a default parameter only fills in for undefined, so null
     // sailed past `kpis = []` and PageHeader read .length off it.
-    ? <PageHeader kpis={phone ? [] : kpis} segments={segments} leftAddon={leftAddon} />
+    ? <PageHeader kpis={phone ? [] : kpis} segments={segs} leftAddon={leftAddon} />
     : null
 
   // On a phone the desktop bar does not shrink — it wraps into three rows of
@@ -154,6 +171,7 @@ export function ModuleListView({
             : <div className="empty"><div className="e-t">{emptyTitle || `No ${def.name.toLowerCase()} match`}</div><div className="e-s">{emptyHint || 'Try clearing a filter or search.'}</div></div>)
         : <>
             {renderTable ? renderTable(phoneList, 'grid') : <ModuleCards def={def} rows={phoneList} store={store} onOpen={onOpen} phone={phone} />}
+            {selection && <PhoneSelectBar selection={selection} />}
             {more > 0 && (
               <button className="btn btn-secondary btn-block loadmore" disabled={loading} onClick={() => onPage(page + 1)}>
                 {loading ? 'Loading…' : `Load ${Math.min(more, pageSize)} more`}
@@ -295,6 +313,58 @@ function PhoneToolbar({
   )
 }
 
+// ---- A selection that outlives the page ----
+// Ticks are kept by id WITH their rows, so ticking eight across three pages
+// and pressing a bulk action acts on all eight: the page on screen only holds
+// its own twenty. ModuleTable hands back the rows it was showing beside the
+// new id set; a phone card toggles its own row.
+export function useSelection() {
+  const [byId, setById] = useState(() => new Map())
+  const ids = useMemo(() => new Set(byId.keys()), [byId])
+  const rowId = (r) => r.id || r._id
+  const set = (nextIds, pageRows = []) => setById(prev => {
+    const seen = new Map(pageRows.map(r => [rowId(r), r]))
+    const m = new Map()
+    for (const id of nextIds) m.set(id, seen.get(id) || prev.get(id) || { id })
+    return m
+  })
+  const toggle = (row) => setById(prev => {
+    const m = new Map(prev); const id = rowId(row)
+    if (m.has(id)) m.delete(id); else m.set(id, row)
+    return m
+  })
+  const clear = () => setById(new Map())
+  return { ids, rows: [...byId.values()], count: byId.size, set, toggle, clear, has: (id) => byId.has(id) }
+}
+
+// ---- The selection on a phone ----
+// The desk ticks rows in the table and the filter bar becomes the selection
+// bar. A phone has no table, so a module offers Select; the cards become tick
+// targets and this bar sits above the tab bar, where the thumb is, with the
+// same actions the desk bar has. Done leaves the mode.
+//
+// ONE ROW. It was a count row over a wrapping row of actions, ~160px that with
+// the tab bar left about 240px of list to pick from. The actions now scroll
+// sideways between the count and Done.
+export function PhoneSelectBar({ selection }) {
+  const n = selection.count || 0
+  return (
+    <div className="psel" role="toolbar" aria-label="Selection">
+      <span className="psel-n">{n} selected</span>
+      <div className="psel-acts">
+        {(selection.actions || []).map(a => (
+          <button key={a.label} type="button" disabled={!n}
+            className={'btn btn-sm ' + (a.tone === 'danger' ? 'btn-danger' : a.tone === 'quiet' ? 'btn-ghost' : 'btn-primary')}
+            onClick={a.onClick}>
+            {a.icon && <Icon name={a.icon} size={15} />}{a.label}
+          </button>
+        ))}
+      </div>
+      <button type="button" className="psel-done" onClick={selection.onClear}>Done</button>
+    </div>
+  )
+}
+
 // ---- ModuleCards: grid of cards from a definition's `card(record,store)` fn. ----
 // On a phone a module may declare `phoneCard` (a compact row layout, in place
 // of the desktop grid tile) and `phoneActions` (what the row can do).
@@ -370,9 +440,12 @@ export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort
   const allOn = selectable && rows.length > 0 && rows.every(r => selected.has(r.id || r._id))
   const someOn = selectable && rows.some(r => selected.has(r.id || r._id))
 
+  // The header box ticks or unticks THIS page; ticks on other pages stay.
   const toggleAll = () => {
     if (!onSelectionChange) return
-    onSelectionChange(allOn ? new Set() : new Set(rows.map(r => r.id || r._id)))
+    const next = new Set(selected)
+    for (const r of rows) { const id = r.id || r._id; if (allOn) next.delete(id); else next.add(id) }
+    onSelectionChange(next, rows)
   }
   // Shift-click extends the last click into a range, same on/off state as the
   // row that was shift-clicked — the affordance every spreadsheet-like table
@@ -392,7 +465,7 @@ export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort
       next.has(id) ? next.delete(id) : next.add(id)
     }
     lastIndex.current = idx
-    onSelectionChange(next)
+    onSelectionChange(next, rows)
   }
 
   const columns = [
@@ -801,7 +874,7 @@ export function FilterBar({ fields = [], value = {}, onChange, search, left, rig
 
   const active = fields.filter(f => (value[f.key] || []).length)
   const set = (key, vals) => onChange({ ...value, [key]: vals })
-  const labelFor = (f, v) => (f.options.find(o => o.value === v)?.label) ?? v
+  const labelFor = (f, v) => f.valueLabel ? f.valueLabel(v) : ((f.options.find(o => o.value === v)?.label) ?? v)
   const toggleVal = (f, v) => {
     const cur = value[f.key] || [], has = cur.includes(v)
     const next = f.multi === false ? (has ? [] : [v]) : (has ? cur.filter(x => x !== v) : [...cur, v])
@@ -817,14 +890,13 @@ export function FilterBar({ fields = [], value = {}, onChange, search, left, rig
     return (
       <div className="fbar fbar-sel">
         <span className="fsel-n">{selection.count} selected</span>
-        <span className="fsel-hint">Filters and sort are paused while rows are selected</span>
         <div className="u-spring" />
         {/* `tone` so a destructive bulk action does not render as the primary
             button beside a harmless one — the two must not look alike when
             they sit a few pixels apart and one cannot be undone. */}
         {(selection.actions || []).map(a => (
           <button key={a.label}
-            className={'btn btn-sm ' + (a.tone === 'danger' ? 'btn-danger' : 'btn-primary')}
+            className={'btn btn-sm ' + (a.tone === 'danger' ? 'btn-danger' : a.tone === 'quiet' ? 'btn-ghost' : 'btn-primary')}
             onClick={a.onClick}>
             {a.icon && <Icon name={a.icon} size={15} />}{a.label}
           </button>
@@ -864,7 +936,7 @@ export function FilterBar({ fields = [], value = {}, onChange, search, left, rig
             <div className="popover">
               {/* Grouped when the module says so. A flat list of eleven filters
                   is a list you read; four short groups is a list you scan. */}
-              {groupFields(fields).map(([groupName, items]) => (
+              {groupFields(fields.filter(f => f.addable !== false)).map(([groupName, items]) => (
                 <div key={groupName || '_'}>
                   <div className="p-head">{groupName || 'Filter by'}</div>
                   {items.map(f => (
@@ -1077,7 +1149,9 @@ export function MediaNote({ p }) {
   return <span className={'media-note' + (bits.length ? '' : ' is-none')}><Icon name="camera" size={11} />{bits.length ? bits.join(' · ') : 'No photos'}</span>
 }
 
-export function PropertyCard({ p, onClick, matchCount }) {
+// `picked` (true/false) turns the card into a tick target for a selection on
+// a phone, where there is no table to tick rows in; undefined is the ordinary card.
+export function PropertyCard({ p, onClick, matchCount, picked, showCatalogue }) {
   const facts = [
     p.carpet || p.area ? `${p.carpet || p.area} sqft` : null,
     p.type !== 'Plot' && p.totalFloors ? `${p.floor || '-'}/${p.totalFloors} flr` : p.floor ? `${p.floor} flr` : null,
@@ -1088,8 +1162,10 @@ export function PropertyCard({ p, onClick, matchCount }) {
   const societyName = p.society || p.project || (p.title ? p.title.split(' - ')[0] : 'Unnamed Property')
 
   return (
-    <button className="pcard" onClick={onClick} style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '16px', gap: 12, textAlign: 'left' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+    <button className={'pcard' + (picked ? ' is-picked' : '')} onClick={onClick} aria-pressed={picked === undefined ? undefined : picked}
+      style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '16px', gap: 12, textAlign: 'left', position: 'relative' }}>
+      {picked !== undefined && <span className={'pick-box pcard-pick' + (picked ? ' on' : '')} aria-hidden="true"><span><Icon name="check" size={13} /></span></span>}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: picked !== undefined ? 30 : 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span className="unit-tag" style={{ margin: 0 }}>{p.type || 'Property'}</span>
           {dealWord(p) && (
@@ -1098,6 +1174,8 @@ export function PropertyCard({ p, onClick, matchCount }) {
             </span>
           )}
           {p.tower && <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Tower {p.tower}{p.unit ? ` · #${p.unit}` : ''}</span>}
+          {/* The same marker as the table row: what the firm shows the public. */}
+          {showCatalogue && p.inCatalogue && <span className="unit-tag unit-cat" style={{ margin: 0 }}><Icon name="eye" size={11} />Catalogue</span>}
         </div>
         <StatusTag status={p.status || 'Available'} />
       </div>
@@ -1123,7 +1201,7 @@ export function PropertyCard({ p, onClick, matchCount }) {
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <span style={{ fontSize: 10.5, textTransform: 'uppercase', color: 'var(--faint)', fontWeight: 600, letterSpacing: '0.04em' }}>Quoted Price</span>
           <span style={{ fontFamily: 'var(--disp)', fontSize: 17, fontWeight: 600, color: 'var(--ink)' }}>
-            {p.priceLabel || p.price || 'Price on request'}
+            {p.priceLabel || (Number(p.price) > 0 ? formatMoney(Number(p.price), { perMonth: p.deal === 'rent' }) : 'Price on request')}
           </span>
         </div>
         {matchCount > 0 && (

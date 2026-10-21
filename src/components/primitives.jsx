@@ -209,14 +209,6 @@ export function SuggestInput({ value, onChange, options = [], id, style, ...rest
     </>
   )
 }
-export function PhoneInput({ value, onChange, ...rest }) {
-  return (
-    <div className="input-group">
-      <span className="prefix">+91</span>
-      <input value={value} onChange={onChange} {...rest} />
-    </div>
-  )
-}
 export function Textarea(props) { return <textarea className="textarea" {...props} /> }
 
 export function Segmented({ options, value, onChange, block }) {
@@ -508,7 +500,7 @@ const EDITABLE_TYPES = new Set(['remark', 'call', 'wa', 'sms', 'followup'])
 const LOCKED_TEXT_TYPES = new Set(['followup'])
 // Exported: the record header shows the latest of these at the top, and a
 // second copy of this map would be two vocabularies drifting apart.
-export const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit', followup: 'Follow-up' }
+export const TYPE_TAG = { remark: 'Remark', call: 'Call', wa: 'WhatsApp', sms: 'SMS', visit: 'Site visit', followup: 'Follow-up', share: 'Shared link' }
 // B4 outcomes are stored as stable keys; these are what a person reads. Derived
 // from the one list rather than typed a second time — the map and the list used
 // to be separate literals that agreed only by luck.
@@ -592,6 +584,41 @@ function VisitProof({ meta }) {
   )
 }
 
+/**
+ * WHAT CAME OF IT: an outcome and a note against something already recorded.
+ * One form, drawn inline by the history's "Add outcome" and in a modal by
+ * Today's Done on a booked meeting (FollowUpDoneModal) — both end in the same
+ * write, so both ask the same question the same way.
+ *
+ * A booking's own sentence is not up for editing. It says what was arranged,
+ * and this box exists to say how it went — an agent recording the outcome of a
+ * demo could once select "Scheduled Online Demo on 19 Aug at 11:00 am", delete
+ * it, type anything, and nothing afterwards could tell what it had been. So
+ * `line` stays on screen, read-only, above the two fields that ARE theirs.
+ *
+ * `footClass` puts the action row in a modal's sticky footer.
+ */
+export function OutcomeForm({ line, outcomes, outcome, onOutcome, text, onText, placeholder, onCancel, onSave,
+  blank = 'No outcome yet', saving = false, footClass = '', autoFocus = true }) {
+  return (
+    <div className="ev-edit">
+      {line && <div className="ev-locked">{line}</div>}
+      {outcomes && (
+        <select className="input" value={outcome} onChange={ev => onOutcome(ev.target.value)}>
+          <option value="">{blank}</option>
+          {outcomes.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      )}
+      <textarea className="textarea" value={text} onChange={ev => onText(ev.target.value)}
+        rows={2} placeholder={placeholder} autoFocus={autoFocus} />
+      <div className={'ev-edit-actions' + (footClass ? ` ${footClass}` : '')}>
+        <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
+        <button className="btn btn-primary btn-sm" disabled={saving} onClick={onSave}>Save</button>
+      </div>
+    </div>
+  )
+}
+
 export function Timeline({ events = [], agents = [], currentUserId, onEditRemark }) {
   const list = events || [];
   // WHICH ROW IS OPEN, decided here rather than by each row for itself.
@@ -663,28 +690,14 @@ function TimelineRow({ e, isLast, agents, currentUserId, onEditRemark, fmtLabel,
       </div>
       <div className="ev-b">
         {editing ? (
-          <div className="ev-edit">
-            {/* A booking's own sentence is not up for editing. It says what was
-                arranged, and this box existed to say how it went — an agent
-                recording the outcome of a demo could select "Scheduled Online
-                Demo on 19 Aug at 11:00 am", delete it, type anything, and
-                nothing afterwards could tell what it had been. The line stays
-                on screen, read-only, above the two fields that ARE theirs. */}
-            {locked && <div className="ev-locked">{fmtLabel(e.label)}</div>}
-            {OUTCOMES_FOR[e.type] && (
-              <select className="input" value={outcome} onChange={ev => edit({ outcome: ev.target.value })}>
-                <option value="">No outcome yet</option>
-                {OUTCOMES_FOR[e.type].map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            )}
-            <textarea className="textarea" value={locked ? note : text}
-              onChange={ev => edit(locked ? { note: ev.target.value } : { text: ev.target.value })}
-              rows={2} placeholder={locked ? 'What happened?' : 'Add a remark…'} autoFocus />
-            <div className="ev-edit-actions">
-              <button className="btn btn-ghost btn-sm" onClick={() => { setDraft(null); onClose?.() }}>Cancel</button>
-              <button className="btn btn-primary btn-sm" onClick={save}>Save</button>
-            </div>
-          </div>
+          <OutcomeForm
+            line={locked ? fmtLabel(e.label) : null}
+            outcomes={OUTCOMES_FOR[e.type]}
+            outcome={outcome} onOutcome={v => edit({ outcome: v })}
+            text={locked ? note : text}
+            onText={v => edit(locked ? { note: v } : { text: v })}
+            placeholder={locked ? 'What happened?' : 'Add a remark…'}
+            onCancel={() => { setDraft(null); onClose?.() }} onSave={save} />
         ) : (
           <>
             <div className="ev-l">{tag && <span className="ev-remark-tag">{tag}</span>}{fmtLabel(e.label)}</div>

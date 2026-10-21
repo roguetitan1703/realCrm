@@ -21,7 +21,7 @@
  * points at the old one (the old one is kept, marked renewed), and warns its
  * agent 30 days before it ends. A sale has none of that. It replaces the
  * `tenancy` blob on a property: no rent, no document, one per flat overwritten
- * at renewal, a tenant who was a string. See docs/specs/mahalaxmi-batch.md "D".
+ * at renewal, a tenant who was a string. See docs/archive/mahalaxmi-batch.md "D".
  * ============================================================================
  */
 import { sql } from './db.js';
@@ -30,8 +30,10 @@ import { audit } from './audit.js';
 import { fileTicket } from './media.js';
 import {
   createProperty, prepareListing, updateLead, getLeadById, addTimelineEvent, getSettings, projectNorm,
-  type ActorCtx,
+  localeOf, timezoneOf, phoneLike, type ActorCtx, type Locale,
 } from './store.js';
+import { moneyFull } from '../../../src/lib/locale.js';
+import { editedPhone } from './phone.js';
 import { finalStageOf } from '../../../src/data/pipelineRoles.js';
 
 export type AgreementKind = 'rent' | 'sale';
@@ -53,7 +55,11 @@ const money = (v: any): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 const ymd = (v: any): string | null => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
-const rupees = (n: number | null) => (n == null ? '' : `₹${Math.round(n).toLocaleString('en-IN')}`);
+/** An agreement's amount in the firm's currency: ₹45,000 · $2,500. */
+const amountText = (n: number | null, loc: Locale) => (n == null ? '' : moneyFull(n, loc));
+
+/** The firm's calendar date today, on its own clock (settings `timezone`). */
+const todayIn = (tz: string) => sql`(now() AT TIME ZONE ${tz})::date`;
 
 /** How a flat is named in a sentence: "Blue Ridge A-402", or the typed label. */
 function flatLabel(p: any, fallback?: string | null): string {
@@ -62,12 +68,12 @@ function flatLabel(p: any, fallback?: string | null): string {
   return [p.project, unit].filter(Boolean).join(' ') || p.title || fallback || 'the flat';
 }
 
-const SELECT = sql`
+const selectIn = (tz: string) => sql`
   SELECT a.*, to_char(a.start_date, 'YYYY-MM-DD') AS start_ymd, to_char(a.end_date, 'YYYY-MM-DD') AS end_ymd,
          p.title AS p_title, p.project AS p_project, p.wing AS p_wing, p.unit_no AS p_unit, p.status AS p_status,
          l.id AS l_id, l.name AS l_name, l.phone AS l_phone,
          o.name AS o_name, o.phone AS o_phone,
-         (a.end_date - (now() AT TIME ZONE 'Asia/Kolkata')::date) AS days_left
+         (a.end_date - ${todayIn(tz)}) AS days_left
     FROM crm_agreements a
     LEFT JOIN crm_properties p ON p.id = a.property_id AND p.tenant_id = a.tenant_id
     LEFT JOIN crm_leads l ON l.id = a.lead_id AND l.tenant_id = a.tenant_id
@@ -108,7 +114,6 @@ export function rowToAgreement(r: any) {
 
 /** "Ending soon": a live rent ending within this many days, or already past its end. */
 export const ENDING_SOON_DAYS = 30;
-const TODAY_IST = sql`(now() AT TIME ZONE 'Asia/Kolkata')::date`;
 
 export async function listAgreements(opts: {
   kind?: string; status?: string; leadId?: string; propertyId?: string; ownerId?: string; agentId?: string;
@@ -116,6 +121,7 @@ export async function listAgreements(opts: {
   project?: string; locality?: string;
 } = {}) {
   const t = tid();
+  const tz = await timezoneOf(t);
   const limit = Math.min(Math.max(Number(opts.limit) || 25, 1), 200);
   const page = Math.max(Number(opts.page) || 1, 1);
   const where: any[] = [sql`a.tenant_id = ${t}`];
@@ -130,7 +136,7 @@ export async function listAgreements(opts: {
   // renewal work: a live rent that ends within ENDING_SOON_DAYS or is past its
   // end with nobody having renewed or ended it. "past" is ended or renewed.
   if (opts.status === 'ending') {
-    where.push(sql`a.kind = 'rent' AND a.status = 'active' AND a.end_date IS NOT NULL AND a.end_date <= ${TODAY_IST} + ${ENDING_SOON_DAYS}::int`);
+    where.push(sql`a.kind = 'rent' AND a.status = 'active' AND a.end_date IS NOT NULL AND a.end_date <= ${todayIn(tz)} + ${ENDING_SOON_DAYS}::int`);
   } else if (opts.status === 'past') {
     where.push(sql`a.status IN ('ended', 'renewed')`);
   } else if (opts.status && opts.status !== 'all') {
@@ -143,7 +149,7 @@ export async function listAgreements(opts: {
   const q = String(opts.q || '').trim().toLowerCase();
   if (q) {
     const like = `%${q}%`;
-    const match = sql`(lower(coalesce(a.party_name, l.name, '')) LIKE ${like} OR coalesce(a.party_phone, l.phone, '') LIKE ${like}
+    const match = sql`(lower(coalesce(a.party_name, l.name, '')) LIKE ${like} OR ${phoneLike(sql`coalesce(a.party_phone, l.phone)`, q)}
       OR lower(coalesce(p.project, a.property_label, '')) LIKE ${like} OR lower(coalesce(p.unit_no, '')) LIKE ${like})`;
     where.push(match); base.push(match);
   }
@@ -156,7 +162,7 @@ export async function listAgreements(opts: {
     : opts.sort === 'amount' ? sql`a.amount ${dir} NULLS LAST, a.created_at DESC`
     : sql`(a.kind = 'rent' AND a.status = 'active') DESC, a.end_date ${dir} NULLS LAST, a.created_at DESC`;
   const rows = await sql`
-    ${SELECT} WHERE ${clause}
+    ${selectIn(tz)} WHERE ${clause}
     ORDER BY ${order}
     LIMIT ${limit} OFFSET ${(page - 1) * limit}`;
   const [{ n }] = await sql`
@@ -174,7 +180,7 @@ export async function listAgreements(opts: {
     const [c] = await sql`
       SELECT count(*) FILTER (WHERE a.status = 'active')::int AS active,
              count(*) FILTER (WHERE a.kind = 'rent' AND a.status = 'active' AND a.end_date IS NOT NULL
-                                AND a.end_date <= ${TODAY_IST} + ${ENDING_SOON_DAYS}::int)::int AS ending,
+                                AND a.end_date <= ${todayIn(tz)} + ${ENDING_SOON_DAYS}::int)::int AS ending,
              count(*) FILTER (WHERE a.status IN ('ended', 'renewed'))::int AS past,
              count(*)::int AS "all"
         FROM crm_agreements a
@@ -199,7 +205,8 @@ export async function listAgreements(opts: {
 }
 
 export async function getAgreement(id: string) {
-  const [r] = await sql`${SELECT} WHERE a.tenant_id = ${tid()} AND a.id = ${id}`;
+  const t = tid();
+  const [r] = await sql`${selectIn(await timezoneOf(t))} WHERE a.tenant_id = ${t} AND a.id = ${id}`;
   return r ? rowToAgreement(r) : null;
 }
 
@@ -232,7 +239,13 @@ export async function createAgreement(input: any, ctx: ActorCtx = {}, opts: { re
   // Who signed, copied onto the agreement — see rowToAgreement. The form fills
   // it from the lead and the person may correct it.
   const partyName = String(input.partyName ?? '').trim() || lead?.name || null;
-  const partyPhone = String(input.partyPhone ?? '').trim() || lead?.phone || null;
+  // Typed on the form: E.164 or refused with the reason. The lead's own number,
+  // or a renewal's copy of the old agreement's, is kept as it is stored.
+  const sentPhone = String(input.partyPhone ?? '').trim();
+  const keptPhone = opts.renews ? opts.renews.party?.phone : lead?.phone;
+  const partyPhone = sentPhone
+    ? editedPhone(sentPhone, keptPhone, (await localeOf(t)).country, 'partyPhone')
+    : lead?.phone || null;
   if (!partyName && !partyPhone) throw new AgreementError(`Add the ${kind === 'rent' ? 'tenant' : 'buyer'}'s name.`);
 
   let [property] = input.propertyId
@@ -248,7 +261,7 @@ export async function createAgreement(input: any, ctx: ActorCtx = {}, opts: { re
     if (!np.bhk && !np.subtype && !np.type) throw new AgreementError('Add what kind of flat it is.');
     const created = await createProperty(prepareListing({
       ...np, deal: kind, status: kind === 'rent' ? 'Leased' : 'Sold', price: amount, source: 'Agreement',
-    }), ctx);
+    }, await localeOf(t)), ctx);
     [property] = await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id = ${created.id}`;
   }
   const label = property ? null : (String(input.propertyLabel || '').trim() || null);
@@ -277,9 +290,10 @@ export async function createAgreement(input: any, ctx: ActorCtx = {}, opts: { re
   }
 
   const saved = await getAgreement(id);
+  const loc = await localeOf(t);
   const what = kind === 'rent'
-    ? `${opts.renews ? 'Renewed' : 'Rented'} ${saved!.flat} · ${rupees(amount)}/month from ${start}${saved!.endDate ? ` to ${saved!.endDate}` : ''}`
-    : `Bought ${saved!.flat} · ${rupees(amount)} on ${start}`;
+    ? `${opts.renews ? 'Renewed' : 'Rented'} ${saved!.flat} · ${amountText(amount, loc)}/month from ${start}${saved!.endDate ? ` to ${saved!.endDate}` : ''}`
+    : `Bought ${saved!.flat} · ${amountText(amount, loc)} on ${start}`;
   if (lead) {
     // The status follows the deal, through updateLead so the change is
     // attributed and timed like any other — not the other way round.
@@ -320,7 +334,7 @@ export async function updateAgreement(id: string, patch: any, ctx: ActorCtx = {}
     if (!n) throw new AgreementError('The name cannot be empty.');
     next.party_name = n;
   }
-  if (patch.partyPhone !== undefined) next.party_phone = String(patch.partyPhone || '').trim() || null;
+  if (patch.partyPhone !== undefined) next.party_phone = editedPhone(patch.partyPhone, before.party?.phone, (await localeOf(tid())).country, 'partyPhone');
   if (!Object.keys(next).length) return before;
   const start = next.start_date ?? before.startDate;
   const end = next.end_date !== undefined ? next.end_date : before.endDate;
@@ -453,7 +467,7 @@ export async function convertOwner(ownerId: string, input: any, ctx: ActorCtx = 
       owner: o.name || null, ownerPhone: o.phone || null, ownerEmail: o.email || null,
       keyAccess: f.keyAccess || keyNote,
       source: 'Calling',
-    }), ctx);
+    }, await localeOf(t)), ctx, { phoneAsReceived: true });
     propertyId = created.id;
     // createProperty links the owner it finds by flat; this row IS the owner,
     // said explicitly so a near-miss in that lookup cannot pick someone else.
@@ -483,10 +497,12 @@ export async function convertOwner(ownerId: string, input: any, ctx: ActorCtx = 
 export async function rentsEnding(limit = 50) {
   const c = getContext();
   const mine = c?.role === 'agent' && c.userId ? sql`AND a.agent_id = ${c.userId}` : sql``;
+  const t = tid();
+  const tz = await timezoneOf(t);
   const rows = await sql`
-    ${SELECT}
-     WHERE a.tenant_id = ${tid()} AND a.kind = 'rent' AND a.status = 'active' AND a.end_date IS NOT NULL
-       AND a.end_date <= (now() AT TIME ZONE 'Asia/Kolkata')::date + 60 ${mine}
+    ${selectIn(tz)}
+     WHERE a.tenant_id = ${t} AND a.kind = 'rent' AND a.status = 'active' AND a.end_date IS NOT NULL
+       AND a.end_date <= ${todayIn(tz)} + 60 ${mine}
      ORDER BY a.end_date ASC LIMIT ${limit}`;
   return rows.map(rowToAgreement);
 }

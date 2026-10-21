@@ -252,9 +252,13 @@ export const LEAD_MODULE_SCHEMA = {
       // added as its own (disabled) option so the value has somewhere to sit
       // until someone actually picks a replacement.
       options: (store, record) => {
-        const live = store?.state?.agents?.map(a => ({ value: a.id, label: a.name })) || []
+        // Only people who can take work (activeAgents, the server's own rule):
+        // a suspended or off-duty member was offered and then refused with 422.
+        const live = store?.activeAgents?.().map(a => ({ value: a.id, label: a.name })) || []
         const cur = record?.agentId
         if (!cur || live.some(o => o.value === cur)) return live
+        const still = store?.state?.agents?.find(a => a.id === cur)
+        if (still) return [{ value: cur, label: still.name, disabled: true }, ...live]
         const former = store?.state?.formerAgents?.find(a => a.id === cur)
         return [{ value: cur, label: (former?.name || 'Former owner') + ' (left)', disabled: true }, ...live]
       },
@@ -406,9 +410,13 @@ export const OWNER_MODULE_SCHEMA = {
       key: 'agentId', label: 'Assigned Owner', type: 'select', section: 'domain',
       // Same disabled-departed-holder guard as the lead schema — see there for why.
       options: (store, record) => {
-        const live = store?.state?.agents?.map(a => ({ value: a.id, label: a.name })) || []
+        // Only people who can take work (activeAgents, the server's own rule):
+        // a suspended or off-duty member was offered and then refused with 422.
+        const live = store?.activeAgents?.().map(a => ({ value: a.id, label: a.name })) || []
         const cur = record?.agentId
         if (!cur || live.some(o => o.value === cur)) return live
+        const still = store?.state?.agents?.find(a => a.id === cur)
+        if (still) return [{ value: cur, label: still.name, disabled: true }, ...live]
         const former = store?.state?.formerAgents?.find(a => a.id === cur)
         return [{ value: cur, label: (former?.name || 'Former owner') + ' (left)', disabled: true }, ...live]
       },
