@@ -192,7 +192,7 @@ export default function ImportPage({ store, go, sel, topBar }) {
   }
 
   const undo = async (id, added) => {
-    if (!window.confirm(`Undo this import? The ${added} record${added === 1 ? '' : 's'} it created will be removed; any in use since are kept.`)) return
+    if (!window.confirm('Undo this import? What it created is removed; anything in use since is kept.')) return
     try {
       const out = await api.revertImport(id)
       store.toast(`Removed ${out.deleted} record${out.deleted === 1 ? '' : 's'}${out.kept ? ` · ${out.kept} kept, in use` : ''}`)

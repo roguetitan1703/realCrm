@@ -146,11 +146,14 @@ async function matchesNow(tenantId: string, ask: Ask, keyed?: Keyed): Promise<st
 }
 
 const askLine = (a: Ask, loc: any) => {
+  // Each choice is one of its alternatives: "1 BHK or 2 BHK to rent or to buy
+  // in Wakad or Baner", never the values run together.
+  const or = (xs: string[]) => xs.join(' or ');
   const words = [
-    ...(a.config || []).map(c => listingKind(c, null, loc)),
-    ...(a.deal || []).map(d => (d === 'rent' ? 'to rent' : d === 'sale' ? 'to buy' : d)),
-    ...(a.locality || []).map(l => `in ${l.replace(/\b\w/g, c => c.toUpperCase())}`),
-  ];
+    or((a.config || []).map(c => listingKind(c, null, loc))),
+    or((a.deal || []).map(d => (d === 'rent' ? 'to rent' : d === 'sale' ? 'to buy' : d))),
+    a.locality?.length ? `in ${or(a.locality.map(l => l.replace(/\b\w/g, c => c.toUpperCase())))}` : '',
+  ].filter(Boolean);
   return words.join(' ') || 'any home';
 };
 

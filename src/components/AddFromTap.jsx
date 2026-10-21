@@ -150,7 +150,7 @@ export function AddFromTapModal({ store, go, Modal, code, PhoneStep, onlyTalk = 
   if (nothingToDo) return null
 
   return (
-    <Modal title={via === 'talk' && lead ? 'Pressed Talk to us' : 'Add as lead'} onClose={store.closeModal} width={440}>
+    <Modal title={!lead ? 'Add as lead' : via === 'talk' ? 'Pressed Talk to us' : 'Interested'} onClose={store.closeModal} width={440}>
       {info.loading ? (
         <div className="mylinks-empty"><span className="snd-spin" aria-label="Loading" /></div>
       ) : lead ? (
