@@ -19,11 +19,6 @@ Every module has its own **Core Locked Fields** (mandatory SQL columns required 
 * **Domain-Specific APIs & Actions:**
   * `POST /api/v1/modules/leads/records/:id/actions/call` $\rightarrow$ Triggers 2-leg Exotel telephony bridge.
     * *Safety Check:* Verifies agent has active call minutes quota and `primary_phone` is valid E.164.
-  * `POST /api/v1/modules/leads/records/:id/actions/whatsapp` $\rightarrow$ Sends Meta WABA template.
-    * *Safety Check:* Verifies template is Meta-approved (`status == 'APPROVED'`) and substitutes variables (`{{buyer_name}}`, `{{project_name}}`).
-  * `POST /api/v1/modules/leads/records/:id/actions/schedule-visit` $\rightarrow$ Schedules a physical Site Visit.
-    * *Safety Check:* Automatically updates stage to *"Site Visit Scheduled"*, logs calendar invite in timeline, and triggers confirmation WhatsApp to buyer.
-  * `POST /api/v1/modules/leads/records/:id/actions/convert-to-client` $\rightarrow$ Converts a *"Closed Won"* lead into a permanent Client / Booking record.
 
 ---
 
@@ -35,10 +30,6 @@ Every module has its own **Core Locked Fields** (mandatory SQL columns required 
 * **Dynamic Custom Fields (JSONB `data`):** `rera_no` (mandatory), `builder_name`, `possession_year`, `city`, `locality`, `amenities_list`, `brochure_pdf_url`.
 * **Domain-Specific APIs & Actions:**
   * `GET /api/v1/modules/properties/records/:id/units` $\rightarrow$ Fetches all inventory units linked to this project (`parent_record_id = :id`), grouped by floor and BHK type.
-  * `POST /api/v1/modules/properties/records/:id/actions/block-unit` $\rightarrow$ Temporarily blocks an inventory unit (e.g., Unit A-402) during token negotiation.
-    * *Safety Check (Double-Booking Prevention):* Enforces database row-level locking (`SELECT FOR UPDATE`). If unit status is not `"Available"`, aborts with HTTP 409 Conflict!
-  * `POST /api/v1/modules/properties/records/:id/actions/release-unit` $\rightarrow$ Releases a blocked unit back to `"Available"` if token payment expires after 48 hours.
-  * `POST /api/v1/modules/properties/records/:id/actions/generate-brochure-link` $\rightarrow$ Generates a tracked, expiring PDF brochure link for WhatsApp distribution.
 
 ---
 
