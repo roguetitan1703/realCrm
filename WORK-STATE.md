@@ -26,3 +26,6 @@ Security hotfix to production: `/workspace/reset` (no sign-in, wiped every firm)
 - Daily demo refresh (`--tick`) — waits on Om choosing dev or prod for demos
 - Calling on a phone has no Select mode, so bulk assign/take back is desk-only — waits on Om saying a manager does this from a phone
 - Leads has no "Select all matching" (Owners now does) — waits on a broker asking to take back leads in bulk
+- Merging duplicate leads from the screen sends `merge_strategy: combine_timeline`, which the server answers 400: merge probably always fails — waits on a check in the UI
+- Calling a tenant or buyer from Contacts logs on their lead; when a colleague holds that lead the log now 404s (visibility gate, 28 Oct) — waits on deciding where that call belongs
+- Duty status (crm_agents.duty_status): nothing sets it, every agent ACTIVE in prod; route now desk-only — waits on Om saying remove it
