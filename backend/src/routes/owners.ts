@@ -97,8 +97,10 @@ ownersRouter.post('/bulk-assign', async (req: Request, res: Response) => {
     const { agentId, agentIds, match, expect } = req.body || {};
     let { ids } = req.body || {};
     if (match && typeof match === 'object') {
+      // A filter moves only the count the desk confirmed: without one, `{ match: {} }` is the whole firm.
+      if (expect == null) return res.status(400).json({ error: 'expect is required with match' });
       ids = await ownerIdsMatching(listScope(match));
-      if (expect != null && Number(expect) !== ids.length) {
+      if (Number(expect) !== ids.length) {
         return res.status(409).json({ success: false, error: 'List changed', n: ids.length,
           message: `The list now holds ${ids.length}, not ${Number(expect)}. Nothing was moved.` });
       }
