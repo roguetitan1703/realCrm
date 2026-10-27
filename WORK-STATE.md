@@ -1,12 +1,14 @@
 # Work state
 
 ## Now
-Release 1 (catalog, buyer forms, phones, sign-in, import undo) is complete on `development` (f28f5fb) and waits on Om's dev-preview re-test and deploy.
+Release 1 is live (main a036eb4, API 45a68f6, 27 Oct). Om is teaching bhumi and mahalaxmi; pick the next task from the 27 Oct meeting.
 
 ## Next
-1. Om: dev API redeploy + re-test, then the release (`docs/releases/2026-10-20.md`); answers on ports 5000/5001 and the hotfix
-2. Help desk: report a problem, then the help centre
-3. Cutroom records the US film (RUN.md)
+1. Work OS #154 bulk unassign a finished calling list
+2. Work OS #153 WhatsApp tap opens with an intro template (lead / owner calling), wording from Om
+3. Work OS #155 merge misspelt project names in bulk (aliases, preview, undo), needs a spec first
+4. Work OS #129 help desk: report a problem, then the help centre (#156 demos feed it)
+5. Work OS #130 collapsible sidebar
 
 ## Later
 - A firm's weekly off for "days worked" — waits on how the firms actually work
