@@ -673,7 +673,6 @@ export const api = {
   getImportRows: (id, status) => request(`/imports/${encodeURIComponent(id)}/rows${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   revertImport: (id) => request(`/imports/${encodeURIComponent(id)}/revert`, { method: 'POST', body: JSON.stringify({}) }),
   hasPendingWrites,
-  resetDatabase: () => request('/workspace/reset', { method: 'POST' }),
 
   // Lead ingest (the per-tenant URL the client pastes into 99acres/MagicBricks)
   baseUrl: () => BASE_URL,
@@ -832,7 +831,6 @@ export const api = {
 
   // Team & Routing
   getRoster: () => request('/team/roster'),
-  addAgent: (agent) => request('/team/roster', { method: 'POST', body: JSON.stringify(agent) }),
   getRouting: () => request('/team/routing'),
   updateRouting: (config) => request('/team/routing', { method: 'PUT', body: JSON.stringify(config) }),
   updateAgentStatus: (id, status) => request(`/team/users/${id}/duty-status`, { method: 'PATCH', body: JSON.stringify({ status }) }),

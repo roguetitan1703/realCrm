@@ -14,7 +14,7 @@ import { Router, Request, Response } from 'express';
 import { appEnv } from '../services/env';
 import { requireTenantAuth } from '../middleware/auth';
 import { phoneInvalidBody } from '../services/phone';
-import { getPulse, resetDatabase, updateSettings, getSettings, withReplyFallback, replyFallbackOf, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, checkDuplicates, listContacts } from '../services/store';
+import { getPulse, updateSettings, getSettings, withReplyFallback, replyFallbackOf, getBrand, updateBrand, getTodayFeed, getBootstrap, searchWorkspace, getDeskSummary, checkDuplicates, listContacts } from '../services/store';
 import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { isDeskRole } from '../lib/permissions';
@@ -305,19 +305,6 @@ workspaceRouter.post('/brand', async (req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({ success: false, error: 'Brand update failed', message: err.message });
   }
-});
-
-/**
- * POST /api/v1/workspace/reset
- * Resets and re-seeds the server database to clean default state
- */
-workspaceRouter.post('/reset', async (req: Request, res: Response) => {
-  const state = await resetDatabase();
-  res.status(200).json({
-    success: true,
-    message: 'Database reset to clean default state successfully.',
-    state,
-  });
 });
 
 

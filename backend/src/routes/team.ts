@@ -499,63 +499,6 @@ teamRouter.get('/roster', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/v1/team/roster
- * Add a new sales agent team member
- */
-teamRouter.post('/roster', async (req: Request, res: Response) => {
-  try {
-    const { name, phone, email, role } = req.body;
-    const cleanName = (name || '').trim();
-    if (!cleanName) return res.status(400).json({ error: 'Name is required' });
-    // Email is required: a forgotten password is reset by email. Code sign-in
-    // is retired, so this path still gives no login ID or password (BACKLOG).
-    // Phone stays optional (used for tel:/wa).
-    const normPhone = await teamPhone(req.tenantId!, phone);
-    const normEmail = email ? String(email).trim().toLowerCase() : null;
-    if (!normEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normEmail)) {
-      return res.status(400).json({ error: 'A valid email is needed to reset their password.' });
-    }
-    const teamRole = role === 'manager' ? 'manager' : 'agent';
-    const id = `u_${Date.now().toString(36)}`;
-    const initials = cleanName.split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase();
-    const meta = { initials, avatar: '', phone: normPhone, email: normEmail };
-
-    // Roster row (drives team/lead-assignment reads) + a real users row so the
-    // person can actually sign in by OTP. Both share the same id + tenant.
-    await sql`
-      INSERT INTO crm_agents (id, name, first, initials, avatar, role, duty_status, metadata, tenant_id)
-      VALUES (${id}, ${cleanName}, ${cleanName.split(' ')[0]}, ${initials}, '', ${teamRole}, 'ACTIVE', ${sql.json(meta)}, ${req.tenantId})
-    `;
-    await sql`
-      INSERT INTO users (id, tenant_id, name, phone, email, role, status, metadata)
-      VALUES (${id}, ${req.tenantId}, ${cleanName}, ${normPhone}, ${normEmail}, ${teamRole}, 'ACTIVE', ${sql.json(meta)})
-      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, email = EXCLUDED.email, role = EXCLUDED.role
-    `;
-    const agents = await getAgents();
-    return res.status(201).json({ success: true, agents, newAgentId: id });
-  } catch (err: any) {
-    if (phoneRefusal(res, err)) return;
-    return res.status(500).json({ error: 'Failed to add agent', message: err.message });
-  }
-});
-
-/**
- * PATCH /api/v1/team/users/:id/role  { role: 'agent' | 'manager' }
- * Change a teammate's access tier (kept in step across roster + users).
- */
-teamRouter.patch('/users/:id/role', async (req: Request, res: Response) => {
-  try {
-    const role = req.body?.role === 'manager' ? 'manager' : 'agent';
-    const id = req.params.id;
-    await sql`UPDATE crm_agents SET role = ${role} WHERE id = ${id} AND tenant_id = ${req.tenantId}`;
-    await sql`UPDATE users SET role = ${role} WHERE id = ${id} AND tenant_id = ${req.tenantId}`;
-    return res.status(200).json({ success: true, agents: await getAgents() });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to change role', message: err.message });
-  }
-});
-
-/**
  * GET /api/v1/team/routing
  * Retrieve round-robin lead routing rules
  */
