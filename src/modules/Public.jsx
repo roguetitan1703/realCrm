@@ -60,7 +60,7 @@ export function PublicShell({ firm: raw, tenant, children, embed = embedded(), b
   const firm = firmOf(raw)
   useEffect(() => { document.documentElement.classList.add('pv-root'); return () => document.documentElement.classList.remove('pv-root') }, [])
   return (
-    <div className={'pv' + (embed ? ' is-embed' : '')} style={firm?.accent ? { '--pv-accent': firm.accent } : undefined}>
+    <div className={'pv-page' + (embed ? ' is-embed' : '')} style={firm?.accent ? { '--pv-accent': firm.accent } : undefined}>
       {bar}
       {!embed && (
         <header className="pv-head">

@@ -190,10 +190,19 @@ export function RangeControl({ data, onRange }) {
     setCustom(m === 'custom')
     if (m === 'day') return set(null, to)
     if (DAYS[m]) return set(shiftDay(to, -(DAYS[m] - 1)), to)
+    // Custom has no length to apply: its two dates are the next step.
+    setOpen(true)
     return set(data.from || shiftDay(to, -6), to)
   }
+  // The length is always in view and one tap; the button beside it opens only
+  // the dates. Behind the button, the length was a second click away and
+  // read as part of choosing a day.
   return (
     <span className="ad-range">
+      <Segmented value={mode} onChange={pickMode} options={[
+        { value: 'day', label: 'Day' }, { value: '7', label: '7 days' },
+        { value: '30', label: '30 days' }, { value: 'custom', label: 'Custom' },
+      ]} />
       <button type="button" ref={anchor} className="ad-range-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>
         <Icon name="calendar" size={14} />
         <span className="ad-range-l">{periodName(data)}</span>
@@ -201,12 +210,8 @@ export function RangeControl({ data, onRange }) {
       </button>
       {open && inHost(<>
         <div className="ad-pop-back" onClick={() => setOpen(false)} />
-        <div className="ad-pop" role="dialog" aria-label="Period">
+        <div className="ad-pop" role="dialog" aria-label="Dates">
           <div className="sheet-grab" />
-          <Segmented value={mode} onChange={pickMode} options={[
-            { value: 'day', label: 'Day' }, { value: '7', label: '7 days' },
-            { value: '30', label: '30 days' }, { value: 'custom', label: 'Custom' },
-          ]} />
           <div className="ad-pop-pick">
             {mode === 'day' && <>
               <button type="button" className="ad-step" aria-label="Previous day" onClick={() => set(null, shiftDay(to, -1))}><Icon name="chevLeft" size={16} /></button>
