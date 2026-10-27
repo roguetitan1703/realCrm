@@ -1,14 +1,15 @@
 # Work state
 
 ## Now
-Release 1 is live (main a036eb4, API 45a68f6, 27 Oct). Om is teaching bhumi and mahalaxmi; pick the next task from the 27 Oct meeting.
+Security hotfix to production: `/workspace/reset` (no sign-in, wiped every firm), the agent split in bulk-assign, and the team role/roster routes are closed on `development` (764d0be, f593094). Waits on the route-sweep review, then Om's go to push `main` and run deploy-api.sh.
 
 ## Next
-1. Work OS #154 bulk unassign a finished calling list
-2. Work OS #153 WhatsApp tap opens with an intro template (lead / owner calling), wording from Om
-3. Work OS #155 merge misspelt project names in bulk (aliases, preview, undo), needs a spec first
-4. Work OS #129 help desk: report a problem, then the help centre (#156 demos feed it)
-5. Work OS #130 collapsible sidebar
+1. Phone, from the 28 Oct audit: Call clears the booked follow-up before the outcome; the Today badge leaves out overdue; New lead's Name field is 38px; calendar month grid clipped (desk too); calendar crashes on demo-showcase (Calendar.jsx:182)
+2. Phone redesign for the agent: Today as one "who to ring next" list, one sheet after every call (outcome + next), record's first screen = next step + Call/WhatsApp; 44px targets. Then an owner's Team page on phone
+3. Desk mismatches from the audit: counts that disagree with their lists, tiles landing with no chip, Esc on dialogs, agents see Import
+4. Work OS #153 WhatsApp intro templates, wording from Om
+5. Work OS #155 merge misspelt project names, needs a spec and Om's scope
+6. Work OS #129 help desk (#156 demos feed it); #130 collapsible sidebar
 
 ## Later
 - A firm's weekly off for "days worked" — waits on how the firms actually work
