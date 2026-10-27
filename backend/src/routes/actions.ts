@@ -17,7 +17,7 @@ import {
   mapEventForClient, canSeeRecord } from '../services/store';
 import { isSafeKey, tenantOfKey } from '../services/media';
 import { audit } from '../services/audit';
-import { assertLeadWrite, canDeleteRecord } from '../lib/permissions';
+import { assertLeadWrite, isDeskRole } from '../lib/permissions';
 import { followUpKindOf } from '../../../src/data/followUpKinds.js';
 
 export const actionsRouter = Router();
@@ -323,10 +323,10 @@ actionsRouter.post(
   '/:id/actions/merge',
   async (req: Request, res: Response) => {
     try {
-      // Merging deletes the duplicate, so it is the owner's call, like any
-      // delete -- the desk already only offered it to them. This had no check.
-      if (!canDeleteRecord(req.user?.role)) {
-        return res.status(403).json({ error: 'Forbidden', message: 'Only an owner can merge records.', code: 'ROLE_REQUIRED' });
+      // Merging deletes the duplicate, so it is desk work: owner, admin or
+      // manager, the same people the Merge action is shown to. This had no check.
+      if (!isDeskRole(req.user?.role)) {
+        return res.status(403).json({ error: 'Forbidden', message: 'Only the desk can merge records.', code: 'ROLE_REQUIRED' });
       }
       const primaryRecordId = req.params.id;
       const parseResult = MergeSchema.safeParse(req.body);
