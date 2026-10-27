@@ -10,6 +10,7 @@ import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
 import { LEAD_STATUSES } from '../data/leadStatus.js'
 import { useServerList } from '../lib/serverList.js'
+import { useKeptPager } from '../lib/useNav.js'
 import UnassignedBar from '../components/UnassignedBar.jsx'
 import { api } from '../lib/api.js'
 import Icon from '../components/Icon.jsx'
@@ -118,8 +119,8 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   // In the URL with the other filters, so Back from a lead keeps the search.
   const q = f.q || ''
   const [view, setView] = useState('list')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  // Kept on the history entry, so back from a lead lands on the same page.
+  const { page, setPage, pageSize, setPageSize } = useKeptPager('leads', !!phone)
   // Which rows are checked, on the page currently shown. A Set of lead ids.
   const selection = useSelection()
   const selected = selection.ids
@@ -442,9 +443,9 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     )
   }
   const a = store.agentById(l.agentId)
-  // Opened from another screen (a Performance, Today or Calendar row): back
-  // returns there, as the phone's back gesture does — see Owners.jsx.
-  const back = () => (sel.recFrom ? window.history.back() : setSel(s => ({ ...s, leadOpen: false })))
+  // The list this lead belongs to. The arrow goes wherever the person came
+  // from (useNav's back); this is only where it goes when nothing is there.
+  const back = () => setSel(s => ({ ...s, leadOpen: false }))
   const role = store.state.role
   const userId = store.state.activeAgentId
   const editable = canEditLead(role, userId, l)
