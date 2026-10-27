@@ -4319,6 +4319,9 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
 export async function deleteOwner(id: string, ctx: ActorCtx = SYSTEM_CTX): Promise<boolean> {
   const t = tid();
   const existing = await getOwnerById(id);
+  // getOwnerById is scoped to what the caller may see; the DELETE below is
+  // scoped only to the firm. Not visible reads as not there.
+  if (!existing) return false;
   // THE CALLING ROW IS THE OWNER'S CONTACT. Once a flat of theirs is in
   // Properties, this row is who the flat belongs to, so deleting it would
   // leave the flat with an owner that is not there. Refused, with the reason.

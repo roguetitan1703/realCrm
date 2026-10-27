@@ -10,7 +10,7 @@
  * ============================================================================
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { appEnv } from '../services/env';
 import { requireTenantAuth } from '../middleware/auth';
 import { phoneInvalidBody } from '../services/phone';
@@ -21,6 +21,15 @@ import { isDeskRole } from '../lib/permissions';
 import { listAudit, verifyTenantLedger } from '../services/audit';
 
 export const workspaceRouter = Router();
+
+// SIGNED IN, EXCEPT /resolve. Routes here were opted in one at a time, so the
+// ones that were missed were open to anyone who could name a tenant in
+// X-Tenant-ID: /pulse (and the notification run it kicks off) and /reset, an
+// unauthenticated TRUNCATE of every CRM table for every firm. /resolve is the
+// one the sign-in screen calls before there is anyone to sign in.
+const PUBLIC_PATHS = new Set(['/resolve']);
+workspaceRouter.use((req: Request, res: Response, next: NextFunction) =>
+  PUBLIC_PATHS.has(req.path) ? next() : requireTenantAuth(req, res, next));
 
 // The client-side icon uploader that used to live here is GONE, deliberately.
 // It let any browser write the tenant's home-screen icon, and what it wrote was
@@ -68,7 +77,7 @@ workspaceRouter.get('/audit', async (req: Request, res: Response) => {
  * no listings — screens read those for themselves, a page at a time.
  *
  */
-workspaceRouter.get('/bootstrap', requireTenantAuth, async (_req: Request, res: Response) => {
+workspaceRouter.get('/bootstrap', async (_req: Request, res: Response) => {
   try {
     // `env` alongside the state, so the marker survives a reload that never
     // touches the unauthenticated resolve.
@@ -78,7 +87,7 @@ workspaceRouter.get('/bootstrap', requireTenantAuth, async (_req: Request, res: 
   }
 });
 
-workspaceRouter.get('/today', requireTenantAuth, async (req: Request, res: Response) => {
+workspaceRouter.get('/today', async (req: Request, res: Response) => {
   try {
     // `mine=1` is the phone asking for the signed-in person's own day rather
     // than the firm's. An agent is scoped to themselves either way.
@@ -88,7 +97,7 @@ workspaceRouter.get('/today', requireTenantAuth, async (req: Request, res: Respo
   }
 });
 
-workspaceRouter.get('/search', requireTenantAuth, async (req: Request, res: Response) => {
+workspaceRouter.get('/search', async (req: Request, res: Response) => {
   try {
     const out = await searchWorkspace(String(req.query.q || ''), Number(req.query.limit) || 8);
     return res.status(200).json({ success: true, ...out });
@@ -97,7 +106,7 @@ workspaceRouter.get('/search', requireTenantAuth, async (req: Request, res: Resp
   }
 });
 
-workspaceRouter.get('/desk-summary', requireTenantAuth, async (_req: Request, res: Response) => {
+workspaceRouter.get('/desk-summary', async (_req: Request, res: Response) => {
   try {
     return res.status(200).json({ success: true, ...(await getDeskSummary()) });
   } catch (err: any) {
@@ -113,7 +122,7 @@ workspaceRouter.get('/desk-summary', requireTenantAuth, async (_req: Request, re
 workspaceRouter.delete('/import-batches/:batchId', (_req: Request, res: Response) =>
   res.status(410).json({ error: 'retired', message: 'Undo an import from Import history.' }));
 
-workspaceRouter.post('/dedupe-check', requireTenantAuth, async (req: Request, res: Response) => {
+workspaceRouter.post('/dedupe-check', async (req: Request, res: Response) => {
   try {
     const b = req.body || {};
     return res.status(200).json({ success: true, ...(await checkDuplicates({ phones: b.phones, names: b.names, titles: b.titles })) });
@@ -122,7 +131,7 @@ workspaceRouter.post('/dedupe-check', requireTenantAuth, async (req: Request, re
   }
 });
 
-workspaceRouter.get('/contacts', requireTenantAuth, async (req: Request, res: Response) => {
+workspaceRouter.get('/contacts', async (req: Request, res: Response) => {
   try {
     const q = req.query;
     const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);

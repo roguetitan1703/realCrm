@@ -37,7 +37,7 @@ import { localities, asOptions } from '../lib/suggest.js'
 import { REJECTED_STATUS } from '../data/leadStatus.js'
 import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 
-import { canAssignLead, canEditLead, canUpdateLeadStatus, canEditListing, isDeskRole } from '../lib/permissions.js'
+import { canAssignLead, canEditLead, canUpdateLeadStatus, canEditListing, canDeleteRecord, isDeskRole } from '../lib/permissions.js'
 import { api } from '../lib/api.js'
 import { assignFailed } from '../lib/workforce.js'
 import { openSend } from './SendSheet.jsx'
@@ -465,6 +465,7 @@ export const LEADS_DEF = {
     { id: 'merge', tier: 'manage', icon: 'copy', label: 'Merge duplicate', tone: 'danger',
       when: (l) => !!l.duplicateOf, run: (store, l) => store.merge(l.id) },
     { id: 'delete', tier: 'manage', icon: 'trash', label: 'Delete lead', tone: 'danger',
+      when: (r, store) => canDeleteRecord(store.state.role),
       run: (store, l, ctx) => { if (window.confirm('Delete this lead record permanently?')) { store.deleteLead(l.id); ctx?.onClose?.() } } },
   ],
 
@@ -765,6 +766,7 @@ export const OWNERS_DEF = {
       sub: (o, store) => { const a = store.agentById(o.agentId); return a ? a.name : 'Unassigned' },
       run: (store, o) => store.openModal({ kind: 'bulkAssign', leadIds: [o.id], isOwner: true, fromAgentIds: [o.agentId || null] }) },
     { id: 'delete', tier: 'manage', icon: 'trash', label: 'Delete owner', tone: 'danger',
+      when: (r, store) => canDeleteRecord(store.state.role),
       run: (store, o, ctx) => { if (window.confirm('Delete this owner record permanently?')) { store.deleteOwner(o.id); ctx?.onClose?.() } } },
   ],
 
@@ -1059,6 +1061,7 @@ export const PROPERTIES_DEF = {
       when: (p, store, ctx) => !!ctx?.go,
       run: (store, p, ctx) => ctx.go('properties', { propAdd: true, propId: null, propOpen: false, propCopyOf: p.id }) },
     { id: 'delete', tier: 'manage', icon: 'trash', tone: 'danger', label: 'Delete property record',
+      when: (r, store) => canDeleteRecord(store.state.role),
       run: (store, p, ctx) => { if (window.confirm('Delete this property permanently?')) { store.deleteProperty(p.id); ctx?.onClose?.() } } },
   ],
 }

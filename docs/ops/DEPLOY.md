@@ -98,16 +98,8 @@ browser as mixed content — the most common "works locally, not deployed" cause
 
 ## After deploying the API — RESET ONCE (required)
 
-This release adds two columns (`follow_up`, `overdue`) and a corrected seed.
-The schema upgrade is automatic and idempotent on boot, but the **data** only
-refreshes on reset:
-
-```bash
-curl -X POST -H "X-Tenant-ID: bhumi-propcity" https://api.re.delpat.in/api/v1/workspace/reset
-```
-
-Skip this and follow-ups stay empty — which breaks the follow-up beat and leaves
-the mobile Today screen blank.
+The demo-era `/workspace/reset` step that used to sit here is gone: that route
+truncated every firm's data with no sign-in and was removed on 28 Oct 2026.
 
 ---
 

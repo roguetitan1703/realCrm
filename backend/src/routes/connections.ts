@@ -192,6 +192,9 @@ connectionsRouter.delete('/:id', async (req: Request, res: Response) => {
 
 connectionsRouter.get('/inbox', async (req: Request, res: Response) => {
   const tenant = requireTenant(req, res); if (!tenant) return;
+  // Raw portal pushes carry every buyer's name and phone, whoever they went
+  // to. Same rule as the rest of this screen; this one had none.
+  if (!requireManager(req, res)) return;
   const { rows, total } = await listInbox(tenant, {
     integrationId: req.query.connection as string | undefined,
     status: req.query.status as string | undefined,
@@ -210,6 +213,7 @@ connectionsRouter.get('/inbox', async (req: Request, res: Response) => {
  *  someone to type dot-paths from memory. */
 connectionsRouter.get('/:id/sample', async (req: Request, res: Response) => {
   const tenant = requireTenant(req, res); if (!tenant) return;
+  if (!requireManager(req, res)) return;
   const integration = await getIntegration(tenant, req.params.id);
   if (!integration) return res.status(404).json({ error: 'No such connection' });
 

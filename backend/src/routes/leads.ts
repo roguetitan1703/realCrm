@@ -10,10 +10,9 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { CallActionSchema, WhatsAppActionSchema, StageChangeSchema, MergeSchema } from '../models';
-import { requireTenantAuth, requireModuleEnabled, requireQuotaAvailable } from '../middleware/auth';
+import { CallActionSchema, StageChangeSchema, MergeSchema } from '../models';
+import { requireTenantAuth } from '../middleware/auth';
 import { getLeads, createLead, getLeadById, listLeads, getLeadsSummary, getLeadCandidates, bulkAssignLeads, bulkDeleteLeads, splitAssign } from '../services/store';
-import { sql } from '../services/db';
 import { notWorkableBody } from '../services/workforce';
 import { phoneInvalidBody } from '../services/phone';
 import { leadShares } from '../services/sharing';
@@ -215,93 +214,10 @@ leadsRouter.post('/', async (req: Request, res: Response) => {
  */
 
 /**
- * 2. SEND WHATSAPP BUSINESS TEMPLATE ACTION (Live DB timeline logging)
- * POST /api/v1/leads/:id/actions/whatsapp
+ * Three more routes lived here — /:id/actions/whatsapp, /schedule-visit and
+ * /convert-to-client — that nothing in the app called. Each wrote straight to
+ * crm_leads or the timeline past updateLead(), so none checked the lead was
+ * the caller's and none was audited; schedule-visit took its author from the
+ * request body, and whatsapp recorded "sent via Meta Cloud API" for a message
+ * nobody sent. Removed.
  */
-leadsRouter.post(
-  '/:id/actions/whatsapp',
-  requireModuleEnabled('whatsapp'),
-  requireQuotaAvailable('whatsapp_credits'),
-  async (req: Request, res: Response) => {
-    try {
-      const recordId = req.params.id;
-      const parseResult = WhatsAppActionSchema.safeParse(req.body);
-
-      if (!parseResult.success) {
-        return res.status(400).json({ error: 'Validation Error', details: parseResult.error.format() });
-      }
-
-      const { template_id, variables } = parseResult.data;
-      console.log(`[Leads Router - WABA] Dispatched template '${template_id}' to Lead ${recordId}`);
-
-      const evId = `evt_${Date.now()}`;
-      const content = `WhatsApp template '${template_id}' dispatched via Meta Cloud API`;
-      await sql`
-        INSERT INTO crm_timeline_events (id, record_id, author, type, title, description, timestamp, tenant_id)
-        VALUES (${evId}, ${recordId}, ${req.user?.id || 'system'}, 'whatsapp', 'WhatsApp Sent', ${content}, NOW(), ${req.tenantId})
-      `;
-
-      return res.status(200).json({
-        success: true,
-        message: 'WhatsApp template message sent via Meta Cloud API.',
-        waba_message_id: `waba_${Date.now()}`,
-      });
-    } catch (err: any) {
-      return res.status(500).json({ error: 'WhatsApp Action Failed', message: err.message });
-    }
-  }
-);
-
-/**
- * 3. SCHEDULE SITE VISIT ACTION (Live DB stage update & timeline logging)
- * POST /api/v1/leads/:id/actions/schedule-visit
- */
-leadsRouter.post('/:id/actions/schedule-visit', async (req: Request, res: Response) => {
-  try {
-    const recordId = req.params.id;
-    const { visit_date, notes, agent_id } = req.body;
-
-    await sql`UPDATE crm_leads SET stage = 'Visit Scheduled' WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
-
-    const evId = `evt_${Date.now()}`;
-    const content = `Site Visit Scheduled for ${visit_date}. ${notes || ''}`;
-    await sql`
-      INSERT INTO crm_timeline_events (id, record_id, author, type, title, description, timestamp, tenant_id)
-      VALUES (${evId}, ${recordId}, ${agent_id || 'system'}, 'visit', 'Site Visit Scheduled', ${content}, NOW(), ${req.tenantId})
-    `;
-
-    return res.status(200).json({
-      success: true,
-      message: 'Site visit scheduled, stage locked, and calendar invites dispatched.',
-      visit_details: { recordId, visit_date, agent_id },
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Schedule Visit Failed', message: err.message });
-  }
-});
-
-/**
- * 5. CONVERT TO CLIENT ACTION (Live stage progression & unit booking)
- * POST /api/v1/leads/:id/actions/convert-to-client
- */
-leadsRouter.post('/:id/actions/convert-to-client', async (req: Request, res: Response) => {
-  try {
-    const recordId = req.params.id;
-    const { booking_amount, unit_number, property_id } = req.body;
-
-    await sql`UPDATE crm_leads SET stage = 'Deal Closed' WHERE id = ${recordId} AND tenant_id = ${req.tenantId}`;
-    if (unit_number) {
-      // crm_units keeps status inside the `data` JSONB, not a column.
-      await sql`UPDATE crm_units SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{status}', '"Sold"') WHERE (id = ${unit_number} OR title = ${unit_number}) AND tenant_id = ${req.tenantId}`;
-    }
-
-    const clientRecordId = `rec_clients_${Date.now()}`;
-    return res.status(200).json({
-      success: true,
-      message: 'Lead successfully converted to Client booking.',
-      client_record_id: clientRecordId,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Conversion Failed', message: err.message });
-  }
-});
