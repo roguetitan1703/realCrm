@@ -12,7 +12,7 @@ import { phoneInvalidBody } from '../services/phone';
 import { Router, Request, Response } from 'express';
 import { requireTenantAuth } from '../middleware/auth';
 import { prepareListing, localeOf,
-  createProperty, getUnits, blockUnit, releaseUnit,
+  createProperty, getUnits,
   listProperties, getPropertyById, getPropertiesSummary, getPropertyTabs,
   listProjects, getProject, getPropertyBuyers,
   setPropertyVerified, setPropertyGallery, setCatalogue,
@@ -287,78 +287,8 @@ propertiesRouter.get('/:id/units', async (req: Request, res: Response) => {
 });
 
 /**
- * 2. BLOCK INVENTORY UNIT ACTION (Coded double-booking DB row lock safety check)
- * POST /api/v1/properties/:id/units/:unitId/actions/block
+ * Unit block/release and a "tracked brochure link" lived here. Nothing in the
+ * app called them; block and release rewrote a unit's status with no role
+ * check or history, and the brochure route answered with a link on a demo
+ * domain that tracked nothing. Removed.
  */
-propertiesRouter.post('/:id/units/:unitId/actions/block', async (req: Request, res: Response) => {
-  try {
-    const { id: propertyId, unitId } = req.params;
-    const { buyer_name, lead_id, block_duration_hours = 48 } = req.body;
-
-    console.log(`[Properties Router - Block Unit] Attempting to block Unit ${unitId} for buyer ${buyer_name}`);
-
-    const result = await blockUnit(unitId, buyer_name || 'Anonymous Buyer', block_duration_hours);
-    if (!result.success) {
-      return res.status(409).json({
-        error: result.error || 'Double-Booking Conflict',
-        message: result.message || 'This unit was just blocked or sold by another sales agent!',
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: result.message,
-      blocked_until: result.blocked_until,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Block Unit Failed', message: err.message });
-  }
-});
-
-/**
- * 3. RELEASE INVENTORY UNIT ACTION
- * POST /api/v1/properties/:id/units/:unitId/actions/release
- */
-propertiesRouter.post('/:id/units/:unitId/actions/release', async (req: Request, res: Response) => {
-  try {
-    const { unitId } = req.params;
-    console.log(`[Properties Router - Release Unit] Releasing Unit ${unitId} back to Available`);
-
-    const result = await releaseUnit(unitId);
-    if (!result.success) {
-      return res.status(404).json({ error: 'Release Unit Failed', message: result.error });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: result.message,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Release Unit Failed', message: err.message });
-  }
-});
-
-/**
- * 4. GENERATE TRACKED BROCHURE LINK ACTION
- * POST /api/v1/properties/:id/actions/generate-brochure
- */
-propertiesRouter.post('/:id/actions/generate-brochure', async (req: Request, res: Response) => {
-  try {
-    const propertyId = req.params.id;
-    const { lead_id, agent_id } = req.body;
-
-    const trackingCode = `brochure_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    const trackedUrl = `https://skylinerealty.in/view-brochure/${trackingCode}`;
-
-    console.log(`[Properties Router - Brochure] Generated tracked link for Project ${propertyId}: ${trackedUrl}`);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Tracked brochure link generated. When buyer clicks, timeline event will be logged automatically.',
-      tracked_url: trackedUrl,
-      expires_in_days: 30,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Brochure Generation Failed', message: err.message });
-  }
-});

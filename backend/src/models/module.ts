@@ -75,30 +75,6 @@ export interface ModuleRecord {
 // ============================================================================
 
 /**
- * Payload schema for triggering Click-to-Call on ANY record with primary_phone
- * POST /api/v1/records/:id/actions/call
- */
-export const CallActionSchema = z.object({
-  agent_id: z.string().min(1, "Agent ID required"),
-  record_call: z.boolean().default(true),
-  custom_metadata: z.record(z.any()).optional(),
-});
-export type CallActionPayload = z.infer<typeof CallActionSchema>;
-
-/**
- * Payload schema for sending WhatsApp Business template to ANY record with primary_phone
- * POST /api/v1/records/:id/actions/whatsapp
- */
-export const WhatsAppActionSchema = z.object({
-  template_id: z.string().min(1, "Template ID required"),
-  // Positional (["Amit", "3 BHK"]) or named ({ text: "…" }) — the app fills
-  // templates by name, so rejecting objects 400'd every real send.
-  variables: z.union([z.array(z.string()), z.record(z.string(), z.any())]).default([]),
-  media_url: z.string().url().optional(),
-});
-export type WhatsAppActionPayload = z.infer<typeof WhatsAppActionSchema>;
-
-/**
  * Payload schema for updating Kanban stage on ANY record
  * POST /api/v1/records/:id/actions/stage-change
  */
@@ -136,26 +112,3 @@ export const WebhookIngestSchema = z.object({
   custom_attributes: z.record(z.any()).default({}),
 });
 export type WebhookIngestPayload = z.infer<typeof WebhookIngestSchema>;
-
-export const CreateModuleSchema = z.object({
-  key: z.string().min(2, "Module key required (e.g., 'loans')"),
-  name: z.string().min(2, "Module display name required (e.g., 'Home Loans')"),
-  icon: z.string().default("folder"),
-  config: z.object({
-    supports_pipeline: z.boolean().default(true),
-    supports_custom_fields: z.boolean().default(true),
-    default_view: z.enum(["kanban", "table", "grid"]).default("kanban"),
-    title_field: z.string().default("title")
-  }).optional()
-});
-export type CreateModulePayload = z.infer<typeof CreateModuleSchema>;
-
-export const CreateCustomFieldSchema = z.object({
-  field_key: z.string().min(2, "Field key required"),
-  field_label: z.string().min(2, "Field label required"),
-  field_type: z.enum(["text", "number", "select", "date", "phone", "email", "boolean"]).default("text"),
-  options: z.array(z.string()).optional(),
-  is_required: z.boolean().default(false),
-  is_filterable: z.boolean().default(true)
-});
-export type CreateCustomFieldPayload = z.infer<typeof CreateCustomFieldSchema>;

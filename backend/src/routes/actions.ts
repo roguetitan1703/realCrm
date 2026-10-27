@@ -8,26 +8,16 @@
  */
 
 import { Router, Request, Response } from 'express';
-import {
-  CallActionSchema,
-  WhatsAppActionSchema,
-  StageChangeSchema,
-  MergeSchema,
-} from '../models';
-import {
-  requireTenantAuth,
-  requireModuleEnabled,
-  requireQuotaAvailable,
-} from '../middleware/auth';
+import { StageChangeSchema, MergeSchema } from '../models';
+import { requireTenantAuth } from '../middleware/auth';
 import {
   addTimelineEvent, updateLead, mergeLeads, getLeadById,
   getTimelineEventById, updateTimelineEvent, maybeAutoAdvanceStage,
   addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES, noteOwnerContact, closeFollowUpFor, completeFollowUp,
-  mapEventForClient } from '../services/store';
-import { sql } from '../services/db';
+  mapEventForClient, canSeeRecord } from '../services/store';
 import { isSafeKey, tenantOfKey } from '../services/media';
 import { audit } from '../services/audit';
-import { assertLeadWrite } from '../lib/permissions';
+import { assertLeadWrite, canDeleteRecord } from '../lib/permissions';
 import { followUpKindOf } from '../../../src/data/followUpKinds.js';
 
 export const actionsRouter = Router();
@@ -44,6 +34,8 @@ actionsRouter.post('/:id/actions/remark', async (req: Request, res: Response) =>
     const recordId = req.params.id;
     const text = String(req.body?.text || '').trim();
     if (!text) return res.status(400).json({ error: 'Remark text is required' });
+    // A record this person cannot see is a record that does not exist (canSeeRecord).
+    if (!(await canSeeRecord(recordId))) return res.status(404).json({ error: 'Not found' });
     const authorId = req.user?.id || null;
     const evt = await addTimelineEvent({
       record_id: recordId, type: 'remark', title: 'Remark', description: text,
@@ -107,6 +99,7 @@ actionsRouter.patch('/:id/actions/remark/:eventId', async (req: Request, res: Re
     if (!text && !outcome) return res.status(400).json({ error: 'Add a remark or an outcome' });
     const existing = await getTimelineEventById(eventId, req.tenantId!);
     if (!existing) return res.status(404).json({ error: 'Not found' });
+    if (!(await canSeeRecord(existing.record_id))) return res.status(404).json({ error: 'Not found' });
     if (!AUTHOR_EDITABLE_TYPES.has(existing.type)) return res.status(400).json({ error: 'This entry cannot be edited' });
     const authorId = req.user?.id || null;
     if (!authorId || existing.author !== authorId) {
@@ -213,6 +206,8 @@ actionsRouter.post('/:id/actions/contact-log', async (req: Request, res: Respons
     const authorId = req.user?.id || null;
     const TITLES: Record<string, string> = { call: 'Call', wa: 'WhatsApp', sms: 'SMS', email: 'Email' };
     const title = TITLES[channel] || 'Call';
+    // A record this person cannot see is a record that does not exist (canSeeRecord).
+    if (!(await canSeeRecord(recordId))) return res.status(404).json({ error: 'Not found' });
     const evt = await addTimelineEvent({
       record_id: recordId, type: dbType, title, description: `${title} initiated`,
       author: authorId || undefined,
@@ -290,7 +285,8 @@ actionsRouter.post(
       // The note rides along instead of being the reason for a second row.
       // The note only when there IS one — see assertLeadWrite: an always-present
       // key reads as an attempt to write that field even when it carries nothing.
-      await updateLead(recordId, { stage: new_stage_id, ...(note ? { stageNote: note } : {}) });
+      const moved = await updateLead(recordId, { stage: new_stage_id, ...(note ? { stageNote: note } : {}) });
+      if (!moved) return res.status(404).json({ error: 'Not found' });
 
       // No outbound webhook here. There is no outbound-webhook feature: no
       // tenant configures a URL, nothing stores one, and this call site hard-
@@ -327,6 +323,11 @@ actionsRouter.post(
   '/:id/actions/merge',
   async (req: Request, res: Response) => {
     try {
+      // Merging deletes the duplicate, so it is the owner's call, like any
+      // delete -- the desk already only offered it to them. This had no check.
+      if (!canDeleteRecord(req.user?.role)) {
+        return res.status(403).json({ error: 'Forbidden', message: 'Only an owner can merge records.', code: 'ROLE_REQUIRED' });
+      }
       const primaryRecordId = req.params.id;
       const parseResult = MergeSchema.safeParse(req.body);
 
@@ -339,6 +340,7 @@ actionsRouter.post(
       console.log(`[Merge Engine] Merging duplicate ${duplicate_record_id} into primary ${primaryRecordId} using strategy '${merge_strategy}'`);
 
       const merged = await mergeLeads(primaryRecordId, duplicate_record_id);
+      if (!merged) return res.status(404).json({ error: 'Not found' });
 
       return res.status(200).json({
         success: true,
