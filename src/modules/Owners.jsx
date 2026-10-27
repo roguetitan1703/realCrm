@@ -195,6 +195,10 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const [pageSize, setPageSize] = useState(20)
   const selection = useSelection()
   const selected = selection.ids
+  // "Select all 42": every row the filter holds, not the twenty on screen —
+  // taking a finished calling list back is the whole list, never a page.
+  const [allMatching, setAllMatching] = useState(false)
+  const clearSel = () => { selection.clear(); setAllMatching(false) }
   // The open record lives in the URL too — see Leads and Properties.
   const openId = sel?.ownerOpen ? sel.ownerId : null
 
@@ -209,7 +213,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
       for (const k of Object.keys(next)) if (next[k] === undefined || next[k] === null || next[k] === '' || next[k] === 'all') delete next[k]
       return { ...s, ownerFilters: Object.keys(next).length ? next : undefined }
     })
-    setPage(1); selection.clear()
+    setPage(1); clearSel()
   }
   // A tab is its own order: a sort picked on another tab does not follow it.
   const pickTab = (key) => {
@@ -239,7 +243,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   const setPageP = (v) => setPage(v)
 
   // A checked row belongs to the list it was checked in.
-  useEffect(() => { selection.clear() }, [view, projectSel])
+  useEffect(() => { clearSel() }, [view, projectSel])
 
   // ONE SET OF PARAMETERS for the rows and for the tab counts, so a tab can
   // never promise rows its list cannot find.
@@ -323,9 +327,20 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     ? window.history.back()
     : setSel(s => ({ ...s, ownerOpen: false, ownerId: undefined })))
 
+  const total = source.total ?? 0
+  const selCount = allMatching ? total : selected.size
+  // Whose rows these are, when it is one person: the Agent filter, or else the
+  // ticked rows themselves.
+  const fromAgentIds = allMatching
+    ? (agentSel !== 'all' && agentSel !== '_none' && !agentSel.includes(',') ? [agentSel] : [])
+    : selection.rows.map(r => r.agentId || null)
   const bulkAssign = () => store.openModal({
-    kind: 'bulkAssign', leadIds: [...selected], isOwner: true,
-    onDone: () => selection.clear(),
+    kind: 'bulkAssign', isOwner: true,
+    leadIds: allMatching ? [] : [...selected],
+    // The list's own parameters, so the server moves exactly what it listed.
+    match: allMatching ? { ...scope, segment, stage } : undefined,
+    count: selCount, fromAgentIds,
+    onDone: clearSel,
   })
 
   if (openId) {
@@ -372,10 +387,15 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
       </div>
     ),
     // The toolbar IS the selection bar — see FilterBar. No second band.
-    selection: (canAssign && view === 'list' && selected.size > 0) ? {
-      count: selected.size,
-      actions: [{ label: 'Bulk assign', icon: 'userPlus', onClick: bulkAssign }],
-      onClear: () => selection.clear(),
+    selection: (canAssign && view === 'list' && selCount > 0) ? {
+      count: selCount,
+      actions: [
+        ...(!allMatching && total > selected.size ? [{ label: `Select all ${total}`, tone: 'quiet', onClick: () => {
+          selection.set(new Set(source.rows.map(r => r.id)), source.rows); setAllMatching(true)
+        } }] : []),
+        { label: 'Bulk assign', icon: 'userPlus', onClick: bulkAssign },
+      ],
+      onClear: clearSel,
     } : null,
     page, onPage: view === 'projects' ? undefined : setPageP, pageSize, onPageSize: view === 'projects' ? undefined : setPageSize,
     showViewSwitch: false,
@@ -394,7 +414,8 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
       : v === 'grid'
         ? <ModuleCards def={def} rows={list} store={store} onOpen={open} phone={phone} />
         : <ModuleTable def={def} rows={list} store={store} onOpen={open} sortKey={sortKey} sortDir={sortDir} onSort={(v) => patchBag({ sortKey: v })}
-            selectable={canAssign} selectedIds={selected} onSelectionChange={selection.set} />,
+            selectable={canAssign} selectedIds={selected}
+            onSelectionChange={(ids, rows) => { setAllMatching(false); selection.set(ids, rows) }} />,
   })
 
   return (

@@ -16,22 +16,28 @@ import { convertOwner } from '../services/agreements';
 import { holds, sendError } from './agreements';
 import {
   createOwner, listOwners, getOwnersSummary, getOwnerTabs, listOwnerProjects,
-  getOwnerById, updateOwner, deleteOwner, bulkAssignOwners, assignProjectOwners, splitAssign, OWNER_STATUSES,
+  getOwnerById, updateOwner, deleteOwner, bulkAssignOwners, assignProjectOwners, splitAssign, ownerIdsMatching, OWNER_STATUSES,
 } from '../services/store';
 
 export const ownersRouter = Router();
 ownersRouter.use(requireTenantAuth);
 
+/** Which rows a list request means — read by GET / and by bulk-assign's
+ *  `match`, so "select all 42" moves the 42 the list showed. */
+const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+const listScope = (q: any) => ({
+  q: str(q.q), stage: str(q.stage), project: str(q.project), tower: str(q.tower), agentId: str(q.agentId),
+  locality: str(q.locality), agent: str(q.agent), source: str(q.source), config: str(q.config),
+  segment: str(q.segment), mine: q.mine === '1' || q.mine === 1,
+});
+
 /** GET /api/v1/owners?page=&limit=&q=&stage=&project=&agentId=&sortKey=&sortDir= */
 ownersRouter.get('/', async (req: Request, res: Response) => {
   try {
     const q = req.query;
-    const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
     const { rows, total, page, limit } = await listOwners({
+      ...listScope(q),
       page: Number(q.page) || 1, limit: Number(q.limit) || 50,
-      q: str(q.q), stage: str(q.stage), project: str(q.project), tower: str(q.tower), agentId: str(q.agentId),
-      locality: str(q.locality), agent: str(q.agent), source: str(q.source), config: str(q.config),
-      segment: str(q.segment), mine: q.mine === '1',
       sortKey: str(q.sortKey), sortDir: str(q.sortDir),
     });
     return res.status(200).json({
@@ -48,7 +54,6 @@ ownersRouter.get('/', async (req: Request, res: Response) => {
 ownersRouter.get('/tabs', async (req: Request, res: Response) => {
   try {
     const q = req.query;
-    const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
     const tabs = await getOwnerTabs({
       q: str(q.q), stage: str(q.stage), project: str(q.project), tower: str(q.tower),
       locality: str(q.locality), agent: str(q.agent), source: str(q.source), config: str(q.config),
@@ -82,10 +87,24 @@ ownersRouter.get('/projects', async (_req: Request, res: Response) => {
 /**
  * POST /api/v1/owners/bulk-assign  { ids, agentId }  — one person, or null to unassign
  *   or { ids, agentIds: [a, b] } — split between them, one each in turn.
+ *   or { match, expect, … } in place of ids — every row the list with those
+ *   parameters holds (GET /owners' query), not just the page on screen.
+ *   `expect` is the count the desk confirmed; if the list has changed since,
+ *   nothing moves and the new count comes back (409).
  */
 ownersRouter.post('/bulk-assign', async (req: Request, res: Response) => {
   try {
-    const { ids, agentId, agentIds } = req.body || {};
+    const { agentId, agentIds, match, expect } = req.body || {};
+    let { ids } = req.body || {};
+    if (match && typeof match === 'object') {
+      // A filter moves only the count the desk confirmed: without one, `{ match: {} }` is the whole firm.
+      if (expect == null) return res.status(400).json({ error: 'expect is required with match' });
+      ids = await ownerIdsMatching(listScope(match));
+      if (Number(expect) !== ids.length) {
+        return res.status(409).json({ success: false, error: 'List changed', n: ids.length,
+          message: `The list now holds ${ids.length}, not ${Number(expect)}. Nothing was moved.` });
+      }
+    }
     if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids[] is required' });
     const ctx = {
       actorType: 'user' as const, actorId: req.user?.id ?? null, actorLabel: null,

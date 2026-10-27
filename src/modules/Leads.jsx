@@ -242,6 +242,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const bulkAssign = () => store.openModal({
     kind: 'bulkAssign',
     leadIds: [...selected],
+    fromAgentIds: selection.rows.map(r => r.agentId || null),
     onDone: () => selection.clear(),
   })
 

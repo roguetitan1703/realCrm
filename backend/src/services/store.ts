@@ -4012,6 +4012,21 @@ export async function listOwners(opts: OwnerListOpts = {}): Promise<{ rows: any[
 }
 
 /**
+ * EVERY ROW A FILTERED LIST MEANS, not just the page on screen — for "select
+ * all 42" on the calling list. The same builder and the same parameters as
+ * listOwners, so the number the desk confirmed and the rows that move are one
+ * query's answer. Desk only: an agent never moves work.
+ */
+export async function ownerIdsMatching(opts: OwnerListOpts = {}): Promise<string[]> {
+  const who = getContext();
+  if (who?.role === 'agent') throw new ForbiddenError('Assigning owners is done from the desk.');
+  const t = tid();
+  const clause = andAll(await ownerWhere(t, opts));
+  const rows = await sql`SELECT id FROM crm_owners WHERE ${clause} ORDER BY tower NULLS LAST, unit_no, created_at, id`;
+  return (rows as any[]).map(r => r.id);
+}
+
+/**
  * THE CALLING SCREEN'S COUNTS, for exactly the rows on screen — the same
  * builder as listOwners, each count taken across the one control it labels:
  *
@@ -4454,6 +4469,9 @@ export async function agentLoads(side: 'leads' | 'owners'): Promise<Record<strin
 export async function splitAssign(
   kind: 'leads' | 'owners', ids: string[], targets: string[], ctx: ActorCtx = SYSTEM_CTX,
 ): Promise<{ assigned: number; perTarget: { id: string; name: string | null; n: number }[] }> {
+  // The same rule as bulkAssignLeads/bulkAssignOwners. This path skipped it, so
+  // an agent posting two agentIds could move any record in the firm.
+  if (getContext()?.role === 'agent') throw new ForbiddenError('Assigning is done from the desk.');
   const t = tid();
   const clean = [...new Set((ids || []).filter(Boolean))];
   await assertWorkable(t, targets || []);
