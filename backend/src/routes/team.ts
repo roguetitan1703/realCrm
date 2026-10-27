@@ -132,11 +132,17 @@ async function emailTaken(tenantId: string, email: string, exceptId?: string): P
 /** Roster of live users with role, status, and last-active (from sessions). */
 teamRouter.get('/users', async (req: Request, res: Response) => {
   try {
+    // The team list is the desk's (Team is a desk screen). An agent got every
+    // colleague's login, contact details and when they were last active; now
+    // they get their own row.
+    const c = getContext();
+    const self = isDeskRole(c?.role) ? null : (c?.userId || '__none__');
     const users = await sql`
       SELECT u.id, u.name, u.login_id, u.email, u.phone, u.role, u.status, u.must_change_password, u.metadata,
         (SELECT max(last_seen_at) FROM sessions s WHERE s.user_id = u.id AND s.revoked = FALSE) AS last_active
       FROM users u
       WHERE u.tenant_id = ${req.tenantId} AND u.deleted_at IS NULL
+        ${self ? sql`AND u.id = ${self}` : sql``}
       ORDER BY CASE u.role WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END, u.name
     `;
     return res.status(200).json({ success: true, users });
