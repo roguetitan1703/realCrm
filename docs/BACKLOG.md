@@ -22,9 +22,6 @@ Paying tenants are `bhumi` and `mahalaxmi`. A line that writes their data says s
 The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 `usage-2026-10-17.md`. Decisions waiting on Om are `PLAN.md` §6.
 
-- **Release 1** — everything on `development` (`releases/2026-10-13.md`).
-  Waits on Om's re-test on the dev preview; re-run the first-run preview the
-  morning of the deploy, and have the reopen script written before it.
 - **Feed watch** — an active integration silent 7+ days after a normal month
   raises one alert to the owner and to Delpat. bhumi's 99acres sent nothing for
   4 weeks (12 Sep – 9 Oct) and nobody noticed. *owner, Delpat*
@@ -52,12 +49,19 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 - **Help desk** (Work OS #129) — Om, 19 Oct: both. (1) Report a problem to
   Delpat from inside the app, prefilled with firm, person, screen, version;
   (2) a help centre of how-to pages and videos in the app (the tutorial-videos
-  engine exists).
+  engine exists). How-to demos (Work OS #156): Soham and Om (intern) make them
+  with CutRoom.
 - **Collapsible sidebar** (Work OS #130) — ride in a release, never its own. *owner*
-- **Catalog** (Work OS #131) — built on `development` (`specs/listing-pages.md`
-  §A, §A.5): public catalogue + shared links, plus work only to people who can
-  take it. Waits on the final walk, then on Om's yes to `stale-rota-ids.ts`
-  (read-only), since stale rota ids at the paying firms stop getting leads.
+- **WhatsApp intro templates** (Work OS #153) — lead and owner calling, with the
+  agent's name and the project. A lead's WhatsApp already prefills from
+  `whatsappIntroTemplate`; owner calling sends empty (`Modals.jsx`). Waits on
+  Om's wording. *agent*
+- **Bulk unassign a finished calling list** (Work OS #154) — `POST
+  /owners/bulk-assign` already takes null; needs an entry point, owner only.
+  Next to build. *owner*
+- **Bulk merge misspelt project names** (Work OS #155) — nothing exists
+  (`projectNorm` in `store.ts` only normalises); needs a spec. Waits on Om:
+  scope (owners, leads, flats) and whether aliases apply at intake. *owner*
 
 ## Small
 
@@ -124,34 +128,32 @@ gaps are in `specs/notifications.md` §1, not here.
   the production read was refused here. Count per tenant: done properties jobs
   and their `config.importBatchId` listings; leads and owners carrying a batch
   with no job (older desk batches, which now have no undo).
-- **After the API deploy — phones** (specs/phone.md): the boot log's
+- **Now due, phones** (specs/phone.md; API deployed 27 Oct): the boot log's
   `[Phones] E.164 repair` line matches the dry run (bhumi 1 user, 4 leads, 52
   owners, 55 properties; mahalaxmi 3, 1, 6, 7) and names no user collision.
   The desk's phone boxes (lead, owner, team, profile, reply-to, listing owner,
   console roster) were not driven in a browser; the catalogue form was.
-  The dry run's counts predate the received/typed reader and placeholders
-  (21 Oct): re-run before the deploy. The enquiry form's plain-field fallback
+  Production after the repair (27 Oct): owners bhumi 805 E.164 / 1 other,
+  mahalaxmi 3,737 / 0; leads bhumi 1,033 / 3, mahalaxmi 547 / 0. The enquiry form's plain-field fallback
   when the phone box chunk fails was not driven in a browser.
 
 - **A listing owner's Callback stays on To do after the call** (seen on the
   demo, 17 Oct): a lead's booked call closes on Call, an owner's did not.
   Check whether that is the rule or a gap. *agent*
-- **After the Vercel deploy:** /privacy, /terms and /data-deletion open in an
-  incognito window with the full text in the page source (Meta App Review).
-- **After the API deploy:** a photo link previews in WhatsApp, Slack and
-  Telegram; Siddhi's leads show Siddhi.
-- **After the API deploy — notifications** (`specs/notifications.md` §13):
-  the boot log's first-run line matches the preview (bhumi 3,263 of 3,300
-  closed, mahalaxmi 1,233 of 1,274: preview of 27 Oct); Apple failures (110 of 458 in 14 days before) drop to near
-  zero; the first 09:00 summary goes out; Team shows Anil's and Vinod's state;
-  after a week, console → Alerts says which types change behaviour, and
-  whether `lead_untouched` earns its place (spec §12).
+- **Now due, frontend** (deployed 27 Oct): /privacy, /terms and /data-deletion
+  open in an incognito window with the full text in the page source (Meta App
+  Review).
+- **Now due, API** (deployed 27 Oct): a photo link previews in WhatsApp, Slack
+  and Telegram; Siddhi's leads show Siddhi.
+- **Now due, notifications** (`specs/notifications.md` §13; first run done 27
+  Oct: closed 3,263 at bhumi (37 open), 1,233 at mahalaxmi (41 open)): Apple
+  failures (110 of 458 in 14 days before) drop to near zero; the first 09:00
+  summary goes out; Team shows Anil's and Vinod's state; after a week, console
+  → Alerts says which types change behaviour, and whether `lead_untouched`
+  earns its place (spec §12).
 
 ## Bigger pieces — each has a spec
 
-- **WhatsApp and Instagram through Meta** (Tech Provider: Embedded Signup with
-  Coexistence, webhook, inbox, New contacts queue). Brief only, no spec yet;
-  the legal pages it needs are live at /privacy, /terms, /data-deletion.
 - **Enquiries** — a person is not an enquiry. `specs/enquiries.md`, planning.
 - **PWA on a real device** — install identity, offline. `specs/pwa.md`.
 - **Branding audit** across login, desk, phone, PWA, email, share.

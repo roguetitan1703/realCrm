@@ -142,7 +142,7 @@ second (`docs/releases/2026-10-13.md`). Five frontend deploys in eight weeks.
 
 | # | Item | For | Outcome (measurable) | Size | Depends on | Writes paying firms' data |
 |---|---|---|---|---|---|---|
-| **W1** | **Release 1**: alert lifecycle, working hours, Performance 7/30 days, follow-up done from Today, Apple push fix, legal pages. 45 commits on `development`; 17 touch the app | both | Bells per agent 140–297 → 0–5; Apple timeouts 257/month → under 10; a week of the team visible | M (Om: re-test, merge, 2 deploys) | Om's re-test on dev. Re-run `alert-first-run-preview.ts` first: it is 4 days stale | **Yes.** Status columns on ~2,227 bhumi and ~757 mahalaxmi `notifications` rows (first run, `runOnce`). No other table |
+| **W1** | **Release 1 (shipped 27 Oct)**: alert lifecycle, working hours, Performance 7/30 days, follow-up done from Today, Apple push fix, legal pages. 45 commits on `development`; 17 touch the app | both | Bells per agent 140–297 → 0–5; Apple timeouts 257/month → under 10; a week of the team visible | M (Om: re-test, merge, 2 deploys) | Om's re-test on dev. Re-run `alert-first-run-preview.ts` first: it is 4 days stale | **Yes.** Status columns on ~2,227 bhumi and ~757 mahalaxmi `notifications` rows (first run, `runOnce`). No other table |
 | W1 | Send Prithviraj the demo (#125, overdue 15 Oct) | Delpat | One reply, one date | S, no code | demo-showcase tenant exists | No |
 | W1 | Release note to each owner: 6 lines on WhatsApp, in their words (bell clears itself, 9–9 quiet hours, the month view) | owners | Each owner opens Performance → 30 days once in week 2 (check `audit_log`) | S | Release 1 | No |
 | **W1–2** | **Feed watch.** A sweep: an active integration with `last_received_at` older than 7 days that received ≥8 pushes in the 28 days before. One `feed_silent` alert, morning urgency, to the owner ("99acres has sent nothing for 7 days") and to Delpat (console + a message to Om) | owner, Delpat | A silent feed is named within 1 day, not 28. 0 unexplained silent feeds at any week end | S | Alert catalogue (`closesWhen`: a push arrives) | Yes: new alert rows only |
@@ -152,7 +152,7 @@ second (`docs/releases/2026-10-13.md`). Five frontend deploys in eight weeks.
 | **W3** | **Release 2**: feed watch, one-place outcome, collapsible sidebar (#130, S, Sonnet builder) | both | As above | — | — | Feed alerts only |
 | W4–5 | **Help the owner act.** Team gets one line per agent that is inactive 7+ days and holds open leads ("Siddhi · 65 open · last active 6 Oct"), beside the Alerts column. Then one support call per owner (not code): set the rota, reassign Siddhi's leads, turn push on for Anil and Vinod, ask bhumi about the 1,324 owners, ask mahalaxmi how Zahir works | owner | 0 open leads held by anyone inactive 7+ days; push on 8/8 and 5/5; mahalaxmi assignments/day 82 → under 20 | S + 2 calls | Release 1 | No (the owner writes, in the app) |
 | **W5** | **Release 3**: finish-what-was-booked, Team inactive line, help desk if Q1 says "report a problem" (S: the existing support WhatsApp number, prefilled with firm, user, screen, version) | both | Support requests arrive with context | — | Q1 | No |
-| **W5–8** | **Catalog, steps 1–2** (`specs/listing-pages.md` §7): send records + multi-flat send from the lead; old photo links redirect; buyer's buttons (Interested · Book a visit · Not for me) and sticky "Talk to us"; responses on the lead; one alert. Needs a reply-to person per firm and agents' phone numbers (bhumi: 4 of 8 missing) | agent at bhumi; the buyer | ≥40 sends/month at bhumi with ≥2 flats per send; ≥10% of sends get a response; the sending spreads beyond Mohit (36 of 57 today) | L (two releases) | Releases 1–3 out; Q5 | Yes, small: 2 bhumi photo links redirected; new tables otherwise |
+| **W5–8** | **Catalog (shipped 27 Oct with release 1, with the public catalogue)**: steps 1–2 (`specs/listing-pages.md` §7): send records + multi-flat send from the lead; old photo links redirect; buyer's buttons (Interested · Book a visit · Not for me) and sticky "Talk to us"; responses on the lead; one alert. Needs a reply-to person per firm and agents' phone numbers (bhumi: 4 of 8 missing) | agent at bhumi; the buyer | ≥40 sends/month at bhumi with ≥2 flats per send; ≥10% of sends get a response; the sending spreads beyond Mohit (36 of 57 today) | L (two releases) | Releases 1–3 out; Q5 | Yes, small: 2 bhumi photo links redirected; new tables otherwise |
 | W7, W8 | **Releases 4 and 5**: catalog step 1, then step 2 | — | — | — | — | — |
 | **W1–8, parallel** | **Meta track A** (#101–#106): footer, legal pages (live with Release 1), documents, business portfolio, Business app, read the docs. Om's calendar, no builder | Delpat | Business verified and app created by 12 Dec. **Gate:** no track B work before verification passes | S each, Meta's clock | Release 1 | No |
 | W8 | Decide: catalog step 3; Meta track B; enquiries model | Om | From §4's numbers | — | — | — |
@@ -234,14 +234,10 @@ firm, days since last API deploy, `main` vs deployed commit.
 
 ## 6. Questions only Om can answer
 
-1. **What is the help desk (#129)?** *Answered 19 Oct: report a problem AND a help centre.* Example: Ravish's push stopped; today he
-   tells the owner, who WhatsApps you. *Yes = "a way for a firm's person to
-   report a problem to Delpat from inside the app"*: S, reuse the support
-   WhatsApp bubble, prefilled with firm, user, screen, version; ships in
-   Release 3. *No, it means a help centre (how-to pages or videos in the
-   app)*: M, the tutorial-videos engine exists; LATER. *No, it means a ticket
-   module for the firm's own customers*: decline; nothing in the usage asks
-   for it. **Recommendation:** report-a-problem.
+1. **What is the help desk (#129)?** *Answered 19 Oct: report a problem AND a
+   help centre.* Report a problem is S (the support WhatsApp bubble, prefilled
+   with firm, user, screen, version, Release 3); the help centre is M (the
+   tutorial-videos engine exists).
 2. **What do bhumi and mahalaxmi pay, and will #3 pay the same?** Nothing in
    the repo says. Example: Prithviraj asks "how much?" on the demo call. *Yes,
    a price exists and is written down*: put it in the onboarding runbook.

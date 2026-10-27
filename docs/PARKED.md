@@ -34,7 +34,8 @@ No number from either firm asks for these; reopen with one.
 - **Meta track B (build)** — Later, gated: no build before Meta verifies
   Delpat. Track A (paperwork, #101–#106) runs on Om's time. This replaces the
   30 Sep line below that ruled the WhatsApp Business API out because the firms
-  will not pay: the bet now is client #3 onwards, not the two firms.
+  will not pay: the bet now is client #3 onwards, not the two firms. Whether
+  bhumi does its own business verification (#118) is `PLAN.md` §6 Q6.
 - **Skeletons, pagination restyle, group-by as kanban** — no number behind them.
 - **Property import: a default sale/rent for the file** — lead import is 0 at
   both firms; no new work on import, agreements, units, calendar, email or

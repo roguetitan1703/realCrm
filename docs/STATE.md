@@ -7,47 +7,53 @@ a live database so the next session neither re-derives it nor assumes it.
 
 The work itself is in `docs/BACKLOG.md`; set-aside work in `docs/PARKED.md`.
 
-**Last session: 2026-10-19 → 21.** The catalog (Work OS #131,
-`specs/listing-pages.md` §A, §A.6) is complete on `development` (f28f5fb):
-shared links, the public catalogue, the three buyer forms, work only to people
-who can take it, the phone model (E.164), code sign-in retired, the import
-undo and the retired batch delete. Every merge was reviewed; a final walk on
-dev (phone and desk) found no blocker and its two bugs are fixed. What the
-firms will notice and the deploy order: `releases/2026-10-20.md`. Nothing
-deployed.
+**Last session: 2026-10-27.** Release 1 is live: the catalog (Work OS #131,
+`specs/listing-pages.md` §A), the alert lifecycle, Performance 7/30 days,
+the phone model (E.164), code sign-in retired, the import undo and the retired
+batch delete. The API crash-looped once on a missing `libphonenumber-js`
+install; `scripts/deploy-api.sh` now checks `npm ls` and installs. What the
+firms notice: `releases/2026-10-13.md` and `releases/2026-10-20.md`. #131 and
+#132 (Performance range) are Done in Work OS.
 
 ---
 
 ## Deployed
 
-Not re-read this session; as of 17 Oct:
+As of 27 Oct 2026:
 
 | | at | how |
 |---|---|---|
-| Backend — AWS EC2 (PM2 runs prod and dev) | `78458b6` (5 Oct) | `scripts/deploy-api.sh` on the box, `main` only |
-| Dev API (`api.dev.re.delpat.in`) | `0eb1c5c` — far behind `development` | pull + `npm ci` + `pm2 restart re-api-dev` |
-| `main` | `820514e` (6 Oct) | |
-| `development` | `f28f5fb` (21 Oct) | |
+| Frontend — Vercel | `a036eb4` (27 Oct) | `main` = `origin/main` |
+| Backend — AWS EC2 (`re-api` under PM2) | `45a68f6` (27 Oct) | `scripts/deploy-api.sh` on the box, by hand |
+| Dev API (`re-api-dev`) | stopped on the box | needs `npm install` before restart |
+| `main` | `a036eb4` | |
+| `development` | `a036eb4` + `570fd23` (work-state) | ahead by docs only |
 
 ---
 
 ## Waiting on the user
 
-- **Redeploy the dev API, re-test on the dev preview,** then the release
-  (`releases/2026-10-20.md`: API first, `npm ci`, read the boot log, then the
-  frontend). Re-run the phone dry run and `alert-first-run-preview.ts` the
-  morning of the deploy.
-- **AWS security group:** ports 5000 and 5001 must have no inbound rule.
-- **A hotfix off `main`** for the two live holes (code sign-in; any agent
-  deleting an import batch): yes or no. Recommended no if the release goes
-  within days; neither was ever used in production (21 Oct).
+- **AWS security group:** confirm ports 5000 and 5001 have no inbound rule.
+- **`re-api-dev` is stopped:** run `npm install`, then restart it, when the dev
+  preview is wanted again.
+- **"Call not received → Contacted"** question: open.
+- **A one-page what's-new for the firms:** yes or no.
+- **Ask Akash** whether the intern's Meta setup is done (Work OS #157).
 - **`PLAN.md` §6** questions still open.
 
 ---
 
 ## Checked this session
 
-- **Production, read only (`BEGIN READ ONLY`, `transaction_read_only = on`):**
+- **Production after the deploy, read only (27 Oct):**
+  - Migrations applied: `push_subscription_session`,
+    `share_events_one_view_per_day`, `phones_e164`,
+    `2026_10_12_alert_lifecycle_first_run`.
+  - Alert first run closed 3,263 at bhumi (37 open) and 1,233 at mahalaxmi
+    (41 open).
+  - Phones in E.164: owners bhumi 805 / 1 other, mahalaxmi 3,737 / 0; leads
+    bhumi 1,033 / 3, mahalaxmi 547 / 0.
+- **Production before the deploy, read only (`BEGIN READ ONLY`, `transaction_read_only = on`; 21 Oct):**
   - Rotas: 0 stale ids at bhumi and mahalaxmi. Strategies: bhumi leads
     round_robin, owners manual, sweeps off; mahalaxmi round_robin both,
     sweeps off. Honouring "Leave unassigned" changes nothing for them.
