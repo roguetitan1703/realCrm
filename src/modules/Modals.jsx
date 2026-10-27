@@ -130,7 +130,8 @@ export default function Modals({ store, go }) {
       {m?.kind === 'ownerCallback' && <OwnerCallbackModal store={store} ownerId={m.ownerId} />}
       {m?.kind === 'editRecord' && <ModuleFormModal store={store} moduleId={m.moduleId} recordId={m.recordId} />}
       {m?.kind === 'assign' && <AssignModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'bulkAssign' && <BulkAssignModal store={store} leadIds={m.leadIds} isOwner={m.isOwner} onDone={m.onDone} />}
+      {m?.kind === 'bulkAssign' && <BulkAssignModal store={store} leadIds={m.leadIds} isOwner={m.isOwner} onDone={m.onDone}
+        match={m.match} count={m.count} fromAgentIds={m.fromAgentIds} />}
       {m?.kind === 'assignProject' && <AssignProjectModal store={store} project={m.project} />}
       {m?.kind === 'reassign' && <ReassignModal store={store} fromId={m.fromId} />}
       {m?.kind === 'addAgent' && <AddAgentModal store={store} />}
@@ -1253,11 +1254,20 @@ function AssignModal({ store, leadId }) {
 // ---- Bulk assign: the same route AssignModal uses (bulkAssignLeads), just
 // with more than one id. One code path for one row and for a whole selection,
 // rather than a loop of single-lead assigns from the client. ----
-function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
+function BulkAssignModal({ store, leadIds = [], isOwner, onDone, match, count, fromAgentIds = [] }) {
   const [busy, setBusy] = useState(false)
   const [picked, setPicked] = useState([])
-  const n = leadIds.length
+  // Taking work back is confirmed with its number: it empties somebody's list.
+  const [confirming, setConfirming] = useState(false)
+  // `match` is "every row this list holds" (Owners' Select all): the server
+  // resolves it, and `count` is the number the desk saw.
+  const n = match ? (count ?? 0) : leadIds.length
   const noun = isOwner ? 'owner' : 'lead'
+  const nouns = `${noun}${n === 1 ? '' : 's'}`
+  // One person holds the whole selection: name them. Several, or nobody: don't.
+  const holders = [...new Set(fromAgentIds)]
+  const from = holders.length === 1 && holders[0] ? store.agentById(holders[0]) : null
+  const fromName = from ? (from.name || from.first) : null
   // THE NUMBER BESIDE EACH NAME IS ABOUT THE WORK BEING HANDED OUT. Every
   // assign screen read the desk summary, which counts open LEADS — so splitting
   // a calling list showed how many buyers each person was carrying, which
@@ -1278,14 +1288,18 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
 
   const send = (agentIds, single) => {
     setBusy(true)
-    const call = isOwner ? api.bulkAssignOwners : api.bulkAssignLeads
-    call(leadIds, single ?? null, agentIds)
+    const req = match
+      ? api.bulkAssignOwnersMatching(match, n, single ?? null, agentIds)
+      : (isOwner ? api.bulkAssignOwners : api.bulkAssignLeads)(leadIds, single ?? null, agentIds)
+    req
       .then(res => {
         if (res?.success) {
           const moved = res.assigned ?? res.updated ?? n
+          const what = `${moved} ${noun}${moved === 1 ? '' : 's'}`
           store.toast(res.perTarget?.length > 1
             ? `${moved} shared: ${res.perTarget.filter(p => p.n).map(p => `${p.name} ${p.n}`).join(', ')}`
-            : (agentIds || single ? `${moved} ${noun}${moved === 1 ? '' : 's'} assigned` : `${moved} ${noun}${moved === 1 ? '' : 's'} unassigned`))
+            : (agentIds || single ? `${what} assigned`
+              : fromName ? `${what} taken back from ${fromName}` : `${what} unassigned`))
           store.settled?.()
           onDone?.()
           store.closeModal()
@@ -1295,13 +1309,37 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
         }
       })
       .catch(err => {
+        // The list moved between the count and the click: nothing was moved,
+        // and the screen is out of date — say so and refresh it.
+        if (err?.status === 409 && match) {
+          store.toast(err.body?.message || 'The list changed. Nothing was moved.', 'warn')
+          store.settled?.()
+          onDone?.()
+          store.closeModal()
+          return
+        }
         if (assignFailed(store, err)) setPicked([])
         setBusy(false)
       })
   }
 
+  if (confirming) {
+    return (
+      <Modal title={fromName ? `Take back ${n} ${nouns} from ${fromName}?` : `Unassign ${n} ${nouns}?`}
+        onClose={store.closeModal} width={420}>
+        <div className="lc-foot">
+          <Button disabled={busy} onClick={() => setConfirming(false)}>Cancel</Button>
+          <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} disabled={busy}
+            onClick={() => send(undefined, null)}>
+            {busy ? 'Unassigning…' : fromName ? `Take back ${n}` : `Unassign ${n}`}
+          </Button>
+        </div>
+      </Modal>
+    )
+  }
+
   return (
-    <Modal title={`Assign ${n} ${noun}${n === 1 ? '' : 's'}`} onClose={store.closeModal} width={420}>
+    <Modal title={`Assign ${n} ${nouns}`} onClose={store.closeModal} width={420}>
       <div className="pick-list">
         {agents.map(a => {
           const on = picked.includes(a.id)
@@ -1331,8 +1369,8 @@ function BulkAssignModal({ store, leadIds = [], isOwner, onDone }) {
       </Button></div>
       {/* Taking work off the desk is a different intent from handing it to
           someone, so it does not sit in the same list as the people. */}
-      <button className="pick-unassign" disabled={busy} onClick={() => send(undefined, null)}>
-        Leave unassigned
+      <button className="pick-unassign" disabled={busy} onClick={() => setConfirming(true)}>
+        Unassign
       </button>
     </Modal>
   )

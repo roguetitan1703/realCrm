@@ -763,7 +763,7 @@ export const OWNERS_DEF = {
       label: (o) => (o.agentId ? 'Reassign caller' : 'Assign caller'),
       when: (o, store) => canAssignLead(store.state.role),
       sub: (o, store) => { const a = store.agentById(o.agentId); return a ? a.name : 'Unassigned' },
-      run: (store, o) => store.openModal({ kind: 'bulkAssign', leadIds: [o.id], isOwner: true }) },
+      run: (store, o) => store.openModal({ kind: 'bulkAssign', leadIds: [o.id], isOwner: true, fromAgentIds: [o.agentId || null] }) },
     { id: 'delete', tier: 'manage', icon: 'trash', label: 'Delete owner', tone: 'danger',
       run: (store, o, ctx) => { if (window.confirm('Delete this owner record permanently?')) { store.deleteOwner(o.id); ctx?.onClose?.() } } },
   ],

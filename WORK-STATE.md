@@ -21,3 +21,5 @@ Release 1 (catalog, buyer forms, phones, sign-in, import undo) is complete on `d
 - Abandoning the import wizard at the map step leaves an "uploaded, 0 created" job in History, waits on a cleanup rule
 - Four write scripts import the services without CRM_NO_BOOT (dedupe-leads, remap-connections, reprocess-inbox, test-notifications): run against production they start initSchema, waits on their next use
 - Daily demo refresh (`--tick`) — waits on Om choosing dev or prod for demos
+- Calling on a phone has no Select mode, so bulk assign/take back is desk-only — waits on Om saying a manager does this from a phone
+- Leads has no "Select all matching" (Owners now does) — waits on a broker asking to take back leads in bulk

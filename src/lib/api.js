@@ -751,6 +751,10 @@ export const api = {
   updateOwner: (id, patch) => request(`/owners/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteOwner: (id) => request(`/owners/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   bulkAssignOwners: (ids, agentId, agentIds) => request('/owners/bulk-assign', { method: 'POST', body: JSON.stringify({ ids, agentId, agentIds }) }),
+  // Every row the list with these parameters holds (listOwners' own), not the
+  // page on screen. `expect` is the count the desk confirmed: if the list has
+  // moved since, the server moves nothing and answers 409 with the new count.
+  bulkAssignOwnersMatching: (match, expect, agentId, agentIds) => request('/owners/bulk-assign', { method: 'POST', body: JSON.stringify({ match, expect, agentId, agentIds }) }),
 
   // Properties CRUD
   getProperties: () => request('/properties'),
