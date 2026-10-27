@@ -1,5 +1,104 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { parseUrl, bootNav, stampNavWorkspace, urlFor, isRoot, isStandaloneApp, TAKEOVER_KEYS, RECORD_KEYS } from './nav.js'
+import { currentTenant } from './api.js'
+
+// ── What each history entry carries ─────────────────────────────────────────
+// `depth`  how many of OUR places sit under this one in this tab. The floor and
+//          its spare copy are 0. Back can only be handed to the browser above
+//          0: below it is a deep link, a fresh tab, or another site.
+// `ws`     the workspace the entry was written in. A tab that signs into a
+//          second firm keeps the first firm's entries underneath.
+// `scroll` where the scrollers stood when this place was left for another.
+// `keep`   list state that is not a filter (page, grouping) — see useKept().
+// Every write goes through writeEntry so `entry` mirrors the entry we are on;
+// the overlay guard has to put back an entry it has already been popped off.
+let entry = null
+const readEntry = () => window.history.state || {}
+function writeEntry(state, url, push) {
+  const next = { ...state, nav: true, ws: currentTenant() }
+  if (push) window.history.pushState(next, '', url)
+  else window.history.replaceState(next, '', url)
+  entry = next
+}
+
+// The entry being returned to, between a popstate and the screen it names
+// mounting. useKept reads it then and only then: a screen arrived at fresh
+// must not inherit the page its last visit was left on.
+let restoring = null
+
+/** Can the in-app back arrow hand this press to the browser? */
+export function canStepBack() {
+  const s = readEntry()
+  return Boolean(s.nav && s.depth > 0 && s.ws === currentTenant())
+}
+
+// ── Scroll ──────────────────────────────────────────────────────────────────
+// The shell owns the scrollers: `.m-body` on a phone, `.app-body` (and a list's
+// `.ll-content`) on the desk. They outlive the screens inside them, so a list
+// scrolled to row 60 handed its offset to the record opened from it, and back
+// found the list re-fetched and sitting at the top.
+const SCROLLERS = '.m-body, .app-body, .ll-content'
+const readScroll = () => [...document.querySelectorAll(SCROLLERS)].map(el => el.scrollTop)
+const STOPS = ['wheel', 'touchstart', 'keydown', 'mousedown']
+let settling = null
+function applyScroll(tops) {
+  settling?.()
+  const want = tops || []
+  const put = () => {
+    let done = true
+    document.querySelectorAll(SCROLLERS).forEach((el, i) => {
+      const t = want[i] || 0
+      if (Math.abs(el.scrollTop - t) <= 1) return
+      el.scrollTop = t
+      if (Math.abs(el.scrollTop - t) > 1) done = false
+    })
+    return done
+  }
+  if (put()) return
+  // The rows under the offset are still being fetched. Keep trying until they
+  // arrive, the person touches the screen, or it is plain they are not coming.
+  let stop = false
+  const quit = () => { stop = true; settling = null; for (const ev of STOPS) window.removeEventListener(ev, quit, true) }
+  for (const ev of STOPS) window.addEventListener(ev, quit, true)
+  settling = quit
+  const until = Date.now() + 4000
+  const tick = () => { if (stop) return; if (put() || Date.now() > until) { quit(); return } setTimeout(tick, 60) }
+  setTimeout(tick, 60)
+}
+
+// ── List state that is not a filter ─────────────────────────────────────────
+// The page a list is on and how it is grouped stay OUT of the URL (an entry
+// per page tap is not navigation), which used to mean out of everything: the
+// list unmounts when a record takes the screen, so back from a lead found page
+// 1 of a list left on page 3, and a phone's "Load more" rows were gone with
+// the place you had scrolled to. They ride on the history entry instead —
+// invisible, and exactly as durable as the entry. `revive` adapts what was
+// kept when it is read back.
+export function useKept(key, initial, revive) {
+  const [v, setV] = useState(() => {
+    const kept = restoring?.keep?.[key]
+    return kept === undefined ? initial : (revive ? revive(kept) : kept)
+  })
+  const last = useRef(v)
+  useEffect(() => {
+    if (last.current === v) return
+    last.current = v
+    const s = readEntry()
+    writeEntry({ ...s, keep: { ...(s.keep || {}), [key]: v } }, window.location.href, false)
+  }, [key, v])
+  return [v, setV]
+}
+
+/** A list's page and page size, kept on its entry. A phone list grows by
+ *  "Load more", and rebuilt on its third page it would hold rows 41–60 only,
+ *  so it comes back as one page holding all three. */
+export function useKeptPager(key, accumulate) {
+  const [p, setP] = useKept(`${key}.pager`, { page: 1, pageSize: 20 },
+    accumulate ? (k) => ({ page: 1, pageSize: Math.min(200, (k.page || 1) * (k.pageSize || 20)) }) : undefined)
+  const setPage = useCallback((page) => setP(x => (x.page === page ? x : { ...x, page })), [setP])
+  const setPageSize = useCallback((pageSize) => setP(x => (x.pageSize === pageSize ? x : { ...x, pageSize })), [setP])
+  return { page: p.page, pageSize: p.pageSize, setPage, setPageSize }
+}
 
 // ============================================================================
 // useNav — screen + selection, mirrored to the URL, with a back-to-exit guard
@@ -26,8 +125,6 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
   const first = useRef(bootNav()).current
   const [screen, setScreenState] = useState(first.screen || home)
   const [sel, setSelState] = useState(first.sel)
-  const screenRef = useRef(screen)
-  screenRef.current = screen
 
   // Set when a popstate is what changed the state, so the effect below doesn't
   // immediately push the entry the user just went back through.
@@ -53,12 +150,12 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
     // screen nobody can reach yet, on a page that is not it. Worse on the bare
     // root, where it made a workspace picker look like a route.
     if (!enabled) return
-    if (window.history.state?.nav) return
+    if (window.history.state?.nav) { entry = window.history.state; return }
     const url = urlFor(first.screen || home, first.sel)
     stampNavWorkspace()
-    window.history.replaceState({ nav: true, floor: true }, '', url)
+    writeEntry({ floor: true, depth: 0 }, url, false)
     if (!isStandaloneApp()) {
-      window.history.pushState({ nav: true }, '', url)
+      writeEntry({ depth: 0 }, url, true)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled])
@@ -71,23 +168,47 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
   // so the URL still carries them (reload and sharing keep working) without
   // burying the screen you came from.
   const placeRef = useRef(null)
+  // Set by back() when it fell back to the parent: that step is "up", not
+  // "forward", so it takes over the record's entry instead of stacking a list
+  // on a record that the next back would return to.
+  const replaceNext = useRef(false)
+  // The scrollers as they stood when the navigation was asked for. By the
+  // time the effect below runs the new screen is already drawn.
+  const leftScroll = useRef([])
   useEffect(() => {
     if (!enabled) return
-    if (fromPop.current) { fromPop.current = false; return }
-    const next = urlFor(screen, sel)
     const place = JSON.stringify([screen, sel.leadId, sel.leadOpen, sel.ownerId, sel.ownerOpen,
-      sel.propId, sel.propOpen, sel.projKey, sel.projOpen, sel.propAdd, sel.person])
+      sel.propId, sel.propOpen, sel.projKey, sel.projOpen, sel.propAdd, sel.person, sel.contactId])
+    const firstRun = placeRef.current === null
     const samePlace = placeRef.current === place
     placeRef.current = place
+    if (fromPop.current) {
+      fromPop.current = false
+      restoring = null
+      if (!samePlace) applyScroll(readEntry().scroll)
+      return
+    }
+    const next = urlFor(screen, sel)
+    const up = replaceNext.current
+    replaceNext.current = false
     stampNavWorkspace()
     if (next !== window.location.search) {
-      if (samePlace) window.history.replaceState({ nav: true }, '', next)
-      else window.history.pushState({ nav: true }, '', next)
+      const cur = readEntry()
+      if (samePlace || up) writeEntry({ ...cur, scroll: undefined }, next, false)
+      else {
+        writeEntry({ ...cur, scroll: leftScroll.current }, window.location.href, false)
+        writeEntry({ depth: (cur.depth || 0) + 1 }, next, true)
+      }
     }
+    if (!samePlace && !firstRun) applyScroll([])
   }, [screen, sel, enabled])
 
   useEffect(() => {
     const onPop = () => {
+      // The entry just left, as last written; history.state is already the
+      // one under it.
+      const left = entry
+      entry = readEntry()
       // A back press with a form on screen means "close the form", every time.
       // It never means "go to the previous screen and leave the form floating
       // over it", and on a phone — where back is a system gesture people use
@@ -95,7 +216,7 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
       // press by putting the entry back, so one gesture closes one thing.
       if (overlayRef.current?.isOpen()) {
         overlayRef.current.close()
-        window.history.pushState({ nav: true }, '', urlFor(screen, sel))
+        writeEntry(left || { depth: (entry.depth || 0) + 1 }, urlFor(screen, sel), true)
         return
       }
       const at = parseUrl()
@@ -107,7 +228,7 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
       // the entry is put back.
       if (isRoot(nextScreen, at.sel, home) && isRoot(screen, sel, home)) {
         if (!exitArmed.current) {
-          window.history.pushState({ nav: true }, '', urlFor(screen, sel))
+          writeEntry(left || { depth: (entry.depth || 0) + 1 }, urlFor(screen, sel), true)
           exitArmed.current = true
           onExitWarning?.()
           setTimeout(() => { exitArmed.current = false }, 2500)
@@ -121,6 +242,7 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
       }
 
       fromPop.current = true
+      restoring = entry
       setScreenState(nextScreen)
       setSelState(at.sel)
     }
@@ -146,7 +268,9 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
       let at
       // parseUrl takes a QUERY STRING, not a URL.
       try { at = parseUrl(new URL(e.data.url, window.location.origin).search) } catch { return }
-      window.history.pushState({ nav: true }, '', e.data.url)
+      const cur = readEntry()
+      writeEntry({ ...cur, scroll: readScroll() }, window.location.href, false)
+      writeEntry({ depth: (cur.depth || 0) + 1 }, e.data.url, true)
       fromPop.current = true
       setScreenState(at.screen || home)
       setSelState(at.sel)
@@ -164,6 +288,8 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
     // form that survives the trip is worse than one that closes, because it
     // then submits against whatever screen you landed on.
     overlayRef.current?.close()
+    leftScroll.current = readScroll()
+    replaceNext.current = false
     // OPENING A ROW IS NOT LEAVING THE SCREEN. A navigation whose patch is made
     // only of record keys — clicking a lead in a filtered list — keeps the
     // filters it was standing on. Anything else (a sidebar item, a dashboard
@@ -171,11 +297,6 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
     // tile tapped an hour ago still silently filtering the book.
     const recordOnly = Object.keys(patch).length > 0
       && Object.keys(patch).every(k => RECORD_KEYS.includes(k))
-    // A record opened from ANOTHER screen remembers which, so its back button
-    // returns there. Opened from a Performance row, back used to land on the
-    // Calling or Leads list, a screen the person never visited.
-    const from = screenRef.current
-    const fromElsewhere = recordOnly && key !== from && (patch.leadOpen || patch.ownerOpen || patch.propOpen)
     setScreenState(key)
     setSelState(s => {
       const next = { ...s }
@@ -186,12 +307,36 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
         if (recordOnly && (k === 'leadFilters' || k === 'propFilters' || k === 'ownerFilters' || k === 'contactFilters')) continue
         next[k] = null
       }
-      if (fromElsewhere) next.recFrom = from
       return { ...next, ...patch }
     })
   }, [])
 
-  return { screen, setScreen: setScreenState, sel, setSel: setSelState, go, boot: first }
+  // A screen changing its own selection (opening a row it lists, closing a
+  // record) is a navigation too, and is measured the same way.
+  const setSel = useCallback((u) => {
+    leftScroll.current = readScroll()
+    replaceNext.current = false
+    setSelState(u)
+  }, [])
+
+  // ── THE BACK ARROW ────────────────────────────────────────────────────────
+  // One answer for every record and secondary screen, on both chromes: the
+  // arrow does what the phone's back gesture does. Each record used to close
+  // itself onto its OWN module's list, so Leads → a lead → one of its homes →
+  // back landed on the property list — a screen the person never visited, with
+  // the lead and the filtered list behind it both gone.
+  //
+  // `parent` is only for when nothing of ours is underneath — a deep link, an
+  // alert opened in a fresh tab, the first entry after a reload. Then the arrow
+  // goes UP to the record's list instead of off the app.
+  const back = useCallback((parent) => {
+    if (canStepBack()) { window.history.back(); return }
+    parent?.()
+    // After, not before: parent() is itself a go() or setSel(), which clear it.
+    replaceNext.current = true
+  }, [])
+
+  return { screen, setScreen: setScreenState, sel, setSel, go, back, boot: first }
 }
 
 export { isStandaloneApp }

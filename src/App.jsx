@@ -125,7 +125,7 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [store])
-  const { screen, setScreen, sel, setSel, go, boot } = useNav({
+  const { screen, setScreen, sel, setSel, go, back, boot } = useNav({
     home: isPhone || state.role === 'agent' ? 'today' : 'dashboard',
     onExitWarning: warnExit,
     overlay,
@@ -211,7 +211,7 @@ export default function App() {
             mount — not a second implementation, the same component. */}
         {support ? <SupportBar support={support} onClose={() => store.logout()} /> : <PushRow store={store} />}
         <EnvMark />
-        <Phone store={store} framed={false} screen={screen} sel={sel} setSel={setSel} go={go} />
+        <Phone store={store} framed={false} screen={screen} sel={sel} setSel={setSel} go={go} back={back} />
         <Toasts toasts={state.toasts} onDismiss={(id) => store.dispatch({ type: 'UNTOAST', id })} />
       </div>
     )
@@ -272,6 +272,8 @@ export default function App() {
     store, go, sel, setSel,
     topBar: (opts) => (
       <TopBar {...opts}
+        // A screen names its parent; the arrow itself is useNav's back().
+        onBack={opts.onBack && (() => back(opts.onBack))}
         onSearch={opts.onSearch === false ? undefined : () => store.setSearch(true)}
         onBell={opts.onBell === false ? undefined : () => store.setNotif(true)}
         profile={profile}
@@ -291,7 +293,7 @@ export default function App() {
       <EnvMark />
       {state.dataStale && <StaleBanner />}
       <AppShell nav={nav} active={effectiveScreen} activeSub={sel.contactsTab || 'owners'} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
-        <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.ownerId || ''}-${sel.propId || ''}`} {...ctx} />
+        <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.ownerId || ''}-${sel.propId || ''}-${sel.contactId || ''}`} {...ctx} />
       </AppShell>
       {state.waState && <WaModal store={store} />}
       <Modals store={store} go={go} />

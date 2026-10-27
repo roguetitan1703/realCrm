@@ -28,10 +28,8 @@ export const TAKEOVER_KEYS = [
   // Today's half (To do / My work / Team) and a teammate opened from Team or
   // the Performance page, and the day they are read on.
   'todayView', 'person', 'day', 'from',
-  // The screen a record was opened FROM, when that was another screen (a row on
-  // Performance, Today, Calendar). Not in the URL: the record's back button reads
-  // it to step back there instead of dropping you on this screen's list.
-  'recFrom',
+  // A contact opened on the Contacts screen.
+  'contactId',
 ]
 
 // Opening a record is not leaving the screen.
@@ -44,7 +42,7 @@ export const TAKEOVER_KEYS = [
 // over", and a navigation made only of them keeps the filters underneath.
 export const RECORD_KEYS = [
   'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propFromOwner', 'propCopyOf', 'propCopyBack', 'projOpen', 'projKey',
-  'person',
+  'person', 'contactId',
 ]
 
 // ── One filter bag, in the URL ──────────────────────────────────────────────
@@ -162,6 +160,10 @@ export function parseUrl(search = window.location.search) {
       propCopyBack: (p.get('new') === 'property' && p.get('back') === 'list') ? 'list' : undefined,
       // Contacts' tab — Owners / Tenants / Buyers — so a reload stays on it.
       contactsTab: ['tenants', 'buyers'].includes(p.get('tab')) ? p.get('tab') : undefined,
+      // A contact had no address: it was local state, so the browser's back
+      // left Contacts altogether and the arrow could not tell a record from a
+      // list. It is a place like any record.
+      contactId: (p.get('screen') === 'clients' && p.get('contact')) || undefined,
       todayView: ['work', 'team'].includes(p.get('view')) ? p.get('view') : undefined,
       person: p.get('person') || undefined,
       day: /^\d{4}-\d{2}-\d{2}$/.test(p.get('day') || '') ? p.get('day') : undefined,
@@ -202,6 +204,7 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (sel.propAdd && sel.propCopyOf) p.set('copy-of', sel.propCopyOf)
   if (sel.propAdd && sel.propCopyOf && sel.propCopyBack === 'list') p.set('back', 'list')
   if (screen === 'clients' && sel.contactsTab && sel.contactsTab !== 'owners') p.set('tab', sel.contactsTab)
+  if (screen === 'clients' && sel.contactId) p.set('contact', sel.contactId)
   if (screen === 'today' && sel.todayView) p.set('view', sel.todayView)
   if ((screen === 'today' || screen === 'performance') && sel.person) p.set('person', sel.person)
   if ((screen === 'today' || screen === 'performance') && sel.day) p.set('day', sel.day)

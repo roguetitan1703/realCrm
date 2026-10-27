@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
 import { useServerList } from '../lib/serverList.js'
+import { useKept, useKeptPager } from '../lib/useNav.js'
 import { useRecord } from '../lib/useRecord.js'
 import { api } from '../lib/api.js'
 import { ModuleListView, ModuleTable, PropertyCard, ProjectCard, MediaNote, useSelection } from '../components/collections.jsx'
@@ -113,9 +114,10 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   // filter, a tab or a project already chosen means the list. The same on a
   // phone.
   const filtered = Object.keys(flt).length > 0 || tab !== 'all'
-  const [view, setView] = useState(filtered ? 'list' : 'projects')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  // Kept on the history entry with the page, so back from a listing lands on
+  // the list it was opened from rather than the project cards.
+  const [view, setView] = useKept('properties.view', filtered ? 'list' : 'projects')
+  const { page, setPage, pageSize, setPageSize } = useKeptPager('properties', !!phone)
   const selection = useSelection()
   const selected = selection.ids
   // A phone has no table to tick: Select turns the cards into tick targets.

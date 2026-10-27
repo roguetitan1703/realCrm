@@ -8,6 +8,7 @@ import { initials, callbackSignal, whenLabel } from '../lib/format.js'
 import { canAssignLead } from '../lib/permissions.js'
 import { OWNER_STAGES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { useServerList } from '../lib/serverList.js'
+import { useKept, useKeptPager } from '../lib/useNav.js'
 import { useServerData } from '../lib/useServerData.js'
 import UnassignedBar from '../components/UnassignedBar.jsx'
 import { api } from '../lib/api.js'
@@ -190,9 +191,10 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // GROUPED BY PROJECT is where Calling opens, on a phone too: a calling list
   // is townships, and a caller picks the building before the flat. Arriving
   // with a tab, a project or a caller already chosen means the list.
-  const [view, setView] = useState(bag.tab || bag.step || bag.status || bag.project || bag.caller || bag.config ? 'list' : 'projects')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  // Kept on the history entry, as the page is, so back from an owner lands on
+  // the list it was opened from rather than the project cards.
+  const [view, setView] = useKept('calling.view', bag.tab || bag.step || bag.status || bag.project || bag.caller || bag.config ? 'list' : 'projects')
+  const { page, setPage, pageSize, setPageSize } = useKeptPager('calling', !!phone)
   const selection = useSelection()
   const selected = selection.ids
   // The open record lives in the URL too — see Leads and Properties.
@@ -315,13 +317,11 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     // ON TOP OF the list's state, not instead of it. These replaced the whole
     // selection, so the open project went with it and Back landed on the
     // project cards instead of the project's list.
-    setSel(s => ({ ...s, ownerId: o.id, ownerOpen: true, recFrom: undefined }))
+    setSel(s => ({ ...s, ownerId: o.id, ownerOpen: true }))
   }
-  // Opened from another screen (a Performance or Today row): back returns
-  // there, as the phone's back gesture does. From this list: back to the list.
-  const back = () => (sel.recFrom
-    ? window.history.back()
-    : setSel(s => ({ ...s, ownerOpen: false, ownerId: undefined })))
+  // The list this owner belongs to: where the arrow goes when nothing of ours
+  // is underneath. Otherwise it goes where the person came from (useNav).
+  const back = () => setSel(s => ({ ...s, ownerOpen: false, ownerId: undefined }))
 
   const bulkAssign = () => store.openModal({
     kind: 'bulkAssign', leadIds: [...selected], isOwner: true,

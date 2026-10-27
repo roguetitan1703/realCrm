@@ -43,7 +43,7 @@ const TABS = [
 // on the phone and had nowhere there to see the week.
 const SCREENS = { leads: Leads, calling: Owners, properties: Properties, calendar: Calendar }
 
-export default function Phone({ store, framed = false, screen, sel, setSel, go: navGo }) {
+export default function Phone({ store, framed = false, screen, sel, setSel, go: navGo, back }) {
   const { state } = store
   // Nav is owned by App and mirrored to the URL, so the phone and the desk
   // cannot disagree about where you are, a reload lands back on this record,
@@ -73,7 +73,8 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
     <MobileTopBar
       title={opts.title}
       sub={opts.eyebrow}
-      onBack={opts.onBack}
+      // A screen names its parent; the arrow itself is useNav's back().
+      onBack={opts.onBack && (() => back(opts.onBack))}
       firmName={state.settings?.firmName || ''}
       logoUrl={state.brand?.logoUrl}
       right={
@@ -116,7 +117,7 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
   // Opened from Me, so its back arrow returns there.
   const screenCtx = tab === 'calendar' ? { ...ctx, topBar: (o) => topBar({ ...o, onBack: () => go('me') }) } : ctx
   const body = Screen
-    ? <Screen key={`${tab}-${sel.leadId || ''}-${sel.propId || ''}`} {...screenCtx} />
+    ? <Screen key={`${tab}-${sel.leadId || ''}-${sel.ownerId || ''}-${sel.propId || ''}`} {...screenCtx} />
     : tab === 'me'
       ? <PhoneMe store={store} me={me} topBar={topBar} go={go} />
       : <PhoneToday store={store} go={go} topBar={topBar} sel={sel} phone />

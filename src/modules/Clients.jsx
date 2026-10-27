@@ -8,6 +8,7 @@ import { AREA_UNITS, labelOf } from '../data/propertyFields.js'
 import { CLIENTS_DEF, partiesDef } from './definitions.jsx'
 import { api } from '../lib/api.js'
 import { useServerList } from '../lib/serverList.js'
+import { useKept, useKeptPager } from '../lib/useNav.js'
 import { useServerData } from '../lib/useServerData.js'
 
 // ============================================================================
@@ -66,12 +67,11 @@ export default function Clients(props) {
 function Parties({ store, go, sel, setSel, topBar, phone, kind }) {
   const { state } = store
   const def = partiesDef(kind)
-  const [page, setPage] = useState(1)
+  const { page, setPage, pageSize, setPageSize } = useKeptPager(`contacts.${kind}`, !!phone)
   const { bag, filters, onFilters, q, onSearch } = useContactFilters(sel, setSel, setPage)
-  const [pageSize, setPageSize] = useState(20)
   // Tenants: two tabs, everyone and the rents that need a renewal call. Buyers
   // have none: a sale does not end, so "current" and "ended" meant nothing.
-  const [seg, setSeg] = useState('all')
+  const [seg, setSeg] = useKept(`contacts.${kind}.seg`, 'all')
   const [sortKey, setSortKey] = useState(kind === 'rent' ? 'ends' : 'start')
   const [sortDir, setSortDir] = useState(kind === 'rent' ? 'asc' : 'desc')
   const status = kind === 'rent' ? seg : 'all'
@@ -121,21 +121,17 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
   const { state } = store
   // WHAT THEY GAVE US, as tabs: Landlords first, because a flat to let is the
   // work that comes back every eleven months.
-  const [seg, setSeg] = useState('Landlord')
+  // Kept on the history entry with the page, so back from a contact or a flat
+  // of theirs lands on the tab and page it was opened from.
+  const [seg, setSeg] = useKept('contacts.seg', 'Landlord')
   const [sortKey, setSortKey] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
   const [view, setView] = useState('list')
-  const [selClient, setSelClient] = useState(null)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  const { page, setPage, pageSize, setPageSize } = useKeptPager('contacts', !!phone)
   const { bag, filters: flt, onFilters: setFltP, q, onSearch: setQP } = useContactFilters(sel, setSel, setPage)
   const setSortKeyP = (v) => { setSortKey(v); setPage(1) }
   const setSortDirP = (v) => { setSortDir(v); setPage(1) }
   const setPageSizeP = (v) => { setPageSize(v); setPage(1) }
-
-  // Arriving at Contacts is a fresh arrival: an open record must not survive it
-  // (the record is LOCAL state and would render over the list).
-  useEffect(() => { setSelClient(null); setPage(1) }, [state.dataAsOf])
 
   // The directory is two derived views over the leads and the listings, and
   // both are paged and counted in SQL. Building them in the browser is what
@@ -156,9 +152,26 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
         : r.listings > 1 ? `${r.listings} listings` : null,
     ].filter(Boolean).join(' · ') || r.locality || '',
     signal: <StatusTag status={r.role} />,
-    onClick: () => setSelClient(r),
+    onClick: () => openClient(r),
   }))
   const counts = source.counts || {}
+
+  // THE OPEN CONTACT IS A PLACE (sel.contactId, in the URL), not local state:
+  // as local state the browser's back left Contacts altogether, and nothing
+  // could return to it from a flat of theirs. The row is held in the record
+  // cache, because the page it came from may not be the page that comes back.
+  const openId = sel.contactId
+  const selClient = openId ? ((source.rows || []).find(r => r.id === openId) || store.lookup('contact', openId)) : null
+  function openClient(r) {
+    store.cacheRecords('contact', [(source.rows || []).find(x => x.id === r.id) || r])
+    setSel(s => ({ ...s, contactId: r.id }))
+  }
+  const closeClient = () => setSel(s => ({ ...s, contactId: undefined }))
+  // A link or a reload naming a contact this page cannot find: the list.
+  useEffect(() => {
+    if (openId && !selClient && !source.loading) closeClient()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId, !!selClient, source.loading])
 
   // An owner's portfolio, fetched when one is opened. Owners are derived from
   // the listings, so "their properties" is a query on owner name -- it was an
@@ -190,7 +203,7 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
 
   const { header, toolbar, body } = ModuleListView({
     def: CLIENTS_DEF, source: { ...source, rows }, store,
-    onOpen: (r) => setSelClient(r),
+    onOpen: (r) => openClient(r),
     segments, filters: flt, onFilters: setFltP,
     facets: { projects: asOptions(source.facets?.projects), localities: asOptions(source.facets?.localities) },
     search: q, onSearch: setQP,
@@ -207,20 +220,20 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
     emptyTitle: 'No owners match',
     emptyHint: 'Try another tab, filter or search.',
     renderTable: (list, v) => v === 'grid'
-      ? <ModuleCards def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} />
-      : <ModuleTable def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => setSelClient(r)} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP} />,
+      ? <ModuleCards def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => openClient(r)} />
+      : <ModuleTable def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => openClient(r)} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP} />,
   })
 
   // Full-page detail takeover — same pattern as Leads & Properties (not a drawer).
   if (selClient) {
     return (
       <>
-        {topBar({ eyebrow: 'Contacts', title: selClient.name, onBack: () => setSelClient(null) })}
+        {topBar({ eyebrow: 'Contacts', title: selClient.name, onBack: closeClient })}
         <div className="app-body">
           <ModuleDetail
             def={CLIENTS_DEF} record={selClient} store={store}
             avatar={<span className="av av-lg av-supply">{initials(selClient.name)}</span>}
-            actionCtx={{ onClose: () => setSelClient(null) }}
+            actionCtx={{ onClose: closeClient }}
             sections={[{
               id: 'portfolio',
               title: 'Their properties',
