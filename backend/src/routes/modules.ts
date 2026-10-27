@@ -9,9 +9,8 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { CreateModuleSchema, CreateCustomFieldSchema } from '../models';
 import { requireTenantAuth } from '../middleware/auth';
-import { getSettings, updateSettings } from '../services/store';
+import { getSettings } from '../services/store';
 
 export const modulesRouter = Router();
 
@@ -70,82 +69,10 @@ modulesRouter.get('/:moduleKey/config', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * 2. CREATE A NEW CUSTOM MODULE
- * POST /api/v1/modules
- */
-modulesRouter.post('/', async (req: Request, res: Response) => {
-  const tenant = req.tenant!;
-  const parseResult = CreateModuleSchema.safeParse(req.body);
-
-  if (!parseResult.success) {
-    return res.status(400).json({ error: 'Validation Error', details: parseResult.error.format() });
-  }
-
-  const { key, name, icon, supports_pipeline, default_view } = parseResult.data;
-  console.log(`[Create Module] Tenant ${tenant.name} creating custom module: '${key}' (${name})`);
-
-  try {
-    const settings = await getSettings();
-    const customModules = settings.custom_modules || [];
-    const newMod = {
-      id: `mod_${key}_${Date.now()}`,
-      tenant_id: tenant.id,
-      key,
-      name,
-      icon,
-      is_system: false,
-      config: { supports_pipeline, supports_custom_fields: true, default_view },
-    };
-    customModules.push(newMod);
-    await updateSettings({ ...settings, custom_modules: customModules });
-
-    return res.status(201).json({
-      success: true,
-      message: `Custom module '${name}' created successfully! It is immediately ready for use.`,
-      module: newMod,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to create custom module', message: err.message });
-  }
-});
 
 /**
- * 3. ADD A DYNAMIC CUSTOM FIELD TO A MODULE
- * POST /api/v1/modules/:moduleKey/fields
+ * POST / (create a custom module) and POST /:moduleKey/fields (add a custom
+ * field) lived here. Nothing in the app called them or read what they wrote,
+ * and neither checked the role, so any agent could rewrite the firm's settings
+ * row past the desk check on POST /workspace/settings. Removed.
  */
-modulesRouter.post('/:moduleKey/fields', async (req: Request, res: Response) => {
-  const { moduleKey } = req.params;
-  const tenant = req.tenant!;
-  const parseResult = CreateCustomFieldSchema.safeParse(req.body);
-
-  if (!parseResult.success) {
-    return res.status(400).json({ error: 'Validation Error', details: parseResult.error.format() });
-  }
-
-  const fieldDef = parseResult.data;
-  console.log(`[Add Custom Field] Adding field '${fieldDef.field_key}' (${fieldDef.field_label}) to module '${moduleKey}'`);
-
-  try {
-    const settings = await getSettings();
-    const customFieldsMap = settings.custom_fields || {};
-    const moduleFields = customFieldsMap[moduleKey] || [];
-    const newField = {
-      id: `cf_${Date.now()}`,
-      tenant_id: tenant.id,
-      module_key: moduleKey,
-      ...fieldDef,
-    };
-    moduleFields.push(newField);
-    customFieldsMap[moduleKey] = moduleFields;
-    await updateSettings({ ...settings, custom_fields: customFieldsMap });
-
-    return res.status(201).json({
-      success: true,
-      message: `Custom field '${fieldDef.field_label}' added to '${moduleKey}' module.`,
-      custom_field: newField,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to add custom field', message: err.message });
-  }
-});

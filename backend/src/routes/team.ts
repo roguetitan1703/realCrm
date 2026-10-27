@@ -636,6 +636,8 @@ teamRouter.put('/routing', async (req: Request, res: Response) => {
   });
 });
 
+const DUTY_STATUSES = ['ACTIVE', 'OFF_DUTY', 'ON_LEAVE'];
+
 /**
  * 1. TOGGLE AGENT DUTY STATUS ACTION
  * PATCH /api/v1/team/users/:id/duty-status
@@ -643,7 +645,18 @@ teamRouter.put('/routing', async (req: Request, res: Response) => {
 teamRouter.patch('/users/:id/duty-status', async (req: Request, res: Response) => {
   try {
     const userId = req.params.id;
-    const { status } = req.body; // 'ACTIVE' vs 'OFF_DUTY' vs 'ON_LEAVE'
+    const { status } = req.body || {};
+    // Taking someone off duty takes them out of the lead rota, so it is user
+    // management: an owner for anyone, a manager for agents. This had no check,
+    // so any agent could take a colleague out of routing (or put them back),
+    // and any string was stored as a duty status.
+    if (!DUTY_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `status must be one of ${DUTY_STATUSES.join(', ')}` });
+    }
+    const u = await loadUser(req.tenantId!, userId);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    const perm = canManageRole(u.role);
+    if (!perm.ok) return res.status(403).json({ error: perm.msg });
 
     await sql`UPDATE crm_agents SET duty_status = ${status} WHERE id = ${userId} AND tenant_id = ${req.tenantId}`;
     if (status === 'OFF_DUTY' || status === 'ON_LEAVE') {
@@ -671,6 +684,12 @@ teamRouter.patch('/users/:id/duty-status', async (req: Request, res: Response) =
 teamRouter.get('/users/:id/performance', async (req: Request, res: Response) => {
   try {
     const userId = req.params.id;
+    // Someone's numbers are the desk's to read, or their own. The app already
+    // keeps agents off Performance; this route let any agent read a colleague's.
+    const c = getContext();
+    if (!isDeskRole(c?.role) && c?.userId !== userId) {
+      return res.status(403).json({ error: "Only an owner or a manager can see a colleague's numbers." });
+    }
     const metrics = await getAgentPerformance(userId);
 
     return res.status(200).json({

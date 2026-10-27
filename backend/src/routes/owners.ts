@@ -14,6 +14,7 @@ import { notWorkableBody } from '../services/workforce';
 import { phoneInvalidBody } from '../services/phone';
 import { convertOwner } from '../services/agreements';
 import { holds, sendError } from './agreements';
+import { canDeleteRecord } from '../lib/permissions';
 import {
   createOwner, listOwners, getOwnersSummary, getOwnerTabs, listOwnerProjects,
   getOwnerById, updateOwner, deleteOwner, bulkAssignOwners, assignProjectOwners, splitAssign, OWNER_STATUSES,
@@ -186,6 +187,11 @@ ownersRouter.post('/:id/convert', async (req: Request, res: Response) => {
 });
 
 ownersRouter.delete('/:id', async (req: Request, res: Response) => {
+  // Deleting destroys the row's history, so it is the owner's call — the same
+  // rule as a lead or a listing (records.ts). This route had no check at all.
+  if (!canDeleteRecord(req.user?.role)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Only an owner can delete a record.', code: 'ROLE_REQUIRED' });
+  }
   try {
     const ok = await deleteOwner(req.params.id, {
       actorType: 'user', actorId: req.user?.id ?? null, actorLabel: req.user?.name ?? null,
