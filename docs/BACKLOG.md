@@ -141,8 +141,8 @@ gaps are in `specs/notifications.md` §1, not here.
 - **After the API deploy:** a photo link previews in WhatsApp, Slack and
   Telegram; Siddhi's leads show Siddhi.
 - **After the API deploy — notifications** (`specs/notifications.md` §13):
-  the boot log's first-run line matches the preview (bhumi ~2,177 closed,
-  mahalaxmi ~717); Apple failures (110 of 458 in 14 days before) drop to near
+  the boot log's first-run line matches the preview (bhumi 3,263 of 3,300
+  closed, mahalaxmi 1,233 of 1,274: preview of 27 Oct); Apple failures (110 of 458 in 14 days before) drop to near
   zero; the first 09:00 summary goes out; Team shows Anil's and Vinod's state;
   after a week, console → Alerts says which types change behaviour, and
   whether `lead_untouched` earns its place (spec §12).

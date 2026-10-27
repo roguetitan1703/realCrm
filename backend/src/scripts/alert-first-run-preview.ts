@@ -14,8 +14,14 @@
  * Uses DATABASE_URL (production) unless APP_ENV=development.
  */
 import postgres from 'postgres';
-import { databaseUrl } from '../services/env.js';
-import { backfillAlertRecords, closeSettled, expireRecordless } from '../services/alertLifecycle.js';
+
+// Importing the services reaches store.ts, whose import starts the server's
+// boot (initSchema and the one-time repairs) unless this is set. Run as a
+// static import, this preview began migrating production on 27 Oct. Set
+// before the dynamic imports below, which is the only order that works.
+process.env.CRM_NO_BOOT = '1';
+const { databaseUrl } = await import('../services/env.js');
+const { backfillAlertRecords, closeSettled, expireRecordless } = await import('../services/alertLifecycle.js');
 
 const arg = (k: string) => process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1];
 const tenants = (arg('tenant') || '').split(',').filter(Boolean);
@@ -34,6 +40,16 @@ async function main() {
       for (const [c, type] of [['record_kind', 'TEXT'], ['record_ids', 'TEXT[]'], ['subject_at', 'TEXT'],
         ['closed_at', 'TIMESTAMPTZ'], ['close_reason', 'TEXT'], ['read_at', 'TIMESTAMPTZ']]) {
         await tx.unsafe(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS ${c} ${type}`);
+      }
+      // Tables the release creates that the close rules read (share_work).
+      // They are empty on the day it ships, so an empty TEMP copy (searched
+      // before public, dropped with the transaction) gives the exact answer.
+      const [{ links }] = await tx`SELECT to_regclass('public.crm_share_links') IS NOT NULL AS links`;
+      if (!links) {
+        await tx.unsafe(`CREATE TEMP TABLE crm_share_links (id TEXT, tenant_id TEXT, lead_id TEXT, created_by TEXT,
+          property_ids TEXT[], created_at TIMESTAMPTZ) ON COMMIT DROP`);
+        await tx.unsafe(`CREATE TEMP TABLE crm_share_events (id TEXT, tenant_id TEXT, lead_id TEXT, link_id TEXT,
+          property_id TEXT) ON COMMIT DROP`);
       }
       await tx`SET LOCAL transaction_read_only = on`;
       const before = await tx`SELECT count(*)::int AS n FROM ${tx(TABLE)} WHERE closed_at IS NULL`;

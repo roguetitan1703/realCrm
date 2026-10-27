@@ -19,4 +19,5 @@ Release 1 (catalog, buyer forms, phones, sign-in, import undo) is complete on `d
 - Homeowner calling stages carry India's default words ("Key Received") for a US firm — waits on stages joining the market preset
 - "Call not received" moves a listing owner to Contacted (`routes/actions.ts:135`), waits on Om saying whether a no-answer is first outreach
 - Abandoning the import wizard at the map step leaves an "uploaded, 0 created" job in History, waits on a cleanup rule
+- Four write scripts import the services without CRM_NO_BOOT (dedupe-leads, remap-connections, reprocess-inbox, test-notifications): run against production they start initSchema, waits on their next use
 - Daily demo refresh (`--tick`) — waits on Om choosing dev or prod for demos
