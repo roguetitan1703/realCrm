@@ -974,7 +974,7 @@ async function createLedgerTables(): Promise<void> {
 
   // Append-only, tamper-evident. seq gives a monotonic order; prev_hash/hash
   // form a chain so no past row can be altered or removed undetected. Never
-  // truncated (see resetDatabase).
+  // truncated.
   await sql`
     CREATE TABLE IF NOT EXISTS audit_log (
       seq BIGSERIAL PRIMARY KEY,

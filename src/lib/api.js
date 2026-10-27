@@ -673,7 +673,6 @@ export const api = {
   getImportRows: (id, status) => request(`/imports/${encodeURIComponent(id)}/rows${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   revertImport: (id) => request(`/imports/${encodeURIComponent(id)}/revert`, { method: 'POST', body: JSON.stringify({}) }),
   hasPendingWrites,
-  resetDatabase: () => request('/workspace/reset', { method: 'POST' }),
 
   // Lead ingest (the per-tenant URL the client pastes into 99acres/MagicBricks)
   baseUrl: () => BASE_URL,

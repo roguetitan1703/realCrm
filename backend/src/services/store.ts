@@ -1302,17 +1302,6 @@ export async function backfillPasswordAuth(): Promise<void> {
   if (noPw.length) console.log(`[Auth] ${noPw.length} user(s) had no password; each given a unique one, all must change at next sign-in.`);
 }
 
-/**
- * Reset database to a clean factory seed state.
- */
-export async function resetDatabase(): Promise<ServerState> {
-  console.log(`[Supabase DB] 🧹 Truncating all CRM tables for workspace reset...`);
-  // users is re-seeded from agents; superadmins are platform-level and must
-  // survive a workspace reset, so they are deliberately NOT truncated.
-  await sql`TRUNCATE TABLE activities, crm_timeline_events, crm_units, crm_leads, crm_owners, crm_properties, crm_agents, crm_settings, crm_routing_rules, users, auth_otp CASCADE;`;
-  return await seedDatabase(true);
-}
-
 // Ensure seeded on module load. ensureAuthIdentity runs after, so an
 // already-populated database (seed skipped by the lead-count guard) still gets
 // the Phase 0 identity model — tenant, superadmin, and users mirror.
@@ -4315,6 +4304,9 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
 export async function deleteOwner(id: string, ctx: ActorCtx = SYSTEM_CTX): Promise<boolean> {
   const t = tid();
   const existing = await getOwnerById(id);
+  // getOwnerById is scoped to what the caller may see; the DELETE below is
+  // scoped only to the firm. Not visible reads as not there.
+  if (!existing) return false;
   // THE CALLING ROW IS THE OWNER'S CONTACT. Once a flat of theirs is in
   // Properties, this row is who the flat belongs to, so deleting it would
   // leave the flat with an owner that is not there. Refused, with the reason.

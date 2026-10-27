@@ -1800,18 +1800,7 @@ export function StoreProvider({ children }) {
       apiClient.getBootstrap()
         .then(res => { if (res?.success && res.state) dispatch({ type: 'HYDRATE_SERVER', state: res.state }) })
         .catch(err => console.warn('[Onboard hydrate] error:', err.message))
-    },
-    resetDatabase: () => {
-      dispatch({ type: 'RESET' })
-      toast('Database reset to clean default dataset')
-      apiClient.resetDatabase()
-        .then(res => {
-          if (res && res.success && res.state) {
-            dispatch({ type: 'HYDRATE_SERVER', state: res.state })
-          }
-        })
-        .catch(err => console.error('[Reset API] Backend error:', err.message))
-    },
+    }
   }
 
   return <StoreCtx.Provider value={api}>{children}</StoreCtx.Provider>

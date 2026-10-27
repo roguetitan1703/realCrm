@@ -880,16 +880,6 @@ function SystemSection({ store }) {
           screen without putting a box inside a box. Both disappear together
           when neither has anything to say (`.devcard:empty`). */}
       <ThisDevice store={store} />
-      {/* <Panel>
-        <SectionHead title="Database" />
-        <div className="sys-row">
-          <div>
-            <div className="sys-t">Reset demo data</div>
-            <div className="sys-s">Restores the clean baseline — 3 agents, 6 properties, 8 leads. Clears anything added during the demo.</div>
-          </div>
-          <Button variant="ghost" className="btn-danger" onClick={store.resetDatabase}>Reset data</Button>
-        </div>
-      </Panel> */}
     </>
   )
 }
