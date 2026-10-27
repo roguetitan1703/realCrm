@@ -43,7 +43,7 @@ export function canEditListing(role?: string | null): boolean {
  * flat, with the owner in front of them, could not put it on the book, so it
  * arrived later as a note to a manager or not at all.
  *
- * Every signed-in employee may add. Editing stays with the desk, and
+ * Every signed-in employee may add (and, by canEditListing above, edit);
  * `created_by` records who added each one so the desk can go back and ask.
  */
 export function canAddListing(role?: string | null): boolean {

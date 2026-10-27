@@ -154,12 +154,11 @@ const updateHandler = async (req: Request, res: Response) => {
   const { moduleKey, id } = req.params;
   const updates = req.body;
 
-  // A listing somebody ELSE sourced is desk-owned; one this agent added is
-  // theirs to correct. That needs the row, because authorship is a fact about
-  // the record rather than about the role — same shape as assertLeadWrite().
-  // Note this guards the RECORD, not the record's history — remarks, call logs
-  // and visit logs go through /records/:id/actions/* and stay open to every
-  // signed-in user.
+  // EVERY EMPLOYEE EDITS EVERY LISTING, deliberately — the firm's decision, set
+  // out in canEditListing() (lib/permissions.ts). `created_by` answers who
+  // changed what afterwards; nothing here prevents it beforehand. This guards
+  // the RECORD; its history goes through /records/:id/actions/*, which every
+  // signed-in user may append to on a listing.
   if (moduleKey === 'properties' && !canEditListing(req.user?.role)) {
     return res.status(403).json({ error: 'Forbidden', message: 'Sign in to change a listing.', code: 'ROLE_REQUIRED' });
   }

@@ -1753,13 +1753,19 @@ export async function getDeskSummary(): Promise<any> {
   const totals: any[] = deskRow?.totals ? [deskRow.totals] : [];
   const byStage: any[] = deskRow?.by_stage || [];
   const bySource: any[] = deskRow?.by_source || [];
-  const perAgent: any[] = deskRow?.per_agent || [];
-  const perAgentStage: any[] = deskRow?.per_agent_stage || [];
+  // AN AGENT GETS THEIR OWN ROW AND NOBODY ELSE'S. The per-person blocks were
+  // keyed by whoever holds the record: per_agent_calls, lead calls and visits
+  // were not scoped at all, and per_agent counted leads an agent created but
+  // someone else holds -- so any agent could read every colleague's numbers.
+  const me = scopeUserId();
+  const own = (rows: any[], key = 'k') => (me ? rows.filter(r => r[key] === me) : rows);
+  const perAgent: any[] = own(deskRow?.per_agent || []);
+  const perAgentStage: any[] = own(deskRow?.per_agent_stage || [], 'a');
   const props: any[] = deskRow?.props ? [deskRow.props] : [];
   const owners: any[] = deskRow?.owners ? [deskRow.owners] : [];
-  const perAgentCalls: any[] = deskRow?.per_agent_calls || [];
-  const perAgentLeadCalls: any[] = deskRow?.per_agent_lead_calls || [];
-  const perAgentVisits: any[] = deskRow?.per_agent_visits || [];
+  const perAgentCalls: any[] = own(deskRow?.per_agent_calls || []);
+  const perAgentLeadCalls: any[] = own(deskRow?.per_agent_lead_calls || []);
+  const perAgentVisits: any[] = own(deskRow?.per_agent_visits || []);
 
   const asMap = (rows: any[]) => Object.fromEntries(rows.map(r => [r.k, r.n]));
   const stagesByAgent = new Map<string, Record<string, number>>();
@@ -4225,6 +4231,25 @@ export async function assignProjectOwners(opts: {
   return { assigned, perTarget };
 }
 
+/**
+ * MAY THIS PERSON APPEND TO THIS RECORD'S HISTORY — the timeline routes
+ * (/records/:id/actions/*) take any record id, and wrote to whatever id they
+ * were given. Visibility is the lists' own: leadScope() for a lead,
+ * ownerScope() for a calling row, and the listing book is the firm's, so every
+ * property. Not visible reads as not there. Desk roles are not scoped, as
+ * everywhere else, so this answers true for them without a lookup.
+ */
+export async function canSeeRecord(id: string): Promise<boolean> {
+  if (!scopeUserId()) return true;
+  const t = tid();
+  const [hit] = await sql`
+    SELECT 1 FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}
+    UNION ALL SELECT 1 FROM crm_owners WHERE id = ${id} AND tenant_id = ${t} AND ${ownerScope()}
+    UNION ALL SELECT 1 FROM crm_properties WHERE id = ${id} AND tenant_id = ${t}
+    LIMIT 1`;
+  return !!hit;
+}
+
 export async function getOwnerById(id: string): Promise<any | null> {
   // AN AGENT'S ROW, OR NOT FOUND. The list was scoped to the agent but one row
   // by id was not, for reading or (through updateOwner) for changing: an agent
@@ -4448,7 +4473,9 @@ export async function agentLoads(side: 'leads' | 'owners'): Promise<Record<strin
                  WHERE tenant_id = ${t} AND ${OPEN} AND agent_id IS NOT NULL GROUP BY 1`
     : await sql`SELECT agent_id AS id, count(*)::int AS n FROM crm_owners
                  WHERE tenant_id = ${t} AND ${OWNER_OPEN} AND agent_id IS NOT NULL GROUP BY 1`;
-  return Object.fromEntries((rows as any[]).map(r => [r.id, r.n]));
+  // A colleague's load is the desk's to read; an agent gets their own.
+  const me = scopeUserId();
+  return Object.fromEntries((rows as any[]).filter(r => !me || r.id === me).map(r => [r.id, r.n]));
 }
 
 /**
@@ -7658,30 +7685,6 @@ export async function getUnits(propertyId?: string): Promise<any[]> {
     title: r.title,
     data: r.data || {},
   }));
-}
-
-export async function blockUnit(unitId: string, buyerName: string, durationHours: number = 48) {
-  const rows = await sql`SELECT * FROM crm_units WHERE id = ${unitId} AND tenant_id = ${tid()}`;
-  if (rows.length === 0) return { success: false, error: 'Unit not found' };
-  const unit = rows[0];
-  const currentStatus = unit.data?.status || 'Available';
-  if (currentStatus !== 'Available') {
-    return { success: false, error: 'Double-Booking Conflict', message: `This unit was just blocked or sold (${currentStatus})!` };
-  }
-  const newData = { ...unit.data, status: 'Blocked', blocked_by_buyer: buyerName, blocked_at: new Date().toISOString() };
-  await sql`UPDATE crm_units SET data = ${sql.json(newData)} WHERE id = ${unitId} AND tenant_id = ${tid()}`;
-  return { success: true, message: `Unit ${unitId} successfully blocked for ${durationHours} hours.`, blocked_until: new Date(Date.now() + durationHours * 3600 * 1000) };
-}
-
-export async function releaseUnit(unitId: string) {
-  const rows = await sql`SELECT * FROM crm_units WHERE id = ${unitId} AND tenant_id = ${tid()}`;
-  if (rows.length === 0) return { success: false, error: 'Unit not found' };
-  const unit = rows[0];
-  const newData = { ...unit.data, status: 'Available' };
-  delete newData.blocked_by_buyer;
-  delete newData.blocked_at;
-  await sql`UPDATE crm_units SET data = ${sql.json(newData)} WHERE id = ${unitId} AND tenant_id = ${tid()}`;
-  return { success: true, message: `Unit ${unitId} status reverted to Available.` };
 }
 
 // --- TEAM PERFORMANCE AGGREGATION ---

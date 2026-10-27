@@ -463,7 +463,7 @@ export const LEADS_DEF = {
       sub: (l, store) => { const a = store.agentById(l.agentId); return a ? a.name : 'Unassigned' },
       run: (store, l) => store.openModal({ kind: 'assign', leadId: l.id }) },
     { id: 'merge', tier: 'manage', icon: 'copy', label: 'Merge duplicate', tone: 'danger',
-      when: (l) => !!l.duplicateOf, run: (store, l) => store.merge(l.id) },
+      when: (l, store) => !!l.duplicateOf && isDeskRole(store.state.role), run: (store, l) => store.merge(l.id) },
     { id: 'delete', tier: 'manage', icon: 'trash', label: 'Delete lead', tone: 'danger',
       when: (r, store) => canDeleteRecord(store.state.role),
       run: (store, l, ctx) => { if (window.confirm('Delete this lead record permanently?')) { store.deleteLead(l.id); ctx?.onClose?.() } } },
