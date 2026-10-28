@@ -12,6 +12,7 @@ import {
   BHK_FILTER,
   appliesTo, areaFieldsFor, labelOf, normaliseBhk, normaliseSubtype, optionsOf,
 } from '../data/propertyFields.js'
+import { canAssignLead } from '../lib/permissions.js'
 import { allOf, configLabel, fmtMoney, listText, money, textList, arrivedOn, dayLabel } from '../lib/format.js'
 
 // How soon the lead needs possession. A LEAD-side vocabulary (it describes the
@@ -245,6 +246,8 @@ export const LEAD_MODULE_SCHEMA = {
       label: 'Assigned Owner',
       type: 'select',
       section: 'domain',
+      // Who holds it is the desk's (assertLeadWrite refuses an agent's change).
+      editIf: (store) => canAssignLead(store?.state?.role),
       // A departed agent's id is not one of `options` — a <select> with no
       // matching <option> silently falls back to whichever one renders first,
       // so opening Edit and saving without touching this field would have
@@ -408,6 +411,8 @@ export const OWNER_MODULE_SCHEMA = {
     { key: 'source', label: 'Source', type: 'text', section: 'domain' },
     {
       key: 'agentId', label: 'Assigned Owner', type: 'select', section: 'domain',
+      // The desk's, as on a lead (updateOwner refuses an agent's change).
+      editIf: (store) => canAssignLead(store?.state?.role),
       // Same disabled-departed-holder guard as the lead schema — see there for why.
       options: (store, record) => {
         // Only people who can take work (activeAgents, the server's own rule):

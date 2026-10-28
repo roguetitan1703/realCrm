@@ -149,6 +149,8 @@ const STATUS_TEXT = {
   parsed: 'Lead created',
   merged: 'Added to an existing lead',
   pending: 'Waiting for mapping',
+  held: 'Held: over the limit',
+  processing: 'Processing',
   ignored: 'Duplicate',
 }
 

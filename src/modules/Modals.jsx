@@ -196,7 +196,9 @@ function ModuleFormModal({ store, moduleId, recordId }) {
   // nowhere near an editor: rendered here they would offer a text box over a
   // timestamp, and `save()` writes every field in this list, so an accidental
   // keystroke would rewrite the arrival date of a real enquiry.
-  const fields = def.schema.fields.filter(f => (!f.when || f.when(form)) && !f.readOnly)
+  // `editIf(store)` is who may change it: a field the signed-in role may not
+  // change is neither offered nor sent (the holder, for an agent).
+  const fields = def.schema.fields.filter(f => (!f.when || f.when(form)) && !f.readOnly && (!f.editIf || f.editIf(store)))
   const coreFields = fields.filter(f => f.section === 'core')
   const domainFields = fields.filter(f => f.section !== 'core')
   const setField = (key, val) => setForm(prev => setNestedValue(prev, key, val))
@@ -719,17 +721,18 @@ function NewLeadModal({ store, leadId }) {
     timeline: '',
     // Not stated until someone picks one: 'Website' was saved on every lead.
     source: '',
-    // WHO TAKES IT. An agent adding a lead is taking it: themselves. The desk
+    // WHO TAKES IT. An agent adding a lead is taking it: the server gives it
+    // to them (createLead), so nothing is sent and no picker is shown. The desk
     // (owner, manager) is entering it for the team: the firm's rule — "Next in
     // turn" under the rota (not sent, so the server deals it), "Unassigned"
     // under Leave unassigned (null: the desk chose it, so no "nobody has it"
     // alert). It defaulted to whoever was signed in, so an owner's lead landed
     // on the owner.
-    agentId: (!canAssignLead(store.state.role) && store.activeAgents().some(a => a.id === store.state.activeAgentId))
-      ? store.state.activeAgentId : (rota ? undefined : null),
+    agentId: (!canAssignLead(store.state.role) || rota) ? undefined : null,
     notes: ''
   })
   const set = (k, v) => setF(s => ({ ...s, [k]: v }))
+  const mayAssign = canAssignLead(store.state.role)
   // CAME FROM: one of my recent links with nobody on it — the person who
   // wrote after seeing a link in a group (listing-pages.md §A.1c, I2r). Saved
   // by attaching the link to the new lead, which moves its history across.
@@ -907,7 +910,7 @@ function NewLeadModal({ store, leadId }) {
           </Field>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: mayAssign ? '1fr 1fr' : '1fr', gap: 12 }}>
           <div className="field">
             <label>Source</label>
             <select className="input" value={f.source} onChange={e => set('source', e.target.value)} style={{ width: '100%' }}>
@@ -916,7 +919,9 @@ function NewLeadModal({ store, leadId }) {
               {store.state.settings.sources.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
-          <div className="field">
+          {/* The desk's: an agent's lead is theirs, and a lead they edit stays
+              with whoever holds it (assertLeadWrite refuses the change). */}
+          {mayAssign && <div className="field">
             <label>Assign Owner</label>
             {/* "Next in turn" (rota only) is not sent: the server deals it.
                 "Unassigned" is a choice, sent as null. Under Leave unassigned it
@@ -925,7 +930,7 @@ function NewLeadModal({ store, leadId }) {
             <select className="input" value={f.agentId === undefined ? '' : f.agentId === null ? NOBODY : f.agentId}
               onChange={e => set('agentId', e.target.value === NOBODY ? null : (e.target.value || undefined))} style={{ width: '100%' }}>
               {!edit && rota && <option value="">Next in turn</option>}
-              {(edit || !rota || canAssignLead(store.state.role)) && <option value={NOBODY}>Unassigned</option>}
+              <option value={NOBODY}>Unassigned</option>
               {store.activeAgents().map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               {/* The person holding it now, if they can no longer take work —
                   shown so the field says who it is, not offered. */}
@@ -933,7 +938,7 @@ function NewLeadModal({ store, leadId }) {
                 <option value={f.agentId} disabled>{(store.agentById(f.agentId)?.name || 'Former member')} · {notWorkableReason(store.agentById(f.agentId))}</option>
               )}
             </select>
-          </div>
+          </div>}
         </div>
 
         {!edit && (myLinks || []).length > 0 && (
@@ -972,6 +977,7 @@ function NewOwnerModal({ store, ownerId }) {
     agentId: null,
   })
   const set = (k, v) => setF(s => ({ ...s, [k]: v }))
+  const mayAssign = canAssignLead(store.state.role)
 
   // Closes only on a saved record; a refusal leaves the form as typed.
   const [saving, setSaving] = useState(false)
@@ -1024,13 +1030,15 @@ function NewOwnerModal({ store, ownerId }) {
         {edit?.unitRef && !edit?.unitNo && (
           <div className="imp-unmapped">On file as: {edit.unitRef}</div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: mayAssign ? '1fr 1fr' : '1fr', gap: 12 }}>
           <div className="field">
             <label>Locality</label>
             <SuggestInput id="owner-locality" value={f.locality} onChange={v => set('locality', v)}
               options={localities(store)} placeholder="Where's the unit?" />
           </div>
-          <div className="field">
+          {/* The desk's: an agent's owner is theirs (createOwner), and the
+              holder of one they edit is not theirs to change (updateOwner). */}
+          {mayAssign && <div className="field">
             <label>Assign to</label>
             <select className="input" value={f.agentId || ''} onChange={e => set('agentId', e.target.value || null)} style={{ width: '100%' }}>
               <option value="">Unassigned</option>
@@ -1039,7 +1047,7 @@ function NewOwnerModal({ store, ownerId }) {
                 <option value={f.agentId} disabled>{(store.agentById(f.agentId)?.name || 'Former member')} · {notWorkableReason(store.agentById(f.agentId))}</option>
               )}
             </select>
-          </div>
+          </div>}
         </div>
         <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={save} icon="check">{saving ? 'Saving…' : edit ? 'Save Changes' : 'Add Owner'}</Button></div>
       </div>

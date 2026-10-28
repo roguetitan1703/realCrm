@@ -1176,6 +1176,13 @@ export async function migrateIngestionD1(): Promise<void> {
   await sql`CREATE INDEX IF NOT EXISTS idx_inbox_integration ON webhook_inbox (integration_id, received_at DESC);`;
   // "Replay pending" reads exactly this.
   await sql`CREATE INDEX IF NOT EXISTS idx_inbox_pending ON webhook_inbox (tenant_id, status) WHERE status = 'pending';`;
+  // A CLAIM before a row is turned into a lead (claimInbox in ingestion.ts):
+  // status 'processing', what it was before, and since when — so two runs
+  // cannot process one row, and a claim a crash left behind can be put back.
+  await sql.unsafe(`ALTER TABLE webhook_inbox ADD COLUMN IF NOT EXISTS claimed_from TEXT`);
+  await sql.unsafe(`ALTER TABLE webhook_inbox ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`);
+  // What the held release and the stale-claim check read on every sweep.
+  await sql`CREATE INDEX IF NOT EXISTS idx_inbox_held ON webhook_inbox (tenant_id, integration_id, received_at) WHERE status IN ('held', 'processing');`;
 
   // The unknown-key log already exists but was installation-wide and unbounded.
   // Keep it minimal by design: no body is ever stored for an unauthenticated

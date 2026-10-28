@@ -2166,14 +2166,24 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts
   // rota`, so the desk picking "Unassigned" on Add lead had the lead dealt to
   // the next person anyway. An explicit null from someone who may assign —
   // the desk, or a system caller — means unassigned. An agent may not decide
-  // who holds work (canAssignLead, assignUnowned), so an agent's null is
-  // treated as not sent: the firm's arrival rule decides, as it does for a
-  // portal enquiry. Nobody named → arrivalLeadAgent(), which is the rota or,
-  // under "Leave unassigned", nobody.
+  // who holds work (canAssignLead, bulkAssignLeads), so AN AGENT'S LEAD IS
+  // THEIRS: whatever they sent, or nothing, it lands on them — the one adding
+  // it is the one who has the buyer on the line. Naming a colleague is refused
+  // the way every other agent assignment is, not quietly rewritten: an agent
+  // who handed a lead on and saw it land on themselves would not know why.
+  // Their null used to mean "the firm's rule decides", which dealt the lead
+  // they had just typed in to the next person on the rota.
+  // Desk and system callers: nobody named → arrivalLeadAgent(), which is the
+  // rota or, under "Leave unassigned", nobody.
   const sentAgent = leadData.agentId !== undefined ? leadData.agentId : leadData.agent_id;
+  const who = getContext();
   let agentId: string | null = sentAgent || null;
-  if (agentId) await assertWorkable(tid(), [agentId]);
-  else if (sentAgent === undefined || getContext()?.role === 'agent') agentId = await arrivalLeadAgent();
+  if (who?.role === 'agent') {
+    if (!who.userId) throw new ForbiddenError('Not signed in.');
+    if (agentId && agentId !== who.userId) throw new ForbiddenError('Assigning leads is done from the desk.');
+    agentId = who.userId;
+  } else if (agentId) await assertWorkable(tid(), [agentId]);
+  else if (sentAgent === undefined) agentId = await arrivalLeadAgent();
 
   // NO INVENTED NAME. This defaulted to 'New Inquiry', which is a fact about
   // the payload dressed up as the person's name: it sorted under N, it was
@@ -2578,13 +2588,17 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // PUSH: someone handed you a live client. You now own a conversation you
   // haven't read yet, so this can't wait for you to next open the app.
   // notify() drops it when you assigned it to yourself.
-  if (patch.agentId !== undefined && agentId !== oldLead.agentId) {
+  // Either spelling: `agentId` is read above from agentId OR agent_id, so a
+  // holder changed through `agent_id` is a change of hands too. This tested
+  // patch.agentId only, and a PUT with agent_id moved the lead with no history.
+  const handsChanged = (agentId || null) !== (oldLead.agentId || null);
+  if (handsChanged) {
     await recordAssignment({
       recordId: id, prevAgentId: oldLead.agentId, agentId,
       author: ctx.actorId ?? getContext()?.userId ?? null,
     });
   }
-  if (patch.agentId !== undefined && agentId && agentId !== oldLead.agentId) {
+  if (handsChanged && agentId) {
     notify({ userId: agentId, type: 'lead_reassigned', data: { name }, link, push: true })
       .catch(err => console.warn('[Notify] lead_reassigned failed:', err?.message));
   }
@@ -3703,9 +3717,18 @@ export async function createOwner(data: any, ctx: ActorCtx = SYSTEM_CTX): Promis
   // an owner arriving via import or the API. Only kicks in when the desk has
   // actually turned it on (owner_strategy defaults to 'manual') and nobody
   // already named an agent for this row.
-  let agentId = data.agentId || null;
+  // AN AGENT'S OWNER IS THEIRS, as an agent's lead is (createLead): whatever
+  // they sent, or nothing, it lands on them, and naming a colleague is refused.
+  // Either spelling of the field is read, so neither slips past.
+  const sentAgent = data.agentId !== undefined ? data.agentId : data.agent_id;
+  const who = getContext();
+  let agentId: string | null = sentAgent || null;
   let autoRouted = false;
-  if (agentId) await assertWorkable(t, [agentId]);
+  if (who?.role === 'agent') {
+    if (!who.userId) throw new ForbiddenError('Not signed in.');
+    if (agentId && agentId !== who.userId) throw new ForbiddenError('Assigning owners is done from the desk.');
+    agentId = who.userId;
+  } else if (agentId) await assertWorkable(t, [agentId]);
   if (!agentId) {
     const rules = await getRoutingRules();
     if (autoAssigns(rules, 'owners')) {
@@ -4266,12 +4289,16 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
   const t = tid();
   const existing = await getOwnerById(id);
   if (!existing) return null;
-  // An agent does not hand a row to somebody else; that is the desk's.
+  // WHO HOLDS IT is the desk's, as on a lead (assertLeadWrite). An agent's
+  // change was dropped in silence — the form said saved and nothing moved —
+  // and taking one for themselves went through. Either is refused now; re-
+  // sending the current holder is not a change. Either spelling is read.
   const c = getContext();
-  if (c?.role === 'agent' && patch.agentId !== undefined && patch.agentId !== c.userId) {
-    patch = { ...patch }; delete patch.agentId;
-  }
-  if (patch.agentId && patch.agentId !== existing.agentId) await assertWorkable(t, [patch.agentId]);
+  const sentAgent = patch.agentId !== undefined ? patch.agentId : patch.agent_id;
+  const nextAgent: string | null = sentAgent !== undefined ? (sentAgent || null) : (existing.agentId || null);
+  const handsChanged = nextAgent !== (existing.agentId || null);
+  if (c?.role === 'agent' && handsChanged) throw new ForbiddenError('Assigning owners is done from the desk.');
+  if (nextAgent && handsChanged) await assertWorkable(t, [nextAgent]);
   const next = {
     name: patch.name !== undefined ? patch.name : existing.name,
     phone: patch.phone !== undefined ? editedPhone(patch.phone, existing.phone, (await localeOf(t)).country) : existing.phone,
@@ -4288,7 +4315,7 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
     saleable_area: patch.saleableArea !== undefined ? patch.saleableArea : existing.saleableArea,
     locality: patch.locality !== undefined ? patch.locality : existing.locality,
     stage: patch.stage !== undefined ? patch.stage : existing.stage,
-    agent_id: patch.agentId !== undefined ? patch.agentId : existing.agentId,
+    agent_id: nextAgent,
     // null is a real value here — it is how a callback is cleared once it has
     // been made — so these read `!== undefined`, never a truthiness check.
     callback_at: patch.callbackAt !== undefined
@@ -4331,7 +4358,15 @@ export async function updateOwner(id: string, patch: any, ctx: ActorCtx = SYSTEM
   // and updateLead has always said so. This one said nothing — so a reassign
   // that came through the record rather than the bulk action was silent.
   // notify() drops it when you assigned it to yourself.
-  if (patch.agentId !== undefined && next.agent_id && next.agent_id !== existing.agentId) {
+  // A change of hands is history (CLAUDE.md §4), like every other one; this
+  // path wrote none, so a reassign from the record left no line on it.
+  if (handsChanged) {
+    await recordAssignment({
+      recordId: id, prevAgentId: existing.agentId || null, agentId: nextAgent,
+      author: ctx.actorId ?? getContext()?.userId ?? null,
+    });
+  }
+  if (handsChanged && next.agent_id) {
     notify({
       userId: next.agent_id, type: 'owner_reassigned', push: true,
       data: { name: updated?.name || 'Owner' },

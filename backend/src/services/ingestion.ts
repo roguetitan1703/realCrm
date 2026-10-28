@@ -21,6 +21,7 @@ import { notify, notifyOrDesk } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
 import { hashKey, lockKey, keyState, currentLock } from './integrationKeys';
+import { hit, spent } from './rateLimit';
 
 export type Integration = {
   id: string;
@@ -216,26 +217,106 @@ function safeHeaders(h: Record<string, any>): Record<string, string> {
 
 export async function recordPush(args: {
   integration: Integration; body: any; headers: Record<string, any>; ip: string | null;
+  /** `held`: over the rate limit — stored, never parsed until replayed. */
+  status?: 'pending' | 'held';
 }): Promise<string> {
   const id = rid('wh');
   await sql`
     INSERT INTO webhook_inbox (id, tenant_id, integration_id, source_ip, headers, raw_body, status)
     VALUES (${id}, ${args.integration.tenant_id}, ${args.integration.id}, ${args.ip},
-            ${sql.json(safeHeaders(args.headers))}, ${sql.json(args.body ?? {})}, 'pending')
+            ${sql.json(safeHeaders(args.headers))}, ${sql.json(args.body ?? {})}, ${args.status || 'pending'})
   `;
+  // A held push still says the portal is sending (feed watch reads this).
   await sql`UPDATE integrations SET last_received_at = NOW() WHERE id = ${args.integration.id}`;
   return id;
 }
 
 export async function markInbox(
-  id: string, status: 'parsed' | 'merged' | 'failed' | 'ignored', extra: { leadId?: string | null; error?: string | null } = {},
-): Promise<void> {
-  await sql`
+  id: string, status: 'parsed' | 'merged' | 'failed' | 'ignored',
+  extra: { leadId?: string | null; error?: string | null; claim?: string | null } = {},
+): Promise<boolean> {
+  // A claimed row is finished only by the run that still holds the claim. If
+  // its claim was put back (recoverStaleClaims) and taken by another run, this
+  // run's outcome must not overwrite that one's.
+  const done = await sql`
     UPDATE webhook_inbox
     SET status = ${status}, lead_id = ${extra.leadId ?? null},
-        error = ${extra.error ? String(extra.error).slice(0, 500) : null}, parsed_at = NOW()
+        error = ${extra.error ? String(extra.error).slice(0, 500) : null}, parsed_at = NOW(),
+        claimed_from = NULL, claimed_at = NULL
     WHERE id = ${id}
+      ${extra.claim ? sql`AND status = 'processing' AND claimed_at::text = ${extra.claim}` : sql``}
   `;
+  if (extra.claim && !done.count) console.warn(`[Ingest] ${id}: claim lost before it finished (${status}); left to the run that holds it`);
+  return done.count > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Claiming rows before they become leads
+// ---------------------------------------------------------------------------
+
+export type ClaimedRow = { id: string; integration_id: string; raw_body: any; received_at: Date; claimed_from: string; claim: string };
+
+/** A claim older than this was left by a run that died; it is put back.
+ *  INGEST_CLAIM_STALE_SECONDS shortens it, to test that a long run keeps its
+ *  rows (it claims in batches far younger than this). */
+const CLAIM_STALE_SECONDS = Number(process.env.INGEST_CLAIM_STALE_SECONDS) > 0 ? Number(process.env.INGEST_CLAIM_STALE_SECONDS) : 600;
+/** Rows a run claims at a time, so no claim it holds is ever old. */
+const CLAIM_BATCH = 20;
+
+/**
+ * ONE ROW, ONE RUN. Every path that turns a stored push into a lead — the live
+ * push, the connection's Process button, the held-push release — claims the
+ * rows first: one statement moves them to 'processing' (remembering what they
+ * were) and returns only the rows it moved, with SKIP LOCKED so two runs
+ * started together take different rows instead of the same ones twice. Read
+ * then process, without a claim, let two runs each create a lead from one push
+ * and then overwrite each other's outcome.
+ *
+ * Only rows whose connection has a mapping are claimed: without one there is
+ * nothing to process, and a claimed row nobody processes is a stuck row.
+ */
+export async function claimInbox(tenantId: string, opts: {
+  statuses: string[]; integrationId?: string; ids?: string[]; limit?: number; notIds?: string[];
+}): Promise<ClaimedRow[]> {
+  if (!tenantId) throw new Error('claimInbox: tenantId is required');
+  // A CTE, not `WHERE id IN (SELECT … LIMIT n FOR UPDATE SKIP LOCKED)`: the
+  // planner may run that subquery more than once, and with SKIP LOCKED each
+  // run returns different rows, so the LIMIT stops holding (a batch of 20
+  // claimed all 60). A locking CTE runs exactly once.
+  const rows = await sql`
+    WITH pick AS (
+      SELECT x.id FROM webhook_inbox x
+        JOIN integrations g ON g.id = x.integration_id AND g.tenant_id = x.tenant_id
+       WHERE x.tenant_id = ${tenantId} AND x.status IN ${sql(opts.statuses)}
+         AND x.raw_body IS NOT NULL AND g.parser_config IS NOT NULL
+         ${opts.integrationId ? sql`AND x.integration_id = ${opts.integrationId}` : sql``}
+         ${opts.ids ? sql`AND x.id IN ${sql(opts.ids)}` : sql``}
+         ${opts.notIds?.length ? sql`AND NOT (x.id = ANY(${opts.notIds}::text[]))` : sql``}
+       ORDER BY x.received_at ASC
+       ${opts.limit ? sql`LIMIT ${opts.limit}` : sql``}
+       FOR UPDATE OF x SKIP LOCKED)
+    UPDATE webhook_inbox w
+       SET status = 'processing', claimed_from = w.status, claimed_at = NOW()
+      FROM pick
+     WHERE w.id = pick.id AND w.tenant_id = ${tenantId} AND w.status IN ${sql(opts.statuses)}
+    RETURNING w.id, w.integration_id, w.raw_body, w.received_at, w.claimed_from, w.claimed_at::text AS claim`;
+  return (rows as unknown as ClaimedRow[]).sort((a, b) => +new Date(a.received_at) - +new Date(b.received_at));
+}
+
+/** Give one claimed row back as it was (a release that may not spend now). */
+async function unclaim(row: ClaimedRow): Promise<void> {
+  await sql`UPDATE webhook_inbox SET status = ${row.claimed_from}, claimed_from = NULL, claimed_at = NULL
+             WHERE id = ${row.id} AND status = 'processing' AND claimed_at::text = ${row.claim}`;
+}
+
+/** Put back what a crashed run claimed and never finished. */
+export async function recoverStaleClaims(tenantId: string): Promise<number> {
+  const back = await sql`
+    UPDATE webhook_inbox SET status = coalesce(claimed_from, 'pending'), claimed_from = NULL, claimed_at = NULL
+     WHERE tenant_id = ${tenantId} AND status = 'processing'
+       AND (claimed_at IS NULL OR claimed_at < NOW() - make_interval(secs => ${CLAIM_STALE_SECONDS}))`;
+  if (back.count) console.warn(`[Ingest] ${tenantId}: ${back.count} push(es) left mid-processing by a stopped run put back`);
+  return back.count;
 }
 
 export async function listInbox(
@@ -342,16 +423,81 @@ export async function bestPayload(
  * 30 seconds produces one row with a count, not 2,880 rows a day.
  */
 export async function logReject(args: {
-  ip: string | null; presentedKey: string; path: string; tenantHint?: string | null;
+  ip: string | null; presentedKey: string; path: string; tenantHint?: string | null; note?: string;
 }): Promise<void> {
   const prefix = String(args.presentedKey || '').slice(0, 12) || '(none)';
   const day = new Date().toISOString().slice(0, 10);
-  const id = `rej_${day}_${crypto.createHash('sha1').update(`${args.ip}|${prefix}`).digest('hex').slice(0, 12)}`;
+  const note = args.note || 'invalid or unknown key';
+  // The note joins the id only when it is not the original one, so the rows an
+  // unknown key already collapses into keep their ids.
+  const salt = args.note ? `|${note}` : '';
+  const id = `rej_${day}_${crypto.createHash('sha1').update(`${args.ip}|${prefix}${salt}`).digest('hex').slice(0, 12)}`;
   await sql`
     INSERT INTO ingest_rejects (id, ip, key_prefix, path, tenant_hint, note, count)
-    VALUES (${id}, ${args.ip}, ${prefix}, ${args.path}, ${args.tenantHint ?? null}, 'invalid or unknown key', 1)
+    VALUES (${id}, ${args.ip}, ${prefix}, ${args.path}, ${args.tenantHint ?? null}, ${note}, 1)
     ON CONFLICT (id) DO UPDATE SET count = ingest_rejects.count + 1, received_at = NOW()
   `;
+}
+
+/**
+ * HOW MANY PUSHES ONE CONNECTION MAY SEND. A key is a credential that sits in a
+ * portal's panel and in whatever the broker pasted it into; leaked, it could
+ * write leads into a desk as fast as it could send. These are per connection
+ * (one key), so one noisy portal never blocks another.
+ *
+ * Measured, not guessed (backend/src/scripts/ingest-peaks.ts, production, 60
+ * days to 28 Oct): the busiest connection, bhumi's MagicBricks, peaked at 8 a
+ * minute, 26 an hour and 27 a day. Every limit is more than ten times that.
+ * Re-run the script on production before tightening any of these.
+ *
+ * OVER THE MINUTE OR HOUR, A PUSH IS HELD, NOT LOST. Most portals do not retry
+ * a non-2xx, so a refused enquiry would be gone. It is stored as a `held` inbox
+ * row — no lead, no alert — and answered 429; releaseHeld() turns it into a
+ * lead within the hour, at the connection's own rate, through the same path as
+ * any push.
+ * Only past the day cap, or once a day's worth is already held, is a push
+ * dropped: then nothing is stored and ingest_rejects counts it.
+ */
+export const INGEST_LIMITS = { perMinute: 60, perHour: 300, perDay: 1000, heldPerDay: 1000 } as const;
+
+/**
+ * A connection's last 24 hours: pushes that went through, and pushes held. A
+ * held row claimed for release ('processing', claimed from 'held') is still
+ * held until it lands. The one count the live limit and the release share.
+ */
+export async function pushesToday(tenantId: string, integrationId: string): Promise<{ accepted: number; held: number }> {
+  const [day] = await sql`
+    SELECT count(*) FILTER (WHERE NOT ${HELD_ROW})::int AS accepted,
+           count(*) FILTER (WHERE ${HELD_ROW})::int AS held
+      FROM webhook_inbox
+     WHERE tenant_id = ${tenantId} AND integration_id = ${integrationId}
+       AND received_at > NOW() - interval '1 day'`;
+  return day as unknown as { accepted: number; held: number };
+}
+const HELD_ROW = sql`(status = 'held' OR (status = 'processing' AND claimed_from = 'held'))`;
+
+export type IngestRefusal = { window: string; limit: number; retryAfter: number; hold: boolean };
+
+/**
+ * Spends one push from the connection's allowance, or says which window is
+ * full and whether the push is held or dropped. Minute and hour are counted in
+ * memory (services/rateLimit.ts, the same limiter the public pages and sign-in
+ * use). The day is counted from webhook_inbox — the rows the cap is about — so
+ * a restart cannot reset it.
+ *
+ * HELD ROWS ARE NOT ACCEPTED PUSHES. The day cap counts what went through;
+ * held rows have their own cap. Counted together, a flood's held rows would
+ * keep the day cap shut for a day after the flood stopped, and the real
+ * enquiries in that day would be dropped instead of held. A held row that is
+ * processed later becomes an accepted one.
+ */
+export async function spendIngestPush(integration: Integration): Promise<null | IngestRefusal> {
+  const day = await pushesToday(integration.tenant_id, integration.id);
+  if (day.accepted >= INGEST_LIMITS.perDay) return { window: 'day', limit: INGEST_LIMITS.perDay, retryAfter: 3600, hold: false };
+  const roomToHold = day.held < INGEST_LIMITS.heldPerDay;
+  if (!hit(`ingest-min:${integration.id}`, INGEST_LIMITS.perMinute, 60_000)) return { window: 'minute', limit: INGEST_LIMITS.perMinute, retryAfter: 60, hold: roomToHold };
+  if (!hit(`ingest-hour:${integration.id}`, INGEST_LIMITS.perHour, 3_600_000)) return { window: 'hour', limit: INGEST_LIMITS.perHour, retryAfter: 600, hold: roomToHold };
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -366,6 +512,8 @@ export async function logReject(args: {
  */
 export async function processInboxRow(
   integration: Integration, inboxId: string, body: any,
+  /** When the push arrived (the inbox row's received_at). */
+  opts: { receivedAt?: Date | string | null; claim?: string | null } = {},
 ): Promise<{ status: string; leadId?: string | null; reason?: string }> {
   // Sanitised at the point of use, not only when the mapper saves — a config
   // stored before the target vocabulary was normalised (flat "locality" from
@@ -380,14 +528,39 @@ export async function processInboxRow(
     const why = parsed.errors.length
       ? parsed.errors.join(' ')
       : `Payload is missing ${parsed.missing.join(' and ')}.`;
-    await markInbox(inboxId, 'failed', { error: why });
+    await markInbox(inboxId, 'failed', { error: why, claim: opts.claim });
     return { status: 'failed', reason: why };
   }
 
   return await landEnquiry({
     tenantId: integration.tenant_id, provider: integration.provider, integrationId: integration.id,
-    inboxId, lead: parsed.lead, body, desk,
+    inboxId, lead: parsed.lead, body, desk, receivedAt: opts.receivedAt ?? null, claim: opts.claim ?? null,
   });
+}
+
+/** How far before the push a portal's own enquiry time is believed. */
+const PORTAL_TIME_MAX_LEAD_HOURS = 3;
+
+/**
+ * WHEN THE BUYER ASKED. The portal's own time when it is believable, else when
+ * the push arrived (a held or replayed push is processed later than that;
+ * the processing time is never the answer). Not believable: a date with no
+ * time (parsed to UTC midnight, it reads as 05:30 that day), a time after the
+ * push arrived (a wrong zone pushes it forward), or one more than
+ * PORTAL_TIME_MAX_LEAD_HOURS before it (a wrong zone the other way; portals
+ * push within minutes). With neither, undefined: the caller's "now".
+ */
+export function enquiryTime(portal: any, receivedAt?: Date | string | null): string | undefined {
+  const pushed = receivedAt ? new Date(receivedAt) : null;
+  const okPushed = pushed && !isNaN(pushed.getTime()) ? pushed : null;
+  const said = portal ? new Date(portal) : null;
+  if (said && !isNaN(said.getTime())) {
+    const dateOnly = said.getUTCHours() === 0 && said.getUTCMinutes() === 0 && said.getUTCSeconds() === 0 && said.getUTCMilliseconds() === 0;
+    const ref = okPushed || new Date();
+    const ahead = said.getTime() - ref.getTime();
+    if (!dateOnly && ahead <= 2 * 60_000 && -ahead <= PORTAL_TIME_MAX_LEAD_HOURS * 3_600_000) return said.toISOString();
+  }
+  return okPushed ? okPushed.toISOString() : undefined;
 }
 
 /**
@@ -411,13 +584,17 @@ export async function landEnquiry(args: {
    *  buyer forms name what was asked), so no lead_assigned, lead_unrouted or
    *  lead_repeat goes out beside it. The return says what happened. */
   announce?: boolean;
+  /** When the push carrying it arrived — for a held or replayed push, not now. */
+  receivedAt?: Date | string | null;
+  /** The claim this run holds on the inbox row (claimInbox). */
+  claim?: string | null;
 }): Promise<{ status: string; leadId?: string | null; reason?: string; previousStage?: string | null }> {
   const { tenantId, inboxId } = args;
   const integration = { id: args.integrationId || `${args.provider.toLowerCase()}:${tenantId}`, tenant_id: tenantId, provider: args.provider };
   const desk = args.desk || await deskConfigOf(tenantId);
   const body = args.body;
   const mark = async (status: 'parsed' | 'merged' | 'failed' | 'ignored', extra: { leadId?: string | null; error?: string | null } = {}) => {
-    if (inboxId) await markInbox(inboxId, status, extra);
+    if (inboxId) await markInbox(inboxId, status, { ...extra, claim: args.claim });
   };
   return await runWithContext(
     {
@@ -443,6 +620,11 @@ export async function landEnquiry(args: {
       // retry; the same person saying something different is a new enquiry.
       // And a short window, because with three fields a genuine second enquiry
       // is byte-identical too — after which only the clock can tell them apart.
+      // WHEN THEY ENQUIRED, one answer for the lead's First received
+      // (createLead's received_at) and every enquiry row's time — see
+      // enquiryTime(). The parser writes `received_at`; this read
+      // `receivedAt`, which nothing sets, so the enquiry row always said "now".
+      const enquiredAt = enquiryTime((lead as any).received_at || (lead as any).receivedAt, args.receivedAt);
       const providerId = lead.external_id;
       const lockKey = providerId
         ? `ingest:${integration.id}:${providerId}`
@@ -475,7 +657,7 @@ export async function landEnquiry(args: {
         const r = lead.req || {};
         const said = [r.notes, r.interest && `Interested in: ${Array.isArray(r.interest) ? r.interest.join(', ') : r.interest}`].filter(Boolean).join(' · ');
         const session = await recordEnquiry({
-          leadId: existing.id, at: (lead as any).receivedAt || undefined,
+          leadId: existing.id, at: enquiredAt,
           source: integration.provider, integrationId: args.integrationId,
           req: lead.req, enquiryId: (lead as any).external_id || null, rawRef: inboxId,
         });
@@ -586,7 +768,7 @@ export async function landEnquiry(args: {
         // a note. Additive: it changes nothing above it. Sessions, not payloads
         // — see docs/specs/desk-rework.md §2.
         const session = await recordEnquiry({
-          leadId: existing.id, at: (lead as any).receivedAt || undefined,
+          leadId: existing.id, at: enquiredAt,
           source: integration.provider, integrationId: args.integrationId,
           req: lead.req, enquiryId: (lead as any).external_id || null, rawRef: inboxId,
         });
@@ -659,6 +841,7 @@ export async function landEnquiry(args: {
       const { external_id, ...leadFields } = lead;
       const created = await createLead({
         ...leadFields,
+        received_at: enquiredAt ?? null,
         agentId: args.agentId || undefined, agent_id: undefined,
         stage: 'New',
         source: leadFields.source || integration.provider,
@@ -669,7 +852,7 @@ export async function landEnquiry(args: {
       // has enquired twice would show a count of one.
       if (created?.id) {
         await recordEnquiry({
-          leadId: created.id, at: (lead as any).receivedAt || undefined,
+          leadId: created.id, at: enquiredAt,
           source: leadFields.source || integration.provider, integrationId: args.integrationId,
           req: lead.req, enquiryId: external_id || null, rawRef: inboxId,
         });
@@ -694,38 +877,141 @@ export async function landEnquiry(args: {
 export async function replayPending(
   tenantId: string, integrationId?: string,
 ): Promise<{ processed: number; ingested: number; merged: number; failed: number; ignored: number }> {
-  const rows = await sql`
-    SELECT id, integration_id, raw_body FROM webhook_inbox
-    WHERE tenant_id = ${tenantId} AND status IN ('pending', 'failed') AND raw_body IS NOT NULL
-      ${integrationId ? sql`AND integration_id = ${integrationId}` : sql``}
-    ORDER BY received_at ASC
-  `;
+  // Pending and failed only. Held pushes are released by releaseHeld(), at the
+  // connection's own rate; a button that let them all through at once would
+  // be the flood the limit stopped.
+  //
+  // IN BATCHES: a claim must stay younger than the stale window however long
+  // the run is, or another run puts it back and processes the row again.
+  // `seen` keeps a row that failed here from being claimed again by this run.
+  await recoverStaleClaims(tenantId);
   const tally = { processed: 0, ingested: 0, merged: 0, failed: 0, ignored: 0 };
-  const cache = new Map<string, Integration | null>();
-
-  for (const row of rows as any[]) {
-    if (!cache.has(row.integration_id)) {
-      const found = await sql`
-        SELECT id, tenant_id, provider, api_key_last4, parser_config, active, created_at, created_by, last_received_at
-        FROM integrations WHERE id = ${row.integration_id} LIMIT 1
-      `;
-      cache.set(row.integration_id, (found[0] as Integration) || null);
-    }
-    const integration = cache.get(row.integration_id);
-    // No parser still means no lead — replaying can't invent one.
-    if (!integration?.parser_config) continue;
-
-    tally.processed++;
-    try {
-      const out = await processInboxRow(integration, row.id, row.raw_body);
-      if (out.status === 'ingested') tally.ingested++;
-      else if (out.status === 'merged') tally.merged++;
-      else if (out.status === 'ignored') tally.ignored++;
+  const seen: string[] = [];
+  for (;;) {
+    const rows = await claimInbox(tenantId, { statuses: ['pending', 'failed'], integrationId, limit: CLAIM_BATCH, notIds: seen });
+    if (!rows.length) break;
+    const integrations = await integrationsById(tenantId, rows.map(r => r.integration_id));
+    for (const row of rows) {
+      seen.push(row.id);
+      tally.processed++;
+      const out = await processClaimed(integrations.get(row.integration_id)!, row);
+      if (out === 'ingested') tally.ingested++;
+      else if (out === 'merged') tally.merged++;
+      else if (out === 'ignored') tally.ignored++;
       else tally.failed++;
-    } catch (err: any) {
-      tally.failed++;
-      await markInbox(row.id, 'failed', { error: err.message }).catch(() => {});
     }
   }
   return tally;
+}
+
+/** The connections these claimed rows belong to, read once. */
+async function integrationsById(tenantId: string, ids: string[]): Promise<Map<string, Integration>> {
+  const uniq = [...new Set(ids)];
+  if (!uniq.length) return new Map();
+  const found = await sql`
+    SELECT id, tenant_id, provider, api_key_last4, parser_config, active, created_at, created_by, last_received_at
+      FROM integrations WHERE tenant_id = ${tenantId} AND id IN ${sql(uniq)}`;
+  return new Map((found as unknown as Integration[]).map(i => [i.id, i]));
+}
+
+/** One claimed row through the one path, its outcome written whatever happens. */
+export async function processClaimed(integration: Integration, row: ClaimedRow): Promise<string> {
+  try {
+    const out = await processInboxRow(integration, row.id, row.raw_body, { receivedAt: row.received_at, claim: row.claim });
+    return out.status;
+  } catch (err: any) {
+    await markInbox(row.id, 'failed', { error: err.message, claim: row.claim }).catch(() => {});
+    return 'failed';
+  }
+}
+
+/**
+ * HELD PUSHES RELEASE THEMSELVES. A push over a connection's minute or hour
+ * limit is kept as `held` (spendIngestPush); this turns them into leads,
+ * oldest first, spending the SAME allowance a live push spends — so a backlog
+ * drains at the connection's own rate and never faster, and a connection that
+ * keeps flooding just keeps its backlog until the day cap stops holding more.
+ * Run by the routing sweep's timer (index.ts) for every tenant with held rows,
+ * with the tenant passed in, never read from a request context.
+ *
+ * A held push the portal has since resent, and that resend was processed,
+ * is a duplicate, not a second enquiry: it is marked ignored against that
+ * lead, with no repeat alert. Same body, same connection, accepted from 15
+ * minutes before the held one arrived (the window landEnquiry treats identical
+ * bodies as one retry) to RESEND_WINDOW_HOURS after it — a portal resends
+ * within minutes of a 429; the same bytes hours later are a real repeat.
+ */
+const RESEND_WINDOW_HOURS = 2;
+export async function releaseHeld(tenantId: string): Promise<{ released: number; duplicates: number }> {
+  if (!tenantId) throw new Error('releaseHeld: tenantId is required');
+  await recoverStaleClaims(tenantId);
+  // A held push whose body the 30-day purge removed can never be processed:
+  // failed, said once, and not scanned again every sweep.
+  const purged = await sql`
+    UPDATE webhook_inbox SET status = 'failed', error = 'Held past the 30-day body purge; never processed', parsed_at = NOW()
+     WHERE tenant_id = ${tenantId} AND status = 'held' AND raw_body IS NULL
+    RETURNING integration_id`;
+  if (purged.length) {
+    console.error(`[Ingest] ✗ ${tenantId}: ${purged.length} held push(es) lost to the 30-day body purge before release (${[...new Set((purged as any[]).map(r => r.integration_id))].join(', ')})`);
+  }
+  const conns = await sql`
+    SELECT w.integration_id FROM webhook_inbox w
+      JOIN integrations g ON g.id = w.integration_id AND g.tenant_id = w.tenant_id
+     WHERE w.tenant_id = ${tenantId} AND w.status = 'held' AND g.parser_config IS NOT NULL
+     GROUP BY w.integration_id`;
+  const integrations = await integrationsById(tenantId, (conns as any[]).map(c => c.integration_id));
+  let released = 0, duplicates = 0;
+  for (const integration of integrations.values()) {
+    for (;;) {
+      // The day cap first: past it, nothing more becomes a lead today.
+      const day = await pushesToday(tenantId, integration.id);
+      if (day.accepted >= INGEST_LIMITS.perDay) break;
+      const minKey = `ingest-min:${integration.id}`, hourKey = `ingest-hour:${integration.id}`;
+      if (spent(minKey, INGEST_LIMITS.perMinute, 60_000) || spent(hourKey, INGEST_LIMITS.perHour, 3_600_000)) break;
+      // Claim, THEN spend: a pass with nothing to claim spends nothing. A live
+      // push that took the last slot in between: the row goes back held.
+      const [row] = await claimInbox(tenantId, { statuses: ['held'], integrationId: integration.id, limit: 1 });
+      if (!row) break;
+      if (!hit(minKey, INGEST_LIMITS.perMinute, 60_000) || !hit(hourKey, INGEST_LIMITS.perHour, 3_600_000)) { await unclaim(row); break; }
+      const [dup] = await sql`
+        SELECT o.lead_id FROM webhook_inbox o
+         WHERE o.tenant_id = ${tenantId} AND o.integration_id = ${integration.id} AND o.id <> ${row.id}
+           AND o.status IN ('parsed', 'merged', 'ignored') AND o.lead_id IS NOT NULL
+           AND o.received_at >= ${row.received_at}::timestamptz - interval '15 minutes'
+           AND o.received_at <= ${row.received_at}::timestamptz + make_interval(hours => ${RESEND_WINDOW_HOURS})
+           AND md5(o.raw_body::text) = (SELECT md5(h.raw_body::text) FROM webhook_inbox h WHERE h.id = ${row.id})
+         ORDER BY o.received_at LIMIT 1`;
+      if (dup) {
+        await markInbox(row.id, 'ignored', { leadId: dup.lead_id, error: 'Resent by the portal; the resend was processed', claim: row.claim });
+        duplicates++;
+        continue;
+      }
+      await processClaimed(integration, row);
+      released++;
+    }
+  }
+  if (released || duplicates) console.log(`[Ingest] ${tenantId}: released ${released} held push(es), ${duplicates} already resent`);
+  // OLDER THAN TWO HOURS IS A FAILURE. At the limits a backlog drains within
+  // the hour; one still waiting after two means the release is not keeping up
+  // or not running, and nothing on screen says so.
+  const stuck = await sql`
+    SELECT w.integration_id, count(*)::int AS n, min(w.received_at) AS oldest
+      FROM webhook_inbox w
+      JOIN integrations g ON g.id = w.integration_id AND g.tenant_id = w.tenant_id
+     WHERE w.tenant_id = ${tenantId} AND w.status = 'held' AND g.parser_config IS NOT NULL
+       AND w.received_at < NOW() - interval '2 hours'
+     GROUP BY w.integration_id`;
+  for (const r of stuck as any[]) {
+    console.error(`[Ingest] ✗ HELD PUSHES NOT RELEASED: tenant ${tenantId}, connection ${r.integration_id}: ${r.n} held, oldest ${new Date(r.oldest).toISOString()}`);
+  }
+  return { released, duplicates };
+}
+
+/** releaseHeld for every tenant with held pushes, or a claim a stopped run
+ *  left behind (put back there), one tenant after another. */
+export async function releaseHeldAll(): Promise<void> {
+  const tenants = await sql`SELECT DISTINCT tenant_id FROM webhook_inbox WHERE status IN ('held', 'processing')`;
+  for (const t of tenants as any[]) {
+    await releaseHeld(t.tenant_id).catch(err => console.warn(`[Ingest] ${t.tenant_id}: held release failed:`, err?.message));
+  }
 }

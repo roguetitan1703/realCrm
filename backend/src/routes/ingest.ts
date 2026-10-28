@@ -20,7 +20,7 @@
 
 import { Router, Request, Response } from 'express';
 import {
-  resolveByKey, recordPush, markInbox, logReject, processInboxRow,
+  resolveByKey, recordPush, logReject, spendIngestPush, claimInbox, processClaimed,
 } from '../services/ingestion';
 import { getTenantForIngest } from '../services/store';
 
@@ -122,6 +122,37 @@ async function handleIngest(req: Request, res: Response) {
     }
   }
 
+  // A leaked key must not fill a desk (INGEST_LIMITS). Over the minute or hour
+  // the push is HELD: stored, no lead, answered 429 — most portals never retry,
+  // so refusing it outright would lose a real enquiry. Past the day cap (or once
+  // a day's worth is held) it is dropped. Never silent either way: a line naming
+  // the tenant and connection, and a 429 with Retry-After.
+  const over = await spendIngestPush(integration);
+  if (over) {
+    const path = req.originalUrl.split('?')[0];
+    const what = `tenant ${integration.tenant_id}, connection ${integration.id} (${integration.provider}), over ${over.limit} per ${over.window}`;
+    res.set('Retry-After', String(over.retryAfter));
+    if (over.hold) {
+      try {
+        const heldId = await recordPush({ integration, body: payload, headers: req.headers as any, ip, status: 'held' });
+        console.warn(`[Ingest] rate limited, held ${heldId}: ${what}`);
+        return res.status(429).json({
+          error: 'Too many requests', held: true, id: heldId,
+          message: `This key sent more than ${over.limit} enquiries in the last ${over.window}. This one is kept and will be processed later.`,
+        });
+      } catch (err: any) {
+        console.error('[Ingest] Could not hold push:', err.message);
+      }
+    }
+    console.warn(`[Ingest] rate limited, dropped: ${what}`);
+    await logReject({ ip, presentedKey: key, path, tenantHint: integration.tenant_id, note: `rate limited: ${integration.id} over ${over.limit}/${over.window}` })
+      .catch(err => console.warn('[Ingest] reject log failed:', err?.message));
+    return res.status(429).json({
+      error: 'Too many requests', held: false,
+      message: `This key sent more than ${over.limit} enquiries in the last ${over.window}. Nothing was recorded; send it again after ${over.retryAfter} seconds.`,
+    });
+  }
+
   let inboxId: string;
   try {
     inboxId = await recordPush({ integration, body: payload, headers: req.headers as any, ip });
@@ -142,12 +173,17 @@ async function handleIngest(req: Request, res: Response) {
     return;
   }
 
+  // Claimed first, like every path that turns a push into a lead
+  // (claimInbox): a Process press landing at this moment takes other rows.
   try {
-    const out = await processInboxRow(integration, inboxId, payload);
-    console.log(`[Ingest] ${integration.provider}: ${out.status}${out.leadId ? ` → ${out.leadId}` : ''}`);
+    const [row] = await claimInbox(integration.tenant_id, { statuses: ['pending'], ids: [inboxId] });
+    if (!row) return;
+    const status = await processClaimed(integration, row);
+    console.log(`[Ingest] ${integration.provider}: ${status}`);
   } catch (err: any) {
-    console.error('[Ingest] Parse failed:', err.message);
-    await markInbox(inboxId, 'failed', { error: err.message }).catch(() => {});
+    // The row stays pending (or is put back from 'processing' by the next
+    // replay), visible and replayable; the response has already gone.
+    console.error('[Ingest] Processing failed:', err.message);
   }
 }
 
