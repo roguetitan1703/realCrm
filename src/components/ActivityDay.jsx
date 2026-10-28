@@ -321,8 +321,10 @@ export function TeamToday({ store, hasCalling, onOpen }) {
   const rows = (data?.people || [])
     .map(p => ({ ...p, t: tally(p) }))
     // Agents always have a row: an empty one is the finding. The owner and
-    // managers appear on a day they did something themselves.
-    .filter(p => p.role === 'agent' || p.t.effort > 0)
+    // managers appear on a day they did something themselves, or hold
+    // follow-ups that are already missed: leaving those out made the rows add
+    // up to less than the firm's own overdue total (18 of 22 on the dev desk).
+    .filter(p => p.role === 'agent' || p.t.effort > 0 || p.t.missed > 0)
     // By name, so a person is in the same place every day; off duty and
     // people who have left go last.
     .sort((a, b) => ((a.gone || a.duty === 'OFF_DUTY') - (b.gone || b.duty === 'OFF_DUTY'))
