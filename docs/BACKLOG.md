@@ -112,7 +112,8 @@ gaps are in `specs/notifications.md` §1, not here.
 - **Booked site visits with no time** — bhumi 5 of 29 (typed text only).
 - **`/api/v1/ingest` has no rate limit** (code). A leaked key fills a desk.
 - **A control that does nothing** (code, 18 Oct). "Merge duplicate" shows only
-  when `duplicateOf` is set, and nothing sets it. *owner*
+  when `duplicateOf` is set, and nothing sets it (checked 28 Oct: no route writes
+  `duplicate_of`). Its request, once reachable, is now accepted by the server. *owner*
 
 ## To verify
 
