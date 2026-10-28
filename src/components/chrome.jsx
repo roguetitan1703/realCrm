@@ -53,10 +53,15 @@ export function Sidebar({ items, active, activeSub, onNav, footer, firmName, log
                   discloses them here rather than stacking a second pill row on
                   top of the page's own role pills. Only shown while the section
                   is open, so the nav stays short for everyone else. */}
-              {it.children && active === it.key && !collapsed && (
+              {/* Kept on the rail too: this list is the ONLY switch between
+                  the stores (the page has none), so hiding it collapsed left
+                  Tenants and Buyers unreachable. Short stacked labels there. */}
+              {it.children && active === it.key && (
                 <div className="n-sub-list">
                   {it.children.map(c => (
                     <a key={c.sub} className={'n-sub-item' + (activeSub === c.sub ? ' on' : '')}
+                      title={collapsed ? (c.count != null ? `${c.label} · ${c.count}` : c.label) : undefined}
+                      aria-current={activeSub === c.sub ? 'page' : undefined}
                       onClick={() => onNav(it.key, { [it.subKey]: c.sub })}>
                       {c.label}
                       {c.count != null && <span className="n-sub-count">{c.count}</span>}
