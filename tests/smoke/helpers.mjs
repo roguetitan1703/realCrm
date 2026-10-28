@@ -1,25 +1,27 @@
 // Shared pieces for the smoke tests. DEVELOPMENT backend only: it refuses to run
 // against anything but localhost, and the workspace is always `delpat`.
 //
-//   tsx backend/src/scripts/run-api.ts --env=development --port=5191
-//   VITE_API_URL=http://localhost:5191 DEV_API_URL=http://localhost:5191 npx vite --port 5190
-//   npm run test:smoke
+// By default they drive the stack the README starts (`npm run dev:api` on 5001,
+// `npm run dev` on 5173) with the data `npm run setup:local` seeds. Another
+// stack: SMOKE_API=http://localhost:5191/api/v1 SMOKE_WEB=http://localhost:5190.
 import { chromium, devices } from 'playwright'
 
-export const WEB = process.env.SMOKE_WEB || 'http://localhost:5190'
-export const API = process.env.SMOKE_API || 'http://localhost:5191/api/v1'
+export const WEB = process.env.SMOKE_WEB || 'http://localhost:5173'
+export const API = process.env.SMOKE_API || 'http://localhost:5001/api/v1'
 export const TENANT = 'delpat'
 const LOCAL = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/
 if (!LOCAL.test(API) || !LOCAL.test(WEB)) {
   throw new Error('smoke tests run against a local development stack only')
 }
 
-export const OWNER = { handle: 'akashpatel', password: '00000000' }
-// The seeded synthetic agent and manager. setup() gives them a known password
-// through the owner's reset-password route (development data only).
-export const PW = 'Smoke#Pass12'
-export const AGENT = { id: 'u_team_1785582498593_1', handle: 'kavish', password: PW }
-export const MANAGER = { id: 'u_team_1785582499967_2', handle: 'siddharthvarma', password: PW }
+// The logins seed-dev-login.ts creates. setup() gives the agent and the manager
+// this password through the owner's reset-password route, so the tests also run
+// on a development database whose people were made some other way; their ids
+// are looked up by login, never written down here.
+export const PW = '00000000'
+export const OWNER = { handle: 'akashpatel', password: PW }
+export const AGENT = { id: null, handle: 'kavish', password: PW }
+export const MANAGER = { id: null, handle: 'siddharthvarma', password: PW }
 
 export async function call(method, path, token, body) {
   const r = await fetch(API + path, {
@@ -40,6 +42,12 @@ export async function login(user) {
 
 export async function resetFixtures() {
   const t = await login(OWNER)
+  const roster = (await call('GET', '/team/users', t)).json?.users || []
+  for (const u of [AGENT, MANAGER]) {
+    const row = roster.find(x => String(x.login_id || '').toLowerCase() === u.handle)
+    if (!row) throw new Error(`no ${u.handle} on ${TENANT}: run npm run setup:local (or npm run seed:dev:login)`)
+    u.id = row.id
+  }
   for (const u of [AGENT, MANAGER]) {
     const r = await call('POST', `/team/users/${u.id}/reset-password`, t, { password: PW, mustChangePassword: false })
     if (r.status !== 200) throw new Error(`reset ${u.handle}: ${r.status}`)
