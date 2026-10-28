@@ -6,7 +6,7 @@ Push `development` to `main` (32 commits: sidebar #130, desk fixes, feed watch, 
 ## Next
 1. Phone redesign for the agent, on its own branch `b-phone-redesign` (merges only when Om approves it whole): spec + mockups done (9d5b0f7), waits on Om's six answers; then Today as one "who to ring next" list, one sheet after every call, record's first screen = next step; 44px targets. Then an owner's Team page on phone
 2. Feed watch: owner alert merged (28a7fe9); production read 28 Oct: 0 alerts at bhumi/mahalaxmi, 2 at delpat. Delpat half (console view, a daily email to Om via sendMail) waits on Om
-2c. Local setup + dev data stays current: merged 28 Oct (`npm run setup:local`, `npm run dev:refresh`, README). Shared dev db needs `npm run dev:refresh -- --adopt=delpat` once; the callback figures are fixed on `b-callbacks` (one catalogue, a pill per pile), waiting on review and merge
+2c. Local setup + dev data stays current: merged 28 Oct (`npm run setup:local`, `npm run dev:refresh`, README). Shared dev db needs `npm run dev:refresh -- --adopt=delpat` once; callback figures match their lists, merged (9514127)
 3. Desk mismatches: fixed and merged (d9d82df + this merge); naming of "Not yet contacted"/"Never called" and the Performance default wait on Om
 4. Work OS #153 WhatsApp intro templates, wording from Om
 5. Work OS #155 merge misspelt project names, needs a spec and Om's scope
