@@ -594,6 +594,22 @@ export function SelectDropdown({ value, options, onChange, label, align, searcha
  * table's own scroller, not just the page) and closes on a click outside BOTH
  * the button and the menu, which are no longer parent and child.
  */
+// True when the element's centre lies outside the viewport or outside any
+// scrolling ancestor (a table body, a list pane) that clips it.
+function anchorClipped(el) {
+  if (!el) return true
+  const r = el.getBoundingClientRect()
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+  if (cy < 0 || cy > window.innerHeight || cx < 0 || cx > window.innerWidth) return true
+  for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+    const o = getComputedStyle(n)
+    if (!/(auto|scroll|hidden|clip)/.test(o.overflowX + o.overflowY)) continue
+    const c = n.getBoundingClientRect()
+    if (cy < c.top || cy > c.bottom || cx < c.left || cx > c.right) return true
+  }
+  return false
+}
+
 export function AnchoredPopover({ anchorRef, open, onClose, className = '', children }) {
   const popRef = useRef(null)
   const [pos, setPos] = useState(null)
@@ -617,9 +633,16 @@ export function AnchoredPopover({ anchorRef, open, onClose, className = '', chil
     // its real height rather than zero.
     const raf = requestAnimationFrame(place)
     window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true) }
-  }, [open, anchorRef])
+    // Follows the button while it is on screen; once it has scrolled out of the
+    // page or out of the table that clips it, the menu closes instead of
+    // hanging over whatever is now there.
+    const onScroll = () => {
+      if (anchorClipped(anchorRef.current)) onClose()
+      else place()
+    }
+    window.addEventListener('scroll', onScroll, true)
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', place); window.removeEventListener('scroll', onScroll, true) }
+  }, [open, anchorRef, onClose])
 
   useEffect(() => {
     if (!open) return
