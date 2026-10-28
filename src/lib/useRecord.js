@@ -52,6 +52,8 @@ export function useRecord(store, kind, id) {
   // cache hit counts as having fetched it — otherwise opening a record the
   // list already paged in would cost a request the cache exists to avoid.
   const seen = useRef({ key: '', tick: -1 })
+  // Retry after a failed read: a new value re-runs the fetch below.
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     if (!id) { setState({ loading: false, error: null }); return }
@@ -89,7 +91,8 @@ export function useRecord(store, kind, id) {
       })
     return () => { live = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, id, tick, full])
+  }, [kind, id, tick, full, attempt])
 
-  return { record: known, loading: state.loading, error: state.error }
+  const retry = () => { setState(s => ({ ...s, error: null })); setAttempt(n => n + 1) }
+  return { record: known, loading: state.loading, error: state.error, retry }
 }
