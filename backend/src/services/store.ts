@@ -2588,13 +2588,17 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // PUSH: someone handed you a live client. You now own a conversation you
   // haven't read yet, so this can't wait for you to next open the app.
   // notify() drops it when you assigned it to yourself.
-  if (patch.agentId !== undefined && agentId !== oldLead.agentId) {
+  // Either spelling: `agentId` is read above from agentId OR agent_id, so a
+  // holder changed through `agent_id` is a change of hands too. This tested
+  // patch.agentId only, and a PUT with agent_id moved the lead with no history.
+  const handsChanged = (agentId || null) !== (oldLead.agentId || null);
+  if (handsChanged) {
     await recordAssignment({
       recordId: id, prevAgentId: oldLead.agentId, agentId,
       author: ctx.actorId ?? getContext()?.userId ?? null,
     });
   }
-  if (patch.agentId !== undefined && agentId && agentId !== oldLead.agentId) {
+  if (handsChanged && agentId) {
     notify({ userId: agentId, type: 'lead_reassigned', data: { name }, link, push: true })
       .catch(err => console.warn('[Notify] lead_reassigned failed:', err?.message));
   }
