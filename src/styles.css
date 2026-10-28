@@ -1304,10 +1304,10 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .cal .cal-nav{display:inline-flex;gap:4px}
 .cal .cal-nav button{width:30px;height:30px;border-radius:7px;border:1px solid var(--line);background:var(--card);cursor:pointer;color:var(--ink-2);display:flex;align-items:center;justify-content:center}
 .cal .cal-nav button:hover{background:var(--card-2)}
-.cal .cal-dow{display:grid;grid-template-columns:repeat(7,1fr);background:var(--card-2);border-bottom:1px solid var(--line-2)}
+.cal .cal-dow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));background:var(--card-2);border-bottom:1px solid var(--line-2)}
 .cal .cal-dow span{padding:8px 10px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;text-align:left}
-.cal .cal-grid{display:grid;grid-template-columns:repeat(7,1fr)}
-.cal .cell{min-height:104px;border-right:1px solid var(--line-2);border-bottom:1px solid var(--line-2);padding:6px 7px;display:flex;flex-direction:column;gap:4px;position:relative}
+.cal .cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.cal .cell{min-width:0;min-height:104px;border-right:1px solid var(--line-2);border-bottom:1px solid var(--line-2);padding:6px 7px;display:flex;flex-direction:column;gap:4px;position:relative}
 .cal .cell:nth-child(7n){border-right:none}
 .cal .cell.out{background:var(--card-2)}
 .cal .cell.today{background:var(--accent-wash)}
@@ -1320,6 +1320,7 @@ body{overscroll-behavior-y:auto;touch-action:manipulation}
 .cal .ev-chip .ev-n{font-size:11px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal .ev-chip.overdue{background:var(--alert-wash);border-color:#E4C4C0}.cal .ev-chip.overdue .ev-t{color:var(--alert)}
 .cal .ev-chip.visit{background:#F6EEDD;border-color:#E8D6B0}.cal .ev-chip.visit .ev-t{color:#8A5E1E}
+@media (max-width:720px){.cal .cal-dow span{padding:8px 2px;text-align:center}.cal .cell{min-height:60px;padding:4px 2px}.cal .ev-chip{padding:2px 3px;gap:0;justify-content:center}.cal .ev-chip .ev-n{display:none}.cal .ev-more{font-size:10px;white-space:nowrap}}
 .cal .ev-more{font-size:10.5px;font-weight:600;color:var(--muted);cursor:pointer;padding:1px 4px}
 /* side agenda for the picked day */
 .cal-wrap{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
