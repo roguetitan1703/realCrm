@@ -213,7 +213,7 @@ export function ModuleListView({
     : <div className={'list-body' + (loading ? ' is-loading' : '')}>
         {renderTable
           ? renderTable(pageList, view)
-          : <ModuleTable def={def} rows={pageList} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={onSortKey} />}
+          : <ModuleTable def={def} rows={pageList} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={onSortKey} onSortDir={onSortDir} />}
         {onPage && <Pager page={page} pageCount={pageCount} onPage={onPage} total={total} pageSize={pageSize} onPageSize={onPageSize} />}
       </div>
 
@@ -434,7 +434,7 @@ export function ModuleCards({ def, rows, store, onOpen, phone }) {
 // a trailing actions column. Both are opt-in per module, driven entirely by
 // what the caller passes, so a module that doesn't need them renders exactly
 // the plain table it always did.
-export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort, selectable, selectedIds, onSelectionChange }) {
+export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort, onSortDir, selectable, selectedIds, onSelectionChange }) {
   const lastIndex = useRef(null)
   const selected = selectedIds || new Set()
   const allOn = selectable && rows.length > 0 && rows.every(r => selected.has(r.id || r._id))
@@ -508,7 +508,7 @@ export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort
       ],
     }
   })
-  return <Table columns={columns} rows={tableRows} sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+  return <Table columns={columns} rows={tableRows} sortKey={sortKey} sortDir={sortDir} onSort={onSort} onSortDir={onSortDir} />
 }
 
 // ---- SelectDropdown: a labelled single-value dropdown (lead type, status…). ----
@@ -1056,13 +1056,15 @@ export function SortControl({ value, options, dir, onSort, onDir }) {
 }
 
 // ---- Table (dense) ----
-export function Table({ columns, rows, sortKey, sortDir, onSort }) {
+export function Table({ columns, rows, sortKey, sortDir, onSort, onSortDir }) {
+  // Same header again flips the direction; the toolbar arrow drives the same state.
+  const clickHead = (key) => (key === sortKey && onSortDir) ? onSortDir(sortDir === 'asc' ? 'desc' : 'asc') : onSort(key)
   return (
     <table className="tbl">
       <thead>
         <tr>
           {columns.map(c => (
-            <th key={c.key} onClick={c.sortable ? () => onSort(c.key) : undefined} style={c.sortable ? undefined : { cursor: 'default' }}>
+            <th key={c.key} onClick={c.sortable ? () => clickHead(c.key) : undefined} style={c.sortable ? undefined : { cursor: 'default' }}>
               {c.label}{c.key === sortKey && <span className="caret">{sortDir === 'asc' ? '▲' : '▼'}</span>}
             </th>
           ))}

@@ -337,7 +337,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     cta: { label: 'New lead', onClick: () => store.openModal({ kind: 'newLead' }) },
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} phone={phone} />
-      : <ModuleTable def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP}
+      : <ModuleTable def={LEADS_DEF} rows={list} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP} onSortDir={setSortDirP}
           selectable={canAssign} selectedIds={selected} onSelectionChange={selection.set} />,
   })
 

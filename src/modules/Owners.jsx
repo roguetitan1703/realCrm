@@ -413,7 +413,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
           onOpen={(key) => toProject(key === 'No project' ? '_none' : key)} />
       : v === 'grid'
         ? <ModuleCards def={def} rows={list} store={store} onOpen={open} phone={phone} />
-        : <ModuleTable def={def} rows={list} store={store} onOpen={open} sortKey={sortKey} sortDir={sortDir} onSort={(v) => patchBag({ sortKey: v })}
+        : <ModuleTable def={def} rows={list} store={store} onOpen={open} sortKey={sortKey} sortDir={sortDir} onSort={(v) => patchBag({ sortKey: v })} onSortDir={(v) => patchBag({ sortDir: v })}
             selectable={canAssign} selectedIds={selected}
             onSelectionChange={(ids, rows) => { setAllMatching(false); selection.set(ids, rows) }} />,
   })
