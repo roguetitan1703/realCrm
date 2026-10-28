@@ -4,7 +4,7 @@
 Production deploy of 6078505 (security hotfix incl. the `/workspace/reset` wipe, #154, back navigation, four phone fixes): `main` pushed 28 Oct, Vercel deploying; waits on Om running deploy-api.sh, then a 404 check on /workspace/reset and the PM2 log grep for "Truncating all CRM tables".
 
 ## Next
-1. Phone redesign for the agent, on its own branch `b-phone-redesign` (merges only when Om approves it whole): spec + mockups first (builder B, running), then Today as one "who to ring next" list, one sheet after every call, record's first screen = next step; 44px targets. Then an owner's Team page on phone
+1. Phone redesign for the agent, on its own branch `b-phone-redesign` (merges only when Om approves it whole): spec + mockups done (9d5b0f7), waits on Om's six answers; then Today as one "who to ring next" list, one sheet after every call, record's first screen = next step; 44px targets. Then an owner's Team page on phone
 2. Feed watch (BACKLOG Now, PLAN W1–2): `feed_silent` alert when an active portal feed goes quiet 7+ days — builder B on `b-feed-watch`
 3. Desk mismatches from the audit (builder S on `s-desk`): counts that disagree with their lists, tiles landing with no chip, Esc on dialogs, agents see Import
 4. Work OS #153 WhatsApp intro templates, wording from Om
