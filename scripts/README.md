@@ -29,10 +29,12 @@ the `public` schema so the target becomes exactly the backup. Restoring onto the
 
 ## Nightly automation (no cost)
 
-Linux/macOS cron — 2am daily, keep 14 days:
+Linux/macOS cron — 2am daily. `--cron` verifies each dump and keeps the newest
+`KEEP` (default 14) of its own files; no separate `find -delete` needed. See
+`docs/ops/DEPLOY.md` "Nightly backup".
 
 ```cron
-0 2 * * * cd /path/to/realCrm && ./scripts/db-backup.sh --cron && find backups -name '*.sql.gz' -mtime +14 -delete
+0 2 * * * cd /path/to/realCrm && ./scripts/db-backup.sh --cron
 ```
 
 Windows Task Scheduler: run `bash scripts/db-backup.sh --cron` on a daily

@@ -122,6 +122,30 @@ Expected: `3 agents 8 props 12 leads` and `followUps: 11 | overdue: 3`.
 Finally, in the browser at https://realestate.delpat.in: change something,
 hard-refresh, confirm it survived. That proves the whole chain.
 
+## Nightly backup
+
+`scripts/db-backup.sh --cron` dumps `DATABASE_URL` from `~/realestate/.env`,
+verifies the file (gzip, size, `crm_leads` CREATE + COPY), keeps the newest 14
+`backups/realcrm_prod_*.sql.gz` and deletes older ones. A failed dump never
+deletes anything and exits non-zero. `DATABASE_URL` must be the **direct**
+connection (port 5432); the pooler on 6543 cannot `pg_dump`.
+
+```bash
+crontab -e     # one-time, as the user that owns ~/realestate
+CRON_TZ=Asia/Kolkata
+30 2 * * * cd ~/realestate && ./scripts/db-backup.sh --cron >> ~/realestate/backups/backup.log 2>&1
+```
+
+Optional off-box copy: add `BACKUP_COPY_TO=user@host:/path/` before the command
+(rsync, else scp; unset = no copy).
+
+Check it ran: `tail -n 8 ~/realestate/backups/backup.log` and
+`ls -lh ~/realestate/backups/` (newest file today, over a MB). A line starting
+`✖` means that night failed.
+
+Restore (destructive, replaces `public`): `cd ~/realestate && ./scripts/db-restore.sh`,
+pick the file, type `RESTORE`.
+
 ## Safety net
 
 If the API is unreachable, a red **"Offline — not saving"** badge appears in the top

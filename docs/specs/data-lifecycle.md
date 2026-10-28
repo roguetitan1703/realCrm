@@ -53,5 +53,5 @@ a per-feature afterthought.
 - [ ] `audit_log` archival path (verified export + re-genesis) — design only until needed.
 - [ ] R2 orphan-sweep (objects with no referencing row).
 - [ ] Superadmin console: DB size + R2 usage figure + threshold alert.
-- [ ] Backup rotation in the dump scripts.
+- [x] Backup rotation in the dump scripts (`db-backup.sh --cron`: verify, keep newest `KEEP`=14).
 - [ ] **Review gate:** any new growing store must land with its policy row added here.
