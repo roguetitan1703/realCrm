@@ -13,6 +13,7 @@ Push `development` to `main` (32 commits: sidebar #130, desk fixes, feed watch, 
 6. Work OS #129 help desk (#156 demos feed it)
 
 ## Later
+- Closing a lead (Rejected / Deal Closed) leaves its booked follow-up behind: 30 of the 37 overdue bookings in production sit on closed leads — check whether any desk count or alert reads them
 - A firm's weekly off for "days worked" — waits on how the firms actually work
 - Alerts are stamped with the app's clock and links/events with the database's; on a skewed host (this PC: DB 2.5s ahead) "a fresh link after the alert" closes a tap made right after a send — waits on checking the AWS host's skew
 - Idle-owner sweep threw after its first owner since 23 Sep (fixed in review 3) — waits on a read-only prod check of which firms had `owner_reassign_idle_enabled`

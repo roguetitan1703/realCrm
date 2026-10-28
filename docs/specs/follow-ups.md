@@ -371,3 +371,20 @@ nobody answered, and how often nobody tried again. Q2, Om's lead case
 (visits, meetings, no-kind bookings overdue after a call). Q3, Om's owner case.
 Q4, whether agents re-book after "not received" today, which is what D1 would
 do for them.
+
+## 7. What production said (28 Oct, read only, bhumi + mahalaxmi, last 60 days)
+
+- Calls logged: bhumi 1,526 (outcome on 353), mahalaxmi 838 (outcome on 396).
+- Bookings: Scheduled 37, Rescheduled 22, owner callbacks 2. About 1 booking per 40 calls.
+  Owners with a callback set today: 0 in both firms.
+- Q1, booking closed by a call: 3 (bhumi 1, mahalaxmi 2), and every one was called again within 3 days.
+  The lead rule's harm is real but small at this volume.
+- Q2, leads overdue today: all 37 are Site Visits, and 30 of them are on leads already Rejected or Deal Closed.
+  Closing a lead leaves its booking behind (BACKLOG). On open leads: bhumi 5 (avg 38 days late), mahalaxmi 2.
+- Q3: no rows, because no owner has a callback.
+- Q4, after a call that did not get through: next try booked within 10 minutes for 0 of 308 lead calls and
+  0 of 185 owner calls. Never called again: 163 of 308 leads, 185 of 185 owners.
+
+What this means: wrong bookings are not the main problem. Bookings barely happen at all. The rules in §4 still stand,
+but D1 (offer the next try, one tap) is the one that changes behaviour. It belongs in the phone redesign's
+after-call moment, not in a rule.
