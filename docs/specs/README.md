@@ -17,6 +17,7 @@ building. Once a spec ships it keeps a short as-built note, not the build log.
 | [enquiries.md](./enquiries.md) | F. Enquiries: a person is not an enquiry | 🧭 planning (decisions locked, 4 opens) |
 | [listing-pages.md](./listing-pages.md) | Sending flats to a lead, the buyer's page, the firm's catalogue | 🅿️ parked 13 Oct (model in §0); PLAN proposes steps 1–2 |
 | [notifications.md](./notifications.md) | An alert is open work: lifecycle, urgency, working hours | ✅ built, on `development` |
+| [phone-redesign.md](./phone-redesign.md) | The agent's phone: Today, after a call, the record; Team as phase 2 | 🧭 planning (6 questions for Om) |
 | [performance.md](./performance.md) | What a day answers vs a range | ✅ built, on `development` |
 | [desk-rework.md](./desk-rework.md), [lead-sources.md](./lead-sources.md), [demo-tenants.md](./demo-tenants.md) | — | not reviewed in this list |
 

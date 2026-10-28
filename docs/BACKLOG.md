@@ -35,12 +35,13 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
   asks the same fact. One sheet on return from the dialer, outcome sets the
   status by a visible map, a status change with no contact asks one tap
   (waits on PLAN Q3). Absorbs "one outcome model" (`CALL_OUTCOMES`,
-  `WA_OUTCOMES`, `VISIT_OUTCOMES`). *agent*
+  `WA_OUTCOMES`, `VISIT_OUTCOMES`). Spec: `specs/phone-redesign.md` §2. *agent*
 - **Finish what was booked.** Past due now: bhumi 24 of 33, mahalaxmi 7 of 9.
   Done on the phone lead record (`FollowUpDoneModal` is ready); moving to Site
   Visit books the visit; "Did it happen?" the day after. Visit proof rule waits
   on PLAN Q4 (also settles: history's Add outcome closes a visit with no proof).
-  A call about a booked visit still completes nothing. *agent*
+  A call about a booked visit still completes nothing. Phone side:
+  `specs/phone-redesign.md` §3. *agent*
 - **Team: who stopped.** One line per agent inactive 7+ days holding open leads
   (Siddhi: 65 open, last active 11 Oct). Then one support call per owner. *owner*
 - **Business rails.** Weekly numbers script (PLAN §4, read-only); a release
