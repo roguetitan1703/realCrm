@@ -36,7 +36,7 @@ import { failAbandonedImports } from './services/imports';
 import { scheduleCloseSettled } from './services/alertLifecycle';
 import { processScheduledNotifications } from './services/notifications';
 import { envBanner, appEnv, runningCode } from './services/env';
-import { checkIntegrationKeys } from './services/ingestion';
+import { checkIntegrationKeys, releaseHeldAll } from './services/ingestion';
 
 // ── A DROPPED DATABASE CONNECTION USED TO KILL THE WHOLE API ────────────────
 //
@@ -381,7 +381,12 @@ if (isMain || process.env.START_SERVER === 'true') {
     // Never honoured in production: an env file copied from a builder must not
     // stop the paying firms' sweeps.
     if (process.env.CRM_NO_SWEEPS === '1' && process.env.APP_ENV !== 'production') console.log('⏸  Routing sweeps off (CRM_NO_SWEEPS=1)');
-    else setInterval(() => { runRoutingSweeps().catch(err => console.warn('[Routing Sweep] run failed:', err?.message)); }, 5 * 60 * 1000);
+    // Held pushes (over a connection's rate limit) are released on the same
+    // clock and under the same switch: releasing one hands out a lead.
+    else setInterval(async () => {
+      await runRoutingSweeps().catch(err => console.warn('[Routing Sweep] run failed:', err?.message));
+      await releaseHeldAll().catch(err => console.warn('[Ingest] held release failed:', err?.message));
+    }, 5 * 60 * 1000);
     failAbandonedImports().then(n => { if (n) console.log(`[Imports] ${n} run(s) lost to a restart marked stopped`); })
       .catch(err => console.warn('[Imports] abandoned-run check failed:', err?.message));
     // The alert sweep on a clock of its own. It ran only when an open tab

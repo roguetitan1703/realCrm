@@ -20,7 +20,7 @@
 
 import { Router, Request, Response } from 'express';
 import {
-  resolveByKey, recordPush, markInbox, logReject, processInboxRow, spendIngestPush,
+  resolveByKey, recordPush, logReject, spendIngestPush, claimInbox, processClaimed,
 } from '../services/ingestion';
 import { getTenantForIngest } from '../services/store';
 
@@ -173,12 +173,17 @@ async function handleIngest(req: Request, res: Response) {
     return;
   }
 
+  // Claimed first, like every path that turns a push into a lead
+  // (claimInbox): a Process press landing at this moment takes other rows.
   try {
-    const out = await processInboxRow(integration, inboxId, payload);
-    console.log(`[Ingest] ${integration.provider}: ${out.status}${out.leadId ? ` → ${out.leadId}` : ''}`);
+    const [row] = await claimInbox(integration.tenant_id, { statuses: ['pending'], ids: [inboxId] });
+    if (!row) return;
+    const status = await processClaimed(integration, row);
+    console.log(`[Ingest] ${integration.provider}: ${status}`);
   } catch (err: any) {
-    console.error('[Ingest] Parse failed:', err.message);
-    await markInbox(inboxId, 'failed', { error: err.message }).catch(() => {});
+    // The row stays pending (or is put back from 'processing' by the next
+    // replay), visible and replayable; the response has already gone.
+    console.error('[Ingest] Processing failed:', err.message);
   }
 }
 

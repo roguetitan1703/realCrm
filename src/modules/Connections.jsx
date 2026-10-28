@@ -150,6 +150,7 @@ const STATUS_TEXT = {
   merged: 'Added to an existing lead',
   pending: 'Waiting for mapping',
   held: 'Held: over the limit',
+  processing: 'Processing',
   ignored: 'Duplicate',
 }
 
@@ -699,8 +700,7 @@ export default function Connections({ store }) {
         // 'failed' is included: the mapper can drop a bad key and re-save,
         // and those pushes deserve another try against the corrected mapping
         // rather than showing the same stale error forever. See replayPending.
-        // 'held' too: pushes over the rate limit, kept for exactly this button.
-        const pending = ((c.counts || {}).pending || 0) + ((c.counts || {}).failed || 0) + ((c.counts || {}).held || 0)
+        const pending = ((c.counts || {}).pending || 0) + ((c.counts || {}).failed || 0)
         const st = stateOf(c)
         const total = Object.values(c.counts || {}).reduce((a, b) => a + b, 0)
         return (
