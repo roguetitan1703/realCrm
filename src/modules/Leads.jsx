@@ -7,7 +7,7 @@ import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, fol
 import { personLabel } from '../lib/phone.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
-import { canEditLead, canAssignLead, canDeleteRecord } from '../lib/permissions.js'
+import { canEditLead, canAssignLead, canDeleteRecord, isDeskRole } from '../lib/permissions.js'
 import { LEAD_STATUSES } from '../data/leadStatus.js'
 import { useServerList } from '../lib/serverList.js'
 import { useKeptPager } from '../lib/useNav.js'
@@ -347,7 +347,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
         title: 'Leads',
         // Bulk import is desk work and has no phone screen, so the phone chrome
         // must not offer a route to one.
-        actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import</Button>
+        actions: (phone || !isDeskRole(role)) ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'clients' })}>Import</Button>
       })}
       <UnassignedBar store={store} side="leads" go={go} onShow={() => patchFilters({ flag: ['unassigned'] })} />
       {header}

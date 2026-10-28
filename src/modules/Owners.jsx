@@ -5,7 +5,7 @@ import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Overdue, Timeline } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { initials, callbackSignal, whenLabel } from '../lib/format.js'
-import { canAssignLead } from '../lib/permissions.js'
+import { canAssignLead, isDeskRole } from '../lib/permissions.js'
 import { OWNER_STAGES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 import { useServerList } from '../lib/serverList.js'
 import { useKept, useKeptPager } from '../lib/useNav.js'
@@ -422,7 +422,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     <>
       {topBar({
         title: 'Calling',
-        actions: phone ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'owners' })}>Import</Button>
+        actions: (phone || !isDeskRole(role)) ? null : <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'owners' })}>Import</Button>
       })}
       <UnassignedBar store={store} side="owners" go={go} onShow={() => pickTab('unassigned')} />
       {header}

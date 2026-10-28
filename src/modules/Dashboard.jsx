@@ -237,7 +237,7 @@ export default function Dashboard({ store, go, topBar }) {
               {outcomes.length === 0
                 ? <div className="detail-empty">Nothing called yet.</div>
                 : <Distribution rows={outcomes.map(([name, n]) => ({ name, n }))}
-                    onPick={(r) => toCalling('open', r.name)} />}
+                    onPick={(r) => go('calling', { ownerFilters: { status: r.name }, ownerOpen: false, ownerId: undefined })} />}
             </Panel>
           </div>
         )}

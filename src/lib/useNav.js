@@ -126,6 +126,22 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
   const [screen, setScreenState] = useState(first.screen || home)
   const [sel, setSelState] = useState(first.sel)
 
+  // ESC DISMISSES WHAT IS ON TOP, here once for every overlay. A dialog is
+  // closed the way its backdrop is: by pressing the backdrop, so a modal with
+  // something typed into it nudges instead of throwing the typing away (Modal
+  // owns that rule; this does not re-implement it). Overlays with no backdrop
+  // (alerts drawer, range picker) are closed outright.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || !overlayRef.current?.isOpen()) return
+      const backdrops = document.querySelectorAll('.overlay')
+      if (backdrops.length) backdrops[backdrops.length - 1].click()
+      else overlayRef.current.close()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // Set when a popstate is what changed the state, so the effect below doesn't
   // immediately push the entry the user just went back through.
   const fromPop = useRef(false)

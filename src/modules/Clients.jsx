@@ -10,6 +10,7 @@ import { api } from '../lib/api.js'
 import { useServerList } from '../lib/serverList.js'
 import { useKept, useKeptPager } from '../lib/useNav.js'
 import { useServerData } from '../lib/useServerData.js'
+import { isDeskRole } from '../lib/permissions.js'
 
 // ============================================================================
 // 👤 CONTACTS — the people whose property this firm manages
@@ -268,7 +269,7 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
     <>
       {topBar({
         title: 'Contacts',
-        actions: <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'properties' })}>Import</Button>
+        actions: isDeskRole(store.state.role) ? <Button variant="secondary" size="sm" icon="layers" onClick={() => go('import', { kind: 'properties' })}>Import</Button> : null
       })}
       {header}
       <ListLayout toolbar={toolbar}>{body}</ListLayout>
