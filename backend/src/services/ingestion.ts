@@ -21,6 +21,7 @@ import { notify, notifyOrDesk } from './notifications';
 import { runWithContext } from './context';
 import { queueManager } from './queue';
 import { hashKey, lockKey, keyState, currentLock } from './integrationKeys';
+import { hit } from './rateLimit';
 
 export type Integration = {
   id: string;
@@ -342,16 +343,52 @@ export async function bestPayload(
  * 30 seconds produces one row with a count, not 2,880 rows a day.
  */
 export async function logReject(args: {
-  ip: string | null; presentedKey: string; path: string; tenantHint?: string | null;
+  ip: string | null; presentedKey: string; path: string; tenantHint?: string | null; note?: string;
 }): Promise<void> {
   const prefix = String(args.presentedKey || '').slice(0, 12) || '(none)';
   const day = new Date().toISOString().slice(0, 10);
-  const id = `rej_${day}_${crypto.createHash('sha1').update(`${args.ip}|${prefix}`).digest('hex').slice(0, 12)}`;
+  const note = args.note || 'invalid or unknown key';
+  // The note joins the id only when it is not the original one, so the rows an
+  // unknown key already collapses into keep their ids.
+  const salt = args.note ? `|${note}` : '';
+  const id = `rej_${day}_${crypto.createHash('sha1').update(`${args.ip}|${prefix}${salt}`).digest('hex').slice(0, 12)}`;
   await sql`
     INSERT INTO ingest_rejects (id, ip, key_prefix, path, tenant_hint, note, count)
-    VALUES (${id}, ${args.ip}, ${prefix}, ${args.path}, ${args.tenantHint ?? null}, 'invalid or unknown key', 1)
+    VALUES (${id}, ${args.ip}, ${prefix}, ${args.path}, ${args.tenantHint ?? null}, ${note}, 1)
     ON CONFLICT (id) DO UPDATE SET count = ingest_rejects.count + 1, received_at = NOW()
   `;
+}
+
+/**
+ * HOW MANY PUSHES ONE CONNECTION MAY SEND. A key is a credential that sits in a
+ * portal's panel and in whatever the broker pasted it into; leaked, it could
+ * write leads into a desk as fast as it could send. These are per connection
+ * (one key), so one noisy portal never blocks another.
+ *
+ * Measured, not guessed (backend/src/scripts/ingest-peaks.ts): the busiest
+ * real connection in the 17 Oct usage snapshot (docs/usage-2026-10-17.md) sent
+ * about 200 pushes in a month, under 10 a day. A month of it fits inside one
+ * hour here, so even a portal flushing a backlog after an outage goes through;
+ * a leaked key is held to 1,000 leads a day, which an owner notices and pauses.
+ * Re-run the script on production before tightening any of these.
+ */
+export const INGEST_LIMITS = { perMinute: 60, perHour: 300, perDay: 1000 } as const;
+
+/**
+ * Spends one push from the connection's allowance, or says which window is
+ * full. Minute and hour are counted in memory (services/rateLimit.ts, the same
+ * limiter the public pages and sign-in use). The day is counted from
+ * webhook_inbox itself — the rows the cap is about — so a restart cannot reset
+ * it; the minute cap bounds how far requests in flight together can overshoot.
+ */
+export async function spendIngestPush(integration: Integration): Promise<null | { window: string; limit: number; retryAfter: number }> {
+  const [{ n }] = await sql`
+    SELECT count(*)::int AS n FROM webhook_inbox
+     WHERE integration_id = ${integration.id} AND received_at > NOW() - interval '1 day'` as unknown as [{ n: number }];
+  if (n >= INGEST_LIMITS.perDay) return { window: 'day', limit: INGEST_LIMITS.perDay, retryAfter: 3600 };
+  if (!hit(`ingest-min:${integration.id}`, INGEST_LIMITS.perMinute, 60_000)) return { window: 'minute', limit: INGEST_LIMITS.perMinute, retryAfter: 60 };
+  if (!hit(`ingest-hour:${integration.id}`, INGEST_LIMITS.perHour, 3_600_000)) return { window: 'hour', limit: INGEST_LIMITS.perHour, retryAfter: 600 };
+  return null;
 }
 
 // ---------------------------------------------------------------------------

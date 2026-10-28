@@ -20,7 +20,7 @@
 
 import { Router, Request, Response } from 'express';
 import {
-  resolveByKey, recordPush, markInbox, logReject, processInboxRow,
+  resolveByKey, recordPush, markInbox, logReject, processInboxRow, spendIngestPush,
 } from '../services/ingestion';
 import { getTenantForIngest } from '../services/store';
 
@@ -120,6 +120,24 @@ async function handleIngest(req: Request, res: Response) {
         .catch(() => {});
       return res.status(401).json({ error: 'Unauthorized', message: 'Key does not belong to this workspace.' });
     }
+  }
+
+  // A leaked key must not fill a desk (INGEST_LIMITS). Refused BEFORE the push
+  // is stored, so a refused push leaves no inbox row and no lead — and it is
+  // never silent: the sender gets a 429 it can retry on, and we keep a line
+  // and a counted ingest_rejects row naming the tenant and the connection.
+  const over = await spendIngestPush(integration);
+  if (over) {
+    console.warn(`[Ingest] rate limited: tenant ${integration.tenant_id}, connection ${integration.id} (${integration.provider}), over ${over.limit} per ${over.window}`);
+    await logReject({
+      ip, presentedKey: key, path: req.originalUrl.split('?')[0], tenantHint: integration.tenant_id,
+      note: `rate limited: ${integration.id} over ${over.limit}/${over.window}`,
+    }).catch(err => console.warn('[Ingest] reject log failed:', err?.message));
+    res.set('Retry-After', String(over.retryAfter));
+    return res.status(429).json({
+      error: 'Too many requests',
+      message: `This key sent more than ${over.limit} enquiries in the last ${over.window}. Nothing was recorded; send it again after ${over.retryAfter} seconds.`,
+    });
   }
 
   let inboxId: string;

@@ -115,7 +115,6 @@ gaps are in `specs/notifications.md` §1, not here.
 - **A lead's Callback stores no time** — bhumi 19 of 20, mahalaxmi 42 of 42 have
   none, so nothing can say a callback is late. (Owners store one.) *agent*
 - **Booked site visits with no time** — bhumi 5 of 29 (typed text only).
-- **`/api/v1/ingest` has no rate limit** (code). A leaked key fills a desk.
 - **A column header sorts one way only** (code, dev). Clicking Last enquiry
   again does not flip it (`Table` calls `onSort(key)`, never the direction);
   only the toolbar arrow does. Newest-first takes two controls. *manager*
