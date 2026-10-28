@@ -523,6 +523,16 @@ async function maybeReturned(f: Firm, link: any) {
       EXISTS (SELECT 1 FROM notifications WHERE tenant_id = ${f.id} AND type = 'share_returned'
                 AND ${link.lead_id} = ANY(record_ids) AND created_at >= ${firmDayStart(tz)}) AS told`;
   if (!s.before || s.today || s.told) return;
+  // DECIDED BY THE DATABASE, not by the read above: two opens arriving together
+  // both passed it and both alerted. One claim row per link per firm day, under
+  // the unique (tenant_id, code) index; the one that inserts it alerts. (An
+  // advisory lock held across alert() would pin a pooled connection per waiter.)
+  const day = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+  const won = await sql`
+    INSERT INTO crm_share_events (id, tenant_id, link_id, kind, code, lead_id, created_at)
+    VALUES (${rid('sev')}, ${f.id}, ${link.id}, 'returned', ${`ret:${link.id}:${day}`}, ${link.lead_id}, ${new Date()})
+    ON CONFLICT DO NOTHING RETURNING id`;
+  if (!won.length) return;
   const who = await whoAnswers(f.id, link.lead_id, link.created_by);
   if (!who.lead) return;
   await alert(f.id, who.recipient, {
