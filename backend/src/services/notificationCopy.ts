@@ -121,6 +121,10 @@ export const COPY: Builders = {
     title: `Rent agreement ends ${d.ends}`,
     body: facts(d.name, d.flat),
   }),
+  feed_silent: (d) => ({
+    title: `${d.portal} has sent nothing for ${plural(d.days, 'day')}`,
+    body: facts(d.last && `Last push ${d.last}`),
+  }),
   followup_due: (d) => ({
     title: 'Follow-up due now',
     body: facts(d.name, d.action, d.locality),
@@ -215,6 +219,7 @@ const PHRASE: Record<string, (n: number) => string> = {
   owner_assigned: (n) => `${plural(n, 'batch', 'batches')} of owners to call`,
   owner_reassigned: (n) => `${plural(n, 'batch', 'batches')} of owners moved to you`,
   agreement_ending: (n) => `${plural(n, 'tenancy', 'tenancies')} ending`,
+  feed_silent: (n) => `${plural(n, 'portal')} sending nothing`,
   lead_reassign_loop: (n) => `${plural(n, 'lead')} keeps being handed on`,
   share_interested: (n) => `${plural(n, 'buyer')} interested`,
   share_expired_open: (n) => `${plural(n, 'expired link')} opened`,

@@ -88,7 +88,7 @@ safety net. One implementation, two callers.
 |---|---|---|
 | **now** | immediately, high priority — work handed to you | `lead_assigned`, `lead_assigned_bulk`, `lead_reassigned`, `lead_unrouted`, `lead_repeat`, `owner_assigned`, `owner_reassigned`, `calendar_task_assigned` (moved here 13 Oct: a lead assigned by hand was held for 9 am) |
 | **at its time** | when the thing is due | `followup_due`, `site_visit_reminder` (an hour before) |
-| **morning** | one notification at the opening hour, summarising | `agreement_ending`, `lead_untouched`, `lead_reassign_loop`, `owner_reassign_loop` |
+| **morning** | one notification at the opening hour, summarising | `agreement_ending`, `lead_untouched`, `lead_reassign_loop`, `owner_reassign_loop`, `feed_silent` (owners; closes on a push) |
 | **drawer** | never buzzes | `remark_added`, `lead_moved_away` |
 
 **The firm's working hours** — one setting, Settings → Response times, default
