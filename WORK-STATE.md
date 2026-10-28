@@ -1,12 +1,12 @@
 # Work state
 
 ## Now
-Production deploy of 6078505 (security hotfix incl. the `/workspace/reset` wipe, #154, back navigation, four phone fixes): `main` pushed 28 Oct, Vercel deploying; waits on Om running deploy-api.sh, then a 404 check on /workspace/reset and the PM2 log grep for "Truncating all CRM tables".
+Push `development` to `main` (32 commits: sidebar #130, desk fixes, feed watch, small fixes, backup script, npm deploy:api/backup, smoke tests). Smoke 39/39 on development d50811d; waits on Om's go, then `npm run deploy:api` and the backup cron on the EC2. Production got 6078505 on 28 Oct (deploy confirmed by 401 on /workspace/reset and /pulse).
 
 ## Next
 1. Phone redesign for the agent, on its own branch `b-phone-redesign` (merges only when Om approves it whole): spec + mockups done (9d5b0f7), waits on Om's six answers; then Today as one "who to ring next" list, one sheet after every call, record's first screen = next step; 44px targets. Then an owner's Team page on phone
 2. Feed watch: owner alert merged (28a7fe9); production read 28 Oct: 0 alerts at bhumi/mahalaxmi, 2 at delpat. Delpat half (console view, a daily email to Om via sendMail) waits on Om
-2a. /ingest rate limit + agents can't assign in Add lead — builder A on `a-ingest`; review subagent before merge; run its peak-traffic script on production first
+2a. /ingest rate limit (held pushes released by the sweep) + agents can't assign leads/owners — builder A on `a-ingest`, third round after two reviews; production peaks read 28 Oct (max 8/min, 26/hour, 27/day); re-review before merge
 3. Desk mismatches: fixed and merged (d9d82df + this merge); naming of "Not yet contacted"/"Never called" and the Performance default wait on Om
 4. Work OS #153 WhatsApp intro templates, wording from Om
 5. Work OS #155 merge misspelt project names, needs a spec and Om's scope

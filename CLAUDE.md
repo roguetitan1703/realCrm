@@ -173,6 +173,7 @@ The user's standing complaint is agents asserting what they have not checked.
 3. **Measure the blast radius before anything that writes or notifies** — rows
    affected, per tenant, stated, and `bhumi` confirmed unaffected.
 4. **Run `npm run build`, and parse the backend separately.** Every time.
+   Before any push to `main`, `npm run test:smoke` passes against development.
 5. **Drive the real UI for UI changes** when the user has not asked you to stop.
    Playwright is installed; phone viewport is `devices['iPhone 13']`. Measure
    geometry rather than eyeballing it. Verify where the person uses it: "the
