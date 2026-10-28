@@ -7,7 +7,7 @@ Push `development` to `main` (32 commits: sidebar #130, desk fixes, feed watch, 
 1. Phone redesign for the agent, on its own branch `b-phone-redesign` (merges only when Om approves it whole): spec + mockups done (9d5b0f7), waits on Om's six answers; then Today as one "who to ring next" list, one sheet after every call, record's first screen = next step; 44px targets. Then an owner's Team page on phone
 2. Feed watch: owner alert merged (28a7fe9); production read 28 Oct: 0 alerts at bhumi/mahalaxmi, 2 at delpat. Delpat half (console view, a daily email to Om via sendMail) waits on Om
 2a. /ingest rate limit (held pushes released by the sweep) + agents can't assign leads/owners — builder A on `a-ingest`, third round after two reviews; production peaks read 28 Oct (max 8/min, 26/hour, 27/day); re-review before merge
-2c. Dev data stays current (Om, 28 Oct: dev): on a development boot, and at the day's turn while it runs, if the last refresh is before today, move every synthetic tenant's dates forward by the gap (follow-ups, enquiries, timelines) so dev always looks like a live today; refuses anything but development like seed-dev. Plus: the API can run on a local Postgres (db.ts forces ssl), one command to create + seed it. Builder B when a slot frees
+2c. Local setup + dev data stays current: built on `b-local` (setup:local, dev:refresh, README rewrite, smoke on local data); waits on review and merge
 3. Desk mismatches: fixed and merged (d9d82df + this merge); naming of "Not yet contacted"/"Never called" and the Performance default wait on Om
 4. Work OS #153 WhatsApp intro templates, wording from Om
 5. Work OS #155 merge misspelt project names, needs a spec and Om's scope
@@ -31,10 +31,11 @@ Push `development` to `main` (32 commits: sidebar #130, desk fixes, feed watch, 
 - Calling a tenant or buyer from Contacts logs on their lead; when a colleague holds that lead the log now 404s (visibility gate, 28 Oct) — waits on deciding where that call belongs
 - Pressing Call closes the booked follow-up before the outcome (fix 3dcb711 on `s-phone-bugs`, held): with outcomes on 20% of bhumi's calls, closing only on an outcome would leave most called bookings overdue — waits on Om, or on the redesign's after-call sheet
 - The firm logo renders as a broken image in the desk sidebar (seen on delpat, dev) — waits on checking brand_config's logo URL
-- Dashboard "Later today" (callbacks due later today) opens the whole Callbacks tab: `callbacks_today` exists on the server but Calling has no pill for it — waits on the Calling pill row being revisited (redesign or Om's naming answer)
+- Dashboard "Later today" and "Callbacks due" (late callbacks only) both open the whole Callbacks tab: `callbacks_today`/`callbacks_overdue` exist on the server but Calling has no pill for them, so on local data the tile says 7 and the list 15 (smoke desk test 1 fails there; the shared dev data has no future callbacks, so it passed by accident) — waits on the Calling pill row being revisited (redesign or Om's naming answer)
 - `webhookSender.ts` (outbound webhooks) has no caller and its menu entry is gone — waits on deciding to delete it or build outbound webhooks
 - Nightly backup: script + cron line merged (9d67760, DEPLOY.md "Nightly backup"); production dump taken 28 Oct 15:21 on this PC, verified against live counts; Supabase free plan keeps none — waits on the next push to main and Om installing the cron on the EC2
 - Regression test suite (there are no tests: 0 test files): agent-phone, owner-desk and permission flows as Playwright + API tests, run before every push to main — parked by Om 28 Oct, builder S or A later; the smoke tests in tests/smoke/ (s-smoke) are its seed
-- README.md describes the July demo ("open index.html, any OTP logs you in"); nothing in it is true now — waits on 2c (the real local setup) so it can say one true thing
 - Dev API (api.dev.re.delpat.in, re-api-dev on the EC2) answers 502 (28 Oct) — waits on Om looking at PM2 on the box
 - Duty status (crm_agents.duty_status): nothing sets it, every agent ACTIVE in prod; route now desk-only — waits on Om saying remove it
+- The shared dev database has no firm marked synthetic, so its dates do not move yet — waits on Om running `npm run dev:refresh -- --adopt=delpat` (and any other fixture firm) against it
+- A row's status menu stays open while its button sits under the sticky top bar (still "in view" by geometry) — waits on a desk polish pass
