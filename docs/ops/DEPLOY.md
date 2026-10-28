@@ -131,9 +131,11 @@ deletes anything and exits non-zero. `DATABASE_URL` must be the **direct**
 connection (port 5432); the pooler on 6543 cannot `pg_dump`.
 
 ```bash
+which pg_dump && pg_dump --version   # needs the client; else: sudo apt install postgresql-client
+timedatectl | grep "Time zone"      # the line below assumes UTC
 crontab -e     # one-time, as the user that owns ~/realestate
-CRON_TZ=Asia/Kolkata
-30 2 * * * cd ~/realestate && ./scripts/db-backup.sh --cron >> ~/realestate/backups/backup.log 2>&1
+# 21:00 UTC = 02:30 IST. Ubuntu's cron ignores CRON_TZ, so the time is in the box's zone.
+0 21 * * * cd ~/realestate && ./scripts/db-backup.sh --cron >> ~/realestate/backups/backup.log 2>&1
 ```
 
 Optional off-box copy: add `BACKUP_COPY_TO=user@host:/path/` before the command
