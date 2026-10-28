@@ -68,8 +68,10 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 
 ## Small
 
-- Visit slots on the buyer forms ignore the firm's days off: every day of the
-  next week offers working hours (`buyerAsks.ts visitSlots`).
+- Visit slots on the buyer forms offer every day of the next week: the firm's
+  days off are stored nowhere (only `workHours`), so `buyerAsks.ts visitSlots`
+  has nothing to skip. Needs a days-off setting first (same gap as "days
+  worked", WORK-STATE Later). Waits on Om.
 - Boot sends four requests (bootstrap, desk-summary, owners summary, unread
   count); bootstrap's size has never been measured.
 - Demo connections on `raipur` and `urban` still default `deal: 'sale'`.
