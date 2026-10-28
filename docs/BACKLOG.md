@@ -70,13 +70,9 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 
 - Visit slots on the buyer forms ignore the firm's days off: every day of the
   next week offers working hours (`buyerAsks.ts visitSlots`).
-- Schedule follow-up has no busy guard; a double tap sends two writes (the
-  server drops an identical one, `sameBooking`).
 - Boot sends four requests (bootstrap, desk-summary, owners summary, unread
   count); bootstrap's size has never been measured.
 - Chart palette repeats after 6 sources (`styles.css` `data-i`).
-- Row menus follow their button when it scrolls out of view instead of closing.
-- Credential Copy does not include the workspace link.
 - Demo connections on `raipur` and `urban` still default `deal: 'sale'`.
 - Sale-stamped leads from before the rule (bhumi 252, mahalaxmi 67) cannot be
   told from real sales by count; `scripts/reprocess-inbox.ts --overwrite=deal`
@@ -116,12 +112,8 @@ gaps are in `specs/notifications.md` §1, not here.
   none, so nothing can say a callback is late. (Owners store one.) *agent*
 - **Booked site visits with no time** — bhumi 5 of 29 (typed text only).
 - **`/api/v1/ingest` has no rate limit** (code). A leaked key fills a desk.
-- **A column header sorts one way only** (code, dev). Clicking Last enquiry
-  again does not flip it (`Table` calls `onSort(key)`, never the direction);
-  only the toolbar arrow does. Newest-first takes two controls. *manager*
-- **Two controls that do nothing** (code, 18 Oct). The profile menu offers "API
-  Integrations & Webhooks", but `dispatchOutboundWebhook` has no caller. "Merge
-  duplicate" shows only when `duplicateOf` is set, and nothing sets it. *owner*
+- **A control that does nothing** (code, 18 Oct). "Merge duplicate" shows only
+  when `duplicateOf` is set, and nothing sets it. *owner*
 
 ## To verify
 

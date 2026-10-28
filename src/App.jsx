@@ -254,7 +254,6 @@ export default function App() {
     profileItems.push(
       { icon: 'settings', label: 'Settings', onClick: () => go('settings') },
       { icon: 'team', label: 'Manage team', onClick: () => go('team') },
-      { icon: 'zap', label: 'API Integrations & Webhooks', onClick: () => go('integrations') },
     )
   }
   profileItems.push(

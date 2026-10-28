@@ -222,7 +222,7 @@ function Owners({ store, go, sel, setSel, topBar, phone }) {
     emptyHint: 'Try another tab, filter or search.',
     renderTable: (list, v) => v === 'grid'
       ? <ModuleCards def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => openClient(r)} />
-      : <ModuleTable def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => openClient(r)} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP} />,
+      : <ModuleTable def={CLIENTS_DEF} rows={list} store={store} onOpen={(r) => openClient(r)} sortKey={sortKey} sortDir={sortDir} onSort={setSortKeyP} onSortDir={setSortDirP} />,
   })
 
   // Full-page detail takeover — same pattern as Leads & Properties (not a drawer).

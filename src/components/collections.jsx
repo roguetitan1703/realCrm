@@ -213,7 +213,7 @@ export function ModuleListView({
     : <div className={'list-body' + (loading ? ' is-loading' : '')}>
         {renderTable
           ? renderTable(pageList, view)
-          : <ModuleTable def={def} rows={pageList} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={onSortKey} />}
+          : <ModuleTable def={def} rows={pageList} store={store} onOpen={onOpen} sortKey={sortKey} sortDir={sortDir} onSort={onSortKey} onSortDir={onSortDir} />}
         {onPage && <Pager page={page} pageCount={pageCount} onPage={onPage} total={total} pageSize={pageSize} onPageSize={onPageSize} />}
       </div>
 
@@ -434,7 +434,7 @@ export function ModuleCards({ def, rows, store, onOpen, phone }) {
 // a trailing actions column. Both are opt-in per module, driven entirely by
 // what the caller passes, so a module that doesn't need them renders exactly
 // the plain table it always did.
-export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort, selectable, selectedIds, onSelectionChange }) {
+export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort, onSortDir, selectable, selectedIds, onSelectionChange }) {
   const lastIndex = useRef(null)
   const selected = selectedIds || new Set()
   const allOn = selectable && rows.length > 0 && rows.every(r => selected.has(r.id || r._id))
@@ -508,7 +508,7 @@ export function ModuleTable({ def, rows, store, onOpen, sortKey, sortDir, onSort
       ],
     }
   })
-  return <Table columns={columns} rows={tableRows} sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+  return <Table columns={columns} rows={tableRows} sortKey={sortKey} sortDir={sortDir} onSort={onSort} onSortDir={onSortDir} />
 }
 
 // ---- SelectDropdown: a labelled single-value dropdown (lead type, status…). ----
@@ -594,6 +594,22 @@ export function SelectDropdown({ value, options, onChange, label, align, searcha
  * table's own scroller, not just the page) and closes on a click outside BOTH
  * the button and the menu, which are no longer parent and child.
  */
+// True when the element's centre lies outside the viewport or outside any
+// scrolling ancestor (a table body, a list pane) that clips it.
+function anchorClipped(el) {
+  if (!el) return true
+  const r = el.getBoundingClientRect()
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+  if (cy < 0 || cy > window.innerHeight || cx < 0 || cx > window.innerWidth) return true
+  for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+    const o = getComputedStyle(n)
+    if (!/(auto|scroll|hidden|clip)/.test(o.overflowX + o.overflowY)) continue
+    const c = n.getBoundingClientRect()
+    if (cy < c.top || cy > c.bottom || cx < c.left || cx > c.right) return true
+  }
+  return false
+}
+
 export function AnchoredPopover({ anchorRef, open, onClose, className = '', children }) {
   const popRef = useRef(null)
   const [pos, setPos] = useState(null)
@@ -617,9 +633,16 @@ export function AnchoredPopover({ anchorRef, open, onClose, className = '', chil
     // its real height rather than zero.
     const raf = requestAnimationFrame(place)
     window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
-    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true) }
-  }, [open, anchorRef])
+    // Follows the button while it is on screen; once it has scrolled out of the
+    // page or out of the table that clips it, the menu closes instead of
+    // hanging over whatever is now there.
+    const onScroll = () => {
+      if (anchorClipped(anchorRef.current)) onClose()
+      else place()
+    }
+    window.addEventListener('scroll', onScroll, true)
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', place); window.removeEventListener('scroll', onScroll, true) }
+  }, [open, anchorRef, onClose])
 
   useEffect(() => {
     if (!open) return
@@ -1056,13 +1079,15 @@ export function SortControl({ value, options, dir, onSort, onDir }) {
 }
 
 // ---- Table (dense) ----
-export function Table({ columns, rows, sortKey, sortDir, onSort }) {
+export function Table({ columns, rows, sortKey, sortDir, onSort, onSortDir }) {
+  // Same header again flips the direction; the toolbar arrow drives the same state.
+  const clickHead = (key) => (key === sortKey && onSortDir) ? onSortDir(sortDir === 'asc' ? 'desc' : 'asc') : onSort(key)
   return (
     <table className="tbl">
       <thead>
         <tr>
           {columns.map(c => (
-            <th key={c.key} onClick={c.sortable ? () => onSort(c.key) : undefined} style={c.sortable ? undefined : { cursor: 'default' }}>
+            <th key={c.key} onClick={c.sortable ? () => clickHead(c.key) : undefined} style={c.sortable ? undefined : { cursor: 'default' }}>
               {c.label}{c.key === sortKey && <span className="caret">{sortDir === 'asc' ? '▲' : '▼'}</span>}
             </th>
           ))}
