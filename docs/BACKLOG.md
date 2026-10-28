@@ -88,8 +88,6 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 - **Owners have no duplicate flag or merge** (specs/phone.md). After the phone
   repair, owners on one number: bhumi 10 new + 31 already, mahalaxmi 6 + 127
   (production dry run, 20 Oct). Only a search by the number shows them. *owner*
-- A lead whose full record never loads (offline) keeps its homes and history
-  sections spinning instead of showing what the list row has. *agent*
 - The dev R2 bucket's CORS refuses `localhost:5190` (builder ports), so visit
   proof cannot upload from a builder's frontend.
 - Enquiry spam: one machine rotating numbers fills a firm's 100/day cap in

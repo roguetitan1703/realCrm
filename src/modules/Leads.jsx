@@ -407,7 +407,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   // hold it. This used to be a find() over every lead in the firm, which meant
   // a deep link from a notification sat on "Opening lead details…" until the
   // whole collection had downloaded, and said it forever if it never did.
-  const { record: l, loading, error } = useRecord(store, 'lead', sel.leadId)
+  const { record: l, loading, error, retry } = useRecord(store, 'lead', sel.leadId)
   // Above the early return: a hook cannot be called conditionally, and the
   // "record not loaded yet" branch below is exactly such a condition.
   const matches = useLeadMatches(l)
@@ -432,6 +432,12 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     setSel(s => ({ ...s, leadOpen: false, leadId: undefined }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error])
+  // The list row is on screen but the full record never came: the two sections
+  // that need it say so and offer a retry, rather than spinning for ever.
+  const detailFailed = !!l?.__partial && !!error && error !== 'not-found'
+  const detailWait = detailFailed
+    ? <div className="detail-empty">Could not load <button className="btn btn-secondary btn-sm" onClick={retry}>Retry</button></div>
+    : <div className="list-spin" role="status" aria-label="Loading"><span /></div>
   if (!l) {
     return (
       <>
@@ -639,7 +645,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
       right: <button className="btn btn-secondary btn-sm" onClick={() => store.openModal({ kind: 'attachProp', leadId: l.id })}><Icon name="plus" size={14} /> Attach property</button>,
       // A list row has no shortlist: wait for the record rather than show
       // (and offer to send) the wrong homes.
-      render: () => l.__partial ? <div className="list-spin" role="status" aria-label="Loading"><span /></div>
+      render: () => l.__partial ? detailWait
         : propRows.length === 0
         ? <div className="detail-empty">None yet.</div>
         : <>
@@ -701,7 +707,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     {
       id: 'timeline',
       title: 'Inquiry interaction timeline',
-      render: () => l.__partial ? <div className="list-spin" role="status" aria-label="Loading"><span /></div> : <Timeline events={l.timeline} agents={store.state.agents} currentUserId={store.state.activeAgentId}
+      render: () => l.__partial ? detailWait : <Timeline events={l.timeline} agents={store.state.agents} currentUserId={store.state.activeAgentId}
         onEditRemark={(eventId, text, outcome) => store.editRemark('lead', l.id, eventId, text, outcome)} />,
     },
   ]
