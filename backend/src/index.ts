@@ -317,7 +317,7 @@ footer{margin-top:40px;color:var(--muted);font-size:12px}
 <table><tbody>
 <tr><td>200</td><td>Received and queued for ingestion into CRM.</td></tr>
 <tr><td>401</td><td>Missing or invalid API key.</td></tr>
-<tr><td>429</td><td>Too many enquiries from this key in a short time. Nothing was recorded; send it again after the <code>Retry-After</code> seconds.</td></tr>
+<tr><td>429</td><td>Too many enquiries from this key in a short time. With <code>"held": true</code> the enquiry was kept and will be processed; with <code>"held": false</code> nothing was recorded: send it again after the <code>Retry-After</code> seconds.</td></tr>
 </tbody></table>
 
 <footer>Send one test enquiry first to verify delivery before turning on the live feed.</footer>

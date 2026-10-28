@@ -217,13 +217,16 @@ function safeHeaders(h: Record<string, any>): Record<string, string> {
 
 export async function recordPush(args: {
   integration: Integration; body: any; headers: Record<string, any>; ip: string | null;
+  /** `held`: over the rate limit — stored, never parsed until replayed. */
+  status?: 'pending' | 'held';
 }): Promise<string> {
   const id = rid('wh');
   await sql`
     INSERT INTO webhook_inbox (id, tenant_id, integration_id, source_ip, headers, raw_body, status)
     VALUES (${id}, ${args.integration.tenant_id}, ${args.integration.id}, ${args.ip},
-            ${sql.json(safeHeaders(args.headers))}, ${sql.json(args.body ?? {})}, 'pending')
+            ${sql.json(safeHeaders(args.headers))}, ${sql.json(args.body ?? {})}, ${args.status || 'pending'})
   `;
+  // A held push still says the portal is sending (feed watch reads this).
   await sql`UPDATE integrations SET last_received_at = NOW() WHERE id = ${args.integration.id}`;
   return id;
 }
@@ -365,29 +368,46 @@ export async function logReject(args: {
  * write leads into a desk as fast as it could send. These are per connection
  * (one key), so one noisy portal never blocks another.
  *
- * Measured, not guessed (backend/src/scripts/ingest-peaks.ts): the busiest
- * real connection in the 17 Oct usage snapshot (docs/usage-2026-10-17.md) sent
- * about 200 pushes in a month, under 10 a day. A month of it fits inside one
- * hour here, so even a portal flushing a backlog after an outage goes through;
- * a leaked key is held to 1,000 leads a day, which an owner notices and pauses.
+ * Measured, not guessed (backend/src/scripts/ingest-peaks.ts, production, 60
+ * days to 28 Oct): the busiest connection, bhumi's MagicBricks, peaked at 8 a
+ * minute, 26 an hour and 27 a day. Every limit is more than ten times that.
  * Re-run the script on production before tightening any of these.
+ *
+ * OVER THE MINUTE OR HOUR, A PUSH IS HELD, NOT LOST. Most portals do not retry
+ * a non-2xx, so a refused enquiry would be gone. It is stored as a `held` inbox
+ * row — no lead, no alert — and answered 429; replayPending() (the connection's
+ * Process button) turns it into a lead later through the same path as any push.
+ * Only past the day cap, or once a day's worth is already held, is a push
+ * dropped: then nothing is stored and ingest_rejects counts it.
  */
-export const INGEST_LIMITS = { perMinute: 60, perHour: 300, perDay: 1000 } as const;
+export const INGEST_LIMITS = { perMinute: 60, perHour: 300, perDay: 1000, heldPerDay: 1000 } as const;
+
+export type IngestRefusal = { window: string; limit: number; retryAfter: number; hold: boolean };
 
 /**
  * Spends one push from the connection's allowance, or says which window is
- * full. Minute and hour are counted in memory (services/rateLimit.ts, the same
- * limiter the public pages and sign-in use). The day is counted from
- * webhook_inbox itself — the rows the cap is about — so a restart cannot reset
- * it; the minute cap bounds how far requests in flight together can overshoot.
+ * full and whether the push is held or dropped. Minute and hour are counted in
+ * memory (services/rateLimit.ts, the same limiter the public pages and sign-in
+ * use). The day is counted from webhook_inbox — the rows the cap is about — so
+ * a restart cannot reset it.
+ *
+ * HELD ROWS ARE NOT ACCEPTED PUSHES. The day cap counts what went through;
+ * held rows have their own cap. Counted together, a flood's held rows would
+ * keep the day cap shut for a day after the flood stopped, and the real
+ * enquiries in that day would be dropped instead of held. A held row that is
+ * processed later becomes an accepted one.
  */
-export async function spendIngestPush(integration: Integration): Promise<null | { window: string; limit: number; retryAfter: number }> {
-  const [{ n }] = await sql`
-    SELECT count(*)::int AS n FROM webhook_inbox
-     WHERE integration_id = ${integration.id} AND received_at > NOW() - interval '1 day'` as unknown as [{ n: number }];
-  if (n >= INGEST_LIMITS.perDay) return { window: 'day', limit: INGEST_LIMITS.perDay, retryAfter: 3600 };
-  if (!hit(`ingest-min:${integration.id}`, INGEST_LIMITS.perMinute, 60_000)) return { window: 'minute', limit: INGEST_LIMITS.perMinute, retryAfter: 60 };
-  if (!hit(`ingest-hour:${integration.id}`, INGEST_LIMITS.perHour, 3_600_000)) return { window: 'hour', limit: INGEST_LIMITS.perHour, retryAfter: 600 };
+export async function spendIngestPush(integration: Integration): Promise<null | IngestRefusal> {
+  const [day] = await sql`
+    SELECT count(*) FILTER (WHERE status <> 'held')::int AS accepted,
+           count(*) FILTER (WHERE status = 'held')::int AS held
+      FROM webhook_inbox
+     WHERE tenant_id = ${integration.tenant_id} AND integration_id = ${integration.id}
+       AND received_at > NOW() - interval '1 day'` as unknown as [{ accepted: number; held: number }];
+  if (day.accepted >= INGEST_LIMITS.perDay) return { window: 'day', limit: INGEST_LIMITS.perDay, retryAfter: 3600, hold: false };
+  const roomToHold = day.held < INGEST_LIMITS.heldPerDay;
+  if (!hit(`ingest-min:${integration.id}`, INGEST_LIMITS.perMinute, 60_000)) return { window: 'minute', limit: INGEST_LIMITS.perMinute, retryAfter: 60, hold: roomToHold };
+  if (!hit(`ingest-hour:${integration.id}`, INGEST_LIMITS.perHour, 3_600_000)) return { window: 'hour', limit: INGEST_LIMITS.perHour, retryAfter: 600, hold: roomToHold };
   return null;
 }
 
@@ -733,7 +753,7 @@ export async function replayPending(
 ): Promise<{ processed: number; ingested: number; merged: number; failed: number; ignored: number }> {
   const rows = await sql`
     SELECT id, integration_id, raw_body FROM webhook_inbox
-    WHERE tenant_id = ${tenantId} AND status IN ('pending', 'failed') AND raw_body IS NOT NULL
+    WHERE tenant_id = ${tenantId} AND status IN ('pending', 'failed', 'held') AND raw_body IS NOT NULL
       ${integrationId ? sql`AND integration_id = ${integrationId}` : sql``}
     ORDER BY received_at ASC
   `;

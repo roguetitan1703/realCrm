@@ -6,7 +6,7 @@
  *   … --days=60   to look further back (default 30)
  *
  * RUN IT against production before deploying or changing the /ingest limit
- * (INGEST_LIMITS in routes/ingest.ts). For every tenant and connection it
+ * (INGEST_LIMITS in services/ingestion.ts). For every tenant and connection it
  * prints the busiest minute, hour and day over the window, measured as a
  * SLIDING window ending at each push — the same shape the limiter counts — so
  * the limit can be set with headroom above a real peak rather than a guess.
@@ -14,8 +14,10 @@
  * of one firm burst together.
  *
  * Every push lands in webhook_inbox before anything else happens (accepted,
- * parsed or not), so the table is the whole record of what portals sent.
- * Pushes refused with 401 (unknown key) are not there and do not count.
+ * parsed or not, or held over the limit), so the table is the whole record of
+ * what portals sent. Pushes refused with 401 (unknown key), and pushes dropped
+ * past the day cap, are not there and do not count; the drops are listed at
+ * the end from ingest_rejects, beside the held pushes still waiting.
  *
  * Imports no service except env.ts (which only reads .env files) and opens one
  * connection of its own, inside sql.begin('READ ONLY', …): Postgres refuses any
@@ -72,15 +74,28 @@ async function main() {
     if (perTenant.length) console.table(perTenant.map((r: any) => ({ ...r, last_push: r.last_push?.toISOString?.() ?? r.last_push })));
     const top = (k: string) => Math.max(0, ...perConn.map((r: any) => r[k]));
     console.log(`\nHighest of any connection: ${top('peak_min')}/min, ${top('peak_hour')}/hour, ${top('peak_day')}/day.`);
-    // After the limit ships: every refused push is counted here, one row per
+    // After the limit ships: every dropped push is counted here, one row per
     // ip + key + day.
     const refused = await tx`
       SELECT received_at::date AS day, tenant_hint AS tenant, note, ip, count
         FROM ingest_rejects
        WHERE note LIKE 'rate limited%' AND received_at > now() - make_interval(days => ${days})
        ORDER BY received_at DESC`;
-    console.log(`\nRefused by the rate limit in the window: ${refused.reduce((s: number, r: any) => s + Number(r.count || 0), 0)}`);
+    console.log(`\nDropped by the rate limit in the window: ${refused.reduce((s: number, r: any) => s + Number(r.count || 0), 0)}`);
     if (refused.length) console.table(refused);
+    // Held over the minute/hour limit and not processed yet (the connection's
+    // Process button, or POST /api/v1/connections/<id>/replay).
+    const held = await tx`
+      SELECT t.slug, coalesce(g.provider, w.integration_id) AS connection,
+             count(*)::int AS held_waiting, min(w.received_at) AS oldest
+        FROM webhook_inbox w
+        LEFT JOIN tenants t ON t.id = w.tenant_id
+        LEFT JOIN integrations g ON g.id = w.integration_id
+       WHERE w.status = 'held'
+       GROUP BY t.slug, g.provider, w.integration_id
+       ORDER BY held_waiting DESC`;
+    console.log(`\nHeld over the limit, waiting to be processed: ${held.reduce((s: number, r: any) => s + r.held_waiting, 0)}`);
+    if (held.length) console.table(held);
   });
   await db.end();
 }

@@ -122,20 +122,33 @@ async function handleIngest(req: Request, res: Response) {
     }
   }
 
-  // A leaked key must not fill a desk (INGEST_LIMITS). Refused BEFORE the push
-  // is stored, so a refused push leaves no inbox row and no lead — and it is
-  // never silent: the sender gets a 429 it can retry on, and we keep a line
-  // and a counted ingest_rejects row naming the tenant and the connection.
+  // A leaked key must not fill a desk (INGEST_LIMITS). Over the minute or hour
+  // the push is HELD: stored, no lead, answered 429 — most portals never retry,
+  // so refusing it outright would lose a real enquiry. Past the day cap (or once
+  // a day's worth is held) it is dropped. Never silent either way: a line naming
+  // the tenant and connection, and a 429 with Retry-After.
   const over = await spendIngestPush(integration);
   if (over) {
-    console.warn(`[Ingest] rate limited: tenant ${integration.tenant_id}, connection ${integration.id} (${integration.provider}), over ${over.limit} per ${over.window}`);
-    await logReject({
-      ip, presentedKey: key, path: req.originalUrl.split('?')[0], tenantHint: integration.tenant_id,
-      note: `rate limited: ${integration.id} over ${over.limit}/${over.window}`,
-    }).catch(err => console.warn('[Ingest] reject log failed:', err?.message));
+    const path = req.originalUrl.split('?')[0];
+    const what = `tenant ${integration.tenant_id}, connection ${integration.id} (${integration.provider}), over ${over.limit} per ${over.window}`;
     res.set('Retry-After', String(over.retryAfter));
+    if (over.hold) {
+      try {
+        const heldId = await recordPush({ integration, body: payload, headers: req.headers as any, ip, status: 'held' });
+        console.warn(`[Ingest] rate limited, held ${heldId}: ${what}`);
+        return res.status(429).json({
+          error: 'Too many requests', held: true, id: heldId,
+          message: `This key sent more than ${over.limit} enquiries in the last ${over.window}. This one is kept and will be processed later.`,
+        });
+      } catch (err: any) {
+        console.error('[Ingest] Could not hold push:', err.message);
+      }
+    }
+    console.warn(`[Ingest] rate limited, dropped: ${what}`);
+    await logReject({ ip, presentedKey: key, path, tenantHint: integration.tenant_id, note: `rate limited: ${integration.id} over ${over.limit}/${over.window}` })
+      .catch(err => console.warn('[Ingest] reject log failed:', err?.message));
     return res.status(429).json({
-      error: 'Too many requests',
+      error: 'Too many requests', held: false,
       message: `This key sent more than ${over.limit} enquiries in the last ${over.window}. Nothing was recorded; send it again after ${over.retryAfter} seconds.`,
     });
   }
