@@ -64,6 +64,10 @@ npm run seed:dev       # synthetic leads into the development db
   `npx esbuild <changed backend files> --outdir=/tmp/ck`.
 - **Never push to `main`.** Vercel deploys on every commit to it, off a capped
   plan. Work on `development`; the user merges and deploys.
+- **Two repos.** `roguetitan1703/realCrm` (public, Vercel and the EC2 pull it) and a
+  private copy `Delpat-Tech/realCrm` for the team. `origin` carries both push URLs
+  (`git remote set-url --add --push origin …` for each); a fresh clone pushes to one
+  only until you add them.
 - **`dev:api:prod` is a production writer.** A watcher restart runs `initSchema()`
   against production — adding a `runOnce` gate on this machine is a production
   write. Do not leave one running.
