@@ -1320,7 +1320,11 @@ export async function backfillPasswordAuth(): Promise<void> {
 // store's queries ran initSchema() — and any runOnce not yet applied there —
 // against whichever database it pointed at, production included. Such a script
 // sets CRM_NO_BOOT=1 before importing; the server never does.
-if (process.env.CRM_NO_BOOT !== '1') seedDatabase()
+// `booted` settles when the chain has finished: true when every step ran,
+// false when one threw (already logged) or the boot was switched off. Things
+// that must wait for the schema (the development data refresh, `npm run
+// setup:local`) wait on it instead of guessing with a timer.
+export const booted: Promise<boolean> = process.env.CRM_NO_BOOT === '1' ? Promise.resolve(false) : seedDatabase()
   .then(() => ensureAuthIdentity())
   .then(() => runOnce('backfill_password_auth', () => backfillPasswordAuth()))
   .then(() => runOnce('backfill_shortlist', () => backfillShortlist()))
@@ -1390,7 +1394,8 @@ if (process.env.CRM_NO_BOOT !== '1') seedDatabase()
   // on every existing alert from its link, then closes the ones whose work is
   // already done. Writes only status columns on `notifications`.
   .then(() => runOnce('2026_10_12_alert_lifecycle_first_run', () => firstRunAlertLifecycle()))
-  .catch(err => console.error('[Supabase Boot Error]:', err.message));
+  .then(() => true)
+  .catch(err => { console.error('[Supabase Boot Error]:', err.message); return false; });
 
 // ============================================================================
 // 📖 ASYNC READ & MUTATION HELPER API

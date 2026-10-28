@@ -23,6 +23,7 @@
  * does not. See docs/specs/lead-sources.md for the in-app version of this.
  */
 import postgres from 'postgres';
+import { pgOptions } from '../services/pgOptions.js';
 
 const arg = (k: string, d?: string) => {
   const hit = process.argv.find(a => a.startsWith(`--${k}=`));
@@ -41,7 +42,7 @@ if (!tenant || !from || !to) {
 }
 if (from === to) { console.error('\nfrom and to are the same.\n'); process.exit(1); }
 
-const sql = postgres(process.env.DATABASE_URL!, { max: 1, ssl: 'require' });
+const sql = postgres(process.env.DATABASE_URL!, pgOptions(process.env.DATABASE_URL!, { max: 1 }));
 
 async function main() {
   const [t] = await sql`SELECT id, slug FROM tenants WHERE slug = ${tenant!} OR id = ${tenant!} LIMIT 1`;

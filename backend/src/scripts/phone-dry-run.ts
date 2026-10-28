@@ -35,6 +35,7 @@
  * --list=all prints every unreadable row; by default at most 25 per table.
  */
 import postgres from 'postgres';
+import { pgOptions } from '../services/pgOptions.js';
 import { PHONE_TABLES, firmCountries, verdict, type PhoneRow } from '../services/phoneRepair.js';
 import { getCountryCallingCode } from 'libphonenumber-js/max';
 
@@ -60,7 +61,7 @@ function shape(raw: string, cc: string): string {
   return 'other';
 }
 
-const sql = postgres(url, { max: 1, ssl: 'require' });
+const sql = postgres(url, pgOptions(url, { max: 1 }));
 try {
   await sql.begin('READ ONLY', async (q: any) => {
     // The same tables, country and verdict the repair uses (services/phoneRepair.ts).

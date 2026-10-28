@@ -32,6 +32,7 @@
  * ============================================================================
  */
 import postgres from 'postgres';
+import { pgOptions } from '../services/pgOptions.js';
 
 const arg = (k: string) => process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1];
 const env = String(arg('env') || '').toLowerCase();
@@ -52,7 +53,7 @@ const { databaseUrl, dbRef } = await import('../services/env');
 const { keyState, lockKey, currentLock } = await import('../services/integrationKeys');
 
 const url = databaseUrl();
-const sql = postgres(url, { max: 1, ssl: 'require' });
+const sql = postgres(url, pgOptions(url, { max: 1 }));
 const lock = currentLock();
 
 console.log(`\n  ${env.toUpperCase()} · db ${dbRef(url)} · new keys lock with ${lock}${tenant ? ` · tenant ${tenant} only` : ''}\n`);

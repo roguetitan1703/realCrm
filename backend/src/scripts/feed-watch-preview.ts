@@ -16,6 +16,7 @@
  * it never guesses which database.
  */
 import postgres from 'postgres';
+import { pgOptions } from '../services/pgOptions.js';
 
 // Importing the services reaches store.ts, whose import starts the server's
 // boot (initSchema and the one-time repairs) unless this is set first.
@@ -30,7 +31,7 @@ const { FEED_SILENT } = await import('../services/notificationCatalogue.js');
 const arg = (k: string) => process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1];
 const only = (arg('tenant') || '').split(',').filter(Boolean);
 
-const db = postgres(databaseUrl(), { max: 1, ssl: 'require', onnotice: () => {} });
+const db = postgres(databaseUrl(), pgOptions(databaseUrl(), { max: 1, onnotice: () => {} }));
 
 async function main() {
   console.log(`${appEnv()}: active connection, no push for ${FEED_SILENT.silentDays} days, ≥${FEED_SILENT.minPushes} pushes in the ${FEED_SILENT.priorDays} days before its last.`);

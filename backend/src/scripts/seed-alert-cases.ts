@@ -21,6 +21,7 @@
  */
 import postgres from 'postgres';
 import { appEnv, databaseUrl, dbRef } from '../services/env.js';
+import { pgOptions } from '../services/pgOptions.js';
 
 process.env.APP_ENV = process.env.APP_ENV || 'development';
 const TENANT = 'delpat';
@@ -33,7 +34,7 @@ if (process.env.DATABASE_URL && dbRef(url) === dbRef(process.env.DATABASE_URL)) 
 const API = (arg('api') || 'http://localhost:5001').replace(/\/+$/, '') + '/api/v1';
 if (/api\.re\.delpat\.in/.test(API)) { console.error('✗ That is the production API. Refusing.'); process.exit(1); }
 
-const db = postgres(url, { max: 1, ssl: 'require', onnotice: () => {} });
+const db = postgres(url, pgOptions(url, { max: 1, onnotice: () => {} }));
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 async function clear() {

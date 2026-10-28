@@ -23,13 +23,14 @@
  */
 import postgres from 'postgres';
 import { databaseUrl, dbRef, appEnv } from '../services/env.js';
+import { pgOptions } from '../services/pgOptions.js';
 
 const arg = (k: string) => process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1];
 const only = arg('tenant');
 
 const url = databaseUrl();
 if (!url) { console.error('No database URL resolved.'); process.exit(1); }
-const sql = postgres(url, { max: 1, ssl: 'require' });
+const sql = postgres(url, pgOptions(url, { max: 1 }));
 console.log(`\nenvironment ${appEnv()} · database ${dbRef(url)}${only ? ` · tenant ${only}` : ''}\n`);
 
 /** Today's rule: only these four event types, plus three activity types. */

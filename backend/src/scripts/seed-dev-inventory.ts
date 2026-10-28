@@ -27,6 +27,8 @@
  */
 import postgres from 'postgres';
 import { appEnv, databaseUrl, dbRef } from '../services/env.js';
+import { pgOptions } from '../services/pgOptions.js';
+import { adoptSynthetic } from '../services/devData.js';
 
 process.env.APP_ENV = process.env.APP_ENV || 'development';
 const TENANT = 'delpat';
@@ -42,13 +44,14 @@ if (process.env.DATABASE_URL && dbRef(url) === dbRef(process.env.DATABASE_URL)) 
   console.error(`\n✗ The development URL resolves to the same project as DATABASE_URL (${dbRef(url)}). Refusing.\n`);
   process.exit(1);
 }
-const sql = postgres(url, { max: 1, ssl: 'require' });
+const sql = postgres(url, pgOptions(url, { max: 1 }));
 
 async function clear() {
   const ids = (await sql`
     SELECT id FROM crm_properties WHERE tenant_id = ${TENANT} AND id LIKE 'p\\_demo\\_%'
     UNION ALL SELECT id FROM crm_owners WHERE tenant_id = ${TENANT} AND id LIKE 'own\\_demo\\_%'
     UNION ALL SELECT id FROM crm_leads WHERE tenant_id = ${TENANT} AND id LIKE 'l\\_demo\\_inv\\_%'`).map((r: any) => r.id);
+  await sql`DELETE FROM lead_shortlist WHERE tenant_id = ${TENANT} AND lead_id LIKE 'l\\_demo\\_inv\\_%'`;
   const a = await sql`DELETE FROM crm_agreements WHERE tenant_id = ${TENANT} AND id LIKE 'agr\\_demo\\_%'`;
   const e = ids.length ? await sql`DELETE FROM crm_timeline_events WHERE tenant_id = ${TENANT} AND record_id IN ${sql(ids)}` : { count: 0 };
   const p = await sql`DELETE FROM crm_properties WHERE tenant_id = ${TENANT} AND id LIKE 'p\\_demo\\_%'`;
@@ -57,6 +60,7 @@ async function clear() {
   console.log(`cleared: ${p.count} flats, ${o.count} owners, ${a.count} agreements, ${l.count} leads, ${e.count} timeline events`);
 }
 
+if (!clearOnly) await adoptSynthetic(sql, TENANT, 'seed-dev-inventory');
 await clear();
 if (clearOnly) { await sql.end(); process.exit(0); }
 
@@ -133,6 +137,33 @@ for (const [key, name, phone, deal, loc] of LEADS) {
       ${sql.json({ locality: loc, config: '2 BHK', deal })}, now() - interval '40 days')`;
 }
 
+// The person the smoke tests open from a search: one lead of that name, with a
+// flat on their shortlist to open from the record.
+await sql`INSERT INTO crm_leads (id, tenant_id, name, phone, stage, source, agent_id, deal, locality, req, created_at)
+  VALUES ('l_demo_inv_3', ${TENANT}, 'Aarav Gupta', '+919822100045', 'Interested', 'Demo', ${agent(0)}, 'rent', 'Fairhaven',
+    ${sql.json({ locality: 'Fairhaven', config: '2 BHK', deal: 'rent' })}, now() - interval '9 days')`;
+await sql`INSERT INTO lead_shortlist (id, tenant_id, lead_id, property_id)
+  VALUES ('shl_l_demo_inv_3_p_demo_f1', ${TENANT}, 'l_demo_inv_3', 'p_demo_f1')`;
+
+// The calling list: owners from the society rolls, not yet worked to a key.
+// Four projects, a few on each agent and a few on nobody.
+const ROLL_FIRST = ['Suresh', 'Anita', 'Vikram', 'Lata', 'Deepak', 'Sunita', 'Manoj', 'Rekha', 'Ajay', 'Smita', 'Ravi', 'Usha'];
+const ROLL_LAST = ['Kulkarni', 'Pawar', 'Deshpande', 'More', 'Jadhav', 'Chavan', 'Gaikwad', 'Patil', 'Shinde'];
+const ROLL_STAGES = ['New', 'New', 'Contacted', 'Interested', 'New', 'Contacted'];
+const ROLLS: [string, string, string][] = [['Oakridge Towers', 'A', 'Fairhaven'], ['Lakeview Residency', '1', 'Kingsmead'],
+  ['Palm Grove', '', 'Northgate'], ['Sunridge Heights', 'D', 'Sunridge']];
+let roll = 0;
+for (const [project, tower, locality] of ROLLS) {
+  for (let k = 0; k < 10; k++, roll++) {
+    const name = `${ROLL_FIRST[roll % ROLL_FIRST.length]} ${ROLL_LAST[(roll * 7) % ROLL_LAST.length]}`;
+    const who = roll % 5 === 4 ? null : agent(roll);
+    await sql`INSERT INTO crm_owners (id, tenant_id, name, phone, project, tower, unit_no, config, locality, stage, source, agent_id, created_at, updated_at)
+      VALUES (${`own_demo_roll_${roll}`}, ${TENANT}, ${name}, ${`98221003${String(roll).padStart(2, '0')}`}, ${project}, ${tower || null},
+        ${String(101 + k * 100 + (roll % 4))}, ${['1 BHK', '2 BHK', '3 BHK'][roll % 3]}, ${locality}, ${ROLL_STAGES[roll % ROLL_STAGES.length]},
+        'Import', ${who}, now() - interval '30 days', now() - interval '30 days')`;
+  }
+}
+
 // [key, kind, status, flat, lead, party, phone, amount, deposit, start (days from today), end (days from today)]
 const AGREEMENTS: [string, 'rent' | 'sale', string, string, string | null, string, string, number, number | null, number, number | null][] = [
   ['1', 'rent', 'active', 'a1', 'l_demo_inv_1', 'Rohit Kale', '+919822100041', 29000, 90000, -315, 20],
@@ -152,5 +183,5 @@ const [c] = await sql`SELECT
   (SELECT count(*)::int FROM crm_properties WHERE tenant_id = ${TENANT} AND id LIKE 'p\\_demo\\_%') AS flats,
   (SELECT count(*)::int FROM crm_owners WHERE tenant_id = ${TENANT} AND id LIKE 'own\\_demo\\_%') AS owners,
   (SELECT count(*)::int FROM crm_agreements WHERE tenant_id = ${TENANT} AND id LIKE 'agr\\_demo\\_%') AS agreements`;
-console.log(`wrote: ${c.flats} flats (11 that match leads, 4 that match none, 4 let or sold), ${c.owners} owners (3 ready to convert), ${c.agreements} agreements, 2 leads`);
+console.log(`wrote: ${c.flats} flats (11 that match leads, 4 that match none, 4 let or sold), ${c.owners} owners (3 ready to convert, ${roll} on the calling list), ${c.agreements} agreements, 3 leads`);
 await sql.end();

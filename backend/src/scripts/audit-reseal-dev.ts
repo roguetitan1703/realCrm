@@ -17,6 +17,7 @@
 process.env.APP_ENV = process.env.APP_ENV || 'development';
 import postgres from 'postgres';
 import { appEnv, databaseUrl, dbRef } from '../services/env.js';
+import { pgOptions } from '../services/pgOptions.js';
 
 const WRITE = process.argv.includes('--write');
 if (appEnv() !== 'development') { console.error(`✗ APP_ENV is "${appEnv()}". Development only.`); process.exit(1); }
@@ -27,7 +28,7 @@ if (process.env.DATABASE_URL && dbRef(url) === dbRef(process.env.DATABASE_URL)) 
   process.exit(1);
 }
 
-const sql = postgres(url, { max: 1, ssl: 'require' });
+const sql = postgres(url, pgOptions(url, { max: 1 }));
 
 async function main() {
   const { verifyChain } = await import('../services/audit.js');

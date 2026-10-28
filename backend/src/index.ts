@@ -31,7 +31,9 @@ import { notificationsRouter } from './routes/notifications';
 import { pwaRouter } from './routes/pwa';
 import { filesRouter, mediaRouter } from './routes/files';
 import { withRequestContext } from './middleware/auth';
-import { getTenantForIngest, runRoutingSweeps } from './services/store';
+import { getTenantForIngest, runRoutingSweeps, booted } from './services/store';
+import { sql } from './services/db';
+import { startDevRefresh } from './services/devData';
 import { failAbandonedImports } from './services/imports';
 import { scheduleCloseSettled } from './services/alertLifecycle';
 import { processScheduledNotifications } from './services/notifications';
@@ -393,6 +395,9 @@ if (isMain || process.env.START_SERVER === 'true') {
     // polled /pulse, so an alert held for 09:00 waited for the first person to
     // open the app — the one moment it was meant to reach them before.
     setInterval(() => { processScheduledNotifications().catch(() => {}); }, 60 * 1000);
+    // Development only: synthetic firms' dates brought up to today once the
+    // schema is ready, and again at the day's turn (services/devData.ts).
+    startDevRefresh(sql, booted);
     // CAN THIS SERVER STILL OPEN THE PORTALS' KEYS?
     //
     // Replacing the demo JWT_SECRET in August silently replaced the lock on

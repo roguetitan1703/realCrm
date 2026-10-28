@@ -22,6 +22,7 @@
  * Writes nothing. Safe on any tenant, including bhumi.
  */
 import postgres from 'postgres';
+import { pgOptions } from '../services/pgOptions.js';
 
 const arg = (k: string, d?: string) =>
   process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1] ?? d;
@@ -30,7 +31,7 @@ const slug = arg('tenant');
 if (!slug) { console.error('Pass --tenant=<slug>.'); process.exit(1); }
 const since = arg('since');
 
-const sql = postgres(process.env.DATABASE_URL!, { max: 1, ssl: 'require' });
+const sql = postgres(process.env.DATABASE_URL!, pgOptions(process.env.DATABASE_URL!, { max: 1 }));
 
 const pad = (v: any, n: number) => String(v ?? '').padEnd(n).slice(0, n);
 

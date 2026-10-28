@@ -1,50 +1,118 @@
-# RealEstate by Delpat — CRM
+# The real estate CRM by Delpat
 
-> **📍 Now a production SaaS.** For the current plan and how the docs are
-> organized, start at **[docs/STATE.md](./docs/STATE.md)**,
-> **[docs/BACKLOG.md](./docs/BACKLOG.md)** and **[docs/README.md](./docs/README.md)**. The note below is the original demo
-> README, kept for history.
+A white-label CRM that Delpat sells to real estate firms. Leads arrive from the
+property portals and the firm's own forms, are routed to agents, and are worked
+by phone: calls, WhatsApp, follow-ups, site visits, through to a closed deal.
+Alongside them it keeps the firm's listings, owners, tenants and buyers. Each
+firm is a workspace at its own address (`/<firm>`), and every row in the
+database belongs to exactly one firm. It is in production with paying firms.
 
----
+## Who uses it
 
-# Bhumi Propcity — CRM demo (historical)
+- **An agent, on a phone, between calls.** They want the next person to ring
+  and a way to record what happened with one thumb.
+- **The firm's owner or manager, at a desk.** They want to know whether the
+  team is working the book and where it is stuck, by agent.
 
-A clickable, white-label real-estate CRM demo for a Pune brokerage. Pure static
-front-end (HTML/CSS/JS, no build step, no backend). All data is in-memory and
-resets on refresh — perfect for a repeatable live walkthrough.
+Every screen belongs to one of the two. [CLAUDE.md](./CLAUDE.md) is the working
+agreement for anyone changing the code; read it before your first change.
 
-## Run locally
-Just open `index.html` in a browser. That's it.
+## What you need
 
-Any phone number + any OTP logs you in. Narrow the window (or use a phone /
-device toolbar) for the mobile field-tool; a wide window shows the desktop
-back-office.
+- **Node 20 or newer** (`node --version`)
+- **Postgres 15 or newer**, running on your machine. Either install it
+  (postgresql.org/download) or run it in Docker:
 
-## Deploy (pick one — both work, it's a static site)
+  ```
+  docker run -d --name realcrm-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
+  ```
 
-### Vercel (fastest, best mobile link)
-- **Web:** vercel.com → New Project → import this folder / repo → deploy. No
-  settings needed (`vercel.json` is included).
-- **CLI:** `npm i -g vercel` then run `vercel` in this folder and follow the prompts.
+No accounts, keys or files from Delpat are needed.
 
-### GitHub Pages
-1. Push this folder to a GitHub repo.
-2. Repo → Settings → Pages → Source: `main` branch, `/root`.
-3. Your link is `https://<user>.github.io/<repo>/`.
+## Set up
 
-All asset paths are relative, so it works from any subpath.
+```
+git clone <this repository> realcrm
+cd realcrm
+npm install
+npm run setup:local
+```
 
-## White-label / rebrand
-Everything brand-specific lives in **`theme.js`** (`brand` object) — firm name,
-monogram, city line. Change it there and it updates everywhere, including the
-WhatsApp message sign-offs. The next brokerage is a config swap, not a rebuild.
+`setup:local` expects the Postgres user `postgres` with password `postgres` on
+port 5432. If yours differs, say so once:
 
-## Files
-- `index.html` — shell (fonts, animations, script loads)
-- `theme.js` — brand + design tokens
-- `data.js` — seed data + matching + WhatsApp message generation
-- `app.js` — state container + all view-models + CRUD
-- `render.js` — the Actions rail component
-- `screens.js` — mobile screens
-- `desktop.js` — desktop back-office
-- `main.js` — modals, search, toasts, render loop
+```
+npm run setup:local -- --db=postgres://USER:PASSWORD@localhost:PORT/realcrm
+```
+
+It creates the `realcrm` database, writes `.env` (only if you have none), builds
+the schema and seeds a demo firm, `delpat`, with made-up people: leads,
+owners, flats and a few days of the team's work. Running it again changes
+nothing except bringing the dates up to today.
+
+## Run
+
+In two terminals:
+
+```
+npm run dev:api     # the API, http://localhost:5001
+npm run dev         # the app, http://localhost:5173
+```
+
+Open **http://localhost:5173/delpat** and sign in. The password is `00000000`
+for everyone:
+
+| Role    | Login            |
+|---------|------------------|
+| Owner   | `akashpatel`     |
+| Manager | `siddharthvarma` |
+| Agent   | `kavish` (also `mohit`, `aniket`, `rupali`) |
+
+The agent's view is the phone one: narrow the window or use the browser's
+device toolbar.
+
+The demo data never goes stale. Each time the API starts, and after midnight
+while it runs, every date in the demo firm moves forward by the days that have
+passed, so there is always work overdue and due today. To do it without the
+API: `npm run dev:refresh`.
+
+Email, push notifications and photo upload are off in a local setup; the API
+says so in one line when it starts. Everything else works.
+
+## Test
+
+With both `dev:api` and `dev` running:
+
+```
+npx playwright install chromium   # once
+npm run test:smoke
+```
+
+The smoke tests sign in as the owner (desk), the manager and an agent (iPhone
+13 size) and walk the main flows. They refuse to run against anything but
+localhost.
+
+Before you push: `npm run build` (the only valid frontend check; it needs
+`VITE_API_URL`, which `.env` has) and `npm run check:api`.
+
+## Where things are
+
+| Path | What |
+|---|---|
+| `src/modules/` | One file per screen; `definitions.jsx` drives every module |
+| `src/components/` | Shared pieces: lists, records, sheets, toolbars |
+| `src/lib/` | API client, store, formatting |
+| `backend/src/routes/` | The HTTP API, one router per area |
+| `backend/src/services/` | Everything the routes call; `db.ts` holds the schema (`initSchema`) |
+| `backend/src/scripts/` | Seeders and maintenance tools, each with a header saying when to run it |
+| `tests/smoke/` | The smoke tests |
+| `docs/` | `STATE.md` (where things stand), `BACKLOG.md` (the work), `specs/` (designs) |
+
+## Do not
+
+- **Run `npm run dev:api:prod`.** It connects to the production database and
+  writes to it.
+- **Open or sign in to a client firm's workspace** (`bhumi`, `mahalaxmi`).
+  Work in `delpat`, which is made-up data.
+- **Push to `main`.** Every commit to it deploys. Work on a branch.
+- **Commit `.env`** or put a real person's details in seed data.

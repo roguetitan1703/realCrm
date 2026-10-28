@@ -31,6 +31,7 @@
  * ============================================================================
  */
 import postgres from 'postgres';
+import { pgOptions } from '../services/pgOptions.js';
 
 const arg = (k: string) => process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1];
 const env = String(arg('env') || '').toLowerCase();
@@ -43,7 +44,7 @@ const only = arg('tenant') || null;
 const apply = process.argv.includes('--apply');
 
 const { databaseUrl, dbRef } = await import('../services/env');
-const sql = postgres(databaseUrl(), { max: 1, ssl: 'require' });
+const sql = postgres(databaseUrl(), pgOptions(databaseUrl(), { max: 1 }));
 
 /** The walk. The endings are deliberately absent — Reject sets those. */
 const WALK = ['New', 'Call Not Received', 'Incoming Not Available', 'Switch Off', 'Contacted', 'Interested', 'Key Received'];

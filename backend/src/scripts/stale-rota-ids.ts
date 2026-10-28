@@ -20,6 +20,7 @@
  *   npx tsx --env-file=.env backend/src/scripts/stale-rota-ids.ts
  */
 import postgres from 'postgres';
+import { pgOptions } from '../services/pgOptions.js';
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL (production) is not set.');
@@ -28,7 +29,7 @@ if (process.env.DEV_DATABASE_URL && url === process.env.DEV_DATABASE_URL) {
 }
 // READ ONLY inside the transaction: the Supabase pooler drops the
 // default_transaction_read_only startup parameter, so it never protected anything.
-const sql = postgres(url, { max: 1, ssl: 'require' });
+const sql = postgres(url, pgOptions(url, { max: 1 }));
 
 try {
   await sql.begin('READ ONLY', async (sql) => {

@@ -75,7 +75,14 @@ export function dbRef(url: string | undefined): string {
   const direct = url.match(/@db\.([a-z0-9]+)\.supabase\.co/i)?.[1];
   if (direct) return direct.toLowerCase();
   const pooled = url.match(/postgres\.([a-z0-9]+):/i)?.[1];
-  return (pooled || '').toLowerCase();
+  if (pooled) return pooled.toLowerCase();
+  // ANY OTHER POSTGRES — a laptop's own, a container — is named by host, port
+  // and database. Returning '' here made every guard below read "unknown" for a
+  // local database, and seed-dev refused to seed one at all.
+  try {
+    const u = new URL(url);
+    return `${u.hostname.replace(/^\[|\]$/g, '')}:${u.port || '5432'}/${u.pathname.replace(/^\//, '') || 'postgres'}`.toLowerCase();
+  } catch { return ''; }
 }
 
 export function appEnv(): AppEnv {
