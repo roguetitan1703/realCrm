@@ -8,6 +8,8 @@
     "dev:api": "tsx backend/src/scripts/run-api.ts --env=development --watch",
     "dev:api:prod": "tsx backend/src/scripts/run-api.ts --env=production --port=5000 --watch",
     "start:api": "tsx backend/src/scripts/run-api.ts --env=production",
+    "deploy:api": "bash scripts/deploy-api.sh",
+    "backup": "bash scripts/db-backup.sh --cron",
     "start:api:dev": "tsx backend/src/scripts/run-api.ts --env=development",
     "build": "npm run check:vocab && npm run check:names && vite build --mode production",
     "build:dev": "npm run check:vocab && vite build --mode development",
