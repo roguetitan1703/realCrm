@@ -29,8 +29,21 @@ const requireApiUrl = (mode) => ({
   },
 })
 
+// WHICH BUILD THIS IS. Baked into the bundle as __BUILD_ID__ and written beside
+// it as /version.json, so a tab left open across a deploy can see a newer one
+// is live (src/lib/appVersion.js). Vercel names the commit; anywhere else the
+// build time stands in. `vite` (dev) is 'dev', which never checks.
+const BUILD_ID = (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 12) || Date.now().toString(36)
+const buildVersion = () => ({
+  name: 'build-version',
+  config: (_, { command }) => ({ define: { __BUILD_ID__: JSON.stringify(command === 'build' ? BUILD_ID : 'dev') } }),
+  generateBundle() {
+    this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ build: BUILD_ID }) })
+  },
+})
+
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), requireApiUrl(mode)],
+  plugins: [react(), requireApiUrl(mode), buildVersion()],
   // 5001 is where `npm run dev:api` puts the DEVELOPMENT backend — production
   // keeps 5000, so both can run on one machine and neither has to be stopped to
   // look at the other. `npm run dev:api:prod` is the deliberate way to point a

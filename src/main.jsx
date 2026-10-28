@@ -5,6 +5,7 @@ import Gallery from './modules/Gallery.jsx'
 import { SharedLinkPage, CataloguePage, CatalogueHomePage } from './modules/Public.jsx'
 import { registerServiceWorker, applyPwaIdentity, slugFromLocation } from './lib/pwa.js'
 import { captureSupport } from './lib/support.js'
+import { somethingTyped } from './lib/appVersion.js'
 
 // THE DESK AND THE CONSOLE LOAD ON THEIR OWN. A buyer opening a shared link or
 // the catalogue gets the buyer's pages and nothing else: not the desk, and not
@@ -22,9 +23,7 @@ const RELOADED = 'chunk-reload-at'
 window.addEventListener('vite:preloadError', (event) => {
   // Never over someone's typing: a form with text in it handles its own
   // missing piece (Public.jsx's phone box falls back to a plain field).
-  const typed = [...document.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea')]
-    .some(el => el.value && el.value.trim())
-  if (typed) return
+  if (somethingTyped()) return
   let last = null
   try { last = sessionStorage.getItem(RELOADED) } catch { /* storage blocked */ }
   if (last) return

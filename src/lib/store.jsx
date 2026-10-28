@@ -19,6 +19,7 @@ import { disablePush } from './push.js'
 import { readSupport, endSupport } from './support.js'
 import { isOpen } from '../data/leadStatus.js'
 import { canWork, isNotWorkable, notWorkableText } from './workforce.js'
+import { reloadIfNewBuild } from './appVersion.js'
 
 // Pending shortlist writes, per lead (see changeShortlist).
 const shortlistQueue = new Map()
@@ -970,8 +971,12 @@ export function StoreProvider({ children }) {
   // timer entirely; this is the version that works today on every browser,
   // including the ones that never grant notification permission.
   const pulseRef = useRef(null)
+  // Keyed on signing in: read only at mount, a session started on the sign-in
+  // screen never armed the pulse, so nothing moved until the page was reloaded.
+  const loggedIn = state.loggedIn
   useEffect(() => {
-    if (!apiClient.getToken?.()) return
+    if (!loggedIn || !apiClient.getToken?.()) return
+    pulseRef.current = null
 
     let stopped = false
     let timer = null
@@ -980,9 +985,11 @@ export function StoreProvider({ children }) {
 
     const FAST = 15000, SLOW = 60000, QUIET_AFTER = 8
 
-    const check = async () => {
+    const check = async (force = false) => {
       if (stopped || checking) return
       if (document.visibilityState !== 'visible') return
+      // A newer deploy than this tab runs: reload at a safe moment (appVersion.js).
+      reloadIfNewBuild({ force, pendingWrites: !!apiClient.hasPendingWrites?.() })
       // A poll landing mid-write would paint the pre-write row back on screen.
       if (apiClient.hasPendingWrites?.()) return
       checking = true
@@ -1018,7 +1025,7 @@ export function StoreProvider({ children }) {
     const wake = () => {
       if (document.visibilityState !== 'visible') return
       quiet = 0
-      check().then(arm)
+      check(true).then(arm)
     }
     document.addEventListener('visibilitychange', wake)
     window.addEventListener('online', wake)
@@ -1030,7 +1037,7 @@ export function StoreProvider({ children }) {
       document.removeEventListener('visibilitychange', wake)
       window.removeEventListener('online', wake)
     }
-  }, [loadServerState, loadNotifUnread])
+  }, [loggedIn, loadServerState, loadNotifUnread])
 
 
   // `act` is one thing to do about what just happened — Undo — as { label, run }.
