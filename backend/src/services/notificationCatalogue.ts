@@ -47,6 +47,7 @@ export type Audience =
   | 'assignee'        // the one person who now holds the record
   | 'previous'        // the person it was taken away from
   | 'desk'            // owners + managers, via notifyRoles
+  | 'owner'           // the firm's owners only (feedWatch.ts asserts there is one)
   | 'actor';          // the person who did the thing (rare, and usually wrong)
 
 export interface NotifKind {
@@ -91,7 +92,7 @@ export interface NotifKind {
 export type Urgency = 'now' | 'at_time' | 'morning' | 'drawer';
 
 /** The close tests alertLifecycle.ts knows. */
-export const CLOSE_TESTS = ['lead_worked', 'lead_worked_desk', 'lead_routed', 'booking', 'owner_worked', 'agreement', 'share_work', 'buyer_ask', 'opened'] as const;
+export const CLOSE_TESTS = ['lead_worked', 'lead_worked_desk', 'lead_routed', 'booking', 'owner_worked', 'agreement', 'share_work', 'buyer_ask', 'feed_alive', 'opened'] as const;
 export type CloseTest = typeof CLOSE_TESTS[number];
 
 /**
@@ -194,11 +195,30 @@ export const NOTIFICATIONS: NotifKind[] = [
       // A sales opening, not a fire: the morning summary.
       trigger: "a home matching a buyer's New homes like these enters the catalogue or becomes Available again — at most once a day per lead", urgency: 'morning', closesWhen: 'share_work', gate: null }),
 
+  // ---- A portal stopped sending (feedWatch.ts) ----------------------------
+  // bhumi's 99acres sent nothing from 12 Sep to 9 Oct and nobody noticed for
+  // four weeks: a silent portal is leads the firm pays for, lost, and blamed on
+  // the CRM. ONE open alert per connection, to the owners; a push closes it
+  // (`feed_alive`), pausing or deleting the connection closes it `not_yours`.
+  // Raised again only after that one has closed. The rule is FEED_SILENT below.
+  K({ key: 'feed_silent', label: 'A portal has sent nothing for a week', audience: 'owner',
+      trigger: 'an active connection whose last push is older than FEED_SILENT.silentDays, after at least FEED_SILENT.minPushes in the FEED_SILENT.priorDays before it',
+      urgency: 'morning', closesWhen: 'feed_alive', gate: null }),
+
   K({ key: 'remark_added', label: 'Someone left a remark', audience: 'assignee',
       // Demoted to the drawer. Somebody typing a note on your record is worth
       // knowing and is not worth a buzz.
       trigger: 'a remark is written on a record somebody else holds', urgency: 'drawer', closesWhen: 'opened', gate: null }),
 ];
+
+/**
+ * WHEN A FEED COUNTS AS SILENT (docs/PLAN.md, feed watch). Silent: no push for
+ * `silentDays`. Worth an alert only for a feed that was alive — at least
+ * `minPushes` pushes in the `priorDays` ending at its last push — so a portal
+ * that sends twice a month, or a connection set up and never used, is not
+ * announced every week.
+ */
+export const FEED_SILENT = { silentDays: 7, priorDays: 28, minPushes: 8 } as const;
 
 const BY_KEY = new Map(NOTIFICATIONS.map(k => [k.key, k]));
 

@@ -22,9 +22,12 @@ Paying tenants are `bhumi` and `mahalaxmi`. A line that writes their data says s
 The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 `usage-2026-10-17.md`. Decisions waiting on Om are `PLAN.md` §6.
 
-- **Feed watch** — an active integration silent 7+ days after a normal month
-  raises one alert to the owner and to Delpat. bhumi's 99acres sent nothing for
-  4 weeks (12 Sep – 9 Oct) and nobody noticed. *owner, Delpat*
+- **Feed watch: the Delpat half.** The owner's `feed_silent` alert is built on
+  `development` (`services/feedWatch.ts`, catalogue `FEED_SILENT`); before the
+  deploy Om runs `scripts/feed-watch-preview.ts` read-only on production. Left:
+  silent feeds in the console (it shows no connections today, only lead
+  sources on the firm page) and a message to Om (`email.ts sendMail` to
+  `superadmins.email` exists; no channel built). *Delpat*
 
 ## Next — in plan order
 

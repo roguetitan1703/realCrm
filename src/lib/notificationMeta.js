@@ -27,6 +27,7 @@ const META = {
   followup_set: { icon: 'calendar', tone: 'info' },
   followup_due: { icon: 'clock', tone: 'attention' },
   agreement_ending: { icon: 'calendar', tone: 'attention' },
+  feed_silent: { icon: 'zap', tone: 'urgent' },
   site_visit_reminder: { icon: 'mapPin', tone: 'attention' },
   calendar_task_assigned: { icon: 'calendar', tone: 'info' },
   remark_added: { icon: 'note', tone: 'info' },

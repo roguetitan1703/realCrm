@@ -158,6 +158,16 @@ function rule(test: CloseTest, tz: string): Rule | null {
             AND l.agent_id IS NOT NULL AND l.agent_id <> n.user_id)`;
       return { pending: sql`(${sw.pending} AND NOT ${heldByOther})`, done: sw.done };
     }
+    // A silent portal (feedWatch.ts): open while the connection is still
+    // active and nothing has arrived since the alert. A push → done; paused or
+    // deleted → not_yours.
+    case 'feed_alive': return {
+      pending: sql`EXISTS (SELECT 1 FROM integrations i
+        WHERE i.tenant_id = n.tenant_id AND i.id = ANY(n.record_ids) AND i.active
+          AND (i.last_received_at IS NULL OR i.last_received_at <= n.created_at))`,
+      done: sql`EXISTS (SELECT 1 FROM integrations i
+        WHERE i.tenant_id = n.tenant_id AND i.id = ANY(n.record_ids) AND i.last_received_at > n.created_at)`,
+    };
     case 'opened': return null;
   }
 }

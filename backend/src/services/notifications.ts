@@ -24,6 +24,7 @@ import { followUpKind } from './followUp.js';
 import { deskConfigOf, type DeskConfig } from './store.js';
 import { runShareRetention } from './retention.js';
 import { buyerAskSweep } from './buyerAsks.js';
+import { feedWatchSweep } from './feedWatch.js';
 
 function tid(): string {
   return getContext()?.tenantId || DEFAULT_TENANT_ID;
@@ -49,7 +50,7 @@ export interface NotifyInput {
    * (alertLifecycle.ts). Read from `link` when not given, which covers every
    * single-record alert; a batch passes its ids.
    */
-  record?: { kind: 'lead' | 'owner' | 'agreement' | 'share_tap'; ids: string[] };
+  record?: { kind: 'lead' | 'owner' | 'agreement' | 'share_tap' | 'integration'; ids: string[] };
   /** For an alert about a booking: the follow_up.at it was about. */
   subjectAt?: string | null;
   tenantId?: string;            // defaults to the request tenant
@@ -524,6 +525,10 @@ export async function processScheduledNotifications(
       // it throttles and guards itself. A one-firm script run waits for it.
       const asks = buyerAskSweep(t, { force: !!onlySlug });
       if (onlySlug) await asks;
+
+      // A portal that stopped sending (feedWatch.ts): hourly per firm, before
+      // dispatch so a new alert is held for the morning like the rest.
+      await feedWatchSweep(t, { force: !!onlySlug });
 
       // Close what has been done, then send what has come due — held for the
       // morning, or through the night. Here because this is the one sweep.
