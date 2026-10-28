@@ -7,6 +7,7 @@ Push `development` to `main` (32 commits: sidebar #130, desk fixes, feed watch, 
 1. Phone redesign for the agent, on its own branch `b-phone-redesign` (merges only when Om approves it whole): spec + mockups done (9d5b0f7), waits on Om's six answers; then Today as one "who to ring next" list, one sheet after every call, record's first screen = next step; 44px targets. Then an owner's Team page on phone
 2. Feed watch: owner alert merged (28a7fe9); production read 28 Oct: 0 alerts at bhumi/mahalaxmi, 2 at delpat. Delpat half (console view, a daily email to Om via sendMail) waits on Om
 2a. /ingest rate limit (held pushes released by the sweep) + agents can't assign leads/owners — builder A on `a-ingest`, third round after two reviews; production peaks read 28 Oct (max 8/min, 26/hour, 27/day); re-review before merge
+2c. Dev data stays current (Om, 28 Oct: dev): on a development boot, and at the day's turn while it runs, if the last refresh is before today, move every synthetic tenant's dates forward by the gap (follow-ups, enquiries, timelines) so dev always looks like a live today; refuses anything but development like seed-dev. Plus: the API can run on a local Postgres (db.ts forces ssl), one command to create + seed it. Builder B when a slot frees
 3. Desk mismatches: fixed and merged (d9d82df + this merge); naming of "Not yet contacted"/"Never called" and the Performance default wait on Om
 4. Work OS #153 WhatsApp intro templates, wording from Om
 5. Work OS #155 merge misspelt project names, needs a spec and Om's scope
@@ -24,7 +25,6 @@ Push `development` to `main` (32 commits: sidebar #130, desk fixes, feed watch, 
 - "Call not received" moves a listing owner to Contacted (`routes/actions.ts:135`), waits on Om saying whether a no-answer is first outreach
 - Abandoning the import wizard at the map step leaves an "uploaded, 0 created" job in History, waits on a cleanup rule
 - Four write scripts import the services without CRM_NO_BOOT (dedupe-leads, remap-connections, reprocess-inbox, test-notifications): run against production they start initSchema, waits on their next use
-- Daily demo refresh (`--tick`) — waits on Om choosing dev or prod for demos
 - Calling on a phone has no Select mode, so bulk assign/take back is desk-only — waits on Om saying a manager does this from a phone
 - Leads has no "Select all matching" (Owners now does) — waits on a broker asking to take back leads in bulk
 - Merge duplicate lead: the 400 is fixed (client sent a strategy the server refuses), but nothing sets `duplicateOf`, so the action never shows — waits on Om deciding whether duplicate detection is wanted (BACKLOG, A control that does nothing)
@@ -35,4 +35,6 @@ Push `development` to `main` (32 commits: sidebar #130, desk fixes, feed watch, 
 - `webhookSender.ts` (outbound webhooks) has no caller and its menu entry is gone — waits on deciding to delete it or build outbound webhooks
 - Nightly backup: script + cron line merged (9d67760, DEPLOY.md "Nightly backup"); production dump taken 28 Oct 15:21 on this PC, verified against live counts; Supabase free plan keeps none — waits on the next push to main and Om installing the cron on the EC2
 - Regression test suite (there are no tests: 0 test files): agent-phone, owner-desk and permission flows as Playwright + API tests, run before every push to main — parked by Om 28 Oct, builder S or A later; the smoke tests in tests/smoke/ (s-smoke) are its seed
+- README.md describes the July demo ("open index.html, any OTP logs you in"); nothing in it is true now — waits on 2c (the real local setup) so it can say one true thing
+- Dev API (api.dev.re.delpat.in, re-api-dev on the EC2) answers 502 (28 Oct) — waits on Om looking at PM2 on the box
 - Duty status (crm_agents.duty_status): nothing sets it, every agent ACTIVE in prod; route now desk-only — waits on Om saying remove it
