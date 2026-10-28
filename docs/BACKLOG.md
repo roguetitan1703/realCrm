@@ -62,7 +62,7 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 - **Bulk unassign a finished calling list** (Work OS #154) — `POST
   /owners/bulk-assign` already takes null; needs an entry point, owner only.
   Next to build. *owner*
-- **Bulk merge misspelt project names** (Work OS #155) — nothing exists
+- **Bulk merge misspelt project names** (Work OS #155) — a rename, not a record merge: pick the variant names, choose one, rewrite `project` on `crm_properties` AND `crm_owners` (calling list), timeline entry with the old name. Nothing exists yet
   (`projectNorm` in `store.ts` only normalises); needs a spec. Waits on Om:
   scope (owners, leads, flats) and whether aliases apply at intake. *owner*
 
