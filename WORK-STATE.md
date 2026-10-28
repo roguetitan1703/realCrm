@@ -1,10 +1,10 @@
 # Work state
 
 ## Now
-Push `development` to `main` (32 commits: sidebar #130, desk fixes, feed watch, small fixes, backup script, npm deploy:api/backup, smoke tests). Smoke 39/39 on development d50811d; waits on Om's go, then `npm run deploy:api` and the backup cron on the EC2. Production got 6078505 on 28 Oct (deploy confirmed by 401 on /workspace/reset and /pulse).
+Push `development` to `main` (67 commits since 6078505: ingest limits and assignment rules, auto-reload on a new deploy, local setup + README, callback counts, follow-ups spec, smoke flake fix). Smoke 41/41 on development 6c25fe2, 28 Oct; waits on Om's go, then on the EC2 `git pull origin main`, `npm run deploy:api`, `npm run backup` and the cron line.
 
 ## Next
-1. Phone UI and UX, new from the user flows (Om, 28 Oct: the earlier spec 9d5b0f7 was anchored to the current screens and is superseded): a fresh Fable design is running — flows, phone mock-ups, decisions. Om reviews it, then build on its own branch, merged only when he approves it whole. Musts: status changed from the lead list; call outcome and follow-up booked in one action; the screen says what changed and what happens next, never blocks
+1. Phone UI and UX, new from the user flows (the earlier spec 9d5b0f7 rearranged the current screens and is superseded): the fresh design is on `b-phone-redesign` (c7e7aa1, docs/specs/phone-ui/) and published for Om. Waits on his review and its 9 decisions plus follow-ups D1–D5. Then slice 1: the after-call sheet, its `call-result` write, ack + Undo. Built on its own branch, merged only when Om approves it whole
 2. Feed watch: owner alert merged (28a7fe9); production read 28 Oct: 0 alerts at bhumi/mahalaxmi, 2 at delpat. Delpat half (console view, a daily email to Om via sendMail) waits on Om
 2c. Local setup + dev data stays current: merged 28 Oct (`npm run setup:local`, `npm run dev:refresh`, README). Shared dev db needs `npm run dev:refresh -- --adopt=delpat` once; callback figures match their lists, merged (9514127)
 3. Desk mismatches: fixed and merged (d9d82df + this merge); naming of "Not yet contacted"/"Never called" and the Performance default wait on Om
