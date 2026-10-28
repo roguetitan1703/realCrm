@@ -5,7 +5,9 @@ Production deploy of 6078505 (security hotfix incl. the `/workspace/reset` wipe,
 
 ## Next
 1. Phone redesign for the agent, on its own branch `b-phone-redesign` (merges only when Om approves it whole): spec + mockups done (9d5b0f7), waits on Om's six answers; then Today as one "who to ring next" list, one sheet after every call, record's first screen = next step; 44px targets. Then an owner's Team page on phone
-2. Feed watch (BACKLOG Now, PLAN W1–2): `feed_silent` alert when an active portal feed goes quiet 7+ days — builder B on `b-feed-watch`
+2. Feed watch: owner alert merged (28a7fe9); production read 28 Oct: 0 alerts at bhumi/mahalaxmi, 2 at delpat. Delpat half (console view, a daily email to Om via sendMail) waits on Om
+2a. /ingest rate limit + agents can't assign in Add lead — builder A on `a-ingest`; review subagent before merge; run its peak-traffic script on production first
+2b. Small BACKLOG fixes (header sort, double-save, row menus, credential link, dead webhooks menu) — builder S on `s-small`
 3. Desk mismatches: fixed and merged (d9d82df + this merge); naming of "Not yet contacted"/"Never called" and the Performance default wait on Om
 4. Work OS #153 WhatsApp intro templates, wording from Om
 5. Work OS #155 merge misspelt project names, needs a spec and Om's scope
