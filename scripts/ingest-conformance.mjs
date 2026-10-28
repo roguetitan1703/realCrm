@@ -18,6 +18,12 @@
  */
 
 const [, , BASE = 'http://localhost:5050', TENANT = 'delpat', KEY] = process.argv
+// DEVELOPMENT ONLY: a local backend and a tenant that is not a paying firm.
+// (Both arguments were free: `node scripts/... https://api.<prod> bhumi` ran.)
+if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(BASE) || !['delpat', 'test-org', 'skyline-realty'].includes(TENANT)) {
+  console.error(`refused: ${BASE} / ${TENANT} -- local backend and delpat, test-org or skyline-realty only`); process.exit(2)
+}
+
 if (!KEY) { console.error('usage: node scripts/ingest-conformance.mjs <baseUrl> <tenant> <apiKey>'); process.exit(2) }
 
 const URL_BASE = `${BASE}/api/v1/ingest/${TENANT}`

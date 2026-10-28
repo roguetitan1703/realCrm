@@ -15,6 +15,14 @@
  */
 
 const [, , BASE = 'http://localhost:5050', TENANT = 'delpat'] = process.argv
+// DEVELOPMENT ONLY: a local backend and a tenant that is not a paying firm.
+// (Both arguments were free: `node scripts/... https://api.<prod> bhumi` ran.)
+if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(BASE) || !['delpat', 'test-org', 'skyline-realty'].includes(TENANT)) {
+  console.error(`refused: ${BASE} / ${TENANT} -- local backend and delpat, test-org or skyline-realty only`); process.exit(2)
+}
+// It also writes through db.ts, so the database must be the development one.
+if (!['development', 'local'].includes(process.env.APP_ENV || '')) { console.error('refused: set APP_ENV=development'); process.exit(2) }
+
 const { sql } = await import('../backend/src/services/db.ts')
 const { createIntegration, setParserConfig, deleteIntegration } = await import('../backend/src/services/ingestion.ts')
 

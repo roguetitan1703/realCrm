@@ -78,15 +78,12 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 - Sale-stamped leads from before the rule (bhumi 252, mahalaxmi 67) cannot be
   told from real sales by count; `scripts/reprocess-inbox.ts --overwrite=deal`
   reads the stored payload.
-- `test:ingest` / `test:leadflows` hit a real endpoint; which tenant is unaudited.
 - The app has never stored an audit-chain check (`audit_checks` empty); the
   chain verifies clean, 7 chains, 13,941 rows.
 - `.env` lines split on `\n` only; check `grep -c $'\r' .env` on EC2 first.
 - Add lead offers an agent "Unassigned" (it now means "the firm's rule
   decides") and lets an agent name a colleague; the rules say agents don't
   assign. *agent*
-- "Back on their link" (`maybeReturned`) is check-then-insert; two parallel
-  opens can raise it twice.
 - **Owners have no duplicate flag or merge** (specs/phone.md). After the phone
   repair, owners on one number: bhumi 10 new + 31 already, mahalaxmi 6 + 127
   (production dry run, 20 Oct). Only a search by the number shows them. *owner*
