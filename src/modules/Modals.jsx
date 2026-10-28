@@ -977,6 +977,7 @@ function NewOwnerModal({ store, ownerId }) {
     agentId: null,
   })
   const set = (k, v) => setF(s => ({ ...s, [k]: v }))
+  const mayAssign = canAssignLead(store.state.role)
 
   // Closes only on a saved record; a refusal leaves the form as typed.
   const [saving, setSaving] = useState(false)
@@ -1029,13 +1030,15 @@ function NewOwnerModal({ store, ownerId }) {
         {edit?.unitRef && !edit?.unitNo && (
           <div className="imp-unmapped">On file as: {edit.unitRef}</div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: mayAssign ? '1fr 1fr' : '1fr', gap: 12 }}>
           <div className="field">
             <label>Locality</label>
             <SuggestInput id="owner-locality" value={f.locality} onChange={v => set('locality', v)}
               options={localities(store)} placeholder="Where's the unit?" />
           </div>
-          <div className="field">
+          {/* The desk's: an agent's owner is theirs (createOwner), and the
+              holder of one they edit is not theirs to change (updateOwner). */}
+          {mayAssign && <div className="field">
             <label>Assign to</label>
             <select className="input" value={f.agentId || ''} onChange={e => set('agentId', e.target.value || null)} style={{ width: '100%' }}>
               <option value="">Unassigned</option>
@@ -1044,7 +1047,7 @@ function NewOwnerModal({ store, ownerId }) {
                 <option value={f.agentId} disabled>{(store.agentById(f.agentId)?.name || 'Former member')} · {notWorkableReason(store.agentById(f.agentId))}</option>
               )}
             </select>
-          </div>
+          </div>}
         </div>
         <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={save} icon="check">{saving ? 'Saving…' : edit ? 'Save Changes' : 'Add Owner'}</Button></div>
       </div>

@@ -411,7 +411,7 @@ export const OWNER_MODULE_SCHEMA = {
     { key: 'source', label: 'Source', type: 'text', section: 'domain' },
     {
       key: 'agentId', label: 'Assigned Owner', type: 'select', section: 'domain',
-      // The desk's, as on a lead (updateOwner drops an agent's change).
+      // The desk's, as on a lead (updateOwner refuses an agent's change).
       editIf: (store) => canAssignLead(store?.state?.role),
       // Same disabled-departed-holder guard as the lead schema — see there for why.
       options: (store, record) => {
