@@ -123,9 +123,10 @@ gaps are in `specs/notifications.md` §1, not here.
   mahalaxmi 3,737 / 0; leads bhumi 1,033 / 3, mahalaxmi 547 / 0. The enquiry form's plain-field fallback
   when the phone box chunk fails was not driven in a browser.
 
-- **A listing owner's Callback stays on To do after the call** (seen on the
-  demo, 17 Oct): a lead's booked call closes on Call, an owner's did not.
-  Check whether that is the rule or a gap. *agent*
+- **A listing owner's Callback stays on To do after the call**: checked 28 Oct,
+  it is the rule (an owner's callback never ends on a call; a lead's ends on
+  Call, before the outcome). Both are wrong; one model proposed in
+  `specs/follow-ups.md`, waits on Om's D1–D5. *agent*
 - **Now due, frontend** (deployed 27 Oct): /privacy, /terms and /data-deletion
   open in an incognito window with the full text in the page source (Meta App
   Review).
