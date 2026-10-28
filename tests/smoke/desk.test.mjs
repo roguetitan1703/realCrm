@@ -20,12 +20,13 @@ const pagerTotal = async () => {
   const m = t.match(/of\s+(\d+)/)
   return m ? Number(m[1]) : null
 }
+const pillCount = async () => Number(await page.locator('.segpill.on .segpill-c').innerText())
 const sortCaret = (label) => page.locator('table th', { hasText: label }).first().innerText()
 
 test('Dashboard tiles land on lists whose count matches and a chip shows', async () => {
   for (const [tile, urlPart, chip] of [['Not contacted', 'seg=never_contacted', '.segpill.on'],
                                        ['Follow-up overdue', 'seg=overdue', '.segpill.on'],
-                                       ['Callbacks due', 'tab=callbacks', '.segpill.on']]) {
+                                       ['Callbacks overdue', 'tab=callbacks_overdue', '.segpill.on']]) {
     await go(page, 'screen=dashboard')
     const card = page.locator('a, button, div').filter({ hasText: new RegExp('^' + tile + NL + '?\\s*\\d+$') }).last()
     const n = Number((await card.innerText()).match(/(\d+)\s*$/)[1])
@@ -34,7 +35,37 @@ test('Dashboard tiles land on lists whose count matches and a chip shows', async
     assert.ok(page.url().includes(urlPart), `${tile}: landed on ${page.url()}`)
     assert.ok(await page.locator(chip).first().isVisible(), `${tile}: no active chip`)
     assert.equal(await pagerTotal(), n, `${tile}: tile says ${n}, list says ${await pagerTotal()}`)
+    assert.equal(await pillCount(), n, `${tile}: tile says ${n}, its pill says ${await pillCount()}`)
   }
+})
+
+// THE CALLING QUEUE ROW AND THE SIDEBAR BADGE. Every callback figure on the
+// desk is a segment of the calling catalogue (backend leadSegments.ts) and
+// opens the pill of that segment: the figure, the pill and the rows are one
+// predicate. "Callbacks due 7" opened the whole Callbacks tab of 15, and
+// "Later today 0" opened the same 15. (The queue's "Never called" opens the New
+// tab, which counts a status, not a dial; its name waits on the firm.)
+test('Calling queue figures and the Calling badge each open their own pill, and the counts agree', async () => {
+  for (const [label, key] of [['Callbacks overdue', 'callbacks_overdue'], ['Callbacks later today', 'callbacks_today'], ['Unassigned', 'unassigned']]) {
+    await go(page, 'screen=dashboard')
+    const fig = page.locator('.qfig-i').filter({ has: page.locator('.qfig-l', { hasText: new RegExp('^' + label + '$') }) })
+    assert.equal(await fig.count(), 1, `no "${label}" in the calling queue row`)
+    const n = Number(await fig.locator('.qfig-v').innerText())
+    await fig.click()
+    await page.waitForTimeout(2500)
+    assert.ok(page.url().includes('tab=' + key), `${label}: landed on ${page.url()}`)
+    const on = page.locator('.segpill.on')
+    assert.ok(await on.isVisible(), `${label}: no active pill`)
+    assert.ok((await on.innerText()).startsWith(label), `${label}: active pill is "${await on.innerText()}"`)
+    assert.equal(await pillCount(), n, `${label}: figure ${n}, pill ${await pillCount()}`)
+    const rows = n ? await pagerTotal() : await page.locator('table.tbl tbody tr').count()
+    assert.equal(rows, n, `${label}: figure ${n}, list ${rows}`)
+  }
+  await go(page, 'screen=calling')
+  const badge = page.locator('nav').locator('a, button').filter({ hasText: /^Calling/ }).locator('.n-badge')
+  const b = (await badge.count()) ? Number(await badge.innerText()) : 0
+  const pill = page.locator('.segpill').filter({ hasText: /^Callbacks overdue/ })
+  assert.equal(Number(await pill.locator('.segpill-c').innerText()), b, `Calling badge ${b}, Callbacks overdue pill ${await pill.innerText()}`)
 })
 
 // "Missed" is not "overdue": a follow-up is missed once its DAY has ended

@@ -89,15 +89,34 @@ export function statusFromSheet(text) {
 }
 
 /**
- * WHERE A LINK INTO CALLING LANDS. The dashboard and Today count callbacks and
- * owners to call, and each figure opens the calling tab that holds those rows:
- * a callback figure opens Callbacks (sorted soonest first, so the ones already
- * due are at the top), "never called" opens the New tab. One map, so the two screens
- * that link in cannot land on different tabs for the same figure.
+ * THE CALLING LIST'S PILES, as the server names them (state.ownerSegments,
+ * from backend/src/services/leadSegments.ts — the predicate and the label sit
+ * together there). This list is only the fallback for an API older than this
+ * build; when the two disagree, the server is right.
+ */
+export const OWNER_SEGMENT_FALLBACK = [
+  { key: 'callbacks_overdue', label: 'Callbacks overdue', surface: ['pill', 'tile'], tone: 'alert' },
+  { key: 'callbacks_today', label: 'Callbacks later today', surface: ['pill', 'tile'] },
+  { key: 'callbacks', label: 'Callbacks', surface: ['pill'] },
+  { key: 'unassigned', label: 'Unassigned', surface: ['pill', 'tile'] },
+]
+export const ownerSegmentsOf = (state) =>
+  (state?.ownerSegments?.length ? state.ownerSegments : OWNER_SEGMENT_FALLBACK)
+export const ownerSegLabel = (state, key) =>
+  ownerSegmentsOf(state).find(s => s.key === key)?.label
+  || OWNER_SEGMENT_FALLBACK.find(s => s.key === key)?.label || key
+/** The tabs whose list is about a callback time: sorted soonest first, with the time as a column. */
+export const isCallbackTab = (tab) => String(tab || '').startsWith('callbacks')
+
+/**
+ * WHERE A LINK INTO CALLING LANDS. Every callback figure opens the pill of its
+ * own segment, so the figure and the list are one predicate; "never called"
+ * opens the New tab (a status, not a dial: the two differ, and the name waits
+ * on the firm). One map, so the screens that link in cannot land on different
+ * tabs for the same figure.
  */
 export function callingFiltersFor(segment) {
-  if (String(segment || '').startsWith('callbacks')) return { tab: 'callbacks' }
+  if (['callbacks_overdue', 'callbacks_today', 'callbacks', 'unassigned'].includes(segment)) return { tab: segment }
   if (segment === 'to_call' || segment === 'never_called') return { step: 'New' }
-  if (segment === 'unassigned') return { tab: 'unassigned' }
   return undefined
 }

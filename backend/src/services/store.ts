@@ -16,7 +16,7 @@ import { DEFAULT_SETTINGS } from '../../../src/data/theme.js';
 import { finalStageOf, stageLabelIn, LABELLED_LEAD_STAGES } from '../../../src/data/pipelineRoles.js';
 import { audit } from './audit.js';
 import { fileTicket } from './media.js';
-import { buildLeadSegments, publicSegments, noPersonActivitySince, notHandedOnSince, lastPersonActivity, lastRemark, lastRemarkAt, type LeadSegment } from './leadSegments.js';
+import { buildLeadSegments, publicSegments, buildOwnerSegments, publicOwnerSegments, OWNER_SEGMENT_CATALOGUE, OWNER_OPEN, noPersonActivitySince, notHandedOnSince, lastPersonActivity, lastRemark, lastRemarkAt, type LeadSegment } from './leadSegments.js';
 import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles, notifyOrDesk } from './notifications.js';
 import { firstRunAlertLifecycle } from './alertLifecycle.js';
@@ -1576,6 +1576,8 @@ export async function getBootstrap(): Promise<any> {
     // its own build (the two deploy separately), and the server's list wins
     // whenever it arrives.
     leadSegments: publicSegments(),
+    // The calling list's piles, from the same file and for the same reason.
+    ownerSegments: publicOwnerSegments(),
     localities: localityRows.map((r: any) => r.v),
     projects: projectRows.map((r: any) => r.v),
     configs: configRows.map((r: any) => r.v),
@@ -1730,8 +1732,7 @@ export async function getDeskSummary(): Promise<any> {
                count(*)::int AS owners,
                count(*) FILTER (WHERE last_call_at IS NOT NULL)::int AS called,
                count(*) FILTER (WHERE last_call_at >= ${today})::int AS called_today,
-               count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
-               count(*) FILTER (WHERE callback_at IS NOT NULL AND callback_at < NOW())::int AS late
+               count(*) FILTER (WHERE stage = 'Interested')::int AS interested
           FROM crm_owners WHERE tenant_id = ${t} AND agent_id IS NOT NULL GROUP BY 1),
     per_agent_lead_calls AS (SELECT author AS k, count(*)::int AS calls
           FROM crm_timeline_events
@@ -1800,7 +1801,7 @@ export async function getDeskSummary(): Promise<any> {
     owners: owners[0]?.n ?? 0,
     perAgentCalls: Object.fromEntries((perAgentCalls as any[]).map(r => [r.k, {
       owners: r.owners, called: r.called, calledToday: r.called_today,
-      interested: r.interested, late: r.late,
+      interested: r.interested,
     }])),
   };
 }
@@ -3920,20 +3921,14 @@ export async function createOwnersBatch(list: any[], ctx: ActorCtx = SYSTEM_CTX)
  * township differently.
  */
 export const projectNorm = (expr: any) => sql`lower(regexp_replace(coalesce(${expr}, ''), '[^[:alnum:]]', '', 'g'))`;
-export const OWNER_OPEN = sql`coalesce(stage, 'New') NOT IN ('Not Interested', 'Do Not Call')`;
+// The calling list's piles live with the lead piles (leadSegments.ts): one
+// catalogue, the predicate and its label side by side. Re-exported because
+// activityReport reads OWNER_OPEN from here.
+export { OWNER_OPEN };
 // Takes the firm's day boundary because "today" is a local question — see
 // dayStart(). As a module-level constant it could only ever ask Postgres for
 // UTC midnight, which is 05:30 in Pune.
-const ownerSegments = (d0: any): Record<string, any> => ({
-  open: OWNER_OPEN,
-  callbacks_overdue: sql`${OWNER_OPEN} AND callback_at IS NOT NULL AND callback_at < NOW()`,
-  callbacks_today: sql`${OWNER_OPEN} AND callback_at >= NOW() AND callback_at < ${d0} + interval '1 day'`,
-  callbacks: sql`${OWNER_OPEN} AND callback_at IS NOT NULL`,
-  to_call: sql`${OWNER_OPEN} AND callback_at IS NULL AND last_call_at IS NULL`,
-  never_called: sql`${OWNER_OPEN} AND last_call_at IS NULL`,
-  unassigned: sql`${OWNER_OPEN} AND agent_id IS NULL`,
-  closed: sql`NOT (${OWNER_OPEN})`,
-});
+const ownerSegments = (d0: any): Record<string, any> => buildOwnerSegments(d0);
 
 type OwnerListOpts = {
   page?: number; limit?: number; q?: string; stage?: string; project?: string; tower?: string; agentId?: string;
@@ -4067,6 +4062,7 @@ export async function ownerIdsMatching(opts: OwnerListOpts = {}): Promise<string
 export async function getOwnerTabs(opts: OwnerListOpts = {}): Promise<any> {
   const t = tid();
   const seg = ownerSegments(dayStart(await timezoneOf(t)));
+  const pillKeys = OWNER_SEGMENT_CATALOGUE.filter(s => s.surface.includes('pill')).map(s => s.key);
   const acrossSegment = andAll(await ownerWhere(t, opts, { segment: true }));
   const acrossBoth = andAll(await ownerWhere(t, opts, { segment: true, stage: true }));
   const acrossStage = andAll(await ownerWhere(t, opts, { stage: true }));
@@ -4075,9 +4071,10 @@ export async function getOwnerTabs(opts: OwnerListOpts = {}): Promise<any> {
   const byStageOf = (where: any) => sql`SELECT coalesce(stage, 'New') AS stage, count(*)::int AS n
           FROM crm_owners WHERE ${where} GROUP BY 1`;
   const [[c], tabStage, byStage, byAgent, byConfig] = await Promise.all([
-    sql`SELECT count(*)::int AS total,
-               count(*) FILTER (WHERE ${seg.callbacks})::int AS callbacks,
-               count(*) FILTER (WHERE ${seg.unassigned})::int AS unassigned
+    // Every pill in the catalogue, counted with the predicate that filters its
+    // list, inside the same filters.
+    sql`SELECT count(*)::int AS total
+               ${pillKeys.reduce((acc, k) => sql`${acc}, count(*) FILTER (WHERE ${seg[k]})::int AS ${sql(k)}`, sql``)}
           FROM crm_owners WHERE ${acrossSegment}`,
     byStageOf(acrossBoth),
     byStageOf(acrossStage),
@@ -4098,6 +4095,9 @@ export async function getOwnerTabs(opts: OwnerListOpts = {}): Promise<any> {
   const map = (rows: any) => Object.fromEntries((rows as any[]).map(r => [r.stage, r.n]));
   return {
     total: c?.total ?? 0, callbacks: c?.callbacks ?? 0, unassigned: c?.unassigned ?? 0,
+    // Keyed by segment, for the pill row; the two above are what an older
+    // client reads.
+    segments: Object.fromEntries(pillKeys.map(k => [k, c?.[k] ?? 0])),
     tabStage: map(tabStage), byStage: map(byStage),
     byAgent: (byAgent as any[]).map(r => ({ value: r.value, label: r.label, count: r.count })),
     byConfig: (byConfig as any[]).map(r => ({ value: r.label, label: r.label, count: r.count })),
@@ -4704,18 +4704,17 @@ export async function getOwnerQueueCounts(mine?: boolean): Promise<any> {
   const t = tid();
   const scope = ownerScope(mine);
   const today = dayStart(await timezoneOf(t));
-  const open = sql`coalesce(stage, 'New') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}`;
+  // The calling list's piles (leadSegments.ts), the same predicates the
+  // Calling tabs count and filter with — so a figure here is the pill it opens.
+  const seg = ownerSegments(today);
   const rows = await sql`
     SELECT count(*)::int AS total,
-           count(*) FILTER (WHERE ${open})::int AS open,
-           count(*) FILTER (WHERE ${open} AND agent_id IS NULL)::int AS unassigned,
-           count(*) FILTER (WHERE ${open} AND last_call_at IS NULL)::int AS never_called,
-           count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL AND callback_at < NOW())::int AS callbacks_overdue,
-           count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL AND callback_at >= NOW()
-                            AND callback_at < ${today} + interval '1 day')::int AS callbacks_today,
-           count(*) FILTER (WHERE ${open} AND callback_at IS NOT NULL
-                            AND callback_at >= ${today} + interval '1 day')::int AS callbacks_upcoming,
-           count(*) FILTER (WHERE ${open} AND callback_at IS NULL AND last_call_at IS NULL)::int AS to_call,
+           count(*) FILTER (WHERE ${seg.open})::int AS open,
+           count(*) FILTER (WHERE ${seg.unassigned})::int AS unassigned,
+           count(*) FILTER (WHERE ${seg.never_called})::int AS never_called,
+           count(*) FILTER (WHERE ${seg.callbacks_overdue})::int AS callbacks_overdue,
+           count(*) FILTER (WHERE ${seg.callbacks_today})::int AS callbacks_today,
+           count(*) FILTER (WHERE ${seg.to_call})::int AS to_call,
            count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
            count(*) FILTER (WHERE last_call_at >= ${today})::int AS called_today
       FROM crm_owners WHERE tenant_id = ${t} AND ${scope}`;
@@ -4725,7 +4724,6 @@ export async function getOwnerQueueCounts(mine?: boolean): Promise<any> {
     neverCalled: r.never_called ?? 0,
     callbacksOverdue: r.callbacks_overdue ?? 0,
     callbacksToday: r.callbacks_today ?? 0,
-    callbacksUpcoming: r.callbacks_upcoming ?? 0,
     toCall: r.to_call ?? 0,
     interested: r.interested ?? 0,
     calledToday: r.called_today ?? 0,
@@ -4744,18 +4742,14 @@ export async function getOwnerTodayRows(perGroup = 6, mine?: boolean): Promise<a
   const t = tid();
   const scope = ownerScope(mine);
   // NOT `today` — that name is taken below by the rows themselves.
-  const d0 = dayStart(await timezoneOf(t));
-  const open = sql`coalesce(stage, 'New') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}`;
+  const seg = ownerSegments(dayStart(await timezoneOf(t)));
   const n = Math.min(Math.max(Number(perGroup) || 6, 1), 25);
   const [overdue, today, toCall] = await Promise.all([
-    sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${open}
-          AND callback_at IS NOT NULL AND callback_at < NOW()
+    sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${seg.callbacks_overdue}
         ORDER BY callback_at ASC LIMIT ${n}`,
-    sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${open}
-          AND callback_at >= NOW() AND callback_at < ${d0} + interval '1 day'
+    sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${seg.callbacks_today}
         ORDER BY callback_at ASC LIMIT ${n}`,
-    sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${open}
-          AND callback_at IS NULL AND last_call_at IS NULL
+    sql`SELECT * FROM crm_owners WHERE tenant_id = ${t} AND ${scope} AND ${seg.to_call}
         ORDER BY created_at ASC LIMIT ${n}`,
   ]);
   return {

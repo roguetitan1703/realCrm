@@ -6,7 +6,7 @@ import { Button, Overdue, Timeline } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { initials, callbackSignal, whenLabel } from '../lib/format.js'
 import { canAssignLead, isDeskRole } from '../lib/permissions.js'
-import { OWNER_STAGES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
+import { OWNER_STAGES, OWNER_TERMINAL_STATUSES, ownerSegmentsOf, isCallbackTab } from '../data/ownerStatus.js'
 import { useServerList } from '../lib/serverList.js'
 import { useKept, useKeptPager } from '../lib/useNav.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -185,7 +185,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // A to Z, like Leads: this is where each owner SITS. The Callbacks tab is the
   // one list whose order is its point — soonest first, so whoever is already
   // due is at the top — and a sort picked by hand still wins.
-  const sortKey = bag.sortKey || (tab === 'callbacks' ? 'callback' : 'name')
+  const sortKey = bag.sortKey || (isCallbackTab(tab) ? 'callback' : 'name')
   const sortDir = bag.sortDir || 'asc'
 
   // GROUPED BY PROJECT is where Calling opens, on a phone too: a calling list
@@ -286,21 +286,30 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   }
 
   // THE TAB ROW IS SHORT ON PURPOSE: where a caller works from, not every
-  // status. All · Callbacks (the one tab that is a time) · the first two steps
-  // of the firm's walk (New, and Call Not Received: the never-dialled and the
-  // ring-again) · Unassigned for whoever hands work out. Every other status is
-  // in the Status dropdown, under its own name.
+  // status. All · the callback piles (the tabs that are a time: late, later
+  // today, every one booked) · the first two steps of the firm's walk (New,
+  // and Call Not Received: the never-dialled and the ring-again) · Unassigned
+  // for whoever hands work out. Every other status is in the Status dropdown,
+  // under its own name.
   const c = counts || {}
   const tabStage = c.tabStage || {}
   const byStage = c.byStage || {}
   const firmStages = (state.settings.ownerStages?.length ? state.settings.ownerStages : OWNER_STAGES)
     .filter(s => !OWNER_TERMINAL_STATUSES.includes(s))
   const steps = firmStages.slice(0, 2)
+  // The pills are the calling list's catalogue (leadSegments.ts, served), each
+  // counted by the predicate that filters it — the same one every figure that
+  // links here counts with, so "Callbacks overdue 7" anywhere opens 7 rows.
+  // The firm's first two steps sit after the callback piles; Unassigned last,
+  // for whoever hands work out.
+  const segCount = (k) => c.segments?.[k] ?? c[k] ?? 0
+  const pills = ownerSegmentsOf(state).filter(s => s.surface?.includes('pill'))
   const segs = [
     { key: 'all', label: 'All', count: c.total ?? 0 },
-    { key: 'callbacks', label: 'Callbacks', count: c.callbacks ?? 0 },
+    ...pills.filter(s => s.key !== 'unassigned')
+      .map(s => ({ key: s.key, label: s.label, tone: s.tone || undefined, count: segCount(s.key) })),
     ...steps.map(s => ({ key: `step:${s}`, label: s, count: tabStage[s] ?? 0 })),
-    ...(canAssign && !phone ? [{ key: 'unassigned', label: 'Unassigned', count: c.unassigned ?? 0 }] : []),
+    ...(canAssign && !phone ? pills.filter(s => s.key === 'unassigned').map(s => ({ key: s.key, label: s.label, count: segCount(s.key) })) : []),
   ].map(s => ({ ...s, on: tab === s.key, disabled: s.key !== 'all' && !s.count && tab !== s.key, onClick: () => pickTab(s.key) }))
   // Every status the firm uses, then the two endings, then any status the firm
   // dropped that rows still carry — so no row is reachable only through All.
@@ -313,7 +322,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
 
   // The callback time is a column on the one tab that is about it. Everywhere
   // else it was "Not called" down seven hundred rows.
-  const def = useMemo(() => (tab === 'callbacks' ? OWNERS_DEF
+  const def = useMemo(() => (isCallbackTab(tab) ? OWNERS_DEF
     : { ...OWNERS_DEF, columns: OWNERS_DEF.columns.filter(c => c.key !== 'callback') }), [tab])
 
   const open = (o) => {
