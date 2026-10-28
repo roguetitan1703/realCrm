@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Site visit — book, the day of, how it went</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">
+<style>:root{
+  --ink:#26241f;--ink-2:#5b574e;--ink-3:#8a857a;
+  --paper:#f4efe6;--paper-2:#ebe4d7;--card:#fffdf8;--line:#ddd5c6;
+  --accent:#c2841b;--accent-soft:#f6e7c6;--accent-ink:#7a4f06;
+  --alert:#b23a2e;--alert-soft:#f5dcd8;--ok:#3f7d4e;--ok-soft:#dcebdf;
+  --r:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#e9e4da;color:var(--ink);font:15px/1.35 "Noto Sans","Noto Sans Devanagari",system-ui,sans-serif}
+body{padding:24px}
+a{color:var(--accent-ink)}
+.page-head{max-width:1600px;margin:0 auto 18px}
+.page-head h1{font-size:20px;font-weight:600}
+.page-head p{color:var(--ink-2);font-size:14px;margin-top:4px}
+.page-head nav a{margin-right:14px;font-size:14px}
+.frames{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;max-width:1600px;margin:0 auto}
+.frame{width:390px;flex:0 0 390px}
+.frame h3{font-size:13px;font-weight:600;color:var(--ink-2);margin:0 0 8px 4px}
+.phone{width:390px;height:844px;background:var(--paper);border-radius:40px;border:8px solid #1c1b18;position:relative;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 40px rgba(0,0,0,.18)}
+.phone.short{height:640px;width:360px}
+.frame.short{width:360px;flex-basis:360px}
+.status{height:34px;flex:0 0 34px;display:flex;justify-content:space-between;align-items:center;padding:0 24px;font-size:12px;color:var(--ink-2)}
+.topbar{display:flex;align-items:center;gap:10px;padding:6px 16px 10px;flex:0 0 auto}
+.topbar .title{font-size:20px;font-weight:600;flex:1;min-width:0}
+.topbar .sub{font-size:12px;color:var(--ink-3);font-weight:400;display:block}
+.ico{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:var(--ink);background:transparent;font-size:20px;flex:0 0 44px}
+.ico.box{background:var(--card);border:1px solid var(--line)}
+.scroll{flex:1;overflow:hidden;position:relative;padding:0 12px 12px;display:flex;flex-direction:column;gap:10px}
+.tabbar{flex:0 0 68px;background:var(--card);border-top:1px solid var(--line);display:flex;padding:6px 6px 12px}
+.tabbar div{flex:1;text-align:center;font-size:11px;color:var(--ink-3);padding-top:6px}
+.tabbar div b{display:block;font-size:20px;font-weight:400;line-height:1.1;margin-bottom:2px}
+.tabbar div.on{color:var(--ink);font-weight:600}
+.tabbar div.on b{color:var(--accent-ink)}
+.tabbar .badge{display:inline-block;background:var(--alert);color:#fff;border-radius:9px;font-size:10px;padding:0 5px;margin-left:3px;vertical-align:top;font-weight:600}
+
+/* piles */
+.piles{display:flex;gap:6px;overflow:hidden;white-space:nowrap;flex:0 0 auto;padding:2px 0}
+.pile{height:36px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;border-radius:18px;background:var(--card);border:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+.pile b{font-weight:600;color:var(--ink)}
+.pile.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.pile.on b{color:#fff}
+.pile.alert b{color:var(--alert)}
+.pile.on.alert b{color:#ffb3aa}
+
+/* up-next card */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.card.upnext{border-left:4px solid var(--accent)}
+.kicker{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-ink);font-weight:600;margin-bottom:4px}
+.kicker.alert{color:var(--alert)}
+.name{font-size:20px;font-weight:600;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.name .first{font-weight:700}
+.name.num{font-variant-numeric:tabular-nums;font-weight:500}
+.meta{font-size:13px;color:var(--ink-2);margin-top:4px}
+.meta.req{color:var(--ink)}
+.remark{font-size:13px;color:var(--ink-3);margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.remark::before{content:"“";color:var(--ink-3)}
+.remark::after{content:"”"}
+.actions{display:flex;gap:8px;margin-top:12px}
+.btn{height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:15px;font-weight:600;flex:1;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.btn.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.btn.accent{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.ghost{background:transparent}
+.btn.sm{height:40px;font-size:14px;flex:0 0 auto;padding:0 14px}
+.btn.wa{flex:0 0 112px}
+.btn[disabled],.btn.off{opacity:.45}
+
+/* rows */
+.list{display:flex;flex-direction:column;gap:6px;overflow:hidden}
+.row{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 0 10px 12px;display:flex;align-items:stretch;gap:8px;min-height:72px;position:relative}
+.row .body{flex:1;min-width:0}
+.row .n{font-size:15px;font-weight:600;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.row .n.num{font-weight:500;font-variant-numeric:tabular-nums}
+.row .why{font-size:12px;color:var(--ink-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .why.alert{color:var(--alert);font-weight:600}
+.row .why.ok{color:var(--ok)}
+.row .rm{font-size:12px;color:var(--ink-3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .side{display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between;gap:4px;padding-right:8px}
+.row .call{width:48px;align-self:stretch;display:grid;place-items:center;border-left:1px solid var(--line);color:var(--ink);font-size:20px;margin:-10px 0}
+.row.hi{outline:2px solid var(--accent);outline-offset:-1px}
+.row.pending{border-left:4px solid var(--alert)}
+.row.dim{opacity:.55}
+.row .swipe{position:absolute;right:0;top:0;bottom:0;width:140px;background:var(--accent-soft);border-radius:0 12px 12px 0;display:flex;align-items:center;justify-content:space-around;font-size:12px;font-weight:600;color:var(--accent-ink)}
+.chip{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:14px;font-size:12px;font-weight:600;white-space:nowrap;border:1px solid transparent}
+.s-new{background:var(--accent-soft);color:var(--accent-ink)}
+.s-fu{background:#e3e9f3;color:#2f4b72}
+.s-cb{background:#eee5f5;color:#5a3a80}
+.s-cnr{background:var(--paper-2);color:var(--ink-2)}
+.s-int{background:var(--ok-soft);color:var(--ok)}
+.s-sv{background:#ffe6c7;color:#8a4b00}
+.s-won{background:#cfe6d3;color:#1f5a30}
+.s-rej{background:#eee9e0;color:var(--ink-3);text-decoration:line-through}
+.chip.tap{border-color:var(--ink-3);border-style:dashed}
+.chip .car{margin-left:4px;font-size:10px;opacity:.7}
+.sec{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:600;padding:6px 4px 0}
+
+/* sheet */
+.scrim{position:absolute;inset:0;background:rgba(38,36,31,.45);z-index:5}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--card);border-radius:22px 22px 0 0;z-index:6;padding:8px 14px 0;display:flex;flex-direction:column;max-height:92%}
+.sheet .grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 10px}
+.sheet .h{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px}
+.sheet .h .name{font-size:18px;flex:1}
+.sheet .h .x{width:44px;height:44px;display:grid;place-items:center;font-size:20px;color:var(--ink-2);margin:-8px -8px 0 0}
+.sheet .body{overflow:hidden;flex:1;display:flex;flex-direction:column;gap:10px;padding-bottom:10px}
+.sheet .foot{position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:10px 0 14px;display:flex;gap:8px;margin:0 -14px;padding-left:14px;padding-right:14px}
+.lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.opt{min-height:48px;border:1px solid var(--line);border-radius:12px;padding:7px 10px;display:flex;flex-direction:column;justify-content:center;background:var(--paper);font-size:14px;font-weight:600;line-height:1.2}
+.opt small{font-weight:400;font-size:11px;color:var(--ink-2);margin-top:2px;line-height:1.25}
+.opt.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.opt.on small{color:#cfc8b8}
+.opt.cur{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.opt.wide{grid-column:1/-1}
+.tchips{display:flex;gap:6px;flex-wrap:wrap}
+.tchip{height:40px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:var(--paper);display:inline-flex;align-items:center;font-size:14px;font-weight:600}
+.tchip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.tchip.ghost{font-weight:500;color:var(--ink-2)}
+.fact{background:var(--paper-2);border-radius:10px;padding:9px 12px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.fact .arr{color:var(--accent-ink)}
+.fact small{font-weight:400;color:var(--ink-2);font-size:12px;display:block}
+.fact.alert{background:var(--alert-soft)}
+.fact.ok{background:var(--ok-soft)}
+.input{height:48px;border:1px solid var(--line);border-radius:12px;background:var(--paper);padding:0 12px;display:flex;align-items:center;font-size:15px;color:var(--ink-3)}
+.input.filled{color:var(--ink)}
+.input .cc{color:var(--ink);font-weight:600;margin-right:8px;padding-right:8px;border-right:1px solid var(--line)}
+.input.sm{height:40px}
+
+/* ack bar */
+.ack{position:absolute;left:10px;right:10px;bottom:78px;background:var(--ink);color:var(--paper);border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px;font-size:14px;z-index:4;box-shadow:0 8px 20px rgba(0,0,0,.25)}
+.ack .t{flex:1;min-width:0;line-height:1.3}
+.ack .t b{color:#fff}
+.ack .t small{display:block;color:#cfc8b8;font-size:12px}
+.ack .u{font-weight:700;color:#ffd27a;padding:8px 6px;flex:0 0 auto}
+.ack .u2{font-weight:600;color:var(--paper);padding:8px 6px;flex:0 0 auto;border:1px solid #6b665a;border-radius:8px}
+.ack.notab{bottom:14px}
+
+/* misc */
+.tl{display:flex;flex-direction:column;gap:0;border-left:2px solid var(--line);margin-left:6px;padding-left:12px}
+.tl .ev{padding:7px 0;font-size:13px;position:relative}
+.tl .ev::before{content:"";position:absolute;left:-18px;top:13px;width:8px;height:8px;border-radius:4px;background:var(--ink-3)}
+.tl .ev.me::before{background:var(--accent)}
+.tl .ev .w{color:var(--ink-3);font-size:12px}
+.tl .ev .e{float:right;color:var(--accent-ink);font-size:12px;font-weight:600}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px}
+.kv dt{color:var(--ink-3)}
+.kv dd{color:var(--ink);font-weight:500}
+.photo{height:150px;border-radius:12px;background:linear-gradient(160deg,#9a8f7a,#5e564a);display:flex;align-items:flex-end;padding:10px;color:#fff;font-size:12px;font-weight:600}
+.photo .gps{background:rgba(0,0,0,.45);padding:4px 8px;border-radius:8px}
+.agent{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.agent .top{display:flex;justify-content:space-between;align-items:baseline}
+.agent .top .n{font-weight:600;font-size:15px}
+.agent .top .last{font-size:12px;color:var(--ink-3)}
+.agent .top .last.alert{color:var(--alert);font-weight:600}
+.agent .nums{display:flex;gap:6px}
+.num{flex:1;background:var(--paper);border-radius:10px;padding:6px 8px;font-size:11px;color:var(--ink-2)}
+.num b{display:block;font-size:17px;color:var(--ink);font-weight:600;line-height:1.1}
+.num.alert b{color:var(--alert)}
+.reach{font-size:11px;padding:2px 7px;border-radius:9px;background:var(--ok-soft);color:var(--ok);font-weight:600}
+.reach.off{background:var(--alert-soft);color:var(--alert)}
+.push{position:absolute;top:44px;left:12px;right:12px;background:var(--card);border-radius:16px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:7;font-size:14px;border:1px solid var(--line)}
+.push .app{font-size:11px;color:var(--ink-3);display:flex;justify-content:space-between;margin-bottom:4px}
+.push b{display:block}
+.keys{background:#d9d4c9;flex:0 0 220px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px}
+.keys div{background:#fff;border-radius:6px;display:grid;place-items:center;font-size:20px;color:var(--ink)}
+.dialer{position:absolute;inset:0;background:#111;color:#eee;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:8;font-size:14px}
+.dialer .big{font-size:26px;font-weight:600}
+.dialer .end{width:70px;height:70px;border-radius:35px;background:#d33;margin-top:30px}
+.note{font-size:12px;color:var(--ink-3);margin:0 0 8px 4px;max-width:390px}
+</style></head>
+<body>
+<div class="page-head"><nav><a href="index.html">← All screens</a></nav><h1>Site visit — book, the day of, how it went</h1><p>Flow (d). Visit card on Now, camera + GPS, outcome chips, no-show reschedule, location refused.</p></div>
+<div class="frames">
+
+<section class="frame"><h3>1 · Saturday — the visit sits on top of Now</h3>
+<div class="phone">
+  <div class="status"><span>09:50</span><span>▲ 4G ▮</span></div>
+  <div class="topbar"><div class="title">Now<span class="sub">Sat 1 Nov · Prakash</span></div><div class="ico box">⌕</div><div class="ico box">+</div></div>
+  <div class="scroll">
+    <div class="piles"><span class="pile on"><b>1</b> Visit</span><span class="pile alert"><b>2</b> Overdue</span><span class="pile"><b>5</b> Due</span><span class="pile"><b>1</b> New</span></div>
+    <div class="card upnext" style="border-left-color:#8a4b00">
+      <div class="kicker" style="color:#8a4b00">Visit today · 11:00</div>
+      <div class="name"><span class="first">Deepak</span> &amp; Sarita Joshi</div>
+      <div class="meta"><span class="chip s-sv">Site Visit</span>&nbsp; Maple Court · 2 BHK · Wakad</div>
+      <div class="meta req">Tower B, Datta Mandir Rd · 4.2 km</div>
+      <div class="remark">Wants ground floor, parking for two</div>
+      <div class="actions"><div class="btn primary">☏ Call</div><div class="btn">Navigate</div><div class="btn accent" style="flex:0 0 110px">Log visit</div></div>
+    </div>
+    <div class="sec">Up next</div>
+    <div class="list">
+      <div class="row"><div class="body"><div class="n">Rahul Mehta</div><div class="why alert">Overdue · callback Thu 11:00</div><div class="rm">Said after 2–3 days, prefers morning</div></div><div class="side"><span class="chip s-cb">Callback</span></div><div class="call">☏</div></div>
+      <div class="row"><div class="body"><div class="n">Nilesh Wagh</div><div class="why">Due 11:00 · follow-up</div><div class="rm">No broker, wants ready possession</div></div><div class="side"><span class="chip s-fu">Follow-Up</span></div><div class="call">☏</div></div>
+    </div>
+  </div>
+  <div class="push"><div class="app"><span>Skyline Realty</span><span>10:00</span></div><b>Visit at 11:00 · Deepak &amp; Sarita Joshi</b>Maple Court · 2 BHK · Wakad</div>
+  <div class="tabbar"><div class="on"><b>◉</b>Now<span class="badge">8</span></div><div><b>☰</b>Leads</div><div><b>☏</b>Calling</div><div><b>◯</b>Me</div></div>
+</div></section>
+
+<section class="frame"><h3>2 · Log visit — camera shot, GPS fix, how it went, next step, one Save</h3>
+<div class="phone">
+  <div class="status"><span>11:48</span><span>▲ 4G ▮</span></div>
+  <div class="scroll"></div><div class="scrim"></div>
+  <div class="sheet" style="max-height:96%">
+    <div class="grab"></div>
+    <div class="h"><div><div class="name"><span class="first">Deepak</span> &amp; Sarita Joshi</div><div class="meta">Visit · Maple Court · booked 11:00</div></div><div class="x">✕</div></div>
+    <div class="body">
+      <div class="photo"><span class="gps">11:47 · ±14 m · 60 m from Maple Court</span></div>
+      <div class="lbl">How it went</div>
+      <div class="tchips"><span class="tchip">Interested</span><span class="tchip on">Negotiating</span><span class="tchip">Booked</span><span class="tchip">Not interested</span><span class="tchip">No show</span></div>
+      <div class="lbl">Next</div>
+      <div class="tchips"><span class="tchip">Call tomorrow 11</span><span class="tchip on">Call Mon 11:00</span><span class="tchip">Another visit</span><span class="tchip ghost">Pick…</span></div>
+      <div class="fact"><span class="arr">→</span><span>Visit logged · Negotiating · call Mon 3 Nov 11:00<small>status stays Site Visit · visit booking done</small></span></div>
+      <div class="input sm filled">Asked for 2 L off, wants parking in writing</div>
+    </div>
+    <div class="foot"><div class="btn ghost" style="flex:0 0 100px">Retake</div><div class="btn primary">Save · call Mon 11:00</div></div>
+  </div>
+</div></section>
+
+<section class="frame"><h3>3 · No show — reschedule chips, nothing lost</h3>
+<div class="phone">
+  <div class="status"><span>11:40</span><span>▲ 4G ▮</span></div>
+  <div class="scroll"></div><div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="h"><div><div class="name"><span class="first">Deepak</span> &amp; Sarita Joshi</div><div class="meta">Visit · Maple Court · booked 11:00</div></div><div class="x">✕</div></div>
+    <div class="body">
+      <div class="photo" style="height:110px"><span class="gps">11:39 · ±9 m · 40 m from Maple Court</span></div>
+      <div class="lbl">How it went</div>
+      <div class="tchips"><span class="tchip">Interested</span><span class="tchip">Negotiating</span><span class="tchip">Booked</span><span class="tchip">Not interested</span><span class="tchip on">No show</span></div>
+      <div class="lbl">Visit again</div>
+      <div class="tchips"><span class="tchip on">Tomorrow 11:00</span><span class="tchip">Sun 4 pm</span><span class="tchip">Call first</span><span class="tchip ghost">Pick…</span></div>
+      <div class="fact"><span class="arr">→</span><span>No show · visit moved to Sun 2 Nov 11:00<small>you were there 11:39 · counted</small></span></div>
+    </div>
+    <div class="foot"><div class="btn ghost" style="flex:0 0 100px">Retake</div><div class="btn primary">Save · visit Sun 11:00</div></div>
+  </div>
+</div></section>
+
+<section class="frame"><h3>4 · Location refused — nothing is logged, the booking stays</h3>
+<div class="phone">
+  <div class="status"><span>11:45</span><span>▲ 4G ▮</span></div>
+  <div class="scroll"></div><div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="h"><div><div class="name"><span class="first">Deepak</span> &amp; Sarita Joshi</div><div class="meta">Visit · Maple Court · booked 11:00</div></div><div class="x">✕</div></div>
+    <div class="body">
+      <div class="fact alert"><span class="arr">!</span><span>Location off · visit not logged<small>booking 11:00 stays</small></span></div>
+      <div class="btn primary">Open settings</div>
+      <div class="btn">Try again</div>
+    </div>
+    <div class="foot"><div class="btn ghost">Close</div></div>
+  </div>
+</div></section>
+
+<section class="frame"><h3>5 · Booked from the record — Book sheet, property from the shortlist</h3>
+<div class="phone">
+  <div class="status"><span>12:30</span><span>▲ 4G ▮</span></div>
+  <div class="scroll"></div><div class="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="h"><div><div class="name"><span class="first">Abdul</span> Rahman Sayyed</div><div class="meta">Book · now Interested</div></div><div class="x">✕</div></div>
+    <div class="body">
+      <div class="tchips"><span class="tchip on">Site visit</span><span class="tchip">Call</span><span class="tchip">Meeting</span><span class="tchip">Online demo</span></div>
+      <div class="lbl">Day</div>
+      <div class="tchips"><span class="tchip">Tomorrow</span><span class="tchip on">Sat 1 Nov</span><span class="tchip">Sun</span><span class="tchip ghost">Pick…</span></div>
+      <div class="tchips"><span class="tchip">10:00</span><span class="tchip">11:00</span><span class="tchip on">4:00 pm</span><span class="tchip ghost">Other</span></div>
+      <div class="lbl">Where</div>
+      <div class="tchips"><span class="tchip on">Maple Court · 2 BHK</span><span class="tchip">Pride World City · 2 BHK</span><span class="tchip ghost">Search</span><span class="tchip ghost">Not decided</span></div>
+      <div class="fact"><span class="arr">→</span><span>Site Visit · Sat 1 Nov · 4:00 pm · Maple Court<small>status → Site Visit · reminder 3:00 pm</small></span></div>
+    </div>
+    <div class="foot"><div class="btn ghost" style="flex:0 0 100px">Cancel</div><div class="btn primary">Save · visit Sat 4:00 pm</div></div>
+  </div>
+</div></section>
+
+</div>
+
+</body></html>

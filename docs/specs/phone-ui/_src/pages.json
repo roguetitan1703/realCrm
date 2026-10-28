@@ -1,0 +1,14 @@
+[
+  {"file":"01-now","title":"Now — who to ring","blurb":"Flow (a). The app opens on one person. Piles filter the same list; swipe for Later today / Not mine."},
+  {"file":"02-call-moment","title":"The call moment — outcome + next step","blurb":"Flow (b). Before the call, the dialer, coming back, one tap, saved with Undo, next person. Includes a cold-restart and the 360×640 fit."},
+  {"file":"03-outcomes","title":"Every outcome, what it does","blurb":"Flow (b) table. Not received (retry), wrong number, call back later, interested → visit, not interested → reason, connected → requirement."},
+  {"file":"04-leads-inline-status","title":"Lead list — status from the row","blurb":"Flow (b′). Tap the chip, pick, the sheet grows one row when the status needs a time or a reason, row stays put, Undo."},
+  {"file":"05-lead-record","title":"Lead record","blurb":"The full page: requirement, next step, homes sent, timeline with Edit on your own rows."},
+  {"file":"06-site-visit","title":"Site visit — book, the day of, how it went","blurb":"Flow (d). Visit card on Now, camera + GPS, outcome chips, no-show reschedule, location refused."},
+  {"file":"07-send-homes","title":"Send homes on WhatsApp","blurb":"Flow (e). Shortlist and matches, Send, the ack with a next step offered, the buyer's tap coming back as Came back."},
+  {"file":"08-calling","title":"Calling — the owner list","blurb":"Flow (f). Same queue shape; project · unit · locality on every row; owner outcome sheet; Interested → Add their flat."},
+  {"file":"09-new-lead","title":"New lead — push, first call, walk-in","blurb":"Flows (c) and (g). The push, the First call card, a repeat enquiry, Add lead with a duplicate found."},
+  {"file":"10-search","title":"Someone calls back — search","blurb":"Flow (h). Number first, leads and owners in one list, Not found → Add as lead."},
+  {"file":"11-team","title":"Team — the manager's glance","blurb":"Flow (i). Stopped-first, every figure a tap, phone reach beside the name."},
+  {"file":"12-rules","title":"Rules — what moves on its own","blurb":"Section 11 of flows.md, as the agent reads it under Me. Also the Undo and no-outcome recovery states."}
+]
