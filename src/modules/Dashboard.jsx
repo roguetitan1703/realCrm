@@ -3,7 +3,7 @@ import { Kpi, Panel, SectionHead } from '../components/primitives.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { TeamToday } from '../components/ActivityDay.jsx'
-import { callingFiltersFor } from '../data/ownerStatus.js'
+import { callingFiltersFor, ownerSegLabel } from '../data/ownerStatus.js'
 
 // THE MANAGER'S SCREEN. One question: is the team working the book, and who is
 // stuck. Tiles for what can be cleared today, then a row per agent with a
@@ -181,7 +181,7 @@ export default function Dashboard({ store, go, topBar }) {
           <Kpi icon="clock" label="Went cold today" value={n(totals.cold_today)}
             alert={totals.cold_today > 0} onClick={() => toLeads({ seg: 'going_cold' })} />
           {hasCalling && (
-            <Kpi icon="phone" label="Callbacks due" value={oq.callbacksOverdue}
+            <Kpi icon="phone" label={ownerSegLabel(state, 'callbacks_overdue')} value={oq.callbacksOverdue}
               alert={oq.callbacksOverdue > 0} onClick={() => toCalling('callbacks_overdue')} />
           )}
           {hasCalling && (
@@ -221,16 +221,16 @@ export default function Dashboard({ store, go, topBar }) {
                   a tile above. */}
               <div className="qfig">
                 <button className={'qfig-i' + (oq.callbacksOverdue ? ' alert' : '')} onClick={() => toCalling('callbacks_overdue')}>
-                  <span className="qfig-v">{oq.callbacksOverdue}</span><span className="qfig-l">Due</span>
+                  <span className="qfig-v">{oq.callbacksOverdue}</span><span className="qfig-l">{ownerSegLabel(state, 'callbacks_overdue')}</span>
                 </button>
                 <button className="qfig-i" onClick={() => toCalling('callbacks_today')}>
-                  <span className="qfig-v">{oq.callbacksToday}</span><span className="qfig-l">Later today</span>
+                  <span className="qfig-v">{oq.callbacksToday}</span><span className="qfig-l">{ownerSegLabel(state, 'callbacks_today')}</span>
                 </button>
                 <button className="qfig-i" onClick={() => toCalling('to_call')}>
                   <span className="qfig-v">{oq.toCall}</span><span className="qfig-l">Never called</span>
                 </button>
                 <button className="qfig-i" onClick={() => toCalling('unassigned')}>
-                  <span className="qfig-v">{oq.unassigned}</span><span className="qfig-l">Unassigned</span>
+                  <span className="qfig-v">{oq.unassigned}</span><span className="qfig-l">{ownerSegLabel(state, 'unassigned')}</span>
                 </button>
               </div>
               <div className="dash-sub">Outcomes</div>

@@ -25,7 +25,7 @@ test('Today loads and the badge is the overdue + due rows', async () => {
   // The badge is what is waiting right now: overdue follow-ups and late
   // callbacks (Phone.jsx BADGES). "Due today" is later today, not late yet, and
   // is not in it; the old pattern counted it whenever the data had one.
-  const heads = [...txt.matchAll(/^(OVERDUE|CALLBACKS DUE)\n(\d+)$/gm)].map(m => Number(m[2]))
+  const heads = [...txt.matchAll(/^(OVERDUE|CALLBACKS OVERDUE)\n(\d+)$/gm)].map(m => Number(m[2]))
   assert.ok(heads.length >= 1, 'no Overdue / Due sections on Today')
   const badge = Number((await page.locator('.tab-dot').first().innerText()).trim())
   assert.equal(badge, heads.reduce((a, b) => a + b, 0), `badge ${badge} vs sections ${heads}`)
@@ -129,6 +129,24 @@ test('Calendar month renders', async () => {
   await go(page, 'screen=calendar')
   const t = await page.locator('body').innerText()
   assert.match(t, /(January|February|March|April|May|June|July|August|September|October|November|December)/)
+})
+
+// Today's callback groups and the Calling pills are one predicate each
+// (backend leadSegments.ts), both scoped to the agent's own rows: a group's
+// number is the pill's number and the rows that pill opens.
+test("Today's callback groups match the agent's Calling pills and their rows", async () => {
+  await go(page, 'screen=today')
+  const txt = await page.locator('body').innerText()
+  for (const [label, key] of [['Callbacks overdue', 'callbacks_overdue'], ['Callbacks later today', 'callbacks_today']]) {
+    const m = txt.match(new RegExp('^' + label.toUpperCase() + '\\n(\\d+)$', 'm'))
+    const n = m ? Number(m[1]) : 0   // a group with nothing in it is not drawn
+    await go(page, 'screen=calling&tab=' + key)
+    const on = page.locator('.segpill.on')
+    assert.ok(await on.isVisible(), `${label}: no active pill`)
+    assert.ok((await on.innerText()).startsWith(label), `${label}: active pill is "${await on.innerText()}"`)
+    assert.equal(Number(await on.locator('.segpill-c').innerText()), n, `${label}: Today ${n}, pill ${await on.innerText()}`)
+    assert.equal(await page.locator('.rcard').count(), Math.min(n, 20), `${label}: Today ${n}, list rows`)
+  }
 })
 
 test('Calling list opens a project, then an owner', async () => {

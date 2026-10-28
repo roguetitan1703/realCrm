@@ -23,6 +23,7 @@
  * ============================================================================
  */
 import { sql } from './db.js';
+import { OWNER_TERMINAL_STATUSES } from './statuses.js';
 
 /**
  * CONTACT IS SOMETHING A PERSON DID.
@@ -321,3 +322,83 @@ export function buildLeadSegments(p: SegmentInputs) {
 }
 
 export type LeadSegment = keyof ReturnType<typeof buildLeadSegments>;
+
+/**
+ * ============================================================================
+ * THE CALLING LIST'S PILES — the owners a caller rings, in the same shape.
+ * ============================================================================
+ * Every figure about the calling list — the dashboard's tiles and queue row,
+ * the sidebar and phone tab badges, Today's groups, the Calling tab row — is
+ * one of these keys, counted with the predicate below and opened on the pill
+ * of the same key. The callback piles used to be written out four times
+ * (the tab counts, the queue counts, Today's rows, the per-agent book), and
+ * the two clocked ones had no pill: "Callbacks due 7" and "Later today 0"
+ * both opened the whole Callbacks tab of 15.
+ *
+ * THREE CALLBACK PILES, because the desk asks three questions of one column:
+ *   - who is LATE (the time passed, nobody closed it) — the badge, the alert
+ *     tile, and what an owner chases an agent about;
+ *   - who is still to ring LATER TODAY — the rest of an agent's day;
+ *   - every callback booked, soonest first — the list a caller works from.
+ * They do not share a word with the lead side: a lead's late follow-up is
+ * "Follow-up overdue", and Today's "Due today" means not late yet.
+ *
+ * Open is the firm's open: anything but the two endings. A callback left on an
+ * owner marked Not Interested is not work, and none of these count it.
+ *
+ * KEYS ARE STABLE — `?tab=callbacks` is in links people have sent.
+ */
+export const OWNER_OPEN = sql`coalesce(stage, 'New') NOT IN ${sql(OWNER_TERMINAL_STATUSES)}`;
+
+export const OWNER_SEGMENT_CATALOGUE: SegmentDef[] = [
+  {
+    key: 'callbacks_overdue', label: 'Callbacks overdue',
+    help: 'A booked callback whose time has passed.',
+    surface: ['pill', 'tile'], tone: 'alert',
+  },
+  {
+    key: 'callbacks_today', label: 'Callbacks later today',
+    help: 'A callback booked for later today, its time not reached yet.',
+    surface: ['pill', 'tile'],
+  },
+  {
+    key: 'callbacks', label: 'Callbacks',
+    help: 'Every open owner with a callback booked, late or coming.',
+    surface: ['pill'],
+  },
+  {
+    key: 'unassigned', label: 'Unassigned',
+    help: 'Open, and no caller on it.',
+    surface: ['pill', 'tile'],
+  },
+  // Reachable by link, no pill of their own. `to_call` is the dashboard's
+  // "Never called" and opens the New tab, which counts a different thing (a
+  // status, not a dial) — its name waits on the firm's word for it.
+  { key: 'to_call', label: 'Never called', help: 'Open, never dialled, nothing booked.', surface: ['internal'] },
+  { key: 'never_called', label: 'Never dialled', help: 'Open and never dialled.', surface: ['internal'] },
+  { key: 'open', label: 'Open', help: 'Not Interested or Do Not Call excepted.', surface: ['internal'] },
+  { key: 'closed', label: 'Closed', help: 'Not Interested or Do Not Call.', surface: ['internal'] },
+];
+
+/** Labels for the client, as publicSegments() serves the lead piles. */
+export const publicOwnerSegments = () =>
+  OWNER_SEGMENT_CATALOGUE.filter(s => !s.surface.includes('internal'))
+    .map(({ key, label, surface, tone }) => ({ key, label, surface, tone: tone ?? null }));
+
+/**
+ * The predicates. `d0` is the start of the firm's day (store.dayStart) —
+ * "later today" ends at the firm's midnight, not UTC's.
+ */
+export function buildOwnerSegments(d0: any) {
+  return {
+    open: OWNER_OPEN,
+    callbacks_overdue: sql`(${OWNER_OPEN} AND callback_at IS NOT NULL AND callback_at < NOW())`,
+    callbacks_today: sql`(${OWNER_OPEN} AND callback_at >= NOW() AND callback_at < ${d0} + interval '1 day')`,
+    callbacks: sql`(${OWNER_OPEN} AND callback_at IS NOT NULL)`,
+    to_call: sql`(${OWNER_OPEN} AND callback_at IS NULL AND last_call_at IS NULL)`,
+    never_called: sql`(${OWNER_OPEN} AND last_call_at IS NULL)`,
+    unassigned: sql`(${OWNER_OPEN} AND agent_id IS NULL)`,
+    closed: sql`NOT (${OWNER_OPEN})`,
+  } as Record<string, any>;
+}
+export type OwnerSegment = 'open' | 'callbacks_overdue' | 'callbacks_today' | 'callbacks' | 'to_call' | 'never_called' | 'unassigned' | 'closed';

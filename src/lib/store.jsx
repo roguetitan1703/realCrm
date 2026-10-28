@@ -265,6 +265,8 @@ function freshState() {
     // and the screens fall back to their own list so an API older than this
     // build still renders pills.
     leadSegments: Array.isArray(cs.leadSegments) ? cs.leadSegments : [],
+    // The calling list's piles, from the same file (state.ownerSegments).
+    ownerSegments: Array.isArray(cs.ownerSegments) ? cs.ownerSegments : [],
     localities: Array.isArray(cs.localities) ? cs.localities : [],
     projects: Array.isArray(cs.projects) ? cs.projects : [],
     configs: Array.isArray(cs.configs) ? cs.configs : [],
@@ -347,6 +349,7 @@ function reducer(state, action) {
         formerAgents: Array.isArray(s.formerAgents) ? s.formerAgents : state.formerAgents,
         inactiveAgentIds: Array.isArray(s.inactiveAgentIds) ? s.inactiveAgentIds : state.inactiveAgentIds,
         leadSegments: Array.isArray(s.leadSegments) ? s.leadSegments : state.leadSegments,
+        ownerSegments: Array.isArray(s.ownerSegments) ? s.ownerSegments : state.ownerSegments,
         localities: Array.isArray(s.localities) ? s.localities : state.localities,
         projects: Array.isArray(s.projects) ? s.projects : state.projects,
         configs: Array.isArray(s.configs) ? s.configs : state.configs,
@@ -374,6 +377,7 @@ function reducer(state, action) {
         formerAgents: Array.isArray(s.formerAgents) ? s.formerAgents : state.formerAgents,
         inactiveAgentIds: Array.isArray(s.inactiveAgentIds) ? s.inactiveAgentIds : state.inactiveAgentIds,
         leadSegments: Array.isArray(s.leadSegments) ? s.leadSegments : state.leadSegments,
+        ownerSegments: Array.isArray(s.ownerSegments) ? s.ownerSegments : state.ownerSegments,
         localities: Array.isArray(s.localities) ? s.localities : state.localities,
         projects: Array.isArray(s.projects) ? s.projects : state.projects,
         configs: Array.isArray(s.configs) ? s.configs : state.configs,

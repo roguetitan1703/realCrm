@@ -30,7 +30,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../../lib/api.js'
 import { useServerData } from '../../lib/useServerData.js'
 import { isTerminal } from '../../data/leadStatus.js'
-import { callingFiltersFor } from '../../data/ownerStatus.js'
+import { callingFiltersFor, ownerSegLabel } from '../../data/ownerStatus.js'
 import { Overdue, StageTag, MoreRows, useCap, RepeatTag } from '../../components/primitives.jsx'
 import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue, followUpToday, followUpAction } from '../../lib/format.js'
 import { personLabel } from '../../lib/phone.js'
@@ -288,8 +288,14 @@ function TodoList({ store, go, feed }) {
     : a.leadId ? go('leads', { leadId: a.leadId, leadOpen: true }) : null)
   // A group knows where it goes. Previously "See all" only ever landed on the
   // leads list, which is wrong the moment a group is owners.
+  //
+  // Today counts the caller's OWN rows (mine), and Calling shows an agent only
+  // theirs but shows an owner or manager the firm's — so from their Today the
+  // list opens on them in the Agent control, or "Callbacks overdue 2" would
+  // open the whole firm's eleven.
+  const me = state.activeAgentId || state.session?.userId || null
   const seeAll = (g) => (g.screen === 'calling'
-    ? go('calling', { ownerFilters: callingFiltersFor(g.segment) })
+    ? go('calling', { ownerFilters: { ...callingFiltersFor(g.segment), ...(state.role !== 'agent' && me ? { caller: me } : {}) } })
     : go('leads', { leadFilters: g.filter }))
 
   const renewals = feed.renewals
@@ -325,9 +331,9 @@ function TodoList({ store, go, feed }) {
   // would mean scrolling past everything on one side to see the other.
   const groups = [
     { key: 'overdue', label: 'Overdue', rows: overdue, count: c.overdue ?? overdue.length, tone: 'overdue', due: true, filter: { flag: ['overdue'] } },
-    { key: 'cbLate', label: 'Callbacks due', kind: 'owner', rows: ownerRows.callbacksOverdue || [], count: oc.callbacksOverdue ?? 0, tone: 'overdue', screen: 'calling', segment: 'callbacks_overdue' },
+    { key: 'cbLate', label: ownerSegLabel(state, 'callbacks_overdue'), kind: 'owner', rows: ownerRows.callbacksOverdue || [], count: oc.callbacksOverdue ?? 0, tone: 'overdue', screen: 'calling', segment: 'callbacks_overdue' },
     { key: 'today', label: 'Due today', rows: todayFu, count: todayFu.length, due: true },
-    { key: 'cbToday', label: 'Callbacks later today', kind: 'owner', rows: ownerRows.callbacksToday || [], count: oc.callbacksToday ?? 0, screen: 'calling', segment: 'callbacks_today' },
+    { key: 'cbToday', label: ownerSegLabel(state, 'callbacks_today'), kind: 'owner', rows: ownerRows.callbacksToday || [], count: oc.callbacksToday ?? 0, screen: 'calling', segment: 'callbacks_today' },
     { key: 'cameBack', label: 'Came back today', rows: cameBack, count: c.cameBack ?? cameBack.length, filter: { seg: 'repeat_enquiry' } },
     { key: 'fresh', label: 'Not yet contacted', rows: fresh, count: c.fresh ?? fresh.length, filter: { stage: 'New' } },
     { key: 'toCall', label: 'Owners to call', kind: 'owner', rows: ownerRows.toCall || [], count: oc.toCall ?? 0, screen: 'calling', segment: 'to_call' },
