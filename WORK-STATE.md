@@ -4,7 +4,7 @@
 Push `development` to `main` (32 commits: sidebar #130, desk fixes, feed watch, small fixes, backup script, npm deploy:api/backup, smoke tests). Smoke 39/39 on development d50811d; waits on Om's go, then `npm run deploy:api` and the backup cron on the EC2. Production got 6078505 on 28 Oct (deploy confirmed by 401 on /workspace/reset and /pulse).
 
 ## Next
-1. Phone redesign for the agent, on its own branch `b-phone-redesign` (merges only when Om approves it whole): spec + mockups done (9d5b0f7), waits on Om's six answers; then Today as one "who to ring next" list, one sheet after every call, record's first screen = next step; 44px targets. Then an owner's Team page on phone
+1. Phone UI and UX, new from the user flows (Om, 28 Oct: the earlier spec 9d5b0f7 was anchored to the current screens and is superseded): a fresh Fable design is running — flows, phone mock-ups, decisions. Om reviews it, then build on its own branch, merged only when he approves it whole. Musts: status changed from the lead list; call outcome and follow-up booked in one action; the screen says what changed and what happens next, never blocks
 2. Feed watch: owner alert merged (28a7fe9); production read 28 Oct: 0 alerts at bhumi/mahalaxmi, 2 at delpat. Delpat half (console view, a daily email to Om via sendMail) waits on Om
 2c. Local setup + dev data stays current: merged 28 Oct (`npm run setup:local`, `npm run dev:refresh`, README). Shared dev db needs `npm run dev:refresh -- --adopt=delpat` once; callback figures match their lists, merged (9514127)
 3. Desk mismatches: fixed and merged (d9d82df + this merge); naming of "Not yet contacted"/"Never called" and the Performance default wait on Om
