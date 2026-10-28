@@ -849,7 +849,9 @@ function NewLeadModal({ store, leadId }) {
   return (
     <Modal title={edit ? `Edit lead: ${edit.name}` : 'New Lead Record'} onClose={store.closeModal} width={520}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
+        {/* .grid-2 stacks under 720px: the phone input is ~275px wide on its
+            own, which left the name box 38px beside it. */}
+        <div className="grid-2" style={{ gap: 12 }}>
           <Field label="Full Name *"><Input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Client Name" autoFocus /></Field>
           <Field label="Phone Number *"><PhoneInput value={f.phone} onChange={e => set('phone', e.target.value)} /></Field>
         </div>
