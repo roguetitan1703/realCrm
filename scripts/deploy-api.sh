@@ -34,7 +34,7 @@ if [ "$before" = "$after" ]; then
   echo "• Already at $(git log --oneline -1). Restarting anyway."
 else
   echo "• $(git rev-list --count "$before..$after") new commit(s):"
-  git log --oneline "$before..$after"
+  git --no-pager log --oneline "$before..$after"
   # Only when the lockfile moved: a needless install is the slow half of a deploy.
   if ! git diff --quiet "$before" "$after" -- package-lock.json; then
     echo "• package-lock.json changed — npm install"
