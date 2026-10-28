@@ -11,12 +11,26 @@ import { currentTenant } from '../lib/api.js'
 // two wrong letters in the corner of every screen is still the wrong firm.
 
 // ---- desktop sidebar ----
+// Collapses to an icon rail for a desk that wants the width for its table.
+// Remembered per browser AND per workspace: the URL names the workspace
+// (currentTenant), so two firms open in one browser each keep their own
+// choice instead of one global key answering for both (CLAUDE.md §3.5).
+const navKey = () => `crm_nav_collapsed_${currentTenant() || '_'}`
+function readCollapsed() {
+  try { return localStorage.getItem(navKey()) === '1' } catch (e) { return false }
+}
+function writeCollapsed(on) {
+  try { localStorage.setItem(navKey(), on ? '1' : '0') } catch (e) { /* private mode: the choice lasts this page */ }
+}
+
 export function Sidebar({ items, active, activeSub, onNav, footer, firmName, logoUrl, sub }) {
   const name = firmName || ''
   const initials = initialsOfName(name)
+  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const toggle = () => setCollapsed(c => { writeCollapsed(!c); return !c })
   return (
-    <nav className="nav">
-      <div className="n-brand">
+    <nav className={'nav' + (collapsed ? ' collapsed' : '')}>
+      <div className="n-brand" title={collapsed ? name : undefined}>
         <div className={'n-mono' + (logoUrl ? ' has-logo' : '')}>{logoUrl ? <img src={logoUrl} alt="" /> : initials}</div>
         <div><div className="n-fn">{name}</div>{sub ? <div className="n-sub">{sub}</div> : null}</div>
       </div>
@@ -25,8 +39,10 @@ export function Sidebar({ items, active, activeSub, onNav, footer, firmName, log
           ? <div key={it.section} className="n-sec">{it.section}</div>
           : (
             <div key={it.key}>
-              <a className={active === it.key ? 'on' : ''} onClick={() => onNav(it.key)}>
-                <Icon name={it.icon} />{it.label}
+              <a className={active === it.key ? 'on' : ''} onClick={() => onNav(it.key)}
+                title={collapsed ? (it.badge > 0 ? `${it.label} · ${it.badge}` : it.label) : undefined}
+                aria-label={collapsed ? it.label : undefined}>
+                <Icon name={it.icon} /><span className="n-lbl">{it.label}</span>
                 {/* > 0, not != null. A badge means "this many are waiting for
                     you", so a badge reading 0 is an alert about nothing —
                     and both callers default to 0 rather than to null, so
@@ -37,10 +53,15 @@ export function Sidebar({ items, active, activeSub, onNav, footer, firmName, log
                   discloses them here rather than stacking a second pill row on
                   top of the page's own role pills. Only shown while the section
                   is open, so the nav stays short for everyone else. */}
+              {/* Kept on the rail too: this list is the ONLY switch between
+                  the stores (the page has none), so hiding it collapsed left
+                  Tenants and Buyers unreachable. Short stacked labels there. */}
               {it.children && active === it.key && (
                 <div className="n-sub-list">
                   {it.children.map(c => (
                     <a key={c.sub} className={'n-sub-item' + (activeSub === c.sub ? ' on' : '')}
+                      title={collapsed ? (c.count != null ? `${c.label} · ${c.count}` : c.label) : undefined}
+                      aria-current={activeSub === c.sub ? 'page' : undefined}
                       onClick={() => onNav(it.key, { [it.subKey]: c.sub })}>
                       {c.label}
                       {c.count != null && <span className="n-sub-count">{c.count}</span>}
@@ -51,10 +72,15 @@ export function Sidebar({ items, active, activeSub, onNav, footer, firmName, log
             </div>
           ))}
       </div>
+      <button type="button" className="n-toggle" onClick={toggle}
+        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!collapsed}
+        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+        <Icon name={collapsed ? 'chevRight' : 'chevLeft'} size={16} />
+      </button>
       {footer && (
-        <div className="n-foot">
+        <div className="n-foot" title={collapsed ? [footer.name, footer.role].filter(Boolean).join(' · ') : undefined}>
           <Avatar agent={footer.agent} />
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="n-foot-who" style={{ flex: 1, minWidth: 0 }}>
             <div className="nf-name">{footer.name}</div>
             <div className="n-sub">{footer.role}</div>
           </div>
@@ -76,7 +102,7 @@ export function Sidebar({ items, active, activeSub, onNav, footer, firmName, log
       )}
       <div className="n-poweredby">
         <img src="/brand-mark.svg" width={14} height={14} alt="" />
-        <span>Powered by <strong>Delpat</strong></span>
+        <span className="n-lbl">Powered by <strong>Delpat</strong></span>
       </div>
     </nav>
   )
