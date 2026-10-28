@@ -1364,7 +1364,7 @@ export function StoreProvider({ children }) {
       const primaryId = api.lookup('lead', leadId)?.duplicateOf
       if (!primaryId) { toast('No duplicate recorded for this lead', 'warn'); return Promise.resolve(null) }
       return write('Merge',
-        () => apiClient.mergeRecords(primaryId, leadId, 'combine_timeline'),
+        () => apiClient.mergeRecords(primaryId, leadId),
         () => dispatch({ type: 'MERGE', leadId, primaryId }),
         'Merged into one record')
     },

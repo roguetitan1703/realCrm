@@ -27,7 +27,7 @@ Push `development` to `main` (32 commits: sidebar #130, desk fixes, feed watch, 
 - Daily demo refresh (`--tick`) — waits on Om choosing dev or prod for demos
 - Calling on a phone has no Select mode, so bulk assign/take back is desk-only — waits on Om saying a manager does this from a phone
 - Leads has no "Select all matching" (Owners now does) — waits on a broker asking to take back leads in bulk
-- Merging duplicate leads from the screen sends `merge_strategy: combine_timeline`, which the server answers 400: merge probably always fails — waits on a check in the UI
+- Merge duplicate lead: the 400 is fixed (client sent a strategy the server refuses), but nothing sets `duplicateOf`, so the action never shows — waits on Om deciding whether duplicate detection is wanted (BACKLOG, A control that does nothing)
 - Calling a tenant or buyer from Contacts logs on their lead; when a colleague holds that lead the log now 404s (visibility gate, 28 Oct) — waits on deciding where that call belongs
 - Pressing Call closes the booked follow-up before the outcome (fix 3dcb711 on `s-phone-bugs`, held): with outcomes on 20% of bhumi's calls, closing only on an outcome would leave most called bookings overdue — waits on Om, or on the redesign's after-call sheet
 - The firm logo renders as a broken image in the desk sidebar (seen on delpat, dev) — waits on checking brand_config's logo URL

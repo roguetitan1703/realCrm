@@ -928,5 +928,5 @@ export const api = {
   // browser→R2 directly (see uploadMedia in lib/media.js), never through here.
   mediaUploadUrl: (contentType, kind) => request('/media/upload-url', { method: 'POST', body: JSON.stringify({ contentType, kind }) }),
   changeStage: (recordId, newStage, note) => request(`/records/${recordId}/actions/stage-change`, { method: 'POST', body: JSON.stringify({ new_stage_id: newStage, note }) }),
-  mergeRecords: (primaryId, dupId, strategy = 'combine_timeline') => request(`/records/${primaryId}/actions/merge`, { method: 'POST', body: JSON.stringify({ duplicate_record_id: dupId, merge_strategy: strategy }) }),
+  mergeRecords: (primaryId, dupId, strategy = 'keep_primary') => request(`/records/${primaryId}/actions/merge`, { method: 'POST', body: JSON.stringify({ duplicate_record_id: dupId, merge_strategy: strategy }) }),
 };
