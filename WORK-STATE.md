@@ -33,5 +33,5 @@ Production deploy of 6078505 (security hotfix incl. the `/workspace/reset` wipe,
 - The firm logo renders as a broken image in the desk sidebar (seen on delpat, dev) — waits on checking brand_config's logo URL
 - Dashboard "Later today" (callbacks due later today) opens the whole Callbacks tab: `callbacks_today` exists on the server but Calling has no pill for it — waits on the Calling pill row being revisited (redesign or Om's naming answer)
 - `webhookSender.ts` (outbound webhooks) has no caller and its menu entry is gone — waits on deciding to delete it or build outbound webhooks
-- No scheduled production backup: newest dump is 22 Aug (this PC, `backups/`); Supabase plan's backups unknown — waits on Om's go for a dump now and a nightly cron
+- Nightly backup: script + cron line merged (9d67760, DEPLOY.md "Nightly backup"); production dump taken 28 Oct 15:21 on this PC, verified against live counts; Supabase free plan keeps none — waits on the next push to main and Om installing the cron on the EC2
 - Duty status (crm_agents.duty_status): nothing sets it, every agent ACTIVE in prod; route now desk-only — waits on Om saying remove it
