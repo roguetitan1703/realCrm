@@ -2551,14 +2551,17 @@ function ScheduleFollowUpModal({ store, leadId }) {
   const [customTime, setCustomTime] = useState('11:00')
   const [useCustomTime, setUseCustomTime] = useState(false)
   const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
 
   if (!l) return null
 
-  const saveAppointment = () => {
+  const saveAppointment = async () => {
+    if (busy) return
+    setBusy(true)
     const finalDate = useCustomDate ? customDate : day
     const finalTime = useCustomTime ? customTime : time
     const fullAction = action
-    store.setFollowUp(l.id, {
+    const res = await store.setFollowUp(l.id, {
       action: fullAction,
       // `at` is the appointment. date/time are kept only so the three rows
       // written before this fix keep rendering; everything new reads `at`.
@@ -2571,6 +2574,8 @@ function ScheduleFollowUpModal({ store, leadId }) {
     // remark — editable, pencil and all — so the record of an appointment being
     // made could be rewritten into any sentence at all. updateLead writes it
     // server-side now, as its own type. See the follow_up block in store.ts.
+    setBusy(false)
+    if (!res) return
     store.toast(`Follow-up scheduled: ${action} on ${finalDate} at ${finalTime}`)
     store.closeModal()
   }
@@ -2643,8 +2648,8 @@ function ScheduleFollowUpModal({ store, leadId }) {
           <Input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Meet at Hinjewadi Phase 3 sales lounge" />
         </Field>
 
-        <div className="lc-foot"><Button variant="primary" block onClick={saveAppointment} icon="calendar" style={{ padding: 12, fontWeight: 600 }}>
-          Confirm Appointment
+        <div className="lc-foot"><Button variant="primary" block disabled={busy} onClick={saveAppointment} icon="calendar" style={{ padding: 12, fontWeight: 600 }}>
+          {busy ? 'Saving…' : 'Confirm Appointment'}
         </Button></div>
       </div>
     </Modal>
