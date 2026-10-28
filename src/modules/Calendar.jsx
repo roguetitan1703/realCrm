@@ -58,8 +58,10 @@ export default function Calendar({ store, go, topBar }) {
     // has ever been marked late. A follow-up is late when its own moment has
     // passed, which is only knowable now that one is stored.
     const overdue = followUpOverdue(l.followUp)
-    return { lead: l, date, key: ymd(date), time: l.followUp.time, action: followUpAction(l.followUp), isVisit, overdue, agentId: l.agentId }
-  }).filter(e => e.date)
+    // A booking can carry `at` and no `time` string (demo-showcase has 104 follow-ups,
+    // many without one). Left empty rather than derived: the row shows no time.
+    return { lead: l, date, key: ymd(date), time: l.followUp.time || '', action: followUpAction(l.followUp), isVisit, overdue, agentId: l.agentId }
+  }).filter(e => e.date && !Number.isNaN(e.date.getTime()))
 
   // WHAT IS STILL AHEAD, soonest first.
   //
