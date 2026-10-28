@@ -91,13 +91,15 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
   // The tab badge is one number, and the server already scopes it: an agent's
   // summary counts their own pipeline, an owner's counts the firm's. This used
   // to filter every lead in memory to produce it.
-  const { data: leadCounts } = useServerData(() => api.getLeadsSummary(), [state.dataAsOf], null, '/leads/summary')
-  const { data: ownerSummary } = useServerData(() => api.getOwnersSummary(true), [state.dataAsOf], null, '/owners/summary?mine=1')
-  const overdueN = leadCounts?.overdue || 0
+  const { data: today } = useServerData(() => api.getToday(true), [state.dataAsOf], null, '/workspace/today?mine=1')
+  // Same request and fields as the Today screen's groups (rule 3), so the
+  // badge cannot disagree with the list it opens. It read summary.overdue off
+  // a response that has no such top-level key, so overdue was never counted.
+  const overdueN = today?.counts?.overdue || 0
   // Late callbacks only. Badging the size of the queue would put 732 on the tab
   // permanently, which is decoration — this is the number that means "someone
   // is waiting on you right now".
-  const lateCallbacks = ownerSummary?.summary?.queue?.callbacksOverdue || 0
+  const lateCallbacks = today?.owners?.counts?.callbacksOverdue || 0
 
   const BADGES = { today: overdueN + lateCallbacks, calling: lateCallbacks }
   const tabs = {
