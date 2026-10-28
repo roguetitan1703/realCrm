@@ -56,6 +56,8 @@ npm run dev:api        # backend → DEVELOPMENT db on :5001 (watch)
 npm run dev:api:prod   # backend → PRODUCTION db on :5000 — this WRITES to prod
 npm run build          # check:vocab && vite build   ← the only valid frontend check
 npm run seed:dev       # synthetic leads into the development db
+npm run setup:local    # local Postgres: database, .env, schema, demo firm (README)
+npm run dev:refresh    # move synthetic firms' dates up to today (dev API does it itself)
 ```
 
 - **`npx vite build` is not a build check.** It skips the vocabulary guard and the

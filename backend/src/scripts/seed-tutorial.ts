@@ -21,6 +21,7 @@
  */
 import postgres from 'postgres';
 import { appEnv, databaseUrl, dbRef } from '../services/env.js';
+import { pgOptions } from '../services/pgOptions.js';
 
 process.env.APP_ENV = process.env.APP_ENV || 'development';
 
@@ -61,7 +62,7 @@ const SOURCES = ['99acres', 'MagicBricks', 'Website', 'Walk-in', 'Referral'];
 const STAGES = ['New', 'New', 'Interested', 'Callback', 'Follow-Up', 'Follow-Up', 'Site Visit', 'Call Not Received', 'Deal Closed', 'Rejected'];
 const CONFIGS = ['1 BHK', '2 BHK', '2 BHK', '3 BHK'];
 
-const sql = postgres(url, { max: 1, ssl: 'require' });
+const sql = postgres(url, pgOptions(url, { max: 1 }));
 
 async function wipe() {
   const T = TUTORIAL.tenant;

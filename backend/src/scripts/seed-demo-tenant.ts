@@ -741,39 +741,16 @@ async function wipe(sql: any) {
 }
 
 // Every date in the firm moves forward by the same number of CALENDAR days, so
-// a call made at 4 pm is still at 4 pm and "due today" is still today. Moving
-// by the exact hours would carry yesterday evening's calls to three in the
-// morning. History the move pushes past now (the build day's afternoon, when
-// the refresh runs in the morning) steps back one day.
+// a call made at 4 pm is still at 4 pm and "due today" is still today. The
+// move itself is services/devData.ts shiftTenantDates, the same one that keeps
+// development's synthetic firms current; it moves the anchor too.
 async function refresh(sql: any, demo: any) {
   const anchor = new Date(demo.anchor).getTime();
   const days = Math.floor((NOW + ZONE) / DAY) - Math.floor((anchor + ZONE) / DAY);
   if (days < 1) { console.log('Built today already; nothing to move.'); return; }
-  const secs = days * 86400;
-  const shift = days * DAY;
-  const TABLES = ['crm_leads', 'crm_owners', 'crm_properties', 'crm_timeline_events', 'activities', 'crm_agreements', 'lead_shortlist', 'notifications'];
-  const cols: any[] = await sql`
-    SELECT table_name, column_name, data_type FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name IN ${sql(TABLES)} AND data_type IN ('timestamp with time zone', 'timestamp without time zone', 'date')`;
-  for (const t of TABLES) {
-    const set = cols.filter(c => c.table_name === t);
-    if (!set.length) continue;
-    const parts = set.map(c => c.data_type === 'date'
-      ? sql`${sql(c.column_name)} = ${sql(c.column_name)} + ${days}::int`
-      : sql`${sql(c.column_name)} = ${sql(c.column_name)} + make_interval(secs => ${secs})`);
-    const clause = parts.reduce((a: any, p: any) => sql`${a}, ${p}`);
-    await sql`UPDATE ${sql(t)} SET ${clause} WHERE tenant_id = ${SLUG}`;
-  }
-  await sql`UPDATE crm_leads SET follow_up = jsonb_set(follow_up, '{at}', to_jsonb(to_char(((follow_up->>'at')::timestamptz + make_interval(secs => ${secs})) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')))
-            WHERE tenant_id = ${SLUG} AND follow_up->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'`;
-  const back = [['crm_timeline_events', 'timestamp'], ['activities', 'at'], ['crm_leads', 'created_at'], ['crm_owners', 'created_at'],
-    ['crm_owners', 'last_call_at'], ['crm_properties', 'created_at']];
-  let stepped = 0;
-  for (const [t, c] of back) {
-    const r = await sql`UPDATE ${sql(t)} SET ${sql(c)} = ${sql(c)} - interval '1 day' WHERE tenant_id = ${SLUG} AND ${sql(c)} > now()`;
-    stepped += r.count;
-  }
-  await sql`UPDATE tenants SET brand_config = jsonb_set(brand_config, '{demo,anchor}', to_jsonb(${new Date(anchor + shift).toISOString()}::text)) WHERE id = ${SLUG}`;
+  const { shiftTenantDates } = await import('../services/devData.js');
+  const counts = await sql.begin((tx: any) => shiftTenantDates(tx, SLUG, days));
+  const stepped = counts['history stepped back to before now'] || 0;
   console.log(`✓ /${SLUG} moved forward ${days} day${days === 1 ? '' : 's'}${stepped ? `; ${stepped} rows that landed after now went back a day` : ''}`);
 }
 

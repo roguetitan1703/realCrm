@@ -24,6 +24,7 @@
  * write. APP_ENV must be named; it never guesses which database.
  */
 import postgres from 'postgres';
+import { pgOptions } from '../services/pgOptions.js';
 
 if (!['development', 'production'].includes(String(process.env.APP_ENV || ''))) {
   console.error('Set APP_ENV=development or APP_ENV=production.'); process.exit(1);
@@ -33,7 +34,7 @@ const { databaseUrl, appEnv } = await import('../services/env.js');
 const arg = (k: string) => process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1];
 const days = Math.max(1, Math.min(365, Number(arg('days')) || 30));
 
-const db = postgres(databaseUrl(), { max: 1, ssl: 'require', onnotice: () => {} });
+const db = postgres(databaseUrl(), pgOptions(databaseUrl(), { max: 1, onnotice: () => {} }));
 
 /** Sliding-window peaks, partitioned by `by` (a column list). */
 const peaks = (tx: any, by: 'integration' | 'tenant') => {

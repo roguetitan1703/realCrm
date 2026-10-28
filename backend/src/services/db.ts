@@ -11,6 +11,8 @@ import path from 'path';
 import postgres from 'postgres';
 import { databaseUrl, assertEnvMatchesDatabase, assertRequiredConfig, appEnv } from './env';
 import { planPhones } from './phoneRepair';
+import { isLocalDatabase, pgOptions } from './pgOptions';
+import { ensureDevDataTable } from './devData';
 
 // 1. Zero-dependency .env loader
 
@@ -38,14 +40,14 @@ if (!dbUrl) {
 // has not released yet. Ten here plus one seeder is most of the budget, and the
 // symptom is a 500 reading `max clients reached in session mode`, not a
 // connection error, so it looks like a bug in the query.
-const POOL_MAX = appEnv() === 'development' ? 4 : 10;
+// A Postgres on this machine has no such cap, so it gets production's ten.
+const POOL_MAX = appEnv() === 'development' && !isLocalDatabase(dbUrl) ? 4 : 10;
 
-export const sql = postgres(dbUrl, {
-  ssl: 'require',
+export const sql = postgres(dbUrl, pgOptions(dbUrl, {
   max: POOL_MAX,
   idle_timeout: 20,
   connect_timeout: 15,
-});
+}));
 
 // Canonical id of the seeded DEMO tenant. Deliberately a neutral firm — not any
 // real client's name — so demo/fake data never rides under a real brand. Real
@@ -648,6 +650,10 @@ export async function initSchema(): Promise<void> {
     await migrateIngestionD1();
     await migrateSharing();
     await migratePhones();
+    // Which firms are synthetic, and the day their data is anchored to
+    // (services/devData.ts). A development database only: production has no
+    // synthetic firm to move.
+    if (appEnv() === 'development') await ensureDevDataTable(sql);
 
     console.log('[Supabase DB] ✅ PostgreSQL schema initialization completed successfully.');
   } catch (err: any) {

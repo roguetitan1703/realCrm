@@ -19,6 +19,8 @@
  */
 import postgres from 'postgres';
 import { dbRef, databaseUrl, appEnv } from '../services/env';
+import { pgOptions } from '../services/pgOptions.js';
+import { adoptSynthetic } from '../services/devData.js';
 
 const arg = (k: string, d?: string) =>
   process.argv.find(a => a.startsWith(`--${k}=`))?.split('=')[1] ?? d;
@@ -49,17 +51,33 @@ Refusing to seed: the development URL names the same database as DATABASE_URL ($
 }
 const slug = arg('tenant', 'skyline-realty')!;
 const count = Math.min(Number(arg('n', '200')), 2000);
-const sql = postgres(url, { max: 1, ssl: 'require' });
+const sql = postgres(url, pgOptions(url, { max: 1 }));
 
-const FIRST = ['Aarav', 'Vivaan', 'Aditya', 'Diya', 'Ananya', 'Ishaan', 'Kabir', 'Meera', 'Rohan', 'Sana', 'Tanvi', 'Yash', 'Nikhil', 'Pooja', 'Rahul', 'Sneha'];
-const LAST = ['Sharma', 'Patel', 'Reddy', 'Nair', 'Iyer', 'Desai', 'Kulkarni', 'Joshi', 'Menon', 'Gupta'];
+const FIRST = ['Aarav', 'Vivaan', 'Aditya', 'Diya', 'Ananya', 'Ishaan', 'Kabir', 'Meera', 'Rohan', 'Sana', 'Tanvi', 'Yash', 'Nikhil', 'Pooja', 'Rahul', 'Sneha',
+  'Aditi', 'Gaurav', 'Harsh', 'Isha', 'Jaya', 'Kunal', 'Lakshmi', 'Nitin', 'Omkar', 'Prachi', 'Riya', 'Siddhi', 'Tushar', 'Varun'];
+const LAST = ['Sharma', 'Patel', 'Reddy', 'Nair', 'Iyer', 'Desai', 'Kulkarni', 'Joshi', 'Menon', 'Gupta',
+  'Bhatt', 'Chopra', 'Dutta', 'Kapoor', 'Mishra', 'Pillai', 'Saxena', 'Trivedi'];
 const LOCALITIES = ['Wakad', 'Baner', 'Hinjewadi', 'Kharadi', 'Aundh', 'Balewadi', 'Pimple Saudagar'];
 const SOURCES = ['Housing.com', '99acres', 'MagicBricks', 'Website', 'Walk-in', 'Referral'];
 const STAGES = ['New', 'Interested', 'Call Not Received', 'Callback', 'Follow-Up', 'Site Visit', 'Rejected', 'Deal Closed'];
 const CONFIGS = ['1 BHK', '2 BHK', '3 BHK', '4 BHK'];
 
-const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
-const rand = (n: number) => Math.floor(Math.random() * n);
+// SEEDED, so a second run draws the same leads, and their ids are numbered
+// rather than stamped with the clock: run twice, the second run inserts
+// nothing (ON CONFLICT DO NOTHING) instead of doubling the firm.
+let seed = 20261028;
+const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
+const rand = (n: number) => Math.floor(rnd() * n);
+// ONE PERSON PER NAME. The smoke tests find people by name ("Aarav Gupta" must
+// be one row; a colleague's lead must not be on an agent's screen, judged by
+// its name), so a second "Sneha Menon" on another agent's desk reads as a leak.
+// The names the other dev seeders write are taken too.
+const RESERVED = new Set(['Aarav Gupta', 'Rohit Kale', 'Anand Rao', 'Neha Kulkarni', 'Rahul Deshpande', 'Sameer Joshi', 'Pooja Nair', 'Arjun Mehta']);
+// Open stages have a next step booked; the mix gives Today something overdue,
+// something due later today and something coming.
+const OPEN = new Set(['Interested', 'Callback', 'Follow-Up', 'Site Visit']);
+const ACTION: Record<string, string> = { Interested: 'Follow-up Call', Callback: 'Callback', 'Follow-Up': 'Follow-up Call', 'Site Visit': 'Site Visit' };
 
 async function main() {
   const [tenant] = await sql`SELECT id, name FROM tenants WHERE slug = ${slug} OR id = ${slug}`;
@@ -68,6 +86,7 @@ async function main() {
     process.exit(1);
   }
   const t = tenant.id;
+  await adoptSynthetic(sql, t, 'seed-dev');
   // A FRESH DATABASE HAS NO DESK. The auth seed creates the tenant and its
   // owner; the agents come from the bundled demo dataset, which a new project
   // never received. Without them every seeded lead lands unassigned, which
@@ -107,31 +126,53 @@ async function main() {
   agentIds.push(null, null);
 
   console.log(`Seeding ${count} leads into ${tenant.name} (${t}) across ${agents.length} agents…`);
-  let made = 0;
+  // Today in the firm's day (IST, as the other dev seeders draw it).
+  const [clock] = await sql`SELECT (date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata') AS d0, now() AS now`;
+  const d0 = new Date(clock.d0).getTime(), now = new Date(clock.now).getTime();
+  let made = 0, booked = 0;
+  const used = new Set<string>();
   for (let i = 0; i < count; i++) {
-    const name = `${pick(FIRST)} ${pick(LAST)}`;
+    // Distinct while there are names left to give (30 × 18); past that, repeats.
+    let name = `${pick(FIRST)} ${pick(LAST)}`;
+    for (let tries = 0; RESERVED.has(name) || (used.has(name) && tries < 500); tries++) name = `${pick(FIRST)} ${pick(LAST)}`;
+    used.add(name);
     // A phone number that cannot collide with a real one: the 5550xxx block is
     // reserved for fiction, and findLeadByPhone matches on the last ten digits.
     const phone = `+9199555${String(100000 + i).slice(-6)}`;
     const stage = pick(STAGES);
     const ageDays = rand(45);
-    const created = new Date(Date.now() - ageDays * 86400_000 - rand(86400_000));
-    const id = `l_stg_${Date.now()}_${i}`;
+    const created = new Date(now - ageDays * 86400_000 - rand(86400_000));
+    const id = `l_stg_${t}_${i}`;
     const req = {
       locality: pick(LOCALITIES),
       config: pick(CONFIGS),
       budgetMin: (30 + rand(40)) * 100000,
       budgetMax: (80 + rand(120)) * 100000,
     };
-    await sql`
-      INSERT INTO crm_leads (id, tenant_id, name, phone, stage, source, locality, agent_id, req, created_at, updated_at)
+    const agent = pick(agentIds);
+    // 0: overdue by one to three days; 1: today, later on; 2: in the next few days.
+    let followUp: any = null;
+    if (OPEN.has(stage) && agent) {
+      const kind = i % 3;
+      const hour = 10 + rand(9);
+      let at = kind === 0 ? d0 - (1 + rand(3)) * 86400_000 + hour * 3600_000
+        : kind === 1 ? Math.max(now + (1 + rand(4)) * 3600_000, d0 + hour * 3600_000)
+        : d0 + (1 + rand(4)) * 86400_000 + hour * 3600_000;
+      // Run late in the evening, "later today" would be tomorrow: keep it today.
+      if (kind === 1 && at >= d0 + 86400_000) at = d0 + 86400_000 - 15 * 60_000;
+      if (at < created.getTime()) at = created.getTime() + 3600_000;
+      followUp = { action: ACTION[stage], at: new Date(at).toISOString() };
+    }
+    const r = await sql`
+      INSERT INTO crm_leads (id, tenant_id, name, phone, stage, source, locality, agent_id, req, follow_up, created_at, updated_at)
       VALUES (${id}, ${t}, ${name}, ${phone}, ${stage}, ${pick(SOURCES)}, ${req.locality},
-              ${pick(agentIds)}, ${sql.json(req)}, ${created}, ${created})
+              ${agent}, ${sql.json(req)}, ${followUp ? sql.json(followUp) : null}, ${created}, ${created})
       ON CONFLICT (id) DO NOTHING`;
-    made++;
+    made += r.count;
+    if (r.count && followUp) booked++;
   }
   const [n] = await sql`SELECT count(*)::int n FROM crm_leads WHERE tenant_id = ${t}`;
-  console.log(`Done. ${made} inserted; ${tenant.name} now holds ${n.n} leads.`);
+  console.log(`Done. ${made} inserted (${booked} with a follow-up booked; ${count - made} already there); ${tenant.name} now holds ${n.n} leads.`);
 }
 
 main().then(() => sql.end()).catch(async (e) => { console.error(e); await sql.end(); process.exit(1); });

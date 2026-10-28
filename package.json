@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "dev:api": "tsx backend/src/scripts/run-api.ts --env=development --watch",
@@ -15,6 +18,8 @@
     "build:dev": "npm run check:vocab && vite build --mode development",
     "preview": "vite preview",
     "seed:dev": "tsx backend/src/scripts/seed-dev.ts",
+    "setup:local": "node scripts/setup-local.mjs",
+    "dev:refresh": "tsx backend/src/scripts/dev-refresh.ts",
     "deploy:dev": "npx vercel deploy --local-config vercel.development.json --yes",
     "check:vocab": "node scripts/check-vocabulary.mjs",
     "test:ingest": "node scripts/ingest-conformance.mjs",

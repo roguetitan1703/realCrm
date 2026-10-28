@@ -14,6 +14,7 @@
  * Uses DATABASE_URL (production) unless APP_ENV=development.
  */
 import postgres from 'postgres';
+import { pgOptions } from '../services/pgOptions.js';
 
 // Importing the services reaches store.ts, whose import starts the server's
 // boot (initSchema and the one-time repairs) unless this is set. Run as a
@@ -27,7 +28,7 @@ const arg = (k: string) => process.argv.find(a => a.startsWith(`--${k}=`))?.spli
 const tenants = (arg('tenant') || '').split(',').filter(Boolean);
 if (!tenants.length) { console.error('Pass --tenant=<slug>[,<slug>].'); process.exit(1); }
 
-const db = postgres(databaseUrl(), { max: 1, ssl: 'require', onnotice: () => {} });
+const db = postgres(databaseUrl(), pgOptions(databaseUrl(), { max: 1, onnotice: () => {} }));
 const TABLE = 'alert_preview';
 
 async function main() {

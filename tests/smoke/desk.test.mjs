@@ -37,12 +37,21 @@ test('Dashboard tiles land on lists whose count matches and a chip shows', async
   }
 })
 
-test('Team today rows add up to the overdue total', async () => {
+// "Missed" is not "overdue": a follow-up is missed once its DAY has ended
+// (services/activityReport.ts); one due at 11 am today is overdue at noon but
+// not missed until tomorrow. So the rows add up to the overdue leads whose day
+// is over, read from the same overdue list the tile opens. Comparing with the
+// tile itself only held while nothing was due earlier today.
+test('Team today rows add up to the overdue follow-ups from before today', async () => {
   await go(page, 'screen=dashboard')
   const overdue = Number((await page.locator('a, button, div').filter({ hasText: new RegExp('^Follow-up overdue' + NL + '?\\s*\\d+$') }).last().innerText()).match(/(\d+)\s*$/)[1])
+  const list = await call('GET', '/leads/page?segment=overdue&limit=200', ownerToken)
+  assert.equal(list.json.total, overdue, `overdue tile ${overdue}, overdue list ${list.json.total}`)
+  const day = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+  const missed = list.json.data.filter(l => l.followUp?.at && day(l.followUp.at) < day(Date.now())).length
   const body = await page.locator('body').innerText()
   const sum = [...body.matchAll(/(\d+) missed follow-ups?/g)].reduce((a, m) => a + Number(m[1]), 0)
-  assert.equal(sum, overdue, `Team today rows sum ${sum}, overdue tile ${overdue}`)
+  assert.equal(sum, missed, `Team today rows sum ${sum}, overdue from before today ${missed}`)
 })
 
 test('Performance loads', async () => {
@@ -85,12 +94,17 @@ test('Leads: toolbar direction and header caret are one state', async () => {
 
 test('a row menu closes when its button scrolls out of view', async () => {
   await go(page, 'screen=leads&seg=all')
-  const btn = page.locator('table.tbl tbody tr:nth-child(10) .stg-btn').first()
+  // A row near the top: a page of 20 rows scrolls only ~400px, so row 10,
+  // scrolled into view first, could not travel far enough to leave the screen.
+  const btn = page.locator('table.tbl tbody tr:nth-child(3) .stg-btn').first()
   await btn.scrollIntoViewIfNeeded()
   await btn.click()
   await page.waitForTimeout(500)
   assert.equal(await page.locator('.pop-anchored').count(), 1, 'menu did not open')
-  await page.mouse.move(700, 500)
+  // Wheel over the list, never over the open menu: a wheel on the menu scrolls
+  // the menu, and where the menu sits depends on how wide the columns came out.
+  const pop = await page.locator('.pop-anchored').boundingBox()
+  await page.mouse.move(pop.x > 600 ? pop.x - 250 : pop.x + pop.width + 250, 500)
   await page.mouse.wheel(0, 1800)
   await page.waitForTimeout(700)
   assert.equal(await page.locator('.pop-anchored').count(), 0, 'menu stayed open after its button scrolled away')
@@ -112,7 +126,8 @@ test('Esc: New lead closes when empty and holds when typed', async () => {
 
 test('Esc: Schedule follow-up and the search panel close', async () => {
   await go(page, 'screen=leads&seg=all')
-  await page.locator('table.tbl tbody tr').nth(2).click()
+  // The name cell: the middle of a row can be its status control, which opens a menu instead.
+  await page.locator('table.tbl tbody tr').nth(2).locator('td').nth(1).click()
   await page.getByRole('button', { name: /Schedule follow-up/ }).first().click()
   await page.getByText('Activity Type').waitFor()
   await page.keyboard.press('Escape'); await page.waitForTimeout(500)
@@ -151,7 +166,7 @@ test('back keeps the filter: list -> lead -> property -> back -> back', async ()
   await page.locator('input[placeholder^="Search leads"]').fill('Aarav Gupta'); await page.waitForTimeout(2000)
   const listUrl = page.url()
   assert.equal(await page.locator('table.tbl tbody tr').count(), 1, 'search did not narrow the list to one row')
-  await page.locator('table.tbl tbody tr').first().click(); await page.waitForTimeout(1500)
+  await page.locator('table.tbl tbody tr').first().locator('td').nth(1).click(); await page.waitForTimeout(1500)
   const prop = page.locator('button:has-text("Shortlisted"), button:has-text("Open flat"), a:has-text("Open flat")').first()
   assert.ok(await prop.count(), 'the lead has no openable property (dev data changed?)')
   await prop.click(); await page.waitForTimeout(1500)

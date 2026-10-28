@@ -36,6 +36,7 @@
 // — from the repo root, where every other script works.
 import '../services/env.js';
 import postgres from 'postgres';
+import { pgOptions } from '../services/pgOptions.js';
 import { createHash } from 'crypto';
 
 const WRITE = process.argv.includes('--write');
@@ -50,7 +51,7 @@ if (PROD && ref(PROD) === ref(DEV)) {
   process.exit(1);
 }
 
-const sql = postgres(DEV, { max: 1, ssl: 'require' });
+const sql = postgres(DEV, pgOptions(DEV, { max: 1 }));
 
 /** Stable index from a string, so one real value always becomes one fake one. */
 const idx = (s: string, n: number) =>

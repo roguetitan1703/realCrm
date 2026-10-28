@@ -22,7 +22,10 @@ const waitLead = () => page.waitForFunction(() => location.search.includes('lead
 test('Today loads and the badge is the overdue + due rows', async () => {
   await go(page, 'screen=today')
   const txt = await page.locator('body').innerText()
-  const heads = [...txt.matchAll(/^(OVERDUE|CALLBACKS DUE|DUE[^\n]*)\n(\d+)$/gm)].map(m => Number(m[2]))
+  // The badge is what is waiting right now: overdue follow-ups and late
+  // callbacks (Phone.jsx BADGES). "Due today" is later today, not late yet, and
+  // is not in it; the old pattern counted it whenever the data had one.
+  const heads = [...txt.matchAll(/^(OVERDUE|CALLBACKS DUE)\n(\d+)$/gm)].map(m => Number(m[2]))
   assert.ok(heads.length >= 1, 'no Overdue / Due sections on Today')
   const badge = Number((await page.locator('.tab-dot').first().innerText()).trim())
   assert.equal(badge, heads.reduce((a, b) => a + b, 0), `badge ${badge} vs sections ${heads}`)

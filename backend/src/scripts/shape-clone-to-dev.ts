@@ -25,6 +25,7 @@
 import postgres from 'postgres';
 import { createHash } from 'crypto';
 import { databaseUrl, dbRef } from '../services/env.js';
+import { pgOptions } from '../services/pgOptions.js';
 
 const WRITE = process.argv.includes('--write');
 const FROM_TENANT = 'bhumi';
@@ -71,7 +72,7 @@ function surfaceFor(id: string, i: number) {
 }
 
 // ── read production ─────────────────────────────────────────────────────────
-const prod = postgres(PROD, { max: 1, ssl: 'require' });
+const prod = postgres(PROD, pgOptions(PROD, { max: 1 }));
 console.log(`\nreading  ${dbRef(PROD)} · tenant ${FROM_TENANT}`);
 
 const srcLeads = await prod`SELECT * FROM crm_leads WHERE tenant_id = ${FROM_TENANT} ORDER BY created_at`;
@@ -87,7 +88,7 @@ await prod.end();
 console.log(`         ${srcLeads.length} leads · ${srcEvents.length} timeline events · ${srcEnq.length} enquiry sessions`);
 
 // ── map the desk onto development's agents ──────────────────────────────────
-const dev = postgres(DEV, { max: 1, ssl: 'require' });
+const dev = postgres(DEV, pgOptions(DEV, { max: 1 }));
 const devAgents = await dev`
   SELECT id FROM users WHERE tenant_id = ${TO_TENANT} AND role = 'agent' AND deleted_at IS NULL ORDER BY id`;
 if (!devAgents.length) { console.error(`\nNo agents on ${TO_TENANT} in development. Run seed:dev first.\n`); await dev.end(); process.exit(1); }

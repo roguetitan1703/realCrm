@@ -24,6 +24,8 @@
  */
 import postgres from 'postgres';
 import { appEnv, databaseUrl, dbRef } from '../services/env.js';
+import { pgOptions } from '../services/pgOptions.js';
+import { adoptSynthetic } from '../services/devData.js';
 
 process.env.APP_ENV = process.env.APP_ENV || 'development';
 const TENANT = 'delpat';
@@ -39,7 +41,7 @@ if (process.env.DATABASE_URL && dbRef(url) === dbRef(process.env.DATABASE_URL)) 
   console.error(`\n✗ The development URL resolves to the same project as DATABASE_URL (${dbRef(url)}). Refusing.\n`);
   process.exit(1);
 }
-const sql = postgres(url, { max: 1, ssl: 'require' });
+const sql = postgres(url, pgOptions(url, { max: 1 }));
 
 // ── Clear ───────────────────────────────────────────────────────────────────
 async function clear() {
@@ -71,12 +73,15 @@ async function clear() {
      ORDER BY record_id, timestamp ASC`;
   for (const r of cbPrev as any[]) await sql`UPDATE crm_owners SET callback_at = ${r.cb || null} WHERE id = ${r.record_id} AND tenant_id = ${TENANT}`;
 
-  const ev = await sql`DELETE FROM crm_timeline_events WHERE tenant_id = ${TENANT} AND (metadata->>'demo' = 'activity' OR record_id LIKE 'l\\_demo\\_%') RETURNING 1`;
+  const ev = await sql`DELETE FROM crm_timeline_events WHERE tenant_id = ${TENANT} AND (metadata->>'demo' = 'activity' OR (record_id LIKE 'l\\_demo\\_%' AND record_id NOT LIKE 'l\\_demo\\_inv\\_%')) RETURNING 1`;
   const act = await sql`DELETE FROM activities WHERE tenant_id = ${TENANT} AND id LIKE 'act\\_demo\\_%' RETURNING 1`;
-  const leads = await sql`DELETE FROM crm_leads WHERE tenant_id = ${TENANT} AND id LIKE 'l\\_demo\\_%' RETURNING 1`;
+  // Its own enquiries only: seed-dev-inventory's leads are l_demo_inv_*, and
+  // this used to delete them with its own, leaving their agreements pointing at nothing.
+  const leads = await sql`DELETE FROM crm_leads WHERE tenant_id = ${TENANT} AND id LIKE 'l\\_demo\\_%' AND id NOT LIKE 'l\\_demo\\_inv\\_%' RETURNING 1`;
   console.log(`  cleared: ${ev.length} events, ${act.length} visits, ${leads.length} demo leads; restored ${leadPrev.length} lead statuses, ${fuPrev.length} follow-ups, ${ownerPrev.length} owner statuses, ${cbPrev.length} callbacks`);
 }
 
+if (!clearOnly) await adoptSynthetic(sql, TENANT, 'seed-dev-activity');
 await clear();
 if (clearOnly) { await sql.end(); process.exit(0); }
 
