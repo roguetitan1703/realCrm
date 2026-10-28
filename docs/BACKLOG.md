@@ -85,9 +85,6 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 - The app has never stored an audit-chain check (`audit_checks` empty); the
   chain verifies clean, 7 chains, 13,941 rows.
 - `.env` lines split on `\n` only; check `grep -c $'\r' .env` on EC2 first.
-- Add lead offers an agent "Unassigned" (it now means "the firm's rule
-  decides") and lets an agent name a colleague; the rules say agents don't
-  assign. *agent*
 - "Back on their link" (`maybeReturned`) is check-then-insert; two parallel
   opens can raise it twice.
 - **Owners have no duplicate flag or merge** (specs/phone.md). After the phone

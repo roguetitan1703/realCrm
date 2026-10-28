@@ -2166,14 +2166,24 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts
   // rota`, so the desk picking "Unassigned" on Add lead had the lead dealt to
   // the next person anyway. An explicit null from someone who may assign —
   // the desk, or a system caller — means unassigned. An agent may not decide
-  // who holds work (canAssignLead, assignUnowned), so an agent's null is
-  // treated as not sent: the firm's arrival rule decides, as it does for a
-  // portal enquiry. Nobody named → arrivalLeadAgent(), which is the rota or,
-  // under "Leave unassigned", nobody.
+  // who holds work (canAssignLead, bulkAssignLeads), so AN AGENT'S LEAD IS
+  // THEIRS: whatever they sent, or nothing, it lands on them — the one adding
+  // it is the one who has the buyer on the line. Naming a colleague is refused
+  // the way every other agent assignment is, not quietly rewritten: an agent
+  // who handed a lead on and saw it land on themselves would not know why.
+  // Their null used to mean "the firm's rule decides", which dealt the lead
+  // they had just typed in to the next person on the rota.
+  // Desk and system callers: nobody named → arrivalLeadAgent(), which is the
+  // rota or, under "Leave unassigned", nobody.
   const sentAgent = leadData.agentId !== undefined ? leadData.agentId : leadData.agent_id;
+  const who = getContext();
   let agentId: string | null = sentAgent || null;
-  if (agentId) await assertWorkable(tid(), [agentId]);
-  else if (sentAgent === undefined || getContext()?.role === 'agent') agentId = await arrivalLeadAgent();
+  if (who?.role === 'agent') {
+    if (!who.userId) throw new ForbiddenError('Not signed in.');
+    if (agentId && agentId !== who.userId) throw new ForbiddenError('Assigning leads is done from the desk.');
+    agentId = who.userId;
+  } else if (agentId) await assertWorkable(tid(), [agentId]);
+  else if (sentAgent === undefined) agentId = await arrivalLeadAgent();
 
   // NO INVENTED NAME. This defaulted to 'New Inquiry', which is a fact about
   // the payload dressed up as the person's name: it sorted under N, it was

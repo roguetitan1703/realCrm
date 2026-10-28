@@ -110,6 +110,9 @@ recordsRouter.post('/', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     const nw = notWorkableBody(err) || phoneInvalidBody(err); if (nw) return res.status(422).json(nw);
+    if (err?.status === 403) {
+      return res.status(403).json({ success: false, error: 'Forbidden', message: err.message, code: err.code });
+    }
     return res.status(500).json({ error: 'Record Creation Failed', message: err.message });
   }
 });

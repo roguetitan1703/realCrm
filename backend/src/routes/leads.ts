@@ -198,6 +198,9 @@ leadsRouter.post('/', async (req: Request, res: Response) => {
     return res.status(201).json({ success: true, data: newLead });
   } catch (err: any) {
     const nw = notWorkableBody(err) || phoneInvalidBody(err); if (nw) return res.status(422).json(nw);
+    if (err?.status === 403) {
+      return res.status(403).json({ success: false, error: 'Forbidden', message: err.message, code: err.code });
+    }
     throw err;
   }
 });

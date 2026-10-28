@@ -63,7 +63,8 @@ export function isDeskRole(role?: string | null): boolean {
  *
  * Three cases, and the difference between the first two is the whole point:
  *
- *   created by them   → full edit. It is their record.
+ *   created by them   → full edit, except who holds it. It is their record;
+ *                       the holder is the desk's on every lead.
  *   assigned to them  → status and remarks only. They work the lead; they do
  *                       not get to rewrite the buyer's name, phone, budget or
  *                       requirement, and they do not get to hand it to someone
@@ -123,6 +124,15 @@ export function assertLeadWrite(
 ): void {
   if (role !== 'agent') return;               // desk, superadmin, or system
   if (!userId) throw new ForbiddenError('Not signed in.');
+
+  // WHO HOLDS IT is the desk's, on every lead — their own included. Authorship
+  // let an agent who created a lead hand it to a colleague from Edit, the one
+  // door bulk assign and Add lead had already closed. Re-sending the current
+  // holder is not a change.
+  const sentAgent = patch.agentId !== undefined ? patch.agentId : patch.agent_id;
+  if (sentAgent !== undefined && (sentAgent || null) !== (lead.agentId || null)) {
+    throw new ForbiddenError('Assigning leads is done from the desk.');
+  }
 
   if (lead.createdBy && lead.createdBy === userId) return;   // their own record
 
