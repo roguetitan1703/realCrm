@@ -187,7 +187,7 @@ export default function Dashboard({ store, go, topBar }) {
           {hasCalling && (
             // PEOPLE, not calls: it counts calling rows rung today. Team today's
             // "calls" counts every call, so the two must not share the word.
-            <Kpi icon="check" label="People called today" value={oq.calledToday} onClick={() => toCalling('never_called')} />
+            <Kpi icon="check" label="People called today" value={oq.calledToday} />
           )}
         </div>
 
