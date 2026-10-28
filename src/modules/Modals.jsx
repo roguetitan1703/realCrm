@@ -10,7 +10,7 @@ import { theme } from '../data/theme.js'
 import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho, unitLabel, followUpAction, followUpLabel } from '../lib/format.js'
 import { matchesForLead, leadsForProperty, ownerUpdateMessage, openWhatsAppChat, followUpMessage } from '../lib/matching.js'
 import WaSend from '../components/WaSend.jsx'
-import { api } from '../lib/api.js'
+import { api, workspaceUrl } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { notifMeta, cleanTitle, isAssignment } from '../lib/notificationMeta.js'
 import { REJECTION_REASONS, REJECTED_STATUS } from '../data/leadStatus.js'
@@ -1612,7 +1612,7 @@ function AddAgentModal({ store }) {
     const locked = left > 0
     const guardedClose = () => { if (!locked) store.closeModal() }
     const copyCreds = () => {
-      const text = `${store.state.settings.firmName || 'Workspace'} sign-in\n${idLabel}: ${done.handle}\nTemporary password: ${done.initialPassword}`
+      const text = `${store.state.settings.firmName || 'Workspace'} sign-in\n${workspaceUrl()}\n${idLabel}: ${done.handle}\nTemporary password: ${done.initialPassword}`
       copyText(text).then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500) } })
     }
     return (

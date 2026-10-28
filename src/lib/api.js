@@ -257,6 +257,12 @@ export function currentTenant() {
   return pathSlug();
 }
 
+/** Where a person signs in to this workspace: origin + its slug, from the URL. */
+export function workspaceUrl() {
+  const slug = currentTenant();
+  return slug && typeof window !== 'undefined' ? `${window.location.origin}/${slug}` : '';
+}
+
 /** The workspace slug in the path, or '' on the picker and /admin. */
 function pathSlug() {
   if (typeof window === 'undefined') return '';

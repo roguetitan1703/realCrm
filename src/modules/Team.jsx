@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Avatar, Button, Field, Input, SectionHead, PageHeader, Segmented, RowMenu, Pager } from '../components/primitives.jsx'
 import PhoneInput from '../components/PhoneInput.jsx'
 import Icon from '../components/Icon.jsx'
-import { api } from '../lib/api.js'
+import { api, workspaceUrl } from '../lib/api.js'
 // The shared frame: a backdrop tap stops closing once anything is typed (CLAUDE.md §5).
 import { Modal } from './Modals.jsx'
 import { useServerData } from '../lib/useServerData.js'
@@ -311,7 +311,7 @@ function RevealCard({ data, store, onClose }) {
   const idLabel = data.byId ? 'User ID' : 'Email'
   const copy = () => {
     const firm = store.state.settings?.firmName || 'Workspace'
-    const text = `${firm} sign-in\n${idLabel}: ${data.handle}\nTemporary password: ${data.password}`
+    const text = `${firm} sign-in\n${workspaceUrl()}\n${idLabel}: ${data.handle}\nTemporary password: ${data.password}`
     copyText(text).then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500) } })
   }
   return (
