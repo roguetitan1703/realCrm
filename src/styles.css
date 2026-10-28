@@ -2748,6 +2748,13 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
   --dist-4: #A8586B;
   --dist-5: #7A6AA0;
   --dist-6: #B0803A;
+  /* 7-12: sources past six used to wrap onto the first six colours. */
+  --dist-7: #3F8F8A;
+  --dist-8: #C4673D;
+  --dist-9: #55607A;
+  --dist-10: #8F8A3C;
+  --dist-11: #7C4F3A;
+  --dist-12: #C27BA0;
 }
 .dist-bar{display:flex;height:8px;border-radius:5px;overflow:hidden;background:var(--line-2);margin:2px 0 12px}
 .dist-bar i{display:block;height:100%;min-width:2px}
@@ -2757,6 +2764,12 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .dist-bar i[data-i="3"]{background:var(--dist-4)}
 .dist-bar i[data-i="4"]{background:var(--dist-5)}
 .dist-bar i[data-i="5"]{background:var(--dist-6)}
+.dist-bar i[data-i="6"]{background:var(--dist-7)}
+.dist-bar i[data-i="7"]{background:var(--dist-8)}
+.dist-bar i[data-i="8"]{background:var(--dist-9)}
+.dist-bar i[data-i="9"]{background:var(--dist-10)}
+.dist-bar i[data-i="10"]{background:var(--dist-11)}
+.dist-bar i[data-i="11"]{background:var(--dist-12)}
 .dist-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px 16px}
 .dist-row{display:flex;align-items:center;gap:8px;width:100%;background:transparent;border:none;border-radius:7px;
   padding:6px 8px;margin:0 -8px;cursor:pointer;font-family:var(--sans);font-size:12.5px;color:var(--ink);text-align:left}
@@ -2770,6 +2783,12 @@ a.ev-proof-geo:hover{color:var(--accent);text-decoration:underline}
 .dist-dot[data-i="3"]{background:var(--dist-4)}
 .dist-dot[data-i="4"]{background:var(--dist-5)}
 .dist-dot[data-i="5"]{background:var(--dist-6)}
+.dist-dot[data-i="6"]{background:var(--dist-7)}
+.dist-dot[data-i="7"]{background:var(--dist-8)}
+.dist-dot[data-i="8"]{background:var(--dist-9)}
+.dist-dot[data-i="9"]{background:var(--dist-10)}
+.dist-dot[data-i="10"]{background:var(--dist-11)}
+.dist-dot[data-i="11"]{background:var(--dist-12)}
 .dist-k{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dist-n{color:var(--muted);font-variant-numeric:tabular-nums;flex-shrink:0}
 @media (max-width:640px){.dist-grid{grid-template-columns:1fr}}

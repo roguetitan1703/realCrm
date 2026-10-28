@@ -72,7 +72,6 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
   next week offers working hours (`buyerAsks.ts visitSlots`).
 - Boot sends four requests (bootstrap, desk-summary, owners summary, unread
   count); bootstrap's size has never been measured.
-- Chart palette repeats after 6 sources (`styles.css` `data-i`).
 - Demo connections on `raipur` and `urban` still default `deal: 'sale'`.
 - Sale-stamped leads from before the rule (bhumi 252, mahalaxmi 67) cannot be
   told from real sales by count; `scripts/reprocess-inbox.ts --overwrite=deal`

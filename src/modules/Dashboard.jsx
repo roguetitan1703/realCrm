@@ -108,7 +108,7 @@ export default function Dashboard({ store, go, topBar }) {
       <>
         <div className="dist-bar">
           {live.map((r, i) => (
-            <i key={r.name} title={`${r.name}: ${r.n}`} data-i={i % 6}
+            <i key={r.name} title={`${r.name}: ${r.n}`} data-i={i % 12}
               style={{ width: (r.n / total * 100) + '%' }} />
           ))}
         </div>
@@ -116,7 +116,7 @@ export default function Dashboard({ store, go, topBar }) {
           {rows.map((r, i) => (
             <button key={r.name} className={'dist-row' + (r.n === 0 ? ' zero' : '')}
               onClick={() => onPick(r)}>
-              <span className="dist-dot" data-i={live.findIndex(x => x.name === r.name) % 6} />
+              <span className="dist-dot" data-i={live.findIndex(x => x.name === r.name) % 12} />
               <span className="dist-k">{r.name}</span>
               <span className="dist-n">{r.n}</span>
             </button>
