@@ -294,9 +294,15 @@ const facts = def.headerFacts ? def.headerFacts(record, store).filter(Boolean) :
               them reading as the main thing to do. */}
           <div className="rh-actions">
             {signals && <div className="rh-signals">{signals}</div>}
-            {!phone && primary.map((a, i) => (
+            {/* `href` makes it a real link — a desk's Call is tel:, which the
+                browser hands to whatever dials (Windows: the paired phone). */}
+            {!phone && primary.map((a, i) => (a.href ? (
+              <a key={i} className={'btn btn-' + (i === 0 ? 'primary' : 'secondary') + ' btn-sm'} href={a.href} onClick={a.onClick}>
+                {a.icon && <Icon name={a.icon} />}{a.label}
+              </a>
+            ) : (
               <Button key={i} variant={i === 0 ? 'primary' : 'secondary'} size="sm" icon={a.icon} onClick={a.onClick}>{a.label}</Button>
-            ))}
+            )))}
             {!phone && onEdit && <Button variant="secondary" size="sm" icon="edit" onClick={onEdit}>Edit</Button>}
           </div>
         </div>
@@ -363,6 +369,13 @@ const facts = def.headerFacts ? def.headerFacts(record, store).filter(Boolean) :
                 could not say what for. */}
             {prog.note && prog.note(record, store) && (
               <span className="rh-prog-note">{prog.note(record, store)}</span>
+            )}
+            {/* What a call did, beside the status it usually moves. Not gated on
+                canSet: logging a call needs only sight of the record. */}
+            {prog.outcome && (!prog.outcome.when || prog.outcome.when(record, store)) && (
+              <Button variant="secondary" size="sm" icon={prog.outcome.icon} className="rh-outcome" onClick={() => prog.outcome.run(store, record)}>
+                {prog.outcome.label}
+              </Button>
             )}
             {/* Gated on canSet, like the control above it. An exit is the most
                 destructive thing on the record and it was drawn for everyone —

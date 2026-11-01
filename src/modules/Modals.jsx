@@ -155,7 +155,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'send' && <SendSheet store={store} Modal={Modal} homes={m.homes} leadId={m.leadId} lead={m.lead} suggested={m.suggested} onSent={m.onSent} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
       {m?.kind === 'scheduleFollowUp' && <ScheduleFollowUpModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} recordType={m.recordType} recordId={m.recordId} record={m.record} />}
+      {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} recordType={m.recordType} recordId={m.recordId} record={m.record} event={m.event} />}
       {m?.kind === 'closeDeal' && <CloseDealModal store={store} leadId={m.leadId} Modal={Modal} />}
       {m?.kind === 'agreement' && <AgreementModal store={store} mode={m.mode} agreementId={m.agreementId} propertyId={m.propertyId} onDone={m.onDone} Modal={Modal} />}
       {m?.kind === 'ownerEdit' && <OwnerEditModal store={store} propId={m.propId} />}
@@ -605,13 +605,17 @@ function AttachPropModal({ store, leadId }) {
 // callers backed out of it and wrote what happened as a plain remark, so the
 // call itself was never counted. The outcome starts empty so nobody records
 // "Connected" by not touching the menu.
-function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) {
+// `event`: a call already logged (the desk's tel: Call, or one dialled from the
+// phone with the outcome skipped). The sheet then says what that call did
+// instead of logging a second one.
+function LogCallModal({ store, leadId, recordType = 'lead', recordId, record, event }) {
   const id = recordId || leadId
   // `record` when the opener holds it: a record reached by a link is fetched,
   // not cached, and the lookup alone would draw nothing.
   const l = store.lookup(recordType, id) || record
   const [outcome, setOutcome] = useState('')
-  const [text, setText] = useState('')
+  // A remark already on that call is kept: saving sends the whole text.
+  const [text, setText] = useState(() => event?.metadata?.remark || '')
   const [busy, setBusy] = useState(false)
   if (!l) return null
 
@@ -627,7 +631,8 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) 
     // API key and a call SID and wrote "Initiated outbound telephony call …
     // via DID 08045678900" to the timeline. No call was placed and no telephony
     // is connected — it was a sentence describing something that did not happen.
-    api.logContactAction(l.id, 'call')
+    const logged = event?.id ? Promise.resolve({ timeline_event: event }) : api.logContactAction(l.id, 'call')
+    logged
       .then(res => {
         const evtId = res?.timeline_event?.id
         return evtId ? api.editRemark(l.id, evtId, text.trim(), outcome || undefined) : null
@@ -637,7 +642,7 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) 
   }
 
   return (
-    <Modal title={`Record call · ${(l.name || l.phone || '').split(' ')[0]}`} onClose={store.closeModal} width={430}>
+    <Modal title={`${event ? 'Record outcome' : 'Record call'} · ${(l.name || l.phone || '').split(' ')[0]}`} onClose={store.closeModal} width={430}>
       <div className="lc-who">
         <span className="mono-num">{formatPhone(l.phone) || '—'}</span>
         <StageTag stage={l.stage || 'New'} />

@@ -799,6 +799,10 @@ input,textarea,select{font-family:inherit}
 /* The record's one irreversible action. It used to be muted grey text that
    only turned red on hover — indistinguishable from a caption next to the
    status dropdown, so people could not find it. */
+/* What the call did — beside the status it usually moves, the same height. */
+.rh-outcome{flex-shrink:0;white-space:nowrap;min-height:34px}
+/* A desk Call is a tel: link drawn as a button; links underline by default. */
+a.btn{text-decoration:none}
 .rh-exit{flex-shrink:0;display:inline-flex;align-items:center;gap:6px;border:1px solid #E4C4C0;border-radius:var(--radius);background:var(--alert-wash);color:var(--alert);font-family:var(--sans);font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;padding:7px 12px;min-height:34px}
 .rh-exit:hover{background:var(--alert);border-color:var(--alert);color:#fff}
 .rh-exit:focus-visible{outline:2px solid var(--alert);outline-offset:2px}
@@ -3950,7 +3954,12 @@ html.pv-root,html.pv-root body{background:#f5f4f0}
 .app-mobile{--ctrl-h:40px}
 .app-mobile .segpill{min-height:40px}
 .m-top .m-back,.m-top .m-bell{width:40px;height:40px}
-.app-mobile .rh-exit{min-height:40px}
+.app-mobile .rh-exit,.app-mobile .rh-outcome{min-height:40px}
+/* Status, Record outcome and the exit do not fit one 390px row: the status
+   takes the first line, the two buttons share the second. */
+.app-mobile .rh-prog{flex-wrap:wrap;gap:10px}
+.app-mobile .rh-prog>:first-child{flex:1 1 100%}
+.app-mobile .rh-prog .rh-outcome,.app-mobile .rh-prog .rh-exit{flex:1 1 0;justify-content:center}
 @media (max-width:760px){
   .inv-all-x{min-height:40px;padding:0 8px}
   .inv-all-send{min-height:40px}

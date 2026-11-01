@@ -4,7 +4,7 @@ import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown, useSelection 
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
 import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf, money, dealWord } from '../lib/format.js'
-import { personLabel } from '../lib/phone.js'
+import { personLabel, telLink } from '../lib/phone.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord, isDeskRole } from '../lib/permissions.js'
@@ -14,7 +14,7 @@ import { useKeptPager } from '../lib/useNav.js'
 import UnassignedBar from '../components/UnassignedBar.jsx'
 import { api } from '../lib/api.js'
 import Icon from '../components/Icon.jsx'
-import { LEADS_DEF } from './definitions.jsx'
+import { LEADS_DEF, openCallOutcome } from './definitions.jsx'
 import { AgreementList } from '../components/Agreements.jsx'
 import { finalStageOf, stageLabel } from '../data/pipelineRoles.js'
 import { firmLocale } from '../lib/locale.js'
@@ -516,6 +516,11 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
     kind: 'contact', channel, name: personLabel(l), phone: l.phone, email: l.email,
     recordType: 'lead', recordId: l.id,
   })
+  // The tel: link does the dialling; this records that it happened and asks
+  // what the call did, on the entry it just wrote.
+  const callFromDesk = () => store.logContactAction('lead', l.id, 'call').then(res => {
+    if (res?.timeline_event?.id) openCallOutcome(store, l, 'lead', res.timeline_event)
+  })
   // Rail: the follow-up card, which is the only thing that changes per lead.
   // A REJECTED OR CLOSED LEAD IS NOT WAITING ON ANYTHING. Rejecting does not
   // clear an appointment booked before anyone knew, so this card went on
@@ -760,11 +765,16 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
             ...(phone && isSiteVisit(l.followUp)
               ? [{ label: 'Log visit', icon: 'camera', onClick: () => store.openModal({ kind: 'visitProof', leadId: l.id }) }]
               : []),
-            // RECORD CALL on a desk — see Owners.jsx: nothing dials from a desk.
+            // CALL ON THE DESK TOO. 12a3c27 swapped it for "Record call" on the
+            // belief that nothing dials from a desk; Windows hands tel: to the
+            // paired phone (Phone Link), which is how the team called from the
+            // PC. So it is a plain tel: link there, logged as the phone logs
+            // it, and the call sheet opens on that call for what happened.
+            // Record outcome (beside the status) reaches the same sheet later.
             ...(l.phone ? [
               phone
                 ? { label: 'Call', icon: 'phone', onClick: () => contact('call') }
-                : { label: 'Record call', icon: 'phone', onClick: () => store.openModal({ kind: 'logCall', recordType: 'lead', recordId: l.id, record: l }) },
+                : { label: 'Call', icon: 'phone', href: telLink(l.phone) || `tel:${l.phone}`, onClick: () => callFromDesk() },
               { label: 'WhatsApp', icon: 'wa', tone: 'wa', onClick: () => contact('wa') },
             ] : []),
             // Email steps aside for Log visit. The row is three across on a
