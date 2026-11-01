@@ -23,7 +23,7 @@
 import { currentTenant } from './api.js'
 
 export const TAKEOVER_KEYS = [
-  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propProject', 'propFromOwner', 'propCopyOf', 'propCopyBack', 'projOpen', 'projKey',
+  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propSection', 'propAdd', 'propProject', 'propFromOwner', 'propCopyOf', 'propCopyBack', 'projOpen', 'projKey',
   'leadFilters', 'propFilters', 'ownerFilters', 'contactFilters', 'contactsTab', 'settingsSection', 'settingsSide',
   // Today's half (To do / My work / Team) and a teammate opened from Team or
   // the Performance page, and the day they are read on.
@@ -41,7 +41,7 @@ export const TAKEOVER_KEYS = [
 // full unfiltered book. These are the keys that mean "a record took the screen
 // over", and a navigation made only of them keeps the filters underneath.
 export const RECORD_KEYS = [
-  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propAdd', 'propFromOwner', 'propCopyOf', 'propCopyBack', 'projOpen', 'projKey',
+  'leadOpen', 'leadId', 'ownerOpen', 'ownerId', 'propOpen', 'propId', 'propSection', 'propAdd', 'propFromOwner', 'propCopyOf', 'propCopyBack', 'projOpen', 'projKey',
   'person', 'contactId',
 ]
 
@@ -149,6 +149,8 @@ export function parseUrl(search = window.location.search) {
       leadId: lead || undefined, leadOpen: !!lead,
       ownerId: owner || undefined, ownerOpen: !!owner,
       propId: prop || undefined, propOpen: !!prop,
+      // Where on the listing to land: its matched buyers, from a card's count.
+      propSection: (prop && p.get('section') === 'buyers') ? 'buyers' : undefined,
       projKey: project || undefined, projOpen: !!project,
       propAdd: p.get('new') === 'property' || undefined,
       // Convert to property: the property form, filled in from this calling row.
@@ -198,6 +200,7 @@ export function urlFor(screen, sel = {}, search = window.location.search) {
   if (sel.leadOpen && sel.leadId) p.set('lead', sel.leadId)
   if (sel.ownerOpen && sel.ownerId) p.set('owner', sel.ownerId)
   if (sel.propOpen && sel.propId) p.set('prop', sel.propId)
+  if (sel.propOpen && sel.propId && sel.propSection) p.set('section', sel.propSection)
   if (sel.projOpen && sel.projKey) p.set('project', sel.projKey)
   if (sel.propAdd) p.set('new', 'property')
   if (sel.propAdd && sel.propFromOwner) p.set('from-owner', sel.propFromOwner)

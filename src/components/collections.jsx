@@ -1198,7 +1198,9 @@ export function MediaNote({ p }) {
 
 // `picked` (true/false) turns the card into a tick target for a selection on
 // a phone, where there is no table to tick rows in; undefined is the ordinary card.
-export function PropertyCard({ p, onClick, matchCount, picked, showCatalogue }) {
+// `onMatches` makes the buyer count its own tap: the record, at its matched
+// buyers — the same list the count was taken from.
+export function PropertyCard({ p, onClick, matchCount, picked, showCatalogue, onMatches }) {
   const facts = [
     p.carpet || p.area ? `${p.carpet || p.area} sqft` : null,
     p.type !== 'Plot' && p.totalFloors ? `${p.floor || '-'}/${p.totalFloors} flr` : p.floor ? `${p.floor} flr` : null,
@@ -1252,7 +1254,9 @@ export function PropertyCard({ p, onClick, matchCount, picked, showCatalogue }) 
           </span>
         </div>
         {matchCount > 0 && (
-          <span className="pc-demand" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 14, background: 'var(--accent-wash)', color: 'var(--accent)', fontWeight: 600, fontSize: 12 }}>
+          <span className="pc-demand" data-matches={matchCount}
+            onClick={onMatches ? (e) => { e.stopPropagation(); onMatches() } : undefined}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', borderRadius: 14, background: 'var(--accent-wash)', color: 'var(--accent)', fontWeight: 600, fontSize: 12 }}>
             <Icon name="people" size={14} />
             {matchCount} buyer{matchCount > 1 ? 's' : ''}
           </span>

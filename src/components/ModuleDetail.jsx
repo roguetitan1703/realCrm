@@ -201,16 +201,19 @@ function DetailSection({ s, record, store }) {
   const [open, setOpen] = useState(!s.collapsed)
   const title = typeof s.title === 'function' ? s.title(record, store) : s.title
   const right = typeof s.right === 'function' ? s.right(record, store) : s.right
+  // Addressable, so a link can land on it: a card's buyer count opens the
+  // record at its matched buyers (#sec-buyers).
+  const id = s.id ? `sec-${s.id}` : undefined
   if (!s.collapsed) {
     return (
-      <Panel>
+      <Panel id={id}>
         {s.title && <SectionHead title={title} right={right} />}
         {s.render(record, store)}
       </Panel>
     )
   }
   return (
-    <Panel>
+    <Panel id={id}>
       <button type="button" className={'sh sh-toggle' + (open ? ' open' : '')} onClick={() => setOpen(o => !o)}>
         <span className="t">{title}</span>
         <span className="r">{right}<Icon name="chevDown" size={15} /></span>

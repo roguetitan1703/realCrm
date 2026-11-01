@@ -1,5 +1,5 @@
-import { isOpen } from '../data/leadStatus.js'
-import { askedFor, budgetOf, facetFit, latestOf, localityFit, dmy } from './format.js'
+import { askedFor, latestOf, dmy } from './format.js'
+import { pairFit } from './matchRule.js'
 import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import { formatMoney, roomsText } from './locale.js'
@@ -12,6 +12,10 @@ import {
 } from '../data/propertyFields.js'
 
 // --- matching ---------------------------------------------------------------
+// Whether a listing answers a requirement is ONE rule, lib/matchRule.js. The
+// buyers for a listing are computed on the server with it (the card's count
+// and the record's list, GET /properties/:id/buyers); a lead's matching flats
+// are scored here with it, over the candidates the server narrowed.
 export function matchesForLead(lead, allProps = []) {
   if (!lead?.req || !allProps?.length) return []
   // EVERYTHING THEY HAVE ASKED FOR, not the latest point — 2–3 BHK and
@@ -21,75 +25,34 @@ export function matchesForLead(lead, allProps = []) {
   const r = askedFor(lead)
   const UNAVAILABLE = ['Sold', 'Leased', 'Off-Market', 'Blocked', 'Closed', 'Let']
   return allProps
-    // `p.type === r.config` was a HARD FILTER here: "2 BHK Apartment" against
-    // "2 BHK", which is never equal, so this list was almost always empty and
-    // the buyer suggestions on a lead have effectively never worked. Config is
-    // now compared through the shared vocabulary and — crucially — is a SCORE,
-    // not a gate. Showing a 3 BHK to someone who asked for 2 is a conversation
-    // an agent has every day; refusing to show it is not a feature.
-    // The one true disqualifier stays a filter: a shop is not a home.
-    .filter(p => p.deal === r.deal && !UNAVAILABLE.includes(p.status) && !facetFit(p, r).hard)
+    .filter(p => !UNAVAILABLE.includes(p.status))
     .map(p => {
-      let score = 0; const fit = []
-      const f = facetFit(p, r)
-      if (f.bhkMatch) { score += 3; fit.push(labelOf(BHK, f.want.bhk)) }
-      else if (f.subtypeMatch) { score += 2 }
-      if (localityFit(p, r)) { score += 3; fit.push(p.locality) }
-      // budgetOf() reads whichever spelling the record carries — see its note.
-      // This compared against r.budgetMin, which no lead has, so `inBudget` was
-      // false for every property and the +3 it is worth was never awarded. With
-      // the threshold at >= 3, that alone decided which matches appeared.
-      const { min: bMin, max: bMax } = budgetOf(r)
-      const inBudget = p.price >= bMin * 0.95 && p.price <= bMax * 1.08
-      if (inBudget) { score += 3; fit.push('in budget') }
-      else if (p.price < bMin) { score += 1; fit.push('under budget') }
-      if (p.status === 'Available') score += 1
+      const m = pairFit(p, r)
+      if (!m) return null
+      const fit = []
+      if (m.bhk) fit.push(labelOf(BHK, m.bhk))
+      if (m.area) fit.push(p.locality)
+      if (m.budget === 'fits') fit.push('in budget')
+      else if (m.budget === 'under') fit.push('under budget')
       // Compared against 'Immediate', which is not a POSSESSION value — so
       // this never fired once and no match ever showed "ready to move".
       if (normaliseTo(POSSESSION, p.possession) === 'ready') fit.push('ready to move')  // vocab-ok: display prose
-      return { ...p, _score: score, fitLine: fit.slice(0, 3).join(' · ') }
+      // Available ranks above a flat whose status nobody set.
+      return { ...p, _score: m.score + (p.status === 'Available' ? 1 : 0), fitLine: fit.slice(0, 3).join(' · ') }
     })
-    .filter(p => p._score >= 3)
-    .sort((a, b) => b._score - a._score)
-    .slice(0, 4)
-}
-
-export function leadsForProperty(property, allLeads = []) {
-  if (!property || !allLeads?.length) return []
-  return allLeads
-    // Same defect, mirrored: the buyers shown ON a listing were filtered by the
-    // same never-true string compare.
-    .filter(l => l.req && l.req.deal === property.deal && isOpen(l.stage) && !facetFit(property, l.req).hard)
-    .map(l => {
-      let score = 0; const fit = []
-      const f = facetFit(property, l.req)
-      if (f.bhkMatch) { score += 3; fit.push(labelOf(BHK, f.want.bhk)) }
-      else if (f.subtypeMatch) { score += 2 }
-      // Through the same comparison as the other direction — a requirement
-      // that names two areas answers a listing in either.
-      if (localityFit(property, l.req)) { score += 3; fit.push(property.locality) }
-      const { min: bMin, max: bMax } = budgetOf(l.req)
-      const inBudget = property.price >= bMin * 0.95 && property.price <= bMax * 1.08
-      if (inBudget) { score += 3; fit.push('budget fits') }
-      else if (property.price < bMin) { score += 1; fit.push('under their budget') }
-      return { lead: l, _score: score, fitLine: fit.slice(0, 2).join(' · ') }
-    })
-    .filter(x => x._score >= 3)
+    .filter(Boolean)
     .sort((a, b) => b._score - a._score)
     .slice(0, 4)
 }
 
 // --- Owner-update WhatsApp (activity summary for the property's owner) -------
-export function ownerUpdateMessage(property, allLeads = [], firmName = tenantFirm()) {
+// `buyers` are the listing's matched buyers, as the server sends them
+// (getPropertyBuyers) — the same people its card counts.
+export function ownerUpdateMessage(property, buyers = [], firmName = tenantFirm()) {
   const p = property
-  const buyers = leadsForProperty(p, allLeads)
   const partyWord = p.deal === 'rent' ? 'tenants' : 'buyers'
-  // Third copy of the same never-true compare — this one decided a number sent
-  // to the OWNER in a WhatsApp message, so it reported 0 visits forever.
-  // Through localityFit like the other two — this was the last raw compare of
-  // the three, and it decides a number sent to the OWNER in a WhatsApp message.
-  const visits = allLeads.filter(l => l.stage === 'Site Visit' &&
-    l.req?.deal === p.deal && localityFit(p, l.req) && !facetFit(p, l.req).hard).length
+  // Visits by the matched buyers: the number the OWNER reads in this message.
+  const visits = buyers.filter(l => l.stage === 'Site Visit').length
   const L = []
   L.push(`Namaste ${p.owner || 'Sir/Ma\'am'} ji,`)
   L.push('')

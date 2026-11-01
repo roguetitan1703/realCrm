@@ -368,7 +368,7 @@ export function GlanceCard({ thumb, eyebrow, name, value, per, sub, meta, facts 
 }
 
 // ---- Panel / section header / KV / progress ----
-export function Panel({ children, style }) { return <div className="panel" style={style}>{children}</div> }
+export function Panel({ children, style, id }) { return <div className="panel" id={id} style={style}>{children}</div> }
 /**
  * A ROW UNDER "THIS DEVICE" — alerts and install, the same shape.
  *

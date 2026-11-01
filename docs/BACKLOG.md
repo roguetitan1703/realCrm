@@ -48,7 +48,6 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 ## Next — in plan order
 
 - **UI review** (`specs/ui-review.md`, flows in `specs/user-flows.md`, 1 Nov): 28 findings, 11 proposals. P1 after-call sheet, P2 Start calling, P3 one word and one number, P4 owner's desk by agent, P5 FAB rule. Waits on Om picking. *agent, manager*
-- **A flat's card says "144 buyers", its record "4 matched"** (review F6): `demandFor()` SQL counts unknown deal/locality as a match; `matching.js` does not. One engine (P6). *agent*
 
 - **One place to say what happened.** Outcome on 20% of bhumi's calls (Ravish
   163 calls, Anil 110: none), 51% of mahalaxmi's; mahalaxmi sets a status on

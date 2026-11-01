@@ -8,7 +8,7 @@ import { theme } from '../data/theme.js'
 // waiting for someone to type a budget. Plain JSX, so the build never said a
 // word about it.
 import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho, unitLabel, followUpAction, followUpLabel } from '../lib/format.js'
-import { matchesForLead, leadsForProperty, ownerUpdateMessage, openWhatsAppChat, followUpMessage } from '../lib/matching.js'
+import { matchesForLead, ownerUpdateMessage, openWhatsAppChat, followUpMessage } from '../lib/matching.js'
 import WaSend from '../components/WaSend.jsx'
 import { api, workspaceUrl } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'

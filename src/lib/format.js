@@ -619,13 +619,23 @@ export function askedFor(lead) {
  *  several. `p.locality === req.locality` is false against a list, which is how
  *  a widened requirement would have scored worse than a narrow one. */
 export function localityFit(p, req) {
-  const want = asList(req?.locality).map(s => s.toLowerCase())
-  if (!want.length || !p?.locality) return false
-  return want.includes(String(p.locality).toLowerCase())
+  const want = areasOf(req?.locality)
+  const has = areasOf(p?.locality)
+  if (!want.length || !has.length) return false
+  return has.some(a => want.includes(a))
+}
+
+/** A typed locality as the areas it names, lower-cased and trimmed: a listing
+ *  typed "Mahalunge " or "Hinjewadi, Maan" (46 of bhumi's 77 Available flats
+ *  carry a stray space or a comma) is in Mahalunge, or in either. */
+export function areasOf(v) {
+  return asList(v).flatMap(s => s.split(',')).map(s => s.trim().toLowerCase()).filter(Boolean)
 }
 
 /** A requirement's category / bhk / subtype, from whatever it actually holds. */
-export function reqFacets(req) {
+/** `loc` is the firm's locale; the browser's own by default, passed by the
+ *  server, which has no browser firm (lib/locale.js). */
+export function reqFacets(req, loc = firmLocale()) {
   if (!req) return { category: null, bhk: null, subtype: null, bhks: [] }
   // Everything the person told us, in one string — the config field is where a
   // portal puts "Commercial Office", but the useful word is as often in the
@@ -635,31 +645,31 @@ export function reqFacets(req) {
     // "0 BHK" is how 99acres describes a showroom: nought bedrooms is not a
     // small flat, it is a building with no bedrooms in it.
     || (COMMERCIAL_WORDS.test(text) || /\b0\s*bhk\b/i.test(text) ? 'commercial' : null)
-    || (normaliseBhk(text) ? 'residential' : null)
+    || (normaliseBhk(text, loc) ? 'residential' : null)
   // EVERY CONFIG ASKED FOR, not just one. Somebody who enquired about a 2 BHK
   // and then a 3 BHK wants either, and reading only the first scores the other
   // as a miss. `bhk` stays the current one, for the places that name a single
   // config on a line; `bhks` is what a comparison uses.
   const bhks = category === 'commercial' ? []
-    : [...new Set(asList(req.config).map(c => normaliseBhk(c)).filter(Boolean))]
+    : [...new Set(asList(req.config).map(c => normaliseBhk(c, loc)).filter(Boolean))]
   return {
     category,
     // A commercial requirement has no BHK, and reading "0" as one would file a
     // showroom next to studio flats.
-    bhk: category === 'commercial' ? null : (bhks[0] || normaliseBhk(text)),
-    bhks: bhks.length ? bhks : (category === 'commercial' ? [] : [normaliseBhk(text)].filter(Boolean)),
+    bhk: category === 'commercial' ? null : (bhks[0] || normaliseBhk(text, loc)),
+    bhks: bhks.length ? bhks : (category === 'commercial' ? [] : [normaliseBhk(text, loc)].filter(Boolean)),
     subtype: req.subtype || normaliseSubtype(text, category || 'residential'),
   }
 }
 
 /** The same three facets for a listing, tolerant of rows written before the
  *  columns existed — the property half of the comparison above. */
-export function propFacets(p) {
+export function propFacets(p, loc = firmLocale()) {
   if (!p) return { category: null, bhk: null, subtype: null }
   const category = p.category || (COMMERCIAL_WORDS.test(p.type || '') ? 'commercial' : 'residential')
   return {
     category,
-    bhk: p.bhk || (category === 'commercial' ? null : normaliseBhk(p.type)),
+    bhk: p.bhk || (category === 'commercial' ? null : normaliseBhk(p.type, loc)),
     subtype: p.subtype || normaliseSubtype(p.type, category),
   }
 }
@@ -672,8 +682,8 @@ export function propFacets(p) {
  * else is a degree, because "3 BHK when they asked for 2" is a conversation an
  * agent legitimately has and a filter that forbids it is wrong.
  */
-export function facetFit(p, req) {
-  const a = propFacets(p), b = reqFacets(req)
+export function facetFit(p, req, loc = firmLocale()) {
+  const a = propFacets(p, loc), b = reqFacets(req, loc)
   const hard = Boolean(a.category && b.category && a.category !== b.category)
   return {
     hard,

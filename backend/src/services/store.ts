@@ -45,6 +45,7 @@ import { parsePayload } from './parser.js';
 // The firm's money, phone and bedroom words — one implementation, shared with
 // the screens. The server always passes the firm's locale (deskConfigOf).
 import { resolveLocale, moneyFull, roomLabel } from '../../../src/lib/locale.js';
+import { pairFit } from '../../../src/lib/matchRule.js';
 export type Locale = ReturnType<typeof resolveLocale>;
 
 /**
@@ -440,6 +441,9 @@ function rowToProperty(r: any): any {
     type: r.type,
     locality: r.locality,
     price: r.price,
+    // The price as a number, from the numeric column — what matching compares
+    // (src/lib/matchRule.js priceOf), so the browser and the server read one.
+    priceAmount: r.price_amount != null ? Number(r.price_amount) : null,
     tower: r.wing || r.tower,
     unit: r.unit_no || r.unit,
     tenancy: r.tenancy || undefined,
@@ -659,14 +663,9 @@ const sourceKey = (v: string) => (v === SOURCE_NONE ? '' : String(v).toLowerCase
 // merged those rows over the record it held, so a lead opened from the list
 // showed one shortlisted home where it had six, and the next shortlist write was
 // built from that list. `undefined` here means "not loaded", `[]` means "none".
-function rowToLead(r: any, events?: TimelineEvent[], shortlistRows?: any[], names?: Map<string, string>): any {
-  const createdMs = r.created_at ? new Date(r.created_at).getTime() : Date.now();
-  const minsAgo = Math.max(0, Math.floor((Date.now() - createdMs) / 60000));
-
-  // Format timeline events for lead object
-  const leadEvents = events ? collapseStatusMirrors(events.filter(e => e.record_id === r.id))
-    .map(e => mapEventForClient(e, names)) : [];
-
+/** A lead row's requirement. Also what the buyer matching reads (buyersFor),
+ *  so a matched lead and its record cannot describe two requirements. */
+export function reqOfRow(r: any): any {
   // Columns are source of truth; fall back to the req JSONB when a column is null.
   const jreq = r.req || {};
   const req: any = { ...jreq };
@@ -683,6 +682,18 @@ function rowToLead(r: any, events?: TimelineEvent[], shortlistRows?: any[], name
   req.maxBudget = r.budget_max != null ? Number(r.budget_max) : jreq.maxBudget;
   req.purpose = r.purpose || jreq.purpose;
   req.timeline = r.timeline_pref || jreq.timeline;
+  return req;
+}
+
+function rowToLead(r: any, events?: TimelineEvent[], shortlistRows?: any[], names?: Map<string, string>): any {
+  const createdMs = r.created_at ? new Date(r.created_at).getTime() : Date.now();
+  const minsAgo = Math.max(0, Math.floor((Date.now() - createdMs) / 60000));
+
+  // Format timeline events for lead object
+  const leadEvents = events ? collapseStatusMirrors(events.filter(e => e.record_id === r.id))
+    .map(e => mapEventForClient(e, names)) : [];
+
+  const req = reqOfRow(r);
 
   // lead_shortlist rows are the source of truth once they exist; fall back to
   // the JSONB columns for leads that haven't been backfilled/touched yet.
@@ -4990,23 +5001,20 @@ const highestOf = (vals: any[]) => { const n = numsOf(vals); return n.length ? M
 /**
  * Candidate listings for a lead's requirement.
  *
- * Scoring and the fit reasons stay in the client's matching.js — that is
- * product logic and it must keep giving the same answers — but it no longer
- * needs the whole book to run against. Postgres does the coarse cut (same deal,
- * budget in range with headroom, same locality or type) and the client scores
- * what comes back.
+ * Postgres does the coarse cut (same deal, price inside the budget's 25%
+ * stretch, an area they named) and the client scores what comes back with the
+ * one rule, src/lib/matchRule.js. The cut must never be stricter than that
+ * rule, or a flat the rule would match is never offered.
  */
 export async function getLeadCandidates(leadId: string, limit = 100): Promise<any[]> {
   const t = tid();
   const lead = (await sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND id = ${leadId} LIMIT 1`)[0];
   if (!lead) return [];
   const req = lead.req || {};
-  // Null, not 'sale'. A lead whose deal type nobody has established was being
-  // matched against sale stock only — so a rent-seeker's suggestions were every
-  // flat in the book except the ones they could actually rent, and it looked
-  // like a working feature. When we do not know, do not narrow: show both and
-  // let the scorer rank them.
-  const deal = lead.deal || req.deal || null;
+  // Unknown is not a match (src/lib/matchRule.js): a lead whose deal nobody
+  // has established is matched to no flat, so there is nothing to narrow to.
+  const deal = reqOfRow(lead).deal || null;
+  if (!deal) return [];
   // THE ACCUMULATED SPAN, NOT THE LATEST POINT. A buyer who enquired at ₹68L
   // and again at ₹95L is looking across that range, and narrowing to whichever
   // listing they opened last hides every flat between. Same for locality: two
@@ -5023,14 +5031,20 @@ export async function getLeadCandidates(leadId: string, limit = 100): Promise<an
     sql`tenant_id = ${t}`,
     sql`coalesce(status, 'Available') = 'Available'`,
   ];
-  if (deal) where.push(sql`deal = ${deal}`);
+  where.push(sql`deal = ${deal}`);
   // 25% headroom either side: a listing just outside the stated budget is still
   // worth showing, and the client's scorer is what decides how good a fit it is.
   if (min != null) where.push(sql`(${PRICE_NUM} IS NULL OR ${PRICE_NUM} >= ${Math.floor(min * 0.75)})`);
   // An unpriced listing is not excluded by an upper bound — "price on request"
   // is common and the client's scorer can still rank it.
   if (max != null) where.push(sql`(${PRICE_NUM} IS NULL OR ${PRICE_NUM} <= ${Math.ceil(max * 1.25)})`);
-  if (localities.length) where.push(sql`locality = ANY(${localities})`);
+  // In an area they named, or a flat whose area nobody wrote — read the way
+  // areasOf() reads it: trimmed, any case, "Hinjewadi, Maan" is in either.
+  const areas = [...new Set(localities.flatMap(l => String(l).split(',')).map(a => a.trim().toLowerCase()).filter(Boolean))];
+  if (areas.length) {
+    where.push(sql`(nullif(trim(coalesce(locality, '')), '') IS NULL OR EXISTS (
+      SELECT 1 FROM unnest(string_to_array(lower(locality), ',')) a WHERE trim(a) = ANY(${areas})))`);
+  }
   const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
   const rows = await sql`SELECT * FROM crm_properties WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit}`;
   return rows.map(rowToProperty);
@@ -5097,14 +5111,14 @@ export async function listProperties(opts: {
   // matcher over every lead in the firm, per card — which is the single reason
   // the listings grid needed the leads in memory at all. One join, bounded to
   // the page that is actually being rendered.
-  const demand = await demandFor(t, rows.map((r: any) => r.id));
+  const demand = await buyersFor(t, rows.map(rowToProperty));
   // A list row carries no history (only the record reads the shared timeline)
   // and cannot name an author the record finds in the ledger — left out rather
   // than sent as [] and null, which overwrote both on the open record.
   const mapped = rows.map((r: any) => {
     const { timeline: _history, ...p } = rowToProperty(r);
     if (p.createdBy == null) delete p.createdBy;
-    return { ...p, demandCount: demand.get(r.id) ?? 0 };
+    return { ...p, demandCount: demand.get(r.id)?.length ?? 0 };
   });
   return { rows: mapped, total: countRows[0]?.n ?? 0, page, limit };
 }
@@ -5231,23 +5245,51 @@ export async function getPropertyTabs(opts: PropertyListOpts = {}): Promise<any>
   return r || {};
 }
 
-/** Open leads whose requirement matches each of the given listings. */
-async function demandFor(t: string, ids: string[]): Promise<Map<string, number>> {
-  if (!ids.length) return new Map();
-  const rows = await sql`
-    SELECT p.id AS id, count(l.id)::int AS n
-      FROM crm_properties p
-      LEFT JOIN crm_leads l
-        ON l.tenant_id = p.tenant_id
-       AND coalesce(l.stage, '') NOT IN ${sql(TERMINAL_STATUSES)}
-       AND (coalesce(l.deal, l.req->>'deal') IS NULL OR p.deal IS NULL
-            OR coalesce(l.deal, l.req->>'deal') = p.deal)
-       AND (l.locality IS NULL OR p.locality IS NULL OR l.locality = p.locality)
-       AND (l.budget_max IS NULL OR p.price_amount IS NULL OR l.budget_max >= p.price_amount * 0.75)
-       AND (l.budget_min IS NULL OR p.price_amount IS NULL OR l.budget_min <= p.price_amount * 1.25)
-     WHERE p.tenant_id = ${t} AND p.id IN ${sql(ids)}
-     GROUP BY p.id`;
-  return new Map(rows.map((r: any) => [r.id, r.n]));
+/**
+ * THE BUYERS A LISTING MATCHES — the number on its card and the rows on its
+ * record, from this one function, so the two cannot disagree. The rule is
+ * src/lib/matchRule.js (pairFit): deal stated on both sides, and something the
+ * lead actually said — bedrooms, area, price — fits. Best fit first, then the
+ * newest.
+ *
+ * It was two: a SQL join here that counted a lead whose deal, locality or
+ * budget was unknown (a flat's card said 144 buyers), and the browser's scorer
+ * over 50 of those, cut to four (its record said 4 matched).
+ *
+ * The open leads are read once for the whole page of listings and scored in
+ * memory: the comparison reads bedrooms out of free text ("2 BHK Apartment",
+ * "3 bed"), which the browser's matcher for a lead's flats also does, through
+ * the same function.
+ */
+type BuyerFit = { id: string; score: number; fitLine: string };
+async function buyersFor(t: string, props: any[]): Promise<Map<string, BuyerFit[]>> {
+  const out = new Map<string, BuyerFit[]>(props.map(p => [p.id, []]));
+  // Unknown deal on the listing matches nobody, so it needs no read.
+  const stated = props.filter(p => p.deal);
+  if (!stated.length) return out;
+  const [loc, leads] = await Promise.all([
+    localeOf(t),
+    sql`SELECT id, created_at, deal, req, requirement, locality, budget_min, budget_max, purpose, timeline_pref
+          FROM crm_leads WHERE tenant_id = ${t} AND ${OPEN}
+         ORDER BY created_at DESC`,
+  ]);
+  const reqs = (leads as any[]).map(r => ({ id: r.id as string, req: reqOfRow(r) }));
+  for (const p of stated) {
+    const fits: BuyerFit[] = [];
+    for (const l of reqs) {
+      const f = pairFit(p, l.req, loc);
+      if (!f) continue;
+      const fit = [
+        f.bhk ? roomLabel(f.bhk, loc) : '',
+        f.area ? p.locality : '',
+        f.budget === 'fits' ? 'budget fits' : f.budget === 'under' ? 'under their budget' : '',
+      ].filter(Boolean);
+      fits.push({ id: l.id, score: f.score, fitLine: fit.join(' · ') });
+    }
+    // Stable: equal scores keep the newest-first order they were read in.
+    out.set(p.id, fits.sort((a, b) => b.score - a.score));
+  }
+  return out;
 }
 
 export async function getPropertyById(id: string): Promise<any | null> {
@@ -5256,7 +5298,7 @@ export async function getPropertyById(id: string): Promise<any | null> {
   if (!rows[0]) return null;
   const row = rows[0];
   const [demand, events, audited] = await Promise.all([
-    demandFor(t, [id]),
+    buyersFor(t, [rowToProperty(row)]),
     sql`SELECT * FROM crm_timeline_events WHERE tenant_id = ${t} AND record_id = ${id}
         ORDER BY timestamp DESC LIMIT 200`,
     // WHO ADDED IT, for a listing from before the column was stamped (7.2):
@@ -5281,7 +5323,7 @@ export async function getPropertyById(id: string): Promise<any | null> {
   if (!(events as any[]).some(e => e.type === 'creation')) {
     history.push({ id: null, type: 'note', label: 'Added', authorId: createdBy, timestamp: row.created_at, metadata: {} });
   }
-  return { ...p, createdBy, timeline: history, demandCount: demand.get(id) ?? 0 };
+  return { ...p, createdBy, timeline: history, demandCount: demand.get(id)?.length ?? 0 };
 }
 
 /** One line in a listing's history, by whoever made the request. */
@@ -5524,41 +5566,27 @@ export async function getProject(key: string): Promise<any | null> {
 }
 
 /**
- * The buyers whose requirement matches one property.
- *
- * This is `getLeadCandidates` read from the other end, and it replaces running
- * the client-side matcher across every lead in the firm to answer a question
- * about a single flat.
+ * The buyers one listing matches, best fit first — every one of them, so the
+ * record's list is the number on the card (buyersFor). Each lead carries the
+ * fit line that says what matched.
  */
-export async function getPropertyBuyers(propertyId: string, limit = 50): Promise<any[]> {
+export async function getPropertyBuyers(propertyId: string): Promise<any[]> {
   const t = tid();
   const p = (await sql`SELECT * FROM crm_properties WHERE tenant_id = ${t} AND id = ${propertyId} LIMIT 1`)[0];
   if (!p) return [];
-  const price = p.price_amount != null ? Number(p.price_amount) : null;
-  // The listing's own deal type, and null if it has none. Matching a
-  // deal-less listing as though it were for sale showed its "interested
-  // buyers" as everyone we had never asked.
-  const deal = p.deal || null;
-
-  const where: any[] = [
-    sql`tenant_id = ${t}`,
-    OPEN,
-  ];
-  // Narrow only when BOTH sides know. Unknown on either side is not a
-  // mismatch, it is a missing answer, and the scorer ranks what comes back.
-  if (deal) where.push(sql`(coalesce(deal, req->>'deal') IS NULL OR coalesce(deal, req->>'deal') = ${deal})`);
-  if (p.locality) where.push(sql`(locality IS NULL OR locality = ${p.locality})`);
-  // Same 25% headroom the other direction uses, and for the same reason: a
-  // budget stated as a round number is not a hard wall.
-  if (price != null) {
-    where.push(sql`(budget_max IS NULL OR budget_max >= ${Math.floor(price * 0.75)})`);
-    where.push(sql`(budget_min IS NULL OR budget_min <= ${Math.ceil(price * 1.25)})`);
-  }
-  const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
-  const rows = await sql`SELECT * FROM crm_leads WHERE ${clause} ORDER BY created_at DESC LIMIT ${limit}`;
-  const shortlistRows = await sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(rows.map(r => r.id).length ? rows.map(r => r.id) : [''])}`;
+  const fits = (await buyersFor(t, [rowToProperty(p)])).get(p.id) || [];
+  if (!fits.length) return [];
+  const ids = fits.map(f => f.id);
+  const [rows, shortlistRows] = await Promise.all([
+    sql`SELECT * FROM crm_leads WHERE tenant_id = ${t} AND id IN ${sql(ids)}`,
+    sql`SELECT * FROM lead_shortlist WHERE tenant_id = ${t} AND lead_id IN ${sql(ids)}`,
+  ]);
+  const byId = new Map((rows as any[]).map(r => [r.id, r]));
   const byLead = groupShortlistByLead(shortlistRows);
-  return rows.map(r => rowToLead(r, undefined, byLead.get(r.id) || []));
+  return fits.filter(f => byId.has(f.id)).map(f => ({
+    ...rowToLead(byId.get(f.id), undefined, byLead.get(f.id) || []),
+    matchScore: f.score, fitLine: f.fitLine,
+  }));
 }
 
 /**
@@ -5908,7 +5936,8 @@ export async function updateProperty(id: string, patch: any, ctx: ActorCtx = SYS
   const config: Record<string, any> = { ...(row.config || {}) };
   if (patch.config && typeof patch.config === 'object') Object.assign(config, patch.config);
   for (const [k, v] of Object.entries(patch)) {
-    if (k === 'config' || k === 'id' || k === 'inCatalogue' || k === 'in_catalogue') continue;
+    // priceAmount is read from its column (rowToProperty), never written back.
+    if (k === 'config' || k === 'id' || k === 'inCatalogue' || k === 'in_catalogue' || k === 'priceAmount') continue;
     if (!PROPERTY_COLUMNS.has(k) && !C4_CLIENT_KEYS.has(k)) config[k] = v;
   }
 

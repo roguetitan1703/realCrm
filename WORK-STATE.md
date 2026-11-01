@@ -37,4 +37,7 @@ Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in stil
 - Duty status (crm_agents.duty_status): nothing sets it, every agent ACTIVE in prod; route now desk-only — waits on Om saying remove it
 - The shared dev database has no firm marked synthetic, so its dates do not move yet — waits on Om running `npm run dev:refresh -- --adopt=delpat` (and any other fixture firm) against it
 - A row's status menu stays open while its button sits under the sticky top bar (still "in view" by geometry) — waits on a desk polish pass
+- Locality spellings split one area into several ("Mahalunge", "Mhalunge", "Mahlunge", "ahalunge" on bhumi's Available flats): buyer matching reads them as different areas — waits on a locality pick list for listings, or Om saying merge them
+- Flats priced in thousands (bhumi 2: ₹75, ₹8,500 for sale; mahalaxmi 4: ₹30, ₹34 rent) fit every lead whose budget is only a ceiling, so one bhumi card says 210 buyers — waits on Om saying fix the prices or add a sanity check on the price field
+- 169 of bhumi's 669 open leads have no deal (buy or rent) and now match no flat — waits on Om, or on the after-call sheet asking it
 - The idle-owner sweep's assignment alert reads "undefined owners assigned to you" (notificationCopy.ts owner_assigned gets no `n` from the sweep; seen on delpat dev, 1 Nov) — waits on the next notifications batch
