@@ -12,7 +12,7 @@
 
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, randomInt, createHash } from 'crypto';
 import { sql, DEFAULT_TENANT_ID } from './db.js';
 import { audit } from './audit.js';
 import { emailConfigured, sendPasswordResetEmail } from './email.js';
@@ -189,12 +189,31 @@ export function passwordIssue(pw: string): string | null {
   return null;
 }
 
-/** A memorable suggestion an admin can hand over (word-place-number). */
-const PW_WORDS = ['tiger', 'river', 'maple', 'cedar', 'delta', 'orbit', 'ember', 'coral', 'ivory', 'onyx', 'pine', 'wren'];
-const PW_PLACES = ['pune', 'mumbai', 'thane', 'nashik', 'baner', 'wakad', 'kothrud', 'hadapsar'];
+/** A suggestion an admin can read out over the phone: word-word-place-1234.
+ *  128 x 128 x 16 x 10,000 is about 2.6 billion, drawn with crypto.randomInt.
+ *  The old word-place-NN was about 8,500 from Math.random, and it is what every
+ *  blank create, reseat and reset hands out. Short, common, lower-case words
+ *  only, so nobody has to spell one. */
+const PW_WORDS = [
+  'tiger', 'river', 'maple', 'cedar', 'delta', 'orbit', 'ember', 'coral', 'ivory', 'onyx', 'pine', 'wren',
+  'apple', 'mango', 'lemon', 'grape', 'peach', 'plum', 'olive', 'melon', 'berry', 'guava', 'chili', 'ginger',
+  'eagle', 'falcon', 'hawk', 'heron', 'robin', 'crow', 'swan', 'owl', 'parrot', 'pigeon', 'sparrow', 'peacock',
+  'lion', 'horse', 'zebra', 'camel', 'panda', 'otter', 'bison', 'koala', 'whale', 'shark', 'dolphin', 'turtle',
+  'cloud', 'storm', 'rain', 'snow', 'frost', 'thunder', 'breeze', 'sunny', 'misty', 'dawn', 'dusk', 'night',
+  'stone', 'brick', 'glass', 'steel', 'silver', 'gold', 'copper', 'marble', 'amber', 'pearl', 'ruby', 'jade',
+  'lake', 'ocean', 'hill', 'valley', 'forest', 'meadow', 'island', 'desert', 'canyon', 'harbor', 'garden', 'bridge',
+  'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'black', 'white', 'brown', 'golden', 'violet',
+  'rocket', 'anchor', 'arrow', 'candle', 'drum', 'flute', 'kite', 'lantern', 'mirror', 'pencil', 'ribbon', 'basket',
+  'happy', 'brave', 'calm', 'quick', 'bright', 'gentle', 'lucky', 'proud', 'swift', 'quiet', 'royal', 'fresh',
+  'tulip', 'lotus', 'rose', 'daisy', 'lily', 'jasmine', 'orchid', 'mint',
+];
+const PW_PLACES = [
+  'pune', 'mumbai', 'thane', 'nashik', 'baner', 'wakad', 'kothrud', 'hadapsar',
+  'nagpur', 'goa', 'delhi', 'jaipur', 'surat', 'indore', 'kochi', 'mysore',
+];
 export function suggestPassword(): string {
-  const pick = (a: string[]) => a[Math.floor(Math.random() * a.length)];
-  return `${pick(PW_WORDS)}-${pick(PW_PLACES)}-${Math.floor(10 + Math.random() * 89)}`;
+  const pick = (a: string[]) => a[randomInt(a.length)];
+  return `${pick(PW_WORDS)}-${pick(PW_WORDS)}-${pick(PW_PLACES)}-${String(randomInt(10000)).padStart(4, '0')}`;
 }
 
 // ---- Sessions --------------------------------------------------------------
