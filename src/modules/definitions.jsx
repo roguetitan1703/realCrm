@@ -696,6 +696,9 @@ export const OWNERS_DEF = {
     exit: { label: 'Mark as rejected', when: (o, store) => !OWNER_TERMINAL_STATUSES.includes(o.stage)
         && (o.stage || 'New') !== finalStageOf(store.state.settings, 'calling'),
       run: (store, o) => store.openModal({ kind: 'rejectOwner', ownerId: o.id }) },
+    // What the call did, beside the status: the lead's own sheet and functions.
+    outcome: { label: 'Record outcome', icon: 'phone', when: (o) => !!o.phone,
+      run: (store, o) => openCallOutcome(store, o, 'owner') },
     // Convert to property, at the final status — components/Agreements.jsx.
     finish: (o, store, ctx) => <FinishOwner owner={o} store={store} go={ctx.go} canAct={ctx.canAct} />,
   },
