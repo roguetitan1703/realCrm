@@ -3,7 +3,7 @@
 // collapses to the "Actions" strip and expands on hover.
 import { useState } from 'react'
 import Icon from './Icon.jsx'
-import { Button, Segmented, QuickChip, SectionHead } from './primitives.jsx'
+import { Button, DateInput, Segmented, QuickChip, SectionHead } from './primitives.jsx'
 
 export function ActionRail({ children }) {
   return (
@@ -100,7 +100,7 @@ export function Scheduler({ onSave, saveLabel = 'Add to calendar' }) {
         ))}
       </div>
       <div className="s-dt">
-        {picking && <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} />}
+        {picking && <DateInput value={date} onChange={setDate} />}
         <input className="input" type="time" value={time} onChange={e => setTime(e.target.value)} />
       </div>
       <Button variant="primary" block icon="calendar" style={{ marginTop: 10 }}

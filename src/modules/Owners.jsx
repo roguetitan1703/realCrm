@@ -12,7 +12,8 @@ import { useKept, useKeptPager } from '../lib/useNav.js'
 import { useServerData } from '../lib/useServerData.js'
 import UnassignedBar from '../components/UnassignedBar.jsx'
 import { api } from '../lib/api.js'
-import { OWNERS_DEF } from './definitions.jsx'
+import { telLink } from '../lib/phone.js'
+import { OWNERS_DEF, openCallOutcome } from './definitions.jsx'
 
 // The project cards — same "township lens" as Properties' Group by project,
 // over the cold-calling list. Clicking one filters the existing table by that
@@ -92,6 +93,9 @@ function OwnerRecord({ store, ownerId, topBar, phone, onBack, go }) {
     kind: 'contact', channel, name: o.name, phone: o.phone, email: o.email,
     recordType: 'owner', recordId: o.id,
   })
+  const callFromDesk = () => store.logContactAction('owner', o.id, 'call').then(res => {
+    if (res?.timeline_event?.id) openCallOutcome(store, o, 'owner', res.timeline_event)
+  })
   const cb = callbackSignal(o.callbackAt)
 
   // The callback card is this module's follow-up card: the one piece of state a
@@ -131,12 +135,13 @@ function OwnerRecord({ store, ownerId, topBar, phone, onBack, go }) {
           // Same reasoning as a lead: reaching the person is why this page is
           // open, so it is full width on the record rather than behind a menu.
           primary={[
-            // RECORD CALL on a desk: nothing dials from a desk, and "Call" sent
-            // callers to Add remark instead, so the call itself was never logged.
+            // CALL ON THE DESK TOO, as on a lead (same functions): a plain tel:
+            // link, which Windows hands to the paired phone, logged as the phone
+            // logs it, with the call sheet opened on that entry.
             ...(o.phone ? [
               phone
                 ? { label: 'Call', icon: 'phone', onClick: () => contact('call') }
-                : { label: 'Record call', icon: 'phone', onClick: () => store.openModal({ kind: 'logCall', recordType: 'owner', recordId: o.id, record: o }) },
+                : { label: 'Call', icon: 'phone', href: telLink(o.phone) || `tel:${o.phone}`, onClick: () => callFromDesk() },
               { label: 'WhatsApp', icon: 'wa', tone: 'wa', onClick: () => contact('wa') },
             ] : []),
             ...(o.email ? [{ label: 'Email', icon: 'mail', onClick: () => contact('email') }] : []),

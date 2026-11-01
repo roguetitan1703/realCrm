@@ -18,7 +18,7 @@ import { uploadMedia } from '../lib/media.js'
 import { dayLabel, unitLabel } from '../lib/format.js'
 import { finalStageOf } from '../data/pipelineRoles.js'
 import { BHK_COMMON, BHK_MORE, SUBTYPES } from '../data/propertyFields.js'
-import { Button, Field, Input, Segmented, SuggestInput } from './primitives.jsx'
+import { Button, DateInput, Field, Input, Segmented, SuggestInput } from './primitives.jsx'
 import { projectNames } from '../lib/suggest.js'
 import Icon from './Icon.jsx'
 import { currencySymbol, moneyFull, roomLabel, roomsHeading } from '../lib/locale.js'
@@ -322,10 +322,10 @@ export function CloseDealModal({ store, leadId, Modal }) {
       </Row>
       <Row>
         <Half><Field label={kind === 'rent' ? 'Starts' : 'Date of sale'} required>
-          <input className="input" type="date" value={f.startDate} onChange={e => set('startDate', e.target.value)} />
+          <DateInput value={f.startDate} onChange={v => set('startDate', v)} />
         </Field></Half>
         {kind === 'rent' && <Half><Field label="Ends" hint="11 months if left empty">
-          <input className="input" type="date" value={f.endDate} onChange={e => set('endDate', e.target.value)} />
+          <DateInput value={f.endDate} onChange={v => set('endDate', v)} />
         </Field></Half>}
       </Row>
       <FileField file={file} onFile={setFile} />
@@ -393,10 +393,10 @@ export function AgreementModal({ store, mode, agreementId, propertyId, onDone, M
           </Row>
           <Row>
             <Half><Field label={kind === 'rent' ? 'Starts' : 'Date of sale'} required>
-              <input className="input" type="date" value={f.startDate} onChange={e => set('startDate', e.target.value)} />
+              <DateInput value={f.startDate} onChange={v => set('startDate', v)} />
             </Field></Half>
             {kind === 'rent' && <Half><Field label="Ends" hint={mode === 'edit' ? undefined : '11 months if left empty'}>
-              <input className="input" type="date" value={f.endDate} onChange={e => set('endDate', e.target.value)} />
+              <DateInput value={f.endDate} onChange={v => set('endDate', v)} />
             </Field></Half>}
           </Row>
           <div className="lc-foot">

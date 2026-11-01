@@ -19,6 +19,7 @@ building. Once a spec ships it keeps a short as-built note, not the build log.
 | [notifications.md](./notifications.md) | An alert is open work: lifecycle, urgency, working hours | ✅ built, on `development` |
 | [performance.md](./performance.md) | What a day answers vs a range | ✅ built, on `development` |
 | [follow-ups.md](./follow-ups.md) | What a booked follow-up or callback is, what finishes it, what moves it | 🧭 planning (5 decisions for Om) |
+| [picklists.md](../picklists.md) | Every pick list, its values and where it lives (reference) | reference |
 | [projects.md](./projects.md) | A project's description and photos; renaming variant project names (Work OS #155) | 🧭 planning (7 decisions for Om) |
 | [desk-rework.md](./desk-rework.md), [lead-sources.md](./lead-sources.md), [demo-tenants.md](./demo-tenants.md) | — | not reviewed in this list |
 
