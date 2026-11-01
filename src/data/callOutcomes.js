@@ -31,7 +31,14 @@ export const CALL_REACH = {
   no_answer: 'not received',
   unreachable: 'busy or off',
   wrong_number: 'wrong number',
+  // Not a call's written outcome: no outcome written, and a WhatsApp's reach
+  // (activityReport `contactOf`). One list so every report says them alike.
+  no_outcome: 'result not written',
+  replied: 'replied on WhatsApp',
+  messaged: 'messaged, no reply',
 }
+/** Capitalised for a heading or legend. */
+export const reachTitle = (k) => (CALL_REACH[k] || '').replace(/^./, c => c.toUpperCase())
 
 export const CALL_OUTCOMES = [
   // ~15 remarks are a captured requirement typed as prose ("Looking 3bhk in

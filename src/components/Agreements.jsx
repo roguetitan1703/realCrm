@@ -17,7 +17,7 @@ import { useServerData } from '../lib/useServerData.js'
 import { uploadMedia } from '../lib/media.js'
 import { dayLabel, unitLabel } from '../lib/format.js'
 import { finalStageOf } from '../data/pipelineRoles.js'
-import { BHK_COMMON, BHK_MORE, SUBTYPES } from '../data/propertyFields.js'
+import { BHK, SUBTYPES } from '../data/propertyFields.js'
 import { Button, DateInput, Field, Input, Segmented, SuggestInput } from './primitives.jsx'
 import { projectNames } from '../lib/suggest.js'
 import Icon from './Icon.jsx'
@@ -164,7 +164,7 @@ function Row({ children }) { return <div style={{ display: 'flex', gap: 10 }}>{c
 function Half({ children }) { return <div style={{ flex: 1, minWidth: 0 }}>{children}</div> }
 
 const TYPES = SUBTYPES.residential
-const BHKS = [...BHK_COMMON, ...BHK_MORE]
+const BHKS = BHK  // every configuration the add-property form accepts
 
 /**
  * The file on the form, sent with the save. Optional: an agreement is often

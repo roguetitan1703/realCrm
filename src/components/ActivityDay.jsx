@@ -36,23 +36,14 @@ import { useStore } from '../lib/store.jsx'
 import { stageLabel } from '../data/pipelineRoles.js'
 import { firmLocale } from '../lib/locale.js'
 import { formatPhone } from '../lib/phone.js'
+import { CALL_REACH } from '../data/callOutcomes.js'
 
 // ── Reading one person's counts ─────────────────────────────────────────────
 export const fmt = (n) => Number(n || 0).toLocaleString(firmLocale().numberLocale)
 export const word = (n, one, many) => (n === 1 ? one : many)
 
-/** What a call's written outcome says about whether anybody picked up. */
-const REACH = [
-  ['answered', 'picked up', 'picked up'],
-  ['no_answer', 'did not pick up', 'did not pick up'],
-  ['unreachable', 'busy or switched off', 'busy or switched off'],
-  ['wrong_number', 'wrong number', 'wrong numbers'],
-  ['no_outcome', 'result not written', 'result not written'],
-  // A WhatsApp's reach, for the contact status (activityReport `contactOf`).
-  ['replied', 'replied on WhatsApp', 'replied on WhatsApp'],
-  ['messaged', 'messaged, no reply', 'messaged, no reply'],
-]
-const REACH_LABEL = Object.fromEntries(REACH.map(([k, one]) => [k, one]))
+/** What a call's written outcome says about whether anybody picked up: CALL_REACH, the one list. */
+const REACH_LABEL = CALL_REACH
 
 export function tally(person) {
   const c = person?.counts || []
@@ -286,7 +277,7 @@ function TeamRow({ r, side, isToday, lateEnough, onClick }) {
         <span className="tt-calls">
           {t.calls ? (
             <>
-              <span><b>{fmt(t.calls)}</b> {word(t.calls, 'call', 'calls')}<span className="tt-sub"> · {fmt(t.pickedUp)} picked up</span></span>
+              <span><b>{fmt(t.calls)}</b> {word(t.calls, 'call', 'calls')}<span className="tt-sub"> · {fmt(t.pickedUp)} {CALL_REACH.answered}</span></span>
               <span className="tt-bar" aria-hidden="true"><i style={{ width: `${share}%` }} /></span>
             </>
           ) : <span className={quietFair && !t.n('whatsapp') ? 'tt-alert' : 'ad-quiet'}>{isToday ? 'No calls yet' : 'No calls'}</span>}

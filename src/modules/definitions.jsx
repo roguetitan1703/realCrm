@@ -326,7 +326,7 @@ export const LEADS_DEF = {
     // WHO HAS THIS LEAD, and the way to change it — the same cell. It used to
     // render only a bare + button for anyone who could assign, so the column
     // headed "Sales Executive" never actually named one.
-    { key: 'agent', label: 'Sales Executive', render: (l, store) => (
+    { key: 'agent', label: 'Agent', render: (l, store) => (
       <OwnerCell
         record={l} store={store} canAssign={canAssignLead(store.state.role)}
         onAssign={(agentId) => api.bulkAssignLeads([l.id], agentId)
@@ -726,7 +726,7 @@ export const OWNERS_DEF = {
       return cb.tone === 'overdue' ? <Overdue>{cb.label}</Overdue> : <span className="source">{cb.label}</span>
     } },
     { key: 'stage', label: 'Status', sortable: true, render: (o, store) => <div>{ownerStageCell(o, store)}<RowNote record={o} /></div> },
-    { key: 'agent', label: 'Sales Executive', render: (o, store) => (
+    { key: 'agent', label: 'Agent', render: (o, store) => (
       <OwnerCell
         record={o} store={store} canAssign={canAssignLead(store.state.role)}
         onAssign={(agentId) => api.bulkAssignOwners([o.id], agentId)

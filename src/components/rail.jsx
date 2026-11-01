@@ -3,7 +3,7 @@
 // collapses to the "Actions" strip and expands on hover.
 import { useState } from 'react'
 import Icon from './Icon.jsx'
-import { Button, DateInput, Segmented, QuickChip, SectionHead } from './primitives.jsx'
+import { Button, SectionHead } from './primitives.jsx'
 
 export function ActionRail({ children }) {
   return (
@@ -81,30 +81,3 @@ export function ActionGroup({ groups, items }) {
   )
 }
 
-// ---- Scheduler — decluttered: what · when · time · save. ----
-// "Pick a date" reveals the native date input only when needed, so the common
-// path (today/tomorrow/weekend + a time) stays two taps.
-export function Scheduler({ onSave, saveLabel = 'Add to calendar' }) {
-  const [action, setAction] = useState('call')
-  const [quick, setQuick] = useState('today')
-  const [date, setDate] = useState('')
-  const [time, setTime] = useState('11:00')
-  const picking = quick === 'pick'
-  return (
-    <div className="sched">
-      <Segmented block value={action} onChange={setAction}
-        options={[{ value: 'call', label: 'Call' }, { value: 'site', label: 'Site visit' }, { value: 'meeting', label: 'Meeting' }]} />
-      <div className="s-when">
-        {[['today', 'Today'], ['tomorrow', 'Tomorrow'], ['weekend', 'Weekend'], ['pick', 'Date…']].map(([v, l]) => (
-          <QuickChip key={v} on={quick === v} onClick={() => setQuick(v)}>{l}</QuickChip>
-        ))}
-      </div>
-      <div className="s-dt">
-        {picking && <DateInput value={date} onChange={setDate} />}
-        <input className="input" type="time" value={time} onChange={e => setTime(e.target.value)} />
-      </div>
-      <Button variant="primary" block icon="calendar" style={{ marginTop: 10 }}
-        onClick={() => onSave({ action, quick, date, time })}>{saveLabel}</Button>
-    </div>
-  )
-}

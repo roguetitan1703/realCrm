@@ -8,12 +8,11 @@ import { Modal } from './Modals.jsx'
 import { useServerData } from '../lib/useServerData.js'
 import { buildRoster } from '../components/roster.jsx'
 import { whenLabel } from '../lib/format.js'
+import { roleLabel } from '../lib/permissions.js'
 import { copyText } from '../lib/clipboard.js'
 import { firmLocale } from '../lib/locale.js'
 import { REACH_LABEL, shownLabel, reachWarn } from '../lib/alertReach.js'
 
-const ROLE_LABEL = { admin: 'Owner / Admin', owner: 'Owner', agent: 'Sales Advisor', manager: 'Sales Manager' }
-const roleLabel = (r) => ROLE_LABEL[r] || (r ? r[0].toUpperCase() + r.slice(1) : 'Sales Advisor')
 
 // The api client throws Error("API Error: 400 … — <detail>"); show just the detail.
 const cleanErr = (err) => {
@@ -429,7 +428,7 @@ function EditUserModal({ store, user, canManage, onClose, onDone }) {
           <Field label="Mobile number (optional)"><PhoneInput value={phone} onChange={e => setPhone(e.target.value)} /></Field>
           {canSetRole && (
             <Field label="Access level">
-              <Segmented value={role} onChange={setRole} options={[{ value: 'agent', label: 'Sales agent' }, { value: 'manager', label: 'Manager' }]} />
+              <Segmented value={role} onChange={setRole} options={[{ value: 'agent', label: roleLabel('agent') }, { value: 'manager', label: roleLabel('manager') }]} />
             </Field>
           )}
           <div className="lc-foot"><Button variant="primary" block disabled={saving} onClick={submit}>{saving ? 'Saving…' : 'Save changes'}</Button></div>

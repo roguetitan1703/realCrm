@@ -408,7 +408,7 @@ export const OWNER_MODULE_SCHEMA = {
     { key: 'unitNo', label: 'Unit no.', type: 'text', section: 'domain' },
     { key: 'config', label: 'Configuration', type: 'text', section: 'domain' },
     { key: 'unitRef', label: 'Unit reference (old)', type: 'text', section: 'domain' },
-    { key: 'locality', label: 'Locality', type: 'text', section: 'domain', suggest: localities },
+    { key: 'locality', label: 'Locality', type: 'text', section: 'domain', pickOrOther: (store) => ({ options: localities(store), otherLabel: 'Add new', emptyLabel: 'Select locality', keepUnknown: true, placeholder: 'New locality' }) },
     { key: 'source', label: 'Source', type: 'text', section: 'domain' },
     {
       key: 'agentId', label: 'Assigned Owner', type: 'select', section: 'domain',

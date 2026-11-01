@@ -54,6 +54,11 @@ export const REJECTION_REASONS = [
   'Others',
 ]
 
+// What a client said about a flat they were shown on a site visit (the visit
+// feedback sheet). A different question from REJECTION_REASONS, which is why a
+// LEAD was rejected: the two lists are separate on purpose.
+export const VISIT_REJECT_REASONS = ['Price / budget', 'Vaastu / facing', 'Floor', 'Location', 'Noise', 'Size / layout', 'Furnishing', 'Parking']
+
 // The colour class each status carries. Keys must match the values above
 // exactly — an unmatched key falls through to default styling, which is how a
 // closed lead once rendered as if it were open.
