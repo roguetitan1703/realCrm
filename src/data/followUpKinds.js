@@ -1,8 +1,9 @@
 // ============================================================================
 // WHAT A BOOKED FOLLOW-UP IS, AND WHAT FINISHES IT
 // ============================================================================
-// The schedule form offers the four ACTIONS; every booking stores one of them
-// in `follow_up.action` (older rows: free text, sometimes "<kind> — <name>").
+// The schedule form offers these ACTIONS; every booking stores one of them in
+// `follow_up.action` (older rows: free text, sometimes "<kind> — <name>", and
+// "Client Meeting", which is no longer offered but still reads as a meeting).
 //
 // Each kind is finished by doing the work it booked, and the server closes the
 // booking in the same write (closeFollowUpFor / completeFollowUp, store.ts):
@@ -16,7 +17,9 @@
 // that closes the booking cannot disagree about what a booking is.
 // ============================================================================
 
-export const FOLLOW_UP_ACTIONS = ['Site Visit', 'Client Meeting', 'Follow-up Call', 'Online Demo']
+/** Offered when booking, the default first. */
+export const FOLLOW_UP_ACTIONS = ['Follow-up Call', 'Site Visit', 'Online Demo']
+export const DEFAULT_FOLLOW_UP_ACTION = FOLLOW_UP_ACTIONS[0]
 
 // In this order: "Site visit call-back" is a visit, "Client meeting call" a meeting.
 const KINDS = [

@@ -110,6 +110,27 @@ const eqi = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerC
 // ---------------------------------------------------------------------------
 // LEADS
 // ---------------------------------------------------------------------------
+/**
+ * MY CALL ON THIS RECORD TODAY THAT NOBODY HAS SAID THE OUTCOME OF.
+ * Mine because only the author may edit an entry (actions.ts remark PATCH);
+ * today because an outcome typed now about last week's unanswered call is a
+ * different call, and attaching it there would leave today's unrecorded.
+ */
+export function pendingCallOf(record, meId) {
+  const today = new Date().toDateString()
+  const latest = (record?.timeline || [])
+    .filter(e => e.type === 'call' && meId && e.authorId === meId && e.timestamp
+      && new Date(e.timestamp).toDateString() === today)
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0]
+  return latest && !latest.metadata?.outcome ? latest : null
+}
+
+/** The call sheet: on `event` (or today's pending call), else a fresh call. */
+export function openCallOutcome(store, record, kind = 'lead', event) {
+  const pending = event || pendingCallOf(record, store.state.activeAgentId)
+  store.openModal({ kind: 'logCall', recordType: kind, recordId: record.id, record, event: pending || undefined })
+}
+
 export const LEADS_DEF = {
   id: 'leads',
   name: 'Leads',
@@ -180,6 +201,11 @@ export const LEADS_DEF = {
     // "rejected", and the status dropdown still reopens it if it has to be.
     exit: { label: 'Mark as rejected', when: (l, store) => l.stage !== REJECTED_STATUS && l.stage !== finalStageOf(store.state.settings, 'leads'),
       run: (store, l) => store.openModal({ kind: 'rejectLead', leadId: l.id }) },
+    // WHAT THE CALL DID, next to the status it usually changes: the call
+    // sheet (LogCallModal) on today's call of mine that has no outcome yet, or
+    // on a fresh one when there is none.
+    outcome: { label: 'Record outcome', icon: 'phone', when: (l) => !!l.phone,
+      run: (store, l) => openCallOutcome(store, l) },
     // Close the deal, at the final stage — components/Agreements.jsx.
     finish: (l, store, ctx) => <FinishLead lead={l} store={store} go={ctx.go} canAct={ctx.canAct} />,
   },
@@ -406,8 +432,9 @@ export const LEADS_DEF = {
     // first one. Four ways to do two things.
     { id: 'whatsapp', tier: 'quick', icon: 'wa', label: 'WhatsApp',
       run: (store, l) => store.openWhatsApp(null, l.id) },
-    // Recording a call is the record's main button on a desk ("Record call",
-    // Leads.jsx), so it is not repeated here.
+    // Calling is the record's main button (Leads.jsx) and recording what a
+    // call did sits beside the status (progression.outcome), so neither is
+    // repeated here.
     // Scheduling was deliberately NOT here while the follow-up card owned it —
     // see the note above. The card is gone on a phone (it rendered above the
     // record's own identity, restating what the action bar already offers), and

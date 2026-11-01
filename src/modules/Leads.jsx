@@ -3,8 +3,8 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown, useSelection } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
-import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
-import { personLabel } from '../lib/phone.js'
+import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf, money, dealWord } from '../lib/format.js'
+import { personLabel, telLink } from '../lib/phone.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
 import { canEditLead, canAssignLead, canDeleteRecord, isDeskRole } from '../lib/permissions.js'
@@ -14,7 +14,7 @@ import { useKeptPager } from '../lib/useNav.js'
 import UnassignedBar from '../components/UnassignedBar.jsx'
 import { api } from '../lib/api.js'
 import Icon from '../components/Icon.jsx'
-import { LEADS_DEF } from './definitions.jsx'
+import { LEADS_DEF, openCallOutcome } from './definitions.jsx'
 import { AgreementList } from '../components/Agreements.jsx'
 import { finalStageOf, stageLabel } from '../data/pipelineRoles.js'
 import { firmLocale } from '../lib/locale.js'
@@ -506,7 +506,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   const toggleTick = (id) => setTicked(t => { const n = new Set(t); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const allTicked = propRows.length > 0 && propRows.every(r => ticked.has(r.p.id))
   const sendTicked = () => openSend(store, propRows.filter(r => ticked.has(r.p.id)).map(r => r.p), {
-    leadId: l.id, onSent: () => setTicked(new Set()),
+    leadId: l.id, lead: l, onSent: () => setTicked(new Set()),
   })
 
   const openEdit = () => store.openModal({ kind: 'editRecord', moduleId: 'leads', recordId: l.id })
@@ -515,6 +515,11 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   const contact = (channel) => store.openModal({
     kind: 'contact', channel, name: personLabel(l), phone: l.phone, email: l.email,
     recordType: 'lead', recordId: l.id,
+  })
+  // The tel: link does the dialling; this records that it happened and asks
+  // what the call did, on the entry it just wrote.
+  const callFromDesk = () => store.logContactAction('lead', l.id, 'call').then(res => {
+    if (res?.timeline_event?.id) openCallOutcome(store, l, 'lead', res.timeline_event)
   })
   // Rail: the follow-up card, which is the only thing that changes per lead.
   // A REJECTED OR CLOSED LEAD IS NOT WAITING ON ANYTHING. Rejecting does not
@@ -690,7 +695,13 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                   {/* Joined, not templated. Hardcoding the separators printed a
                       trailing " · " whenever a property had no price, which on
                       imported inventory is most of them. */}
-                  <div className="relrow-sub">{[row.p.type, row.p.locality, row.line].filter(Boolean).join(' · ')}</div>
+                  <div className="relrow-sub">
+                    {/* Rent or Sale and its figure first: the two things an
+                        agent checks before sending a flat to this person. */}
+                    {row.line && <span className="inv-deal">{row.line}</span>}
+                    {row.line && (row.p.type || row.p.locality) ? ' · ' : ''}
+                    {[row.p.type, row.p.locality].filter(Boolean).join(' · ')}
+                  </div>
                   {sent && <div className={'inv-sent' + (sent.opens > 0 ? ' is-open' : '')}>{sentHomeLine(sent)}</div>}
                 </button>
                 {/* Shortlisted by a person, so a person can take it off. A
@@ -754,11 +765,16 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
             ...(phone && isSiteVisit(l.followUp)
               ? [{ label: 'Log visit', icon: 'camera', onClick: () => store.openModal({ kind: 'visitProof', leadId: l.id }) }]
               : []),
-            // RECORD CALL on a desk — see Owners.jsx: nothing dials from a desk.
+            // CALL ON THE DESK TOO. 12a3c27 swapped it for "Record call" on the
+            // belief that nothing dials from a desk; Windows hands tel: to the
+            // paired phone (Phone Link), which is how the team called from the
+            // PC. So it is a plain tel: link there, logged as the phone logs
+            // it, and the call sheet opens on that call for what happened.
+            // Record outcome (beside the status) reaches the same sheet later.
             ...(l.phone ? [
               phone
                 ? { label: 'Call', icon: 'phone', onClick: () => contact('call') }
-                : { label: 'Record call', icon: 'phone', onClick: () => store.openModal({ kind: 'logCall', recordType: 'lead', recordId: l.id, record: l }) },
+                : { label: 'Call', icon: 'phone', href: telLink(l.phone) || `tel:${l.phone}`, onClick: () => callFromDesk() },
               { label: 'WhatsApp', icon: 'wa', tone: 'wa', onClick: () => contact('wa') },
             ] : []),
             // Email steps aside for Log visit. The row is three across on a
@@ -786,12 +802,13 @@ function followFrom(f, l) {
   return { action: type, date: dateLabel, time: f.time || '11:00 am' }
 }
 
-// compact, quiet money string for a property row (deal-aware)
+// "Rent ₹25k/mo" · "Sale ₹1.2Cr": the deal and its figure, in the money
+// formatter budgets use, so a rent reads per month. Either half is left out
+// when the listing does not say it — never a guessed deal, never "undefined".
+// `price` is the stored digits (store.ts digits()); priceLabel only when
+// there are none.
 function quotedShort(p) {
-  // A property with no price has no price line. Template-stringing an absent
-  // priceLabel produced the literal word "undefined", which then rendered as a
-  // fact on the record: "2 BHK Apartment · Pune · undefined". Same shape as the
-  // budget dash — a missing value dressed up as a value.
-  if (!p?.priceLabel) return ''
-  return p.deal === 'rent' ? `${p.priceLabel}` : `${p.priceLabel}${p.negotiable ? ' · neg.' : ''}`
+  const n = Number(String(p?.price ?? '').replace(/\D/g, ''))
+  const figure = n > 0 ? money(n, { perMonth: p.deal === 'rent' }) : (p?.priceLabel || '')
+  return [dealWord(p), figure].filter(Boolean).join(' ')
 }

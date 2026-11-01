@@ -21,10 +21,10 @@ Paying tenants are `bhumi` and `mahalaxmi`. A line that writes their data says s
 
 ### Om's list, 1 Nov (building now)
 
-- **Lead page: Call is back, and Record outcome sits next to status and Reject.** On a laptop, Call is a `tel:` link that Windows hands to the paired phone. *agent*
-- **Follow-up kinds: drop "Client Meeting"; default to Follow-up Call; the picked kind is obvious.** *agent*
-- **Shortlist shows Rent/Sale and price on each flat; sending a flat whose deal doesn't match what the lead wants asks first.** *agent*
-- **Catalogue hides Leased and Unavailable on its own**, with no setting. *buyer*
+- **Lead page: Call is back, and Record outcome sits next to status and Reject.** Built on `b-nov` (fa63d00); the Calling owner record still has the desk's Record call from 12a3c27. *agent*
+- **Follow-up kinds: drop "Client Meeting"; default to Follow-up Call; the picked kind is obvious.** Built on `b-nov` (0877ef1). *agent*
+- **Shortlist shows Rent/Sale and price on each flat; sending a flat whose deal doesn't match what the lead wants asks first.** Built on `b-nov` (f67fb95). *agent*
+- **Catalogue hides Leased and Unavailable on its own**, with no setting. Already so: `CATALOGUE_WHERE` shows only Available (a590faa, live since 27 Oct); checked on dev, a ticked Leased flat is not listed. Waits on Om: where he saw one. *buyer*
 - **Pull down to refresh on phone lists.** *agent*
 - **Leads sort by date arrived, newest first, by default** (not by name). *agent*
 - **Rental "Available from" reads dd/mm/yy.** *agent*

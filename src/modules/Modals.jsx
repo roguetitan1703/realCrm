@@ -22,7 +22,7 @@ import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities, projectNames } from '../lib/suggest.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
-import { FOLLOW_UP_ACTIONS, followUpKindOf } from '../data/followUpKinds.js'
+import { FOLLOW_UP_ACTIONS, DEFAULT_FOLLOW_UP_ACTION } from '../data/followUpKinds.js'
 import { ActivityRecords } from '../components/ActivityDay.jsx'
 import { CloseDealModal, AgreementModal } from '../components/Agreements.jsx'
 import SendSheet, { SenderPhone } from './SendSheet.jsx'
@@ -155,7 +155,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'send' && <SendSheet store={store} Modal={Modal} homes={m.homes} leadId={m.leadId} lead={m.lead} suggested={m.suggested} onSent={m.onSent} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
       {m?.kind === 'scheduleFollowUp' && <ScheduleFollowUpModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} recordType={m.recordType} recordId={m.recordId} record={m.record} />}
+      {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} recordType={m.recordType} recordId={m.recordId} record={m.record} event={m.event} />}
       {m?.kind === 'closeDeal' && <CloseDealModal store={store} leadId={m.leadId} Modal={Modal} />}
       {m?.kind === 'agreement' && <AgreementModal store={store} mode={m.mode} agreementId={m.agreementId} propertyId={m.propertyId} onDone={m.onDone} Modal={Modal} />}
       {m?.kind === 'ownerEdit' && <OwnerEditModal store={store} propId={m.propId} />}
@@ -605,13 +605,17 @@ function AttachPropModal({ store, leadId }) {
 // callers backed out of it and wrote what happened as a plain remark, so the
 // call itself was never counted. The outcome starts empty so nobody records
 // "Connected" by not touching the menu.
-function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) {
+// `event`: a call already logged (the desk's tel: Call, or one dialled from the
+// phone with the outcome skipped). The sheet then says what that call did
+// instead of logging a second one.
+function LogCallModal({ store, leadId, recordType = 'lead', recordId, record, event }) {
   const id = recordId || leadId
   // `record` when the opener holds it: a record reached by a link is fetched,
   // not cached, and the lookup alone would draw nothing.
   const l = store.lookup(recordType, id) || record
   const [outcome, setOutcome] = useState('')
-  const [text, setText] = useState('')
+  // A remark already on that call is kept: saving sends the whole text.
+  const [text, setText] = useState(() => event?.metadata?.remark || '')
   const [busy, setBusy] = useState(false)
   if (!l) return null
 
@@ -627,7 +631,8 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) 
     // API key and a call SID and wrote "Initiated outbound telephony call …
     // via DID 08045678900" to the timeline. No call was placed and no telephony
     // is connected — it was a sentence describing something that did not happen.
-    api.logContactAction(l.id, 'call')
+    const logged = event?.id ? Promise.resolve({ timeline_event: event }) : api.logContactAction(l.id, 'call')
+    logged
       .then(res => {
         const evtId = res?.timeline_event?.id
         return evtId ? api.editRemark(l.id, evtId, text.trim(), outcome || undefined) : null
@@ -637,7 +642,7 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record }) 
   }
 
   return (
-    <Modal title={`Record call · ${(l.name || l.phone || '').split(' ')[0]}`} onClose={store.closeModal} width={430}>
+    <Modal title={`${event ? 'Record outcome' : 'Record call'} · ${(l.name || l.phone || '').split(' ')[0]}`} onClose={store.closeModal} width={430}>
       <div className="lc-who">
         <span className="mono-num">{formatPhone(l.phone) || '—'}</span>
         <StageTag stage={l.stage || 'New'} />
@@ -2543,14 +2548,15 @@ const instantOf = (ymd, timeStr) => {
 
 function ScheduleFollowUpModal({ store, leadId }) {
   const l = store.lookup('lead', leadId)
-  // A reschedule keeps what was booked. This opened on Site Visit every time,
-  // so moving a meeting by an hour quietly turned it into a visit.
-  const [action, setAction] = useState(() => {
-    const cur = followUpAction(l?.followUp).toLowerCase()
-    return FOLLOW_UP_ACTIONS.find(a => a.toLowerCase() === cur)
-      || (cur && FOLLOW_UP_ACTIONS.find(a => followUpKindOf(a) === followUpKindOf(cur)))
-      || 'Site Visit'
-  })
+  // A reschedule keeps what was booked, word for word. This opened on Site
+  // Visit every time, so moving a meeting by an hour quietly turned it into a
+  // visit — and matching by kind would turn a "Client Meeting" (no longer
+  // offered) into an Online Demo. A booked kind that is not offered stays on
+  // the row as its own choice.
+  const booked = followUpAction(l?.followUp)
+  const offered = FOLLOW_UP_ACTIONS.find(a => a.toLowerCase() === booked.toLowerCase())
+  const kinds = booked && !offered ? [booked, ...FOLLOW_UP_ACTIONS] : FOLLOW_UP_ACTIONS
+  const [action, setAction] = useState(() => offered || booked || DEFAULT_FOLLOW_UP_ACTION)
   const chips = dayChips()
   const [day, setDay] = useState(chips[1].ymd)
   const [customDate, setCustomDate] = useState(chips[1].ymd)
@@ -2598,9 +2604,11 @@ function ScheduleFollowUpModal({ store, leadId }) {
         <div className="field">
           <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Activity Type</label>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 5 }}>
-            {FOLLOW_UP_ACTIONS.map(t =>
-              pill(action === t, () => setAction(t), t)
-            )}
+            {kinds.map(t => (
+              <button key={t} type="button" className={'qchip fu-kind' + (action === t ? ' on' : '')} aria-pressed={action === t} onClick={() => setAction(t)}>
+                {action === t && <Icon name="check" size={13} />}{t}
+              </button>
+            ))}
           </div>
         </div>
 

@@ -33,7 +33,25 @@ export function homeOf(p) {
     sub: [configLabel(p), p.locality].filter(Boolean).join(' · '),
     unit: unitLabel(p),
     inCatalogue: !!p.inCatalogue,
+    deal: p.deal || null,
   }
+}
+
+/**
+ * The homes whose deal is not the one this lead wants, as one question:
+ * "Pride World City B-1204 is for Sale; Rahul wants to rent. Send anyway?"
+ * Null when nothing mismatches — and when either side does not say its deal,
+ * because an unstated deal is not a mismatch.
+ */
+export function dealMismatch(homes, lead) {
+  const want = lead?.req?.deal || lead?.deal || null
+  if (want !== 'rent' && want !== 'sale') return null
+  const off = homes.filter(h => (h.deal === 'rent' || h.deal === 'sale') && h.deal !== want)
+  if (!off.length) return null
+  const names = off.map(h => [h.title, h.unit].filter(Boolean).join(' '))
+  const shown = names.length > 3 ? `${names.slice(0, 2).join(', ')} and ${names.length - 2} more` : names.join(names.length === 2 ? ' and ' : ', ')
+  const who = (personLabel(lead) || 'This lead').split(' ')[0]
+  return `${shown} ${off.length === 1 ? 'is' : 'are'} for ${want === 'rent' ? 'Sale' : 'Rent'}; ${who} wants to ${want === 'rent' ? 'rent' : 'buy'}. Send anyway?`
 }
 
 /** Opens the sheet on these properties. `leadId` makes that lead the
@@ -67,9 +85,16 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
     to.kind === 'lead' || to.kind === 'none' || (to.kind === 'new' && readPhone(to.phone).ok))
 
   const recipientName = to.kind === 'lead' ? personLabel(to.lead) : to.kind === 'new' ? (to.name?.trim() || formatPhone(to.phone)) : ''
+  // Asked once, on the sheet, before anything is made: the first press shows
+  // the question and the button becomes Send anyway. Not window.confirm — a
+  // dialog in between costs the desk's click the tab it opens for WhatsApp.
+  const mismatch = to.kind === 'lead' ? dealMismatch(homes, to.lead) : null
+  const [askedFor, setAskedFor] = useState(null)
+  const asking = !!mismatch && askedFor === mismatch
 
   const send = async (app) => {
     if (!ready || busy) return
+    if (mismatch && !asking) { setAskedFor(mismatch); return }
     setBusy(true); setErr('')
     // A desk browser blocks a tab opened after a network round trip, so it is
     // opened now, while the click still counts, and pointed at WhatsApp once
@@ -238,11 +263,12 @@ export default function SendSheet({ store, Modal, homes: initial = [], leadId, l
         {privateOnes.length > 0 && sendable > 0 && (
           <div className="snd-note">{privateOnes.length === 1 ? '1 left out: not in the catalogue' : `${privateOnes.length} left out: not in the catalogue`}</div>
         )}
+        {asking && <div className="snd-err" role="alert">{mismatch}</div>}
         {err && <div className="snd-err" role="alert">{err}</div>}
       </div>
       <div className="mfm-foot">
         <Button onClick={close}>Cancel</Button>
-        <WaSend label={busy ? 'Sending…' : recipientName ? `Send to ${recipientName.split(' ')[0]}` : 'Make link'}
+        <WaSend label={busy ? 'Sending…' : asking ? 'Send anyway' : recipientName ? `Send to ${recipientName.split(' ')[0]}` : 'Make link'}
           disabled={!ready || busy} onSend={send} />
       </div>
     </Modal>
