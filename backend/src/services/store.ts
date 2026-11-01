@@ -1394,8 +1394,8 @@ export const booted: Promise<boolean> = process.env.CRM_NO_BOOT === '1' ? Promis
   // on every existing alert from its link, then closes the ones whose work is
   // already done. Writes only status columns on `notifications`.
   .then(() => runOnce('2026_10_12_alert_lifecycle_first_run', () => firstRunAlertLifecycle()))
-  // NOT ENABLED — waits on Om. See REPAIR_CLOSED_LEAD_BOOKINGS. While false,
-  // runOnce is never called, so nothing is recorded as done either.
+  // See REPAIR_CLOSED_LEAD_BOOKINGS. While false, runOnce is never called, so
+  // nothing is recorded as done either.
   .then(() => (REPAIR_CLOSED_LEAD_BOOKINGS
     ? runOnce('2026_11_01_clear_bookings_on_closed_leads', () => clearBookingsOnClosedLeads())
     : undefined))
@@ -7631,12 +7631,12 @@ export async function completeFollowUp(
  * its booking (updateLead, 1 Nov). Each gets the same 'Booking cleared' line a
  * close writes now, then its follow_up is emptied.
  *
- * OFF until Om approves: it writes the paying firms' leads. Measured on
+ * Om approved it 1 Nov. It writes the paying firms' leads. Measured on
  * production 1 Nov (closed leads with a booking): bhumi 23, mahalaxmi 9,
- * urban 2, delpat 1; none elsewhere. Flip the flag to true for the next boot
- * to run it once (schema_migrations), on whichever database that API opens.
+ * urban 2, delpat 1; none elsewhere. Runs once per database on the next boot
+ * (schema_migrations).
  */
-const REPAIR_CLOSED_LEAD_BOOKINGS = false;
+const REPAIR_CLOSED_LEAD_BOOKINGS = true;
 
 async function clearBookingsOnClosedLeads(): Promise<void> {
   const rows = await sql`SELECT id, tenant_id, stage, follow_up FROM crm_leads
