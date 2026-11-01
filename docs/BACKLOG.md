@@ -33,7 +33,7 @@ The rest shipped to `development` on 1 Nov (merges f2198e1, 89d1454): Call back 
 - **Project description + project photos**, shown on every property in that project. Spec: `specs/projects.md`; waits on Om (§9). *manager*
 - **Piles to act on: Deal Closed with no deal recorded; an owner's unit Available with no property created.** Waits on Om: "converted" to what. *manager*
 - **Payment pending bar + subscription details** (plan, recurring). Delpat sets it in the console; the firm sees a top bar when overdue. Money: builder A + review. Waits on Om: who sees the bar. *Delpat*
-- **Laptop view is hard to read.** Waits on Om: which screens, and the laptop's size. *manager*
+- **Laptop view is hard to read.** Tables measured at 1280, 1366 and 1536 wide and tightened for every module (1 Nov): Leads fits at 1280, Properties still runs 64px past the edge at 1280 (scrolls inside the list). Waits on Om: whether that is the screen he meant. *manager*
 - **"Lead input not recorded", "all values filling (reason at calling, outcome on the timeline)", "phone: no suggestion on pick list".** Waits on Om: an example of each.
 - **Sale and rent advance routine in leads.** Later (Om).
 
