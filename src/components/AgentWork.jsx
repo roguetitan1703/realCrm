@@ -30,6 +30,7 @@
 //
 // Every number opens the people behind it (the same query), and a red number
 // follows the fair rules in the report's header.
+import { CALL_REACH, reachTitle } from '../data/callOutcomes.js'
 import { useState } from 'react'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -52,13 +53,13 @@ function useViewRange(date, from, onRange) {
 
 // What a person's calls came to, in the order a manager reads it.
 const CONTACT = [
-  { key: 'answered', label: 'Picked up', color: '#2f7d54' },
-  { key: 'replied', label: 'Replied on WhatsApp', color: '#5aa37a' },
-  { key: 'no_answer', label: 'Did not pick up', color: '#c79a2b' },
-  { key: 'unreachable', label: 'Busy or switched off', color: '#d27433' },
-  { key: 'wrong_number', label: 'Wrong number', color: '#b23a3a' },
-  { key: 'messaged', label: 'Messaged, no reply', color: '#8fa9c4' },
-  { key: 'no_outcome', label: 'Result not written', color: '#a6ada9' },
+  { key: 'answered', label: reachTitle('answered'), color: '#2f7d54' },
+  { key: 'replied', label: reachTitle('replied'), color: '#5aa37a' },
+  { key: 'no_answer', label: reachTitle('no_answer'), color: '#c79a2b' },
+  { key: 'unreachable', label: reachTitle('unreachable'), color: '#d27433' },
+  { key: 'wrong_number', label: reachTitle('wrong_number'), color: '#b23a3a' },
+  { key: 'messaged', label: reachTitle('messaged'), color: '#8fa9c4' },
+  { key: 'no_outcome', label: reachTitle('no_outcome'), color: '#a6ada9' },
   { key: 'other', label: 'Other', color: '#6f8090' },
 ]
 const CONTACT_LABEL = Object.fromEntries(CONTACT.map(c => [c.key, c.label]))
@@ -124,7 +125,7 @@ function Summary({ t, open, self }) {
       </button>
       <div className="pv-figs">
         <Fig n={t.calls} label={word(t.calls, 'call', 'calls')} onClick={() => open('call')} />
-        <Fig n={t.n('contact', 'answered')} label="picked up" onClick={() => open('contact', 'answered')} />
+        <Fig n={t.n('contact', 'answered')} label={CALL_REACH.answered} onClick={() => open('contact', 'answered')} />
         {!self && <Fig n={t.n('followup_set')} label="follow-ups booked" onClick={() => open('followup_set')} />}
       </div>
     </div>
@@ -421,7 +422,7 @@ export function TeamBoard({ store, hasCalling, onOpenPerson, heading = true, boo
               {/* LISTINGS, on the calling side: the flats an agent put on the
                   book that day — the supply the calling is for. */}
               <div className={'pv-ag pv-ag-head' + (side === 'calling' ? ' with-listings' : '')} aria-hidden="true">
-                <span>Agent</span><span>People</span><span>Calls</span><span>Picked up</span>{side === 'calling' && <span>Listings</span>}<span>What came of it</span><span />
+                <span>Agent</span><span>People</span><span>Calls</span><span>{reachTitle('answered')}</span>{side === 'calling' && <span>Listings</span>}<span>What came of it</span><span />
               </div>
               {people.map(p => {
                 const out = p.t.statuses.slice(0, 3)
