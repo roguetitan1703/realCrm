@@ -1078,6 +1078,13 @@ export function SortControl({ value, options, dir, onSort, onDir }) {
   )
 }
 
+// A cell cut short with an ellipsis (laptop widths) says its whole text on hover.
+function fullTextOnHover(e) {
+  const td = e.currentTarget
+  if (td.title || td.querySelector('[title]') || td.scrollWidth <= td.clientWidth + 1) return
+  td.title = td.textContent.trim()
+}
+
 // ---- Table (dense) ----
 export function Table({ columns, rows, sortKey, sortDir, onSort, onSortDir }) {
   // Same header again flips the direction; the toolbar arrow drives the same state.
@@ -1097,7 +1104,7 @@ export function Table({ columns, rows, sortKey, sortDir, onSort, onSortDir }) {
         {rows.map(r => (
           <tr key={r.id} className={r.selected ? 'sel' : ''} onClick={r.onClick} style={{ cursor: r.onClick ? 'pointer' : 'default' }}>
             {r.cells.map((cell, i) => (
-              <td key={i} onClick={r.onClick} style={{ cursor: r.onClick ? 'pointer' : 'default' }}>{cell}</td>
+              <td key={i} onClick={r.onClick} onMouseEnter={fullTextOnHover} style={{ cursor: r.onClick ? 'pointer' : 'default' }}>{cell}</td>
             ))}
           </tr>
         ))}
