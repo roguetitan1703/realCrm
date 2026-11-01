@@ -319,14 +319,6 @@ export async function passwordLogin(
   }
 
   await sql`UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ${u.id}`;
-  // A password set before today's rules (the shared default `Firm@2026`, or
-  // anything shorter than the minimum) still signs in, but this is the only
-  // moment the server sees it in plain text, so it is the only moment it can
-  // tell. Send them through the forced change now rather than leave it in place.
-  if (!u.must_change_password && passwordIssue(passStr)) {
-    await sql`UPDATE users SET must_change_password = TRUE WHERE id = ${u.id} AND tenant_id = ${tenantId}`;
-    u.must_change_password = true;
-  }
   const jti = await createSession(tenantId, u.id, ctx);
   const token = signToken({ kind: 'user', tenant_id: tenantId, user_id: u.id, role: u.role, jti, ...(u.must_change_password ? { mc: true } : {}) });
   audit({
