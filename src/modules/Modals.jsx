@@ -22,7 +22,7 @@ import { getNestedValue, setNestedValue } from '../components/ModuleFields.jsx'
 import { MODULE_DEFINITIONS } from './definitions.jsx'
 import { localities, projectNames } from '../lib/suggest.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
-import { FOLLOW_UP_ACTIONS, followUpKindOf } from '../data/followUpKinds.js'
+import { FOLLOW_UP_ACTIONS, DEFAULT_FOLLOW_UP_ACTION } from '../data/followUpKinds.js'
 import { ActivityRecords } from '../components/ActivityDay.jsx'
 import { CloseDealModal, AgreementModal } from '../components/Agreements.jsx'
 import SendSheet, { SenderPhone } from './SendSheet.jsx'
@@ -2543,14 +2543,15 @@ const instantOf = (ymd, timeStr) => {
 
 function ScheduleFollowUpModal({ store, leadId }) {
   const l = store.lookup('lead', leadId)
-  // A reschedule keeps what was booked. This opened on Site Visit every time,
-  // so moving a meeting by an hour quietly turned it into a visit.
-  const [action, setAction] = useState(() => {
-    const cur = followUpAction(l?.followUp).toLowerCase()
-    return FOLLOW_UP_ACTIONS.find(a => a.toLowerCase() === cur)
-      || (cur && FOLLOW_UP_ACTIONS.find(a => followUpKindOf(a) === followUpKindOf(cur)))
-      || 'Site Visit'
-  })
+  // A reschedule keeps what was booked, word for word. This opened on Site
+  // Visit every time, so moving a meeting by an hour quietly turned it into a
+  // visit — and matching by kind would turn a "Client Meeting" (no longer
+  // offered) into an Online Demo. A booked kind that is not offered stays on
+  // the row as its own choice.
+  const booked = followUpAction(l?.followUp)
+  const offered = FOLLOW_UP_ACTIONS.find(a => a.toLowerCase() === booked.toLowerCase())
+  const kinds = booked && !offered ? [booked, ...FOLLOW_UP_ACTIONS] : FOLLOW_UP_ACTIONS
+  const [action, setAction] = useState(() => offered || booked || DEFAULT_FOLLOW_UP_ACTION)
   const chips = dayChips()
   const [day, setDay] = useState(chips[1].ymd)
   const [customDate, setCustomDate] = useState(chips[1].ymd)
@@ -2598,9 +2599,11 @@ function ScheduleFollowUpModal({ store, leadId }) {
         <div className="field">
           <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Activity Type</label>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 5 }}>
-            {FOLLOW_UP_ACTIONS.map(t =>
-              pill(action === t, () => setAction(t), t)
-            )}
+            {kinds.map(t => (
+              <button key={t} type="button" className={'qchip fu-kind' + (action === t ? ' on' : '')} aria-pressed={action === t} onClick={() => setAction(t)}>
+                {action === t && <Icon name="check" size={13} />}{t}
+              </button>
+            ))}
           </div>
         </div>
 
