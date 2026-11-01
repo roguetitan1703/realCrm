@@ -12,7 +12,7 @@ import {
   appliesTo, areaFieldsFor, countsFor, isPlot, normaliseBhk, normaliseSubtype,
   KEY_ACCESS,
 } from '../data/propertyFields.js'
-import { api } from '../lib/api.js'
+import { api, currentTenant } from '../lib/api.js'
 import { unitLabel } from '../lib/format.js'
 import { roomLabel } from '../lib/locale.js'
 
@@ -58,7 +58,9 @@ const STEPS = [
   { key: 'details', label: 'Details & media', hint: 'Everything else' },
 ]
 
-const DRAFT_KEY = 'crm_property_draft'
+// Per workspace: a draft typed in one firm must never open in another's Add property.
+const draftKey = () => `crm_property_draft_${currentTenant() || '_'}`
+try { localStorage.removeItem('crm_property_draft') } catch { /* old global key */ }
 
 // ---- small inputs, driven by the canonical vocabulary ----------------------
 
@@ -267,7 +269,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
     // A half-typed listing survives a refresh or an accidental navigation —
     // losing it is the exact failure the modal was retired for.
     try {
-      const raw = localStorage.getItem(DRAFT_KEY)
+      const raw = localStorage.getItem(draftKey())
       if (raw) return { ...blank(), ...JSON.parse(raw) }
     } catch { /* corrupt draft is not worth crashing over */ }
     return blank()
@@ -304,7 +306,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
   // Nor for a conversion or a duplicate: those forms belong to one record.
   useEffect(() => {
     if (editing || ownerId || copyId) return
-    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(form)) } catch { /* quota */ }
+    try { localStorage.setItem(draftKey(), JSON.stringify(form)) } catch { /* quota */ }
   }, [form, editing])
 
   const subtypes = SUBTYPES[form.category] || SUBTYPES.residential
@@ -389,7 +391,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
         go('properties', { propAdd: false, propCopyOf: undefined, propId: created.id, propOpen: true })
         return
       }
-      try { localStorage.removeItem(DRAFT_KEY) } catch { /* nothing to clear */ }
+      try { localStorage.removeItem(draftKey()) } catch { /* nothing to clear */ }
 
       if (again) {
         const next = blank()
@@ -412,7 +414,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
   const discard = () => {
     if (ownerId) { close(); return }
     if (!editing && !window.confirm('Discard this draft?')) return
-    if (!editing) { try { localStorage.removeItem(DRAFT_KEY) } catch { /* nothing to clear */ } }
+    if (!editing) { try { localStorage.removeItem(draftKey()) } catch { /* nothing to clear */ } }
     close()
   }
 
