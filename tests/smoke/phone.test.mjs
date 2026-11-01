@@ -153,7 +153,7 @@ test("Today's callback groups match the agent's Calling pills and their rows", a
 
 test('Calling list opens a project, then an owner', async () => {
   await go(page, 'screen=calling')
-  await page.locator('.projcard').first().tap()
+  await page.locator('.pjl-row').first().tap()
   await page.waitForFunction(() => location.search.includes('in-project='))
   await page.locator('.rcard').first().tap()
   await page.waitForFunction(() => /[?&]owner=/.test(location.search), null, { timeout: 10000 })

@@ -164,10 +164,13 @@ function AccessPanel({ store }) {
                 const mine = canManage(u.role)
                 const self = u.id === meId
                 const rowBusy = busy === u.id
-                // Everything rare, or destructive, or both — behind the ⋯. What's
-                // left visible (Edit, Reassign seat, Suspend) is what an owner
-                // actually reaches for most.
+                // Everything rare, or destructive, or both — behind the ⋯. Edit is
+                // the one left visible, so a row stays one line on a laptop.
+                // Handing over your own seat, suspending yourself or deleting
+                // yourself are not real actions, so they are absent on your row.
                 const overflow = [
+                  ...(!self ? [{ icon: 'userPlus', label: 'Reassign seat', onClick: () => setSeat(u) }] : []),
+                  ...(!self ? [{ icon: 'eyeOff', label: isSuspended(u) ? 'Reactivate' : 'Suspend', onClick: () => toggleSuspend(u) }] : []),
                   { icon: 'shield', label: 'Reset password', onClick: () => resetPw(u) },
                   { icon: 'x', label: 'Force logout', onClick: () => forceLogout(u) },
                   ...(!self && canDelete ? [{ icon: 'trash', label: 'Delete', tone: 'danger', onClick: () => del(u) }] : []),
@@ -205,15 +208,6 @@ function AccessPanel({ store }) {
                       {mine ? (
                         <div className="acc-actions">
                           <button className="acc-act" disabled={rowBusy} onClick={() => setEdit(u)} title="Edit name, email, phone or role">Edit</button>
-                          {/* Handing over your own seat, suspending yourself or
-                              deleting yourself are not real actions — they'd
-                              either sign you out mid-click or lock the firm out
-                              of its own owner account. Not disabled, absent:
-                              a greyed-out Delete button on your own row still
-                              asks "could I delete myself?", which is a question
-                              this screen has no business raising. */}
-                          {!self && <button className="acc-act" disabled={rowBusy} onClick={() => setSeat(u)} title="Hand this seat (and its leads) to a new person">Reassign seat</button>}
-                          {!self && <button className="acc-act" disabled={rowBusy} onClick={() => toggleSuspend(u)}>{isSuspended(u) ? 'Reactivate' : 'Suspend'}</button>}
                           <RowMenu items={overflow} disabled={rowBusy} />
                         </div>
                       ) : (

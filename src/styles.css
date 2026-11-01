@@ -680,6 +680,7 @@ input,textarea,select{font-family:inherit}
 @media (min-width:1700px){.tbl tbody td{max-width:260px}}
 .tbl tbody td:has(.acc-actions){max-width:none;overflow:visible}
 .tbl .acc-actions{flex-wrap:nowrap}
+
 .tbl .acc-mustchg{display:inline;margin:0 0 0 6px}
 .tbl .acc-reach-v,.tbl .acc-reach-s{display:inline}
 .tbl .acc-reach-s{margin-left:6px}
