@@ -2622,8 +2622,7 @@ function ScheduleFollowUpModal({ store, leadId }) {
             </button>
           </div>
           {useCustomDate ? (
-            <input type="date" value={customDate} onChange={e => setCustomDate(e.target.value)}
-              style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)', marginTop: 5, fontSize: 13, fontFamily: 'inherit' }} />
+            <div style={{ marginTop: 5 }}><DateInput value={customDate} onChange={setCustomDate} /></div>
           ) : (
             <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 5 }}>
               {chips.map(c =>

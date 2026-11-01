@@ -55,6 +55,8 @@ const money = (v: any): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 const ymd = (v: any): string | null => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+/** "05/11/26" from "2026-11-05", the way the firm writes a date (the web app's dmy()). */
+const dmy = (v: string | null | undefined) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || "")); return m ? `${m[3]}/${m[2]}/${m[1].slice(2)}` : String(v || ""); };
 /** An agreement's amount in the firm's currency: ₹45,000 · $2,500. */
 const amountText = (n: number | null, loc: Locale) => (n == null ? '' : moneyFull(n, loc));
 
@@ -292,8 +294,8 @@ export async function createAgreement(input: any, ctx: ActorCtx = {}, opts: { re
   const saved = await getAgreement(id);
   const loc = await localeOf(t);
   const what = kind === 'rent'
-    ? `${opts.renews ? 'Renewed' : 'Rented'} ${saved!.flat} · ${amountText(amount, loc)}/month from ${start}${saved!.endDate ? ` to ${saved!.endDate}` : ''}`
-    : `Bought ${saved!.flat} · ${amountText(amount, loc)} on ${start}`;
+    ? `${opts.renews ? 'Renewed' : 'Rented'} ${saved!.flat} · ${amountText(amount, loc)}/month from ${dmy(start)}${saved!.endDate ? ` to ${dmy(saved!.endDate)}` : ''}`
+    : `Bought ${saved!.flat} · ${amountText(amount, loc)} on ${dmy(start)}`;
   if (lead) {
     // The status follows the deal, through updateLead so the change is
     // attributed and timed like any other — not the other way round.
