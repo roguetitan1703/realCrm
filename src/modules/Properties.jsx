@@ -10,7 +10,6 @@ import { useServerData } from '../lib/useServerData.js'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { StatusTag, Quoted, Button, KV, Timeline, MoreRows, useCap, CappedList, Panel, SectionHead, Toggle } from '../components/primitives.jsx'
 import { NbaBanner } from '../components/rail.jsx'
-import { leadsForProperty } from '../lib/matching.js'
 import { fileUrl } from '../lib/media.js'
 import Lightbox from '../components/Lightbox.jsx'
 import MediaEditor from '../components/MediaEditor.jsx'
@@ -212,6 +211,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
   useEffect(() => { selection.clear() }, [view, projectSel])
 
   const open = (id) => go('properties', { propId: id, propOpen: true })
+  const openMatches = (id) => go('properties', { propId: id, propOpen: true, propSection: 'buyers' })
 
   // ONE QUESTION for the rows and for the tab counts, so a tab can never
   // promise listings its list cannot find.
@@ -343,8 +343,9 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
         ? <div className="grid-cards">{list.map(p => picking
             ? <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} picked={selected.has(p.id)} showCatalogue={isDeskRole(state.role)}
                 onClick={() => selection.toggle(p)} />
-            : <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} showCatalogue={isDeskRole(state.role)} onClick={() => open(p.id)} />)}</div>
-        : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open}
+            : <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} showCatalogue={isDeskRole(state.role)} onClick={() => open(p.id)}
+                onMatches={() => openMatches(p.id)} />)}</div>
+        : <PropTable def={PROPERTIES_DEF} list={list} store={store} onOpen={open} onMatches={openMatches}
             selectable selectedIds={selected} onSelectionChange={selection.set} />,
   })
 
@@ -436,12 +437,14 @@ function ProjectGrid({ store, onOpen, picking, selection }) {
 }
 
 // Table view: definition columns + a module-specific "Buyers" demand column injected.
-// `demandCount` rides on the row from the server, counted by one join over the
-// page being rendered. It used to be leadsForProperty() run per row against
-// every lead in the firm.
-function PropTable({ def, list, store, onOpen, selectable, selectedIds, onSelectionChange }) {
+// `demandCount` rides on the row from the server: how many buyers the listing
+// matches, the same list its record shows (services/store.ts buyersFor).
+function PropTable({ def, list, store, onOpen, onMatches, selectable, selectedIds, onSelectionChange }) {
   const demandCol = { key: 'demand', label: 'Buyers', render: (p) => (
-    p.demandCount ? <span className="pc-demand"><Icon name="people" size={13} />{p.demandCount}</span> : <span className="cell-quiet">—</span>
+    p.demandCount
+      ? <button type="button" className="pc-demand lnk" data-matches={p.demandCount}
+          onClick={(e) => { e.stopPropagation(); onMatches(p.id) }}><Icon name="people" size={13} />{p.demandCount}</button>
+      : <span className="cell-quiet">—</span>
   ) }
   // insert Buyers just before the trailing Quoted column
   const cols = def.columns.slice()
@@ -465,11 +468,19 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
   const { rows: liveAgreements } = useAgreementsFor({ propertyId: sel.propId, status: 'active' }, store)
   const mayEdit = canEditListing(store.state.role)
   // The two things this page needs beyond the listing itself, each its own read:
-  // the buyers it matches, and the other units in its project. Both used to be
-  // array scans over collections held in memory for exactly this.
-  const { data: candidates } = useServerData(
+  // the buyers it matches, and the other units in its project. The buyers are
+  // matched on the server, best fit first, by the same function that counts
+  // the number on this listing's card (lib/matchRule.js).
+  const { data: matched, loading: matching } = useServerData(
     () => sel.propId ? api.getPropertyBuyers(sel.propId).then(r => r?.buyers || []) : Promise.resolve([]),
     [sel.propId], [])
+  // Arrived from a card's buyer count: land on the list it counted, once the
+  // list (and so the page above it) has its height.
+  useEffect(() => {
+    if (sel.propSection !== 'buyers' || matching || !p) return
+    document.getElementById('sec-buyers')?.scrollIntoView({ block: 'start' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel.propSection, matching, p?.id])
   const projKey = p?.project || p?.society || ''
   const { data: siblingPage } = useServerData(
     () => projKey ? api.listProperties({ project: projKey, excludeId: sel.propId, limit: 24 }) : Promise.resolve({ data: [] }),
@@ -496,7 +507,7 @@ function PropertyDetail({ store, go, sel, setSel, topBar, phone }) {
   }
 
   const proj = p.project || p.society
-  const buyers = leadsForProperty(p, candidates || [])
+  const buyers = (matched || []).map(l => ({ lead: l, fitLine: l.fitLine }))
   // A rent ending within 60 days is the one thing about a let flat that needs
   // doing, so it takes the banner.
   const ending = (liveAgreements || []).find(a => a.kind === 'rent' && a.daysLeft != null && a.daysLeft <= 60)

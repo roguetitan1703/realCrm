@@ -198,12 +198,11 @@ propertiesRouter.get('/projects/:key', async (req: Request, res: Response) => {
 /**
  * 1e. THE BUYERS FOR ONE LISTING
  * GET /api/v1/properties/:id/buyers
- * `leadsForProperty(p, allLeads)` on the desk needed every lead in memory to
- * answer a question about one flat. Same match, run where the leads are.
+ * Every lead the listing matches — the same count as its card's (buyersFor).
  */
 propertiesRouter.get('/:id/buyers', async (req: Request, res: Response) => {
   try {
-    const buyers = await getPropertyBuyers(req.params.id, Number(req.query.limit) || 50);
+    const buyers = await getPropertyBuyers(req.params.id);
     return res.status(200).json({ success: true, buyers, total: buyers.length });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to fetch buyers', message: err.message });
