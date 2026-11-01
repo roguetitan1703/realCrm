@@ -55,6 +55,10 @@ export default defineConfig(({ mode }) => ({
   // the page's own origin — so that one genuinely needs the proxy.
   server: {
     open: true,
+    // Builders work in git worktrees under .claude/worktrees, inside this
+    // folder. Watched, every file a builder writes (its dist, its edits)
+    // reloaded the page here mid-test and failed the smoke run.
+    watch: { ignored: ['**/.claude/worktrees/**'] },
     proxy: {
       '/api': { target: DEV_API, changeOrigin: true },
       '/pwa': { target: DEV_API, changeOrigin: true },
