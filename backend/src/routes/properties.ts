@@ -136,8 +136,10 @@ propertiesRouter.post('/catalogue', async (req: Request, res: Response) => {
  */
 propertiesRouter.get('/projects', async (req: Request, res: Response) => {
   try {
+    // The list's own filters (listOpts), so a grouped view and the list it
+    // groups are asked one question.
     const { rows, total } = await listProjects({
-      q: typeof req.query.q === 'string' ? req.query.q : undefined,
+      ...listOpts(req.query),
       limit: Number(req.query.limit) || 200,
     });
     return res.status(200).json({ success: true, data: rows, total });

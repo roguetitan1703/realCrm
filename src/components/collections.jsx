@@ -1128,56 +1128,41 @@ export function ListRow({ avatar, name, meta, right, onClick }) {
   )
 }
 
-// ---- Project card: aggregates a township/society's units into one tile. ----
-// Rendered in the Properties "group by project" view; opens the project detail.
-// `picked` (true/false) makes it a tick target, as PropertyCard; `undo` is
-// the card's Undo rename ({ onClick }), which sits under the card's own button.
-export function ProjectCard({ project, onClick, picked, undo }) {
-  const card = <ProjectCardBody project={project} onClick={onClick} picked={picked} boxed={!!undo} />
-  if (!undo) return card
-  return (
-    <div className="projcard pj-box">
-      {card}
-      <button type="button" className="pj-assign" onClick={undo.onClick}><Icon name="refresh" size={13} />Undo rename</button>
-    </div>
-  )
-}
-function ProjectCardBody({ project, onClick, picked, boxed }) {
+// ---- Project row: one line per township in Properties' Group by project. ----
+// A row, not a card: a firm's inventory is dozens of projects, and a card each
+// put four on a desk screen and one and a half on a phone. `picked`
+// (true/false) makes it a tick target for Rename; `undo` is its Undo rename
+// ({ onClick }); `children` (the flats a search found in it) sit under it.
+export function ProjectRow({ project, onClick, picked, undo, searching, children }) {
   const { name, locality, developer, wings, counts, priceRange, independent } = project
+  const sub = [locality, developer].filter(Boolean).join(' · ')
   return (
-    <button className={(boxed ? 'pj-open' : 'projcard' + (independent ? ' indep' : '')) + (picked !== undefined ? ' picking' : '') + (picked ? ' is-picked' : '')}
-      onClick={onClick} aria-pressed={picked === undefined ? undefined : picked}>
-      {picked !== undefined && <span className={'pick-box pcard-pick' + (picked ? ' on' : '')} aria-hidden="true"><span><Icon name="check" size={13} /></span></span>}
-      <div className="pj-head">
-        <div className="pj-id">
-          <div className="pj-name">{name}</div>
-          <div className="pj-sub">
-            <Icon name="pin" size={13} className="ic" />{locality}
-            {developer ? <span className="pj-dev"> · {developer}</span> : null}
-          </div>
-        </div>
-        <span className="pj-count"><b>{counts.total}</b> unit{counts.total !== 1 ? 's' : ''}</span>
+    <div className={'pjl-item' + (independent ? ' indep' : '') + (picked ? ' is-picked' : '')}>
+      <div className="pjl-line">
+        <button type="button" className="pjl-row" onClick={onClick} aria-pressed={picked === undefined ? undefined : picked}>
+          {picked !== undefined && <span className={'pick-box' + (picked ? ' on' : '')} aria-hidden="true"><span><Icon name="check" size={13} /></span></span>}
+          <span className="pjl-id">
+            <span className="pjl-name">{name}</span>
+            {sub && <span className="pjl-sub">{sub}</span>}
+          </span>
+          <span className="pjl-n">
+            {searching
+              ? <><b>{counts.matched}</b> of {counts.total}</>
+              : <><b>{counts.total}</b> unit{counts.total !== 1 ? 's' : ''}</>}
+          </span>
+          <span className="pjl-facts">
+            {locality && <span className="pjl-f pjl-loc">{locality}</span>}
+            <span className="pjl-f pjl-avail"><b>{counts.available}</b> available</span>
+            <span className="pjl-f pjl-sold">{counts.sold > 0 ? <><b>{counts.sold}</b> sold</> : null}</span>
+            <span className="pjl-f pjl-wings">{wings.length > 0 ? `${wings.length} wing${wings.length > 1 ? 's' : ''}` : null}</span>
+            <span className="pjl-f pjl-price">{priceRangeLabel(priceRange) || '—'}</span>
+          </span>
+          <Icon name="chevRight" size={15} className="ic pjl-go" />
+        </button>
+        {undo && <button type="button" className="pjl-undo" onClick={undo.onClick}><Icon name="refresh" size={13} />Undo rename</button>}
       </div>
-
-      <div className="pj-meter">
-        <div className="pj-bar">
-          <i className="avail" style={{ width: Math.round((counts.available / Math.max(1, counts.total)) * 100) + '%' }} />
-        </div>
-        <div className="pj-legend">
-          <span className="pj-dot avail">{counts.available} available</span>
-          {counts.sold > 0 && <span className="pj-dot sold">{counts.sold} sold</span>}
-          {wings.length > 0 && <span className="pj-wings">{wings.length} wing{wings.length > 1 ? 's' : ''}</span>}
-        </div>
-      </div>
-
-      <div className="pj-foot">
-        <div>
-          <span className="pj-flabel">Price range</span>
-          <span className="pj-price">{priceRangeLabel(priceRange) || '—'}</span>
-        </div>
-        <Icon name="chevRight" size={16} className="ic pj-go" />
-      </div>
-    </button>
+      {children}
+    </div>
   )
 }
 

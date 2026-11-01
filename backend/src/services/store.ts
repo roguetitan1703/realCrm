@@ -5154,6 +5154,22 @@ const PROP_MEDIA: Record<string, any> = {
 
 type PropertyListOpts = Parameters<typeof listProperties>[0] & {};
 
+/**
+ * WHAT A TYPED SEARCH MATCHES on a listing — the list, its tab counts and the
+ * grouped-by-project view all read this one. The flat number is in it: a title
+ * written as just the project name ("Lakeview Residency") carried no number,
+ * so searching "110" could not find flat 110. "A-302" finds wing A, flat 302.
+ */
+function propertySearch(q: string) {
+  const like = `%${q.toLowerCase()}%`;
+  return sql`(lower(coalesce(title, '')) LIKE ${like}
+      OR lower(coalesce(locality, '')) LIKE ${like}
+      OR lower(coalesce(project, '')) LIKE ${like}
+      OR lower(coalesce(owner_name, '')) LIKE ${like}
+      OR lower(coalesce(unit_no, unit, '')) LIKE ${like}
+      OR lower(concat_ws('-', nullif(coalesce(nullif(wing, ''), tower), ''), coalesce(unit_no, unit))) LIKE ${like})`;
+}
+
 /** Which listings a request means — read by the list and by its tab counts. */
 function propertyWhere(t: string, opts: PropertyListOpts = {}, omit: { tab?: boolean } = {}): any[] {
   // Built as a list of fragments so an absent filter contributes no SQL at all,
@@ -5162,13 +5178,7 @@ function propertyWhere(t: string, opts: PropertyListOpts = {}, omit: { tab?: boo
   if (!omit.tab && opts.tab && PROPERTY_TABS[opts.tab]) where.push(PROPERTY_TABS[opts.tab]);
   if (opts.unit === 'missing') where.push(PROP_NO_UNIT);
   const q = String(opts.q || '').trim();
-  if (q) {
-    const like = `%${q.toLowerCase()}%`;
-    where.push(sql`(lower(coalesce(title, '')) LIKE ${like}
-      OR lower(coalesce(locality, '')) LIKE ${like}
-      OR lower(coalesce(project, '')) LIKE ${like}
-      OR lower(coalesce(owner_name, '')) LIKE ${like})`);
-  }
+  if (q) where.push(propertySearch(q));
   // The filter UI is multi-select — "Available or Blocked" is one filter, not
   // two — so every value filter accepts a comma-separated list and matches any
   // of them. A single value is just a list of one.
@@ -5497,16 +5507,17 @@ export async function getPropertiesSummary(): Promise<any> {
  * grouping in JavaScript, which meant it needed every unit in memory to show a
  * list of six project names. The grouping is a GROUP BY; do it here.
  */
-export async function listProjects(opts: { q?: string; limit?: number } = {}): Promise<{ rows: any[]; total: number }> {
+export async function listProjects(opts: PropertyListOpts = {}): Promise<{ rows: any[]; total: number }> {
   const t = tid();
   const limit = Math.min(Math.max(Number(opts.limit) || 200, 1), 500);
-  const where: any[] = [sql`tenant_id = ${t}`];
-  const q = String(opts.q || '').trim();
-  if (q) {
-    const like = `%${q.toLowerCase()}%`;
-    where.push(sql`(lower(coalesce(project, '')) LIKE ${like} OR lower(coalesce(locality, '')) LIKE ${like})`);
-  }
-  const clause = where.reduce((acc, f, i) => (i === 0 ? f : sql`${acc} AND ${f}`));
+  // WHAT IS BEING ASKED FOR — the search, the filters and the tab — is the
+  // list's own question (propertyWhere), so a project's "3 of 12" is the same
+  // three flats the list would show. It used to read none of them: a search
+  // typed while grouped changed nothing on screen. The project itself is the
+  // group, never a filter on it.
+  const { project: _p, excludeId: _x, limit: _l, page: _pg, ...ask } = opts;
+  const asking = Object.values(ask).some(v => v !== undefined && v !== null && String(v).trim() !== '');
+  const match = asking ? andAll(propertyWhere(t, ask)) : sql`TRUE`;
 
   // `mode()` picks the most common locality rather than an arbitrary one — a
   // township spanning two localities should read as the one most of it is in.
@@ -5518,6 +5529,7 @@ export async function listProjects(opts: { q?: string; limit?: number } = {}): P
                 ELSE mode() WITHIN GROUP (ORDER BY ${PROJECT_KEY}) END AS key,
            ${projectNorm(PROJECT_KEY)} AS norm,
            count(*)::int AS units,
+           count(*) FILTER (WHERE ${match})::int AS matched,
            count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available,
            count(*) FILTER (WHERE coalesce(status, 'Available') = 'Sold')::int AS sold,
            count(*) FILTER (WHERE deal = 'rent')::int AS rent,
@@ -5527,9 +5539,30 @@ export async function listProjects(opts: { q?: string; limit?: number } = {}): P
            array_remove(array_agg(DISTINCT nullif(wing, '')), NULL) AS wings,
            min(${PRICE_NUM}) AS price_min,
            max(${PRICE_NUM}) AS price_max
-      FROM crm_properties WHERE ${clause}
+      FROM crm_properties WHERE tenant_id = ${t}
      GROUP BY ${projectNorm(PROJECT_KEY)}
+    HAVING count(*) FILTER (WHERE ${match}) > 0
      ORDER BY 2 DESC LIMIT ${limit}`;
+
+  // THE MATCHING FLATS, under their project, so a search lands on the flat
+  // rather than on a project to open and search again. Up to FLATS_PER_GROUP a
+  // project; its row opens the whole list of them.
+  const FLATS_PER_GROUP = 25;
+  const flats = new Map<string, any[]>();
+  if (asking && rows.length) {
+    const hits = await sql`
+      SELECT * FROM (
+        SELECT p.*, ${projectNorm(PROJECT_KEY)} AS _norm,
+               row_number() OVER (PARTITION BY ${projectNorm(PROJECT_KEY)}
+                 ORDER BY lower(coalesce(nullif(wing, ''), tower, '')), length(coalesce(unit_no, unit, '')), coalesce(unit_no, unit, ''), created_at) AS _n
+          FROM crm_properties p WHERE ${match} AND tenant_id = ${t}
+      ) x WHERE _n <= ${FLATS_PER_GROUP} ORDER BY _norm, _n`;
+    for (const r of hits as any[]) {
+      const { timeline: _history, ...p } = rowToProperty(r);
+      if (!flats.has(r._norm)) flats.set(r._norm, []);
+      flats.get(r._norm)!.push(p);
+    }
+  }
 
   // Biggest projects first, with the implicit bucket always last — it is a
   // leftovers pile, not the firm's largest township.
@@ -5550,8 +5583,11 @@ export async function listProjects(opts: { q?: string; limit?: number } = {}): P
       builder: r.builder || null,
       developer: r.builder || null,
       wings: (r.wings || []).sort(),
-      counts: { total: r.units, available: r.available, sold: r.sold, rent: r.rent, sale: r.sale },
+      // `matched` is the flats that answer the search and filters; it is
+      // `total` when nothing is being asked.
+      counts: { total: r.units, matched: r.matched, available: r.available, sold: r.sold, rent: r.rent, sale: r.sale },
       priceRange: { min: r.price_min != null ? Number(r.price_min) : null, max: r.price_max != null ? Number(r.price_max) : null },
+      ...(asking ? { flats: flats.get(r.norm) || [] } : {}),
     })),
     total: rows.length,
   };

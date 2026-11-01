@@ -4,7 +4,7 @@ import { useServerList } from '../lib/serverList.js'
 import { useKept, useKeptPager } from '../lib/useNav.js'
 import { useRecord } from '../lib/useRecord.js'
 import { api } from '../lib/api.js'
-import { ModuleListView, ModuleTable, PropertyCard, ProjectCard, MediaNote, useSelection } from '../components/collections.jsx'
+import { ModuleListView, ModuleTable, PropertyCard, ProjectRow, MediaNote, useSelection } from '../components/collections.jsx'
 import { priceRangeLabel } from '../lib/projects.js'
 import { useServerData } from '../lib/useServerData.js'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
@@ -338,7 +338,8 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
     } : null,
     emptyHint: 'Try clearing a filter or search.',
     renderTable: (list, v) => v === 'projects'
-      ? <ProjectGrid store={store} onOpen={toProject} picking={picking} selection={selection} />
+      ? <ProjectGrid store={store} ask={toQuery({ ...flt, q, tab: tab === 'all' ? undefined : tab })}
+          onOpen={toProject} onOpenFlat={open} picking={picking} selection={selection} />
       : v === 'grid'
         ? <div className="grid-cards">{list.map(p => picking
             ? <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} picked={selected.has(p.id)} showCatalogue={isDeskRole(state.role)}
@@ -410,27 +411,43 @@ function UnitsTable({ units, onOpen }) {
 }
 
 // ---------------------------------------------------------------------------
-// ProjectGrid — the township lens. The grouping is a GROUP BY on the server, so
-// this reads project rows directly instead of aggregating every unit in the
-// firm in the browser (which is what made this view require the collection).
-// `picking` turns the cards into tick targets for Rename (desk only); the
+// ProjectGrid — the township lens, one compact row a project. The grouping is a
+// GROUP BY on the server, so this reads project rows directly instead of
+// aggregating every unit in the firm in the browser.
+// WHAT IS BEING ASKED FOR goes to the server with it — the search, the filters
+// and the tab — and only the projects holding a match come back, each with the
+// flats that matched, shown under it. The grouped view used to ignore the
+// search box: typing a flat number changed nothing on screen.
+// `picking` turns the rows into tick targets for Rename (desk only); the
 // leftovers bucket is not a project and cannot be renamed.
-function ProjectGrid({ store, onOpen, picking, selection }) {
-  const { data, loading, error } = useServerData(() => api.listProjects(), [store.state.dataAsOf], { data: [] }, '/properties/projects')
+function ProjectGrid({ store, ask: asked, onOpen, onOpenFlat, picking, selection }) {
+  const ask = Object.fromEntries(Object.entries(asked).filter(([k, v]) => k !== 'project' && v != null && String(v).trim() !== ''))
+  const askKey = JSON.stringify(ask)
+  const { data, loading, error } = useServerData(() => api.listProjects(ask), [store.state.dataAsOf, askKey], { data: [] },
+    '/properties/projects' + (askKey !== '{}' ? `?${new URLSearchParams(ask)}` : ''))
   const undoFor = useUndoableRenames(store)
+  const searching = Object.keys(ask).length > 0
   const rows = data?.data || []
   if (loading && !rows.length) return <div className="list-spin" role="status" aria-label="Loading"><span /></div>
   if (error) return <div className="detail-missing">Could not load projects.</div>
-  if (!rows.length) return <div className="detail-missing">No projects yet.</div>
+  if (!rows.length) return searching
+    ? <div className="empty"><div className="e-t">No properties match</div><div className="e-s">Try clearing a filter or search.</div></div>
+    : <div className="detail-missing">No projects yet.</div>
   return (
-    <div className="grid-cards">
+    <div className="pjl">
       {rows.map(pj => {
         const tickable = picking && !pj.independent
         const r = !picking ? undoFor(pj.norm) : null
-        return <ProjectCard key={pj.key} project={pj}
-          picked={tickable ? selection.has(pj.key) : undefined}
-          onClick={() => (picking ? (tickable && selection.toggle({ id: pj.key, key: pj.key, name: pj.name })) : onOpen(pj.key))}
-          undo={r ? { onClick: () => undoProjectRename(store, r.id) } : undefined} />
+        return (
+          <ProjectRow key={pj.key} project={pj} searching={searching}
+            picked={tickable ? selection.has(pj.key) : undefined}
+            onClick={() => (picking ? (tickable && selection.toggle({ id: pj.key, key: pj.key, name: pj.name })) : onOpen(pj.key))}
+            undo={r ? { onClick: () => undoProjectRename(store, r.id) } : undefined}>
+            {searching && !picking && pj.flats?.length > 0 && (
+              <div className="pjl-flats"><UnitsTable units={pj.flats} onOpen={onOpenFlat} /></div>
+            )}
+          </ProjectRow>
+        )
       })}
     </div>
   )
