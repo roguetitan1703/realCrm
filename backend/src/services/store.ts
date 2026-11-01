@@ -3981,10 +3981,16 @@ async function ownerWhere(t: string, opts: OwnerListOpts, omit: { segment?: bool
   // in this tower" is how a caller works a project for one buyer's need.
   const configs = omit.config ? [] : String(opts.config || '').split(',').map(x => x.trim()).filter(Boolean);
   if (configs.length) where.push(sql`${CONFIG_KEY(sql`config`)} IN ${sql(configs.map(c => c.toLowerCase().replace(/\s+/g, '')))}`);
+  // THE SEARCH: who (name, phone), where (project, locality) and which flat —
+  // "T1-1203", "1203" or the old free-text unit line. A caller is asked about
+  // a flat by its number; the search could only find it by the owner's name.
   const q = String(opts.q || '').trim();
   if (q) {
     const like = `%${q.toLowerCase()}%`;
-    where.push(sql`(lower(coalesce(name, '')) LIKE ${like} OR ${phoneLike('phone', q)} OR lower(coalesce(project, '')) LIKE ${like})`);
+    where.push(sql`(lower(coalesce(name, '')) LIKE ${like} OR ${phoneLike('phone', q)}
+      OR lower(coalesce(project, '')) LIKE ${like} OR lower(coalesce(locality, '')) LIKE ${like}
+      OR lower(coalesce(unit_no, '')) LIKE ${like} OR lower(coalesce(unit_ref, '')) LIKE ${like}
+      OR lower(concat_ws('-', nullif(tower, ''), nullif(unit_no, ''))) LIKE ${like})`);
   }
   // coalesce: a row with no stage is New everywhere else (OWNER_OPEN, the
   // counts), so the New tab has to find it too.
@@ -4167,15 +4173,25 @@ export async function getOwnersSummary(mine?: boolean): Promise<any> {
 
 /** Owners grouped by project — the same "township lens" as listProjects, over
  *  the cold-calling list instead of the inventory. */
-export async function listOwnerProjects(): Promise<{ rows: any[]; total: number }> {
+export async function listOwnerProjects(opts: OwnerListOpts = {}): Promise<{ rows: any[]; total: number }> {
   const t = tid();
   const scope = ownerScope();
+  // WHAT IS BEING ASKED FOR — the search and the list's filters — is the
+  // list's own question (ownerWhere), so a project's "3 of 40" is the three
+  // rows its list would show. The grouped view used to ignore the search box
+  // entirely. `mine` is the list's scope, not a question: alone it changes
+  // nothing here, as before; with a search it bounds the matches as it bounds
+  // the list. The project itself is the group, never a filter on it.
+  const { project: _p, tower: _tw, page: _pg, limit: _l, sortKey: _sk, sortDir: _sd, mine, ...ask } = opts;
+  const asking = Object.values(ask).some(v => v !== undefined && v !== null && String(v).trim() !== '');
+  const match = asking ? andAll(await ownerWhere(t, { ...ask, mine })) : sql`TRUE`;
   const [rows, holders] = await Promise.all([
     sql`
     SELECT CASE WHEN ${projectNorm(sql`project`)} = '' THEN 'No project'
                 ELSE mode() WITHIN GROUP (ORDER BY project) END AS key,
            ${projectNorm(sql`project`)} AS norm,
            count(*)::int AS total,
+           count(*) FILTER (WHERE ${match})::int AS matched,
            count(*) FILTER (WHERE coalesce(stage, 'New') = 'New')::int AS "new",
            count(*) FILTER (WHERE stage = 'Interested')::int AS interested,
            count(*) FILTER (WHERE agent_id IS NULL)::int AS unassigned,
@@ -4184,7 +4200,9 @@ export async function listOwnerProjects(): Promise<{ rows: any[]; total: number 
            -- from the rows, never a list somebody typed.
            array_remove(array_agg(DISTINCT nullif(tower, '')), NULL) AS towers
       FROM crm_owners WHERE tenant_id = ${t} AND ${scope}
-     GROUP BY ${projectNorm(sql`project`)} ORDER BY 2 DESC`,
+     GROUP BY ${projectNorm(sql`project`)}
+    HAVING count(*) FILTER (WHERE ${match}) > 0
+     ORDER BY 2 DESC`,
     // WHO IS ON THIS PROJECT, by name. A firm assigns a township to somebody,
     // then moves a handful of its flats to two other callers — and the card
     // could only say "728 owners", which answers a question nobody asked. One
@@ -4200,6 +4218,25 @@ export async function listOwnerProjects(): Promise<{ rows: any[]; total: number 
      WHERE o.tenant_id = ${t} AND ${scope} AND o.agent_id IS NOT NULL
      GROUP BY 1, 2, 3 ORDER BY 4 DESC`,
   ]);
+  // THE MATCHING OWNERS, under their project, so a search lands on the person
+  // rather than on a project to open and search again. Up to 25 a project; its
+  // row opens the whole list of them. Same order as the list's default (name).
+  const OWNERS_PER_GROUP = 25;
+  const hitsByProject = new Map<string, any[]>();
+  if (asking && rows.length) {
+    const hits = await sql`
+      SELECT * FROM (
+        SELECT crm_owners.*, ${lastRemark('crm_owners')} AS last_remark, ${lastRemarkAt('crm_owners')} AS last_remark_at,
+               ${projectNorm(sql`project`)} AS _norm,
+               row_number() OVER (PARTITION BY ${projectNorm(sql`project`)}
+                 ORDER BY lower(coalesce(nullif(name, ''), phone)), id) AS _n
+          FROM crm_owners WHERE ${match}
+      ) x WHERE _n <= ${OWNERS_PER_GROUP} ORDER BY _norm, _n`;
+    for (const r of hits as any[]) {
+      if (!hitsByProject.has(r._norm)) hitsByProject.set(r._norm, []);
+      hitsByProject.get(r._norm)!.push(rowToOwner(r));
+    }
+  }
   const byProject = new Map<string, { id: string; name: string; n: number }[]>();
   for (const h of holders as any[]) {
     const list = byProject.get(h.norm) || [];
@@ -4209,9 +4246,12 @@ export async function listOwnerProjects(): Promise<{ rows: any[]; total: number 
   return {
     rows: rows.map((r: any) => ({
       key: r.key, name: r.key, norm: r.norm, locality: r.locality || null,
-      counts: { total: r.total, new: r.new, interested: r.interested, unassigned: r.unassigned },
+      // `matched` is the rows that answer the search and filters; it is
+      // `total` when nothing is being asked.
+      counts: { total: r.total, matched: r.matched, new: r.new, interested: r.interested, unassigned: r.unassigned },
       towers: (r.towers || []).sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true })),
       holders: byProject.get(r.norm) || [],
+      ...(asking ? { owners: hitsByProject.get(r.norm) || [] } : {}),
     })),
     total: rows.length,
   };

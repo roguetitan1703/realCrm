@@ -756,7 +756,13 @@ export const api = {
   assignOwnerProject: (project, targets, onlyUnassigned) => request('/owners/assign-project', {
     method: 'POST', body: JSON.stringify({ project, targets, onlyUnassigned }),
   }),
-  listOwnerProjects: () => request('/owners/projects'),
+  // The list's own parameters (q, mine, …), so the grouped view is asked what the list is.
+  listOwnerProjects: (params = {}) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
+    const s = qs.toString()
+    return request(`/owners/projects${s ? `?${s}` : ''}`)
+  },
   getOwner: (id) => request(`/owners/${encodeURIComponent(id)}`),
   createOwner: (owner) => request('/owners', { method: 'POST', body: JSON.stringify(owner) }),
   updateOwner: (id, patch) => request(`/owners/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),

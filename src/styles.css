@@ -1034,52 +1034,11 @@ button.btn-ghost.fu-done{color:var(--accent)}
 .pcard .pc-demand{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:var(--accent-ink);background:var(--accent-wash);border-radius:10px;padding:2px 8px;flex-shrink:0}
 .grid-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
 
-/* project card — aggregates a township/society's units */
-.projcard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);cursor:pointer;transition:border-color .12s,box-shadow .12s;text-align:left;width:100%;padding:16px 17px;display:flex;flex-direction:column;gap:14px}
-.projcard:hover{border-color:var(--muted);box-shadow:var(--shadow)}
-.projcard.indep{border-style:dashed}
-/* The CALLING card (Owners.jsx) is a container with its own Assign control, so
-   the part that opens the project is the button INSIDE it (a button in a button
-   swallows the inner click). Only that card drops its padding: this rule once
-   applied to every .projcard and left the Properties cards with none. */
-.projcard.pj-box{padding:0}
-/* Ticked for Rename (Select on the project cards). */
-.projcard.picking,.pj-open.picking{position:relative}
-.picking .pj-head{padding-right:30px}
-.projcard.is-picked,.pj-box:has(>.is-picked){outline:2px solid var(--accent);outline-offset:-2px}
-.pj-open{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:14px;padding:16px 17px 12px;width:100%;box-sizing:border-box;flex:1}
-.pj-assign{display:flex;align-items:center;gap:6px;margin:0 17px 14px;padding:7px 11px;border:1px solid var(--line);
-  background:var(--card-2);border-radius:8px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;align-self:flex-start}
-.pj-assign:hover{border-color:var(--accent);color:var(--accent-ink)}
-/* Who is on this project, by first name and count. Wraps rather than truncates:
-   four callers on a township is normal and the fourth matters as much. */
-.pj-who{display:flex;flex-wrap:wrap;gap:6px}
-.pj-who-one{font-size:11.5px;font-weight:600;color:var(--ink-2);background:var(--card-2);border:1px solid var(--line);border-radius:6px;padding:2px 7px}
-.pj-who-one b{font-weight:700;color:var(--ink)}
-.pj-who-none{color:var(--muted)}
-.pj-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-.pj-name{font-family:var(--disp);font-weight:600;font-size:16.5px;letter-spacing:-.01em;line-height:1.2}
-.pj-sub{font-size:12.5px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:4px}
-.pj-sub .ic{color:var(--faint)}
-.pj-dev{color:var(--ink-2)}
-.pj-count{flex-shrink:0;font-size:12px;color:var(--muted);background:var(--card-2);border:1px solid var(--line-2);border-radius:12px;padding:3px 10px}
-.pj-count b{font-family:var(--disp);color:var(--ink);font-size:14px;font-variant-numeric:tabular-nums}
-.pj-meter{display:flex;flex-direction:column;gap:7px}
-.pj-bar{height:7px;background:var(--line-2);border-radius:4px;overflow:hidden}
-.pj-bar i.avail{display:block;height:100%;background:var(--accent);border-radius:4px}
-.pj-legend{display:flex;align-items:center;gap:14px;font-size:11.5px;color:var(--muted)}
-.pj-dot{display:inline-flex;align-items:center;gap:5px;font-weight:500}
-.pj-dot::before{content:"";width:7px;height:7px;border-radius:50%}
-.pj-dot.avail{color:var(--ink-2)}.pj-dot.avail::before{background:var(--accent)}
-.pj-dot.sold::before{background:var(--muted)}
-.pj-wings{margin-left:auto;color:var(--faint)}
-.pj-foot{display:flex;align-items:flex-end;justify-content:space-between;border-top:1px solid var(--line-2);padding-top:12px}
-.pj-flabel{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:600}
-.pj-price{font-family:var(--disp);font-weight:600;font-size:16px;color:var(--ink)}
-.projcard:hover .pj-go{color:var(--accent)}
-/* Properties' Group by project: one row a project (ProjectRow). A desk row is
-   one line; a phone row is two — name and count, then where and what is free. */
+/* Group by project, on Properties and Calling: one row a project (ProjectRow).
+   A desk row is one line; a phone row is two — name and count, then where and
+   what is left to work. */
 .pjl{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden}
+.pjl.is-loading{opacity:.6;transition:opacity .15s}
 .pjl-item+.pjl-item{border-top:1px solid var(--line-2)}
 .pjl-item.is-picked{box-shadow:inset 3px 0 0 var(--accent);background:var(--accent-wash)}
 .pjl-line{display:flex;align-items:center}
@@ -1102,8 +1061,15 @@ button.btn-ghost.fu-done{color:var(--accent)}
 .pjl-wings{width:58px;color:var(--faint)}
 .pjl-price{width:150px;text-align:right;font-weight:600;color:var(--ink-2)}
 .pjl-go{flex:none;color:var(--faint)}
-.pjl-undo{flex:none;display:flex;align-items:center;gap:5px;margin-right:12px;padding:5px 9px;border:1px solid var(--line);border-radius:7px;background:var(--card);font-size:12px;font-weight:600;color:var(--ink-2);cursor:pointer}
-.pjl-undo:hover{border-color:var(--accent);color:var(--accent-ink)}
+.pjl-act{flex:none;display:flex;align-items:center;gap:5px;margin-right:12px;padding:5px 9px;border:1px solid var(--line);border-radius:7px;background:var(--card);font-size:12px;font-weight:600;color:var(--ink-2);cursor:pointer}
+.pjl-act:hover{border-color:var(--accent);color:var(--accent-ink)}
+.pjl-act:disabled{opacity:.6;cursor:default}
+.pjl-act+.pjl-act{margin-left:-6px}
+.pjl-item.is-busy .pjl-row{opacity:.55}
+.pjl-call,.pjl-int{width:96px}
+.pjl-unas{width:104px}
+.pjl-who{width:220px;overflow:hidden;text-overflow:ellipsis;color:var(--ink-2)}
+.app-mobile .pjl-act{margin-right:8px;padding:5px 8px}
 .pjl-flats{border-top:1px dashed var(--line-2);background:var(--card-2);padding:2px 0 4px 14px}
 .app-mobile .pjl-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;column-gap:10px;row-gap:2px;padding:8px 12px;min-height:48px}
 .app-mobile .pjl-row .pick-box{grid-column:1;grid-row:1/3;margin:-8px -4px -8px -8px}

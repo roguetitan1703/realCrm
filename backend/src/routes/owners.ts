@@ -76,9 +76,11 @@ ownersRouter.get('/summary', async (req: Request, res: Response) => {
 });
 
 /** GET /api/v1/owners/projects — grouped-by-project counts. Before /:id. */
-ownersRouter.get('/projects', async (_req: Request, res: Response) => {
+ownersRouter.get('/projects', async (req: Request, res: Response) => {
   try {
-    const { rows, total } = await listOwnerProjects();
+    // The list's own parameters (listScope), so the grouped view and the list
+    // it groups are asked one question.
+    const { rows, total } = await listOwnerProjects(listScope(req.query));
     return res.status(200).json({ success: true, data: rows, total });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to list owner projects', message: err.message });
