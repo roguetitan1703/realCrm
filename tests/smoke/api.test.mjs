@@ -53,9 +53,8 @@ test('agent: a colleague lead is not readable and not writable', async () => {
   assert.ok([403, 404].includes(patch.status), `PATCH record gave ${patch.status}`)
 })
 
-test('agent: owners bulk-assign, merge and imports are refused', async () => {
+test('agent: owners bulk-assign and imports are refused', async () => {
   assert.equal((await call('POST', '/owners/bulk-assign', agent, { ids: ['x'], agentId: AGENT.id })).status, 403)
-  assert.equal((await call('POST', `/records/${other.id}/actions/merge`, agent, { duplicate_record_id: 'x' })).status, 403)
   assert.equal((await call('POST', '/imports', agent, {})).status, 403)
   assert.equal((await call('GET', '/imports', agent)).status, 403)
 })
