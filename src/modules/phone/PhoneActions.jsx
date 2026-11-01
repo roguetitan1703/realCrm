@@ -49,7 +49,7 @@ export default function PhoneActions({ store, go, context = {} }) {
       }
       // Destroying history is the owner's call, on either module.
       if (!canDeleteRecord(role)) {
-        actions = actions.filter(a => a.id !== 'delete' && a.id !== 'merge')
+        actions = actions.filter(a => a.id !== 'delete')
       }
       // Call and WhatsApp are NOT here. They sit on the lead's own screen, full
       // width, one tap — reaching the client is the reason the page gets opened

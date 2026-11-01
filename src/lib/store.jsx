@@ -629,21 +629,6 @@ function reducer(state, action) {
     case 'UPDATE_PROP':
       return patchRecord(state, 'property', action.propId, p => ({ ...p, ...action.patch }))
 
-    case 'MERGE': {
-      // The duplicate is gone; the primary absorbs its shortlist and follow-up.
-      const dup = state.cache?.lead?.[action.leadId]
-      const primaryId = dup?.duplicateOf || action.primaryId
-      if (!primaryId) return state
-      const merged = patchRecord(state, 'lead', primaryId, l => ({
-        ...l,
-        shortlist: Array.from(new Set([...(l.shortlist || []), ...(dup?.shortlist || [])])),
-        followUp: l.followUp || dup?.followUp || null,
-        notes: ['[MERGED INQUIRY] duplicate record ' + (dup?.name || action.leadId) + ' merged in', ...(l.notes || [])],
-        timeline: withEvent(l, 'note', 'Merged duplicate enquiry (' + (dup?.name || 'Lead') + ')'),
-      }))
-      return dropRecords(merged, 'lead', [action.leadId])
-    }
-
     case 'ATTACH_PROP':
       return patchRecord(state, 'lead', action.leadId, l => {
         const shortlist = l.shortlist || []
@@ -1387,14 +1372,6 @@ export function StoreProvider({ children }) {
     // record of a booked appointment became a sentence anyone could rewrite.
     // A parameter that is accepted and ignored is worse than one that is not
     // offered, so it is not offered.
-    merge: (leadId) => {
-      const primaryId = api.lookup('lead', leadId)?.duplicateOf
-      if (!primaryId) { toast('No duplicate recorded for this lead', 'warn'); return Promise.resolve(null) }
-      return write('Merge',
-        () => apiClient.mergeRecords(primaryId, leadId),
-        () => dispatch({ type: 'MERGE', leadId, primaryId }),
-        'Merged into one record')
-    },
     // Remark thread (B1) — real persistence, not the old client-only note echo.
     // kind = 'lead' | 'property' | 'owner'.
     // Resolves true once saved, so a caller can keep its text on a refusal.

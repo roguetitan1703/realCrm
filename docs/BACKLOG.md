@@ -130,9 +130,10 @@ gaps are in `specs/notifications.md` §1, not here.
   delpat 1 (1 Nov). Closing a lead now clears its booking; the one-time repair is
   written and off (`REPAIR_CLOSED_LEAD_BOOKINGS` in store.ts, production write).
   Waits on Om. *manager*
-- **A control that does nothing** (code, 18 Oct). "Merge duplicate" shows only
-  when `duplicateOf` is set, and nothing sets it (checked 28 Oct: no route writes
-  `duplicate_of`). Its request, once reachable, is now accepted by the server. *owner*
+- **Three numbers on two leads each, from before every door checked the phone** —
+  bhumi 2, mahalaxmi 1 (1 Nov). "Merge duplicate" is gone (it never showed, and
+  its merge deleted the copy's visits and enquiries). Waits on Om: merge these
+  by hand or build a merge that moves everything. *owner*
 
 ## To verify
 

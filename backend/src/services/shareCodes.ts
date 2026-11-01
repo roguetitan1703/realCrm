@@ -77,13 +77,6 @@ export const slugSuffix = randomCode;
 
 // ── What a link does when its lead changes ─────────────────────────────────
 
-/** Merged: the links, their events and the devices follow the surviving lead. */
-export async function shareLeadMerged(tenantId: string, fromLeadId: string, toLeadId: string): Promise<void> {
-  await sql`UPDATE crm_share_links SET lead_id = ${toLeadId} WHERE tenant_id = ${tenantId} AND lead_id = ${fromLeadId}`;
-  await sql`UPDATE crm_share_events SET lead_id = ${toLeadId} WHERE tenant_id = ${tenantId} AND lead_id = ${fromLeadId}`;
-  await sql`UPDATE crm_share_devices SET lead_id = ${toLeadId} WHERE tenant_id = ${tenantId} AND lead_id = ${fromLeadId}`;
-}
-
 /**
  * Deleted: its links turn off (spec §A.1), and its devices are let go so the
  * next number from that browser starts clean. Events keep their lead id: they

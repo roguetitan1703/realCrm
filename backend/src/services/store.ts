@@ -29,7 +29,7 @@ import { planRoster, rosterPhone, RosterRow } from './roster.js';
 import { requirePhone, editedPhone, keepPhone, phoneKey } from './phone.js';
 import { toE164, isPlaceholderPhone } from '../../../src/lib/phone.js';
 import { assertLeadWrite, ForbiddenError, isDeskRole } from '../lib/permissions.js';
-import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js';
+import { shareLeadsDeleted, slugSuffix } from './shareCodes.js';
 import { canTakeWork, onDutyWorkers, assertWorkable } from './workforce.js';
 import { IS_AVAILABLE, HAS_PHOTO } from './catalogueRules.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
@@ -718,7 +718,6 @@ function rowToLead(r: any, events?: TimelineEvent[], shortlistRows?: any[], name
     notes: r.notes || [],
     shortlist,
     feedback,
-    duplicateOf: r.duplicate_of || undefined,
     // Who entered this lead, as distinct from who is working it. The client
     // needs both to decide whether to offer a full edit or only a status change.
     createdBy: r.created_by || null,
@@ -2798,35 +2797,6 @@ export async function deleteProperty(id: string, ctx: ActorCtx = SYSTEM_CTX): Pr
     });
   }
   return ok;
-}
-
-export async function mergeLeads(primaryId: string, duplicateId: string): Promise<any | null> {
-  const primary = await getLeadById(primaryId);
-  const duplicate = await getLeadById(duplicateId);
-  if (!primary || !duplicate) return null;
-
-  const combinedNotes = [
-    `[MERGED INQUIRY] Merged duplicate record ${duplicate.name} (${duplicate.phone}) into this record.`,
-    ...(primary.notes || []),
-    ...(duplicate.notes || []),
-  ];
-
-  const t = tid();
-  await sql`UPDATE crm_leads SET notes = ${sql.json(combinedNotes)} WHERE id = ${primaryId} AND tenant_id = ${t}`;
-  await sql`UPDATE crm_timeline_events SET record_id = ${primaryId} WHERE record_id = ${duplicateId} AND tenant_id = ${t}`;
-
-  await addTimelineEvent({
-    record_id: primaryId,
-    type: 'merge',
-    title: 'Duplicate Record Merged',
-    description: `Merged inquiry from ${duplicate.name} (${duplicate.phone}, Source: ${duplicate.source}).`,
-  });
-
-  // The duplicate's shared links follow the surviving lead — before the delete
-  // below, which would otherwise turn them off.
-  await shareLeadMerged(t, duplicateId, primaryId);
-  await deleteLead(duplicateId);
-  return await getLeadById(primaryId);
 }
 
 /**
