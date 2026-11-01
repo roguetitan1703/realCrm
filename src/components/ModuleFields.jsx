@@ -11,6 +11,7 @@ import {
   TENANT_TYPES, TRANSACTION,
   BHK_FILTER,
   appliesTo, areaFieldsFor, labelOf, normaliseBhk, normaliseSubtype, optionsOf,
+  KEY_ACCESS,
 } from '../data/propertyFields.js'
 import { canAssignLead } from '../lib/permissions.js'
 import { allOf, configLabel, fmtMoney, listText, money, textList, arrivedOn, dmy } from '../lib/format.js'
@@ -610,7 +611,7 @@ export const PROPERTY_MODULE_SCHEMA = {
     // shared listing must never carry it.
     { key: 'ownerPhone', label: 'Owner phone', type: 'text', section: 'internal' },
     { key: 'ownerEmail', label: 'Owner email', type: 'text', section: 'internal' },
-    { key: 'keyAccess', label: 'Key / access', type: 'text', section: 'internal' },
+    { key: 'keyAccess', label: 'Key / access', type: 'text', section: 'internal', pickOrOther: () => ({ options: KEY_ACCESS, placeholder: 'Who holds the keys, best time to visit' }) },
     // ---- Listing copy ----------------------------------------------------
     // The one thing no template can write: the client's own paragraph about
     // the project. Opt-in per message (see the composer), never automatic.

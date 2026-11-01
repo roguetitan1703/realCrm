@@ -209,6 +209,43 @@ export function DateInput({ value, onChange, ...rest }) {
     value={text} onChange={e => type(e.target.value)} {...rest} />
 }
 /**
+ * A pick list with a way out: the listed `options` (plain strings, stored as
+ * shown) plus one last entry (`otherLabel`: "Other", "Add new") that opens a
+ * text box. The value is always the string — a picked option or what was typed.
+ *
+ * A value that is not in the list is NEVER rewritten or dropped. By default it
+ * opens in the text box exactly as stored (legacy free text: "call owner before
+ * visit "); with `keepUnknown` it stays in the list as its own entry (a locality
+ * the firm uses that no list has caught up with). With no options at all it is
+ * just the text box, since there is nothing to pick.
+ */
+const OTHER = '__other__'
+export function PickOrOther({ value, onChange, options = [], otherLabel = 'Other', emptyLabel = 'Not stated', placeholder, keepUnknown = false, required = false }) {
+  const v = value == null ? '' : String(value)
+  const known = options.includes(v)
+  // Derived, not remembered: a record's value arrives after the form mounts.
+  const [picked, setPicked] = useState(false)
+  const other = picked || (!!v && !known && !keepUnknown)
+  const textOnly = options.length === 0
+  if (textOnly) return <input className="input" value={v} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
+  return (
+    <>
+      <select className="input" value={other ? OTHER : v} onChange={e => {
+        const raw = e.target.value
+        if (raw === OTHER) { if (!other) { setPicked(true); onChange('') } return }
+        setPicked(false)
+        onChange(raw)
+      }}>
+        {!required && <option value="">{emptyLabel}</option>}
+        {keepUnknown && v && !known && <option value={v}>{v}</option>}
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+        <option value={OTHER}>{otherLabel}</option>
+      </select>
+      {other && <input className="input" style={{ marginTop: 6 }} autoFocus={!v} value={v} onChange={e => onChange(e.target.value)} placeholder={placeholder} />}
+    </>
+  )
+}
+/**
  * Free text, with the firm's own values offered as you type (src/lib/suggest.js).
  * A native datalist on purpose: it suggests without restricting — the next
  * project or locality is always one nobody has typed yet — and picking a

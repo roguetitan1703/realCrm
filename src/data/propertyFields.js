@@ -29,6 +29,12 @@ const o = (value, label) => ({ value, label })
 // changes with them.
 const room = (value) => ({ value, get label() { return roomLabel(value) } })
 
+// How a visitor gets in. The stored text is the label itself: the column was
+// free text from the start and holds what brokers typed ("Availabel in office"),
+// which no token list could be matched back to. A value outside this list is a
+// person's own words and is shown as they are; "Other" is how one is entered.
+export const KEY_ACCESS = ['Keys in office', 'Call owner before visit', 'Owner lives there', 'Tenant lives there', 'With a broker']
+
 // ---- Top level --------------------------------------------------------------
 export const CATEGORIES = [o('residential', 'Residential'), o('commercial', 'Commercial')]
 

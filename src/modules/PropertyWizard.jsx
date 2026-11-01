@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Field, Input, Textarea, SuggestInput, DateInput } from '../components/primitives.jsx'
+import { Button, Field, Input, Textarea, SuggestInput, DateInput, PickOrOther } from '../components/primitives.jsx'
 import PhoneInput from '../components/PhoneInput.jsx'
 import { projectNames } from '../lib/suggest.js'
 import Icon from '../components/Icon.jsx'
@@ -10,6 +10,7 @@ import {
   LOCKIN_OPTIONS, MAINTENANCE_MODE, OPEN_SIDES, OWNERSHIP, PAINTING_CHARGES,
   POSSESSION, PRICE_INCLUDES, SUBTYPES, TENANT_TYPES, TRANSACTION,
   appliesTo, areaFieldsFor, countsFor, isPlot, normaliseBhk, normaliseSubtype,
+  KEY_ACCESS,
 } from '../data/propertyFields.js'
 import { api } from '../lib/api.js'
 import { unitLabel } from '../lib/format.js'
@@ -748,7 +749,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                   <div className="pw-row">
                     <Field label="Unit / flat no."><Input value={form.unit || ''} onChange={e => set('unit', e.target.value)} placeholder="701" /></Field>
                     <Field label="Key / access">
-                      <Input value={form.keyAccess || ''} onChange={e => set('keyAccess', e.target.value)}
+                      <PickOrOther value={form.keyAccess || ''} onChange={v => set('keyAccess', v)} options={KEY_ACCESS}
                         placeholder="Who holds the keys, best time to visit" />
                     </Field>
                   </div>
