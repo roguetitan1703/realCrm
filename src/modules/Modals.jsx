@@ -13,7 +13,7 @@ import WaSend from '../components/WaSend.jsx'
 import { api, workspaceUrl } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 import { notifMeta, cleanTitle, isAssignment } from '../lib/notificationMeta.js'
-import { REJECTION_REASONS, REJECTED_STATUS } from '../data/leadStatus.js'
+import { REJECTION_REASONS, VISIT_REJECT_REASONS, REJECTED_STATUS } from '../data/leadStatus.js'
 import { OWNER_REJECTION_REASONS } from '../data/ownerStatus.js'
 import { getPosition, geoPermission, processImage, uploadMedia } from '../lib/media.js'
 import { COUNTED_ITEMS, FIXTURES, SOCIETY_AMENITIES, STATUS } from '../data/propertyFields.js'
@@ -675,11 +675,6 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record, ev
 
 // SuggestInput — free text with the firm's own values offered — lives in
 // components/primitives.jsx now; project fields use it as well as locality.
-
-const CONFIG_OPTIONS = [
-  '1 BHK Apartment', '2 BHK Apartment', '3 BHK Apartment',
-  '4 BHK+ Villa', 'Commercial Office', 'Plot'
-];
 
 const NOBODY = '__nobody'
 // What this form wrote as `purpose` when the notes box was empty.
@@ -2245,7 +2240,6 @@ function StatusModal({ store, propId }) {
 
 
 // ---- Structured site-visit outcome (Liked / Rejected + reason) ----
-const REJECT_REASONS = ['Price / budget', 'Vaastu / facing', 'Floor', 'Location', 'Noise', 'Size / layout', 'Furnishing', 'Parking']
 function VisitFeedbackModal({ store, leadId, propId }) {
   const l = store.lookup('lead', leadId)
   // The property comes from the lead's shortlist first. Reading only the
@@ -2254,7 +2248,7 @@ function VisitFeedbackModal({ store, leadId, propId }) {
   // not there, with no error and no toast.
   const p = (l?.shortlistProps || []).find(x => x.id === propId) || store.lookup('property', propId)
   const [verdict, setVerdict] = useState('liked')
-  const [reason, setReason] = useState(REJECT_REASONS[0])
+  const [reason, setReason] = useState(VISIT_REJECT_REASONS[0])
   if (!l || !p) return null
   const save = () => { store.visitFeedback(leadId, propId, verdict, verdict === 'rejected' ? reason : null, p.society); store.closeModal() }
   return (
@@ -2266,7 +2260,7 @@ function VisitFeedbackModal({ store, leadId, propId }) {
         <>
           <div style={{ fontSize: 11, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600, margin: '16px 0 8px' }}>Reason</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-            {REJECT_REASONS.map(r => <button key={r} className={'qchip' + (reason === r ? ' on' : '')} onClick={() => setReason(r)}>{r}</button>)}
+            {VISIT_REJECT_REASONS.map(r => <button key={r} className={'qchip' + (reason === r ? ' on' : '')} onClick={() => setReason(r)}>{r}</button>)}
           </div>
         </>
       )}
