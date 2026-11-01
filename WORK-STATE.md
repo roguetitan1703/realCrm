@@ -1,7 +1,7 @@
 # Work state
 
 ## Now
-Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in still serves 27 Oct (a036eb4), API runs 6078505 (28 Oct); (2) his go to push development to main (smoke 41/41 on 82be595; includes sign-in hardening that asks Firm@2026/short-password users for a new one at next sign-in); (3) EC2: `npm run deploy:api` (runs the closed-lead repair once: bhumi 23, mahalaxmi 9), `npm run backup` + cron. Frontend before backend.
+Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in still serves 27 Oct (a036eb4), API runs 6078505 (28 Oct); (2) his go to push development to main (smoke 41/41 on 6589451: adds one-line desk tables, grouped search on Properties and Calling, compact project rows; no forced password change, Om 2 Nov); (3) EC2: `npm run deploy:api` (runs the closed-lead repair once: bhumi 23, mahalaxmi 9), `npm run backup` + cron. Frontend before backend.
 
 ## Next
 0. UI review (docs/specs/ui-review.md, published for Om): waits on Om picking proposals; recommended P1 after-call sheet + P3 one word one number
