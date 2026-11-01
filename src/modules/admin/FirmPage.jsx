@@ -5,6 +5,7 @@ import { supportFragment } from '../../lib/support.js'
 import { Button } from '../../components/primitives.jsx'
 import Icon from '../../components/Icon.jsx'
 import Ledger, { fmtWhen } from './Ledger.jsx'
+import Billing from './Billing.jsx'
 import { REACH_LABEL, PUSH_STATE_LABEL, shownLabel, reachWarn } from '../../lib/alertReach.js'
 
 // ============================================================================
@@ -18,6 +19,7 @@ import { REACH_LABEL, PUSH_STATE_LABEL, shownLabel, reachWarn } from '../../lib/
 //              password they were handed, never signed in, alerts not arriving),
 //              where they are signed in, the last sign-ins and failures
 //   Audit log  its ledger
+//   Billing    what it pays Delpat: set up, Mark paid, payments (Billing.jsx)
 // Open desk opens the firm's own screens, read only, as its owner, for two
 // hours (routes/admin.ts); it is on the firm's ledger.
 
@@ -99,7 +101,7 @@ Continue?`)) return
       <div className="adm-head">
         <div>
           <h1>{t.name}</h1>
-          <div className="adm-sub"><code>/{t.slug}</code><span>{t.plan || 'PRO'} · {(t.status || 'ACTIVE').toLowerCase()}</span><span>Since {new Date(t.created_at).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span></div>
+          <div className="adm-sub"><code>/{t.slug}</code><span>Since {new Date(t.created_at).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</span></div>
         </div>
         <Button variant="secondary" icon="eye" disabled={busy === 'desk'} onClick={() => openDesk(false)}>View their CRM</Button>
         <Button variant="secondary" icon="edit" disabled={busy === 'desk'} onClick={() => openDesk(true)}>Work in their CRM</Button>
@@ -215,6 +217,8 @@ Continue?`)) return
       )}
 
       {tab === 'ledger' && <Panel title="Audit log"><Ledger firmId={firmId} /></Panel>}
+
+      {tab === 'billing' && <Billing firmId={firmId} />}
 
       {tab === 'alerts' && <AlertOutcomes rows={d.alerts || []} />}
 

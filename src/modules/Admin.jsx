@@ -18,6 +18,7 @@ import PhoneInput from '../components/PhoneInput.jsx'
 import Icon from '../components/Icon.jsx'
 import FirmPage from './admin/FirmPage.jsx'
 import Ledger from './admin/Ledger.jsx'
+import { STATUS_LABEL, billingDate } from '../lib/billing.js'
 
 const COLOR_PRESETS = ['#7C3AED', '#1E6F52', '#1D4ED8', '#B45309', '#B91C1C', '#0F766E', '#0E7490', '#BE185D']
 
@@ -34,6 +35,7 @@ const FIRM_NAV = [
   { key: 'people', label: 'People and sign-ins', icon: 'people' },
   { key: 'ledger', label: 'Audit log', icon: 'note' },
   { key: 'alerts', label: 'Alerts', icon: 'bell' },
+  { key: 'billing', label: 'Billing', icon: 'note' },
 ]
 
 const DAY_MS = 86400000
@@ -179,7 +181,7 @@ export default function Admin() {
               {!data ? <div className="adm-wait tall" aria-busy="true" /> : (
                 <section className="adm-panel">
                   <table className="adm-tbl adm-firms">
-                    <thead><tr><th>Firm</th><th className="num">People</th><th className="num">Leads</th><th className="num">This week</th><th className="num">Calling</th><th className="num">Properties</th><th>Last work</th><th>Last signed in</th></tr></thead>
+                    <thead><tr><th>Firm</th><th className="num">People</th><th className="num">Leads</th><th className="num">This week</th><th className="num">Calling</th><th className="num">Properties</th><th>Last work</th><th>Last signed in</th><th>Billing</th></tr></thead>
                     <tbody>
                       {tenants.map(t => {
                         const idle = !t.last_work || Date.now() - new Date(t.last_work).getTime() > 3 * DAY_MS
@@ -193,6 +195,9 @@ export default function Admin() {
                             <td className="num">{Number(t.properties).toLocaleString('en-IN')}</td>
                             <td className={idle ? 'adm-warn' : ''}>{agoShort(t.last_work)}</td>
                             <td>{agoShort(t.last_seen)}</td>
+                            <td className={t.billing?.status === 'overdue' ? 'adm-warn' : ''}>
+                              {t.billing ? `${STATUS_LABEL[t.billing.status]} · ${billingDate(t.billing.due_on)}` : '—'}
+                            </td>
                           </tr>
                         )
                       })}

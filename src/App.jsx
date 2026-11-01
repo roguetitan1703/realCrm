@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useStore } from './lib/store.jsx'
 import { useNav } from './lib/useNav.js'
 import { AppShell } from './layouts/layouts.jsx'
-import { TopBar, Toasts, StaleBanner } from './components/chrome.jsx'
+import { TopBar, Toasts, StaleBanner, BillingBar } from './components/chrome.jsx'
 import { PLATFORM, tenantDocTitle } from './data/platform.js'
 import { autoEnablePush } from './lib/push.js'
 import { isDeskRole, roleLabel } from './lib/permissions.js'
@@ -210,6 +210,8 @@ export default function App() {
         {/* The phone chrome returns before the desk one, so this needs its own
             mount — not a second implementation, the same component. */}
         {support ? <SupportBar support={support} onClose={() => store.logout()} /> : <PushRow store={store} />}
+        {/* The phone has no Settings, so the bar is the whole notice there. */}
+        <BillingBar billing={state.billing} />
         <EnvMark />
         <Phone store={store} framed={false} screen={screen} sel={sel} setSel={setSel} go={go} back={back} />
         <Toasts toasts={state.toasts} onDismiss={(id) => store.dispatch({ type: 'UNTOAST', id })} />
@@ -291,6 +293,7 @@ export default function App() {
       {support ? <SupportBar support={support} onClose={() => store.logout()} /> : <PushRow store={store} />}
       <EnvMark />
       {state.dataStale && <StaleBanner />}
+      <BillingBar billing={state.billing} onOpen={state.billing?.plan ? () => go('settings', { settingsSection: 'billing' }) : undefined} />
       <AppShell nav={nav} active={effectiveScreen} activeSub={sel.contactsTab || 'owners'} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
         <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.ownerId || ''}-${sel.propId || ''}-${sel.contactId || ''}`} {...ctx} />
       </AppShell>

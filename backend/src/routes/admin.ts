@@ -14,6 +14,9 @@
  *   POST /firms/:id/users/:uid/reset-password   a new password, shown once
  *   GET  /firms/:id/audit             its ledger, paged and filtered, and checked
  *   GET  /platform/audit              Delpat's own events (logins, onboarding)
+ *   GET  /firms/:id/billing           its subscription and payments (billing.md)
+ *   PUT  /firms/:id/billing           set up or edit the subscription
+ *   POST /firms/:id/billing/payments  Mark paid: record a payment, roll the period
  *   POST /logout
  *   POST /onboard/preview, /onboard   a new firm
  *
@@ -31,6 +34,7 @@ import { planRoster } from '../services/roster.js';
 import { prefixUsage } from '../services/media.js';
 import { deliveryReadiness } from '../services/push.js';
 import { alertOutcomes } from '../services/alertLifecycle.js';
+import { readSubscription, allSubscriptions, listPayments, parseSubscription, saveSubscription, parsePayment, recordPayment } from '../services/billing.js';
 import { randomBytes } from 'crypto';
 
 export const adminRouter = Router();
@@ -95,6 +99,11 @@ adminRouter.get('/overview', async (_req: Request, res: Response) => {
            AND coalesce(e.author, 'System') NOT IN ('System', 'Import')) AS last_work,
         (SELECT max(s.last_seen_at) FROM sessions s WHERE s.tenant_id = t.id AND s.support_by IS NULL) AS last_seen
       FROM tenants t ORDER BY t.created_at ASC NULLS FIRST`;
+    const billing = await allSubscriptions();
+    for (const t of tenants as any[]) {
+      const b = billing.get(t.id);
+      t.billing = b ? { status: b.status, due_on: b.due_on, paid_through: b.paid_through } : null;
+    }
     return res.json({ success: true, tenants });
   } catch (err: any) {
     return res.status(500).json({ error: 'Overview failed', message: err.message });
@@ -225,6 +234,54 @@ adminRouter.get('/firms/:id/audit', async (req: Request, res: Response) => {
     return res.json({ success: true, ...page, check });
   } catch (err: any) {
     return res.status(500).json({ error: 'Could not read the ledger', message: err.message });
+  }
+});
+
+// ── BILLING (docs/specs/billing.md) ─────────────────────────────────────────
+// The only writes to a firm's subscription anywhere: this router is behind
+// requireSuperadmin. Each write is on the firm's ledger with what it changed.
+
+adminRouter.get('/firms/:id/billing', async (req: Request, res: Response) => {
+  const t = await firmOr404(req, res); if (!t) return;
+  try {
+    const [subscription, payments] = await Promise.all([readSubscription(t.id), listPayments(t.id)]);
+    return res.json({ success: true, subscription, payments });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Could not read billing', message: err.message });
+  }
+});
+
+adminRouter.put('/firms/:id/billing', async (req: Request, res: Response) => {
+  const t = await firmOr404(req, res); if (!t) return;
+  const parsed = parseSubscription(req.body);
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+  try {
+    const v = parsed.value;
+    const saved = await saveSubscription(t.id, v, parsed.expected, saOf(req).superadmin_id);
+    if (!saved.ok) return res.status(saved.status).json({ error: saved.error });
+    const before = saved.before;
+    await firmAudit(req, t.id, 'billing.set',
+      `${saOf(req).name} (Delpat) ${before ? 'changed' : 'set up'} billing: ${v.plan_name}, ₹${v.amount} ${v.cycle}, due ${v.due_on}`,
+      { type: 'billing', id: t.id }, { before, after: v });
+    return res.json({ success: true, subscription: await readSubscription(t.id) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Could not save billing', message: err.message });
+  }
+});
+
+adminRouter.post('/firms/:id/billing/payments', async (req: Request, res: Response) => {
+  const t = await firmOr404(req, res); if (!t) return;
+  const parsed = parsePayment(req.body);
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+  try {
+    const r = await recordPayment(t.id, parsed.value, saOf(req).superadmin_id);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    await firmAudit(req, t.id, 'billing.payment',
+      `${saOf(req).name} (Delpat) recorded a payment of ₹${r.payment.amount} on ${r.payment.paid_on} for ${r.payment.period_from} to ${r.payment.period_to}`,
+      { type: 'billing_payment', id: r.payment.id }, { payment: r.payment, due_on: r.due_on, paid_through: r.paid_through });
+    return res.json({ success: true, payment: r.payment, subscription: await readSubscription(t.id) });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Could not record the payment', message: err.message });
   }
 });
 
