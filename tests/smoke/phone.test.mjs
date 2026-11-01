@@ -91,6 +91,8 @@ test('book a follow-up: a double tap is a single write', async () => {
     if (await b.count()) { await b.tap(); found = true }
   }
   assert.ok(found, 'no lead among the first 8 offers Schedule follow-up')
+  // A time has to be picked: the form no longer books one nobody chose.
+  await page.getByRole('button', { name: '4:30 pm', exact: true }).tap()
   writes.length = 0
   const btn = page.locator('.lc-foot button').last()
   await btn.tap()

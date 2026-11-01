@@ -86,8 +86,10 @@ function LatestRemark({ record, store }) {
   // is metadata.remark — read it here, or a row with a real note would be
   // ranked on words nobody chose and then rendered showing them.
   const said = (e) => (e.metadata?.remark || '').trim() || (e.label || '').trim()
+  // Not the system's: closing a lead writes "Booking cleared" as a follow-up
+  // line, and it is not something anybody said about this person.
   const notes = (record.timeline || []).filter(e =>
-    NOTE_TYPES.has(e.type) && (said(e) || e.metadata?.outcome))
+    NOTE_TYPES.has(e.type) && (e.authorId || e.author) !== 'System' && (said(e) || e.metadata?.outcome))
   const written = (e) => !!e.metadata?.outcome || !AUTO_TEXT.test(said(e))
   const latest = notes.find(written) || notes[0]
   const textRef = useRef(null)

@@ -655,6 +655,18 @@ input,textarea,select{font-family:inherit}
 .tbl tbody tr.sel td{background:var(--accent-wash)}
 .tbl .name{font-weight:600}
 .tbl .sub{font-size:12px;color:var(--muted)}
+/* A 14" LAPTOP is a 1280-1536px viewport (1920 wide at 125-150%, or 1366).
+   Beside the sidebar that leaves about 1000px for a nine-column table, and 32px
+   of side padding in every cell spent close to 300px of it on air: names broke
+   over two lines, phone numbers over two more, and the last column ran past the
+   edge at 1280. Numbers never break inside themselves; cells pad less below
+   1536. Every module's table is this one. */
+.tbl .mono-num{white-space:nowrap}
+@media (max-width:1535px){
+  .tbl thead th,.tbl tbody td{padding-left:10px;padding-right:10px}
+  .tbl thead th:first-child,.tbl tbody td:first-child{padding-left:16px}
+  .tbl thead th:last-child,.tbl tbody td:last-child{padding-right:16px}
+}
 /* standardized table cell renderers (used by MODULE_DEFINITION columns) */
 .cell-txt{font-size:13px}
 .cell-quiet{font-size:13px;color:var(--muted)}

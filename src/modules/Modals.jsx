@@ -154,7 +154,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'attachLink' && <AttachLinkModal store={store} Modal={Modal} linkId={m.linkId} onDone={m.onDone} />}
       {m?.kind === 'send' && <SendSheet store={store} Modal={Modal} homes={m.homes} leadId={m.leadId} lead={m.lead} suggested={m.suggested} onSent={m.onSent} />}
       {m?.kind === 'attachProp' && <AttachPropModal store={store} leadId={m.leadId} />}
-      {m?.kind === 'scheduleFollowUp' && <ScheduleFollowUpModal store={store} leadId={m.leadId} />}
+      {m?.kind === 'scheduleFollowUp' && <ScheduleFollowUpModal store={store} leadId={m.leadId} callback={!!m.callback} />}
       {m?.kind === 'logCall' && <LogCallModal store={store} leadId={m.leadId} recordType={m.recordType} recordId={m.recordId} record={m.record} event={m.event} />}
       {m?.kind === 'closeDeal' && <CloseDealModal store={store} leadId={m.leadId} Modal={Modal} />}
       {m?.kind === 'agreement' && <AgreementModal store={store} mode={m.mode} agreementId={m.agreementId} propertyId={m.propertyId} onDone={m.onDone} Modal={Modal} />}
@@ -618,6 +618,12 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record, ev
   // A remark already on that call is kept: saving sends the whole text.
   const [text, setText] = useState(() => event?.metadata?.remark || '')
   const [busy, setBusy] = useState(false)
+  // "ASKED TO CALL BACK" IS A CALLBACK, so on a lead it asks when, like the
+  // status does, and books it with the status in one write (setCallback).
+  // It recorded the outcome and nothing else: the lead's status and booking
+  // said nobody was due to ring, while the call said somebody was.
+  const w = useWhen()
+  const booksCallback = recordType === 'lead' && outcome === 'callback'
   if (!l) return null
 
   const save = () => {
@@ -638,6 +644,9 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record, ev
         const evtId = res?.timeline_event?.id
         return evtId ? api.editRemark(l.id, evtId, text.trim(), outcome || undefined) : null
       })
+      // After the call is logged: logging it closes the call that was booked,
+      // and this books the next one.
+      .then(() => booksCallback ? store.setCallback(l.id, bookingOf(DEFAULT_FOLLOW_UP_ACTION, w)) : null)
       .catch(err => console.warn('[Call log] error:', err.message))
       .finally(() => { store.settled?.(); store.toast(label); store.closeModal() })
   }
@@ -654,12 +663,13 @@ function LogCallModal({ store, leadId, recordType = 'lead', recordId, record, ev
           {CALL_OUTCOMES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </Field>
+      {booksCallback && <WhenPicker w={w} />}
       <Field label="Remark">
         <Textarea value={text} onChange={e => setText(e.target.value)} placeholder="What was said" />
       </Field>
       <div className="lc-foot">
         <Button onClick={store.closeModal}>Cancel</Button>
-        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} disabled={busy || (!outcome && !text.trim())} onClick={save}>
+        <Button variant="primary" style={{ flex: 1, justifyContent: 'center' }} disabled={busy || (!outcome && !text.trim()) || (booksCallback && !w.at)} onClick={save}>
           {busy ? 'Saving…' : 'Save'}
         </Button>
       </div>
@@ -2541,7 +2551,84 @@ const instantOf = (ymd, timeStr) => {
   return isNaN(dt.getTime()) ? null : dt.toISOString()
 }
 
-function ScheduleFollowUpModal({ store, leadId }) {
+// WHEN — the day chips, the time chips and their exact pickers, for every
+// booking: the schedule form, a Callback, "Asked to call back" on a call. One
+// control, so no path can book a day somebody typed.
+//
+// THE TIME STARTS EMPTY. It started at "11:00 am", which matched none of the
+// chips, so nothing on screen was lit and pressing Confirm booked eleven
+// o'clock without anybody choosing it. `at` is null until a time is picked,
+// and the caller's button waits for it.
+function useWhen() {
+  const chips = dayChips()
+  const [day, setDay] = useState(chips[1].ymd)
+  const [customDate, setCustomDate] = useState(chips[1].ymd)
+  const [useCustomDate, setUseCustomDate] = useState(false)
+  const [time, setTime] = useState('')
+  const [customTime, setCustomTime] = useState('')
+  const [useCustomTime, setUseCustomTime] = useState(false)
+  const date = useCustomDate ? customDate : day
+  const timeText = useCustomTime ? customTime : time
+  return {
+    chips, day, setDay, customDate, setCustomDate, useCustomDate, setUseCustomDate,
+    time, setTime, customTime, setCustomTime, useCustomTime, setUseCustomTime,
+    date, timeText, at: date && timeText ? instantOf(date, timeText) : null,
+  }
+}
+
+function WhenPicker({ w }) {
+  const pill = (on, onClick, label) => (
+    <button key={label} type="button" className={'qchip' + (on ? ' on' : '')} aria-pressed={on} onClick={onClick}>{label}</button>
+  )
+  const label = { fontSize: 12, fontWeight: 600, color: 'var(--ink)' }
+  const swap = { fontSize: 11.5, color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }
+  const input = { width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)', marginTop: 5, fontSize: 13, fontFamily: 'inherit' }
+  return (
+    <>
+      <div className="field">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <label style={label}>Date</label>
+          <button type="button" onClick={() => w.setUseCustomDate(!w.useCustomDate)} style={swap}>
+            {w.useCustomDate ? 'Pick Quick Day' : 'Pick Custom Calendar Date'}
+          </button>
+        </div>
+        {w.useCustomDate ? (
+          <DateInput value={w.customDate} onChange={w.setCustomDate} />
+        ) : (
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 5 }}>
+            {w.chips.map(c => pill(w.day === c.ymd, () => { w.setDay(c.ymd); w.setUseCustomDate(false) }, c.label))}
+          </div>
+        )}
+      </div>
+      <div className="field">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <label style={label}>Time Slot</label>
+          <button type="button" onClick={() => w.setUseCustomTime(!w.useCustomTime)} style={swap}>
+            {w.useCustomTime ? 'Pick Quick Time' : 'Enter Exact Time'}
+          </button>
+        </div>
+        {w.useCustomTime ? (
+          <input type="time" value={w.customTime} onChange={e => w.setCustomTime(e.target.value)} style={input} />
+        ) : (
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 5 }}>
+            {['10:30 am', '11:30 am', '2:30 pm', '4:30 pm', '6:00 pm'].map(t =>
+              pill(w.time === t, () => { w.setTime(t); w.setUseCustomTime(false) }, t))}
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+/** The follow_up a picked moment books. `at` is the appointment; date/time are
+ *  what older rows rendered from and are still written beside it. */
+const bookingOf = (action, w, note) => ({
+  action, at: w.at, date: w.date, time: w.timeText, note: note || undefined,
+})
+
+// `callback`: opened by choosing the Callback status. The kind is a call and
+// is not offered; saving sets the status and books the call in one write.
+function ScheduleFollowUpModal({ store, leadId, callback = false }) {
   const l = store.lookup('lead', leadId)
   // A reschedule keeps what was booked, word for word. This opened on Site
   // Visit every time, so moving a meeting by an hour quietly turned it into a
@@ -2551,52 +2638,32 @@ function ScheduleFollowUpModal({ store, leadId }) {
   const booked = followUpAction(l?.followUp)
   const offered = FOLLOW_UP_ACTIONS.find(a => a.toLowerCase() === booked.toLowerCase())
   const kinds = booked && !offered ? [booked, ...FOLLOW_UP_ACTIONS] : FOLLOW_UP_ACTIONS
-  const [action, setAction] = useState(() => offered || booked || DEFAULT_FOLLOW_UP_ACTION)
-  const chips = dayChips()
-  const [day, setDay] = useState(chips[1].ymd)
-  const [customDate, setCustomDate] = useState(chips[1].ymd)
-  const [useCustomDate, setUseCustomDate] = useState(false)
-  const [time, setTime] = useState('11:00 am')
-  const [customTime, setCustomTime] = useState('11:00')
-  const [useCustomTime, setUseCustomTime] = useState(false)
+  const [action, setAction] = useState(() => callback ? DEFAULT_FOLLOW_UP_ACTION : (offered || booked || DEFAULT_FOLLOW_UP_ACTION))
+  const w = useWhen()
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
 
   if (!l) return null
 
   const saveAppointment = async () => {
-    if (busy) return
+    if (busy || !w.at) return
     setBusy(true)
-    const finalDate = useCustomDate ? customDate : day
-    const finalTime = useCustomTime ? customTime : time
-    const fullAction = action
-    const res = await store.setFollowUp(l.id, {
-      action: fullAction,
-      // `at` is the appointment. date/time are kept only so the three rows
-      // written before this fix keep rendering; everything new reads `at`.
-      at: instantOf(finalDate, finalTime),
-      date: finalDate,
-      time: finalTime,
-      note: note.trim() || undefined,
-    })
+    const fu = bookingOf(action, w, note.trim())
+    const res = callback ? await store.setCallback(l.id, fu) : await store.setFollowUp(l.id, fu)
     // NO addNote HERE. This wrote the booking into the timeline as a plain
     // remark — editable, pencil and all — so the record of an appointment being
     // made could be rewritten into any sentence at all. updateLead writes it
     // server-side now, as its own type. See the follow_up block in store.ts.
     setBusy(false)
     if (!res) return
-    store.toast(`Follow-up scheduled: ${action} on ${finalDate} at ${finalTime}`)
+    if (!callback) store.toast(`Follow-up scheduled: ${action} on ${w.date} at ${w.timeText}`)
     store.closeModal()
   }
 
-  const pill = (on, onClick, label) => (
-    <button key={label} type="button" className={'qchip' + (on ? ' on' : '')} onClick={onClick}>{label}</button>
-  )
-
   return (
-    <Modal title={`Schedule follow-up: ${personLabel(l)}`} onClose={store.closeModal} width={480}>
+    <Modal title={`${callback ? 'Callback' : 'Schedule follow-up'}: ${personLabel(l)}`} onClose={store.closeModal} width={480}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div className="field">
+        {!callback && <div className="field">
           <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Activity Type</label>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 5 }}>
             {kinds.map(t => (
@@ -2605,46 +2672,9 @@ function ScheduleFollowUpModal({ store, leadId }) {
               </button>
             ))}
           </div>
-        </div>
+        </div>}
 
-        <div className="field">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Date</label>
-            <button type="button" onClick={() => setUseCustomDate(!useCustomDate)}
-              style={{ fontSize: 11.5, color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
-              {useCustomDate ? 'Pick Quick Day' : 'Pick Custom Calendar Date'}
-            </button>
-          </div>
-          {useCustomDate ? (
-            <div style={{ marginTop: 5 }}><DateInput value={customDate} onChange={setCustomDate} /></div>
-          ) : (
-            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 5 }}>
-              {chips.map(c =>
-                pill(day === c.ymd, () => { setDay(c.ymd); setUseCustomDate(false) }, c.label)
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="field">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Time Slot</label>
-            <button type="button" onClick={() => setUseCustomTime(!useCustomTime)}
-              style={{ fontSize: 11.5, color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
-              {useCustomTime ? 'Pick Quick Time' : 'Enter Exact Time'}
-            </button>
-          </div>
-          {useCustomTime ? (
-            <input type="time" value={customTime} onChange={e => setCustomTime(e.target.value)}
-              style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)', marginTop: 5, fontSize: 13, fontFamily: 'inherit' }} />
-          ) : (
-            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 5 }}>
-              {['10:30 am', '11:30 am', '2:30 pm', '4:30 pm', '6:00 pm'].map(t =>
-                pill(time === t, () => { setTime(t); setUseCustomTime(false) }, t)
-              )}
-            </div>
-          )}
-        </div>
+        <WhenPicker w={w} />
 
         {/* "Assigned Sales Executive" was here: a dropdown of the whole team
             that wrote followUp.agentId, a field NOTHING in this codebase reads.
@@ -2654,12 +2684,12 @@ function ScheduleFollowUpModal({ store, leadId }) {
             is worse than no control — the appointment belongs to whoever the
             lead is assigned to, and reassigning is done on the lead itself. */}
 
-        <Field label="Agenda or location (optional)">
-          <Input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Meet at Hinjewadi Phase 3 sales lounge" />
+        <Field label={callback ? 'What to say (optional)' : 'Agenda or location (optional)'}>
+          <Input value={note} onChange={e => setNote(e.target.value)} placeholder={callback ? 'Wants the floor plan first' : 'e.g. Meet at Hinjewadi Phase 3 sales lounge'} />
         </Field>
 
-        <div className="lc-foot"><Button variant="primary" block disabled={busy} onClick={saveAppointment} icon="calendar" style={{ padding: 12, fontWeight: 600 }}>
-          {busy ? 'Saving…' : 'Confirm Appointment'}
+        <div className="lc-foot"><Button variant="primary" block disabled={busy || !w.at} onClick={saveAppointment} icon="calendar" style={{ padding: 12, fontWeight: 600 }}>
+          {busy ? 'Saving…' : callback ? 'Book callback' : 'Confirm Appointment'}
         </Button></div>
       </div>
     </Modal>

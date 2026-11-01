@@ -21,14 +21,15 @@ import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles, notifyOrDesk } from './notifications.js';
 import { firstRunAlertLifecycle } from './alertLifecycle.js';
 import { suggestPassword } from './auth.js';
-import { followUpKind } from './followUp.js';
-import { followUpKindOf } from '../../../src/data/followUpKinds.js';
+import { followUpKind, BookingRefused } from './followUp.js';
+import { followUpKindOf, bookedAt } from '../../../src/data/followUpKinds.js';
+import { CALLBACK_STATUS } from '../../../src/data/leadStatus.js';
 import { galleryPath } from './gallery.js';
 import { planRoster, rosterPhone, RosterRow } from './roster.js';
 import { requirePhone, editedPhone, keepPhone, phoneKey } from './phone.js';
 import { toE164, isPlaceholderPhone } from '../../../src/lib/phone.js';
 import { assertLeadWrite, ForbiddenError, isDeskRole } from '../lib/permissions.js';
-import { shareLeadMerged, shareLeadsDeleted, slugSuffix } from './shareCodes.js';
+import { shareLeadsDeleted, slugSuffix } from './shareCodes.js';
 import { canTakeWork, onDutyWorkers, assertWorkable } from './workforce.js';
 import { IS_AVAILABLE, HAS_PHOTO } from './catalogueRules.js';
 // Block C canonical vocabulary. Shared with the frontend deliberately: the
@@ -717,7 +718,6 @@ function rowToLead(r: any, events?: TimelineEvent[], shortlistRows?: any[], name
     notes: r.notes || [],
     shortlist,
     feedback,
-    duplicateOf: r.duplicate_of || undefined,
     // Who entered this lead, as distinct from who is working it. The client
     // needs both to decide whether to offer a full edit or only a status change.
     createdBy: r.created_by || null,
@@ -1394,6 +1394,11 @@ export const booted: Promise<boolean> = process.env.CRM_NO_BOOT === '1' ? Promis
   // on every existing alert from its link, then closes the ones whose work is
   // already done. Writes only status columns on `notifications`.
   .then(() => runOnce('2026_10_12_alert_lifecycle_first_run', () => firstRunAlertLifecycle()))
+  // NOT ENABLED — waits on Om. See REPAIR_CLOSED_LEAD_BOOKINGS. While false,
+  // runOnce is never called, so nothing is recorded as done either.
+  .then(() => (REPAIR_CLOSED_LEAD_BOOKINGS
+    ? runOnce('2026_11_01_clear_bookings_on_closed_leads', () => clearBookingsOnClosedLeads())
+    : undefined))
   .then(() => true)
   .catch(err => { console.error('[Supabase Boot Error]:', err.message); return false; });
 
@@ -2368,7 +2373,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   const notes = patch.notes !== undefined ? patch.notes : oldLead.notes;
   const shortlist = patch.shortlist !== undefined ? patch.shortlist : oldLead.shortlist;
   const feedback = patch.feedback !== undefined ? patch.feedback : oldLead.feedback;
-  const followUp = patch.followUp !== undefined ? patch.followUp : (oldLead as any).followUp;
+  let followUp = patch.followUp !== undefined ? patch.followUp : (oldLead as any).followUp;
   const overdue = patch.overdue !== undefined ? patch.overdue : (oldLead as any).overdue;
 
   // When the caller sends a `req` object it is the WHOLE requirement, so a key
@@ -2419,6 +2424,40 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   const rejectionReason = stage === REJECTED_STATUS
     ? (patch.rejectionReason ?? patch.rejection_reason ?? oldLead.rejectionReason ?? null)
     : (movingStage && !keepReason ? null : (oldLead.rejectionReason ?? null));
+
+  // WHAT MAKES TWO BOOKINGS THE SAME BOOKING — see bookingChanged below.
+  const sameBooking = (a: any, b: any) => !!a && !!b
+    && ['action', 'at', 'date', 'time', 'note'].every(k =>
+      String(a[k] ?? '') === String(b[k] ?? ''));
+
+  // A BOOKING IS A MOMENT. A new or changed follow-up without one in `at` is
+  // refused: the schedule form, a Callback and the buyer link all send one,
+  // and a booking of typed words ("This Saturday") is one no reminder fires on
+  // and nothing can call late. One already standing is left as it is.
+  if (patch.followUp && !sameBooking(patch.followUp, oldLead.followUp) && !bookedAt(patch.followUp)) {
+    throw new BookingRefused('booking_needs_time', 'Pick a date and a time for the booking.');
+  }
+
+  // CLOSING A LEAD ENDS ITS BOOKING. Rejected or Deal Closed, by any path —
+  // the status menu, Mark as rejected, closing the deal — leaves nothing owed
+  // to that person, so a visit or call still booked on them is not work. It
+  // stayed: 30 of the 37 overdue bookings in production (28 Oct) sat on closed
+  // leads, kept off the desk only by each reader remembering to ask OPEN, and
+  // the due alert and the calendar did not. Cleared here, in the write that
+  // closes the lead, with a line saying so below — not 'Completed', which
+  // Performance counts as a follow-up done.
+  const closingClears = movingStage && TERMINAL_STATUSES.includes(stage) && !!followUp;
+  if (closingClears) followUp = null;
+
+  // A CALLBACK IS A CALL BOOKED FOR A TIME. A person moving a lead there must
+  // leave it with one — booked in this same patch (the status menu and "Asked
+  // to call back" both open the time picker and send the two together) or
+  // already standing. System callers (ingestion, imports) pass: they set what a
+  // sheet or a portal said, and have nobody to ask.
+  if (movingStage && String(stage).toLowerCase() === CALLBACK_STATUS.toLowerCase() && who?.userId
+      && !(bookedAt(followUp) && followUpKindOf((followUp as any)?.action) === 'call')) {
+    throw new BookingRefused('callback_needs_time', 'Say when to call back.');
+  }
 
   await sql`
     UPDATE crm_leads SET
@@ -2474,7 +2513,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   //
   // Written here, by the side that owns the row, as `follow_up` — outside the
   // editable set, like the completion it will eventually pair with.
-  // WHAT MAKES TWO BOOKINGS THE SAME BOOKING -- named, not inferred from a
+  // WHAT MAKES TWO BOOKINGS THE SAME BOOKING -- named (sameBooking, above), not inferred from a
   // stringify.
   //
   // This compared `JSON.stringify(followUp) !== JSON.stringify(hadFollowUp)`.
@@ -2484,9 +2523,6 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // when every value is identical -- THE GUARD NEVER MATCHED. Pressing Save on
   // an appointment without changing anything wrote another 'Rescheduled' row,
   // every time, and the record grew a stack of identical entries.
-  const sameBooking = (a: any, b: any) => !!a && !!b
-    && ['action', 'at', 'date', 'time', 'note'].every(k =>
-      String(a[k] ?? '') === String(b[k] ?? ''));
   const bookingChanged = !!followUp && !sameBooking(followUp, hadFollowUp);
 
   if (bookingChanged) {
@@ -2505,7 +2541,16 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     }).catch(() => {});
   }
 
-  if (hadFollowUp && !followUp) {
+  if (closingClears) {
+    await addTimelineEvent({
+      record_id: id,
+      type: 'follow_up',
+      title: 'Booking cleared',
+      description: [followUpKind(hadFollowUp), followUpWhen(hadFollowUp, await deskConfigOf(tid()))].filter(Boolean).join(', '),
+      author: 'System',
+      metadata: { reason: 'lead_closed', stage },
+    }).catch(() => {});
+  } else if (hadFollowUp && !followUp) {
     const action = String((hadFollowUp as any).action || 'Follow-up');
     if (followUpKindOf(action) !== 'visit') {
       await addTimelineEvent({
@@ -2752,35 +2797,6 @@ export async function deleteProperty(id: string, ctx: ActorCtx = SYSTEM_CTX): Pr
     });
   }
   return ok;
-}
-
-export async function mergeLeads(primaryId: string, duplicateId: string): Promise<any | null> {
-  const primary = await getLeadById(primaryId);
-  const duplicate = await getLeadById(duplicateId);
-  if (!primary || !duplicate) return null;
-
-  const combinedNotes = [
-    `[MERGED INQUIRY] Merged duplicate record ${duplicate.name} (${duplicate.phone}) into this record.`,
-    ...(primary.notes || []),
-    ...(duplicate.notes || []),
-  ];
-
-  const t = tid();
-  await sql`UPDATE crm_leads SET notes = ${sql.json(combinedNotes)} WHERE id = ${primaryId} AND tenant_id = ${t}`;
-  await sql`UPDATE crm_timeline_events SET record_id = ${primaryId} WHERE record_id = ${duplicateId} AND tenant_id = ${t}`;
-
-  await addTimelineEvent({
-    record_id: primaryId,
-    type: 'merge',
-    title: 'Duplicate Record Merged',
-    description: `Merged inquiry from ${duplicate.name} (${duplicate.phone}, Source: ${duplicate.source}).`,
-  });
-
-  // The duplicate's shared links follow the surviving lead — before the delete
-  // below, which would otherwise turn them off.
-  await shareLeadMerged(t, duplicateId, primaryId);
-  await deleteLead(duplicateId);
-  return await getLeadById(primaryId);
 }
 
 /**
@@ -7608,6 +7624,38 @@ export async function completeFollowUp(
   const ended = await endFollowUp(leadId, String(fu.action || 'Follow-up'),
     event ? undefined : { outcome, ...(remark ? { remark } : {}) });
   return { event, ended };
+}
+
+/**
+ * THE BOOKINGS CLOSED LEADS WERE LEFT HOLDING, before closing a lead cleared
+ * its booking (updateLead, 1 Nov). Each gets the same 'Booking cleared' line a
+ * close writes now, then its follow_up is emptied.
+ *
+ * OFF until Om approves: it writes the paying firms' leads. Measured on
+ * production 1 Nov (closed leads with a booking): bhumi 23, mahalaxmi 9,
+ * urban 2, delpat 1; none elsewhere. Flip the flag to true for the next boot
+ * to run it once (schema_migrations), on whichever database that API opens.
+ */
+const REPAIR_CLOSED_LEAD_BOOKINGS = false;
+
+async function clearBookingsOnClosedLeads(): Promise<void> {
+  const rows = await sql`SELECT id, tenant_id, stage, follow_up FROM crm_leads
+                          WHERE stage IN ${sql(TERMINAL_STATUSES)} AND follow_up IS NOT NULL`;
+  const desks = new Map<string, DeskConfig>();
+  for (const r of rows as any[]) {
+    if (!desks.has(r.tenant_id)) desks.set(r.tenant_id, await deskConfigOf(r.tenant_id));
+    const description = [followUpKind(r.follow_up), followUpWhen(r.follow_up, desks.get(r.tenant_id)!)].filter(Boolean).join(', ');
+    await sql.begin(async (tx: any) => {
+      const cleared = await tx`UPDATE crm_leads SET follow_up = NULL
+                                WHERE id = ${r.id} AND tenant_id = ${r.tenant_id} AND follow_up IS NOT NULL RETURNING id`;
+      if (!cleared.length) return;
+      await tx`INSERT INTO crm_timeline_events (id, record_id, type, title, description, author, timestamp, metadata, tenant_id)
+               VALUES (${`evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`}, ${r.id}, 'follow_up', 'Booking cleared',
+                       ${description}, 'System', ${new Date().toISOString()},
+                       ${sql.json({ reason: 'lead_closed', stage: r.stage, repair: true, was: r.follow_up })}, ${r.tenant_id})`;
+    });
+  }
+  console.log(`[Repair] cleared ${rows.length} booking(s) left on closed leads`);
 }
 
 async function closeSiteVisitAppointment(leadId: string): Promise<void> {

@@ -33,7 +33,7 @@ The rest shipped to `development` on 1 Nov (merges f2198e1, 89d1454): Call back 
 - **Project description + project photos**, shown on every property in that project. Spec: `specs/projects.md`; waits on Om (§9). *manager*
 - **Piles to act on: Deal Closed with no deal recorded; an owner's unit Available with no property created.** Waits on Om: "converted" to what. *manager*
 - **Payment pending bar + subscription details** (plan, recurring). Delpat sets it in the console; the firm sees a top bar when overdue. Money: builder A + review. Waits on Om: who sees the bar. *Delpat*
-- **Laptop view is hard to read.** Waits on Om: which screens, and the laptop's size. *manager*
+- **Laptop view is hard to read.** Tables measured at 1280, 1366 and 1536 wide and tightened for every module (1 Nov): Leads fits at 1280, Properties still runs 64px past the edge at 1280 (scrolls inside the list). Waits on Om: whether that is the screen he meant. *manager*
 - **"Lead input not recorded", "all values filling (reason at calling, outcome on the timeline)", "phone: no suggestion on pick list".** Waits on Om: an example of each.
 - **Sale and rent advance routine in leads.** Later (Om).
 
@@ -116,12 +116,24 @@ gaps are in `specs/notifications.md` §1, not here.
   in the last day. Likely our model, not the agents: real portal leads may not
   behave the way the pile assumes. Study how real leads actually move before
   changing the rule. *manager*
-- **A lead's Callback stores no time** — bhumi 19 of 20, mahalaxmi 42 of 42 have
-  none, so nothing can say a callback is late. (Owners store one.) *agent*
-- **Booked site visits with no time** — bhumi 5 of 29 (typed text only).
-- **A control that does nothing** (code, 18 Oct). "Merge duplicate" shows only
-  when `duplicateOf` is set, and nothing sets it (checked 28 Oct: no route writes
-  `duplicate_of`). Its request, once reachable, is now accepted by the server. *owner*
+- **Callback leads with no time, from before 1 Nov** — bhumi 13 of 13, mahalaxmi
+  30 of 30 (1 Nov). A new Callback now asks when and is refused without a booked
+  call; these were not backfilled (production write). Waits on Om: leave them,
+  or list them per agent to book. A Callback whose call is then logged without
+  an outcome still keeps the status with nothing booked. *agent*
+- **Booked site visits with no time, from before `at` existed** — bhumi 5 of 40
+  (1 Nov), all "Site Visit — <name>" with "Tomorrow"/"This Saturday". The server
+  now refuses a booking without a moment; these were not backfilled (production
+  write, and "Tomorrow" from weeks ago has no date to recover). Waits on Om:
+  clear them or leave them. *agent*
+- **Bookings left on leads closed before 1 Nov** — bhumi 23, mahalaxmi 9, urban 2,
+  delpat 1 (1 Nov). Closing a lead now clears its booking; the one-time repair is
+  written and off (`REPAIR_CLOSED_LEAD_BOOKINGS` in store.ts, production write).
+  Waits on Om. *manager*
+- **Three numbers on two leads each, from before every door checked the phone** —
+  bhumi 2, mahalaxmi 1 (1 Nov). "Merge duplicate" is gone (it never showed, and
+  its merge deleted the copy's visits and enquiries). Waits on Om: merge these
+  by hand or build a merge that moves everything. *owner*
 
 ## To verify
 

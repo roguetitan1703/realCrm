@@ -8,17 +8,18 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { StageChangeSchema, MergeSchema } from '../models';
+import { StageChangeSchema } from '../models';
 import { requireTenantAuth } from '../middleware/auth';
 import {
-  addTimelineEvent, updateLead, mergeLeads, getLeadById,
+  addTimelineEvent, updateLead, getLeadById,
   getTimelineEventById, updateTimelineEvent, maybeAutoAdvanceStage,
   addActivity, ACTIVITY_TYPES, ACTIVITY_OUTCOMES, noteOwnerContact, closeFollowUpFor, completeFollowUp,
   mapEventForClient, canSeeRecord } from '../services/store';
 import { isSafeKey, tenantOfKey } from '../services/media';
 import { audit } from '../services/audit';
-import { assertLeadWrite, isDeskRole } from '../lib/permissions';
+import { assertLeadWrite } from '../lib/permissions';
 import { followUpKindOf } from '../../../src/data/followUpKinds.js';
+import { bookingRefusedBody } from '../services/followUp';
 
 export const actionsRouter = Router();
 
@@ -307,6 +308,7 @@ actionsRouter.post(
         audit_note: note ?? null,
       });
     } catch (err: any) {
+      const refused = bookingRefusedBody(err); if (refused) return res.status(422).json(refused);
       if (err?.status === 403) {
         return res.status(403).json({ success: false, error: 'Forbidden', message: err.message, code: err.code });
       }
@@ -316,44 +318,14 @@ actionsRouter.post(
 );
 
 /**
- * 4. UNIVERSAL RECORD DEDUPLICATION MERGE ENGINE
- * POST /api/v1/records/:id/actions/merge
+ * A DUPLICATE MERGE lived here, behind a "Merge duplicate" action that showed
+ * only on a lead carrying `duplicate_of` — a column nothing has ever written,
+ * so neither was reachable. It also could not have been trusted: it moved the
+ * duplicate's timeline and deleted it, leaving its site visits, enquiries,
+ * shortlist and agreements to go with the delete. Removed with the action.
+ * Two leads cannot share a number now (findLeadByPhone at every door); the
+ * three pairs from before that (1 Nov: bhumi 2, mahalaxmi 1) are in BACKLOG.
  */
-actionsRouter.post(
-  '/:id/actions/merge',
-  async (req: Request, res: Response) => {
-    try {
-      // Merging deletes the duplicate, so it is desk work: owner, admin or
-      // manager, the same people the Merge action is shown to. This had no check.
-      if (!isDeskRole(req.user?.role)) {
-        return res.status(403).json({ error: 'Forbidden', message: 'Only the desk can merge records.', code: 'ROLE_REQUIRED' });
-      }
-      const primaryRecordId = req.params.id;
-      const parseResult = MergeSchema.safeParse(req.body);
-
-      if (!parseResult.success) {
-        return res.status(400).json({ error: 'Validation Error', details: parseResult.error.format() });
-      }
-
-      const { duplicate_record_id, merge_strategy } = parseResult.data;
-
-      console.log(`[Merge Engine] Merging duplicate ${duplicate_record_id} into primary ${primaryRecordId} using strategy '${merge_strategy}'`);
-
-      const merged = await mergeLeads(primaryRecordId, duplicate_record_id);
-      if (!merged) return res.status(404).json({ error: 'Not found' });
-
-      return res.status(200).json({
-        success: true,
-        message: `Successfully merged all timeline notes and call recordings from record ${duplicate_record_id} into primary record ${primaryRecordId}.`,
-        primary_record_id: primaryRecordId,
-        archived_duplicate_id: duplicate_record_id,
-        data: merged,
-      });
-    } catch (err: any) {
-      return res.status(500).json({ error: 'Merge Engine Failed', message: err.message });
-    }
-  }
-);
 
 /**
  * B4 — log an ACTIVITY on a lead, with proof.

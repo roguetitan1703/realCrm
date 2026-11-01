@@ -89,15 +89,6 @@ export const StageChangeSchema = z.object({
 });
 export type StageChangePayload = z.infer<typeof StageChangeSchema>;
 
-/**
- * Payload schema for merging duplicate records
- * POST /api/v1/records/:id/actions/merge
- */
-export const MergeSchema = z.object({
-  duplicate_record_id: z.string().min(1, "Duplicate Record ID required"),
-  merge_strategy: z.enum(["keep_primary", "keep_newest"]).default("keep_primary"),
-});
-export type MergePayload = z.infer<typeof MergeSchema>;
 
 /**
  * Payload schema for portal webhook lead ingestion

@@ -35,6 +35,10 @@ export const WON_STATUS = 'Deal Closed'
 export const REJECTED_STATUS = 'Rejected'
 export const NEW_STATUS = 'New'
 export const NO_ANSWER_STATUS = 'Call Not Received'
+// A Callback is a call booked for a time — the status says why, the booking
+// says when. Setting it asks for the time (ScheduleFollowUpModal, `callback`)
+// and the server refuses it from a person without a booked call (updateLead).
+export const CALLBACK_STATUS = 'Callback'
 
 export const isTerminal = (s) => TERMINAL_STATUSES.includes(String(s || ''))
 export const isOpen = (s) => !isTerminal(s)

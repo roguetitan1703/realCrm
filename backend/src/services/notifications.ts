@@ -21,6 +21,7 @@ import { sendPushToUser, pruneDeliveryLog, retryFailedPushes } from './push.js';
 import { copyFor, COPY, summaryCopy } from './notificationCopy.js';
 import { recordFromLink, closeSettled } from './alertLifecycle.js';
 import { followUpKind } from './followUp.js';
+import { TERMINAL_STATUSES } from './statuses.js';
 import { deskConfigOf, type DeskConfig } from './store.js';
 import { runShareRetention } from './retention.js';
 import { buyerAskSweep } from './buyerAsks.js';
@@ -357,6 +358,10 @@ export async function processScheduledNotifications(
         FROM crm_leads
         WHERE tenant_id = ${t}
           AND follow_up IS NOT NULL
+          -- Not on a closed lead. Closing one clears its booking now
+          -- (updateLead), but rows closed before that still carry one, and
+          -- "your visit is due" about a person who said no is not work.
+          AND coalesce(stage, '') NOT IN ${sql(TERMINAL_STATUSES)}
           -- at, NOT due_at. This read a key nothing in the codebase has ever
           -- written, so the alert a desk most obviously needs -- the one saying
           -- the thing you booked is due now -- has fired zero times since it
