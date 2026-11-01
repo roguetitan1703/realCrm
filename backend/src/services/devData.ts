@@ -40,6 +40,8 @@ const SKIP_TABLES = new Set([
   'tenants', 'users', 'sessions', 'auth_otp', 'password_resets', 'superadmins',
   'audit_log', 'audit_checks', 'schema_migrations', 'push_subscriptions', 'push_gone_endpoints',
   'crm_job_runs', 'crm_public_form_days', 'crm_settings', 'crm_routing_rules', MARKERS,
+  // What a firm owes Delpat is Delpat's calendar, not the firm's story.
+  'tenant_billing', 'tenant_billing_payments',
 ]);
 // A claim on an inbox row is a lock, not a fact about the past.
 const SKIP_COLUMNS = new Set(['claimed_at', 'locked_until']);

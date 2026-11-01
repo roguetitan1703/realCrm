@@ -650,6 +650,7 @@ export async function initSchema(): Promise<void> {
     await migrateIngestionD1();
     await migrateSharing();
     await migratePhones();
+    await createBillingTables();
     // Which firms are synthetic, and the day their data is anchored to
     // (services/devData.ts). A development database only: production has no
     // synthetic firm to move.
@@ -1358,6 +1359,42 @@ export async function migrateSharing(): Promise<void> {
   await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS catalogue_slug TEXT`);
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_props_catalogue_slug ON crm_properties (tenant_id, catalogue_slug) WHERE catalogue_slug IS NOT NULL;`;
   await sql`CREATE INDEX IF NOT EXISTS idx_crm_props_catalogue ON crm_properties (tenant_id) WHERE in_catalogue = TRUE;`;
+}
+
+/**
+ * WHAT A FIRM PAYS DELPAT (docs/specs/billing.md). Written by the superadmin
+ * console only; status is derived in services/billing.ts, never stored. New
+ * tables, IF NOT EXISTS: nothing is rewritten, so no runOnce gate.
+ */
+async function createBillingTables(): Promise<void> {
+  await sql`
+    CREATE TABLE IF NOT EXISTS tenant_billing (
+      tenant_id TEXT PRIMARY KEY,
+      plan_name TEXT NOT NULL,
+      amount NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
+      cycle TEXT NOT NULL CHECK (cycle IN ('monthly', 'quarterly', 'yearly')),
+      due_on DATE NOT NULL,
+      paid_through DATE,
+      notify_days_before INT NOT NULL DEFAULT 0 CHECK (notify_days_before BETWEEN 0 AND 60),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by TEXT
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS tenant_billing_payments (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      paid_on DATE NOT NULL,
+      amount NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
+      note TEXT,
+      period_from DATE NOT NULL,
+      period_to DATE NOT NULL,
+      recorded_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_billing_payments ON tenant_billing_payments (tenant_id, paid_on DESC, created_at DESC);`;
 }
 
 /**

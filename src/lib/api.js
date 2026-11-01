@@ -645,12 +645,18 @@ export const api = {
   // The ids and passwords a roster would be created with. Writes nothing.
   adminOnboardPreview: (roster) => request('/admin/onboard/preview', { method: 'POST', body: JSON.stringify(roster), headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   adminOnboard: (config) => request('/admin/onboard', { method: 'POST', body: JSON.stringify(config), headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  // A firm's subscription (docs/specs/billing.md): set up or edit, and Mark paid.
+  adminBilling: (id) => request(`/admin/firms/${encodeURIComponent(id)}/billing`, { fresh: true, headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  adminSaveBilling: (id, body) => request(`/admin/firms/${encodeURIComponent(id)}/billing`, { method: 'PUT', body: JSON.stringify(body), headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
+  adminRecordPayment: (id, body) => request(`/admin/firms/${encodeURIComponent(id)}/billing/payments`, { method: 'POST', body: JSON.stringify(body), headers: { Authorization: `Bearer ${lsGet(ADMIN_TOKEN_KEY)}` } }),
   getAdminToken: () => lsGet(ADMIN_TOKEN_KEY),
   clearAdminToken: () => lsSet(ADMIN_TOKEN_KEY, ''),
   // Session + firm identity, no record collections. What the phone boots on.
   getBootstrap: () => request('/workspace/bootstrap'),
   // Tiny change-token used by the live-refresh loop; see getPulse() on the server.
   getPulse: () => request('/workspace/pulse'),
+  // The firm's own subscription, read only (owner and manager).
+  getBilling: () => request('/workspace/billing', { fresh: true }),
   // Global search across leads and properties, run in SQL. The desk used to
   // answer this by filtering two in-memory arrays, which is the single reason
   // the arrays had to exist at all.

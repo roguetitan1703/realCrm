@@ -21,6 +21,7 @@ building. Once a spec ships it keeps a short as-built note, not the build log.
 | [follow-ups.md](./follow-ups.md) | What a booked follow-up or callback is, what finishes it, what moves it | 🧭 planning (5 decisions for Om) |
 | [picklists.md](../picklists.md) | Every pick list, its values and where it lives (reference) | reference |
 | [projects.md](./projects.md) | A project's description and photos; renaming variant project names (Work OS #155) | 🧭 planning (7 decisions for Om) |
+| [billing.md](./billing.md) | What a firm pays Delpat; the payment-pending bar | 🏗️ building (`a-billing`) |
 | [desk-rework.md](./desk-rework.md), [lead-sources.md](./lead-sources.md), [demo-tenants.md](./demo-tenants.md) | — | not reviewed in this list |
 
 > Each spec carries: **Decisions** (locked), **Data model**, **Flows/API**,

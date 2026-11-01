@@ -6,6 +6,7 @@ import { Avatar } from './primitives.jsx'
 import { subscribeConnection } from '../lib/api.js'
 import { subscribeOutbox } from '../lib/outbox.js'
 import { currentTenant } from '../lib/api.js'
+import { billingBarText } from '../lib/billing.js'
 
 // Initials from whatever firm name we actually have. Never a bundled default:
 // two wrong letters in the corner of every screen is still the wrong firm.
@@ -189,6 +190,30 @@ export function StaleBanner() {
     <div className="stale-banner" role="status">
       <Icon name="zap" size={13} />
       <span>Can’t reach the server. Lists and records won’t load until you reconnect.</span>
+    </div>
+  )
+}
+
+/**
+ * PAYMENT PENDING (docs/specs/billing.md). Every signed-in person when the
+ * firm's payment to Delpat is overdue; owner and manager also when it is due
+ * soon. Never blocks work. × hides it for this browser session only, keyed by
+ * firm and the date it is about, so the next period shows again. `onOpen`
+ * (desk, owner/manager) opens Settings → Billing.
+ */
+export function BillingBar({ billing, onOpen }) {
+  const text = billingBarText(billing)
+  const key = `crm_billing_hidden_${currentTenant()}`
+  const stamp = `${billing?.status}:${billing?.due_on || ''}`
+  const [hidden, setHidden] = useState(() => { try { return sessionStorage.getItem(key) } catch { return null } })
+  if (!text || hidden === stamp) return null
+  const hide = () => { try { sessionStorage.setItem(key, stamp) } catch { /* private mode: hidden until reload */ } setHidden(stamp) }
+  return (
+    <div className={'billbar' + (billing.status === 'overdue' ? ' late' : '')} role="status">
+      {onOpen
+        ? <button type="button" className="billbar-t" onClick={onOpen}>{text}</button>
+        : <span className="billbar-t">{text}</span>}
+      <button type="button" className="billbar-x" aria-label="Hide" onClick={hide}><Icon name="x" size={14} /></button>
     </div>
   )
 }

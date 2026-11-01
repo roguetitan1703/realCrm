@@ -292,6 +292,9 @@ function freshState() {
     // a full reload of the workspace. See `settled()` below.
     mutationTick: 0,
     dataStale: false,    // true when we're showing a cached snapshot (offline read)
+    // What the firm owes Delpat, from boot and every pulse (billing.md). null:
+    // no subscription, or nothing for this person to see. Never cached.
+    billing: null,
     // HAS THE BOOT PAYLOAD LANDED YET?
     //
     // Every list above starts `[]` and `dealMix` starts `{sale:0, rent:0}`,
@@ -429,6 +432,8 @@ function reducer(state, action) {
       if (keys.length > CACHE_LIMIT) for (const k of keys.slice(0, keys.length - CACHE_LIMIT)) delete next[k]
       return { ...state, cache: { ...state.cache, [kind]: next } }
     }
+
+    case 'SET_BILLING': return { ...state, billing: action.billing || null }
 
     case 'SET_BRAND': return { ...state, brand: { ...state.brand, ...action.patch } }
 
@@ -825,6 +830,8 @@ export function StoreProvider({ children }) {
         if (res && res.success && res.state) {
           dispatch({ type: 'HYDRATE_SERVER', state: res.state })
           writeStateCache(res.state)   // keep a snapshot for the next offline load
+          // Absent (the server could not read it) keeps what we had.
+          if ('billing' in res) dispatch({ type: 'SET_BILLING', billing: res.billing })
         }
       })
       .catch(err => {
@@ -1001,6 +1008,9 @@ export function StoreProvider({ children }) {
         const res = await apiClient.getPulse()
         const token = res?.token
         if (!token || stopped) return
+        // The payment notice moves without the desk moving (Mark paid in the
+        // console), so it is read on every pulse, not only when the token does.
+        if ('billing' in res) dispatch({ type: 'SET_BILLING', billing: res.billing })
         if (pulseRef.current === null) { pulseRef.current = token; return }
         if (token !== pulseRef.current) {
           pulseRef.current = token

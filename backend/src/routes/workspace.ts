@@ -19,6 +19,7 @@ import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { isDeskRole } from '../lib/permissions';
 import { listAudit, verifyTenantLedger } from '../services/audit';
+import { billingNotice, readSubscription, listPayments } from '../services/billing';
 
 export const workspaceRouter = Router();
 
@@ -81,7 +82,10 @@ workspaceRouter.get('/bootstrap', async (_req: Request, res: Response) => {
   try {
     // `env` alongside the state, so the marker survives a reload that never
     // touches the unauthenticated resolve.
-    return res.status(200).json({ success: true, env: appEnv(), state: await getBootstrap() });
+    // `billing` beside the state, not in it: the state is cached for offline
+    // reads, and a payment notice from a cache is a notice nobody can clear.
+    const [state, billing] = await Promise.all([getBootstrap(), billingNotice().catch(() => undefined)]);
+    return res.status(200).json({ success: true, env: appEnv(), state, billing });
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to bootstrap', message: err.message });
   }
@@ -245,9 +249,28 @@ import { processScheduledNotifications } from '../services/notifications.js';
 
 workspaceRouter.get('/pulse', async (req: Request, res: Response) => {
   processScheduledNotifications().catch(() => {});
-  const pulse = await getPulse();
+  // The payment notice rides here (billing.md): Mark paid in the console
+  // clears the bar on the next poll, with no polling of its own.
+  const [pulse, billing] = await Promise.all([getPulse(), billingNotice().catch(() => undefined)]);
   res.set('Cache-Control', 'no-store');
-  res.status(200).json({ success: true, ...pulse });
+  res.status(200).json({ success: true, ...pulse, billing });
+});
+
+/**
+ * GET /api/v1/workspace/billing — the firm's own subscription and its last
+ * payments, read only, for Settings → Billing. Owner and manager only: an
+ * agent is told a payment is late, never what it is. Delpat's notes on a
+ * payment are not sent. Writes are the superadmin console's alone.
+ */
+workspaceRouter.get('/billing', async (req: Request, res: Response) => {
+  if (!isDeskRole(getContext()?.role)) return res.status(403).json({ error: 'Owner or manager access required' });
+  try {
+    const t = getContext()!.tenantId;
+    const [subscription, payments] = await Promise.all([readSubscription(t), listPayments(t, 12, false)]);
+    return res.status(200).json({ success: true, subscription, payments: subscription ? payments : [] });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to load billing', message: err.message });
+  }
 });
 
 /**

@@ -14,6 +14,7 @@ import { isDeskRole } from '../lib/permissions.js'
 import { firmLocale } from '../lib/locale.js'
 import { formatPhone } from '../lib/phone.js'
 import { canWork, notWorkableReason, shownStrategy } from '../lib/workforce.js'
+import { CYCLE_LABEL, STATUS_LABEL, billingDate, rupees } from '../lib/billing.js'
 
 // `everyone: true` is a section an agent may open. The rest are the desk's.
 // An agent reaches this screen for one reason — the intro message they are
@@ -35,11 +36,15 @@ const NAV = [
   // phone. `?screen=settings` carries no section, so nothing linked to the old
   // key — it was component state.
   { key: 'system', label: 'This device', icon: 'settings', everyone: true },
+  // What the firm pays Delpat, read only (billing.md). Listed only when Delpat
+  // has set up a subscription: no row, no section.
+  { key: 'billing', label: 'Billing', icon: 'note', billing: true },
 ]
 
 export default function Settings({ store, topBar, sel }) {
   const { settings, agents, routing, inactiveAgentIds } = store.state
-  const nav = isDeskRole(store.state.role) ? NAV : NAV.filter(n => n.everyone)
+  const nav = (isDeskRole(store.state.role) ? NAV : NAV.filter(n => n.everyone))
+    .filter(n => !n.billing || store.state.billing)
   // Routing edits are held until Save, and held HERE — moving to another
   // Settings section and back is not an answer about whether to keep them.
   const [routingDraft, setRoutingDraft] = useState({})
@@ -47,6 +52,13 @@ export default function Settings({ store, topBar, sel }) {
   // an agent on a blank pane beside a nav that does not list it.
   // A link from a list ("Choose who takes turns") names the section and side.
   const [section, setSection] = useState(nav.some(n => n.key === sel?.settingsSection) ? sel.settingsSection : nav[0].key)
+  // The payment bar links here while Settings may already be open; the boot
+  // read that lists Billing can also land after the first render.
+  const navKeys = nav.map(n => n.key).join()
+  useEffect(() => {
+    if (sel?.settingsSection && nav.some(n => n.key === sel.settingsSection)) setSection(sel.settingsSection)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel?.settingsSection, navKeys])
 
   return (
     <>
@@ -70,6 +82,7 @@ export default function Settings({ store, topBar, sel }) {
               {section === 'sharing' && <SharingSection store={store} settings={settings} />}
               {/* {section === 'audit' && <AuditSection />} */}
               {section === 'system' && <SystemSection store={store} />}
+              {section === 'billing' && <BillingSection store={store} />}
             </div>
           </div>
         </div>
@@ -880,6 +893,50 @@ function SystemSection({ store }) {
           screen without putting a box inside a box. Both disappear together
           when neither has anything to say (`.devcard:empty`). */}
       <ThisDevice store={store} />
+    </>
+  )
+}
+
+// ---- Billing --------------------------------------------------------------
+// Who: the owner or manager. What they want: what the firm pays Delpat, when
+// the next payment is due, and what has been paid. Read only; Delpat records
+// payments in its console. Re-read when the notice on the pulse changes, so a
+// payment recorded while this is open shows here too.
+function BillingSection({ store }) {
+  const b = store.state.billing
+  const { data, error } = useServerData(() => api.getBilling(), [b?.status, b?.due_on], null)
+  const sub = data?.subscription
+  return (
+    <>
+      <SecHead title="Billing" />
+      {error && <div className="set-sec-sub">{error.message || 'Could not load billing'}</div>}
+      {sub && (
+        <Panel>
+          <div className="shr-rows">
+            <div className="shr-row"><span className="shr-l">Plan</span><span>{sub.plan_name}</span></div>
+            <div className="shr-row"><span className="shr-l">Amount</span><span>{rupees(sub.amount)} · {CYCLE_LABEL[sub.cycle]}</span></div>
+            <div className="shr-row"><span className="shr-l">Next due</span><span className={sub.status === 'overdue' ? 'bill-late' : ''}>{billingDate(sub.due_on, { year: true })} · {STATUS_LABEL[sub.status]}</span></div>
+            <div className="shr-row"><span className="shr-l">Paid through</span><span>{sub.paid_through ? billingDate(sub.paid_through, { year: true }) : 'Not recorded'}</span></div>
+          </div>
+        </Panel>
+      )}
+      {sub && (
+        <Panel>
+          <SectionHead title="Payments" />
+          {!data.payments.length ? <div className="set-sec-sub">None recorded</div> : (
+            <table className="bill-tbl">
+              <thead><tr><th>Paid on</th><th className="num">Amount</th><th>For</th></tr></thead>
+              <tbody>{data.payments.map(p => (
+                <tr key={p.id}>
+                  <td>{billingDate(p.paid_on, { year: true })}</td>
+                  <td className="num">{rupees(p.amount)}</td>
+                  <td>{billingDate(p.period_from)} – {billingDate(p.period_to, { year: true })}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+        </Panel>
+      )}
     </>
   )
 }
