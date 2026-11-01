@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Field, Input, Textarea, SuggestInput, DateInput, PickOrOther } from '../components/primitives.jsx'
 import PhoneInput from '../components/PhoneInput.jsx'
-import { projectNames } from '../lib/suggest.js'
+import { localities, projectNames } from '../lib/suggest.js'
 import Icon from '../components/Icon.jsx'
 import MediaEditor from '../components/MediaEditor.jsx'
 import {
@@ -507,7 +507,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                   <div className="pw-grp-t">Where it is</div>
                   <div className="pw-row">
                     <Field label="Project / society"><SuggestInput value={form.society || ''} onChange={v => set('society', v)} options={projectNames(store)} placeholder="Skyline Heights" /></Field>
-                    <Field label="Locality" required><Input value={form.locality || ''} onChange={e => set('locality', e.target.value)} placeholder="Wakad" /></Field>
+                    <Field label="Locality" required><PickOrOther value={form.locality || ''} onChange={v => set('locality', v)} options={localities(store)} otherLabel="Add new" emptyLabel="Select locality" keepUnknown placeholder="New locality" /></Field>
                   </div>
                   {applies.floors ? (
                     <div className="pw-row pw-row-3">

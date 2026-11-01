@@ -472,7 +472,7 @@ export const PROPERTY_MODULE_SCHEMA = {
     // ---- Overview: what it is, where, what it costs ----------------------
     // `suggest`: the edit form offers the firm's existing names (src/lib/suggest.js).
     { key: 'society', label: 'Project / Society', type: 'text', section: 'core', required: true, suggest: projectNames },
-    { key: 'locality', label: 'Locality', type: 'text', section: 'core', suggest: localities },
+    { key: 'locality', label: 'Locality', type: 'text', section: 'core', pickOrOther: (store) => ({ options: localities(store), otherLabel: 'Add new', emptyLabel: 'Select locality', keepUnknown: true, placeholder: 'New locality' }) },
     tokenField('deal', 'Deal', DEALS, 'core'),
     tokenField('category', 'Category', CATEGORIES, 'core'),
     {
