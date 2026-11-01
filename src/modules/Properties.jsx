@@ -22,7 +22,7 @@ import PropertyWizard, { fromCopy, scoreOf } from './PropertyWizard.jsx'
 import { canEditListing, canAddListing, canChangeCatalogue, isDeskRole } from '../lib/permissions.js'
 import { catalogueToast } from '../lib/share.js'
 import { openSend } from './SendSheet.jsx'
-import { useUndoableRenames, undoProjectRename } from '../components/ProjectRename.jsx'
+import { useUndoableRenames } from '../components/ProjectRename.jsx'
 
 // The filter bar speaks in arrays ({ status: ['Available','Blocked'] }) because
 // its controls are multi-select; the API speaks in comma-separated values. This
@@ -425,24 +425,34 @@ function ProjectGrid({ store, ask: asked, onOpen, onOpenFlat, picking, selection
   const askKey = JSON.stringify(ask)
   const { data, loading, error } = useServerData(() => api.listProjects(ask), [store.state.dataAsOf, askKey], { data: [] },
     '/properties/projects' + (askKey !== '{}' ? `?${new URLSearchParams(ask)}` : ''))
-  const undoFor = useUndoableRenames(store)
-  const searching = Object.keys(ask).length > 0
+  const { undoFor, undoing, undo } = useUndoableRenames(store)
   const rows = data?.data || []
+  // From the answer, not the question: while a new search is in flight the
+  // rows on screen are the last answer's, and must not be labelled as this one's.
+  const searching = rows.some(pj => pj.flats !== undefined)
   if (loading && !rows.length) return <div className="list-spin" role="status" aria-label="Loading"><span /></div>
   if (error) return <div className="detail-missing">Could not load projects.</div>
-  if (!rows.length) return searching
+  if (!rows.length) return Object.keys(ask).length
     ? <div className="empty"><div className="e-t">No properties match</div><div className="e-s">Try clearing a filter or search.</div></div>
     : <div className="detail-missing">No projects yet.</div>
   return (
-    <div className="pjl">
+    <div className={'pjl' + (loading ? ' is-loading' : '')}>
       {rows.map(pj => {
         const tickable = picking && !pj.independent
         const r = !picking ? undoFor(pj.norm) : null
         return (
-          <ProjectRow key={pj.key} project={pj} searching={searching}
+          <ProjectRow key={pj.key} name={pj.name} independent={pj.independent}
+            sub={[pj.locality, pj.developer].filter(Boolean).join(' · ')} loc={pj.locality}
+            noun="unit" counts={pj.counts} searching={searching}
+            facts={[
+              { cls: 'pjl-avail', node: <><b>{pj.counts.available}</b> available</> },
+              { cls: 'pjl-sold', node: pj.counts.sold > 0 ? <><b>{pj.counts.sold}</b> sold</> : null },
+              { cls: 'pjl-wings', node: pj.wings.length > 0 ? `${pj.wings.length} wing${pj.wings.length > 1 ? 's' : ''}` : null },
+              { cls: 'pjl-price', node: priceRangeLabel(pj.priceRange) || '—' },
+            ]}
+            actions={r ? [{ label: undoing === r.id ? 'Undoing…' : 'Undo rename', icon: 'refresh', busy: undoing === r.id, onClick: () => undo(r.id) }] : []}
             picked={tickable ? selection.has(pj.key) : undefined}
-            onClick={() => (picking ? (tickable && selection.toggle({ id: pj.key, key: pj.key, name: pj.name })) : onOpen(pj.key))}
-            undo={r ? { onClick: () => undoProjectRename(store, r.id) } : undefined}>
+            onClick={() => (picking ? (tickable && selection.toggle({ id: pj.key, key: pj.key, name: pj.name })) : onOpen(pj.key))}>
             {searching && !picking && pj.flats?.length > 0 && (
               <div className="pjl-flats"><UnitsTable units={pj.flats} onOpen={onOpenFlat} /></div>
             )}

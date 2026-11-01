@@ -24,18 +24,34 @@ export function undoProjectRename(store, id) {
     .then(r => {
       store.settled?.()
       store.toast(r?.kept ? `Rename undone · ${r.kept} changed since, kept` : 'Rename undone')
+      return true
     })
-    .catch(e => store.toast(e?.body?.message || 'Could not undo the rename.', 'warn'))
+    .catch(e => { store.toast(e?.body?.message || 'Could not undo the rename.', 'warn'); return false })
 }
 
-/** The renames that can still be undone, for the cards (desk only). */
+/**
+ * The renames that can still be undone, for the project rows (desk only).
+ * `undo(id)` marks that row busy at once and keeps it so until the refetched
+ * rows no longer carry the rename — the undo itself is several writes and
+ * takes a second or more, and until then the row looked as if the tap did
+ * nothing.
+ */
 export function useUndoableRenames(store) {
   const desk = isDeskRole(store.state.role)
   const { data } = useServerData(
     () => (desk ? api.listProjectRenames().then(r => r?.data || []) : Promise.resolve([])),
     [store.state.dataAsOf, desk], [])
-  // The newest rename landing on a card is the one its Undo undoes.
-  return (norm) => (norm ? (data || []).find(r => r.toNorm === norm) || null : null)
+  const [undoing, setUndoing] = useState(null)
+  useEffect(() => {
+    if (undoing && !(data || []).some(r => r.id === undoing)) setUndoing(null)
+  }, [data, undoing])
+  const undo = (id) => {
+    setUndoing(id)
+    undoProjectRename(store, id).then(ok => { if (!ok) setUndoing(null) })
+  }
+  // The newest rename landing on a row is the one its Undo undoes.
+  const undoFor = (norm) => (norm ? (data || []).find(r => r.toNorm === norm) || null : null)
+  return { undoFor, undoing, undo }
 }
 
 export function RenameProjectsModal({ store, Modal, keys = [], onDone }) {

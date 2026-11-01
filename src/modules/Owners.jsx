@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ListLayout } from '../layouts/layouts.jsx'
-import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown, useSelection } from '../components/collections.jsx'
+import { ModuleListView, ModuleCards, ModuleTable, ProjectRow, SelectDropdown, useSelection } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Overdue, Timeline } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
@@ -14,71 +14,64 @@ import UnassignedBar from '../components/UnassignedBar.jsx'
 import { api } from '../lib/api.js'
 import { telLink } from '../lib/phone.js'
 import { OWNERS_DEF, openCallOutcome } from './definitions.jsx'
-import { useUndoableRenames, undoProjectRename } from '../components/ProjectRename.jsx'
+import { useUndoableRenames } from '../components/ProjectRename.jsx'
 
-// The project cards — same "township lens" as Properties' Group by project,
-// over the cold-calling list. Clicking one filters the existing table by that
-// project rather than opening a separate page: assigning/status-changing an
-// owner is the same row-level UI either way, so there is nothing a dedicated
-// project-detail screen would add.
-// `picking` turns the cards into tick targets for Rename (desk only); "No
+// The project rows — same "township lens" as Properties' Group by project, and
+// the same ProjectRow, over the cold-calling list. Clicking one filters the
+// existing table by that project rather than opening a separate page:
+// assigning/status-changing an owner is the same row-level UI either way.
+// THE SEARCH goes to the server with it (`ask`, the list's own parameters):
+// only projects holding a match come back, "N of M", each with the owners that
+// matched shown under it in the list's own table (cards on a phone). It used
+// to ignore the search box: typing a name or a flat number changed nothing.
+// `picking` turns the rows into tick targets for Rename (desk only); "No
 // project" is not a name and cannot be renamed.
-function OwnerProjectGrid({ store, onOpen, onAssign, canAssign, refreshAt, picking, selection }) {
-  const [rows, setRows] = useState(null)
-  const undoFor = useUndoableRenames(store)
-  useEffect(() => {
-    let live = true
-    api.listOwnerProjects().then(r => { if (live) setRows(r?.data || []) }).catch(() => { if (live) setRows([]) })
-    return () => { live = false }
-  }, [refreshAt])
-  if (rows === null) return <div className="list-spin" role="status" aria-label="Loading"><span /></div>
-  if (!rows.length) return <div className="detail-missing">No owners yet. Import a list to start.</div>
+function OwnerProjectGrid({ store, ask, def, phone, onOpen, onOpenOwner, onAssign, canAssign, refreshAt, picking, selection }) {
+  const askKey = JSON.stringify(ask)
+  const { data, loading, error } = useServerData(() => api.listOwnerProjects(ask).then(r => r?.data || []), [refreshAt, askKey], null)
+  const { undoFor, undoing, undo } = useUndoableRenames(store)
+  const rows = data || []
+  if (loading && !data) return <div className="list-spin" role="status" aria-label="Loading"><span /></div>
+  if (error) return <div className="detail-missing">Could not load projects.</div>
+  // From the answer, not the question: while a new search is in flight the
+  // rows on screen are the last answer's, and must not be labelled as this one's.
+  const searching = rows.some(pj => pj.owners !== undefined)
+  if (!rows.length) return ask.q
+    ? <div className="empty"><div className="e-t">No owners match</div><div className="e-s">Adjust the filter or search, or import a list.</div></div>
+    : <div className="detail-missing">No owners yet. Import a list to start.</div>
   return (
-    <div className="grid-cards">
+    <div className={'pjl' + (loading ? ' is-loading' : '')}>
       {rows.map(pj => {
         const tickable = picking && !!pj.norm
-        const picked = tickable ? selection.has(pj.key) : undefined
-        const undo = !picking ? undoFor(pj.norm) : null
+        const r = !picking ? undoFor(pj.norm) : null
+        // WHO IS ON THIS PROJECT, by first name — the question a manager opens
+        // the screen with, once a township has been shared out.
+        const who = (pj.holders || []).slice(0, 3).map(h => `${String(h.name).split(' ')[0]} ${h.n}`).join(' · ')
+          + ((pj.holders || []).length > 3 ? ` · +${pj.holders.length - 3}` : '')
         return (
-        <div key={pj.key} className="projcard pj-box">
-          <button className={'pj-open' + (picked !== undefined ? ' picking' : '') + (picked ? ' is-picked' : '')} aria-pressed={picked}
+          <ProjectRow key={pj.key} name={pj.name} independent={!pj.norm}
+            sub={pj.locality} loc={pj.locality}
+            noun="owner" counts={pj.counts} searching={searching}
+            facts={[
+              { cls: 'pjl-call', node: pj.counts.new > 0 ? <><b>{pj.counts.new}</b> to call</> : 'All called' },
+              { cls: 'pjl-int', node: pj.counts.interested > 0 ? <><b>{pj.counts.interested}</b> interested</> : null },
+              { cls: 'pjl-unas', node: pj.counts.unassigned > 0 ? <><b>{pj.counts.unassigned}</b> unassigned</> : null },
+              { cls: 'pjl-who', node: who || null },
+            ]}
+            actions={[
+              ...(canAssign && !picking ? [{ label: 'Assign', icon: 'userPlus', onClick: () => onAssign(pj) }] : []),
+              ...(r ? [{ label: undoing === r.id ? 'Undoing…' : 'Undo rename', icon: 'refresh', busy: undoing === r.id, onClick: () => undo(r.id) }] : []),
+            ]}
+            picked={tickable ? selection.has(pj.key) : undefined}
             onClick={() => (picking ? (tickable && selection.toggle({ id: pj.key, key: pj.key, name: pj.name })) : onOpen(pj.key))}>
-            {picked !== undefined && <span className={'pick-box pcard-pick' + (picked ? ' on' : '')} aria-hidden="true"><span><Icon name="check" size={13} /></span></span>}
-            <div className="pj-head">
-              <div className="pj-id">
-                <div className="pj-name">{pj.name}</div>
-                {pj.locality && <div className="pj-sub"><Icon name="pin" size={13} className="ic" />{pj.locality}</div>}
+            {searching && !picking && pj.owners?.length > 0 && (
+              <div className="pjl-flats">
+                {phone
+                  ? <ModuleCards def={def} rows={pj.owners} store={store} onOpen={onOpenOwner} phone />
+                  : <ModuleTable def={def} rows={pj.owners} store={store} onOpen={onOpenOwner} />}
               </div>
-              <span className="pj-count"><b>{pj.counts.total}</b> owner{pj.counts.total !== 1 ? 's' : ''}</span>
-            </div>
-            <div className="pj-legend">
-              {pj.counts.new > 0
-                ? <span className="pj-dot avail">{pj.counts.new} to call</span>
-                : <span className="pj-sub">All called</span>}
-              {pj.counts.interested > 0 && <span className="pj-dot sold">{pj.counts.interested} interested</span>}
-            </div>
-            {/* WHO IS ON IT. A township handed to one caller and then partly
-                shared out reads as "728 owners" and nothing else — this is the
-                question a manager opens the screen with. */}
-            <div className="pj-who">
-              {(pj.holders || []).slice(0, 4).map(h => (
-                <span key={h.id} className="pj-who-one">{String(h.name).split(' ')[0]} <b>{h.n}</b></span>
-              ))}
-              {(pj.holders || []).length > 4 && <span className="pj-who-one">+{pj.holders.length - 4} more</span>}
-              {pj.counts.unassigned > 0 && <span className="pj-who-one pj-who-none">Unassigned <b>{pj.counts.unassigned}</b></span>}
-            </div>
-          </button>
-          {canAssign && !picking && (
-            <button className="pj-assign" onClick={() => onAssign(pj)}>
-              <Icon name="userPlus" size={13} />Assign
-            </button>
-          )}
-          {undo && (
-            <button className="pj-assign" onClick={() => undoProjectRename(store, undo.id)}>
-              <Icon name="refresh" size={13} />Undo rename
-            </button>
-          )}
-        </div>
+            )}
+          </ProjectRow>
         )
       })}
     </div>
@@ -452,6 +445,8 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     renderTable: (list, v) => v === 'projects'
       ? <OwnerProjectGrid
           store={store} picking={picking} selection={selection}
+          ask={{ ...(q ? { q } : {}), ...(scope.mine ? { mine: 1 } : {}) }}
+          def={def} phone={phone} onOpenOwner={open}
           refreshAt={state.dataAsOf}
           canAssign={canAssign}
           onAssign={(pj) => store.openModal({ kind: 'assignProject', project: pj })}

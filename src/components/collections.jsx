@@ -1128,16 +1128,19 @@ export function ListRow({ avatar, name, meta, right, onClick }) {
   )
 }
 
-// ---- Project row: one line per township in Properties' Group by project. ----
-// A row, not a card: a firm's inventory is dozens of projects, and a card each
-// put four on a desk screen and one and a half on a phone. `picked`
-// (true/false) makes it a tick target for Rename; `undo` is its Undo rename
-// ({ onClick }); `children` (the flats a search found in it) sit under it.
-export function ProjectRow({ project, onClick, picked, undo, searching, children }) {
-  const { name, locality, developer, wings, counts, priceRange, independent } = project
-  const sub = [locality, developer].filter(Boolean).join(' · ')
+// ---- Project row: one line per township, in Group by project on Properties
+// and on Calling. ----
+// A row, not a card: a firm's book is dozens of projects, and a card each put
+// four on a desk screen and one and a half on a phone. The screen supplies what
+// it counts: `noun` for the total ("unit", "owner"), `facts` as
+// [{ cls, node }] (empty ones collapse on a phone), `actions` as
+// [{ label, icon, onClick, busy }] beside the row. While `searching`, the count
+// is "N of M" — N the rows that matched, from the same query as the list.
+// `picked` (true/false) makes it a tick target for Rename; `children` (the rows
+// a search found in it) sit under it.
+export function ProjectRow({ name, sub, loc, noun, counts, searching, facts = [], actions = [], picked, independent, onClick, children }) {
   return (
-    <div className={'pjl-item' + (independent ? ' indep' : '') + (picked ? ' is-picked' : '')}>
+    <div className={'pjl-item' + (independent ? ' indep' : '') + (picked ? ' is-picked' : '') + (actions.some(a => a.busy) ? ' is-busy' : '')}>
       <div className="pjl-line">
         <button type="button" className="pjl-row" onClick={onClick} aria-pressed={picked === undefined ? undefined : picked}>
           {picked !== undefined && <span className={'pick-box' + (picked ? ' on' : '')} aria-hidden="true"><span><Icon name="check" size={13} /></span></span>}
@@ -1148,18 +1151,19 @@ export function ProjectRow({ project, onClick, picked, undo, searching, children
           <span className="pjl-n">
             {searching
               ? <><b>{counts.matched}</b> of {counts.total}</>
-              : <><b>{counts.total}</b> unit{counts.total !== 1 ? 's' : ''}</>}
+              : <><b>{counts.total}</b> {noun}{counts.total !== 1 ? 's' : ''}</>}
           </span>
           <span className="pjl-facts">
-            {locality && <span className="pjl-f pjl-loc">{locality}</span>}
-            <span className="pjl-f pjl-avail"><b>{counts.available}</b> available</span>
-            <span className="pjl-f pjl-sold">{counts.sold > 0 ? <><b>{counts.sold}</b> sold</> : null}</span>
-            <span className="pjl-f pjl-wings">{wings.length > 0 ? `${wings.length} wing${wings.length > 1 ? 's' : ''}` : null}</span>
-            <span className="pjl-f pjl-price">{priceRangeLabel(priceRange) || '—'}</span>
+            {loc && <span className="pjl-f pjl-loc">{loc}</span>}
+            {facts.map((f, i) => <span key={i} className={'pjl-f ' + (f.cls || '')}>{f.node}</span>)}
           </span>
           <Icon name="chevRight" size={15} className="ic pjl-go" />
         </button>
-        {undo && <button type="button" className="pjl-undo" onClick={undo.onClick}><Icon name="refresh" size={13} />Undo rename</button>}
+        {actions.map(a => (
+          <button key={a.label} type="button" className="pjl-act" onClick={a.onClick} disabled={a.busy}>
+            <Icon name={a.icon} size={13} />{a.label}
+          </button>
+        ))}
       </div>
       {children}
     </div>
