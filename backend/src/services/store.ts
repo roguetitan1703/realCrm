@@ -2421,6 +2421,19 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     ? (patch.rejectionReason ?? patch.rejection_reason ?? oldLead.rejectionReason ?? null)
     : (movingStage && !keepReason ? null : (oldLead.rejectionReason ?? null));
 
+  // WHAT MAKES TWO BOOKINGS THE SAME BOOKING — see bookingChanged below.
+  const sameBooking = (a: any, b: any) => !!a && !!b
+    && ['action', 'at', 'date', 'time', 'note'].every(k =>
+      String(a[k] ?? '') === String(b[k] ?? ''));
+
+  // A BOOKING IS A MOMENT. A new or changed follow-up without one in `at` is
+  // refused: the schedule form, a Callback and the buyer link all send one,
+  // and a booking of typed words ("This Saturday") is one no reminder fires on
+  // and nothing can call late. One already standing is left as it is.
+  if (patch.followUp && !sameBooking(patch.followUp, oldLead.followUp) && !bookedAt(patch.followUp)) {
+    throw new BookingRefused('booking_needs_time', 'Pick a date and a time for the booking.');
+  }
+
   // A CALLBACK IS A CALL BOOKED FOR A TIME. A person moving a lead there must
   // leave it with one — booked in this same patch (the status menu and "Asked
   // to call back" both open the time picker and send the two together) or
@@ -2485,7 +2498,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   //
   // Written here, by the side that owns the row, as `follow_up` — outside the
   // editable set, like the completion it will eventually pair with.
-  // WHAT MAKES TWO BOOKINGS THE SAME BOOKING -- named, not inferred from a
+  // WHAT MAKES TWO BOOKINGS THE SAME BOOKING -- named (sameBooking, above), not inferred from a
   // stringify.
   //
   // This compared `JSON.stringify(followUp) !== JSON.stringify(hadFollowUp)`.
@@ -2495,9 +2508,6 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // when every value is identical -- THE GUARD NEVER MATCHED. Pressing Save on
   // an appointment without changing anything wrote another 'Rescheduled' row,
   // every time, and the record grew a stack of identical entries.
-  const sameBooking = (a: any, b: any) => !!a && !!b
-    && ['action', 'at', 'date', 'time', 'note'].every(k =>
-      String(a[k] ?? '') === String(b[k] ?? ''));
   const bookingChanged = !!followUp && !sameBooking(followUp, hadFollowUp);
 
   if (bookingChanged) {

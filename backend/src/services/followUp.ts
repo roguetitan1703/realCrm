@@ -15,6 +15,11 @@ export function followUpKind(fu: any): string {
 /**
  * A BOOKING THE SERVER WILL NOT SAVE, and why — a 422 the client shows as is.
  *
+ * `booking_needs_time`: a follow-up without a moment in `at`. Five of bhumi's
+ * 40 booked visits (1 Nov) held only typed words ("This Saturday", "10:30 am")
+ * from the form before `at` existed; nothing stopped an old page or any other
+ * caller saving more, and no reminder fires on one or calls it late.
+ *
  * `callback_needs_time`: a person moving a lead to Callback with no call
  * booked. 13 of 13 at bhumi and 30 of 30 at mahalaxmi (1 Nov) carried none:
  * the status said "ring them back" and nothing said when, so nothing could
