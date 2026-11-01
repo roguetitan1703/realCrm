@@ -13,6 +13,7 @@ Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in stil
 6. Work OS #129 help desk (#156 demos feed it)
 
 ## Later
+- Calling's Group by project ignores the search box the way Properties' did (OwnerProjectGrid never sends `q`; its own code, not shared) — waits on Om saying it gets the same matched-rows treatment
 - A firm's weekly off for "days worked" — waits on how the firms actually work
 - Alerts are stamped with the app's clock and links/events with the database's; on a skewed host (this PC: DB 2.5s ahead) "a fresh link after the alert" closes a tap made right after a send — waits on checking the AWS host's skew
 - Idle-owner sweep threw after its first owner since 23 Sep (fixed in review 3) — waits on a read-only prod check of which firms had `owner_reassign_idle_enabled`
