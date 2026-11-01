@@ -10,7 +10,7 @@
 import { MobileShell, MobileTopBar } from '../layouts/layouts.jsx'
 import { Avatar } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
-import { api } from '../lib/api.js'
+import { api, invalidateReads } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
 
 import Leads from './Leads.jsx'
@@ -128,7 +128,9 @@ export default function Phone({ store, framed = false, screen, sel, setSel, go: 
     <MobileShell
       framed={framed}
       tabs={tabs}
-      onRefresh={() => store.loadServerState?.()}
+      // Pull down: drop the 30-second read cache (or every list would answer from
+      // it), re-read the boot payload, then bump the token every server list watches.
+      onRefresh={() => { invalidateReads(); return Promise.resolve(store.reloadServer?.(true)).then(() => store.touched?.()) }}
       // A FULL-SCREEN FORM IS NOT A SCREEN WITH A BUTTON ON IT.
       // The property wizard fills the viewport and carries its own footer;
       // the FAB floated over it, covering the form and offering "Add

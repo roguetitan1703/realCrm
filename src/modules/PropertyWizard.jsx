@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Field, Input, Textarea, SuggestInput } from '../components/primitives.jsx'
+import { Button, Field, Input, Textarea, SuggestInput, DateInput, PickOrOther } from '../components/primitives.jsx'
 import PhoneInput from '../components/PhoneInput.jsx'
-import { projectNames } from '../lib/suggest.js'
+import { localities, projectNames } from '../lib/suggest.js'
 import Icon from '../components/Icon.jsx'
 import MediaEditor from '../components/MediaEditor.jsx'
 import {
@@ -10,6 +10,7 @@ import {
   LOCKIN_OPTIONS, MAINTENANCE_MODE, OPEN_SIDES, OWNERSHIP, PAINTING_CHARGES,
   POSSESSION, PRICE_INCLUDES, SUBTYPES, TENANT_TYPES, TRANSACTION,
   appliesTo, areaFieldsFor, countsFor, isPlot, normaliseBhk, normaliseSubtype,
+  KEY_ACCESS,
 } from '../data/propertyFields.js'
 import { api } from '../lib/api.js'
 import { unitLabel } from '../lib/format.js'
@@ -505,8 +506,8 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                 <div className="pw-grp">
                   <div className="pw-grp-t">Where it is</div>
                   <div className="pw-row">
-                    <Field label="Project / society"><SuggestInput value={form.society || ''} onChange={v => set('society', v)} options={projectNames(store)} placeholder="Skyline Heights" /></Field>
-                    <Field label="Locality" required><Input value={form.locality || ''} onChange={e => set('locality', e.target.value)} placeholder="Wakad" /></Field>
+                    <Field label="Project / society"><SuggestInput value={form.society || ''} onChange={v => set('society', v)} options={projectNames(store)} capitalise placeholder="Skyline Heights" /></Field>
+                    <Field label="Locality" required><PickOrOther value={form.locality || ''} onChange={v => set('locality', v)} options={localities(store)} otherLabel="Add new" emptyLabel="Select locality" keepUnknown placeholder="New locality" /></Field>
                   </div>
                   {applies.floors ? (
                     <div className="pw-row pw-row-3">
@@ -637,7 +638,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                       <Field label="Parking charges"><Chips options={MAINTENANCE_MODE} value={form.parkingChargesMode} onChange={v => set('parkingChargesMode', v)} /></Field>
                       <Field label="Painting charges"><Chips options={PAINTING_CHARGES} value={form.paintingCharges} onChange={v => set('paintingCharges', v)} /></Field>
                     </div>
-                    <Field label="Available from"><Input type="date" value={form.availableFrom || ''} onChange={e => set('availableFrom', e.target.value)} /></Field>
+                    <Field label="Available from"><DateInput value={form.availableFrom || ''} onChange={v => set('availableFrom', v)} /></Field>
                   </div>
                 )}
 
@@ -748,7 +749,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                   <div className="pw-row">
                     <Field label="Unit / flat no."><Input value={form.unit || ''} onChange={e => set('unit', e.target.value)} placeholder="701" /></Field>
                     <Field label="Key / access">
-                      <Input value={form.keyAccess || ''} onChange={e => set('keyAccess', e.target.value)}
+                      <PickOrOther value={form.keyAccess || ''} onChange={v => set('keyAccess', v)} options={KEY_ACCESS}
                         placeholder="Who holds the keys, best time to visit" />
                     </Field>
                   </div>

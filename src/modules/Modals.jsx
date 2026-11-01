@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import Icon from '../components/Icon.jsx'
-import { Button, Field, Input, Textarea, Segmented, Avatar, Source, StageTag, Money, SuggestInput, OutcomeForm } from '../components/primitives.jsx'
+import { Button, Field, Input, Textarea, Segmented, Avatar, Source, StageTag, Money, SuggestInput, DateInput, PickOrOther, OutcomeForm } from '../components/primitives.jsx'
 import PhoneInput from '../components/PhoneInput.jsx'
 import { theme } from '../data/theme.js'
 // parseBudgetNum was USED in three places here and imported in none of them —
@@ -289,9 +289,10 @@ function ModuleFormModal({ store, moduleId, recordId }) {
     }
     // A date field gets a date picker, holding "YYYY-MM-DD" — which is exactly
     // what the server now sends for a DATE column, so the box opens filled.
-    if (f.type === 'date') return <Input type="date" value={String(v || '').slice(0, 10)} onChange={e => setField(f.key, e.target.value)} />
+    if (f.type === 'date') return <DateInput value={String(v || '').slice(0, 10)} onChange={val => setField(f.key, val)} />
+    if (f.pickOrOther) return <PickOrOther value={v} onChange={val => setField(f.key, val)} {...f.pickOrOther(store)} />
     // A field that names something the firm already has (a project) offers it.
-    if (f.suggest) return <SuggestInput value={v} onChange={val => setField(f.key, val)} options={f.suggest(store)} />
+    if (f.suggest) return <SuggestInput value={v} onChange={val => setField(f.key, val)} options={f.suggest(store)} capitalise={!!f.capitalise} />
     return <Input type={f.type === 'number' ? 'number' : 'text'} value={v} onChange={e => setField(f.key, e.target.value)} />
   }
 
@@ -1027,7 +1028,7 @@ function NewOwnerModal({ store, ownerId }) {
             could not be filtered — nothing knew which part of the sentence was
             which. Identity is project + tower + unit. */}
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr .6fr .8fr .8fr', gap: 12 }}>
-          <Field label="Project / Society"><SuggestInput value={f.project} onChange={v => set('project', v)} options={projectNames(store)} placeholder="e.g. Godrej Green Vistas" /></Field>
+          <Field label="Project / Society"><SuggestInput value={f.project} onChange={v => set('project', v)} options={projectNames(store)} capitalise placeholder="e.g. Godrej Green Vistas" /></Field>
           <Field label="Tower"><Input value={f.tower} onChange={e => set('tower', e.target.value)} placeholder="B" /></Field>
           <Field label="Unit no."><Input value={f.unitNo} onChange={e => set('unitNo', e.target.value)} placeholder="1603" /></Field>
           <Field label="Configuration"><Input value={f.config} onChange={e => set('config', e.target.value)} placeholder={roomsText('2 BHK')} /></Field>

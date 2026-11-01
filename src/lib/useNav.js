@@ -184,6 +184,12 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
   // so the URL still carries them (reload and sharing keep working) without
   // burying the screen you came from.
   const placeRef = useRef(null)
+  // The place left behind, said in a form where "not set" and false agree, and
+  // whether it was an add form. Each pushed entry remembers the place it was
+  // pushed FROM (`from`), which is how closing a form can tell it is stepping
+  // back onto the place the form was opened over.
+  const lastKeyRef = useRef(null)
+  const lastAddRef = useRef(false)
   // Set by back() when it fell back to the parent: that step is "up", not
   // "forward", so it takes over the record's entry instead of stacking a list
   // on a record that the next back would return to.
@@ -195,6 +201,11 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
     if (!enabled) return
     const place = JSON.stringify([screen, sel.leadId, sel.leadOpen, sel.ownerId, sel.ownerOpen,
       sel.propId, sel.propOpen, sel.projKey, sel.projOpen, sel.propAdd, sel.person, sel.contactId])
+    const key = JSON.stringify([screen, sel.leadId || null, !!sel.leadOpen, sel.ownerId || null, !!sel.ownerOpen,
+      sel.propId || null, !!sel.propOpen, sel.projKey || null, !!sel.projOpen, !!sel.propAdd, sel.person || null, sel.contactId || null])
+    const leftKey = lastKeyRef.current, leftAdd = lastAddRef.current
+    lastKeyRef.current = key
+    lastAddRef.current = !!sel.propAdd
     const firstRun = placeRef.current === null
     const samePlace = placeRef.current === place
     placeRef.current = place
@@ -205,6 +216,20 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
       return
     }
     const next = urlFor(screen, sel)
+    // AN ADD FORM CLOSED WITHOUT SAVING LEAVES NO ENTRY. Opening Add property
+    // pushed one and closing it pushed the list again, so Back from the list
+    // reopened the empty form. When the form is closed onto exactly the place it
+    // was opened over, the close IS the back press: take that step instead of
+    // stacking a copy. Saving lands on the new record, a different place, and
+    // still pushes.
+    {
+      const cur0 = readEntry()
+      if (leftAdd && !sel.propAdd && !replaceNext.current && cur0.nav && cur0.depth > 0
+          && cur0.ws === currentTenant() && cur0.from === key && leftKey !== key) {
+        window.history.back()
+        return
+      }
+    }
     const up = replaceNext.current
     replaceNext.current = false
     stampNavWorkspace()
@@ -213,7 +238,7 @@ export function useNav({ home, onExitWarning, overlay, enabled = true }) {
       if (samePlace || up) writeEntry({ ...cur, scroll: undefined }, next, false)
       else {
         writeEntry({ ...cur, scroll: leftScroll.current }, window.location.href, false)
-        writeEntry({ depth: (cur.depth || 0) + 1 }, next, true)
+        writeEntry({ depth: (cur.depth || 0) + 1, from: leftKey }, next, true)
       }
     }
     if (!samePlace && !firstRun) applyScroll([])

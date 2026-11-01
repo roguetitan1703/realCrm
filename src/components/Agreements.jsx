@@ -194,7 +194,7 @@ function OutsideFlat({ v, set, store }) {
   return (
     <div className="cd-outside">
       <Row>
-        <Half><Field label="Project or society"><SuggestInput value={v.society} onChange={val => set('society', val)} options={projectNames(store)} placeholder="Green Park" /></Field></Half>
+        <Half><Field label="Project or society"><SuggestInput value={v.society} onChange={val => set('society', val)} options={projectNames(store)} capitalise placeholder="Green Park" /></Field></Half>
         <div style={{ width: 90 }}><Field label="Tower"><Input value={v.tower} onChange={e => set('tower', e.target.value)} placeholder="B" /></Field></div>
         <div style={{ width: 90 }}><Field label="Flat no."><Input value={v.unit} onChange={e => set('unit', e.target.value)} placeholder="702" /></Field></div>
       </Row>

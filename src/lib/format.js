@@ -174,6 +174,35 @@ export function dayLabel(ymd) {
   return y === new Date().getFullYear() ? label : `${label} ${y}`
 }
 
+/**
+ * A name's first letter of every word upper-cased, the rest exactly as typed —
+ * "godrej green vistas" → "Godrej Green Vistas", while "DLF" and "TCS Park" keep
+ * their capitals (a full title-case would turn them into "Dlf"). For text being
+ * typed or saved; stored rows are never passed through it.
+ */
+export const capitaliseWords = (s) => String(s ?? '').replace(/(^|\s)(\S)/g, (_, sp, ch) => sp + ch.toUpperCase())
+
+/**
+ * "05/11/26" from "2026-11-05" — day first, the way the firm writes a date.
+ * The native date box shows the BROWSER's order (mm/dd/yyyy on an English-US
+ * phone), which is how a rental went out with the wrong "Available from".
+ * Not a plain date comes back untouched.
+ */
+export function dmy(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || ''))
+  return m ? `${m[3]}/${m[2]}/${m[1].slice(2)}` : (ymd || '')
+}
+/** "05/11/26" or "05/11/2026" (or the digits alone) to "2026-11-05"; '' when it is not a real date. */
+export function ymdFromDmy(text) {
+  const digits = String(text || '').replace(/\D/g, '')
+  if (digits.length !== 6 && digits.length !== 8) return ''
+  const d = +digits.slice(0, 2), mo = +digits.slice(2, 4)
+  const y = digits.length === 6 ? 2000 + +digits.slice(4) : +digits.slice(4)
+  const t = new Date(y, mo - 1, d)
+  if (t.getFullYear() !== y || t.getMonth() !== mo - 1 || t.getDate() !== d) return ''
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+}
+
 export function arrivedOn(iso, { withTime = false } = {}) {
   if (!iso) return ''
   const d = new Date(iso)

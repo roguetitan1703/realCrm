@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useLayoutEffect, useId } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
-import { whenLabel, agentName, repeatMark } from '../lib/format.js'
+import { whenLabel, agentName, repeatMark, dmy, ymdFromDmy, capitaliseWords } from '../lib/format.js'
 import { fileUrl, formatDistance } from '../lib/media.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 import { stageLabel } from '../data/pipelineRoles.js'
@@ -190,19 +190,76 @@ export function Input({ error, ...rest }) {
   return <input className={'input' + (error ? ' err' : '')} {...rest} />
 }
 /**
+ * A calendar date typed and shown as dd/mm/yy. Holds "YYYY-MM-DD" (what the
+ * server stores); `onChange` receives that, or '' while what is typed is not yet
+ * a real date. A native type="date" box shows the browser's order instead.
+ */
+export function DateInput({ value, onChange, ...rest }) {
+  const [text, setText] = useState(dmy(value))
+  // Follow the value when something else sets it (a form reset, a loaded record),
+  // but never rewrite what is half typed.
+  useEffect(() => { if (ymdFromDmy(text) !== (value || '')) setText(dmy(value)) }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
+  const type = (raw) => {
+    const d = raw.replace(/\D/g, '').slice(0, 8)
+    const shown = d.length > 4 ? `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}` : d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d
+    setText(shown)
+    onChange(ymdFromDmy(shown))
+  }
+  return <input className={'input' + (text.length >= 8 && !ymdFromDmy(text) ? ' err' : '')} type="text" inputMode="numeric" autoComplete="off" placeholder="dd/mm/yy" maxLength={10}
+    value={text} onChange={e => type(e.target.value)} {...rest} />
+}
+/**
+ * A pick list with a way out: the listed `options` (plain strings, stored as
+ * shown) plus one last entry (`otherLabel`: "Other", "Add new") that opens a
+ * text box. The value is always the string — a picked option or what was typed.
+ *
+ * A value that is not in the list is NEVER rewritten or dropped. By default it
+ * opens in the text box exactly as stored (legacy free text: "call owner before
+ * visit "); with `keepUnknown` it stays in the list as its own entry (a locality
+ * the firm uses that no list has caught up with). With no options at all it is
+ * just the text box, since there is nothing to pick.
+ */
+const OTHER = '__other__'
+export function PickOrOther({ value, onChange, options = [], otherLabel = 'Other', emptyLabel = 'Not stated', placeholder, keepUnknown = false, required = false }) {
+  const v = value == null ? '' : String(value)
+  const known = options.includes(v)
+  // Derived, not remembered: a record's value arrives after the form mounts.
+  const [picked, setPicked] = useState(false)
+  const other = picked || (!!v && !known && !keepUnknown)
+  const textOnly = options.length === 0
+  if (textOnly) return <input className="input" value={v} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
+  return (
+    <>
+      <select className="input" value={other ? OTHER : v} onChange={e => {
+        const raw = e.target.value
+        if (raw === OTHER) { if (!other) { setPicked(true); onChange('') } return }
+        setPicked(false)
+        onChange(raw)
+      }}>
+        {!required && <option value="">{emptyLabel}</option>}
+        {keepUnknown && v && !known && <option value={v}>{v}</option>}
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+        <option value={OTHER}>{otherLabel}</option>
+      </select>
+      {other && <input className="input" style={{ marginTop: 6 }} autoFocus={!v} value={v} onChange={e => onChange(e.target.value)} placeholder={placeholder} />}
+    </>
+  )
+}
+/**
  * Free text, with the firm's own values offered as you type (src/lib/suggest.js).
  * A native datalist on purpose: it suggests without restricting — the next
  * project or locality is always one nobody has typed yet — and picking a
  * suggestion is what stops "Godrej Hill Retreat" and "Godrej Hills Retreat"
- * becoming two projects. `onChange` receives the string.
+ * becoming two projects. `onChange` receives the string. `capitalise` upper-cases
+ * the first letter of each word as it is typed (project names).
  */
-export function SuggestInput({ value, onChange, options = [], id, style, ...rest }) {
+export function SuggestInput({ value, onChange, options = [], id, style, capitalise = false, ...rest }) {
   const auto = useId()
   const listId = id || `sg-${auto.replace(/:/g, '')}`
   return (
     <>
       <input className="input" list={listId} value={value ?? ''} autoComplete="off"
-        onChange={e => onChange(e.target.value)} style={{ width: '100%', ...style }} {...rest} />
+        onChange={e => onChange(capitalise ? capitaliseWords(e.target.value) : e.target.value)} style={{ width: '100%', ...style }} {...rest} />
       <datalist id={listId}>
         {options.map(o => <option key={o} value={o} />)}
       </datalist>

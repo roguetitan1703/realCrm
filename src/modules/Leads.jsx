@@ -86,14 +86,16 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   const seg = f.seg || 'all'
   const intent = f.intent || 'all'
   const stage = f.stage || 'all'
-  // A-TO-Z BY DEFAULT, because a list an agent works through has to hold
-  // still. Sorted by last activity, the lead you had just worked became the
-  // most recent thing on the desk and went to the top — so an agent who had
-  // learnt where each person sat lost them every time they did their job, and
-  // had to search for somebody they had touched a minute earlier. A name never
-  // changes when you call someone. Last activity is still one tap away.
-  const sortKey = f.sortKey || 'name'
-  const sortDir = f.sortDir || 'asc'
+  // NEWEST ARRIVAL FIRST BY DEFAULT, and it holds still. Sorted by last
+  // activity, the lead you had just worked became the most recent thing on the
+  // desk and went to the top — an agent who had learnt where each person sat
+  // lost them every time they did their job. The date a lead ARRIVED never
+  // changes when you call someone, and it is what the list is read for: what
+  // came in since I last looked. A sort the person picks wins; each key opens in
+  // its natural direction (a name A-Z, an arrival newest first).
+  const sortKey = f.sortKey || 'createdAt'
+  const naturalDir = (k) => (k === 'createdAt' ? 'desc' : 'asc')
+  const sortDir = f.sortDir || naturalDir(sortKey)
   // AN AGENT FILTER NOBODY CAN SEE IS NOT A FILTER.
   //
   // The Agent control below is gated on canAssign, which is false for an agent.
@@ -144,7 +146,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     source: v?.source, locality: v?.locality, agent: v?.agent, flag: v?.flag, alert: v?.alert,
   })
   const setQP = (v) => patchFilters({ q: v || undefined })
-  const setSortKeyP = (v) => patchFilters({ sortKey: v })
+  const setSortKeyP = (v) => patchFilters({ sortKey: v, sortDir: naturalDir(v) })
   const setSortDirP = (v) => patchFilters({ sortDir: v })
   const setSegP = (v) => patchFilters({ seg: v })
   // The Agent control is single-value on screen and an array in the URL — the

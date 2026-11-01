@@ -11,9 +11,10 @@ import {
   TENANT_TYPES, TRANSACTION,
   BHK_FILTER,
   appliesTo, areaFieldsFor, labelOf, normaliseBhk, normaliseSubtype, optionsOf,
+  KEY_ACCESS,
 } from '../data/propertyFields.js'
 import { canAssignLead } from '../lib/permissions.js'
-import { allOf, configLabel, fmtMoney, listText, money, textList, arrivedOn, dayLabel } from '../lib/format.js'
+import { allOf, configLabel, fmtMoney, listText, money, textList, arrivedOn, dmy } from '../lib/format.js'
 
 // How soon the lead needs possession. A LEAD-side vocabulary (it describes the
 // buyer's urgency, not the property), so it lives with the lead schema — but
@@ -399,7 +400,7 @@ export const OWNER_MODULE_SCHEMA = {
     { key: 'name', label: 'Full Name', type: 'text', section: 'core', required: true, hideInSheet: true },
     { key: 'phone', label: 'Primary Phone', type: 'text', section: 'core', required: true, hideInSheet: true },
     { key: 'email', label: 'Email Address', type: 'email', section: 'domain' },
-    { key: 'project', label: 'Project / Society', type: 'text', section: 'domain', suggest: projectNames },
+    { key: 'project', label: 'Project / Society', type: 'text', section: 'domain', suggest: projectNames, capitalise: true },
     // The flat in its own fields — project + tower + unit is what makes two
     // rows the same calling row. `unitRef` stays for the records written before
     // these columns existed, and is shown only when it holds something.
@@ -470,8 +471,8 @@ export const PROPERTY_MODULE_SCHEMA = {
   fields: [
     // ---- Overview: what it is, where, what it costs ----------------------
     // `suggest`: the edit form offers the firm's existing names (src/lib/suggest.js).
-    { key: 'society', label: 'Project / Society', type: 'text', section: 'core', required: true, suggest: projectNames },
-    { key: 'locality', label: 'Locality', type: 'text', section: 'core', suggest: localities },
+    { key: 'society', label: 'Project / Society', type: 'text', section: 'core', required: true, suggest: projectNames, capitalise: true },
+    { key: 'locality', label: 'Locality', type: 'text', section: 'core', pickOrOther: (store) => ({ options: localities(store), otherLabel: 'Add new', emptyLabel: 'Select locality', keepUnknown: true, placeholder: 'New locality' }) },
     tokenField('deal', 'Deal', DEALS, 'core'),
     tokenField('category', 'Category', CATEGORIES, 'core'),
     {
@@ -579,7 +580,7 @@ export const PROPERTY_MODULE_SCHEMA = {
     // A date, shown as one ("1 Oct 2026") and edited with a date picker. It was
     // a text field over a DATE column and printed the raw stored timestamp.
     { key: 'availableFrom', label: 'Available from', type: 'date', section: 'terms', when: (p) => pApplies(p).rentTerms,
-      renderValue: (v) => (v ? dayLabel(v) : '') },
+      renderValue: (v) => (v ? dmy(v) : '') },
     {
       key: 'preferredTenants', label: 'Preferred tenants', type: 'chips', section: 'terms',
       when: (p) => pApplies(p).tenantPreference,
@@ -610,7 +611,7 @@ export const PROPERTY_MODULE_SCHEMA = {
     // shared listing must never carry it.
     { key: 'ownerPhone', label: 'Owner phone', type: 'text', section: 'internal' },
     { key: 'ownerEmail', label: 'Owner email', type: 'text', section: 'internal' },
-    { key: 'keyAccess', label: 'Key / access', type: 'text', section: 'internal' },
+    { key: 'keyAccess', label: 'Key / access', type: 'text', section: 'internal', pickOrOther: () => ({ options: KEY_ACCESS, placeholder: 'Who holds the keys, best time to visit' }) },
     // ---- Listing copy ----------------------------------------------------
     // The one thing no template can write: the client's own paragraph about
     // the project. Opt-in per message (see the composer), never automatic.
