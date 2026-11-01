@@ -19,19 +19,13 @@ Paying tenants are `bhumi` and `mahalaxmi`. A line that writes their data says s
 
 ## Now
 
-### Om's list, 1 Nov (building now)
+### Om's list, 1 Nov (left from the batch)
 
-- **Lead page: Call is back, and Record outcome sits next to status and Reject.** Built on `b-nov` (fa63d00); the Calling owner record still has the desk's Record call from 12a3c27. *agent*
-- **Follow-up kinds: drop "Client Meeting"; default to Follow-up Call; the picked kind is obvious.** Built on `b-nov` (0877ef1). *agent*
-- **Shortlist shows Rent/Sale and price on each flat; sending a flat whose deal doesn't match what the lead wants asks first.** Built on `b-nov` (f67fb95). *agent*
-- **Catalogue hides Leased and Unavailable on its own**, with no setting. Already so: `CATALOGUE_WHERE` shows only Available (a590faa, live since 27 Oct); checked on dev, a ticked Leased flat is not listed. Waits on Om: where he saw one. *buyer*
-- **Pull down to refresh on phone lists.** *agent*
-- **Leads sort by date arrived, newest first, by default** (not by name). *agent*
-- **Rental "Available from" reads dd/mm/yy.** *agent*
-- **Key access becomes a pick list**: Keys in office · Call owner before visit · Owner lives there · Tenant lives there · With a broker · Other (text). From bhumi's free text, e.g. "Availabel in office", "currtly tenent are stay". *agent*
-- **Locality is a pick list of the firm's own localities, with Add new.** *agent*
-- **Project names capitalise each word as typed**, keeping acronyms ("DLF" stays "DLF"). Existing names: 42 of bhumi's 58 projects and 12 of mahalaxmi's 12 are not in that form, so changing them is a production write that waits on Om. *agent*
-- **An add flow you abandon (e.g. Add property) leaves no entry in Back.** *agent*
+The rest shipped to `development` on 1 Nov (merges f2198e1, 89d1454): Call back on the lead page with Record outcome beside the status, follow-up kinds, shortlist deal and price with a mismatch ask, pull to refresh, leads by date arrived, dd/mm/yy, key access and locality pick lists, project names capitalised as typed, abandoned Add property out of Back.
+
+- **Calling owner record on the desk still says Record call**, not Call + Record outcome (12a3c27). Waits on Om. *agent*
+- **Catalogue hides Leased**: already so since 27 Oct (a590faa, only Available is listed). Waits on Om: where he saw one. *buyer*
+- **Existing project names to Title Case**: 42 of bhumi's 58, 12 of mahalaxmi's 12. Production write; waits on Om. *agent*
 
 ### Om's list, 1 Nov (needs a spec or Om)
 
@@ -114,6 +108,8 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
   Turnstile) or per-firm adaptive limits.
 
 ## Bugs
+
+- **Editing a property from its URL (`?new=property&prop=ID`) opens a blank form** (1 Nov, builder S): the edit form reads the record cache; tapping Edit from the record works.
 
 Measured on production, read-only, 12 Oct, unless marked. Alert delivery
 gaps are in `specs/notifications.md` §1, not here.
