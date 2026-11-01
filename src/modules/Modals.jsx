@@ -1034,8 +1034,8 @@ function NewOwnerModal({ store, ownerId }) {
         <div style={{ display: 'grid', gridTemplateColumns: mayAssign ? '1fr 1fr' : '1fr', gap: 12 }}>
           <div className="field">
             <label>Locality</label>
-            <SuggestInput id="owner-locality" value={f.locality} onChange={v => set('locality', v)}
-              options={localities(store)} placeholder="Where's the unit?" />
+            <PickOrOther value={f.locality} onChange={v => set('locality', v)}
+              options={localities(store)} otherLabel="Add new" emptyLabel="Select locality" keepUnknown placeholder="New locality" />
           </div>
           {/* The desk's: an agent's owner is theirs (createOwner), and the
               holder of one they edit is not theirs to change (updateOwner). */}
