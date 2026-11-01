@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown, useSelection } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
-import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
+import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf, money, dealWord } from '../lib/format.js'
 import { personLabel } from '../lib/phone.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
@@ -506,7 +506,7 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   const toggleTick = (id) => setTicked(t => { const n = new Set(t); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const allTicked = propRows.length > 0 && propRows.every(r => ticked.has(r.p.id))
   const sendTicked = () => openSend(store, propRows.filter(r => ticked.has(r.p.id)).map(r => r.p), {
-    leadId: l.id, onSent: () => setTicked(new Set()),
+    leadId: l.id, lead: l, onSent: () => setTicked(new Set()),
   })
 
   const openEdit = () => store.openModal({ kind: 'editRecord', moduleId: 'leads', recordId: l.id })
@@ -690,7 +690,13 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
                   {/* Joined, not templated. Hardcoding the separators printed a
                       trailing " · " whenever a property had no price, which on
                       imported inventory is most of them. */}
-                  <div className="relrow-sub">{[row.p.type, row.p.locality, row.line].filter(Boolean).join(' · ')}</div>
+                  <div className="relrow-sub">
+                    {/* Rent or Sale and its figure first: the two things an
+                        agent checks before sending a flat to this person. */}
+                    {row.line && <span className="inv-deal">{row.line}</span>}
+                    {row.line && (row.p.type || row.p.locality) ? ' · ' : ''}
+                    {[row.p.type, row.p.locality].filter(Boolean).join(' · ')}
+                  </div>
                   {sent && <div className={'inv-sent' + (sent.opens > 0 ? ' is-open' : '')}>{sentHomeLine(sent)}</div>}
                 </button>
                 {/* Shortlisted by a person, so a person can take it off. A
@@ -786,12 +792,13 @@ function followFrom(f, l) {
   return { action: type, date: dateLabel, time: f.time || '11:00 am' }
 }
 
-// compact, quiet money string for a property row (deal-aware)
+// "Rent ₹25k/mo" · "Sale ₹1.2Cr": the deal and its figure, in the money
+// formatter budgets use, so a rent reads per month. Either half is left out
+// when the listing does not say it — never a guessed deal, never "undefined".
+// `price` is the stored digits (store.ts digits()); priceLabel only when
+// there are none.
 function quotedShort(p) {
-  // A property with no price has no price line. Template-stringing an absent
-  // priceLabel produced the literal word "undefined", which then rendered as a
-  // fact on the record: "2 BHK Apartment · Pune · undefined". Same shape as the
-  // budget dash — a missing value dressed up as a value.
-  if (!p?.priceLabel) return ''
-  return p.deal === 'rent' ? `${p.priceLabel}` : `${p.priceLabel}${p.negotiable ? ' · neg.' : ''}`
+  const n = Number(String(p?.price ?? '').replace(/\D/g, ''))
+  const figure = n > 0 ? money(n, { perMonth: p.deal === 'rent' }) : (p?.priceLabel || '')
+  return [dealWord(p), figure].filter(Boolean).join(' ')
 }
