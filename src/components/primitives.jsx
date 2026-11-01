@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useLayoutEffect, useId } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
-import { whenLabel, agentName, repeatMark } from '../lib/format.js'
+import { whenLabel, agentName, repeatMark, dmy, ymdFromDmy } from '../lib/format.js'
 import { fileUrl, formatDistance } from '../lib/media.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 import { stageLabel } from '../data/pipelineRoles.js'
@@ -188,6 +188,25 @@ export function Field({ label, children, required, hint }) {
 }
 export function Input({ error, ...rest }) {
   return <input className={'input' + (error ? ' err' : '')} {...rest} />
+}
+/**
+ * A calendar date typed and shown as dd/mm/yy. Holds "YYYY-MM-DD" (what the
+ * server stores); `onChange` receives that, or '' while what is typed is not yet
+ * a real date. A native type="date" box shows the browser's order instead.
+ */
+export function DateInput({ value, onChange, ...rest }) {
+  const [text, setText] = useState(dmy(value))
+  // Follow the value when something else sets it (a form reset, a loaded record),
+  // but never rewrite what is half typed.
+  useEffect(() => { if (ymdFromDmy(text) !== (value || '')) setText(dmy(value)) }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
+  const type = (raw) => {
+    const d = raw.replace(/\D/g, '').slice(0, 8)
+    const shown = d.length > 4 ? `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}` : d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d
+    setText(shown)
+    onChange(ymdFromDmy(shown))
+  }
+  return <input className={'input' + (text.length >= 8 && !ymdFromDmy(text) ? ' err' : '')} type="text" inputMode="numeric" autoComplete="off" placeholder="dd/mm/yy" maxLength={10}
+    value={text} onChange={e => type(e.target.value)} {...rest} />
 }
 /**
  * Free text, with the firm's own values offered as you type (src/lib/suggest.js).

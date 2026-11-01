@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import Icon from '../components/Icon.jsx'
-import { Button, Field, Input, Textarea, Segmented, Avatar, Source, StageTag, Money, SuggestInput, OutcomeForm } from '../components/primitives.jsx'
+import { Button, Field, Input, Textarea, Segmented, Avatar, Source, StageTag, Money, SuggestInput, DateInput, OutcomeForm } from '../components/primitives.jsx'
 import PhoneInput from '../components/PhoneInput.jsx'
 import { theme } from '../data/theme.js'
 // parseBudgetNum was USED in three places here and imported in none of them —
@@ -289,7 +289,7 @@ function ModuleFormModal({ store, moduleId, recordId }) {
     }
     // A date field gets a date picker, holding "YYYY-MM-DD" — which is exactly
     // what the server now sends for a DATE column, so the box opens filled.
-    if (f.type === 'date') return <Input type="date" value={String(v || '').slice(0, 10)} onChange={e => setField(f.key, e.target.value)} />
+    if (f.type === 'date') return <DateInput value={String(v || '').slice(0, 10)} onChange={val => setField(f.key, val)} />
     // A field that names something the firm already has (a project) offers it.
     if (f.suggest) return <SuggestInput value={v} onChange={val => setField(f.key, val)} options={f.suggest(store)} />
     return <Input type={f.type === 'number' ? 'number' : 'text'} value={v} onChange={e => setField(f.key, e.target.value)} />

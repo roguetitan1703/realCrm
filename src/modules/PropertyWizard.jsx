@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Field, Input, Textarea, SuggestInput } from '../components/primitives.jsx'
+import { Button, Field, Input, Textarea, SuggestInput, DateInput } from '../components/primitives.jsx'
 import PhoneInput from '../components/PhoneInput.jsx'
 import { projectNames } from '../lib/suggest.js'
 import Icon from '../components/Icon.jsx'
@@ -637,7 +637,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                       <Field label="Parking charges"><Chips options={MAINTENANCE_MODE} value={form.parkingChargesMode} onChange={v => set('parkingChargesMode', v)} /></Field>
                       <Field label="Painting charges"><Chips options={PAINTING_CHARGES} value={form.paintingCharges} onChange={v => set('paintingCharges', v)} /></Field>
                     </div>
-                    <Field label="Available from"><Input type="date" value={form.availableFrom || ''} onChange={e => set('availableFrom', e.target.value)} /></Field>
+                    <Field label="Available from"><DateInput value={form.availableFrom || ''} onChange={v => set('availableFrom', v)} /></Field>
                   </div>
                 )}
 
