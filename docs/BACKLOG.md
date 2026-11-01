@@ -115,24 +115,16 @@ gaps are in `specs/notifications.md` §1, not here.
   in the last day. Likely our model, not the agents: real portal leads may not
   behave the way the pile assumes. Study how real leads actually move before
   changing the rule. *manager*
-- **Callback leads with no time, from before 1 Nov** — bhumi 13 of 13, mahalaxmi
-  30 of 30 (1 Nov). A new Callback now asks when and is refused without a booked
-  call; these were not backfilled (production write). Waits on Om: leave them,
-  or list them per agent to book. A Callback whose call is then logged without
-  an outcome still keeps the status with nothing booked. *agent*
-- **Booked site visits with no time, from before `at` existed** — bhumi 5 of 40
-  (1 Nov), all "Site Visit — <name>" with "Tomorrow"/"This Saturday". The server
-  now refuses a booking without a moment; these were not backfilled (production
-  write, and "Tomorrow" from weeks ago has no date to recover). Waits on Om:
-  clear them or leave them. *agent*
-- **Bookings left on leads closed before 1 Nov** — bhumi 23, mahalaxmi 9, urban 2,
-  delpat 1 (1 Nov). Closing a lead now clears its booking; the one-time repair is
-  written and off (`REPAIR_CLOSED_LEAD_BOOKINGS` in store.ts, production write).
-  Waits on Om. *manager*
-- **Three numbers on two leads each, from before every door checked the phone** —
-  bhumi 2, mahalaxmi 1 (1 Nov). "Merge duplicate" is gone (it never showed, and
-  its merge deleted the copy's visits and enquiries). Waits on Om: merge these
-  by hand or build a merge that moves everything. *owner*
+- **A Callback whose call is then logged without an outcome** keeps the status
+  with nothing booked; it shows "Time not set" (635e052) like the old ones
+  (bhumi 13, mahalaxmi 30 and 5 word-only visits, left as they are, Om 1 Nov). *agent*
+- **Three numbers on two leads each** — bhumi 2, mahalaxmi 1 (1 Nov). Causes:
+  bhumi "ujwal" came in by MagicBricks and Website in Aug in two number formats
+  (one form since the 27 Oct phone repair); bhumi "Prasad" has an unreadable
+  number, matched only since findLeadByRawPhone; mahalaxmi "Umesh" was two
+  99acres pushes 0.14s apart (race fixed 37973b6). The three pairs remain:
+  merging them is a production write, and "Merge duplicate" is gone (it
+  deleted the copy's visits and enquiries). Waits on Om. *owner*
 
 ## To verify
 
