@@ -564,7 +564,12 @@ function ResetPasswordModal({ store, user, onClose, onDone }) {
     if (e) e.preventDefault()
     setSaving(true)
     api.adminResetPassword(user.id, password.trim(), mustChange)
-      .then(res => onDone({ password: res?.initialPassword || password.trim(), mustChange }))
+      .then(res => {
+        // Never show an empty card: the password set is the one the server says.
+        const pw = res?.initialPassword || password.trim()
+        if (!pw) throw new Error('The password was reset but not returned. Reset it again.')
+        onDone({ password: pw, mustChange })
+      })
       .catch(err => { store.toast(cleanErr(err), 'warn'); setSaving(false) })
   }
 
