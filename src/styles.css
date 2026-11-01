@@ -667,6 +667,33 @@ input,textarea,select{font-family:inherit}
   .tbl thead th:first-child,.tbl tbody td:first-child{padding-left:16px}
   .tbl thead th:last-child,.tbl tbody td:last-child{padding-right:16px}
 }
+/* DENSE AT LAPTOP WIDTH. A manager scanning by agent wants a screenful of rows,
+   not six. Below 1536 a cell is one line and ends in an ellipsis rather than
+   wrapping (name, phone, source, agent, next follow-up, last enquiry, the
+   status remark whose full text is on its title), and below 1441 the rows lose
+   their padding. Every module's table is this one. */
+@media (max-width:1535px){
+  .tbl tbody td{white-space:nowrap;max-width:230px;overflow:hidden;text-overflow:ellipsis}
+  .tbl tbody td:has(.overdue){max-width:none}
+  .tbl .name,.tbl .sub{overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .tbl .rej-note{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;margin-top:2px;line-height:1.3}
+}
+@media (max-width:1440px){
+  .tbl tbody td{padding-top:7px;padding-bottom:7px;max-width:150px}
+  .tbl tbody td:first-child{max-width:none}
+  .tbl thead th{padding-top:9px;padding-bottom:9px}
+  .tbl thead th,.tbl tbody td{padding-left:8px;padding-right:8px}
+  .tbl thead th:first-child,.tbl tbody td:first-child{padding-left:14px}
+  .tbl thead th:last-child,.tbl tbody td:last-child{padding-right:14px}
+  .tbl tbody td:nth-child(2){max-width:190px}
+}
+@media (max-width:1320px){
+  .tbl tbody td{max-width:118px}
+  .tbl tbody td:has(.overdue){max-width:none}
+  .tbl tbody td:nth-child(2){max-width:170px}
+  .tbl thead th,.tbl tbody td{padding-left:6px;padding-right:6px}
+  .tbl thead th{letter-spacing:.02em}
+}
 /* standardized table cell renderers (used by MODULE_DEFINITION columns) */
 .cell-txt{font-size:13px}
 .cell-quiet{font-size:13px;color:var(--muted)}
