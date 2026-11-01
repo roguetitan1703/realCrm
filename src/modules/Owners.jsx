@@ -14,14 +14,18 @@ import UnassignedBar from '../components/UnassignedBar.jsx'
 import { api } from '../lib/api.js'
 import { telLink } from '../lib/phone.js'
 import { OWNERS_DEF, openCallOutcome } from './definitions.jsx'
+import { useUndoableRenames, undoProjectRename } from '../components/ProjectRename.jsx'
 
 // The project cards — same "township lens" as Properties' Group by project,
 // over the cold-calling list. Clicking one filters the existing table by that
 // project rather than opening a separate page: assigning/status-changing an
 // owner is the same row-level UI either way, so there is nothing a dedicated
 // project-detail screen would add.
-function OwnerProjectGrid({ onOpen, onAssign, canAssign, refreshAt }) {
+// `picking` turns the cards into tick targets for Rename (desk only); "No
+// project" is not a name and cannot be renamed.
+function OwnerProjectGrid({ store, onOpen, onAssign, canAssign, refreshAt, picking, selection }) {
   const [rows, setRows] = useState(null)
+  const undoFor = useUndoableRenames(store)
   useEffect(() => {
     let live = true
     api.listOwnerProjects().then(r => { if (live) setRows(r?.data || []) }).catch(() => { if (live) setRows([]) })
@@ -31,9 +35,15 @@ function OwnerProjectGrid({ onOpen, onAssign, canAssign, refreshAt }) {
   if (!rows.length) return <div className="detail-missing">No owners yet. Import a list to start.</div>
   return (
     <div className="grid-cards">
-      {rows.map(pj => (
+      {rows.map(pj => {
+        const tickable = picking && !!pj.norm
+        const picked = tickable ? selection.has(pj.key) : undefined
+        const undo = !picking ? undoFor(pj.norm) : null
+        return (
         <div key={pj.key} className="projcard pj-box">
-          <button className="pj-open" onClick={() => onOpen(pj.key)}>
+          <button className={'pj-open' + (picked !== undefined ? ' picking' : '') + (picked ? ' is-picked' : '')} aria-pressed={picked}
+            onClick={() => (picking ? (tickable && selection.toggle({ id: pj.key, key: pj.key, name: pj.name })) : onOpen(pj.key))}>
+            {picked !== undefined && <span className={'pick-box pcard-pick' + (picked ? ' on' : '')} aria-hidden="true"><span><Icon name="check" size={13} /></span></span>}
             <div className="pj-head">
               <div className="pj-id">
                 <div className="pj-name">{pj.name}</div>
@@ -58,13 +68,19 @@ function OwnerProjectGrid({ onOpen, onAssign, canAssign, refreshAt }) {
               {pj.counts.unassigned > 0 && <span className="pj-who-one pj-who-none">Unassigned <b>{pj.counts.unassigned}</b></span>}
             </div>
           </button>
-          {canAssign && (
+          {canAssign && !picking && (
             <button className="pj-assign" onClick={() => onAssign(pj)}>
               <Icon name="userPlus" size={13} />Assign
             </button>
           )}
+          {undo && (
+            <button className="pj-assign" onClick={() => undoProjectRename(store, undo.id)}>
+              <Icon name="refresh" size={13} />Undo rename
+            </button>
+          )}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -205,7 +221,9 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // "Select all 42": every row the filter holds, not the twenty on screen —
   // taking a finished calling list back is the whole list, never a page.
   const [allMatching, setAllMatching] = useState(false)
-  const clearSel = () => { selection.clear(); setAllMatching(false) }
+  const clearSel = () => { selection.clear(); setAllMatching(false); setPicking(false) }
+  // Select on the project cards, for Rename (owners and managers).
+  const [picking, setPicking] = useState(false)
   // The open record lives in the URL too — see Leads and Properties.
   const openId = sel?.ownerOpen ? sel.ownerId : null
 
@@ -362,6 +380,13 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   }
 
   // GROUP BY PROJECT, or the project's chip with × back to the cards.
+  const mayRename = isDeskRole(role) && view === 'projects'
+  const pickCtl = mayRename ? (
+    <button className={'grp-toggle' + (picking ? ' on' : '')} aria-pressed={picking}
+      onClick={() => (picking ? clearSel() : setPicking(true))}>
+      <Icon name="check" size={14} />Select
+    </button>
+  ) : null
   const groupCtl = projectSel ? (
     <span className="proj-chip">
       <Icon name="building" size={14} />
@@ -370,7 +395,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     </span>
   ) : (
     <button className={'grp-toggle' + (view === 'projects' ? ' on' : '')}
-      onClick={() => setView(view === 'projects' ? 'list' : 'projects')}>
+      onClick={() => { clearSel(); setView(view === 'projects' ? 'list' : 'projects') }}>
       <Icon name="building" size={14} />{phone ? 'By project' : 'Group by project'}
     </button>
   )
@@ -401,7 +426,11 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
       </div>
     ),
     // The toolbar IS the selection bar — see FilterBar. No second band.
-    selection: (canAssign && view === 'list' && selCount > 0) ? {
+    selection: (mayRename && picking && (phone || selected.size > 0)) ? {
+      count: selected.size,
+      actions: [{ label: 'Rename', icon: 'edit', onClick: () => store.openModal({ kind: 'renameProjects', keys: selection.rows.map(r => r.key), onDone: clearSel }) }],
+      onClear: clearSel,
+    } : (canAssign && view === 'list' && selCount > 0) ? {
       count: selCount,
       actions: [
         ...(!allMatching && total > selected.size ? [{ label: `Select all ${total}`, tone: 'quiet', onClick: () => {
@@ -416,11 +445,13 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
     // GROUP BY PROJECT, first in the bar: it changes what the list IS. Inside a
     // project it becomes that project's chip, and × goes back to the cards.
     // On a phone it sits beside the two dropdowns instead, one row of controls.
-    toolbarLeft: phone ? undefined : groupCtl,
+    // Select (Rename) beside the search on a phone: the dropdown row is full.
+    toolbarLeft: phone ? pickCtl || undefined : <>{groupCtl}{pickCtl}</>,
     cta: { label: 'New owner', onClick: () => store.openModal({ kind: 'newOwner' }) },
     emptyTitle: 'No owners match', emptyHint: 'Adjust the filter or search, or import a list.',
     renderTable: (list, v) => v === 'projects'
       ? <OwnerProjectGrid
+          store={store} picking={picking} selection={selection}
           refreshAt={state.dataAsOf}
           canAssign={canAssign}
           onAssign={(pj) => store.openModal({ kind: 'assignProject', project: pj })}

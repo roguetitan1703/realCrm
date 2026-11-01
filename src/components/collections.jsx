@@ -164,7 +164,8 @@ export function ModuleListView({
       // as no results.
       // Grouped by project is the same view on a phone: the screen draws its
       // project cards, which do not depend on the page of rows.
-      body: view === 'projects' && renderTable ? renderTable(phoneList, 'projects')
+      // A selection on the cards (Rename) carries the same bar as on rows.
+      body: view === 'projects' && renderTable ? <>{renderTable(phoneList, 'projects')}{selection && <PhoneSelectBar selection={selection} />}</>
         : list.length === 0
         ? (loading
             ? <ListSpinner />
@@ -1129,10 +1130,24 @@ export function ListRow({ avatar, name, meta, right, onClick }) {
 
 // ---- Project card: aggregates a township/society's units into one tile. ----
 // Rendered in the Properties "group by project" view; opens the project detail.
-export function ProjectCard({ project, onClick }) {
+// `picked` (true/false) makes it a tick target, as PropertyCard; `undo` is
+// the card's Undo rename ({ onClick }), which sits under the card's own button.
+export function ProjectCard({ project, onClick, picked, undo }) {
+  const card = <ProjectCardBody project={project} onClick={onClick} picked={picked} boxed={!!undo} />
+  if (!undo) return card
+  return (
+    <div className="projcard pj-box">
+      {card}
+      <button type="button" className="pj-assign" onClick={undo.onClick}><Icon name="refresh" size={13} />Undo rename</button>
+    </div>
+  )
+}
+function ProjectCardBody({ project, onClick, picked, boxed }) {
   const { name, locality, developer, wings, counts, priceRange, independent } = project
   return (
-    <button className={'projcard' + (independent ? ' indep' : '')} onClick={onClick}>
+    <button className={(boxed ? 'pj-open' : 'projcard' + (independent ? ' indep' : '')) + (picked !== undefined ? ' picking' : '') + (picked ? ' is-picked' : '')}
+      onClick={onClick} aria-pressed={picked === undefined ? undefined : picked}>
+      {picked !== undefined && <span className={'pick-box pcard-pick' + (picked ? ' on' : '')} aria-hidden="true"><span><Icon name="check" size={13} /></span></span>}
       <div className="pj-head">
         <div className="pj-id">
           <div className="pj-name">{name}</div>

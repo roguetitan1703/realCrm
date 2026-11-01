@@ -4197,7 +4197,7 @@ export async function listOwnerProjects(): Promise<{ rows: any[]; total: number 
   }
   return {
     rows: rows.map((r: any) => ({
-      key: r.key, name: r.key, locality: r.locality || null,
+      key: r.key, name: r.key, norm: r.norm, locality: r.locality || null,
       counts: { total: r.total, new: r.new, interested: r.interested, unassigned: r.unassigned },
       towers: (r.towers || []).sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true })),
       holders: byProject.get(r.norm) || [],
@@ -5042,7 +5042,7 @@ export async function getLeadCandidates(leadId: string, limit = 100): Promise<an
 // deal/locality/type silently matched nothing, so these two fragments are the
 // single definition of "the project this unit belongs to" and "its price as a
 // number", used by every query below.
-const PROJECT_KEY = sql`coalesce(nullif(project, ''), nullif(split_part(coalesce(title, ''), ' - ', 1), ''))`;
+export const PROJECT_KEY = sql`coalesce(nullif(project, ''), nullif(split_part(coalesce(title, ''), ' - ', 1), ''))`;
 // The bucket ungrouped units fall into. Must match INDEPENDENT_PROJECT in
 // src/lib/format.js -- the client filters and links on this exact string.
 const INDEPENDENT_PROJECT = 'Independent / Direct';
@@ -5474,6 +5474,7 @@ export async function listProjects(opts: { q?: string; limit?: number } = {}): P
   const rows = await sql`
     SELECT CASE WHEN ${projectNorm(PROJECT_KEY)} = '' THEN ${INDEPENDENT_PROJECT}
                 ELSE mode() WITHIN GROUP (ORDER BY ${PROJECT_KEY}) END AS key,
+           ${projectNorm(PROJECT_KEY)} AS norm,
            count(*)::int AS units,
            count(*) FILTER (WHERE coalesce(status, 'Available') = 'Available')::int AS available,
            count(*) FILTER (WHERE coalesce(status, 'Available') = 'Sold')::int AS sold,
@@ -5499,6 +5500,9 @@ export async function listProjects(opts: { q?: string; limit?: number } = {}): P
     rows: ordered.map(r => ({
       key: r.key,
       name: r.key,
+      // The grouping key itself, so a screen can match a card to a rename
+      // without a second copy of projectNorm in the browser.
+      norm: r.norm,
       independent: r.key === INDEPENDENT_PROJECT,
       locality: r.locality || null,
       builder: r.builder || null,

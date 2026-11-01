@@ -23,6 +23,7 @@ import PropertyWizard, { fromCopy, scoreOf } from './PropertyWizard.jsx'
 import { canEditListing, canAddListing, canChangeCatalogue, isDeskRole } from '../lib/permissions.js'
 import { catalogueToast } from '../lib/share.js'
 import { openSend } from './SendSheet.jsx'
+import { useUndoableRenames, undoProjectRename } from '../components/ProjectRename.jsx'
 
 // The filter bar speaks in arrays ({ status: ['Available','Blocked'] }) because
 // its controls are multi-select; the API speaks in comma-separated values. This
@@ -276,7 +277,13 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
       })
       .catch(e => store.toast(e?.status === 403 ? 'Only an owner or manager can change the catalogue.' : 'Could not change the catalogue. Try again.', 'warn'))
   }
-  const selActions = [
+  // RENAME, from ticked project cards: every property and calling row on
+  // them takes one name (docs/specs/projects.md). Owners and managers only.
+  const mayRename = isDeskRole(state.role)
+  const renameProjects = () => store.openModal({ kind: 'renameProjects', keys: picked.map(r => r.key), onDone: endPick })
+  const selActions = view === 'projects' ? [
+    { label: 'Rename', icon: 'edit', onClick: renameProjects },
+  ] : [
     { label: 'Send', icon: 'wa', onClick: send },
     ...(mayCatalogue ? [
       { label: 'Show in catalogue', icon: 'eye', tone: 'quiet', onClick: () => catalogue(true) },
@@ -298,7 +305,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
     page, onPage: paginated ? setPageP : undefined, pageSize, onPageSize: paginated ? setPageSizeP : undefined,
     // Grid/list toggle only applies to the flat unit views, hide it in project view.
     showViewSwitch: view !== 'projects',
-    selection: (view !== 'projects' && (phone ? picking : selected.size > 0)) ? {
+    selection: ((view !== 'projects' || picking) && (phone ? picking : selected.size > 0)) ? {
       count: selected.size,
       actions: selActions,
       onClear: endPick,
@@ -317,7 +324,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
           onClick={() => { endPick(); setView(view === 'projects' ? 'list' : 'projects') }}>
           <Icon name="building" size={14} />Group by project
         </button>
-        {phone && view !== 'projects' && (
+        {((phone && view !== 'projects') || (mayRename && view === 'projects')) && (
           <button className={'grp-toggle' + (picking ? ' on' : '')} aria-pressed={picking}
             onClick={() => (picking ? endPick() : setPicking(true))}>
             <Icon name="check" size={14} />Select
@@ -331,7 +338,7 @@ function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }
     } : null,
     emptyHint: 'Try clearing a filter or search.',
     renderTable: (list, v) => v === 'projects'
-      ? <ProjectGrid onOpen={toProject} />
+      ? <ProjectGrid store={store} onOpen={toProject} picking={picking} selection={selection} />
       : v === 'grid'
         ? <div className="grid-cards">{list.map(p => picking
             ? <PropertyCard key={p.id} p={p} matchCount={p.demandCount || 0} picked={selected.has(p.id)} showCatalogue={isDeskRole(state.role)}
@@ -405,13 +412,27 @@ function UnitsTable({ units, onOpen }) {
 // ProjectGrid — the township lens. The grouping is a GROUP BY on the server, so
 // this reads project rows directly instead of aggregating every unit in the
 // firm in the browser (which is what made this view require the collection).
-function ProjectGrid({ onOpen }) {
-  const { data, loading, error } = useServerData(() => api.listProjects(), [], { data: [] }, '/properties/projects')
+// `picking` turns the cards into tick targets for Rename (desk only); the
+// leftovers bucket is not a project and cannot be renamed.
+function ProjectGrid({ store, onOpen, picking, selection }) {
+  const { data, loading, error } = useServerData(() => api.listProjects(), [store.state.dataAsOf], { data: [] }, '/properties/projects')
+  const undoFor = useUndoableRenames(store)
   const rows = data?.data || []
   if (loading && !rows.length) return <div className="list-spin" role="status" aria-label="Loading"><span /></div>
   if (error) return <div className="detail-missing">Could not load projects.</div>
   if (!rows.length) return <div className="detail-missing">No projects yet.</div>
-  return <div className="grid-cards">{rows.map(pj => <ProjectCard key={pj.key} project={pj} onClick={() => onOpen(pj.key)} />)}</div>
+  return (
+    <div className="grid-cards">
+      {rows.map(pj => {
+        const tickable = picking && !pj.independent
+        const r = !picking ? undoFor(pj.norm) : null
+        return <ProjectCard key={pj.key} project={pj}
+          picked={tickable ? selection.has(pj.key) : undefined}
+          onClick={() => (picking ? (tickable && selection.toggle({ id: pj.key, key: pj.key, name: pj.name })) : onOpen(pj.key))}
+          undo={r ? { onClick: () => undoProjectRename(store, r.id) } : undefined} />
+      })}
+    </div>
+  )
 }
 
 // Table view: definition columns + a module-specific "Buyers" demand column injected.

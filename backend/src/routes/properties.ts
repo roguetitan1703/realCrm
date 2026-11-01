@@ -17,7 +17,8 @@ import { prepareListing, localeOf,
   listProjects, getProject, getPropertyBuyers,
   setPropertyVerified, setPropertyGallery, setCatalogue,
 } from '../services/store';
-import { canAddListing, canEditListing, isDeskRole } from '../lib/permissions';
+import { canAddListing, canEditListing, isDeskRole, ForbiddenError } from '../lib/permissions';
+import { previewRename, renameProjects, listUndoableRenames, undoRename, RenameError } from '../services/projectRenames';
 
 export const propertiesRouter = Router();
 propertiesRouter.use(requireTenantAuth);
@@ -143,6 +144,45 @@ propertiesRouter.get('/projects', async (req: Request, res: Response) => {
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to list projects', message: err.message });
   }
+});
+
+/**
+ * RENAME PROJECTS — "merge projects" (docs/specs/projects.md §6). Owners and
+ * managers only, checked in the service (ForbiddenError) as well as here.
+ * POST /properties/projects/rename/preview { keys[], to } → spellings, counts
+ * POST /properties/projects/rename { keys[], to, expect } → { renameId, properties, owners }
+ * GET  /properties/projects/renames → the renames that can still be undone
+ * POST /properties/projects/renames/:id/undo → { restored, kept }
+ * Declared before /projects/:key so 'renames' is never taken for a key.
+ */
+const renameFailed = (res: Response, err: any) => {
+  if (err instanceof RenameError) return res.status(err.status).json({ success: false, error: err.message, message: err.message, ...err.extra });
+  if (err instanceof ForbiddenError) return res.status(403).json({ success: false, error: 'Forbidden', message: err.message });
+  return res.status(500).json({ error: 'Could not rename projects', message: err?.message });
+};
+const deskOnly = (req: Request, res: Response) => {
+  if (isDeskRole(req.user?.role)) return true;
+  res.status(403).json({ error: 'Forbidden', message: 'Only an owner or a manager can rename projects.', code: 'ROLE_REQUIRED' });
+  return false;
+};
+propertiesRouter.post('/projects/rename/preview', async (req: Request, res: Response) => {
+  if (!deskOnly(req, res)) return;
+  try { return res.status(200).json({ success: true, ...(await previewRename(req.body)) }); }
+  catch (err: any) { return renameFailed(res, err); }
+});
+propertiesRouter.post('/projects/rename', async (req: Request, res: Response) => {
+  if (!deskOnly(req, res)) return;
+  try { return res.status(200).json({ success: true, ...(await renameProjects(req.body, actor(req))) }); }
+  catch (err: any) { return renameFailed(res, err); }
+});
+propertiesRouter.get('/projects/renames', async (req: Request, res: Response) => {
+  try { return res.status(200).json({ success: true, data: await listUndoableRenames() }); }
+  catch (err: any) { return renameFailed(res, err); }
+});
+propertiesRouter.post('/projects/renames/:id/undo', async (req: Request, res: Response) => {
+  if (!deskOnly(req, res)) return;
+  try { return res.status(200).json({ success: true, ...(await undoRename(req.params.id, actor(req))) }); }
+  catch (err: any) { return renameFailed(res, err); }
 });
 
 propertiesRouter.get('/projects/:key', async (req: Request, res: Response) => {

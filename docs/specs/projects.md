@@ -1,6 +1,11 @@
 # Projects: a description and photos, and one name per project
 
-Status: 🧭 planning, for Om to decide (§9). No code changed for this.
+Status: rename built (§5 Select + Rename on both card grids, §6 preview /
+rename / renames / undo, `crm_project_renames`), with D1 no, D3 no, D6 30
+days. As built: no `projects_before` column (there is no `crm_projects` yet);
+properties match on `PROJECT_KEY`, the same key as the card; Undo from the
+card refuses while a later rename changed the same rows. Description, photos
+(D2, D4, D5) and Tidy names (D7) are not built.
 
 **Who it is for.**
 - **The firm's owner, at a desk.** Writes a project's description and adds its

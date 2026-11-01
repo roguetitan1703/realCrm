@@ -801,6 +801,13 @@ export const api = {
     return request(`/properties/projects${q ? `?${q}` : ''}`)
   },
   getProject: (key) => request(`/properties/projects/${encodeURIComponent(key)}`),
+  // Rename projects ("merge"): every property and calling row on the picked
+  // cards takes one name. `expect` is the counts the preview showed; the
+  // server answers 409 with the new counts if the rows have moved since.
+  previewProjectRename: (keys, to) => request('/properties/projects/rename/preview', { method: 'POST', body: JSON.stringify({ keys, to }) }),
+  renameProjects: (keys, to, expect) => request('/properties/projects/rename', { method: 'POST', body: JSON.stringify({ keys, to, expect }) }),
+  listProjectRenames: () => request('/properties/projects/renames'),
+  undoProjectRename: (id) => request(`/properties/projects/renames/${encodeURIComponent(id)}/undo`, { method: 'POST' }),
   createProperty: (prop) => request('/properties', { method: 'POST', body: JSON.stringify(prop) }),
 
   // Real 30-day sales metrics for one agent (calls / site visits / win rate)
