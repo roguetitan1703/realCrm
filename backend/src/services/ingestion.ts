@@ -564,6 +564,24 @@ export function enquiryTime(portal: any, receivedAt?: Date | string | null): str
 }
 
 /**
+ * ONE NUMBER AT A TIME. landEnquiry looks the number up, then creates a lead
+ * if nobody has it. Two pushes for one buyer in the same instant (99acres sent
+ * mahalaxmi's Umesh twice, 0.14s apart, under two enquiry ids) both looked
+ * before either created, and the firm got two leads on one number. Pushes for
+ * the same last ten digits now wait for the one ahead. In-process: the API is
+ * one process.
+ */
+const landing = new Map<string, Promise<unknown>>();
+function oneAtATime<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const ahead = landing.get(key) || Promise.resolve();
+  const run = ahead.catch(() => {}).then(fn);
+  const tail = run.catch(() => {});
+  landing.set(key, tail);
+  tail.then(() => { if (landing.get(key) === tail) landing.delete(key); });
+  return run;
+}
+
+/**
  * AN ENQUIRY WITH A NUMBER → A LEAD, or a repeat on the lead that number
  * already is. The one path every inbound enquiry takes: a portal push (above)
  * and the firm's public catalogue form (routes/public.ts, source "Catalogue").
@@ -596,7 +614,8 @@ export async function landEnquiry(args: {
   const mark = async (status: 'parsed' | 'merged' | 'failed' | 'ignored', extra: { leadId?: string | null; error?: string | null } = {}) => {
     if (inboxId) await markInbox(inboxId, status, { ...extra, claim: args.claim });
   };
-  return await runWithContext(
+  const digits = String(args.lead?.phone ?? '').replace(/\D/g, '').slice(-10);
+  return await oneAtATime(`${tenantId}:${digits || crypto.randomUUID()}`, () => runWithContext(
     {
       tenantId, userId: null, role: 'system',
       actorType: 'system', actorLabel: `ingest:${integration.provider}`,
@@ -860,7 +879,7 @@ export async function landEnquiry(args: {
       await mark('parsed', { leadId: created?.id || null });
       return { status: 'ingested', leadId: created?.id || null };
     },
-  );
+  ));
 }
 
 /**
