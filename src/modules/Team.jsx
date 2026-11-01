@@ -232,7 +232,7 @@ function AccessPanel({ store }) {
       {edit && <EditUserModal store={store} user={edit} canManage={canManage} onClose={() => setEdit(null)}
         onDone={() => { setEdit(null); store.reloadServer?.(); load() }} />}
       {resetTarget && <ResetPasswordModal store={store} user={resetTarget} onClose={() => setResetTarget(null)}
-        onDone={(res) => { const u = resetTarget; setResetTarget(null); store.reloadServer?.(); load(); setReveal({ title: 'Password reset', name: u.name, handle: u.login_id || u.email, byId: !!u.login_id, password: res.password }) }} />}
+        onDone={(res) => { const u = resetTarget; setResetTarget(null); store.reloadServer?.(); load(); setReveal({ title: 'Password reset', name: u.name, handle: u.login_id || u.email, byId: !!u.login_id, password: res.password, mustChange: res.mustChange }) }} />}
       {reveal && <RevealCard data={reveal} store={store} onClose={() => setReveal(null)} />}
       {suspending && <SuspendModal store={store} user={suspending}
         onClose={() => setSuspending(null)}
@@ -308,9 +308,12 @@ function RevealCard({ data, store, onClose }) {
   const locked = left > 0
   const tryClose = () => { if (!locked) onClose() }
   const idLabel = data.byId ? 'User ID' : 'Email'
+  // Only a reset can skip the forced change; adding and reseating always set it.
+  const mustChange = data.mustChange !== false
+  const pwLabel = mustChange ? 'Temporary password' : 'Password'
   const copy = () => {
     const firm = store.state.settings?.firmName || 'Workspace'
-    const text = `${firm} sign-in\n${workspaceUrl()}\n${idLabel}: ${data.handle}\nTemporary password: ${data.password}`
+    const text = `${firm} sign-in\n${workspaceUrl()}\n${idLabel}: ${data.handle}\n${pwLabel}: ${data.password}`
     copyText(text).then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500) } })
   }
   return (
@@ -320,7 +323,7 @@ function RevealCard({ data, store, onClose }) {
           <button className="btn btn-icon btn-quiet" onClick={tryClose} disabled={locked} style={locked ? { opacity: .4, cursor: 'default' } : undefined}><Icon name="x" /></button>
         </div>
         <div className="m-content">
-          <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Give these to <b style={{ color: 'var(--ink)' }}>{data.name}</b>. The password <b style={{ color: 'var(--ink)' }}>won't be shown again</b>. Copy it now. They set their own on first sign-in.</div>
+          <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>Give these to <b style={{ color: 'var(--ink)' }}>{data.name}</b>. The password <b style={{ color: 'var(--ink)' }}>won't be shown again</b>. Copy it now.{mustChange ? ' They set their own on first sign-in.' : ''}</div>
           {/* What moved with the seat, stated — not left to be discovered. */}
           {data.note && <div className="u-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>They take over {data.note}.</div>}
           <div style={{ background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
@@ -328,7 +331,7 @@ function RevealCard({ data, store, onClose }) {
           </div>
           {/* Password is the thing that matters — make it the hero, not a table row. */}
           <div style={{ marginBottom: 14 }}>
-            <div className="u-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>Temporary password</div>
+            <div className="u-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>{pwLabel}</div>
             <div className="mono-num" style={{ fontSize: 20, fontWeight: 700, letterSpacing: '.02em', background: 'var(--accent-wash)', color: 'var(--accent-ink)', border: '1px solid var(--accent-line)', borderRadius: 10, padding: '12px 14px', textAlign: 'center', wordBreak: 'break-all' }}>{data.password}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -551,27 +554,28 @@ function prettyUA(ua) {
 }
 
 function ResetPasswordModal({ store, user, onClose, onDone }) {
-  const [password, setPassword] = useState('Firm@2026')
+  // Empty on purpose: a pre-filled value is the same password at every firm.
+  // Left blank, the server generates one for this reset.
+  const [password, setPassword] = useState('')
   const [mustChange, setMustChange] = useState(true)
   const [saving, setSaving] = useState(false)
 
   const submit = (e) => {
     if (e) e.preventDefault()
-    if (!password.trim()) { store.toast('Enter a new password.', 'warn'); return }
     setSaving(true)
     api.adminResetPassword(user.id, password.trim(), mustChange)
-      .then(() => onDone({ password: password.trim(), mustChange }))
+      .then(res => onDone({ password: res?.initialPassword || password.trim(), mustChange }))
       .catch(err => { store.toast(cleanErr(err), 'warn'); setSaving(false) })
   }
 
   return (
     <Modal title={`Reset password: ${user.name}`} onClose={onClose} width={420}>
           <div className="u-muted" style={{ fontSize: 13, marginBottom: 14 }}>
-            Set a custom new password for <b style={{ color: 'var(--ink)' }}>{user.name}</b> ({user.login_id || user.email}).
+            Set a new password for <b style={{ color: 'var(--ink)' }}>{user.name}</b> ({user.login_id || user.email}).
           </div>
 
           <Field label="New Password">
-            <Input value={password} onChange={e => setPassword(e.target.value)} placeholder="Type new password" autoFocus />
+            <Input value={password} onChange={e => setPassword(e.target.value)} placeholder="Leave blank to generate one" autoFocus />
           </Field>
 
           <div style={{ marginBottom: 18, background: 'var(--card-2)', padding: 12, borderRadius: 10, border: '1px solid var(--line)' }}>

@@ -176,9 +176,16 @@ function sessionExpiryISO(): string {
   return new Date(Date.now() + SESSION_TTL_DAYS * 86400000).toISOString();
 }
 
+// Passwords this product itself once put in a box for people (the Team
+// screen's reset pre-filled `Firm@2026`, shipped in the public bundle). Every
+// firm got the same one, so it is the first thing anyone guesses. Not a
+// dictionary: only what we handed out.
+const SHIPPED_DEFAULTS = new Set(['firm@2026']);
+
 /** Minimum strength for a user-chosen password. Returns a message or null. */
 export function passwordIssue(pw: string): string | null {
   if (!pw || String(pw).length < 8) return 'Password must be at least 8 characters.';
+  if (SHIPPED_DEFAULTS.has(String(pw).trim().toLowerCase())) return 'That password was a shared default. Choose another.';
   return null;
 }
 
