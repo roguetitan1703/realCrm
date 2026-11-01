@@ -113,7 +113,25 @@ export function followUpLabel(fu) {
       return `${date}, ${time}`
     }
   }
-  return [fu.date, fu.time].filter(Boolean).join(' · ')
+  // No moment was ever stored: the old text ("Tomorrow") is a word that went
+  // stale the day after it was typed, so it is not shown. Not overdue either.
+  return TIME_NOT_SET
+}
+
+/** What a booking with no stored moment reads as. One string, one place. */
+export const TIME_NOT_SET = 'Time not set'
+/** A lead whose status is Callback — compared case-insensitively. */
+export const isCallbackLead = (lead) => String(lead?.stage || '').trim().toLowerCase() === 'callback'
+/**
+ * WHEN A LEAD'S NEXT STEP IS — the one line every list and record reads.
+ * A lead with a booking says when (or "Time not set" when it has no moment);
+ * a Callback lead with no booking at all says "Time not set" too; anything
+ * else says nothing ('').
+ */
+export function nextWhenLabel(lead) {
+  const fu = nextStepOf(lead)
+  if (fu) return followUpLabel(fu)
+  return isCallbackLead(lead) && !isTerminal(lead.stage) ? TIME_NOT_SET : ''
 }
 
 /** A follow-up whose moment has passed. Unknowable for the legacy string rows,

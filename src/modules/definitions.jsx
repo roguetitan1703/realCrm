@@ -26,7 +26,7 @@ import { OwnerCell, StageCell, MediaNote, mediaCount } from '../components/colle
 import { FinishLead, FinishOwner } from '../components/Agreements.jsx'
 import { finalStageOf } from '../data/pipelineRoles.js'
 import { getNestedValue } from '../components/ModuleFields.jsx'
-import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, dayLabel, arrivedOn, flatOf, dealWord, followUpLabel, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
+import { asList, reqShort, reqConfigLabel, latestPlus, budgetRange, hasBudget, budgetOf, quotedLine, unitLabel, thumbTint, initials, projectOf, fmtMoney, configLabel, callbackSignal, whenLabel, dayLabel, arrivedOn, flatOf, dealWord, followUpLabel, nextWhenLabel, TIME_NOT_SET, followUpOverdue, followUpAction, nextStepOf } from '../lib/format.js'
 import { getPref } from '../lib/prefs.js'
 import { moneyFull } from '../lib/locale.js'
 import { formatPhone, personLabel } from '../lib/phone.js'
@@ -346,7 +346,7 @@ export const LEADS_DEF = {
       // nextStepOf, not l.followUp: a rejected lead keeps whatever was booked
       // before it was rejected, and this column is what is still owed.
       const fu = nextStepOf(l)
-      const nf = fu ? followUpLabel(fu) : '—'
+      const nf = nextWhenLabel(l) || '—'
       return followUpOverdue(fu) ? <Overdue>{nf}</Overdue> : <span className="cell-quiet mono-num">{nf}</span>
     } },
     // WHEN THEY LAST ASKED. Sortable, because "show me this week's" is the
@@ -451,7 +451,7 @@ export const LEADS_DEF = {
     // that draws the card, so neither list is guessing about the other.
     { id: 'schedule', tier: 'quick', icon: 'calendar', when: (l, store, ctx) => !ctx?.onRail,
       label: (l) => (l.followUp ? 'Reschedule follow-up' : 'Schedule follow-up'),
-      sub: (l) => (nextStepOf(l) ? followUpLabel(l.followUp) : null),
+      sub: (l) => nextWhenLabel(l) || null,
       run: (store, l) => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id }) },
     // THERE IS NO "MARK FOLLOW-UP DONE". It was a tick in this menu that
     // deleted the appointment and stored nothing about it — no outcome, no
@@ -556,6 +556,7 @@ export const LEADS_DEF = {
               the tab that selects it cannot describe the same lead
               differently. */}
           {followUpOverdue(nextStepOf(l)) ? <span className="prow-flag"><span className="dot" />Follow-up overdue</span> : null}
+          {nextWhenLabel(l) === TIME_NOT_SET ? <span className="cell-quiet">{TIME_NOT_SET}</span> : null}
           <StageCell
             record={l} store={store}
             stages={(store.state.settings.stages || []).filter(s => s !== REJECTED_STATUS)}

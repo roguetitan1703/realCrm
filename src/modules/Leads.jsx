@@ -3,7 +3,7 @@ import { ListLayout } from '../layouts/layouts.jsx'
 import { ModuleListView, ModuleCards, ModuleTable, SelectDropdown, useSelection } from '../components/collections.jsx'
 import { ModuleDetail } from '../components/ModuleDetail.jsx'
 import { Button, Timeline, Avatar, CappedList } from '../components/primitives.jsx'
-import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, followUpOverdue, followUpAction, nextStepOf, money, dealWord } from '../lib/format.js'
+import { asList, initials, unitLabel, budgetRange, whenLabel, followUpLabel, nextWhenLabel, isCallbackLead, followUpOverdue, followUpAction, nextStepOf, money, dealWord } from '../lib/format.js'
 import { personLabel, telLink } from '../lib/phone.js'
 import { matchesForLead } from '../lib/matching.js'
 import { useRecord } from '../lib/useRecord.js'
@@ -564,6 +564,11 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
             </button>
           ) : null}
         </div>
+      ) : isCallbackLead(l) && nextWhenLabel(l) ? (
+        <div className="fu-active"><div>
+          <div className="fu-title">Callback</div>
+          <div className="fu-when">{nextWhenLabel(l)}</div>
+        </div></div>
       ) : <div className="detail-empty">No follow-up scheduled.</div>}
       <Button variant="secondary" size="sm" block icon="calendar" onClick={() => store.openModal({ kind: 'scheduleFollowUp', leadId: l.id })}>
         {nextStep ? 'Reschedule follow-up' : 'Schedule follow-up'}
@@ -581,7 +586,12 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
       <span className="rh-next-tag">{followUpOverdue(nextStep) ? 'Overdue' : 'Next'}</span>
       <span className="rh-next-body">{followUpAction(nextStep)} · {followUpLabel(nextStep)}</span>
     </div>
-  ) : null
+  ) : (nextWhenLabel(l) ? (
+    <div className="rh-next">
+      <span className="rh-next-tag">Next</span>
+      <span className="rh-next-body">Callback · {nextWhenLabel(l)}</span>
+    </div>
+  ) : null)
 
   const sections = [
     // THE DEAL THEY CLOSED — the agreement's card, where its file is attached

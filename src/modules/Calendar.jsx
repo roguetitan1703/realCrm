@@ -3,7 +3,7 @@ import { Empty, PageHeader } from '../components/primitives.jsx'
 import Icon from '../components/Icon.jsx'
 import { api } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
-import { followUpOverdue, followUpAction } from '../lib/format.js'
+import { followUpOverdue, followUpAction, TIME_NOT_SET } from '../lib/format.js'
 import { personLabel } from '../lib/phone.js'
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -60,7 +60,7 @@ export default function Calendar({ store, go, topBar }) {
     const overdue = followUpOverdue(l.followUp)
     // A booking can carry `at` and no `time` string (demo-showcase has 104 follow-ups,
     // many without one). Left empty rather than derived: the row shows no time.
-    return { lead: l, date, key: ymd(date), time: l.followUp.time || '', action: followUpAction(l.followUp), isVisit, overdue, agentId: l.agentId }
+    return { lead: l, date, key: ymd(date), time: l.followUp.at ? (l.followUp.time || '') : TIME_NOT_SET, action: followUpAction(l.followUp), isVisit, overdue, agentId: l.agentId }
   }).filter(e => e.date && !Number.isNaN(e.date.getTime()))
 
   // WHAT IS STILL AHEAD, soonest first.
