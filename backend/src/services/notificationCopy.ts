@@ -142,9 +142,13 @@ export const COPY: Builders = {
     body: facts(d.name, d.author && `by ${d.author}`),
   }),
 
-  owner_assigned: (d) => ({
-    title: `${plural(d.n, 'owner')} assigned to you`,
-  }),
+  // One owner arrives by name ({ name }, notifyHandedOver and the sweeps'
+  // single case); several by count. Reading d.n alone titled the single one
+  // "undefined owners assigned to you".
+  owner_assigned: (d) =>
+    d.n != null
+      ? { title: `${plural(d.n, 'owner')} assigned to you` }
+      : { title: 'Owner assigned to you', body: facts(d.name) },
 
   // A buyer on a shared link (listing-pages.md §A). "Rahul is interested" when
   // the link was sent to Rahul; "Someone on Rahul's link" when the tap came
