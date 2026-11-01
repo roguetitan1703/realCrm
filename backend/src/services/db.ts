@@ -1364,12 +1364,13 @@ export async function migrateSharing(): Promise<void> {
 /**
  * WHAT A FIRM PAYS DELPAT (docs/specs/billing.md). Written by the superadmin
  * console only; status is derived in services/billing.ts, never stored. New
- * tables, IF NOT EXISTS: nothing is rewritten, so no runOnce gate.
+ * tables, IF NOT EXISTS: nothing is rewritten, so no runOnce gate. Keyed to
+ * the firm: deleting a tenant row takes its billing with it.
  */
 async function createBillingTables(): Promise<void> {
   await sql`
     CREATE TABLE IF NOT EXISTS tenant_billing (
-      tenant_id TEXT PRIMARY KEY,
+      tenant_id TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
       plan_name TEXT NOT NULL,
       amount NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
       cycle TEXT NOT NULL CHECK (cycle IN ('monthly', 'quarterly', 'yearly')),
@@ -1384,7 +1385,7 @@ async function createBillingTables(): Promise<void> {
   await sql`
     CREATE TABLE IF NOT EXISTS tenant_billing_payments (
       id TEXT PRIMARY KEY,
-      tenant_id TEXT NOT NULL,
+      tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
       paid_on DATE NOT NULL,
       amount NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
       note TEXT,
@@ -1394,6 +1395,12 @@ async function createBillingTables(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
+  // The keys, for a database that made the tables before they carried them
+  // (development, 1 Nov). A no-op where CREATE TABLE above made them.
+  for (const [table, name] of [['tenant_billing', 'tenant_billing_tenant_fk'], ['tenant_billing_payments', 'tenant_billing_payments_tenant_fk']]) {
+    const has = await sql`SELECT 1 FROM pg_constraint WHERE conrelid = ${table}::regclass AND contype = 'f' LIMIT 1`;
+    if (!has.length) await sql`ALTER TABLE ${sql(table)} ADD CONSTRAINT ${sql(name)} FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE`;
+  }
   await sql`CREATE INDEX IF NOT EXISTS idx_billing_payments ON tenant_billing_payments (tenant_id, paid_on DESC, created_at DESC);`;
 }
 

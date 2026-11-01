@@ -17,11 +17,16 @@
 import { randomUUID } from 'crypto';
 import { sql } from './db.js';
 import { getContext } from './context.js';
-import { isDeskRole } from '../lib/permissions.js';
 
 export const CYCLES = ['monthly', 'quarterly', 'yearly'] as const;
 export type Cycle = typeof CYCLES[number];
 const CYCLE_INTERVAL: Record<Cycle, string> = { monthly: '1 month', quarterly: '3 months', yearly: '1 year' };
+
+/**
+ * Who may see what a firm pays: its owner and managers, as with the ledger
+ * (/workspace/audit). Not every desk role: `admin` is one, and is not told.
+ */
+export const seesBilling = (role?: string | null) => role === 'owner' || role === 'manager';
 
 /** Delpat bills in India; "today" for a due date is Delpat's today. */
 const BILLING_TZ = 'Asia/Kolkata';
@@ -68,7 +73,7 @@ export async function billingNotice(): Promise<any | null> {
   if (!ctx?.tenantId || !ctx.userId) return null;
   const s = await readSubscription(ctx.tenantId);
   if (!s) return null;
-  if (isDeskRole(ctx.role)) {
+  if (seesBilling(ctx.role)) {
     return {
       status: s.status, plan: s.plan_name, amount: s.amount, cycle: s.cycle, due_on: s.due_on,
       show: s.status === 'overdue' || s.status === 'due_soon',
@@ -81,41 +86,63 @@ export type SubscriptionInput = {
   plan_name: string; amount: number; cycle: Cycle; due_on: string;
   paid_through: string | null; notify_days_before: number;
 };
+/** The due date the console was showing when it opened the form; null when setting one up. */
+export type Expected = { due_on: string | null };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const isDate = (v: any) => typeof v === 'string' && DATE_RE.test(v) && !Number.isNaN(Date.parse(v));
-const isAmount = (v: any) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1e10;
+/** A real calendar day: Date.parse takes 2026-02-31 and rolls it into March. */
+const isDate = (v: any) => {
+  if (typeof v !== 'string' || !DATE_RE.test(v)) return false;
+  const [y, m, d] = v.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return y >= 2000 && y <= 2100 && t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+};
+/** Rupees, more than zero, and well inside NUMERIC(12,2). */
+const isAmount = (v: any) => typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 1e9;
+/** Today on Delpat's clock (IST, no daylight saving), as YYYY-MM-DD. */
+const todayIST = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 
 /** Every field the console sends, checked. A sent body is the whole subscription. */
-export function parseSubscription(b: any): { ok: true; value: SubscriptionInput } | { ok: false; error: string } {
+export function parseSubscription(b: any): { ok: true; value: SubscriptionInput; expected: Expected } | { ok: false; error: string } {
   const plan = typeof b?.plan_name === 'string' ? b.plan_name.trim() : '';
   if (!plan || plan.length > 80) return { ok: false, error: 'Plan name is required' };
+  const expect = b?.expect_due_on == null || b.expect_due_on === '' ? null : b.expect_due_on;
+  if (expect !== null && !isDate(expect)) return { ok: false, error: 'Reload and try again' };
   const amount = Number(b?.amount);
-  if (b?.amount === '' || b?.amount == null || !isAmount(amount)) return { ok: false, error: 'Amount must be a number of rupees' };
+  if (b?.amount === '' || b?.amount == null || !isAmount(amount)) return { ok: false, error: 'Amount must be from ₹0.01 to ₹1,00,00,00,000' };
   if (!CYCLES.includes(b?.cycle)) return { ok: false, error: 'Billing cycle must be monthly, quarterly or yearly' };
-  if (!isDate(b?.due_on)) return { ok: false, error: 'Due date is required' };
+  if (!isDate(b?.due_on)) return { ok: false, error: 'Due date must be a real date' };
   const paid = b?.paid_through == null || b.paid_through === '' ? null : b.paid_through;
   if (paid !== null && !isDate(paid)) return { ok: false, error: 'Paid through must be a date' };
   // Paid through is the end of the last paid period; the due date starts the next.
   if (paid !== null && paid >= b.due_on) return { ok: false, error: 'Paid through must be before the due date' };
   const days = b?.notify_days_before == null || b.notify_days_before === '' ? 0 : Number(b.notify_days_before);
   if (!Number.isInteger(days) || days < 0 || days > 60) return { ok: false, error: 'Days before must be 0 to 60' };
-  return { ok: true, value: { plan_name: plan, amount, cycle: b.cycle, due_on: b.due_on, paid_through: paid, notify_days_before: days } };
+  return { ok: true, value: { plan_name: plan, amount, cycle: b.cycle, due_on: b.due_on, paid_through: paid, notify_days_before: days }, expected: { due_on: expect } };
 }
 
-/** Create or replace a firm's subscription. Returns the row before and after. */
-export async function saveSubscription(tenantId: string, v: SubscriptionInput, by: string) {
+/**
+ * Create or replace a firm's subscription. Returns the row before and after.
+ * The form says which due date it was looking at; if a Mark paid (or another
+ * edit) has moved it since, nothing is written, or the save would put the
+ * paid period back as due.
+ */
+export async function saveSubscription(tenantId: string, v: SubscriptionInput, expected: Expected, by: string)
+  : Promise<{ ok: true; before: any; after: SubscriptionInput } | { ok: false; status: 409; error: string }> {
   return await sql.begin(async (tx: any) => {
     const [before] = await tx`SELECT plan_name, amount::float8 AS amount, cycle, to_char(due_on, 'YYYY-MM-DD') AS due_on,
         to_char(paid_through, 'YYYY-MM-DD') AS paid_through, notify_days_before
       FROM tenant_billing WHERE tenant_id = ${tenantId} FOR UPDATE`;
+    if ((before?.due_on ?? null) !== expected.due_on) {
+      return { ok: false, status: 409, error: 'Billing changed elsewhere. Reload and try again.' } as const;
+    }
     await tx`
       INSERT INTO tenant_billing (tenant_id, plan_name, amount, cycle, due_on, paid_through, notify_days_before, updated_by)
       VALUES (${tenantId}, ${v.plan_name}, ${v.amount}, ${v.cycle}, ${v.due_on}, ${v.paid_through}, ${v.notify_days_before}, ${by})
       ON CONFLICT (tenant_id) DO UPDATE SET plan_name = EXCLUDED.plan_name, amount = EXCLUDED.amount, cycle = EXCLUDED.cycle,
         due_on = EXCLUDED.due_on, paid_through = EXCLUDED.paid_through, notify_days_before = EXCLUDED.notify_days_before,
         updated_by = EXCLUDED.updated_by, updated_at = NOW()`;
-    return { before: before || null, after: v };
+    return { ok: true, before: before || null, after: v } as const;
   });
 }
 
@@ -154,8 +181,9 @@ export async function recordPayment(tenantId: string, p: { expectDueOn: string; 
 export function parsePayment(b: any): { ok: true; value: { expectDueOn: string; paidOn: string; amount: number; note: string | null } } | { ok: false; error: string } {
   if (!isDate(b?.due_on)) return { ok: false, error: 'The due date being paid is required' };
   if (!isDate(b?.paid_on)) return { ok: false, error: 'Paid on must be a date' };
+  if (b.paid_on > todayIST()) return { ok: false, error: 'Paid on cannot be in the future' };
   const amount = Number(b?.amount);
-  if (b?.amount === '' || b?.amount == null || !isAmount(amount)) return { ok: false, error: 'Amount must be a number of rupees' };
+  if (b?.amount === '' || b?.amount == null || !isAmount(amount)) return { ok: false, error: 'Amount must be from ₹0.01 to ₹1,00,00,00,000' };
   const note = typeof b?.note === 'string' && b.note.trim() ? b.note.trim().slice(0, 500) : null;
   return { ok: true, value: { expectDueOn: b.due_on, paidOn: b.paid_on, amount, note } };
 }

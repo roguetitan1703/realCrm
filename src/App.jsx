@@ -293,7 +293,7 @@ export default function App() {
       {support ? <SupportBar support={support} onClose={() => store.logout()} /> : <PushRow store={store} />}
       <EnvMark />
       {state.dataStale && <StaleBanner />}
-      <BillingBar billing={state.billing} onOpen={isDeskRole(state.role) ? () => go('settings', { settingsSection: 'billing' }) : undefined} />
+      <BillingBar billing={state.billing} onOpen={state.billing?.plan ? () => go('settings', { settingsSection: 'billing' }) : undefined} />
       <AppShell nav={nav} active={effectiveScreen} activeSub={sel.contactsTab || 'owners'} onNav={go} footer={footer} topbar={null} firmName={state.settings.firmName} logoUrl={state.brand?.logoUrl} sub={state.settings.city || state.brand?.city || ''}>
         <Screen key={`${effectiveScreen}-${sel.leadId || ''}-${sel.ownerId || ''}-${sel.propId || ''}-${sel.contactId || ''}`} {...ctx} />
       </AppShell>

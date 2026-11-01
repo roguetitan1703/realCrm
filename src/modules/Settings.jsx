@@ -44,7 +44,7 @@ const NAV = [
 export default function Settings({ store, topBar, sel }) {
   const { settings, agents, routing, inactiveAgentIds } = store.state
   const nav = (isDeskRole(store.state.role) ? NAV : NAV.filter(n => n.everyone))
-    .filter(n => !n.billing || store.state.billing)
+    .filter(n => !n.billing || store.state.billing?.plan)
   // Routing edits are held until Save, and held HERE — moving to another
   // Settings section and back is not an answer about whether to keep them.
   const [routingDraft, setRoutingDraft] = useState({})

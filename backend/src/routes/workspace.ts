@@ -19,7 +19,7 @@ import { sql } from '../services/db';
 import { getContext } from '../services/context';
 import { isDeskRole } from '../lib/permissions';
 import { listAudit, verifyTenantLedger } from '../services/audit';
-import { billingNotice, readSubscription, listPayments } from '../services/billing';
+import { billingNotice, readSubscription, listPayments, seesBilling } from '../services/billing';
 
 export const workspaceRouter = Router();
 
@@ -263,7 +263,7 @@ workspaceRouter.get('/pulse', async (req: Request, res: Response) => {
  * payment are not sent. Writes are the superadmin console's alone.
  */
 workspaceRouter.get('/billing', async (req: Request, res: Response) => {
-  if (!isDeskRole(getContext()?.role)) return res.status(403).json({ error: 'Owner or manager access required' });
+  if (!seesBilling(getContext()?.role)) return res.status(403).json({ error: 'Owner or manager access required' });
   try {
     const t = getContext()!.tenantId;
     const [subscription, payments] = await Promise.all([readSubscription(t), listPayments(t, 12, false)]);

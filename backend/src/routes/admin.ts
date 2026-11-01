@@ -257,7 +257,9 @@ adminRouter.put('/firms/:id/billing', async (req: Request, res: Response) => {
   if (!parsed.ok) return res.status(400).json({ error: parsed.error });
   try {
     const v = parsed.value;
-    const { before } = await saveSubscription(t.id, v, saOf(req).superadmin_id);
+    const saved = await saveSubscription(t.id, v, parsed.expected, saOf(req).superadmin_id);
+    if (!saved.ok) return res.status(saved.status).json({ error: saved.error });
+    const before = saved.before;
     await firmAudit(req, t.id, 'billing.set',
       `${saOf(req).name} (Delpat) ${before ? 'changed' : 'set up'} billing: ${v.plan_name}, ₹${v.amount} ${v.cycle}, due ${v.due_on}`,
       { type: 'billing', id: t.id }, { before, after: v });

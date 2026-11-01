@@ -14,8 +14,9 @@ can fix it.
 ## 1. Decisions
 
 1. **Delpat writes, the firm reads.** Only the superadmin console writes a
-   subscription or a payment. A firm sees its own, read only; an agent sees no
-   amount and no plan.
+   subscription or a payment. A firm's owner and managers see its own, read
+   only (`seesBilling`, as for the ledger; the `admin` role is not included).
+   Anyone else sees no amount and no plan.
 2. **No row, nothing anywhere.** A firm with no subscription row has no bar, no
    Billing section and no status in the console beyond "Not set up". Absence is
    never read as overdue (CLAUDE.md §3.1).
@@ -32,7 +33,11 @@ can fix it.
 5. **Mark paid rolls one period.** The payment covers `due_on` to
    `due_on + cycle − 1 day`: `paid_through` becomes that end, `due_on` moves on
    by one cycle. Two periods behind needs two payments. The request names the
-   `due_on` it is paying, so a double click cannot roll twice (409).
+   `due_on` it is paying, so a double click cannot roll twice (409). Edit
+   sends the `due_on` it opened on the same way, so a form left open across
+   a Mark paid cannot put the paid period back as due (409, "changed
+   elsewhere"). Amounts are more than ₹0 and at most ₹100 crore; dates are
+   real calendar days; a payment cannot be dated after today (IST).
    Month arithmetic is Postgres's: a 31 Jan due date becomes 28 Feb, then 28 Mar;
    Delpat edits the due date if that matters.
 6. **Payments are append-only.** No edit, no delete; a mistake is corrected by
@@ -66,6 +71,8 @@ tenant_billing_payments   one row per payment recorded
 
 Created in `initSchema()` (`createBillingTables`), `IF NOT EXISTS` DDL only: no
 row is rewritten, so there is nothing for a `runOnce` gate to protect. Both
+tables carry `tenant_id REFERENCES tenants(id) ON DELETE CASCADE` (added by
+ALTER where the tables already existed without it). Both
 tables are in `devData.ts` SKIP_TABLES — `dev:refresh` must not move a due date.
 Rollback: drop the two tables; nothing else reads them.
 

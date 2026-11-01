@@ -32,7 +32,8 @@ export default function Billing({ firmId }) {
     e.preventDefault()
     setBusy(true); setErr('')
     try {
-      await api.adminSaveBilling(firmId, { ...form, amount: Number(form.amount), notify_days_before: Number(form.notify_days_before || 0), paid_through: form.paid_through || null })
+      // The due date this form opened on: if a Mark paid moved it since, the server refuses.
+      await api.adminSaveBilling(firmId, { ...form, expect_due_on: sub?.due_on || null, amount: Number(form.amount), notify_days_before: Number(form.notify_days_before || 0), paid_through: form.paid_through || null })
       await load(); setForm(null)
     } catch (e2) { setErr(e2.message || 'Could not save') } finally { setBusy(false) }
   }
@@ -73,7 +74,7 @@ export default function Billing({ firmId }) {
         {form && (
           <form className="bill-form" onSubmit={save}>
             <label>Plan<input required value={form.plan_name} onChange={set('plan_name')} /></label>
-            <label>Amount (₹)<input required type="number" min="0" step="0.01" value={form.amount} onChange={set('amount')} /></label>
+            <label>Amount (₹)<input required type="number" min="0.01" step="0.01" value={form.amount} onChange={set('amount')} /></label>
             <label>Billing cycle
               <select value={form.cycle} onChange={set('cycle')}>
                 {Object.entries(CYCLE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
@@ -90,8 +91,8 @@ export default function Billing({ firmId }) {
         )}
         {pay && (
           <form className="bill-form" onSubmit={markPaid}>
-            <label>Paid on<input required type="date" value={pay.paid_on} onChange={setP('paid_on')} /></label>
-            <label>Amount (₹)<input required type="number" min="0" step="0.01" value={pay.amount} onChange={setP('amount')} /></label>
+            <label>Paid on<input required type="date" max={todayIso()} value={pay.paid_on} onChange={setP('paid_on')} /></label>
+            <label>Amount (₹)<input required type="number" min="0.01" step="0.01" value={pay.amount} onChange={setP('amount')} /></label>
             <label className="wide">Note<input value={pay.note} onChange={setP('note')} maxLength={500} /></label>
             <div className="bill-form-acts">
               <span className="adm-dim">For {billingDate(sub.due_on, { year: true })}</span>
