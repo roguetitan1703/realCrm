@@ -11,7 +11,7 @@ Every fixed set of choices in the app: what it is called, where a person meets i
 - **Values:** New, Follow-Up, Callback, Call Not Received, Interested, Site Visit, Deal Closed, Rejected.
 - **Default:** New (the first one; `NEW_STATUS`).
 - **Firm can change:** yes, except Deal Closed and Rejected, which are fixed. Those two can carry a different shown name (`stageLabels`), nothing else. The others can be renamed, added, removed (leads move to the first stage) and reordered. A new firm starts with the eight above.
-- **Code:** `src/data/leadStatus.js` `LEAD_STATUSES`, `TERMINAL_STATUSES`; `backend/src/services/store.ts` `LEAD_STATUSES` (a second copy, see Disagreements); roles in `src/data/pipelineRoles.js` (`LABELLED_LEAD_STAGES`, `DEFAULT_FINAL.leads`); the firm's own list is `crm_settings.stages`.
+- **Code:** `src/data/leadStatus.js` `LEAD_STATUSES`, `TERMINAL_STATUSES`; `backend/src/services/store.ts` `LEAD_STATUSES` (a second copy, checked equal by `npm run check:vocab`); roles in `src/data/pipelineRoles.js` (`LABELLED_LEAD_STAGES`, `DEFAULT_FINAL.leads`); the firm's own list is `crm_settings.stages`.
 
 ### Rejection reasons (leads)
 - **Shows:** "Mark as rejected" sheet.
@@ -46,10 +46,10 @@ Every fixed set of choices in the app: what it is called, where a person meets i
 - **Values:** Price / budget, Vaastu / facing, Floor, Location, Noise, Size / layout, Furnishing, Parking.
 - **Default:** Price / budget (first).
 - **Firm can change:** no.
-- **Code:** `src/modules/Modals.jsx` `REJECT_REASONS` (local to the file).
+- **Code:** `src/data/leadStatus.js` `VISIT_REJECT_REASONS`.
 
 ### Follow-up kinds
-- **Shows:** schedule-a-follow-up sheet. The rail Scheduler uses its own three (Call, Site visit, Meeting).
+- **Shows:** schedule-a-follow-up sheet. One list, `src/data/followUpKinds.js` `FOLLOW_UP_ACTIONS` (the rail has no scheduler of its own).
 - **Values:** Follow-up Call, Site Visit, Online Demo. A kind already booked but not on the list is added to the front.
 - **Default:** Follow-up Call.
 - **Firm can change:** no (the message templates for them are editable in Settings > Message templates).
@@ -137,17 +137,17 @@ Form defaults: category residential, deal sale, subtype apartment, area unit sq.
 | Consulting days | add form | none, 15d (15 days), 30d (30 days), custom | `CONSULTING_DAYS` |
 | Consulting percent | record | none, 1 (1%), 2 (2%), custom | `CONSULTING_PERCENT` |
 | Key / access | add form, record (Internal) | Keys in office, Call owner before visit, Owner lives there, Tenant lives there, With a broker, or "Other" typed text (a stored value not on the list is kept as typed) | `KEY_ACCESS` (picker `PickOrOther`) |
-| Locality | add form, filters | not a fixed list. The firm's own localities are offered, "Add new" types one; an unlisted stored value is kept | `src/lib/suggest.js` `localities`; `ModuleFields.jsx` `locality` |
+| Locality | add form (properties and owners), filters | not a fixed list. The firm's own localities are offered, "Add new" types one; an unlisted stored value is kept | `src/lib/suggest.js` `localities`; `ModuleFields.jsx` `locality` |
 | Project / society | add form, calling, agreements | not fixed; the firm's own project names are suggested | `suggest.js` `projectNames` |
 
 ## Agreements
 - **Kind:** rent, sale. Shown Rent / Sale on the form. Code: `src/components/Agreements.jsx`, `backend/src/services/agreements.ts`.
 - **Status (stored, not picked):** active, ended, renewed. Filters: Ending soon (rent, active, ending within the soon window), Past (ended or renewed).
-- **Flat details for a flat outside the catalogue:** property type = `SUBTYPES.residential`; configuration = `BHK_COMMON` + `BHK_MORE`; default Not known.
+- **Flat details for a flat outside the catalogue:** property type = `SUBTYPES.residential`; configuration = all of `BHK`, as the add-property form; default Not known.
 - **Default kind:** rent. **Firm can change:** no.
 
 ## Team and access
-- **Roles:** owner (shown Owner; `admin` also shows Owner), manager (Manager), agent (Agent), superadmin (Delpat; platform only). Adding a team member offers only Sales agent and Manager. Desk roles (admin, owner, manager) see the whole book. Code: `src/lib/permissions.js` `ROLE_LABELS`, `DESK_ROLES`; `src/modules/Team.jsx`; `src/modules/Admin.jsx`.
+- **Roles:** owner (shown Owner; `admin` also shows Owner), manager (Manager), agent (Agent), superadmin (Delpat; platform only). Adding a team member offers only Agent and Manager (labels from `roleLabel`). Desk roles (admin, owner, manager) see the whole book. Code: `src/lib/permissions.js` `ROLE_LABELS`, `DESK_ROLES`; `src/modules/Team.jsx`; `src/modules/Admin.jsx`.
 - **Account status:** active, suspended (a suspended member is signed out and gets no new work). Code: `Team.jsx`.
 - **Duty status:** ACTIVE, OFF_DUTY, ON_LEAVE; the last two take no new leads when the firm has no rota. Code: `backend/src/services/workforce.ts` `ON_DUTY`.
 - **Client role (Contacts):** Buyer, Tenant, Owner, Investor, Channel Partner. Code: `src/components/ModuleFields.jsx` `CLIENT_MODULE_SCHEMA`.
@@ -157,19 +157,13 @@ Form defaults: category residential, deal sale, subtype apartment, area unit sq.
 - **Page size:** 10, 20, 50, 100 (`src/components/primitives.jsx` `PAGE_SIZE_OPTIONS`).
 - **Share-link expiry:** 7, 15, 30 days (`src/modules/Settings.jsx` `EXPIRY_DAYS`).
 - **Working hours, response time, "gone cold after":** hour and number pickers in Settings > Response times.
-- **Activity reach (reports):** answered, no_answer, unreachable, wrong_number, no_outcome, replied, messaged (`src/components/ActivityDay.jsx` `REACH`, `src/components/AgentWork.jsx` `CONTACT`, `src/data/callOutcomes.js` `CALL_REACH`).
+- **Activity reach (reports):** answered, no_answer, unreachable, wrong_number, no_outcome, replied, messaged (one list, `src/data/callOutcomes.js` `CALL_REACH`; ActivityDay and AgentWork read it).
 - **Import fields (mapping targets):** `src/lib/importSchema.js` `PROPERTY_FIELDS`, `LEAD_FIELDS`, `OWNER_FIELDS`; connection mapping targets `src/modules/Connections.jsx` `TARGETS`.
 - **Brand colour presets:** `src/modules/Settings.jsx` and `src/modules/Admin.jsx` `COLOR_PRESETS`.
 
 ## Disagreements
-Found while reading; not fixed here.
+Found while reading; not fixed here. The rest were fixed 1 Nov.
 
-1. **Owner statuses, backend vs web.** `backend/src/services/store.ts` `OWNER_STATUSES` includes `Callback`; `src/data/ownerStatus.js` `OWNER_STATUSES` does not (deliberately: old rows stay valid on the server). The web cannot offer Callback as a status; the server accepts it.
-2. **Lead statuses are written twice**: `src/data/leadStatus.js` and `backend/src/services/store.ts` `LEAD_STATUSES`. Same eight today, nothing ties them together. `OWNER_STAGES` and the terminal lists are also written twice.
-3. **Reach words, three versions.** `CALL_REACH` says answered / not received / busy or off / wrong number; `ActivityDay.jsx` `REACH` says picked up / did not pick up / busy or switched off; `AgentWork.jsx` `CONTACT` says Picked up / Did not pick up / Busy or switched off. Same keys, different words.
-4. **Configuration lists differ by screen.** Agreements offers `BHK_COMMON` + `BHK_MORE` (1, 2, 3, 1rk, 1.5, 2.5, 3.5, 4, 4.5, 5); the add-property form offers all of `BHK` (to 12 and 5plus); filters use `BHK_FILTER`. A 6 BHK flat cannot be given a configuration on an outside-flat agreement.
-5. **`CONFIG_OPTIONS` in `Modals.jsx` is dead.** It lists "1 BHK Apartment" to "4 BHK+ Villa", "Commercial Office", "Plot" and nothing reads it. The lead form's Configuration comes from `ModuleFields.jsx` `req.config`.
-6. **Rejection reasons, lead vs visit.** Lead rejection reasons (`REJECTION_REASONS`) and visit-feedback reasons (`REJECT_REASONS`) are separate lists and are not meant to match, but the second lives inside `Modals.jsx` rather than in `src/data/`.
-7. **Owner source and locality are free text** (`OWNER_MODULE_SCHEMA`), while a lead's source is a pick list and its locality a select over the firm's localities.
-8. **Follow-up kinds, two lists.** The lead sheet offers Follow-up Call / Site Visit / Online Demo; the rail Scheduler offers Call / Site visit / Meeting.
-9. **Role words.** The firm sees "Sales agent" when adding someone and "Agent" everywhere after; `admin` and `owner` both read "Owner".
+- **Owner source is free text** (`OWNER_MODULE_SCHEMA`). A lead's source is the firm's portal list (99acres and the like); an owner's comes from a cold-call sheet or an import, so those portals do not fit and a second list would be invented. Left as is.
+- **`admin` and `owner` both read "Owner".** Deliberate: `admin` is a legacy alias that exists in code and on no real tenant (`src/lib/permissions.js` `ROLE_LABELS`).
+- **Server-only legacy values** (owner `Callback`) are listed once in `scripts/check-vocabulary.mjs` `SERVER_ONLY_LEGACY`; the guard fails the build if the backend and web status lists otherwise differ.

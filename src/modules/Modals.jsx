@@ -33,7 +33,7 @@ import { copyText } from '../lib/clipboard.js'
 import { currencySymbol, firmLocale, roomsText } from '../lib/locale.js'
 import { formatPhone, telLink, personLabel } from '../lib/phone.js'
 import { notWorkableReason, assignFailed, shownStrategy } from '../lib/workforce.js'
-import { canAssignLead } from '../lib/permissions.js'
+import { canAssignLead, roleLabel } from '../lib/permissions.js'
 
 /**
  * Generic modal frame.
@@ -1646,7 +1646,7 @@ function AddAgentModal({ store }) {
     <Modal title="Add teammate" onClose={store.closeModal} width={400}>
       <Field label="Full name"><Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Kiran Patil" autoFocus /></Field>
       <Field label="Access">
-        <Segmented value={role} onChange={setRole} options={[{ value: 'agent', label: 'Sales agent' }, { value: 'manager', label: 'Manager' }]} />
+        <Segmented value={role} onChange={setRole} options={[{ value: 'agent', label: roleLabel('agent') }, { value: 'manager', label: roleLabel('manager') }]} />
       </Field>
       {role === 'agent' ? (
         <>
