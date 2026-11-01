@@ -32,7 +32,7 @@ import { useServerData } from '../../lib/useServerData.js'
 import { isTerminal } from '../../data/leadStatus.js'
 import { callingFiltersFor, ownerSegLabel } from '../../data/ownerStatus.js'
 import { Overdue, StageTag, MoreRows, useCap, RepeatTag } from '../../components/primitives.jsx'
-import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue, followUpToday, followUpAction } from '../../lib/format.js'
+import { initials, reqShort, renewalSignal, unitLabel, callbackSignal, followUpOverdue, followUpToday, followUpAction, followUpLabel } from '../../lib/format.js'
 import { personLabel } from '../../lib/phone.js'
 import Icon from '../../components/Icon.jsx'
 import { AgentWork, TeamBoard } from '../../components/AgentWork.jsx'
@@ -105,7 +105,7 @@ function LeadRow({ l, onOpen, store, tone, quiet, due }) {
           {tone === 'overdue'
             ? <Overdue>{l.followUp?.time || 'Overdue'}</Overdue>
             : quiet ? <span className="source mono-num">{quietFor(l)}</span>
-              : l.followUp ? <span className="source">{l.followUp.time}</span> : <StageTag stage={l.stage} />}
+              : l.followUp ? <span className="source">{l.followUp.at ? l.followUp.time : followUpLabel(l.followUp)}</span> : <StageTag stage={l.stage} />}
         </span>
       </button>
       {fin && (
