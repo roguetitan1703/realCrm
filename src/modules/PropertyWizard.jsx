@@ -506,7 +506,7 @@ export default function PropertyWizard({ store, go, sel, topBar, phone }) {
                 <div className="pw-grp">
                   <div className="pw-grp-t">Where it is</div>
                   <div className="pw-row">
-                    <Field label="Project / society"><SuggestInput value={form.society || ''} onChange={v => set('society', v)} options={projectNames(store)} placeholder="Skyline Heights" /></Field>
+                    <Field label="Project / society"><SuggestInput value={form.society || ''} onChange={v => set('society', v)} options={projectNames(store)} capitalise placeholder="Skyline Heights" /></Field>
                     <Field label="Locality" required><PickOrOther value={form.locality || ''} onChange={v => set('locality', v)} options={localities(store)} otherLabel="Add new" emptyLabel="Select locality" keepUnknown placeholder="New locality" /></Field>
                   </div>
                   {applies.floors ? (

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useLayoutEffect, useId } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { theme, stageClassFor } from '../data/theme.js'
-import { whenLabel, agentName, repeatMark, dmy, ymdFromDmy } from '../lib/format.js'
+import { whenLabel, agentName, repeatMark, dmy, ymdFromDmy, capitaliseWords } from '../lib/format.js'
 import { fileUrl, formatDistance } from '../lib/media.js'
 import { CALL_OUTCOMES, WA_OUTCOMES, VISIT_OUTCOMES, labelForOutcome } from '../data/callOutcomes.js'
 import { stageLabel } from '../data/pipelineRoles.js'
@@ -250,15 +250,16 @@ export function PickOrOther({ value, onChange, options = [], otherLabel = 'Other
  * A native datalist on purpose: it suggests without restricting — the next
  * project or locality is always one nobody has typed yet — and picking a
  * suggestion is what stops "Godrej Hill Retreat" and "Godrej Hills Retreat"
- * becoming two projects. `onChange` receives the string.
+ * becoming two projects. `onChange` receives the string. `capitalise` upper-cases
+ * the first letter of each word as it is typed (project names).
  */
-export function SuggestInput({ value, onChange, options = [], id, style, ...rest }) {
+export function SuggestInput({ value, onChange, options = [], id, style, capitalise = false, ...rest }) {
   const auto = useId()
   const listId = id || `sg-${auto.replace(/:/g, '')}`
   return (
     <>
       <input className="input" list={listId} value={value ?? ''} autoComplete="off"
-        onChange={e => onChange(e.target.value)} style={{ width: '100%', ...style }} {...rest} />
+        onChange={e => onChange(capitalise ? capitaliseWords(e.target.value) : e.target.value)} style={{ width: '100%', ...style }} {...rest} />
       <datalist id={listId}>
         {options.map(o => <option key={o} value={o} />)}
       </datalist>

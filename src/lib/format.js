@@ -175,6 +175,14 @@ export function dayLabel(ymd) {
 }
 
 /**
+ * A name's first letter of every word upper-cased, the rest exactly as typed —
+ * "godrej green vistas" → "Godrej Green Vistas", while "DLF" and "TCS Park" keep
+ * their capitals (a full title-case would turn them into "Dlf"). For text being
+ * typed or saved; stored rows are never passed through it.
+ */
+export const capitaliseWords = (s) => String(s ?? '').replace(/(^|\s)(\S)/g, (_, sp, ch) => sp + ch.toUpperCase())
+
+/**
  * "05/11/26" from "2026-11-05" — day first, the way the firm writes a date.
  * The native date box shows the BROWSER's order (mm/dd/yyyy on an English-US
  * phone), which is how a rental went out with the wrong "Available from".

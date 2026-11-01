@@ -400,7 +400,7 @@ export const OWNER_MODULE_SCHEMA = {
     { key: 'name', label: 'Full Name', type: 'text', section: 'core', required: true, hideInSheet: true },
     { key: 'phone', label: 'Primary Phone', type: 'text', section: 'core', required: true, hideInSheet: true },
     { key: 'email', label: 'Email Address', type: 'email', section: 'domain' },
-    { key: 'project', label: 'Project / Society', type: 'text', section: 'domain', suggest: projectNames },
+    { key: 'project', label: 'Project / Society', type: 'text', section: 'domain', suggest: projectNames, capitalise: true },
     // The flat in its own fields — project + tower + unit is what makes two
     // rows the same calling row. `unitRef` stays for the records written before
     // these columns existed, and is shown only when it holds something.
@@ -471,7 +471,7 @@ export const PROPERTY_MODULE_SCHEMA = {
   fields: [
     // ---- Overview: what it is, where, what it costs ----------------------
     // `suggest`: the edit form offers the firm's existing names (src/lib/suggest.js).
-    { key: 'society', label: 'Project / Society', type: 'text', section: 'core', required: true, suggest: projectNames },
+    { key: 'society', label: 'Project / Society', type: 'text', section: 'core', required: true, suggest: projectNames, capitalise: true },
     { key: 'locality', label: 'Locality', type: 'text', section: 'core', pickOrOther: (store) => ({ options: localities(store), otherLabel: 'Add new', emptyLabel: 'Select locality', keepUnknown: true, placeholder: 'New locality' }) },
     tokenField('deal', 'Deal', DEALS, 'core'),
     tokenField('category', 'Category', CATEGORIES, 'core'),
