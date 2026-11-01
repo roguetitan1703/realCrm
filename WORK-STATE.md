@@ -1,9 +1,10 @@
 # Work state
 
 ## Now
-Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in still serves 27 Oct (a036eb4); (2) his go to push development to main (1 Nov batch, pick lists, known bugs, payment bar, closed-lead repair ON, time not set, same-number race, laptop tables, project rename; smoke 41/41 on 2bea89c); (3) EC2: `npm run deploy:api` (runs the closed-lead repair once: bhumi 23, mahalaxmi 9), `npm run backup` + cron. Frontend before backend: the new backend refuses a Callback with no time.
+Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in still serves 27 Oct (a036eb4), API runs 6078505 (28 Oct); (2) his go to push development to main (smoke 41/41 on 82be595; includes sign-in hardening that asks Firm@2026/short-password users for a new one at next sign-in); (3) EC2: `npm run deploy:api` (runs the closed-lead repair once: bhumi 23, mahalaxmi 9), `npm run backup` + cron. Frontend before backend.
 
 ## Next
+0. UI review (docs/specs/ui-review.md, published for Om): waits on Om picking proposals; recommended P1 after-call sheet + P3 one word one number
 1. Phone UI and UX, new from the user flows (the earlier spec 9d5b0f7 rearranged the current screens and is superseded): the fresh design is on `b-phone-redesign` (c7e7aa1, docs/specs/phone-ui/) and published for Om. Waits on his review and its 9 decisions plus follow-ups D1–D5. Then slice 1: the after-call sheet, its `call-result` write, ack + Undo. Built on its own branch, merged only when Om approves it whole
 2. Feed watch: owner alert merged (28a7fe9); production read 28 Oct: 0 alerts at bhumi/mahalaxmi, 2 at delpat. Delpat half (console view, a daily email to Om via sendMail) waits on Om
 2c. Local setup + dev data stays current: merged 28 Oct (`npm run setup:local`, `npm run dev:refresh`, README). Shared dev db needs `npm run dev:refresh -- --adopt=delpat` once; callback figures match their lists, merged (9514127)
