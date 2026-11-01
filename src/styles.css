@@ -668,16 +668,21 @@ input,textarea,select{font-family:inherit}
   .tbl thead th:last-child,.tbl tbody td:last-child{padding-right:16px}
 }
 /* DENSE AT LAPTOP WIDTH. A manager scanning by agent wants a screenful of rows,
-   not six. Below 1536 a cell is one line and ends in an ellipsis rather than
+   not six. At every desk width a cell is one line and ends in an ellipsis rather than
    wrapping (name, phone, source, agent, next follow-up, last enquiry, the
    status remark whose full text is on its title), and below 1441 the rows lose
    their padding. Every module's table is this one. */
-@media (max-width:1535px){
-  .tbl tbody td{white-space:nowrap;max-width:230px;overflow:hidden;text-overflow:ellipsis}
-  .tbl tbody td:has(.overdue){max-width:none}
-  .tbl .name,.tbl .sub{overflow:hidden;text-overflow:ellipsis;max-width:100%}
-  .tbl .rej-note{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;margin-top:2px;line-height:1.3}
-}
+.tbl tbody td{white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
+.tbl tbody td:has(.overdue){max-width:none}
+.tbl .name,.tbl .sub{overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.tbl .rej-note{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;margin-top:2px;line-height:1.3}
+@media (max-width:1699px){.tbl thead th,.tbl tbody td{padding-left:10px;padding-right:10px}.tbl thead th:first-child,.tbl tbody td:first-child{padding-left:16px}.tbl thead th:last-child,.tbl tbody td:last-child{padding-right:16px}.tbl tbody td{max-width:190px}.tbl tbody td:nth-child(2){max-width:220px}}
+@media (min-width:1700px){.tbl tbody td{max-width:260px}}
+.tbl tbody td:has(.acc-actions){max-width:none;overflow:visible}
+.tbl .acc-actions{flex-wrap:nowrap}
+.tbl .acc-mustchg{display:inline;margin:0 0 0 6px}
+.tbl .acc-reach-v,.tbl .acc-reach-s{display:inline}
+.tbl .acc-reach-s{margin-left:6px}
 @media (max-width:1440px){
   .tbl tbody td{padding-top:7px;padding-bottom:7px;max-width:150px}
   .tbl tbody td:first-child{max-width:none}
