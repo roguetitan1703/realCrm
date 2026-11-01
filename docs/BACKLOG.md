@@ -25,12 +25,12 @@ The rest shipped to `development` on 1 Nov (merges f2198e1, 89d1454): Call back 
 
 - **Calling owner record on the desk still says Record call**, not Call + Record outcome (12a3c27). Waits on Om. *agent*
 - **Catalogue hides Leased**: already so since 27 Oct (a590faa, only Available is listed). Waits on Om: where he saw one. *buyer*
-- **Existing project names to Title Case**: 42 of bhumi's 58, 12 of mahalaxmi's 12. Production write; waits on Om. *agent*
+- **Existing project names to Title Case**: 36 of bhumi's 58 spellings (41 properties), 7 of mahalaxmi's 12 (9); the Tidy names action in `specs/projects.md`, decision D7. Production write; waits on Om. *agent*
 
 ### Om's list, 1 Nov (needs a spec or Om)
 
 - **Catalogue share message, better wording.** Waits on Om's wording, or a draft from us. *agent*
-- **Project description + project photos**, shown on every property in that project. A project is derived today (no table), so it needs a place to live. Spec. *manager*
+- **Project description + project photos**, shown on every property in that project. Spec: `specs/projects.md`; waits on Om (§9). *manager*
 - **Piles to act on: Deal Closed with no deal recorded; an owner's unit Available with no property created.** Waits on Om: "converted" to what. *manager*
 - **Payment pending bar + subscription details** (plan, recurring). Delpat sets it in the console; the firm sees a top bar when overdue. Money: builder A + review. Waits on Om: who sees the bar. *Delpat*
 - **Laptop view is hard to read.** Waits on Om: which screens, and the laptop's size. *manager*
@@ -78,9 +78,7 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
   `whatsappIntroTemplate`; owner calling sends empty (`Modals.jsx`). Waits on
   Om's wording. *agent*
 - **Bulk unassign a finished calling list** (Work OS #154) — built (d7a22f2, 5d6f9d9), on `main` since 1 Nov; live after `npm run deploy:api` on the EC2. *owner*
-- **Bulk merge misspelt project names** (Work OS #155) — a rename, not a record merge: pick the variant names, choose one, rewrite `project` on `crm_properties` AND `crm_owners` (calling list), timeline entry with the old name. Nothing exists yet
-  (`projectNorm` in `store.ts` only normalises); needs a spec. Waits on Om:
-  scope (owners, leads, flats) and whether aliases apply at intake. *owner*
+- **Bulk merge misspelt project names** (Work OS #155) — a rename, not a record merge, over `crm_properties` and `crm_owners`, with a timeline entry and Undo. Spec: `specs/projects.md` (bhumi: 14 spelling groups, 6 typo groups); waits on Om (§9 D1, D3, D6). *owner*
 
 ## Small
 
