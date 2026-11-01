@@ -126,6 +126,10 @@ gaps are in `specs/notifications.md` §1, not here.
   now refuses a booking without a moment; these were not backfilled (production
   write, and "Tomorrow" from weeks ago has no date to recover). Waits on Om:
   clear them or leave them. *agent*
+- **Bookings left on leads closed before 1 Nov** — bhumi 23, mahalaxmi 9, urban 2,
+  delpat 1 (1 Nov). Closing a lead now clears its booking; the one-time repair is
+  written and off (`REPAIR_CLOSED_LEAD_BOOKINGS` in store.ts, production write).
+  Waits on Om. *manager*
 - **A control that does nothing** (code, 18 Oct). "Merge duplicate" shows only
   when `duplicateOf` is set, and nothing sets it (checked 28 Oct: no route writes
   `duplicate_of`). Its request, once reachable, is now accepted by the server. *owner*

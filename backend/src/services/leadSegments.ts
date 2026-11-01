@@ -236,7 +236,7 @@ export const SEGMENT_CATALOGUE: SegmentDef[] = [
   { key: 'closed', label: 'Closed', help: 'Rejected or deal closed.', surface: ['internal'] },
   { key: 'month', label: 'This month', help: 'Arrived this month, before today.', surface: ['internal'] },
   { key: 'noanswer', label: 'No answer', help: 'Sitting at Call Not Received.', surface: ['internal'] },
-  { key: 'followup', label: 'Has a next step', help: 'A follow-up is booked.', surface: ['internal'] },
+  { key: 'followup', label: 'Has a next step', help: 'Open, with a follow-up booked.', surface: ['internal'] },
   // INTERNAL AGAIN, at the firm's request: no pill on the Leads list. The
   // predicate stays — the desk table still counts with it, and ?seg=no_next_step
   // still filters if something links to it — but nothing offers it as a pill.
@@ -284,7 +284,10 @@ export function buildLeadSegments(p: SegmentInputs) {
     month: p.monthStart,
     noanswer: sql`stage = 'Call Not Received'`,
     closed: sql`NOT (${p.OPEN})`,
-    followup: sql`follow_up IS NOT NULL`,
+    // OPEN, because a closed lead has no next step: the calendar reads this,
+    // and drew a visit booked for a person since rejected as an overdue
+    // appointment in red.
+    followup: sql`(${p.OPEN} AND follow_up IS NOT NULL)`,
 
     // NOTHING BOOKED AFTER IT. The phone's biggest group by far -- 222 of
     // bhumi's 246 open leads -- and it had no destination at all: its "See all"
