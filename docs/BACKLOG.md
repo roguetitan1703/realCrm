@@ -19,6 +19,30 @@ Paying tenants are `bhumi` and `mahalaxmi`. A line that writes their data says s
 
 ## Now
 
+### Om's list, 1 Nov (building now)
+
+- **Lead page: Call is back, and Record outcome sits next to status and Reject.** On a laptop, Call is a `tel:` link that Windows hands to the paired phone. *agent*
+- **Follow-up kinds: drop "Client Meeting"; default to Follow-up Call; the picked kind is obvious.** *agent*
+- **Shortlist shows Rent/Sale and price on each flat; sending a flat whose deal doesn't match what the lead wants asks first.** *agent*
+- **Catalogue hides Leased and Unavailable on its own**, with no setting. *buyer*
+- **Pull down to refresh on phone lists.** *agent*
+- **Leads sort by date arrived, newest first, by default** (not by name). *agent*
+- **Rental "Available from" reads dd/mm/yy.** *agent*
+- **Key access becomes a pick list**: Keys in office · Call owner before visit · Owner lives there · Tenant lives there · With a broker · Other (text). From bhumi's free text, e.g. "Availabel in office", "currtly tenent are stay". *agent*
+- **Locality is a pick list of the firm's own localities, with Add new.** *agent*
+- **Project names capitalise each word as typed**, keeping acronyms ("DLF" stays "DLF"). Existing names: 42 of bhumi's 58 projects and 12 of mahalaxmi's 12 are not in that form, so changing them is a production write that waits on Om. *agent*
+- **An add flow you abandon (e.g. Add property) leaves no entry in Back.** *agent*
+
+### Om's list, 1 Nov (needs a spec or Om)
+
+- **Catalogue share message, better wording.** Waits on Om's wording, or a draft from us. *agent*
+- **Project description + project photos**, shown on every property in that project. A project is derived today (no table), so it needs a place to live. Spec. *manager*
+- **Piles to act on: Deal Closed with no deal recorded; an owner's unit Available with no property created.** Waits on Om: "converted" to what. *manager*
+- **Payment pending bar + subscription details** (plan, recurring). Delpat sets it in the console; the firm sees a top bar when overdue. Money: builder A + review. Waits on Om: who sees the bar. *Delpat*
+- **Laptop view is hard to read.** Waits on Om: which screens, and the laptop's size. *manager*
+- **"Lead input not recorded", "all values filling (reason at calling, outcome on the timeline)", "phone: no suggestion on pick list".** Waits on Om: an example of each.
+- **Sale and rent advance routine in leads.** Later (Om).
+
 The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 `usage-2026-10-17.md`. Decisions waiting on Om are `PLAN.md` §6.
 
@@ -59,9 +83,7 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
   agent's name and the project. A lead's WhatsApp already prefills from
   `whatsappIntroTemplate`; owner calling sends empty (`Modals.jsx`). Waits on
   Om's wording. *agent*
-- **Bulk unassign a finished calling list** (Work OS #154) — `POST
-  /owners/bulk-assign` already takes null; needs an entry point, owner only.
-  Next to build. *owner*
+- **Bulk unassign a finished calling list** (Work OS #154) — built (d7a22f2, 5d6f9d9), on `main` since 1 Nov; live after `npm run deploy:api` on the EC2. *owner*
 - **Bulk merge misspelt project names** (Work OS #155) — a rename, not a record merge: pick the variant names, choose one, rewrite `project` on `crm_properties` AND `crm_owners` (calling list), timeline entry with the old name. Nothing exists yet
   (`projectNorm` in `store.ts` only normalises); needs a spec. Waits on Om:
   scope (owners, leads, flats) and whether aliases apply at intake. *owner*
