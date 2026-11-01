@@ -651,6 +651,7 @@ export async function initSchema(): Promise<void> {
     await migrateSharing();
     await migratePhones();
     await createBillingTables();
+    await createProjectRenameTable();
     // Which firms are synthetic, and the day their data is anchored to
     // (services/devData.ts). A development database only: production has no
     // synthetic firm to move.
@@ -1359,6 +1360,28 @@ export async function migrateSharing(): Promise<void> {
   await sql.unsafe(`ALTER TABLE crm_properties ADD COLUMN IF NOT EXISTS catalogue_slug TEXT`);
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_props_catalogue_slug ON crm_properties (tenant_id, catalogue_slug) WHERE catalogue_slug IS NOT NULL;`;
   await sql`CREATE INDEX IF NOT EXISTS idx_crm_props_catalogue ON crm_properties (tenant_id) WHERE in_catalogue = TRUE;`;
+}
+
+/**
+ * WHAT A PROJECT RENAME CHANGED (docs/specs/projects.md §6), so it can be
+ * undone row by row: each row's copies of the name before and after. New
+ * table, IF NOT EXISTS: nothing is rewritten, so no runOnce gate.
+ */
+async function createProjectRenameTable(): Promise<void> {
+  await sql`
+    CREATE TABLE IF NOT EXISTS crm_project_renames (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'rename',
+      to_name TEXT,
+      from_keys TEXT[] NOT NULL,
+      rows JSONB NOT NULL,
+      actor_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      undone_at TIMESTAMPTZ
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_project_renames ON crm_project_renames (tenant_id, created_at DESC);`;
 }
 
 /**

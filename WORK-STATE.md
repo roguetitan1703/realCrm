@@ -38,3 +38,4 @@ Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in stil
 - Duty status (crm_agents.duty_status): nothing sets it, every agent ACTIVE in prod; route now desk-only — waits on Om saying remove it
 - The shared dev database has no firm marked synthetic, so its dates do not move yet — waits on Om running `npm run dev:refresh -- --adopt=delpat` (and any other fixture firm) against it
 - A row's status menu stays open while its button sits under the sticky top bar (still "in view" by geometry) — waits on a desk polish pass
+- The idle-owner sweep's assignment alert reads "undefined owners assigned to you" (notificationCopy.ts owner_assigned gets no `n` from the sweep; seen on delpat dev, 1 Nov) — waits on the next notifications batch

@@ -29,6 +29,7 @@ import SendSheet, { SenderPhone } from './SendSheet.jsx'
 import { AttachLinkModal } from '../components/MyLinks.jsx'
 import { AddFromTapModal } from '../components/AddFromTap.jsx'
 import BuyerAskModal from '../components/BuyerAsk.jsx'
+import { RenameProjectsModal } from '../components/ProjectRename.jsx'
 import { copyText } from '../lib/clipboard.js'
 import { currencySymbol, firmLocale, roomsText } from '../lib/locale.js'
 import { formatPhone, telLink, personLabel } from '../lib/phone.js'
@@ -133,6 +134,7 @@ export default function Modals({ store, go }) {
       {m?.kind === 'bulkAssign' && <BulkAssignModal store={store} leadIds={m.leadIds} isOwner={m.isOwner} onDone={m.onDone}
         match={m.match} count={m.count} fromAgentIds={m.fromAgentIds} />}
       {m?.kind === 'assignProject' && <AssignProjectModal store={store} project={m.project} />}
+      {m?.kind === 'renameProjects' && <RenameProjectsModal store={store} Modal={Modal} keys={m.keys} onDone={m.onDone} />}
       {m?.kind === 'reassign' && <ReassignModal store={store} fromId={m.fromId} />}
       {m?.kind === 'addAgent' && <AddAgentModal store={store} />}
       {m?.kind === 'contact' && <ContactConfirmModal store={store} channel={m.channel} name={m.name} phone={m.phone} email={m.email} waText={m.waText} recordType={m.recordType} recordId={m.recordId} />}
