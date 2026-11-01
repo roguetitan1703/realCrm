@@ -192,6 +192,57 @@ for (const file of files) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Backend and web status lists must agree
+// ---------------------------------------------------------------------------
+// The web and the server cannot share a module, so each holds a copy of the
+// status lists. This reads the server's copy as text and compares it with the
+// web's, so a status added on one side and not the other fails the build.
+//
+// LEGACY: values the SERVER still accepts (old rows hold them) but the web
+// deliberately no longer offers. Listed here, once, and nowhere else.
+const SERVER_ONLY_LEGACY = {
+  // Callback left the owner status list 2026-09-23 (a callback is a time, held
+  // in callback_at); the server keeps accepting it so old rows stay valid.
+  OWNER_STATUSES: ['Callback'],
+}
+{
+  const read = (f) => readFileSync(join(ROOT, 'backend', 'src', 'services', f), 'utf8')
+  const serverSrc = read('store.ts') + '\n' + read('statuses.ts')
+  const serverList = (name, seen = new Set()) => {
+    const m = serverSrc.match(new RegExp(String.raw`export const ${name}\s*=\s*\[([^\]]*)\]`))
+    if (!m || seen.has(name)) return null
+    seen.add(name)
+    const out = []
+    for (const part of m[1].split(',').map(x => x.trim()).filter(Boolean)) {
+      if (part.startsWith('...')) out.push(...(serverList(part.slice(3), seen) || []))
+      else out.push(part.replace(/^['"]|['"]$/g, ''))
+    }
+    return out
+  }
+  const lead = await import(pathToFileURL(join(ROOT, 'src', 'data', 'leadStatus.js')).href)
+  const owner = await import(pathToFileURL(join(ROOT, 'src', 'data', 'ownerStatus.js')).href)
+  const pairs = [
+    ['LEAD_STATUSES', lead.LEAD_STATUSES],
+    ['TERMINAL_STATUSES', lead.TERMINAL_STATUSES],
+    ['OWNER_STAGES', owner.OWNER_STAGES],
+    ['OWNER_TERMINAL_STATUSES', owner.OWNER_TERMINAL_STATUSES],
+    ['OWNER_STATUSES', owner.OWNER_STATUSES],
+  ]
+  for (const [name, web] of pairs) {
+    const server = serverList(name)
+    if (!server) { problems.push(`backend list ${name} not found: update the vocabulary guard`); continue }
+    const legacy = SERVER_ONLY_LEGACY[name] || []
+    const serverCore = server.filter(v => !legacy.includes(v))
+    const same = serverCore.length === web.length && serverCore.every((v, i) => v === web[i])
+    if (!same) {
+      problems.push(`${name} differs between backend and web\n    backend: ${serverCore.join(', ')}\n    web:     ${web.join(', ')}\n` +
+        `    Change both (backend/src/services/store.ts or statuses.ts, and src/data/), or list a deliberate server-only value in SERVER_ONLY_LEGACY.`)
+    }
+    for (const v of legacy) if (!server.includes(v)) problems.push(`SERVER_ONLY_LEGACY lists '${v}' for ${name} but the backend no longer has it: remove it`)
+  }
+}
+
 if (problems.length) {
   console.error(`\n✗ vocabulary guard: ${problems.length} problem${problems.length > 1 ? 's' : ''}\n`)
   problems.forEach(p => console.error('  ' + p + '\n'))
