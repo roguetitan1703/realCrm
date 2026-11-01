@@ -1,7 +1,7 @@
 # Work state
 
 ## Now
-Push `development` to `main` (67 commits since 6078505: ingest limits and assignment rules, auto-reload on a new deploy, local setup + README, callback counts, follow-ups spec, smoke flake fix). Smoke 41/41 on development 6c25fe2, 28 Oct; waits on Om's go, then on the EC2 `git pull origin main`, `npm run deploy:api`, `npm run backup` and the cron line.
+Frontend stuck: realestate.delpat.in still serves the 27 Oct deployment (a036eb4); the 28 and 30 Oct production deploys built but were never assigned to the domain (team `delpat`, my CLI has no access). Om promotes 0695296 in Vercel. Backend: `npm run deploy:api` on the EC2, then `npm run backup` + cron. development is ahead of main again (1 Nov batch, smoke 41/41).
 
 ## Next
 1. Phone UI and UX, new from the user flows (the earlier spec 9d5b0f7 rearranged the current screens and is superseded): the fresh design is on `b-phone-redesign` (c7e7aa1, docs/specs/phone-ui/) and published for Om. Waits on his review and its 9 decisions plus follow-ups D1–D5. Then slice 1: the after-call sheet, its `call-result` write, ack + Undo. Built on its own branch, merged only when Om approves it whole
