@@ -76,7 +76,7 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
   `whatsappIntroTemplate`; owner calling sends empty (`Modals.jsx`). Waits on
   Om's wording. *agent*
 - **Bulk unassign a finished calling list** (Work OS #154) — built (d7a22f2, 5d6f9d9), on `main` since 1 Nov; live after `npm run deploy:api` on the EC2. *owner*
-- **Bulk merge misspelt project names** (Work OS #155) — a rename, not a record merge, over `crm_properties` and `crm_owners`, with a timeline entry and Undo. Spec: `specs/projects.md` (bhumi: 14 spelling groups, 6 typo groups); waits on Om (§9 D1, D3, D6). *owner*
+- **Bulk merge misspelt project names** (Work OS #155) — built (2bea89c): tick cards on Projects (Properties or Calling), pick the name; properties and calling owners renamed, leads untouched, timeline per row, Undo 30 days. Live after the release. *owner*
 
 ## Small
 

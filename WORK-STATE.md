@@ -1,7 +1,7 @@
 # Work state
 
 ## Now
-Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in still serves 27 Oct (a036eb4); (2) his go to push development to main (45 commits: 1 Nov batch, pick lists, known bugs, payment bar; smoke 41/41 on 9bc1afe, billing reviewed); (3) EC2: `npm run deploy:api`, `npm run backup` + cron. Order matters: frontend before backend, since the new backend refuses a Callback with no time.
+Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in still serves 27 Oct (a036eb4); (2) his go to push development to main (1 Nov batch, pick lists, known bugs, payment bar, closed-lead repair ON, time not set, same-number race, laptop tables, project rename; smoke 41/41 on 2bea89c); (3) EC2: `npm run deploy:api` (runs the closed-lead repair once: bhumi 23, mahalaxmi 9), `npm run backup` + cron. Frontend before backend: the new backend refuses a Callback with no time.
 
 ## Next
 1. Phone UI and UX, new from the user flows (the earlier spec 9d5b0f7 rearranged the current screens and is superseded): the fresh design is on `b-phone-redesign` (c7e7aa1, docs/specs/phone-ui/) and published for Om. Waits on his review and its 9 decisions plus follow-ups D1–D5. Then slice 1: the after-call sheet, its `call-result` write, ack + Undo. Built on its own branch, merged only when Om approves it whole
@@ -9,7 +9,6 @@ Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in stil
 2c. Local setup + dev data stays current: merged 28 Oct (`npm run setup:local`, `npm run dev:refresh`, README). Shared dev db needs `npm run dev:refresh -- --adopt=delpat` once; callback figures match their lists, merged (9514127)
 3. Desk mismatches: fixed and merged (d9d82df + this merge); naming of "Not yet contacted"/"Never called" and the Performance default wait on Om
 4. Work OS #153 WhatsApp intro templates, wording from Om
-5. Work OS #155 merge misspelt project names, needs a spec and Om's scope
 6. Work OS #129 help desk (#156 demos feed it)
 
 ## Later
@@ -26,7 +25,7 @@ Release waits on Om: (1) promote 0695296 in Vercel — realestate.delpat.in stil
 - Four write scripts import the services without CRM_NO_BOOT (dedupe-leads, remap-connections, reprocess-inbox, test-notifications): run against production they start initSchema, waits on their next use
 - Calling on a phone has no Select mode, so bulk assign/take back is desk-only — waits on Om saying a manager does this from a phone
 - Leads has no "Select all matching" (Owners now does) — waits on a broker asking to take back leads in bulk
-- Merge duplicate lead: the 400 is fixed (client sent a strategy the server refuses), but nothing sets `duplicateOf`, so the action never shows — waits on Om deciding whether duplicate detection is wanted (BACKLOG, A control that does nothing)
+- Billing due dates on the 29th–31st slide to the 28th after February (Postgres month add) — waits on a firm due on those days
 - Calling a tenant or buyer from Contacts logs on their lead; when a colleague holds that lead the log now 404s (visibility gate, 28 Oct) — waits on deciding where that call belongs
 - Pressing Call closes the booked follow-up before the outcome (fix 3dcb711 on `s-phone-bugs`, held): with outcomes on 20% of bhumi's calls, closing only on an outcome would leave most called bookings overdue — waits on Om, or on the redesign's after-call sheet
 - The firm logo renders as a broken image in the desk sidebar (seen on delpat, dev) — waits on checking brand_config's logo URL
