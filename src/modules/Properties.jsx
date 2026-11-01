@@ -80,10 +80,36 @@ export default function Properties({ store, go, sel, setSel, topBar, phone }) {
   const editing = sel.propAdd && sel.propId
   const mayEditThis = mayEditAny
   if (sel.propAdd && (editing ? mayEditThis : mayAdd)) {
-    return <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} phone={phone} />
+    return editing
+      ? <PropertyEditGate store={store} go={go} sel={sel} topBar={topBar} phone={phone} />
+      : <PropertyWizard store={store} go={go} sel={sel} topBar={topBar} phone={phone} />
   }
   if (sel.propOpen && sel.propId) return <PropertyDetail store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} />
   return <PropertyList store={store} go={go} sel={sel} setSel={setSel} topBar={topBar} phone={phone} mayEdit={mayEditAny} mayAdd={mayAdd} />
+}
+
+// THE EDIT FORM NEVER OPENS ON A RECORD IT DOES NOT HAVE. Opened by address
+// (a reload, a shared link) nothing is cached, and the form used to start blank
+// and could be saved over the real listing. A list row is a partial record, so
+// it does not count either: the form waits for the whole one.
+function PropertyEditGate({ store, go, sel, topBar, phone }) {
+  const { record, error } = useRecord(store, 'property', sel.propId)
+  const ready = !!record && !record.__partial
+  useEffect(() => {
+    if (error !== 'not-found') return
+    store.toast('Listing not found')
+    go('properties', { propAdd: false, propId: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error])
+  if (ready) return <PropertyWizard key={sel.propId} store={store} go={go} sel={sel} topBar={topBar} phone={phone} />
+  return (
+    <>
+      {topBar({ title: 'Edit property', eyebrow: 'Properties', onBack: () => go('properties', { propAdd: false, propId: null }) })}
+      {error && error !== 'not-found'
+        ? <div className="detail-missing">Could not open this listing.</div>
+        : <div className="list-spin" role="status" aria-label="Loading"><span /></div>}
+    </>
+  )
 }
 
 function PropertyList({ store, go, sel, setSel, topBar, phone, mayEdit, mayAdd }) {
