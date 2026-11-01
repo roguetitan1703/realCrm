@@ -250,6 +250,7 @@ export const LEADS_DEF = {
   },
 
   sortOptions: [
+    { key: 'createdAt', label: 'Date arrived', value: (l) => (l.createdAt ? new Date(l.createdAt).getTime() : 0) },
     { key: 'activity', label: 'Last activity', value: (l) => l.lastActivityAt || l.createdAt },
     { key: 'budget', label: 'Budget', value: (l) => budgetOf(l.req).max || 0 },
     { key: 'name', label: 'Name', value: (l) => personLabel(l).toLowerCase() },
