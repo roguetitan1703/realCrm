@@ -41,3 +41,18 @@ export function followUpFinish(fu) {
   const k = KINDS.find(x => x.kind === kind) || OTHER
   return { finish: k.finish, label: k.label }
 }
+
+/**
+ * WHEN IT IS BOOKED FOR, or null when the booking holds no moment.
+ *
+ * `at` is the appointment (an ISO instant). Rows from before it existed carry
+ * only what somebody typed — "Tomorrow", "This Saturday" — which no query can
+ * sort, fire on or call late. A booking without one is not a booking: the
+ * server refuses to save one (updateLead), and a Callback needs one.
+ */
+export function bookedAt(fu) {
+  const at = String(fu?.at || '')
+  if (!/^\d{4}-\d{2}-\d{2}/.test(at)) return null
+  const d = new Date(at)
+  return isNaN(d.getTime()) ? null : d
+}

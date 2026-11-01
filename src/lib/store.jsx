@@ -17,7 +17,7 @@ import { getPref, setPref } from './prefs.js'
 import { messageLang } from '../data/vocabLocale.js'
 import { disablePush } from './push.js'
 import { readSupport, endSupport } from './support.js'
-import { isOpen } from '../data/leadStatus.js'
+import { isOpen, CALLBACK_STATUS } from '../data/leadStatus.js'
 import { canWork, isNotWorkable, notWorkableText } from './workforce.js'
 import { reloadIfNewBuild } from './appVersion.js'
 
@@ -1330,6 +1330,14 @@ export function StoreProvider({ children }) {
     // the server answers reads as a broken drag. It snaps back if the write is
     // refused — to the stage it actually had, read before the dispatch.
     setStage: (leadId, stage) => {
+      // CALLBACK ASKS WHEN. Every status control on a lead — the row's menu,
+      // the card's, the record's — comes through here, so here is where a
+      // Callback stops being a bare status: it opens the time picker, and the
+      // status and the booked call are saved together (setCallback).
+      if (stage === CALLBACK_STATUS) {
+        dispatch({ type: 'SET', patch: { modal: { kind: 'scheduleFollowUp', leadId, callback: true } } })
+        return Promise.resolve(null)
+      }
       const prev = api.lookup('lead', leadId)?.stage
       return optimistic('Stage change',
         () => dispatch({ type: 'STAGE', leadId, stage }),
@@ -1360,6 +1368,14 @@ export function StoreProvider({ children }) {
         () => apiClient.updateLead(leadId, { followUp }).then(adopt('lead')),
         'Follow-up set and added to the calendar')
     },
+    // The status and its booked call in ONE write: the server refuses a
+    // Callback from a person with no call booked, so the two cannot be sent
+    // one after the other.
+    setCallback: (leadId, followUp) => write('Callback',
+      () => apiClient.updateLead(leadId, { stage: CALLBACK_STATUS, followUp }).then(adopt('lead')),
+      // The reply is the record (adopt); nothing to patch on top of it.
+      null,
+      'Callback booked'),
     // `logEvent` used to dispatch a timeline entry into local React state and
     // toast "Call logged" — with no request behind it. The entry was gone on
     // the next reload and no teammate ever saw it. It goes through the same

@@ -116,8 +116,11 @@ gaps are in `specs/notifications.md` §1, not here.
   in the last day. Likely our model, not the agents: real portal leads may not
   behave the way the pile assumes. Study how real leads actually move before
   changing the rule. *manager*
-- **A lead's Callback stores no time** — bhumi 19 of 20, mahalaxmi 42 of 42 have
-  none, so nothing can say a callback is late. (Owners store one.) *agent*
+- **Callback leads with no time, from before 1 Nov** — bhumi 13 of 13, mahalaxmi
+  30 of 30 (1 Nov). A new Callback now asks when and is refused without a booked
+  call; these were not backfilled (production write). Waits on Om: leave them,
+  or list them per agent to book. A Callback whose call is then logged without
+  an outcome still keeps the status with nothing booked. *agent*
 - **Booked site visits with no time** — bhumi 5 of 29 (typed text only).
 - **A control that does nothing** (code, 18 Oct). "Merge duplicate" shows only
   when `duplicateOf` is set, and nothing sets it (checked 28 Oct: no route writes

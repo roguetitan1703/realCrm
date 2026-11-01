@@ -19,6 +19,7 @@ import { isSafeKey, tenantOfKey } from '../services/media';
 import { audit } from '../services/audit';
 import { assertLeadWrite, isDeskRole } from '../lib/permissions';
 import { followUpKindOf } from '../../../src/data/followUpKinds.js';
+import { bookingRefusedBody } from '../services/followUp';
 
 export const actionsRouter = Router();
 
@@ -307,6 +308,7 @@ actionsRouter.post(
         audit_note: note ?? null,
       });
     } catch (err: any) {
+      const refused = bookingRefusedBody(err); if (refused) return res.status(422).json(refused);
       if (err?.status === 403) {
         return res.status(403).json({ success: false, error: 'Forbidden', message: err.message, code: err.code });
       }

@@ -21,8 +21,9 @@ import { getContext, runWithContext } from './context.js';
 import { notify, notifyRoles, notifyOrDesk } from './notifications.js';
 import { firstRunAlertLifecycle } from './alertLifecycle.js';
 import { suggestPassword } from './auth.js';
-import { followUpKind } from './followUp.js';
-import { followUpKindOf } from '../../../src/data/followUpKinds.js';
+import { followUpKind, BookingRefused } from './followUp.js';
+import { followUpKindOf, bookedAt } from '../../../src/data/followUpKinds.js';
+import { CALLBACK_STATUS } from '../../../src/data/leadStatus.js';
 import { galleryPath } from './gallery.js';
 import { planRoster, rosterPhone, RosterRow } from './roster.js';
 import { requirePhone, editedPhone, keepPhone, phoneKey } from './phone.js';
@@ -2419,6 +2420,16 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   const rejectionReason = stage === REJECTED_STATUS
     ? (patch.rejectionReason ?? patch.rejection_reason ?? oldLead.rejectionReason ?? null)
     : (movingStage && !keepReason ? null : (oldLead.rejectionReason ?? null));
+
+  // A CALLBACK IS A CALL BOOKED FOR A TIME. A person moving a lead there must
+  // leave it with one — booked in this same patch (the status menu and "Asked
+  // to call back" both open the time picker and send the two together) or
+  // already standing. System callers (ingestion, imports) pass: they set what a
+  // sheet or a portal said, and have nobody to ask.
+  if (movingStage && String(stage).toLowerCase() === CALLBACK_STATUS.toLowerCase() && who?.userId
+      && !(bookedAt(followUp) && followUpKindOf((followUp as any)?.action) === 'call')) {
+    throw new BookingRefused('callback_needs_time', 'Say when to call back.');
+  }
 
   await sql`
     UPDATE crm_leads SET
