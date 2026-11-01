@@ -109,7 +109,6 @@ The order is `PLAN.md` §3 (20 Oct – 12 Dec), written from the usage snapshot
 
 ## Bugs
 
-- **Editing a property from its URL (`?new=property&prop=ID`) opens a blank form** (1 Nov, builder S): the edit form reads the record cache; tapping Edit from the record works.
 
 Measured on production, read-only, 12 Oct, unless marked. Alert delivery
 gaps are in `specs/notifications.md` §1, not here.
