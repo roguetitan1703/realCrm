@@ -64,6 +64,9 @@ async function normsOf(q: any, keys: string[], to: string): Promise<{ picked: st
     UNION ALL SELECT ${projectNorm(sql`${to}::text`)}, true`;
   const picked = (rows as any[]).filter(r => !r.target).map(r => r.n).filter(Boolean);
   const target = (rows as any[]).find(r => r.target)?.n;
+  // "---" or "/" has no letters or digits: its key is '', the leftovers
+  // bucket, and every renamed row would fall into "Independent / Direct".
+  if (!target) throw new RenameError(400, 'Give a name with letters or numbers');
   return { picked, all: [...new Set([...picked, target].filter(Boolean))] };
 }
 
@@ -80,7 +83,11 @@ async function plan(q: any, t: string, keys: string[], to: string, lock: boolean
            ${projectNorm(sql`config->>'society'`)} AS sn,
            ${projectNorm(sql`config->>'project'`)} AS cn,
            ${projectNorm(sql`split_part(coalesce(title, ''), ' - ', 1)`)} AS tn,
-           position(' - ' in coalesce(title, '')) AS dash
+           -- The part from " - " on, cut in SQL: Postgres counts characters and
+           -- String.slice counts UTF-16 units, so an emoji before the dash
+           -- would shift a cut made in JavaScript.
+           CASE WHEN position(' - ' in coalesce(title, '')) > 0
+                THEN substr(title, position(' - ' in title)) END AS title_rest
       FROM crm_properties
      WHERE tenant_id = ${t} AND ${projectNorm(PROJECT_KEY)} IN ${sql(all)}
      ORDER BY id ${forUpdate}`;
@@ -104,7 +111,7 @@ async function plan(q: any, t: string, keys: string[], to: string, lock: boolean
     const after = { ...before, project: to };
     if (inSet(r.sn)) after.society = to;
     if (inSet(r.cn)) after.cfgProject = to;
-    if (inSet(r.tn) && r.title) after.title = r.dash > 0 ? `${to}${String(r.title).slice(r.dash - 1)}` : to;
+    if (inSet(r.tn) && r.title) after.title = r.title_rest != null ? `${to}${r.title_rest}` : to;
     const same = before.project === after.project && before.society === after.society
       && before.cfgProject === after.cfgProject && before.title === after.title;
     if (!same) changes.push({ t: 'p', id: r.id, before, after });
@@ -186,6 +193,14 @@ export async function renameProjects(body: any, ctx: ActorCtx) {
  *  ids written. */
 async function applyRows(tx: any, t: string, changes: Change[], side: 'before' | 'after', onlyIf?: 'before' | 'after'): Promise<Set<string>> {
   const done = new Set<string>();
+  // Undo locks its rows in id order first, as plan() does for a rename, so
+  // the two cannot take the same rows' locks in opposite orders.
+  if (onlyIf) {
+    const pIds = changes.filter(c => c.t === 'p').map(c => c.id);
+    const oIds = changes.filter(c => c.t === 'o').map(c => c.id);
+    if (pIds.length) await tx`SELECT id FROM crm_properties WHERE tenant_id = ${t} AND id = ANY(${pIds}::text[]) ORDER BY id FOR UPDATE`;
+    if (oIds.length) await tx`SELECT id FROM crm_owners WHERE tenant_id = ${t} AND id = ANY(${oIds}::text[]) ORDER BY id FOR UPDATE`;
+  }
   const ps = changes.filter(c => c.t === 'p') as Extract<Change, { t: 'p' }>[];
   const os = changes.filter(c => c.t === 'o') as Extract<Change, { t: 'o' }>[];
   if (ps.length) {
