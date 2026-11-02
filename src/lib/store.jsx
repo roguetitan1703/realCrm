@@ -634,19 +634,14 @@ function reducer(state, action) {
     case 'UPDATE_PROP':
       return patchRecord(state, 'property', action.propId, p => ({ ...p, ...action.patch }))
 
+    // No local "Shortlisted" line: this runs before the server answers, and
+    // the server writes the real one, which the record reads once it settles.
     case 'ATTACH_PROP':
       return patchRecord(state, 'lead', action.leadId, l => {
         const shortlist = l.shortlist || []
         if (shortlist.includes(action.propId)) return l
-        return {
-          ...l, shortlist: [action.propId, ...shortlist],
-          timeline: withEvent(l, 'note', 'Shortlisted ' + (action.label || 'a property')),
-        }
+        return { ...l, shortlist: [action.propId, ...shortlist] }
       })
-
-    // A shortlist put back as it was (an optimistic removal the server refused).
-    case 'SET_SHORTLIST':
-      return patchRecord(state, 'lead', action.leadId, l => ({ ...l, shortlist: action.shortlist }))
 
     case 'DETACH_PROP':
       return patchRecord(state, 'lead', action.leadId, l => ({
@@ -1169,17 +1164,6 @@ export function StoreProvider({ children }) {
    */
   const settled = useCallback(() => dispatch({ type: 'MUTATED' }), [])
 
-  // ONE SHORTLIST CHANGE AT A TIME, PER LEAD. The server takes the whole list,
-  // and the cached lead only moves once the server answers — so a second
-  // attach clicked before the first returned sent a list without the first,
-  // and it was dropped. Each change now builds on the one queued before it.
-  //
-  // AND BUILT ON THE WHOLE LIST. The base was the cached lead's shortlist, and a
-  // lead opened from a list is cached as its list row, which carries no
-  // shortlist (or, from an older API, a stale one): attaching one home sent a
-  // list of one, and the server deleted the rest. The base is now the full
-  // record, fetched when the cache holds only a row; if it cannot be read,
-  // nothing is sent.
   // The whole lead: the cached one when it is the full record, otherwise read.
   const fullLead = (leadId) => {
     const c = api.lookup('lead', leadId)
@@ -1190,28 +1174,85 @@ export function StoreProvider({ children }) {
       return rec
     }).catch(() => null)
   }
-  const changeShortlist = (leadId, next, send) => {
-    const q = shortlistQueue.get(leadId) || { list: null, chain: Promise.resolve(), pending: 0 }
+  // The shortlist as the SERVER holds it, read past the cache — which carries
+  // the optimistic changes still waiting to be sent, so building on it would
+  // count each of them twice.
+  const serverShortlist = (leadId) => apiClient.getLead(leadId)
+    .then(r => (r?.lead || r?.record || null)?.shortlist).catch(() => null)
+
+  // SHORTLIST CHANGES, PER LEAD: one request in flight, the rest folded into
+  // the next. The server REPLACES the list with what it is sent, so:
+  //
+  // BUILT ON THE ONE BEFORE. A second attach sent before the first returned
+  // carried a list without the first, and it was dropped. Each send now starts
+  // from the list the previous one sent.
+  //
+  // BUILT ON THE WHOLE LIST. A lead opened from a list is cached as its row,
+  // which carries no shortlist: attaching one home sent a list of one and the
+  // server deleted the rest. The base is the full record's list (`seed`, read
+  // from the cache before the optimistic change), or the server's when the
+  // cache holds only a row or a send has just failed. If it cannot be read,
+  // nothing is sent.
+  //
+  // ONE REQUEST FOR A BURST. Each tap waited for the one before, a round trip
+  // apiece, so seven flats were seven requests and the last showed up twenty
+  // seconds later. Taps made while a send is in flight wait for it and go
+  // together in the next: seven quick taps are two requests.
+  //
+  // `op.next(list)` returns the new list, or null to leave it (nothing to
+  // change); `op.undo()` takes back its optimistic change when the send fails.
+  // Resolves with the server's answer, or null.
+  const changeShortlist = (leadId, seed, op) => new Promise((resolve) => {
+    // The seed counts only for an idle lead: once changes are queued the cache
+    // carries their optimistic marks and is no longer the server's list.
+    const q = shortlistQueue.get(leadId)
+      || { list: null, seed: Array.isArray(seed) ? seed : null, ops: [], running: false }
     shortlistQueue.set(leadId, q)
-    q.pending++
-    const mine = q.chain.then(async () => {
-      try {
-        const base = q.list || (await fullLead(leadId))?.shortlist
-        if (!Array.isArray(base)) { toast('Could not read this lead’s shortlist. Try again.', 'warn'); return null }
-        const list = next(base)
-        if (!list) return null
-        q.list = list
-        const res = await send(list)
-        // Failed: the next change starts from the server's list, not this one.
-        if (!res) q.list = null
-        return res
-      } finally {
-        // Nothing newer queued: the cached lead is the truth again.
-        if (--q.pending === 0) shortlistQueue.delete(leadId)
+    q.ops.push({ ...op, resolve })
+    if (!q.running) pumpShortlist(leadId, q)
+  })
+  const pumpShortlist = async (leadId, q) => {
+    q.running = true
+    let shortlisted = 0, sent = false
+    try {
+      while (q.ops.length) {
+        const base = q.list || q.seed || await serverShortlist(leadId)
+        q.seed = null
+        // Taken AFTER the base is read, so taps made meanwhile ride along.
+        const batch = q.ops.splice(0)
+        if (!Array.isArray(base)) {
+          toast('Could not read this lead’s shortlist. Try again.', 'warn')
+          batch.slice().reverse().forEach(o => o.undo?.())
+          batch.forEach(o => o.resolve(null))
+          continue
+        }
+        let list = base
+        const moved = []
+        for (const o of batch) {
+          const n = o.next(list)
+          if (n) { list = n; moved.push(o) } else o.resolve(null)
+        }
+        if (!moved.length) continue
+        sent = true
+        const res = await apiClient.updateLead(leadId, { shortlist: list })
+          .then(r => { if (rejected(r)) throw new Error(r.error || 'rejected'); return r })
+          .catch(err => { failed(err, 'Shortlist'); return null })
+        // Failed: the next send starts from the server's list, not this one.
+        q.list = res ? list : null
+        if (res) shortlisted += moved.filter(o => o.attach).length
+        // Taken back newest first, so an attach and a detach of one flat in the
+        // same send cancel out.
+        else moved.slice().reverse().forEach(o => o.undo?.())
+        moved.forEach(o => o.resolve(res))
       }
-    })
-    q.chain = mine.catch(() => null)
-    return mine
+    } finally {
+      q.running = false
+      // Nothing left: the cached lead is the truth again.
+      if (!q.ops.length) shortlistQueue.delete(leadId)
+      if (shortlisted) toast(shortlisted === 1 ? 'Shortlisted' : `${shortlisted} shortlisted`)
+      // Once per burst, not per send: every list on screen refetches on this.
+      if (sent) settled()
+    }
   }
 
   const write = useCallback((what, call, apply, okMsg) => call()
@@ -1460,26 +1501,27 @@ export function StoreProvider({ children }) {
     // first one server-side while local state showed both — the divergence only
     // became visible after a reload, which is why nobody caught it. Send the
     // whole list, every time.
-    attachProp: (leadId, propId, label) => changeShortlist(leadId,
-      (cur) => (cur.includes(propId) ? (toast('Already on this lead’s shortlist'), null) : [...cur, propId]),
-      (list) => write('Shortlist',
-        () => apiClient.updateLead(leadId, { shortlist: list }),
-        () => dispatch({ type: 'ATTACH_PROP', leadId, propId, label }),
-        'Shortlisted')),
-    // OPTIMISTIC, like the other quick actions: the row goes at once and comes
-    // back if the server refuses. It waited for the round trip (~2.5s), so the
-    // x looked broken and got tapped again.
+    // OPTIMISTIC, like the other quick actions: the row changes at once and
+    // goes back if the server refuses. Both waited for the round trip (~2.5s),
+    // so the x looked broken and got tapped again, and a lead sent seven flats
+    // showed them one by one over twenty seconds.
+    attachProp: (leadId, propId) => {
+      const seed = api.lookup('lead', leadId)
+      dispatch({ type: 'ATTACH_PROP', leadId, propId })
+      return changeShortlist(leadId, seed && !seed.__partial ? seed.shortlist : null, {
+        attach: true,
+        next: (cur) => (cur.includes(propId) ? (toast('Already on this lead’s shortlist'), null) : [...cur, propId]),
+        undo: () => dispatch({ type: 'DETACH_PROP', leadId, propId }),
+      })
+    },
     detachProp: (leadId, propId) => {
-      const before = api.lookup('lead', leadId)?.shortlist
+      const seed = api.lookup('lead', leadId)
       dispatch({ type: 'DETACH_PROP', leadId, propId })
       toast('Taken off the shortlist')
-      const undo = () => { if (Array.isArray(before)) dispatch({ type: 'SET_SHORTLIST', leadId, shortlist: before }) }
-      return changeShortlist(leadId,
-        (cur) => cur.filter(x => x !== propId),
-        (list) => apiClient.updateLead(leadId, { shortlist: list })
-          .then(res => { if (rejected(res)) throw new Error(res.error || 'rejected'); settled(); return res })
-          .catch(err => { undo(); failed(err, 'Remove from shortlist'); settled(); return null }))
-        .then(res => { if (!res) undo(); return res })
+      return changeShortlist(leadId, seed && !seed.__partial ? seed.shortlist : null, {
+        next: (cur) => (cur.includes(propId) ? cur.filter(x => x !== propId) : null),
+        undo: () => dispatch({ type: 'ATTACH_PROP', leadId, propId }),
+      })
     },
     // Visit feedback was purely local — the verdict that is supposed to refine
     // this lead's matches never reached the server, so it was forgotten on

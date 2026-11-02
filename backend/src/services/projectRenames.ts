@@ -70,13 +70,23 @@ async function normsOf(q: any, keys: string[], to: string): Promise<{ picked: st
   return { picked, all: [...new Set([...picked, target].filter(Boolean))] };
 }
 
+/** The same set normsOf() returns as `all`, as a subquery, so the reads that
+ *  filter on it need not wait for normsOf to come back. */
+const allNorms = (keys: string[], to: string) => sql`(
+  SELECT n FROM (SELECT ${projectNorm(sql`k`)} AS n FROM unnest(${keys}::text[]) AS x(k)
+                 UNION SELECT ${projectNorm(sql`${to}::text`)}) s
+   WHERE n <> '')`;
+
 /** Every row the rename would change, with its before and after. One read
- *  for the preview and the write, so the count confirmed is the count moved. */
+ *  for the preview and the write, so the count confirmed is the count moved.
+ *
+ *  THE THREE READS GO TOGETHER: none waits for another's answer. Outside a
+ *  transaction they run side by side; in one they pipeline on its connection
+ *  once their statements are prepared there. A refused name still throws,
+ *  and rolls the transaction back. */
 async function plan(q: any, t: string, keys: string[], to: string, lock: boolean) {
-  const { picked, all } = await normsOf(q, keys, to);
-  if (picked.length < 1) throw new RenameError(400, 'Pick at least one project.');
   const forUpdate = lock ? sql`FOR UPDATE` : sql``;
-  const props = await q`
+  const [{ picked, all }, props, owners] = await Promise.all([normsOf(q, keys, to), q`
     SELECT id, project, config->>'society' AS society, config->>'project' AS cfg_project, title,
            ${projectNorm(PROJECT_KEY)} AS kn,
            ${projectNorm(sql`project`)} AS pn,
@@ -89,13 +99,15 @@ async function plan(q: any, t: string, keys: string[], to: string, lock: boolean
            CASE WHEN position(' - ' in coalesce(title, '')) > 0
                 THEN substr(title, position(' - ' in title)) END AS title_rest
       FROM crm_properties
-     WHERE tenant_id = ${t} AND ${projectNorm(PROJECT_KEY)} IN ${sql(all)}
-     ORDER BY id ${forUpdate}`;
-  const owners = await q`
+     WHERE tenant_id = ${t} AND ${projectNorm(PROJECT_KEY)} IN ${allNorms(keys, to)}
+     ORDER BY id ${forUpdate}`,
+    q`
     SELECT id, project, ${projectNorm(sql`project`)} AS pn
       FROM crm_owners
-     WHERE tenant_id = ${t} AND ${projectNorm(sql`project`)} IN ${sql(all)}
-     ORDER BY id ${forUpdate}`;
+     WHERE tenant_id = ${t} AND ${projectNorm(sql`project`)} IN ${allNorms(keys, to)}
+     ORDER BY id ${forUpdate}`,
+  ]);
+  if (picked.length < 1) throw new RenameError(400, 'Pick at least one project.');
   const inSet = (n: string | null) => !!n && all.includes(n);
 
   const changes: Change[] = [];
@@ -170,11 +182,11 @@ export async function renameProjects(body: any, ctx: ActorCtx) {
         { properties: p.properties, owners: p.owners });
     }
     if (!p.changes.length) return { properties: 0, owners: 0, changes: p.changes, picked: p.picked };
-    await applyRows(tx, t, p.changes, 'after');
-    await tx`
+    // plan() locked the rows; one statement writes them, their history and
+    // the rename record.
+    await writeRows(tx, t, p.changes, 'after', undefined, { author, renameId: id, kind: 'rename' }, sql`
       INSERT INTO crm_project_renames (id, tenant_id, kind, to_name, from_keys, rows, actor_id)
-      VALUES (${id}, ${t}, 'rename', ${to}, ${p.picked}::text[], ${sql.json(p.changes as any)}, ${ctx.actorId ?? null})`;
-    await timeline(tx, t, p.changes, author, id, 'rename');
+      VALUES (${id}, ${t}, 'rename', ${to}, ${p.picked}::text[], ${sql.json(p.changes as any)}, ${ctx.actorId ?? null})`);
     return { properties: p.properties, owners: p.owners, changes: p.changes, picked: p.picked };
   });
   if (!out.changes.length) return { renameId: null, to, properties: 0, owners: 0 };
@@ -188,78 +200,73 @@ export async function renameProjects(body: any, ctx: ActorCtx) {
   return { renameId: id, to, properties: out.properties, owners: out.owners };
 }
 
-/** Write each row's `before` or `after`, in two statements. With `onlyIf`,
- *  a row is written only while it still holds `onlyIf` (Undo). Returns the
- *  ids written. */
-async function applyRows(tx: any, t: string, changes: Change[], side: 'before' | 'after', onlyIf?: 'before' | 'after'): Promise<Set<string>> {
-  const done = new Set<string>();
-  // Undo locks its rows in id order first, as plan() does for a rename, so
-  // the two cannot take the same rows' locks in opposite orders.
-  if (onlyIf) {
-    const pIds = changes.filter(c => c.t === 'p').map(c => c.id);
-    const oIds = changes.filter(c => c.t === 'o').map(c => c.id);
-    if (pIds.length) await tx`SELECT id FROM crm_properties WHERE tenant_id = ${t} AND id = ANY(${pIds}::text[]) ORDER BY id FOR UPDATE`;
-    if (oIds.length) await tx`SELECT id FROM crm_owners WHERE tenant_id = ${t} AND id = ANY(${oIds}::text[]) ORDER BY id FOR UPDATE`;
-  }
+/**
+ * Write each row's `before` or `after`, its timeline event, and `record` (the
+ * rename's own row: inserted, or marked undone), in ONE statement. With
+ * `onlyIf`, a row is written only while it still holds `onlyIf` (Undo), and
+ * only the rows written get an event. Returns the ids written. The caller has
+ * already locked the rows.
+ *
+ * ONE STATEMENT, NOT FIVE. Undo took ~2.7s on a handful of rows: the lock
+ * reads, the two updates, the undone mark and the history went one after
+ * another, and a statement this connection has not run before costs a second
+ * round trip to describe its parameters, which a rename or an undo nearly
+ * always is. The arrays keep the statement's shape fixed whatever the row
+ * count, so it can be prepared once and reused.
+ */
+async function writeRows(tx: any, t: string, changes: Change[], side: 'before' | 'after', onlyIf: 'before' | 'after' | undefined,
+  ev: { author: string; renameId: string; kind: 'rename' | 'undo' }, record: any): Promise<Set<string>> {
   const ps = changes.filter(c => c.t === 'p') as Extract<Change, { t: 'p' }>[];
   const os = changes.filter(c => c.t === 'o') as Extract<Change, { t: 'o' }>[];
-  if (ps.length) {
-    const v = ps.map(c => c[side]);
-    const g = onlyIf ? ps.map(c => c[onlyIf]) : null;
-    // config keys are set when the target value is a string and removed when
-    // it is null; a row whose config was null stays null if neither key is set.
-    const rows = await tx`
+  const v = ps.map(c => c[side]);
+  const g = onlyIf ? ps.map(c => c[onlyIf]) : ps.map(() => ({ project: null, title: null, society: null, cfgProject: null }));
+  const og = onlyIf ? os.map(c => c[onlyIf].project) : os.map(() => null);
+  // The old name stays on the record's history: one event per row written.
+  const stamp = Date.now();
+  const evIds = changes.map((_, i) => `evt_${stamp}_${i}_${randomBytes(3).toString('hex')}`);
+  const rename = ev.kind === 'rename';
+  const rows = await tx`
+    WITH up AS (
       UPDATE crm_properties p SET
         project = v.project,
         title = v.title,
+        -- config keys are set when the target value is a string and removed
+        -- when it is null; a row whose config was null stays null if neither
+        -- key is set.
         config = CASE WHEN v.soc IS NULL AND v.cp IS NULL AND (p.config IS NULL OR NOT (p.config ? 'society' OR p.config ? 'project')) THEN p.config
                  ELSE (coalesce(p.config, '{}'::jsonb) - 'society' - 'project')
                       || jsonb_strip_nulls(jsonb_build_object('society', v.soc, 'project', v.cp)) END,
         updated_at = NOW()
       FROM unnest(${ps.map(c => c.id)}::text[], ${v.map(x => x.project)}::text[], ${v.map(x => x.title)}::text[],
                   ${v.map(x => x.society)}::text[], ${v.map(x => x.cfgProject)}::text[],
-                  ${g ? g.map(x => x.project) : ps.map(() => null)}::text[], ${g ? g.map(x => x.title) : ps.map(() => null)}::text[],
-                  ${g ? g.map(x => x.society) : ps.map(() => null)}::text[], ${g ? g.map(x => x.cfgProject) : ps.map(() => null)}::text[])
+                  ${g.map(x => x.project)}::text[], ${g.map(x => x.title)}::text[],
+                  ${g.map(x => x.society)}::text[], ${g.map(x => x.cfgProject)}::text[])
            AS v(id, project, title, soc, cp, gp, gt, gs, gc)
       WHERE p.tenant_id = ${t} AND p.id = v.id
-        ${onlyIf ? sql`AND p.project IS NOT DISTINCT FROM v.gp AND p.title IS NOT DISTINCT FROM v.gt
-                       AND p.config->>'society' IS NOT DISTINCT FROM v.gs AND p.config->>'project' IS NOT DISTINCT FROM v.gc` : sql``}
-      RETURNING p.id`;
-    for (const r of rows as any[]) done.add(r.id);
-  }
-  if (os.length) {
-    const rows = await tx`
+        AND (NOT ${!!onlyIf}::boolean OR (p.project IS NOT DISTINCT FROM v.gp AND p.title IS NOT DISTINCT FROM v.gt
+             AND p.config->>'society' IS NOT DISTINCT FROM v.gs AND p.config->>'project' IS NOT DISTINCT FROM v.gc))
+      RETURNING p.id
+    ), uo AS (
       UPDATE crm_owners o SET project = v.project, updated_at = NOW()
-        FROM unnest(${os.map(c => c.id)}::text[], ${os.map(c => c[side].project)}::text[],
-                    ${onlyIf ? os.map(c => c[onlyIf].project) : os.map(() => null)}::text[]) AS v(id, project, gp)
+        FROM unnest(${os.map(c => c.id)}::text[], ${os.map(c => c[side].project)}::text[], ${og}::text[]) AS v(id, project, gp)
        WHERE o.tenant_id = ${t} AND o.id = v.id
-         ${onlyIf ? sql`AND o.project IS NOT DISTINCT FROM v.gp` : sql``}
-      RETURNING o.id`;
-    for (const r of rows as any[]) done.add(r.id);
-  }
-  return done;
-}
-
-/** One timeline event per row, one INSERT (as recordAssignment does). The old
- *  name stays on the record's history. */
-async function timeline(tx: any, t: string, changes: Change[], author: string, renameId: string, kind: 'rename' | 'undo') {
-  if (!changes.length) return;
-  const now = new Date().toISOString();
-  const rows = changes.map((c, i) => ({
-    id: `evt_${Date.now()}_${i}_${randomBytes(3).toString('hex')}`,
-    record_id: c.id,
-    type: kind === 'rename' ? 'project_renamed' : 'project_rename_undone',
-    title: kind === 'rename' ? 'Project renamed' : 'Project rename undone',
-    description: kind === 'rename' ? `Was "${c.before.project ?? ''}"` : `Back to "${c.before.project ?? ''}"`,
-    author,
-    timestamp: now,
-    metadata: sql.json({ renameId, from: c.before.project ?? null, to: c.after.project ?? null }) as any,
-    tenant_id: t,
-  }));
-  for (let i = 0; i < rows.length; i += 500) {
-    await tx`INSERT INTO crm_timeline_events ${sql(rows.slice(i, i + 500) as any[],
-      'id', 'record_id', 'type', 'title', 'description', 'author', 'timestamp', 'metadata', 'tenant_id')}`;
-  }
+         AND (NOT ${!!onlyIf}::boolean OR o.project IS NOT DISTINCT FROM v.gp)
+      RETURNING o.id
+    ), done AS (
+      SELECT id FROM up UNION ALL SELECT id FROM uo
+    ), ev AS (
+      INSERT INTO crm_timeline_events (id, record_id, type, title, description, author, timestamp, metadata, tenant_id)
+      SELECT e.id, e.record_id, ${rename ? 'project_renamed' : 'project_rename_undone'}::text,
+             ${rename ? 'Project renamed' : 'Project rename undone'}::text, e.description, ${ev.author}::text,
+             ${new Date(stamp).toISOString()}::timestamptz, e.metadata::jsonb, ${t}::text
+        FROM unnest(${evIds}::text[], ${changes.map(c => c.id)}::text[],
+                    ${changes.map(c => (rename ? `Was "${c.before.project ?? ''}"` : `Back to "${c.before.project ?? ''}"`))}::text[],
+                    ${changes.map(c => JSON.stringify({ renameId: ev.renameId, from: c.before.project ?? null, to: c.after.project ?? null }))}::text[])
+             AS e(id, record_id, description, metadata)
+       WHERE e.record_id IN (SELECT id FROM done)
+    ), rec AS (${record})
+    SELECT id FROM done`;
+  return new Set((rows as any[]).map(r => r.id as string));
 }
 
 /**
@@ -298,20 +305,35 @@ export async function undoRename(id: string, ctx: ActorCtx) {
   const t = writeTenant();
   const author = getContext()?.userId ?? ctx.actorId ?? 'System';
   const out = await sql.begin(async (tx: any) => {
+    // The rename, whether a later one overlaps it, and the locks on its rows,
+    // in one read (it was four). Rows are locked in id order, properties then
+    // owners, as plan() locks them for a rename, so the two cannot take the
+    // same rows' locks in opposite orders. A refusal below rolls back and
+    // releases them.
     const [r] = await tx`
-      SELECT r.* FROM crm_project_renames r
-       WHERE r.id = ${id} AND r.tenant_id = ${t} FOR UPDATE`;
+      WITH r AS (
+        SELECT * FROM crm_project_renames WHERE id = ${id} AND tenant_id = ${t} FOR UPDATE
+      ), lp AS (
+        SELECT p.id FROM crm_properties p
+         WHERE p.tenant_id = ${t} AND p.id IN (SELECT e->>'id' FROM r, jsonb_array_elements(r.rows) e WHERE e->>'t' = 'p')
+         ORDER BY p.id FOR UPDATE
+      ), lo AS (
+        SELECT o.id FROM crm_owners o
+         WHERE o.tenant_id = ${t} AND o.id IN (SELECT e->>'id' FROM r, jsonb_array_elements(r.rows) e WHERE e->>'t' = 'o')
+         ORDER BY o.id FOR UPDATE
+      )
+      SELECT r.*, EXISTS (${laterOverlap(sql`r`)}) AS later,
+             (SELECT count(*) FROM lp) AS locked_p, (SELECT count(*) FROM lo) AS locked_o
+        FROM r`;
     if (!r) throw new RenameError(404, 'Not found');
     if (r.undone_at) throw new RenameError(409, 'This rename has already been undone.');
     if (new Date(r.created_at).getTime() < Date.now() - UNDO_DAYS * 86400000) {
       throw new RenameError(409, `A rename can be undone for ${UNDO_DAYS} days.`);
     }
-    const [later] = await tx`SELECT 1 AS x FROM crm_project_renames r WHERE r.id = ${id} AND r.tenant_id = ${t} AND EXISTS (${laterOverlap(sql`r`)})`;
-    if (later) throw new RenameError(409, 'A later rename changed these rows. Undo that one first.');
+    if (r.later) throw new RenameError(409, 'A later rename changed these rows. Undo that one first.');
     const changes = (r.rows || []) as Change[];
-    const restored = await applyRows(tx, t, changes, 'before', 'after');
-    await tx`UPDATE crm_project_renames SET undone_at = NOW() WHERE id = ${id} AND tenant_id = ${t}`;
-    await timeline(tx, t, changes.filter(c => restored.has(c.id)), author, id, 'undo');
+    const restored = await writeRows(tx, t, changes, 'before', 'after', { author, renameId: id, kind: 'undo' },
+      sql`UPDATE crm_project_renames SET undone_at = NOW() WHERE id = ${id} AND tenant_id = ${t}`);
     return { restored: restored.size, kept: changes.length - restored.size, to: r.to_name };
   });
   audit({
