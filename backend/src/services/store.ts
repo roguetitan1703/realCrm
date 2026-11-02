@@ -2371,8 +2371,33 @@ export async function createLead(leadData: any, ctx: ActorCtx = SYSTEM_CTX, opts
   return created;
 }
 
+/**
+ * THE LEAD AS A WRITE NEEDS IT: the row and its shortlist, scoped like
+ * getLeadById, and nothing else. updateLead read the whole record (timeline,
+ * enquiries, activities, the shortlisted flats, author names: two waves of
+ * reads) only to merge a patch onto the columns and check who may write.
+ */
+async function leadForWrite(id: string): Promise<any | undefined> {
+  const t = tid();
+  const [rows, shortlistRows] = await Promise.all([
+    sql`SELECT * FROM crm_leads WHERE id = ${id} AND tenant_id = ${t} AND ${leadScope()}`,
+    sql`SELECT * FROM lead_shortlist WHERE lead_id = ${id} AND tenant_id = ${t}`,
+  ]);
+  if (!rows.length) return undefined;
+  return rowToLead(rows[0], [], shortlistRows as any[]);
+}
+
 export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_CTX): Promise<any | null> {
-  const oldLead = await getLeadById(id);
+  // ONE WAVE: the lead, the firm's stage words (only a stage move prints
+  // them) and whether a named new holder may take work. The check's answer is
+  // used only if the holder really changes; re-sending the current one was
+  // never checked and still is not.
+  const sentHolder = (patch.agentId !== undefined ? patch.agentId : patch.agent_id) || null;
+  const [oldLead, shown, holderRefusal] = await Promise.all([
+    leadForWrite(id),
+    patch.stage !== undefined ? getSettings() : null,
+    sentHolder ? assertWorkable(tid(), [sentHolder]).then(() => null, (e: any) => e) : null,
+  ]);
   if (!oldLead) return null;
 
   // A sales executive gets a full edit only on a lead they created; on one
@@ -2390,7 +2415,7 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   const source = patch.source !== undefined ? patch.source : oldLead.source;
   // '' is nobody, stored as null — not a value that reads as "someone".
   const agentId = (patch.agentId !== undefined ? patch.agentId : (patch.agent_id !== undefined ? patch.agent_id : oldLead.agentId)) || null;
-  if (agentId && agentId !== oldLead.agentId) await assertWorkable(tid(), [agentId]);
+  if (agentId && agentId !== oldLead.agentId && holderRefusal) throw holderRefusal;
   const req = patch.req !== undefined ? patch.req : oldLead.req;
   const notes = patch.notes !== undefined ? patch.notes : oldLead.notes;
   const shortlist = patch.shortlist !== undefined ? patch.shortlist : oldLead.shortlist;
@@ -2547,9 +2572,17 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // every time, and the record grew a stack of identical entries.
   const bookingChanged = !!followUp && !sameBooking(followUp, hadFollowUp);
 
+  // WHAT THIS SAVE PUTS IN THE HISTORY, collected and written in ONE insert
+  // below, in this order — each line was its own awaited round trip. Only the
+  // status line was ever allowed to fail the save; the rest are best-effort,
+  // and that is kept (historyMust).
+  const history: Omit<TimelineEvent, 'id' | 'timestamp'>[] = [];
+  let historyMust = false;
+  const desk = (bookingChanged || closingClears || hadFollowUp) ? await deskConfigOf(tid()) : null;
+
   if (bookingChanged) {
     const fu: any = followUp;
-    await addTimelineEvent({
+    history.push({
       record_id: id,
       type: 'follow_up',
       // 'Scheduled', not 'Follow-up scheduled'. The row already wears a
@@ -2558,30 +2591,30 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       // The chip says what kind of entry this is; the title says what happened
       // to it; the description says which follow-up. Three jobs, one word each.
       title: hadFollowUp ? 'Rescheduled' : 'Scheduled',
-      description: [followUpKind(fu), followUpWhen(fu, await deskConfigOf(tid()))].filter(Boolean).join(', '),
-      author: getContext()?.userId || null,
-    }).catch(() => {});
+      description: [followUpKind(fu), followUpWhen(fu, desk!)].filter(Boolean).join(', '),
+      author: getContext()?.userId || undefined,
+    });
   }
 
   if (closingClears) {
-    await addTimelineEvent({
+    history.push({
       record_id: id,
       type: 'follow_up',
       title: 'Booking cleared',
-      description: [followUpKind(hadFollowUp), followUpWhen(hadFollowUp, await deskConfigOf(tid()))].filter(Boolean).join(', '),
+      description: [followUpKind(hadFollowUp), followUpWhen(hadFollowUp, desk!)].filter(Boolean).join(', '),
       author: 'System',
       metadata: { reason: 'lead_closed', stage },
-    }).catch(() => {});
+    });
   } else if (hadFollowUp && !followUp) {
     const action = String((hadFollowUp as any).action || 'Follow-up');
     if (followUpKindOf(action) !== 'visit') {
-      await addTimelineEvent({
+      history.push({
         record_id: id,
         type: 'follow_up',
         title: 'Completed',
         description: followUpKind({ action }),
-        author: getContext()?.userId || null,
-      }).catch(() => {});
+        author: getContext()?.userId || undefined,
+      });
     }
   }
 
@@ -2609,15 +2642,14 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
       [f.project, [f.wing, f.unit_no].filter(Boolean).join('-')].filter(Boolean).join(' ') || f.title || 'a property']));
     const who = oldLead?.name || oldLead?.phone || 'a lead';
     const author = ctx.actorId ?? getContext()?.userId ?? 'System';
-    // One INSERT for the lot: two events per flat, awaited in turn, were
-    // fourteen round trips for seven flats.
-    await addTimelineEvents(changed.filter(pid => nameOf.has(pid)).flatMap(pid => {
+    // Two lines per flat, one on each record, in the same insert as the rest.
+    history.push(...changed.filter(pid => nameOf.has(pid)).flatMap(pid => {
       const title = added.includes(pid) ? 'Shortlisted' : 'Taken off the shortlist';
       return [
         { record_id: id, type: 'shortlist', title, description: nameOf.get(pid), author, metadata: { propertyId: pid } },
         { record_id: pid, type: 'shortlist', title, description: `For ${who}`, author, metadata: { leadId: id } },
       ];
-    })).catch(() => {});
+    }));
   }
 
   if (patch.stage && patch.stage !== oldLead.stage) {
@@ -2635,9 +2667,10 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     // In the firm's words: a firm that calls Deal Closed "Booked" reads
     // "Site Visit → Booked" in the history. metadata carries the stored value,
     // which is what the activity report and every count read.
-    const shown = await getSettings();
+    // (`shown`, the firm's settings, was read with the lead above.)
     const line = `${stageLabelIn(shown, oldLead.stage)} → ${stageLabelIn(shown, patch.stage)}${note ? `: ${note}` : ''}`;
-    await addTimelineEvent({
+    historyMust = true;
+    history.push({
       record_id: id,
       type: 'stage_change',
       title: line,
@@ -2659,13 +2692,17 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // (store adopt()) showed none until something else re-read the lead.
   // Either spelling: `agentId` is read above from agentId OR agent_id, so a
   // holder changed through `agent_id` is a change of hands too.
+  // The history lines and the assignment line go together: neither waits on
+  // the other, and both are in before the read.
   const handsChanged = (agentId || null) !== (oldLead.agentId || null);
-  if (handsChanged) {
-    await recordAssignment({
-      recordId: id, prevAgentId: oldLead.agentId, agentId,
-      author: ctx.actorId ?? getContext()?.userId ?? null,
-    });
-  }
+  await Promise.all([
+    history.length
+      ? addTimelineEvents(history).catch(err => { if (historyMust) throw err; console.warn('[Lead history] could not write:', err?.message); })
+      : null,
+    handsChanged
+      ? recordAssignment({ recordId: id, prevAgentId: oldLead.agentId, agentId, author: ctx.actorId ?? getContext()?.userId ?? null })
+      : null,
+  ]);
   const updated = await getLeadById(id);
   audit({
     tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
