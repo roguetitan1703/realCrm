@@ -2653,6 +2653,19 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
     });
   }
 
+  // A CHANGE OF HANDS IS HISTORY (CLAUDE.md §4), written BEFORE the read the
+  // reply is built from. It was written after, so the record a reassign
+  // answered with had no line saying so, and a screen that keeps the reply
+  // (store adopt()) showed none until something else re-read the lead.
+  // Either spelling: `agentId` is read above from agentId OR agent_id, so a
+  // holder changed through `agent_id` is a change of hands too.
+  const handsChanged = (agentId || null) !== (oldLead.agentId || null);
+  if (handsChanged) {
+    await recordAssignment({
+      recordId: id, prevAgentId: oldLead.agentId, agentId,
+      author: ctx.actorId ?? getContext()?.userId ?? null,
+    });
+  }
   const updated = await getLeadById(id);
   audit({
     tenant_id: tid(), actor_type: ctx.actorType || 'system', actor_id: ctx.actorId ?? null,
@@ -2664,16 +2677,6 @@ export async function updateLead(id: string, patch: any, ctx: ActorCtx = SYSTEM_
   // PUSH: someone handed you a live client. You now own a conversation you
   // haven't read yet, so this can't wait for you to next open the app.
   // notify() drops it when you assigned it to yourself.
-  // Either spelling: `agentId` is read above from agentId OR agent_id, so a
-  // holder changed through `agent_id` is a change of hands too. This tested
-  // patch.agentId only, and a PUT with agent_id moved the lead with no history.
-  const handsChanged = (agentId || null) !== (oldLead.agentId || null);
-  if (handsChanged) {
-    await recordAssignment({
-      recordId: id, prevAgentId: oldLead.agentId, agentId,
-      author: ctx.actorId ?? getContext()?.userId ?? null,
-    });
-  }
   if (handsChanged && agentId) {
     notify({ userId: agentId, type: 'lead_reassigned', data: { name }, link, push: true })
       .catch(err => console.warn('[Notify] lead_reassigned failed:', err?.message));
@@ -3558,9 +3561,22 @@ async function moveRecords(q: any, kind: 'lead' | 'owner', ids: string[], agentI
   return { kind, ids: clean, agentId, n: res.count, before: before as any[] };
 }
 
-/** The ledger line and the hand-over alert for a committed move. */
-async function afterMove(m: Move, ctx: ActorCtx): Promise<void> {
+/**
+ * The ledger line and the hand-over alert for a committed move — AFTER THE
+ * REPLY. The move and its `assignment` history are committed before this runs
+ * (moveRecords), so nothing here changes what the person is told; it only
+ * describes it. Awaited, the name lookup, the alert's row read, its insert and
+ * the push held every assign for another ~0.5s. Detached, it still runs inside
+ * the request's context (services/context.ts carries through an un-awaited
+ * promise), and notify() still refuses and logs a recipient who cannot take
+ * work. Its errors are logged, never thrown at a request that already answered.
+ */
+function afterMove(m: Move, ctx: ActorCtx): void {
   if (!m.n) return;
+  describeMove(m, ctx).catch(err => console.warn('[Move] audit or hand-over alert failed:', err?.message));
+}
+
+async function describeMove(m: Move, ctx: ActorCtx): Promise<void> {
   const t = tid();
   const { n, agentId } = m;
   if (m.kind === 'lead') {
@@ -3591,7 +3607,14 @@ async function moveAll(plan: { kind: 'lead' | 'owner'; ids: string[]; agentId: s
     for (const p of plan) if (p.ids.length) out.push(await moveRecords(tx, p.kind, p.ids, p.agentId, ctx));
     return out;
   }) as any;
-  for (const m of moves) await afterMove(m, ctx);
+  // After the reply, one move after another: a hand-out to seven people is
+  // seven alerts, and run side by side they would take seven of the pool's
+  // connections at once from every other firm's requests.
+  const said = moves.filter(m => m.n);
+  if (said.length) {
+    (async () => { for (const m of said) await describeMove(m, ctx); })()
+      .catch(err => console.warn('[Move] audit or hand-over alert failed:', err?.message));
+  }
   return moves;
 }
 
@@ -3599,7 +3622,7 @@ export async function bulkAssignLeads(ids: string[], agentId: string | null, ctx
   const who = getContext();
   if (who?.role === 'agent') throw new ForbiddenError('Assigning leads is done from the desk.');
   const m = await moveRecords(sql, 'lead', ids, agentId, ctx);
-  await afterMove(m, ctx);
+  afterMove(m, ctx);
   return m.n;
 }
 
@@ -4746,7 +4769,7 @@ export async function bulkAssignOwners(ids: string[], agentId: string | null, ct
   // Same move as bulkAssignLeads, on the calling list (moveRecords): the
   // previous holder read first, so an owner moved between callers carries it.
   const m = await moveRecords(sql, 'owner', ids, agentId, ctx);
-  await afterMove(m, ctx);
+  afterMove(m, ctx);
   return m.n;
 }
 

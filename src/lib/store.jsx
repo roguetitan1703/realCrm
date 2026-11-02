@@ -1368,12 +1368,33 @@ export function StoreProvider({ children }) {
     touched: settled,
     cacheRecords: (kind, records, partial) => dispatch({ type: 'CACHE_RECORDS', kind, records, partial }),
 
+    // WHO HOLDS IT, at once. The picker closed and the row kept the old name
+    // for the ~1.5s the server took; now it moves on the tap and goes back,
+    // with the reason, if the server refuses (a colleague suspended since the
+    // screen loaded, an agent's session). The server still writes the
+    // assignment history; the reply replaces this guess (adopt).
     assign: (leadId, agentId) => {
       const a = state.agents.find(x => x.id === agentId)
-      return write('Assign',
-        () => apiClient.updateLead(leadId, { agentId }).then(adopt('lead')),
+      const prev = api.lookup('lead', leadId)?.agentId ?? null
+      return optimistic('Assign',
         () => dispatch({ type: 'ASSIGN', leadId, agentId }),
+        () => dispatch({ type: 'UPDATE_LEAD', leadId, patch: { agentId: prev } }),
+        () => apiClient.updateLead(leadId, { agentId }).then(adopt('lead')),
         'Lead assigned to ' + (a ? a.first : ''), 'lead')
+    },
+    // The Agent cell on a list row — the same, through the bulk route the
+    // cell has always used (one id).
+    assignRow: (kind, id, agentId) => {
+      const lead = kind === 'lead'
+      const prev = api.lookup(kind, id)?.agentId ?? null
+      return optimistic('Assign',
+        () => dispatch(lead ? { type: 'ASSIGN', leadId: id, agentId } : { type: 'UPDATE_OWNER', id, patch: { agentId } }),
+        () => dispatch(lead ? { type: 'UPDATE_LEAD', leadId: id, patch: { agentId: prev } } : { type: 'UPDATE_OWNER', id, patch: { agentId: prev } }),
+        // A refusal's words are in `message` here, which optimistic() would
+        // not read.
+        () => (lead ? apiClient.bulkAssignLeads([id], agentId) : apiClient.bulkAssignOwners([id], agentId))
+          .then(res => { if (res?.success === false) throw new Error(res.message || res.error || 'Could not assign'); return res }),
+        `${lead ? 'Lead' : 'Owner'} ${agentId ? 'assigned' : 'unassigned'}`, kind)
     },
     updateLead: (leadId, patch) => write('Update lead',
       () => apiClient.updateLead(leadId, patch).then(adopt('lead')),

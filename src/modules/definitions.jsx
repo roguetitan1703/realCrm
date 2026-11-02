@@ -39,7 +39,6 @@ import { OWNER_STATUSES, OWNER_TERMINAL_STATUSES } from '../data/ownerStatus.js'
 
 import { canAssignLead, canEditLead, canUpdateLeadStatus, canEditListing, canDeleteRecord, isDeskRole } from '../lib/permissions.js'
 import { api } from '../lib/api.js'
-import { assignFailed } from '../lib/workforce.js'
 import { openSend } from './SendSheet.jsx'
 import Icon from '../components/Icon.jsx'
 // Filter options are GENERATED from the canonical vocabulary rather than typed
@@ -329,17 +328,8 @@ export const LEADS_DEF = {
     { key: 'agent', label: 'Agent', render: (l, store) => (
       <OwnerCell
         record={l} store={store} canAssign={canAssignLead(store.state.role)}
-        onAssign={(agentId) => api.bulkAssignLeads([l.id], agentId)
-          .then(res => {
-            // settled(), not reloadServer(): the boot payload carries no
-            // leads, so re-reading it could not show this assignment. It
-            // refreshed the row only because HYDRATE_SERVER happens to move
-            // dataAsOf, which the list watches — a whole extra round trip to
-            // trigger a side effect of a request that answered nothing.
-            if (res?.success) { store.toast(agentId ? 'Lead assigned' : 'Lead unassigned'); store.settled?.() }
-            else store.toast(res?.message || 'Could not assign', 'warn')
-          })
-          .catch(err => assignFailed(store, err))}
+        // Optimistic: the name changes on the tap (store.assignRow).
+        onAssign={(agentId) => store.assignRow('lead', l.id, agentId)}
       />
     ) },
     { key: 'next', label: 'Next follow-up', render: (l) => {
@@ -728,12 +718,7 @@ export const OWNERS_DEF = {
     { key: 'agent', label: 'Agent', render: (o, store) => (
       <OwnerCell
         record={o} store={store} canAssign={canAssignLead(store.state.role)}
-        onAssign={(agentId) => api.bulkAssignOwners([o.id], agentId)
-          .then(res => {
-            if (res?.success) { store.toast(agentId ? 'Owner assigned' : 'Owner unassigned'); store.settled?.() }
-            else store.toast(res?.message || 'Could not assign', 'warn')
-          })
-          .catch(err => assignFailed(store, err))}
+        onAssign={(agentId) => store.assignRow('owner', o.id, agentId)}
       />
     ) },
   ],

@@ -32,6 +32,17 @@ function OwnerProjectGrid({ store, ask, def, phone, onOpen, onOpenOwner, onAssig
   const { data, loading, error } = useServerData(() => api.listOwnerProjects(ask).then(r => r?.data || []), [refreshAt, askKey], null)
   const { undoFor, undoing, undo } = useUndoableRenames(store)
   const rows = data || []
+  // THE ROWS UNDER A PROJECT, as the record cache knows them — the list's own
+  // rule (useServerList): written to the cache when they arrive, read back
+  // through it, so a write that patches an owner (an assignment from the Agent
+  // cell, a status) moves its row here at once rather than at the next read.
+  useEffect(() => {
+    const all = (data || []).flatMap(pj => pj.owners || [])
+    if (all.length) store.cacheRecords('owner', all, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data])
+  const known = store.state.cache?.owner
+  const ownersOf = (pj) => (known ? pj.owners.map(o => (known[o.id] && known[o.id] !== o ? { ...o, ...known[o.id] } : o)) : pj.owners)
   if (loading && !data) return <div className="list-spin" role="status" aria-label="Loading"><span /></div>
   if (error) return <div className="detail-missing">Could not load projects.</div>
   // From the answer, not the question: while a new search is in flight the
@@ -68,8 +79,8 @@ function OwnerProjectGrid({ store, ask, def, phone, onOpen, onOpenOwner, onAssig
             {searching && !picking && pj.owners?.length > 0 && (
               <div className="pjl-flats">
                 {phone
-                  ? <ModuleCards def={def} rows={pj.owners} store={store} onOpen={onOpenOwner} phone />
-                  : <ModuleTable def={def} rows={pj.owners} store={store} onOpen={onOpenOwner} />}
+                  ? <ModuleCards def={def} rows={ownersOf(pj)} store={store} onOpen={onOpenOwner} phone />
+                  : <ModuleTable def={def} rows={ownersOf(pj)} store={store} onOpen={onOpenOwner} />}
               </div>
             )}
           </ProjectRow>
