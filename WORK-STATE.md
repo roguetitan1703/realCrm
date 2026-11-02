@@ -2,7 +2,7 @@
 
 ## Now
 Actions feel slow (Om 2 Nov): every save waits on the server, several round trips each. A on `a-auth-speed`: 3 round trips of auth per request (session SELECT+UPDATE, uncached settings, lead saves authenticated twice) — security review before merge. B on `b-speed`: shortlist batching + optimistic attach, rename/undo time.
-Release 2 Nov: main = c440165 pushed (Om's go), API live on c440165, closed-lead repair ran (bhumi 23, mahalaxmi 9, urban 2, delpat 1; 0 left). Waits on Om: promote c440165 in Vercel (built green, site still old), and the backup — pg_dump 17 from PGDG (prod is Postgres 17.6), first `npm run backup`, cron.
+Release 2 Nov: main = c440165 pushed (Om's go), API live on c440165, closed-lead repair ran (bhumi 23, mahalaxmi 9, urban 2, delpat 1; 0 left). Backup live on the EC2: pg_dump 17.11 (PGDG), first dump 2 Nov 04:53 UTC verified (6.0 MB), cron 21:00 UTC installed. Waits on Om: promote c440165 in Vercel (built green, site still old at 04:55 UTC).
 
 ## Next
 S1. Speed, after B's shortlist work (audit 2 Nov, ranked): owner status/callback optimistic + store the returned owner + Owners.jsx `fetched || cached` prefers stale fetched; Record call = one endpoint (contact-log + editRemark + callback in sequence today); follow-up/Callback modal closes at once; inline assign and AssignModal optimistic, notify after responding; Add remark closes at once; Today "Done" leaves at once; reject owner one request; skip refetching the lead a write just returned and narrow what `settled()` refreshes; updateLead reads the lead twice; hand-out rota N locked queries → `dealRota(n)`; moveAll per-target loop; property edit per-field events; verifyProperty labelled optimistic but is not
@@ -35,7 +35,8 @@ S2. Bug: `noteOwnerContact` (store.ts ~4740) reportedly writes "Stage → Contac
 - The firm logo renders as a broken image in the desk sidebar (seen on delpat, dev) — waits on checking brand_config's logo URL
 - On a phone, an owner's or manager's Calling tab badge counts their own late callbacks (Today's feed is theirs) while their Calling list shows the firm's — waits on the owner's phone pages in the redesign
 - `webhookSender.ts` (outbound webhooks) has no caller and its menu entry is gone — waits on deciding to delete it or build outbound webhooks
-- Nightly backup: script + cron line merged (9d67760, DEPLOY.md "Nightly backup"); production dump taken 28 Oct 15:21 on this PC, verified against live counts; Supabase free plan keeps none — waits on the next push to main and Om installing the cron on the EC2
+- Backups stay on the EC2 only (no off-box copy, BACKUP_COPY_TO unset): a lost box loses them — waits on Om picking a second place
+- The EC2 has a pending kernel upgrade (needs a reboot); check `pm2 startup`/`pm2 save` brings re-api back before rebooting — waits on Om choosing a quiet hour
 - Regression test suite (there are no tests: 0 test files): agent-phone, owner-desk and permission flows as Playwright + API tests, run before every push to main — parked by Om 28 Oct, builder S or A later; the smoke tests in tests/smoke/ (s-smoke) are its seed
 - Dev API (api.dev.re.delpat.in, re-api-dev on the EC2) answers 502 (28 Oct) — waits on Om looking at PM2 on the box
 - Duty status (crm_agents.duty_status): nothing sets it, every agent ACTIVE in prod; route now desk-only — waits on Om saying remove it
