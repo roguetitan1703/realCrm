@@ -21,6 +21,9 @@ import { isOpen, CALLBACK_STATUS } from '../data/leadStatus.js'
 import { canWork, isNotWorkable, notWorkableText } from './workforce.js'
 import { reloadIfNewBuild } from './appVersion.js'
 
+// What a write can say it touched (MUTATED, asOf()).
+const WRITE_KINDS = ['lead', 'owner', 'property']
+
 // Pending shortlist writes, per lead (see changeShortlist).
 const shortlistQueue = new Map()
 
@@ -291,6 +294,10 @@ function freshState() {
     // their deps, so a mutation refreshes the page you are looking at without
     // a full reload of the workspace. See `settled()` below.
     mutationTick: 0,
+    // When each kind of record was last written, and `all` when everything
+    // was (a refresh, or a write that did not say what it touched). A read
+    // that cannot change with some kind of write keys on asOf() without it.
+    asOf: {},
     dataStale: false,    // true when we're showing a cached snapshot (offline read)
     // What the firm owes Delpat, from boot and every pulse (billing.md). null:
     // no subscription, or nothing for this person to see. Never cached.
@@ -367,6 +374,7 @@ function reducer(state, action) {
         // read cache, twice per load). The pulse's read, sent because the
         // change token moved, is the one that means "look again".
         dataAsOf: action.refresh ? Date.now() : state.dataAsOf,
+        asOf: action.refresh ? { ...state.asOf, all: Date.now() } : state.asOf,
         dataStale: false,   // fresh from the server
       }
     }
@@ -424,7 +432,9 @@ function reducer(state, action) {
       for (const r of action.records || []) if (r?.id) {
         const prev = next[r.id]
         delete next[r.id]
-        if (!action.partial) { next[r.id] = r; continue }
+        // A write's own reply: the record as of the write about to settle, so
+        // useRecord need not ask for it again (see adopt()).
+        if (!action.partial) { next[r.id] = action.adopted ? { ...r, __tick: (state.mutationTick || 0) + 1 } : r; continue }
         const row = { ...r }
         for (const k of keep) delete row[k]
         next[r.id] = (prev && !prev.__partial)
@@ -478,10 +488,15 @@ function reducer(state, action) {
     // work until the first screen someone forgot.
     //
     // No loop: only a write dispatches this, and a refetch is not a write.
+    //
+    // `kind` says what the write touched ('lead', 'owner', 'property'). Every
+    // read on dataAsOf still moves; a read keyed on asOf(...) skips the kinds
+    // it names. An untyped write moves them all.
     case 'MUTATED': return {
       ...state,
       mutationTick: (state.mutationTick || 0) + 1,
       dataAsOf: Date.now(),
+      asOf: { ...state.asOf, [action.kind || 'all']: Date.now() },
     }
 
     // Real, server-persisted remark events (B1) — kind picks the array so the
@@ -1169,7 +1184,9 @@ export function StoreProvider({ children }) {
    * bumping first would re-fetch the old rows and visibly undo the optimistic
    * update a moment before the write lands.
    */
-  const settled = useCallback(() => dispatch({ type: 'MUTATED' }), [])
+  // `kind` — what the write touched, when only one kind of record: see MUTATED.
+  // Called bare as a handler too, so anything but a string is "everything".
+  const settled = useCallback((kind) => dispatch({ type: 'MUTATED', kind: typeof kind === 'string' ? kind : undefined }), [])
 
   // The whole lead: the cached one when it is the full record, otherwise read.
   const fullLead = (leadId) => {
@@ -1258,16 +1275,16 @@ export function StoreProvider({ children }) {
       if (!q.ops.length) shortlistQueue.delete(leadId)
       if (shortlisted) toast(shortlisted === 1 ? 'Shortlisted' : `${shortlisted} shortlisted`)
       // Once per burst, not per send: every list on screen refetches on this.
-      if (sent) settled()
+      if (sent) settled('lead')
     }
   }
 
-  const write = useCallback((what, call, apply, okMsg) => call()
+  const write = useCallback((what, call, apply, okMsg, kind) => call()
     .then(res => {
       if (rejected(res)) throw new Error(res.error || 'rejected')
       if (apply) apply(res)
       if (okMsg) toast(okMsg)
-      settled()
+      settled(kind)
       return res
     })
     .catch(err => { failed(err, what); return null }), [failed, toast, settled])
@@ -1279,22 +1296,22 @@ export function StoreProvider({ children }) {
   // update returns its columns without its history.
   const adopt = useCallback((kind, partial) => (res) => {
     const rec = res?.data
-    if (rec?.id) dispatch({ type: 'CACHE_RECORDS', kind, records: [rec], partial })
+    if (rec?.id && res?.success !== false) dispatch({ type: 'CACHE_RECORDS', kind, records: [rec], partial, adopted: !partial })
     return res
   }, [])
 
   // Each listing's photo saves, chained so they reach the server in order.
   const mediaQueue = useRef({})
-  const optimistic = useCallback((what, apply, revert, call, okMsg) => {
+  const optimistic = useCallback((what, apply, revert, call, okMsg, kind) => {
     apply()
     if (okMsg) toast(okMsg)
     return call()
       .then(res => {
         if (rejected(res)) throw new Error(res.error || 'rejected')
-        settled()
+        settled(kind)
         return res
       })
-      .catch(err => { revert(); failed(err, what); settled(); return null })
+      .catch(err => { revert(); failed(err, what); settled(kind); return null })
   }, [failed, toast, settled])
 
   const api = {
@@ -1330,6 +1347,9 @@ export function StoreProvider({ children }) {
     // request in the overwhelmingly common case. A miss is a normal outcome,
     // not an error: useRecord() fetches that one record by id.
     lookup: (kind, id) => (id && state.cache?.[kind]?.[id]) || null,
+    // A refetch token that ignores writes to the kinds named: a read that no
+    // lead write can change keys on asOf('lead') instead of dataAsOf.
+    asOf: (...ignore) => ['all', ...WRITE_KINDS.filter(k => !ignore.includes(k))].map(k => state.asOf?.[k] || 0).join('.'),
     // A write made outside the store's own methods (the conversion forms in
     // components/Agreements.jsx) announces itself the same way, so every open
     // screen refetches instead of showing the record as it was.
@@ -1341,12 +1361,12 @@ export function StoreProvider({ children }) {
       return write('Assign',
         () => apiClient.updateLead(leadId, { agentId }).then(adopt('lead')),
         () => dispatch({ type: 'ASSIGN', leadId, agentId }),
-        'Lead assigned to ' + (a ? a.first : ''))
+        'Lead assigned to ' + (a ? a.first : ''), 'lead')
     },
     updateLead: (leadId, patch) => write('Update lead',
       () => apiClient.updateLead(leadId, patch).then(adopt('lead')),
       () => dispatch({ type: 'UPDATE_LEAD', leadId, patch }),
-      'Lead details updated'),
+      'Lead details updated', 'lead'),
     // A LISTING'S PHOTOS, saved as they are changed. Optimistic: reordering and
     // removing are taps on tiles, and a tile that waits on the server before it
     // moves reads as a frozen screen. A refused write puts the list back as it
@@ -1388,8 +1408,10 @@ export function StoreProvider({ children }) {
         // No note. This sent the literal "Stage updated via CRM view" to satisfy
         // a mandatory-note rule, and it was then printed on every stage row in
         // every lead's history — a sentence that says only "this app did it".
-        () => apiClient.changeStage(leadId, stage),
-        'Stage → ' + stage)
+        // The reply carries the record (an API older than this build does not,
+        // and then the record is read again as before).
+        () => apiClient.changeStage(leadId, stage).then(adopt('lead')),
+        'Stage → ' + stage, 'lead')
     },
     // Optimistic for the same reason: this is a tick on a row the agent is
     // working through, and the tick has to land under the finger.
@@ -1409,7 +1431,7 @@ export function StoreProvider({ children }) {
         () => dispatch({ type: 'FOLLOWUP', leadId, followUp }),
         () => dispatch({ type: 'FOLLOWUP', leadId, followUp: prev }),
         () => apiClient.updateLead(leadId, { followUp }).then(adopt('lead')),
-        'Follow-up set and added to the calendar')
+        'Follow-up set and added to the calendar', 'lead')
     },
     // The status and its booked call in ONE write: the server refuses a
     // Callback from a person with no call booked, so the two cannot be sent
@@ -1418,7 +1440,7 @@ export function StoreProvider({ children }) {
       () => apiClient.updateLead(leadId, { stage: CALLBACK_STATUS, followUp }).then(adopt('lead')),
       // The reply is the record (adopt); nothing to patch on top of it.
       null,
-      'Callback booked'),
+      'Callback booked', 'lead'),
     // `logEvent` used to dispatch a timeline entry into local React state and
     // toast "Call logged" — with no request behind it. The entry was gone on
     // the next reload and no teammate ever saw it. It goes through the same

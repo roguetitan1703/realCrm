@@ -190,7 +190,8 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
     // of it still re-sorts.
     { filters: flt, search: q, sortKey, sortDir, page, pageSize, accumulate: !!phone,
       holdOrder: true, viewDeps: [seg, intent, stage] },
-    [state.dataAsOf, seg, intent, stage],
+    // An owner written on Calling cannot change a page of leads.
+    [store.asOf('owner'), seg, intent, stage],
     // The rows this page shows, into the record cache -- see useServerList.
     // Never passed, so opening a row always cost a fetch for a record the
     // list had just delivered, and no optimistic update was ever visible here.
@@ -220,7 +221,7 @@ function LeadList({ store, go, sel, setSel, topBar, phone }) {
   // over every lead in the firm, which is the same number only while the whole
   // collection is in the browser. No `?? counts.total` fallback — a segment
   // with a real zero shows 0, not the grand total borrowed from another pill.
-  const counts = useLeadsSummary(state.dataAsOf, filterParams)
+  const counts = useLeadsSummary(store.asOf('owner'), filterParams)
   // A ZERO PILL STAYS ON SCREEN, DIMMED AND UNCLICKABLE. Hiding it reflows the
   // row on every filter touch, so the pill a thumb is reaching for moves; and a
   // pile that is empty under the current filters is an answer, not an absence.
@@ -418,7 +419,9 @@ function LeadRecord({ store, go, sel, setSel, topBar, phone }) {
   // the shortlist rows below rather than a second list of the same homes.
   const { data: shareRows } = useServerData(
     () => (sel.leadId ? api.leadShares(sel.leadId).then(r => r?.data || []) : Promise.resolve([])),
-    [sel.leadId, store.state.mutationTick], [])
+    // Moves with a send (an untyped write), not with a status change or a
+    // shortlist tap, which cannot change what was sent.
+    [sel.leadId, store.asOf('lead', 'owner', 'property')], [])
   // Homes ticked for Send. Cleared when the lead changes.
   const [ticked, setTicked] = useState(() => new Set())
   useEffect(() => { setTicked(new Set()) }, [sel.leadId])

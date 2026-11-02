@@ -394,7 +394,7 @@ export default function Today({ store, go, topBar, sel = {}, phone = true }) {
   // calling work. The desk: if the firm has a calling list at all, since an
   // owner's own queue is usually empty while the team's is not.
   const { data: firmOwners, loading: firmLoading } = useServerData(
-    () => (isDesk ? api.getOwnersSummary() : Promise.resolve(null)), [isDesk, state.dataAsOf], null, isDesk ? '/owners/summary' : null)
+    () => (isDesk ? api.getOwnersSummary() : Promise.resolve(null)), [isDesk, store.asOf('lead', 'property')], null, isDesk ? '/owners/summary' : null)
   const hasCalling = isDesk
     ? (firmOwners?.summary?.queue?.total || 0) > 0
     : Object.values(oc).some(v => Number(v) > 0)

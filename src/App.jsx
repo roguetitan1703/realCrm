@@ -169,9 +169,10 @@ export default function App() {
   )
   // The calling queue's own counts — same read the Calling screen and Today
   // use, so the sidebar badge and the screen it opens never disagree.
+  // A lead or a listing written cannot move it (asOf, store.jsx).
   const { data: ownerSummary } = useServerData(
     () => (sidebar ? api.getOwnersSummary() : Promise.resolve(null)),
-    [state.dataAsOf, sidebar],
+    [store.asOf('lead', 'property'), sidebar],
     null,
     '/owners/summary',
   )

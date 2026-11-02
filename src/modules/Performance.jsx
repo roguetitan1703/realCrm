@@ -15,7 +15,7 @@ import { AgentWork, TeamBoard } from '../components/AgentWork.jsx'
 // crowded out the people.
 export default function Performance({ store, go, sel, topBar }) {
   const { state } = store
-  const { data: ownerSummary, loading } = useServerData(() => api.getOwnersSummary(), [state.dataAsOf], null, '/owners/summary')
+  const { data: ownerSummary, loading } = useServerData(() => api.getOwnersSummary(), [store.asOf('lead', 'property')], null, '/owners/summary')
   const { data: desk } = useServerData(() => api.getDeskSummary(), [state.dataAsOf], null, '/workspace/desk-summary')
   const hasCalling = (ownerSummary?.summary?.queue?.total || 0) > 0
   const settled = !!ownerSummary || !loading

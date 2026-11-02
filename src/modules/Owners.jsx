@@ -263,6 +263,10 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
   // A checked row belongs to the list it was checked in.
   useEffect(() => { clearSel() }, [view, projectSel])
 
+  // Calling's refetch token: moves with owner writes and untyped ones, not
+  // with a lead or a listing written (asOf, store.jsx).
+  const ownersAsOf = store.asOf('lead', 'property')
+
   // ONE SET OF PARAMETERS for the rows and for the tab counts, so a tab can
   // never promise rows its list cannot find.
   const scope = {
@@ -287,19 +291,20 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
       holdOrder: true, viewDeps: [tab, status, agentSel, projectSel, towerSel, configSel, phone],
       // Grouped by project shows cards, not this page of rows.
       off: view === 'projects' },
-    [state.dataAsOf, tab, status, agentSel, projectSel, towerSel, configSel, phone],
+    // Calling reads owners: a lead or a listing written cannot change them.
+    [ownersAsOf, tab, status, agentSel, projectSel, towerSel, configSel, phone],
     { store, kind: 'owner' },
   )
   const { data: counts } = useServerData(
     // The dropdown's status only: a step tab is counted across, not within.
     () => api.getOwnerTabs({ ...scope, segment, stage: status }).then(r => r?.tabs || {}),
-    [state.dataAsOf, q, tab, status, agentSel, projectSel, towerSel, configSel, phone], {})
+    [ownersAsOf, q, tab, status, agentSel, projectSel, towerSel, configSel, phone], {})
 
   // The picked project's towers, for the Tower filter. Without a project there
   // is no tower to offer, and this was a second firm-wide project read beside
   // the cards' own on every load.
   const { data: projectList } = useServerData(
-    () => (projectSel ? api.listOwnerProjects().then(r => r?.data || []) : Promise.resolve([])), [state.dataAsOf, !!projectSel], [])
+    () => (projectSel ? api.listOwnerProjects().then(r => r?.data || []) : Promise.resolve([])), [ownersAsOf, !!projectSel], [])
   const currentProject = (projectList || []).find(p => (p.key === 'No project' ? '_none' : p.key) === projectSel)
   const facets = {
     towers: (currentProject?.towers || []).map(t => ({ value: t, label: t })),
@@ -452,7 +457,7 @@ export default function Owners({ store, go, sel, setSel, topBar, phone }) {
           store={store} picking={picking} selection={selection}
           ask={{ ...(q ? { q } : {}), ...(scope.mine ? { mine: 1 } : {}) }}
           def={def} phone={phone} onOpenOwner={open}
-          refreshAt={state.dataAsOf}
+          refreshAt={ownersAsOf}
           canAssign={canAssign}
           onAssign={(pj) => store.openModal({ kind: 'assignProject', project: pj })}
           onOpen={(key) => toProject(key === 'No project' ? '_none' : key)} />
