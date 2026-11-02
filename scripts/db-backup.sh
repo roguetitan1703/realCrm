@@ -29,13 +29,13 @@
 #   • Use the DIRECT connection (host db.<ref>.supabase.co, port 5432).
 #     The pooler on port 6543 (pgbouncer) does NOT support pg_dump.
 #   • SSL is required; the script appends sslmode=require if missing.
-#   • pg_dump must be >= the server's major version. Host has pg_dump 18 here,
-#     which dumps any current Supabase server fine.
+#   • pg_dump must be >= the server's major version (production is 17).
+#     Ubuntu's own postgresql-client is older; install postgresql-client-17 from PGDG (DEPLOY.md).
 # =============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."   # run from repo root regardless of caller's cwd
 
-PG_IMAGE="${PG_IMAGE:-postgres:16-alpine}"   # only used if host pg_dump is absent
+PG_IMAGE="${PG_IMAGE:-postgres:17-alpine}"   # only used if host pg_dump is absent
 KEEP="${KEEP:-14}"
 MIN_BYTES="${MIN_BYTES:-10000}"
 BACKUP_NAME="${BACKUP_NAME:-prod}"

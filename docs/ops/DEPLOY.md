@@ -131,7 +131,8 @@ deletes anything and exits non-zero. `DATABASE_URL` must be the **direct**
 connection (port 5432); the pooler on 6543 cannot `pg_dump`.
 
 ```bash
-which pg_dump && pg_dump --version   # needs the client; else: sudo apt install postgresql-client
+pg_dump --version   # must be 17+ (production is Postgres 17). Ubuntu's own client is older:
+# sudo apt install -y postgresql-common && sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y && sudo apt install -y postgresql-client-17
 timedatectl | grep "Time zone"      # the line below assumes UTC
 crontab -e     # one-time, as the user that owns ~/realestate
 # 21:00 UTC = 02:30 IST. Ubuntu's cron ignores CRON_TZ, so the time is in the box's zone.
