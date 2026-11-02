@@ -1,10 +1,14 @@
 # Work state
 
 ## Now
-Actions feel slow (Om 2 Nov): every save waits on the server, several round trips each. A on `a-auth-speed`: 3 round trips of auth per request (session SELECT+UPDATE, uncached settings, lead saves authenticated twice) — security review before merge. B on `b-speed`: shortlist batching + optimistic attach, rename/undo time.
-Release 2 Nov: main = c440165 pushed (Om's go), API live on c440165, closed-lead repair ran (bhumi 23, mahalaxmi 9, urban 2, delpat 1; 0 left). Backup live on the EC2: pg_dump 17.11 (PGDG), first dump 2 Nov 04:53 UTC verified (6.0 MB), cron 21:00 UTC installed. Waits on Om: promote c440165 in Vercel (built green, site still old at 04:55 UTC).
+Actions feel slow (Om 2 Nov). Merged on development: shortlist bursts (7 taps → 2 requests) and rename undo 2.9s → 1.2s (b-speed), a sold/rented flat on a lead shows its status and cannot be ticked (71d4f4b); smoke 41/41. A's auth change (a9a7506 on `a-auth-speed`, 2–4 → 1 round trip per request) is in security review before merge.
+Release 2 (c440165) is live on both halves; backup nightly on the EC2 (STATE.md).
 
 ## Next
+D1. Waits on Om: daily date refresh for production demo firms (urban, raipur, …) — today only the development db refreshes; it is a daily production write limited to demo firms (recommended yes, measure first, review)
+D2. Waits on Om: #153 intro wording (drafts given 2 Nov) and what is wrong with today's share message
+D3. Waits on Om: the delpat production login, for the signed-in live check
+S0. Each screen loads 6–7 shell requests (bootstrap, desk-summary, owners/summary, notifications ×2, device-state); Leads and Calling fetch routing/backlog 3 times; desk Calling sends 11 at once against a 10-connection pool (measured on dev 2 Nov)
 S1. Speed, after B's shortlist work (audit 2 Nov, ranked): owner status/callback optimistic + store the returned owner + Owners.jsx `fetched || cached` prefers stale fetched; Record call = one endpoint (contact-log + editRemark + callback in sequence today); follow-up/Callback modal closes at once; inline assign and AssignModal optimistic, notify after responding; Add remark closes at once; Today "Done" leaves at once; reject owner one request; skip refetching the lead a write just returned and narrow what `settled()` refreshes; updateLead reads the lead twice; hand-out rota N locked queries → `dealRota(n)`; moveAll per-target loop; property edit per-field events; verifyProperty labelled optimistic but is not
 S2. Bug: `noteOwnerContact` (store.ts ~4740) reportedly writes "Stage → Contacted" on every contact with an owner already Contacted — verify, then fix with S1
 0. UI review (docs/specs/ui-review.md, published for Om): waits on Om picking proposals; recommended P1 after-call sheet + P3 one word one number
