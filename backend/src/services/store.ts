@@ -4763,17 +4763,26 @@ export async function bulkAssignOwners(ids: string[], agentId: string | null, ct
 export async function noteOwnerContact(recordId: string, channel: string): Promise<void> {
   const t = tid();
   try {
+    // WHAT IT WAS, not what it is. This returned the stage after the update,
+    // which is Contacted both when this call moved it there and when it was
+    // already there — so every call to an owner already Contacted wrote
+    // another "Stage → Contacted" line. The row is locked and read first so
+    // the line is written only for the move.
     const rows = await sql`
-      UPDATE crm_owners SET
-        last_call_at = ${channel === 'call' ? sql`NOW()` : sql`last_call_at`},
-        stage = CASE WHEN coalesce(stage, 'New') = 'New' THEN 'Contacted' ELSE stage END,
+      WITH before AS (
+        SELECT id, coalesce(stage, 'New') AS was FROM crm_owners
+        WHERE id = ${recordId} AND tenant_id = ${t} FOR UPDATE
+      )
+      UPDATE crm_owners o SET
+        last_call_at = ${channel === 'call' ? sql`NOW()` : sql`o.last_call_at`},
+        stage = CASE WHEN before.was = 'New' THEN 'Contacted' ELSE o.stage END,
         updated_at = NOW()
-      WHERE id = ${recordId} AND tenant_id = ${t}
-      RETURNING stage`;
-    if (rows.length && rows[0].stage === 'Contacted') {
+      FROM before WHERE o.id = before.id AND o.tenant_id = ${t}
+      RETURNING o.stage, before.was`;
+    if (rows.length && rows[0].was === 'New' && rows[0].stage === 'Contacted') {
       await addTimelineEvent({
         record_id: recordId, type: 'stage_change', title: 'Stage → Contacted',
-        description: 'First outreach logged', author: 'System', metadata: { auto: true },
+        description: 'First outreach logged', author: 'System', metadata: { auto: true, from: 'New', to: 'Contacted' },
       });
     }
   } catch (err: any) {
