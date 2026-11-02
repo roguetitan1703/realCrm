@@ -43,6 +43,7 @@ import { readPhone, toE164, phoneProblem, waLink } from '../../../src/lib/phone.
 import { CATALOGUE_WHERE, HAS_PHOTO } from './catalogueRules.js';
 import { canTakeWork } from './workforce.js';
 import { BHK } from '../../../src/data/propertyFields.js';
+import { formatMoney } from '../../../src/lib/locale.js';
 import { isDeskRole } from '../lib/permissions.js';
 import {
   findLeadByPhone, createLead, updateLead, addTimelineEvent, sharingOf, deskConfigOf, localeOf, listingKind, replyFallbackOf, bhkTokenOf, type Locale,
@@ -978,13 +979,13 @@ export async function createShareLink(input: any, origin: string | null, opts: {
   // the insert. They are only read here — the checks below run in the order
   // they always did, so the same request gets the same answer.
   const idsOk = ids.length > 0 && ids.length <= 30;
-  const [[sender], sharing, rows, leadRows, code, slug] = await Promise.all([
+  const [[sender], sharing, rows, leadRows, code, firm] = await Promise.all([
     sql`SELECT id, name, phone FROM users WHERE tenant_id = ${m.tenantId} AND id = ${m.userId} AND deleted_at IS NULL LIMIT 1`,
     sharingOf(m.tenantId),
-    idsOk ? sql`SELECT id, status, in_catalogue FROM crm_properties WHERE tenant_id = ${m.tenantId} AND id IN ${sql(ids)}` : Promise.resolve([]),
+    idsOk ? sql`SELECT id, status, in_catalogue, deal, project, locality, bhk, subtype, config, price_amount FROM crm_properties WHERE tenant_id = ${m.tenantId} AND id IN ${sql(ids)}` : Promise.resolve([]),
     input?.leadId ? sql`SELECT * FROM crm_leads WHERE tenant_id = ${m.tenantId} AND id = ${String(input.leadId)} LIMIT 1` : Promise.resolve([]),
     freshCode(m.tenantId),
-    firmSlug(m.tenantId),
+    firmRow(m.tenantId),
   ]);
   if (!sender) throw new ShareError(401, 'auth_required');
   // Senders need a number (Om, §A.4): the buyer's WhatsApp opens to it.
@@ -1033,7 +1034,7 @@ export async function createShareLink(input: any, origin: string | null, opts: {
     throw new ShareError(422, 'sharing_stopped', 'Sharing is stopped. An owner can allow it again in Settings.');
   }
 
-  const url = `${appBase(origin)}/${slug}/${code}`;
+  const url = `${appBase(origin)}/${firm.slug}/${code}`;
   if (lead) {
     // Its own kind, not `whatsapp`: the link is made before anything is sent,
     // so it is not contact (leadSegments.ts CONTACT_EVENT_TYPES) and does not
@@ -1054,13 +1055,53 @@ export async function createShareLink(input: any, origin: string | null, opts: {
     summary: `Shared ${ids.length} home${ids.length === 1 ? '' : 's'}${lead ? '' : ' without a recipient'}`,
     metadata: { code, leadId: lead?.id || null, propertyIds: ids, showPrice, createdLead, freshOf: opts.freshOf || null }, ip: m.ip, user_agent: m.userAgent,
   });
-  const text = ids.length === 1 ? `Here is a home you may like: ${url}` : `Here are ${ids.length} homes you may like: ${url}`;
+  const loc = await localeOf(m.tenantId);
+  const text = shareText({
+    name: lead?.name, flats: ids.map(i => byId.get(i)), url, showPrice, loc,
+    sender: sender.name, firm: firm.brand_config?.firmName || firm.name,
+  });
   return {
     link: { id: link.id, code, url, expiresAt: link.expires_at, showPrice },
     lead: lead ? { id: lead.id, name: lead.name, created: createdLead } : null,
-    waUrl: waUrl(lead?.phone || null, text, await localeOf(m.tenantId)),
+    waUrl: waUrl(lead?.phone || null, text, loc),
     text,
   };
+}
+
+/**
+ * The message a link goes out in. It used to be one line -- "Here are 3 homes
+ * you may like: <link>" -- from nobody, about nothing: a buyer could not tell
+ * from the chat which homes, at what price, or who sent them, so the link read
+ * as spam. Now it greets them by name, lists what is in it the way a broker
+ * would type it, and is signed by the agent and the firm.
+ *
+ * The list stops at five: past that a chat message is a brochure, and the
+ * page shows them all. Price only when the link shows price.
+ */
+const SHOWN_IN_TEXT = 5;
+export function shareText(o: { name?: string | null; flats: any[]; url: string; showPrice: boolean; loc: Locale; sender?: string | null; firm?: string | null }): string {
+  const first = String(o.name || '').trim().split(/\s+/)[0];
+  // A lead saved as its phone number has no name to greet.
+  const hello = first && !/\d{4}/.test(first) ? `Hello ${first},` : 'Hello,';
+  const n = o.flats.length;
+  const line = (r: any) => {
+    const kind = listingKind(r.bhk, r.subtype, o.loc);
+    const place = [r.project || r.config?.society, r.locality].filter(Boolean).join(', ');
+    const amount = Number(r.price_amount) > 0 ? formatMoney(Number(r.price_amount), { style: 'message', perMonth: r.deal === 'rent' }, o.loc) : '';
+    return '• ' + [[kind, place].filter(Boolean).join(', ') || 'Home', o.showPrice ? amount : ''].filter(Boolean).join(' · ');
+  };
+  const L = [hello, '', n === 1 ? 'Here is a home for you:' : `Here are ${n} homes for you:`];
+  o.flats.slice(0, SHOWN_IN_TEXT).forEach(r => L.push(line(r)));
+  if (n > SHOWN_IN_TEXT) L.push(`+ ${n - SHOWN_IN_TEXT} more`);
+  L.push('', `Photos and details: ${o.url}`, '', n === 1 ? 'Let me know when you would like to see it.' : 'Let me know which ones you would like to see.');
+  const sign = [o.sender, o.firm].map(x => String(x || '').trim()).filter(Boolean);
+  if (sign.length) L.push(sign.join(', '));
+  return L.join('\n');
+}
+
+async function firmRow(tenantId: string): Promise<{ slug: string; name: string; brand_config: any }> {
+  const [t] = await sql`SELECT slug, id, name, brand_config FROM tenants WHERE id = ${tenantId} LIMIT 1`;
+  return { slug: t?.slug || tenantId, name: t?.name || '', brand_config: t?.brand_config || {} };
 }
 
 async function firmSlug(tenantId: string): Promise<string> {

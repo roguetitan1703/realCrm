@@ -48,7 +48,20 @@ export const FIRM = theme.brand.firmName
 // settings JSON already holds, and a rename would hand a paying client back the
 // default in place of the sentence they wrote. The label is the part the desk
 // reads. Same call, same reason, as `reminderDays` in Settings → Response times.
-export const DEFAULT_WHATSAPP_INTRO = 'Hello {name}, I received your inquiry for a {requirement} in {locality} via {source}. I am reaching out from {firmName}. We have several excellent options matching your preferences. When would be a convenient time to connect over a quick call?'
+// What WhatsApp opens on, to a lead and to a listing owner. Signed by the agent
+// who sends it: a buyer who enquired on a portal does not know the firm's name,
+// and an owner who gets a message from a stranger's number needs to know who
+// is asking before they say whether the flat is free.
+export const DEFAULT_WHATSAPP_INTRO = 'Hello {name}, this is {agentName} from {firmName}. You enquired about a {requirement} in {locality} on {source}. When is a good time to talk?'
+export const DEFAULT_OWNER_INTRO = 'Hello {name}, this is {agentName} from {firmName}. We understand you have a flat in {project}. Is it available for sale or rent? We have clients looking in {locality}.'
+// The lead message every firm had before 2 Nov. A firm whose saved copy is
+// still exactly this never wrote its own, so it reads as the current default
+// rather than keeping the sales pitch with no one's name on it.
+export const OLD_WHATSAPP_INTRO = 'Hello {name}, I received your inquiry for a {requirement} in {locality} via {source}. I am reaching out from {firmName}. We have several excellent options matching your preferences. When would be a convenient time to connect over a quick call?'
+export const leadIntroTemplate = (settings) => {
+  const t = String(settings?.whatsappIntroTemplate || '').trim()
+  return !t || t === OLD_WHATSAPP_INTRO ? DEFAULT_WHATSAPP_INTRO : t
+}
 
 export const DEFAULT_INTRO_MESSAGE = 'Hello, this is {agentName} from {firmName}. We work on residential property in the area and are happy to help if you are looking to buy, sell or rent.'
 
@@ -59,6 +72,7 @@ export const DEFAULT_SETTINGS = {
   stages: [...theme.stages],
   sources: [...theme.sources],
   whatsappIntroTemplate: DEFAULT_WHATSAPP_INTRO,
+  ownerIntroTemplate: DEFAULT_OWNER_INTRO,
   introMessage: DEFAULT_INTRO_MESSAGE,
 }
 

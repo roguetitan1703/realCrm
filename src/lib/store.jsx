@@ -6,7 +6,7 @@
 import { setStageLabels } from '../data/pipelineRoles.js'
 import { setFirmLocale } from './locale.js'
 import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react'
-import { DEFAULT_SETTINGS, DEFAULT_BRAND, PROTECTED_STAGES } from '../data/theme.js'
+import { DEFAULT_SETTINGS, DEFAULT_BRAND, PROTECTED_STAGES, leadIntroTemplate } from '../data/theme.js'
 import { initials } from './format.js'
 import { generateMessage, followUpMessage } from './matching.js'
 import { api as apiClient, invalidateReads, currentTenant, subscribeAuthFailure } from './api.js'
@@ -1136,9 +1136,10 @@ export function StoreProvider({ children }) {
     // branch of it — a follow-up with no listing attached is still being sent in
     // Marathi if that is what the agent chose.
     return lead ? followUpMessage(lead, state.settings.firmName, {
-      whatsappIntroTemplate: state.settings.whatsappIntroTemplate,
+      whatsappIntroTemplate: leadIntroTemplate(state.settings),
+      agentName: state.agents.find(a => a.id === state.activeAgentId)?.name,
     }) : ''
-  }, [state.cache, state.settings.firmName, state.settings.whatsappIntroTemplate])
+  }, [state.cache, state.settings, state.agents, state.activeAgentId])
 
   const openWhatsApp = useCallback((propId, leadId) => {
     // The composer opens in the language this person writes in, not a fixed one.

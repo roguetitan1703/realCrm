@@ -4,7 +4,7 @@ import Icon from './Icon.jsx'
 import { isDeskRole } from '../lib/permissions.js'
 import { introText } from '../lib/matching.js'
 import { copyText } from '../lib/clipboard.js'
-import { DEFAULT_WHATSAPP_INTRO, DEFAULT_INTRO_MESSAGE } from '../data/theme.js'
+import { DEFAULT_WHATSAPP_INTRO, DEFAULT_OWNER_INTRO, DEFAULT_INTRO_MESSAGE, leadIntroTemplate } from '../data/theme.js'
 
 /**
  * THE FIRM'S TWO MESSAGE TEMPLATES — one component, two surfaces.
@@ -18,6 +18,7 @@ import { DEFAULT_WHATSAPP_INTRO, DEFAULT_INTRO_MESSAGE } from '../data/theme.js'
  * WHO SEES WHAT (desk-rework.md §2, G):
  *
  *   WhatsApp message  filled in from a lead, sent to that buyer   desk only
+ *   Owner message     filled in from an owner on the calling list desk only
  *   Intro message     a standing sentence, no lead in it          everyone
  *
  * An agent sees the intro READ-ONLY, resolved, with a Copy button, and a line
@@ -62,12 +63,20 @@ export default function MessageTemplates({ store }) {
   return (
     <>
       <TemplateEditor
-        title="WhatsApp message template"
-        value={state.settings?.whatsappIntroTemplate || DEFAULT_WHATSAPP_INTRO}
+        title="WhatsApp to a lead"
+        value={leadIntroTemplate(state.settings)}
         fallback={DEFAULT_WHATSAPP_INTRO}
-        tokens={['{name}', '{requirement}', '{locality}', '{source}', '{firmName}']}
+        tokens={['{name}', '{agentName}', '{firmName}', '{requirement}', '{locality}', '{source}']}
         onSave={(v) => store.patchSettings({ whatsappIntroTemplate: v }, 'WhatsApp message saved')}
         onReset={() => store.patchSettings({ whatsappIntroTemplate: DEFAULT_WHATSAPP_INTRO }, 'WhatsApp message reset')}
+      />
+      <TemplateEditor
+        title="WhatsApp to an owner"
+        value={state.settings?.ownerIntroTemplate || DEFAULT_OWNER_INTRO}
+        fallback={DEFAULT_OWNER_INTRO}
+        tokens={['{name}', '{agentName}', '{firmName}', '{project}', '{locality}']}
+        onSave={(v) => store.patchSettings({ ownerIntroTemplate: v }, 'Owner message saved')}
+        onReset={() => store.patchSettings({ ownerIntroTemplate: DEFAULT_OWNER_INTRO }, 'Owner message reset')}
       />
       <TemplateEditor
         title="Intro message template"

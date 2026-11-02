@@ -4,6 +4,7 @@ import { firmName as tenantFirm } from './tenant.js'
 import { localLabel } from '../data/vocabLocale.js'
 import { formatMoney, roomsText } from './locale.js'
 import { waLink, waDigits } from './phoneLink.js'
+import { DEFAULT_WHATSAPP_INTRO, DEFAULT_OWNER_INTRO } from '../data/theme.js'
 import {
   AREA_UNITS, BHK, COUNTED_ITEMS, FACING, FIXTURES, FURNISH, OWNERSHIP,
   LOCKIN_OPTIONS, PAINTING_CHARGES, POSSESSION, SOCIETY_AMENITIES, SUBTYPES,
@@ -649,9 +650,7 @@ export function introText(template, { firmName, agentName } = {}) {
 // whatever the firm wrote in Settings.
 export function followUpMessage(lead, firmName = tenantFirm(), opts = {}) {
   if (!lead) return ''
-  const tpl = opts.whatsappIntroTemplate
-    || opts.introTemplate
-    || 'Hello {name}, I received your inquiry for a {requirement} in {locality} via {source}. I am reaching out from {firmName}. We have several excellent options matching your preferences. When would be a convenient time to connect over a quick call?'
+  const tpl = opts.whatsappIntroTemplate || opts.introTemplate || DEFAULT_WHATSAPP_INTRO
 
   const firstName = String(lead.name || 'there').trim().split(' ')[0]
   // ONE VALUE EACH, because this is a sentence sent to the buyer. An
@@ -660,13 +659,14 @@ export function followUpMessage(lead, firmName = tenantFirm(), opts = {}) {
   // nothing to them — so the message names the current ask and no more.
   const config = latestOf(lead.req?.config) || ''
   const configLabel = roomsText(labelOf(BHK, config) || config)
-  const dealLabel = lead.req?.deal ? (lead.req.deal === 'rent' ? 'Rent' : 'Sale') : ''
-  const reqStr = [configLabel, dealLabel].filter(Boolean).join(' ') || 'property'
+  // "a 2 BHK for rent", the way a person says it, not the desk's "2 BHK Rent".
+  const dealLabel = lead.req?.deal ? (lead.req.deal === 'rent' ? 'for rent' : 'to buy') : ''
+  const reqStr = [configLabel || (dealLabel ? 'flat' : ''), dealLabel].filter(Boolean).join(' ') || 'property'
   const locStr = latestOf(lead.req?.locality) || 'your preferred location'
   const sourceStr = lead.source || 'our portal'
   const firm = firmName || 'our team'
 
-  let text = tpl
+  let text = withAgent(tpl, opts.agentName)
     .replace(/\{name\}/gi, firstName)
     .replace(/\{firmName\}/gi, firm)
     .replace(/\{firm\}/gi, firm)
@@ -675,4 +675,40 @@ export function followUpMessage(lead, firmName = tenantFirm(), opts = {}) {
     .replace(/\{source\}/gi, sourceStr)
 
   return text.trim()
+}
+
+// "this is {agentName} from" with nobody to name reads as "this is  from", so
+// with no name the clause goes and the sentence is the firm's.
+function withAgent(tpl, agentName) {
+  const who = String(agentName || '').trim()
+  return who
+    ? tpl.replace(/\{agentName\}/gi, who)
+    : tpl.replace(/this is \{agentName\} from /gi, 'this is ').replace(/\{agentName\}/gi, '')
+}
+
+// --- Calling a listing owner -------------------------------------------------
+// The owner-calling list is cold outreach: a number and, usually, a project.
+// Nothing about the owner's flat is known beyond that, so the message asks
+// the one question the call would ask.
+export function ownerIntroMessage(owner, firmName = tenantFirm(), opts = {}) {
+  if (!owner) return ''
+  const tpl = opts.ownerIntroTemplate || DEFAULT_OWNER_INTRO
+  const first = String(owner.name || '').trim().split(/\s+/)[0]
+  const name = first && !/\d{4}/.test(first) ? first : ''
+  const project = String(owner.project || '').trim()
+  const locality = String(owner.locality || '').trim()
+  const firm = firmName || 'our team'
+  // The place is named once: the project when there is one, else the
+  // locality. "A flat in Baner ... clients looking in Baner" reads as a form.
+  const place = project || locality
+  return withAgent(tpl, opts.agentName)
+    .replace(/Hello \{name\},/gi, name ? `Hello ${name},` : 'Hello,')
+    .replace(/\{name\}/gi, name)
+    .replace(/\{firmName\}|\{firm\}/gi, firm)
+    .replace(/ in \{project\}/gi, place ? ` in ${place}` : '')
+    .replace(/\{project\}/gi, place)
+    .replace(/ in \{locality\}/gi, locality && project ? ` in ${locality}` : ' in your area')
+    .replace(/\{locality\}/gi, locality)
+    .replace(/\s{2,}/g, ' ')
+    .trim()
 }

@@ -2,13 +2,13 @@ import { useState, useEffect, useRef } from 'react'
 import Icon from '../components/Icon.jsx'
 import { Button, Field, Input, Textarea, Segmented, Avatar, Source, StageTag, Money, SuggestInput, DateInput, PickOrOther, OutcomeForm } from '../components/primitives.jsx'
 import PhoneInput from '../components/PhoneInput.jsx'
-import { theme } from '../data/theme.js'
+import { theme, leadIntroTemplate } from '../data/theme.js'
 // parseBudgetNum was USED in three places here and imported in none of them —
 // every money field's onBlur and the lead form's save were one ReferenceError
 // waiting for someone to type a budget. Plain JSX, so the build never said a
 // word about it.
 import { budgetRange, reqLine, reqShort, hasBudget, initials, latestOf, latestPlus, listText, textList, thumbTint, fitReasons, reqFacets, parseBudgetNum, moneyEcho, unitLabel, followUpAction, followUpLabel } from '../lib/format.js'
-import { matchesForLead, ownerUpdateMessage, openWhatsAppChat, followUpMessage } from '../lib/matching.js'
+import { matchesForLead, ownerUpdateMessage, openWhatsAppChat, followUpMessage, ownerIntroMessage } from '../lib/matching.js'
 import WaSend from '../components/WaSend.jsx'
 import { api, workspaceUrl } from '../lib/api.js'
 import { useServerData } from '../lib/useServerData.js'
@@ -1719,13 +1719,23 @@ function ContactConfirmModal({ store, channel, name, phone, email, waText, recor
     } else if (stored) {
       if (channel === 'wa') {
         let msg = waText || ''
+        const agentName = store.me()?.name
         if (!msg && recordType === 'lead' && recordId) {
           const lead = store.lookup('lead', recordId)
           if (lead) {
             msg = followUpMessage(lead, store.state.settings.firmName, {
-              whatsappIntroTemplate: store.state.settings.whatsappIntroTemplate,
+              whatsappIntroTemplate: leadIntroTemplate(store.state.settings), agentName,
             })
           }
+        }
+        // An owner on the calling list, opened from Calling or Contacts. A
+        // Contacts row may not have the owner cached; the name it was opened
+        // with still greets them.
+        if (!msg && recordType === 'owner') {
+          const owner = (recordId && store.lookup('owner', recordId)) || { name }
+          msg = ownerIntroMessage(owner, store.state.settings.firmName, {
+            ownerIntroTemplate: store.state.settings.ownerIntroTemplate, agentName,
+          })
         }
         openWhatsAppChat(msg, stored, app)
       } else {
