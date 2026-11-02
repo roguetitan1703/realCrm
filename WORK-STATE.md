@@ -6,8 +6,11 @@ Release 2 (c440165) is live on both halves; backup nightly on the EC2 (STATE.md)
 Messages (d39fb04, on development): WhatsApp to a lead names the agent and what they asked for; WhatsApp to an owner opens on an intro (new, editable in Settings); a property link lists the homes with price and is signed. bhumi gets the new lead message (none saved); mahalaxmi keeps its own.
 Demo refresh merged (f38ea1c, reviewed, fixes in): production demo firms demo-vadodara, urban, raipur move to today daily; hardcoded list, paying firms refused, 120-day cap. Runs on live with the next release (first run: vadodara ~30 days, urban 77, raipur 75). The standing intro message is removed (f7be81a, Om). Signed-in live check of c440165 2 Nov: every desk and phone screen loads, no console errors; desk sign-in 6.1s (bootstrap 3.2s), screens 0.6-1.5s.
 
+Link message editable (bc71cb6, on development): Settings → Message templates has a third editor, "Property link" ({name} {homes} {link} {agentName} {firmName}, saved as sharing.messageTemplate, refused without {link}); all three editors fold. Outcome lists editable per firm: builder B on `b-outcomes` (Settings → Outcomes, call/WhatsApp/visit lists, reach kept for Performance; a booked Follow-up Call offers the call list, not the visit list).
+
 ## Next
-D1. Waits on Om: release go (push main, Vercel promote, deploy:api). Carries the speed work, the three messages and the demo refresh
+D1. Waits on Om: push main was refused by the permission check (2 Nov); Om pushes it or allows it, then Vercel promote and deploy:api on the EC2. Carries the speed work, the three messages, the demo refresh, the link message editor
+B1. Outcome lists editable (b-outcomes): review the diff, drive it, merge
 S1. Speed, left of the 2 Nov audit: Record call = one endpoint — waits on the after-call sheet (UI review P1)
 0. UI review (docs/specs/ui-review.md, published for Om): waits on Om picking proposals; recommended P1 after-call sheet + P3 one word one number
 1. Phone UI and UX, new from the user flows (the earlier spec 9d5b0f7 rearranged the current screens and is superseded): the fresh design is on `b-phone-redesign` (c7e7aa1, docs/specs/phone-ui/) and published for Om. Waits on his review and its 9 decisions plus follow-ups D1–D5. Then slice 1: the after-call sheet, its `call-result` write, ack + Undo. Built on its own branch, merged only when Om approves it whole
