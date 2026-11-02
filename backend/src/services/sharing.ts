@@ -44,6 +44,7 @@ import { CATALOGUE_WHERE, HAS_PHOTO } from './catalogueRules.js';
 import { canTakeWork } from './workforce.js';
 import { BHK } from '../../../src/data/propertyFields.js';
 import { formatMoney } from '../../../src/lib/locale.js';
+import { DEFAULT_SHARE_TEMPLATE, fillShareTemplate } from '../../../src/data/shareMessage.js';
 import { isDeskRole } from '../lib/permissions.js';
 import {
   findLeadByPhone, createLead, updateLead, addTimelineEvent, sharingOf, deskConfigOf, localeOf, listingKind, replyFallbackOf, bhkTokenOf, type Locale,
@@ -1058,7 +1059,7 @@ export async function createShareLink(input: any, origin: string | null, opts: {
   const loc = await localeOf(m.tenantId);
   const text = shareText({
     name: lead?.name, flats: ids.map(i => byId.get(i)), url, showPrice, loc,
-    sender: sender.name, firm: firm.brand_config?.firmName || firm.name,
+    sender: sender.name, firm: firm.brand_config?.firmName || firm.name, template: sharing.messageTemplate,
   });
   return {
     link: { id: link.id, code, url, expiresAt: link.expires_at, showPrice },
@@ -1073,16 +1074,15 @@ export async function createShareLink(input: any, origin: string | null, opts: {
  * you may like: <link>" -- from nobody, about nothing: a buyer could not tell
  * from the chat which homes, at what price, or who sent them, so the link read
  * as spam. Now it greets them by name, lists what is in it the way a broker
- * would type it, and is signed by the agent and the firm.
+ * would type it, and is signed by the agent and the firm -- in the firm's own
+ * words when it has written them (src/data/shareMessage.js).
  *
  * The list stops at five: past that a chat message is a brochure, and the
  * page shows them all. Price only when the link shows price.
  */
 const SHOWN_IN_TEXT = 5;
-export function shareText(o: { name?: string | null; flats: any[]; url: string; showPrice: boolean; loc: Locale; sender?: string | null; firm?: string | null }): string {
+export function shareText(o: { name?: string | null; flats: any[]; url: string; showPrice: boolean; loc: Locale; sender?: string | null; firm?: string | null; template?: string | null }): string {
   const first = String(o.name || '').trim().split(/\s+/)[0];
-  // A lead saved as its phone number has no name to greet.
-  const hello = first && !/\d{4}/.test(first) ? `Hello ${first},` : 'Hello,';
   const n = o.flats.length;
   const line = (r: any) => {
     const kind = listingKind(r.bhk, r.subtype, o.loc);
@@ -1090,13 +1090,17 @@ export function shareText(o: { name?: string | null; flats: any[]; url: string; 
     const amount = Number(r.price_amount) > 0 ? formatMoney(Number(r.price_amount), { style: 'message', perMonth: r.deal === 'rent' }, o.loc) : '';
     return '• ' + [[kind, place].filter(Boolean).join(', ') || 'Home', o.showPrice ? amount : ''].filter(Boolean).join(' · ');
   };
-  const L = [hello, '', n === 1 ? 'Here is a home for you:' : `Here are ${n} homes for you:`];
-  o.flats.slice(0, SHOWN_IN_TEXT).forEach(r => L.push(line(r)));
-  if (n > SHOWN_IN_TEXT) L.push(`+ ${n - SHOWN_IN_TEXT} more`);
-  L.push('', `Photos and details: ${o.url}`, '', n === 1 ? 'Let me know when you would like to see it.' : 'Let me know which ones you would like to see.');
-  const sign = [o.sender, o.firm].map(x => String(x || '').trim()).filter(Boolean);
-  if (sign.length) L.push(sign.join(', '));
-  return L.join('\n');
+  const homes = [n === 1 ? 'Here is a home for you:' : `Here are ${n} homes for you:`];
+  o.flats.slice(0, SHOWN_IN_TEXT).forEach(r => homes.push(line(r)));
+  if (n > SHOWN_IN_TEXT) homes.push(`+ ${n - SHOWN_IN_TEXT} more`);
+  return fillShareTemplate(o.template || DEFAULT_SHARE_TEMPLATE, {
+    // A lead saved as its phone number has no name to greet.
+    name: first && !/\d{4}/.test(first) ? first : '',
+    homes: homes.join('\n'),
+    link: o.url,
+    agentName: o.sender,
+    firmName: o.firm,
+  });
 }
 
 async function firmRow(tenantId: string): Promise<{ slug: string; name: string; brand_config: any }> {

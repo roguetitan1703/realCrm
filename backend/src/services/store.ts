@@ -6845,6 +6845,8 @@ export async function getSettings(): Promise<any> {
  *   replyToPhone           where a buyer's WhatsApp goes when nobody holds them
  *   showPriceOnCatalogue   the catalogue's prices; a link's own tick defaults to it
  *   catalogueShowsProject  off: the catalogue names the locality, not the building
+ *   messageTemplate        null, or the firm's words for the message a link goes
+ *                          out in (src/data/shareMessage.js); must hold {link}
  *   stopped                null, or when the owner stopped sharing. Stopping turns
  *                          off every link the firm has, for good (the leak case),
  *                          and refuses new ones until the owner allows sharing
@@ -6855,6 +6857,7 @@ export async function getSettings(): Promise<any> {
 export const SHARING_DEFAULTS = {
   linkExpiryDays: 15, replyToPhone: null as string | null,
   showPriceOnCatalogue: false, catalogueShowsProject: true, stopped: null as string | null,
+  messageTemplate: null as string | null,
 };
 export const LINK_EXPIRY_CHOICES = [7, 15, 30];
 
@@ -6900,6 +6903,12 @@ async function cleanSharingPatch(patch: any, current: any, ctx: ActorCtx | null)
   }
   if (p.showPriceOnCatalogue !== undefined) next.showPriceOnCatalogue = p.showPriceOnCatalogue === true;
   if (p.catalogueShowsProject !== undefined) next.catalogueShowsProject = p.catalogueShowsProject !== false;
+  if (p.messageTemplate !== undefined) {
+    const t = String(p.messageTemplate ?? '').trim();
+    if (t.length > 2000) throw new Error('The message is too long.');
+    if (t && !t.includes('{link}')) throw new Error('The message must include {link}.');
+    next.messageTemplate = t || null;
+  }
   // `stopped`: true stops sharing and turns off every link; null (or false)
   // allows sharing again. The stored stamp sent back unchanged is no change
   // (the settings screen saves the whole object). Owner only, both ways.
