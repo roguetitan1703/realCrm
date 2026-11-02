@@ -259,7 +259,19 @@ export async function createSession(tenantId: string | null, userId: string, ctx
  *  see one snapshot, so the row returned is the one before the slide, as it
  *  was. A support session (support_by) still never slides its expiry. */
 export async function touchSession(jti: string): Promise<any | null> {
-  const rows = await sql`
+  // A FAILED WRITE MUST NOT REVIVE A DEAD SESSION. The caller fails open on an
+  // error. With read and write in one statement, a write that fails (database
+  // read-only on disk-full, a lock timeout on the row) threw for a revoked or
+  // expired session too, and the caller let it in; as two statements, the read
+  // had already refused it. So on an error, ask the read alone, and let only
+  // its failure reach the caller.
+  const rows = await liveAndSlide(jti).catch(() =>
+    sql`SELECT * FROM sessions WHERE id = ${jti} AND revoked = FALSE AND expires_at > NOW() LIMIT 1`);
+  return rows[0] || null;
+}
+
+function liveAndSlide(jti: string) {
+  return sql`
     WITH live AS (
       SELECT * FROM sessions WHERE id = ${jti} AND revoked = FALSE AND expires_at > NOW() LIMIT 1
     ), slide AS (
@@ -270,7 +282,6 @@ export async function touchSession(jti: string): Promise<any | null> {
     )
     SELECT * FROM live
   `;
-  return rows[0] || null;
 }
 
 export async function revokeSession(jti: string): Promise<void> {
