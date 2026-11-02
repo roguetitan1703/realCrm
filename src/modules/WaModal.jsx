@@ -8,7 +8,7 @@ import { thumbTint } from '../lib/format.js'
 import { openWhatsAppChat, matchesForLead } from '../lib/matching.js'
 import WaSend from '../components/WaSend.jsx'
 import { MESSAGE_LANGUAGES } from '../data/vocabLocale.js'
-import { WA_OUTCOMES } from '../data/callOutcomes.js'
+import { outcomeList } from '../data/callOutcomes.js'
 
 // ============================================================================
 // 💬 THE WHATSAPP COMPOSER — one component, every entry point
@@ -33,7 +33,10 @@ export default function WaModal({ store }) {
   // The logged event, once the message has gone. Holding its id is what makes
   // the outcome step possible without a second round trip to find it.
   const [sent, setSent] = useState(null)
-  const [outcome, setOutcome] = useState(WA_OUTCOMES[0].value)
+  // Empty until somebody picks one. It started on the first option ("Details
+  // shared"), so a message saved without touching the chips recorded an
+  // outcome nobody chose — a fact invented by the default.
+  const [outcome, setOutcome] = useState('')
   const [reply, setReply] = useState('')
   const leadId = wa?.leadId || null
   useEffect(() => {
@@ -149,7 +152,7 @@ export default function WaModal({ store }) {
 
   const saveOutcome = () => {
     // The key, not the label — see the note in callOutcomes.js.
-    if (l && sent) store.editRemark('lead', l.id, sent, reply.trim() || noteFor(), outcome)
+    if (l && sent) store.editRemark('lead', l.id, sent, reply.trim() || noteFor(), outcome || undefined)
     store.closeWhatsApp()
   }
 
@@ -174,7 +177,7 @@ export default function WaModal({ store }) {
             <div className="wa-out">
               <label className="wa-attach-l">What happened</label>
               <div className="chiprow wrap">
-                {WA_OUTCOMES.map(o => (
+                {[{ value: '', label: 'No outcome yet' }, ...outcomeList('wa')].map(o => (
                   <button key={o.value} type="button"
                     className={'chipo' + (o.value === outcome ? ' on' : '')}
                     onClick={() => setOutcome(o.value)}>{o.label}</button>
