@@ -7,27 +7,31 @@ a live database so the next session neither re-derives it nor assumes it.
 
 The work itself is in `docs/BACKLOG.md`; set-aside work in `docs/PARKED.md`.
 
-**Last session: 2026-10-27.** Release 1 is live: the catalog (Work OS #131,
-`specs/listing-pages.md` §A), the alert lifecycle, Performance 7/30 days,
-the phone model (E.164), code sign-in retired, the import undo and the retired
-batch delete. The API crash-looped once on a missing `libphonenumber-js`
-install; `scripts/deploy-api.sh` now checks `npm ls` and installs. What the
-firms notice: `releases/2026-10-13.md` and `releases/2026-10-20.md`. #131 and
-#132 (Performance range) are Done in Work OS.
+**Last session: 2026-11-02.** Release 2 is live on both halves (c440165):
+billing bar (overdue only, per-firm warn days), project rename/merge with Undo,
+one matching rule for card counts and records, same-number enquiry race fixed,
+grouped search on Properties and Calling, compact project rows, one-line desk
+tables, no default password (and no forced change for anyone already on it),
+callbacks with no time refused by the API and shown "time not set". The
+closed-lead booking repair ran once at boot (04:48 UTC): bhumi 23, mahalaxmi 9,
+urban 2, delpat 1 cleared; 0 closed leads hold a booking (read-only check).
+Nightly backup is live on the EC2 (pg_dump 17.11 from PGDG, production is
+Postgres 17.6; first dump 6.0 MB verified; cron 21:00 UTC). Speed work is in
+progress on `a-auth-speed` and `b-speed` (WORK-STATE Now).
 
 ---
 
 ## Deployed
 
-As of 27 Oct 2026:
+As of 2 Nov 2026, 05:00 UTC:
 
 | | at | how |
 |---|---|---|
-| Frontend — Vercel | `a036eb4` (27 Oct) | `main` = `origin/main` |
-| Backend — AWS EC2 (`re-api` under PM2) | `45a68f6` (27 Oct) | `scripts/deploy-api.sh` on the box, by hand |
+| Frontend — Vercel | `c440165` (`/version.json` = `c440165282c8`) | promoted by Om |
+| Backend — AWS EC2 (`re-api` under PM2) | `c440165` (`/health`) | `npm run deploy:api` on the box, by Om |
 | Dev API (`re-api-dev`) | stopped on the box | needs `npm install` before restart |
-| `main` | `a036eb4` | |
-| `development` | `a036eb4` + `570fd23` (work-state) | ahead by docs only |
+| `main` | `c440165` | pushed 2 Nov on Om's go |
+| `development` | ahead by the backup-script fix (13c4d3d) and work-state | |
 
 ---
 
