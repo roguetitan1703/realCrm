@@ -30,7 +30,7 @@ import { adminRouter } from './routes/admin';
 import { notificationsRouter } from './routes/notifications';
 import { pwaRouter } from './routes/pwa';
 import { filesRouter, mediaRouter } from './routes/files';
-import { withRequestContext } from './middleware/auth';
+import { withRequestContext, requireTenantAuth } from './middleware/auth';
 import { getTenantForIngest, runRoutingSweeps, booted } from './services/store';
 import { sql } from './services/db';
 import { startDevRefresh } from './services/devData';
@@ -218,6 +218,12 @@ app.use('/api/v1/notifications', notificationsRouter);
 app.use('/api/v1/workspace', workspaceRouter);
 
 // 2. Composable Module Metadata & Schema Editor
+// ONE SIGN-IN CHECK FOR THE WHOLE PREFIX. The records router lives under this
+// one's path, and each used to carry its own `use(requireTenantAuth)`, so a lead
+// save was authenticated twice. Here it runs once, in front of both, and
+// anything under /api/v1/modules — a route not written yet included — is
+// refused without a session.
+app.use('/api/v1/modules', requireTenantAuth);
 app.use('/api/v1/modules', modulesRouter);
 
 // 3. Universal Record CRUD Engine (Nested under moduleKey or top level)
