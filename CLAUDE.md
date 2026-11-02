@@ -72,7 +72,8 @@ npm run dev:refresh    # move synthetic firms' dates up to today (dev API does i
   only until you add them.
 - **`dev:api:prod` is a production writer.** A watcher restart runs `initSchema()`
   against production — adding a `runOnce` gate on this machine is a production
-  write. Do not leave one running.
+  write — and it runs the demo-firm date refresh with this checkout's list.
+  Do not leave one running.
 - **Two databases, and the process refuses to guess.** `APP_ENV=development`
   selects `DEV_DATABASE_URL` and will not fall back. Boot refuses if both URLs
   name the same project or `JWT_SECRET` is missing. `vite build` refuses without

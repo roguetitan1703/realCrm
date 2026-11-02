@@ -27,6 +27,10 @@
  * after the anchor moves forward with the rest, and shiftTenantDates puts
  * anything that lands after now back under now.
  *
+ * EVERY dated column moves, links' expiry included: a share link keeps its
+ * remaining life, and one that expired inside the first move comes back.
+ * Deliberate, for demo data; do not exempt it.
+ *
  * A move longer than MAX_MOVE_DAYS is refused and the firm skipped, so a bad
  * anchor cannot throw a firm years forward.
  * ============================================================================
@@ -60,6 +64,7 @@ export async function ensureDemoLedger(sql: Sql): Promise<void> {
 const isPaying = (s: string) => PAYING_TENANTS.has(String(s).toLowerCase());
 const missingSaid = new Set<string>();
 const refusedSaid = new Set<string>();
+const failedSaid = new Set<string>();
 class TooFar extends Error { constructor(public days: number, public anchor?: string) { super('too far'); } }
 
 export type DemoMove = { slug: string; tenant: string; days: number; anchoredFrom?: string; counts: Record<string, number> };
@@ -76,61 +81,69 @@ export async function refreshDemoFirms(sql: Sql, opts: { slugs?: readonly string
   await ensureDemoLedger(sql);
   const out: DemoMove[] = [];
   for (const slug of slugs) {
-    if (isPaying(slug)) { log(`[Demo dates] ✗ ${slug} is a paying firm; never moved.`); continue; }
-    const [t] = await sql`SELECT id, slug FROM tenants WHERE slug = ${slug} LIMIT 1`;
-    if (!t) {
-      if (!missingSaid.has(slug)) log(`[Demo dates] ${slug} is not on this database; skipped.`);
-      missingSaid.add(slug);
-      continue;
-    }
-    if (isPaying(t.id)) { log(`[Demo dates] ✗ ${slug} is the paying firm ${t.id}; never moved.`); continue; }
-    const tid: string = t.id;
-    const [due] = await sql`SELECT (${firmToday(sql, tid)} - refreshed_on)::int AS gap FROM demo_refresh_tenants WHERE tenant_id = ${tid}`;
-    if (due && due.gap < 1) continue;
-
-    let done: DemoMove | null;
+    // One firm failing (a bad timezone in its settings, say) must not stop the
+    // ones after it; said once per firm per process, not every ten minutes.
     try {
-      done = await sql.begin(async (tx: Sql) => {
-        // Lock order matches refreshDevData (its marker row, then this ledger
-        // through shiftTenantDates), so a dev refresh in another process waits
-        // here instead of both moving the firm.
-        const [{ dev }] = await tx`SELECT to_regclass('public.dev_synthetic_tenants') IS NOT NULL AS dev`;
-        if (dev) await tx`SELECT 1 FROM dev_synthetic_tenants WHERE tenant_id = ${tid} FOR UPDATE`;
-        const zone = firmZone(tx, tid);
-        const ins = await tx`
-          INSERT INTO demo_refresh_tenants (tenant_id, slug, first_anchor, refreshed_on)
-          SELECT ${tid}, ${slug}, d, d FROM (
-            SELECT least(${firmToday(tx, tid)}, coalesce((coalesce(
-              (SELECT CASE WHEN brand_config->'demo'->>'anchor' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
-                           THEN (brand_config->'demo'->>'anchor')::timestamptz END FROM tenants WHERE id = ${tid}),
-              (SELECT max(created_at) FROM crm_leads WHERE tenant_id = ${tid} AND created_at <= now())
-            ) AT TIME ZONE ${zone})::date, ${firmToday(tx, tid)})) AS d
-          ) a
-          ON CONFLICT (tenant_id) DO NOTHING
-          RETURNING to_char(first_anchor, 'YYYY-MM-DD') AS anchor`;
-        const [m] = await tx`
-          SELECT (${firmToday(tx, tid)} - refreshed_on)::int AS gap
-            FROM demo_refresh_tenants WHERE tenant_id = ${tid} FOR UPDATE`;
-        const anchoredFrom = ins[0]?.anchor as string | undefined;
-        if (!m || m.gap < 1) return anchoredFrom ? { slug, tenant: tid, days: 0, anchoredFrom, counts: {} } : null;
-        // Thrown, so a first run's ledger row goes too and a corrected anchor can be tried.
-        if (m.gap > MAX_MOVE_DAYS) throw new TooFar(m.gap, anchoredFrom);
-        const counts = await shiftTenantDates(tx, tid, m.gap);
-        return { slug, tenant: tid, days: m.gap as number, anchoredFrom, counts };
-      });
+      if (isPaying(slug)) { log(`[Demo dates] ✗ ${slug} is a paying firm; never moved.`); continue; }
+      const [t] = await sql`SELECT id, slug FROM tenants WHERE slug = ${slug} LIMIT 1`;
+      if (!t) {
+        if (!missingSaid.has(slug)) log(`[Demo dates] ${slug} is not on this database; skipped.`);
+        missingSaid.add(slug);
+        continue;
+      }
+      if (isPaying(t.id)) { log(`[Demo dates] ✗ ${slug} is the paying firm ${t.id}; never moved.`); continue; }
+      const tid: string = t.id;
+      const [due] = await sql`SELECT (${firmToday(sql, tid)} - refreshed_on)::int AS gap FROM demo_refresh_tenants WHERE tenant_id = ${tid}`;
+      if (due && due.gap < 1) continue;
+
+      let done: DemoMove | null;
+      try {
+        done = await sql.begin(async (tx: Sql) => {
+          // Lock order matches refreshDevData (its marker row, then this ledger
+          // through shiftTenantDates), so a dev refresh in another process waits
+          // here instead of both moving the firm.
+          const [{ dev }] = await tx`SELECT to_regclass('public.dev_synthetic_tenants') IS NOT NULL AS dev`;
+          if (dev) await tx`SELECT 1 FROM dev_synthetic_tenants WHERE tenant_id = ${tid} FOR UPDATE`;
+          const zone = firmZone(tx, tid);
+          const ins = await tx`
+            INSERT INTO demo_refresh_tenants (tenant_id, slug, first_anchor, refreshed_on)
+            SELECT ${tid}, ${slug}, d, d FROM (
+              SELECT least(${firmToday(tx, tid)}, coalesce((coalesce(
+                (SELECT CASE WHEN brand_config->'demo'->>'anchor' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+                             THEN (brand_config->'demo'->>'anchor')::timestamptz END FROM tenants WHERE id = ${tid}),
+                (SELECT max(created_at) FROM crm_leads WHERE tenant_id = ${tid} AND created_at <= now())
+              ) AT TIME ZONE ${zone})::date, ${firmToday(tx, tid)})) AS d
+            ) a
+            ON CONFLICT (tenant_id) DO NOTHING
+            RETURNING to_char(first_anchor, 'YYYY-MM-DD') AS anchor`;
+          const [m] = await tx`
+            SELECT (${firmToday(tx, tid)} - refreshed_on)::int AS gap
+              FROM demo_refresh_tenants WHERE tenant_id = ${tid} FOR UPDATE`;
+          const anchoredFrom = ins[0]?.anchor as string | undefined;
+          if (!m || m.gap < 1) return anchoredFrom ? { slug, tenant: tid, days: 0, anchoredFrom, counts: {} } : null;
+          // Thrown, so a first run's ledger row goes too and a corrected anchor can be tried.
+          if (m.gap > MAX_MOVE_DAYS) throw new TooFar(m.gap, anchoredFrom);
+          const counts = await shiftTenantDates(tx, tid, m.gap);
+          return { slug, tenant: tid, days: m.gap as number, anchoredFrom, counts };
+        });
+      } catch (e: any) {
+        if (!(e instanceof TooFar)) throw e;
+        if (!refusedSaid.has(slug)) log(`[Demo dates] ✗ ${slug} would move ${e.days} days${e.anchor ? ` (from ${e.anchor})` : ''}, over ${MAX_MOVE_DAYS}; skipped, nothing moved.`);
+        refusedSaid.add(slug);
+        continue;
+      }
+      if (!done) continue;
+      out.push(done);
+      const first = done.anchoredFrom ? ` (first run, anchored to ${done.anchoredFrom})` : '';
+      if (!done.days) { log(`[Demo dates] ${slug}${first}: already dated today`); continue; }
+      const total = Object.entries(done.counts).filter(([k]) => !k.startsWith('history')).reduce((s, [, n]) => s + n, 0);
+      log(`[Demo dates] ${slug} moved forward ${done.days} day${done.days === 1 ? '' : 's'}${first}: ${total} rows`
+        + ` (${Object.entries(done.counts).map(([k, n]) => `${k} ${n}`).join(', ') || 'nothing dated'})`);
+      failedSaid.delete(slug);
     } catch (e: any) {
-      if (!(e instanceof TooFar)) throw e;
-      if (!refusedSaid.has(slug)) log(`[Demo dates] ✗ ${slug} would move ${e.days} days${e.anchor ? ` (from ${e.anchor})` : ''}, over ${MAX_MOVE_DAYS}; skipped, nothing moved.`);
-      refusedSaid.add(slug);
-      continue;
+      if (!failedSaid.has(slug)) log(`[Demo dates] ✗ ${slug} failed, skipped: ${e?.message}`);
+      failedSaid.add(slug);
     }
-    if (!done) continue;
-    out.push(done);
-    const first = done.anchoredFrom ? ` (first run, anchored to ${done.anchoredFrom})` : '';
-    if (!done.days) { log(`[Demo dates] ${slug}${first}: already dated today`); continue; }
-    const total = Object.entries(done.counts).filter(([k]) => !k.startsWith('history')).reduce((s, [, n]) => s + n, 0);
-    log(`[Demo dates] ${slug} moved forward ${done.days} day${done.days === 1 ? '' : 's'}${first}: ${total} rows`
-      + ` (${Object.entries(done.counts).map(([k, n]) => `${k} ${n}`).join(', ') || 'nothing dated'})`);
   }
   return out;
 }

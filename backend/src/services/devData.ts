@@ -62,9 +62,14 @@ const HISTORY: [string, string][] = [
 ];
 const ISO = 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"';
 
-function refusePaying(tenantId: string) {
-  if (PAYING_TENANTS.has(String(tenantId).toLowerCase())) {
-    throw new Error(`Refusing: "${tenantId}" is a paying firm. Its dates are never moved, on any database.`);
+// By id and by the slug the id resolves to: the list is slugs, and an id that
+// ever stops equalling its slug must not slip past it.
+async function refusePaying(sql: Sql, tenantId: string) {
+  const [t] = await sql`SELECT slug FROM tenants WHERE id = ${tenantId}`;
+  for (const name of [tenantId, t?.slug]) {
+    if (name && PAYING_TENANTS.has(String(name).toLowerCase())) {
+      throw new Error(`Refusing: "${tenantId}" is a paying firm. Its dates are never moved, on any database.`);
+    }
   }
 }
 
@@ -73,7 +78,7 @@ function refusePaying(tenantId: string) {
  * Returns rows changed per table. Runs inside whatever transaction `sql` is.
  */
 export async function shiftTenantDates(sql: Sql, tenantId: string, days: number): Promise<Record<string, number>> {
-  refusePaying(tenantId);
+  await refusePaying(sql, tenantId);
   if (!Number.isInteger(days) || days < 1) return {};
   const cols: { table_name: string; column_name: string; data_type: string }[] = await sql`
     SELECT c.table_name, c.column_name, c.data_type
@@ -177,7 +182,7 @@ function requireDevelopment(what: string) {
  */
 export async function adoptSynthetic(sql: Sql, tenantId: string, seededBy: string): Promise<void> {
   requireDevelopment('Marking a firm synthetic');
-  refusePaying(tenantId);
+  await refusePaying(sql, tenantId);
   await ensureDevDataTable(sql);
   await sql`INSERT INTO dev_synthetic_tenants (tenant_id, seeded_by, refreshed_on)
             VALUES (${tenantId}, ${seededBy}, ${firmToday(sql, tenantId)})
