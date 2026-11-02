@@ -228,11 +228,13 @@ function useTodayFeed(dataAsOf) {
   useEffect(() => {
     let live = true
     setLoading(true)
+    const askedAt = Date.now()
     // The phone is 'my day'. A manager on a desk still sees the firm.
     api.getToday(true)
       .then(r => {
         if (!live || !r?.success) return
         setFeed({
+          askedAt,
           leads: r.leads || [], renewals: r.renewals || [], quiet: r.quiet || [],
           counts: r.counts || {}, owners: r.owners || { counts: {} },
         })
@@ -275,7 +277,10 @@ function TodaySkeleton() {
 /** The work queue: every group of things to do today. */
 function TodoList({ store, go, feed }) {
   const { state } = store
-  const scoped = feed.leads
+  // A booking finished from a row since this read left (store BOOKING_DONE):
+  // shown as finished, so the row leaves its group on the tap.
+  const done = state.doneBookings || {}
+  const scoped = feed.leads.map(l => (l.followUp && done[l.id] > (feed.askedAt || 0) ? { ...l, followUp: null } : l))
   const c = feed.counts || {}
   const oc = feed.owners?.counts || {}
 

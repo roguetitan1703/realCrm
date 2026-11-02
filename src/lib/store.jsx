@@ -635,6 +635,17 @@ function reducer(state, action) {
         timeline: withEvent(l, 'stage', 'Stage → ' + action.stage),
       }))
 
+    // A booking finished on this screen, and when: Today reads its rows
+    // through this, so the row leaves on the tap. Only a read of the day that
+    // left BEFORE this moment is overridden — a later one already knows, and a
+    // booking made after it must show.
+    case 'BOOKING_DONE': {
+      const next = { ...(state.doneBookings || {}) }
+      if (action.on) next[action.leadId] = Date.now()
+      else delete next[action.leadId]
+      return { ...state, doneBookings: next }
+    }
+
     case 'FOLLOWUP': {
       // fu === null means "marked done" — clearing the appointment, not setting one.
       //
@@ -1555,12 +1566,18 @@ export function StoreProvider({ children }) {
     // A booked meeting or demo, finished from Today with how it went. The
     // server clears the booking and writes its 'Completed' row; `settled()`
     // re-reads Today, so the row leaves the To do list.
-    completeFollowUp: (leadId, outcome, remark) => apiClient.completeFollowUp(leadId, outcome, remark)
-      .then(res => {
-        if (res?.success) { settled(); toast('Saved'); return res }
-        toast('Could not save', 'warn'); return null
-      })
-      .catch(err => { toast(err.message || 'Could not save. Try again.', 'warn'); return null }),
+    // DONE LEAVES AT ONCE. Today's row waited ~2s for the server and then a
+    // re-read of the day; the booking is cleared on the tap now (the cache, and
+    // the Today feed through `doneBookings`) and comes back, with a toast, if
+    // the server refuses. Resolves to the reply, or null on a refusal.
+    completeFollowUp: (leadId, outcome, remark) => {
+      const prev = api.lookup('lead', leadId)?.followUp ?? null
+      return optimistic('Follow-up',
+        () => { dispatch({ type: 'FOLLOWUP', leadId, followUp: null }); dispatch({ type: 'BOOKING_DONE', leadId, on: true }) },
+        () => { dispatch({ type: 'BOOKING_DONE', leadId, on: false }); if (prev) dispatch({ type: 'FOLLOWUP', leadId, followUp: prev }) },
+        () => apiClient.completeFollowUp(leadId, outcome, remark),
+        'Saved', 'lead')
+    },
     logActivity: (leadId, payload) => new Promise((resolve) => {
       apiClient.logActivity(leadId, payload)
         .then(res => {
